@@ -88,7 +88,9 @@ void main() {
       'OG1 one cut, both faces, by coordinates: a door at 1,400 in a 5,000 '
       'wall at 23° gives two pieces whose gap corners are the oracle\'s; a '
       'window at 3,600 gives three; a gap clamped against the free start cap '
-      'drops the start piece; the tiling gives 0 each time', () {
+      'drops the start piece; the tiling gives 0 each time; the door\'s leaf '
+      'and arc, the window\'s lines and the gap\'s are the oracle\'s in '
+      'world (M-08h)', () {
     final doc = doorWall();
     final f = oracleFrameOf(doc, hA);
     expect(f.len, closeTo(5000, 1e-6));
@@ -121,6 +123,11 @@ void main() {
     expect(oracle.tilingOf(hA), noViolations);
     expect(storedPiecesTriangulate(doc, hA), isTrue);
     expect(storedPiecesSimpleCcw(doc, hA), isTrue);
+    // The symbol (D10), host-local → world → own local: hinged at the end
+    // jamb, 1,850, on the right face, its leaf off the band's right.
+    expectDoorOnOracle(doc, hD);
+    expect((doorOracle(doc, hD).hinge - oracleAt(f, 1850, f.ro)).length,
+        lessThan(1e-6));
 
     // A window at 3,600 (1,200): gaps [950, 1850] and [3000, 4200].
     run(
@@ -142,6 +149,8 @@ void main() {
     expect(hasVertex(three[2], oracleAt(f, 4200, f.ro)), isTrue);
     expect(OpeningOracle(doc).gaps(hA).length, 2);
     expect(OpeningOracle(doc).tilingOf(hA), noViolations);
+    expectLinesOnOracle(doc, hW);
+    expectDoorOnOracle(doc, hD);
     expect(storedPiecesTriangulate(doc, hA), isTrue);
     expect(storedPiecesSimpleCcw(doc, hA), isTrue);
 
@@ -164,6 +173,7 @@ void main() {
     expect(usOf(g, one.single).reduce(math.min), greaterThan(1000 - 1e-6));
     expect(worldCentrelines(doc, hB), hasLength(1));
     expect(OpeningOracle(doc).tilingOf(hB), noViolations);
+    expectLinesOnOracle(doc, hG);
     expect(storedPiecesTriangulate(doc, hB), isTrue);
     expect(storedPiecesSimpleCcw(doc, hB), isTrue);
   });
@@ -173,7 +183,8 @@ void main() {
       'openings in A, one stored past the node and clamped at the mitre, one '
       'in B: 0 tiling violations, every piece triangulates and is simple and '
       'anticlockwise, three pieces and two; opening.clamped names exactly '
-      'the clamped door, by a corner', () {
+      'the clamped door, by a corner; a window stored 5e-7 past a free '
+      'wall\'s span is clamped by a corner, judged exactly', () {
     for (final ja in Justification.values) {
       for (final jb in Justification.values) {
         final why = '${ja.name}/${jb.name}';
@@ -221,6 +232,30 @@ void main() {
         expect(clampedReports.single.message, contains('corner'), reason: why);
       }
     }
+
+    // Task 5 review m-1: the corner is judged exactly (D17 as amended). A
+    // 900 window on a free 3,000 wall, 150 left-justified, stored 5e-7 past
+    // the start of its span, less than the tolerance: it is clamped by
+    // 5e-7, and a corner moved it.
+    final probe = wallDoc();
+    run(probe,
+        addWall(probe, hA, plan(-1500, 3300), plan(1500, 3300), 150, left));
+    final (uS, _) = oracleSpan(probe, hA);
+    run(
+        probe,
+        addOpening(probe, hW,
+            OpeningParams(hA, uS + 450 - 5e-7, 900, OpeningKind.window)));
+    final past =
+        OpeningOracle(probe).cut(probe.components.get<OpeningParams>(hW)!)!;
+    expect(past.clamped, isTrue);
+    expect(past.a - (uS - 5e-7), closeTo(5e-7, 1e-8), reason: 'moved 5e-7');
+    final [report] = [
+      for (final d in diagnosticsOf(probe))
+        if (d.code.startsWith('opening.')) d
+    ];
+    expect(report.code, 'opening.clamped');
+    expect(report.handles, [hW]);
+    expect(report.message, contains('corner'));
   });
 
   test(
@@ -272,7 +307,8 @@ void main() {
       return resolveHit(hit, doc)?.target;
     }
 
-    // The door is a childless group until Task 6: nothing else lies there.
+    // Nothing of the wall lies in the doorway; the door's own leaf and arc
+    // lie off the band, far from this point (D10).
     expect(pick(oracleAt(f, 1400, 0)), isNot(hA), reason: 'the doorway');
     expect(pick(oracleAt(f, 850, 0)), hA, reason: 'control: in the piece');
   });

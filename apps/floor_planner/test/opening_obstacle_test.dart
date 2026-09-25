@@ -216,8 +216,9 @@ void main() {
       'OG6 (M-08m, M-08q, M-08q2) a door [1,150, 2,050] and a window '
       '[1,500, 2,700] overlap: one merged gap, two pieces, tiling 0, one '
       'opening.overlap from the lower handle [lower, higher], whichever kind '
-      'it is; a door nested in a window likewise; touching openings, and '
-      'ones within the tolerance of touching, make one gap and no overlap', () {
+      'it is; both symbols drawn over the merged gap; a door nested in a '
+      'window likewise; touching openings, and ones within the tolerance of '
+      'touching, make one gap and no overlap', () {
     const door = OpeningParams(hA, 1600, 900, OpeningKind.door);
     const window = OpeningParams(hA, 2100, 1200, OpeningKind.window);
     for (final (name, first, second) in [
@@ -235,6 +236,17 @@ void main() {
       expect(centrelineHandles(doc, hA), hasLength(2), reason: name);
       expectGapAt(doc, hA, 1150, 2700);
       expect(oracle.tilingOf(hA), noViolations, reason: name);
+      // Both symbols are drawn, each over its own cut inside the merged gap
+      // (D8, D10); the no-fit window outside the band (D11).
+      final (dh, wh) = first.kind == OpeningKind.door ? (hD, hW) : (hW, hD);
+      for (final h in [dh, wh]) {
+        final at = oracle.drawn(h);
+        expect(at.fits, isTrue, reason: name);
+        expect(at.a >= 1150 && at.b <= 2700, isTrue, reason: '$name: $at');
+      }
+      expectDoorOnOracle(doc, dh, reason: '$name: the door');
+      expectLinesOnOracle(doc, wh, reason: '$name: the window');
+      expectLinesOnOracle(doc, hM, reason: '$name: the no-fit window');
       // Reported once, by the lower handle, which comes before the no-fit
       // window's report in diagnostics()' ascending order.
       expect(
@@ -569,6 +581,10 @@ void main() {
       expect(usOf(f, piece).reduce(math.min), greaterThan(1000 - 1e-6),
           reason: name);
       expect(oracle.tilingOf(hA), noViolations, reason: name);
+      // Window A's stored start, 0, is the free start cap's own u, and the
+      // frame's uS is 0 only within rounding (−3.8e-10 here, so A is not
+      // clamped and no such report exists); rounding the other way would
+      // clamp A by an ulp, so a report of that is not asserted either way.
       expect([
         for (final r in reports(doc))
           if (!r.startsWith('opening.clamped [$hD]')) r

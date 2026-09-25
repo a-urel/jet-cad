@@ -358,6 +358,70 @@ List<List<Vector2>> centrelinePieces(
         HostFrame f, List<(double, double)> merged) =>
     [for (final p in _pieces(f, merged)) p.line];
 
+/// Opening [o]'s symbol (spec 08 D10, D11), computed in its host's local
+/// space on the host's frame [f] and taken to the opening's own local space
+/// by [toOwn], which is `toWorld(self)⁻¹ · toWorld(host)`: host-local →
+/// world → own local. Every child is ByLayer, `Generated`'s default.
+///
+/// [cut] is the opening's cut (D8); the symbol is drawn over `[x₁, x₂]`,
+/// the cut's interval. Null means no-fit (D11): the symbol is drawn over
+/// the **stored** interval `[c − w/2, c + w/2]`, never over the band.
+///
+/// - **door** (a LINE, then an ARC): the hinge `H` is the jamb corner on the
+///   swing-side face at `x₁` (hinge `start`) or `x₂` (hinge `end`); the leaf
+///   runs from `H` perpendicular to the wall, away from the band, `w` long;
+///   the swing is the quarter arc about `H` of radius `w` between the leaf's
+///   tip and the shut jamb (the other jamb on the same face), a sweep of
+///   +π/2, starting at whichever of the two makes it anticlockwise. A no-fit
+///   door is drawn the same way: its symbol lies outside the band already;
+/// - **window** (three LINEs, in order): the left face, the midline
+///   `(lOff + rOff)/2` and the right face, from `x₁` to `x₂`. No-fit, each
+///   is translated by the thickness `t` along the left normal: offsets
+///   `lOff + t`, `lOff + t/2` and `lOff`;
+/// - **gap** (one LINE): the threshold line on the centreline (offset 0)
+///   from `x₁ + m` to `x₂ − m`, `m = min(t/4, w/4)`. No-fit, at offset
+///   `lOff + t/2`.
+///
+/// [o] must not be degenerate (D6): it generates nothing.
+List<Generated> symbolOf(
+    HostFrame f, OpeningParams o, Cut? cut, Transform2 toOwn) {
+  final w = o.width;
+  final fits = cut != null;
+  final x1 = fits ? cut.a : o.position - w / 2;
+  final x2 = fits ? cut.b : o.position + w / 2;
+  final t = f.lOff - f.rOff;
+  Vector2 own(double u, double off) => toOwn.transformPoint(f.at(u, off));
+  Generated line(double u1, double u2, double off) =>
+      Generated(EntityKind.line, linePayload(own(u1, off), own(u2, off)));
+  switch (o.kind) {
+    case OpeningKind.door:
+      final (uh, us) = o.hinge == HingeEnd.start ? (x1, x2) : (x2, x1);
+      final (face, out) =
+          o.swing == SwingSide.left ? (f.lOff, w) : (f.rOff, -w);
+      final hinge = own(uh, face);
+      final tip = own(uh, face + out);
+      final shut = own(us, face);
+      final toTip = tip - hinge, toShut = shut - hinge;
+      final ccw = toTip.x * toShut.y - toTip.y * toShut.x > 0;
+      final from = ccw ? toTip : toShut;
+      return [
+        Generated(EntityKind.line, linePayload(hinge, tip)),
+        Generated(
+            EntityKind.arc,
+            arcPayload(
+                hinge, toTip.length, math.atan2(from.y, from.x), math.pi / 2)),
+      ];
+    case OpeningKind.window:
+      final offsets = fits
+          ? [f.lOff, (f.lOff + f.rOff) / 2, f.rOff]
+          : [f.lOff + t, f.lOff + t / 2, f.lOff];
+      return [for (final off in offsets) line(x1, x2, off)];
+    case OpeningKind.gap:
+      final m = math.min(t / 4, w / 4);
+      return [line(x1 + m, x2 - m, fits ? 0 : f.lOff + t / 2)];
+  }
+}
+
 /// The walls a regeneration sees around [host] (the **view adapter**,
 /// Ruling 08-8): [host] as a [WorldWall], and every neighbour of it in
 /// [view] carrying `WallParams`, as 07's outline reads them. Null when
@@ -414,21 +478,34 @@ List<(Handle, OpeningParams)> openingsInView(
     ];
 
 /// Everything D7 and D8 decide for one host: its [HostLayout], its openings
-/// (ascending) with their parameters, each one's cut (null: no fit, D8), and
-/// the merged cuts.
+/// (ascending), each one's cut (null: no fit, D8), and the merged cuts.
 typedef HostCuts = ({
   HostLayout layout,
   List<Handle> openings,
-  List<OpeningParams> params,
   List<Cut?> cuts,
   List<(double, double)> merged,
 });
 
+/// Each view's [hostCutsInView] results, by host. A view is built for one
+/// pass (an edit's plan, `drift()`, `diagnostics()`) over a document that
+/// does not change during it, so a host's cuts are computed once per pass:
+/// the wall and each of its `n` openings would otherwise each recompute
+/// them, `n + 1` times per host edit.
+final Expando<Map<Handle, HostCuts?>> _hostCutsByView =
+    Expando('hostCutsInView');
+
 /// [host]'s cuts through the view adapter: one computation, made by the wall
-/// for its pieces and by each of its openings for its diagnostics, so both
-/// see the same decision. Null when [host] has no openings, is not a live
-/// wall, or is degenerate (07 D2: no frame).
+/// for its pieces and by each of its openings for its symbol and its
+/// diagnostics, so all of them see the same decision. Memoised per [view]
+/// and host. Null when [host] has no openings, is not a live wall, or is
+/// degenerate (07 D2: no frame).
 HostCuts? hostCutsInView(ParametricView view, Handle host) {
+  final memo = _hostCutsByView[view] ??= <Handle, HostCuts?>{};
+  if (memo.containsKey(host)) return memo[host];
+  return memo[host] = _hostCuts(view, host);
+}
+
+HostCuts? _hostCuts(ParametricView view, Handle host) {
   final openings = openingsInView(view, host);
   if (openings.isEmpty) return null;
   final layout = layoutInView(view, host);
@@ -439,7 +516,6 @@ HostCuts? hostCutsInView(ParametricView view, Handle host) {
   return (
     layout: layout,
     openings: [for (final (h, _) in openings) h],
-    params: [for (final (_, o) in openings) o],
     cuts: placed.cuts,
     merged: placed.merged,
   );

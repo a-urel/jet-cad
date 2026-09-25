@@ -106,9 +106,8 @@ final class OpeningParams implements Component {
 ///   it, its edit the host;
 /// - [references] is `[host]`, with the default policy, `cascade`: deleting
 ///   the host deletes its openings in the same edit (D4);
-/// - [generate] draws nothing yet: the symbols come with Task 6 (Ruling
-///   08-7), so until then an opening is a childless group whose only effect
-///   is the cut it makes in its host (D9, `WallType`);
+/// - [generate] draws its symbol (D10, D11), from the same decision its
+///   host's cut takes ([hostCutsInView]);
 /// - [diagnose] reports D17's codes, from the same decision the host's cut
 ///   takes ([hostCutsInView]).
 final class OpeningType extends ParametricType<OpeningParams> {
@@ -123,8 +122,35 @@ final class OpeningType extends ParametricType<OpeningParams> {
   @override
   Iterable<Handle> references(OpeningParams params) => [params.host];
 
+  /// [self]'s symbol ([symbolOf], spec 08 D10, D11): over its cut when it
+  /// fits, over its stored interval, outside the band, when it does not
+  /// (D8's no-fit, "a wall keeps a piece" included). The host's frame and
+  /// every cut are [hostCutsInView]'s, the very decision the host's pieces
+  /// take, and the symbol goes host-local → world → own local through
+  /// `toWorld(self)⁻¹ · toWorld(host)`.
+  ///
+  /// Nothing, so a childless group, for a degenerate opening (D6), an
+  /// opening whose host is not a live wall (orphaned, or a box: D17's
+  /// `opening.orphan`) and one whose host is degenerate (D8: no frame, no
+  /// face to draw against). Otherwise the child count is fixed by the kind,
+  /// so the children keep their handles across every regeneration, a door
+  /// that becomes no-fit included.
   @override
-  List<Generated> generate(ParametricView view, Handle self) => const [];
+  List<Generated> generate(ParametricView view, Handle self) {
+    final o = view.paramsOf<OpeningParams>(self)!;
+    if (_degenerate(o)) return const [];
+    final all = hostCutsInView(view, o.host);
+    if (all == null) return const [];
+    final i = all.openings.indexOf(self);
+    if (i < 0) return const [];
+    final toOwn = view.toWorld(self).invert().multiply(view.toWorld(o.host));
+    return symbolOf(all.layout.frame, o, all.cuts[i], toOwn);
+  }
+
+  /// D6's degenerate opening: a width not greater than `wallJoin.linear`,
+  /// or a non-finite position or width.
+  static bool _degenerate(OpeningParams o) =>
+      !o.position.isFinite || !o.width.isFinite || !(o.width > wallJoin.linear);
 
   /// At most one entry of each code for [self] (spec 08 D17), warnings
   /// unless stated, except `opening.overlap`, one per overlapping pair:
@@ -154,9 +180,7 @@ final class OpeningType extends ParametricType<OpeningParams> {
   @override
   List<Diagnostic> diagnose(ParametricView view, Handle self) {
     final o = view.paramsOf<OpeningParams>(self)!;
-    if (!o.position.isFinite ||
-        !o.width.isFinite ||
-        !(o.width > wallJoin.linear)) {
+    if (_degenerate(o)) {
       return [
         Diagnostic(
           severity: DiagnosticSeverity.error,
