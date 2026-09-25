@@ -30,11 +30,18 @@ final class PanelFieldFocusNode extends FocusNode {
   /// with the focus on the route's scope no key reaches the shell's
   /// shortcuts.
   ///
-  /// Only a focused field calls it: Enter, and `onTapOutside`, which a
-  /// text field arms only while it has the focus.
+  /// The walk starts from the node that has the focus, which is not always
+  /// this one. Enter comes from the focused field, but `onTapOutside` is
+  /// armed from the field's focus at its *last build*: within one frame it
+  /// can fire for a field that has since lost the focus -- tap Width, then
+  /// tap the scale, then click the Page title before a frame (fix/post-07
+  /// F2F3b m1). Walking from this node there would find it unfocused, go on
+  /// from the scale, step back to Width, and stop on Width, which `seen`
+  /// already holds. From the focused node the walk passes both. And when
+  /// the focused node is not a panel field, there is nothing to hand back.
   void handBack() {
     final seen = <FocusNode>{};
-    FocusNode? node = this;
+    FocusNode? node = hasFocus ? this : FocusManager.instance.primaryFocus;
     while (node is PanelFieldFocusNode && seen.add(node)) {
       node.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
       node = node.enclosingScope?.focusedChild;

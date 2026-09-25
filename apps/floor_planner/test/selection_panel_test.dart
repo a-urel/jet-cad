@@ -1,11 +1,13 @@
 import 'dart:convert';
 
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_tool.dart';
 import 'package:floor_planner/planner_view.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -812,12 +814,12 @@ void main() {
     final b = await typeWidthThenHeight(tester, view);
     await tester.tap(pageScale());
     await tester.pump();
-    await tester.enterText(pageScale(), '50');
+    await tester.enterText(pageScale(), '75');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(sizeOf(view, b), [150, 90]);
     expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
-        50);
+        75);
     expect(doc.commands.undoDepth, depth + 3);
     expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
     await press(tester, LogicalKeyboardKey.keyW);
@@ -840,5 +842,32 @@ void main() {
     expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
     await press(tester, LogicalKeyboardKey.keyL);
     expect(status(tester), 'Line');
+  });
+
+  testWidgets(
+      "SE15 a tap on the page panel's scale after Width, then a mouse click "
+      "on the panel's title before a frame: the hand-back walks from the "
+      'focused scale, not from Width, and ends on the canvas (fix/post-07 '
+      'F2F3b m1)', (tester) async {
+    final view = await pumpBoxes(tester);
+    final b = boxes(view.document).first;
+    await select(tester, view, [b]);
+    await tester.tap(width);
+    await tester.pump();
+    final widthNode = tester.widget<TextField>(width).focusNode!;
+    final scaleNode = tester.widget<TextField>(pageScale()).focusNode!;
+    // No frame: Width's tap-outside is still armed from its last build,
+    // and the scale's is not armed yet.
+    await tester.tap(pageScale());
+    expect(FocusManager.instance.primaryFocus, same(scaleNode));
+    expect(widthNode.hasFocus, isFalse);
+    await tester.tapAt(
+        tester.getCenter(find.descendant(
+            of: find.byType(PagePanel), matching: find.text('Page'))),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
   });
 }

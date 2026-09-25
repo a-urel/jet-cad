@@ -33,11 +33,13 @@ class _PagePanelState extends State<PagePanel> {
     super.initState();
     _syncScale();
     widget.page.addListener(_syncScale);
+    _scaleFocus.addListener(_onScaleFocus);
   }
 
   @override
   void dispose() {
     widget.page.removeListener(_syncScale);
+    _scaleFocus.removeListener(_onScaleFocus);
     _scale.dispose();
     _scaleFocus.dispose();
     super.dispose();
@@ -48,6 +50,17 @@ class _PagePanelState extends State<PagePanel> {
     if (page == null) return;
     final text = _number(page.scaleDenominator);
     if (_scale.text != text) _scale.text = text;
+  }
+
+  /// The scale is committed on submit (spec 04), so a field left any other
+  /// way -- a tap outside, say -- would go on showing a scale the page does
+  /// not have: it re-syncs to the model when it loses the focus
+  /// (fix/post-07 F2F3b m2). On Enter this comes after the commit:
+  /// `onEditingComplete` hands the focus back and `onSubmitted` commits at
+  /// once, while the focus change lands in a later microtask, so the field
+  /// shows the committed value.
+  void _onScaleFocus() {
+    if (!_scaleFocus.hasFocus) _syncScale();
   }
 
   static String _number(double v) =>
@@ -139,7 +152,8 @@ class _PagePanelState extends State<PagePanel> {
                   // again at once. `onSubmitted` still runs after Enter's.
                   // Without these, Enter and a mouse click outside take the
                   // focus to the route's scope, where no key reaches the
-                  // shell -- even from a canvas click.
+                  // shell -- even from a canvas click. Either way the field
+                  // then re-syncs to the model (`_onScaleFocus`).
                   onEditingComplete: _scaleFocus.handBack,
                   onTapOutside: (_) => _scaleFocus.handBack(),
                 ),

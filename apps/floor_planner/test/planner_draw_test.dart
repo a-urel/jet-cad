@@ -460,6 +460,9 @@ void main() {
 
   Finder scale() => find.byKey(const Key('page-scale'));
 
+  String scaleText(WidgetTester tester) =>
+      tester.widget<TextField>(scale()).controller!.text;
+
   testWidgets(
       "A18 Enter in the page panel's scale field commits it and hands focus "
       "back to the canvas: the tool's Escape and the shell's letters work at "
@@ -475,13 +478,15 @@ void main() {
     final depth = doc.commands.undoDepth;
     await tester.tap(scale());
     await tester.pump();
-    await tester.enterText(scale(), '50');
+    await tester.enterText(scale(), '75');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
-        50);
+        75);
     expect(doc.commands.undoDepth, depth + 1);
     expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    // The focus loss re-syncs the field after the commit, not before it.
+    expect(scaleText(tester), '75');
     await press(tester, LogicalKeyboardKey.escape);
     expect(polyline.isPending, isFalse, reason: "Escape reached the tool");
     expect(status(tester), 'Polyline');
@@ -629,5 +634,30 @@ void main() {
     final view = await pumpDraw(tester, doc);
     final slot = await draftLine(tester, view);
     expect(argbOnCanvas(tester, slot), 0xFF000000);
+  });
+
+  testWidgets(
+      "A23 the page panel's scale field left without Enter shows the page's "
+      "scale again: typed 75 on 1:20, then a mouse click on the panel's "
+      'title commits nothing (fix/post-07 F2F3b m2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    await tester.pump();
+    expect(scaleText(tester), '75');
+    await tester.tapAt(
+        tester.getCenter(find.descendant(
+            of: find.byType(PagePanel), matching: find.text('Page'))),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        20);
+    expect(doc.commands.undoDepth, depth);
+    expect(scaleText(tester), '20',
+        reason: 'the field never shows a scale the page does not have');
   });
 }
