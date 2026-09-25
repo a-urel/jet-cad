@@ -196,8 +196,10 @@ class OpeningTool extends PlacementTool {
         _otherCuts,
         f.uOf(_toLocal!.transformPoint(raw)),
         settings.value.width,
-        // The aperture in the host's local units.
-        apertureWorld / toWorld.scaleMagnitude);
+        // The aperture in the host's local units along its centreline: one
+        // local unit along `d` is `|toWorld · d|` in world, exactly, even
+        // for a non-uniformly scaled group.
+        apertureWorld / toWorld.transformDirection(f.d).length);
     if (v == null) return null;
     _edgeSnapped = true;
     _edgeHost = host;

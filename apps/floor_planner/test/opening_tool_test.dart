@@ -755,6 +755,103 @@ void main() {
   });
 
   test(
+      'OT3 (rv10-storedCuts) another opening\'s candidates are its drawn '
+      'edges: a clamped window\'s drawn edge attracts a door and its stored '
+      'edge does not; a no-fit opening\'s stored edges attract nothing', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(6000, 0), 200, centre);
+    final foot = oracleAt(oracleFrameOf(doc, a), 2000, 0);
+    addWallFromSeed(doc, polar(foot, 23 + 80, 1800), foot, 115, left);
+    final [(_, o2)] = OpeningOracle(doc).obstacles(a);
+    // Stored [o2 − 100, o2 + 900], so it is drawn clamped at [o2, o2 + 1000].
+    final win = doc.handleSeed.next();
+    doc.commands.execute(addOpening(
+        doc, win, OpeningParams(a, o2 + 400, 1000, OpeningKind.window)));
+    // 4,000 wide: no stretch holds it (the longest runs from o2 to the end,
+    // ~3,940). Stored [o2 + 1700, o2 + 5700], drawn nowhere.
+    final nofit = doc.handleSeed.next();
+    doc.commands.execute(addOpening(
+        doc, nofit, OpeningParams(a, o2 + 3700, 4000, OpeningKind.window)));
+    doc.commands.clearHistory();
+    final oracle = OpeningOracle(doc);
+    final wc = oracle.cut(doc.components.get<OpeningParams>(win)!)!;
+    expect(wc.clamped, isTrue);
+    expect([wc.a - o2, wc.b - o2], [closeTo(0, 1e-6), closeTo(1000, 1e-6)]);
+    expect(oracle.cut(doc.components.get<OpeningParams>(nofit)!), isNull);
+
+    // 0.5 px/mm: a 20 mm aperture. A 600 door, pressed 40 off the
+    // centreline.
+    final f = oracleFrameOf(doc, a);
+    final rig = directRig(doc, OpeningKind.door, scale: 0.5);
+    rig.tool.settings.value = const OpeningSettings(width: 600);
+    for (final (u, want, why) in [
+      (
+        o2 + 1000 + 300 + 12,
+        wc.b + 300,
+        'left edge 12 from the window\'s drawn right edge: snapped'
+      ),
+      (
+        o2 + 900 + 300 + 5,
+        o2 + 1205,
+        'left edge 5 from its stored right edge: not snapped'
+      ),
+      (
+        o2 + 1700 - 300 - 6,
+        o2 + 1394,
+        'right edge 6 from the no-fit\'s stored left edge: not snapped'
+      ),
+    ]) {
+      final before = openings(doc);
+      pressAt(rig, oracleAt(f, u, -40));
+      final o = doc.components.get<OpeningParams>(added(doc, before))!;
+      expect(o.host, a);
+      expect(o.position, closeTo(want, 1e-6), reason: why);
+      doc.commands.undo();
+    }
+  });
+
+  test(
+      'OT3 (t11-apertureDir) on a host scaled non-uniformly the aperture is '
+      'measured along its centreline: an edge within the world aperture '
+      'snaps, one just beyond it does not', () {
+    final doc = wallDoc();
+    final h = doc.handleSeed.next();
+    doc.commands.execute(addWall(doc, h, plan(0, 0), plan(4000, 0), 200, centre,
+        at: groupAt(h.value).multiply(Transform2.scale(2, 0.5))));
+    final p = doc.components.get<WallParams>(h)!;
+    final local = (Vector2(p.ex, p.ey) - Vector2(p.sx, p.sy)).length;
+    final f = oracleFrameOf(doc, h);
+    // World mm per local unit along the centreline: far from the group's
+    // geometric mean scale, 1, so √|det| would be the wrong divisor.
+    final k = f.len / local;
+    expect((k - 1).abs(), greaterThan(0.2), reason: 'k = $k');
+    // A 600 (local) window, unclamped, 60% along: its left edge is the only
+    // candidate near the door.
+    final wc = 0.6 * local;
+    doc.commands.execute(addOpening(doc, doc.handleSeed.next(),
+        OpeningParams(h, wc, 600, OpeningKind.window)));
+    doc.commands.clearHistory();
+    expect(diagnosticsOf(doc), isEmpty);
+
+    // 0.5 px/mm: a 20 mm aperture in world. A 600 (local) door whose right
+    // edge is `world` mm (in world) short of the window's left edge, pressed
+    // on the centreline: the group does not keep right angles, so a point
+    // off the centreline would project elsewhere in local space.
+    final rig = directRig(doc, OpeningKind.door, scale: 0.5);
+    rig.tool.settings.value = const OpeningSettings(width: 600);
+    for (final (world, snaps) in [(19.9, true), (20.1, false)]) {
+      final u = wc - 300 - 300 - world / k;
+      final before = openings(doc);
+      pressAt(rig, oracleAt(f, u * k, 0));
+      final o = doc.components.get<OpeningParams>(added(doc, before))!;
+      expect(o.host, h);
+      expect(o.position, closeTo(snaps ? wc - 600 : u, 1e-6),
+          reason: '$world mm in world');
+      doc.commands.undo();
+    }
+  });
+
+  test(
       'OT5 (X10-marker) the snap marker is painted at the projected point on '
       'the host\'s centreline, not at the chain\'s point; off every wall, '
       'at the chain\'s point', () {
