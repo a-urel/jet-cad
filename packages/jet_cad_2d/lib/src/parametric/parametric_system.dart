@@ -147,29 +147,20 @@ class DanglingReferenceError implements Exception {
 /// Read-only access for [ParametricType.generate] and
 /// [ParametricType.diagnose].
 final class ParametricView {
-  ParametricView._(this._target, this._survey, [this._before]);
+  ParametricView._(this._target, this._survey);
 
   final CommandTarget _target;
   final _Survey _survey;
 
-  /// The survey before the edit, inside an edit only: [paramsOf] reads it to
-  /// hide an object the edit lost.
-  final _Survey? _before;
-
-  /// [h]'s component of type [U], or null. Inside an edit, null also for an
-  /// object this edit lost (live before, not after): a deleted referent's
-  /// component is detached only after the plan (06 D8's cleanup), and an
-  /// orphan must see its host gone (spec 08 D4), not a host whose transform
-  /// has fallen back to the identity.
-  U? paramsOf<U extends Component>(Handle h) {
-    final before = _before;
-    if (before != null &&
-        before.objects.containsKey(h) &&
-        !_survey.objects.containsKey(h)) {
-      return null;
-    }
-    return _target.components.get<U>(h);
-  }
+  /// [h]'s component of type [U], or null, and null for any handle that is
+  /// not a live object of the survey this view was built over (inside an
+  /// edit, `drift()` and `diagnostics()` alike). An object an edit lost
+  /// keeps its component until 06 D8's cleanup, after the plan, and a
+  /// re-parented one keeps it for good; either way an orphan must see its
+  /// host gone (spec 08 D4), not a host whose transform has fallen back to
+  /// the identity or that no longer regenerates.
+  U? paramsOf<U extends Component>(Handle h) =>
+      _survey.objects.containsKey(h) ? _target.components.get<U>(h) : null;
 
   /// The accumulated transform: group-local to world.
   Transform2 toWorld(Handle h) => _worldOf(_target, h);

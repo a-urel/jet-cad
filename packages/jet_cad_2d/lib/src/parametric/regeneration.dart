@@ -363,68 +363,56 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
 /// referrers, before the edit, of each `before.referrers` key that is no
 /// longer an object (06's `_isObject` on the current tree, so a removed
 /// node, a detached component and a group that is no longer root-level
-/// alike), in ascending order. Each loses its present children, leaves
-/// first (a fill whose boundary goes too is skipped: the boundary's removal
-/// takes it), then its node. A doomed object is then no longer an object
-/// itself, so the next round picks up its own `cascade` referrers. Each
-/// round costs O(referents).
+/// alike), in ascending order. Each loses its subtree as the select tool
+/// deletes a group ([_subtreeRemoval]). A doomed object is then no longer
+/// an object itself, so the next round picks up its own `cascade`
+/// referrers. Each round costs O(referents).
 ///
-/// The commands are applied one at a time, like `_run`'s regeneration loop
-/// and for the same reason: a child's refusal undoes what the cascade
-/// applied, then [r0], and rethrows; a failed rollback throws 06's
-/// "partially mutated" `StateError` and undoes nothing more.
+/// Everything, deciding each command as well as applying it, every round,
+/// runs under one rollback: a failure undoes what the cascade applied, then
+/// [r0], and rethrows, so the target is as it was before the edit; a failed
+/// rollback throws 06's "partially mutated" `StateError` and undoes nothing
+/// more. The commands are applied one at a time, like `_run`'s regeneration
+/// loop and for the same reason (06 debt): a child's refusal and a failed
+/// rollback stay apart.
 CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, CommandResult r0, String label) {
   if (before.referrers.isEmpty) return r0;
   final inverses = <DraftCommand>[];
   final touched = <Handle>{...r0.touched};
-  void apply(DraftCommand c) {
-    final CommandResult applied;
+  try {
+    while (true) {
+      final doomed = <Handle>{
+        for (final e in before.referrers.entries)
+          if (!_isObject(t, types, e.key))
+            for (final d in e.value)
+              if (before.objects[d]!.type.referencePolicy ==
+                      ReferencePolicy.cascade &&
+                  _isObject(t, types, d))
+                d,
+      }.toList()
+        ..sort(_byValue);
+      if (doomed.isEmpty) break;
+      for (final d in doomed) {
+        for (final c in _subtreeRemoval(t, before, d)) {
+          final applied = c.apply(t);
+          inverses.add(applied.inverse);
+          touched.addAll(applied.touched);
+        }
+      }
+    }
+  } catch (error) {
     try {
-      applied = c.apply(t);
-    } catch (error) {
-      try {
-        for (final i in inverses.reversed) {
-          i.apply(t);
-        }
-      } catch (rollbackError) {
-        throw StateError('"$label": the reference cascade threw ($error) and '
-            'its rollback threw ($rollbackError); the target is partially '
-            'mutated and nothing was recorded in history');
+      for (final i in inverses.reversed) {
+        i.apply(t);
       }
-      _undoInner(t, label, r0, error);
-      rethrow;
+    } catch (rollbackError) {
+      throw StateError('"$label": the reference cascade threw ($error) and '
+          'its rollback threw ($rollbackError); the target is partially '
+          'mutated and nothing was recorded in history');
     }
-    inverses.add(applied.inverse);
-    touched.addAll(applied.touched);
-  }
-
-  while (true) {
-    final doomed = <Handle>{
-      for (final e in before.referrers.entries)
-        if (!_isObject(t, types, e.key))
-          for (final d in e.value)
-            if (before.objects[d]!.type.referencePolicy ==
-                    ReferencePolicy.cascade &&
-                _isObject(t, types, d))
-              d,
-    }.toList()
-      ..sort(_byValue);
-    if (doomed.isEmpty) break;
-    for (final d in doomed) {
-      final present = {
-        for (final c in before.children[d] ?? const <Handle>[])
-          if (t.entities.slotOf(c) != null) c,
-      };
-      for (final c in present) {
-        if (t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill &&
-            present.contains(_boundaryOf(t, c))) {
-          continue;
-        }
-        apply(RemoveEntityCommand(c));
-      }
-      apply(RemoveNodeCommand(d));
-    }
+    _undoInner(t, label, r0, error);
+    rethrow;
   }
   if (inverses.isEmpty) return r0;
   return CommandResult(
@@ -432,6 +420,79 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
         label: r0.inverse.label),
     touched: touched,
   );
+}
+
+/// The commands that remove the doomed object [d]'s subtree, as the select
+/// tool's `_groupCascade` does: a group's leaves, then its child instances
+/// and nested groups (recursively) in its listed order, then the group.
+///
+/// A group's **fills go before its other leaves**, so a region's fill is
+/// removed before its boundary: `RemoveEntityCommand` on a fill is always
+/// available and undoes exactly, whereas removing a boundary takes its fill
+/// with it only when the pair could be rebuilt, and refuses a loaded,
+/// unfillable one (an open boundary, say), which would refuse the whole
+/// edit.
+///
+/// [d]'s own leaves are the survey's (an edit cannot add into a live
+/// object, 06 D6); a nested group's are found by one scan of the live
+/// slots, paid only when [d] has nested groups.
+List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
+  final groups = <Handle>[];
+  void collect(Handle g) {
+    groups.add(g);
+    final node = t.tree[g];
+    if (node is! GroupNode) return;
+    for (final c in t.tree.childNodesOf(node.children)) {
+      if (t.tree[c] is GroupNode) collect(c);
+    }
+  }
+
+  collect(d);
+  final leaves = <Handle, List<Handle>>{
+    d: [
+      for (final c in before.children[d] ?? const <Handle>[])
+        if (t.entities.slotOf(c) != null) c,
+    ],
+  };
+  if (groups.length > 1) {
+    final nested = groups.skip(1).toSet();
+    for (final slot in t.entities.liveSlots) {
+      final owner = t.entities.ownerAt(slot);
+      if (nested.contains(owner)) {
+        (leaves[owner] ??= []).add(t.entities.handleAt(slot));
+      }
+    }
+    for (final list in leaves.values) {
+      list.sort(_byValue);
+    }
+  }
+  final out = <DraftCommand>[];
+  void remove(Handle g) {
+    final own = leaves[g] ?? const <Handle>[];
+    bool isFill(Handle c) =>
+        t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+    for (final c in own) {
+      if (isFill(c)) out.add(RemoveEntityCommand(c));
+    }
+    for (final c in own) {
+      if (!isFill(c)) out.add(RemoveEntityCommand(c));
+    }
+    final node = t.tree[g];
+    if (node is GroupNode) {
+      for (final c in t.tree.childNodesOf(node.children)) {
+        final child = t.tree[c];
+        if (child is GroupNode) {
+          remove(c);
+        } else if (child is InstanceNode) {
+          out.add(RemoveNodeCommand(c));
+        }
+      }
+    }
+    out.add(RemoveNodeCommand(g));
+  }
+
+  remove(d);
+  return out;
 }
 
 /// Spec 08 D5, Ruling 08-5: every seed that is a live `cascade`-policy
@@ -520,13 +581,15 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
     if (seeds.isEmpty && cleanup.isEmpty) return r;
-    plan = _plan(t, _closure(seeds, before, after), after,
-        ParametricView._(t, after, before));
+    plan = _plan(
+        t, _closure(seeds, before, after), after, ParametricView._(t, after));
   } catch (error) {
     _undoInner(t, edit.label, r, error);
     rethrow;
   }
-  edit._geometryChanged = plan.isNotEmpty;
+  // The cascade removes entities even when the plan is empty (a detached
+  // host with no neighbour): the index must not skip it (spec 06 D9).
+  edit._geometryChanged = plan.isNotEmpty || !identical(r, r0);
 
   // This loop is `CompoundCommand.apply` by hand, on purpose (06 debt). A
   // compound reports its own rollback failure as a `StateError`, which is

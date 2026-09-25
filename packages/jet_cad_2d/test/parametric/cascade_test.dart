@@ -122,6 +122,58 @@ final class ChangeCount {
   int count = 0;
 }
 
+/// A `cascade`-policy client naming two referents (Ruling 08-5's order).
+final class Brace implements Component {
+  const Brace(this.a, this.b);
+  static const String id = 'test.brace';
+  final Handle a, b;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'a': a.toJson(), 'b': b.toJson()};
+  static Brace fromJson(Map<String, Object?> j) =>
+      Brace(Handle.fromJson(j['a']), Handle.fromJson(j['b']));
+  @override
+  bool operator ==(Object o) => o is Brace && o.a == a && o.b == b;
+  @override
+  int get hashCode => Object.hash(a, b);
+}
+
+final class BraceType extends ParametricType<Brace> {
+  const BraceType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Brace params, Transform2 toWorld) => Aabb2.empty();
+  @override
+  Iterable<Handle> references(Brace params) => [params.a, params.b];
+  @override
+  List<Generated> generate(ParametricView view, Handle self) => const [];
+}
+
+final ParametricCatalog braceCatalog = testCatalog()
+  ..register<Brace>(Brace.id, Brace.fromJson, const BraceType());
+
+/// [scene]'s encoding, edited by [edit] over its entity list, then loaded.
+DraftDocument loadedScene(
+    void Function(Map<String, Object?> j, List<Map<String, Object?>> e) edit) {
+  final j = jsonDecode(enc(scene())) as Map<String, Object?>;
+  edit(j, [for (final e in j['entities']! as List) e as Map<String, Object?>]);
+  return reload(jsonEncode(j));
+}
+
+Map<String, Object?> recordOf(Map<String, Object?> e) =>
+    e['record']! as Map<String, Object?>;
+
+Map<String, Object?> geometryOf(Map<String, Object?> e) =>
+    e['geometry']! as Map<String, Object?>;
+
+/// P2's region's entity of [kind] (`fill` or `polyline`) in [entities].
+Map<String, Object?> p2Region(
+        List<Map<String, Object?>> entities, String kind) =>
+    entities.firstWhere((e) =>
+        recordOf(e)['owner'] == hP2.value && recordOf(e)['kind'] == kind);
+
 void main() {
   setUp(() {
     generateCalls.clear();
@@ -470,5 +522,207 @@ void main() {
     expect(loaded.commands.undoDepth, depth + 2);
     expect(drift(loaded), [hP1]);
     expect(references(loaded).single.handles, [hP1, missing]);
+  });
+  test(
+      'CS8 (Task 2 review I-1) a detached host with no neighbour: the plan '
+      'is empty, but the cascade removed entities, so the edit reports '
+      'geometry and the spatial index drops P1\'s children', () async {
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, atA, postA));
+    doc.commands
+        .execute(create(doc, hP1, p1At, const Pin(hA, 450, region: true)));
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    // P1's region's right edge, in world: nothing of A's is near it.
+    final probe = p1At.transformPoint(Vector2(50, 25));
+    final hit = HitPath();
+    expect(index.pickInto(probe, 2.0, QueryFilter.picking(), hit), isTrue);
+    expect(kids(doc, hP1), contains(hit.entity));
+    await pumpEventQueue();
+    final changes = <CommandApplied>[];
+    doc.changes.listen((c) {
+      if (c is CommandApplied) changes.add(c);
+    });
+
+    doc.commands.execute(SetComponentCommand<Post>(hA, null));
+    await pumpEventQueue();
+    expectGone(doc, hP1);
+    expect(changes.single.capability, isNot(Capability.components));
+    expect(index.pickInto(probe, 2.0, QueryFilter.picking(), hit), isFalse);
+  });
+
+  test(
+      'CS9 (Task 2 review I-2) a cascade command that throws after an '
+      'earlier referrer\'s removals applied: the delete is refused, and the '
+      'document, the history and doc.changes are as before', () async {
+    // A second fill, owned by the root, names P2's boundary: once P2's own
+    // fill is gone, removing the boundary is refused (it cannot rebuild
+    // that pair), after P1 and P2's fill have already been removed.
+    final doc = loadedScene((j, entities) {
+      final copy = jsonDecode(jsonEncode(p2Region(entities, 'fill')))
+          as Map<String, Object?>;
+      final seed = j['handleSeed']! as int;
+      recordOf(copy)['handle'] = seed + 1;
+      recordOf(copy)['owner'] = j['root'];
+      (j['entities']! as List).add(copy);
+      j['handleSeed'] = seed + 1;
+    });
+    expect(doc.validate().map((d) => d.code),
+        contains('fill.boundary_foreign_owner'));
+    expect(kids(doc, hP1), isNotEmpty);
+    final before = canon(doc, sortNodes: true);
+    final depth = doc.commands.undoDepth;
+    await pumpEventQueue();
+    final changes = ChangeCount(doc);
+
+    expect(
+        () => doc.commands.execute(deleteObject(doc, hA)),
+        throwsA(isA<StateError>().having((e) => e.message, 'message',
+            startsWith('cannot remove boundary'))));
+    await pumpEventQueue();
+    expect(canon(doc, sortNodes: true), before);
+    expect(doc.commands.undoDepth, depth);
+    expect(changes.count, 0);
+  });
+
+  test(
+      'CS10 (Task 2 review m-1) a loaded region whose boundary cannot be '
+      'filled (open), or whose fill names no boundary: the cascade removes '
+      'the fill first, so deleting A lands; one step; undo is exact', () async {
+    final open = loadedScene((j, entities) {
+      final g = geometryOf(p2Region(entities, 'polyline'));
+      final coords = g['coords']! as List;
+      g['coords'] = coords.sublist(0, coords.length - 2);
+    });
+    final missing = loadedScene((j, entities) {
+      geometryOf(p2Region(entities, 'fill'))['scalars'] = [-7];
+    });
+    expect(missing.validate().map((d) => d.code),
+        contains('fill.boundary_missing'));
+    for (final (name, doc) in [('open', open), ('missing', missing)]) {
+      expect(hasFill(doc, hP2), isTrue, reason: name);
+      final before = state(doc);
+      final depth = doc.commands.undoDepth;
+
+      doc.commands.execute(deleteObject(doc, hA));
+      for (final h in [hA, hP1, hP2]) {
+        expectGone(doc, h);
+      }
+      expect(doc.commands.undoDepth, depth + 1, reason: name);
+      final after = state(doc);
+      doc.commands.undo();
+      expect(state(doc), before, reason: name);
+      doc.commands.redo();
+      expect(state(doc), after, reason: name);
+    }
+  });
+
+  test(
+      'CS11 (Task 2 review m-3) the cascade removes a referrer\'s subtree '
+      'as the select tool does: a nested group under P1, with its own leaf, '
+      'goes too; validate() stays clean; undo is exact', () {
+    final doc = scene();
+    final nested = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: nested,
+        parent: hP1,
+        transform:
+            Transform2.translation(120, -80).multiply(Transform2.rotation(0.6)),
+        children: const [])));
+    final leaf = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+        record: draftRecord(leaf, nested, EntityKind.line),
+        payload: linePayload(Vector2(10.5, 20.25), Vector2(310.75, 45.5))));
+    expect(doc.validate(), isEmpty);
+    expect(drift(doc), isEmpty);
+    final before = state(doc);
+    final depth = doc.commands.undoDepth;
+
+    doc.commands.execute(deleteObject(doc, hA));
+    expectGone(doc, hP1);
+    expect(doc.tree[nested], isNull);
+    expect(doc.entities.slotOf(leaf), isNull);
+    expect(doc.validate(), isEmpty);
+    expect(doc.commands.undoDepth, depth + 1);
+    doc.commands.undo();
+    expect(state(doc), before);
+    expect(doc.tree[nested]!.parent, hP1);
+    expect(doc.entities.ownerAt(doc.entities.slotOf(leaf)!), nested);
+  });
+
+  test(
+      'DR3 (Task 2 review m-2) Ruling 08-5\'s order: the lowest dead '
+      'referent of the lowest seed is the one refused', () {
+    final doc = DraftDocument.empty();
+    ParametricSystem(doc, braceCatalog).install();
+    final line = addDrafted(doc, EntityKind.line,
+        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)));
+    doc.commands.execute(line);
+    final low = line.record.handle;
+    final high = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: high,
+        parent: doc.rootHandle,
+        transform: parked,
+        children: const [])));
+    expect(low.value, lessThan(high.value));
+    const h1 = Handle(6000), h2 = Handle(6100);
+    // A refused create still raises the handle seed (06: `AddNodeCommand`
+    // raises it and its rollback does not lower it): compared without it.
+    String bytes() {
+      final j = jsonDecode(enc(doc)) as Map<String, Object?>;
+      expect(j.remove('handleSeed'), isNotNull);
+      return jsonEncode(j);
+    }
+
+    final before = bytes();
+
+    // One seed: declared high first, refused on low.
+    expect(
+        () => doc.commands.execute(create(doc, h1, tAt, Brace(high, low))),
+        throwsA(isA<DanglingReferenceError>()
+            .having((e) => e.object, 'object', h1)
+            .having((e) => e.referent, 'referent', low)));
+    // Two seeds, the higher one first in the command: the lower is refused.
+    expect(
+        () => doc.commands.execute(CompoundCommand([
+              create(doc, h2, qAt, Brace(low, low)),
+              create(doc, h1, tAt, Brace(high, high)),
+            ], label: 'Two')),
+        throwsA(isA<DanglingReferenceError>()
+            .having((e) => e.object, 'object', h1)
+            .having((e) => e.referent, 'referent', high)));
+    expect(bytes(), before);
+    expect(doc.tree[h1], isNull);
+    expect(doc.tree[h2], isNull);
+  });
+
+  test(
+      'LV2 (the broader paramsOf rule) a Post re-parented under a plain '
+      'group is no object, and its orphan Tag sees it gone in drift() too: '
+      'drift() is empty and parametric.orphan names it', () {
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hA, atA, postA));
+    doc.commands.execute(create(doc, hT, tAt, const Tag(hA)));
+    final g = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: g,
+        parent: doc.rootHandle,
+        transform: parked,
+        children: const [])));
+    expect(hasSegment(worldSegments(doc, hT), worldMarker(tAt)), isFalse);
+
+    doc.commands.execute(CompoundCommand([
+      RemoveNodeCommand(hA),
+      AddNodeCommand(
+          GroupNode(handle: hA, parent: g, transform: atA, children: const [])),
+    ], label: 'Re-parent'));
+    // The Post keeps its component on a nested group: misplaced, not live.
+    expect(doc.components.get<Post>(hA), postA);
+    expect(hasSegment(worldSegments(doc, hT), worldMarker(tAt)), isTrue);
+    expect(drift(doc), isEmpty);
+    final report = references(doc);
+    expect(report.single.code, 'parametric.orphan');
+    expect(report.single.handles, [hT, hA]);
   });
 }
