@@ -1,6 +1,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'box.dart';
+import 'opening.dart';
 import 'wall.dart';
 
 /// The floor planner's parametric types (spec 07 D1): the Box and the
@@ -10,7 +11,9 @@ final ParametricCatalog parametricCatalog = ParametricCatalog()
   ..register<BoxParams>(
       BoxParams.componentTypeId, BoxParams.fromJson, const BoxType())
   ..register<WallParams>(
-      WallParams.componentTypeId, WallParams.fromJson, const WallType());
+      WallParams.componentTypeId, WallParams.fromJson, const WallType())
+  ..register<OpeningParams>(OpeningParams.componentTypeId,
+      OpeningParams.fromJson, const OpeningType());
 
 /// Builds and installs the document's parametric system.
 ParametricSystem installParametric(DraftDocument doc) =>

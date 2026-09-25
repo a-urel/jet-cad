@@ -28,7 +28,8 @@ int debugOverlapTests = 0;
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
 /// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.reach, this.children, this.owned);
+  _Survey(this.objects, this.reach, this.children, this.owned,
+      this.references, this.referrers);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -41,6 +42,12 @@ final class _Survey {
 
   /// Every child of a live object, to its owner: the set G of spec D4.
   final Map<Handle, Handle> owned;
+
+  /// SPIKE 08: each object's referents that are live objects, ascending.
+  final Map<Handle, List<Handle>> references;
+
+  /// SPIKE 08: each referenced live object's referrers, ascending.
+  final Map<Handle, List<Handle>> referrers;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -94,18 +101,51 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   for (final list in children.values) {
     list.sort(_byValue);
   }
-  return _Survey(objects, reach, children, owned);
+  // SPIKE 08: O(n) over the objects; a reference to anything that is not
+  // a live object (a deleted wall, a box) is ignored here.
+  final references = <Handle, List<Handle>>{};
+  final referrers = <Handle, List<Handle>>{};
+  for (final h in order) {
+    final to = {
+      for (final x in objects[h]!.referencesOf(t, h))
+        if (x != h && objects.containsKey(x)) x
+    }.toList()
+      ..sort(_byValue);
+    if (to.isEmpty) continue;
+    references[h] = List.unmodifiable(to);
+    for (final x in to) {
+      (referrers[x] ??= []).add(h); // ascending: `order` is
+    }
+  }
+  return _Survey(objects, reach, children, owned, references, {
+    for (final e in referrers.entries) e.key: List.unmodifiable(e.value)
+  });
 }
 
 /// Seeds plus their neighbours before and after, as a sorted list of live
 /// objects (spec D4 step 6). One hop: generation reads parameters only.
 /// Neighbours are asked for the seeds only (spec 07 D10).
-List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) => {
-      ...seeds,
-      for (final s in seeds) ...before.neighboursOf(s),
-      for (final s in seeds) ...after.neighboursOf(s),
-    }.where(after.objects.containsKey).toList()
-      ..sort(_byValue);
+///
+/// SPIKE 08: plus, for each seed, the objects it references and the
+/// objects that reference it, before and after -- and then the referrers
+/// of every spatial neighbour too: a referrer reads its referent's joints
+/// (an opening is clamped into its wall's straight span), so a neighbour's
+/// change reaches it in two hops (seed -> neighbour -> referrer).
+List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
+  final core = {
+    ...seeds,
+    for (final s in seeds) ...before.neighboursOf(s),
+    for (final s in seeds) ...after.neighboursOf(s),
+    for (final s in seeds) ...?before.references[s],
+    for (final s in seeds) ...?after.references[s],
+  };
+  return {
+    ...core,
+    for (final x in core) ...?before.referrers[x],
+    for (final x in core) ...?after.referrers[x],
+  }.where(after.objects.containsKey).toList()
+    ..sort(_byValue);
+}
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
@@ -281,16 +321,69 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
   }
 }
 
+/// SPIKE 08: every live object that referenced (before the edit) an object
+/// whose node is now gone is deleted too, transitively: its children (a
+/// fill whose boundary goes too is skipped, as the select tool does), then
+/// its node. Returns [r] extended by the removals, as one result.
+CommandResult _cascade(CommandTarget t, _Survey before, CommandResult r) {
+  final inverses = <DraftCommand>[];
+  final touched = <Handle>{...r.touched};
+  while (true) {
+    final doomed = <Handle>{
+      for (final h in before.objects.keys)
+        if (t.tree[h] == null) ...?before.referrers[h],
+    }.where((d) => t.tree[d] != null).toList()
+      ..sort(_byValue);
+    if (doomed.isEmpty) break;
+    final commands = <DraftCommand>[];
+    for (final d in doomed) {
+      final kids = [
+        for (final c in before.children[d] ?? const <Handle>[])
+          if (t.entities.slotOf(c) != null) c
+      ];
+      for (final c in kids) {
+        final isFill =
+            t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+        // The boundary's removal takes its fill with it.
+        if (isFill && kids.contains(_boundaryOf(t, c))) continue;
+        commands.add(RemoveEntityCommand(c));
+      }
+      commands.add(RemoveNodeCommand(d));
+    }
+    final applied =
+        CompoundCommand(commands, label: 'Delete referrers').apply(t);
+    inverses.add(applied.inverse);
+    touched.addAll(applied.touched);
+  }
+  if (inverses.isEmpty) return r;
+  return CommandResult(
+    inverse: CompoundCommand([...inverses.reversed, r.inverse],
+        label: r.inverse.label),
+    touched: touched,
+  );
+}
+
 /// Spec D4 steps 1-9.
 CommandResult _run(ParametricEdit edit, CommandTarget t) {
   final types = edit._system._types;
   final before = _survey(t, types);
-  final r = edit.inner.apply(t);
+  final r0 = edit.inner.apply(t);
 
-  final refused = _refused(t, types, before, r.touched);
+  final refused = _refused(t, types, before, r0.touched);
   if (refused != null) {
-    _undoInner(t, edit.label, r, GeneratedGeometryError(refused));
+    _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
     throw GeneratedGeometryError(refused);
+  }
+
+  // SPIKE 08: the cascade is applied here, after the guard and before the
+  // after-survey, so the survey never sees a doomed referrer and the plan
+  // never generates one. From here on `r` stands for inner + cascade.
+  final CommandResult r;
+  try {
+    r = _cascade(t, before, r0);
+  } catch (error) {
+    _undoInner(t, edit.label, r0, error);
+    rethrow;
   }
 
   // The after-survey calls every registered type's `reach` again, with

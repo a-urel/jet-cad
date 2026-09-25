@@ -444,6 +444,25 @@ double sweep(End x, End y) {
   return (ring: ring, fellBack: false, hole: hole);
 }
 
+/// SPIKE 08: [outline]'s two caps kept apart, world space: the end cap
+/// (from the wall's right face to its left face) and the start cap (left
+/// face to right face). A wall whose joined ring is not simple gets its
+/// free caps, as [outline]'s fallback. Null for a degenerate wall.
+({List<Vector2> endCap, List<Vector2> startCap, bool fellBack})? capsOf(
+    WorldWall w, List<WorldWall> others) {
+  if (w.degenerate) return null;
+  final ce = cap(End(w, 1), classify(w, 1, others)).points;
+  final cs = cap(End(w, 0), classify(w, 0, others)).points;
+  if (!isSimpleCcw(simplifyRing([...ce, ...cs]))) {
+    return (
+      endCap: cap(End(w, 1), const Free()).points,
+      startCap: cap(End(w, 0), const Free()).points,
+      fellBack: true,
+    );
+  }
+  return (endCap: ce, startCap: cs, fellBack: false);
+}
+
 /// The signed area of a closed ring, anticlockwise positive.
 double signedArea(List<Vector2> r) {
   var a = 0.0;

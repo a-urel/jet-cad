@@ -39,6 +39,12 @@ abstract class ParametricType<T extends Component> {
   /// must not mutate: an `execute` from here throws `StateError`, like one
   /// from [generate]. Default: nothing to report.
   List<Diagnostic> diagnose(ParametricView view, Handle self) => const [];
+
+  /// SPIKE 08: the objects [params] reference (an opening: its host wall).
+  /// An edit of a referenced object regenerates its referrers, and an edit
+  /// of a referrer regenerates what it references; deleting a referenced
+  /// object deletes its referrers in the same edit. Default: none.
+  Iterable<Handle> references(T params) => const [];
 }
 
 /// One generated entity (spec D3), or one generated region (spec 07 D8).
@@ -111,6 +117,10 @@ final class ParametricView {
   /// Ascending handles of the objects whose reach overlaps [h]'s, computed
   /// on the first call for [h] and memoised (spec 07 D10). Unmodifiable.
   List<Handle> neighbours(Handle h) => _survey.neighboursOf(h);
+
+  /// SPIKE 08: ascending handles of the live objects whose
+  /// [ParametricType.references] name [h]. Unmodifiable.
+  List<Handle> referrers(Handle h) => _survey.referrers[h] ?? const [];
 }
 
 /// The parametric types an application knows, independent of any document
@@ -347,4 +357,6 @@ final class _Registration<T extends Component> {
       type.reach(t.components.get<T>(h) as T, _worldOf(t, h));
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);
+  Iterable<Handle> referencesOf(CommandTarget t, Handle h) =>
+      type.references(t.components.get<T>(h) as T);
 }

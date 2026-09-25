@@ -1,6 +1,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'opening.dart';
 import 'wall_geometry.dart';
 
 /// Which side of the centreline a wall's body lies on, looking from `start`
@@ -185,6 +186,25 @@ final class WallType extends ParametricType<WallParams> {
     final centreline = Generated(
         EntityKind.polyline, polylinePayload([p.start, p.end]),
         color: kWallColor);
+    // SPIKE 08: a wall with openings that fit splits its band into pieces.
+    final openings = openingsOf(view, self);
+    if (openings.isNotEmpty) {
+      final f = hostFrame(view, self);
+      if (f != null) {
+        final cuts = mergeCuts([
+          for (final o in openings)
+            if (cutOf(f, o) case final c?) c,
+        ]);
+        if (cuts.isNotEmpty) {
+          return [
+            for (final piece in piecesOf(f, cuts))
+              Generated.region(polylinePayload(piece, closed: true),
+                  color: kWallColor),
+            centreline,
+          ];
+        }
+      }
+    }
     final ring = _localOutlineOf(view, self, p).ring;
     if (ring.isEmpty) return [centreline];
     return [
