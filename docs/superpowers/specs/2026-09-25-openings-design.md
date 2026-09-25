@@ -592,6 +592,17 @@ For an opening with stored centre `c` and width `w` on a host frame:
   each starts more than `wallJoin.linear` before the other ends. Touching
   is not overlap.
 - **The degenerate width** (≤ `wallJoin.linear`) never fits (D6).
+- **A wall keeps a piece** (amended at execution, controller,
+  2026-09-25, Task 4's finding and review m1). After merging, if the
+  wall would be left with **no piece longer than `wallJoin.linear`** (a
+  cut spanning the whole span, merged cuts that cover it, or cuts that
+  leave only slivers), the fitting opening with the **highest handle** is
+  made **no-fit** (D11's outside symbol, `opening.nofit`) and the cuts are
+  placed and merged again without it; this repeats until a piece remains
+  or no fitting opening is left. A wall therefore never generates zero
+  children, and the choice is deterministic. **Pinned by** a test with a
+  whole-span gap and one with two windows whose merged cuts cover a
+  2,000 mm wall; mutant: "allow a zero-piece wall".
 
 **Costs:** an opening can be drawn far from its stored position when a
 narrow stretch holds it; `opening.clamped` says so. **Pinned by:** `OG2`,
