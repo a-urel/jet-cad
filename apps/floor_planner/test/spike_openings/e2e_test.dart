@@ -273,6 +273,51 @@ void main() {
     expect(driftOf(doc), isEmpty);
     expect(doc.tree[hD], isNotNull);
   });
+
+  test(
+      'Q5a a door whose own group carries a transform (by load or undo) '
+      'still draws at its host; a select-tool move of the door changes '
+      'nothing visible', () {
+    final doc = wallDoc();
+    run(doc, addWall(doc, hA, plan(-2500, 0), plan(2500, 0), 200, left));
+    run(
+        doc,
+        addOpening(
+            doc,
+            hD,
+            const OpeningParams(hA, 1400, 900, OpeningKind.door,
+                hinge: HingeEnd.end, swing: SwingSide.right),
+            at: groupAt(4000)));
+    expectDoorAt(doc, hD, reason: 'rotated door group');
+    final leaf0 = worldPoints(doc, hD, EntityKind.line).single;
+    final wall0 = worldPieces(doc, hA);
+    run(doc, moveBy(doc, hD, 700, 300));
+    final leaf1 = worldPoints(doc, hD, EntityKind.line).single;
+    // ignore: avoid_print
+    print('Q5a door moved by (700, 300): leaf start moved '
+        '${(leaf1[0] - leaf0[0]).length} mm; wall pieces equal: '
+        '${wall0.toString() == worldPieces(doc, hA).toString()}');
+    expectDoorAt(doc, hD, reason: 'after the move');
+    expect(doc.commands.canUndo, isTrue);
+  });
+
+  test(
+      'Q5b the host lengthened at its start: the door keeps its distance '
+      'from the start, so it moves in world', () {
+    final doc = doorWall();
+    final leaf0 = worldPoints(doc, hD, EntityKind.line).single;
+    final p = doc.components.get<WallParams>(hA)!;
+    final d = (p.end - p.start).normalized();
+    run(
+        doc,
+        SetComponentCommand<WallParams>(
+            hA, p.copyWith(start: p.start - d * 500)));
+    final leaf1 = worldPoints(doc, hD, EntityKind.line).single;
+    // ignore: avoid_print
+    print('Q5b start pulled back 500 mm: the door moved '
+        '${(leaf1[0] - leaf0[0]).length} mm in world');
+    expectDoorAt(doc, hD);
+  });
 }
 
 String enc2(DraftDocument doc, Handle k) =>

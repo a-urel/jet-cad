@@ -81,14 +81,19 @@ List<Vector2> gapRect(DraftDocument doc, Handle h, double a, double b) {
   return [at(a, f.ro), at(b, f.ro), at(b, f.lo), at(a, f.lo)];
 }
 
-/// Wall [h]'s uncut world outline among its wall neighbours in [doc]: 07's
-/// own `outline`, the band the pieces must tile.
+/// Wall [h]'s uncut world outline: what 07 stores for it with no openings,
+/// read from a twin of [doc] (saved, reloaded, every opening deleted) --
+/// the band the pieces must tile. A differential oracle: 07's own path,
+/// local-space fallback included.
 List<Vector2> uncutOutline(DraftDocument doc, Handle h) {
-  final others = [
-    for (final o in doc.components.withComponent<WallParams>())
-      if (o != h && doc.tree[o] != null) worldWallOf(doc, o),
-  ];
-  return outline(worldWallOf(doc, h), others).ring;
+  final twin = reload(enc(doc));
+  for (final o in twin.components.withComponent<OpeningParams>().toList()) {
+    twin.commands.execute(CompoundCommand([
+      for (final k in kids(twin, o)) RemoveEntityCommand(k),
+      RemoveNodeCommand(o),
+    ], label: 'Delete opening'));
+  }
+  return worldOutline(twin, h);
 }
 
 /// The tiling oracle: [count] points uniform in the bounding box of

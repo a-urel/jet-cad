@@ -180,16 +180,28 @@ List<List<Vector2>> piecesOf(HostFrame f, List<(double, double)> cuts) {
     out.add(simplifyRing(ring));
   }
 
+  // A cut clamped onto the span lands on a cap's face vertex: the face
+  // point recomputed there differs from it by rounding, and that near
+  // duplicate makes the triangulator refuse the piece. Within
+  // `wallJoin.linear` of it, the cap's own vertex is the cut's corner.
+  bool on(Vector2 capVertex, double u) =>
+      (f.uOf(capVertex) - u).abs() <= wallJoin.linear;
   final a0 = cuts.first.$1;
-  add([f.right(a0), f.left(a0), ...f.startCap],
-      a0 - f.startCap.map(f.uOf).reduce(math.min));
+  add([
+    if (!on(f.startCap.last, a0)) f.right(a0),
+    if (!on(f.startCap.first, a0)) f.left(a0),
+    ...f.startCap,
+  ], a0 - f.startCap.map(f.uOf).reduce(math.min));
   for (var i = 0; i + 1 < cuts.length; i++) {
     final b = cuts[i].$2, a = cuts[i + 1].$1;
     add([f.right(a), f.left(a), f.left(b), f.right(b)], a - b);
   }
   final bn = cuts.last.$2;
-  add([...f.endCap, f.left(bn), f.right(bn)],
-      f.endCap.map(f.uOf).reduce(math.max) - bn);
+  add([
+    ...f.endCap,
+    if (!on(f.endCap.last, bn)) f.left(bn),
+    if (!on(f.endCap.first, bn)) f.right(bn),
+  ], f.endCap.map(f.uOf).reduce(math.max) - bn);
   return out;
 }
 
