@@ -145,15 +145,12 @@ class OpeningTool extends PlacementTool {
   void hovered(Vector2 raw) {
     final ctx = _context;
     final host = ctx == null ? null : _bands.hostAt(ctx.document, raw.x, raw.y);
-    final placed = host == null
-        ? null
-        : _place(ctx!.document, host, raw, hoverPoint, _nextHandle(ctx));
-    if (placed == null) {
+    if (host == null || !_ready(ctx!.document, host)) {
       _preview = const [];
       return;
     }
     debugPreviewBuilds++;
-    _preview = _previewOf(placed);
+    _preview = _previewOf(_place(host, raw, hoverPoint, null));
   }
 
   @override
@@ -165,13 +162,15 @@ class OpeningTool extends PlacementTool {
     _bands.invalidate();
     _preview = const [];
     final host = _bands.hostAt(doc, _raw.x, _raw.y);
-    if (host == null) return;
-    final self = _nextHandle(ctx);
-    final placed = _place(doc, host, _raw, point, self);
-    if (placed == null) return;
+    if (host == null || !_ready(doc, host)) return;
     try {
       commit(ctx, () {
+        // The new opening's handle, allocated first (after the permission
+        // check, Ruling 05-3): the placement is decided among the host's
+        // openings in ascending handle order (D8's "a wall keeps a piece"),
+        // and this one takes its place there.
         final h = doc.handleSeed.next();
+        final placed = _place(host, _raw, point, h);
         return CompoundCommand([
           AddNodeCommand(GroupNode(
               handle: h,
@@ -193,12 +192,6 @@ class OpeningTool extends PlacementTool {
       // The host stopped being an object: nothing is placed.
     }
   }
-
-  /// The handle the next commit will allocate: the placement is decided
-  /// among the host's openings in ascending handle order (D8's "a wall
-  /// keeps a piece"), and this one takes its place there.
-  static Handle _nextHandle(ToolContext ctx) =>
-      Handle(ctx.document.handleSeed.current.value + 1);
 
   /// Refreshes the frame cache for [host] (Ruling 08-13). False when [host]
   /// has no frame: not a live wall, or degenerate.
@@ -226,14 +219,18 @@ class OpeningTool extends PlacementTool {
     return _layout != null;
   }
 
+  /// Whether an opening can be placed on [host] now: the settings hold a
+  /// width the tools may give, and the frame cache holds [host]'s frame.
+  bool _ready(DraftDocument doc, Handle host) =>
+      isOpeningWidth(kind, settings.value.width) && _frameFor(doc, host);
+
   /// Where an opening [self] of this tool's kind and width goes on [host]
-  /// for a press at [raw] resolved to [resolved] (spec 08 D14). Null when
-  /// [host] has no frame or the width is not one the tools may give.
-  _Placement? _place(DraftDocument doc, Handle host, Vector2 raw,
-      Vector2 resolved, Handle self) {
+  /// for a press at [raw] resolved to [resolved] (spec 08 D14), once
+  /// [_ready]. A null [self] is the hover's would-be opening: the handle the
+  /// next commit allocates is above every handle in the document, so it is
+  /// admitted after all of the host's openings.
+  _Placement _place(Handle host, Vector2 raw, Vector2 resolved, Handle? self) {
     final w = settings.value.width;
-    if (!isOpeningWidth(kind, w)) return null;
-    if (!_frameFor(doc, host)) return null;
     final layout = _layout!;
     final f = layout.frame;
     final toLocal = _toLocal!;
@@ -256,12 +253,15 @@ class OpeningTool extends PlacementTool {
   }
 
   /// The cut (D8) an opening [self] centred at [c], [w] wide, gets among the
-  /// host's cached openings: admitted in ascending handle order.
-  Cut? _cutAmong(HostLayout layout, double c, double w, Handle self) {
-    final before = [
-      for (final (h, _, _) in _others)
-        if (h.value < self.value) h,
-    ].length;
+  /// host's cached openings: admitted in ascending handle order, a null
+  /// [self] after all of them.
+  Cut? _cutAmong(HostLayout layout, double c, double w, Handle? self) {
+    final before = self == null
+        ? _others.length
+        : [
+            for (final (h, _, _) in _others)
+              if (h.value < self.value) h,
+          ].length;
     final openings = [
       for (final (_, oc, ow) in _others) (oc, ow),
     ]..insert(before, (c, w));

@@ -13,7 +13,7 @@ import 'wall_geometry.dart';
 /// tools, which find their host with [hostAt]. The shell owns one instance
 /// and hands it to all four.
 ///
-/// Per non-degenerate wall, ascending by handle, [_stride] doubles: the
+/// Per live, non-degenerate wall, ascending by handle, [_stride] doubles: the
 /// world start and end (`WorldWall`'s own `s` and `e`, so bitwise what
 /// `WallType` builds), the unit direction, the length, the left and right
 /// face offsets and the thickness; and the wall's handle beside them.
@@ -122,6 +122,12 @@ final class WallBands {
     _walls = 0;
     _handles.clear();
     for (final h in doc.components.withComponent<WallParams>()) {
+      // Live wall objects only, as the engine's survey reads one: a
+      // root-level group. A stray `WallParams` (on a nested group, or on a
+      // handle with no node, which no tool or file path makes) is not a
+      // wall, and must not shadow one under it.
+      final node = doc.tree[h];
+      if (node is! GroupNode || node.parent != doc.tree.root) continue;
       final w = WorldWall(h, doc.components.get<WallParams>(h)!,
           doc.tree.accumulatedTransform(h));
       if (w.degenerate) continue;

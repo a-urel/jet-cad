@@ -134,12 +134,14 @@ Handle addWallFromSeed(
 
 typedef Rig = ({OpeningTool tool, ToolContext ctx});
 
-/// An opening tool of [kind] over [doc]: a unit camera (a 10 mm aperture),
-/// object snap on, no page (no grid).
-Rig directRig(DraftDocument doc, OpeningKind kind) {
+/// An opening tool of [kind] over [doc]: a camera at [scale] pixels per mm
+/// (the default, 1, gives a 10 mm aperture), object snap as [snap] says
+/// (none: on), no page (no grid).
+Rig directRig(DraftDocument doc, OpeningKind kind,
+    {double scale = 1, SnapSettings? snap}) {
   final index = SpatialIndex(doc);
   final camera = CameraController(
-      ViewportTransform(worldToScreenMatrix: Transform2.identity()));
+      ViewportTransform(worldToScreenMatrix: Transform2.scale(scale, scale)));
   final selection = SelectionController(doc);
   final settings = ValueNotifier(OpeningSettings.defaultFor(kind));
   final tool = OpeningTool(kind, settings);
@@ -153,7 +155,11 @@ Rig directRig(DraftDocument doc, OpeningKind kind) {
   return (
     tool: tool,
     ctx: ToolContext(
-        document: doc, index: index, camera: camera, selection: selection),
+        document: doc,
+        index: index,
+        camera: camera,
+        selection: selection,
+        snap: snap),
   );
 }
 
@@ -431,6 +437,182 @@ void main() {
       expect((o.hinge, o.swing), (HingeEnd.start, swing), reason: 'at $off');
     }
     expect(driftOf(doc), isEmpty);
+  });
+
+  test(
+      'OT2 (rv9-hingeRaw) the hinge follows the stored centre, not the '
+      'click: a click at 2,400 on a 5,000 host runs into a T obstacle at '
+      '[2,300, 2,420], is clamped past L/2 and hangs on the end jamb '
+      '(Task 9 review m1)', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(5000, 0), 200, centre);
+    // A 120 stem, square to A, ending on A's centreline at 2,360: A's band
+    // is blocked from 2,300 to 2,420.
+    final foot = oracleAt(oracleFrameOf(doc, a), 2360, 0);
+    addWallFromSeed(doc, polar(foot, 23 + 90, 1800), foot, 120, centre);
+    doc.commands.clearHistory();
+    final [(o1, o2)] = OpeningOracle(doc).obstacles(a);
+    expect(o1, closeTo(2300, 1e-6));
+    expect(o2, closeTo(2420, 1e-6));
+    final f = oracleFrameOf(doc, a);
+    final rig = directRig(doc, OpeningKind.door);
+    pressAt(rig, oracleAt(f, 2400, -40));
+    final o = doc.components.get<OpeningParams>(openings(doc).single)!;
+    expect(o.host, a);
+    expect(o.position, closeTo(o2 + 450, 1e-6),
+        reason: 'the nearer stretch is past the obstacle: clamped to 2,870');
+    expect(2400, lessThan(f.len / 2), reason: 'the click is on the start half');
+    expect(o.position, greaterThan(f.len / 2));
+    expect(o.hinge, HingeEnd.end, reason: 'the stored centre is past L/2');
+    expect(o.swing, SwingSide.right);
+    expect(diagnosticsOf(doc), isEmpty);
+  });
+
+  test(
+      'OT2 (rv9-swingResolved) the swing follows the raw click, not the '
+      'resolved point: at 0.15 px/mm, clicks 30 mm either side of a centred '
+      'wall at 2,510 snap to its centreline\'s midpoint, and still swing '
+      'left and right (Task 9 review m2)', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(5000, 0), 200, centre);
+    doc.commands.clearHistory();
+    final f = oracleFrameOf(doc, a);
+    final rig = directRig(doc, OpeningKind.door, scale: 0.15);
+    for (final (off, swing) in [
+      (30.0, SwingSide.left),
+      (-30.0, SwingSide.right),
+    ]) {
+      final before = openings(doc);
+      pressAt(rig, oracleAt(f, 2510, off));
+      final resolved = rig.tool.hoverPoint;
+      expect(rig.tool.hoverKind, SnapKind.midpoint, reason: 'at $off');
+      expect(oracleU(f, resolved), closeTo(2500, 1e-6), reason: 'at $off');
+      expect(((resolved - f.s).dot(f.n)).abs(), lessThan(1e-6),
+          reason: 'the resolved point is on the centreline (at $off)');
+      final o = doc.components.get<OpeningParams>(added(doc, before))!;
+      expect(o.swing, swing, reason: 'the raw click is $off off');
+      doc.commands.undo();
+    }
+  });
+
+  test(
+      'OT1 (rv9-selfFirst) the new opening is admitted with the handle its '
+      'commit allocates, after the host\'s openings: an 800 door clicked at '
+      '1,700 on a 2,000 wall whose 1,200 window cuts [0, 1,200] would leave '
+      'no piece, so it is no-fit, stored at the projected click, and its '
+      'preview has no jambs (Task 9 review m3)', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(2000, 0), 200, centre);
+    final win = doc.handleSeed.next();
+    doc.commands.execute(
+        addOpening(doc, win, OpeningParams(a, 600, 1200, OpeningKind.window)));
+    doc.commands.clearHistory();
+    final f = oracleFrameOf(doc, a);
+    final rig = directRig(doc, OpeningKind.door);
+    rig.tool.settings.value = const OpeningSettings(width: 800);
+    final p = oracleAt(f, 1700, 40);
+    hoverTo(rig, p);
+    expect([
+      for (final (k, _) in rig.tool.debugPreview) k
+    ], [
+      EntityKind.line,
+      EntityKind.arc
+    ], reason: 'the no-fit symbol alone: no cut, no jambs');
+    pressAt(rig, p);
+    final d = added(doc, [win]);
+    expect(d.value, greaterThan(win.value));
+    final o = doc.components.get<OpeningParams>(d)!;
+    expect(o.position, closeTo(1700, 1e-6), reason: 'no-fit: the click');
+    final oracle = OpeningOracle(doc);
+    expect(oracle.cut(o), isNotNull,
+        reason: 'alone it would fit, clamped to [1,200, 2,000]');
+    expect([
+      for (final (h, c) in oracle.cutsOn(a)) (h, c == null)
+    ], [
+      (win, false),
+      (d, true)
+    ], reason: 'admitted after the window, it would leave no piece');
+    expect([
+      for (final g in diagnosticsOf(doc))
+        if (g.code == 'opening.nofit') g.handles,
+    ], [
+      [d],
+    ]);
+  });
+
+  test(
+      'OT1 (liveness) a stray WallParams on a handle with no node, or on a '
+      'nested group, lying over a live wall at a lower handle, is not a '
+      'host: D places on the live wall (Task 9 review m5)', () {
+    final doc = wallDoc();
+    final bare = doc.handleSeed.next();
+    final plain = doc.handleSeed.next();
+    final nested = doc.handleSeed.next();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(4000, 0), 200, centre);
+    final f = oracleFrameOf(doc, a);
+    // In world: a node-less handle's accumulated transform is the identity,
+    // and the nested group and its parent sit at the identity.
+    final s = oracleAt(f, 0, 0), e = oracleAt(f, f.len, 0);
+    final over = WallParams(s.x, s.y, e.x, e.y, 600, centre);
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: plain,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          children: const [])),
+      AddNodeCommand(GroupNode(
+          handle: nested,
+          parent: plain,
+          transform: Transform2.identity(),
+          children: const [])),
+      SetComponentCommand<WallParams>(bare, over),
+      SetComponentCommand<WallParams>(nested, over),
+    ], label: 'Add strays'));
+    doc.commands.clearHistory();
+    expect(doc.tree[bare], isNull, reason: 'no node');
+    expect(doc.tree[nested]!.parent, plain, reason: 'not root-level');
+    expect(bare.value < a.value && nested.value < a.value, isTrue);
+    final rig = directRig(doc, OpeningKind.door);
+    pressAt(rig, oracleAt(f, 1300, 60));
+    expect(openings(doc), hasLength(1), reason: 'placed');
+    final o = doc.components.get<OpeningParams>(openings(doc).single)!;
+    expect(o.host, a);
+    expect(o.position, closeTo(1300, 1e-6));
+  });
+
+  testWidgets(
+      'OT1 (rv9-guardDNG) D, N and G typed into the Text tool\'s field and '
+      'into the page panel\'s scale field are text, not shortcuts (as '
+      'planner_draw_test.dart\'s A8 and A9)', (tester) async {
+    final view = await pumpTools(tester, toolShellDoc(FlutterTextMeasurer()));
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(status(tester), 'Text');
+    await clickAt(tester, view, plan(1200, 800));
+    for (final key in const [
+      LogicalKeyboardKey.keyD,
+      LogicalKeyboardKey.keyN,
+      LogicalKeyboardKey.keyG,
+    ]) {
+      expect(await tester.sendKeyEvent(key), isFalse,
+          reason: '$key reaches the platform as text');
+      await tester.pump();
+      expect(status(tester), 'Text', reason: '$key in the text field');
+    }
+    await press(tester, LogicalKeyboardKey.escape);
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(status(tester), 'Select');
+    await tester.tap(find.byKey(const Key('page-scale')));
+    await tester.pump();
+    for (final key in const [
+      LogicalKeyboardKey.keyD,
+      LogicalKeyboardKey.keyN,
+      LogicalKeyboardKey.keyG,
+    ]) {
+      expect(await tester.sendKeyEvent(key), isFalse,
+          reason: '$key reaches the platform as text');
+      await tester.pump();
+      expect(status(tester), 'Select', reason: '$key in the scale field');
+    }
   });
 
   test(
