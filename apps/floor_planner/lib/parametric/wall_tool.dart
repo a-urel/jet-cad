@@ -1,6 +1,4 @@
-import 'dart:async' show StreamSubscription, unawaited;
 import 'dart:math' as math;
-import 'dart:typed_data' show Float64List;
 import 'dart:ui' show Canvas;
 
 import 'package:flutter/foundation.dart'
@@ -10,7 +8,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'wall.dart';
-import 'wall_geometry.dart';
+import 'wall_bands.dart';
 
 /// The Wall tool's settings (spec 07 D11): what the next wall is drawn
 /// with. The shell owns them; the Selection panel's Wall section edits
@@ -66,7 +64,11 @@ final class WallSettings {
 /// [points] holds the chain's first point and, once a wall is down, its
 /// last: the next wall's start.
 class WallTool extends PlacementTool {
-  WallTool(this.settings);
+  /// [bands] is the band cache the shell shares with the opening tools
+  /// (spec 08 D14, Ruling 08-11); without one the tool keeps its own.
+  WallTool(this.settings, {WallBands? bands})
+      : _bands = bands ?? WallBands(),
+        _ownsBands = bands == null;
 
   /// Owned by the shell and shared with the Selection panel, which edits it;
   /// the tool only reads it, at each commit and each paint.
@@ -81,17 +83,10 @@ class WallTool extends PlacementTool {
   /// The context of the last hover, for [hovered], which has none.
   ToolContext? _context;
 
-  /// The band scan's cache (see [_joinBandInto]): per non-degenerate wall,
-  /// ascending by handle, [_stride] doubles -- the world start and end
-  /// (`WorldWall`'s own `s` and `e`, so bitwise what `WallType` builds),
-  /// the unit direction, the length, the left and right face offsets and
-  /// the thickness. Rebuilt only when [_cachedDocument] reports a change.
-  static const int _stride = 10;
-  Float64List _cache = Float64List(_stride * 16);
-  int _cachedWalls = 0;
-  bool _cacheStale = true;
-  DraftDocument? _cachedDocument;
-  StreamSubscription<DocChange>? _changes;
+  /// The band scan's cache (see [_joinBandInto]), rebuilt only when the
+  /// document reports a change or [WallBands.invalidate] is called.
+  final WallBands _bands;
+  final bool _ownsBands;
 
   /// How many band scans have run: a test seam for the early return.
   @visibleForTesting
@@ -140,7 +135,7 @@ class WallTool extends PlacementTool {
       // Rebuilt once per click: the change stream delivers after the
       // current task, so an edit in the same synchronous task as this
       // click would otherwise leave the scan on the old bands.
-      _cacheStale = true;
+      _bands.invalidate();
       final joined = Vector2.zero();
       if (_joinBandInto(ctx, point.x, point.y, joined)) point = joined;
     }
@@ -197,72 +192,15 @@ class WallTool extends PlacementTool {
   /// leaves [out] alone, when the point is in no wall's band.
   ///
   /// It runs on every pointer move while a chain is pending: an O(walls)
-  /// scan over cached doubles that allocates nothing in steady state. The
-  /// cache is rebuilt after the document changes (its `changes` stream,
-  /// which delivers after the task that made the change), after this
-  /// tool's own commit, and at every click, which must never join a band
-  /// the document no longer has.
+  /// scan over [WallBands]' cached doubles that allocates nothing in
+  /// steady state. The cache is rebuilt after the document changes (its
+  /// `changes` stream, which delivers after the task that made the change),
+  /// after this tool's own commit, and at every click, which must never
+  /// join a band the document no longer has.
   bool _joinBandInto(ToolContext ctx, double px, double py, Vector2 out) {
     if (!(ctx.snap?.objectSnap ?? true)) return false;
-    _refreshCache(ctx.document);
     debugBandScans++;
-    final tol = wallJoin.linear;
-    final c = _cache;
-    for (var i = 0, o = 0; i < _cachedWalls; i++, o += _stride) {
-      final sx = c[o], sy = c[o + 1];
-      final dx = c[o + 4], dy = c[o + 5];
-      final length = c[o + 6];
-      final vx = px - sx, vy = py - sy;
-      final along = vx * dx + vy * dy;
-      // Along the left normal (-dy, dx), as the face offsets are.
-      final across = vy * dx - vx * dy;
-      if (across > c[o + 7] + tol ||
-          across < c[o + 8] - tol ||
-          along < -tol ||
-          along > length + tol) {
-        continue;
-      }
-      final t = c[o + 9];
-      final toEnd = length - along;
-      if (along <= t || toEnd <= t) {
-        if (along <= toEnd) {
-          out.setValues(sx, sy);
-        } else {
-          out.setValues(c[o + 2], c[o + 3]);
-        }
-      } else {
-        out.setValues(sx + dx * along, sy + dy * along);
-      }
-      return true;
-    }
-    return false;
-  }
-
-  void _refreshCache(DraftDocument doc) {
-    if (!identical(doc, _cachedDocument)) {
-      final old = _changes;
-      if (old != null) unawaited(old.cancel());
-      _cachedDocument = doc;
-      _changes = doc.changes.listen((_) => _cacheStale = true);
-      _cacheStale = true;
-    }
-    if (!_cacheStale) return;
-    _cacheStale = false;
-    _cachedWalls = 0;
-    for (final h in doc.components.withComponent<WallParams>()) {
-      final w = WorldWall(h, doc.components.get<WallParams>(h)!,
-          doc.tree.accumulatedTransform(h));
-      if (w.degenerate) continue;
-      if ((_cachedWalls + 1) * _stride > _cache.length) {
-        _cache = Float64List(_cache.length * 2)..setAll(0, _cache);
-      }
-      final (left, right) = w.offsets;
-      _cache.setAll(_cachedWalls * _stride, [
-        w.s.x, w.s.y, w.e.x, w.e.y, w.d.x, w.d.y, //
-        w.s.distanceTo(w.e), left, right, w.t,
-      ]);
-      _cachedWalls++;
-    }
+    return _bands.joinInto(ctx.document, px, py, out);
   }
 
   /// Spec 07 D2: a wall no longer than `wallJoin.linear` is degenerate.
@@ -277,7 +215,7 @@ class WallTool extends PlacementTool {
     if (_tooShort(s, e)) return false;
     final w = settings.value;
     if (!isWallThickness(w.thickness)) return false;
-    _cacheStale = true;
+    _bands.invalidate();
     return commit(ctx, () {
       final doc = ctx.document;
       final h = doc.handleSeed.next();
@@ -299,9 +237,7 @@ class WallTool extends PlacementTool {
 
   @override
   void dispose() {
-    final changes = _changes;
-    if (changes != null) unawaited(changes.cancel());
-    _changes = null;
+    if (_ownsBands) _bands.dispose();
     super.dispose();
   }
 

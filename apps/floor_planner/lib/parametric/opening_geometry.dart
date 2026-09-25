@@ -12,6 +12,7 @@
 // stretches, D8's candidate rule and its "a wall keeps a piece" (amended at
 // execution), and D9's split centreline are new.
 import 'dart:math' as math;
+import 'dart:typed_data' show ByteData;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -232,6 +233,35 @@ Cut? placeCut(List<(double, double)> stretches, double c, double w) {
   if (x < a) x = a;
   if (x > b - w) x = b - w;
   return (a: x, b: x + w, clamped: x != want);
+}
+
+/// The centre to store for an opening of width [w] that is to cut at
+/// [cut] among [stretches] (spec 08 D14, D16: stored where it is drawn):
+/// `cut.a + w/2`, moved by the fewest ulps that make [placeCut] place it
+/// unclamped. `(cut.a + w/2) − w/2` need not round back to `cut.a`, and a
+/// start one ulp outside `[a, b − w]` would be clamped (D8's exact
+/// comparison), so the opening would be `opening.clamped` from birth.
+/// Gives up after a few ulps and returns the last value tried: a stretch
+/// exactly `w` long whose `b − w` rounds below `a` holds no unclamped
+/// start at all.
+double storedCentreOf(List<(double, double)> stretches, Cut cut, double w) {
+  var c = cut.a + w / 2;
+  for (var i = 0; i < 8; i++) {
+    final placed = placeCut(stretches, c, w);
+    if (placed == null || !placed.clamped) return c;
+    // Raised by the clamp: the centre is too low, and the other way round.
+    c = _nextAfter(c, placed.a > c - w / 2);
+  }
+  return c;
+}
+
+/// The double next to [x], above it when [up].
+double _nextAfter(double x, bool up) {
+  if (x == 0) return up ? double.minPositive : -double.minPositive;
+  final b = ByteData(8)..setFloat64(0, x);
+  final bits = b.getInt64(0);
+  b.setInt64(0, (x > 0) == up ? bits + 1 : bits - 1);
+  return b.getFloat64(0);
 }
 
 /// The cuts of one wall merged (spec 08 D8, decision 6): sorted by start; a
@@ -520,3 +550,60 @@ HostCuts? _hostCuts(ParametricView view, Handle host) {
     merged: placed.merged,
   );
 }
+
+/// Whether [h] is a live object of [doc] as the engine's survey reads one:
+/// its node is a root-level group.
+bool _isLiveGroup(DraftDocument doc, Handle h) {
+  final node = doc.tree[h];
+  return node is GroupNode && node.parent == doc.tree.root;
+}
+
+/// The walls the tools, the grips and the panel see around [host] (the
+/// **document adapter**, Ruling 08-8): [host] as a [WorldWall], and every
+/// other live wall object of [doc] (a root-level group carrying
+/// `WallParams`), ascending by handle. The view adapter ([wallsInView])
+/// sees only [host]'s neighbours; [classify], [cap] and [obstaclesOf]
+/// ignore a wall that does not join [host], so the extra walls change
+/// nothing (`HF7` pins that both give the same bits). Null when [host] is
+/// not a live wall.
+({WorldWall host, List<WorldWall> walls})? wallsInDocument(
+    DraftDocument doc, Handle host) {
+  final p = doc.components.get<WallParams>(host);
+  if (p == null || !_isLiveGroup(doc, host)) return null;
+  return (
+    host: WorldWall(host, p, doc.tree.accumulatedTransform(host)),
+    walls: [
+      for (final h in doc.components.withComponent<WallParams>())
+        if (h != host && _isLiveGroup(doc, h))
+          WorldWall(h, doc.components.get<WallParams>(h)!,
+              doc.tree.accumulatedTransform(h)),
+    ],
+  );
+}
+
+/// [host]'s frame through the document adapter ([wallsInDocument]). Null
+/// when [host] is not a live wall or is degenerate.
+HostFrame? hostFrameInDocument(DraftDocument doc, Handle host) {
+  final w = wallsInDocument(doc, host);
+  return w == null ? null : hostFrameOf(w.host, w.walls);
+}
+
+/// [host]'s layout (frame, obstacles, stretches) through the document
+/// adapter ([wallsInDocument]). Null when [host] is not a live wall or is
+/// degenerate.
+HostLayout? layoutInDocument(DraftDocument doc, Handle host) {
+  final w = wallsInDocument(doc, host);
+  return w == null ? null : layoutOf(w.host, w.walls);
+}
+
+/// [host]'s openings in [doc]: the live objects carrying `OpeningParams`
+/// whose host is [host], ascending by handle, with their parameters, as
+/// [openingsInView] reads them in a regeneration.
+List<(Handle, OpeningParams)> openingsInDocument(
+        DraftDocument doc, Handle host) =>
+    [
+      for (final h in doc.components.withComponent<OpeningParams>())
+        if (doc.components.get<OpeningParams>(h)! case final o
+            when o.host == host && _isLiveGroup(doc, h))
+          (h, o),
+    ];

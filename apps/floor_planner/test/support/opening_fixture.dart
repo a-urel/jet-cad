@@ -779,3 +779,181 @@ List<(double, double)> oracleObstacles(DraftDocument doc, Handle h) =>
 /// Opening [h]'s cut, by [OpeningOracle.cut].
 OracleCut? oracleCut(DraftDocument doc, Handle h) =>
     OpeningOracle(doc).cut(doc.components.get<OpeningParams>(h)!);
+
+// ---------------------------------------------------------------------------
+// OG9's random plans (Task 5), shared with HF7 (Task 9).
+
+/// What [randomOpeningPlan] counted over its calls.
+final class RandomPlanStats {
+  int refused = 0, openings = 0, coveringOpenings = 0, tees = 0;
+  int crossings = 0;
+  final List<String> failures = <String>[];
+}
+
+/// One of OG9's random plans, trial [trial]: 2–4 walls at a node at the far
+/// origin, one T stem and one X crossing wall, 0–3 random openings per
+/// wall, keep-a-piece cases drawn from [cover] (so the walls and the
+/// random openings are the same as without them), and a free wall 12 m
+/// away that always carries one. Every wall in its own rotated group.
+/// Returns the document and the walls to check, and counts into [stats].
+({DraftDocument doc, List<Handle> checked}) randomOpeningPlan(
+    math.Random rnd, math.Random cover, int trial, RandomPlanStats stats) {
+  final doc = wallDoc();
+  bool attempt(DraftCommand c) {
+    try {
+      doc.commands.execute(c);
+      return true;
+    } on ArgumentError {
+      stats.refused++;
+      stats.failures.add('trial $trial: ${c.label} refused');
+      return false;
+    }
+  }
+
+  final hub = plan(rnd.nextDouble() * 5000, rnd.nextDouble() * 5000);
+  final n = 2 + rnd.nextInt(3);
+  final hs = <Handle>[];
+  var deg = rnd.nextDouble() * 360;
+  for (var i = 0; i < n; i++) {
+    final h = Handle(1000 + 100 * i);
+    final t = [115.0, 150.0, 200.0, 300.0][rnd.nextInt(4)];
+    final j = Justification.values[rnd.nextInt(3)];
+    final len = 800 + rnd.nextDouble() * 3000;
+    final tip = polar(hub, deg, len);
+    if (attempt(rnd.nextBool()
+        ? addWall(doc, h, hub, tip, t, j)
+        : addWall(doc, h, tip, hub, t, j))) {
+      hs.add(h);
+    }
+    deg += 50 + rnd.nextDouble() * (300 / n);
+  }
+
+  // One T stem and one X crossing wall, each inside a random wall's
+  // straight part (read off 07's stored outline by the oracle).
+  final plain = OpeningOracle(doc);
+  Vector2? inside(Handle w) {
+    final (s, e) = plain.span(w);
+    if (e - s < 400) return null;
+    final u = s + 200 + rnd.nextDouble() * (e - s - 400);
+    return oracleAt(oracleFrameOf(doc, w), u, 0);
+  }
+
+  double dirOf(Handle w) {
+    final d = oracleFrameOf(doc, w).d;
+    return math.atan2(d.y, d.x) * 180 / math.pi;
+  }
+
+  final extra = <Handle>[];
+  final tw = hs[rnd.nextInt(hs.length)];
+  if (inside(tw) case final p?) {
+    const h = Handle(1500);
+    final a =
+        dirOf(tw) + (rnd.nextBool() ? 1 : -1) * (35 + rnd.nextDouble() * 110);
+    final t = [115.0, 150.0, 200.0][rnd.nextInt(3)];
+    final j = Justification.values[rnd.nextInt(3)];
+    final far = polar(p, a, 800 + rnd.nextDouble() * 2000);
+    if (attempt(rnd.nextBool()
+        ? addWall(doc, h, p, far, t, j)
+        : addWall(doc, h, far, p, t, j))) {
+      extra.add(h);
+      stats.tees++;
+    }
+  }
+  final xw = hs[rnd.nextInt(hs.length)];
+  if (inside(xw) case final c?) {
+    const h = Handle(1600);
+    final a = dirOf(xw) + 35 + rnd.nextDouble() * 110;
+    final t = [115.0, 150.0, 200.0][rnd.nextInt(3)];
+    final j = Justification.values[rnd.nextInt(3)];
+    if (attempt(addWall(
+        doc,
+        h,
+        polar(c, a + 180, 400 + rnd.nextDouble() * 1500),
+        polar(c, a, 400 + rnd.nextDouble() * 1500),
+        t,
+        j))) {
+      extra.add(h);
+      stats.crossings++;
+    }
+  }
+
+  final all = [...hs, ...extra];
+  var oh = 5000;
+  // Keep-a-piece cases (D8 as amended), from their own stream: a gap
+  // 1e-7 to 5e-7 short of a span, or two openings that touch and cover
+  // it but for 2e-7 slivers, before or after the random openings (so
+  // with lower or higher handles than theirs).
+  List<OpeningParams> covering(Handle h, double s, double e) {
+    if (cover.nextBool()) {
+      final d = 1e-7 + cover.nextDouble() * 4e-7;
+      return [OpeningParams(h, (s + e) / 2, e - s - d, OpeningKind.gap)];
+    }
+    final m = s + (e - s) * (0.3 + 0.4 * cover.nextDouble());
+    return [
+      OpeningParams(h, (s + m) / 2 + 1e-7, m - s - 2e-7, OpeningKind.window),
+      OpeningParams(h, (m + e) / 2 - 1e-7, e - m - 2e-7, OpeningKind.door),
+    ];
+  }
+
+  void addAll(List<OpeningParams> os, {bool covers = false}) {
+    for (final o in os) {
+      if (attempt(addOpening(doc, Handle(oh += 10), o))) {
+        stats.openings++;
+        if (covers) stats.coveringOpenings++;
+      }
+    }
+  }
+
+  // On a quarter of the node's walls whose span is one stretch. A
+  // mitred end keeps its corner as a piece, so these rarely yield.
+  final pre = OpeningOracle(doc);
+  for (final h in all) {
+    final len = oracleFrameOf(doc, h).len;
+    final st = pre.stretches(h);
+    final cases = st.length == 1 && cover.nextDouble() < 0.25
+        ? covering(h, st.single.$1, st.single.$2)
+        : const <OpeningParams>[];
+    final coverFirst = cover.nextBool();
+    if (coverFirst) addAll(cases, covers: true);
+    for (var k = rnd.nextInt(4); k > 0; k--) {
+      final o = OpeningParams(h, rnd.nextDouble() * len,
+          300 + rnd.nextDouble() * 1200, OpeningKind.values[rnd.nextInt(3)],
+          hinge: HingeEnd.values[rnd.nextInt(2)],
+          swing: SwingSide.values[rnd.nextInt(2)]);
+      if (attempt(addOpening(doc, Handle(oh += 10), o))) stats.openings++;
+    }
+    if (!coverFirst) addAll(cases, covers: true);
+  }
+
+  // A free wall 12 m from the node, square at both ends, so covering
+  // its span empties it: it always carries a covering case, and 0-2
+  // random openings before or after it.
+  const hF = Handle(1700);
+  final checked = [...all];
+  final fp = polar(hub, cover.nextDouble() * 360, 12000);
+  if (attempt(addWall(
+      doc,
+      hF,
+      fp,
+      polar(fp, cover.nextDouble() * 360, 800 + cover.nextDouble() * 3000),
+      [115.0, 150.0, 200.0, 300.0][cover.nextInt(4)],
+      Justification.values[cover.nextInt(3)]))) {
+    checked.add(hF);
+    final len = oracleFrameOf(doc, hF).len;
+    final (s, e) = OpeningOracle(doc).span(hF);
+    final cases = covering(hF, s, e);
+    final others = [
+      for (var k = cover.nextInt(3); k > 0; k--)
+        OpeningParams(hF, cover.nextDouble() * len,
+            300 + cover.nextDouble() * 1200, OpeningKind.window),
+    ];
+    if (cover.nextBool()) {
+      addAll(cases, covers: true);
+      addAll(others);
+    } else {
+      addAll(others);
+      addAll(cases, covers: true);
+    }
+  }
+  return (doc: doc, checked: checked);
+}

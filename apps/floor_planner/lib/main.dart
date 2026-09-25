@@ -6,6 +6,9 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
+import 'parametric/opening.dart';
+import 'parametric/opening_tool.dart';
+import 'parametric/wall_bands.dart';
 import 'parametric/wall_grips.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
@@ -106,7 +109,19 @@ class _PlannerShellState extends State<PlannerShell> {
   // panel's Wall section edits them while the tool is active.
   final ValueNotifier<WallSettings> _wallSettings =
       ValueNotifier<WallSettings>(const WallSettings());
-  late final WallTool _wall = WallTool(_wallSettings);
+  // Spec 08 D14, Ruling 08-11: one band cache, shared by the Wall tool and
+  // the three opening tools.
+  final WallBands _bands = WallBands();
+  late final WallTool _wall = WallTool(_wallSettings, bands: _bands);
+  // Spec 08 D14, Ruling 08-17: the shell owns each opening tool's settings.
+  final Map<OpeningKind, ValueNotifier<OpeningSettings>> _openingSettings = {
+    for (final k in OpeningKind.values)
+      k: ValueNotifier<OpeningSettings>(OpeningSettings.defaultFor(k)),
+  };
+  late final Map<OpeningKind, OpeningTool> _openingTools = {
+    for (final k in OpeningKind.values)
+      k: OpeningTool(k, _openingSettings[k]!, bands: _bands),
+  };
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -153,6 +168,27 @@ class _PlannerShellState extends State<PlannerShell> {
         shortcut: 'W',
         logicalKey: LogicalKeyboardKey.keyW,
         tool: _wall,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-door',
+        label: 'Door',
+        shortcut: 'D',
+        logicalKey: LogicalKeyboardKey.keyD,
+        tool: _openingTools[OpeningKind.door]!,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-window',
+        label: 'Window',
+        shortcut: 'N',
+        logicalKey: LogicalKeyboardKey.keyN,
+        tool: _openingTools[OpeningKind.window]!,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-gap',
+        label: 'Gap',
+        shortcut: 'G',
+        logicalKey: LogicalKeyboardKey.keyG,
+        tool: _openingTools[OpeningKind.gap]!,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-circle',
@@ -274,6 +310,10 @@ class _PlannerShellState extends State<PlannerShell> {
     }
     _fill.dispose();
     _wallSettings.dispose();
+    for (final s in _openingSettings.values) {
+      s.dispose();
+    }
+    _bands.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();

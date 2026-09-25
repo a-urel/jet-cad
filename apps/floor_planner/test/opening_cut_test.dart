@@ -327,11 +327,12 @@ void main() {
     // The keep-a-piece cases draw from their own stream, so the walls and
     // the random openings are the same as without them.
     final cover = math.Random(809);
-    var walls = 0, openings = 0, pieces = 0, clamped = 0, nofit = 0;
-    var overlapping = 0, refused = 0, bad = 0, untriangulated = 0;
+    final stats = RandomPlanStats();
+    var walls = 0, pieces = 0, clamped = 0, nofit = 0;
+    var overlapping = 0, bad = 0, untriangulated = 0;
     var notCcw = 0, exactEnds = 0, inexactEnds = 0, keptPiece = 0;
-    var mismatched = 0, coveringOpenings = 0, unexplained = 0, childless = 0;
-    var tees = 0, crossings = 0, obstacles = 0;
+    var mismatched = 0, unexplained = 0, childless = 0;
+    var obstacles = 0;
     // Symbols (D10-D12, Task 6 review m-2): per kind, how many were
     // compared with the oracle and how many are off it; of the fitting ones,
     // how many have a sample strictly inside one of their host's pieces
@@ -340,166 +341,9 @@ void main() {
     final symbols = {for (final k in OpeningKind.values) k: 0};
     var offOracle = 0, fittingSymbols = 0, fittingInside = 0;
     var nofitSymbols = 0, nofitInside = 0, samples = 0;
-    final failures = <String>[];
+    final failures = stats.failures;
     for (var trial = 0; trial < 300; trial++) {
-      final doc = wallDoc();
-      bool attempt(DraftCommand c) {
-        try {
-          doc.commands.execute(c);
-          return true;
-        } on ArgumentError {
-          refused++;
-          failures.add('trial $trial: ${c.label} refused');
-          return false;
-        }
-      }
-
-      final hub = plan(rnd.nextDouble() * 5000, rnd.nextDouble() * 5000);
-      final n = 2 + rnd.nextInt(3);
-      final hs = <Handle>[];
-      var deg = rnd.nextDouble() * 360;
-      for (var i = 0; i < n; i++) {
-        final h = Handle(1000 + 100 * i);
-        final t = [115.0, 150.0, 200.0, 300.0][rnd.nextInt(4)];
-        final j = Justification.values[rnd.nextInt(3)];
-        final len = 800 + rnd.nextDouble() * 3000;
-        final tip = polar(hub, deg, len);
-        if (attempt(rnd.nextBool()
-            ? addWall(doc, h, hub, tip, t, j)
-            : addWall(doc, h, tip, hub, t, j))) {
-          hs.add(h);
-        }
-        deg += 50 + rnd.nextDouble() * (300 / n);
-      }
-
-      // One T stem and one X crossing wall, each inside a random wall's
-      // straight part (read off 07's stored outline by the oracle).
-      final plain = OpeningOracle(doc);
-      Vector2? inside(Handle w) {
-        final (s, e) = plain.span(w);
-        if (e - s < 400) return null;
-        final u = s + 200 + rnd.nextDouble() * (e - s - 400);
-        return oracleAt(oracleFrameOf(doc, w), u, 0);
-      }
-
-      double dirOf(Handle w) {
-        final d = oracleFrameOf(doc, w).d;
-        return math.atan2(d.y, d.x) * 180 / math.pi;
-      }
-
-      final extra = <Handle>[];
-      final tw = hs[rnd.nextInt(hs.length)];
-      if (inside(tw) case final p?) {
-        const h = Handle(1500);
-        final a = dirOf(tw) +
-            (rnd.nextBool() ? 1 : -1) * (35 + rnd.nextDouble() * 110);
-        final t = [115.0, 150.0, 200.0][rnd.nextInt(3)];
-        final j = Justification.values[rnd.nextInt(3)];
-        final far = polar(p, a, 800 + rnd.nextDouble() * 2000);
-        if (attempt(rnd.nextBool()
-            ? addWall(doc, h, p, far, t, j)
-            : addWall(doc, h, far, p, t, j))) {
-          extra.add(h);
-          tees++;
-        }
-      }
-      final xw = hs[rnd.nextInt(hs.length)];
-      if (inside(xw) case final c?) {
-        const h = Handle(1600);
-        final a = dirOf(xw) + 35 + rnd.nextDouble() * 110;
-        final t = [115.0, 150.0, 200.0][rnd.nextInt(3)];
-        final j = Justification.values[rnd.nextInt(3)];
-        if (attempt(addWall(
-            doc,
-            h,
-            polar(c, a + 180, 400 + rnd.nextDouble() * 1500),
-            polar(c, a, 400 + rnd.nextDouble() * 1500),
-            t,
-            j))) {
-          extra.add(h);
-          crossings++;
-        }
-      }
-
-      final all = [...hs, ...extra];
-      var oh = 5000;
-      // Keep-a-piece cases (D8 as amended), from their own stream: a gap
-      // 1e-7 to 5e-7 short of a span, or two openings that touch and cover
-      // it but for 2e-7 slivers, before or after the random openings (so
-      // with lower or higher handles than theirs).
-      List<OpeningParams> covering(Handle h, double s, double e) {
-        if (cover.nextBool()) {
-          final d = 1e-7 + cover.nextDouble() * 4e-7;
-          return [OpeningParams(h, (s + e) / 2, e - s - d, OpeningKind.gap)];
-        }
-        final m = s + (e - s) * (0.3 + 0.4 * cover.nextDouble());
-        return [
-          OpeningParams(
-              h, (s + m) / 2 + 1e-7, m - s - 2e-7, OpeningKind.window),
-          OpeningParams(h, (m + e) / 2 - 1e-7, e - m - 2e-7, OpeningKind.door),
-        ];
-      }
-
-      void addAll(List<OpeningParams> os, {bool covers = false}) {
-        for (final o in os) {
-          if (attempt(addOpening(doc, Handle(oh += 10), o))) {
-            openings++;
-            if (covers) coveringOpenings++;
-          }
-        }
-      }
-
-      // On a quarter of the node's walls whose span is one stretch. A
-      // mitred end keeps its corner as a piece, so these rarely yield.
-      final pre = OpeningOracle(doc);
-      for (final h in all) {
-        final len = oracleFrameOf(doc, h).len;
-        final st = pre.stretches(h);
-        final cases = st.length == 1 && cover.nextDouble() < 0.25
-            ? covering(h, st.single.$1, st.single.$2)
-            : const <OpeningParams>[];
-        final coverFirst = cover.nextBool();
-        if (coverFirst) addAll(cases, covers: true);
-        for (var k = rnd.nextInt(4); k > 0; k--) {
-          final o = OpeningParams(h, rnd.nextDouble() * len,
-              300 + rnd.nextDouble() * 1200, OpeningKind.values[rnd.nextInt(3)],
-              hinge: HingeEnd.values[rnd.nextInt(2)],
-              swing: SwingSide.values[rnd.nextInt(2)]);
-          if (attempt(addOpening(doc, Handle(oh += 10), o))) openings++;
-        }
-        if (!coverFirst) addAll(cases, covers: true);
-      }
-
-      // A free wall 12 m from the node, square at both ends, so covering
-      // its span empties it: it always carries a covering case, and 0-2
-      // random openings before or after it.
-      const hF = Handle(1700);
-      final checked = [...all];
-      final fp = polar(hub, cover.nextDouble() * 360, 12000);
-      if (attempt(addWall(
-          doc,
-          hF,
-          fp,
-          polar(fp, cover.nextDouble() * 360, 800 + cover.nextDouble() * 3000),
-          [115.0, 150.0, 200.0, 300.0][cover.nextInt(4)],
-          Justification.values[cover.nextInt(3)]))) {
-        checked.add(hF);
-        final len = oracleFrameOf(doc, hF).len;
-        final (s, e) = OpeningOracle(doc).span(hF);
-        final cases = covering(hF, s, e);
-        final others = [
-          for (var k = cover.nextInt(3); k > 0; k--)
-            OpeningParams(hF, cover.nextDouble() * len,
-                300 + cover.nextDouble() * 1200, OpeningKind.window),
-        ];
-        if (cover.nextBool()) {
-          addAll(cases, covers: true);
-          addAll(others);
-        } else {
-          addAll(others);
-          addAll(cases, covers: true);
-        }
-      }
+      final (:doc, :checked) = randomOpeningPlan(rnd, cover, trial, stats);
       expect(driftOf(doc), isEmpty, reason: 'trial $trial');
 
       final oracle = OpeningOracle(doc);
@@ -627,11 +471,12 @@ void main() {
       }
     }
     // ignore: avoid_print
-    print('OG9: $walls walls ($tees T stems, $crossings X walls, '
+    print(
+        'OG9: $walls walls (${stats.tees} T stems, ${stats.crossings} X walls, '
         '$obstacles obstacles), '
-        '$openings openings ($refused refused), $pieces pieces, $clamped '
+        '${stats.openings} openings (${stats.refused} refused), $pieces pieces, $clamped '
         'clamped ($unexplained by neither a corner nor a wall), $nofit '
-        'no-fit ($keptPiece to keep a piece; $coveringOpenings covering '
+        'no-fit ($keptPiece to keep a piece; ${stats.coveringOpenings} covering '
         'openings added), $overlapping '
         'overlapping pairs, $childless childless walls, $bad tiling violations, $untriangulated walls '
         'with a piece that does not triangulate, $notCcw with a piece not '
@@ -646,7 +491,7 @@ void main() {
         'samples; ${sw.elapsedMilliseconds} ms');
     final first = failures.take(10).join('\n');
     expect(childless, 0, reason: first);
-    expect(refused, 0, reason: first);
+    expect(stats.refused, 0, reason: first);
     expect(bad, 0, reason: first);
     expect(untriangulated, 0, reason: first);
     expect(notCcw, 0, reason: first);
