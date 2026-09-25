@@ -156,14 +156,16 @@ void main() {
   });
 
   test(
-      'OR2 (X7-json) save → load → save is byte-identical; each typed '
-      'OpeningParams compares equal; drift() is empty after the load; the '
+      'OR2 (X7-json, rv7-posRound) save → load → save is byte-identical; a '
+      'fractional position and width survive it; each typed OpeningParams '
+      'compares equal; drift() is empty after the load; the '
       'same two edits (slide the door, move the wall) on the original and on '
       'the reload give identical bytes', () {
     final doc = hostWithTwo();
     run(
         doc,
-        addOpening(doc, hG, const OpeningParams(hA, 2600, 500, OpeningKind.gap),
+        addOpening(
+            doc, hG, const OpeningParams(hA, 2600.37, 512.625, OpeningKind.gap),
             at: Transform2.translation(ox + 1234, oy - 4321)
                 .multiply(Transform2.rotation(1.1))));
     expect(worldPieces(doc, hA), hasLength(4));
@@ -182,7 +184,7 @@ void main() {
 
     List<DraftCommand> edits(DraftDocument d) => [
           SetComponentCommand<OpeningParams>(hD,
-              d.components.get<OpeningParams>(hD)!.copyWith(position: 1100)),
+              d.components.get<OpeningParams>(hD)!.copyWith(position: 1100.25)),
           TransformNodeCommand(
               hA,
               Transform2.translation(60000, -45000)
