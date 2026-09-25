@@ -13,6 +13,7 @@ import 'dart:math' as math;
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart';
 import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:floor_planner/parametric/wall_grips.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -626,5 +627,147 @@ void main() {
     // ignore: avoid_print
     print('EP7: $reseated of ${doors.length} doors re-seated');
     expect(reseated, greaterThan(20), reason: 'the fixture is not degenerate');
+  });
+
+  test(
+      'EP8 (rv12-seatWide) a door flush against its wall\'s START stretch '
+      'end, the start dragged 0.5 mm inward along the line, on 12 walls: '
+      'L′ − (L − p) clamps the door by 0.5 mm, far more than rounding, so '
+      'it is kept there exactly and diagnosed opening.clamped, not '
+      're-seated (Task 12 review P5)', () {
+    final grips = WallGrips();
+    for (var i = 0; i < 12; i++) {
+      final doc = wallDoc();
+      final a = doc.handleSeed.next();
+      final len = 3000 + 13.37 * i, deg = 23 + 0.9 * (i % 7);
+      final s = plan(311.5 * (i % 3), 1000.0 * i);
+      run(
+          doc,
+          addWall(doc, a, s, polar(s, deg, len), 200 - 7.5 * i,
+              [left, centre, right][i % 3]));
+      final w = 700 + 3.3 * i;
+      final stretches = layoutInDocument(doc, a)!.stretches;
+      final (start, _) = stretches.first;
+      final door = doc.handleSeed.next();
+      run(
+          doc,
+          addOpening(
+              doc,
+              door,
+              OpeningParams(
+                  a,
+                  storedCentreOf(
+                      stretches, (a: start, b: start + w, clamped: true), w),
+                  w,
+                  OpeningKind.door,
+                  swing: i.isEven ? SwingSide.left : SwingSide.right),
+              at: i.isEven ? ownGroup : null));
+      expect(diagnosticsOf(doc), isEmpty, reason: 'wall $i: flush, unclamped');
+      final was = doc.components.get<WallParams>(a)!;
+      final p = positionOf(doc, door);
+      final f = oracleFrameOf(doc, a);
+
+      run(doc,
+          grips.drag(doc, a, grips.gripsOf(doc, a)[0], oracleAt(f, 0.5, 0))!);
+      final now = doc.components.get<WallParams>(a)!;
+      expect(now.end, was.end, reason: 'wall $i: the end did not move');
+      expect(localLength(now), closeTo(localLength(was) - 0.5, 1e-6));
+      final kept = localLength(now) - (localLength(was) - p);
+      expect(positionOf(doc, door), kept,
+          reason: 'wall $i: L′ − (L − p), exactly: not re-seated');
+      final cut =
+          OpeningOracle(doc).cut(doc.components.get<OpeningParams>(door)!)!;
+      expect(cut.clamped, isTrue);
+      expect(cut.a - (kept - w / 2), closeTo(0.5, 1e-6),
+          reason: 'wall $i: clamped by the half millimetre');
+      expect([
+        for (final d in diagnosticsOf(doc)) '${d.code} ${d.handles}'
+      ], [
+        'opening.clamped [$door]'
+      ], reason: 'wall $i');
+    }
+  });
+
+  test(
+      'EP9 (rv12-movedHostOnly) 24 Ls whose corner is A\'s start and B\'s '
+      'end, A\'s door flush against the corner (stored with storedCentreOf, '
+      'undiagnosed), the corner dragged out along A\'s line: every door is '
+      'kept at L′ − (L − p) exactly and undiagnosed. The re-seat reads A\'s '
+      'stretches with B\'s NEW end, joined at the new corner; B\'s old end '
+      'would be a T in A\'s lengthened band whose far edge is the door\'s, '
+      'give or take rounding, and would re-seat some (Task 12 review m1)', () {
+    final grips = WallGrips();
+    var wouldReseat = 0;
+    for (var i = 0; i < 24; i++) {
+      final doc = wallDoc();
+      final k = plan(-400 + 97.3 * i, 900 - 41.1 * i);
+      final deg = 23 + 0.9 * (i % 7);
+      final js = [left, centre, right];
+      run(doc, addSpoke(doc, hA, k, deg, 4600, 200, js[i % 3], fromHub: true));
+      run(
+          doc,
+          addSpoke(
+              doc, hB, k, deg + 95 + 2.5 * (i % 5), 3800, 115, js[(i ~/ 3) % 3],
+              fromHub: false));
+      final stretches = layoutInDocument(doc, hA)!.stretches;
+      final (start, _) = stretches.first;
+      final w = 700 + 3.3 * i;
+      run(
+          doc,
+          addOpening(
+              doc,
+              hD,
+              OpeningParams(
+                  hA,
+                  storedCentreOf(
+                      stretches, (a: start, b: start + w, clamped: true), w),
+                  w,
+                  OpeningKind.door,
+                  hinge: HingeEnd.start,
+                  swing: i.isEven ? SwingSide.right : SwingSide.left),
+              at: i.isEven ? ownGroup : null));
+      expect(diagnosticsOf(doc), isEmpty, reason: 'L $i: flush, unclamped');
+      final oldA = doc.components.get<WallParams>(hA)!;
+      final oldB = doc.components.get<WallParams>(hB)!;
+      final p = positionOf(doc, hD);
+      final g = grips.gripsOf(doc, hA)[0];
+      final to = polar(k, deg + 180, 300 + 7.3 * i);
+
+      // A's stretches as B's old end would make them, from the drag's own
+      // walls: a T in A's lengthened band, clamping the door by rounding
+      // when its start falls below the T's far edge.
+      final c = grips.drag(doc, hA, g, to)!;
+      final newA = (c as CompoundCommand)
+          .children
+          .whereType<SetComponentCommand<WallParams>>()
+          .firstWhere((m) => m.handle == hA)
+          .value!;
+      final hostOnly = layoutInDocument(doc, hA, moved: {
+        hA: WorldWall(hA, newA, doc.tree.accumulatedTransform(hA)),
+      })!
+          .stretches;
+      expect(hostOnly, hasLength(2), reason: 'L $i: B\'s old end, a T in A');
+      final kept = localLength(newA) - (localLength(oldA) - p);
+      final wrong = placeCut(hostOnly, kept, w)!;
+      expect((wrong.a - (kept - w / 2)).abs(), lessThan(wallJoin.linear),
+          reason: 'L $i: flush against the T\'s far edge');
+      if (wrong.clamped) wouldReseat++;
+
+      expect([for (final m in openingSets(c)) m.handle], [hD]);
+      run(doc, c);
+      final newB = doc.components.get<WallParams>(hB)!;
+      expect(newB.start, oldB.start, reason: 'L $i');
+      expect(newB.end == oldB.end, isFalse, reason: 'L $i: B\'s end moved');
+      expect(layoutInDocument(doc, hA)!.stretches, hasLength(1),
+          reason: 'L $i: B joins A at the new corner');
+      expect(positionOf(doc, hD), kept,
+          reason: 'L $i: L′ − (L − p), exactly: not re-seated');
+      expect(diagnosticsOf(doc), isEmpty, reason: 'L $i');
+      expectOnOracles(doc, 'L $i dragged');
+    }
+    // ignore: avoid_print
+    print('EP9: $wouldReseat of 24 doors clamped by B\'s old end');
+    expect(wouldReseat, greaterThan(3),
+        reason: 'the fixture is not degenerate');
   });
 }

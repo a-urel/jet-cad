@@ -224,13 +224,17 @@ void main() {
     expect(doc.commands.undoDepth, 2);
     expect(paramsOf(doc, p.door), d0.copyWith(width: 850, position: 1812.5));
     expect(driftOf(doc), isEmpty);
-    // The end of the range, inclusive: stored as typed, drawn clamped.
-    await enterAndSubmit(tester, position, '0');
-    expect(paramsOf(doc, p.door).position, 0);
-    expect(doc.commands.undoDepth, 3);
-    doc.commands.undo();
-    await tester.pump();
-    expect(textOf(tester, position), '1812.5');
+    // Both ends of the range, inclusive: stored as typed, drawn clamped.
+    final wall = doc.components.get<WallParams>(p.a)!;
+    final l = (wall.end - wall.start).length;
+    for (final end in [0.0, l]) {
+      await enterAndSubmit(tester, position, '$end');
+      expect(paramsOf(doc, p.door).position, end, reason: 'position $end');
+      expect(doc.commands.undoDepth, 3);
+      doc.commands.undo();
+      await tester.pump();
+      expect(textOf(tester, position), '1812.5');
+    }
 
     // Invalid values revert and commit nothing.
     final d1 = paramsOf(doc, p.door);

@@ -406,6 +406,33 @@ void main() {
   });
 
   test(
+      'SG5 (rv12-gripNoFit) a no-fit window dragged to within '
+      'wallJoin.linear of its stored centre, either side, edge snaps on and '
+      'off: no command, since no-fit is not drawn clamped; 2e-6 away it '
+      'moves (Task 12 review m4)', () {
+    final doc = wallDoc();
+    final (:a, :door, :nofit, :o1, :o2) = addClampedDoor(doc);
+    final f = oracleFrameOf(doc, a);
+    expect(OpeningOracle(doc).cut(paramsOf(doc, nofit)), isNull);
+    expect(paramsOf(doc, nofit).position, 4000);
+    double? aperture;
+    final objects = ObjectGrips(edgeAperture: () => aperture);
+    final g = objects.gripsOf(doc, nofit).single;
+    for (final ap in [null, 20.0]) {
+      aperture = ap;
+      for (final du in [5e-7, -5e-7]) {
+        expect(objects.drag(doc, nofit, g, oracleAt(f, 4000 + du, 30)), isNull,
+            reason: 'aperture $ap, $du off');
+      }
+    }
+    aperture = null;
+    final c = objects.drag(doc, nofit, g, oracleAt(f, 4000 + 2e-6, 30));
+    expect(c, isNotNull, reason: 'beyond the tolerance it moves');
+    doc.commands.execute(c!);
+    expect(paramsOf(doc, nofit).position, closeTo(4000 + 2e-6, 1e-8));
+  });
+
+  test(
       'SG3 (t12-gripOld) a door drawn clamped by 1e-7 (by hand) is re-seated '
       'by a drag onto its own edge: after it, it is stored where it is drawn '
       'and not diagnosed (Task 11 review I1)', () {
