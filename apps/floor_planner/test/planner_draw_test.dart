@@ -3,8 +3,6 @@ import 'dart:convert' show jsonDecode;
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/planner_view.dart';
-import 'package:flutter/foundation.dart'
-    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -481,9 +479,8 @@ void main() {
     await tester.tap(scale());
     await tester.pump();
     await tester.enterText(scale(), '75');
-    // Every text the field shows from Enter on. The focus loss lands after
-    // the commit but before the page notifier hears of it, so the re-sync
-    // must read the document: from the notifier it would show 20 first.
+    // Every text the field shows from Enter on: none. The field already
+    // shows 75, Enter does not re-sync it, and the page listener finds 75.
     final controller = tester.widget<TextField>(scale()).controller!;
     final shown = <String>[];
     void record() => shown.add(controller.text);
@@ -496,8 +493,8 @@ void main() {
     expect(doc.commands.undoDepth, depth + 1);
     expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
     expect(scaleText(tester), '75');
-    expect(shown, everyElement('75'),
-        reason: 'the field never shows the old scale on Enter');
+    expect(shown, isEmpty,
+        reason: "the field's text never changes from Enter on");
     await press(tester, LogicalKeyboardKey.escape);
     expect(polyline.isPending, isFalse, reason: "Escape reached the tool");
     expect(status(tester), 'Polyline');
@@ -698,9 +695,9 @@ void main() {
 
   testWidgets(
       "A25 a window blur while typing in the page panel's scale field keeps "
-      'the typed text: the app goes inactive, the focus parks on the root '
-      'scope, and on resume the field has its focus and 75 back; Enter then '
-      'commits it (fix/post-07 F2F3c m-b)', (tester) async {
+      'the typed text: on web the engine first closes the text input '
+      'connection, which unfocuses the field while the app is still resumed '
+      '(fix/post-07 F2F3d)', (tester) async {
     final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
     final doc = view.document;
     final depth = doc.commands.undoDepth;
@@ -709,31 +706,20 @@ void main() {
     await tester.enterText(scale(), '75');
     await tester.pump();
     final node = tester.widget<TextField>(scale()).focusNode!;
-    // The test platform is Android, where the FocusManager ignores the
-    // lifecycle; it follows it on web and desktop.
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    FocusManager.instance.listenToApplicationLifecycleChangesIfSupported();
-    debugDefaultTargetPlatformOverride = null;
-
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-    await tester.pump();
-    expect(node.hasFocus, isFalse, reason: 'the blur took the focus');
-    expect(FocusManager.instance.primaryFocus,
-        same(FocusManager.instance.rootScope));
-    expect(scaleText(tester), '75');
-
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pump();
     expect(node.hasFocus, isTrue);
-    expect(scaleText(tester), '75');
+    // Resumed, as on web until the window's own blur: a lifecycle guard
+    // (f5920de's) lets a focus-loss re-sync through here.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+
+    // The web engine's `handleBlur` for an `<input>` blur with no element
+    // to take the focus; the window's blur comes after it.
+    tester.testTextInput.closeConnection();
+    await tester.pump();
+    expect(tester.binding.lifecycleState, AppLifecycleState.resumed);
+    expect(node.hasFocus, isFalse, reason: 'the closed connection unfocused');
+    expect(scaleText(tester), '75', reason: 'no tap, so no re-sync');
     expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
         20);
     expect(doc.commands.undoDepth, depth);
-
-    await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pump();
-    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
-        75);
-    expect(doc.commands.undoDepth, depth + 1);
   });
 }

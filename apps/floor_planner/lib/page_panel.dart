@@ -33,13 +33,11 @@ class _PagePanelState extends State<PagePanel> {
     super.initState();
     _syncScale();
     widget.page.addListener(_syncScale);
-    _scaleFocus.addListener(_onScaleFocus);
   }
 
   @override
   void dispose() {
     widget.page.removeListener(_syncScale);
-    _scaleFocus.removeListener(_onScaleFocus);
     _scale.dispose();
     _scaleFocus.dispose();
     super.dispose();
@@ -57,31 +55,35 @@ class _PagePanelState extends State<PagePanel> {
     if (_scale.text != text) _scale.text = text;
   }
 
-  /// The scale is committed on submit (spec 04), so a field left any other
-  /// way -- a tap outside, say -- would go on showing a scale the page does
-  /// not have: it re-syncs to the model when it loses the focus
-  /// (fix/post-07 F2F3b m2).
+  /// The scale is committed on submit (spec 04), so a field left without
+  /// Enter would go on showing a scale the page does not have. A tap outside
+  /// the field -- the user clicking elsewhere in the app -- hands the focus
+  /// back to the canvas and then re-syncs the field to the page's scale
+  /// (fix/post-07 F2F3d). Nothing is committed.
   ///
-  /// On Enter, `onEditingComplete` hands the focus back, which the
-  /// `FocusManager` applies in a microtask, and `onSubmitted` then commits
-  /// at once. So the focus loss comes after the commit, but before the page
-  /// notifier hears of it (`_syncScale` reads the document for this): the
-  /// field goes on showing the committed value (fix/post-07 F2F3c I1).
+  /// Only a pointer down outside the field's tap region calls this, and the
+  /// field arms it from its focus at its last build. A window blur never
+  /// does. On web the focused `<input>` blurs first, with no element to take
+  /// the focus, so the engine closes the text input connection;
+  /// `EditableText.connectionClosed` then unfocuses the field while the app
+  /// is still `resumed`, and the window's own blur, which makes the app
+  /// `inactive`, comes after that (the F2F3c review saw this order in
+  /// Chromium). A focus-loss listener cannot tell that from the user moving
+  /// on, even behind a lifecycle guard, and dropped the typed text (f5920de).
+  /// Here the field keeps it. Once it has rebuilt without the focus, the
+  /// field is no longer armed, so a later click elsewhere in the app does
+  /// not re-sync it either.
   ///
-  /// The re-sync is for the focus moving inside the app, not for the window
-  /// losing it. On web and desktop a window blur makes the app `inactive`,
-  /// and the `FocusManager` then parks the primary focus on the root scope
-  /// until the app is `resumed`, when it gives the field its focus back.
-  /// The binding records the new state before it tells its observers, so
-  /// the state is already `inactive` here; the typed text is kept (F2F3c
-  /// m-b). A null state means no lifecycle change has been reported yet.
-  /// If another node takes the focus before the app is resumed, the
-  /// `FocusManager` does not give it back, and the field keeps the typed
-  /// text without the focus until the page changes.
-  void _onScaleFocus() {
-    if (_scaleFocus.hasFocus) return;
-    final state = WidgetsBinding.instance.lifecycleState;
-    if (state != null && state != AppLifecycleState.resumed) return;
+  /// On Enter, `onEditingComplete` hands the focus back and `onSubmitted`
+  /// commits; the page listener then shows the committed value.
+  ///
+  /// Accepted: every text field has `EditableText`'s default tap group, so a
+  /// click on another text field -- a Selection panel field, say -- is not
+  /// outside this one, and Tab is no tap at all. Leaving the scale either
+  /// way keeps the unsubmitted text visible until the page changes, or the
+  /// field, focused again, is submitted or left by a tap outside.
+  void _onScaleTapOutside(PointerDownEvent _) {
+    _scaleFocus.handBack();
     _syncScale();
   }
 
@@ -174,10 +176,10 @@ class _PagePanelState extends State<PagePanel> {
                   // again at once. `onSubmitted` still runs after Enter's.
                   // Without these, Enter and a mouse click outside take the
                   // focus to the route's scope, where no key reaches the
-                  // shell -- even from a canvas click. Either way the field
-                  // then re-syncs to the model (`_onScaleFocus`).
+                  // shell -- even from a canvas click. A tap outside also
+                  // re-syncs the field (`_onScaleTapOutside`).
                   onEditingComplete: _scaleFocus.handBack,
-                  onTapOutside: (_) => _scaleFocus.handBack(),
+                  onTapOutside: _onScaleTapOutside,
                 ),
                 const SizedBox(height: 8),
                 DropdownButton<DisplayUnit>(
