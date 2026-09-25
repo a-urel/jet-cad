@@ -451,6 +451,9 @@ One line each, from the ledger. None is fixed by this task.
   case. Reachable only after two failures in a row. A fix would rethrow a
   non-refusal `StateError`.
 
+*Fixed on `fix/post-07`; see
+[2026-09-25-fix-post-07.md](2026-09-25-fix-post-07.md).*
+
 **Found and deferred to a post-07 `fix/` branch.** The human deferred the
 white ByLayer defect (ledger); the controller ruled the Page panel's focus
 (Task 8, problem 1) and Box m3 (Task 8 m3) onto the same branch:

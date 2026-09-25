@@ -1,7 +1,9 @@
 import 'dart:convert' show jsonDecode;
 
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/planner_view.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -408,5 +410,316 @@ void main() {
         reason: 'the tool ignores F3, so it reaches the shell');
     expect(status(tester), 'Polyline');
     expect(polyline.isPending, isTrue);
+  });
+
+  testWidgets(
+      'A17 a line drafted with L is ByLayer on layer 0 and resolves black '
+      "through the canvas's own resolver, which survives a rebuild "
+      '(fix/post-07)', (tester) async {
+    final seeded = drawDoc(FlutterTextMeasurer());
+    final view = await pumpDraw(tester, seeded.doc);
+    await press(tester, LogicalKeyboardKey.keyL);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.pump();
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.escape);
+    final doc = view.document;
+    final drafted =
+        ofKind(doc, EntityKind.line).where((h) => h != seeded.line).single;
+    final slot = doc.entities.slotOf(drafted)!;
+    // The fixture is the defect's own: nothing concrete to fall back on.
+    expect(doc.entities.colorAt(slot), kByLayer);
+    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
+    expect(doc.tables.layers[ReservedHandles.layerZero]!.color,
+        const IndexedColor(7));
+
+    DraftCanvasState canvas() =>
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+    final painter = canvas().painter;
+    expect(painter.resolver.styleFor(slot, StyleContext.documentRoot).argb,
+        0xFF000000,
+        reason: 'ACI 7 is the foreground, black on the paper');
+
+    // A rebuild of the shell and the view must hand the canvas the same
+    // resolver: a different one makes `didUpdateWidget` rebuild the painter.
+    tester.element(find.byType(PlannerShell)).markNeedsBuild();
+    tester.element(find.byType(PlannerView)).markNeedsBuild();
+    await tester.pump();
+    expect(identical(canvas().painter, painter), isTrue,
+        reason: 'one resolver per paper foreground, not one per build');
+  });
+
+  /// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.
+  FocusNode canvasFocus(WidgetTester tester) => tester
+      .widget<Focus>(find
+          .descendant(
+              of: find.byType(InteractionLayer), matching: find.byType(Focus))
+          .first)
+      .focusNode!;
+
+  Finder scale() => find.byKey(const Key('page-scale'));
+
+  String scaleText(WidgetTester tester) =>
+      tester.widget<TextField>(scale()).controller!.text;
+
+  testWidgets(
+      "A18 Enter in the page panel's scale field commits it and hands focus "
+      "back to the canvas: the tool's Escape and the shell's letters work at "
+      'once (fix/post-07 F2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    await press(tester, LogicalKeyboardKey.keyP);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    final polyline = view.tools.active as PolylineTool;
+    expect(polyline.isPending, isTrue);
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    // Every text the field shows from Enter on: none. The field already
+    // shows 75, Enter does not re-sync it, and the page listener finds 75.
+    final controller = tester.widget<TextField>(scale()).controller!;
+    final shown = <String>[];
+    void record() => shown.add(controller.text);
+    controller.addListener(record);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    controller.removeListener(record);
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        75);
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    expect(scaleText(tester), '75');
+    expect(shown, isEmpty,
+        reason: "the field's text never changes from Enter on");
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(polyline.isPending, isFalse, reason: "Escape reached the tool");
+    expect(status(tester), 'Polyline');
+    await press(tester, LogicalKeyboardKey.keyL);
+    expect(status(tester), 'Line');
+  });
+
+  testWidgets(
+      "A19 a mouse click outside the page panel's scale field, on the "
+      "panel's title or on the canvas, hands focus back to the canvas "
+      '(fix/post-07 F2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    // A mouse: the field's default tap-outside unfocuses only for one here.
+    Future<void> clickAt(Offset at) async {
+      await tester.tapAt(at, kind: PointerDeviceKind.mouse);
+      await tester.pump();
+    }
+
+    await tester.tap(scale());
+    await tester.pump();
+    await clickAt(tester.getCenter(find.descendant(
+        of: find.byType(PagePanel), matching: find.text('Page'))));
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyR);
+    expect(status(tester), 'Rectangle');
+    await press(tester, LogicalKeyboardKey.keyV);
+    expect(status(tester), 'Select');
+
+    // The canvas click requests the focus itself: the hand-back must not
+    // take it away again.
+    await tester.tap(scale());
+    await tester.pump();
+    await clickAt(globalOf(tester, view, 7150, 3250));
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyL);
+    expect(status(tester), 'Line');
+  });
+
+  /// Drafts one line with L on [view] and returns its slot: ByLayer on
+  /// layer 0, which is ACI 7.
+  Future<int> draftLine(WidgetTester tester, PlannerView view) async {
+    final doc = view.document;
+    final before = ofKind(doc, EntityKind.line).toSet();
+    await press(tester, LogicalKeyboardKey.keyL);
+    await tester.tapAt(globalOf(tester, view, 7010, 3020));
+    await tester.pump();
+    await tester.tapAt(globalOf(tester, view, 7060, 3090));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.escape);
+    final drafted =
+        ofKind(doc, EntityKind.line).where((h) => !before.contains(h)).single;
+    final slot = doc.entities.slotOf(drafted)!;
+    expect(doc.entities.colorAt(slot), kByLayer);
+    expect(doc.entities.layerAt(slot), ReservedHandles.layerZero);
+    return slot;
+  }
+
+  /// The slot's colour through the canvas's own painter's resolver.
+  int argbOnCanvas(WidgetTester tester, int slot) => tester
+      .state<DraftCanvasState>(find.byType(DraftCanvas))
+      .painter
+      .resolver
+      .styleFor(slot, StyleContext.documentRoot)
+      .argb;
+
+  Future<void> tapSwatch(WidgetTester tester, int i) async {
+    final swatch = find.byKey(Key('page-swatch-$i'));
+    await tester.ensureVisible(swatch);
+    await tester.tap(swatch);
+    await tester.pump();
+  }
+
+  testWidgets(
+      'A20 the foreground follows the paper: black on White, white on '
+      'Blueprint picked in the Page panel, back by undo and redo; White to '
+      'Ivory keeps the resolver (fix/post-07 F1b)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    PageComponent page() => doc.components.get<PageComponent>(doc.rootHandle)!;
+    DraftCanvasState canvas() =>
+        tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+    expect(page().background, 0xFFFFFFFF, reason: 'starts on White');
+    final slot = await draftLine(tester, view);
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'White');
+
+    await tapSwatch(tester, 3);
+    expect(page().background, 0xFF1F3A5F);
+    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'Blueprint');
+
+    doc.commands.undo();
+    await tester.pump();
+    expect(page().background, 0xFFFFFFFF);
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'undo to White');
+
+    doc.commands.redo();
+    await tester.pump();
+    expect(page().background, 0xFF1F3A5F);
+    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'redo Blueprint');
+
+    doc.commands.undo();
+    await tester.pump();
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'undo again');
+
+    // White to Ivory: the page changes, the foreground does not, so the
+    // canvas keeps its painter (a new resolver would rebuild it).
+    final painter = canvas().painter;
+    await tapSwatch(tester, 1);
+    expect(page().background, 0xFFFAF6EC);
+    expect(identical(canvas().painter, painter), isTrue,
+        reason: 'same foreground, same resolver');
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'Ivory');
+  });
+
+  testWidgets(
+      'A21 a document that opens on Blueprint drafts white from the start, '
+      'and a load onto White turns it black (fix/post-07 F1b)', (tester) async {
+    final doc = drawDoc(FlutterTextMeasurer()).doc;
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle,
+        doc.components
+            .get<PageComponent>(doc.rootHandle)!
+            .copyWith(background: 0xFF1F3A5F)));
+    doc.commands.clearHistory();
+    final view = await pumpDraw(tester, doc);
+    final slot = await draftLine(tester, view);
+    expect(argbOnCanvas(tester, slot), 0xFFFFFFFF, reason: 'at startup');
+
+    // Out of band, as a decode writes the registry before `notifyLoaded`.
+    doc.components.attach<PageComponent>(
+        doc.rootHandle,
+        doc.components
+            .get<PageComponent>(doc.rootHandle)!
+            .copyWith(background: 0xFFFFFFFF));
+    doc.commands.notifyLoaded();
+    await tester.pump();
+    expect(argbOnCanvas(tester, slot), 0xFF000000, reason: 'after the load');
+  });
+
+  testWidgets(
+      'A22 a document without a page drafts black: no sheet is painted, so '
+      "the drafting lies on the shell's light surface (fix/post-07 F1b)",
+      (tester) async {
+    final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
+    expect(doc.components.get<PageComponent>(doc.rootHandle), isNull);
+    final view = await pumpDraw(tester, doc);
+    final slot = await draftLine(tester, view);
+    expect(argbOnCanvas(tester, slot), 0xFF000000);
+  });
+
+  testWidgets(
+      "A23 the page panel's scale field left without Enter shows the page's "
+      "scale again: typed 75 on 1:20, then a mouse click on the panel's "
+      'title commits nothing (fix/post-07 F2F3b m2)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    await tester.pump();
+    expect(scaleText(tester), '75');
+    await tester.tapAt(
+        tester.getCenter(find.descendant(
+            of: find.byType(PagePanel), matching: find.text('Page'))),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        20);
+    expect(doc.commands.undoDepth, depth);
+    expect(scaleText(tester), '20',
+        reason: 'the field never shows a scale the page does not have');
+  });
+
+  testWidgets(
+      "A24 the page panel's scale field follows an undo and a redo of a "
+      'scale commit: 75 over 1:20, back to 20, on to 75 (fix/post-07 F2F3c '
+      'I1)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    double model() =>
+        doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect([model(), scaleText(tester)], [75, '75']);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)),
+        reason: 'the field is not focused: only the page can move it');
+    doc.commands.undo();
+    await tester.pump();
+    expect([model(), scaleText(tester)], [20, '20']);
+    doc.commands.redo();
+    await tester.pump();
+    expect([model(), scaleText(tester)], [75, '75']);
+  });
+
+  testWidgets(
+      "A25 a window blur while typing in the page panel's scale field keeps "
+      'the typed text: on web the engine first closes the text input '
+      'connection, which unfocuses the field while the app is still resumed '
+      '(fix/post-07 F2F3d)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    await tester.pump();
+    final node = tester.widget<TextField>(scale()).focusNode!;
+    expect(node.hasFocus, isTrue);
+    // Resumed, as on web until the window's own blur: a lifecycle guard
+    // (f5920de's) lets a focus-loss re-sync through here.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+
+    // The web engine's `handleBlur` for an `<input>` blur with no element
+    // to take the focus; the window's blur comes after it.
+    tester.testTextInput.closeConnection();
+    await tester.pump();
+    expect(tester.binding.lifecycleState, AppLifecycleState.resumed);
+    expect(node.hasFocus, isFalse, reason: 'the closed connection unfocused');
+    expect(scaleText(tester), '75', reason: 'no tap, so no re-sync');
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        20);
+    expect(doc.commands.undoDepth, depth);
   });
 }

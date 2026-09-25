@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'panel_focus.dart';
 import 'parametric/box.dart';
 import 'parametric/wall.dart';
 import 'parametric/wall_tool.dart';
@@ -68,7 +69,7 @@ final class _Field {
 
   final _Kind kind;
   final TextEditingController text = TextEditingController();
-  final FocusNode focus = FocusNode();
+  final PanelFieldFocusNode focus = PanelFieldFocusNode();
   Handle? pinned;
   Handle? loadedTarget;
   double? loadedValue;
@@ -364,20 +365,18 @@ class _SelectionPanelState extends State<SelectionPanel> {
           }
         },
         onSubmitted: (_) => _commit(f),
-        // Enter hands focus back to what had it before the field -- the
-        // canvas -- so the shell's letters and Escape work again at once.
-        // `onSubmitted` still runs after it.
-        onEditingComplete: () => f.focus
-            .unfocus(disposition: UnfocusDisposition.previouslyFocusedChild),
+        // Enter hands focus back to what had it before the panel fields --
+        // the canvas -- so the shell's letters and Escape work again at
+        // once; past any other panel field still in the focus history
+        // (fix/post-07 F3; `PanelFieldFocusNode.handBack`). `onSubmitted`
+        // still runs after it.
+        onEditingComplete: f.focus.handBack,
         // Only unfocuses (spec 06 D13's amendment for F2): the commit
         // itself happens in `_onFocusChange`, which fires for this too, so
         // every way of losing focus -- Enter, moving to another field, or a
         // tap outside -- commits. Like Enter, it hands focus back to the
-        // previously focused node: the plain `unfocus()` clears the scope's
-        // focus history and takes the focus to the scope itself, even from
-        // a canvas click that has just requested it.
-        onTapOutside: (_) => f.focus
-            .unfocus(disposition: UnfocusDisposition.previouslyFocusedChild),
+        // canvas, and leaves a canvas click's own focus request alone.
+        onTapOutside: (_) => f.focus.handBack(),
       );
 
   @override

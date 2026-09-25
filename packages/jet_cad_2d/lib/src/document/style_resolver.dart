@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import '../core/handle.dart';
 import 'draft_document.dart';
 import 'node.dart';
@@ -5,6 +7,40 @@ import 'resolved_style.dart';
 import 'style.dart';
 import 'style_context.dart';
 import 'tables.dart';
+
+/// The foreground ([DocumentStyleResolver.foreground], `0xRRGGBB`) for
+/// drawing on a [background] (`0xAARRGGBB`; the alpha byte is ignored):
+/// black (`0x000000`) or white (`0xFFFFFF`), whichever contrasts more.
+///
+/// ACI 7 is black on a light background and white on a dark one
+/// (AutoCAD's rule). The resolver applies the foreground it is given; this
+/// picks one from what the host draws on. It lives here, beside the
+/// resolver, rather than in an app because it is the other half of that
+/// same rule and nothing in it belongs to one host.
+///
+/// "Contrasts more" is WCAG 2's contrast ratio, `(L1 + 0.05) / (L2 + 0.05)`,
+/// on relative luminance: each sRGB channel linearised, then weighted
+/// 0.2126, 0.7152, 0.0722. Linearisation matters: the crossover is at a
+/// luminance of `sqrt(0.0525) - 0.05` ≈ 0.179, which a grey reaches between
+/// bytes 117 and 118 (a 0x767676 paper takes black, 0x757575 white), not
+/// at the 128 a threshold on the raw bytes would put it. A tie goes to
+/// black.
+int foregroundFor(int background) {
+  double linear(int shift) {
+    final c = ((background >> shift) & 0xFF) / 255;
+    return c <= 0.04045
+        ? c / 12.92
+        : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
+  }
+
+  final luminance =
+      0.2126 * linear(16) + 0.7152 * linear(8) + 0.0722 * linear(0);
+  // The ratio of each ink against the paper: black's luminance is 0,
+  // white's is 1.
+  final black = (luminance + 0.05) / 0.05;
+  final white = 1.05 / (luminance + 0.05);
+  return black >= white ? 0x000000 : 0xFFFFFF;
+}
 
 abstract class StyleResolver {
   /// The context an instance imposes on its definition's contents.
@@ -19,9 +55,41 @@ abstract class StyleResolver {
 }
 
 class DocumentStyleResolver implements StyleResolver {
-  DocumentStyleResolver(this.document);
+  DocumentStyleResolver(this.document, {this.foreground = 0xFFFFFF}) {
+    // Rejected rather than masked: Flutter colours are ARGB, and an opaque
+    // black passed as 0xFF000000 would otherwise OR its alpha byte over the
+    // one [styleFor] computes from transparency.
+    if (foreground < 0 || foreground > 0xFFFFFF) {
+      throw ArgumentError.value(
+          foreground, 'foreground', 'must be 0..0xFFFFFF');
+    }
+  }
 
   final DraftDocument document;
+
+  /// The RGB (`0xRRGGBB`) that ACI 7 draws in.
+  ///
+  /// AutoCAD's rule: ACI 7 is not a colour but the *foreground* — black on a
+  /// light background, white on a dark one. [aciToRgb] answers 0xFFFFFF for
+  /// it, which is right on a dark model space and invisible on white paper;
+  /// only the host knows which it draws on, so the host says. Layer 0 is
+  /// ACI 7, so everything drafted ByLayer on it arrives here.
+  ///
+  /// Applies to ACI 7 by whichever route it is reached — the entity's own
+  /// colour, ByLayer onto an ACI 7 layer, ByBlock from an ACI 7 context, or
+  /// [StyleContext.documentRoot] itself — because every route ends in one
+  /// encoded colour before it is turned into RGB. A [TrueColor] is never
+  /// substituted, including `TrueColor(0xFFFFFF)`: the test is on the index,
+  /// not on the RGB value.
+  ///
+  /// Defaults to 0xFFFFFF, the value [aciToRgb] gives, so a caller that does
+  /// not pass one draws exactly as before.
+  final int foreground;
+
+  /// The encoded form of `IndexedColor(7)`: [encodeColor] stores an index as
+  /// itself. Compared before decoding, so the substitution costs one integer
+  /// comparison per entity and allocates nothing.
+  static const int _kAci7 = 7;
 
   @override
   StyleContext contextFor(Handle instance, StyleContext inherited) {
@@ -162,10 +230,12 @@ class DocumentStyleResolver implements StyleResolver {
     return (encoded == kByLayer || encoded == kByBlock) ? ctx.color : encoded;
   }
 
-  int _rgbOf(int encoded) => switch (decodeColor(encoded)) {
-        IndexedColor(:final aci) => aciToRgb(aci),
-        TrueColor(:final rgb) => rgb,
-        // Unreachable: both branches resolve to a concrete value above.
-        _ => aciToRgb(7),
-      };
+  int _rgbOf(int encoded) => encoded == _kAci7
+      ? foreground
+      : switch (decodeColor(encoded)) {
+          IndexedColor(:final aci) => aciToRgb(aci),
+          TrueColor(:final rgb) => rgb,
+          // Unreachable: both branches resolve to a concrete value above.
+          _ => foreground,
+        };
 }

@@ -29,10 +29,15 @@ bool isWallThickness(double t) => t.isFinite && t > wallJoin.linear;
 /// wall from the node is clamped (spec 07 D6).
 const double mitreLimit = 4;
 
-/// Every wall child's colour (spec 07 D3): a black band on light paper,
-/// fill, outline and centreline alike. Concrete, not ByLayer: layer 0 is
-/// ACI 7, which resolves to white (`aciToRgb(7)`), and nothing in the
-/// renderer contrasts it with the paper, so a ByLayer band is paper-white.
+/// Every wall child's colour (spec 07 D3): a black band, fill, outline
+/// and centreline alike, on every paper. Concrete, not ByLayer. When 07
+/// landed, layer 0's ACI 7 resolved to white (`aciToRgb(7)`) and a ByLayer
+/// band was paper-white. Since fix/post-07 the shell's resolver draws ACI 7
+/// in a foreground that follows the paper, black on a light one and white
+/// on Blueprint, so ByLayer drafting follows the paper and a ByLayer wall
+/// would too. Walls stay black on the human's decision: a concrete colour
+/// does not depend on the resolver, so on Blueprint a wall is black while
+/// drafting is white.
 const DraftColor kWallColor = TrueColor(0x000000);
 
 /// A wall's parameters (spec 07 D2): both centreline endpoints in

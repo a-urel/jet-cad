@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'panel_focus.dart';
+
 /// The smallest panel that lets a human change the page (spec D12). Every
 /// control executes one `SetComponentCommand`; the panel rebuilds from the
 /// notifier, so undo moves the controls back. 12 replaces this.
@@ -17,6 +19,7 @@ class PagePanel extends StatefulWidget {
 
 class _PagePanelState extends State<PagePanel> {
   final TextEditingController _scale = TextEditingController();
+  final PanelFieldFocusNode _scaleFocus = PanelFieldFocusNode();
 
   static const List<(String, int)> _swatches = [
     ('White', 0xFFFFFFFF),
@@ -36,14 +39,54 @@ class _PagePanelState extends State<PagePanel> {
   void dispose() {
     widget.page.removeListener(_syncScale);
     _scale.dispose();
+    _scaleFocus.dispose();
     super.dispose();
   }
 
+  /// Shows the page's scale. It reads the page from the document, not from
+  /// [PagePanel.page]: a command updates the document at once, while the
+  /// notifier hears of it only from `document.changes`, an asynchronous
+  /// stream, a microtask or more later.
   void _syncScale() {
-    final page = widget.page.value;
+    final document = widget.document;
+    final page = document.components.get<PageComponent>(document.rootHandle);
     if (page == null) return;
     final text = _number(page.scaleDenominator);
     if (_scale.text != text) _scale.text = text;
+  }
+
+  /// The scale is committed on submit (spec 04), so a field left without
+  /// Enter would go on showing a scale the page does not have. A tap outside
+  /// the field -- the user clicking elsewhere in the app -- hands the focus
+  /// back to the canvas and then re-syncs the field to the page's scale
+  /// (fix/post-07 F2F3d). Nothing is committed.
+  ///
+  /// Only a pointer down outside the field's tap region calls this, and the
+  /// field arms it from its focus at its last build. A window blur never
+  /// does. On web (Chromium; on Safari desktop the engine listens for no
+  /// input blur, and only the window's blur arrives) the focused `<input>`
+  /// blurs first, with no element to take the focus, so the engine closes
+  /// the text input connection;
+  /// `EditableText.connectionClosed` then unfocuses the field while the app
+  /// is still `resumed`, and the window's own blur, which makes the app
+  /// `inactive`, comes after that (the F2F3c review saw this order in
+  /// Chromium). A focus-loss listener cannot tell that from the user moving
+  /// on, even behind a lifecycle guard, and dropped the typed text (f5920de).
+  /// Here the field keeps it. Once it has rebuilt without the focus, the
+  /// field is no longer armed, so a later click elsewhere in the app does
+  /// not re-sync it either.
+  ///
+  /// On Enter, `onEditingComplete` hands the focus back and `onSubmitted`
+  /// commits; the page listener then shows the committed value.
+  ///
+  /// Accepted: every text field has `EditableText`'s default tap group, so a
+  /// click on another text field -- a Selection panel field, say -- is not
+  /// outside this one, and Tab is no tap at all. Leaving the scale either
+  /// way keeps the unsubmitted text visible until the page changes, or the
+  /// field, focused again, is submitted or left by a tap outside.
+  void _onScaleTapOutside(PointerDownEvent _) {
+    _scaleFocus.handBack();
+    _syncScale();
   }
 
   static String _number(double v) =>
@@ -124,11 +167,21 @@ class _PagePanelState extends State<PagePanel> {
                 TextField(
                   key: const Key('page-scale'),
                   controller: _scale,
+                  focusNode: _scaleFocus,
                   decoration: const InputDecoration(
                       prefixText: '1:', labelText: 'Scale'),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   onSubmitted: (text) => _submitScale(page, text),
+                  // Enter and a tap outside hand focus back to the canvas
+                  // (fix/post-07 F2), so the shell's letters and Escape work
+                  // again at once. `onSubmitted` still runs after Enter's.
+                  // Without these, Enter and a mouse click outside take the
+                  // focus to the route's scope, where no key reaches the
+                  // shell -- even from a canvas click. A tap outside also
+                  // re-syncs the field (`_onScaleTapOutside`).
+                  onEditingComplete: _scaleFocus.handBack,
+                  onTapOutside: _onScaleTapOutside,
                 ),
                 const SizedBox(height: 8),
                 DropdownButton<DisplayUnit>(
