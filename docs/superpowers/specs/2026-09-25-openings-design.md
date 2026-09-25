@@ -5,6 +5,12 @@ human skipped the spec review, as for 07 (decision 14). **Amended the same
 day by the controller's ruling on open question 1** (R1: a gap's threshold
 line replaces its jamb lines; D10, D11, D12, the tests and the mutant
 table). The other thirteen open questions were accepted as written.
+**Amended at execution (Plan 08):** the controller's rulings while Plan 08
+ran are marked in place, "amended at execution (controller, …)" (D7, D8,
+D10, D12, D17). The paragraphs headed "**Amended at execution (Plan 08)**"
+record the rest: where the build departed from this text, or made it
+precise. They rewrite nothing above them. Results:
+[2026-09-25-plan-08-results.md](../notes/2026-09-25-plan-08-results.md).
 **Sub-project:** `roadmap/08-openings.md`. **Size:** M.
 **Branch:** `spec-08/openings`, cut from `main` at `357bea6`; this revision
 is written on top of `11f26bc` (the spike's findings note).
@@ -265,6 +271,28 @@ extended).
 edit. **Pinned by:** `RF1`, `RC1` (M-08n); the view's `referrers` by `OR1`,
 `OR3`.
 
+**Amended at execution (Plan 08):** the cost as measured and pinned.
+- **`RC1` pins more than a line draw.** A line draw seeds no object, so
+  a second `references` call at D5's check (the mutant X2-recall) could
+  not change its count (Task 2). `RC1` also asserts exactly 2 × 600 calls
+  for an edit of one Pin, and exactly 600 for `diagnostics()`.
+- **`RC2` takes four warm-ups,** not two: with fewer, the first size ran
+  cold (Task 1 review m-3). It measures n Posts, each with one Pin, which
+  is 2n objects, so the results note compares it with 07's `NC4` at 2n.
+  The reviewer measured about 7 allocations per referring object per
+  survey, linear in n.
+- **`RC3`** (Ruling 08-6) repeats the method in the app, with real walls
+  and one door each, because the test clients have no joints (Open
+  question 13). Printed, not asserted.
+- **The survey keeps each object's declared list** (Ruling 08-3) beside
+  the filtered maps. D5's check and `diagnostics()` read it and never call
+  `references` again.
+- **The engine's test clients** are `Post`, `Pin` and `Tag` (Ruling 08-2),
+  plus `Peg`, a second referrer type. `ComponentStore.handles` lists one
+  type's handles in ascending order already, so with one referrer type
+  `RF1` could not tell a sorted `referrers` list from an unsorted one
+  (X1-sort; Task 1).
+
 ### D3 — The closure follows references, with one extra hop
 
 06 D4 step 6's closure was the seeds and their spatial neighbours before and
@@ -403,6 +431,45 @@ both, so a runtime delete is refused at `_require` before anything runs.
 failure path must now undo it too. **Pinned by:** `CS1`–`CS5`, `OR5`, `OR6`;
 M-08f, M-08f0, M-08f2, M-08v.
 
+**Amended at execution (Plan 08):** four points of the cascade as built,
+and one of the view.
+- **The view hides a lost object.** 06's `ParametricView.paramsOf` read the
+  component store directly. 06 D8's cleanup detaches a deleted object's
+  component only after the plan, so while an edit was planned an orphan
+  still saw its deleted host, and `toWorld` of the removed node fell back
+  to the identity. The Task 1 review's probe: a Pin drew its deleted
+  Post's bottom edge at the world origin. As built, `paramsOf` answers
+  null for any handle that is not a live object of the survey the view
+  was built over, inside an edit and in `drift()` and `diagnostics()`
+  alike (Task 2's ruling). That also covers a re-parented referent, which
+  keeps its component for good. So "its `generate` sees `paramsOf(host)
+  == null`" holds as written. Pinned by `LV1` and `LV2`.
+- **Fills first, over the whole subtree.** "A fill whose boundary goes too
+  is skipped" is reversed. The cascade removes every fill of the doomed
+  object's whole subtree first; then the object's other leaves, its
+  instances and its nested groups, recursively, in listed order; then its
+  node. `RemoveEntityCommand` on a fill is always available and undoes
+  exactly. A boundary's removal takes its fill with it only when the pair
+  could be rebuilt, so a loaded region that cannot be (an open boundary,
+  or a fill in a nested group naming a boundary of the doomed object)
+  would otherwise refuse the whole delete (Task 2 review m-1 and m-3;
+  Task 3's first commit). Pinned by `CS10`, `CS11` and `CS12`.
+- **One rollback for the whole cascade.** Deciding and applying, every
+  round, run under the rollback. A cascade command that throws (a loaded
+  fill naming another object's boundary, say) undoes what the cascade
+  applied, then `r0`, and rethrows; no history is pushed and no event is
+  emitted (Task 2 review I-2). Pinned by `CS9`.
+- **The index hears the cascade.** An edit whose plan is empty but whose
+  cascade removed entities (a detached host with no neighbour) reports
+  the `geometry` capability, so the spatial index and the tile cache drop
+  the removed children. Before the fix, 3,002 dead entities stayed
+  indexed in the review's probe (Task 2 review I-1). Pinned by `CS8`.
+- **The re-parent case is reachable.** The tree accepts
+  `RemoveNodeCommand(A)` then `AddNodeCommand(GroupNode(handle: A, parent:
+  G))` in one compound, so `CS7` runs as the plan wrote it. Re-pointing a
+  referrer and deleting its old referent in one edit still deletes the
+  referrer: the before-referrers decide, as this section reads.
+
 ### D5 — Dangling references: refused on edit, reported on load
 
 A **dangling reference** is a handle an object's `references` name that is
@@ -445,6 +512,17 @@ not a live parametric object.
 
 **Costs:** one more refusal type a caller may meet. **Pinned by:** `DR1`,
 `DR2`, `OS4`; M-08l, M-08y.
+
+**Amended at execution (Plan 08):** the first failure is refused in
+ascending (seed, referent) order (Ruling 08-5), which `DR3` pins with a
+client that declares two distinct dead referents. A refused edit leaves
+the bytes and the history unchanged, but a refused create may have
+advanced the handle seed, as any refused command that allocated a handle
+does, so `DR3` compares without the seed. `opening.orphan` and
+`parametric.dangling` never both name an opening: the app reports
+`opening.orphan` only when the host lists the opening among its referrers
+(`view.referrers(host)`), which a live host of another type does and a
+missing host does not.
 
 ### D6 — `OpeningParams`
 
@@ -560,6 +638,25 @@ its openings, so both get the same bits (spike: `hostFrame`).
 and once per opening in the same plan (Open question 13). **Pinned by:**
 `OG2` (M-08s), `OG3` (M-08o), `OG4` (M-08x).
 
+**Amended at execution (Plan 08):** the collinear exemption as built, and
+two known limits.
+- **The exemption is a parallel skip.** `obstaclesOf` skips any
+  neighbour parallel to the host within `wallJoin.angular`. 07's
+  `classify` would tee a collinear, overlapping end, and this section says
+  it is no obstacle (`HF4`). The Task 3 review's probe found that the skip
+  drops nothing this section would give.
+- **Known limit: a short stem is over-blocked.** The T interval crosses
+  B's faces with the host's near face as infinite lines, so a 100 mm
+  stub blocks about 1,080 mm of the host where no stem lies (Task 3
+  re-review m1). It errs safe: a door cannot be placed near a short stub.
+- **Known limit: the parallel skip is a visible jump.** A B parallel
+  within 1e-9 rad blocks nothing; at 2e-9 rad its face crossings block the
+  rest of the host (Task 3 re-review m2). This is the collinear
+  exemption's edge.
+- **The frame's inputs.** `WorldWall` carries its `WallParams` and its
+  transform, and `HostFrame` also carries the stored end `e` (D9's
+  amendment).
+
 ### D8 — Where an opening cuts: clamp, no-fit, overlap
 
 For an opening with stored centre `c` and width `w` on a host frame:
@@ -673,6 +770,18 @@ narrow stretch holds it; `opening.clamped` says so. **Pinned by:** `OG2`,
 **Costs:** 07's fixed handles for a cut wall (D12 pays it). **Pinned by:**
 `OG1` (M-08e), `OG8` (M-08k), `OG9` (M-08snap), `OR6`; 07's own tests for
 the uncut path.
+
+**Amended at execution (Plan 08):**
+- **The ends of the split centreline.** The first and last centreline
+  pieces end **exactly** at the stored `start` and `end` (`HostFrame.e`),
+  not at `s + L·d` recomputed. The two differ in 4,193 of 10,000 random
+  walls (Task 4 review m3). `OG8` and `OG9` assert it; in Task 16's run,
+  `OG9` checked 1,858 cut-wall ends and found 0 inexact.
+- **Anticlockwise, asserted.** Every stored piece is asserted simple and
+  anticlockwise (`OG1`, `OG2`, `OG9`; Task 4 review m2).
+- **A wall never loses its last piece:** D8's "a wall keeps a piece" (Task
+  4's finding: a cut spanning a whole free wall dropped both pieces and
+  left a childless, unpickable wall group).
 
 ### D10 — The opening's symbols, space and colour
 
@@ -870,6 +979,41 @@ a per-object draw pass; none of 08's does. **Pinned by:** `RD1`; `OR8`
 **Costs:** `WallGrips` must read the document's openings, O(openings), once
 per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
 
+**Amended at execution (Plan 08):**
+- **Stored where it is drawn, by rounding too.** For an opening flush
+  against a stretch end, `p′ = L′ − (L − p)` lands an ulp outside the
+  stretch about half the time: 99 of 200 start drags left
+  `opening.clamped` (Task 11 review I1). D16's no-change rule then could
+  not re-seat it. As built, when the rewritten centre would be clamped by
+  no more than `wallJoin.linear` (rounding alone), the drag stores the
+  centre of the cut the opening gets there instead (`storedCentreOf`,
+  D14's amendment). That never moves an opening visibly (at most 1e-6 mm
+  plus ulps, onto where it is drawn). An opening clamped by more, against
+  a corner, stays put (Task 12 review: 0 of 40 re-seated).
+- **The host's stretches after the drag.** The document adapter takes
+  `moved:`, the compound's new walls standing in for the old ones, so a
+  joined neighbour's new end counts too.
+  - `EP7`: 200 walls; 0 openings clamped after the drag, 97 re-seated.
+  - `EP8`: the corner-flush door stays put.
+  - `EP9`: on 24 L corners, 11 would be clamped by the neighbour's old
+    end without `moved:`.
+- **Which openings.** Each live opening (a root-level group carrying
+  `OpeningParams`) whose host is the wall, read once. A non-live one, made
+  only by a hand-built command, is skipped (`EP6`).
+- **"Both moved" cannot happen.** Both ends of one wall would move only if
+  the wall were no longer than its join tolerance, and the drag that would
+  make it so is refused at length 0 (Task 8 review). So the rule as built
+  is: rewrite when `start` changed and `end` did not; otherwise keep. The
+  wording above is imprecise but harmless.
+- **Test identifiers.** `EG1`–`EG4` are `EP1`–`EP4` (Ruling 08-1), because
+  07's `wall_grips_test.dart` has `EG1`–`EG5`; `EP5`–`EP9` are added.
+- **`EP1`'s fixture.** "Joined walls' openings included" is false for a
+  joined wall at an angle, which swings about its unmoved end. `EP1` uses
+  two collinear walls sharing their starts, and `EP3` covers the L
+  (Ruling 08-10).
+- **Drift.** 2,000 random end drags drift at most 1.9e-7 mm: a random
+  walk, with no creep (Task 8 review).
+
 ### D14 — The tools: Door (D), Window (N), Gap (G)
 
 - **One `OpeningTool` class, three instances** (decision 8), each a
@@ -937,6 +1081,45 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
 **Costs:** a band cache shared by four tools. **Pinned by:** `OT1`, `OT2`
 (M-08z, M-08z2, M-08z3), `OT4`.
 
+**Amended at execution (Plan 08):**
+- **The stored centre is corrected by an ulp or so.** It is the placed
+  cut's `a + w/2`, corrected by `storedCentreOf`. `(x + w/2) − w/2` is not
+  `x` for about 10% of clamped placements, and a start one ulp outside
+  `[a, b − w]` is clamped under D8's exact comparison, so the opening would
+  be `opening.clamped` from birth (Task 9's finding). The correction moves
+  the centre by the fewest ulps (at most 8) that make `placeCut` place it
+  unclamped. It gives up only at the fit/no-fit knife edge: a stretch
+  exactly `w` long whose `b − w` rounds below `a` holds no unclamped
+  start. There the opening is placed clamped by one ulp, and
+  `opening.clamped` reports it. In the Task 9 review's 200,000 fuzzed
+  placements, the drawn cut was within 1.8e-12 of the clamped cut. The
+  slide grip (D16) and the end drag (D13) use the same function.
+- **No handle prediction.** The new opening's handle is allocated first,
+  inside the commit's build (after the permission check). The placement
+  is then decided with it, among the host's openings in ascending handle
+  order (D8's "a wall keeps a piece"). The hover preview admits the
+  would-be opening after the host's existing ones.
+- **The band cache (Ruling 08-11).**
+  - 07's cache moved into `wall_bands.dart` (`WallBands`), shared by the
+    Wall tool and the three opening tools.
+  - It stores each wall's handle, and `hostAt` returns the lowest-handle
+    wall whose band holds the point. It holds live walls only, root-level
+    groups (Task 9 review m5).
+  - The host scan is not gated on object snap: finding the host is not a
+    snap. F3 gates only 07's band joining and D15's edge snaps.
+- **"Scans nothing when no wall is near" (Ruling 08-12)** is read as
+  "builds no preview and computes no frame". The hover still runs 07's
+  O(walls) scan over cached doubles, which allocates nothing in steady
+  state; the tool also memoises the scan per raw point and band
+  generation.
+  - `OT4` at 600 walls, in Task 16's run: 3.62 µs per hover over no wall
+    (the host scan alone 1.98 µs), 10.22 µs over a wall with the preview.
+  - A culled scan through the spatial index is the follow-up.
+- **The swing and the hinge are pinned in the hard cases.** `OT2` pins
+  the hinge when a clamp moves the centre across `L/2`, and the swing
+  taken from the raw point when a midpoint snap puts the resolved point
+  on the centreline (Task 9 review m1 and m2).
+
 ### D15 — Snapping
 
 - **The point a tool or the slide grip resolves** goes through the
@@ -963,6 +1146,38 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   not at the raw one (07's debt `m5` is not repeated).
 
 **Pinned by:** `OT3` (M-08sn), `SG1`.
+
+**Amended at execution (Plan 08):**
+- **The marker (Ruling 08-14).** `PlacementTool` gains `@protected Vector2
+  get markerPoint => hoverPoint`, which `paintOverlay` paints.
+  `OpeningTool` returns the projected, or edge-snapped, point on the host's
+  centreline. This is one render-layer getter (the Files list below). The
+  tool records the raw click in `onPointerDown` before calling `super`,
+  and invalidates its frame cache there first.
+- **The aperture along the centreline** is in the host's local units: the
+  world aperture divided by `|toWorld(host) · d|`, the world length of one
+  local unit along the centreline. It is exact for a non-uniformly scaled
+  group, which only a file makes. Pinned at the tool (`OT3`, Task 10
+  review m2) and at the grip (`SG1`, Task 14's F1).
+- **An edge-snapped centre is stored exactly:** the snapped `u`, not its
+  world point projected back (`OT3`, to 1e-11).
+- **`edgeSnap`** takes the stretches, the other cuts, `u`, `w` and the
+  aperture in local units; no frame.
+- **The slide grip (Ruling 08-15).**
+  - `ObjectGripProvider.drag` receives the point the select tool has
+    already resolved through the chain. So the grip's edge snaps are
+    evaluated on that resolved point, projected, and not on the raw point
+    as a tool's `selfSnap` is.
+  - The composite takes `edgeAperture`. The shell passes
+    `kSnapAperturePixels / camera scale` while object snap is on, else
+    null.
+  - Its candidates are the host's other openings' cuts as the document
+    draws them now.
+  - Cost: near its own old edges, the chain can pull a slid opening onto
+    them. The preview shows it.
+- **Off the centreline under a non-uniformly scaled host,** which only a
+  file makes, the projection is done in local space, so it is oblique in
+  world. Recorded.
 
 ### D16 — Editing: the Opening section, the slide grip, no move or rotate
 
@@ -1059,6 +1274,31 @@ whole in the same step (spike Q2b). Deleting a wall takes its openings (D4).
 
 **Costs:** one render-layer interface method and a composite in the app.
 **Pinned by:** `SG1`, `SG2` (M-08i), `OS1`–`OS4` (M-08pin), `OR7`.
+
+**Amended at execution (Plan 08):**
+- **The slide grip's no-change rule.** The grip returns null when the
+  centre to store `==` the stored one, or lies within `wallJoin.linear` of
+  it while the opening is not drawn clamped now. A no-fit opening counts
+  as not clamped (`SG5`). A clamped one (by an ulp, from a file or an
+  older rewrite) is re-seated where it is drawn by any drag, even onto
+  its own edge (Task 11 review I1; `SG3`).
+- **`movable`, everywhere the select tool moves or rotates (Ruling
+  08-16).**
+  - `GripDrag.move` and `GripDrag.rotate` take `objects` and skip an
+    immovable root-level group; the select tool passes the provider at
+    all four call sites.
+  - `GripCache.rotatable` needs a movable key with an outline, and
+    `hitsRotationGrip` honours it. There is no move cursor over an
+    immovable key.
+  - The render layer exports `movableKey(d, key, objects)`, which is new
+    public API, kept public by ruling (Task 11 review m3).
+- **One movable rule.** `OpeningGrips.movable` is false for an opening
+  and true otherwise. `ObjectGrips.movable` asks the dispatched provider,
+  and a group that is neither a wall nor an opening is movable. So the
+  rule lives in one place (Task 14's F2). Pinned by `SG2`, `SG4` and `SG6`.
+- **Tool mode's settings targets (Ruling 08-17).** Each opening tool's
+  target is a sentinel handle, `Handle(-1 - kind.index)`, beside the Wall
+  tool's `Handle.none`.
 
 ### D17 — Diagnostics
 
@@ -1277,6 +1517,24 @@ up to 60 mm. **Pinned by:** D18's carried-over tests and the replaced `SP5`.
   composite provider and its aperture callback); `shortcut_guard.dart`
   (D, N, G); `tool_palette.dart`; `startup_plan.dart` (D18); tests.
 
+**Amended at execution (Plan 08):** the files as built.
+- **Engine.**
+  - `lib/jet_cad_2d.dart` is unchanged: it exports
+    `parametric_system.dart` whole, so `ReferencePolicy` and
+    `DanglingReferenceError` are exported without an edit.
+  - The engine's `lib` diff is `parametric_system.dart` and
+    `regeneration.dart` only. The test clients include `Peg` (D2's
+    amendment).
+- **Render layer.**
+  - It also changes `draw/placement_tool.dart` (`markerPoint`, D15's
+    amendment), and `grip_cache.dart` exports `movableKey` (D16's).
+  - Its `lib` diff is `placement_tool.dart`, `grip_cache.dart`,
+    `grip_drag.dart` and `select_tool.dart`.
+- **App.**
+  - `wall_bands.dart` is new (D14's amendment).
+  - `tool_palette.dart` is unchanged: the palette's entries live in
+    `main.dart`'s `_entries` (Ruling 08-22).
+
 ### Amendments to 06 and 07
 
 | Section | Amended by | What changes |
@@ -1459,6 +1717,26 @@ kills.
   - `OS4` a refused edit (a malformed loaded host) reverts the field.
 - **The sample plan:** D18's tests.
 
+**Amended at execution (Plan 08):** identifiers as built (Ruling 08-1 and
+the reviews).
+- **Renamed:** `EG1`–`EG4` are `EP1`–`EP4`.
+- **Engine, added:**
+  - `RF6`–`RF8`: deleting a Pin, re-pointing one, and a loaded Pin whose
+    plain-group host becomes a Post;
+  - `CS6`–`CS12`: detach, re-parent, the index, the rollback, fills
+    first, subtrees, nested fills;
+  - `DR3`: Ruling 08-5's order;
+  - `LV1`, `LV2`: the view hides a lost object.
+- **Render layer, added:** `MV1`–`MV4` (`movable`) and `B12` (`markerPoint`).
+- **App, added:**
+  - `HF1`–`HF7`: the host frame, and the two adapters agreeing bit for bit;
+  - `OG11` (a)–(d): a wall keeps a piece;
+  - `OD1`, `DF1`, `RC3`;
+  - `OT5`: the marker;
+  - `EP5`–`EP9`;
+  - `SG3`–`SG6`: re-seating, a fill with a door, a no-fit window, a box;
+  - `SP6`.
+
 ### Named mutants
 
 Each is fired with a `cp` backup, restored with `cp`, then `diff` against
@@ -1504,6 +1782,28 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | M-08z3 | the swing side from the centreline, not the band's midline (D14 amendment) | `OT2`, right-justified case |
 | M-08sn | edge snaps removed | `OT3` |
 | M-08pin | the Opening section's target read at focus loss | `OS2` |
+
+**Amended at execution (Plan 08):**
+- **Every site (Ruling 08-21).** The 37 names took 50 fires:
+  - M-08b at four sites: the wall's reader, the tools' writer, the grip's
+    writer, and the Opening section's Position writer;
+  - M-08h at four: the symbol, the preview's symbol, the preview's jambs,
+    and the grip's preview jambs;
+  - M-08i at four: the render capture, `rotatable`, the composite, and
+    `OpeningGrips.movable`;
+  - M-08sn at three: the geometry, the tool, the grip;
+  - M-08u at two: the window and the gap;
+  - M-08q2 in two forms;
+  - M-08pin against `OS2` and 07's two `WS7` tests, which share
+    `_commit`.
+- **Two named fixtures were not enough alone.**
+  - M-08m survived the plan's `OG6` pair: a merged cut's negative middle
+    extent is dropped. `OG6` gained a nested door-in-window case, which
+    kills it (Task 5).
+  - M-08s's kill at the pure level (`HF5`) was incidental. `OG2` carries
+    it on a joined host (Task 4).
+- All 50 fires are killed. See
+  [plan-08-mutation-log.md](../notes/plan-08-mutation-log.md).
 
 ### Differential check
 
@@ -1625,3 +1925,20 @@ rules otherwise.
 14. **A degenerate opening from a file** (D6) is a childless ghost and
     cannot be picked; only `diagnostics()` names it. As with 07's
     degenerate wall, no UI path makes one.
+
+**Amended at execution (Plan 08):** how each question ended.
+- **Question 1:** resolved before planning.
+- **Questions 2, 3, 5–12 and 14:** built as written. The build makes
+  question 6's cases reachable (`CS6`, `CS7`) and question 11's pinned
+  (`SG2`, `SG6`).
+- **Question 4:** built as written, with D13's amendment: an end drag
+  re-seats an opening that rounding alone would clamp.
+- **Question 13: resolved by a memo.**
+  - Once each opening's symbol needed its host's cuts, n host layouts per
+    wall landed on the edit path. With 50 openings on one wall, a
+    thickness edit took 21–27 ms (Task 6).
+  - `hostCutsInView` is memoised per view and host within one
+    regeneration pass (an `Expando` in the app; the engine is unchanged),
+    which brings the edit to 4.1–6.0 ms.
+  - `cutsOf`'s admission is about n² log n per host, which the Task 6
+    review accepted.
