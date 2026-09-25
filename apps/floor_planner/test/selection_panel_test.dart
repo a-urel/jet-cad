@@ -870,4 +870,31 @@ void main() {
     await press(tester, LogicalKeyboardKey.keyW);
     expect(status(tester), 'Wall');
   });
+
+  testWidgets(
+      'SE16 a mouse click on empty paper after Width, then one on the page '
+      "panel's title before a frame: the canvas has the focus, so there is "
+      'nothing to hand back, and the canvas keeps it (fix/post-07 F2F3c m-a)',
+      (tester) async {
+    final view = await pumpBoxes(tester);
+    final b = boxes(view.document).first;
+    await select(tester, view, [b]);
+    await tester.tap(width);
+    await tester.pump();
+    final widthNode = tester.widget<TextField>(width).focusNode!;
+    expect(widthNode.hasFocus, isTrue);
+    // Empty paper, clear of both boxes; no frame, so Width's tap-outside is
+    // still armed from its last build.
+    await tester.tapAt(globalOf(tester, view, 7150, 3250),
+        kind: PointerDeviceKind.mouse);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await tester.tapAt(
+        tester.getCenter(find.descendant(
+            of: find.byType(PagePanel), matching: find.text('Page'))),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
+    await press(tester, LogicalKeyboardKey.keyW);
+    expect(status(tester), 'Wall');
+  });
 }

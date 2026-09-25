@@ -3,6 +3,8 @@ import 'dart:convert' show jsonDecode;
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/planner_view.dart';
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -479,14 +481,23 @@ void main() {
     await tester.tap(scale());
     await tester.pump();
     await tester.enterText(scale(), '75');
+    // Every text the field shows from Enter on. The focus loss lands after
+    // the commit but before the page notifier hears of it, so the re-sync
+    // must read the document: from the notifier it would show 20 first.
+    final controller = tester.widget<TextField>(scale()).controller!;
+    final shown = <String>[];
+    void record() => shown.add(controller.text);
+    controller.addListener(record);
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
+    controller.removeListener(record);
     expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
         75);
     expect(doc.commands.undoDepth, depth + 1);
     expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
-    // The focus loss re-syncs the field after the commit, not before it.
     expect(scaleText(tester), '75');
+    expect(shown, everyElement('75'),
+        reason: 'the field never shows the old scale on Enter');
     await press(tester, LogicalKeyboardKey.escape);
     expect(polyline.isPending, isFalse, reason: "Escape reached the tool");
     expect(status(tester), 'Polyline');
@@ -659,5 +670,70 @@ void main() {
     expect(doc.commands.undoDepth, depth);
     expect(scaleText(tester), '20',
         reason: 'the field never shows a scale the page does not have');
+  });
+
+  testWidgets(
+      "A24 the page panel's scale field follows an undo and a redo of a "
+      'scale commit: 75 over 1:20, back to 20, on to 75 (fix/post-07 F2F3c '
+      'I1)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    double model() =>
+        doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect([model(), scaleText(tester)], [75, '75']);
+    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)),
+        reason: 'the field is not focused: only the page can move it');
+    doc.commands.undo();
+    await tester.pump();
+    expect([model(), scaleText(tester)], [20, '20']);
+    doc.commands.redo();
+    await tester.pump();
+    expect([model(), scaleText(tester)], [75, '75']);
+  });
+
+  testWidgets(
+      "A25 a window blur while typing in the page panel's scale field keeps "
+      'the typed text: the app goes inactive, the focus parks on the root '
+      'scope, and on resume the field has its focus and 75 back; Enter then '
+      'commits it (fix/post-07 F2F3c m-b)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '75');
+    await tester.pump();
+    final node = tester.widget<TextField>(scale()).focusNode!;
+    // The test platform is Android, where the FocusManager ignores the
+    // lifecycle; it follows it on web and desktop.
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    FocusManager.instance.listenToApplicationLifecycleChangesIfSupported();
+    debugDefaultTargetPlatformOverride = null;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(node.hasFocus, isFalse, reason: 'the blur took the focus');
+    expect(FocusManager.instance.primaryFocus,
+        same(FocusManager.instance.rootScope));
+    expect(scaleText(tester), '75');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(node.hasFocus, isTrue);
+    expect(scaleText(tester), '75');
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        20);
+    expect(doc.commands.undoDepth, depth);
+
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator,
+        75);
+    expect(doc.commands.undoDepth, depth + 1);
   });
 }

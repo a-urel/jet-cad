@@ -45,8 +45,13 @@ class _PagePanelState extends State<PagePanel> {
     super.dispose();
   }
 
+  /// Shows the page's scale. It reads the page from the document, not from
+  /// [PagePanel.page]: a command updates the document at once, while the
+  /// notifier hears of it only from `document.changes`, an asynchronous
+  /// stream, a microtask or more later.
   void _syncScale() {
-    final page = widget.page.value;
+    final document = widget.document;
+    final page = document.components.get<PageComponent>(document.rootHandle);
     if (page == null) return;
     final text = _number(page.scaleDenominator);
     if (_scale.text != text) _scale.text = text;
@@ -55,12 +60,29 @@ class _PagePanelState extends State<PagePanel> {
   /// The scale is committed on submit (spec 04), so a field left any other
   /// way -- a tap outside, say -- would go on showing a scale the page does
   /// not have: it re-syncs to the model when it loses the focus
-  /// (fix/post-07 F2F3b m2). On Enter this comes after the commit:
-  /// `onEditingComplete` hands the focus back and `onSubmitted` commits at
-  /// once, while the focus change lands in a later microtask, so the field
-  /// shows the committed value.
+  /// (fix/post-07 F2F3b m2).
+  ///
+  /// On Enter, `onEditingComplete` hands the focus back, which the
+  /// `FocusManager` applies in a microtask, and `onSubmitted` then commits
+  /// at once. So the focus loss comes after the commit, but before the page
+  /// notifier hears of it (`_syncScale` reads the document for this): the
+  /// field goes on showing the committed value (fix/post-07 F2F3c I1).
+  ///
+  /// The re-sync is for the focus moving inside the app, not for the window
+  /// losing it. On web and desktop a window blur makes the app `inactive`,
+  /// and the `FocusManager` then parks the primary focus on the root scope
+  /// until the app is `resumed`, when it gives the field its focus back.
+  /// The binding records the new state before it tells its observers, so
+  /// the state is already `inactive` here; the typed text is kept (F2F3c
+  /// m-b). A null state means no lifecycle change has been reported yet.
+  /// If another node takes the focus before the app is resumed, the
+  /// `FocusManager` does not give it back, and the field keeps the typed
+  /// text without the focus until the page changes.
   void _onScaleFocus() {
-    if (!_scaleFocus.hasFocus) _syncScale();
+    if (_scaleFocus.hasFocus) return;
+    final state = WidgetsBinding.instance.lifecycleState;
+    if (state != null && state != AppLifecycleState.resumed) return;
+    _syncScale();
   }
 
   static String _number(double v) =>
