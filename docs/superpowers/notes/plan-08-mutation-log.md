@@ -1,8 +1,11 @@
 # Plan 08 mutation log -- M-08a..z3, M-08snap, M-08sn, M-08pin and the tasks' extras
 
-**Tally: 213 fired, 204 killed, 1 survived, 8 equivalent (fired, and they
-survive as argued); 8 N/A (not re-fired).** Two controls were fired as
-well and survive, as the spec says they must; they are not counted.
+**Tally, after Task 14 fix round 1: 213 mutants fired, 206 killed, 0
+survived, 7 equivalent (fired, and they survive as argued); 8 N/A (not
+re-fired).** Two controls were fired as well and survive, as the spec
+says they must; they are not counted. The first run (commit `b1b4c98`)
+stood at 204 killed, 1 survived, 8 equivalent; the fix round (below)
+closed both findings, and three re-fires show it.
 
 - **The spec's 37 named mutants:** 50 fires, one per site or form
   (Ruling 08-21), M-08a's structural fire on a scratch copy included.
@@ -15,19 +18,22 @@ well and survive, as the spec says they must; they are not counted.
     three (the geometry, the tool, the grip); M-08u at two (window, gap);
     M-08q2 in two forms; M-08pin once, against `OS2` and 07's two `WS7`
     tests, which share `_commit`.
-  - **49 killed; 1 equivalent:** `OpeningGrips.movable` (M-08i's fourth
-    site) is unreachable in the shipped wiring (finding F2).
+  - **All 50 killed.** In the first run M-08i's fourth site,
+    `OpeningGrips.movable`, was unreachable and survived (F2); after the
+    fix round the composite delegates to it, and `SG2` kills it there.
   - Every killer the spec names went red, at every site.
 - **The tasks' extras:** 154 fired (Tasks 1-13, implementers' and
   reviewers', from the ledger; 07's three band-joining mutants whose
-  sites moved to `wall_bands.dart` in Task 9), **153 killed, 1
-  survived:** the slide grip's copy of the aperture divisor
-  (`t11-apertureDir-grip`, finding F1).
+  sites moved to `wall_bands.dart` in Task 9), **all 154 killed.** In
+  the first run the slide grip's copy of the aperture divisor
+  (`t11-apertureDir-grip`) survived (F1); the fix round's new
+  `SG1 (t11-apertureDir, the grip's site)` kills it.
 - **Equivalents:** 9 fired against their files; **7 survive** as argued
-  in their tasks. **Two do not:** `rv7-invOrder` (the engine's cascade
-  tests kill it; it is equivalent only at the app level, where the Task 7
-  review fired it) and `rv8-addForm` (Task 13's `EP8` and `EP9` now pin
-  the rewrite's exact form). Both are counted killed.
+  in their tasks. **Two do not, and are reclassified killed:**
+  `rv7-invOrder` (the engine's `CS1`, `CS10`, `CS11`, `CS12` kill it;
+  it is equivalent only at the app level, where the Task 7 review fired
+  it) and `rv8-addForm` (Task 13's `EP8` and `EP9` pin the rewrite's
+  exact form). Their red lines are in their entries.
 - **N/A, not re-fired: 8.** Six reviewer mutants whose edits were never
   written down (Task 4 review `RV-2`, `RV-3`, `RV-6`, `RV-8`; Task 5
   review `RV5-clampedCut`; Task 9 review `rv9-toolNaive`), and two
@@ -38,24 +44,28 @@ well and survive, as the spec says they must; they are not counted.
   never written down, and its first reconstruction survives `CS10`, the
   test that killed it then. `CS12` (Task 3) kills it; see its entry.
 
-**Findings** (reported, not fixed; Task 14 fixes no code):
+**Findings of the first run, and their dispositions** (controller
+rulings; Task 14 fix round 1):
 
-- **F1 -- a multi-site mutant survives at its second site.** The Task 10
+- **F1 -- a multi-site mutant survived at its second site.** The Task 10
   review's m2 made the tool divide the edge-snap aperture by
   `|toWorld · d|` and pinned it with `OT3 (t11-apertureDir)`. The slide
   grip computes the same divisor in `_Slide.place`
   (`opening_grips.dart`), and reverting it there to `scaleMagnitude`
-  survives the whole app suite (232 tests). Only a non-uniformly scaled
-  host tells the two apart, and only a file can make one. The fix is a
-  fixture: `SG1`'s provider on the `scale(2, 0.5)` host of
-  `OT3 (t11-apertureDir)`.
+  survived the whole app suite (232 tests). Only a non-uniformly scaled
+  host tells the two apart, and only a file can make one. **Fixed by a
+  fixture:** `SG1 (t11-apertureDir, the grip's site)` drags a door by the
+  provider on a `scale(2, 0.5)` host along a rotated centreline, and the
+  edge snap engages at 19.9 mm (world) from the window's edge and not at
+  20.1 mm. The mutant at the grip's site is red (fix round 1 entry).
 - **F2 -- a duplicated, unreachable rule.** `OpeningGrips.movable`
-  repeats `ObjectGrips.movable`'s rule, but the composite never
-  delegates to it and nothing else constructs an `OpeningGrips`.
-  Replacing it with `true` survives the whole app suite. Equivalent
-  today; a later change that routes `movable` through the provider would
-  inherit an untested copy. The fix is to delegate, or to delete one
-  copy.
+  repeated `ObjectGrips.movable`'s rule, but the composite never
+  delegated to it and nothing else constructs an `OpeningGrips`;
+  replacing it with `true` survived the whole app suite. **Fixed:**
+  `ObjectGrips.movable` now asks the dispatched provider
+  (`_of(d, group)?.movable(d, group) ?? true`), so the rule lives once,
+  in `OpeningGrips.movable`. M-08i re-fired there and at the composite's
+  new line: `SG2` red at both.
 - **Two "equivalent" mutants are killed** on this tree (`rv7-invOrder`,
   `rv8-addForm`); see above. Not defects: the ledger's equivalence was
   judged on a narrower fixture set.
@@ -65,12 +75,15 @@ well and survive, as the spec says they must; they are not counted.
 worktree held one untracked throwaway file,
 `apps/floor_planner/test/t14_control_test.dart` (the controls), and
 nothing else; it was deleted afterwards. `git status --short` is empty
-now, and was empty before and after M-08a's second run.
+now, and was empty before and after M-08a's second run. Fix round 1's
+three re-fires ran on `b1b4c98` with the round's two edits
+(`object_grips.dart`, `opening_grips_test.dart`) staged, so each
+restore's `git diff --quiet` compares against them.
 
 **Procedure, per mutant.** The driver is `t14-fire.py` in the session
 scratchpad (`/tmp/claude-0/-home-user-jet-cad/b8151ae2-5006-5f50-b81d-c013381534fe/scratchpad/plan08/t14/`);
-the mutants are defined in `t14-mutants.py` and `t14-mutants2.py`
-beside it. For each mutant it does the following, in order:
+the mutants are defined in `t14-mutants.py` to `t14-mutants4.py`
+beside it (`t14-mutants4.py` is fix round 1's). For each mutant it does the following, in order:
 
 1. `cp` every file the mutant touches to `t14-<id>-<basename>`, and
    refuses to run if such a backup already exists.
@@ -86,17 +99,20 @@ beside it. For each mutant it does the following, in order:
    `git diff --quiet -- <file>`.
 
 Every restore below printed `diff` exit 0 and `git diff --quiet` exit 0
-(219 restores, none other). The red lines are copied from the run's
+(222 restores, none other). The red lines are copied from the run's
 output by the driver: the failing test's `[E]` line, the matcher's
 `Expected` / `Actual` / `Which` lines, the failing assertion's location,
-and the run's last summary line, at most fourteen lines per command. A
-line longer than 240 characters is cut, and says so; the full text is in
-the log.
+and the run's last summary line, at most sixteen lines per command,
+re-read from each run's saved log (`t14-tomd.py`). A line longer than
+240 characters is cut, and says so; the full text is in the log.
 
 **Baselines.** Each of the 115 distinct commands was first run on the
 clean tree (with the control file in place), from `t14-baseline.txt`.
 All 115 exited 0; every narrowed command matched exactly one test
 (`+1: All tests passed!`), and every whole-file command passed whole.
+Fix round 1's two commands were baselined the same way on the fixed
+tree: `--plain-name 'SG1 (t11-apertureDir'` `00:00 +1: All tests
+passed!` and `--plain-name 'SG2 (M-08i)'` `00:01 +1: All tests passed!`.
 So each red below is the mutant's doing. The two whole-suite commands
 added in the second batch (`dart test test` in the engine, `flutter test
 test` in the app) were not baselined here; the app suite is the gate
@@ -669,8 +685,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_tool_test.dart --plain-name 'OT1 (M-08b, X9-raw')` (exit 1; log `t14-M-08b-tool-run1.log`)
 
   ```
+  Expected: a numeric value within <0.000001> of <1297.190536458946>
     Actual: <3702.809463542237>
      Which:  differs by <2405.618927083291>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_tool_test.dart:271:5)
   00:02 +0 -1: OT1 (M-08b, X9-raw, X9-unclamped) D, N and G each place one opening with one click and one undo step, centred at the resolved click projected onto the host, at the tool's width; a click near a mitre stores the clamped centre an [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -701,8 +719,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG1 (shell)')` (exit 1; log `t14-M-08b-grip-run2.log`)
 
   ```
+  Expected: a numeric value within <0.000001> of <2017.6326980706485>
     Actual: <4882.36730192916>
      Which:  differs by <2864.7346038585115>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:308:5)
   00:02 +0 -1: SG1 (shell) the slide grip is shown at the drawn centre; a drag edge-snaps while object snap is on and is one undo step; with F3 off it stores the grid point projected; under runtime permissions the grip is not hit [E]
   00:02 +0 -1: Some tests failed.
   ```
@@ -727,7 +747,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS1 the section shows')` (exit 1; log `t14-M-08b-panel-run1.log`)
 
   ```
+  Expected: <2>
     Actual: <3>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:224:5)
   00:02 +0 -1: OS1 the section shows for one opening and hides for none, two, a wall and a box; width and position commit one step each; invalid values revert; the flips are a door's, one step each, and take the focus as the justification tog [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -1120,8 +1142,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_symbol_test.dart --plain-name 'OR8 (M-08j')` (exit 1; log `t14-M-08j-run1.log`)
 
   ```
+  Expected: [EntityKind:EntityKind.line]
     Actual: []
      Which: at location [0] is [] which shorter than expected
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_symbol_test.dart:387:7)
   00:00 +0 -1: OR8 (M-08j, M-08j2) gaps on a 250 centre wall at 23° at the far origin: A (180 < t, m = w/4 = 45) and B (1,100 > t, m = t/4 = 62.5) each draw one ByLayer LINE on the centreline from x₁ + m to x₂ − m; a click at A's line end sel [cut; the full line is in the log]
   00:00 +0 -1: Some tests failed.
   ```
@@ -1142,8 +1166,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_symbol_test.dart --plain-name 'OR8 (M-08j')` (exit 1; log `t14-M-08j2-run1.log`)
 
   ```
+  Expected: a numeric value within <0.000001> of <3555.0>
     Actual: <3510.0000000003965>
      Which:  differs by <44.99999999960346>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_symbol_test.dart:394:7)
   00:00 +0 -1: OR8 (M-08j, M-08j2) gaps on a 250 centre wall at 23° at the far origin: A (180 < t, m = w/4 = 45) and B (1,100 > t, m = t/4 = 62.5) each draw one ByLayer LINE on the centreline from x₁ + m to x₂ − m; a click at A's line end sel [cut; the full line is in the log]
   00:00 +0 -1: Some tests failed.
   ```
@@ -1401,7 +1427,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG2 (M-08i)')` (exit 1; log `t14-M-08i-capture-run1.log`)
 
   ```
+  Expected: <0>
     Actual: <1>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:373:5)
   00:02 +0 -1: SG2 (M-08i) a body drag on a selected door starts nothing and adds nothing to the history, and no rotation grip is drawn for it; a wall selected with its door moves, and the door follows through regeneration with its stored pos [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -1431,7 +1459,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG2 (M-08i)')` (exit 1; log `t14-M-08i-rotatable-run1.log`)
 
   ```
+  Expected: false
     Actual: <true>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:370:5)
   00:01 +0 -1: SG2 (M-08i) a body drag on a selected door starts nothing and adds nothing to the history, and no rotation grip is drawn for it; a wall selected with its door moves, and the door follows through regeneration with its stored pos [cut; the full line is in the log]
   00:01 +0 -1: Some tests failed.
   ```
@@ -1462,7 +1492,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG2 (M-08i)')` (exit 1; log `t14-M-08i-composite-run1.log`)
 
   ```
+  Expected: false
     Actual: <true>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:370:5)
   00:01 +0 -1: SG2 (M-08i) a body drag on a selected door starts nothing and adds nothing to the history, and no rotation grip is drawn for it; a wall selected with its door moves, and the door follows through regeneration with its stored pos [cut; the full line is in the log]
   00:01 +0 -1: Some tests failed.
   ```
@@ -1487,7 +1519,7 @@ what everything reads, is the world centre.
   00:02 +7: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** SURVIVED (0 of 1 commands red). SURVIVED `opening_grips_test.dart` whole; see the next entry and "Survivors and findings".
+- **result:** SURVIVED (0 of 1 commands red). SURVIVED `opening_grips_test.dart` whole, in the first run; see the next entry. **Superseded by fix round 1:** the composite now delegates to this rule, and the re-fire is killed (`fr1-M-08i-openinggrips`).
 
 ### M-08i-openinggrips-full — site 4 against the whole app suite
 
@@ -1507,7 +1539,7 @@ what everything reads, is the world centre.
   00:45 +232: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** SURVIVED (0 of 1 commands red). SURVIVED the whole app suite. **Equivalent in the shipped wiring:** `ObjectGrips.movable` answers for openings itself and never delegates to `OpeningGrips.movable`, and nothing else constructs an `OpeningGrips` (`grep -rn "OpeningGrips(" apps/floor_planner/lib apps/floor_planner/test`: only `object_grips.dart:23`). The rule is duplicated at an unreachable site; recorded as finding F2.
+- **result:** SURVIVED (0 of 1 commands red). SURVIVED the whole app suite, in the first run: `ObjectGrips.movable` answered for openings itself and never delegated to `OpeningGrips.movable`, and nothing else constructs an `OpeningGrips` (only `object_grips.dart:23`). Finding F2; fixed in fix round 1.
 
 ### M-08z — the door's swing side from the opposite side of the click
 
@@ -1667,8 +1699,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG1 (shell)')` (exit 1; log `t14-M-08sn-grip-run2.log`)
 
   ```
+  Expected: a numeric value within <0.000001> of <2017.6326980706485>
     Actual: <1994.0724543174035>
      Which:  differs by <23.560243753245004>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:308:5)
   00:01 +0 -1: SG1 (shell) the slide grip is shown at the drawn centre; a drag edge-snaps while object snap is on and is one undo step; with F3 off it stores the grid point projected; under runtime permissions the grip is not hit [E]
   00:01 +0 -1: Some tests failed.
   ```
@@ -1689,22 +1723,28 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS2 (M-08pin)')` (exit 1; log `t14-M-08pin-run1.log`)
 
   ```
+  Expected: OpeningParams:<OpeningParams(door on 12 at 1730.0, 870.0, end, right)>
     Actual: OpeningParams:<OpeningParams(door on 12 at 1730.0, 900.0, end, right)>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:371:7)
   00:01 +0 -1: OS2 (M-08pin) the commit target is pinned at focus gain: select A, type in Width, select B without taking the focus, blur: A changes, B does not; the same for Position; a pinned opening that dies drops the text [E]
   00:02 +0 -1: Some tests failed.
   ```
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/selection_panel_test.dart --plain-name 'WS7 (Wall)')` (exit 1; log `t14-M-08pin-run2.log`)
 
   ```
+  Expected: WallParams:<WallParams((589.5107255699113, 444.89701554295607) -> (-2120.8749622078612,
     Actual: WallParams:<WallParams((589.5107255699113, 444.89701554295607) -> (-2120.8749622078612,
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/selection_panel_test.dart:557:5)
   00:02 +0 -1: WS7 (Wall) the commit target is pinned at focus gain: a selection change while a field has focus does not redirect its commit (M-07p); a pinned wall that dies drops the text [E]
   00:02 +0 -1: Some tests failed.
   ```
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/selection_panel_test.dart --plain-name 'WS7 (Box)')` (exit 1; log `t14-M-08pin-run3.log`)
 
   ```
+  Expected: [150, 70.0]
     Actual: [120.0, 70.0]
      Which: at location [0] is <120.0> instead of <150>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/selection_panel_test.dart:646:5)
   00:02 +0 -1: WS7 (Box) the commit target is pinned at focus gain: a selection change while a field has focus does not redirect its commit (M-07p) [E]
   00:02 +0 -1: Some tests failed.
   ```
@@ -2031,7 +2071,10 @@ what everything reads, is the world centre.
     test/parametric/references_test.dart 259:5  main.<fn>
   00:00 +6 -4: test/parametric/references_test.dart: RF7 re-pointing a Pin from Post A to Post C regenerates both in the same edit: the tick leaves A and appears on C [E]
     Expected: true
-  ... (20 more kept lines in the log)
+      Actual: <false>
+    test/parametric/references_test.dart 281:5  main.<fn>
+  ... (18 more kept lines in the log)
+  00:00 +19 -8: Some tests failed.
   ```
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
@@ -2446,7 +2489,6 @@ what everything reads, is the world centre.
 - **command:** `(cd packages/jet_cad_2d && CI=true dart test test)` (exit 1; log `t14-non-fill-first-ascending-run1.log`)
 
   ```
-  00:08 +662: test/parametric/diagnose_test.dart: DG3 a diagnose that calls execute throws StateError and changes nothing; the guard is released afterwards
   00:08 +680 -1: test/parametric/cascade_test.dart: CS12 (Task 2 re-review m2) a loaded region whose fill sits in a group nested under P2 and whose boundary is P2's own: every fill of the doomed subtree goes before any boundary, so deleting A [cut; the full line is in the log]
     Bad state: cannot remove boundary C1F: a region's two halves must share one owner, so undo could not restore the pair; remove fill C1E first
     test/parametric/cascade_test.dart 705:18                         main.<fn>
@@ -2507,7 +2549,10 @@ what everything reads, is the world centre.
     test/parametric/cascade_test.dart 345:18                         main.<fn>
   00:00 +9 -5: test/parametric/cascade_test.dart: CS5 a neighbour whose generate throws after the cascade: the delete is refused, and the bytes, the Pins' children, the undo depth and doc.changes are unchanged [E]
     Expected: throws <Instance of 'StateError'> with `message`: 'tripwire'
-  ... (33 more kept lines in the log)
+      Actual: <Closure: () => void>
+       Which: threw StateError:<Bad state: no entity with handle C1E>
+  ... (31 more kept lines in the log)
+  00:00 +15 -12: Some tests failed.
   ```
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (2 of 2 commands red).
@@ -3721,8 +3766,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_paint_test.dart --plain-name 'RD1 (X6-cover)')` (exit 1; log `t14-X6-cover-run1.log`)
 
   ```
+  Expected: a value greater than <0.6>
     Actual: <0.21541647058823532>
      Which: is not a value greater than <0.6>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_paint_test.dart:165:7)
   00:01 +0 -1: RD1 (X6-cover) on Blueprint, door D1 hinged at its end jamb, then a window added on its start side: the piece beside D1's hinge is rewritten into fresh handles above D1's leaf, and D1's leaf still shows light 3-10 px from the h [cut; the full line is in the log]
   00:01 +0 -1: Some tests failed.
   ```
@@ -4059,7 +4106,10 @@ what everything reads, is the world centre.
     test/opening_end_drag_test.dart 552:5               main.<fn>
   00:03 +4 -4: EP7 (t12-keptOld) 200 free walls, each with a door flush against its far end (stored with storedCentreOf, undiagnosed), each start grip dragged once: no door is left opening.clamped; a re-seated door is within wallJoin.linear o [cut; the full line is in the log]
     Expected: non-empty
-  ... (11 more kept lines in the log)
+      Actual: WhereIterable<Diagnostic>:[]
+    test/opening_end_drag_test.dart 620:7               main.<fn>
+  ... (9 more kept lines in the log)
+  00:03 +4 -6: Some tests failed.
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/wall_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
@@ -4126,8 +4176,11 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_tool_test.dart --plain-name 'OT1 (M-08b, X9-raw')` (exit 1; log `t14-X9-raw-run1.log`)
 
   ```
+  Expected: an object with length of <2>
     Actual: [26]
      Which: has length of <1>
+  #4      main.<anonymous closure>.place (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_tool_test.dart:243:7)
+  #5      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_tool_test.dart:291:16)
   00:02 +0 -1: OT1 (M-08b, X9-raw, X9-unclamped) D, N and G each place one opening with one click and one undo step, centred at the resolved click projected onto the host, at the tool's width; a click near a mitre stores the clamped centre an [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -4150,7 +4203,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_tool_test.dart --plain-name 'OT1 (M-08b, X9-raw')` (exit 1; log `t14-X9-unclamped-run1.log`)
 
   ```
+  Expected: empty
     Actual: [
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_tool_test.dart:324:5)
   00:02 +0 -1: OT1 (M-08b, X9-raw, X9-unclamped) D, N and G each place one opening with one click and one undo step, centred at the resolved click projected onto the host, at the tool's width; a click near a mitre stores the clamped centre an [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -4295,8 +4350,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/wall_tool_test.dart --plain-name 'WT3 a click on a centreline')` (exit 1; log `t14-07-noend-run1.log`)
 
   ```
+  Expected: [4503564.800075263, 1201839.075969993]
     Actual: [4503462.786708314, 1201786.4473995788]
      Which: at location [0] is <4503462.786708314> instead of <4503564.800075263>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/wall_tool_test.dart:340:5)
   00:02 +0 -1: WT3 a click on a centreline body makes a T whose stem butts the near face; a click on a centreline end makes a node [E]
   00:02 +0 -1: Some tests failed.
   ```
@@ -4319,8 +4376,11 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/wall_tool_test.dart --plain-name 'WT3 a click on a centreline')` (exit 1; log `t14-07-wrongside-run1.log`)
 
   ```
+  Expected: a value less than <0.000001>
     Actual: <183.78780851798075>
      Which: is not a value less than <0.000001>
+  #4      expectTee (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/wall_tool_test.dart:139:3)
+  #5      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/wall_tool_test.dart:357:5)
   00:02 +0 -1: WT3 a click on a centreline body makes a T whose stem butts the near face; a click on a centreline end makes a node [E]
   00:02 +0 -1: Some tests failed.
   ```
@@ -4437,7 +4497,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_tool_test.dart --plain-name 'OT1 (rv9-guardDNG)')` (exit 1; log `t14-rv9-guardDNG-run1.log`)
 
   ```
+  Expected: false
     Actual: <true>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_tool_test.dart:608:7)
   00:01 +0 -1: OT1 (rv9-guardDNG) D, N and G typed into the Text tool's field and into the page panel's scale field are text, not shortcuts (as planner_draw_test.dart's A8 and A9) [E]
   00:01 +0 -1: Some tests failed.
   ```
@@ -4796,7 +4858,8 @@ what everything reads, is the world centre.
     Expected: a numeric value within <0.000001> of <678.1742942920065>
       Actual: <688.9694131269387>
        Which:  differs by <10.795118834932168>
-  ... (2 more kept lines in the log)
+    test/opening_tool_test.dart 848:7                   main.<fn>
+  00:03 +14 -3: Some tests failed.
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_tool.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
@@ -4948,7 +5011,7 @@ what everything reads, is the world centre.
   00:02 +7: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** SURVIVED (0 of 1 commands red). SURVIVED `opening_grips_test.dart` whole.
+- **result:** SURVIVED (0 of 1 commands red). SURVIVED `opening_grips_test.dart` whole, in the first run. **Superseded by fix round 1** (`fr1-t11-apertureDir-grip`, killed).
 
 #### t11-apertureDir-grip-full — the grip's site against the whole app suite
 
@@ -4967,7 +5030,7 @@ what everything reads, is the world centre.
   00:44 +232: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** SURVIVED (0 of 1 commands red). SURVIVED the whole app suite: **finding F1.** The tool's copy of this divisor is killed by `OT3 (t11-apertureDir)`; the slide grip's copy (`opening_grips.dart`, `_Slide.place`) has no test on a non-uniformly scaled host.
+- **result:** SURVIVED (0 of 1 commands red). SURVIVED the whole app suite, in the first run: finding F1. The tool's copy of this divisor is killed by `OT3 (t11-apertureDir)`; the grip's copy had no test on a non-uniformly scaled host until fix round 1.
 
 #### X11-rotgrip — `hitsRotationGrip` ignores `rotatable`
 
@@ -5152,8 +5215,10 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG1 (shell)')` (exit 1; log `t14-X11-gate-run1.log`)
 
   ```
+  Expected: a numeric value within <0.000001> of <1544.0724543170409>
     Actual: <1567.6326980715676>
      Which:  differs by <23.56024375452671>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:323:5)
   00:02 +0 -1: SG1 (shell) the slide grip is shown at the drawn centre; a drag edge-snaps while object snap is on and is one undo step; with F3 off it stores the grid point projected; under runtime permissions the grip is not hit [E]
   00:02 +0 -1: Some tests failed.
   ```
@@ -5380,7 +5445,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG4 (rv11-fillMovable)')` (exit 1; log `t14-rv11-fillMovable-run1.log`)
 
   ```
+  Expected: false
     Actual: <true>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:549:5)
   00:01 +0 -1: SG4 (rv11-fillMovable) a root fill and a door selected together draw no rotation grip: a fill has no outline, so it is not the movable key the grip needs; a fill and a wall do (Task 11 review m2) [E]
   00:01 +0 -1: Some tests failed.
   ```
@@ -5401,17 +5468,21 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS1 the section shows')` (exit 1; log `t14-X12-gapmin-run1.log`)
 
   ```
+  Expected: '800'
     Actual: '0.000003'
      Which: is different.
             Expected: 800
               Actual: 0.000003
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:264:7)
   00:02 +0 -1: OS1 the section shows for one opening and hides for none, two, a wall and a box; width and position commit one step each; invalid values revert; the flips are a door's, one step each, and take the focus as the justification tog [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS3 tool mode')` (exit 1; log `t14-X12-gapmin-run2.log`)
 
   ```
+  Expected: <900.0>
     Actual: <0.000003>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:484:7)
   00:02 +0 -1: OS3 tool mode: with D active the Width field edits the Door tool's settings keystroke by keystroke, even with an opening selected; a canvas click without Enter places a door with the typed width; N and G have their own settings [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -5431,7 +5502,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS3 tool mode')` (exit 1; log `t14-X12-enter-run1.log`)
 
   ```
+  Expected: <7.0>
     Actual: <900.0>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:441:7)
   00:01 +0 -1: OS3 tool mode: with D active the Width field edits the Door tool's settings keystroke by keystroke, even with an opening selected; a canvas click without Enter places a door with the typed width; N and G have their own settings [cut; the full line is in the log]
   00:01 +0 -1: Some tests failed.
   ```
@@ -5451,7 +5524,11 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS4 (X12-catch)')` (exit 1; log `t14-X12-catch-commit-run1.log`)
 
   ```
+  #19     enterAndSubmit (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:45:30)
+  #20     main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:531:5)
+  Expected: null
     Actual: 'Multiple exceptions (2) were detected during the running of the current test, and at
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:532:5)
   00:01 +0 -1: OS4 (X12-catch) a loaded opening whose host is missing: a width edit is refused with DanglingReferenceError and the field reverts to the model's value, by Enter and by the focus loss; the flips are refused alike; no exception e [cut; the full line is in the log]
   00:01 +0 -1: Some tests failed.
   ```
@@ -5471,7 +5548,11 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS4 (X12-catch)')` (exit 1; log `t14-X12-catch-flip-run1.log`)
 
   ```
+  #37     main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:550:5)
+  #37     main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:552:5)
+  Expected: null
     Actual: 'Multiple exceptions (2) were detected during the running of the current test, and at
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:554:5)
   00:02 +0 -1: OS4 (X12-catch) a loaded opening whose host is missing: a width edit is refused with DanglingReferenceError and the field reverts to the model's value, by Enter and by the focus loss; the flips are refused alike; no exception e [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -5540,7 +5621,9 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_panel_test.dart --plain-name 'OS1 the section shows')` (exit 1; log `t14-rv12-posEnd-run1.log`)
 
   ```
+  Expected: <6000.000000000728>
     Actual: <1812.5>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_panel_test.dart:232:7)
   00:02 +0 -1: OS1 the section shows for one opening and hides for none, two, a wall and a box; width and position commit one step each; invalid values revert; the flips are a door's, one step each, and take the focus as the justification tog [cut; the full line is in the log]
   00:02 +0 -1: Some tests failed.
   ```
@@ -5606,21 +5689,24 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/planner_shell_test.dart)` (exit 1; log `t14-X13-dispose-run1.log`)
 
   ```
-  The following StateError was thrown building Builder:
   Bad state: the dispatcher already has an expander (spec 06 D2)
+  #799    main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:64:18)
+  Expected: exactly one matching candidate
     Actual: _TypeWidgetFinder:<Found 0 widgets with type "DraftCanvas": []>
      Which: means none were found but one was expected
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:67:5)
   00:00 +0 -1: the shell shows a canvas over a non-empty, off-origin plan [E]
-  The following StateError was thrown building Builder:
   Bad state: the dispatcher already has an expander (spec 06 D2)
-  The following StateError was thrown running a test:
+  #799    main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:83:18)
   Bad state: No element
+  #2      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:85:25)
   00:01 +0 -2: the camera is fitted to the real viewport on first layout [E]
-  The following StateError was thrown building Builder:
   Bad state: the dispatcher already has an expander (spec 06 D2)
-  The following StateError was thrown running a test:
+  #799    main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:98:18)
   Bad state: No element
-  ... (47 more kept lines in the log)
+  #2      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:100:25)
+  ... (53 more kept lines in the log)
+  00:02 +0 -12: Some tests failed.
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/startup_plan.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
@@ -5726,11 +5812,13 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/planner_shell_test.dart)` (exit 1; log `t14-rv13-wrongWall-run2.log`)
 
   ```
-  The following StateError was thrown running a test:
   Bad state: Pattern matching error
+  #0      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:259:5)
   00:04 +10 -1: cmd+Z undoes a Delete through the command log [E]
+  Expected: an object with length of <5>
     Actual: [18, 30, 135, 142]
      Which: has length of <4>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:334:5)
   00:04 +10 -2: ctrl+Z after deleting two walls brings both back in one step [E]
   00:05 +10 -2: Some tests failed.
   ```
@@ -5765,7 +5853,10 @@ what everything reads, is the world centre.
     test/startup_plan_test.dart 314:11                  main.<fn>
   00:01 +6 -4: SP5 the sample plan is nine walls, seven doors and eight windows, exactly as spec 08 D18's tables say; no gap, no box; drift() and diagnostics() are empty [E]
     Expected: [
-  ... (4 more kept lines in the log)
+      Actual: [
+       Which: at location [0] is WallParams:<WallParams((12125.0, 8125.0) -> (25875.0, 8125.0), 250.0, left)> instead of WallParams:<WallParams((12125.0, 8125.0) -> (25875.0, 8125.0), 250.0, centre)>
+  ... (2 more kept lines in the log)
+  00:01 +7 -4: Some tests failed.
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/startup_plan.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
@@ -5823,9 +5914,13 @@ what everything reads, is the world centre.
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/planner_shell_test.dart)` (exit 1; log `t14-rv13-noClear-run2.log`)
 
   ```
+  Expected: <1>
     Actual: <200>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:284:5)
   00:04 +10 -1: cmd+Z undoes a Delete through the command log [E]
+  Expected: <1>
     Actual: <200>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/planner_shell_test.dart:361:5)
   00:05 +10 -2: ctrl+Z after deleting two walls brings both back in one step [E]
   00:05 +10 -2: Some tests failed.
   ```
@@ -5860,10 +5955,88 @@ what everything reads, is the world centre.
        Which: has length of <0>
     test/startup_plan_test.dart 212:5                   main.<fn>
   00:00 +5 -4: SP4 every doorway is clear of furniture for 900 mm on both sides (Ruling F-8) [E]
-  ... (13 more kept lines in the log)
+    Expected: an object with length of <7>
+      Actual: []
+  ... (11 more kept lines in the log)
+  00:00 +5 -6: Some tests failed.
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/startup_plan.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
+
+## Task 14 fix round 1: the findings closed
+
+The controller ruled both findings fixed in this round: F1 by a fixture, F2 by one rule. The three re-fires below ran on `b1b4c98` with the round's edits staged. They supersede the first run's verdicts on the same mutants (`t11-apertureDir-grip`, `M-08i-openinggrips`), whose entries stay above as the record of the finding.
+
+### fr1-t11-apertureDir-grip — F1 re-fired: `t11-apertureDir` at the slide grip's site, against the fix round's new test
+
+- **file:** `apps/floor_planner/lib/parametric/opening_grips.dart`; backup `t14-fr1-t11-apertureDir-grip-opening_grips.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  163c163
+  <           apertureWorld / toWorld.transformDirection(f.d).length);
+  ---
+  >           apertureWorld / toWorld.scaleMagnitude);
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG1 (t11-apertureDir')` (exit 1; log `t14-fr1-t11-apertureDir-grip-run1.log`)
+
+  ```
+  00:00 +0 -1: SG1 (t11-apertureDir, the grip's site) on a host scaled non-uniformly the slide grip's aperture is measured along its centreline: an edge 19.9 mm (in world) from a neighbour's edge snaps onto it, one 20.1 mm away does not (Task [cut; the full line is in the log]
+    Expected: a numeric value within <0.000001> of <678.1742942920065>
+      Actual: <688.9694131269387>
+       Which:  differs by <10.795118834932168>
+    test/opening_grips_test.dart 320:7                  main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** KILLED (1 of 1 commands red). KILLED by `SG1 (t11-apertureDir, the grip's site)`, line 320, at the 20.1 mm case: the grip's divisor `scaleMagnitude` (1 for this group) gives a 20 (local) aperture, about 37 mm in world here (`k ≈ 1.86`), so the drag snaps onto the window's edge (688.97) instead of staying where it was dragged (678.17, 10.8 local mm short).
+
+### fr1-M-08i-openinggrips — F2 re-fired: M-08i at `OpeningGrips.movable`, now the one rule the composite delegates to
+
+- **file:** `apps/floor_planner/lib/parametric/opening_grips.dart`; backup `t14-fr1-M-08i-openinggrips-opening_grips.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  99,100c99
+  <   bool movable(DraftDocument d, Handle group) =>
+  <       d.components.get<OpeningParams>(group) == null;
+  ---
+  >   bool movable(DraftDocument d, Handle group) => true;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG2 (M-08i)')` (exit 1; log `t14-fr1-M-08i-openinggrips-run1.log`)
+
+  ```
+  Expected: false
+    Actual: <true>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:415:5)
+  00:01 +0 -1: SG2 (M-08i) a body drag on a selected door starts nothing and adds nothing to the history, and no rotation grip is drawn for it; a wall selected with its door moves, and the door follows through regeneration with its stored pos [cut; the full line is in the log]
+  00:01 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** KILLED (1 of 1 commands red). KILLED by `SG2`, line 415 ("no rotation grip"): the door alone is selected, and with the rule gone it counts as movable.
+
+### fr1-M-08i-composite — M-08i re-fired at the composite's new line (the delegation replaced by `true`)
+
+- **file:** `apps/floor_planner/lib/parametric/object_grips.dart`; backup `t14-fr1-M-08i-composite-object_grips.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  52c52
+  <       _of(d, group)?.movable(d, group) ?? true;
+  ---
+  >       true;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG2 (M-08i)')` (exit 1; log `t14-fr1-M-08i-composite-run1.log`)
+
+  ```
+  Expected: false
+    Actual: <true>
+  #4      main.<anonymous closure> (file:///home/user/jet-cad/.claude/worktrees/plan-openings/apps/floor_planner/test/opening_grips_test.dart:415:5)
+  00:01 +0 -1: SG2 (M-08i) a body drag on a selected door starts nothing and adds nothing to the history, and no rotation grip is drawn for it; a wall selected with its door moves, and the door follows through regeneration with its stored pos [cut; the full line is in the log]
+  00:01 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/object_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** KILLED (1 of 1 commands red). KILLED by `SG2`, line 415.
 
 ## Equivalent mutants, fired
 
@@ -5916,7 +6089,10 @@ The ledger and the carry name these as equivalent. Each was fired against the wh
                 Actual: ... hildren":[],"exportA ...
     test/parametric/cascade_test.dart 664:5  main.<fn>
   00:00 +19 -4: test/parametric/cascade_test.dart: CS12 (Task 2 re-review m2) a loaded region whose fill sits in a group nested under P2 and whose boundary is P2's own: every fill of the doomed subtree goes before any boundary, so deleting A  [cut; the full line is in the log]
-  ... (7 more kept lines in the log)
+    Expected: '{"schemaVersion":6,"header":{"units":"unitless","scale":1.0,"globalLinetypeScale":1.0,"importedExtents":null,"customVariables":{}},"tables":{"layers":[{"handle":1,"name":"0","color":7,"linetype":4,"lineweight":-3,"transparency" [cut; the full line is in the log]
+      Actual: '{"schemaVersion":6,"header":{"units":"unitless","scale":1.0,"globalLinetypeScale":1.0,"importedExtents":null,"customVariables":{}},"tables":{"layers":[{"handle":1,"name":"0","color":7,"linetype":4,"lineweight":-3,"transparency" [cut; the full line is in the log]
+  ... (5 more kept lines in the log)
+  00:00 +23 -4: Some tests failed.
   ```
 - **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_object_test.dart)` (exit 0; log `t14-EQ-rv7-invOrder-run2.log`)
 
@@ -6094,16 +6270,18 @@ The ledger and the carry name these as equivalent. Each was fired against the wh
 
 ## Survivors and findings
 
-- **`t11-apertureDir-grip` (F1).** Survives `opening_grips_test.dart`
-  and the whole app suite. The tool's copy of the same edit
-  (`t11-apertureDir-tool`) is killed by `OT3 (t11-apertureDir)`. This is
-  Ruling 08-21's case: a rule at two sites, pinned at one. Not fixed
-  here (Task 14 fixes no code); the fixture that would kill it is `SG1`'s
-  provider dragging a door on a `scale(2, 0.5)` host, within the
-  aperture measured along the host.
-- **`M-08i-openinggrips` (F2).** Survives the whole app suite, and is
-  equivalent as the shell is wired: `ObjectGrips.movable` decides for
-  openings itself. It is counted equivalent, not survived.
+None survive after fix round 1.
+
+- **`t11-apertureDir-grip` (F1).** Survived `opening_grips_test.dart`
+  and the whole app suite in the first run; the tool's copy
+  (`t11-apertureDir-tool`) was killed by `OT3 (t11-apertureDir)`. This
+  was Ruling 08-21's case: a rule at two sites, pinned at one. Fix round
+  1 added `SG1 (t11-apertureDir, the grip's site)`; the re-fire is red.
+- **`M-08i-openinggrips` (F2).** Survived the whole app suite in the
+  first run, equivalent as the shell was wired: `ObjectGrips.movable`
+  decided for openings itself. Fix round 1 made the composite delegate,
+  so `OpeningGrips.movable` is the one rule; the re-fire is red, and so
+  is M-08i at the composite's new line.
 - **`non-fill-first`.** Its first reconstruction survives `CS10`, its
   Task 2 killer, because ascending order is already fill-first for a
   planner-made region; `CS12` kills it, and the other reading
@@ -6135,8 +6313,8 @@ The ledger and the carry name these as equivalent. Each was fired against the wh
 
 ## Gate at commit
 
-The four gate lines, run on `3d1713f` with this log written (the log is
-the commit's only change, and touches no code), from `t14-gates.sh`:
+**First run** (`b1b4c98`, this log's first version; the commit touched no
+code), from `t14-gates.sh`:
 
 ```
 engine   (packages/jet_cad_2d)          CI=true dart test          00:12 +1014 -2: Some tests failed.   (exit 1)
@@ -6158,8 +6336,18 @@ app      (apps/floor_planner)           CI=true flutter test       00:43 +230: A
          flutter build web --release     ✓ Built build/web                      (exit 0)
 ```
 
-Only the standing Linux failures of Ruling 08-20. `git status --short`
-before the commit: this log alone.
+**Fix round 1** touches the app only (`object_grips.dart`,
+`opening_grips_test.dart`, this log), so the app line was run:
+
+```
+app      (apps/floor_planner)           CI=true flutter test       00:47 +231: All tests passed!        (exit 0)
+         flutter analyze                 No issues found! (ran in 1.2s)         (exit 0)
+         dart format --set-exit-if-changed   Formatted 52 files (0 changed)    (exit 0)
+         flutter build web --release     ✓ Built build/web                      (exit 0)
+```
+
+`+231`: the new `SG1 (t11-apertureDir, the grip's site)`. Only the
+standing Linux failures of Ruling 08-20 anywhere.
 
 ## Appendix: M-08a's scratch diff
 

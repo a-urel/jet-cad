@@ -14,8 +14,10 @@ import 'wall_grips.dart';
 /// - `OpeningParams` → [openings] (the slide grip);
 /// - anything else → no grips, no drag and no preview.
 ///
-/// [movable] is false for an opening, which the select tool neither moves
-/// nor rotates, and true for every other group.
+/// [movable] is the dispatched provider's answer: [openings] says false
+/// for an opening, which the select tool neither moves nor rotates, and
+/// [walls] true for a wall; a group with neither component is movable.
+/// One rule, [OpeningGrips.movable]'s, not a copy of it here (Task 14 F2).
 final class ObjectGrips implements ObjectGripProvider {
   /// [edgeAperture] is the slide grip's edge-snap aperture in world, or null
   /// with object snap off (Ruling 08-15).
@@ -47,5 +49,5 @@ final class ObjectGrips implements ObjectGripProvider {
 
   @override
   bool movable(DraftDocument d, Handle group) =>
-      d.components.get<OpeningParams>(group) == null;
+      _of(d, group)?.movable(d, group) ?? true;
 }

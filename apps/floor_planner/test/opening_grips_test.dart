@@ -278,6 +278,51 @@ void main() {
     expect(paramsOf(doc, door).position, closeTo(1030, 1e-6));
   });
 
+  test(
+      'SG1 (t11-apertureDir, the grip\'s site) on a host scaled '
+      'non-uniformly the slide grip\'s aperture is measured along its '
+      'centreline: an edge 19.9 mm (in world) from a neighbour\'s edge '
+      'snaps onto it, one 20.1 mm away does not (Task 14 F1)', () {
+    final doc = wallDoc();
+    final h = doc.handleSeed.next();
+    doc.commands.execute(addWall(
+        doc, h, plan(0, 0), plan(4000, 0), 200, Justification.centre,
+        at: groupAt(h.value).multiply(Transform2.scale(2, 0.5))));
+    final p = doc.components.get<WallParams>(h)!;
+    final local = (Vector2(p.ex, p.ey) - Vector2(p.sx, p.sy)).length;
+    final f = oracleFrameOf(doc, h);
+    // World mm per local unit along the centreline: far from the group's
+    // geometric mean scale, 1, so √|det| would be the wrong divisor.
+    final k = f.len / local;
+    expect((k - 1).abs(), greaterThan(0.2), reason: 'k = $k');
+    // A 600 (local) window, unclamped, 60% along: its left edge is the
+    // only candidate near the door; the door, 600 (local) wide, starts 20%
+    // along, and its own cut is never a candidate.
+    final wc = 0.6 * local;
+    final door = doc.handleSeed.next();
+    doc.commands.execute(addOpening(
+        doc, door, OpeningParams(h, 0.2 * local, 600, OpeningKind.door),
+        at: doorGroup));
+    doc.commands.execute(addOpening(doc, doc.handleSeed.next(),
+        OpeningParams(h, wc, 600, OpeningKind.window)));
+    doc.commands.clearHistory();
+    expect(diagnosticsOf(doc), isEmpty);
+
+    // A 20 mm aperture in world. The door dragged, on the centreline (the
+    // group does not keep right angles, so a point off it would project
+    // elsewhere in local space), to where its right edge is `world` mm (in
+    // world) short of the window's left edge.
+    final objects = ObjectGrips(edgeAperture: () => 20);
+    final g = objects.gripsOf(doc, door).single;
+    for (final (world, snaps) in [(19.9, true), (20.1, false)]) {
+      final u = wc - 300 - 300 - world / k;
+      doc.commands.execute(objects.drag(doc, door, g, oracleAt(f, u * k, 0))!);
+      expect(paramsOf(doc, door).position, closeTo(snaps ? wc - 600 : u, 1e-6),
+          reason: '$world mm in world');
+      doc.commands.undo();
+    }
+  });
+
   testWidgets(
       'SG1 (shell) the slide grip is shown at the drawn centre; a drag '
       'edge-snaps while object snap is on and is one undo step; with F3 off '
