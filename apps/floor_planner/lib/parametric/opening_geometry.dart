@@ -95,10 +95,13 @@ typedef Obstacle = ({double a, double b, Handle wall});
 /// direction is not parallel to [host]'s within `wallJoin.angular`:
 /// - **a T:** an end of B that lies strictly inside [host]'s centreline
 ///   (07 D4.1's [strictlyInside], [host] as the through wall). The interval
-///   is the `u`-range of `cap(End(B, k), Tee(host))`'s points: 07's own T
+///   is the `u`-range of `cap(End(B, k), Tee(host))`'s points (07's own T
 ///   cap on [host]'s near face, or B's own square end inside [host]'s body
-///   when the mitre limit clamps it. Judged against [host] only, whichever
-///   wall 07 picks as B's through wall;
+///   when the mitre limit clamps it) **together with** the points where B's
+///   two faces cross [host]'s near face, so a clamped T covers B's whole
+///   footprint in [host]'s band (D7 as amended by Task 3's review S1).
+///   Judged against [host] only, whichever wall 07 picks as B's through
+///   wall;
 /// - **an X:** B's centreline crosses [host]'s more than `wallJoin.linear`
 ///   inside both (07 D4's X). The interval is the `u`-range of the four
 ///   points where B's two faces cross [host]'s two faces.
@@ -121,11 +124,20 @@ List<Obstacle> obstaclesOf(
     if (b.handle == host.handle || b.degenerate) continue;
     final cross = host.d.x * b.d.y - host.d.y * b.d.x;
     if (cross.abs() <= wallJoin.angular) continue;
+    final bn = Vector2(-b.d.y, b.d.x);
+    final (bl, br) = b.offsets;
     var tee = false;
     for (final k in const [0, 1]) {
       if (!strictlyInside(b.endpoint(k), host)) continue;
       tee = true;
-      out.add(span(cap(End(b, k), Tee(host)).points, b.handle));
+      final end = End(b, k);
+      // The near face: the one on the side B's body goes to, as 07's cap.
+      final near = host.s + hn * (end.a.dot(hn) > 0 ? hl : hr);
+      out.add(span([
+        ...cap(end, Tee(host)).points,
+        for (final bo in [bl, br])
+          if (intersect(near, host.d, b.s + bn * bo, b.d) case final q?) q,
+      ], b.handle));
     }
     if (tee) continue;
     // Where the centrelines cross, as parameters along each.
@@ -137,8 +149,6 @@ List<Obstacle> obstaclesOf(
         !(ub > wallJoin.linear && ub < bLen - wallJoin.linear)) {
       continue;
     }
-    final bn = Vector2(-b.d.y, b.d.x);
-    final (bl, br) = b.offsets;
     out.add(span([
       for (final ho in [hl, hr])
         for (final bo in [bl, br])

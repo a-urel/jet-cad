@@ -106,3 +106,18 @@ List<Vector2> oracleCrossings(OracleFrame host, OracleFrame b) => [
         for (final bo in [b.lo, b.ro])
           meetFaces(oracleFace(host, ho), oracleFace(b, bo)),
     ];
+
+/// The footprint of [stem]'s end [k] teeing into [host] (spec 08 D7 as
+/// amended by Task 3's review S1): the corners where [stem]'s faces meet
+/// [host]'s near face, together with 07's cap, which is those same corners
+/// unless one lies farther than `mitreLimit / 2 ×` the thicker wall
+/// (`lo − ro`) from the end point, when it is [stem]'s square end.
+List<Vector2> oracleTeeFootprint(OracleFrame host, OracleFrame stem, int k) {
+  final butt = oracleTeeButt(host, stem, k);
+  final p = oracleEnd(stem, k);
+  final limit = mitreLimit / 2 * math.max(host.lo - host.ro, stem.lo - stem.ro);
+  double dist(Vector2 q) =>
+      math.sqrt((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y));
+  final clamped = butt.any((q) => dist(q) > limit);
+  return [...butt, if (clamped) ...oracleSquareEnd(stem, k)];
+}

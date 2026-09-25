@@ -1,4 +1,6 @@
 // Spec 08 D6: OpeningParams, its JSON shape and exact equality.
+import 'dart:convert';
+
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,14 +34,16 @@ void main() {
         ['host', 'position', 'width', 'kind', 'hinge', 'swing']);
     expect([w['kind'], w['hinge'], w['swing']], ['window', 'start', 'left']);
 
-    // 0.1 and 1/3 are not dyadic: a lossy codec shows.
+    // 0.1 and 1/3 are not dyadic: a lossy codec shows. Through a JSON
+    // string, as a document is saved and loaded, not only at the map level.
     for (final kind in OpeningKind.values) {
       for (final hinge in HingeEnd.values) {
         for (final swing in SwingSide.values) {
           final o = OpeningParams(
               const Handle(0xFFFFFFFF), 4500000.1, 2700.0 / 3, kind,
               hinge: hinge, swing: swing);
-          final back = OpeningParams.fromJson(o.toJson());
+          final back = OpeningParams.fromJson(
+              jsonDecode(jsonEncode(o.toJson())) as Map<String, Object?>);
           expect(back, o);
           expect(back.host, o.host);
           expect(back.position, o.position);
