@@ -21,6 +21,12 @@ bool _isObject(
 @visibleForTesting
 int debugOverlapTests = 0;
 
+/// `ParametricType.references` calls made by the surveys (spec 08 D2,
+/// Ruling 08-3), for tests that pin their cost: exactly one per live object
+/// per survey. Never reset by the library.
+@visibleForTesting
+int debugReferenceCalls = 0;
+
 /// Everything the planner reads about the parametric objects at one moment.
 ///
 /// Neighbours are not surveyed (spec 07 D10): [neighboursOf] computes one
@@ -28,7 +34,8 @@ int debugOverlapTests = 0;
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
 /// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.reach, this.children, this.owned);
+  _Survey(this.objects, this.reach, this.children, this.owned, this.declared,
+      this.references, this.referrers);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -41,6 +48,21 @@ final class _Survey {
 
   /// Every child of a live object, to its owner: the set G of spec D4.
   final Map<Handle, Handle> owned;
+
+  /// Each object's `references` as declared, from this survey's one call
+  /// per object (Ruling 08-3), dead and self handles included; absent when
+  /// empty. Whoever needs the declared list reads it here and never calls
+  /// `references` again. Unmodifiable.
+  final Map<Handle, List<Handle>> declared;
+
+  /// Each object's live referents (spec 08 D2): the live objects among its
+  /// [declared] handles, itself excluded, deduplicated, ascending; absent
+  /// when empty. Unmodifiable.
+  final Map<Handle, List<Handle>> references;
+
+  /// Each live referent's live referrers, ascending (spec 08 D2); absent
+  /// when none. Unmodifiable: `ParametricView.referrers` hands them out.
+  final Map<Handle, List<Handle>> referrers;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -94,18 +116,70 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   for (final list in children.values) {
     list.sort(_byValue);
   }
-  return _Survey(objects, reach, children, owned);
+  // Spec 08 D2: one pass, one `references` call per object. The pass walks
+  // [order], so each referrer list is appended to in ascending order.
+  final declared = <Handle, List<Handle>>{};
+  final references = <Handle, List<Handle>>{};
+  final referrers = <Handle, List<Handle>>{};
+  for (final h in order) {
+    final declaredBy = objects[h]!.referencesOf(t, h);
+    if (declaredBy.isEmpty) continue;
+    final named = List<Handle>.unmodifiable(declaredBy);
+    declared[h] = named;
+    final live = {
+      for (final x in named)
+        if (x != h && objects.containsKey(x)) x,
+    }.toList()
+      ..sort(_byValue);
+    if (live.isEmpty) continue;
+    references[h] = List.unmodifiable(live);
+    for (final x in live) {
+      (referrers[x] ??= []).add(h);
+    }
+  }
+  return _Survey(objects, reach, children, owned, declared, references, {
+    for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
+  });
 }
 
-/// Seeds plus their neighbours before and after, as a sorted list of live
-/// objects (spec D4 step 6). One hop: generation reads parameters only.
-/// Neighbours are asked for the seeds only (spec 07 D10).
-List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) => {
-      ...seeds,
-      for (final s in seeds) ...before.neighboursOf(s),
-      for (final s in seeds) ...after.neighboursOf(s),
-    }.where(after.objects.containsKey).toList()
-      ..sort(_byValue);
+/// The objects an edit regenerates, as a sorted list of live objects (spec
+/// 06 D4 step 6, as amended by spec 08 D3):
+///
+/// ```
+/// core    = seeds ∪ neighbours before and after (seeds)
+///                 ∪ references before and after (seeds)
+/// closure = core ∪ referrers before and after (core)
+/// ```
+///
+/// Neighbours are asked for the seeds only (spec 07 D10); references and
+/// referrers are map lookups. The referent direction brings in what a
+/// seed's geometry depends on (a door's wall draws the door's gap); the
+/// referrer direction brings in what depends on a seed (a moved wall's
+/// doors, whose empty reach no spatial relation finds).
+///
+/// Referrers are taken of the whole **core**, not of the seeds only,
+/// because a referrer reads more than its referent's parameters: it reads
+/// the referent's joints, which read the referent's spatial neighbours. A
+/// neighbour B of a door's wall A changes A's straight span, so where the
+/// door is drawn, though the door is neither B's referrer nor B's referent:
+/// it is two hops from B (seed B → neighbour A → referrer). One extra hop
+/// closes it for a type that reads no further than its referents'
+/// neighbours (spec 08 D3).
+List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
+  final core = {
+    ...seeds,
+    for (final s in seeds) ...before.neighboursOf(s),
+    for (final s in seeds) ...after.neighboursOf(s),
+    for (final s in seeds) ...?before.references[s],
+    for (final s in seeds) ...?after.references[s],
+  };
+  return {
+    ...core,
+    for (final x in core) ...?before.referrers[x],
+    for (final x in core) ...?after.referrers[x],
+  }.where(after.objects.containsKey).toList()
+    ..sort(_byValue);
+}
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||

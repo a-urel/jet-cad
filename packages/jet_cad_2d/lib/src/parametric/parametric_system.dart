@@ -39,6 +39,16 @@ abstract class ParametricType<T extends Component> {
   /// must not mutate: an `execute` from here throws `StateError`, like one
   /// from [generate]. Default: nothing to report.
   List<Diagnostic> diagnose(ParametricView view, Handle self) => const [];
+
+  /// The objects [params] reference (an opening: its host). An edit of a
+  /// referent regenerates its referrers, and an edit of a referrer
+  /// regenerates its referents (spec 08 D3). Default: none.
+  ///
+  /// Called once per live object per survey, twice per edit (spec 08 D2),
+  /// including for an edit that touches no object: keep it a field read.
+  /// A handle named here that is not a live parametric object is left out
+  /// of the survey's maps; it relates nothing.
+  Iterable<Handle> references(T params) => const [];
 }
 
 /// One generated entity (spec D3), or one generated region (spec 07 D8).
@@ -111,6 +121,13 @@ final class ParametricView {
   /// Ascending handles of the objects whose reach overlaps [h]'s, computed
   /// on the first call for [h] and memoised (spec 07 D10). Unmodifiable.
   List<Handle> neighbours(Handle h) => _survey.neighboursOf(h);
+
+  /// Ascending handles of the live objects whose
+  /// [ParametricType.references] name [h] (spec 08 D2): a wall lists its
+  /// openings through it. Read from the survey this view was built over:
+  /// the after-survey in an edit, a full survey in `drift()` and
+  /// `diagnostics()`. Unmodifiable, and empty when [h] has none.
+  List<Handle> referrers(Handle h) => _survey.referrers[h] ?? const [];
 }
 
 /// The parametric types an application knows, independent of any document
@@ -347,4 +364,11 @@ final class _Registration<T extends Component> {
       type.reach(t.components.get<T>(h) as T, _worldOf(t, h));
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);
+
+  /// [h]'s declared referents. Every call counts in [debugReferenceCalls]
+  /// (Ruling 08-3): the survey is its only caller, once per object.
+  Iterable<Handle> referencesOf(CommandTarget t, Handle h) {
+    debugReferenceCalls++;
+    return type.references(t.components.get<T>(h) as T);
+  }
 }
