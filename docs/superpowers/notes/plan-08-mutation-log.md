@@ -1,8 +1,10 @@
 # Plan 08 mutation log -- M-08a..z3, M-08snap, M-08sn, M-08pin and the tasks' extras
 
-**Tally, after Task 14 fix round 1: 213 mutants fired, 206 killed, 0
+**Tally, after Task 16's first commit: 214 mutants fired, 207 killed, 0
 survived, 7 equivalent (fired, and they survive as argued); 8 N/A (not
-re-fired).** Two controls were fired as well and survive, as the spec
+re-fired).** After Task 14 fix round 1 it stood at 213 fired, 206
+killed; Task 16's first commit added `own-defaultMovable` (the Task 14
+review's Minor 1), killed by the new `SG6`. Two controls were fired as well and survive, as the spec
 says they must; they are not counted. The first run (commit `b1b4c98`)
 stood at 204 killed, 1 survived, 8 equivalent; the fix round (below)
 closed both findings, and three re-fires show it.
@@ -22,9 +24,10 @@ closed both findings, and three re-fires show it.
     `OpeningGrips.movable`, was unreachable and survived (F2); after the
     fix round the composite delegates to it, and `SG2` kills it there.
   - Every killer the spec names went red, at every site.
-- **The tasks' extras:** 154 fired (Tasks 1-13, implementers' and
+- **The tasks' extras:** 155 fired (Tasks 1-13, implementers' and
   reviewers', from the ledger; 07's three band-joining mutants whose
-  sites moved to `wall_bands.dart` in Task 9), **all 154 killed.** In
+  sites moved to `wall_bands.dart` in Task 9; the Task 14 review's
+  `own-defaultMovable`, in Task 16), **all 155 killed.** In
   the first run the slide grip's copy of the aperture divisor
   (`t11-apertureDir-grip`) survived (F1); the fix round's new
   `SG1 (t11-apertureDir, the grip's site)` kills it.
@@ -79,6 +82,17 @@ now, and was empty before and after M-08a's second run. Fix round 1's
 three re-fires ran on `b1b4c98` with the round's two edits
 (`object_grips.dart`, `opening_grips_test.dart`) staged, so each
 restore's `git diff --quiet` compares against them.
+**Line numbers in `opening_grips_test.dart` (Task 14 review Minor 2):**
+nine first-run entries cite that file's lines as they were at `3d1713f`,
+and fix round 1 inserted 45 lines at line 278, so at `de66cd2` each is
+45 lower in the file: 308 → 353 (`M-08b-grip`, `M-08sn-grip`), 323 →
+368 (`X11-gate`), 370 → 415 (`M-08i-rotatable`, `M-08i-composite`),
+373 → 418 (`M-08i-capture`), 424 → 469 (`rv12-gripNoFit`), 452 → 497
+and 505 → 550 (`t12-gripOld`), 549 → 594 (`rv11-fillMovable`); the
+assertions and the values are unchanged (the review counted the first
+five). Lines up to 276, and the fix round's own entries (320, 415), are
+at `de66cd2` already; Task 16's `SG6` sits at the file's end and moves
+none of them.
 
 **Procedure, per mutant.** The driver is `t14-fire.py` in the session
 scratchpad (`/tmp/claude-0/-home-user-jet-cad/b8151ae2-5006-5f50-b81d-c013381534fe/scratchpad/plan08/t14/`);
@@ -6038,6 +6052,45 @@ The controller ruled both findings fixed in this round: F1 by a fixture, F2 by o
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/object_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red). KILLED by `SG2`, line 415.
 
+## Task 16's first commit: the Task 14 review's Minor 1
+
+The Task 14 review fired `own-defaultMovable` and it survived: no test
+selected a group that is neither a wall nor an opening through the
+composite. The controller ruled a test into Task 16's first commit.
+`SG6 (own-defaultMovable)` (`opening_grips_test.dart`) builds a wall
+with a door and a 06 box in its own rotated group at the far origin, and
+asks the composite: the box and the wall are movable, the door is not;
+`GripDrag.move` over the box and the door moves the box by the drag and
+leaves the door's group and position untouched, and `GripDrag.rotate`
+over the same keys is offered. Fired by hand on the Task 16 tree (the
+first commit's two test edits in the worktree), backups under the
+scratchpad's `plan08/` with the `t16-` prefix. Baseline: `--plain-name
+'SG6 (own-defaultMovable)'` `00:00 +1: All tests passed!`, exit 0
+(`t16-baseline-SG6.log`).
+
+### own-defaultMovable — (Task 14 review Minor 1) the composite's default: a group neither wall nor opening is immovable
+
+- **file:** `apps/floor_planner/lib/parametric/object_grips.dart`; backup `t16-own-defaultMovable-object_grips.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  52c52
+  <       _of(d, group)?.movable(d, group) ?? true;
+  ---
+  >       _of(d, group)?.movable(d, group) ?? false;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart --plain-name 'SG6 (own-defaultMovable)')` (exit 1; log `t16-own-defaultMovable-run1.log`)
+
+  ```
+  00:00 +0 -1: SG6 (own-defaultMovable) a 06 box is movable through the composite: selected with a door, a move takes the box and skips the door, and a rotate is offered; a wall is movable, a door is not (Task 14 review Minor 1) [E]
+    Expected: true
+      Actual: <false>
+    test/opening_grips_test.dart 627:5                  main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/object_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** KILLED (1 of 1 commands red). KILLED by `SG6`, line 627 ("a box"). It survived the whole app suite in the Task 14 review.
+
 ## Equivalent mutants, fired
 
 The ledger and the carry name these as equivalent. Each was fired against the whole file(s) its argument concerns. Seven survive; two are killed on this tree and are counted killed.
@@ -6348,6 +6401,19 @@ app      (apps/floor_planner)           CI=true flutter test       00:47 +231: A
 
 `+231`: the new `SG1 (t11-apertureDir, the grip's site)`. Only the
 standing Linux failures of Ruling 08-20 anywhere.
+
+**Task 16's first commit** touches the app's tests only
+(`opening_grips_test.dart`, `planner_shell_test.dart`'s comment) and
+this log, so the app line's test, analyze and format were run:
+
+```
+app      (apps/floor_planner)           CI=true flutter test       00:44 +232: All tests passed!        (exit 0)
+         flutter analyze                 No issues found! (ran in 1.2s)         (exit 0)
+         dart format --set-exit-if-changed   Formatted 52 files (0 changed)    (exit 0)
+```
+
+`+232`: the new `SG6 (own-defaultMovable)`. The four gate lines and the
+web build are run again on the final tree by Task 16 (the results note).
 
 ## Appendix: M-08a's scratch diff
 

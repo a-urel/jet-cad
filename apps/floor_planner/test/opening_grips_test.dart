@@ -7,6 +7,7 @@
 import 'dart:typed_data';
 
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/object_grips.dart';
 import 'package:floor_planner/parametric/opening.dart';
@@ -596,5 +597,56 @@ void main() {
     await tester.pump();
     expect(view.grips.rotatable, isTrue,
         reason: 'the control: a fill and a wall');
+  });
+
+  test(
+      'SG6 (own-defaultMovable) a 06 box is movable through the composite: '
+      'selected with a door, a move takes the box and skips the door, and a '
+      'rotate is offered; a wall is movable, a door is not (Task 14 review '
+      'Minor 1)', () {
+    final doc = wallDoc();
+    final a = doc.handleSeed.next();
+    doc.commands.execute(
+        addWall(doc, a, plan(0, 0), plan(5000, 0), 200, Justification.right));
+    final door = doc.handleSeed.next();
+    doc.commands.execute(addOpening(
+        doc, door, OpeningParams(a, 1730, 900, OpeningKind.door),
+        at: doorGroup));
+    final box = doc.handleSeed.next();
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: box,
+          parent: doc.rootHandle,
+          transform: groupAt(box.value),
+          children: const [])),
+      SetComponentCommand<BoxParams>(box, const BoxParams(1200, 800)),
+    ], label: 'Add box'));
+    doc.commands.clearHistory();
+    final objects = ObjectGrips(edgeAperture: () => null);
+
+    expect(objects.movable(doc, box), isTrue, reason: 'a box');
+    expect(objects.movable(doc, a), isTrue, reason: 'a wall');
+    expect(objects.movable(doc, door), isFalse, reason: 'a door');
+
+    final t0 = doc.tree.accumulatedTransform(box);
+    final keys = [k(box), k(door)];
+    final from = plan(1000, 1500), v = Vector2(730, -410);
+    final move = GripDrag.move(doc, keys, objects: objects);
+    expect(move, isNotNull, reason: 'the box is left to move');
+    move!
+      ..base.setFrom(from)
+      ..moveTo(from + v);
+    final doorBefore = paramsOf(doc, door);
+    final doorNode = doc.tree[door];
+    doc.commands.execute(move.command(DraftPermissions.all)!);
+    final t1 = doc.tree.accumulatedTransform(box);
+    expect(t1.e - t0.e, closeTo(v.x, 1e-6), reason: 'the box moved');
+    expect(t1.f - t0.f, closeTo(v.y, 1e-6), reason: 'the box moved');
+    expect(paramsOf(doc, door), doorBefore, reason: 'the door is skipped');
+    expect(doc.tree[door], doorNode, reason: 'its group untouched');
+    expect(
+        GripDrag.rotate(doc, keys, from, from + v, objects: objects), isNotNull,
+        reason: 'the box can be rotated');
+    expect(driftOf(doc), isEmpty);
   });
 }

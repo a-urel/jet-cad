@@ -183,8 +183,10 @@ void main() {
     final statusFinder = find.byKey(const Key('status-text'));
     expect(tester.widget<Text>(statusFinder).data, 'Select');
 
-    // kPlanOriginX + 100, kPlanOriginY sits on the outer wall's top edge
-    // (startup_plan.dart's first `rect`, from (x0, y0) to (x1, y0)).
+    // kPlanOriginX + 100, kPlanOriginY sits on the outer face of E1, the
+    // south exterior wall (startup_plan.dart's `e1`, whose band runs from
+    // y0 to y0 + 250), 100 mm from the south-west corner; with this 5 mm
+    // pick radius it resolves to E1's group.
     final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
     final hit = HitPath();
     final hitFound =
