@@ -684,7 +684,10 @@ the uncut path.
     away from the band, as long as the width. The **swing** is a quarter
     arc about `H`, radius the width, from the leaf's tip to the shut jamb
     (the other jamb's point on the same face), a sweep of +π/2, its start
-    angle chosen so the sweep is anticlockwise.
+    angle chosen so the sweep is anticlockwise **in the opening's own
+    space** (amended at execution, Task 6 review m-3: under a mirrored
+    group, possible only from a loaded file, the arc runs clockwise in
+    world while drawing the same quarter).
   - **Window** (three LINEs): the left face, the midline
     (`(lOff + rOff)/2`) and the right face, each from `x₁` to `x₂`, in that
     order.
@@ -788,13 +791,22 @@ A no-fit opening (D8 step 2) draws its symbol over its **stored** interval
     pieces at their jamb edges' points only;
   - a fitting gap's threshold line lies inside the gap, `m` from each
     jamb (D10), and touches nothing;
-  - a no-fit symbol lies outside the band (D11);
+  - a no-fit symbol lies outside the band's **strip** (D11) — but see
+    the limit below;
   - centreline pieces are `kWallColor` inside the band.
 
   So the order between a symbol and its host's pieces is invisible, except
   for a stroke's width at a touching point. The spike rendered it at 8 px/mm
   on Blueprint (white symbol, black wall): nothing covered
   (`r2_blueprint_hinge.png`).
+- **Limit (amended at execution, controller, 2026-09-25, Task 6 review
+  m-1).** At a clamped acute corner or a node of three or more walls, the
+  lowest-handle wall owns the central lobe, so its cap ring has vertices
+  outside its own strip; a **no-fit** symbol drawn outside the strip can
+  then lie inside its own host's lobe (the review's random run: 28 of
+  481 no-fit symbols, 0 fitting ones). Whether it shows there depends on
+  handle order. Accepted: a no-fit opening already carries
+  `opening.nofit`; the same limit already holds for other walls' bands.
 - **No exception.** Revision 1 had one: R1's original two jamb lines
   coincided with the pieces' jamb edges, so a piece added later beside a
   gap covered its jamb on Blueprint and won a click on it (pick ties go to
