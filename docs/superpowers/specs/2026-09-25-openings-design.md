@@ -593,16 +593,23 @@ For an opening with stored centre `c` and width `w` on a host frame:
   is not overlap.
 - **The degenerate width** (≤ `wallJoin.linear`) never fits (D6).
 - **A wall keeps a piece** (amended at execution, controller,
-  2026-09-25, Task 4's finding and review m1). After merging, if the
-  wall would be left with **no piece longer than `wallJoin.linear`** (a
-  cut spanning the whole span, merged cuts that cover it, or cuts that
-  leave only slivers), the fitting opening with the **highest handle** is
-  made **no-fit** (D11's outside symbol, `opening.nofit`) and the cuts are
-  placed and merged again without it; this repeats until a piece remains
-  or no fitting opening is left. A wall therefore never generates zero
-  children, and the choice is deterministic. **Pinned by** a test with a
-  whole-span gap and one with two windows whose merged cuts cover a
-  2,000 mm wall; mutant: "allow a zero-piece wall".
+  2026-09-25; Task 4's finding and review m1, revised after Task 5's
+  review S1). The fitting openings are **admitted in ascending handle
+  order**: each one's cut is added to the admitted cuts and merged, and if
+  that would leave the wall with **no piece longer than
+  `wallJoin.linear`**, this opening is made **no-fit** (D11's outside
+  symbol, `opening.nofit`) and left out; otherwise it is kept. A wall
+  therefore never generates zero children; the outcome is deterministic;
+  an opening yields only when admitting it is what would empty the wall
+  (a whole-span gap on its own yields; two windows that together cover a
+  wall keep the lower-handle one). **Pinned by** `OG11` (a)–(d) — a
+  whole-span gap; two windows covering a 2,000 mm wall; a gap 5e-7 short
+  of a T-bounded span; a case with two yields — and by `OG9`'s generator,
+  which produces keep-a-piece cases for the oracle comparison; mutants
+  "allow a zero-piece wall" and "check only once".
+- **A degenerate host** (07 D2; no frame): its openings cut nothing,
+  report `opening.nofit`, and **draw nothing** (D11 has no face to draw
+  against). The message says the wall is degenerate.
 
 **Costs:** an opening can be drawn far from its stored position when a
 narrow stretch holds it; `opening.clamped` says so. **Pinned by:** `OG2`,
@@ -1050,8 +1057,11 @@ whole in the same step (spike Q2b). Deleting a wall takes its openings (D4).
   opening.
 - **`opening.clamped`** — drawn off its stored position (D8). Handles: the
   opening, then every obstacle wall whose interval overlaps the
-  **unclamped** interval, ascending. The message says whether a corner
-  (the straight span) or a wall (an obstacle) moved it.
+  **unclamped** interval **exactly** (`lo < o.b && o.a < hi`, no
+  tolerance), ascending. The message names "a corner" only when the
+  unclamped interval leaves the straight span, and the walls when any
+  overlap; a clamp is always explained by one or both (amended at
+  execution, Task 5 review m-2/S3).
 - **`opening.overlap`** — two fitting cuts of one host overlap (D8).
   **Once per pair, by the lower handle** (R2): the lower-handle opening
   reports one entry per higher-handle opening it overlaps, handles `[lower,
