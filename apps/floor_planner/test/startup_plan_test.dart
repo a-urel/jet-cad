@@ -132,7 +132,8 @@ void main() {
       'SP2 every furniture fill draws over every floor-finish line (M-05r); '
       'the walls\' pieces are built first, below both (08 D18)', () {
     final doc = startupPlan(measurer);
-    var maxFinish = 0, minFill = 1 << 62, maxWallChild = 0;
+    var maxFinish = 0, minFinish = 1 << 62, minFill = 1 << 62;
+    var maxWallChild = 0;
     for (final slot in doc.entities.liveSlots) {
       final r = doc.entities.read(slot);
       if (r.kind == EntityKind.fill &&
@@ -145,6 +146,11 @@ void main() {
           r.handle.value > maxFinish) {
         maxFinish = r.handle.value;
       }
+      if (r.kind == EntityKind.line &&
+          r.color == const TrueColor(0xBBBBBB) &&
+          r.handle.value < minFinish) {
+        minFinish = r.handle.value;
+      }
       if (doc.components.get<WallParams>(r.owner) != null &&
           r.handle.value > maxWallChild) {
         maxWallChild = r.handle.value;
@@ -153,8 +159,10 @@ void main() {
     expect(maxFinish, greaterThan(0));
     expect(minFill, greaterThan(maxFinish));
     expect(maxWallChild, greaterThan(0));
-    expect(maxWallChild, lessThan(maxFinish),
-        reason: 'the walls\' first children lie below the finishes');
+    // Every wall child lies below the LOWEST finish line, not merely below
+    // the highest: a grid built before the walls would interleave them.
+    expect(maxWallChild, lessThan(minFinish),
+        reason: 'every wall child lies below every finish line');
   });
 
   test(
@@ -264,7 +272,8 @@ void main() {
     // Each door's swing is a quarter arc about the hinge. One end of it is
     // the leaf's far end (perpendicular to the wall); the other is the far
     // jamb, so hinge → far jamb spans the opening along the wall. The
-    // approach zone is that span swept 900 mm to either side of the wall's
+    // approach zone is that span swept 900 mm to either side of the hinge's
+    // face -- the wall's swing face, where 08 D10 puts the hinge, not its
     // centreline: where a person stands to walk through.
     const tol = Tolerance.standard;
     const depth = 900.0;

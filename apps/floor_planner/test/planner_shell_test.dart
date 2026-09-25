@@ -324,7 +324,10 @@ void main() {
     // mid-edge. Each is past the pick radius (about 366 mm here) of every
     // vertex of another object: the corners, the front door
     // (x0 + 6000..7000), E4's windows (y0 + 1700..2700, y0 + 5900..7300)
-    // and P2's butt (y0 + 5000), so each tap can only mean one wall.
+    // and P2's butt (y0 + 5000), so each tap can only mean one wall. E4's
+    // point holds while the pick radius (6 px) is under about 506 mm, its
+    // distance to P2's nearest cap vertex (x0 + 250, y0 + 4940): that is,
+    // at flutter_test's default 800 x 600 surface, not at any size.
     final doc = view.document;
     final e1 = e1Of(doc), e4 = e4Of(doc);
     final objects = [e1, e4, ...openingsOf(doc, e1), ...openingsOf(doc, e4)];

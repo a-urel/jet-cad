@@ -121,21 +121,25 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // their fills draw over the tile and parquet lines. ---
   // Bed 1, a 1400 mm double, clear of the bedroom-1/2 doorway's approach
   // (Ruling F-8): that door's opening is y0 + 7400..8200 on the partition at
-  // x0 + 2600, and a person needs 900 mm in front of it, so the bed ends at
-  // x0 + 1700. The old 1800 mm bed left 340 mm.
+  // x0 + 2600, its hinge on the partition's swing face at x0 + 2660 (08
+  // D10), and a person needs 900 mm in front of it, so the approach reaches
+  // x0 + 1760 and the bed, ending at x0 + 1700, is clear by 60 mm. The old
+  // 1800 mm bed left 340 mm.
   p.rectRegion(x0 + 300, y0 + 6600, x0 + 1700, y0 + 8600); // bed
   // Bed 2, clear of both of bedroom 2's door swings (Ruling F-1): the
   // bedroom-1/2 door's swing starts at y0 + 7400, and the hall/living
-  // partition door's swing starts at x0 + 4100, so the bed (ending at
-  // x0 + 4000, y0 + 7200) sits below-left of both, clear by 100 mm each.
+  // partition door's swing starts at x0 + 4040 (its hinge on the face at
+  // x0 + 4940, the leaf 900 mm), so the bed (ending at x0 + 4000,
+  // y0 + 7200) sits below-left of both, clear by 200 mm and 40 mm.
   p.rectRegion(x0 + 2750, y0 + 5200, x0 + 4000, y0 + 7200); // bed
   // The sofa, moved off the kitchen/bath-living partition door's swing
-  // (Ruling F-1): that arc's far edge is y0 + 4300, so the sofa starts at
-  // y0 + 4500, clear by 200 mm.
+  // (Ruling F-1): that arc starts on the partition's face at y0 + 3560 and
+  // its far edge is y0 + 4360, so the sofa starts at y0 + 4500, clear by
+  // 140 mm.
   p.rectRegion(x0 + 6000, y0 + 4500, x0 + 9000, y0 + 5400); // sofa
   p.rectRegion(x0 + 6400, y0 + 5600, x0 + 8600, y0 + 6800); // table
   // The kitchen counter: one L along the kitchen's south and east walls.
-  // Ruling F-1 moved it off the hall/kitchen door's swing (x0 + 5000..5900)
+  // Ruling F-1 moved it off the hall/kitchen door's swing (x0 + 5060..5960)
   // and the front door's (x0 + 6000..7000); Ruling F-8 then moved its north
   // leg out of the kitchen/living doorway (x0 + 6600..7400 at y0 + 3500),
   // which it faced from 350 mm away. The south leg starts 200 mm east of
