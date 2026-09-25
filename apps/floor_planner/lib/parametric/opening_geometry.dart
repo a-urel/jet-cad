@@ -324,6 +324,50 @@ List<(double, double)> mergeCuts(List<(double, double)> cuts) {
 bool overlaps((double, double) x, (double, double) y) =>
     x.$1 < y.$2 - wallJoin.linear && y.$1 < x.$2 - wallJoin.linear;
 
+/// Spec 08 D15's edge snap: the centre that puts one edge of an opening
+/// centred at [u], [w] wide, on a candidate, or null.
+///
+/// - The candidates are every stretch's ends ([stretches], as [stretchesOf]
+///   gives them: the straight span's ends and the obstacles' edges inside
+///   it) and every edge of [otherCuts] (the host's other openings' drawn
+///   cuts, D8).
+/// - An edge `u − w/2` or `u + w/2` within [aperture] of a candidate (the
+///   distance at most [aperture]) snaps: the centre becomes the one that
+///   puts that edge on it.
+/// - The nearest (edge, candidate) pair wins; ties go to the lower centre.
+///
+/// Everything is along the host's centreline, in its local units: the
+/// caller gives [aperture] in them.
+double? edgeSnap(List<(double, double)> stretches,
+    List<(double, double)> otherCuts, double u, double w, double aperture) {
+  final lo = u - w / 2, hi = u + w / 2;
+  double? best;
+  var bestDistance = double.infinity;
+  void offer(double centre, double distance) {
+    if (distance > aperture) return;
+    if (distance < bestDistance ||
+        (distance == bestDistance && centre < best!)) {
+      best = centre;
+      bestDistance = distance;
+    }
+  }
+
+  void candidate(double q) {
+    offer(q + w / 2, (lo - q).abs());
+    offer(q - w / 2, (hi - q).abs());
+  }
+
+  for (final (a, b) in stretches) {
+    candidate(a);
+    candidate(b);
+  }
+  for (final (a, b) in otherCuts) {
+    candidate(a);
+    candidate(b);
+  }
+  return best;
+}
+
 /// One piece of a cut wall's band (spec 08 D9): its anticlockwise ring and
 /// its centreline's two points, in the host's local space.
 typedef _Piece = ({List<Vector2> ring, List<Vector2> line});

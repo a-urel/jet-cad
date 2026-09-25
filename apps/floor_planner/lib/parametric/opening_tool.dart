@@ -53,7 +53,11 @@ typedef _Placement = ({OpeningParams params, Cut? cut});
 ///   host is not a snap. No wall under the pointer: no preview, and a click
 ///   does nothing.
 /// - **The position** is `u` of the **resolved** point (the snap chain's)
-///   projected onto the host's centreline in its local space. What is
+///   projected onto the host's centreline in its local space, unless an
+///   **edge snap** wins (D15, [selfSnap]): with object snap on, an edge of
+///   the would-be opening at the raw point's projection within the aperture
+///   of one of the host's stretch ends or of its other openings' drawn cut
+///   edges ([edgeSnap]) puts that edge on it, outright. What is
 ///   stored is the centre of the cut the opening would get there (D8): `u`
 ///   itself when it fits there, the clamped centre ([storedCentreOf]) when
 ///   it had to move into a stretch, `u` itself when it is no-fit.
@@ -67,8 +71,12 @@ typedef _Placement = ({OpeningParams params, Cut? cut});
 ///   regenerates. A refused one (a malformed host from a file) places
 ///   nothing.
 ///
-/// **The frame cache** (Ruling 08-13): the hovered host's frame, stretches
-/// and other openings, from the document adapter ([wallsInDocument]). It is
+/// **The snap marker** ([markerPoint], Ruling 08-14) is drawn at the
+/// projected point on the host's centreline, not at the chain's point.
+///
+/// **The frame cache** (Ruling 08-13): the hovered host's frame, stretches,
+/// other openings and their drawn cuts, from the document adapter
+/// ([wallsInDocument]). It is
 /// rebuilt only when the hovered host changes, when the document reports a
 /// change ([WallBands.generation]), and at every click. A pointer move over
 /// the same host costs a projection, a placement and the preview's few
@@ -103,6 +111,28 @@ class OpeningTool extends PlacementTool {
   Transform2? _toWorld, _toLocal;
   List<(Handle, double, double)> _others = const [];
 
+  /// The drawn cuts (D8) of [_others] that fit: [edgeSnap]'s candidates.
+  List<(double, double)> _otherCuts = const [];
+
+  // The last host scan (Ruling 08-12): [selfSnap] and [hovered] ask for the
+  // same raw point on one move, and the scan runs once.
+  DraftDocument? _scanDocument;
+  int _scanGeneration = -1;
+  double _scanX = double.nan, _scanY = double.nan;
+  Handle? _scanHost;
+
+  /// Whether the last resolution's self-snap was an edge snap, on which
+  /// host, and the centre it gave, exactly (spec 08 D15): the world point
+  /// handed on is only its image through the host's transform.
+  bool _edgeSnapped = false;
+  Handle? _edgeHost;
+  double _edgeU = 0;
+
+  /// The snap marker's point while a host is hovered: the projected point on
+  /// its centreline (Ruling 08-14).
+  final Vector2 _marker = Vector2.zero();
+  bool _onHost = false;
+
   /// The hover preview, in world: the would-be symbol, then the would-be
   /// cut's two jamb lines. Built per pointer move, painted per frame.
   List<(EntityKind, GeometryPayload)> _preview = const [];
@@ -135,18 +165,60 @@ class OpeningTool extends PlacementTool {
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
     _context = ctx;
-    if (e.buttons & kPrimaryButton != 0) _raw.setFrom(e.world);
+    if (e.buttons & kPrimaryButton != 0) {
+      _raw.setFrom(e.world);
+      // Rebuilt at every click (Ruling 08-13), before the press resolves:
+      // the change stream delivers after the current task, so an edit in
+      // the same synchronous task as this click would otherwise leave the
+      // scan, the frame and the edge snap stale.
+      _bands.invalidate();
+    }
     super.onPointerDown(e, ctx);
   }
+
+  /// Spec 08 D15's edge snap, as 05 D4's self-snap: it wins outright over
+  /// the chain. With object snap on and a host under [raw], the raw point
+  /// is projected onto the host's centreline and [edgeSnap] is applied
+  /// there; on a hit, the snapped centre's world point on the centreline.
+  @override
+  Vector2? selfSnap(Vector2 raw, double apertureWorld) {
+    _edgeSnapped = false;
+    final ctx = _context;
+    if (ctx == null || !(ctx.snap?.objectSnap ?? true)) return null;
+    final doc = ctx.document;
+    final host = _hostAt(doc, raw);
+    if (host == null || !_ready(doc, host)) return null;
+    final layout = _layout!;
+    final toWorld = _toWorld!;
+    final f = layout.frame;
+    final v = edgeSnap(
+        layout.stretches,
+        _otherCuts,
+        f.uOf(_toLocal!.transformPoint(raw)),
+        settings.value.width,
+        // The aperture in the host's local units.
+        apertureWorld / toWorld.scaleMagnitude);
+    if (v == null) return null;
+    _edgeSnapped = true;
+    _edgeHost = host;
+    _edgeU = v;
+    return toWorld.transformPoint(f.at(v, 0));
+  }
+
+  /// The snap marker sits at the projected point on the hovered host's
+  /// centreline (Ruling 08-14); elsewhere, at the chain's point.
+  @override
+  Vector2 get markerPoint => _onHost ? _marker : super.markerPoint;
 
   /// Runs after every hover's resolution, so [hoverPoint] is the resolved
   /// point and [raw] the pointer's.
   @override
   void hovered(Vector2 raw) {
     final ctx = _context;
-    final host = ctx == null ? null : _bands.hostAt(ctx.document, raw.x, raw.y);
+    final host = ctx == null ? null : _hostAt(ctx.document, raw);
     if (host == null || !_ready(ctx!.document, host)) {
       _preview = const [];
+      _onHost = false;
       return;
     }
     debugPreviewBuilds++;
@@ -156,12 +228,9 @@ class OpeningTool extends PlacementTool {
   @override
   void accept(Vector2 point, ToolContext ctx) {
     final doc = ctx.document;
-    // Rebuilt at every click (Ruling 08-13): the change stream delivers
-    // after the current task, so an edit in the same synchronous task as
-    // this click would otherwise leave the scan and the frame stale.
-    _bands.invalidate();
     _preview = const [];
-    final host = _bands.hostAt(doc, _raw.x, _raw.y);
+    _onHost = false;
+    final host = _hostAt(doc, _raw);
     if (host == null || !_ready(doc, host)) return;
     try {
       commit(ctx, () {
@@ -193,6 +262,23 @@ class OpeningTool extends PlacementTool {
     }
   }
 
+  /// The wall whose band contains [raw] ([WallBands.hostAt]), scanned once
+  /// per raw point and band generation.
+  Handle? _hostAt(DraftDocument doc, Vector2 raw) {
+    if (identical(doc, _scanDocument) &&
+        _bands.generation == _scanGeneration &&
+        raw.x == _scanX &&
+        raw.y == _scanY) {
+      return _scanHost;
+    }
+    final host = _bands.hostAt(doc, raw.x, raw.y);
+    _scanDocument = doc;
+    _scanGeneration = _bands.generation;
+    _scanX = raw.x;
+    _scanY = raw.y;
+    return _scanHost = host;
+  }
+
   /// Refreshes the frame cache for [host] (Ruling 08-13). False when [host]
   /// has no frame: not a live wall, or degenerate.
   bool _frameFor(DraftDocument doc, Handle host) {
@@ -210,13 +296,22 @@ class OpeningTool extends PlacementTool {
     _layout = walls == null ? null : layoutOf(walls.host, walls.walls);
     _toWorld = walls?.host.toWorld;
     _toLocal = _toWorld?.invert();
-    _others = _layout == null
+    final layout = _layout;
+    _others = layout == null
         ? const []
         : [
             for (final (h, o) in openingsInDocument(doc, host))
               (h, o.position, o.width),
           ];
-    return _layout != null;
+    _otherCuts = layout == null
+        ? const []
+        : [
+            for (final c in cutsOf(layout.frame, layout.stretches, [
+              for (final (_, c, w) in _others) (c, w),
+            ]).cuts)
+              if (c != null) (c.a, c.b),
+          ];
+    return layout != null;
   }
 
   /// Whether an opening can be placed on [host] now: the settings hold a
@@ -234,7 +329,12 @@ class OpeningTool extends PlacementTool {
     final layout = _layout!;
     final f = layout.frame;
     final toLocal = _toLocal!;
-    final u = f.uOf(toLocal.transformPoint(resolved));
+    // An edge snap's centre exactly; otherwise the resolved point projected.
+    final u = _edgeSnapped && host == _edgeHost
+        ? _edgeU
+        : f.uOf(toLocal.transformPoint(resolved));
+    _marker.setFrom(_toWorld!.transformPoint(f.at(u, 0)));
+    _onHost = true;
     final cut = _cutAmong(layout, u, w, self);
     final c = cut == null || !cut.clamped
         ? u

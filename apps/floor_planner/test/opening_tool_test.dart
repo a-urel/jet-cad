@@ -190,6 +190,18 @@ Handle added(DraftDocument doc, List<Handle> before) =>
 /// [p]'s numbers, for comparing payloads.
 List<double> numbersOf(GeometryPayload p) => [...p.coords, ...p.scalars];
 
+/// A canvas that records the snap marker's squares (an endpoint's marker,
+/// 05 D9) and ignores everything else.
+class MarkerSpy implements Canvas {
+  final List<Rect> rects = <Rect>[];
+
+  @override
+  void drawRect(Rect rect, Paint paint) => rects.add(rect);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
 void main() {
   testWidgets(
       'OT1 (M-08b, X9-raw, X9-unclamped) D, N and G each place one opening '
@@ -616,6 +628,173 @@ void main() {
   });
 
   test(
+      'OT3 (M-08sn, pure) edgeSnap: an edge within the aperture of a stretch '
+      'end or another opening\'s cut edge moves the centre to put it there; '
+      'the nearest pair wins, ties go to the lower centre, nothing in range '
+      'gives null', () {
+    const stretches = [(137.25, 2061.5), (2311.75, 5890.125)];
+    const cuts = [(3000.5, 3900.5)];
+    const w = 800.0;
+    double? snap(double u, [double aperture = 20]) =>
+        edgeSnap(stretches, cuts, u, w, aperture);
+    // Each edge against each kind of candidate.
+    expect(snap(137.25 + 400 + 12), 137.25 + 400, reason: 'span start');
+    expect(snap(2061.5 - 400 - 7), 2061.5 - 400, reason: 'obstacle, right');
+    expect(snap(2311.75 + 400 + 19.5), 2311.75 + 400, reason: 'obstacle');
+    expect(snap(3000.5 - 400 - 3), 3000.5 - 400, reason: 'cut, right edge');
+    expect(snap(3900.5 + 400 + 16), 3900.5 + 400, reason: 'cut, left edge');
+    expect(snap(5890.125 - 400 + 11), 5890.125 - 400, reason: 'span end');
+    // Within the aperture means at most it; beyond it, nothing.
+    expect(snap(137.25 + 400 + 20), 137.25 + 400);
+    expect(snap(137.25 + 400 + 20.5), isNull);
+    expect(snap(1000), isNull);
+    // Two candidates in range: the nearer wins, whichever edge it is.
+    const two = [(1000.0, 1803.0)];
+    expect(edgeSnap(two, const [], 1401, w, 20), 1400, reason: '1 against 2');
+    expect(edgeSnap(two, const [], 1402.5, w, 20), 1403,
+        reason: '2.5 against 0.5');
+    // A tie (1.5 each way): the lower centre.
+    expect(edgeSnap(two, const [], 1401.5, w, 20), 1400);
+    expect(edgeSnap(const [(1000.0, 1797.0)], const [], 1398.5, w, 20), 1397,
+        reason: 'a tie the other way round: still the lower centre');
+  });
+
+  test(
+      'OT3 (M-08sn, X10-gate) a door\'s edge snaps to a T obstacle\'s edges, '
+      'to a window\'s drawn edges and to the span\'s end, the nearer '
+      'candidate winning; with F3 off it stores the chain\'s projected '
+      'point', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(6000, 0), 200, centre);
+    // A 115 stem at 80° to A, ending on A's centreline at 2,000: a T.
+    final foot = oracleAt(oracleFrameOf(doc, a), 2000, 0);
+    addWallFromSeed(doc, polar(foot, 23 + 80, 1800), foot, 115, left);
+    final [(o1, o2)] = OpeningOracle(doc).obstacles(a);
+    // The window's left edge is 903 past the obstacle: a 900 door fits
+    // between them with 3 mm to spare.
+    final win = doc.handleSeed.next();
+    final wc = o2 + 1403;
+    doc.commands.execute(
+        addOpening(doc, win, OpeningParams(a, wc, 1000, OpeningKind.window)));
+    doc.commands.clearHistory();
+    expect(diagnosticsOf(doc), isEmpty);
+    final f = oracleFrameOf(doc, a);
+    // What the wall draws: the stretch ends the tool snaps to, exactly.
+    final [(s0, e0), (s1, e1)] = layoutInDocument(doc, a)!.stretches;
+    for (final (app, oracle) in [(e0, o1), (s1, o2), (e1, f.len)]) {
+      expect(app, closeTo(oracle, 1e-6), reason: 'the oracle agrees');
+    }
+    expect(s0, closeTo(0, 1e-6));
+
+    // 0.5 px/mm: a 20 mm aperture.
+    final on = directRig(doc, OpeningKind.door, scale: 0.5);
+    final off = directRig(doc, OpeningKind.door,
+        scale: 0.5, snap: SnapSettings(objectSnap: false));
+    double storedAt(Rig rig, double u) {
+      final before = openings(doc);
+      pressAt(rig, oracleAt(f, u, -40));
+      final o = doc.components.get<OpeningParams>(added(doc, before))!;
+      expect(o.host, a);
+      expect(diagnosticsOf(doc), isEmpty, reason: 'at $u');
+      doc.commands.undo();
+      return o.position;
+    }
+
+    // A 600 door has one candidate in range at a time; a 900 door spans
+    // the gap between the obstacle and the window, and has both.
+    for (final (w, u, edge, want, why) in [
+      (
+        600.0,
+        s1 + 300 + 13,
+        -1,
+        s1,
+        'the left edge on the obstacle\'s far edge'
+      ),
+      (600.0, e0 - 300 - 11, 1, e0, 'the right edge on its near edge'),
+      (600.0, wc - 500 - 300 - 8, 1, wc - 500, 'on the window\'s left edge'),
+      (600.0, wc + 500 + 300 + 12, -1, wc + 500, 'on the window\'s right edge'),
+      (600.0, e1 - 300 - 17, 1, e1, 'the right edge on the span\'s end'),
+      (900.0, s1 + 450 + 1, -1, s1, '1 mm against 2: the obstacle'),
+      (900.0, s1 + 450 + 2.5, 1, wc - 500, '2.5 mm against 0.5: the window'),
+    ]) {
+      for (final rig in [on, off]) {
+        rig.tool.settings.value = OpeningSettings(width: w);
+      }
+      final c = storedAt(on, u);
+      // Within a few ulps of u (1e-11), well inside the plan's 1e-9: the
+      // snapped centre is stored as computed, never re-projected from its
+      // world point at the far origin (~1e-10 off, t10-reproject).
+      expect(c + edge * w / 2, closeTo(want, 1e-11), reason: why);
+      expect((c - u).abs(), greaterThan(0.4), reason: 'not the click: $why');
+      // F3 off: the chain's point (the raw point: no grid), projected.
+      expect(storedAt(off, u), closeTo(u, 1e-6), reason: 'F3 off: $why');
+    }
+    // Nothing in range (25 mm): the chain's point.
+    on.tool.settings.value = const OpeningSettings(width: 600);
+    expect(storedAt(on, s1 + 300 + 25), closeTo(s1 + 325, 1e-6));
+
+    // The aperture is in world (t10-apertureLocal): on a host whose group
+    // is scaled 2×, 20 mm in world is 10 local units. A 600 (local) door
+    // whose right edge is 8 units from the end snaps; at 15 units (30 mm in
+    // world) it does not.
+    final hb = doc.handleSeed.next();
+    doc.commands.execute(addWall(
+        doc, hb, plan(0, 4000), plan(4000, 4000), 200, centre,
+        at: groupAt(hb.value).multiply(Transform2.scale(2, 2))));
+    doc.commands.clearHistory();
+    final fb = oracleFrameOf(doc, hb);
+    expect(fb.len, closeTo(4000, 1e-6), reason: 'in world');
+    for (final (gap, want) in [(8.0, 1700.0), (15.0, 1685.0)]) {
+      final before = openings(doc);
+      pressAt(on, oracleAt(fb, 2 * (2000 - 300 - gap), -40));
+      final o = doc.components.get<OpeningParams>(added(doc, before))!;
+      expect(o.host, hb);
+      expect(o.position, closeTo(want, 1e-6), reason: '$gap units off');
+      doc.commands.undo();
+    }
+  });
+
+  test(
+      'OT5 (X10-marker) the snap marker is painted at the projected point on '
+      'the host\'s centreline, not at the chain\'s point; off every wall, '
+      'at the chain\'s point', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(5000, 0), 200, centre);
+    // A loose line whose end lies inside A's band, 70 mm off its centreline:
+    // the chain snaps to it.
+    final f = oracleFrameOf(doc, a);
+    final tip = oracleAt(f, 1900, 70);
+    final far = oracleAt(f, 1900, 900);
+    doc.commands
+        .execute(addDrafted(doc, EntityKind.line, linePayload(tip, far)));
+    doc.commands.clearHistory();
+    final rig = directRig(doc, OpeningKind.door, scale: 0.5);
+    Offset marker() {
+      final spy = MarkerSpy();
+      rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(800, 600));
+      final r = spy.rects.single;
+      return r.center;
+    }
+
+    Offset screen(Vector2 p) {
+      final s = rig.ctx.camera.value.worldToScreen(p);
+      return Offset(s.x, s.y);
+    }
+
+    // Over A, near the line's end: the chain's point is the end, 70 mm off
+    // the centreline; the marker is its projection.
+    hoverTo(rig, oracleAt(f, 1904, 63));
+    expect(xy(rig.tool.hoverPoint), xy(tip), reason: 'the chain snapped');
+    final want = screen(oracleAt(f, 1900, 0));
+    expect((marker() - want).distance, lessThan(1e-6));
+    expect((marker() - screen(tip)).distance, greaterThan(30),
+        reason: 'not the chain\'s point: 35 px away');
+    // Off every wall, near the line's other end: the chain's point.
+    hoverTo(rig, oracleAt(f, 1903, 896));
+    expect((marker() - screen(far)).distance, lessThan(1e-6));
+  });
+
+  test(
       'OT4 (X9-cache, M-08h at the preview) with no wall under the pointer '
       'no preview is built and no frame computed, and a click commits '
       'nothing; over a wall the preview is the symbol the click commits and '
@@ -714,6 +893,29 @@ void main() {
   });
 
   test(
+      'OT4 (t10-scanMemo) the host scan is shared by the edge snap and the '
+      'preview, once per raw point, and never outlives a change: a wall '
+      'moved away in the same task as a press where the pointer last '
+      'hovered is not placed on', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(5000, 0), 200, centre);
+    doc.commands.clearHistory();
+    final f = oracleFrameOf(doc, a);
+    final rig = directRig(doc, OpeningKind.door);
+    final p = oracleAt(f, 2300, 40);
+    hoverTo(rig, p);
+    expect(rig.tool.debugPreview, isNotEmpty, reason: 'over A');
+    // A moves 700 mm across itself; the change stream has not delivered.
+    final shift = plan(0, 700) - plan(0, 0);
+    doc.commands.execute(TransformNodeCommand(
+        a,
+        Transform2.translation(shift.x, shift.y)
+            .multiply(doc.tree.accumulatedTransform(a))));
+    pressAt(rig, p);
+    expect(openings(doc), isEmpty, reason: 'no wall under the press now');
+  });
+
+  test(
       'OT4 (cost) the per-hover cost at 600 walls, printed, not asserted '
       '(07 WT12\'s method)', () {
     final doc = wallDoc();
@@ -727,31 +929,37 @@ void main() {
     doc.handleSeed.raiseTo(Handle(next + 10000));
     expect(walls(doc), hasLength(600));
     final rig = directRig(doc, OpeningKind.door);
-    // Between the walls: in no band, so every hover scans all 600.
-    final p = plan(1500, 1500);
+    // Between the walls: in no band, so every hover scans all 600. Each
+    // point alternates with one 0.5 mm away, as a moving pointer does: the
+    // tool scans once per raw point (the edge snap and the preview share
+    // the scan), so a repeated point would measure no scan at all.
+    final p = [plan(1500, 1500), plan(1500.5, 1500)];
     // On the last wall scanned: a frame (once) and a preview per move.
-    final q = plan(29 * 3000.0 + 400, 19 * 3000.0 + 30);
-    final raw = Vector2.zero();
+    final q = [
+      plan(29 * 3000.0 + 400, 19 * 3000.0 + 30),
+      plan(29 * 3000.0 + 400.5, 19 * 3000.0 + 30),
+    ];
+    final raw = [Vector2.zero(), Vector2(0.5, 0)];
     final none = <double>[], scan = <double>[], over = <double>[];
     const batch = 50;
     for (var k = 0; k < 200; k++) {
       final sw = Stopwatch()..start();
       for (var i = 0; i < batch; i++) {
-        hoverTo(rig, p);
+        hoverTo(rig, p[i & 1]);
       }
       none.add(sw.elapsedMicroseconds / batch);
       sw
         ..reset()
         ..start();
       for (var i = 0; i < batch; i++) {
-        rig.tool.hovered(raw);
+        rig.tool.hovered(raw[i & 1]);
       }
       scan.add(sw.elapsedMicroseconds / batch);
       sw
         ..reset()
         ..start();
       for (var i = 0; i < batch; i++) {
-        hoverTo(rig, q);
+        hoverTo(rig, q[i & 1]);
       }
       over.add(sw.elapsedMicroseconds / batch);
     }
