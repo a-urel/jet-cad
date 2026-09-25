@@ -1,6 +1,8 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'opening.dart';
+import 'opening_geometry.dart';
 import 'wall_geometry.dart';
 
 /// Which side of the centreline a wall's body lies on, looking from `start`
@@ -174,14 +176,19 @@ final class WallType extends ParametricType<WallParams> {
         toWorld.transformPoint(params.end),
       ]).expandedBy(wallJoin.linear);
 
-  /// In this order, fixed at creation (spec 07 D3): the region, whose
-  /// outline is [_localOutlineOf] -- computed in world space, taken to
-  /// group-local space and checked there -- then the open centreline from
-  /// `start` to `end`, the stored values themselves. A degenerate wall (D2)
-  /// generates the centreline alone. Every child is [kWallColor].
+  /// A wall with no fitting cut (spec 08 D9: no openings, none that fits, or
+  /// a degenerate wall) takes 07's path unchanged: in this order, fixed at
+  /// creation (spec 07 D3), the region, whose outline is [_localOutlineOf]
+  /// -- computed in world space, taken to group-local space and checked
+  /// there -- then the open centreline from `start` to `end`, the stored
+  /// values themselves. A degenerate wall (D2) generates the centreline
+  /// alone. Every child is [kWallColor].
+  ///
+  /// A wall with fitting cuts generates [_cut]'s pieces instead.
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     final p = view.paramsOf<WallParams>(self)!;
+    if (_cut(view, self) case final pieces?) return pieces;
     final centreline = Generated(
         EntityKind.polyline, polylinePayload([p.start, p.end]),
         color: kWallColor);
@@ -190,6 +197,41 @@ final class WallType extends ParametricType<WallParams> {
     return [
       Generated.region(polylinePayload(ring, closed: true), color: kWallColor),
       centreline,
+    ];
+  }
+
+  /// [self] split at its openings (spec 08 D9), or null when nothing cuts
+  /// it. Its openings are its referrers carrying `OpeningParams` hosted by
+  /// [self]; each one's cut is placed ([placeCut], D8) in the stretches of
+  /// the layout the view adapter gives ([layoutInView], D7), and the fitting
+  /// cuts are merged ([mergeCuts]). Then, in `u` order, start piece first:
+  /// one region per piece ([piecesOf]), then one open two-point centreline
+  /// per piece ([centrelinePieces]), all [kWallColor]. The planner rewrites
+  /// the i-th piece into the i-th existing region or centreline in handle
+  /// order; an added piece takes fresh handles, a removed one is the
+  /// highest-handle surplus (D9).
+  static List<Generated>? _cut(ParametricView view, Handle self) {
+    final openings = [
+      for (final h in view.referrers(self))
+        if (view.paramsOf<OpeningParams>(h) case final o? when o.host == self)
+          o,
+    ];
+    if (openings.isEmpty) return null;
+    final layout = layoutInView(view, self);
+    if (layout == null) return null;
+    final merged = mergeCuts([
+      for (final o in openings)
+        if (placeCut(layout.stretches, o.position, o.width) case final c?)
+          (c.a, c.b),
+    ]);
+    if (merged.isEmpty) return null;
+    return [
+      for (final ring in piecesOf(layout.frame, merged))
+        Generated.region(polylinePayload(ring, closed: true),
+            color: kWallColor),
+      for (final line in centrelinePieces(layout.frame, merged))
+        Generated(EntityKind.polyline, polylinePayload(line),
+            color: kWallColor),
     ];
   }
 

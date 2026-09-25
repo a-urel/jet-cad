@@ -1,4 +1,4 @@
-// Pure opening geometry (spec 08 D7, D8; Ruling 08-8). No Flutter import:
+// Pure opening geometry (spec 08 D7-D9; Ruling 08-8). No Flutter import:
 // this file is Dart over `package:jet_cad_2d` and `vector_math` only.
 //
 // One function computes a host wall's frame, called by the wall and by each
@@ -6,10 +6,10 @@
 // host's group-local space, where 07 stores the wall's outline.
 //
 // Ported from the spike (`spike/08-openings` at 634fa7c,
-// `apps/floor_planner/lib/parametric/opening.dart`): `hostFrame`, `cutOf`
-// and `mergeCuts`. The spike had no obstacles and clamped into the whole
-// straight span; D7's obstacles and stretches and D8's candidate rule are
-// new.
+// `apps/floor_planner/lib/parametric/opening.dart`): `hostFrame`, `cutOf`,
+// `mergeCuts` and `piecesOf` with its cap-vertex snap. The spike had no
+// obstacles and clamped into the whole straight span; D7's obstacles and
+// stretches, D8's candidate rule and D9's split centreline are new.
 import 'dart:math' as math;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -20,9 +20,9 @@ import 'wall_geometry.dart';
 
 /// A host wall seen from its own group-local space (spec 08 D7).
 ///
-/// - [s] is the stored `start`, [d] the unit direction to `end`, [n] the
-///   left normal and [len] the centreline's length; `u` is the distance
-///   from [s] along [d];
+/// - [s] is the stored `start`, [e] the stored `end`, [d] the unit
+///   direction from [s] to [e], [n] the left normal and [len] the
+///   centreline's length; `u` is the distance from [s] along [d];
 /// - [lOff] and [rOff] are 07 D2's face offsets along [n];
 /// - [endCap] (right face to left face) and [startCap] (left face to right
 ///   face) are 07's own caps ([capsOf]) taken to local space;
@@ -32,13 +32,18 @@ import 'wall_geometry.dart';
 /// - [fellBack] when the caps are the free caps (07's fallback, in world
 ///   or in local space).
 final class HostFrame {
-  HostFrame._(this.s, this.d, this.len, this.lOff, this.rOff, this.endCap,
-      this.startCap, this.fellBack)
+  HostFrame._(this.s, this.e, this.d, this.len, this.lOff, this.rOff,
+      this.endCap, this.startCap, this.fellBack)
       : n = Vector2(-d.y, d.x),
         uS = startCap.map((q) => (q - s).dot(d)).reduce(math.max),
         uE = endCap.map((q) => (q - s).dot(d)).reduce(math.min);
 
   final Vector2 s, d, n;
+
+  /// The stored `end`: where the end piece's centreline stops (D9), the
+  /// stored value itself rather than `s + len·d` recomputed.
+  final Vector2 e;
+
   final double len, lOff, rOff;
   final List<Vector2> endCap, startCap;
   final bool fellBack;
@@ -81,7 +86,7 @@ HostFrame? hostFrameOf(WorldWall host, List<WorldWall> walls) {
   final dv = p.end - p.start;
   final (l, r) = host.offsets;
   return HostFrame._(
-      p.start, dv.normalized(), dv.length, l, r, ce, cs, fellBack);
+      p.start, p.end, dv.normalized(), dv.length, l, r, ce, cs, fellBack);
 }
 
 /// An interval `[a, b]` of `u` that another wall's band occupies inside the
@@ -246,3 +251,112 @@ List<(double, double)> mergeCuts(List<(double, double)> cuts) {
 /// overlap.
 bool overlaps((double, double) x, (double, double) y) =>
     x.$1 < y.$2 - wallJoin.linear && y.$1 < x.$2 - wallJoin.linear;
+
+/// One piece of a cut wall's band (spec 08 D9): its anticlockwise ring and
+/// its centreline's two points, in the host's local space.
+typedef _Piece = ({List<Vector2> ring, List<Vector2> line});
+
+/// The pieces of [f]'s band between the cuts [merged] (sorted and merged,
+/// as [mergeCuts] gives them, all inside the straight span), start piece
+/// first (spec 08 D9; spike rule 3):
+/// - the start piece `[R(a₀), L(a₀)] + start cap`;
+/// - middle piece `i`: `[R(aᵢ₊₁), L(aᵢ₊₁), L(bᵢ), R(bᵢ)]`;
+/// - the end piece `end cap + [L(bₙ), R(bₙ)]`.
+///
+/// The **cap-vertex snap:** a cut clamped onto the span lands on a cap's face
+/// vertex, and the face point recomputed there differs from it by rounding
+/// (~1e-10); that near duplicate makes the triangulator refuse the piece, and
+/// the edit with it. So within `wallJoin.linear` along `u` of a cap's face
+/// vertex, that vertex is the piece's corner and the recomputed point is left
+/// out. A piece no longer than `wallJoin.linear` along the centreline (an
+/// opening clamped against a square cap) is dropped, and its centreline with
+/// it; [simplifyRing] guards every ring.
+List<_Piece> _pieces(HostFrame f, List<(double, double)> merged) {
+  final out = <_Piece>[];
+  void add(List<Vector2> ring, double extent, Vector2 from, Vector2 to) {
+    if (!(extent > wallJoin.linear)) return;
+    out.add((ring: simplifyRing(ring), line: [from, to]));
+  }
+
+  bool on(Vector2 capVertex, double u) =>
+      (f.uOf(capVertex) - u).abs() <= wallJoin.linear;
+  // The start cap runs from the left face to the right face, the end cap
+  // from the right face to the left face (07's `cap`).
+  final a0 = merged.first.$1;
+  add([
+    if (!on(f.startCap.last, a0)) f.right(a0),
+    if (!on(f.startCap.first, a0)) f.left(a0),
+    ...f.startCap,
+  ], a0 - f.startCap.map(f.uOf).reduce(math.min), f.s, f.at(a0, 0));
+  for (var i = 0; i + 1 < merged.length; i++) {
+    final b = merged[i].$2, a = merged[i + 1].$1;
+    add([f.right(a), f.left(a), f.left(b), f.right(b)], a - b, f.at(b, 0),
+        f.at(a, 0));
+  }
+  final bn = merged.last.$2;
+  add([
+    ...f.endCap,
+    if (!on(f.endCap.last, bn)) f.left(bn),
+    if (!on(f.endCap.first, bn)) f.right(bn),
+  ], f.endCap.map(f.uOf).reduce(math.max) - bn, f.at(bn, 0), f.e);
+  return out;
+}
+
+/// The rings of [f]'s band cut at [merged] (spec 08 D9), in `u` order, start
+/// piece first: each simple and anticlockwise in the host's local space.
+/// [merged] must not be empty.
+List<List<Vector2>> piecesOf(HostFrame f, List<(double, double)> merged) =>
+    [for (final p in _pieces(f, merged)) p.ring];
+
+/// One open two-point centreline per piece [piecesOf] keeps, in the same
+/// order (spec 08 D9, decision 16): the start piece's from `u = 0` (the
+/// stored `start`) to `a₀`, a middle piece's from `bᵢ` to `aᵢ₊₁`, the end
+/// piece's from `bₙ` to `L` (the stored `end`). A dropped piece has none.
+List<List<Vector2>> centrelinePieces(
+        HostFrame f, List<(double, double)> merged) =>
+    [for (final p in _pieces(f, merged)) p.line];
+
+/// The walls a regeneration sees around [host] (the **view adapter**,
+/// Ruling 08-8): [host] as a [WorldWall], and every neighbour of it in
+/// [view] carrying `WallParams`, as 07's outline reads them. Null when
+/// [host] is not a live wall.
+({WorldWall host, List<WorldWall> walls})? wallsInView(
+    ParametricView view, Handle host) {
+  final p = view.paramsOf<WallParams>(host);
+  if (p == null) return null;
+  return (
+    host: WorldWall(host, p, view.toWorld(host)),
+    walls: [
+      for (final n in view.neighbours(host))
+        if (view.paramsOf<WallParams>(n) case final q?)
+          WorldWall(n, q, view.toWorld(n)),
+    ],
+  );
+}
+
+/// A host's frame, its obstacles and its stretches (spec 08 D7).
+typedef HostLayout = ({
+  HostFrame frame,
+  List<Obstacle> obstacles,
+  List<(double, double)> stretches,
+});
+
+/// [host]'s layout among [walls]: one computation for the wall and for each
+/// of its openings. Null for a degenerate host.
+HostLayout? layoutOf(WorldWall host, List<WorldWall> walls) {
+  final frame = hostFrameOf(host, walls);
+  if (frame == null) return null;
+  final obstacles = obstaclesOf(frame, host, walls);
+  return (
+    frame: frame,
+    obstacles: obstacles,
+    stretches: stretchesOf(frame, obstacles),
+  );
+}
+
+/// [host]'s layout through the view adapter ([wallsInView]). Null when
+/// [host] is not a live wall or is degenerate.
+HostLayout? layoutInView(ParametricView view, Handle host) {
+  final w = wallsInView(view, host);
+  return w == null ? null : layoutOf(w.host, w.walls);
+}

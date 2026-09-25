@@ -96,6 +96,38 @@ final class OpeningParams implements Component {
       '$position, $width, ${hinge.name}, ${swing.name})';
 }
 
+/// The opening (spec 08 D1, D10): its own root-level group, at the identity
+/// like a wall, referencing its host.
+///
+/// - [reach] is `Aabb2.empty()`: an opening overlaps nothing, so it is never
+///   anybody's spatial neighbour and has none; its reference to its host
+///   alone brings it into a closure (D3), and the host's edit regenerates
+///   it, its edit the host;
+/// - [references] is `[host]`, with the default policy, `cascade`: deleting
+///   the host deletes its openings in the same edit (D4);
+/// - [generate] draws nothing yet: the symbols come with Task 6 (Ruling
+///   08-7), so until then an opening is a childless group whose only effect
+///   is the cut it makes in its host (D9, `WallType`);
+/// - [diagnose] reports nothing yet: D17's codes come with Task 5.
+final class OpeningType extends ParametricType<OpeningParams> {
+  const OpeningType();
+
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  @override
+  Aabb2 reach(OpeningParams params, Transform2 toWorld) => Aabb2.empty();
+
+  @override
+  Iterable<Handle> references(OpeningParams params) => [params.host];
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) => const [];
+
+  @override
+  List<Diagnostic> diagnose(ParametricView view, Handle self) => const [];
+}
+
 /// Whether [w] is a width the tools and the panel may give an opening of
 /// [kind] (spec 08 D6): finite and greater than `wallJoin.linear`, or than
 /// `4 × wallJoin.linear` for a gap, whose threshold line is inset from each
