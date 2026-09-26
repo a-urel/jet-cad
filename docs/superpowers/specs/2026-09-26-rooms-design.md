@@ -1,6 +1,8 @@
 # Rooms and area — design
 
-**Date:** 2026-09-26. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-09-26. **Status:** design, **revision 3**: revision 2
+(`6163da8`) was re-reviewed ("Ready with amendments", T-1 to T-8); see
+[Revision 3](#revision-3). Revision 1
 (`5015828`) was reviewed independently (decision 19): "Ready with
 amendments", findings S-1 to S-19. Revision 2 applies them, and the
 human's answers to revision 1's open questions (decisions 26–28); see
@@ -690,7 +692,7 @@ M-10tintcolour, M-10tintalpha.
 - **The label may lie outside the face** when dragged there; nothing is
   reported.
 
-**Pinned by:** `RL1` (thin L, three placements: the asserted value is the
+**Pinned by:** `RL1` (thin L, all six placements (T-5): the asserted value is the
 pole's **distance** to the boundary, 585.786 by hand, within the 10 mm
 precision at every placement, and at the origin also the pole's
 **coordinates**, (685.786, 685.786) by hand, within 10 mm), `RL2` (the column),
@@ -866,8 +868,10 @@ Aabb2? placeBox(ParametricView view, Handle self) => null;
 /// and after-views to tell whether it changed (a wall: its uncut band's
 /// world ring; a separator: its world segment). Called only when
 /// [contributesPlace], only for objects of an edit's spatial core, and
-/// only when [placeBox] is not null. Default: the box itself.
-Object placeInput(ParametricView view, Handle self) => placeBox(view, self)!;
+/// only when [placeBox] is not null. Default: a fresh `Object()`, equal to
+/// nothing, so a contributor that does not override it always counts as
+/// changed (T-2).
+Object placeInput(ParametricView view, Handle self) => Object();
 /// Spec 10 D16: this type's generate reads contributors by place. Default false.
 bool get readsPlaces => false;
 /// The world box whose contributors this object's current output depends
@@ -887,6 +891,17 @@ Aabb2? placeBoxOf(Handle h);
 /// Read from the survey's snapshot; memoised per view and type.
 List<Handle> objectsOf<U extends Component>();
 ```
+
+**`placeInput`'s default is "always changed"** (T-2). The alternative, a
+default equal to the box, is unsafe: a contributor whose input changes
+inside an unchanged box (a segment flipped from one diagonal of its box to
+the other) would count as unchanged and leave its readers stale, and a
+type that forgot to override would be silently wrong. Making it
+*required* for contributors is not expressible on `ParametricType` without
+forcing every non-contributor type to implement it (a Dart abstract member
+binds every subclass). "Always changed" is revision 1's behaviour for a
+type that does not override: it can only over-rebuild, never drift. The
+wall and the separator override it (D4).
 
 `objectsOf` is generic and survey-backed: the survey already holds every
 live object with its registration, so the first call per type is one O(n)
@@ -1017,23 +1032,29 @@ regenerates no reader never calls `placedIn` and pays nothing.
   the five whose read boxes E1's and P3's bands touch (worked from the
   plan's coordinates for this revision: P5's band, x 21,440–21,560 between
   E1's and P3's near faces, touches only those two read boxes; `RK2`
-  measures it);
-- if any room regenerates: one bulk pass, O(n log n + pairs), and **one
-  more place box per contributor** (the first `placedIn` of the view; the
-  after boxes of `K` are memoised and not recomputed), O(n) band
-  computations, once per edit; then D7's localised traces per room.
+  measures it). That holds **at the plan's own axis-aligned placement**;
+  under rotation the band boxes inflate and can add a neighbour room (the
+  re-review's run at the corpus's 23°, in both its placements: `rebuilt
+  (changed only) [Kitchen, Bath, Living]`; T-3);
+- if any room regenerates: one bulk pass, O(n log n + pairs), and the
+  place boxes the after-view does not hold yet: **`c − |K ∩ contributors
+  live after|` more `placeBox` calls**, `c` the live contributors after
+  the edit (the first `placedIn` of the view; the after boxes of `K` are
+  memoised and not recomputed), O(n) band computations, once per edit;
+  then D7's localised traces per room.
 - **Counters,** `@visibleForTesting`, never reset by the library:
-  `debugPlaceBoxCalls` (every `placeBox` call the engine makes, the bulk
-  pass included) and `debugReadBoxCalls`. `SD6` pins the trigger's counts
+  `debugPlaceBoxCalls` counts **calls into a type's `placeBox`**, the bulk
+  pass included; **a memo hit is not a call** (T-4). And
+  `debugReadBoxCalls`. `SD6` pins the trigger's counts
   on a fixture where no reader regenerates, and the bulk pass's count
   separately (S-13).
 
-**Pinned by:** `SV1`–`SV3` (the before-view), `SD1`–`SD10` (engine
+**Pinned by:** `SV1`–`SV3` (the before-view), `SD1`–`SD11` (engine
 clients: the trigger, two hops, before and after, readers, the counters,
 the bulk pass, an unchanged neighbour adding nothing, no readers,
-`objectsOf`), `RS1`–`RS6` (rooms: c1–c4, `Q3e`, `FB`), `RK1`, `RK2`;
-M-10nbr, M-10before, M-10snap, M-10e, M-10bulk, M-10cand, M-10allK,
-M-10objects.
+`objectsOf`, the diagonal flip `SD11`), `RS1`–`RS6` (rooms: c1–c4,
+`Q3e`, `FB`), `RK1`, `RK2`; M-10nbr, M-10before, M-10snap, M-10e,
+M-10bulk, M-10cand, M-10allK, M-10objects, M-10inputbox.
 
 ### D17 — Engine (f): the dashed linetype's handle
 
@@ -1064,7 +1085,7 @@ One row per change; "—" means the change does not touch that guarantee.
 | (d) dissolve | `ParametricType.dissolves`; `_plan` | never meets it (planned commands) | the dissolve detaches its own component; `lost` never holds it | one step; the node is re-linked last (state-equal, root order normalised) | — | handles restored, so unchanged | — |
 | (e) place | `contributesPlace`, `placeBox`, `placeInput`, `readsPlaces`, `readBox`, `placedIn`, `placeBoxOf`, `objectsOf`; the survey's snapshots and reader count; `_closure`'s trigger; the bulk pass | — | — | only decides the closure; replay never regenerates | — | — | — (edit time only) |
 | (f) handle | `ReservedHandles.dashedLinetype` | — | — | — | the default tables are unchanged; the app's record persists | — | — |
-| (g) ring outline (render layer, D24) | `OutlineCache._addLeaf`'s fill arm | — | — | — (the outline follows the document) | — | — (overlay only) | built at selection, hover and `DocChange` rate, never per frame; painted from the cached path |
+| (g) ring outline and move preview (render layer, D24) | `OutlineCache._addLeaf`'s fill arm; `GripCache.isMovable`; `_paintPreview` | — | — | — (the outline follows the document) | — | — (overlay only) | outline built at selection, hover and `DocChange` rate, never per frame, and painted from the cached path; the preview filter is one set lookup per key per frame, no allocation |
 
 ### D18 — Draw order, undo, save and load
 
@@ -1134,19 +1155,24 @@ One row per change; "—" means the change does not touch that guarantee.
   when the pointer leaves the cached face (a point-in-face test,
   allocation-free) or the cache goes stale; painted from cached payloads,
   so the frame path gains no allocation.
-- **Hovering outside a room** (S-5). D7 reaches `Unbounded` only after
-  growing over every contributor, so the tool **short-circuits**: a
-  pointer outside `U`, the union of every contributor's place box (kept
-  with the cache), is `Unbounded` without a trace. A `SeedInWall` verdict
-  is cached with its wall's band and reused while the pointer stays inside
-  that band (a point-in-ring test). An `Unbounded` point inside `U` (a
-  courtyard open to the outside) is re-traced per move; its cost is
-  measured by `TT6` at 600 walls, printed.
+- **Hovering outside a room** (S-5, T-1). D7 reaches `Unbounded` only
+  after growing over every contributor, so the tool **short-circuits**: a
+  pointer outside `box(U)`, the **bounding box** of every contributor's
+  finite place box (kept with the cache), is `Unbounded` without a trace.
+  Not the union of the boxes itself: that is a set of thin rectangles
+  along the walls, and a room's interior lies outside all of them
+  whenever its walls are axis-aligned (the sample plan's Kitchen seed
+  (19,000, 10,000) is outside every wall's box). A `SeedInWall` verdict is
+  cached with its wall's band and reused while the pointer stays inside
+  that band (a point-in-ring test). An `Unbounded` point inside `box(U)`
+  (a courtyard open to the outside) is re-traced per move; a cache of the
+  components' outer contours would avoid it (the re-review's T-8), but it
+  is **not needed**: its cost is measured by `TT6` at 600 walls, printed.
 - **Refused commits:** an `ArgumentError` or `StateError` from `execute`
   is caught and nothing is placed, as 07's and 08's tools do.
 
 **Pinned by:** `TT1`–`TT7`; M-10name, M-10occupied, M-10seedsnap,
-M-10notice.
+M-10notice, M-10hover, M-10hoverunion.
 
 ### D20 — The Separator tool (S)
 
@@ -1360,11 +1386,15 @@ that cache (`selection_overlay.dart:152-160`).
 - **The mechanism: a drawn fill outlines its area.** In `_addLeaf`'s fill
   arm, instead of returning: when the fill itself passes `rendering()`
   (already checked above it) and its boundary (`boundaryHandleOf(payload)`)
-  is a live entity **whose own flags carry `EntityFlags.invisible`**, the
-  boundary's geometry is added to the key's outline with the fill's
-  transform (a fill and its boundary share their owner, `AddRegionCommand`),
-  exactly as a visible boundary leaf of that kind is added today (the
-  polyline arm, or a circle's arc). Otherwise the fill adds nothing, as now.
+  is a live entity **that `rendering()` rejects** (its own invisible flag,
+  or its layer hidden while the fill's is not; T-6) **and whose owner is
+  the fill's owner**, the boundary's geometry is added to the key's
+  outline with the fill's transform, exactly as a visible boundary leaf of
+  that kind is added today (the polyline arm, or a circle's arc).
+  Otherwise the fill adds nothing, as now. The owner test matters because
+  the transform is the fill's: `AddRegionCommand` gives both one owner,
+  but a loaded file can break that (08's `_subtreeRemoval` comment
+  describes such a load); a boundary with another owner adds nothing.
   - **Why this rule:** the arm's own comment says the outline "is a
     statement about what is drawn". A fill **is** drawn from its boundary's
     geometry whatever the boundary's flag (the painter never reads it,
@@ -1402,11 +1432,35 @@ that cache (`selection_overlay.dart:152-160`).
 - **The colour:** the overlay's existing selected and hover paints
   (`selection_overlay.dart`), unchanged: "the selection colour".
 
-**Pinned by:** `OL1` (a selected group with a fill whose boundary is
+- **The move and rotate preview leaves out non-movable keys** (T-7,
+  controller's ruling; R-31). `_paintPreview`
+  (`selection_overlay.dart:207-228`) strokes every selected key's outline
+  under the drag's `T`, and with D24 a room's outline is its whole ring,
+  so in a mixed selection the ring would appear to move with the walls
+  although R-22's move skips the room. Consistent with R-22, the preview
+  draws only the keys the move will move:
+  - `GripCache` already calls `movableKey(document, key, objects)` for
+    each selected key at its rebuild (`grip_cache.dart:324`, selection and
+    `DocChange` rate). It now **keeps the answer per key**
+    (`bool isMovable(SelectionKey key)`, backed by a set built at that
+    rebuild), instead of only the any-key flag it keeps today;
+  - `_paintPreview` (and the point-cross preview beside it) **skips a key
+    for which `grips?.isMovable(key)` is false**. With no grip cache (a
+    host without one), every key is drawn, as today;
+  - **frame path:** per frame this is one set lookup per selected key, no
+    allocation; the set is rebuilt only at the grip cache's rebuild.
+
+**Pinned by:** `OL5` (a mixed selection of a movable group and a group a
+fake provider calls immovable: during a move drag the preview strokes the
+movable key's path only, counted on a recording canvas; with the
+provider calling both movable, both), M-10preview; and `OL1` (a selected
+group with a fill whose boundary is
 invisible outlines the boundary's loop, by coordinates, under a rotated
 group transform at the corpus far origin), `OL2` (a fill with a visible
 boundary is outlined exactly once; a fill whose layer is hidden, none; a
-fill whose boundary is missing, none), `OL3` (steady state: no path
+fill whose boundary is missing, none; a visible fill whose boundary sits
+on a hidden layer, its loop (T-6); a fill whose boundary has another
+owner, none), `OL3` (steady state: no path
 rebuild across frames with a room selected, `debugRebuilds` unchanged), `OL4`
 (app: selecting a sample-plan room outlines its labels and its ring; the
 Living room's outline shows the column hole); M-10ring, M-10ringdup.
@@ -1483,9 +1537,12 @@ changes. Checked against the code at `418d4c7` and the spike:
     page-key client, a dissolving client, a contributor whose place box
     depends on its neighbours (for the two-hop test), and a reader that
     lists the contributors placed in a stored field.
-- **Render layer, `packages/jet_cad_2d_flutter`:** **one `lib` change**,
-  `lib/src/outline_cache.dart`'s fill arm (D24, decision 27), with tests
-  in `test/outline_cache_test.dart` and `test/selection_overlay_test.dart`.
+- **Render layer, `packages/jet_cad_2d_flutter`:** **two `lib` changes**
+  (D24): `lib/src/outline_cache.dart`'s fill arm (decision 27), and the
+  move preview's movable filter (`lib/src/grip_cache.dart`'s per-key
+  movability, `lib/src/selection_overlay.dart`'s `_paintPreview`; T-7),
+  with tests in `test/outline_cache_test.dart` and
+  `test/selection_overlay_test.dart`.
   Translucent fills, ACI 7's foreground, dashed polylines and invisible
   boundaries all exist already. Its gate stays green with only its
   standing failures.
@@ -1514,7 +1571,8 @@ changes. Checked against the code at `418d4c7` and the spike:
 | 07 D10 (neighbour search) | D16.5 | a bulk sweep, used only when a place reader regenerates |
 | 08 D3 (the closure) | D16.2 | place readers join the core before the referrer step |
 | 08 D4's amendment (the view hides a lost object) | D16.1 | kept, and extended to the snapshot |
-| 02 D9 (the overlay's outline cache: "a statement about what is drawn") | D24 | a drawn fill whose boundary is invisible contributes its boundary's loop |
+| 02 D9 (the overlay's outline cache: "a statement about what is drawn") | D24 | a drawn fill whose boundary is not drawn, with the fill's owner, contributes its boundary's loop |
+| 03 D7 (the move and rotate preview) | D24, R-31 | non-movable keys are left out of the preview, as 08 D16 leaves them out of the move |
 
 ### Invariants
 
@@ -1632,14 +1690,18 @@ here and not left to the plan:
     box calls; a non-contributor edit → 0; a contributor edit → exactly
     one place box per `k ∈ K ∩ contributors` live before plus one per
     such `k` live after (a moved, an added and a deleted contributor), and
-    one read box per live reader; the bulk pass's count (one per
-    contributor) pinned separately on a fixture where a reader does
-    regenerate (S-13); `SD7` the bulk pass gives the same neighbour lists
+    one read box per live reader; the bulk pass's count, `c − |K ∩
+    contributors live after|` (memo hits not counted), pinned separately
+    on a fixture where a reader does regenerate (S-13, T-4); `SD7` the bulk pass gives the same neighbour lists
     as `neighboursOf`, its overlap tests counted and below n²/4 on a
     spread layout; `SD8` the catalog refuses a type with both roles;
     `SD9` an **unchanged** neighbour in `K` adds nothing: a contributor
     moved away from a reader, whose unchanged neighbour's box touches the
     reader, regenerates no reader (the reader's `generate` count; S-4);
+    `SD11` the diagonal flip (T-2): a contributor client whose segment
+    goes from (0, 0)→(10, 10) to (0, 10)→(10, 0), its box unchanged,
+    regenerates the reader it splits, once with the default `placeInput`
+    and once with an override that returns the segment;
     `SD10` a document with no live reader makes no place-box call on a
     contributor edit; `objectsOf<U>()` lists exactly the live objects of
     `U`, ascending, and not a lost or re-parented one (S-3).
@@ -1669,7 +1731,7 @@ here and not left to the plan:
     500 mm: both rooms' areas and labels follow, same handles, one step,
     undo, redo; `RG4` handles across undo, redo,
     purge; `RG5` save → load → save; `RG6` same state + same edit;
-  - `RL1` the thin L at the origin, the corpus and +1e9 mm placements:
+  - `RL1` the thin L at all six placements (T-5):
     the pole inside; its distance to the boundary against 585.786 by hand
     at every placement, and at the origin its coordinates against
     (685.786, 685.786) by hand, both within the 10 mm precision;
@@ -1718,9 +1780,12 @@ here and not left to the plan:
     `TT2` preview equals the generated ring; `TT3` no room in a wall, an
     unbounded face or an occupied face; `TT4` the name's lowest unused N;
     `TT5` the seed is the raw point with F3 on near a vertex; `TT6` the
-    hover allocates nothing in steady state; a hover outside every place
-    box traces nothing (`debugTracedSegments` unchanged; S-5), and inside
-    a wall's band re-uses the cached verdict; timing of an `Unbounded`
+    hover allocates nothing in steady state; a hover outside the bounding
+    box of every finite place box traces nothing (`debugTracedSegments`
+    unchanged; S-5); **a hover at the Kitchen seed (19,000, 10,000),
+    outside every place box but inside that bounding box, is traced and
+    previewed** (`debugTracedSegments` grows, the preview is the Kitchen's
+    ring; T-1); inside a wall's band the cached verdict is re-used; timing of an `Unbounded`
     hover inside the plan at 600 walls, printed; `TT7` a click in an
     occupied face makes nothing and the status line reads
     `Already a room: <name>` (decision 26); hovering there shows it too;
@@ -1738,7 +1803,7 @@ here and not left to the plan:
     rotation grip for rooms alone; `GR5` separator end grips, trimmed;
     `GR6` `GR1` and `GR2` under a room group at a rotated, translated,
     scaled similarity (S-10).
-- **Render layer (`jet_cad_2d_flutter`):** `OL1`–`OL3` (D24).
+- **Render layer (`jet_cad_2d_flutter`):** `OL1`–`OL3` and `OL5` (D24).
 - **The ring highlight in the shell (app):** `OL4` (D24).
 - **Diagnostics:** `DG1` `room.shared` once per pair by the lower handle,
   three rooms in one face give three entries; `DG2` `room.broken` from a
@@ -1788,13 +1853,16 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 |---|---|---|
 | M-10nbr | the trigger's `K` is the seeds only | `RS6` (`FB`), `SD4` |
 | M-10allK | every contributor in `K` adds its boxes, changed or not (revision 1's rule) | `SD9` |
+| M-10inputbox | `placeInput`'s default returns the place box (revision 2's default) | `SD11` (the default client: the reader stays stale) |
 | M-10objects | `objectsOf` answers only `self` (no other room found) | `DG1` |
 | M-10pagelate | page seeds added after the early return | `PG1` (the page-only edit) |
 | M-10hover | the Room tool's hover never short-circuits | `TT6` (the traced-segment counter) |
+| M-10hoverunion | the short-circuit tests the union of the place boxes, not their bounding box (revision 2's wording) | `TT6` (the Kitchen-seed hover gets no preview) |
 | M-10notice | the Room tool sets no status notice | `TT7` |
 | M-10gripframe | the label grip subtracts the world line offset from the local insertion point (revision 1's frames) | `GR6` |
 | M-10ring | `OutlineCache`'s fill arm returns on every fill (today's behaviour) | `OL1`, `OL4` |
 | M-10ringdup | the fill arm also adds a **visible** boundary's geometry | `OL2` (the loop outlined twice) |
+| M-10preview | the move preview draws every selected key, movable or not (today's behaviour) | `OL5` |
 | M-10before | the trigger uses after boxes only | `SD2`; `RD4` (the column, which has no neighbour, deleted: Living keeps its hole without the before box); `RD8` (a separator moved 60 m away: the two rooms it split must merge). A partition's own neighbours mask it, so partition fixtures cannot kill it |
 | M-10snap | the before-view reads the live stores (no snapshot) | `SV1`–`SV3`, `SD3` |
 | M-10cand | `placedIn` by reach instead of place box | `SD1`, `RG1`, `SP7` (a band's faces lie outside its wall's reach, so every room traces `Unbounded` and dissolves) |
@@ -1864,8 +1932,9 @@ mechanism now).
 13. The spatial trigger is exact (the proof's tests) and its cost is
     pinned by counters; the timing is recorded.
 14. The allocation invariants pass unchanged; the render layer's `lib`
-    changes only in `outline_cache.dart`'s fill arm (D24), and its gate is
-    green with only its standing failures.
+    changes only in `outline_cache.dart`'s fill arm and the move preview's
+    movable filter (D24), and its gate is green with only its standing
+    failures.
 15. The sample plan is D23's; its tests pass; `drift()` and
     `diagnostics()` are empty.
 16. Every named mutant is killed, logged in `plan-10-mutation-log.md`;
@@ -1921,8 +1990,11 @@ Every place this spec resolved something the decisions leave open.
   (controller's ruling on S-16).
 - **R-29** (D19) — the status notice reads `Already a room: <name>`, and
   also shows while hovering an occupied face.
-- **R-30** (D24) — a drawn fill whose boundary is invisible outlines its
-  boundary's geometry in the selection overlay.
+- **R-30** (D24) — a drawn fill whose boundary is not drawn (rejected by
+  `rendering()`) and has the fill's owner outlines its boundary's geometry
+  in the selection overlay.
+- **R-31** (D24) — the move and rotate preview leaves out the keys the
+  move leaves out (controller's ruling on T-7).
 
 ## Open questions for the human
 
@@ -1946,7 +2018,7 @@ checked against the code or the arithmetic before it was applied.
 | S-2 (major) the 150 mm pull-back area | **Adopted, 160 mm.** The partition keeps its north T, so its band stays in the merged face: 29,640,000 − 100 × 3,740 = 29,266,000 (`29.27 m²`, 0.001 from a tie). D8's row and `RD5` (asserting the area) changed |
 | S-3 (major) `room.shared` has no way to find other rooms | **Adopted.** `ParametricView.objectsOf<U>()`, survey-backed and memoised (D16), listed in the engine tables; `SD10`, M-10objects |
 | S-4 (major) the trigger rebuilds rooms along unchanged neighbours | **Adopted in full.** `placeInput` compared before and after; only a changed contributor adds its boxes; no reader, no trigger; the cost bound restated (D16.2, D16.6); `SD9`, M-10allK; `RK2` at the corpus rotation and on long exterior walls. The no-drift proof reads only changed inputs and stands |
-| S-5 hover outside a face re-traces everything | **Adopted, partly.** A pointer outside the union of place boxes short-circuits to `Unbounded`; a `SeedInWall` verdict is cached with its band. An `Unbounded` point inside the plan (an open courtyard) has no cheap containment test and is re-traced per move, measured in `TT6` (D19); M-10hover |
+| S-5 hover outside a face re-traces everything | **Adopted, partly.** A pointer outside the union of place boxes short-circuits to `Unbounded`; a `SeedInWall` verdict is cached with its band. An `Unbounded` point inside the plan (an open courtyard) is re-traced per move, measured in `TT6` (D19); M-10hover. *Revision 3 (T-1, T-8): the short-circuit is on the bounding box of the place boxes, and a courtyard cache is possible but not needed* |
 | S-6 growth loop may not terminate | **Adopted.** A non-finite place box is `null`; the loop ends when `B` contains the union of the finite boxes (D7); separators with a non-finite endpoint are degenerate |
 | S-7 M-10cert ambiguous | **Adopted the definition** (return the first `Traced`). **Not adopted: the two-round fixture.** One certificate round always suffices (the re-traced face lies inside the first, so its grown box does too; now stated in D7), so no fixture can need two; `LZ2` kills the mutant as defined |
 | S-8 `PG2` cannot see M-10pagekey | **Adopted:** `PG2` counts `generate` calls |
@@ -1974,3 +2046,23 @@ checked against the code or the arithmetic before it was applied.
 - **28** — the tint is the page's foreground at about 10%: R-8 and R-9 now
   cite it (D9).
 - **Open questions for the human:** none left.
+
+## Revision 3
+
+The independent re-review of revision 2 (`6163da8`; "Ready with
+amendments", T-1 to T-8, one major). Each finding was checked against the
+spec and the code before it was applied; the controller's instructions
+are marked.
+
+| Finding | Outcome |
+|---|---|
+| T-1 (major) the hover short-circuit calls room interiors `Unbounded` | **Adopted** (controller). Checked: the Kitchen seed (19,000, 10,000) lies outside every wall's band box (E1 to y 8,250, P3 from y 11,440, P1 to x 17,060, P5 from x 21,440). The short-circuit is now "outside the **bounding box** of every finite place box" (D19); `TT6` gains the Kitchen-seed hover, which must be traced and previewed; M-10hover and a new M-10hoverunion (the union wording) are in D19's "Pinned by" |
+| T-2 `placeInput` defaults to the box | **Adopted: the default is "always changed"** (a fresh `Object()`), not "required". Why: a Dart abstract member would bind every parametric type, contributor or not, and "always changed" can only over-rebuild. The wall and separator override it. `SD11` (the diagonal flip, with the default and with an override) and M-10inputbox |
+| T-3 S-4's example is axis-aligned only | **Adopted** (controller): D16.6 says so and quotes the re-review's run at 23° (`[Kitchen, Bath, Living]`) |
+| T-4 the bulk pass's count | **Adopted** (controller): `debugPlaceBoxCalls` counts calls into a type's `placeBox`, memo hits excluded, so the bulk pass makes `c − |K ∩ contributors live after|` calls; D16.6 and `SD6` agree |
+| T-5 `RL1`'s placements | **Adopted** (controller): all six, in D10 and the tests |
+| T-6 D24 keys on the flag; the transform assumes one owner | **Adopted** (controller): the rule keys on "the boundary is rejected by `rendering()`" (which covers the flag and a hidden boundary layer) and requires the boundary's owner to be the fill's; `OL2` gains both cases; R-30 reworded |
+| T-7 the move preview drags a room's ring | **Controller's ruling: non-movable keys are left out of the move and rotate preview**, consistent with R-22. `GripCache` keeps each key's movability at its rebuild (`isMovable`); `_paintPreview` skips the others; one set lookup per key per frame, no allocation (D24, R-31); `OL5` and M-10preview; the render `lib` change list, the 03 D7 amendment row and gate 14 updated |
+| T-8 a courtyard cache exists | **Not adopted** (controller): the per-move re-trace stays, timed in `TT6`. Revision 2's "no cheap containment test" is reworded to "not needed" (D19 and the Revision 2 table) |
+
+**Open questions for the human:** none.
