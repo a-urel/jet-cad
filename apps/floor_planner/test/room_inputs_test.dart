@@ -1,6 +1,7 @@
 // Spec 10 D4: the trace inputs, through the view adapter and the document
-// adapter, agree bit for bit (RI1); a wall whose local ring falls back is
-// traced as drawn (RT5).
+// adapter, agree bit for bit (RI1); an input is equal only to the same
+// input, bit for bit, as `placeInput` needs (RI2); a wall whose local ring
+// falls back is traced as drawn (RT5).
 import 'dart:math' as math;
 import 'dart:typed_data' show ByteData;
 
