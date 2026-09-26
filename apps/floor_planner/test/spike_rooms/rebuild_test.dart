@@ -116,7 +116,8 @@ void main() {
         rooms += seeds.length;
       }
       // ignore: avoid_print
-      print('Q3a $place: $rooms rooms, restricted == all walls, both sets');
+      print(
+          'Q3a $place: $rooms rooms, restricted == all walls, all three sets');
     });
   }
 
@@ -156,10 +157,13 @@ void main() {
         final refs = verdictOf(plan, right);
         roomTraceSet = RoomTraceSet.refsAndNeighbours;
         final withNb = verdictOf(plan, right);
+        roomTraceSet = RoomTraceSet.neighboursShape;
+        final shape = verdictOf(plan, right);
         roomTraceSet = RoomTraceSet.refs;
         final line = '$what: all walls ${all.toStringAsFixed(1)}; '
             'refs ${refs is RoomOk ? refs.trace.area.toStringAsFixed(1) : refs}; '
             'refs+neighbours ${withNb is RoomOk ? withNb.trace.area.toStringAsFixed(1) : withNb}; '
+            'neighbours shape ${shape is RoomOk ? shape.trace.area.toStringAsFixed(1) : shape}; '
             'label after the add ${labelsOf(plan.doc, right)} (was $before); '
             'room alive ${alive(plan.doc, right)}; drift ${plan.system.drift()}; '
             'added ${x.map((h) => h.value)}';
@@ -181,6 +185,118 @@ void main() {
       run([(6500, 0, 6500, 4000, 100)], 'c3 T-joined partition');
     });
   }
+
+  test('Q3b c4 a bound moved into an unreferenced wall\'s band', () {
+    for (final place in [origin, corpus]) {
+      final plan = buildPlan(twoRoomWalls, place: place);
+      final right = clickRoom(plan.doc, plan.at(5500, 2000), 'Right')!;
+      // The partition onto the west wall's centreline: its band (-50..50)
+      // lies inside the west wall's (-100..100), which the right room
+      // does not reference.
+      setWall(plan, plan.walls[4],
+          (_) => movedWall(plan, plan.walls[4], s: (0, 0), e: (0, 4000)));
+      final all = areaOf(traceAll(plan.doc, plan.at(5500, 2000)));
+      final refs = verdictOf(plan, right);
+      roomTraceSet = RoomTraceSet.refsAndNeighbours;
+      final nb = verdictOf(plan, right);
+      roomTraceSet = RoomTraceSet.neighboursShape;
+      final shape = verdictOf(plan, right);
+      roomTraceSet = RoomTraceSet.refs;
+      // ignore: avoid_print
+      print('Q3b $place c4: all walls $all (by hand (7900 - 100) x 3800 = '
+          '29,640,000); refs '
+          '${refs is RoomOk ? refs.trace.area : refs} (by hand (7900 - 50) '
+          'x 3800 = 29,830,000); refs+neighbours '
+          '${nb is RoomOk ? nb.trace.area : nb}; neighbours shape '
+          '${shape is RoomOk ? shape.trace.area : shape}; label '
+          '${labelsOf(plan.doc, right)}');
+      expect(all, closeTo(29640000, 1e-2));
+      expect((refs as RoomOk).trace.area, closeTo(29830000, 1e-2));
+    }
+  });
+
+  test('Q3e the closure: refs+neighbours reads two hops, refs only one', () {
+    Handle addW(Plan plan, W w) {
+      final (sx, sy, ex, ey, t) = w;
+      final h = plan.doc.handleSeed.next();
+      plan.doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: h,
+            parent: plan.doc.rootHandle,
+            transform: Transform2.identity(),
+            children: const [])),
+        SetComponentCommand<WallParams>(
+            h,
+            WallParams(plan.at(sx, sy).x, plan.at(sx, sy).y, plan.at(ex, ey).x,
+                plan.at(ex, ey).y, t, Justification.centre)),
+      ], label: 'Add wall'));
+      return h;
+    }
+
+    for (final mode in RoomTraceSet.values) {
+      roomTraceSet = mode;
+      final plan = buildPlan(boxWalls);
+      final room = clickRoom(plan.doc, plan.at(6000, 3000), 'Box')!;
+      // Q: a stub T-joined into the south wall, free end in the room.
+      addW(plan, (4000, 0, 4000, 1500, 100));
+      final afterQ = labelsOf(plan.doc, room);
+      final driftQ = plan.system.drift();
+      // X: joins Q's free end at a node (an L), away from every bound.
+      addW(plan, (4000, 1500, 5000, 1500, 100));
+      final driftX = plan.system.drift();
+      // ignore: avoid_print
+      print('Q3e $mode: after Q $afterQ, drift $driftQ; after X, label '
+          '${labelsOf(plan.doc, room)}, drift $driftX (room ${room.value})');
+      switch (mode) {
+        case RoomTraceSet.refs:
+          expect(driftX, isEmpty);
+          expect(labelsOf(plan.doc, room), ['Box', '29.64 m²']);
+        case RoomTraceSet.refsAndNeighbours:
+          // Q is a neighbour of the south wall and now bounds the room.
+          expect(alive(plan.doc, room), isFalse);
+        case RoomTraceSet.neighboursShape:
+          // Q shapes the ring; X, two hops away, changes Q's outline, and
+          // the room is not in X's closure.
+          expect(driftX, [room]);
+      }
+    }
+    roomTraceSet = RoomTraceSet.refs;
+  });
+
+  test(
+      'Q3d rule 4 (every bound carries an edge) dissolves a valid room: a '
+      'stub wall pushed into the wall it stood against', () {
+    final plan =
+        buildPlan([...boxWalls, (2000, 250, 3000, 250, 300)], place: corpus);
+    final room = clickRoom(plan.doc, plan.at(5500, 2000), 'Box')!;
+    // 7800 x 3800 - 1000 x 300 = 29,640,000 - 300,000 = 29,340,000.
+    expect(labelsOf(plan.doc, room), ['Box', '29.34 m²']);
+    expect(plan.doc.components.get<RoomParams>(room)!.bounds,
+        contains(plan.walls[4]));
+    setWall(
+        plan,
+        plan.walls[4],
+        (p) => movedWall(plan, plan.walls[4], s: (2000, 0), e: (3000, 0))
+            .copyWith(thickness: 150));
+    final all = areaOf(traceAll(plan.doc, plan.at(5500, 2000)));
+    // ignore: avoid_print
+    print('Q3d the stub inside the south wall\'s band: all walls $all '
+        '(7800 x 3800 = 29,640,000); room alive ${alive(plan.doc, room)}');
+    expect(all, closeTo(29640000, 1e-2));
+    expect(alive(plan.doc, room), isFalse);
+  });
+
+  test('Q5 a direct edit of a generated label is refused (06 D6)', () {
+    final plan = buildPlan(twoRoomWalls);
+    final room = clickRoom(plan.doc, plan.at(1500, 2000), 'Left')!;
+    final label = kids(plan.doc, room)
+        .firstWhere((k) => kindOf(plan.doc, k) == EntityKind.text);
+    expect(
+        () => plan.doc.commands
+            .execute(SetEntityTextCommand(label, 'Renamed', '')),
+        throwsA(isA<GeneratedGeometryError>()));
+    expect(labelsOf(plan.doc, room), ['Left', '10.83 m²']);
+  });
 
   // -----------------------------------------------------------------------
   // Q3c: the ring-breaks rule, e2e, with dissolve.

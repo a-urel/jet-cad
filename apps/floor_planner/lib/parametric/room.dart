@@ -91,8 +91,13 @@ enum RoomTraceSet {
   /// computed among all of its wall neighbours (07's joints).
   refs,
 
-  /// Decision 1 as written: the referenced objects and their neighbours.
+  /// The referenced objects and their neighbours; an edge from a
+  /// neighbour breaks the ring (rule 3).
   refsAndNeighbours,
+
+  /// Decision 1 read literally: the referenced objects and their
+  /// neighbours, all of which shape the ring (rule 3 off).
+  neighboursShape,
 }
 
 /// SPIKE switch for Q3's experiment. The spike's rule is [RoomTraceSet.refs].
@@ -200,7 +205,7 @@ RoomVerdict _verdict(ParametricView view, Handle self) {
     ...p.bounds,
     for (final i in p.islands)
       if (live(i)) i,
-    if (roomTraceSet == RoomTraceSet.refsAndNeighbours)
+    if (roomTraceSet != RoomTraceSet.refs)
       for (final b in p.bounds)
         for (final n in view.neighbours(b))
           if (live(n)) n,
@@ -221,7 +226,8 @@ RoomVerdict _verdict(ParametricView view, Handle self) {
       final allowed = {...p.bounds, ...p.islands};
       final used = {...r.outerSources, ...r.holeSourceSet};
       for (final u in used) {
-        if (!allowed.contains(u)) {
+        if (roomTraceSet != RoomTraceSet.neighboursShape &&
+            !allowed.contains(u)) {
           return RoomBroken('${u.toHex()} now bounds the room');
         }
       }
