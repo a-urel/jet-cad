@@ -77,11 +77,23 @@ List<List<double>> worldSegments(DraftDocument doc, Handle group) {
 String enc(DraftDocument d) => DraftDocumentCodec.encodeToString(d);
 
 /// Entities sorted by handle: slot order is history, not state (spec D11).
-String canon(DraftDocument d) {
+/// [sortNodes] also sorts every node's child list: `RemoveNodeCommand`'s
+/// inverse re-links a restored node at the end of its parent, so a
+/// delete-then-undo reorders the root's children without changing draw
+/// order, which is ascending handle value.
+String canon(DraftDocument d, {bool sortNodes = false}) {
   final j = DraftDocumentCodec.encode(d);
   j['entities'] = List<Map<String, Object?>>.from(j['entities']! as List)
     ..sort((a, b) => ((a['record']! as Map)['handle']! as int)
         .compareTo((b['record']! as Map)['handle']! as int));
+  if (sortNodes) {
+    for (final n in j['nodes']! as List) {
+      final children = (n as Map)['children'];
+      if (children is List) {
+        children.sort((a, b) => (a as int).compareTo(b as int));
+      }
+    }
+  }
   return jsonEncode(j);
 }
 

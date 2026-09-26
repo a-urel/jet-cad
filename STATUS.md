@@ -1,5 +1,56 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-26. **Plan 08 (openings) is EXECUTED on
+`plan-08/openings`, NOT MERGED.** The merge is the human's, `--no-ff`.
+**Exit gate 15 of 17: criterion 1's macOS half (`flutter build macos
+--release` and the four lines on macOS) and criterion 17 (the look) are
+OWED.**
+- **What landed:**
+  - doors, windows and gaps hosted in walls. Each is its own parametric
+    object storing its host wall's handle and a position along the host's
+    centreline. It cuts the host's band into pieces and splits its
+    centreline, and draws its symbol. It stays out of corners and out of
+    other walls' T butts and crossings;
+  - it moves with its wall, is deleted with it in one undo step, and stays
+    put when the wall's end is dragged;
+  - the Door (D), Window (N) and Gap (G) tools, with edge snaps; a slide
+    grip; the Opening section; openings are not moved or rotated by the
+    select tool;
+  - the sample plan, rebuilt from 07 walls and 08 openings;
+  - in the engine: references between parametric objects, a closure that
+    follows them, a per-type reference policy (`cascade` or `orphan`) run
+    inside the edit, and dangling references refused on edit and reported
+    on load.
+- **Gates on the final tree (Linux container):**
+  - engine 1,014 (+ the two standing Linux-only hash tests);
+  - render layer 936 + 1 skip + 7 standing goldens;
+  - harness 82;
+  - app 244;
+  - `flutter build web --release` `✓ Built`.
+- **Mutants:** 228 fired, 220 killed, 0 survived; 8 equivalent; 8 N/A. The
+  spec's 37 named mutants took 50 fires, one per site, and all were killed.
+- **The final whole-branch review** ("With fixes", at `5739442`) and its
+  **final fix wave** are done: an opening clamped against a slightly
+  kinked joint no longer refuses the edit (D8: every piece left is valid;
+  D9: the back-tracking vertex dropped; the review's sweep went from 79
+  of 1,620 refused to 0), a no-fit tool position stays in `[0, L]`, and
+  the review's four surviving mutants are killed.
+- **Owed:**
+  - `flutter build macos --release` and the gate lines on macOS: the
+    human's machine;
+  - the look: eleven items per platform, on macOS, in Chrome and in
+    Firefox.
+- **Next:**
+  1. the fix wave's review, if the controller calls one;
+  2. the ledger archive, as the branch's last commit;
+  3. the human's macOS build and look;
+  4. the merge.
+
+See [Plan 08](#plan-08--openings-executed-on-plan-08openings-not-merged)
+and [Resume here](#resume-here).
+
+*Earlier, 2026-09-25:*
+
 **Last updated:** 2026-09-25. **Plan 07 (walls) is MERGED into `main` at
 `63c3878`, and `fix/post-07` at `1ae83f9`**, both `--no-ff` on the human's
 decision and pushed by the human. The human's report on 07: "it works,
@@ -367,6 +418,137 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 08 — openings (executed on `plan-08/openings`, not merged)
+
+**Plan 08 gives the walls their doors, windows and gaps.** An opening is
+its own parametric object: a root-level group carrying `OpeningParams`
+(host, position from the host's start to the centre, width, kind, and for
+a door its hinge and swing).
+- **It reaches its wall through an explicit engine reference.** A wall
+  reads its openings through `view.referrers`; the closure follows
+  references both ways, plus one hop to the referrers of the core.
+- **The wall splits its band** into one region per piece, between the
+  merged cuts, and its centreline into one polyline per piece. Cuts stay
+  inside the wall's straight span and out of other walls' T butts and
+  crossings.
+- **An opening draws its symbol** (a leaf and a quarter arc, three lines,
+  or an inset threshold line) ByLayer, computed in the host's space.
+- **A deleted wall takes its openings** in the same edit (the `cascade`
+  policy), and an end drag rewrites positions so they stay put.
+
+**Where it stands.** `plan-08/openings` was cut from `spec-08/openings` at
+`e30386a` (`main` `357bea6` + spike note `11f26bc` + spec `75c6c0f`,
+`48173e2` + plan `9be697f` + amendment `e30386a`), in the worktree
+`.claude/worktrees/plan-openings`.
+- Tasks 1–14 and their fix rounds are at `328df0b..de66cd2`.
+- Task 15 (invariants and greps) needed no commit.
+- Task 16 is `6b3b944` (the Task 14 review's minors) and the commit that
+  adds this section (the results note, the spec and plan amendments, this
+  file, the roadmap).
+- The human authorised pushes at `c71d3b1` and `2670033`, and another
+  "when Task 16 is done".
+
+**NOT MERGED.** Next come the final whole-branch review, its fix wave if
+any, and the ledger archive
+(`docs/superpowers/ledgers/2026-09-25-openings/`) as the branch's last
+commit. **The merge is the human's decision, `--no-ff`.**
+
+**Documents:**
+- **Spec:** [2026-09-25-openings-design.md](docs/superpowers/specs/2026-09-25-openings-design.md),
+  revision 1.
+  - Amended by the controller in flight: D7, D8, D10, D12 and D17.
+  - Amended at execution by Task 16: the header, D2, D4, D5, D7, D9, D13,
+    D14, D15, D16, the Files, the tests by area, the named mutants and the
+    open questions.
+- **Plan:** [2026-09-25-openings.md](docs/superpowers/plans/2026-09-25-openings.md),
+  with "Amended at execution" notes on Tasks 1–14, Ruling 08-16, the
+  Global Constraints and the mutant assignment.
+- **Results:** [2026-09-25-plan-08-results.md](docs/superpowers/notes/2026-09-25-plan-08-results.md).
+- **Mutation log:** [plan-08-mutation-log.md](docs/superpowers/notes/plan-08-mutation-log.md).
+  **214 fired, 207 killed, 0 survived; 7 equivalent; 8 N/A.**
+- **Spike:** [2026-09-25-openings-spike-findings.md](docs/superpowers/notes/2026-09-25-openings-spike-findings.md)
+  (`spike/08-openings` at `634fa7c`, kept as the record, never to be
+  merged).
+
+**Delivered:**
+- **In `jet_cad_2d`,** changing only `parametric_system.dart` and
+  `regeneration.dart`:
+  - `ParametricType.references` and `referencePolicy`, and
+    `ParametricView.referrers`;
+  - the survey's references and referrers maps, and
+    `debugReferenceCalls`;
+  - the two-hop closure;
+  - `_cascade` inside `_run`, under the rollback;
+  - `DanglingReferenceError` and the D5 check;
+  - `parametric.dangling` and `parametric.orphan`;
+  - `paramsOf` null for any handle that is not a live object of the view.
+- **In `jet_cad_2d_flutter`:**
+  - `ObjectGripProvider.movable`, honoured by `GripDrag.move` and
+    `GripDrag.rotate`, `rotatable`, `hitsRotationGrip` and the select
+    tool's four sites and cursor;
+  - the exported `movableKey`;
+  - `PlacementTool.markerPoint`.
+- **In `apps/floor_planner`:**
+  - `opening.dart`, `opening_geometry.dart` (pure Dart),
+    `opening_tool.dart`, `opening_grips.dart`, `object_grips.dart` and
+    `wall_bands.dart`;
+  - `wall.dart` (pieces and the split centreline), `wall_geometry.dart`
+    (`capsOf`) and `wall_grips.dart` (D13);
+  - the Opening section, D, N and G in the shell, and the rebuilt
+    `startup_plan.dart`.
+
+**Rulings a reader must know** (all of them, with costs, are in the
+results note):
+- **An opening that does not fit** keeps its stored position, is drawn
+  clamped into the nearest stretch wide enough, or is drawn outside the
+  wall (no-fit), and is diagnosed. A wall always keeps a piece: openings
+  are admitted in ascending handle order, and the one that would empty
+  the wall is no-fit.
+- **Stored where it is drawn:** the tools, the slide grip and the end
+  drag store the centre of the cut the opening gets (`storedCentreOf`, an
+  ulp correction), so nothing is clamped by rounding.
+- **Openings are not moved or rotated by the select tool;** in a mixed
+  selection they are skipped, and a door selected with its wall follows
+  the wall.
+- **The references survey is O(n) per edit, twice.** Measured: at 600
+  walls a root line draw costs about 5 ms (`RC3`). `RC1` pins the call
+  count.
+
+### What Plan 08 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **1,014** pass and the 2 standing Linux-only hash tests (`00:13 +1014 -2`, exit 1); analyze and format clean. 987 at the branch point |
+| `packages/jet_cad_2d_flutter` | **936** pass, 1 skip, 7 standing goldens (`00:43 +936 ~1 -7`, exit 1); analyze and format clean. 931 at the branch point |
+| `apps/dev_harness_2d` | **82** (`00:33 +82: All tests passed!`, exit 0), unchanged |
+| `apps/floor_planner` | **232** (`00:44 +232: All tests passed!`, exit 0); analyze and format clean; `flutter build web --release` `✓ Built`. 157 at the branch point |
+| references cost (`RC1`, `RC2`) | `RC1` pinned: exactly 2n `references` calls and 0 overlap tests for a line draw among n objects. `RC2` at 300 Posts + 300 Pins: 2.56 ms per line draw, 2.48 ms per move, against 07's `NC4` at 600 objects: 2.65 / 2.33 ms |
+| app edit cost (`RC3`, JIT) | 600 walls with a door each: 5.03 ms per line draw, 4.85 ms per move |
+| 50 openings on one wall | a thickness edit 21–27 ms without the per-view memo, 4.1–6.0 ms with it (Task 6) |
+| opening tools' hover at 600 walls (`OT4`) | 3.62 µs over no wall; 10.22 µs over a wall, with the preview |
+| property run (`OG9`) | 1,817 walls, 3,235 openings: 0 refused, 0 tiling violations, 0 childless walls; diagnostics equal to the oracle's in every trial; 0 fitting symbols covered |
+| end drags | 2,000 random drags drift at most 1.9e-7 mm; `EP7`: 97 of 200 flush doors re-seated, 0 left clamped |
+| mutations | **214 fired, 207 killed, 0 survived** |
+| the allocation invariants | green and unedited since `e30386a` |
+| the look | **OWED** (eleven items per platform) |
+
+**Exit gate: 15 of 17.** Criteria 2–16 PASS. Criterion 1 is green on
+Linux, and its macOS half is OWED. Criterion 17 is OWED.
+
+**Known limits and debt, one line each** (the full lists are in the
+results note):
+- a short T stub over-blocks about a metre of its host;
+- a near-parallel wall's crossing jumps from blocking nothing to
+  blocking the rest of the host;
+- a no-fit symbol at an acute corner can hide in its host's lobe (D12);
+- a 600-wall line draw costs about 5 ms;
+- 06's bare `RemoveNodeCommand` debt;
+- paste and import must remap stored handles;
+- the rotate-about-base-point follow-up;
+- the Text tool's web alt-tab (fix/post-07).
 
 ---
 
@@ -1907,11 +2089,20 @@ into a standing test. Full account:
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
 | `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **MERGED at `fb0f87d`.** The worktree is the session that ran the plan; remove it and `git branch -d plan-05/drawing-tools` when that session closes. The pre-merge state, for the record: **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**In flight: `plan-07/walls`** (Plan 07, walls), in the session worktree
+**In flight: `plan-08/openings`** (Plan 08, openings), in the worktree
+`.claude/worktrees/plan-openings`, cut from `spec-08/openings` at
+`e30386a`. It is executed and not merged; see
+[Plan 08](#plan-08--openings-executed-on-plan-08openings-not-merged).
+`spec-08/openings` holds the spike note, the spec and the plan commits,
+and `spike/08-openings` (`634fa7c`) is the spike's record, never to be
+merged.
+
+*Before Plan 08 ran, this paragraph read:* **In flight: `plan-07/walls`** (Plan 07, walls), in the session worktree
 `.claude/worktrees/walls`, cut from `spec-07/walls` at `f2daba5`. It is
 executed and not merged; see [Plan 07](#plan-07--walls-executed-on-plan-07walls-not-merged).
 `spec-07/walls` holds the spec and plan commits, and `spike/07-walls`
-(`45aecb6`) is the spike's record, never to be merged.
+(`45aecb6`) is the spike's record, never to be merged. (Plan 07 has
+since merged, at `63c3878`.)
 
 **Before Plan 07, nothing was in flight.** Plan 05 is merged at `fb0f87d`; its branch
 waits only for its session's worktree to close. Plan 03
@@ -2066,7 +2257,59 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice of what comes after 07.**
+**Immediate next step: the human's macOS build and look at Plan 08
+(openings), on `plan-08/openings`, then the merge.**
+- Tasks 1–14 are done (`328df0b..de66cd2`), Task 15 needed no commit,
+  Task 16 is `6b3b944`, `6ea2d70` and the controller's `5739442`.
+- The final whole-branch review returned "With fixes" at `5739442` (I1:
+  a non-triangulable piece at a slightly kinked joint refused the edit);
+  the fix wave `ce8497c` was re-reviewed **"Ready to merge"** (the
+  reviewer's repro lands, its 1,620-case sweep refuses 0, its UI probes
+  pass, ~30,000 fuzz steps with 0 refusals, 0 exceptions, 0 drift).
+- The four gate lines are green on Linux: engine 1,014 + 2 standing;
+  render layer 936 + 1 skip + 7 standing; harness 82; app 244; web `✓
+  Built`.
+- 228 mutants were fired: 220 killed, 0 survived, 8 equivalent.
+- The ledger is archived at `docs/superpowers/ledgers/2026-09-25-openings/`
+  as the branch's last commit.
+
+**What resumes here, in order:**
+1. the human's `flutter build macos --release`, the gate lines on macOS,
+   and the look (eleven items per platform, from
+   [2026-09-25-plan-08-results.md](docs/superpowers/notes/2026-09-25-plan-08-results.md));
+2. the merge, the human's decision, `--no-ff`, from the main checkout;
+3. then the human's choice of next work: the rotate-about-a-base-point
+   follow-up (a general transform feature), the Text tool's web alt-tab
+   `fix/`, or sub-project 10 (rooms) — see the results note's debt list.
+
+*Before the final re-review, this paragraph read:* **Immediate next step: the ledger archive of Plan 08 (openings), on
+`plan-08/openings`, after the final fix wave** (the final whole-branch
+review returned "With fixes" at `5739442`; the fix wave is the commit
+that writes this sentence).
+- Tasks 1–14 are done (`328df0b..de66cd2`), Task 15 needed no commit,
+  Task 16 is `6b3b944`, `6ea2d70` and the controller's `5739442`, and the
+  final fix wave is the commit that writes this sentence.
+- The four gate lines are green on Linux: engine 1,014 + 2 standing;
+  render layer 936 + 1 skip + 7 standing; harness 82; app 244; web `✓
+  Built`.
+- 228 mutants were fired: 220 killed, 0 survived, 8 equivalent.
+
+**What resumes here, in order:**
+1. a review of the final fix wave, if the controller calls one (the
+   final whole-branch review and its fix wave are done);
+2. the ledger archive (`docs/superpowers/ledgers/2026-09-25-openings/`)
+   as the branch's last commit;
+3. the human's `flutter build macos --release`, the gate lines on macOS,
+   and the look (eleven items per platform, from
+   [2026-09-25-plan-08-results.md](docs/superpowers/notes/2026-09-25-plan-08-results.md));
+4. the merge, the human's decision, `--no-ff`, from the main checkout.
+
+The human also asked for a push of `plan-08/openings` when Task 16 is
+done (ledger). Plan 06's itemised look is still OWED. Nothing was
+simulated to fill in any look. See
+[Plan 08](#plan-08--openings-executed-on-plan-08openings-not-merged).
+
+*Before Plan 08 ran, this paragraph read:* **Immediate next step: the human's choice of what comes after 07.**
 `main` is at `1ae83f9`: Plan 07 (walls) merged at `63c3878`, `fix/post-07`
 at `1ae83f9`, both pushed. **The options:**
 1. a `fix/` branch for the Text tool's pending entry, which is lost on a

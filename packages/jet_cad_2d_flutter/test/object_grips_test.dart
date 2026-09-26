@@ -1,5 +1,7 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show SystemMouseCursors;
 import 'package:flutter/widgets.dart' show Offset, Path;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -35,10 +37,24 @@ Handle lineOf(DraftDocument d, Handle group) {
 /// A provider for any group owning a LINE: two stretch grips at that line's
 /// world endpoints. [drag] rewrites the line's end in the group's local
 /// space; [replacement], when set, is the command [drag] returns instead.
+/// [movable] answers true except for the groups in [immovable] (spec 08
+/// D16).
 final class FakeObjects implements ObjectGripProvider {
-  FakeObjects({this.replacement});
+  FakeObjects({this.replacement, this.immovable = const {}});
 
   final DraftCommand Function(DraftDocument d, Handle group)? replacement;
+
+  /// The groups [movable] calls immovable.
+  final Set<Handle> immovable;
+
+  /// Every group [movable] was asked about, in order.
+  final List<Handle> movableAsked = [];
+
+  @override
+  bool movable(DraftDocument d, Handle group) {
+    movableAsked.add(group);
+    return !immovable.contains(group);
+  }
 
   /// Every group [gripsOf] was asked about, in order.
   final List<Handle> asked = [];
@@ -118,6 +134,39 @@ int objectGrip(GripRig rig, Handle group, int ordinal) => rig.grips.grips
 /// A world point off every other object: 30 up and 20 across from the
 /// group's far end, in world.
 Vector2 targetFrom(Grip g) => Vector2(g.x + 20, g.y + 30);
+
+/// The handle a move's or rotate's member rewrites.
+Handle memberOf(DraftCommand c) => switch (c) {
+      SetEntityGeometryCommand(:final handle) => handle,
+      TransformNodeCommand(:final handle) => handle,
+      _ => throw StateError('unexpected member $c'),
+    };
+
+/// [t]'s six numbers, for exact comparison.
+List<double> numbers(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+
+/// A second root-level group beside the scene's: rotated, off the origin,
+/// owning one LINE of its own.
+Handle addOtherGroup(DraftDocument doc) {
+  final g = addGroup(doc, doc.rootHandle,
+      Transform2.translation(7320, 3110).multiply(Transform2.rotation(-0.4)));
+  addEntity(doc, g, EntityKind.line, [0, 0, 25, 10], []);
+  doc.commands.clearHistory();
+  return g;
+}
+
+/// The screen point of the scene group's line at 20 of its 40, local: its
+/// body, 20 away from both of the fake's grips.
+Offset groupBody(GripRig rig, Handle group) {
+  final p = rig.document.tree
+      .accumulatedTransform(group)
+      .transformPoint(Vector2(20, 0));
+  return screenOf(rig.camera, p.x, p.y);
+}
+
+/// Hovers [at] with no button down.
+void hover(GripRig rig, Offset at) =>
+    rig.tool.onPointerMove(pointerAt(rig.camera, at, buttons: 0), rig.context);
 
 void main() {
   test(
@@ -339,5 +388,190 @@ void main() {
     expect(componentsOnly.drags, isEmpty);
     expect(drag.command(DraftPermissions.all), isNotNull,
         reason: 'the control: allowed, it builds');
+  });
+
+  // ---- Spec 08 D16, Ruling 08-16: `movable` -----------------------------
+
+  test(
+      'MV1 (M-08i) GripDrag.move and rotate skip a root-level group the '
+      'provider calls immovable: alone nothing is captured; in a mixed '
+      'selection the rest moves and rotates and the group stays', () {
+    final f = scene();
+    final doc = f.s.document;
+    final other = addOtherGroup(doc);
+    final fake = FakeObjects(immovable: {f.group});
+    final pivot = Vector2(7310, 3170), press = Vector2(7390, 3120);
+
+    // Alone: nothing to capture, so no drag.
+    expect(GripDrag.move(doc, [k(f.group)], objects: fake), isNull);
+    expect(GripDrag.rotate(doc, [k(f.group)], pivot, press, objects: fake),
+        isNull);
+    // The controls: without a provider it is captured.
+    expect(GripDrag.move(doc, [k(f.group)]), isNotNull);
+    expect(GripDrag.rotate(doc, [k(f.group)], pivot, press), isNotNull);
+
+    final keys = [k(f.s.instA), k(f.group), k(other), k(f.s.line)];
+    final rest = [f.s.line, f.s.instA, other]
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final g0 = doc.tree[f.group]!;
+    final o0 = doc.tree[other]!.transform;
+    final before = snapshot(doc);
+
+    // The move: only root-level groups are asked.
+    fake.movableAsked.clear();
+    final move = GripDrag.move(doc, keys, objects: fake)!
+      ..base.setValues(7100, 3100)
+      ..moveTo(Vector2(7163.5, 3071.25));
+    expect(fake.movableAsked.toSet(), {f.group, other});
+    final moved = move.command(DraftPermissions.all)! as CompoundCommand;
+    expect([for (final c in moved.children) memberOf(c)], rest);
+    doc.commands.execute(moved);
+    expect(doc.tree[f.group], g0, reason: 'the immovable group stays');
+    expect(numbers(doc.tree[other]!.transform),
+        numbers(move.transform!.multiply(o0)),
+        reason: 'the movable group moves');
+    doc.commands.undo();
+    expect(snapshot(doc), before);
+
+    // The rotate.
+    final rotate = GripDrag.rotate(doc, keys, pivot, press, objects: fake)!
+      ..rotateTo(pivot + Vector2(math.cos(1.1), math.sin(1.1)) * 80,
+          step: false);
+    final rotated = rotate.command(DraftPermissions.all)! as CompoundCommand;
+    expect([for (final c in rotated.children) memberOf(c)], rest);
+    doc.commands.execute(rotated);
+    expect(doc.tree[f.group], g0, reason: 'the immovable group stays');
+    expect(numbers(doc.tree[other]!.transform),
+        numbers(rotate.transform!.multiply(o0)),
+        reason: 'the movable group turns');
+  });
+
+  test(
+      'MV2 (X11-rotgrip, M-08i) the rotation grip needs a movable key: an '
+      'immovable group alone has a box but is not rotatable, and its grip '
+      'is neither hit nor pressed; beside a movable key it is', () {
+    final f = scene();
+    final doc = f.s.document;
+    final rig = gripRig(doc, objects: FakeObjects(immovable: {f.group}));
+    final m = rig.camera.value.worldToScreenMatrix;
+    rig.selection.replace([k(f.group)]);
+    expect(rig.grips.box, isNotNull, reason: 'the group has an outline');
+    expect(rig.grips.rotatable, isFalse);
+    final disc = rotationGripOf(rig.grips.box!, m, rig.grips.frame).centre;
+    expect(rig.grips.hitsRotationGrip(disc, m), isFalse);
+    rig.tool.onPointerDown(pointerAt(rig.camera, disc), rig.context);
+    expect(rig.tool.pressClass, isNot(PressClass.rotationGrip));
+    release(rig, disc);
+
+    // With a movable leaf beside it: rotatable, and hit.
+    rig.selection.replace([k(f.group), k(f.s.line)]);
+    expect(rig.grips.rotatable, isTrue);
+    final both = rotationGripOf(rig.grips.box!, m, rig.grips.frame).centre;
+    expect(rig.grips.hitsRotationGrip(both, m), isTrue);
+
+    // The control: a provider that calls it movable.
+    final movable = gripRig(doc, objects: FakeObjects());
+    movable.selection.replace([k(f.group)]);
+    expect(movable.grips.rotatable, isTrue);
+    expect(movable.grips.hitsRotationGrip(disc, m), isTrue);
+  });
+
+  test(
+      'MV3 (X11-cursor, M-08i) through the select tool, at all four of its '
+      'call sites: a body drag on a selected or unselected immovable group '
+      'stays a click with no command and hovering it shows no move cursor; '
+      'a centre grip and the rotation grip move and turn the rest only', () {
+    final f = scene();
+    final doc = f.s.document;
+    final rig = gripRig(doc, objects: FakeObjects(immovable: {f.group}));
+    final body = groupBody(rig, f.group);
+    final away = body + const Offset(60, -35);
+    final g0 = doc.tree[f.group]!;
+    final before = snapshot(doc);
+
+    // Selected: no move cursor; a drag stays a click.
+    rig.selection.replace([k(f.group)]);
+    hover(rig, body);
+    expect(rig.selection.hover, k(f.group), reason: 'it is under the pointer');
+    expect(rig.tool.cursor, isNot(SystemMouseCursors.move));
+    pressAndMove(rig, body, away);
+    expect(rig.tool.pressClass, PressClass.selectedBody);
+    expect(rig.tool.dragKind, isNull);
+    release(rig, away);
+    expect(doc.commands.undoDepth, 0);
+    expect(snapshot(doc), before);
+    expect(rig.selection.keys, [k(f.group)]);
+
+    // Unselected: the press selects it, and nothing moves.
+    rig.selection.clear();
+    pressAndMove(rig, body, away);
+    expect(rig.tool.pressClass, PressClass.unselectedBody);
+    expect(rig.tool.dragKind, isNull);
+    release(rig, away);
+    expect(doc.commands.undoDepth, 0);
+    expect(rig.selection.keys, [k(f.group)]);
+
+    // A circle's centre grip moves the selection: the circle, not the group.
+    rig.selection.replace([k(f.group), k(f.s.circle)]);
+    final centre = rig.grips.grips.indexWhere(
+        (r) => r.key == k(f.s.circle) && r.grip.role == GripRole.move);
+    final cg = rig.grips.grips[centre].grip;
+    final c0 = payloadOf(doc, f.s.circle).coords.toList();
+    final from = screenOf(rig.camera, cg.x, cg.y);
+    pressAndMove(rig, from, from + const Offset(-40, 25));
+    expect(rig.tool.dragKind, DragKind.move);
+    release(rig, from + const Offset(-40, 25));
+    expect(doc.commands.undoDepth, 1);
+    expect(doc.tree[f.group], g0, reason: 'the group stays');
+    expect(payloadOf(doc, f.s.circle).coords.toList(), isNot(c0));
+    doc.commands.undo();
+
+    // The rotation grip turns the line, not the group.
+    rig.selection.replace([k(f.group), k(f.s.line)]);
+    final m = rig.camera.value.worldToScreenMatrix;
+    final disc = rotationGripOf(rig.grips.box!, m, rig.grips.frame).centre;
+    final l0 = payloadOf(doc, f.s.line).coords.toList();
+    pressAndMove(rig, disc, disc + const Offset(70, 40));
+    expect(rig.tool.dragKind, DragKind.rotate);
+    release(rig, disc + const Offset(70, 40));
+    expect(doc.commands.undoDepth, 1);
+    expect(doc.tree[f.group], g0, reason: 'the group stays');
+    expect(payloadOf(doc, f.s.line).coords.toList(), isNot(l0));
+  });
+
+  test(
+      'MV4 without a provider, and with one that calls every group movable, '
+      'the rotation grip, the cursor and a body drag are today\'s', () {
+    for (final movable in [false, true]) {
+      final f = scene();
+      final doc = f.s.document;
+      final objects = movable ? FakeObjects() : null;
+      final rig = gripRig(doc, objects: objects);
+      final why = movable ? 'a provider' : 'no provider';
+      rig.selection.replace([k(f.group)]);
+      expect(rig.grips.rotatable, isTrue, reason: why);
+      final body = groupBody(rig, f.group);
+      hover(rig, body);
+      expect(rig.tool.cursor, SystemMouseCursors.move, reason: why);
+      final g0 = doc.tree[f.group]!.transform;
+      pressAndMove(rig, body, body + const Offset(60, -35));
+      expect(rig.tool.dragKind, DragKind.move, reason: why);
+      final t = rig.tool.selectionPreviewTransform!;
+      release(rig, body + const Offset(60, -35));
+      expect(doc.commands.undoDepth, 1, reason: why);
+      expect(numbers(doc.tree[f.group]!.transform), numbers(t.multiply(g0)),
+          reason: why);
+      // The same members with the provider as without.
+      final keys = [k(f.s.instA), k(f.group), k(f.s.line)];
+      List<Handle> members(ObjectGripProvider? p) {
+        final drag = GripDrag.move(doc, keys, objects: p)!
+          ..moveTo(Vector2(7003, 2990));
+        final c = drag.command(DraftPermissions.all)! as CompoundCommand;
+        return [for (final m in c.children) memberOf(m)];
+      }
+
+      expect(members(objects), members(null), reason: why);
+      expect(members(objects), hasLength(3), reason: why);
+    }
   });
 }

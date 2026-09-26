@@ -79,7 +79,16 @@ final class Trip implements RectParams {
 }
 
 RectParams? rectOf(ParametricView v, Handle h) =>
-    v.paramsOf<ClipRect>(h) ?? v.paramsOf<SoftRect>(h) ?? v.paramsOf<Trip>(h);
+    v.paramsOf<ClipRect>(h) ??
+    v.paramsOf<SoftRect>(h) ??
+    v.paramsOf<Trip>(h) ??
+    v.paramsOf<Post>(h);
+
+/// `generate` calls per handle, counted by [RectType], [PostType],
+/// [PinType] and [TagType] (Ruling 08-2). Tests clear it.
+final Map<Handle, int> generateCalls = {};
+
+void _counted(Handle h) => generateCalls[h] = (generateCalls[h] ?? 0) + 1;
 
 List<Vector2> corners(RectParams p) => [
       Vector2(0, 0),
@@ -122,7 +131,15 @@ List<Vector2> corners(RectParams p) => [
 
 /// The rectangle [0,w]x[0,h] in local space, minus every neighbour's
 /// interior: four edges in order, each split into ascending pieces.
-List<Generated> clippedRect(ParametricView view, Handle self) {
+List<Generated> clippedRect(ParametricView view, Handle self) => [
+      for (final edge in clippedEdges(view, self))
+        for (final (a, b) in edge)
+          Generated(EntityKind.line, linePayload(a, b)),
+    ];
+
+/// [clippedRect]'s pieces, edge by edge, in [self]'s local space: edge 0 is
+/// the bottom edge, (0,0) to (w,0).
+List<List<(Vector2, Vector2)>> clippedEdges(ParametricView view, Handle self) {
   final p = rectOf(view, self)!;
   final toLocal = view.toWorld(self).invert();
   final quads = [
@@ -134,7 +151,7 @@ List<Generated> clippedRect(ParametricView view, Handle self) {
         ],
   ];
   final c = corners(p);
-  final out = <Generated>[];
+  final out = <List<(Vector2, Vector2)>>[];
   for (var i = 0; i < 4; i++) {
     final a = c[i], b = c[(i + 1) % 4];
     final len = (b - a).length;
@@ -151,10 +168,9 @@ List<Generated> clippedRect(ParametricView view, Handle self) {
         ],
       ];
     }
-    for (final (lo, hi) in keep) {
-      out.add(Generated(
-          EntityKind.line, linePayload(a + (b - a) * lo, a + (b - a) * hi)));
-    }
+    out.add([
+      for (final (lo, hi) in keep) (a + (b - a) * lo, a + (b - a) * hi),
+    ]);
   }
   return out;
 }
@@ -169,8 +185,10 @@ final class RectType<T extends RectParams> extends ParametricType<T> {
   @override
   Aabb2 reach(T params, Transform2 toWorld) => rectReach(params, toWorld);
   @override
-  List<Generated> generate(ParametricView view, Handle self) =>
-      clippedRect(view, self);
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    return clippedRect(view, self);
+  }
 }
 
 final class TripType extends ParametricType<Trip> {
@@ -338,6 +356,211 @@ final class RegionRectType extends ParametricType<RegionRect> {
   }
 }
 
+/// A host (Ruling 08-2): a clipped rectangle, like [ClipRect], that also
+/// reads its referrers, as a wall reads its openings.
+final class Post implements RectParams {
+  const Post(this.width, this.height);
+  static const String id = 'test.post';
+  @override
+  final double width;
+  @override
+  final double height;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'width': width, 'height': height};
+  static Post fromJson(Map<String, Object?> j) =>
+      Post((j['width']! as num).toDouble(), (j['height']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Post && o.width == width && o.height == height;
+  @override
+  int get hashCode => Object.hash(width, height);
+
+  /// How far below the bottom edge a referrer's tick reaches.
+  static const double tick = 120;
+
+  /// Handles whose `view.referrers` [PostType.diagnose] also reports (RF1),
+  /// beyond the Post's own. Tests reset it.
+  static List<Handle> watch = [];
+
+  /// The very lists `view.referrers` returned to [PostType.diagnose], by
+  /// the handle asked about (RF1: they must be unmodifiable). Tests clear
+  /// it.
+  static final Map<Handle, List<Handle>> seen = {};
+}
+
+/// A referrer's tick on its Post: one LINE down from the bottom edge at
+/// [Pin.offset], in the Post's local space.
+GeometryPayload postTick(double offset) =>
+    linePayload(Vector2(offset, 0), Vector2(offset, -Post.tick));
+
+Diagnostic referrersOf(Handle h, List<Handle> referrers) => Diagnostic(
+      severity: DiagnosticSeverity.info,
+      code: 'test.referrers',
+      message: '${h.toHex()} has ${referrers.length} referrers',
+      handles: [h, ...referrers],
+    );
+
+final class PostType extends ParametricType<Post> {
+  const PostType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Post params, Transform2 toWorld) => rectReach(params, toWorld);
+
+  /// [clippedRect], then one tick per referrer that is a [Pin], in the
+  /// referrers' ascending order.
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    return [
+      ...clippedRect(view, self),
+      for (final r in view.referrers(self))
+        if (view.paramsOf<Pin>(r) case final pin?)
+          Generated(EntityKind.line, postTick(pin.offset)),
+    ];
+  }
+
+  /// One `test.referrers` entry for itself, then one per [Post.watch]
+  /// handle, each naming the handle then its referrers.
+  @override
+  List<Diagnostic> diagnose(ParametricView view, Handle self) => [
+        for (final h in [self, ...Post.watch])
+          referrersOf(h, Post.seen[h] = view.referrers(h)),
+      ];
+}
+
+/// A referrer (Ruling 08-2): it names a [host] and reads it. [offset] is
+/// read by the host, [region] adds one region to what it generates.
+final class Pin implements Component {
+  const Pin(this.host, this.offset, {this.region = false});
+  static const String id = 'test.pin';
+  final Handle host;
+  final double offset;
+  final bool region;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() =>
+      {'host': host.toJson(), 'offset': offset, 'region': region};
+  static Pin fromJson(Map<String, Object?> j) =>
+      Pin(Handle.fromJson(j['host']), (j['offset']! as num).toDouble(),
+          region: j['region']! as bool);
+  @override
+  bool operator ==(Object o) =>
+      o is Pin && o.host == host && o.offset == offset && o.region == region;
+  @override
+  int get hashCode => Object.hash(host, offset, region);
+}
+
+/// A [Pin]'s region, when it has one: a closed square in its local space.
+final GeometryPayload pinRegion = polylinePayload(
+    [Vector2(0, 0), Vector2(50, 0), Vector2(50, 50), Vector2(0, 50)],
+    closed: true);
+
+final class PinType extends ParametricType<Pin> {
+  const PinType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// Empty: no spatial relation ever finds a Pin; only its reference does.
+  @override
+  Aabb2 reach(Pin params, Transform2 toWorld) => Aabb2.empty();
+
+  @override
+  Iterable<Handle> references(Pin params) => [params.host];
+
+  /// On a [Post]: the host's **clipped** bottom edge, host-local to world
+  /// to its own local, so it depends on the host's neighbours (the two-hop
+  /// shape). On another Pin: one LINE from its own origin to the host's.
+  /// Otherwise nothing, and a region last when [Pin.region] is set.
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Pin>(self)!;
+    final host = p.host;
+    final out = <Generated>[];
+    if (view.paramsOf<Post>(host) != null) {
+      out.addAll(hostEdge(view, self, host));
+    } else if (host != self && view.paramsOf<Pin>(host) != null) {
+      // Not on itself: that line would have no length.
+      out.add(Generated(
+          EntityKind.line,
+          linePayload(Vector2(0, 0),
+              hostToOwn(view, self, host).transformPoint(Vector2(0, 0)))));
+    }
+    if (p.region) out.add(Generated.region(pinRegion));
+    return out;
+  }
+}
+
+/// [host]'s local space to [self]'s; asked only for a host that is live.
+Transform2 hostToOwn(ParametricView view, Handle self, Handle host) =>
+    view.toWorld(self).invert().multiply(view.toWorld(host));
+
+/// The Post [host]'s **clipped** bottom edge, host-local to world to
+/// [self]'s local: one LINE per piece.
+List<Generated> hostEdge(ParametricView view, Handle self, Handle host) {
+  final m = hostToOwn(view, self, host);
+  return [
+    for (final (a, b) in clippedEdges(view, host)[0])
+      Generated(EntityKind.line,
+          linePayload(m.transformPoint(a), m.transformPoint(b))),
+  ];
+}
+
+/// An `orphan`-policy referrer (Ruling 08-2, spec 08 D4): like [Pin] on a
+/// live Post, and kept when its host goes. It declares its host **twice**,
+/// so the survey's and `diagnostics()`'s deduplication are both exercised.
+final class Tag implements Component {
+  const Tag(this.host);
+  static const String id = 'test.orphanTag';
+  final Handle host;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'host': host.toJson()};
+  static Tag fromJson(Map<String, Object?> j) =>
+      Tag(Handle.fromJson(j['host']));
+  @override
+  bool operator ==(Object o) => o is Tag && o.host == host;
+  @override
+  int get hashCode => host.hashCode;
+
+  /// The orphan marker's length, up the Tag's own local y axis.
+  static const double marker = 250;
+}
+
+/// What a [Tag] draws with no live Post: one fixed LINE at its own origin.
+final GeometryPayload tagMarker =
+    linePayload(Vector2(0, 0), Vector2(0, Tag.marker));
+
+final class TagType extends ParametricType<Tag> {
+  const TagType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  @override
+  ReferencePolicy get referencePolicy => ReferencePolicy.orphan;
+
+  @override
+  Aabb2 reach(Tag params, Transform2 toWorld) => Aabb2.empty();
+
+  @override
+  Iterable<Handle> references(Tag params) => [params.host, params.host];
+
+  /// On a live [Post]: the host's clipped bottom edge, as a [Pin] draws it.
+  /// Otherwise the orphan marker.
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final host = view.paramsOf<Tag>(self)!.host;
+    if (view.paramsOf<Post>(host) != null) return hostEdge(view, self, host);
+    return [Generated(EntityKind.line, tagMarker)];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -346,4 +569,7 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Trip>(Trip.id, Trip.fromJson, const TripType())
   ..register<Hinge>(Hinge.id, Hinge.fromJson, const HingeType())
   ..register<RegionRect>(
-      RegionRect.id, RegionRect.fromJson, const RegionRectType());
+      RegionRect.id, RegionRect.fromJson, const RegionRectType())
+  ..register<Post>(Post.id, Post.fromJson, const PostType())
+  ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
+  ..register<Tag>(Tag.id, Tag.fromJson, const TagType());

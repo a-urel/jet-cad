@@ -24,6 +24,17 @@ Handle newest(DraftDocument doc) =>
             ? a
             : b));
 
+/// A Line tool whose marker sits a fixed offset from its hover point, as
+/// an opening tool marks the point projected onto its host (spec 08 D15,
+/// Ruling 08-14).
+class _MarkedLineTool extends LineTool {
+  final Vector2 _marker = Vector2.zero();
+
+  @override
+  Vector2 get markerPoint =>
+      _marker..setValues(hoverPoint.x + 5.5, hoverPoint.y - 3.25);
+}
+
 void main() {
   // B10 reads HardwareKeyboard.instance (Ruling F-2), which needs a bound
   // ServicesBinding even though every test here is a plain unit test.
@@ -240,5 +251,28 @@ void main() {
     final fresh = SpyCanvas();
     rig.tool.paintOverlay(fresh, rig.camera.value, const Size(800, 600));
     expect(fresh.named('drawRect'), hasLength(1));
+  });
+
+  test(
+      'B12 the snap marker is drawn at markerPoint: the Line tool\'s is its '
+      'hover point; a tool that overrides it is marked there, with the '
+      'chain\'s kind (Ruling 08-14)', () {
+    final s = drawScene();
+    for (final (tool, dx, dy) in [
+      (LineTool(), 0.0, 0.0),
+      (_MarkedLineTool(), 5.5, -3.25),
+    ]) {
+      final rig = drawRig(s.document, tool);
+      final at = screenOf(rig.camera, kAnchorX, kAnchorY);
+      hoverAt(rig, at + const Offset(2, 2));
+      expect(tool.hoverPoint.x, kAnchorX, reason: 'the chain snapped');
+      expect(tool.hoverPoint.y, kAnchorY);
+      final spy = SpyCanvas();
+      tool.paintOverlay(spy, rig.camera.value, const Size(800, 600));
+      final r = spy.named('drawRect').single.args[0] as Rect;
+      final want = screenOf(rig.camera, kAnchorX + dx, kAnchorY + dy);
+      expect(r.center.dx, closeTo(want.dx, 1e-6), reason: '$tool');
+      expect(r.center.dy, closeTo(want.dy, 1e-6), reason: '$tool');
+    }
   });
 }

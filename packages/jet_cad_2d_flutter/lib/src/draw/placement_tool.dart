@@ -1,6 +1,6 @@
 import 'dart:ui' show Canvas, Offset, Paint, PaintingStyle, Path, Size;
 
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart' show ValueListenable, protected;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/services.dart'
     show
@@ -71,6 +71,14 @@ abstract class PlacementTool extends Tool {
   Vector2 get hoverPoint => _hover.point;
   bool get hoverVisible => _hoverVisible;
   SnapKind? get hoverKind => _hover.objectKind;
+
+  /// Where [paintOverlay] draws the snap marker: the resolved hover point.
+  /// A tool that places its shape somewhere derived from that point
+  /// overrides it (spec 08 D15, Ruling 08-14: an opening tool marks the
+  /// point projected onto its host's centreline). Read per frame: an
+  /// override returns a stored point and allocates nothing.
+  @protected
+  Vector2 get markerPoint => hoverPoint;
 
   /// Spec 05 D4: the last placed point, or none.
   Vector2? get orthoBase => points.isEmpty ? null : points.last;
@@ -265,7 +273,7 @@ abstract class PlacementTool extends Tool {
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {
     if (!_hoverVisible) return;
     final m = camera.worldToScreenMatrix;
-    final p = _hover.point;
+    final p = markerPoint;
     drawSnapMarker(
         canvas,
         Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f),

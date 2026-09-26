@@ -17,13 +17,20 @@ import 'wall.dart';
 /// Built by this one constructor from `(params, toWorld)`, so two walls that
 /// compute the same neighbour get the same bits.
 final class WorldWall {
-  WorldWall(this.handle, WallParams p, Transform2 toWorld)
-      : s = toWorld.transformPoint(p.start),
+  WorldWall(this.handle, WallParams p, this.toWorld)
+      : params = p,
+        s = toWorld.transformPoint(p.start),
         e = toWorld.transformPoint(p.end),
         t = p.thickness,
         j = p.justification;
 
   final Handle handle;
+
+  /// The stored parameters and the group's accumulated transform this wall
+  /// was built from: what the host frame (spec 08 D7), computed in the
+  /// wall's group-local space, reads.
+  final WallParams params;
+  final Transform2 toWorld;
 
   /// The world start and end of the centreline.
   final Vector2 s, e;
@@ -144,7 +151,8 @@ final class NodeJoint extends Joint {
 
 /// Whether [p] lies on [o]'s centreline within `wallJoin.linear` and more
 /// than `wallJoin.linear` from both of its ends, measured along it (D4.1).
-bool _strictlyInside(Vector2 p, WorldWall o) {
+/// Spec 08 D7's T obstacle reads it with the host as [o].
+bool strictlyInside(Vector2 p, WorldWall o) {
   final len = (o.e - o.s).length;
   final u = (p - o.s).dot(o.d);
   if (!(u > wallJoin.linear && u < len - wallJoin.linear)) return false;
@@ -193,7 +201,7 @@ Joint classify(WorldWall self, int k, List<WorldWall> others) {
   ];
   WorldWall? through;
   for (final o in walls) {
-    if (!_strictlyInside(p, o)) continue;
+    if (!strictlyInside(p, o)) continue;
     if (through == null || o.handle.value < through.handle.value) through = o;
   }
   if (through != null) return Tee(through);
@@ -442,6 +450,27 @@ double sweep(End x, End y) {
     );
   }
   return (ring: ring, fellBack: false, hole: hole);
+}
+
+/// [outline]'s two caps kept apart (spec 08 D7), in world space: the end
+/// cap, from the wall's right face to its left face, and the start cap,
+/// from its left face to its right face — `[...endCap, ...startCap]` is
+/// [outline]'s ring before it is simplified. When that ring is not simple
+/// and anticlockwise, both caps are the free caps and `fellBack` is true,
+/// as [outline]'s fallback. Null for a degenerate wall (07 D2).
+({List<Vector2> endCap, List<Vector2> startCap, bool fellBack})? capsOf(
+    WorldWall w, List<WorldWall> others) {
+  if (w.degenerate) return null;
+  final ce = cap(End(w, 1), classify(w, 1, others)).points;
+  final cs = cap(End(w, 0), classify(w, 0, others)).points;
+  if (!isSimpleCcw(simplifyRing([...ce, ...cs]))) {
+    return (
+      endCap: cap(End(w, 1), const Free()).points,
+      startCap: cap(End(w, 0), const Free()).points,
+      fellBack: true,
+    );
+  }
+  return (endCap: ce, startCap: cs, fellBack: false);
 }
 
 /// The signed area of a closed ring, anticlockwise positive.

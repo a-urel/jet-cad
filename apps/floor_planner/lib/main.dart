@@ -6,7 +6,10 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
-import 'parametric/wall_grips.dart';
+import 'parametric/object_grips.dart';
+import 'parametric/opening.dart';
+import 'parametric/opening_tool.dart';
+import 'parametric/wall_bands.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
@@ -106,7 +109,19 @@ class _PlannerShellState extends State<PlannerShell> {
   // panel's Wall section edits them while the tool is active.
   final ValueNotifier<WallSettings> _wallSettings =
       ValueNotifier<WallSettings>(const WallSettings());
-  late final WallTool _wall = WallTool(_wallSettings);
+  // Spec 08 D14, Ruling 08-11: one band cache, shared by the Wall tool and
+  // the three opening tools.
+  final WallBands _bands = WallBands();
+  late final WallTool _wall = WallTool(_wallSettings, bands: _bands);
+  // Spec 08 D14, Ruling 08-17: the shell owns each opening tool's settings.
+  final Map<OpeningKind, ValueNotifier<OpeningSettings>> _openingSettings = {
+    for (final k in OpeningKind.values)
+      k: ValueNotifier<OpeningSettings>(OpeningSettings.defaultFor(k)),
+  };
+  late final Map<OpeningKind, OpeningTool> _openingTools = {
+    for (final k in OpeningKind.values)
+      k: OpeningTool(k, _openingSettings[k]!, bands: _bands),
+  };
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -155,6 +170,27 @@ class _PlannerShellState extends State<PlannerShell> {
         tool: _wall,
         drawing: true),
     PaletteEntry(
+        keyName: 'tool-door',
+        label: 'Door',
+        shortcut: 'D',
+        logicalKey: LogicalKeyboardKey.keyD,
+        tool: _openingTools[OpeningKind.door]!,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-window',
+        label: 'Window',
+        shortcut: 'N',
+        logicalKey: LogicalKeyboardKey.keyN,
+        tool: _openingTools[OpeningKind.window]!,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-gap',
+        label: 'Gap',
+        shortcut: 'G',
+        logicalKey: LogicalKeyboardKey.keyG,
+        tool: _openingTools[OpeningKind.gap]!,
+        drawing: true),
+    PaletteEntry(
         keyName: 'tool-circle',
         label: 'Circle',
         shortcut: 'C',
@@ -187,10 +223,16 @@ class _PlannerShellState extends State<PlannerShell> {
   //   controller prunes a dead key before the cache walks it.
   // - The grip cache is built after the outline cache, so on a selection
   //   change its listener runs after the outlines have been rebuilt.
-  // - Spec 07 D11: a selected wall's end grips come from `WallGrips`.
+  // - Spec 07 D11, 08 D16: a selected wall's end grips and an opening's
+  //   slide grip come from `ObjectGrips`, which also tells the select tool
+  //   not to move or rotate an opening. The slide grip's edge snaps follow
+  //   object snap (F3) at the camera's current aperture (Ruling 08-15).
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
-  late final GripCache _grips =
-      GripCache(_document, _selection, _outlines, objects: WallGrips());
+  late final GripCache _grips = GripCache(_document, _selection, _outlines,
+      objects: ObjectGrips(
+          edgeAperture: () => _snap.objectSnap
+              ? kSnapAperturePixels / _camera.value.scale
+              : null));
 
   late final ToolContext _context = ToolContext(
       document: _document,
@@ -260,8 +302,11 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void initState() {
     super.initState();
-    // Spec 06 D13, Ruling 06-12: startupPlan builds its document with no
-    // parametric object, so installing after it is safe.
+    // Spec 06 D13, Ruling 06-12, spec 08 D18: the document arrives built.
+    // startupPlan builds its walls and openings through a parametric system
+    // of its own and disposes it before returning, so this one installs over
+    // a finished document and trusts its geometry, as it would a loaded file
+    // (06 D10).
     _parametric = installParametric(_document);
     _page.addListener(_onPage);
   }
@@ -274,6 +319,10 @@ class _PlannerShellState extends State<PlannerShell> {
     }
     _fill.dispose();
     _wallSettings.dispose();
+    for (final s in _openingSettings.values) {
+      s.dispose();
+    }
+    _bands.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();
@@ -381,14 +430,17 @@ class _PlannerShellState extends State<PlannerShell> {
                     child: ShellShortcutGuard(
                       child: Column(
                         children: [
-                          // Spec 07 D11: while the Wall tool is active,
-                          // the panel edits its settings.
+                          // Spec 07 D11, 08 D16: while the Wall tool or
+                          // an opening tool is active, the panel edits its
+                          // settings.
                           SelectionPanel(
                               document: _document,
                               selection: _selection,
                               tools: _tools,
                               wallTool: _wall,
-                              wallSettings: _wallSettings),
+                              wallSettings: _wallSettings,
+                              openingTools: _openingTools,
+                              openingSettings: _openingSettings),
                           Expanded(
                             child: PagePanel(document: _document, page: _page),
                           ),

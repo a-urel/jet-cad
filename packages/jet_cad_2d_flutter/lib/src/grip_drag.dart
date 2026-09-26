@@ -3,7 +3,7 @@ import 'dart:math' as math;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'grip_cache.dart' show ObjectGripProvider;
+import 'grip_cache.dart' show ObjectGripProvider, movableKey;
 import 'selection.dart';
 
 /// What a `SelectTool` drag is doing (spec D5).
@@ -59,19 +59,23 @@ final class GripDrag {
   GripDrag._(this.document, this.kind, this._captures, [this.grip]);
 
   /// A move of every movable key in [keys]. A fill follows its boundary and
-  /// an attrib is never root-level, so both are skipped (D4). Null when
-  /// nothing is left.
-  static GripDrag? move(DraftDocument document, Iterable<SelectionKey> keys) {
-    final captures = _capture(document, keys);
+  /// an attrib is never root-level, so both are skipped (D4), and so is a
+  /// root-level group that [objects] calls immovable (spec 08 D16). Null
+  /// when nothing is left.
+  static GripDrag? move(DraftDocument document, Iterable<SelectionKey> keys,
+      {ObjectGripProvider? objects}) {
+    final captures = _capture(document, keys, objects);
     return captures.isEmpty
         ? null
         : GripDrag._(document, DragKind.move, captures);
   }
 
   /// A rotate of [keys] about [pivot], measured from the press at [press].
+  /// It skips what [move] skips.
   static GripDrag? rotate(DraftDocument document, Iterable<SelectionKey> keys,
-      Vector2 pivot, Vector2 press) {
-    final captures = _capture(document, keys);
+      Vector2 pivot, Vector2 press,
+      {ObjectGripProvider? objects}) {
+    final captures = _capture(document, keys, objects);
     if (captures.isEmpty) return null;
     final drag = GripDrag._(document, DragKind.rotate, captures);
     drag.base.setFrom(pivot);
@@ -136,14 +140,16 @@ final class GripDrag {
   }
 
   /// In ascending target handle order: that is the members' order (D4).
-  static List<_Capture> _capture(
-      DraftDocument document, Iterable<SelectionKey> keys) {
+  /// A root-level group [objects] calls immovable is skipped ([movableKey]).
+  static List<_Capture> _capture(DraftDocument document,
+      Iterable<SelectionKey> keys, ObjectGripProvider? objects) {
     final sorted = keys.toList()
       ..sort((a, b) => a.target.value.compareTo(b.target.value));
     final out = <_Capture>[];
     for (final key in sorted) {
       final node = document.tree[key.target];
       if (node != null) {
+        if (!movableKey(document, key, objects)) continue;
         out.add(_NodeCapture(key.target, node));
         continue;
       }

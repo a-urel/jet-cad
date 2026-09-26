@@ -2,7 +2,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'support/clients.dart';
+// This file declares its own Tag and TagType (DG2).
+import 'support/clients.dart' hide Tag, TagType;
 import 'support/fixture.dart';
 
 /// DG1's client: a clipped rectangle that reports one entry, naming itself

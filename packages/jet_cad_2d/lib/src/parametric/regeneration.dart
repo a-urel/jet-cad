@@ -21,6 +21,12 @@ bool _isObject(
 @visibleForTesting
 int debugOverlapTests = 0;
 
+/// `ParametricType.references` calls made by the surveys (spec 08 D2,
+/// Ruling 08-3), for tests that pin their cost: exactly one per live object
+/// per survey. Never reset by the library.
+@visibleForTesting
+int debugReferenceCalls = 0;
+
 /// Everything the planner reads about the parametric objects at one moment.
 ///
 /// Neighbours are not surveyed (spec 07 D10): [neighboursOf] computes one
@@ -28,7 +34,8 @@ int debugOverlapTests = 0;
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
 /// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.reach, this.children, this.owned);
+  _Survey(this.objects, this.reach, this.children, this.owned, this.declared,
+      this.references, this.referrers);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -41,6 +48,21 @@ final class _Survey {
 
   /// Every child of a live object, to its owner: the set G of spec D4.
   final Map<Handle, Handle> owned;
+
+  /// Each object's `references` as declared, from this survey's one call
+  /// per object (Ruling 08-3), dead and self handles included; absent when
+  /// empty. Whoever needs the declared list reads it here and never calls
+  /// `references` again. Unmodifiable.
+  final Map<Handle, List<Handle>> declared;
+
+  /// Each object's live referents (spec 08 D2): the live objects among its
+  /// [declared] handles, itself excluded, deduplicated, ascending; absent
+  /// when empty. Unmodifiable.
+  final Map<Handle, List<Handle>> references;
+
+  /// Each live referent's live referrers, ascending (spec 08 D2); absent
+  /// when none. Unmodifiable: `ParametricView.referrers` hands them out.
+  final Map<Handle, List<Handle>> referrers;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -94,18 +116,70 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   for (final list in children.values) {
     list.sort(_byValue);
   }
-  return _Survey(objects, reach, children, owned);
+  // Spec 08 D2: one pass, one `references` call per object. The pass walks
+  // [order], so each referrer list is appended to in ascending order.
+  final declared = <Handle, List<Handle>>{};
+  final references = <Handle, List<Handle>>{};
+  final referrers = <Handle, List<Handle>>{};
+  for (final h in order) {
+    final declaredBy = objects[h]!.referencesOf(t, h);
+    if (declaredBy.isEmpty) continue;
+    final named = List<Handle>.unmodifiable(declaredBy);
+    declared[h] = named;
+    final live = {
+      for (final x in named)
+        if (x != h && objects.containsKey(x)) x,
+    }.toList()
+      ..sort(_byValue);
+    if (live.isEmpty) continue;
+    references[h] = List.unmodifiable(live);
+    for (final x in live) {
+      (referrers[x] ??= []).add(h);
+    }
+  }
+  return _Survey(objects, reach, children, owned, declared, references, {
+    for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
+  });
 }
 
-/// Seeds plus their neighbours before and after, as a sorted list of live
-/// objects (spec D4 step 6). One hop: generation reads parameters only.
-/// Neighbours are asked for the seeds only (spec 07 D10).
-List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) => {
-      ...seeds,
-      for (final s in seeds) ...before.neighboursOf(s),
-      for (final s in seeds) ...after.neighboursOf(s),
-    }.where(after.objects.containsKey).toList()
-      ..sort(_byValue);
+/// The objects an edit regenerates, as a sorted list of live objects (spec
+/// 06 D4 step 6, as amended by spec 08 D3):
+///
+/// ```
+/// core    = seeds ∪ neighbours before and after (seeds)
+///                 ∪ references before and after (seeds)
+/// closure = core ∪ referrers before and after (core)
+/// ```
+///
+/// Neighbours are asked for the seeds only (spec 07 D10); references and
+/// referrers are map lookups. The referent direction brings in what a
+/// seed's geometry depends on (a door's wall draws the door's gap); the
+/// referrer direction brings in what depends on a seed (a moved wall's
+/// doors, whose empty reach no spatial relation finds).
+///
+/// Referrers are taken of the whole **core**, not of the seeds only,
+/// because a referrer reads more than its referent's parameters: it reads
+/// the referent's joints, which read the referent's spatial neighbours. A
+/// neighbour B of a door's wall A changes A's straight span, so where the
+/// door is drawn, though the door is neither B's referrer nor B's referent:
+/// it is two hops from B (seed B → neighbour A → referrer). One extra hop
+/// closes it for a type that reads no further than its referents'
+/// neighbours (spec 08 D3).
+List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
+  final core = {
+    ...seeds,
+    for (final s in seeds) ...before.neighboursOf(s),
+    for (final s in seeds) ...after.neighboursOf(s),
+    for (final s in seeds) ...?before.references[s],
+    for (final s in seeds) ...?after.references[s],
+  };
+  return {
+    ...core,
+    for (final x in core) ...?before.referrers[x],
+    for (final x in core) ...?after.referrers[x],
+  }.where(after.objects.containsKey).toList()
+    ..sort(_byValue);
+}
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
@@ -281,24 +355,210 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
   }
 }
 
-/// Spec D4 steps 1-9.
+/// Spec 08 D4 step 4: deletes, in the edit, every `cascade`-policy referrer
+/// of an object that stopped being a live object, and returns [r0] extended
+/// by the removals. [r0] itself is returned when nothing is doomed.
+///
+/// Rounds (Ruling 08-4): the doomed objects are the still-live `cascade`
+/// referrers, before the edit, of each `before.referrers` key that is no
+/// longer an object (06's `_isObject` on the current tree, so a removed
+/// node, a detached component and a group that is no longer root-level
+/// alike), in ascending order. Each loses its subtree as the select tool
+/// deletes a group ([_subtreeRemoval]). A doomed object is then no longer
+/// an object itself, so the next round picks up its own `cascade`
+/// referrers. Each round costs O(referents).
+///
+/// Everything, deciding each command as well as applying it, every round,
+/// runs under one rollback: a failure undoes what the cascade applied, then
+/// [r0], and rethrows, so the target is as it was before the edit; a failed
+/// rollback throws 06's "partially mutated" `StateError` and undoes nothing
+/// more. The commands are applied one at a time, like `_run`'s regeneration
+/// loop and for the same reason (06 debt): a child's refusal and a failed
+/// rollback stay apart.
+CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
+    _Survey before, CommandResult r0, String label) {
+  if (before.referrers.isEmpty) return r0;
+  final inverses = <DraftCommand>[];
+  final touched = <Handle>{...r0.touched};
+  try {
+    while (true) {
+      final doomed = <Handle>{
+        for (final e in before.referrers.entries)
+          if (!_isObject(t, types, e.key))
+            for (final d in e.value)
+              if (before.objects[d]!.type.referencePolicy ==
+                      ReferencePolicy.cascade &&
+                  _isObject(t, types, d))
+                d,
+      }.toList()
+        ..sort(_byValue);
+      if (doomed.isEmpty) break;
+      for (final d in doomed) {
+        for (final c in _subtreeRemoval(t, before, d)) {
+          final applied = c.apply(t);
+          inverses.add(applied.inverse);
+          touched.addAll(applied.touched);
+        }
+      }
+    }
+  } catch (error) {
+    try {
+      for (final i in inverses.reversed) {
+        i.apply(t);
+      }
+    } catch (rollbackError) {
+      throw StateError('"$label": the reference cascade threw ($error) and '
+          'its rollback threw ($rollbackError); the target is partially '
+          'mutated and nothing was recorded in history');
+    }
+    _undoInner(t, label, r0, error);
+    rethrow;
+  }
+  if (inverses.isEmpty) return r0;
+  return CommandResult(
+    inverse: CompoundCommand([...inverses.reversed, r0.inverse],
+        label: r0.inverse.label),
+    touched: touched,
+  );
+}
+
+/// The commands that remove the doomed object [d]'s subtree, as the select
+/// tool's `_groupCascade` does: a group's leaves, then its child instances
+/// and nested groups (recursively) in its listed order, then the group.
+///
+/// **Every fill of the whole subtree goes first** (the doomed group's and
+/// each nested group's, in that listed order), before any other leaf, so a
+/// region's fill is removed before its boundary wherever each of the two
+/// lives: `RemoveEntityCommand` on a fill is always available and undoes
+/// exactly, whereas removing a boundary takes its fill with it only when
+/// the pair could be rebuilt, and refuses a loaded, unfillable one (an open
+/// boundary, or a fill in a nested group naming a boundary in [d], say),
+/// which would refuse the whole edit.
+///
+/// [d]'s own leaves are the survey's (an edit cannot add into a live
+/// object, 06 D6); a nested group's are found by one scan of the live
+/// slots, paid only when [d] has nested groups.
+List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
+  final groups = <Handle>[];
+  void collect(Handle g) {
+    groups.add(g);
+    final node = t.tree[g];
+    if (node is! GroupNode) return;
+    for (final c in t.tree.childNodesOf(node.children)) {
+      if (t.tree[c] is GroupNode) collect(c);
+    }
+  }
+
+  collect(d);
+  final leaves = <Handle, List<Handle>>{
+    d: [
+      for (final c in before.children[d] ?? const <Handle>[])
+        if (t.entities.slotOf(c) != null) c,
+    ],
+  };
+  if (groups.length > 1) {
+    final nested = groups.skip(1).toSet();
+    for (final slot in t.entities.liveSlots) {
+      final owner = t.entities.ownerAt(slot);
+      if (nested.contains(owner)) {
+        (leaves[owner] ??= []).add(t.entities.handleAt(slot));
+      }
+    }
+    for (final list in leaves.values) {
+      list.sort(_byValue);
+    }
+  }
+  bool isFill(Handle c) =>
+      t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+  final out = <DraftCommand>[
+    for (final g in groups)
+      for (final c in leaves[g] ?? const <Handle>[])
+        if (isFill(c)) RemoveEntityCommand(c),
+  ];
+  void remove(Handle g) {
+    for (final c in leaves[g] ?? const <Handle>[]) {
+      if (!isFill(c)) out.add(RemoveEntityCommand(c));
+    }
+    final node = t.tree[g];
+    if (node is GroupNode) {
+      for (final c in t.tree.childNodesOf(node.children)) {
+        final child = t.tree[c];
+        if (child is GroupNode) {
+          remove(c);
+        } else if (child is InstanceNode) {
+          out.add(RemoveNodeCommand(c));
+        }
+      }
+    }
+    out.add(RemoveNodeCommand(g));
+  }
+
+  remove(d);
+  return out;
+}
+
+/// Spec 08 D5, Ruling 08-5: every seed that is a live `cascade`-policy
+/// object after the edit must name only live objects. The first failure, in
+/// ascending (seed, referent) order, is thrown. Reads the survey's declared
+/// lists and never calls `references` again (Ruling 08-3). Only seeds are
+/// checked, so an unrelated edit never trips over a bad object elsewhere.
+void _checkDangling(Set<Handle> seeds, _Survey after) {
+  if (seeds.isEmpty || after.declared.isEmpty) return;
+  for (final s in seeds.toList()..sort(_byValue)) {
+    final declared = after.declared[s];
+    if (declared == null ||
+        after.objects[s]!.type.referencePolicy != ReferencePolicy.cascade) {
+      continue;
+    }
+    Handle? first;
+    for (final x in declared) {
+      if (!after.objects.containsKey(x) &&
+          (first == null || x.value < first.value)) {
+        first = x;
+      }
+    }
+    if (first != null) throw DanglingReferenceError(s, first);
+  }
+}
+
+/// Spec 06 D4 steps 1-9, in spec 08 D4's order:
+///
+/// 1. `before`, the survey, with references and referrers;
+/// 2. `r0`, the edit;
+/// 3. 06 D6's guard on `r0.touched`: a refusal undoes `r0`;
+/// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
+///    by the removals, its inverse included;
+/// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
+///    seeds, the dangling-reference check ([_checkDangling]), the early
+///    return, the closure and the plan. Any failure applies `r.inverse`,
+///    the cascade's included, so a refused edit leaves the document byte
+///    for byte as it was;
+/// 6. the apply loop, whose inverse wraps `r.inverse`.
+///
+/// The after-survey never sees a doomed referrer, so the plan never
+/// generates it; `lost` picks each one up by itself (its node is gone), so
+/// the cleanup detaches its component and it seeds the closure like any
+/// deleted object.
 CommandResult _run(ParametricEdit edit, CommandTarget t) {
   final types = edit._system._types;
   final before = _survey(t, types);
-  final r = edit.inner.apply(t);
+  final r0 = edit.inner.apply(t);
 
-  final refused = _refused(t, types, before, r.touched);
+  final refused = _refused(t, types, before, r0.touched);
   if (refused != null) {
-    _undoInner(t, edit.label, r, GeneratedGeometryError(refused));
+    _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
     throw GeneratedGeometryError(refused);
   }
+
+  final r = _cascade(t, types, before, r0, edit.label);
 
   // The after-survey calls every registered type's `reach` again, with
   // whatever `inner` just wrote — a client's `reach` can throw on the new
   // parameters (a negative width, say). `inner` has already applied at
-  // this point, so that throw, `lost`/`cleanup`'s own computation, and
-  // `_plan`'s call into `generate` all share one try: any of them failing
-  // must still undo `inner` and leave nothing in history (spec D4 step 8).
+  // this point, so that throw, `lost`/`cleanup`'s own computation, the
+  // dangling-reference check and `_plan`'s call into `generate` all share
+  // one try: any of them failing must still undo `inner` and the cascade
+  // and leave nothing in history (spec D4 step 8).
   final _Survey after;
   final List<DraftCommand> cleanup;
   final List<DraftCommand> plan;
@@ -318,6 +578,7 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       ],
       ...lost,
     };
+    _checkDangling(seeds, after);
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
@@ -328,7 +589,9 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     _undoInner(t, edit.label, r, error);
     rethrow;
   }
-  edit._geometryChanged = plan.isNotEmpty;
+  // The cascade removes entities even when the plan is empty (a detached
+  // host with no neighbour): the index must not skip it (spec 06 D9).
+  edit._geometryChanged = plan.isNotEmpty || !identical(r, r0);
 
   // This loop is `CompoundCommand.apply` by hand, on purpose (06 debt). A
   // compound reports its own rollback failure as a `StateError`, which is

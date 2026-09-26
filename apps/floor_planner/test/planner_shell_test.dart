@@ -1,4 +1,6 @@
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter/rendering.dart' show RenderCustomPaint;
@@ -8,6 +10,53 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+/// The sample plan's wall whose stored start is (`sx`, `sy`) and end is
+/// (`ex`, `ey`) (spec 08 D18's table).
+Handle wallFrom(
+        DraftDocument doc, double sx, double sy, double ex, double ey) =>
+    doc.components.withComponent<WallParams>().singleWhere((w) {
+      final p = doc.components.get<WallParams>(w)!;
+      return p.sx == sx && p.sy == sy && p.ex == ex && p.ey == ey;
+    });
+
+/// E1, the south exterior wall, and E4, the west one (spec 08 D18).
+Handle e1Of(DraftDocument doc) => wallFrom(doc, kPlanOriginX + 125,
+    kPlanOriginY + 125, kPlanOriginX + kPlanWidth - 125, kPlanOriginY + 125);
+Handle e4Of(DraftDocument doc) => wallFrom(doc, kPlanOriginX + 125,
+    kPlanOriginY + kPlanHeight - 125, kPlanOriginX + 125, kPlanOriginY + 125);
+
+/// [wall]'s openings, ascending.
+List<Handle> openingsOf(DraftDocument doc, Handle wall) => [
+      for (final o in doc.components.withComponent<OpeningParams>())
+        if (doc.components.get<OpeningParams>(o)!.host == wall) o
+    ]..sort((a, b) => a.value.compareTo(b.value));
+
+/// [group]'s children, ascending.
+List<Handle> childrenOf(DraftDocument doc, Handle group) => [
+      for (final slot in doc.entities.liveSlots)
+        if (doc.entities.ownerAt(slot) == group) doc.entities.handleAt(slot)
+    ]..sort((a, b) => a.value.compareTo(b.value));
+
+/// Every live entity handle, ascending.
+List<Handle> liveHandles(DraftDocument doc) => [
+      for (final slot in doc.entities.liveSlots) doc.entities.handleAt(slot)
+    ]..sort((a, b) => a.value.compareTo(b.value));
+
+/// The lowest y of [wall]'s piece outlines: `y0` at a mitred south corner,
+/// `y0 + 125` at a square end on E1's centreline.
+double lowestY(DraftDocument doc, Handle wall) {
+  var y = double.infinity;
+  for (final k in childrenOf(doc, wall)) {
+    final slot = doc.entities.slotOf(k)!;
+    if (doc.entities.kindAt(slot) != EntityKind.polyline) continue;
+    final p = doc.geometry.read(doc.entities.geomIndexAt(slot));
+    for (var i = 0; i < p.pointCount; i++) {
+      if (p.pointAt(i).y < y) y = p.pointAt(i).y;
+    }
+  }
+  return y;
+}
 
 void main() {
   testWidgets('the shell shows a canvas over a non-empty, off-origin plan',
@@ -134,8 +183,10 @@ void main() {
     final statusFinder = find.byKey(const Key('status-text'));
     expect(tester.widget<Text>(statusFinder).data, 'Select');
 
-    // kPlanOriginX + 100, kPlanOriginY sits on the outer wall's top edge
-    // (startup_plan.dart's first `rect`, from (x0, y0) to (x1, y0)).
+    // kPlanOriginX + 100, kPlanOriginY sits on the outer face of E1, the
+    // south exterior wall (startup_plan.dart's `e1`, whose band runs from
+    // y0 to y0 + 250), 100 mm from the south-west corner; with this 5 mm
+    // pick radius it resolves to E1's group.
     final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
     final hit = HitPath();
     final hitFound =
@@ -170,7 +221,12 @@ void main() {
     await tester.pump();
 
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
-    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
+    // On E1's outer face, 3,000 mm along (spec 08 D18): the click selects
+    // E1's group. Not 100 mm along: at this surface the pick radius is about
+    // 366 mm, which reaches the corner where E1's and E4's centrelines end,
+    // and a vertex hit outranks an edge hit, its tie going to the greater
+    // handle, E4.
+    final world = Vector2(kPlanOriginX + 3000, kPlanOriginY);
     final screen = view.camera.value.worldToScreen(world);
     final viewportSize = tester.getSize(find.byType(InteractionLayer));
     expect(screen.x, inInclusiveRange(0, viewportSize.width));
@@ -180,7 +236,7 @@ void main() {
     await tester.tapAt(topLeft + Offset(screen.x, screen.y));
     await tester.pump();
 
-    expect(view.selection.length, 1);
+    expect(view.selection.keys, [SelectionKey.root(e1Of(view.document))]);
   });
 
   // A5 / spec D12: the look asks the human to delete a wall and put it back,
@@ -190,25 +246,49 @@ void main() {
     await tester.pump();
 
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
-    final world = Vector2(kPlanOriginX + 100, kPlanOriginY);
+    final doc = view.document;
+    // E1's outer face, as the test above clicks it.
+    final world = Vector2(kPlanOriginX + 3000, kPlanOriginY);
     final screen = view.camera.value.worldToScreen(world);
     final topLeft = tester.getTopLeft(find.byType(InteractionLayer));
     await tester.tapAt(topLeft + Offset(screen.x, screen.y));
     await tester.pump();
 
-    expect(view.selection.length, 1);
-    final handle = view.selection.keys.single.target;
-    expect(view.document.entities.slotOf(handle), isNotNull);
+    // E1 and its front door (spec 08 D18); E2 and E4 mitre with E1 at the
+    // south corners.
+    final e1 = e1Of(doc);
+    expect(view.selection.keys, [SelectionKey.root(e1)]);
+    final [door] = openingsOf(doc, e1);
+    final e2 = wallFrom(
+        doc,
+        kPlanOriginX + kPlanWidth - 125,
+        kPlanOriginY + 125,
+        kPlanOriginX + kPlanWidth - 125,
+        kPlanOriginY + kPlanHeight - 125);
+    final e4 = e4Of(doc);
+    expect(lowestY(doc, e2), kPlanOriginY, reason: 'E2 mitres with E1');
+    expect(lowestY(doc, e4), kPlanOriginY, reason: 'E4 mitres with E1');
+    final removed = childrenOf(doc, e1).length + childrenOf(doc, door).length;
+    expect(removed, 6 + 2, reason: 'two pieces, and a leaf and an arc');
     // The startup plan is itself built through the log, so the counts below
     // are what pin the undo to exactly one command: the Delete.
-    final liveBefore = view.document.entities.liveCount;
+    final liveBefore = doc.entities.liveCount;
+    final handlesBefore = liveHandles(doc);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
     await tester.pump();
 
-    expect(view.document.entities.slotOf(handle), isNull);
-    expect(view.document.entities.liveCount, liveBefore - 1);
+    // The door goes with its host (spec 08 D4), in the same step, and the
+    // neighbours' corners square.
+    expect(doc.tree[e1], isNull);
+    expect(doc.tree[door], isNull, reason: 'the cascade');
+    expect(doc.commands.undoDepth, 1, reason: 'one step');
+    expect(doc.entities.liveCount, liveBefore - removed);
+    expect(lowestY(doc, e2), closeTo(kPlanOriginY + 125, 1e-9),
+        reason: 'E2\'s corner squares');
+    expect(lowestY(doc, e4), closeTo(kPlanOriginY + 125, 1e-9),
+        reason: 'E4\'s corner squares');
     expect(view.selection.isEmpty, isTrue);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
@@ -217,10 +297,13 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     await tester.pump();
 
-    expect(view.document.entities.slotOf(handle), isNotNull,
-        reason: 'the wall is back');
-    expect(view.document.entities.liveCount, liveBefore,
+    expect(doc.tree[e1], isA<GroupNode>(), reason: 'the wall is back');
+    expect(doc.tree[door], isA<GroupNode>(), reason: 'its door too');
+    expect(doc.entities.liveCount, liveBefore,
         reason: 'exactly one command came off the log, not the plan under it');
+    expect(liveHandles(doc), handlesBefore, reason: 'every child handle');
+    expect(lowestY(doc, e2), kPlanOriginY);
+    expect(lowestY(doc, e4), kPlanOriginY);
     expect(view.selection.isEmpty, isTrue,
         reason: 'undo replays the command log; it never restores the '
             "selection controller's own state");
@@ -238,29 +321,47 @@ void main() {
       return topLeft + Offset(s.x, s.y);
     }
 
-    // The outer rectangle is four lines: its bottom edge and its left edge
-    // are two entities. Both points sit mid-edge, well past the pick radius
-    // of the corner, the door (x0 + 6000..7000) and the left-wall windows
-    // (y0 + 1700..2700, y0 + 5900..7300), so each tap can only mean one wall.
+    // E1 and E4 (spec 08 D18), by points on their outer faces: E1's 3,000
+    // mm along, as above (its mid-edge is the front door's jamb), and E4's
+    // mid-edge. Each is past the pick radius (about 366 mm here) of every
+    // vertex of another object: the corners, the front door
+    // (x0 + 6000..7000), E4's windows (y0 + 1700..2700, y0 + 5900..7300)
+    // and P2's butt (y0 + 5000), so each tap can only mean one wall. E4's
+    // point holds while the pick radius (6 px) is under about 506 mm, its
+    // distance to P2's nearest cap vertex (x0 + 250, y0 + 4940): that is,
+    // at flutter_test's default 800 x 600 surface, not at any size.
+    final doc = view.document;
+    final e1 = e1Of(doc), e4 = e4Of(doc);
+    final objects = [e1, e4, ...openingsOf(doc, e1), ...openingsOf(doc, e4)];
+    expect(objects, hasLength(5), reason: 'a door and two windows');
+    var removed = 0;
+    for (final o in objects) {
+      removed += childrenOf(doc, o).length;
+    }
     await tester.tapAt(at(Vector2(kPlanOriginX + 3000, kPlanOriginY)));
     await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-    await tester.tapAt(at(Vector2(kPlanOriginX, kPlanOriginY + 3000)));
+    await tester.tapAt(at(Vector2(kPlanOriginX, kPlanOriginY + 4500)));
     await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
     await tester.pump();
 
-    expect(view.selection.length, 2);
-    final handles = [for (final k in view.selection.keys) k.target];
+    expect(view.selection.keys.toSet(),
+        {SelectionKey.root(e1), SelectionKey.root(e4)});
     // Ruling 04-1: the history is cleared at startup, so `undoDepth` here
     // would only count what happens from this point on; the live count
     // after exactly one ctrl+Z is what pins it to one entry regardless.
-    final liveBefore = view.document.entities.liveCount;
+    final liveBefore = doc.entities.liveCount;
+    final handlesBefore = liveHandles(doc);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
     await tester.pump();
 
-    expect(view.document.entities.liveCount, liveBefore - 2);
+    for (final o in objects) {
+      expect(doc.tree[o], isNull, reason: 'object $o, with its wall');
+    }
+    expect(doc.commands.undoDepth, 1, reason: 'one step');
+    expect(doc.entities.liveCount, liveBefore - removed);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
@@ -268,11 +369,12 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.pump();
 
-    expect(view.document.entities.liveCount, liveBefore,
+    expect(doc.entities.liveCount, liveBefore,
         reason: 'one ctrl+Z restores both walls, not one');
-    for (final h in handles) {
-      expect(view.document.entities.slotOf(h), isNotNull);
+    for (final o in objects) {
+      expect(doc.tree[o], isA<GroupNode>(), reason: 'object $o is back');
     }
+    expect(liveHandles(doc), handlesBefore, reason: 'every child handle');
     expect(view.selection.isEmpty, isTrue);
   });
 }
