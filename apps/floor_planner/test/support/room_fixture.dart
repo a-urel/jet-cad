@@ -718,7 +718,7 @@ List<Diagnostic> codedAs(List<Diagnostic> diagnostics, String prefix) => [
     ];
 
 // ---------------------------------------------------------------------------
-// Traces compared (LZ1, DF1, FZ1, DE4).
+// Traces compared (LZ1, DF1, FZ1).
 
 /// Asserts that [got] is [want], bit for bit: the same kind; the same
 /// source for [SeedInWall]; for [Traced], every point with `==` on both

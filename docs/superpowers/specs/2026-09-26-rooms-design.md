@@ -718,6 +718,22 @@ of `FZ1`'s tint checks at seed 1010).
   hole, whose keyholed ring does not triangulate: step 2, reported, as the
   same island untied. `FZ1` at seed 1010 now takes step 1 in all 1,855 of
   its tint checks.
+- **The slit is checked as well as the bridge (Task 14c, the 14b
+  review).** "The return edge runs 0.5 mm to the bridge's right, so the
+  ring stays simple" held only if the slit crossed nothing, and nothing
+  checked it: at an acute rightmost vertex whose wedge the bridge runs
+  along, the return edge crossed the hole's edge beside it, the keyholed
+  ring was not simple, and a simple hole took step 2. A vertex now
+  qualifies only when its bridge is clear **and** the slit's three edges
+  (the hole's last edge into `H + s`, the return, and `V + s` onward) cross
+  and touch no other edge of the ring or of a hole not yet joined;
+  otherwise the next nearest vertex is tried, and a hole with none is left
+  out as above. The fallback order is unchanged. Step 2 is then reached by
+  a pinched hole only (the 14b review's fuzz: 16 step-2 cases on simple
+  holes before, none after); a hole within the slit's width of the ring
+  can be left out (`RG2`, unturned). **Pinned by:** `TN1` (the acute
+  hole, six placements; the pinched hole's step 2), `RG2`; mutant
+  X14c-noSlitCheck.
 
 **Pinned by:** `DE1` (the trace: one tie, a chain, a T-branch, a tie drawn
 twice, a separator along a face, two ties, two islands tied, a triangle of

@@ -114,11 +114,37 @@ void expectSimple(List<Vector2> r, String what) {
   }
 }
 
+/// The pairs of edges of the closed ring [r] that properly cross, edge `i`
+/// running from `r[i]` to `r[i + 1]`: every pair, or only those with an
+/// edge in [only] when it is not empty.
+List<(int, int)> crossings(List<Vector2> r, List<int> only) {
+  final n = r.length;
+  double side(Vector2 o, Vector2 p, Vector2 q) =>
+      (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  bool cross(Vector2 a, Vector2 b, Vector2 c, Vector2 d) {
+    final d1 = side(c, d, a), d2 = side(c, d, b);
+    final d3 = side(a, b, c), d4 = side(a, b, d);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  }
+
+  return [
+    for (var i = 0; i < n; i++)
+      for (var j = i + 2; j < n; j++)
+        if (!(i == 0 && j == n - 1) &&
+            (only.isEmpty || only.contains(i) || only.contains(j)) &&
+            cross(r[i], r[(i + 1) % n], r[j], r[(j + 1) % n]))
+          (i, j),
+  ];
+}
+
 void main() {
   test(
-      'TN1 tintOf: a pinched ring takes step 3; a second hole whose view is '
-      'blocked by the first bridges to the growing ring; a hole with no '
-      'visible vertex is left out and reported', () {
+      'TN1 tintOf: a pinched ring takes step 3, a pinched hole step 2; a '
+      'second hole whose view is blocked by the first bridges to the growing '
+      'ring; a hole with no visible vertex is left out and reported; an '
+      'acute hole whose nearest bridge\'s slit would cross it bridges to the '
+      'next vertex', () {
     expect(kSlit, 0.5);
     for (final place in placements) {
       // 1. A pinched ring: two 1,000 x 1,000 squares touching at (6,000,
@@ -276,9 +302,11 @@ void main() {
       expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
 
       // 5. Two holes that overlap (a file's, never a trace's): C's rightmost
-      // vertices lie inside A2, so C joins at one of A2's corners and its
-      // edges cross A2's. The keyholed ring does not triangulate; the outer
-      // ring alone does: step 2, the outer ring as given.
+      // vertices lie inside A2, which joins first. Every bridge from C, or
+      // the slit beside it, crosses A2's edges in the growing ring (before
+      // Task 14c a bridge passed, the ring was not simple and the chain
+      // took step 2). So C is left out, the tint covers it, and A2 is cut
+      // out: step 1, not exact.
       what = 'overlapping holes at $place';
       final a2 = rel(place, const [
         (4000, 4000),
@@ -293,14 +321,109 @@ void main() {
         (3000, 5500),
       ]);
       t = tintOf(square, [a2, c]);
-      expect(t.step, 2, reason: what);
+      expect(t.step, 1, reason: what);
+      expect(t.holesLeftOut, [1], reason: what);
+      expect(t.isExact, isFalse, reason: what);
+      expect(t.points, hasLength(4 + 4 + 2), reason: what);
+      expectOuterKept(t.points, square, what);
+      expectKeyhole(t.points, a2, what);
+      expectSimple(t.points, what);
+
+      // 6. A pinched hole: two 1,000 x 1,000 squares touching at (5,000,
+      // 5,000), walked as one loop that passes that vertex twice. The
+      // keyholed ring passes it twice too and does not triangulate; the
+      // outer ring alone does: step 2, the outer ring as given (the one
+      // step 2 a trace still reaches, D9).
+      what = 'a pinched hole at $place';
+      final pinchedHole = rel(place, const [
+        (4000, 4000),
+        (5000, 4000),
+        (5000, 5000),
+        (6000, 5000),
+        (6000, 6000),
+        (5000, 6000),
+        (5000, 5000),
+        (4000, 5000),
+      ]);
+      t = tintOf(square, [pinchedHole]);
+      expect(t.step, 2, reason: '$what: $t');
       expect([
         for (final p in t.points) (p.x, p.y)
       ], [
         for (final p in square) (p.x, p.y)
       ], reason: what);
       expect(t.holesLeftOut, isEmpty, reason: what);
-      expect(t.isExact, isFalse, reason: what);
+
+      // 7. Traced (the 14b review): a free triangle of separators,
+      // (1,700, 544.5) -> (2,605.25, 1,410.75) -> (1,779.5, 834.75), in
+      // the box. Its rightmost vertex H (2,605.25, 1,410.75) is acute, and
+      // the whole triangle lies below the line from the nearest ring vertex
+      // V0 (100, 100) to H. That bridge is clear, but its slit runs 0.5 mm
+      // to the bridge's right, into the wedge at H: its return edge meets
+      // the hole's edge beside H. The next vertex is tried: step 1, simple.
+      // Shoelace: 1,700 x 576 + 2,605.25 x 290.25 - 1,779.5 x 866.25 =
+      // 979,200 + 756,173.8125 - 1,541,491.875 = 193,881.9375, halved
+      // 96,940.96875; the room 29,640,000 - 96,940.96875 =
+      // 29,543,059.03125 (29.54 m², 0.0019 from 29.545).
+      what = 'an acute hole at $place';
+      final acute = buildPlan(boxWalls,
+          seps: const [
+            (1700, 544.5, 2605.25, 1410.75),
+            (2605.25, 1410.75, 1779.5, 834.75),
+            (1779.5, 834.75, 1700, 544.5),
+          ],
+          place: place);
+      attachPage(acute.doc, PageComponent());
+      final acuteInputs = RoomInputs(acute.doc);
+      addTearDown(acuteInputs.dispose);
+      final acuteSeed = acute.at(5000.5, 2000.25);
+      final face = traceRoomAmong(acuteSeed, acuteInputs) as Traced;
+      expect(face.area, closeTo(29543059.03125, 1e-2), reason: what);
+      expect(face.holes, hasLength(1), reason: what);
+      final acuteRing = [for (final p in face.ring) p - acuteSeed];
+      final triangle = [for (final p in face.holes.single) p - acuteSeed];
+      // The premise: the keyhole to the nearest vertex V0, the slit to the
+      // bridge's right, is not simple, though its bridge crosses nothing.
+      final h = rightmostOf(triangle);
+      expect(
+          (h - (acute.at(2605.25, 1410.75) - acuteSeed)).length, lessThan(1e-6),
+          reason: '$what: H');
+      var v0 = 0;
+      for (var i = 1; i < acuteRing.length; i++) {
+        if ((acuteRing[i] - h).length < (acuteRing[v0] - h).length) v0 = i;
+      }
+      expect((acuteRing[v0] - (acute.at(100, 100) - acuteSeed)).length,
+          lessThan(1e-6),
+          reason: '$what: V0');
+      final d = (h - acuteRing[v0]).normalized();
+      final slit = Vector2(d.y, -d.x) * kSlit;
+      final cw = triangle.reversed.toList();
+      final hi = cw.indexWhere((p) => p.x == h.x && p.y == h.y);
+      final naive = [...acuteRing]..insertAll(v0 + 1, [
+          for (var j = 0; j < cw.length; j++) cw[(hi + j) % cw.length],
+          h + slit,
+          acuteRing[v0] + slit,
+        ]);
+      expect(crossings(naive, [v0]), isEmpty, reason: '$what: the bridge');
+      expect(crossings(naive, const []), isNotEmpty,
+          reason: '$what: the naive keyhole crosses itself');
+      t = tintOf(acuteRing, [triangle]);
+      expect(t.step, 1, reason: '$what: $t');
+      expect(t.isExact, isTrue, reason: what);
+      expectOuterKept(t.points, acuteRing, what);
+      final (v, _) = expectKeyhole(t.points, triangle, what);
+      expect((v - acuteRing[v0]).length, greaterThan(1),
+          reason: '$what: bridged to another vertex than V0');
+      expectSimple(t.points, what);
+      expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
+      // And the room: its fill, its area, no room.tint.
+      final acuteRoom = addRoom(acute.doc, acuteSeed, 'A');
+      expect(kindsOf(acute.doc, acuteRoom).first, EntityKind.fill,
+          reason: what);
+      expect(labelStrings(acute.doc, acuteRoom), ['A', '29.54 m²'],
+          reason: what);
+      expect(codedAs(diagnosticsOf(acute.doc), 'room.'), isEmpty, reason: what);
+      expect(driftOf(acute.doc), isEmpty, reason: what);
     }
   });
 }

@@ -343,12 +343,22 @@ void main() {
       expect(roomDiagnostics(two.doc), isEmpty, reason: '$place');
       expect(driftOf(two.doc), isEmpty, reason: '$place');
 
-      // --- Honest fallbacks, no seam (Ruling 10-16's candidate). Step 2:
-      // two 400 × 400 columns 0.2 mm off the faces, x 100.2..500.2, y
+      // --- Honest fallbacks, no seam (Ruling 10-16's candidate). Two
+      // 400 × 400 columns 0.2 mm off the faces, x 100.2..500.2, y
       // 3,499.8..3,899.8 by the north-west corner, and x 7,499.8..7,899.8,
-      // y 1,800.5..2,200.5 by the east wall. A bridge from one of them is
-      // shorter than the slit is wide at every placement, so the keyholed
-      // ring is not simple and the outer ring alone is the tint.
+      // y 1,800.5..2,200.5 by the east wall. 29,640,000 − 2 × 160,000 =
+      // 29,320,000 (29.32, 0.005 from the ties).
+      //
+      // Before Task 14c this was step 2: a bridge from the north-west
+      // column was clear but its slit, 0.5 mm to the bridge's right,
+      // pierced the column or the face 0.2 mm away, so the keyholed ring
+      // was not simple. Now the slit is checked too (D9, decision 29's
+      // note) and the next vertex is tried. Turned 23°, the column's
+      // rightmost vertex is its south-east corner and a clear keyhole is
+      // found: step 1, exact. Unturned, it is the north-east corner, from
+      // which every clear bridge's slit pierces the north face or the
+      // column: that hole is left out (the tint covers it), the east
+      // column is still cut out, and room.tint says so (D22).
       final near = buildPlan([
         ...boxWalls,
         const W(100.2, 3699.8, 500.2, 3699.8, 400),
@@ -356,7 +366,6 @@ void main() {
       ], place: place);
       attachPage(near.doc, PageComponent());
       final nearRoom = addRoom(near.doc, near.at(1000.25, 2500.5), 'Room 1');
-      // 29,640,000 − 2 × 160,000 = 29,320,000 (29.32, 0.005 from the ties).
       expect(labelStrings(near.doc, nearRoom), ['Room 1', '29.32 m²'],
           reason: '$place');
       expect(
@@ -367,25 +376,102 @@ void main() {
             EntityKind.text,
             EntityKind.text,
           ],
+          reason: 'a region at $place');
+      final nearTint = worldTintOf(near.doc, nearRoom);
+      bool stored(double x, double y) =>
+          nearestTo(near.at(x, y), nearTint) < 1e-5;
+      const northWest = [
+        (100.2, 3499.8),
+        (500.2, 3499.8),
+        (500.2, 3899.8),
+        (100.2, 3899.8),
+      ];
+      const east = [
+        (7499.8, 1800.5),
+        (7899.8, 1800.5),
+        (7899.8, 2200.5),
+        (7499.8, 2200.5),
+      ];
+      for (final (x, y) in east) {
+        expect(stored(x, y), isTrue, reason: 'east column cut out at $place');
+      }
+      if (place.deg == 0) {
+        expect(nearTint, hasLength(4 + 4 + 2), reason: '$place');
+        for (final (x, y) in northWest) {
+          expect(stored(x, y), isFalse, reason: 'north-west left out, $place');
+        }
+        expect(
+            roomDiagnostics(near.doc),
+            [
+              Diagnostic(
+                severity: DiagnosticSeverity.warning,
+                code: 'room.tint',
+                message: 'room ${nearRoom.toHex()} ("Room 1"): its tint covers '
+                    '1 of its holes: no bridge reaches them',
+                handles: [nearRoom],
+              ),
+            ],
+            reason: 'a hole left out at $place');
+      } else {
+        expect(nearTint, hasLength(4 + 2 * (4 + 2)), reason: '$place');
+        for (final (x, y) in northWest) {
+          expect(stored(x, y), isTrue, reason: 'north-west cut out, $place');
+        }
+        expect(roomDiagnostics(near.doc), isEmpty, reason: 'exact at $place');
+      }
+      expect(driftOf(near.doc), isEmpty, reason: '$place');
+
+      // Step 2: an island pinched at a vertex, two 400 × 400 columns x
+      // 5,000..5,400, y 1,800..2,200 and x 5,400..5,800, y 2,200..2,600,
+      // touching at (5,400, 2,200) only. One hole that passes that vertex
+      // twice: the keyholed ring through it is not simple and does not
+      // triangulate; the outer ring alone does. 29,320,000 again.
+      final pinchedHole = buildPlan([
+        ...boxWalls,
+        const W(5000, 2000, 5400, 2000, 400),
+        const W(5400, 2400, 5800, 2400, 400),
+      ], place: place);
+      attachPage(pinchedHole.doc, PageComponent());
+      final holeRoom =
+          addRoom(pinchedHole.doc, pinchedHole.at(1000.25, 2500.5), 'Room 1');
+      final hole =
+          (faceAt(pinchedHole.doc, pinchedHole.at(1000.25, 2500.5)) as Traced)
+              .holes;
+      expect(hole, hasLength(1), reason: 'the premise: one hole at $place');
+      expect(
+          hole.single
+              .where((q) => (q - pinchedHole.at(5400, 2200)).length < 1e-6),
+          hasLength(2),
+          reason: 'the premise: pinched at $place');
+      expect(labelStrings(pinchedHole.doc, holeRoom), ['Room 1', '29.32 m²'],
+          reason: '$place');
+      expect(
+          kindsOf(pinchedHole.doc, holeRoom),
+          [
+            EntityKind.fill,
+            EntityKind.polyline,
+            EntityKind.text,
+            EntityKind.text,
+          ],
           reason: 'honest step 2 at $place');
       expectTintRect(
-          near,
-          nearRoom,
+          pinchedHole,
+          holeRoom,
           const [(100, 100), (7900, 100), (7900, 3900), (100, 3900)],
           'honest step 2 at $place');
       expect(
-          roomDiagnostics(near.doc),
+          roomDiagnostics(pinchedHole.doc),
           [
             Diagnostic(
               severity: DiagnosticSeverity.warning,
               code: 'room.tint',
-              message: 'room ${nearRoom.toHex()} ("Room 1"): its tint covers '
+              message: 'room ${holeRoom.toHex()} ("Room 1"): its tint covers '
                   'its holes: the keyholed ring does not triangulate',
-              handles: [nearRoom],
+              handles: [holeRoom],
             ),
           ],
           reason: 'honest step 2 at $place');
-      expect(driftOf(near.doc), isEmpty, reason: '$place');
+      expect(driftOf(pinchedHole.doc), isEmpty, reason: '$place');
 
       // Step 3: a 400 × 400 column turned 45°, its top vertex on the north
       // face (y 3,900). It touches the ring, so the ring walks round it

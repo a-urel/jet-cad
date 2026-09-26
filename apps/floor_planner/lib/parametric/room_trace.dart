@@ -618,13 +618,15 @@ final class Tint {
   /// Indices into [tintOf]'s holes of those that found no bridge: step 1's
   /// region covers them. Steps 2 and 3 cover every hole anyway.
   ///
-  /// Defensive: a real trace never fills it. Holes are joined in descending
-  /// order of their rightmost x, so a ray to the right from a hole's
-  /// rightmost vertex H meets the growing ring first (the holes not yet
-  /// joined lie at x ≤ H.x, the joined ones are part of the ring), and a
-  /// vertex of the ring is visible from H (Eberly's argument). Only a ring
-  /// and holes that are not a trace's, as `TN1`'s hole outside the ring,
-  /// reach it.
+  /// Rare. Holes are joined in descending order of their rightmost x, so a
+  /// ray to the right from a hole's rightmost vertex H meets the growing
+  /// ring first (the holes not yet joined lie at x ≤ H.x, the joined ones
+  /// are part of the ring), and a vertex of the ring is visible from H
+  /// (Eberly's argument). But the slit must be clear too: a hole within
+  /// the slit's 0.5 mm of the ring, whose every visible bridge puts the slit
+  /// through the ring or the hole, is left out (`RG2`'s column 0.2 mm off
+  /// two faces, unturned). A ring and holes that are not a trace's reach
+  /// it too, as `TN1`'s hole outside the ring and its overlapping holes.
   final List<int> holesLeftOut;
 
   /// Whether the tint shows the face as traced: step 1, every hole cut out.
@@ -647,11 +649,16 @@ final class Tint {
 /// keyholed ring** (the outer ring with the holes already joined) through a
 /// bridge from its rightmost vertex `H` to the nearest vertex `V` of that
 /// ring whose bridge properly crosses no edge of that ring and no edge of
-/// any hole not yet joined, this one included (ties to the earlier vertex).
-/// The hole is walked clockwise from `H`, and the return edge runs [kSlit]
-/// to the bridge's right, from `H` to `V` both moved, so the ring stays
-/// simple. A hole with no such vertex is left out (the tint covers it) and
-/// named in [Tint.holesLeftOut].
+/// any hole not yet joined, this one included (ties to the earlier vertex),
+/// **and whose slit is clear** (decision 29's note, Task 14c). The hole is
+/// walked clockwise from `H`, and the return edge runs [kSlit] to the
+/// bridge's right, from `H` to `V` both moved; the slit's three edges (the
+/// hole's last edge into `H + s`, the return, and `V + s` onward) must
+/// cross nothing and touch nothing either, so the ring stays simple: at an
+/// acute `H` whose wedge the bridge runs along, the return can cross the
+/// hole's edge beside `H` though the bridge is clear. A hole with no such
+/// vertex is left out (the tint covers it) and named in
+/// [Tint.holesLeftOut].
 ///
 /// **The fallback chain**, so an edit is never refused because of a tint:
 /// 1. the keyholed ring, if it triangulates (`triangulationFor` non-empty);
@@ -699,27 +706,35 @@ Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes,
       keyholed,
       for (var j = k; j < order.length; j++) holes[order[j]],
     ];
-    int? vi;
+    final later = [for (var j = k + 1; j < order.length; j++) holes[order[j]]];
+    final n = hole.length;
+    List<Vector2>? joined;
     for (final i in byDistance) {
       final v = keyholed[i];
       if ((v - h).length2 == 0) continue;
-      if (!_blocked(h, v, obstacles)) {
-        vi = i;
-        break;
-      }
+      if (_blocked(h, v, obstacles)) continue;
+      final d = (h - v).normalized();
+      final slit = Vector2(d.y, -d.x) * kSlit; // to the bridge's right
+      final candidate = [...keyholed]..insertAll(i + 1, [
+          for (var j = 0; j < n; j++) hole[(hi + j) % n],
+          h + slit,
+          v + slit,
+        ]);
+      // The slit's three edges, the hole's last edge into H + s, the return
+      // H + s → V + s and V + s onward, 0.5 mm off the bridge: at an acute
+      // H they can cross the hole's edges beside H, or the bridge, though
+      // the bridge itself is clear. Then the next vertex is tried.
+      if (!_clear(candidate, [i + n, i + n + 1, i + n + 2], later)) continue;
+      joined = candidate;
+      break;
     }
-    if (vi == null) {
+    if (joined == null) {
       leftOut.add(order[k]);
       continue;
     }
-    final v = keyholed[vi];
-    final d = (h - v).normalized();
-    final slit = Vector2(d.y, -d.x) * kSlit; // to the bridge's right
-    keyholed.insertAll(vi + 1, [
-      for (var j = 0; j < hole.length; j++) hole[(hi + j) % hole.length],
-      h + slit,
-      v + slit,
-    ]);
+    keyholed
+      ..clear()
+      ..addAll(joined);
   }
   leftOut.sort();
   bool takes(int step, List<Vector2> r) =>
@@ -752,6 +767,42 @@ bool _blocked(Vector2 h, Vector2 v, List<List<Vector2>> rings) {
     }
   }
   return false;
+}
+
+/// Whether the edges [edges] of the closed ring [r] (edge `e` runs from
+/// `r[e]` to `r[e + 1]`) cross nothing: no edge of [r] other than the two
+/// next to it, and no edge of [others], properly crosses one of them, and
+/// no vertex of [r] or [others] other than its own ends lies within
+/// `roomTrace.linear` strictly inside it, nor one of its ends strictly
+/// inside an edge of [r] or [others] that is not next to it. The keyholed
+/// ring stays simple (D9) where the bridge's own test ([_blocked]) cannot
+/// see: along the slit.
+bool _clear(List<Vector2> r, List<int> edges, List<List<Vector2>> others) {
+  final tol = roomTrace.linear;
+  bool inside(Vector2 p, Vector2 a, Vector2 b) =>
+      distToSegment(p, a, b) <= tol &&
+      (p - a).length > tol &&
+      (p - b).length > tol;
+  bool meets(Vector2 a, Vector2 b, Vector2 c, Vector2 d) =>
+      _properlyCross(a, b, c, d) ||
+      inside(c, a, b) ||
+      inside(a, c, d) ||
+      inside(b, c, d);
+  final n = r.length;
+  for (final e in edges) {
+    final a = r[e], b = r[(e + 1) % n];
+    for (var f = 0; f < n; f++) {
+      // The edge itself and the two next to it share an end with it.
+      if (f == e || f == (e + 1) % n || (f + 1) % n == e) continue;
+      if (meets(a, b, r[f], r[(f + 1) % n])) return false;
+    }
+    for (final o in others) {
+      for (var f = 0; f < o.length; f++) {
+        if (meets(a, b, o[f], o[(f + 1) % o.length])) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /// Whether segment [a]–[b] properly crosses [c]–[d]: each strictly
