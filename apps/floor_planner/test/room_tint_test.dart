@@ -301,60 +301,7 @@ void main() {
       expectSimple(t.points, what);
       expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
 
-      // 5. Two holes that overlap (a file's, never a trace's): C's rightmost
-      // vertices lie inside A2, which joins first. Every bridge from C, or
-      // the slit beside it, crosses A2's edges in the growing ring (before
-      // Task 14c a bridge passed, the ring was not simple and the chain
-      // took step 2). So C is left out, the tint covers it, and A2 is cut
-      // out: step 1, not exact.
-      what = 'overlapping holes at $place';
-      final a2 = rel(place, const [
-        (4000, 4000),
-        (6000, 4000),
-        (6000, 6000),
-        (4000, 6000),
-      ]);
-      final c = rel(place, const [
-        (3000, 4500),
-        (5000, 4500),
-        (5000, 5500),
-        (3000, 5500),
-      ]);
-      t = tintOf(square, [a2, c]);
-      expect(t.step, 1, reason: what);
-      expect(t.holesLeftOut, [1], reason: what);
-      expect(t.isExact, isFalse, reason: what);
-      expect(t.points, hasLength(4 + 4 + 2), reason: what);
-      expectOuterKept(t.points, square, what);
-      expectKeyhole(t.points, a2, what);
-      expectSimple(t.points, what);
-
-      // 6. A pinched hole: two 1,000 x 1,000 squares touching at (5,000,
-      // 5,000), walked as one loop that passes that vertex twice. The
-      // keyholed ring passes it twice too and does not triangulate; the
-      // outer ring alone does: step 2, the outer ring as given (the one
-      // step 2 a trace still reaches, D9).
-      what = 'a pinched hole at $place';
-      final pinchedHole = rel(place, const [
-        (4000, 4000),
-        (5000, 4000),
-        (5000, 5000),
-        (6000, 5000),
-        (6000, 6000),
-        (5000, 6000),
-        (5000, 5000),
-        (4000, 5000),
-      ]);
-      t = tintOf(square, [pinchedHole]);
-      expect(t.step, 2, reason: '$what: $t');
-      expect([
-        for (final p in t.points) (p.x, p.y)
-      ], [
-        for (final p in square) (p.x, p.y)
-      ], reason: what);
-      expect(t.holesLeftOut, isEmpty, reason: what);
-
-      // 7. Traced (the 14b review): a free triangle of separators,
+      // 5. Traced (the 14b review): a free triangle of separators,
       // (1,700, 544.5) -> (2,605.25, 1,410.75) -> (1,779.5, 834.75), in
       // the box. Its rightmost vertex H (2,605.25, 1,410.75) is acute, and
       // the whole triangle lies below the line from the nearest ring vertex
@@ -424,6 +371,58 @@ void main() {
           reason: what);
       expect(codedAs(diagnosticsOf(acute.doc), 'room.'), isEmpty, reason: what);
       expect(driftOf(acute.doc), isEmpty, reason: what);
+      // 6. Two holes that overlap (a file's, never a trace's): C's rightmost
+      // vertices lie inside A2, which joins first. Every bridge from C, or
+      // the slit beside it, crosses A2's edges in the growing ring (before
+      // Task 14c a bridge passed, the ring was not simple and the chain
+      // took step 2). So C is left out, the tint covers it, and A2 is cut
+      // out: step 1, not exact.
+      what = 'overlapping holes at $place';
+      final a2 = rel(place, const [
+        (4000, 4000),
+        (6000, 4000),
+        (6000, 6000),
+        (4000, 6000),
+      ]);
+      final c = rel(place, const [
+        (3000, 4500),
+        (5000, 4500),
+        (5000, 5500),
+        (3000, 5500),
+      ]);
+      t = tintOf(square, [a2, c]);
+      expect(t.step, 1, reason: what);
+      expect(t.holesLeftOut, [1], reason: what);
+      expect(t.isExact, isFalse, reason: what);
+      expect(t.points, hasLength(4 + 4 + 2), reason: what);
+      expectOuterKept(t.points, square, what);
+      expectKeyhole(t.points, a2, what);
+      expectSimple(t.points, what);
+
+      // 7. A pinched hole: two 1,000 x 1,000 squares touching at (5,000,
+      // 5,000), walked as one loop that passes that vertex twice. The
+      // keyholed ring passes it twice too and does not triangulate; the
+      // outer ring alone does: step 2, the outer ring as given (the one
+      // step 2 a trace still reaches, D9).
+      what = 'a pinched hole at $place';
+      final pinchedHole = rel(place, const [
+        (4000, 4000),
+        (5000, 4000),
+        (5000, 5000),
+        (6000, 5000),
+        (6000, 6000),
+        (5000, 6000),
+        (5000, 5000),
+        (4000, 5000),
+      ]);
+      t = tintOf(square, [pinchedHole]);
+      expect(t.step, 2, reason: '$what: $t');
+      expect([
+        for (final p in t.points) (p.x, p.y)
+      ], [
+        for (final p in square) (p.x, p.y)
+      ], reason: what);
+      expect(t.holesLeftOut, isEmpty, reason: what);
     }
   });
 }
