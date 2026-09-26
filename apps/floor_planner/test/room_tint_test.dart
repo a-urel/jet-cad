@@ -476,13 +476,15 @@ void main() {
       ], reason: what);
       expect(t.holesLeftOut, isEmpty, reason: what);
 
-      // 8 and 9. Traced, far from everything (the 14c review's fuzz, seed
-      // 1414): holes 85-278 mm from any edge that the perpendicular slit
-      // alone left out. 8 is its plan t107, an acute triangle and an
-      // arrowhead of separators; 9 its plan t0, two triangles of
-      // separators and two thin turned walls, whose keyhole needs V' in
-      // its own sector (the V side). Every hole is cut out: step 1, simple.
-      for (final (label, walls, seps) in <(String, List<W>, List<S>)>[
+      // 8 and 9. Traced, from the 14c reviews' fuzz: holes 85-278 mm from
+      // any edge that the perpendicular slit alone left out (seed 1414: t107,
+      // an acute triangle and an arrowhead of separators; t0, two triangles
+      // of separators and two thin turned walls, whose keyhole needs V' in
+      // its own sector, the V side), and seed 31337's t92, whose slit end
+      // landed on an earlier slit end. Every hole is cut out: step 1,
+      // simple.
+      for (final (label, walls, seps, seedXY)
+          in <(String, List<W>, List<S>, (double, double))>[
         (
           'the far fuzz plan t107',
           const [],
@@ -530,6 +532,7 @@ void main() {
               2276.6033910495235
             ),
           ],
+          (250.25, 250.5),
         ),
         (
           'the far fuzz plan t0 (the V side)',
@@ -577,6 +580,58 @@ void main() {
               1619.117725562984
             ),
           ],
+          (250.25, 250.5),
+        ),
+        (
+          // Seed 31337's plan t92 (the second review): hole A's
+          // rightmost vertex (7,825, 175) and B's (7,899.1, 100.9) lie on
+          // the south-east corner's diagonal x + y = 8,000, with the
+          // corner (7,900, 100). A bridges to the corner, then B bridges
+          // to A's H along the same line, so B's V' = H_A + s is A's H'
+          // exactly: a slit end on a vertex, which `_clear` must see too,
+          // or the ring is pinched.
+          'the fuzz plan t92 (a slit end on a slit end)',
+          const [
+            W(100.6, 960.2247134232631, 399.2233160671864, 960.2247134232631,
+                298.6233160671864),
+          ],
+          const [
+            (7825.0, 175.0, 7677.98650490311, 328.60008025591094),
+            (
+              7677.98650490311,
+              328.60008025591094,
+              7721.749528951844,
+              370.48648494199267
+            ),
+            (7721.749528951844, 370.48648494199267, 7825.0, 175.0),
+            (7899.1, 100.9, 7516.6161490859795, 693.3036188098479),
+            (
+              7516.6161490859795,
+              693.3036188098479,
+              7663.308202375942,
+              788.0149602995416
+            ),
+            (7663.308202375942, 788.0149602995416, 7899.1, 100.9),
+            (
+              5638.475880712067,
+              1016.0143896419854,
+              6101.05586696013,
+              673.8546708147088
+            ),
+            (
+              6101.05586696013,
+              673.8546708147088,
+              6376.695338182006,
+              953.2635397260103
+            ),
+            (
+              6376.695338182006,
+              953.2635397260103,
+              5638.475880712067,
+              1016.0143896419854
+            ),
+          ],
+          (250.5, 3750.25),
         ),
       ]) {
         what = '$label at $place';
@@ -584,7 +639,7 @@ void main() {
             buildPlan([...boxWalls, ...walls], seps: seps, place: place);
         final farInputs = RoomInputs(far.doc);
         addTearDown(farInputs.dispose);
-        final farSeed = far.at(250.25, 250.5);
+        final farSeed = far.at(seedXY.$1, seedXY.$2);
         final farFace = traceRoomAmong(farSeed, farInputs) as Traced;
         expect(farFace.holes, hasLength(greaterThanOrEqualTo(2)), reason: what);
         final farRing = [for (final p in farFace.ring) p - farSeed];

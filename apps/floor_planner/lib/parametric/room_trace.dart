@@ -623,12 +623,16 @@ final class Tint {
   /// ring first (the holes not yet joined lie at x ≤ H.x, the joined ones
   /// are part of the ring), and a vertex of the ring is visible from H
   /// (Eberly's argument). But the slit must be clear too. With each of its
-  /// ends inside its own sector, a slit is cut off only by an edge within
-  /// its 0.5 mm: a hole left out lies within the slit's width of the ring
-  /// or of another hole (`RG2`'s column 0.2 mm off two faces, unturned;
-  /// the 14c review's fuzz, seed 1414, found no other). A ring and holes
-  /// that are not a trace's reach it too, as `TN1`'s hole outside the ring
-  /// and its overlapping holes.
+  /// ends inside its own sector, a **simple** hole's slit is cut off only by
+  /// an edge within its 0.5 mm: a simple hole left out lies within the
+  /// slit's width of the ring or of another hole (`RG2`'s column 0.2 mm off
+  /// two faces, unturned; the 14c reviews' fuzz found no other). A
+  /// **pinched** hole (two shapes sharing a vertex) takes step 2 or is left
+  /// out wherever it lies: its keyhole passes the pinch twice, and its slit
+  /// may end on it (the reviews' seed 1414 plan t81, two thin triangles
+  /// sharing their rightmost vertex 75 mm from the ring, is left out). A
+  /// ring and holes that are not a trace's reach it too, as `TN1`'s hole
+  /// outside the ring and its overlapping holes.
   final List<int> holesLeftOut;
 
   /// Whether the tint shows the face as traced: step 1, every hole cut out.
@@ -664,6 +668,16 @@ final class Tint {
 /// perpendicular slit can cross the hole's edge beside `H`, or the bridge,
 /// though the bridge is clear. A hole with no such vertex is left out (the
 /// tint covers it) and named in [Tint.holesLeftOut].
+///
+/// The perpendicular slit is tried first because it is what the keyhole
+/// always did: placing each end in its sector straight away left out more
+/// holes near the ring than before Task 14c (31 traces over the 14c
+/// review's four fuzz seeds), and any slit that passes the check is simple.
+/// Its cost: at a convex vertex of the ring (nearly every box corner) the
+/// perpendicular `V'` lies outside the face, up to 0.5 mm, so the tint
+/// covers a sliver of the wall there, as it did before Task 14c; where a
+/// later hole bridges to an earlier slit end the two add up, to 1 mm at
+/// most (the reviews' fuzz: 0.99999979 mm).
 ///
 /// **The fallback chain**, so an edit is never refused because of a tint:
 /// 1. the keyholed ring, if it triangulates (`triangulationFor` non-empty);
@@ -817,20 +831,28 @@ Vector2 _slitEnd(Vector2 o, Vector2 from, Vector2 to, Vector2 perp) {
 
 /// Whether the edges [edges] of the closed ring [r] (edge `e` runs from
 /// `r[e]` to `r[e + 1]`) cross nothing: no edge of [r] other than the two
-/// next to it, and no edge of [others], properly crosses one of them, and
-/// no vertex of [r] or [others] other than its own ends lies within
-/// `roomTrace.linear` strictly inside it, nor one of its ends strictly
-/// inside an edge of [r] or [others] that is not next to it. The keyholed
-/// ring stays simple (D9) where the bridge's own test ([_blocked]) cannot
-/// see: along the slit.
+/// next to it, and no edge of [others], properly crosses one of them,
+/// shares an end with one of them within `roomTrace.linear`, or has a
+/// vertex within `roomTrace.linear` strictly inside it, nor has one of its
+/// ends strictly inside an edge of [r] or [others] that is not next to it.
+/// The keyholed ring stays simple (D9) where the bridge's own test
+/// ([_blocked]) cannot see: along the slit.
 bool _clear(List<Vector2> r, List<int> edges, List<List<Vector2>> others) {
   final tol = roomTrace.linear;
   bool inside(Vector2 p, Vector2 a, Vector2 b) =>
       distToSegment(p, a, b) <= tol &&
       (p - a).length > tol &&
       (p - b).length > tol;
+  // An end on an end, too: a slit end that lands on a vertex already in the
+  // ring (an earlier slit's end, where a later bridge runs along the same
+  // line) pinches it. The edges that share an end with this one by
+  // construction, the two next to it, are never asked.
   bool meets(Vector2 a, Vector2 b, Vector2 c, Vector2 d) =>
       _properlyCross(a, b, c, d) ||
+      (a - c).length <= tol ||
+      (a - d).length <= tol ||
+      (b - c).length <= tol ||
+      (b - d).length <= tol ||
       inside(c, a, b) ||
       inside(a, c, d) ||
       inside(b, c, d);
