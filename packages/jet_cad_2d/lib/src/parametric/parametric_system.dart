@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../core/diagnostic.dart';
 import '../core/handle.dart';
@@ -85,6 +86,45 @@ abstract class ParametricType<T extends Component> {
   /// 06 D8's cleanup's. Like [generate], it must not mutate, and whatever it
   /// throws rolls the edit back. Default: never.
   bool dissolves(ParametricView view, Handle self) => false;
+
+  /// Spec 10 D16: this type's geometry is an input to place readers.
+  /// Default false.
+  ///
+  /// A type is a contributor or a reader, never both:
+  /// [ParametricCatalog.register] refuses a type that is both, because the
+  /// trigger reaches readers one hop from what an edit changed.
+  bool get contributesPlace => false;
+
+  /// The world box of what this object contributes, from the view (a wall:
+  /// its uncut band's box; a separator: its segment's), or null for nothing.
+  /// Called only when [contributesPlace]; must not mutate. A box with a
+  /// non-finite coordinate is treated as null (not placed).
+  ///
+  /// Asked with the before-view of an edit (the parameters, transforms and
+  /// page as they were before it) and with its after-view, for the
+  /// contributors of the edit's spatial core, and for every live
+  /// contributor on a view's first [ParametricView.placedIn]; once per
+  /// object per view.
+  Aabb2? placeBox(ParametricView view, Handle self) => null;
+
+  /// Spec 10 D16: this type's generate reads contributors by place
+  /// ([ParametricView.placedIn]). Default false.
+  ///
+  /// An edit regenerates every live reader, not itself a seed, whose
+  /// [readBox] touches the before or after [placeBox] of a contributor in
+  /// the edit's spatial core.
+  bool get readsPlaces => false;
+
+  /// The world box whose contributors this object's current output depends
+  /// on, from its parameters, its transform and [stored], the world box of
+  /// the points of its stored children. Called only when [readsPlaces].
+  ///
+  /// [stored] is formed by the engine: every `(x, y)` pair of the `coords`
+  /// of this object's children's payloads (a fill has none), mapped to
+  /// world and boxed. It is a box of defining points, not of drawn extents:
+  /// a reader whose output has arcs, circles or text extents that matter
+  /// must grow it here. Empty when the object has no children.
+  Aabb2 readBox(T params, Transform2 toWorld, Aabb2 stored) => stored;
 }
 
 /// A referrer's fate when its referent stops being a live object (spec 08
@@ -259,13 +299,29 @@ class DanglingReferenceError implements Exception {
       '${referent.toHex()}, which is not a live parametric object';
 }
 
-/// Read-only access for [ParametricType.generate] and
-/// [ParametricType.diagnose].
+/// Read-only access for [ParametricType.generate],
+/// [ParametricType.diagnose], [ParametricType.dissolves] and
+/// [ParametricType.placeBox].
+///
+/// A view reads the **snapshot** of the survey it was built over (spec 10
+/// D16.1): each live object's registered component and accumulated
+/// transform, and the root's page, as they were when the survey ran. For an
+/// edit's after-view, `drift()` and `diagnostics()` the snapshot is the live
+/// state while the view is used; an edit's before-view reads the state
+/// before the edit, although the edit has already applied.
 final class ParametricView {
   ParametricView._(this._target, this._survey);
 
   final CommandTarget _target;
   final _Survey _survey;
+
+  /// Each place box asked of this view, null included (Ruling 10-6): a type's
+  /// `placeBox` is called once per object per view.
+  final Map<Handle, Aabb2?> _placeBoxes = {};
+
+  /// Every live contributor with a place box, ascending, filled by the first
+  /// [placedIn].
+  List<(Handle, Aabb2)>? _placed;
 
   /// [h]'s component of type [U], or null, and null for any handle that is
   /// not a live object of the survey this view was built over (inside an
@@ -274,11 +330,43 @@ final class ParametricView {
   /// re-parented one keeps it for good; either way an orphan must see its
   /// host gone (spec 08 D4), not a host whose transform has fallen back to
   /// the identity or that no longer regenerates.
-  U? paramsOf<U extends Component>(Handle h) =>
-      _survey.objects.containsKey(h) ? _target.components.get<U>(h) : null;
+  ///
+  /// The component is the survey's snapshot of [h]'s registered component
+  /// (spec 10 D16.1), answered when it is a [U].
+  U? paramsOf<U extends Component>(Handle h) {
+    final c = _survey.params[h];
+    return c is U ? c : null;
+  }
 
-  /// The accumulated transform: group-local to world.
-  Transform2 toWorld(Handle h) => _worldOf(_target, h);
+  /// The accumulated transform, group-local to world: the survey's snapshot
+  /// for a live object of it (spec 10 D16.1), the live tree for any other
+  /// handle.
+  Transform2 toWorld(Handle h) => _survey.toWorld[h] ?? _worldOf(_target, h);
+
+  /// [h]'s place box in this view (spec 10 D16), or null: null for a handle
+  /// that is not a live contributor of the survey, for a contributor that
+  /// places nothing, and for a box with a non-finite coordinate. The type is
+  /// asked once per view; later calls read the memo.
+  Aabb2? placeBoxOf(Handle h) {
+    if (_placeBoxes.containsKey(h)) return _placeBoxes[h];
+    final r = _survey.objects[h];
+    return _placeBoxes[h] =
+        r != null && r.type.contributesPlace ? r.placeBoxOf(this, h) : null;
+  }
+
+  /// Ascending live contributors whose place box touches [box] (spec 10
+  /// D16; closed: touching counts, no tolerance). Computes every
+  /// contributor's box on the first call per view, then scans. Unmodifiable.
+  List<Handle> placedIn(Aabb2 box) {
+    final placed = _placed ??= [
+      for (final h in _survey.objects.keys)
+        if (placeBoxOf(h) case final b?) (h, b),
+    ];
+    return List.unmodifiable([
+      for (final (h, b) in placed)
+        if (b.intersects(box)) h,
+    ]);
+  }
 
   /// Ascending handles of the objects whose reach overlaps [h]'s, computed
   /// on the first call for [h] and memoised (spec 07 D10). Unmodifiable.
@@ -304,8 +392,16 @@ final class ParametricView {
 class ParametricCatalog {
   final List<_Registration<Component>> _types = [];
 
+  /// Throws `ArgumentError` for a [type] that both
+  /// [ParametricType.contributesPlace] and [ParametricType.readsPlaces]
+  /// (spec 10 D16): the trigger gives one hop, and a type that did both
+  /// would need another.
   void register<T extends Component>(
       String typeId, ComponentFactory<T> factory, ParametricType<T> type) {
+    if (type.contributesPlace && type.readsPlaces) {
+      throw ArgumentError.value(typeId, 'typeId',
+          'a type cannot both contribute places and read them (spec 10 D16)');
+    }
     _types.add(_Registration<T>(typeId, factory, type));
   }
 
@@ -558,8 +654,28 @@ final class _Registration<T extends Component> {
   Iterable<Handle> handles(CommandTarget t) => t.components.withComponent<T>();
   bool owns(DraftCommand c) => c is SetComponentCommand<T>;
   DraftCommand detach(Handle h) => SetComponentCommand<T>(h, null);
-  Aabb2 reachOf(CommandTarget t, Handle h) =>
-      type.reach(t.components.get<T>(h) as T, _worldOf(t, h));
+
+  /// [h]'s component of this type, as the survey snapshots it.
+  T componentOf(CommandTarget t, Handle h) => t.components.get<T>(h) as T;
+  Aabb2 reachOf(Component params, Transform2 toWorld) =>
+      type.reach(params as T, toWorld);
+
+  /// The only caller of [ParametricType.placeBox] (Ruling 10-6): a box with
+  /// a non-finite coordinate, the empty box included, is no box.
+  Aabb2? placeBoxOf(ParametricView v, Handle h) {
+    final box = type.placeBox(v, h);
+    if (box == null) return null;
+    return box.minX.isFinite &&
+            box.minY.isFinite &&
+            box.maxX.isFinite &&
+            box.maxY.isFinite
+        ? box
+        : null;
+  }
+
+  /// [ParametricType.readBox] with [params] cast to this type.
+  Aabb2 readBoxOf(Component params, Transform2 toWorld, Aabb2 stored) =>
+      type.readBox(params as T, toWorld, stored);
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
   bool dissolves(ParametricView v, Handle h) => type.dissolves(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);

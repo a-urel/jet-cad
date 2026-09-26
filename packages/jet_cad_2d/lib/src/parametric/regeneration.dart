@@ -34,11 +34,20 @@ int debugReferenceCalls = 0;
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
 /// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.reach, this.children, this.owned, this.declared,
-      this.references, this.referrers, this.page);
+  _Survey(this.objects, this.params, this.toWorld, this.reach, this.children,
+      this.owned, this.declared, this.references, this.referrers, this.page);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
+
+  /// Each object's registered component at this moment (spec 10 D16.1): the
+  /// snapshot every view built over this survey reads. A component is
+  /// immutable, so the reference is the snapshot.
+  final Map<Handle, Component> params;
+
+  /// Each object's accumulated transform at this moment (spec 10 D16.1),
+  /// the one its [reach] was computed with.
+  final Map<Handle, Transform2> toWorld;
 
   /// Each object's reach at this moment, one call per object.
   final Map<Handle, Aabb2> reach;
@@ -108,8 +117,14 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   }
   final order = found.keys.toList()..sort(_byValue);
   final objects = {for (final h in order) h: found[h]!};
+  // Spec 10 D16.1: the snapshots are the component and the transform
+  // `reach` already reads, one read each, and no new client call.
+  final params = {for (final h in order) h: objects[h]!.componentOf(t, h)};
+  final toWorld = {for (final h in order) h: _worldOf(t, h)};
   // Ascending, like [objects]: `neighboursOf` walks it in handle order.
-  final reach = {for (final h in order) h: objects[h]!.reachOf(t, h)};
+  final reach = {
+    for (final h in order) h: objects[h]!.reachOf(params[h]!, toWorld[h]!),
+  };
   final children = <Handle, List<Handle>>{};
   final owned = <Handle, Handle>{};
   for (final slot in t.entities.liveSlots) {
@@ -145,6 +160,8 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   }
   return _Survey(
       objects,
+      params,
+      toWorld,
       reach,
       children,
       owned,
@@ -171,14 +188,83 @@ Iterable<Handle> _pageSeeds(CommandTarget t,
   }
 }
 
+/// The world box of the defining points of [r]'s stored children in [s]
+/// (spec 10 D16.2, S-14): every `(x, y)` pair of each child payload's
+/// `coords` (a fill's payload has none), mapped by [r]'s snapshot transform.
+/// Empty when [r] has no child with a point.
+Aabb2 _storedBox(CommandTarget t, _Survey s, Handle r) {
+  final m = s.toWorld[r]!;
+  var box = Aabb2.empty();
+  for (final c in s.children[r] ?? const <Handle>[]) {
+    final coords =
+        t.geometry.peek(t.entities.geomIndexAt(t.entities.slotOf(c)!)).coords;
+    for (var i = 0; i + 1 < coords.length; i += 2) {
+      box = box
+          .expandedToPoint(m.transformPoint(Vector2(coords[i], coords[i + 1])));
+    }
+  }
+  return box;
+}
+
+/// The live readers an edit regenerates by place (spec 10 D16.2): every
+/// live reader in [after], not itself a seed, whose
+/// [ParametricType.readBox] touches (closed) a box of `L`.
+///
+/// `K` is the spatial part of the core, the seeds and their neighbours
+/// before and after. `L` holds, for each contributor of `K` in ascending
+/// order, its place box in the **before-view** if it was live before (the
+/// snapshot: where it was, although the edit has applied) and in
+/// [afterView] if it is live after. For now every contributor of `K` adds
+/// both boxes (Ruling 10-3's staging: it can only over-rebuild). The
+/// before-view is built here, the only place that reads it; [afterView] is
+/// the one [_plan] receives (Ruling 10-5).
+///
+/// A reader's `stored` box is [_storedBox] over the after-survey. When `L`
+/// is empty no read box is asked.
+List<Handle> _triggered(CommandTarget t, Set<Handle> seeds, _Survey before,
+    _Survey after, ParametricView afterView) {
+  final k = {
+    ...seeds,
+    for (final s in seeds) ...before.neighboursOf(s),
+    for (final s in seeds) ...after.neighboursOf(s),
+  }.toList()
+    ..sort(_byValue);
+  final beforeView = ParametricView._(t, before);
+  final boxes = <Aabb2>[
+    for (final h in k) ...[
+      if (beforeView.placeBoxOf(h) case final b?) b,
+      if (afterView.placeBoxOf(h) case final b?) b,
+    ],
+  ];
+  if (boxes.isEmpty) return const [];
+  final out = <Handle>[];
+  for (final MapEntry(key: h, value: r) in after.objects.entries) {
+    if (!r.type.readsPlaces || seeds.contains(h)) continue;
+    final read = r.readBoxOf(
+        after.params[h]!, after.toWorld[h]!, _storedBox(t, after, h));
+    for (final b in boxes) {
+      if (read.intersects(b)) {
+        out.add(h);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
 /// The objects an edit regenerates, as a sorted list of live objects (spec
-/// 06 D4 step 6, as amended by spec 08 D3):
+/// 06 D4 step 6, as amended by spec 08 D3 and spec 10 D16.2):
 ///
 /// ```
 /// core    = seeds ∪ neighbours before and after (seeds)
 ///                 ∪ references before and after (seeds)
+///                 ∪ triggered
 /// closure = core ∪ referrers before and after (core)
 /// ```
+///
+/// [triggered] is [_triggered]'s: the live readers whose read box touches a
+/// place box of the spatial core, joined to the core before the referrer
+/// step, so a reader's referrers follow it.
 ///
 /// Neighbours are asked for the seeds only (spec 07 D10); references and
 /// referrers are map lookups. The referent direction brings in what a
@@ -194,13 +280,15 @@ Iterable<Handle> _pageSeeds(CommandTarget t,
 /// it is two hops from B (seed B → neighbour A → referrer). One extra hop
 /// closes it for a type that reads no further than its referents'
 /// neighbours (spec 08 D3).
-List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
+List<Handle> _closure(
+    Set<Handle> seeds, _Survey before, _Survey after, List<Handle> triggered) {
   final core = {
     ...seeds,
     for (final s in seeds) ...before.neighboursOf(s),
     for (final s in seeds) ...after.neighboursOf(s),
     for (final s in seeds) ...?before.references[s],
     for (final s in seeds) ...?after.references[s],
+    ...triggered,
   };
   return {
     ...core,
@@ -608,10 +696,14 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///    seeds, the dangling-reference check ([_checkDangling]), the page
 ///    seeds ([_pageSeeds], spec 10 D14: a changed page adds the live
 ///    objects of every type whose page key changed, unchecked for dangling
-///    references, Ruling 10-4), the early return, the closure and the
-///    plan (a dissolving object's removal and detach included, spec 10
-///    D15). Any failure applies `r.inverse`, the cascade's included, so a
-///    refused edit leaves the document byte for byte as it was;
+///    references, Ruling 10-4), the early return, the after-view, the
+///    spatial trigger ([_triggered], spec 10 D16.2: the readers whose read
+///    box touches a before or after place box of the spatial core; the
+///    before-view is built there), the closure and the plan (a dissolving
+///    object's removal and detach included, spec 10 D15), which receives
+///    the trigger's after-view (Ruling 10-5). Any failure applies
+///    `r.inverse`, the cascade's included, so a refused edit leaves the
+///    document byte for byte as it was;
 /// 6. the apply loop, whose inverse wraps `r.inverse`.
 ///
 /// The after-survey never sees a doomed referrer, so the plan never
@@ -672,8 +764,14 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
     if (seeds.isEmpty && cleanup.isEmpty) return r;
+    // Ruling 10-5: one after-view, for the trigger and the plan alike.
+    final view = ParametricView._(t, after);
     plan = _plan(
-        t, _closure(seeds, before, after), after, ParametricView._(t, after));
+        t,
+        _closure(
+            seeds, before, after, _triggered(t, seeds, before, after, view)),
+        after,
+        view);
   } catch (error) {
     _undoInner(t, edit.label, r, error);
     rethrow;

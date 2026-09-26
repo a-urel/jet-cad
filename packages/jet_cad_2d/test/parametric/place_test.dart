@@ -1,0 +1,373 @@
+// Spatial dependencies (spec 10 D16): place contributors (Slab, Rod), place
+// readers (Lens) and the trigger that regenerates, in the edit, every reader
+// whose read box touches the before or after place box of a contributor in
+// the edit's spatial core. Every object sits in its own rotated group off
+// the origin; fields and rectangles have fractional coordinates.
+import 'dart:math' as math;
+import 'dart:typed_data';
+
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:test/test.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'support/clients.dart';
+import 'support/fixture.dart';
+
+const Slab slab = Slab(20.25, 30.5, 800.5, 400.75);
+const Lens lens = Lens(100.5, 50.25, 2000.5, 1500.75);
+
+/// R on A's frame, turned, off the origin.
+final Transform2 atR = onA(3000.5, 500.25, 0.2);
+
+/// R's world field.
+Aabb2 field() => lensField(lens, atR);
+
+List<Handle> drift(DraftDocument doc) => ParametricSystem(doc, catalog).drift();
+
+int calls(Handle h) => generateCalls[h] ?? 0;
+
+/// [p] turned by [turn] with its first corner on ([x], [y]), in world.
+Transform2 cornerAt(Slab p, double x, double y, double turn) =>
+    Transform2.translation(x, y)
+        .multiply(Transform2.rotation(turn))
+        .multiply(Transform2.translation(-p.x, -p.y));
+
+/// The next double after [x] towards [up] (up or down), for an exact touch.
+double nextAfter(double x, {required bool up}) {
+  final b = ByteData(8)..setFloat64(0, x);
+  final bits = b.getInt64(0);
+  b.setInt64(0, (x >= 0) == up ? bits + 1 : bits - 1);
+  return b.getFloat64(0);
+}
+
+/// [p] turned by [turn], its first corner at height [y], moved along x until
+/// its world box's `minX` equals [minX] exactly.
+Transform2 touchingAt(Slab p, double minX, double y, double turn) {
+  var x = minX;
+  x += minX - slabBox(p, cornerAt(p, x, y, turn)).minX;
+  for (var i = 0; i < 10000; i++) {
+    final m = slabBox(p, cornerAt(p, x, y, turn)).minX;
+    if (m == minX) return cornerAt(p, x, y, turn);
+    x = nextAfter(x, up: m < minX);
+  }
+  throw StateError('no exact touch at $minX');
+}
+
+/// The world box of [box] mapped by [m].
+Aabb2 worldBox(List<double> coords, Transform2 m) => Aabb2.fromPoints([
+      for (var i = 0; i + 1 < coords.length; i += 2)
+        m.transformPoint(Vector2(coords[i], coords[i + 1])),
+    ]);
+
+List<double> coordsOf(DraftDocument doc, Handle k) => doc.geometry
+    .read(doc.entities.geomIndexAt(doc.entities.slotOf(k)!))
+    .coords
+    .toList();
+
+EntityKind kindOf(DraftDocument doc, Handle k) =>
+    doc.entities.kindAt(doc.entities.slotOf(k)!);
+
+/// The place boxes Lens [r] draws (its POLYLINE children), in world,
+/// ascending by child handle.
+List<Aabb2> listedBoxes(DraftDocument doc, Handle r) => [
+      for (final k in kids(doc, r))
+        if (kindOf(doc, k) == EntityKind.polyline)
+          worldBox(coordsOf(doc, k), doc.tree.accumulatedTransform(r)),
+    ];
+
+/// The Rod segments Lens [r] draws (its LINE children), in world.
+List<List<double>> listedSegments(DraftDocument doc, Handle r) {
+  final m = doc.tree.accumulatedTransform(r);
+  return [
+    for (final k in kids(doc, r))
+      if (kindOf(doc, k) == EntityKind.line)
+        () {
+          final c = coordsOf(doc, k);
+          final a = m.transformPoint(Vector2(c[0], c[1]));
+          final b = m.transformPoint(Vector2(c[2], c[3]));
+          return [a.x, a.y, b.x, b.y];
+        }(),
+  ];
+}
+
+Matcher boxNear(Aabb2 e) => isA<Aabb2>()
+    .having((b) => b.minX, 'minX', closeTo(e.minX, 1e-6))
+    .having((b) => b.minY, 'minY', closeTo(e.minY, 1e-6))
+    .having((b) => b.maxX, 'maxX', closeTo(e.maxX, 1e-6))
+    .having((b) => b.maxY, 'maxY', closeTo(e.maxY, 1e-6));
+
+/// Lens [r]'s read box as the engine forms it: its world field and the
+/// world box of its stored children's points.
+Aabb2 readBoxOf(DraftDocument doc, Handle r, Lens p) {
+  final m = doc.tree.accumulatedTransform(r);
+  var stored = Aabb2.empty();
+  for (final k in kids(doc, r)) {
+    stored = stored.union(worldBox(coordsOf(doc, k), m));
+  }
+  return stored.union(lensField(p, m));
+}
+
+/// 07 D10's neighbour predicate: reach overlap by more than the tolerance
+/// on both axes.
+bool neighbours(Aabb2 a, Aabb2 b) {
+  const tol = Tolerance.standard;
+  return a.minX < b.maxX - tol.linear &&
+      b.minX < a.maxX - tol.linear &&
+      a.minY < b.maxY - tol.linear &&
+      b.minY < a.maxY - tol.linear;
+}
+
+Aabb2 slabReach(Slab p, Transform2 at) => const SlabType().reach(p, at);
+
+/// A test-local type with both roles (SD8).
+final class _BothType extends ParametricType<Slab> {
+  const _BothType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Slab params, Transform2 toWorld) => Aabb2.empty();
+  @override
+  List<Generated> generate(ParametricView view, Handle self) => const [];
+  @override
+  bool get contributesPlace => true;
+  @override
+  bool get readsPlaces => true;
+}
+
+void main() {
+  setUp(() {
+    generateCalls.clear();
+    Slab.placeCalls.clear();
+  });
+
+  test(
+      'SD1 a contributor moved into a reader\'s field regenerates the '
+      'reader; placedIn is by place box, closed, and skips a non-finite '
+      'box', () {
+    const hS = Handle(1000), hR = Handle(2000), hT = Handle(3000);
+    const hNaN = Handle(4000), hInf = Handle(5000);
+    final f = field();
+
+    // Two loaded Slabs whose first corners lie below and left of R's
+    // field: one with a NaN far corner, one with an infinite one. Loaded:
+    // added before the system is installed, so nothing is generated for
+    // them.
+    final doc = DraftDocument.empty();
+    final system = ParametricSystem(doc, catalog);
+    const nan = Slab(10.5, 20.25, double.nan, 300.5);
+    const inf = Slab(10.5, 20.25, double.infinity, 300.5);
+    final atNaN = cornerAt(nan, f.minX - 400.25, f.minY - 300.5, 0.3);
+    final atInf = cornerAt(inf, f.minX - 600.75, f.minY - 500.25, 0.3);
+    doc.commands.execute(create(doc, hNaN, atNaN, nan));
+    doc.commands.execute(create(doc, hInf, atInf, inf));
+    system.install();
+    // Premises: the infinite Slab's box would touch the field; neither
+    // loaded Slab's reach does, so a reach-based placedIn (M-10cand) is
+    // caught by S alone.
+    expect(slabBox(inf, atInf).intersects(f), isTrue);
+    expect(slabReach(inf, atInf).intersects(f), isFalse);
+    expect(slabReach(nan, atNaN).intersects(f), isFalse);
+    expect(slabBox(inf, atInf).maxX, double.infinity);
+    expect(slabBox(nan, atNaN).minX.isNaN, isTrue);
+
+    doc.commands.execute(create(doc, hR, atR, lens));
+    expect(kids(doc, hR), isEmpty, reason: 'a non-finite box is not placed');
+    expect(drift(doc), isEmpty);
+
+    // A Rod inside the field: R draws its segment.
+    const rod = Rod(0.5, 0.25, 500.75, 200.5);
+    final atT = Transform2.translation(f.minX + 400.5, f.minY + 300.25)
+        .multiply(Transform2.rotation(0.35));
+    doc.commands.execute(create(doc, hT, atT, rod));
+    final (ta, tb) = rod.worldEnds(atT);
+    final segment = [ta.x, ta.y, tb.x, tb.y];
+    expect(listedSegments(doc, hR), [
+      [for (final v in segment) closeTo(v, 1e-6)],
+    ]);
+    expect(listedBoxes(doc, hR), isEmpty);
+    expect(drift(doc), isEmpty);
+
+    // S parked far away.
+    doc.commands.execute(create(doc, hS, parked, slab));
+    expect(listedBoxes(doc, hR), isEmpty);
+
+    // Moved until only its rectangle, not its reach, overlaps the field.
+    final t1 = cornerAt(slab, f.minX - 300.25, f.center.y, 0.15);
+    expect(slabBox(slab, t1).intersects(f), isTrue);
+    expect(slabReach(slab, t1).intersects(readBoxOf(doc, hR, lens)), isFalse,
+        reason: 'the reach misses the read box');
+    expect(slabReach(slab, t1).intersects(f), isFalse);
+    doc.commands.execute(TransformNodeCommand(hS, t1));
+    expect(listedBoxes(doc, hR), [boxNear(slabBox(slab, t1))]);
+    expect(listedSegments(doc, hR), hasLength(1));
+    expect(drift(doc), isEmpty);
+
+    // Moved to the far side, its box exactly touching the field.
+    final t2 = touchingAt(slab, f.maxX, f.center.y, 0.15);
+    final b2 = slabBox(slab, t2);
+    expect(b2.minX, f.maxX, reason: 'touching, exactly');
+    expect(b2.minY < f.maxY && b2.maxY > f.minY, isTrue);
+    doc.commands.execute(TransformNodeCommand(hS, t2));
+    expect(listedBoxes(doc, hR), [boxNear(b2)],
+        reason: 'a box that only touches is listed');
+    expect(listedSegments(doc, hR), hasLength(1));
+    expect(drift(doc), isEmpty);
+    // Neither loaded Slab was touched.
+    expect(doc.components.get<Slab>(hNaN)!.w.isNaN, isTrue);
+    expect(doc.components.get<Slab>(hInf), inf);
+    expect(doc.tree.accumulatedTransform(hInf).e, atInf.e);
+  });
+
+  test(
+      'SD2 a contributor moved out of a reader\'s field regenerates '
+      'the reader (its before box)', () {
+    const hR = Handle(1000), hS = Handle(2000);
+    final f = field();
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hR, atR, lens));
+    final t0 = cornerAt(slab, f.minX + 400.25, f.minY + 350.5, 0.15);
+    doc.commands.execute(create(doc, hS, t0, slab));
+    expect(listedBoxes(doc, hR), [boxNear(slabBox(slab, t0))]);
+    expect(drift(doc), isEmpty);
+
+    // Moved clear of the field and of its old box: its after box misses
+    // R's read box, so only its before box finds R.
+    final t1 = cornerAt(slab, f.maxX + 600.5, f.minY + 350.5, 0.15);
+    final read = readBoxOf(doc, hR, lens);
+    expect(slabBox(slab, t1).intersects(read), isFalse);
+    expect(slabBox(slab, t0).intersects(read), isTrue);
+    final r0 = calls(hR);
+    doc.commands.execute(TransformNodeCommand(hS, t1));
+    expect(calls(hR), r0 + 1);
+    expect(listedBoxes(doc, hR), isEmpty);
+    expect(drift(doc), isEmpty);
+  });
+
+  test(
+      'SD3 a contributor moved far regenerates the reader it left '
+      '(the before-view)', () {
+    const hR = Handle(1000), hS = Handle(2000);
+    final f = field();
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hR, atR, lens));
+    final t0 = cornerAt(slab, f.minX + 700.75, f.minY + 500.25, -0.25);
+    doc.commands.execute(create(doc, hS, t0, slab));
+    expect(listedBoxes(doc, hR), [boxNear(slabBox(slab, t0))]);
+
+    // 60 m away, turned.
+    final t1 = Transform2.translation(60000.5, -1500.25)
+        .multiply(Transform2.rotation(0.4))
+        .multiply(t0);
+    expect(slabBox(slab, t1).minX - f.maxX, greaterThan(50000));
+    doc.commands.execute(TransformNodeCommand(hS, t1));
+    expect(listedBoxes(doc, hR), isEmpty);
+    expect(drift(doc), isEmpty);
+  });
+
+  test(
+      'SD4 the two-hop: a seed that changes a neighbouring '
+      'contributor\'s place box at a far end regenerates the reader there', () {
+    const hW = Handle(1000), hX = Handle(2000), hR = Handle(3000);
+    const w = Slab(10.5, 20.25, 3000.5, 300.75);
+    const clip = ClipRect(400.5, 300.25);
+    final atW = onA(-3000.5, -2000.25, 0.1);
+    final wb = slabBox(w, atW);
+    // R beyond W's far end: its field misses W's box, not W's grown box.
+    const lensW = Lens(0.5, 0.25, 900.5, 600.75);
+    final atRW = Transform2.translation(wb.maxX + 500.25, wb.maxY - 800.5)
+        .multiply(Transform2.rotation(0.25));
+    final fw = lensField(lensW, atRW);
+    // X centred on W's first corner (its reach) when on W, far otherwise.
+    final corner = atW.transformPoint(w.corners[0]);
+    final onW = Transform2.translation(corner.x, corner.y)
+        .multiply(Transform2.rotation(0.7))
+        .multiply(Transform2.translation(-clip.width / 2, -clip.height / 2));
+    final away = Transform2.translation(wb.minX - 5000.5, wb.minY - 4000.25)
+        .multiply(Transform2.rotation(0.7));
+    Aabb2 clipReach(Transform2 at) =>
+        const RectType<ClipRect>(Capability.geometry).reach(clip, at);
+
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hW, atW, w));
+    doc.commands.execute(create(doc, hX, away, clip));
+    doc.commands.execute(create(doc, hR, atRW, lensW));
+    expect(kids(doc, hR), isEmpty);
+    expect(drift(doc), isEmpty);
+
+    // Premises: X's before and after boxes (its reach: it is no
+    // contributor) miss R's read box; X on W is W's neighbour; W's place
+    // box misses R's read box before and touches it after, grown.
+    final read = readBoxOf(doc, hR, lensW);
+    expect(clipReach(away).intersects(read), isFalse);
+    expect(clipReach(onW).intersects(read), isFalse);
+    expect(neighbours(clipReach(onW), slabReach(w, atW)), isTrue);
+    expect(neighbours(clipReach(away), slabReach(w, atW)), isFalse);
+    expect(wb.intersects(read), isFalse);
+    expect(slabBox(w, atW, grown: true).intersects(read), isTrue);
+
+    // X onto W: W's box grows by 1,000 mm at its far end too, and R, two
+    // hops from X, follows.
+    doc.commands.execute(TransformNodeCommand(hX, onW));
+    expect(listedBoxes(doc, hR), [boxNear(slabBox(w, atW, grown: true))]);
+    expect(drift(doc), isEmpty);
+
+    // X off W (the plan's direction): W's box shrinks by 1,000 mm and R
+    // drops it. X's after box misses R's read box; its before box cannot
+    // (R now stores W's grown box, which holds W's reach, which X
+    // overlapped).
+    expect(clipReach(away).intersects(readBoxOf(doc, hR, lensW)), isFalse);
+    expect(fw.intersects(wb), isFalse);
+    doc.commands.execute(TransformNodeCommand(hX, away));
+    expect(listedBoxes(doc, hR), isEmpty);
+    expect(drift(doc), isEmpty);
+  });
+
+  test('SD5 two readers touched by one contributor both regenerate', () {
+    const hR1 = Handle(1000), hR2 = Handle(2000), hS = Handle(3000);
+    const lens2 = Lens(-50.25, 30.75, 1500.5, 1200.25);
+    final f1 = field();
+    final atR2 = Transform2.translation(f1.maxX - 600.5, f1.maxY - 500.25)
+        .multiply(Transform2.rotation(-0.3));
+    final f2 = lensField(lens2, atR2);
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hR1, atR, lens));
+    doc.commands.execute(create(doc, hR2, atR2, lens2));
+    doc.commands.execute(create(doc, hS, parked, slab));
+    expect(kids(doc, hR1), isEmpty);
+    expect(kids(doc, hR2), isEmpty);
+
+    // S into the overlap of both fields.
+    final t1 =
+        cornerAt(slab, f1.maxX - 500.75, math.max(f1.minY, f2.minY), 0.2);
+    final b1 = slabBox(slab, t1);
+    expect(b1.intersects(f1), isTrue);
+    expect(b1.intersects(f2), isTrue);
+    expect(hR1.value, lessThan(hR2.value));
+    doc.commands.execute(TransformNodeCommand(hS, t1));
+    expect(listedBoxes(doc, hR1), [boxNear(b1)]);
+    expect(listedBoxes(doc, hR2), [boxNear(b1)]);
+    expect(drift(doc), isEmpty);
+  });
+
+  test(
+      'SD8 the catalog refuses a type that both contributes and '
+      'reads', () {
+    final refusing = ParametricCatalog();
+    expect(
+        () => refusing.register<Slab>(
+            'test.both', Slab.fromJson, const _BothType()),
+        throwsA(isA<ArgumentError>()));
+    final bare = DraftDocument.empty();
+    refusing.registerComponents(bare.components);
+    expect(bare.components.isRegistered<Slab>(), isFalse,
+        reason: 'the refused type is not registered');
+
+    final roles = ParametricCatalog()
+      ..register<Slab>(Slab.id, Slab.fromJson, const SlabType())
+      ..register<Lens>(Lens.id, Lens.fromJson, const LensType());
+    final doc = DraftDocument.empty();
+    roles.registerComponents(doc.components);
+    expect(doc.components.isRegistered<Slab>(), isTrue);
+    expect(doc.components.isRegistered<Lens>(), isTrue);
+  });
+}

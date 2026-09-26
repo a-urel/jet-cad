@@ -969,6 +969,245 @@ final class FuseType extends ParametricType<Fuse> {
   }
 }
 
+/// One [SlabType.placeBox] call, as the view answered it (SV1-SV3).
+typedef SlabCall = ({
+  ParametricView view,
+  Slab? params,
+  Transform2 toWorld,
+  PageComponent? page,
+});
+
+/// A place contributor (spec 10 D16, Ruling 10-2): a [w] x [h] rectangle at
+/// ([x], [y]) in its own local space. Its reach is a 2 mm box centred on its
+/// first corner ([x], [y]); its place box is its whole rectangle's world box,
+/// grown by [Slab.growth] on every side while any neighbour is a
+/// [ClipRect]. So its place box differs from its reach (M-10cand) and depends
+/// on its neighbours at an end far from them (the two-hop, M-10nbr). It
+/// generates nothing.
+final class Slab implements Component {
+  const Slab(this.x, this.y, this.w, this.h);
+  static const String id = 'test.slab';
+  final double x, y, w, h;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'w': w, 'h': h};
+  static Slab fromJson(Map<String, Object?> j) => Slab(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['w']! as num).toDouble(),
+      (j['h']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Slab && o.x == x && o.y == y && o.w == w && o.h == h;
+  @override
+  int get hashCode => Object.hash(x, y, w, h);
+
+  /// How far a [ClipRect] neighbour grows the place box, mm.
+  static const double growth = 1000;
+
+  /// Every [SlabType.placeBox] call, in order. Tests clear it.
+  static final List<SlabCall> placeCalls = [];
+
+  /// The rectangle's corners, anticlockwise, in its own local space.
+  List<Vector2> get corners => [
+        Vector2(x, y),
+        Vector2(x + w, y),
+        Vector2(x + w, y + h),
+        Vector2(x, y + h),
+      ];
+}
+
+/// [p]'s rectangle, in world, grown by [Slab.growth] when [grown].
+Aabb2 slabBox(Slab p, Transform2 toWorld, {bool grown = false}) {
+  final box =
+      Aabb2.fromPoints([for (final c in p.corners) toWorld.transformPoint(c)]);
+  return grown ? box.expandedBy(Slab.growth) : box;
+}
+
+final class SlabType extends ParametricType<Slab> {
+  const SlabType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// A 2 mm box centred on the first corner, in world.
+  @override
+  Aabb2 reach(Slab params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [(-1, -1), (1, -1), (1, 1), (-1, 1)])
+          toWorld.transformPoint(Vector2(params.x + dx, params.y + dy)),
+      ]);
+
+  @override
+  bool get contributesPlace => true;
+
+  /// [slabBox], grown while any neighbour is a [ClipRect]. Records the call.
+  @override
+  Aabb2? placeBox(ParametricView view, Handle self) {
+    final p = view.paramsOf<Slab>(self);
+    final toWorld = view.toWorld(self);
+    Slab.placeCalls
+        .add((view: view, params: p, toWorld: toWorld, page: view.page));
+    if (p == null) return null;
+    return slabBox(p, toWorld,
+        grown: view
+            .neighbours(self)
+            .any((n) => view.paramsOf<ClipRect>(n) != null));
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    return const [];
+  }
+}
+
+/// A place contributor that is a segment (spec 10 D16, Ruling 10-2), from
+/// ([ax], [ay]) to ([bx], [by]) in its own local space. Its reach and its
+/// place box are the segment's world box, independent of its neighbours. It
+/// generates nothing; a [Lens] draws its segment.
+final class Rod implements Component {
+  const Rod(this.ax, this.ay, this.bx, this.by);
+  static const String id = 'test.rod';
+  final double ax, ay, bx, by;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'ax': ax, 'ay': ay, 'bx': bx, 'by': by};
+  static Rod fromJson(Map<String, Object?> j) => Rod(
+      (j['ax']! as num).toDouble(),
+      (j['ay']! as num).toDouble(),
+      (j['bx']! as num).toDouble(),
+      (j['by']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Rod && o.ax == ax && o.ay == ay && o.bx == bx && o.by == by;
+  @override
+  int get hashCode => Object.hash(ax, ay, bx, by);
+
+  /// The segment's two ends, in world.
+  (Vector2, Vector2) worldEnds(Transform2 toWorld) => (
+        toWorld.transformPoint(Vector2(ax, ay)),
+        toWorld.transformPoint(Vector2(bx, by)),
+      );
+}
+
+final class RodType extends ParametricType<Rod> {
+  const RodType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  Aabb2 _box(Rod p, Transform2 toWorld) {
+    final (a, b) = p.worldEnds(toWorld);
+    return Aabb2.fromPoints([a, b]);
+  }
+
+  @override
+  Aabb2 reach(Rod params, Transform2 toWorld) => _box(params, toWorld);
+
+  @override
+  bool get contributesPlace => true;
+
+  @override
+  Aabb2? placeBox(ParametricView view, Handle self) {
+    final p = view.paramsOf<Rod>(self);
+    return p == null ? null : _box(p, view.toWorld(self));
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    return const [];
+  }
+}
+
+/// A place reader (spec 10 D16, Ruling 10-2) with a stored field: the
+/// rectangle [w] x [h] at ([x], [y]) in its own local space. It generates,
+/// for each contributor `view.placedIn` returns for its world field, a
+/// [Rod]'s segment as a LINE, or any other contributor's place box as a
+/// closed POLYLINE, world to its own local. Its reach is empty: no spatial
+/// relation finds it, only the trigger does. Its read box is `stored` and
+/// its world field, so an empty Lens still reads its field.
+final class Lens implements Component {
+  const Lens(this.x, this.y, this.w, this.h);
+  static const String id = 'test.lens';
+  final double x, y, w, h;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'w': w, 'h': h};
+  static Lens fromJson(Map<String, Object?> j) => Lens(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['w']! as num).toDouble(),
+      (j['h']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Lens && o.x == x && o.y == y && o.w == w && o.h == h;
+  @override
+  int get hashCode => Object.hash(x, y, w, h);
+}
+
+/// [p]'s field, in world.
+Aabb2 lensField(Lens p, Transform2 toWorld) => Aabb2.fromPoints([
+      for (final c in [
+        Vector2(p.x, p.y),
+        Vector2(p.x + p.w, p.y),
+        Vector2(p.x + p.w, p.y + p.h),
+        Vector2(p.x, p.y + p.h),
+      ])
+        toWorld.transformPoint(c),
+    ]);
+
+final class LensType extends ParametricType<Lens> {
+  const LensType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  @override
+  Aabb2 reach(Lens params, Transform2 toWorld) => Aabb2.empty();
+
+  @override
+  bool get readsPlaces => true;
+
+  @override
+  Aabb2 readBox(Lens params, Transform2 toWorld, Aabb2 stored) =>
+      stored.union(lensField(params, toWorld));
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Lens>(self)!;
+    final toWorld = view.toWorld(self);
+    final toLocal = toWorld.invert();
+    return [
+      for (final h in view.placedIn(lensField(p, toWorld)))
+        if (view.paramsOf<Rod>(h) case final rod?)
+          () {
+            final (a, b) = rod.worldEnds(view.toWorld(h));
+            return Generated(
+                EntityKind.line,
+                linePayload(
+                    toLocal.transformPoint(a), toLocal.transformPoint(b)));
+          }()
+        else
+          () {
+            final box = view.placeBoxOf(h)!;
+            return Generated(
+                EntityKind.polyline,
+                polylinePayload([
+                  for (final c in [
+                    Vector2(box.minX, box.minY),
+                    Vector2(box.maxX, box.minY),
+                    Vector2(box.maxX, box.maxY),
+                    Vector2(box.minX, box.maxY),
+                  ])
+                    toLocal.transformPoint(c),
+                ], closed: true));
+          }(),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -985,4 +1224,7 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType())
   ..register<Gauge>(Gauge.id, Gauge.fromJson, const GaugeType())
   ..register<Dial>(Dial.id, Dial.fromJson, const DialType())
-  ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType());
+  ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType())
+  ..register<Slab>(Slab.id, Slab.fromJson, const SlabType())
+  ..register<Rod>(Rod.id, Rod.fromJson, const RodType())
+  ..register<Lens>(Lens.id, Lens.fromJson, const LensType());
