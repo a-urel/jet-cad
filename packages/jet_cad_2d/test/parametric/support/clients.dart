@@ -758,6 +758,109 @@ final class SwatchType extends ParametricType<Swatch> {
   }
 }
 
+/// A 1 mm box centred on ([x], [y]) in an object's local space, in world:
+/// the reach of the page-key clients, which never reaches a neighbour's in
+/// the page tests.
+Aabb2 dotReach(double x, double y, Transform2 toWorld) => Aabb2.fromPoints([
+      for (final (dx, dy) in const [(-.5, -.5), (.5, -.5), (.5, .5), (-.5, .5)])
+        toWorld.transformPoint(Vector2(x + dx, y + dy)),
+    ]);
+
+/// A page-key client keyed on the page's scale (spec 10 D14, Ruling 10-2):
+/// one LINE from ([x], [y]) along its own local x axis, `10 x` the scale
+/// denominator long (500 with no page). [host], when set, is declared in
+/// `references` (policy `cascade`) and otherwise ignored, so a loaded
+/// Gauge can name a dead handle (Ruling 10-4).
+final class Gauge implements Component {
+  const Gauge(this.x, this.y, {this.host});
+  static const String id = 'test.gauge';
+  final double x, y;
+  final Handle? host;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'host': host?.toJson()};
+  static Gauge fromJson(Map<String, Object?> j) =>
+      Gauge((j['x']! as num).toDouble(), (j['y']! as num).toDouble(),
+          host: j['host'] == null ? null : Handle.fromJson(j['host']));
+  @override
+  bool operator ==(Object o) =>
+      o is Gauge && o.x == x && o.y == y && o.host == host;
+  @override
+  int get hashCode => Object.hash(x, y, host);
+
+  /// The key: the page's scale denominator, 50 with no page.
+  static double keyOf(PageComponent? page) => page?.scaleDenominator ?? 50;
+}
+
+final class GaugeType extends ParametricType<Gauge> {
+  const GaugeType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Gauge params, Transform2 toWorld) =>
+      dotReach(params.x, params.y, toWorld);
+  @override
+  Iterable<Handle> references(Gauge params) =>
+      [if (params.host case final host?) host];
+  @override
+  Object? pageKey(PageComponent? page) => Gauge.keyOf(page);
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Gauge>(self)!;
+    final length = 10 * Gauge.keyOf(view.page);
+    return [
+      Generated(EntityKind.line,
+          linePayload(Vector2(p.x, p.y), Vector2(p.x + length, p.y))),
+    ];
+  }
+}
+
+/// A page-key client keyed on the page's display unit (spec 10 D14, Ruling
+/// 10-2): one LINE from ([x], [y]) along its own local x axis,
+/// `100 x (unit.index + 1)` long (300 with no page: metres).
+final class Dial implements Component {
+  const Dial(this.x, this.y);
+  static const String id = 'test.dial';
+  final double x, y;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y};
+  static Dial fromJson(Map<String, Object?> j) =>
+      Dial((j['x']! as num).toDouble(), (j['y']! as num).toDouble());
+  @override
+  bool operator ==(Object o) => o is Dial && o.x == x && o.y == y;
+  @override
+  int get hashCode => Object.hash(x, y);
+
+  /// The key: the page's display unit, metres with no page.
+  static DisplayUnit keyOf(PageComponent? page) =>
+      page?.displayUnit ?? DisplayUnit.meters;
+}
+
+final class DialType extends ParametricType<Dial> {
+  const DialType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Dial params, Transform2 toWorld) =>
+      dotReach(params.x, params.y, toWorld);
+  @override
+  Object? pageKey(PageComponent? page) => Dial.keyOf(page);
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Dial>(self)!;
+    final length = 100.0 * (Dial.keyOf(view.page).index + 1);
+    return [
+      Generated(EntityKind.line,
+          linePayload(Vector2(p.x, p.y), Vector2(p.x + length, p.y))),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -771,4 +874,6 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
   ..register<Tag>(Tag.id, Tag.fromJson, const TagType())
   ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType())
-  ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType());
+  ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType())
+  ..register<Gauge>(Gauge.id, Gauge.fromJson, const GaugeType())
+  ..register<Dial>(Dial.id, Dial.fromJson, const DialType());

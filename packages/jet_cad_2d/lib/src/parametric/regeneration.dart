@@ -35,7 +35,7 @@ int debugReferenceCalls = 0;
 /// an edit with no seeds asks for none.
 final class _Survey {
   _Survey(this.objects, this.reach, this.children, this.owned, this.declared,
-      this.references, this.referrers);
+      this.references, this.referrers, this.page);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -63,6 +63,12 @@ final class _Survey {
   /// Each live referent's live referrers, ascending (spec 08 D2); absent
   /// when none. Unmodifiable: `ParametricView.referrers` hands them out.
   final Map<Handle, List<Handle>> referrers;
+
+  /// The root's `PageComponent` at this moment (spec 10 D14), or null when
+  /// none is attached or `PageComponent` is not registered. A component is
+  /// immutable, so the reference is the snapshot; `_run` compares the two
+  /// surveys' pages by value.
+  final PageComponent? page;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -137,9 +143,33 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       (referrers[x] ??= []).add(h);
     }
   }
-  return _Survey(objects, reach, children, owned, declared, references, {
-    for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
-  });
+  return _Survey(
+      objects,
+      reach,
+      children,
+      owned,
+      declared,
+      references,
+      {
+        for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
+      },
+      t.components.get<PageComponent>(t.tree.root));
+}
+
+/// The objects a page change seeds (spec 10 D14): when the page differs
+/// between [before] and [after] (value equality, a stored value), every
+/// live object in [after] of each registered type whose
+/// [ParametricType.pageKey] of the two pages differs. Empty, at no cost
+/// beyond one `==`, for an edit that leaves the page alone.
+Iterable<Handle> _pageSeeds(CommandTarget t,
+    List<_Registration<Component>> types, _Survey before, _Survey after) sync* {
+  if (before.page == after.page) return;
+  for (final r in types) {
+    if (r.type.pageKey(before.page) == r.type.pageKey(after.page)) continue;
+    for (final h in r.handles(t)) {
+      if (after.objects.containsKey(h)) yield h;
+    }
+  }
 }
 
 /// The objects an edit regenerates, as a sorted list of live objects (spec
@@ -556,10 +586,12 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 /// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
 ///    by the removals, its inverse included;
 /// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
-///    seeds, the dangling-reference check ([_checkDangling]), the early
-///    return, the closure and the plan. Any failure applies `r.inverse`,
-///    the cascade's included, so a refused edit leaves the document byte
-///    for byte as it was;
+///    seeds, the dangling-reference check ([_checkDangling]), the page
+///    seeds ([_pageSeeds], spec 10 D14: a changed page adds the live
+///    objects of every type whose page key changed, unchecked for dangling
+///    references, Ruling 10-4), the early return, the closure and the
+///    plan. Any failure applies `r.inverse`, the cascade's included, so a
+///    refused edit leaves the document byte for byte as it was;
 /// 6. the apply loop, whose inverse wraps `r.inverse`.
 ///
 /// The after-survey never sees a doomed referrer, so the plan never
@@ -606,6 +638,12 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       ...lost,
     };
     _checkDangling(seeds, after);
+    // Spec 10 D14, Ruling 10-4: after the dangling-reference check, which
+    // checks only what the edit touched (a page-seeded object was not
+    // edited, so a loaded one with a dead reference must not refuse a page
+    // change), and before the early return (a page-only edit touches the
+    // root, which is not an object, so its seeds are otherwise empty).
+    seeds.addAll(_pageSeeds(t, types, before, after));
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
