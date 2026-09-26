@@ -4,10 +4,12 @@
 // and not, with every wall and separator at the identity or in its own
 // rotated, translated group). Expected areas are hand arithmetic in the
 // tests; nothing here calls the tracer.
+import 'dart:convert' show jsonDecode;
 import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
 import 'package:floor_planner/parametric/separator.dart';
@@ -15,7 +17,7 @@ import 'package:floor_planner/parametric/wall.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'wall_fixture.dart' show payloadOf;
+import 'wall_fixture.dart' show kids, kindOf, payloadOf;
 
 export 'wall_fixture.dart'
     show kids, kindOf, payloadOf, driftOf, diagnosticsOf, canon, reload, enc;
@@ -537,3 +539,111 @@ const List<W> thinLWalls = [
   W(1200, 6000, 0, 6000, 200),
   W(0, 6000, 0, 0, 200),
 ];
+
+// ---------------------------------------------------------------------------
+// Rooms (Task 12).
+
+/// Attaches [page] to [doc]'s root, one command through the dispatcher, as
+/// the Page panel does; registers `PageComponent` first when [doc] has not
+/// (the app registers it before the page is attached, 04 D12).
+void attachPage(DraftDocument doc, PageComponent page) {
+  if (!doc.components.isRegistered<PageComponent>()) {
+    PageComponent.register(doc.components);
+  }
+  doc.commands
+      .execute(SetComponentCommand<PageComponent>(doc.rootHandle, page));
+}
+
+/// A room at world [seed], named [name], with label offset [label]: the
+/// commit the Room tool will make, a root-level group at the identity and
+/// its `RoomParams`, one compound. Returns the room's handle.
+Handle addRoom(DraftDocument doc, Vector2 seed, String name,
+    {(double, double)? label}) {
+  final h = doc.handleSeed.next();
+  doc.commands.execute(CompoundCommand([
+    AddNodeCommand(GroupNode(
+        handle: h,
+        parent: doc.rootHandle,
+        transform: Transform2.identity(),
+        children: const [])),
+    SetComponentCommand<RoomParams>(
+        h, RoomParams(seed.x, seed.y, name, label: label)),
+  ], label: 'Add room'));
+  return h;
+}
+
+/// [room]'s TEXT children, ascending: its name label, then its area label.
+List<Handle> labelsOf(DraftDocument doc, Handle room) => [
+      for (final k in kids(doc, room))
+        if (kindOf(doc, k) == EntityKind.text) k,
+    ];
+
+/// The string of TEXT [h].
+String textOf(DraftDocument doc, Handle h) => recordOf(doc, h).text;
+
+/// [room]'s tint, world points, no closing duplicate: the boundary its fill
+/// names (D9 steps 1 and 2), or its closed POLYLINE child (step 3). Empty
+/// when it has neither.
+List<Vector2> worldTintOf(DraftDocument doc, Handle room) {
+  final all = kids(doc, room);
+  final fills = [
+    for (final k in all)
+      if (kindOf(doc, k) == EntityKind.fill) k,
+  ];
+  final Handle boundary;
+  if (fills.isNotEmpty) {
+    boundary = Handle(payloadOf(doc, fills.single).scalars[0].toInt());
+  } else {
+    final lines = [
+      for (final k in all)
+        if (kindOf(doc, k) == EntityKind.polyline) k,
+    ];
+    if (lines.isEmpty) return const [];
+    boundary = lines.single;
+  }
+  return worldPoints(doc, boundary, closed: true);
+}
+
+/// The page [doc]'s rooms read: the root's, or `PageComponent()`'s defaults
+/// (spec 10 R-14).
+PageComponent pageOf(DraftDocument doc) =>
+    (doc.components.isRegistered<PageComponent>()
+        ? doc.components.get<PageComponent>(doc.rootHandle)
+        : null) ??
+    PageComponent();
+
+/// [room]'s label anchor in world, from its name TEXT's stored insertion
+/// point `q` (D21's frames): `toWorld(room)(q) − (0, 0.7 · h_name_w)`,
+/// `h_name_w` = 2.5 mm × the page's scale (D11).
+Vector2 anchorOf(DraftDocument doc, Handle room) {
+  final name = labelsOf(doc, room).first;
+  final c = payloadOf(doc, name).coords;
+  final q =
+      doc.tree.accumulatedTransform(room).transformPoint(Vector2(c[0], c[1]));
+  return q - Vector2(0, 0.7 * 2.5 * pageOf(doc).scaleDenominator);
+}
+
+/// Wall [i] of [plan] (its handle order) moved to [w], plan millimetres:
+/// one `SetComponentCommand`, its ends taken back through the wall's own
+/// group in [doc] (default [plan]'s; a reload of it has the same handles),
+/// as a grip drag stores them.
+DraftCommand moveWall(Plan plan, int i, W w, {DraftDocument? doc}) {
+  final h = plan.walls[i];
+  final inv = (doc ?? plan.doc).tree.accumulatedTransform(h).invert();
+  final s = inv.transformPoint(plan.at(w.sx, w.sy));
+  final e = inv.transformPoint(plan.at(w.ex, w.ey));
+  return SetComponentCommand<WallParams>(
+      h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j));
+}
+
+/// Decodes [s] with `PageComponent` and the floor planner's factories, and
+/// installs its system: the app's load, page included.
+DraftDocument reloadWithPage(String s) {
+  final doc = DraftDocumentCodec.decode(jsonDecode(s) as Map<String, Object?>,
+      registerComponents: (r) {
+    PageComponent.register(r);
+    parametricCatalog.registerComponents(r);
+  });
+  installParametric(doc);
+  return doc;
+}

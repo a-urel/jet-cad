@@ -662,8 +662,9 @@ void main() {
       d = traceAt(diagonal, diagonalInputs, (4000, 2000), 'diagonal');
       expectArea(d, 26217500, 'the rest at $place');
 
-      // Separators 0.5 um short of both faces: within roomTrace.linear, so
-      // each still ends on the faces and splits the box (D5 step 4).
+      // Separators 0.5 nm (5e-7 mm) short of both faces: within
+      // roomTrace.linear, so each still ends on the faces and splits the box
+      // (D5 step 4).
       // Vertical at x 3,000: 2,900 x 3,800 = 11,020,000 and 4,900 x 3,800 =
       // 18,620,000. Horizontal at y 2,000: 7,800 x 1,900 = 14,820,000 each.
       for (final (label, sep, seeds, areas) in [
@@ -684,7 +685,7 @@ void main() {
         final nearInputs = inputsOf(near);
         for (var k = 0; k < 2; k++) {
           final r = traceAt(near, nearInputs, seeds[k], label);
-          expectArea(r, areas[k], '$label 0.5 um short at $place, $k');
+          expectArea(r, areas[k], '$label 0.5 nm short at $place, $k');
         }
       }
     }
