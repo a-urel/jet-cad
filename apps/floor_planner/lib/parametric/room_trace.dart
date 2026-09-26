@@ -173,6 +173,144 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
     }
   }
 
+  // 3-6. The arrangement: segments, splits, vertices and face cycles.
+  final (
+    :segments,
+    :verts,
+    :from,
+    :to,
+    :edges,
+    :cycles,
+    :areas,
+    :comp,
+  ) = _arrange(sorted, local);
+  debugTracedSegments += segments;
+  List<Vector2> pointsOf(List<int> cycle) =>
+      [for (final h in cycle) verts[from[h]]];
+
+  // 7. The seed's face: the least positive cycle holding the seed.
+  int? outer;
+  for (var c = 0; c < cycles.length; c++) {
+    if (!(areas[c] > 0)) continue;
+    if (!pointInRing(s0, pointsOf(cycles[c]))) continue;
+    if (outer == null || areas[c] < areas[outer]) outer = c;
+  }
+  if (outer == null) return const Unbounded();
+  final k0 = comp[outer];
+
+  // 8. Holes.
+  final contour = <int, int>{}; // component -> its most negative cycle
+  for (var c = 0; c < cycles.length; c++) {
+    if (comp[c] == k0) continue;
+    final best = contour[comp[c]];
+    if (best == null || areas[c] < areas[best]) contour[comp[c]] = c;
+  }
+  final outerPoints = pointsOf(cycles[outer]);
+  final holeCycles = <int>[];
+  for (final MapEntry(key: component, value: c) in contour.entries) {
+    if (!(areas[c] < 0)) continue; // no area: not a contour
+    final p = verts[from[cycles[c].first]];
+    if (!pointInRing(p, outerPoints)) continue;
+    var nested = false;
+    for (var d = 0; d < cycles.length; d++) {
+      if (comp[d] == k0 || comp[d] == component || !(areas[d] > 0)) continue;
+      final pts = pointsOf(cycles[d]);
+      if (pointInRing(p, pts) && !pointInRing(s0, pts)) {
+        nested = true;
+        break;
+      }
+    }
+    if (!nested) holeCycles.add(c);
+  }
+
+  // 9. Clean-up and the canonical order.
+  double areaOf(List<int> loop) => shoelace(pointsOf(loop));
+  _Ring clean(List<int> hs) {
+    final ring = _rotated((
+      pts: [for (final h in hs) verts[from[h]]],
+      src: [
+        for (final h in hs)
+          edges[from[h] < to[h] ? (from[h], to[h]) : (to[h], from[h])]!,
+      ],
+    ));
+    // Collinear vertices, scanned from the canonical start.
+    final pts = [...ring.pts];
+    final src = [...ring.src];
+    var changed = true;
+    while (changed && pts.length > 3) {
+      changed = false;
+      for (var i = 0; i < pts.length; i++) {
+        final prev = (i - 1 + pts.length) % pts.length;
+        final a = pts[prev], b = pts[i], c = pts[(i + 1) % pts.length];
+        final d = c - a;
+        final along = (b - a).dot(d);
+        if (distToSegment(b, a, c) <= tol && along > 0 && along < d.dot(d)) {
+          src[prev] = {...src[prev], ...src[i]};
+          pts.removeAt(i);
+          src.removeAt(i);
+          changed = true;
+          break;
+        }
+      }
+    }
+    return _rotated((pts: pts, src: src));
+  }
+
+  // Doubled edges (decision 29). The outer cycle, split, leaves one loop
+  // walked anticlockwise, the outer ring, and a clockwise loop for each
+  // island tied to it by zero-width edges only: a hole, as a freestanding
+  // island is. A hole's contour, split, leaves a clockwise loop per island
+  // it ties together. A free separator, or a free tree of them, is doubled
+  // edges only and leaves nothing: a component with no area is not a hole
+  // (D6), whatever the sign of its walk's shoelace residue. The hole test
+  // above reads the cycle as walked, so an island's courtyard stays
+  // outside the face.
+  final outerLoops = _splitDoubled(cycles[outer]);
+  var ringLoop = outerLoops.first;
+  for (final l in outerLoops) {
+    if (areaOf(l) > areaOf(ringLoop)) ringLoop = l;
+  }
+  final ring = clean(ringLoop);
+  final holes = <_Ring>[];
+  for (final loop in [
+    for (final l in outerLoops)
+      if (!identical(l, ringLoop)) l,
+    for (final c in holeCycles) ..._splitDoubled(cycles[c]),
+  ]) {
+    if (!(areaOf(loop) < 0)) continue;
+    final r = clean(loop);
+    final n = r.pts.length;
+    // Walked clockwise (the face lies outside it): reversed to
+    // anticlockwise, each source moving with its edge.
+    holes.add(_rotated((
+      pts: [for (var i = n - 1; i >= 0; i--) r.pts[i]],
+      src: [for (var i = n - 1; i >= 0; i--) r.src[(i - 1 + n) % n]],
+    )));
+  }
+  holes.sort(_byPoints);
+
+  return Traced(
+    [for (final p in ring.pts) p + o],
+    [for (final s in ring.src) _ascending(s)],
+    [
+      for (final h in holes) [for (final p in h.pts) p + o],
+    ],
+    [
+      for (final h in holes) [for (final s in h.src) _ascending(s)],
+    ],
+    shoelace(ring.pts),
+    [for (final h in holes) shoelace(h.pts)],
+  );
+}
+
+/// Steps 3-6 of [traceRoom] over [sorted] (ascending by source), whose
+/// points, in the caller's local frame, are [local]: the segments, their
+/// splits, the vertices clustered within `roomTrace.linear`, the half-edges
+/// (`2k` is `u -> v` and `2k + 1` is `v -> u` for edge `k`), every face
+/// cycle, its shoelace area and its connected component (the least vertex
+/// of the component, by union-find).
+_Arrangement _arrange(List<RoomInput> sorted, List<List<Vector2>> local) {
+  final tol = roomTrace.linear;
   // 3. Segments.
   final segs = <_Seg>[];
   for (var k = 0; k < sorted.length; k++) {
@@ -184,7 +322,6 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
       if ((b - a).length > tol) segs.add(_Seg(a, b, sorted[k].source));
     }
   }
-  debugTracedSegments += segs.length;
 
   // 4. Splits: (t, point) per segment, found by a sweep.
   final splits = [for (final _ in segs) <(double, Vector2)>[]];
@@ -359,125 +496,32 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
     }
     cycles.add(cycle);
   }
-  List<Vector2> pointsOf(List<int> cycle) =>
-      [for (final h in cycle) verts[from[h]]];
-  final areas = [for (final c in cycles) shoelace(pointsOf(c))];
+  final areas = [
+    for (final c in cycles) shoelace([for (final h in c) verts[from[h]]]),
+  ];
   final comp = [for (final c in cycles) find(from[c.first])];
-
-  // 7. The seed's face: the least positive cycle holding the seed.
-  int? outer;
-  for (var c = 0; c < cycles.length; c++) {
-    if (!(areas[c] > 0)) continue;
-    if (!pointInRing(s0, pointsOf(cycles[c]))) continue;
-    if (outer == null || areas[c] < areas[outer]) outer = c;
-  }
-  if (outer == null) return const Unbounded();
-  final k0 = comp[outer];
-
-  // 8. Holes.
-  final contour = <int, int>{}; // component -> its most negative cycle
-  for (var c = 0; c < cycles.length; c++) {
-    if (comp[c] == k0) continue;
-    final best = contour[comp[c]];
-    if (best == null || areas[c] < areas[best]) contour[comp[c]] = c;
-  }
-  final outerPoints = pointsOf(cycles[outer]);
-  final holeCycles = <int>[];
-  for (final MapEntry(key: component, value: c) in contour.entries) {
-    if (!(areas[c] < 0)) continue; // no area: not a contour
-    final p = verts[from[cycles[c].first]];
-    if (!pointInRing(p, outerPoints)) continue;
-    var nested = false;
-    for (var d = 0; d < cycles.length; d++) {
-      if (comp[d] == k0 || comp[d] == component || !(areas[d] > 0)) continue;
-      final pts = pointsOf(cycles[d]);
-      if (pointInRing(p, pts) && !pointInRing(s0, pts)) {
-        nested = true;
-        break;
-      }
-    }
-    if (!nested) holeCycles.add(c);
-  }
-
-  // 9. Clean-up and the canonical order.
-  double areaOf(List<int> loop) => shoelace(pointsOf(loop));
-  _Ring clean(List<int> hs) {
-    final ring = _rotated((
-      pts: [for (final h in hs) verts[from[h]]],
-      src: [
-        for (final h in hs)
-          edges[from[h] < to[h] ? (from[h], to[h]) : (to[h], from[h])]!,
-      ],
-    ));
-    // Collinear vertices, scanned from the canonical start.
-    final pts = [...ring.pts];
-    final src = [...ring.src];
-    var changed = true;
-    while (changed && pts.length > 3) {
-      changed = false;
-      for (var i = 0; i < pts.length; i++) {
-        final prev = (i - 1 + pts.length) % pts.length;
-        final a = pts[prev], b = pts[i], c = pts[(i + 1) % pts.length];
-        final d = c - a;
-        final along = (b - a).dot(d);
-        if (distToSegment(b, a, c) <= tol && along > 0 && along < d.dot(d)) {
-          src[prev] = {...src[prev], ...src[i]};
-          pts.removeAt(i);
-          src.removeAt(i);
-          changed = true;
-          break;
-        }
-      }
-    }
-    return _rotated((pts: pts, src: src));
-  }
-
-  // Doubled edges (decision 29). The outer cycle, split, leaves one loop
-  // walked anticlockwise, the outer ring, and a clockwise loop for each
-  // island tied to it by zero-width edges only: a hole, as a freestanding
-  // island is. A hole's contour, split, leaves a clockwise loop per island
-  // it ties together. A free separator, or a free tree of them, is doubled
-  // edges only and leaves nothing: a component with no area is not a hole
-  // (D6), whatever the sign of its walk's shoelace residue. The hole test
-  // above reads the cycle as walked, so an island's courtyard stays
-  // outside the face.
-  final outerLoops = _splitDoubled(cycles[outer]);
-  var ringLoop = outerLoops.first;
-  for (final l in outerLoops) {
-    if (areaOf(l) > areaOf(ringLoop)) ringLoop = l;
-  }
-  final ring = clean(ringLoop);
-  final holes = <_Ring>[];
-  for (final loop in [
-    for (final l in outerLoops)
-      if (!identical(l, ringLoop)) l,
-    for (final c in holeCycles) ..._splitDoubled(cycles[c]),
-  ]) {
-    if (!(areaOf(loop) < 0)) continue;
-    final r = clean(loop);
-    final n = r.pts.length;
-    // Walked clockwise (the face lies outside it): reversed to
-    // anticlockwise, each source moving with its edge.
-    holes.add(_rotated((
-      pts: [for (var i = n - 1; i >= 0; i--) r.pts[i]],
-      src: [for (var i = n - 1; i >= 0; i--) r.src[(i - 1 + n) % n]],
-    )));
-  }
-  holes.sort(_byPoints);
-
-  return Traced(
-    [for (final p in ring.pts) p + o],
-    [for (final s in ring.src) _ascending(s)],
-    [
-      for (final h in holes) [for (final p in h.pts) p + o],
-    ],
-    [
-      for (final h in holes) [for (final s in h.src) _ascending(s)],
-    ],
-    shoelace(ring.pts),
-    [for (final h in holes) shoelace(h.pts)],
+  return (
+    segments: segs.length,
+    verts: verts,
+    from: from,
+    to: to,
+    edges: edges,
+    cycles: cycles,
+    areas: areas,
+    comp: comp,
   );
 }
+
+typedef _Arrangement = ({
+  int segments,
+  List<Vector2> verts,
+  List<int> from,
+  List<int> to,
+  Map<(int, int), Set<Handle>> edges,
+  List<List<int>> cycles,
+  List<double> areas,
+  List<int> comp,
+});
 
 // ---------------------------------------------------------------------------
 // The localised trace (spec 10 D7).
@@ -574,6 +618,43 @@ TraceResult traceRoomAmong(Vector2 seed, PlaceSource source) {
   // 3. The canonical trace, among exactly C.
   if (_sameHandles(traced, c)) return face;
   return traceRoom(seed, inputsOf(c));
+}
+
+/// The outer contour of each connected component of the arrangement of
+/// [inputs] (spec 10 D19; the re-review's T-8 cache, adopted at execution),
+/// its points relative to [origin]: the component's most negative face
+/// cycle, the walk around its outside, as [traceRoom]'s step 8 finds a
+/// hole's contour. A component with no area (a free separator, or a free
+/// tree of them) is kept too: its walk goes out and back along each edge,
+/// so the crossing number of any point off it is even.
+///
+/// What the Room tool's hover cache reads: a point off every input that
+/// lies inside no contour ([pointInRingXY], the tracer's own test) is in
+/// the arrangement's unbounded face, so [traceRoom] among the same inputs
+/// answers [Unbounded] there. The arrangement is [traceRoom]'s own
+/// (steps 3-6, the same tolerance, every input), taken in the frame of
+/// [origin] rather than of a seed: the two can differ only in a decision
+/// within rounding of `roomTrace.linear`, that is for a point within about
+/// `roomTrace.linear` of an input, which the tracer answers [SeedInWall].
+/// Both answers make no room.
+List<List<Vector2>> outerContours(List<RoomInput> inputs, Vector2 origin) {
+  final sorted = [...inputs]
+    ..sort((a, b) => a.source.value.compareTo(b.source.value));
+  final arrangement = _arrange(sorted, [
+    for (final input in sorted) [for (final p in input.points) p - origin],
+  ]);
+  final cycles = arrangement.cycles;
+  final areas = arrangement.areas;
+  final comp = arrangement.comp;
+  final contour = <int, int>{}; // component -> its most negative cycle
+  for (var c = 0; c < cycles.length; c++) {
+    final best = contour[comp[c]];
+    if (best == null || areas[c] < areas[best]) contour[comp[c]] = c;
+  }
+  final verts = arrangement.verts, from = arrangement.from;
+  return [
+    for (final c in contour.values) [for (final h in cycles[c]) verts[from[h]]],
+  ];
 }
 
 /// Whether [b] contains [u] (closed).
@@ -1002,12 +1083,16 @@ double distToSegment(Vector2 p, Vector2 a, Vector2 b) {
 
 /// Whether [p] is inside ring [r] (no closing duplicate), by the crossing
 /// number.
-bool pointInRing(Vector2 p, List<Vector2> r) {
+bool pointInRing(Vector2 p, List<Vector2> r) => pointInRingXY(p.x, p.y, r);
+
+/// [pointInRing] of the point `(x, y)`: the same test, taking no [Vector2],
+/// so a caller that offsets the point allocates nothing.
+bool pointInRingXY(double x, double y, List<Vector2> r) {
   var inside = false;
   for (var i = 0, j = r.length - 1; i < r.length; j = i++) {
     final a = r[i], b = r[j];
-    if ((a.y > p.y) != (b.y > p.y) &&
-        p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x) {
+    if ((a.y > y) != (b.y > y) &&
+        x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) {
       inside = !inside;
     }
   }

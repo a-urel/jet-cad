@@ -1,5 +1,6 @@
 import 'dart:async' show StreamSubscription, unawaited;
-import 'dart:ui' show Canvas;
+import 'dart:typed_data' show Float64List;
+import 'dart:ui' show Canvas, Size;
 
 import 'package:flutter/foundation.dart'
     show ValueListenable, ValueNotifier, visibleForTesting;
@@ -34,7 +35,8 @@ final RegExp _roomN = RegExp(r'^Room ([1-9][0-9]*)$');
 ///
 /// - **The seed is the raw pointer**, unsnapped (R-18; 08's Ruling 08-14):
 ///   a snap would pull it onto a wall's vertex or face, where the room
-///   dissolves at once. The snap marker is drawn there too ([markerPoint]).
+///   dissolves at once. So no snap marker is drawn ([paintOverlay]): the
+///   pointer is not snapped, as when nothing snaps.
 /// - **The verdict for a point**, hover and click alike, the same code
 ///   ([_verdictAt]), over the shell's [RoomInputs] (Ruling 10-11):
 ///   - outside `inputs.bounds`, the **bounding box** of every place box
@@ -43,9 +45,19 @@ final RegExp _roomN = RegExp(r'^Room ([1-9][0-9]*)$');
 ///   - inside the band of the last `SeedInWall` verdict's wall: reused;
 ///   - inside the cached face (its outer ring, in none of its holes; an
 ///     allocation-free point-in-ring test): reused;
+///   - inside no component's **outer contour** ([outerContours] of every
+///     input, built once per generation on the first hover that reaches
+///     this step): `Unbounded` without a trace (the re-review's T-8 cache,
+///     adopted at execution). This is a point outside the building but
+///     inside the box, between it and a garden wall or along a
+///     non-rectangular footprint. The contours are the tracer's own
+///     arrangement of the same inputs, tested with its own crossing number
+///     ([pointInRingXY]), so a point they answer is `Unbounded` for the
+///     tracer too, bar a point within rounding of `roomTrace.linear` of an
+///     input, which the tracer calls `SeedInWall`: no room either way. A
+///     point inside a contour, a courtyard included, is traced;
 ///   - otherwise `traceRoomAmong(p, inputs)`, the trace `generate` makes
-///     (`RI1`, `LZ1`), and cached. An `Unbounded` point inside the box (a
-///     courtyard open to the outside) is re-traced per move (T-8).
+///     (`RI1`, `LZ1`), and cached.
 ///
 ///   Every cache is dropped when the inputs' [RoomInputs.generation]
 ///   moves: on each document change, and on each [RoomInputs.invalidate].
@@ -85,8 +97,8 @@ class RoomTool extends PlacementTool {
   /// resolved point only.
   final Vector2 _raw = Vector2.zero();
 
-  /// The raw world point of the last pointer event: where the snap marker
-  /// sits, since that is where the seed goes.
+  /// The raw world point of the last pointer event: where a document
+  /// change re-reads the verdict.
   final Vector2 _pointer = Vector2.zero();
 
   final ValueNotifier<String?> _notice = ValueNotifier<String?>(null);
@@ -103,6 +115,21 @@ class RoomTool extends PlacementTool {
   String? _occupied;
   List<GeometryPayload> _facePreview = const [];
   List<Vector2>? _band;
+
+  /// Every component's outer contour, relative to [_contourOrigin], or
+  /// null until a hover needs it.
+  List<List<Vector2>>? _contours;
+
+  /// Each contour's box, `minX, minY, maxX, maxY` in the same frame: a
+  /// point outside it is outside the contour, so the crossing number is
+  /// skipped.
+  Float64List _contourBoxes = Float64List(0);
+  final Vector2 _contourOrigin = Vector2.zero();
+
+  /// How many times the outer contours were built: once per generation at
+  /// most.
+  @visibleForTesting
+  int debugContourBuilds = 0;
 
   /// What is painted: the cached face's preview while the pointer is in an
   /// unoccupied face, empty otherwise.
@@ -131,8 +158,12 @@ class RoomTool extends PlacementTool {
   @override
   String get name => 'Room';
 
+  /// The plain, no-snap glyph, which is none (`drawSnapMarker` of no
+  /// kind and no grid): the seed is the raw pointer (R-18), so a snapped
+  /// kind's marker, wherever drawn, would claim a snap that does not
+  /// happen.
   @override
-  Vector2 get markerPoint => _pointer;
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
 
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
@@ -202,6 +233,7 @@ class RoomTool extends PlacementTool {
       _occupied = null;
       _facePreview = const [];
       _band = null;
+      _contours = null;
     }
     final u = inputs.bounds;
     if (u == null || !u.containsPoint(p)) return _Verdict.none;
@@ -209,6 +241,7 @@ class RoomTool extends PlacementTool {
     if (band != null && pointInRing(p, band)) return _Verdict.none;
     final face = _face;
     if (face != null && _inFace(p, face)) return _faceVerdict;
+    if (!_inAnyContour(p, u)) return _Verdict.none;
     debugTraces++;
     switch (traceRoomAmong(p, inputs)) {
       case final Traced f:
@@ -248,6 +281,44 @@ class RoomTool extends PlacementTool {
       polylinePayload(f.ring, closed: true),
       for (final h in f.holes) polylinePayload(h, closed: true),
     ];
+  }
+
+  /// Whether [p] lies inside some component's outer contour, the contours
+  /// of every input built on first need, relative to the centre of [u]
+  /// (the inputs' bounding box), so the arithmetic runs on numbers the
+  /// size of a building. Allocates nothing once built.
+  bool _inAnyContour(Vector2 p, Aabb2 u) {
+    var contours = _contours;
+    if (contours == null) {
+      debugContourBuilds++;
+      _contourOrigin.setValues(
+          u.minX + (u.maxX - u.minX) / 2, u.minY + (u.maxY - u.minY) / 2);
+      contours = _contours = outerContours([
+        for (final h in inputs.placedIn(u))
+          if (inputs.inputOf(h) case final input?) input,
+      ], _contourOrigin);
+      _contourBoxes = Float64List(4 * contours.length);
+      for (var i = 0; i < contours.length; i++) {
+        final b = Aabb2.fromPoints(contours[i]);
+        _contourBoxes
+          ..[4 * i] = b.minX
+          ..[4 * i + 1] = b.minY
+          ..[4 * i + 2] = b.maxX
+          ..[4 * i + 3] = b.maxY;
+      }
+    }
+    final x = p.x - _contourOrigin.x, y = p.y - _contourOrigin.y;
+    final boxes = _contourBoxes;
+    for (var i = 0; i < contours.length; i++) {
+      if (x < boxes[4 * i] ||
+          y < boxes[4 * i + 1] ||
+          x > boxes[4 * i + 2] ||
+          y > boxes[4 * i + 3]) {
+        continue;
+      }
+      if (pointInRingXY(x, y, contours[i])) return true;
+    }
+    return false;
   }
 
   /// Whether [p] lies in [f]: inside its outer ring and inside none of its

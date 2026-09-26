@@ -16,6 +16,7 @@ import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';
 import 'package:floor_planner/parametric/room_tool.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
+import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/tool_palette.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
@@ -108,6 +109,49 @@ void expectRing(
     final (x, y) = corners[i];
     final d = (ring[(k + i) % ring.length] - plan.at(x, y)).length;
     expect(d, lessThan(1e-6), reason: '$why: corner $i ($x, $y) off by $d');
+  }
+}
+
+/// Decision 29's tied island (`room_tie_test.dart`'s fixture): a column
+/// in the box, and a separator tying it to the south face.
+const W tiedColumn = W(5000, 2000, 5400, 2000, 400);
+const S tiedSeparator = (5200.5, 100, 5200.5, 1800);
+
+/// The reviewer's connected plan (Task 15's review): [nx] × [ny] cells of
+/// 3,000 mm, every cell edge a 200 mm wall, and a garden wall 6,000 mm
+/// east of it, so the strip between lies inside the bounding box and
+/// outside the building.
+List<W> connectedGrid(int nx, int ny) => [
+      for (var i = 0; i < nx; i++)
+        for (var j = 0; j <= ny; j++)
+          W(i * 3000.0, j * 3000.0, (i + 1) * 3000.0, j * 3000.0, 200),
+      for (var i = 0; i <= nx; i++)
+        for (var j = 0; j < ny; j++)
+          W(i * 3000.0, j * 3000.0, i * 3000.0, (j + 1) * 3000.0, 200),
+      W(nx * 3000.0 + 6000, 0, nx * 3000.0 + 6000, ny * 3000.0, 200),
+    ];
+
+/// A canvas that records every call made on it.
+class CanvasSpy implements Canvas {
+  final List<Symbol> calls = <Symbol>[];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      calls.add(invocation.memberName);
+}
+
+/// [got] is [want] up to 1e-6 mm per point, as a cycle: two traces of one
+/// face from two seeds start at the same vertex only up to rounding of the
+/// seed-relative frame.
+void expectSameRing(List<Vector2> got, List<Vector2> want, String why) {
+  expect(got, hasLength(want.length), reason: why);
+  var k = 0;
+  for (var i = 1; i < got.length; i++) {
+    if ((got[i] - want[0]).length < (got[k] - want[0]).length) k = i;
+  }
+  for (var i = 0; i < want.length; i++) {
+    final d = (got[(k + i) % got.length] - want[i]).length;
+    expect(d, lessThan(1e-6), reason: '$why: point $i off by $d');
   }
 }
 
@@ -235,80 +279,101 @@ void main() {
     expect(status(tester), 'Select');
   });
 
-  test('TT2 the hover preview is the ring the room gets, bit for bit', () {
+  test(
+      'TT2 the hover preview is the ring the room gets, bit for bit (the '
+      'tied island of decision 29 included)', () {
+    /// Hovers [seed] in [plan] with [rig]: the preview is the face with
+    /// plan corners [ring] and [holes] (by hand); then clicks there, and
+    /// the room's labels are [name] and [area], and its tint is the
+    /// preview, bit for bit.
+    void check(
+        Plan plan,
+        Rig rig,
+        (double, double) seed,
+        List<(double, double)> ring,
+        List<List<(double, double)>> holes,
+        String name,
+        String area,
+        String why) {
+      final doc = plan.doc;
+      final s = plan.at(seed.$1, seed.$2);
+      hoverTo(rig, s);
+      final preview = [for (final p in rig.tool.debugPreview) ringOf(p)];
+      expect(preview, hasLength(1 + holes.length), reason: why);
+      expectRing(plan, preview.first, ring, why);
+      for (var k = 0; k < holes.length; k++) {
+        expectRing(plan, preview[k + 1], holes[k], '$why: hole $k');
+      }
+      pressAt(rig, s);
+      final room = rooms(doc).last;
+      expect(labelStrings(doc, room), [name, area], reason: why);
+      // The room's group is at the identity, so its tint stores each world
+      // trace point q as `seed + (q − seed)` (its local frame is the
+      // seed's): the preview mapped so is the tint's points.
+      final tint = worldTintOf(doc, room);
+      List<Vector2> stored(List<Vector2> r) => [for (final q in r) s + (q - s)];
+      final outer = stored(preview.first);
+      if (holes.isEmpty) {
+        expect([
+          for (final p in tint) (p.x, p.y)
+        ], [
+          for (final p in outer) (p.x, p.y)
+        ], reason: '$why: the tint is the previewed ring');
+        return;
+      }
+      // D9 step 1: the keyholed ring, the outer ring from its first point,
+      // each hole walked in after a vertex, plus its two slit points.
+      expect(
+          tint,
+          hasLength(outer.length +
+              [for (final h in preview.skip(1)) h.length + 2]
+                  .reduce((x, y) => x + y)),
+          reason: why);
+      var k = 0;
+      for (final p in tint) {
+        if (k < outer.length && p.x == outer[k].x && p.y == outer[k].y) k++;
+      }
+      expect(k, outer.length,
+          reason: '$why: every outer point, in order, bit for bit');
+      expect((tint.first.x, tint.first.y), (outer.first.x, outer.first.y));
+      for (final h in preview.skip(1)) {
+        for (final q in stored(h)) {
+          expect(tint.any((p) => p.x == q.x && p.y == q.y), isTrue,
+              reason: '$why: hole point $q');
+        }
+      }
+    }
+
     for (final place in [origin, corpusGroups]) {
       // The box, the hollow column and the separator face to face at
-      // x = 3,000: the left face has no hole, the right one the column.
+      // x = 3,000: the left face has no hole, the right one the column. By
+      // hand: the inner faces 100 in, the column's outer contour 4,950-
+      // 5,650 × 1,450-2,150.
       final plan = boxAndSeparatorPlan(place);
       final doc = plan.doc;
       final rig = roomRig(doc);
-      for (final (label, (sx, sy), holes, area) in [
-        // 2,900 × 3,800 = 11,020,000: 11.02 m² (0.005 from a tie).
-        ('left', (1500.25, 2000.5), 0, '11.02 m²'),
-        // 4,900 × 3,800 − 700 × 700 = 18,130,000: 18.13 m² (0.005).
-        ('right', (6500.75, 3000.25), 1, '18.13 m²'),
-      ]) {
-        final why = '$label, $place';
-        final seed = plan.at(sx, sy);
-        hoverTo(rig, seed);
-        final preview = [for (final p in rig.tool.debugPreview) ringOf(p)];
-        expect(preview, hasLength(1 + holes), reason: why);
-        final ring = preview.first;
-        // By hand: the inner faces 100 in, the separator at x = 3,000, and
-        // the hollow column's outer contour, 4,950-5,650 × 1,450-2,150.
-        if (label == 'left') {
-          expectRing(plan, ring,
-              const [(100, 100), (3000, 100), (3000, 3900), (100, 3900)], why);
-        } else {
-          expectRing(
-              plan,
-              ring,
-              const [(3000, 100), (7900, 100), (7900, 3900), (3000, 3900)],
-              why);
-          expectRing(
-              plan,
-              preview[1],
-              const [(4950, 1450), (5650, 1450), (5650, 2150), (4950, 2150)],
-              '$why: the hole');
-        }
-        pressAt(rig, seed);
-        final room = rooms(doc).last;
-        expect(labelStrings(doc, room), ['Room ${holes + 1}', area],
-            reason: why);
-        // The room's group is at the identity, so its tint stores each
-        // world trace point q as `seed + (q − seed)` (its local frame is
-        // the seed's): the preview mapped so is the tint's points.
-        final tint = worldTintOf(doc, room);
-        List<Vector2> stored(List<Vector2> r) =>
-            [for (final q in r) seed + (q - seed)];
-        final outer = stored(ring);
-        if (holes == 0) {
-          expect([
-            for (final p in tint) (p.x, p.y)
-          ], [
-            for (final p in outer) (p.x, p.y)
-          ], reason: '$why: the tint is the previewed ring');
-        } else {
-          // D9 step 1: the keyholed ring, the outer ring from its first
-          // point, each hole walked in after a vertex, plus its two slit
-          // points.
-          expect(tint, hasLength(ring.length + preview[1].length + 2),
-              reason: why);
-          var k = 0;
-          for (final p in tint) {
-            if (k < outer.length && p.x == outer[k].x && p.y == outer[k].y) {
-              k++;
-            }
-          }
-          expect(k, outer.length,
-              reason: '$why: every outer point, in order, bit for bit');
-          expect((tint.first.x, tint.first.y), (outer.first.x, outer.first.y));
-          for (final q in stored(preview[1])) {
-            expect(tint.any((p) => p.x == q.x && p.y == q.y), isTrue,
-                reason: '$why: hole point $q');
-          }
-        }
-      }
+      // 2,900 × 3,800 = 11,020,000: 11.02 m² (0.005 from a tie).
+      check(
+          plan,
+          rig,
+          (1500.25, 2000.5),
+          const [(100, 100), (3000, 100), (3000, 3900), (100, 3900)],
+          const [],
+          'Room 1',
+          '11.02 m²',
+          'left, $place');
+      // 4,900 × 3,800 − 700 × 700 = 18,130,000: 18.13 m² (0.005).
+      check(
+          plan,
+          rig,
+          (6500.75, 3000.25),
+          const [(3000, 100), (7900, 100), (7900, 3900), (3000, 3900)],
+          const [
+            [(4950, 1450), (5650, 1450), (5650, 2150), (4950, 2150)],
+          ],
+          'Room 2',
+          '18.13 m²',
+          'right, $place');
       // The hollow column's courtyard lies in the right face's hole: not
       // that face, but a face of its own, 5,050-5,550 × 1,550-2,050.
       final traces = rig.tool.debugTraces;
@@ -323,6 +388,26 @@ void main() {
       hoverTo(rig, plan.at(1700.5, 1200.25));
       expect(rig.tool.debugPreview, isEmpty, reason: 'occupied now');
       expect(driftOf(doc), isEmpty);
+
+      // Decision 29's tied island: a 400 × 400 column, x 5,000-5,400, y
+      // 1,800-2,200, tied to the south face by a separator. The tie's
+      // doubled edges split out: the column is a hole and the room keeps
+      // its fill. 7,800 × 3,800 − 400 × 400 = 29,480,000: 29.48 m² (0.005
+      // from a tie).
+      final tied = buildPlan([...boxWalls, tiedColumn],
+          seps: const [tiedSeparator], place: place);
+      check(
+          tied,
+          roomRig(tied.doc),
+          (6500.75, 3000.25),
+          const [(100, 100), (7900, 100), (7900, 3900), (100, 3900)],
+          const [
+            [(5000, 1800), (5400, 1800), (5400, 2200), (5000, 2200)],
+          ],
+          'Room 1',
+          '29.48 m²',
+          'the tied island, $place');
+      expect(driftOf(tied.doc), isEmpty);
     }
   });
 
@@ -419,6 +504,10 @@ void main() {
         reason: 'premise: the chain snaps to the face vertex');
     expect(faceAt(doc, rig.tool.hoverPoint), isA<SeedInWall>(),
         reason: 'premise: a seed there would be in a wall');
+    // No snap marker: the seed is not snapped (the plain, no-snap glyph).
+    final spy = CanvasSpy();
+    rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(800, 600));
+    expect(spy.calls, isEmpty, reason: 'no snap marker drawn');
     pressAt(rig, raw);
     final room = rooms(doc).single;
     final p = doc.components.get<RoomParams>(room)!;
@@ -528,36 +617,66 @@ void main() {
         ],
         'the wider Kitchen');
 
-    // A courtyard among 600 walls: no wall meets another, so no face is
-    // bounded; the point is inside the bounding box and is re-traced per
-    // move (T-8), timed as 07's WT12 times its hover.
-    final grid = buildPlan([
-      for (var i = 0; i < 30; i++)
-        for (var j = 0; j < 20; j++)
-          W(i * 3000.0, j * 3000.0, i * 3000.0 + 1000, j * 3000.0, 200),
-    ], place: corpus);
-    final big = roomRig(grid.doc);
-    final p = grid.at(1500.5, 1500.25);
-    expect(big.inputs.bounds!.containsPoint(p), isTrue,
-        reason: 'premise: inside the bounding box');
-    final before = big.tool.debugTraces;
-    hoverTo(big, p);
-    hoverTo(big, p);
-    expect(big.tool.debugTraces, before + 2, reason: 'traced per move');
-    expect(big.tool.debugPreview, isEmpty, reason: 'Unbounded');
-    final hover = <double>[];
-    const batch = 5;
-    for (var k = 0; k < 20; k++) {
-      final sw = Stopwatch()..start();
-      for (var i = 0; i < batch; i++) {
-        hoverTo(big, p);
+    // Outside the building but inside the bounding box, among 600 walls
+    // (07's WT12 method, timed, printed): the outer contours of every
+    // component are built once, on the first such hover, and then answer
+    // without a trace (the re-review's T-8 cache).
+    // - a courtyard among 600 free walls: no wall meets another, so no
+    //   face is bounded;
+    // - the reviewer's connected plan: 15 × 20 cells of 3,000 mm, every
+    //   cell edge a wall, and a garden wall 6,000 mm east of it; the point
+    //   lies in the strip between.
+    for (final (what, walls, (px, py)) in [
+      (
+        'a courtyard among 600 free walls',
+        [
+          for (var i = 0; i < 30; i++)
+            for (var j = 0; j < 20; j++)
+              W(i * 3000.0, j * 3000.0, i * 3000.0 + 1000, j * 3000.0, 200),
+        ],
+        (1500.5, 1500.25),
+      ),
+      (
+        'outside a connected 636-wall plan',
+        connectedGrid(15, 20),
+        (48000.5, 30000.25)
+      ),
+    ]) {
+      final grid = buildPlan(walls, place: corpus);
+      final big = roomRig(grid.doc);
+      final p = grid.at(px, py);
+      expect(big.inputs.bounds!.containsPoint(p), isTrue,
+          reason: 'premise: inside the bounding box, $what');
+      expect(faceAt(grid.doc, p), isA<Unbounded>(),
+          reason: 'premise: Unbounded, $what');
+      final builds = big.tool.debugContourBuilds;
+      final traces = big.tool.debugTraces;
+      final segments = debugTracedSegments;
+      final first = Stopwatch()..start();
+      hoverTo(big, p);
+      final build = first.elapsedMicroseconds;
+      hoverTo(big, p);
+      expect(big.tool.debugContourBuilds, builds + 1, reason: 'built once');
+      expect((big.tool.debugTraces, debugTracedSegments), (traces, segments),
+          reason: 'no trace, $what');
+      expect(big.tool.debugPreview, isEmpty, reason: 'Unbounded, $what');
+      final hover = <double>[];
+      const batch = 50;
+      for (var k = 0; k < 20; k++) {
+        final sw = Stopwatch()..start();
+        for (var i = 0; i < batch; i++) {
+          hoverTo(big, p);
+        }
+        hover.add(sw.elapsedMicroseconds / batch);
       }
-      hover.add(sw.elapsedMicroseconds / batch);
+      expect((big.tool.debugTraces, big.tool.debugContourBuilds),
+          (traces, builds + 1));
+      hover.sort();
+      // ignore: avoid_print
+      print('TT6 ${walls.length} walls, $what: median per Unbounded hover '
+          '${hover[hover.length ~/ 2].toStringAsFixed(1)} us; the first, '
+          'which builds the contours, $build us');
     }
-    hover.sort();
-    // ignore: avoid_print
-    print('TT6 n=600 walls: median per Unbounded hover in the courtyard '
-        '${hover[hover.length ~/ 2].toStringAsFixed(1)} us');
   });
 
   testWidgets(
@@ -597,5 +716,135 @@ void main() {
     expect(shellRoomTool(tester).notice.value, isNull);
     await press(tester, LogicalKeyboardKey.keyM);
     expect(status(tester), 'Room');
+  });
+
+  test(
+      'TT8 the outer-contour cache answers every hover as the trace does, at '
+      'every placement; a change drops it', () async {
+    for (final place in placements) {
+      for (final (what, plan, (x0, y0), (x1, y1), exterior) in [
+        (
+          'the sample plan',
+          samplePlan(place),
+          (11800.0, 7800.0),
+          (26200.0, 17200.0),
+          false
+        ),
+        (
+          'the box, the hollow column and the separator',
+          boxAndSeparatorPlan(place),
+          (-150.0, -150.0),
+          (8150.0, 4150.0),
+          false
+        ),
+        (
+          'the L',
+          buildPlan(lWalls, place: place),
+          (-150.0, -150.0),
+          (6150.0, 5150.0),
+          true
+        ),
+        (
+          'a connected 4 × 3 grid and a garden wall',
+          buildPlan(connectedGrid(4, 3), place: place),
+          (-150.0, -150.0),
+          (18150.0, 9150.0),
+          true
+        ),
+      ]) {
+        final why = '$what, $place';
+        final rig = roomRig(plan.doc);
+        var answered = 0, faces = 0;
+        const n = 36;
+        for (var i = 0; i < n; i++) {
+          for (var j = 0; j < n; j++) {
+            final p = plan.at(x0 + (x1 - x0) * (i + 0.37) / n,
+                y0 + (y1 - y0) * (j + 0.61) / n);
+            final traces = rig.tool.debugTraces;
+            hoverTo(rig, p);
+            final want = traceRoomAmong(p, rig.inputs);
+            final preview = [for (final q in rig.tool.debugPreview) ringOf(q)];
+            if (want is Traced) {
+              faces++;
+              expect(preview, hasLength(1 + want.holes.length),
+                  reason: '$why: $p');
+              expectSameRing(preview.first, want.ring, '$why: $p');
+              for (var k = 0; k < want.holes.length; k++) {
+                expectSameRing(preview[k + 1], want.holes[k], '$why: $p');
+              }
+            } else {
+              expect(preview, isEmpty, reason: '$why: $p is $want');
+              if (want is Unbounded &&
+                  rig.inputs.bounds!.containsPoint(p) &&
+                  rig.tool.debugTraces == traces) {
+                answered++;
+              }
+            }
+          }
+        }
+        expect(rig.tool.debugContourBuilds, lessThanOrEqualTo(1), reason: why);
+        expect(faces, greaterThan(0), reason: why);
+        // ignore: avoid_print
+        print('TT8 $why: $faces faces, $answered hovers answered by the '
+            'contours');
+        if (exterior) {
+          expect(answered, greaterThan(0),
+              reason: '$why: the cache answered hovers outside the building');
+        }
+      }
+    }
+
+    // The connected grid's strip closed by two walls: the cache is dropped
+    // on the change, and the strip, x 12,100-17,900, y 100-8,900, is a face.
+    final plan = buildPlan(connectedGrid(4, 3), place: corpusGroups);
+    final rig = roomRig(plan.doc);
+    final p = plan.at(15000.5, 4500.25);
+    hoverTo(rig, p);
+    expect(rig.tool.debugPreview, isEmpty, reason: 'premise: outside');
+    expect(rig.tool.debugContourBuilds, 1);
+    for (final w in const [
+      W(12000, 0, 18000, 0, 200),
+      W(12000, 9000, 18000, 9000, 200),
+    ]) {
+      final h = plan.doc.handleSeed.next();
+      final t = Transform2.identity();
+      final s = plan.at(w.sx, w.sy), e = plan.at(w.ex, w.ey);
+      plan.doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: h,
+            parent: plan.doc.rootHandle,
+            transform: t,
+            children: const [])),
+        SetComponentCommand<WallParams>(
+            h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j)),
+      ], label: 'Add wall'));
+    }
+    await Future<void>.delayed(Duration.zero);
+    hoverTo(rig, p);
+    expect(rig.tool.debugContourBuilds, 2, reason: 'rebuilt after the change');
+    expectRing(
+        plan,
+        ringOf(rig.tool.debugPreview.single),
+        const [(12100, 100), (17900, 100), (17900, 8900), (12100, 8900)],
+        'the closed strip');
+  });
+
+  testWidgets(
+      'SG1 M and S typed into a text entry switch no tool (the shell\'s '
+      'guard, X15-guardMS)', (tester) async {
+    final plan = buildPlan(boxWalls, measurer: FlutterTextMeasurer());
+    final view = await pumpPlan(tester, plan);
+    await press(tester, LogicalKeyboardKey.keyT);
+    expect(status(tester), 'Text');
+    final s = view.camera.value.worldToScreen(Vector2(2000.5, 2000.25));
+    await tester.tapAt(
+        tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y));
+    await tester.pump();
+    expect(find.byKey(const Key('text-entry')), findsOneWidget);
+    for (final k in [LogicalKeyboardKey.keyM, LogicalKeyboardKey.keyS]) {
+      await press(tester, k);
+      expect(status(tester), 'Text', reason: '$k switched no tool');
+      expect(find.byKey(const Key('text-entry')), findsOneWidget);
+    }
   });
 }

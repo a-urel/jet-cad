@@ -10,7 +10,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'opening_geometry.dart' show wallsInView;
-import 'room_trace.dart' show PlaceSource, pointInRing;
+import 'room_trace.dart' show PlaceSource, distToSegment, pointInRing;
 import 'separator.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
@@ -383,8 +383,15 @@ List<Handle> liveObjectsOf<T extends Component>(DraftDocument doc) => [
 /// stored end lies on the face, to rounding, so it joins the face (D5) and
 /// the separator does not draw into the wall. An end in open space stays
 /// where it was put. An end inside several bands (walls that overlap) stops
-/// at the first of their faces the walk meets. Both ends inside one band:
-/// null.
+/// at the first of their faces the walk meets. When the walk crosses into
+/// another band first and passes into the end's band through a joint (a
+/// mitre), the trimmed end lies in that other band: it is trimmed again,
+/// to where the walk enters that one, and so on while it lies in, or within
+/// `roomTrace.linear` of, a band not yet trimmed to (a mitre's end lies on
+/// the edge the two bands share, where the crossing number may count it
+/// out of either). Each round moves the end toward the other end along
+/// the segment and uses up at least one band, so it stops. Both ends inside
+/// one band: null.
 ///
 /// Without [objectSnap], `(a, b)` as placed: trimming is object snapping,
 /// and an end left inside a band still splits the face correctly.
@@ -398,11 +405,28 @@ List<Handle> liveObjectsOf<T extends Component>(DraftDocument doc) => [
     final inA = _bandsHolding(a, inputs);
     final inB = _bandsHolding(b, inputs);
     if (inA.any(inB.contains)) return null;
-    if (inB.isNotEmpty) e = _entry(a, b, inB);
-    if (inA.isNotEmpty) s = _entry(b, a, inA);
+    if (inB.isNotEmpty) e = _trimmed(a, b, inB, inputs);
+    if (inA.isNotEmpty) s = _trimmed(b, a, inA, inputs);
   }
   if (!((e - s).length > roomTrace.linear)) return null;
   return (s, e);
+}
+
+/// [to], which [bands] hold, walked back from [from] to where the walk
+/// enters them ([_entry]), then again while the point reached lies in, or
+/// on the boundary of, a band not yet used.
+Vector2 _trimmed(
+    Vector2 from, Vector2 to, List<RoomInput> bands, RoomInputs inputs) {
+  final used = {...bands};
+  var end = _entry(from, to, bands);
+  while (true) {
+    final more = [
+      for (final band in _bandsTouching(end, inputs))
+        if (used.add(band)) band,
+    ];
+    if (more.isEmpty) return end;
+    end = _entry(from, end, more);
+  }
 }
 
 /// The bands among [inputs] that hold [p] (the crossing-number test, taken
@@ -414,6 +438,31 @@ List<RoomInput> _bandsHolding(Vector2 p, RoomInputs inputs) => [
               Vector2.zero(), [for (final q in input.points) q - p]))
             input,
     ];
+
+/// The bands among [inputs] that hold [p] or pass within
+/// `roomTrace.linear` of it.
+List<RoomInput> _bandsTouching(Vector2 p, RoomInputs inputs) {
+  final tol = roomTrace.linear;
+  final near = Aabb2.raw(p.x - tol, p.y - tol, p.x + tol, p.y + tol);
+  return [
+    for (final h in inputs.placedIn(near))
+      if (inputs.inputOf(h) case final input? when input.closed)
+        if (_touches(p, input.points, tol)) input,
+  ];
+}
+
+/// Whether ring [r] holds [p] or passes within [tol] of it, relative to [p].
+bool _touches(Vector2 p, List<Vector2> r, double tol) {
+  final local = [for (final q in r) q - p];
+  final o = Vector2.zero();
+  if (pointInRing(o, local)) return true;
+  for (var i = 0; i < local.length; i++) {
+    if (distToSegment(o, local[i], local[(i + 1) % local.length]) <= tol) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /// The first point where the segment walked from [from] to [to] crosses an
 /// edge of one of [bands], all of which hold [to]: where it enters them.

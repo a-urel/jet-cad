@@ -366,4 +366,66 @@ void main() {
       }
     }
   });
+
+  test(
+      'ST5 an end trimmed through a mitre lies on the inner face the walk '
+      'entered by, not in the wall', () {
+    for (final place in placements) {
+      // From inside the box to the south-east corner's east half (x + y >
+      // 8,000, beyond the mitre from (7,900, 100) to (8,100, -100)): the
+      // walk enters the south wall's band at its inner face, y 100, and
+      // passes through the mitre into the east wall's band.
+      for (final (x, y) in const [(7960.5, 50.25), (7990.5, 20.25)]) {
+        final why = '($x, $y), $place';
+        final plan = buildPlan(boxWalls, place: place);
+        final rig = separatorRig(plan.doc);
+        final a = place.at(4000.5, 2000.25), b = place.at(x, y);
+        final east = rig.inputs.inputOf(plan.walls[1])!.points;
+        final south = rig.inputs.inputOf(plan.walls[0])!.points;
+        expect((pointInRing(b, east), pointInRing(b, south)), (true, false),
+            reason: 'premise: the end is in the east wall\'s band only, $why');
+        draw(rig, a, b);
+        final p = plan.doc.components
+            .get<SeparatorParams>(separators(plan.doc).single)!;
+        expect((p.start.x, p.start.y), (a.x, a.y), reason: why);
+        final end = p.end;
+        expect(distToLine(end, place.at(0, 100), place.at(8000, 100)),
+            lessThan(1e-6),
+            reason: '$why: on the south wall\'s inner face');
+        expect(distToLine(end, a, b), lessThan(1e-6),
+            reason: '$why: on the drawn segment');
+        final local = place.m.invert().transformPoint(end);
+        expect(local.x, lessThan(7900), reason: '$why: short of the corner');
+        expect(driftOf(plan.doc), isEmpty);
+      }
+    }
+  });
+
+  test(
+      'ST6 an end inside two crossing walls stops at the first of their '
+      'faces the walk meets', () {
+    for (final place in [origin, corpusGroups]) {
+      final why = '$place';
+      // X1 along x, X2 along y, crossing at the origin; 200 mm each.
+      final plan = buildPlan(const [
+        W(-2000, 0, 2000, 0, 200),
+        W(0, -2000, 0, 2000, 200),
+      ], place: place);
+      final rig = separatorRig(plan.doc);
+      final a = place.at(-1500.5, 1200.25), b = place.at(40.5, 30.25);
+      final x1 = rig.inputs.inputOf(plan.walls[0])!.points;
+      final x2 = rig.inputs.inputOf(plan.walls[1])!.points;
+      expect((pointInRing(b, x1), pointInRing(b, x2)), (true, true),
+          reason: 'premise: the end is in both bands, $why');
+      // The walk meets X2's west face, x -100, at y 1,200.25 - 1,400.5 ·
+      // 1,170 / 1,541 ≈ 136.9, above X1's band; X1's north face, y 100,
+      // only later, inside X2's band.
+      final (s, e) = trimSeparator(a, b, rig.inputs, objectSnap: true)!;
+      expect((s.x, s.y), (a.x, a.y), reason: why);
+      final local = place.m.invert().transformPoint(e);
+      expect(local.x, closeTo(-100, 1e-6), reason: '$why: X2\'s west face');
+      expect(local.y, closeTo(1200.25 - 1400.5 * 1170 / 1541, 1e-6),
+          reason: why);
+    }
+  });
 }
