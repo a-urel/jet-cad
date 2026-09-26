@@ -156,14 +156,13 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       t.components.get<PageComponent>(t.tree.root));
 }
 
-/// The objects a page change seeds (spec 10 D14): when the page differs
-/// between [before] and [after] (value equality, a stored value), every
-/// live object in [after] of each registered type whose
-/// [ParametricType.pageKey] of the two pages differs. Empty, at no cost
-/// beyond one `==`, for an edit that leaves the page alone.
+/// The objects a page change seeds (spec 10 D14): every live object in
+/// [after] of each registered type whose [ParametricType.pageKey] of the
+/// two pages differs. `_run` calls it only when the page differs between
+/// [before] and [after] (value equality, a stored value), so an edit that
+/// leaves the page alone pays one `==` and never calls a `pageKey`.
 Iterable<Handle> _pageSeeds(CommandTarget t,
     List<_Registration<Component>> types, _Survey before, _Survey after) sync* {
-  if (before.page == after.page) return;
   for (final r in types) {
     if (r.type.pageKey(before.page) == r.type.pageKey(after.page)) continue;
     for (final h in r.handles(t)) {
@@ -288,12 +287,29 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 /// A matched child's payload is rewritten when it differs; a matched
 /// TEXT's string too (spec 10 D12). Every added record comes from
 /// [_recordOf].
+///
+/// Each object is first asked whether it dissolves (spec 10 D15), with the
+/// same [view], before its `generate`. A dissolving object is not
+/// generated: its plan is [_subtreeRemoval] (the select tool's order), then
+/// the detach of its own component. The detach is planned here because
+/// nothing else would plan it: 06 D8's cleanup detaches only `lost`
+/// objects, and `lost` is computed from the after-survey, where a
+/// dissolving object is still live. For the same reason it is never
+/// detached twice. The removals are planned commands, never in the edit's
+/// `touched`, so 06 D6's guard does not see them.
 List<DraftCommand> _plan(
     CommandTarget t, List<Handle> closure, _Survey s, ParametricView view) {
   var reserved = t.handleSeed.current.value;
   final out = <DraftCommand>[];
   for (final h in closure) {
-    final generated = s.objects[h]!.generate(view, h);
+    final registration = s.objects[h]!;
+    if (registration.dissolves(view, h)) {
+      out
+        ..addAll(_subtreeRemoval(t, s, h))
+        ..add(registration.detach(h));
+      continue;
+    }
+    final generated = registration.generate(view, h);
     final children = s.children[h] ?? const <Handle>[];
     final boundaries = <Handle>{
       for (final c in children)
@@ -495,6 +511,9 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
 /// [d]'s own leaves are the survey's (an edit cannot add into a live
 /// object, 06 D6); a nested group's are found by one scan of the live
 /// slots, paid only when [d] has nested groups.
+///
+/// Two callers: [_cascade], with the before-survey, for a doomed referrer;
+/// [_plan], with the after-survey, for a dissolving object (spec 10 D15).
 List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
   final groups = <Handle>[];
   void collect(Handle g) {
@@ -590,7 +609,8 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///    seeds ([_pageSeeds], spec 10 D14: a changed page adds the live
 ///    objects of every type whose page key changed, unchecked for dangling
 ///    references, Ruling 10-4), the early return, the closure and the
-///    plan. Any failure applies `r.inverse`, the cascade's included, so a
+///    plan (a dissolving object's removal and detach included, spec 10
+///    D15). Any failure applies `r.inverse`, the cascade's included, so a
 ///    refused edit leaves the document byte for byte as it was;
 /// 6. the apply loop, whose inverse wraps `r.inverse`.
 ///
@@ -643,7 +663,11 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     // edited, so a loaded one with a dead reference must not refuse a page
     // change), and before the early return (a page-only edit touches the
     // root, which is not an object, so its seeds are otherwise empty).
-    seeds.addAll(_pageSeeds(t, types, before, after));
+    // Guarded here, so no other edit builds the iterable or calls a
+    // `pageKey`.
+    if (before.page != after.page) {
+      seeds.addAll(_pageSeeds(t, types, before, after));
+    }
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.

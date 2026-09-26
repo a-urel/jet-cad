@@ -791,6 +791,11 @@ final class Gauge implements Component {
 
   /// The key: the page's scale denominator, 50 with no page.
   static double keyOf(PageComponent? page) => page?.scaleDenominator ?? 50;
+
+  /// [GaugeType.pageKey] calls, never reset: tests read deltas (spec 10
+  /// D14: a `pageKey` is called on a page-changing edit only; Task 3's
+  /// review, rv3-noShort).
+  static int pageKeyCalls = 0;
 }
 
 final class GaugeType extends ParametricType<Gauge> {
@@ -804,7 +809,11 @@ final class GaugeType extends ParametricType<Gauge> {
   Iterable<Handle> references(Gauge params) =>
       [if (params.host case final host?) host];
   @override
-  Object? pageKey(PageComponent? page) => Gauge.keyOf(page);
+  Object? pageKey(PageComponent? page) {
+    Gauge.pageKeyCalls++;
+    return Gauge.keyOf(page);
+  }
+
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     _counted(self);
@@ -861,6 +870,105 @@ final class DialType extends ParametricType<Dial> {
   }
 }
 
+/// A dissolving client (spec 10 D15, Ruling 10-2): a [w] x [h] rectangle
+/// at ([x], [y]) in its own local space. It generates a region on the
+/// rectangle and a LINE on its diagonal, and dissolves when [burnt] is set
+/// or when a [ClipRect] neighbour covers its world centre: a verdict read
+/// from the after-view, as a room's is.
+final class Fuse implements Component {
+  const Fuse(this.x, this.y, this.w, this.h, {this.burnt = false});
+  static const String id = 'test.fuse';
+  final double x, y, w, h;
+  final bool burnt;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() =>
+      {'x': x, 'y': y, 'w': w, 'h': h, 'burnt': burnt};
+  static Fuse fromJson(Map<String, Object?> j) => Fuse(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['w']! as num).toDouble(),
+      (j['h']! as num).toDouble(),
+      burnt: j['burnt']! as bool);
+  @override
+  bool operator ==(Object o) =>
+      o is Fuse &&
+      o.x == x &&
+      o.y == y &&
+      o.w == w &&
+      o.h == h &&
+      o.burnt == burnt;
+  @override
+  int get hashCode => Object.hash(x, y, w, h, burnt);
+
+  /// [FuseType.dissolves] calls per handle. Tests clear it.
+  static final Map<Handle, int> dissolvesCalls = {};
+
+  /// When set, [FuseType.dissolves] throws (DV1's rollback case). Tests
+  /// reset it.
+  static bool fault = false;
+
+  /// The rectangle's corners, anticlockwise, in its own local space.
+  List<Vector2> get corners => [
+        Vector2(x, y),
+        Vector2(x + w, y),
+        Vector2(x + w, y + h),
+        Vector2(x, y + h),
+      ];
+
+  /// The rectangle's centre, in its own local space.
+  Vector2 get centre => Vector2(x + w / 2, y + h / 2);
+}
+
+final class FuseType extends ParametricType<Fuse> {
+  const FuseType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// The rectangle, in world.
+  @override
+  Aabb2 reach(Fuse params, Transform2 toWorld) => Aabb2.fromPoints(
+      [for (final c in params.corners) toWorld.transformPoint(c)]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Fuse>(self)!;
+    final c = p.corners;
+    return [
+      Generated.region(polylinePayload(c, closed: true)),
+      Generated(EntityKind.line, linePayload(c[0], c[2])),
+    ];
+  }
+
+  /// [Fuse.burnt], or a [ClipRect] neighbour holds the world centre
+  /// strictly inside (by `Tolerance.standard.linear`), read in the
+  /// neighbour's own local space.
+  @override
+  bool dissolves(ParametricView view, Handle self) {
+    Fuse.dissolvesCalls[self] = (Fuse.dissolvesCalls[self] ?? 0) + 1;
+    if (Fuse.fault) throw StateError('fuse fault');
+    final p = view.paramsOf<Fuse>(self);
+    if (p == null) return false;
+    if (p.burnt) return true;
+    final centre = view.toWorld(self).transformPoint(p.centre);
+    const tol = Tolerance.standard;
+    for (final n in view.neighbours(self)) {
+      final r = view.paramsOf<ClipRect>(n);
+      if (r == null) continue;
+      final q = view.toWorld(n).invert().transformPoint(centre);
+      if (q.x > tol.linear &&
+          q.x < r.width - tol.linear &&
+          q.y > tol.linear &&
+          q.y < r.height - tol.linear) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -876,4 +984,5 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType())
   ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType())
   ..register<Gauge>(Gauge.id, Gauge.fromJson, const GaugeType())
-  ..register<Dial>(Dial.id, Dial.fromJson, const DialType());
+  ..register<Dial>(Dial.id, Dial.fromJson, const DialType())
+  ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType());

@@ -176,6 +176,27 @@ void main() {
     expect(doc.commands.undoDepth, depth + 2);
     expect(drift(doc), isEmpty);
 
+    // One command changes the scale and the unit (Task 3's review,
+    // rv3-firstType): back to 1:50 m, then 1:50 m -> 1:100 ft-in at once.
+    // Both keys changed, so both types regenerate, the Gauge registered
+    // first: 10 x 100 = 1,000 and 100 x (4 + 1) = 500.
+    doc.commands.undo();
+    doc.commands.undo();
+    expect(canon(doc), at50);
+    expect(lineLength(doc, hG), closeTo(500, 1e-6));
+    expect(lineLength(doc, hD), closeTo(300, 1e-6));
+    final g2 = calls(hG), d2 = calls(hD), c2 = calls(hC);
+    final ft100 = m50.copyWith(
+        scaleDenominator: 100, displayUnit: DisplayUnit.feetInches);
+    doc.commands.execute(setPage(doc, ft100));
+    expect(calls(hG), g2 + 1, reason: 'the scale changed');
+    expect(calls(hD), d2 + 1, reason: 'the unit changed');
+    expect(calls(hC), c2);
+    expect(lineLength(doc, hG), closeTo(1000, 1e-6));
+    expect(lineLength(doc, hD), closeTo(500, 1e-6));
+    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
+    expect(drift(doc), isEmpty);
+
     // A page read at creation: a Gauge created on the 1:100 page draws
     // 1,000 from the start.
     doc.commands.execute(create(doc, hG2, atG2, gauge2));
@@ -231,9 +252,22 @@ void main() {
     expect(calls(hG), b0, reason: 'attached at 1:50: the key is unchanged');
     bare.commands.execute(setPage(bare, null));
     expect(calls(hG), b0, reason: 'detached from 1:50: the key is unchanged');
+    final k0 = Gauge.pageKeyCalls;
     bare.commands.execute(setPage(bare, PageComponent(scaleDenominator: 20.5)));
     expect(calls(hG), b0 + 1);
     expect(lineLength(bare, hG), closeTo(205, 1e-6), reason: '10 x 20.5');
+    expect(Gauge.pageKeyCalls, k0 + 2,
+        reason: 'a page change asks the key of the page before and after');
+    expect(drift(bare), isEmpty);
+
+    // Spec 10 D14: `pageKey` is never called on an edit that leaves the
+    // page alone (Task 3's review, rv3-noShort). A Gauge parameter edit
+    // regenerates the Gauge and asks no key.
+    final k1 = Gauge.pageKeyCalls, b1 = calls(hG);
+    bare.commands.execute(SetComponentCommand<Gauge>(hG, Gauge(130.5, -40.25)));
+    expect(calls(hG), b1 + 1, reason: 'the Gauge itself was edited');
+    expect(lineLength(bare, hG), closeTo(205, 1e-6));
+    expect(Gauge.pageKeyCalls, k1, reason: 'the page did not change');
     expect(drift(bare), isEmpty);
 
     // Ruling 10-4: a loaded Gauge whose host names a missing handle. A page

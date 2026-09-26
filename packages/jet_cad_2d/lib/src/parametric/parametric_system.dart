@@ -72,6 +72,19 @@ abstract class ParametricType<T extends Component> {
   /// Called twice per registered type per page-changing edit, and never on
   /// any other edit: keep it a field read.
   Object? pageKey(PageComponent? page) => null;
+
+  /// Whether [self] is deleted instead of regenerated (spec 10 D15): a room
+  /// whose seed ended up in a wall or in an unbounded face.
+  ///
+  /// Asked in the edit, of every live object the edit regenerates, with the
+  /// after-view, **before** its [generate], and by `drift()` of every live
+  /// object. When it answers true, [generate] is not called: the planner
+  /// removes [self]'s children and node, as the select tool deletes a
+  /// group, and then detaches its component, all inside the same edit, one
+  /// undo step. Never asked of an object the edit deleted: that one is
+  /// 06 D8's cleanup's. Like [generate], it must not mutate, and whatever it
+  /// throws rolls the edit back. Default: never.
+  bool dissolves(ParametricView view, Handle self) => false;
 }
 
 /// A referrer's fate when its referent stops being a live object (spec 08
@@ -338,7 +351,9 @@ class ParametricSystem {
   }
 
   /// Handles whose regeneration would change anything (spec D10). A dry
-  /// run: reserves no handle, mutates nothing.
+  /// run: reserves no handle, mutates nothing. An object that
+  /// [ParametricType.dissolves] is named too: its plan removes it (spec 10
+  /// D15), so a loaded broken room shows here.
   ///
   /// Guarded the same way [apply] is (F5): a client `generate` must not
   /// mutate, and a dry run is exactly where a client could try to call
@@ -546,6 +561,7 @@ final class _Registration<T extends Component> {
   Aabb2 reachOf(CommandTarget t, Handle h) =>
       type.reach(t.components.get<T>(h) as T, _worldOf(t, h));
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
+  bool dissolves(ParametricView v, Handle h) => type.dissolves(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);
 
   /// [h]'s declared referents. Every call counts in [debugReferenceCalls]
