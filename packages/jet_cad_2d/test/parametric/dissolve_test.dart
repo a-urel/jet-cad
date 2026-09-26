@@ -15,6 +15,11 @@ import 'support/fixture.dart';
 
 const Handle hF = Handle(1000); // the Fuse
 const Handle hC = Handle(2000); // the ClipRect
+const Handle hG = Handle(3000); // a second Fuse, far from both
+
+/// G, parked (rotated, far from F and C), and G widened.
+const Fuse fuseG = Fuse(40.25, 60.5, 300.5, 200.75);
+const Fuse fuseGWider = Fuse(40.25, 60.5, 450.25, 200.75);
 
 /// F on A's frame (turned, off the origin), its rectangle off its own
 /// origin: centre (600.75, 220.125) in F's local space.
@@ -251,6 +256,35 @@ void main() {
     expect(canon(doc, sortNodes: true), before);
     expect(kids(doc, hF), handles);
     expect(doc.components.get<Fuse>(hF), fuse);
+
+    // One command dissolves F and edits a second Fuse G that sorts after F
+    // in the closure (a higher handle): the plan goes on past the dissolve,
+    // so G regenerates in the same edit (Task 4's review, rv4-break).
+    final two = scene();
+    two.commands.execute(create(two, hG, parked, fuseG));
+    final gHandles = kids(two, hG);
+    expect(gHandles, hasLength(3));
+    expect(hG.value, greaterThan(hF.value));
+    expect(drift(two), isEmpty);
+    final twoDepth = two.commands.undoDepth;
+    final gCalls = calls(hG);
+    two.commands.execute(CompoundCommand([
+      SetComponentCommand<Fuse>(
+          hF, const Fuse(150.5, -80.25, 900.5, 600.75, burnt: true)),
+      SetComponentCommand<Fuse>(hG, fuseGWider),
+    ], label: 'Burn F, widen G'));
+    expectDissolved(two);
+    expect(two.commands.undoDepth, twoDepth + 1);
+    expect(calls(hG), gCalls + 1, reason: 'G is generated after F dissolves');
+    expect(kids(two, hG), gHandles);
+    final gc = fuseGWider.corners;
+    expect(
+        two.geometry
+            .read(two.entities.geomIndexAt(two.entities.slotOf(gHandles[2])!))
+            .coords,
+        [gc[0].x, gc[0].y, gc[2].x, gc[2].y],
+        reason: "G's diagonal follows its new width");
+    expect(drift(two), isEmpty);
 
     // 06 D8: the select tool's delete of F is a loss, not a dissolve. F is
     // not asked, and its component is detached once, by the cleanup.
