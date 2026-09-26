@@ -113,12 +113,15 @@ final class Plan {
 /// Builds [walls], then [seps], then [wallsAfter] (walls whose handles come
 /// after the separators'), then [openings] (hosted by the walls they index
 /// in `[...walls, ...wallsAfter]`), each object one command, at [place].
+/// [measurer] is the document's (a shell test passes a
+/// `FlutterTextMeasurer`).
 Plan buildPlan(List<W> walls,
     {List<S> seps = const [],
     List<W> wallsAfter = const [],
     List<O> openings = const [],
-    Placement place = origin}) {
-  final doc = DraftDocument.empty();
+    Placement place = origin,
+    TextMeasurer measurer = const InsertionPointMeasurer()}) {
+  final doc = DraftDocument.empty(measurer: measurer);
   final system = installParametric(doc);
   ensureDashedLinetype(doc);
   final wh = <Handle>[], sh = <Handle>[], oh = <Handle>[];

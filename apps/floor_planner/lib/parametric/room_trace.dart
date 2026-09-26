@@ -676,8 +676,9 @@ final class Tint {
 /// Its cost: at a convex vertex of the ring (nearly every box corner) the
 /// perpendicular `V'` lies outside the face, up to 0.5 mm, so the tint
 /// covers a sliver of the wall there, as it did before Task 14c; where a
-/// later hole bridges to an earlier slit end the two add up, to 1 mm at
-/// most (the reviews' fuzz: 0.99999979 mm).
+/// later hole bridges to an earlier slit end the two add up: each chained
+/// bridge adds at most 0.5 mm; about 1 mm in the reviews' fuzz
+/// (0.99999979 mm).
 ///
 /// **The fallback chain**, so an edit is never refused because of a tint:
 /// 1. the keyholed ring, if it triangulates (`triangulationFor` non-empty);

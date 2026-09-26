@@ -586,10 +586,10 @@ void main() {
           // Seed 31337's plan t92 (the second review): hole A's
           // rightmost vertex (7,825, 175) and B's (7,899.1, 100.9) lie on
           // the south-east corner's diagonal x + y = 8,000, with the
-          // corner (7,900, 100). A bridges to the corner, then B bridges
-          // to A's H along the same line, so B's V' = H_A + s is A's H'
-          // exactly: a slit end on a vertex, which `_clear` must see too,
-          // or the ring is pinched.
+          // corner (7,900, 100). B, rightmost, joins first and bridges to
+          // the corner; A then bridges to B's H along the same line, so
+          // A's V' = H_B + s is B's H' exactly: a slit end on a vertex,
+          // which `_clear` must see too, or the ring is pinched.
           'the fuzz plan t92 (a slit end on a slit end)',
           const [
             W(100.6, 960.2247134232631, 399.2233160671864, 960.2247134232631,

@@ -386,7 +386,7 @@ String? _tintReport(
     2 => 'its tint covers its holes: the keyholed ring does not triangulate',
     3 => 'its tint is an unfilled outline: its face does not triangulate',
     _ => 'its tint covers ${tint.holesLeftOut.length} of its holes: no '
-        'bridge reaches them',
+        'clear keyhole reaches them',
   };
 }
 

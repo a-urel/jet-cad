@@ -1,15 +1,16 @@
 // What a room traces (spec 10 D4): every live wall's uncut band and every
 // live separator's segment, in world, through two adapters that agree bit
 // for bit -- the view adapter for `generate`, `diagnose` and `placeBox`, and
-// the document adapter for the tools. No Flutter import: this file is Dart
-// over `package:jet_cad_2d` and `vector_math` only (spec 10 D1).
+// the document adapter for the tools -- and the band trimming of a drawn
+// separator (D20). No Flutter import: this file is Dart over
+// `package:jet_cad_2d` and `vector_math` only (spec 10 D1).
 import 'dart:async' show StreamSubscription, unawaited;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'opening_geometry.dart' show wallsInView;
-import 'room_trace.dart' show PlaceSource;
+import 'room_trace.dart' show PlaceSource, pointInRing;
 import 'separator.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
@@ -292,7 +293,7 @@ final class RoomInputs implements PlaceSource {
     _placed.clear();
     final doc = document;
     final walls = <WorldWall>[
-      for (final h in _live<WallParams>(doc))
+      for (final h in liveObjectsOf<WallParams>(doc))
         WorldWall(h, doc.components.get<WallParams>(h)!,
             doc.tree.accumulatedTransform(h)),
     ];
@@ -303,7 +304,7 @@ final class RoomInputs implements PlaceSource {
         for (final n in _neighbours[w.handle]!) byHandle[n]!,
       ]);
     }
-    for (final h in _live<SeparatorParams>(doc)) {
+    for (final h in liveObjectsOf<SeparatorParams>(doc)) {
       _inputs[h] = roomInputOf(h, doc.components.get<SeparatorParams>(h)!,
           doc.tree.accumulatedTransform(h));
     }
@@ -362,9 +363,79 @@ final class RoomInputs implements PlaceSource {
 /// carrying the component, as the engine's survey reads one. A component on
 /// a nested group, or on a handle with no node (a deleted object's), is not
 /// one (08's final review m5).
-List<Handle> _live<T extends Component>(DraftDocument doc) => [
+List<Handle> liveObjectsOf<T extends Component>(DraftDocument doc) => [
       for (final h in doc.components.withComponent<T>())
         if (doc.tree[h] case final GroupNode node
             when node.parent == doc.tree.root)
           h,
     ]..sort((a, b) => a.value.compareTo(b.value));
+
+// ---------------------------------------------------------------------------
+// Band trimming (spec 10 D20, R-21).
+
+/// The separator a person draws from [a] to [b], in world, as it is stored
+/// (spec 10 D20, R-21; Ruling 10-9): the one function the Separator tool and
+/// the separator grips call.
+///
+/// With [objectSnap] (F3), an end inside a wall's uncut band ([inputs]'
+/// closed inputs) moves back along the segment to the first point where the
+/// segment, walked from its other end as placed, enters that band: the
+/// stored end lies on the face, to rounding, so it joins the face (D5) and
+/// the separator does not draw into the wall. An end in open space stays
+/// where it was put. An end inside several bands (walls that overlap) stops
+/// at the first of their faces the walk meets. Both ends inside one band:
+/// null.
+///
+/// Without [objectSnap], `(a, b)` as placed: trimming is object snapping,
+/// and an end left inside a band still splits the face correctly.
+///
+/// Either way, a result no longer than `roomTrace.linear` is null: it
+/// would be a degenerate separator (D3).
+(Vector2, Vector2)? trimSeparator(Vector2 a, Vector2 b, RoomInputs inputs,
+    {required bool objectSnap}) {
+  var s = a, e = b;
+  if (objectSnap) {
+    final inA = _bandsHolding(a, inputs);
+    final inB = _bandsHolding(b, inputs);
+    if (inA.any(inB.contains)) return null;
+    if (inB.isNotEmpty) e = _entry(a, b, inB);
+    if (inA.isNotEmpty) s = _entry(b, a, inA);
+  }
+  if (!((e - s).length > roomTrace.linear)) return null;
+  return (s, e);
+}
+
+/// The bands among [inputs] that hold [p] (the crossing-number test, taken
+/// relative to [p], as the tracer takes its seed).
+List<RoomInput> _bandsHolding(Vector2 p, RoomInputs inputs) => [
+      for (final h in inputs.placedIn(Aabb2.raw(p.x, p.y, p.x, p.y)))
+        if (inputs.inputOf(h) case final input? when input.closed)
+          if (pointInRing(
+              Vector2.zero(), [for (final q in input.points) q - p]))
+            input,
+    ];
+
+/// The first point where the segment walked from [from] to [to] crosses an
+/// edge of one of [bands], all of which hold [to]: where it enters them.
+/// Solved relative to [from], so the point lies on the face to rounding at
+/// any distance from the origin. [to] itself when no edge is crossed (a
+/// point on a band's boundary, which the crossing-number test may count
+/// either way).
+Vector2 _entry(Vector2 from, Vector2 to, List<RoomInput> bands) {
+  final r = to - from;
+  var best = double.infinity;
+  for (final band in bands) {
+    final pts = band.points;
+    final n = pts.length;
+    for (var i = 0; i < n; i++) {
+      final c = pts[i] - from, d = pts[(i + 1) % n] - from;
+      final sx = d.x - c.x, sy = d.y - c.y;
+      final denom = r.x * sy - r.y * sx;
+      if (denom == 0) continue;
+      final t = (c.x * sy - c.y * sx) / denom;
+      final u = (c.x * r.y - c.y * r.x) / denom;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1 && t < best) best = t;
+    }
+  }
+  return best.isFinite ? from + r * best : to;
+}

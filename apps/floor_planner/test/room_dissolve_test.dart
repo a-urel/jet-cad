@@ -407,7 +407,7 @@ void main() {
                 severity: DiagnosticSeverity.warning,
                 code: 'room.tint',
                 message: 'room ${nearRoom.toHex()} ("Room 1"): its tint covers '
-                    '1 of its holes: no bridge reaches them',
+                    '1 of its holes: no clear keyhole reaches them',
                 handles: [nearRoom],
               ),
             ],

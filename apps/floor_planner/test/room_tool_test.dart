@@ -1,0 +1,601 @@
+// Spec 10 D19: the Room tool (M). One click inside a face places one room,
+// seeded at the raw pointer, named with the lowest free `Room N`, in one undo
+// step; the hover previews the face the room would get, traced with the
+// same code as the room's `generate`; a band, an unbounded face and a face
+// that already holds a room make nothing, and the last says so in the
+// status line (decision 26, R-29). The hover short-circuits outside the
+// bounding box of every place box and reuses its caches while the pointer
+// stays in one face or one band.
+//
+// Expected areas are hand arithmetic next to the assertion; every expected
+// label string is at least 0.0005 m² from a rounding tie. Seeds are
+// fractional, and the fixtures run at the origin and at the corpus far
+// origin with every wall and separator in its own rotated group.
+import 'package:floor_planner/main.dart';
+import 'package:floor_planner/parametric/room.dart';
+import 'package:floor_planner/parametric/room_inputs.dart';
+import 'package:floor_planner/parametric/room_tool.dart';
+import 'package:floor_planner/parametric/room_trace.dart';
+import 'package:floor_planner/planner_view.dart';
+import 'package:floor_planner/tool_palette.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'support/room_fixture.dart';
+
+// ---------------------------------------------------------------------------
+// The tool driven directly, as `opening_tool_test.dart` drives its tools.
+
+typedef Rig = ({RoomTool tool, ToolContext ctx, RoomInputs inputs});
+
+/// A Room tool over [doc] with its own [RoomInputs]: a camera at [scale]
+/// pixels per mm (1 gives a 10 mm aperture), object snap on, no page (no
+/// grid).
+Rig roomRig(DraftDocument doc, {double scale = 1}) {
+  final index = SpatialIndex(doc);
+  final camera = CameraController(
+      ViewportTransform(worldToScreenMatrix: Transform2.scale(scale, scale)));
+  final selection = SelectionController(doc);
+  final inputs = RoomInputs(doc);
+  final tool = RoomTool(inputs);
+  addTearDown(() {
+    tool.dispose();
+    inputs.dispose();
+    selection.dispose();
+    camera.dispose();
+    index.dispose();
+  });
+  return (
+    tool: tool,
+    ctx: ToolContext(
+        document: doc, index: index, camera: camera, selection: selection),
+    inputs: inputs,
+  );
+}
+
+ToolPointerEvent pointerAt(Vector2 world, {int buttons = 0}) =>
+    ToolPointerEvent(
+        screen: Offset.zero,
+        world: world,
+        pointer: 1,
+        buttons: buttons,
+        shift: false,
+        control: false,
+        meta: false,
+        alt: false,
+        pickRadiusWorld: 1);
+
+void hoverTo(Rig rig, Vector2 world) =>
+    rig.tool.onPointerMove(pointerAt(world), rig.ctx);
+
+void pressAt(Rig rig, Vector2 world) =>
+    rig.tool.onPointerDown(pointerAt(world, buttons: kPrimaryButton), rig.ctx);
+
+/// Every live room, ascending.
+List<Handle> rooms(DraftDocument doc) => liveObjectsOf<RoomParams>(doc);
+
+/// The one room [doc] gained over [before].
+Handle addedRoom(DraftDocument doc, List<Handle> before) =>
+    rooms(doc).where((r) => !before.contains(r)).single;
+
+/// A preview payload's points, less the repeated first point.
+List<Vector2> ringOf(GeometryPayload p) {
+  final c = p.coords;
+  expect((c[c.length - 2], c[c.length - 1]), (c[0], c[1]),
+      reason: 'an open polyline that closes on its first point');
+  return [
+    for (var i = 0; i + 3 < c.length; i += 2) Vector2(c[i], c[i + 1]),
+  ];
+}
+
+/// [ring] is the polygon with plan corners [corners], in that cyclic order
+/// (anticlockwise; the trace starts it at its least world vertex, which
+/// turns with the placement), each within 1e-6 mm in world.
+void expectRing(
+    Plan plan, List<Vector2> ring, List<(double, double)> corners, String why) {
+  expect(ring, hasLength(corners.length), reason: why);
+  final first = plan.at(corners[0].$1, corners[0].$2);
+  var k = 0;
+  for (var i = 1; i < ring.length; i++) {
+    if ((ring[i] - first).length < (ring[k] - first).length) k = i;
+  }
+  for (var i = 0; i < corners.length; i++) {
+    final (x, y) = corners[i];
+    final d = (ring[(k + i) % ring.length] - plan.at(x, y)).length;
+    expect(d, lessThan(1e-6), reason: '$why: corner $i ($x, $y) off by $d');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The shell.
+
+/// [plan]'s document handed to the shell: its own parametric system is
+/// disposed first, as `startupPlan` disposes its own, and the shell installs
+/// one over the finished document.
+Future<PlannerView> pumpPlan(WidgetTester tester, Plan plan) async {
+  plan.system.dispose();
+  plan.doc.commands.clearHistory();
+  await tester.binding.setSurfaceSize(const Size(1440, 900));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(MaterialApp(home: PlannerShell(document: plan.doc)));
+  await tester.pump();
+  return tester.widget<PlannerView>(find.byType(PlannerView));
+}
+
+Offset screenOf(WidgetTester tester, PlannerView view, Vector2 world) {
+  final s = view.camera.value.worldToScreen(world);
+  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
+}
+
+Future<void> clickAt(WidgetTester tester, PlannerView view, Vector2 p) async {
+  await tester.tapAt(screenOf(tester, view, p));
+  await tester.pump();
+}
+
+Future<void> press(WidgetTester tester, LogicalKeyboardKey key) async {
+  await tester.sendKeyEvent(key);
+  await tester.pump();
+}
+
+Future<void> undoKey(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+  await press(tester, LogicalKeyboardKey.keyZ);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+  await tester.pump();
+}
+
+String status(WidgetTester tester) =>
+    tester.widget<Text>(find.byKey(const Key('status-text'))).data!;
+
+/// The shell's Room tool, found through its palette entry.
+RoomTool shellRoomTool(WidgetTester tester) => tester
+    .widget<ToolPalette>(find.byType(ToolPalette))
+    .entries
+    .firstWhere((e) => e.keyName == 'tool-room')
+    .tool as RoomTool;
+
+/// The sample plan's walls, column, separator and openings at the origin,
+/// on a document the shell can paint (a `FlutterTextMeasurer`).
+Plan shellSamplePlan() => buildPlan([...sampleWalls(), sampleColumn],
+    seps: const [sampleSeparator],
+    openings: sampleOpenings,
+    measurer: FlutterTextMeasurer());
+
+void main() {
+  testWidgets(
+      'TT1 M places one room with one click, one undo step, named Room 1, '
+      'seeded at the raw point; the tool stays active and Esc returns to '
+      'Select', (tester) async {
+    // The tool driven directly, at the corpus far origin in own groups: a
+    // fractional click, hovered first; then an unrelated edit raises the
+    // handle seed before the click (X15-predict: the handle is allocated
+    // inside the commit's build, never predicted).
+    final plan = buildPlan(boxWalls, place: corpusGroups);
+    final doc = plan.doc;
+    final rig = roomRig(doc);
+    final seed = plan.at(2345.625, 1789.375);
+    hoverTo(rig, seed);
+    expect(rig.tool.debugPreview, hasLength(1), reason: 'the face, no hole');
+    final hovered = doc.handleSeed.current;
+    doc.commands.execute(addDrafted(doc, EntityKind.line,
+        linePayload(plan.at(-3000, -3000), plan.at(-2000, -3000.5))));
+    final raised = doc.handleSeed.current;
+    expect(raised.value, greaterThan(hovered.value),
+        reason: 'premise: the edit raised the handle seed');
+    final depth = doc.commands.undoDepth;
+    pressAt(rig, seed);
+    final room = rooms(doc).single;
+    expect(room.value, greaterThan(raised.value),
+        reason: 'allocated at the click');
+    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
+    expect((doc.tree[room]! as GroupNode).transform.isIdentity, isTrue,
+        reason: 'its group at the identity');
+    expect(doc.components.get<RoomParams>(room),
+        RoomParams(seed.x, seed.y, 'Room 1'),
+        reason: 'the raw point, exactly; Room 1; the label auto');
+    // The box's inner faces 100 in: 7,800 × 3,800 = 29,640,000 mm²,
+    // 29.64 m² (0.005 from a tie).
+    expect(labelStrings(doc, room), ['Room 1', '29.64 m²']);
+    expect(driftOf(doc), isEmpty);
+    expect(rig.tool.debugPreview, isEmpty, reason: 'the face now holds a room');
+    expect(rig.tool.notice.value, 'Already a room: Room 1');
+    doc.commands.undo();
+    expect(rooms(doc), isEmpty, reason: 'one undo takes it away');
+
+    // The shell: M and the palette entry both activate the tool, a click
+    // places a room, the tool stays active, and Esc returns to Select.
+    final shell = shellSamplePlan();
+    final view = await pumpPlan(tester, shell);
+    final sdoc = view.document;
+    await press(tester, LogicalKeyboardKey.keyM);
+    expect(status(tester), 'Room');
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(status(tester), 'Select');
+    await tester.tap(find.byKey(const Key('tool-room')));
+    await tester.pump();
+    expect(status(tester), 'Room');
+    final sdepth = sdoc.commands.undoDepth;
+    await clickAt(tester, view, shell.at(18500.5, 9750.25));
+    final kitchen = rooms(sdoc).single;
+    expect(sdoc.commands.undoDepth, sdepth + 1);
+    // The Kitchen: x 17,060-21,440, y 8,250-11,440: 4,380 × 3,190 =
+    // 13,972,200 mm², 13.97 m² (0.0022 from a tie).
+    expect(labelStrings(sdoc, kitchen), ['Room 1', '13.97 m²']);
+    expect(status(tester), 'Room — Already a room: Room 1',
+        reason: 'the tool stays active, over the face it just filled');
+    await undoKey(tester);
+    expect(rooms(sdoc), isEmpty);
+    expect(status(tester), 'Room', reason: 'the face is free again');
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(status(tester), 'Select');
+  });
+
+  test('TT2 the hover preview is the ring the room gets, bit for bit', () {
+    for (final place in [origin, corpusGroups]) {
+      // The box, the hollow column and the separator face to face at
+      // x = 3,000: the left face has no hole, the right one the column.
+      final plan = boxAndSeparatorPlan(place);
+      final doc = plan.doc;
+      final rig = roomRig(doc);
+      for (final (label, (sx, sy), holes, area) in [
+        // 2,900 × 3,800 = 11,020,000: 11.02 m² (0.005 from a tie).
+        ('left', (1500.25, 2000.5), 0, '11.02 m²'),
+        // 4,900 × 3,800 − 700 × 700 = 18,130,000: 18.13 m² (0.005).
+        ('right', (6500.75, 3000.25), 1, '18.13 m²'),
+      ]) {
+        final why = '$label, $place';
+        final seed = plan.at(sx, sy);
+        hoverTo(rig, seed);
+        final preview = [for (final p in rig.tool.debugPreview) ringOf(p)];
+        expect(preview, hasLength(1 + holes), reason: why);
+        final ring = preview.first;
+        // By hand: the inner faces 100 in, the separator at x = 3,000, and
+        // the hollow column's outer contour, 4,950-5,650 × 1,450-2,150.
+        if (label == 'left') {
+          expectRing(plan, ring,
+              const [(100, 100), (3000, 100), (3000, 3900), (100, 3900)], why);
+        } else {
+          expectRing(
+              plan,
+              ring,
+              const [(3000, 100), (7900, 100), (7900, 3900), (3000, 3900)],
+              why);
+          expectRing(
+              plan,
+              preview[1],
+              const [(4950, 1450), (5650, 1450), (5650, 2150), (4950, 2150)],
+              '$why: the hole');
+        }
+        pressAt(rig, seed);
+        final room = rooms(doc).last;
+        expect(labelStrings(doc, room), ['Room ${holes + 1}', area],
+            reason: why);
+        // The room's group is at the identity, so its tint stores each
+        // world trace point q as `seed + (q − seed)` (its local frame is
+        // the seed's): the preview mapped so is the tint's points.
+        final tint = worldTintOf(doc, room);
+        List<Vector2> stored(List<Vector2> r) =>
+            [for (final q in r) seed + (q - seed)];
+        final outer = stored(ring);
+        if (holes == 0) {
+          expect([
+            for (final p in tint) (p.x, p.y)
+          ], [
+            for (final p in outer) (p.x, p.y)
+          ], reason: '$why: the tint is the previewed ring');
+        } else {
+          // D9 step 1: the keyholed ring, the outer ring from its first
+          // point, each hole walked in after a vertex, plus its two slit
+          // points.
+          expect(tint, hasLength(ring.length + preview[1].length + 2),
+              reason: why);
+          var k = 0;
+          for (final p in tint) {
+            if (k < outer.length && p.x == outer[k].x && p.y == outer[k].y) {
+              k++;
+            }
+          }
+          expect(k, outer.length,
+              reason: '$why: every outer point, in order, bit for bit');
+          expect((tint.first.x, tint.first.y), (outer.first.x, outer.first.y));
+          for (final q in stored(preview[1])) {
+            expect(tint.any((p) => p.x == q.x && p.y == q.y), isTrue,
+                reason: '$why: hole point $q');
+          }
+        }
+      }
+      // The hollow column's courtyard lies in the right face's hole: not
+      // that face, but a face of its own, 5,050-5,550 × 1,550-2,050.
+      final traces = rig.tool.debugTraces;
+      hoverTo(rig, plan.at(5300.25, 1800.5));
+      expect(rig.tool.debugTraces, traces + 1,
+          reason: 'not the cached face, $place');
+      expectRing(
+          plan,
+          ringOf(rig.tool.debugPreview.single),
+          const [(5050, 1550), (5550, 1550), (5550, 2050), (5050, 2050)],
+          'the courtyard, $place');
+      hoverTo(rig, plan.at(1700.5, 1200.25));
+      expect(rig.tool.debugPreview, isEmpty, reason: 'occupied now');
+      expect(driftOf(doc), isEmpty);
+    }
+  });
+
+  test('TT3 no room in a band, in an unbounded face or in an occupied face',
+      () {
+    for (final place in [origin, corpusGroups]) {
+      final plan = buildPlan(boxWalls, place: place);
+      final doc = plan.doc;
+      // Two rooms in the box's one face: Pantry, the lower handle, in a
+      // turned, translated group whose local seed lies outside the face,
+      // then Kitchen.
+      final at =
+          Transform2.translation(plan.at(-9000, 500).x, plan.at(-9000, 500).y)
+              .multiply(Transform2.rotation(1.1));
+      final pantry = addRoom(doc, plan.at(6200.5, 3100.25), 'Pantry', at: at);
+      final local = doc.components.get<RoomParams>(pantry)!.seed;
+      expect(faceAt(doc, local), isNot(isA<Traced>()),
+          reason: 'premise: the local seed is outside the face, $place');
+      addRoom(doc, plan.at(1500.25, 2000.5), 'Kitchen');
+      final rig = roomRig(doc);
+      final before = rooms(doc);
+      for (final (what, (x, y), notice) in [
+        ('in the south wall\'s band', (4000.5, 30.25), null),
+        ('outside the box', (-2000.5, 2000.25), null),
+        ('in the occupied face', (6000.75, 1200.5), 'Already a room: Pantry'),
+      ]) {
+        final why = '$what, $place';
+        final p = plan.at(x, y);
+        final depth = doc.commands.undoDepth;
+        hoverTo(rig, p);
+        expect(rig.tool.debugPreview, isEmpty, reason: '$why: no preview');
+        expect(rig.tool.notice.value, notice, reason: why);
+        pressAt(rig, p);
+        expect(doc.commands.undoDepth, depth, reason: '$why: no command');
+        expect(rooms(doc), before, reason: '$why: no room');
+        expect(rig.tool.debugPreview, isEmpty, reason: why);
+        expect(rig.tool.notice.value, notice, reason: '$why, after a click');
+      }
+
+      // An edit in the same task as the click, its change not yet
+      // delivered: a hover caches the free face, a room lands in it, and
+      // the click still finds the face occupied.
+      final free = buildPlan(boxWalls, place: place);
+      final frig = roomRig(free.doc);
+      final q = free.at(4100.5, 2900.25);
+      hoverTo(frig, q);
+      expect(frig.tool.debugPreview, hasLength(1), reason: 'premise: free');
+      addRoom(free.doc, free.at(1200.25, 900.5), 'Study');
+      final fdepth = free.doc.commands.undoDepth;
+      pressAt(frig, q);
+      expect(free.doc.commands.undoDepth, fdepth,
+          reason: 'a same-task edit, $place');
+      expect(frig.tool.notice.value, 'Already a room: Study');
+    }
+  });
+
+  test('TT4 a new room takes the lowest unused Room N', () {
+    final plan = samplePlan(corpusGroups);
+    final doc = plan.doc;
+    Vector2 at(String name) {
+      final (x, y) = sampleSeeds[name]!;
+      return plan.at(x, y);
+    }
+
+    addRoom(doc, at('Hall'), 'Room 1');
+    addRoom(doc, at('Bedroom 1'), 'Room 3');
+    addRoom(doc, at('Kitchen'), 'Kitchen');
+    // Names that are not exactly `Room N`: none of them takes an N.
+    addRoom(doc, at('Bedroom 2'), 'Room 02');
+    addRoom(doc, at('Dining'), 'Room 2 ');
+    final rig = roomRig(doc);
+    var before = rooms(doc);
+    pressAt(rig, at('Bath'));
+    final bath = addedRoom(doc, before);
+    expect(doc.components.get<RoomParams>(bath)!.name, 'Room 2');
+    before = rooms(doc);
+    pressAt(rig, at('Living'));
+    final living = addedRoom(doc, before);
+    expect(doc.components.get<RoomParams>(living)!.name, 'Room 4');
+    expect(driftOf(doc), isEmpty);
+  });
+
+  test('TT5 the seed is the raw point with object snap on beside a vertex', () {
+    // At 0.25 px/mm the aperture is 40 mm; the raw point lies 30 mm from
+    // the box's south-west inner corner, inside the room.
+    final plan = buildPlan(boxWalls, place: corpusGroups);
+    final doc = plan.doc;
+    final rig = roomRig(doc, scale: 0.25);
+    final corner = plan.at(100, 100);
+    final raw = plan.at(100 + 21.2132034356, 100 + 21.2132034356);
+    expect((raw - corner).length, closeTo(30, 1e-6));
+    hoverTo(rig, raw);
+    expect((rig.tool.hoverPoint - corner).length, lessThan(1e-6),
+        reason: 'premise: the chain snaps to the face vertex');
+    expect(faceAt(doc, rig.tool.hoverPoint), isA<SeedInWall>(),
+        reason: 'premise: a seed there would be in a wall');
+    pressAt(rig, raw);
+    final room = rooms(doc).single;
+    final p = doc.components.get<RoomParams>(room)!;
+    expect((p.seedX, p.seedY), (raw.x, raw.y), reason: 'the raw point');
+    expect(labelStrings(doc, room), ['Room 1', '29.64 m²'],
+        reason: 'the room lives: 7,800 × 3,800');
+    expect(driftOf(doc), isEmpty);
+  });
+
+  test(
+      'TT6 steady hovers re-trace nothing; outside the bounding box of every '
+      'place box nothing is traced; the Kitchen seed, outside every place box '
+      'but inside that box, is traced and previewed; a band\'s verdict is '
+      'reused; an Unbounded hover at 600 walls is timed', () async {
+    final plan = samplePlan(origin);
+    final doc = plan.doc;
+    final rig = roomRig(doc);
+    final tool = rig.tool;
+    ({int segments, int traces, int previews}) counters() => (
+          segments: debugTracedSegments,
+          traces: tool.debugTraces,
+          previews: tool.debugPreviewBuilds,
+        );
+
+    // The Kitchen seed, (19,000, 10,000): outside every place box (T-1: E1
+    // reaches y 8,250, P3 starts at y 11,440, P1 ends at x 17,060, P5
+    // starts at x 21,440), inside their bounding box.
+    final kitchen = plan.at(19000, 10000);
+    expect(
+        rig.inputs
+            .placedIn(Aabb2.raw(kitchen.x, kitchen.y, kitchen.x, kitchen.y)),
+        isEmpty,
+        reason: 'premise: outside every place box');
+    expect(rig.inputs.bounds!.containsPoint(kitchen), isTrue,
+        reason: 'premise: inside their bounding box');
+    var c = counters();
+    hoverTo(rig, kitchen);
+    expect(debugTracedSegments, greaterThan(c.segments), reason: 'traced');
+    expect(tool.debugPreviewBuilds, c.previews + 1, reason: 'previewed');
+    expect(tool.debugPreview, hasLength(1));
+    // The Kitchen: x 17,060-21,440 (P1's east face, P5's west face), y
+    // 8,250-11,440 (E1's inner face, P3's south face).
+    expectRing(
+        plan,
+        ringOf(tool.debugPreview.single),
+        const [
+          (17060, 8250),
+          (21440, 8250),
+          (21440, 11440),
+          (17060, 11440),
+        ],
+        'the Kitchen');
+
+    // Fifty hovers across the Kitchen: nothing traced, nothing built.
+    c = counters();
+    for (var i = 0; i < 50; i++) {
+      hoverTo(rig, plan.at(17100.5 + 86.25 * i, 8300.25 + 61.5 * i));
+      expect(tool.debugPreview, hasLength(1));
+    }
+    expect(counters(), c, reason: 'steady hovers in one face');
+
+    // Outside the bounding box of every place box: nothing traced, no
+    // preview.
+    for (final (x, y) in const [
+      (11000.5, 12000.25),
+      (19000.25, 7000.5),
+      (27000.75, 16000.5),
+      (19000.5, 18000.25),
+    ]) {
+      hoverTo(rig, plan.at(x, y));
+      expect(tool.debugPreview, isEmpty);
+      expect(counters(), c, reason: 'outside the box, ($x, $y)');
+    }
+
+    // Inside E1's band: traced once, then reused while the pointer stays
+    // in the band.
+    hoverTo(rig, plan.at(15000.5, 8030.25));
+    expect(tool.debugTraces, c.traces + 1, reason: 'the first band hover');
+    expect(tool.debugPreview, isEmpty);
+    c = counters();
+    for (var i = 0; i < 20; i++) {
+      hoverTo(rig, plan.at(14000.5 + 301.25 * i, 8010.25 + 10.5 * i));
+    }
+    expect(counters(), c, reason: 'the band\'s verdict reused');
+
+    // Back in the Kitchen: its face is still cached.
+    hoverTo(rig, plan.at(20000.5, 11000.25));
+    expect(counters(), c);
+    expect(tool.debugPreview, hasLength(1));
+
+    // P5 moved 300.5 east: the cache is dropped on the document's change
+    // (X15-stale), and the same pointer previews the wider Kitchen.
+    doc.commands.execute(
+        moveWall(plan, 8, const W(21800.5, 8125, 21800.5, 11500, 120)));
+    await Future<void>.delayed(Duration.zero);
+    hoverTo(rig, plan.at(20000.5, 11000.25));
+    expect(tool.debugTraces, c.traces + 1, reason: 're-traced after the edit');
+    expect(tool.debugPreviewBuilds, c.previews + 1);
+    expectRing(
+        plan,
+        ringOf(tool.debugPreview.single),
+        const [
+          (17060, 8250),
+          (21740.5, 8250),
+          (21740.5, 11440),
+          (17060, 11440),
+        ],
+        'the wider Kitchen');
+
+    // A courtyard among 600 walls: no wall meets another, so no face is
+    // bounded; the point is inside the bounding box and is re-traced per
+    // move (T-8), timed as 07's WT12 times its hover.
+    final grid = buildPlan([
+      for (var i = 0; i < 30; i++)
+        for (var j = 0; j < 20; j++)
+          W(i * 3000.0, j * 3000.0, i * 3000.0 + 1000, j * 3000.0, 200),
+    ], place: corpus);
+    final big = roomRig(grid.doc);
+    final p = grid.at(1500.5, 1500.25);
+    expect(big.inputs.bounds!.containsPoint(p), isTrue,
+        reason: 'premise: inside the bounding box');
+    final before = big.tool.debugTraces;
+    hoverTo(big, p);
+    hoverTo(big, p);
+    expect(big.tool.debugTraces, before + 2, reason: 'traced per move');
+    expect(big.tool.debugPreview, isEmpty, reason: 'Unbounded');
+    final hover = <double>[];
+    const batch = 5;
+    for (var k = 0; k < 20; k++) {
+      final sw = Stopwatch()..start();
+      for (var i = 0; i < batch; i++) {
+        hoverTo(big, p);
+      }
+      hover.add(sw.elapsedMicroseconds / batch);
+    }
+    hover.sort();
+    // ignore: avoid_print
+    print('TT6 n=600 walls: median per Unbounded hover in the courtyard '
+        '${hover[hover.length ~/ 2].toStringAsFixed(1)} us');
+  });
+
+  testWidgets(
+      'TT7 a click in an occupied face places nothing and the status line '
+      'says so; hovering there shows it; it clears on leaving the face and '
+      'on deactivation', (tester) async {
+    final plan = shellSamplePlan();
+    addRoom(plan.doc, plan.at(19000, 10000), 'Kitchen');
+    final view = await pumpPlan(tester, plan);
+    final doc = view.document;
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    addTearDown(mouse.removePointer);
+    Future<void> hover(double x, double y) async {
+      await mouse.moveTo(screenOf(tester, view, plan.at(x, y)));
+      await tester.pump();
+    }
+
+    await press(tester, LogicalKeyboardKey.keyM);
+    expect(status(tester), 'Room');
+    await hover(20500.5, 9000.25);
+    expect(status(tester), 'Room — Already a room: Kitchen',
+        reason: 'hovering the occupied face');
+    final before = rooms(doc);
+    final depth = doc.commands.undoDepth;
+    await clickAt(tester, view, plan.at(18200.5, 10800.25));
+    expect(rooms(doc), before, reason: 'nothing placed');
+    expect(doc.commands.undoDepth, depth);
+    expect(status(tester), 'Room — Already a room: Kitchen',
+        reason: 'after a click there');
+    // The Bath: a face with no room.
+    await hover(23500.5, 10000.25);
+    expect(status(tester), 'Room', reason: 'cleared on leaving the face');
+    await hover(19000.5, 10500.25);
+    expect(status(tester), 'Room — Already a room: Kitchen');
+    await press(tester, LogicalKeyboardKey.escape);
+    expect(status(tester), 'Select', reason: 'cleared on deactivation');
+    expect(shellRoomTool(tester).notice.value, isNull);
+    await press(tester, LogicalKeyboardKey.keyM);
+    expect(status(tester), 'Room');
+  });
+}

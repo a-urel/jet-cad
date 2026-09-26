@@ -746,8 +746,8 @@ of `FZ1`'s tint checks at seed 1010).
   Its cost: at a convex vertex of the ring (nearly every box corner) the
   perpendicular `V'` lies outside the face, by up to 0.5 mm, so the tint
   covers a sliver of the wall there, as before Task 14c; where a later
-  hole bridges to an earlier slit end the two add up, to 1 mm at most (the
-  fuzz: 0.99999979 mm). The area label is the trace's, never the tint's.
+  hole bridges to an earlier slit end the two add up: each chained bridge
+  adds at most 0.5 mm; about 1 mm in the reviews' fuzz (0.99999979 mm). The area label is the trace's, never the tint's.
 - **What remains.** Step 2 is reached by a pinched hole only (none on a
   simple hole in the 14c review's four fuzz seeds). A **simple** hole is
   left out only within the slit's width (0.5 mm) of the ring or of another

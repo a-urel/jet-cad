@@ -9,6 +9,9 @@ import 'parametric/catalog.dart';
 import 'parametric/object_grips.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
+import 'parametric/room_inputs.dart';
+import 'parametric/room_tool.dart';
+import 'parametric/separator_tool.dart';
 import 'parametric/wall_bands.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
@@ -122,6 +125,11 @@ class _PlannerShellState extends State<PlannerShell> {
     for (final k in OpeningKind.values)
       k: OpeningTool(k, _openingSettings[k]!, bands: _bands),
   };
+  // Spec 10 D19, D20, Ruling 10-11: one room-input cache, shared by the
+  // Room tool and the Separator tool.
+  late final RoomInputs _roomInputs = RoomInputs(_document);
+  late final RoomTool _room = RoomTool(_roomInputs);
+  late final SeparatorTool _separator = SeparatorTool(_roomInputs);
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -191,6 +199,20 @@ class _PlannerShellState extends State<PlannerShell> {
         tool: _openingTools[OpeningKind.gap]!,
         drawing: true),
     PaletteEntry(
+        keyName: 'tool-room',
+        label: 'Room',
+        shortcut: 'M',
+        logicalKey: LogicalKeyboardKey.keyM,
+        tool: _room,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-separator',
+        label: 'Separator',
+        shortcut: 'S',
+        logicalKey: LogicalKeyboardKey.keyS,
+        tool: _separator,
+        drawing: true),
+    PaletteEntry(
         keyName: 'tool-circle',
         label: 'Circle',
         shortcut: 'C',
@@ -244,7 +266,9 @@ class _PlannerShellState extends State<PlannerShell> {
       grips: _grips);
   late final ToolController _tools =
       ToolController(initial: _select, context: _context);
-  late final Listenable _status = Listenable.merge([_selection, _tools]);
+  // Spec 10 D19, R-29: the Room tool's notice joins the status line.
+  late final Listenable _status =
+      Listenable.merge([_selection, _tools, _room.notice]);
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -284,9 +308,14 @@ class _PlannerShellState extends State<PlannerShell> {
     if (!identical(_tools.active, _select)) _activate(_select);
   }
 
+  /// The active tool, the selection's size when it is not empty, and the
+  /// Room tool's notice when it has one (spec 10 D19, R-29).
   String _statusLine() {
     final base = _tools.active.name;
-    return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+    final line =
+        _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+    final notice = _room.notice.value;
+    return notice == null ? line : '$line — $notice';
   }
 
   String _zoomLine() {
@@ -323,6 +352,7 @@ class _PlannerShellState extends State<PlannerShell> {
       s.dispose();
     }
     _bands.dispose();
+    _roomInputs.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();
