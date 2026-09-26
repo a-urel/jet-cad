@@ -649,4 +649,45 @@ void main() {
         reason: 'the box can be rotated');
     expect(driftOf(doc), isEmpty);
   });
+
+  test(
+      'SG7 (fr-X8) the slide grip reads the host\'s admission: of two '
+      'windows that together cover a free 2,000 wall, the higher-handle one '
+      'yields (keep-a-piece) and is no-fit; its grip sits at its stored '
+      'centre, not where it would be drawn alone, and a drag within the '
+      'tolerance of it issues nothing', () {
+    final doc = wallDoc();
+    final a = doc.handleSeed.next();
+    doc.commands.execute(addWall(doc, a, plan(-1000, 2600), plan(1000, 2600),
+        200, Justification.centre));
+    final kept = doc.handleSeed.next();
+    doc.commands.execute(addOpening(
+        doc, kept, OpeningParams(a, 450, 900, OpeningKind.window),
+        at: doorGroup));
+    final yielded = doc.handleSeed.next();
+    doc.commands.execute(addOpening(
+        doc, yielded, OpeningParams(a, 1650, 1100, OpeningKind.window)));
+    final f = oracleFrameOf(doc, a);
+    expect(f.len, closeTo(2000, 1e-6));
+    final oracle = OpeningOracle(doc);
+    final alone = oracle.cut(paramsOf(doc, yielded))!;
+    expect(alone.a, closeTo(900, 1e-6), reason: 'alone: clamped to the end');
+    expect([for (final (h, c) in oracle.cutsOn(a)) (h, c != null)],
+        [(kept, true), (yielded, false)]);
+    expect(
+        diagnosticsOf(doc).any(
+            (d) => d.code == 'opening.nofit' && d.handles.contains(yielded)),
+        isTrue);
+
+    final grips = ObjectGrips(edgeAperture: () => null);
+    final gk = grips.gripsOf(doc, kept).single;
+    expect((Vector2(gk.x, gk.y) - oracleAt(f, 450, 0)).length, lessThan(1e-6));
+    final g = grips.gripsOf(doc, yielded).single;
+    expect((Vector2(g.x, g.y) - oracleAt(f, 1650, 0)).length, lessThan(1e-6),
+        reason: 'at the stored centre, not ${(alone.a + alone.b) / 2}');
+    for (final du in [5e-7, -5e-7]) {
+      expect(grips.drag(doc, yielded, g, oracleAt(f, 1650 + du, 30)), isNull,
+          reason: 'no-fit is not drawn clamped: $du');
+    }
+  });
 }

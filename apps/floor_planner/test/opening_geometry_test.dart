@@ -3,10 +3,15 @@
 // (`groupAt`), no host is axis-aligned, and no opening is central. The
 // expected values come from `support/opening_fixture.dart`'s oracles, which
 // never call the geometry under test.
+import 'dart:math' as math;
+
+import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/opening_fixture.dart';
 import 'support/wall_fixture.dart';
@@ -352,5 +357,114 @@ void main() {
     expect(st.every((s) => s.$2 - s.$1 < wide), isTrue);
     expect(f.uE - f.uS, greaterThan(wide), reason: 'the span would hold it');
     expect(placeCut(st, c, wide), isNull);
+  });
+
+  test(
+      'HF8 (fr-X4) the frame\'s local-space fallback: 07\'s WR13 L (A 200 '
+      'right into the hub, B 200 left out of it at 178°, turned 133° about '
+      'the hub), whose caps are simple in world and not in A\'s local space: '
+      'A\'s frame falls back to the free caps computed in local space, bit '
+      'for bit, and a door clamped against the hub end lands on them', () {
+    const hA = Handle(1000), hB = Handle(1100), hD = Handle(5000);
+    final hub = far(1234.5, 678.25);
+    final doc = wallDoc();
+    final id = Transform2.identity();
+    doc.commands.execute(CompoundCommand([
+      addWall(doc, hA, far(-2500, 678.25), hub, 200, right, at: id),
+      addWall(doc, hB, hub, polar(hub, 178, 600), 200, left, at: id),
+    ], label: 'Add L'));
+    final t = Transform2.translation(hub.x, hub.y)
+        .multiply(Transform2.rotation(133 * math.pi / 180))
+        .multiply(Transform2.translation(-hub.x, -hub.y));
+    doc.commands.execute(CompoundCommand([
+      for (final h in [hA, hB])
+        TransformNodeCommand(h, t.multiply(doc.tree[h]!.transform)),
+    ], label: 'Rotate'));
+    final a = worldWallOf(doc, hA);
+    final world = capsOf(a, [worldWallOf(doc, hB)])!;
+    expect(world.fellBack, isFalse, reason: 'simple in world');
+    final toLocal = a.toWorld.invert();
+    expect(
+        isSimpleCcw(simplifyRing([
+          for (final q in [...world.endCap, ...world.startCap])
+            toLocal.transformPoint(q),
+        ])),
+        isFalse,
+        reason: 'not in local space');
+
+    final f = hostFrameInDocument(doc, hA)!;
+    expect(f.fellBack, isTrue);
+    final free = WorldWall(hA, doc.components.get<WallParams>(hA)!, id);
+    List<List<double>> bits(List<Vector2> ps) =>
+        [for (final q in ps) q.storage.toList()];
+    expect(bits(f.endCap), bits(cap(End(free, 1), const Free()).points));
+    expect(bits(f.startCap), bits(cap(End(free, 0), const Free()).points));
+
+    // A door clamped against the hub end cuts at the free cap, and lands.
+    doc.handleSeed.raiseTo(const Handle(9000));
+    final depth = doc.commands.undoDepth;
+    doc.commands.execute(addOpening(
+        doc, hD, OpeningParams(hA, f.len - 100, 900, OpeningKind.door)));
+    expect(doc.commands.undoDepth, depth + 1);
+    final layout = layoutInDocument(doc, hA)!;
+    final [cut] =
+        cutsOf(layout.frame, layout.stretches, [(f.len - 100, 900)]).cuts;
+    expect(cut!.b, f.uE, reason: 'against the free end cap');
+    expect(storedPiecesTriangulate(doc, hA), isTrue);
+    expect(storedPiecesSimpleCcw(doc, hA), isTrue);
+    expect(driftOf(doc), isEmpty);
+  });
+
+  test(
+      'HF9 (fr-X7, ffw-obstacleLive) the document adapter sees live walls '
+      'only: a hand-built WallParams on a group nested under a plain root '
+      'group, and one on a handle with no node, both crossing a live host, '
+      'are neither hosts nor obstacles', () {
+    const hA = Handle(1000);
+    const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
+    final doc = wallDoc();
+    doc.commands
+        .execute(addWall(doc, hA, plan(0, 0), plan(4000, 0), 200, centre));
+    // Across A at 1,800 and 2,600, in world: the nested group and its parent
+    // sit at the identity, and a node-less handle's transform is the
+    // identity.
+    final fa = oracleFrameOf(doc, hA);
+    WallParams across(double u) {
+      final s = oracleAt(fa, u, -900), e = oracleAt(fa, u + 150, 900);
+      return WallParams(s.x, s.y, e.x, e.y, 150, centre);
+    }
+
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: plain,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          children: const [])),
+      AddNodeCommand(GroupNode(
+          handle: nested,
+          parent: plain,
+          transform: Transform2.identity(),
+          children: const [])),
+      SetComponentCommand<WallParams>(nested, across(1800)),
+      SetComponentCommand<WallParams>(bare, across(2600)),
+    ], label: 'Add strays'));
+    expect(doc.tree[nested]!.parent, plain, reason: 'not root-level');
+    expect(doc.tree[bare], isNull, reason: 'no node');
+
+    for (final h in [nested, bare]) {
+      expect(wallsInDocument(doc, h), isNull, reason: '$h is not a host');
+      expect(hostFrameInDocument(doc, h), isNull, reason: '$h');
+      expect(layoutInDocument(doc, h), isNull, reason: '$h');
+    }
+    final w = wallsInDocument(doc, hA)!;
+    expect([for (final x in w.walls) x.handle], isEmpty);
+    final layout = layoutInDocument(doc, hA)!;
+    expect(layout.obstacles, isEmpty, reason: 'no obstacle');
+    expect(layout.stretches, [(layout.frame.uS, layout.frame.uE)]);
+
+    // Control: the same wall live, in its own root group, is an X.
+    doc.commands.execute(addWallLocal(
+        doc, const Handle(6000), across(1800), Transform2.identity()));
+    expect(layoutInDocument(doc, hA)!.obstacles, hasLength(1));
   });
 }

@@ -1,10 +1,14 @@
 # Plan 08 mutation log -- M-08a..z3, M-08snap, M-08sn, M-08pin and the tasks' extras
 
-**Tally, after Task 16's first commit: 214 mutants fired, 207 killed, 0
-survived, 7 equivalent (fired, and they survive as argued); 8 N/A (not
-re-fired).** After Task 14 fix round 1 it stood at 213 fired, 206
-killed; Task 16's first commit added `own-defaultMovable` (the Task 14
-review's Minor 1), killed by the new `SG6`. Two controls were fired as well and survive, as the spec
+**Tally, after the final fix wave: 228 mutants fired, 220 killed, 0
+survived, 8 equivalent (fired, and they survive as argued); 8 N/A (not
+re-fired).** The final fix wave fired 14 (see "The final fix wave"):
+the final review's four survivors (`fr-X4`, `fr-X7`, `fr-X8`, `fr-X9`),
+now killed, and ten of its own, nine killed and one equivalent
+(`ffw-memoNever`). **After Task 16's first commit** it stood at 214
+fired, 207 killed, 7 equivalent. After Task 14 fix round 1 it stood at
+213 fired, 206 killed; Task 16's first commit added `own-defaultMovable`
+(the Task 14 review's Minor 1), killed by the new `SG6`. Two controls were fired as well and survive, as the spec
 says they must; they are not counted. The first run (commit `b1b4c98`)
 stood at 204 killed, 1 survived, 8 equivalent; the fix round (below)
 closed both findings, and three re-fires show it.
@@ -31,8 +35,8 @@ closed both findings, and three re-fires show it.
   the first run the slide grip's copy of the aperture divisor
   (`t11-apertureDir-grip`) survived (F1); the fix round's new
   `SG1 (t11-apertureDir, the grip's site)` kills it.
-- **Equivalents:** 9 fired against their files; **7 survive** as argued
-  in their tasks. **Two do not, and are reclassified killed:**
+- **Equivalents:** 10 fired against their files; **8 survive** as argued
+  (7 in their tasks, and the final fix wave's `ffw-memoNever`). **Two do not, and are reclassified killed:**
   `rv7-invOrder` (the engine's `CS1`, `CS10`, `CS11`, `CS12` kill it;
   it is equivalent only at the app level, where the Task 7 review fired
   it) and `rv8-addForm` (Task 13's `EP8` and `EP9` pin the rewrite's
@@ -6092,9 +6096,344 @@ scratchpad's `plan08/` with the `t16-` prefix. Baseline: `--plain-name
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/object_grips.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red). KILLED by `SG6`, line 627 ("a box"). It survived the whole app suite in the Task 14 review.
 
+## The final fix wave
+
+The final whole-branch review (at `5739442`, ledger) re-fired ten log
+entries (all killed) and fired ten of its own, `fr-X1`–`fr-X10`: six
+killed, and `fr-X4`, `fr-X7`, `fr-X8` and `fr-X9` survived the whole app
+suite. Its I1 (a non-triangulable piece at a slightly kinked joint) and
+m1 (a no-fit tool position outside `[0, L]`) were fixed in the fix wave's
+commit, with tests. The fix wave fired the four survivors against its
+new tests and fourteen mutants in all, each on the final code, with
+`ffw-mutant.sh` and `ffw-fire-all.sh` (scratchpad `plan08/ffw/`): `cp`
+the file to a backup, one exact edit, the command, `cp` back, `diff`
+(exit 0 every time; the whole output is `ffw-fire-all.out`). Where a
+command ran the whole app suite, only its red lines are shown. Thirteen
+are killed; `ffw-memoNever` is equivalent and is under "Equivalent
+mutants, fired".
+
+**A control** (`ffw-headctl2.log`, `ffw-headctl2-tool.log`): with
+`opening_geometry.dart` and `opening_tool.dart` at `5739442`, `KJ1`–`KJ5`
+(a copy without `KJ6`, which needs the new `isValidPiece`) and `OT1
+(ffw-noFitRaw)` are all red: `KJ1`'s repro and 1e-6° case refused
+(`ArgumentError` at the execute), `KJ2: 1620 cases, 79 refused, 0
+no-fit`, `KJ3` places nothing, `KJ4` and `KJ5` fail on the
+`ArgumentError` that escapes pointer-up, and the tool stores
+705.9999999991544 for a 700 wall.
+
+### fr-X4 — (the final review's) 07's local-space fallback dropped from 08's frame
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-fr-X4-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  83c83
+  <   if (!isSimpleCcw(simplifyRing([...ce, ...cs]))) {
+  ---
+  >   if (false && !isSimpleCcw(simplifyRing([...ce, ...cs]))) {
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_geometry_test.dart)` (exit 1; log `ffw-fr-X4.log`)
+
+  ```
+  00:00 +7 -1: HF8 (fr-X4) the frame's local-space fallback: 07's WR13 L (A 200 right into the hub, B 200 left out of it at 178°, turned 133° about the hub), whose caps are simple in world and not in A's local space: A's frame falls back to the free caps computed in local space, bit for bit, and a door clamped against the hub end lands on them [E]
+    Expected: true
+      Actual: <false>
+    test/opening_geometry_test.dart 396:5               main.<fn>
+  00:00 +8 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `HF8`, line 396 (the frame does not fall back). It survived the whole app suite at `5739442`.
+
+### fr-X7 — (the final review's) the document adapter's host liveness check removed
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-fr-X7-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  717c717
+  <   if (p == null || !_isLiveGroup(doc, host)) return null;
+  ---
+  >   if (p == null) return null;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_geometry_test.dart)` (exit 1; log `ffw-fr-X7.log`)
+
+  ```
+  00:00 +8 -1: HF9 (fr-X7, ffw-obstacleLive) the document adapter sees live walls only: a hand-built WallParams on a group nested under a plain root group, and one on a handle with no node, both crossing a live host, are neither hosts nor obstacles [E]
+    Expected: null
+      Actual: ({WorldWall host, List<WorldWall> walls}):<(host: Instance of 'WorldWall', walls: [Instance of 'WorldWall'])>
+    test/opening_geometry_test.dart 455:7               main.<fn>
+  00:00 +8 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `HF9`, line 455 (a nested stray is a host). It survived the whole app suite at `5739442`.
+
+### fr-X8 — (the final review's) the slide grip reads each opening's cut alone, not the admission
+
+- **file:** `apps/floor_planner/lib/parametric/opening_grips.dart`; backup `ffw-fr-X8-opening_grips.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  124c124,127
+  <     return _Slide._(p, layout, walls.host.toWorld, openings, i, placed.cuts);
+  ---
+  >     return _Slide._(p, layout, walls.host.toWorld, openings, i, [
+  >       for (final (_, o) in openings)
+  >         placeCut(layout.stretches, o.position, o.width),
+  >     ]);
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_grips_test.dart)` (exit 1; log `ffw-fr-X8.log`)
+
+  ```
+  00:02 +9 -1: SG7 (fr-X8) the slide grip reads the host's admission: of two windows that together cover a free 2,000 wall, the higher-handle one yields (keep-a-piece) and is no-fit; its grip sits at its stored centre, not where it would be drawn alone, and a drag within the tolerance of it issues nothing [E]
+    Expected: a value less than <0.000001>
+      Actual: <199.99999999966735>
+    test/opening_grips_test.dart 686:5                  main.<fn>
+  00:02 +9 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_grips.dart`; `diff` exit 0.
+- **result:** KILLED by `SG7`, line 686 (the yielded window's grip 200 mm off its stored centre). It survived the whole app suite at `5739442`.
+
+### fr-X9 — (the final review's) the band cache ignores the centreline's length
+
+- **file:** `apps/floor_planner/lib/parametric/wall_bands.dart`; backup `ffw-fr-X9-wall_bands.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  64,65c64
+  <           along < -tol ||
+  <           along > c[o + 6] + tol) {
+  ---
+  >           along < -tol) {
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/wall_bands_test.dart)` (exit 1; log `ffw-fr-X9.log`)
+
+  ```
+  00:00 +0 -1: WB1 (fr-X9) a point on a wall's centreline line beyond either end, or in its band's width beyond an end, is in no band: it neither joins nor hosts; just inside an end it joins that end, bit for bit, and hosts [E]
+    Expected: null
+      Actual: <1000>
+    test/wall_bands_test.dart 40:7                      main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/wall_bands.dart`; `diff` exit 0.
+- **result:** KILLED by `WB1`, line 40 (a point past the end hosts). It survived the whole app suite at `5739442`.
+
+### ffw-validPiece — the admission without the validity check: only "no piece" makes an opening no-fit
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-validPiece-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  331c331
+  <     if (pieces.isEmpty || !pieces.every(ok)) {
+  ---
+  >     if (pieces.isEmpty) {
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test)` (exit 1; log `ffw-validPiece.log`)
+
+  ```
+  00:21 +143 -1: test/opening_kink_test.dart: KJ1 (ffw-validPiece) a 1e-6° kink (A 200 left, B 150 centre): the end cap zigzags across the jamb (a cap vertex lies on it), so no end piece is valid; a window clamped against the end is no-fit, and the edit lands in one step instead of being refused [E]
+    test/opening_kink_test.dart 222:18                               main.<fn>
+  00:45 +243 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `KJ1 (ffw-validPiece)` (the 1e-6° kink), line 222: the edit is refused (`ArgumentError` from the planner's region check). Nothing else in the app suite goes red: the cleanup alone rescues every other kinked case.
+
+### ffw-dropBacktrack — the back-tracking cleanup removed
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-dropBacktrack-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  427c427
+  <       ring: _dropBacktracks(simplifyRing(ring)),
+  ---
+  >       ring: simplifyRing(ring),
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test)` (exit 1; log `ffw-dropBacktrack.log`)
+
+  ```
+  00:22 +142 -1: test/opening_kink_test.dart: KJ1 (ffw-validPiece, ffw-dropBacktrack) the reviewer's repro: A (3,000, 200 centre), B out of A's end at a 2° kink (150 right), a 600 gap at 2,900 lands in one step, clamped against the end; the end piece is the cap's lobe without the back-tracking left face; every piece valid, the tiling exact, no drift, undo and redo exact [E]
+    Expected: ['opening.clamped [5000]']
+      Actual: ['opening.nofit [5000]']
+    test/opening_kink_test.dart 176:5                   main.<fn>
+  00:23 +147 -2: test/opening_kink_test.dart: KJ2 the kink sweep: 15 bends (0° to 60°, both signs) × A 200 or 115 × B 150, 200 or 300 × all nine justification pairs × a window clamped against the kinked start or end: 1,620 cases, none refused, none no-fit, every piece valid, no drift [E]
+    Expected: <0>
+      Actual: <79>
+    test/opening_kink_test.dart 285:5                   main.<fn>
+  Expected: empty
+    Actual: ['opening.nofit [1104]']
+  00:25 +148 -3: test/opening_kink_test.dart: KJ3 (shell) the Window tool clicked near the 2°-kinked end places one window, clamped against it, in one history entry [E]
+  Expected: a numeric value within <0.000001> of <2999.9999999997335>
+    Actual: <3299.99999999988>
+  00:26 +151 -4: test/opening_kink_test.dart: KJ4 (shell) a window's slide grip dragged to the 2°-kinked end lands one command, clamped against the end; nothing escapes pointer-up [E]
+  Expected: ['opening.clamped [5000]']
+    Actual: ['opening.nofit [5000]']
+  00:26 +155 -5: test/opening_kink_test.dart: KJ5 (shell) with a gap clamped against A's end at a 30° joint, B's far end dragged so that B turns to about 2° lands one command: A keeps its gap, every piece valid [E]
+  00:46 +239 -5: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `KJ1` (the repro, line 176: no-fit instead of clamped), `KJ2` (line 285: 79 no-fit), `KJ3` (line 302), `KJ4` (line 333), `KJ5` (line 371). **Nothing is refused** anywhere in the app suite: the validity check turns each such opening no-fit. The needless no-fits are what the cleanup prevents (79 of `KJ2`'s 1,620; 230 more of the scratch search's 7,776).
+
+### ffw-validNoSimple — the piece predicate without `isSimpleCcw`
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-validNoSimple-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  512c512
+  <   if (ring.length < 3 || !isSimpleCcw(ring)) return false;
+  ---
+  >   if (ring.length < 3) return false;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_kink_test.dart)` (exit 1; log `ffw-validNoSimple.log`)
+
+  ```
+  00:02 +6 -1: KJ6 (ffw-validNoSimple, ffw-validNoTri) the piece predicate is both checks: a clockwise rectangle triangulates but is refused; a ring with an exact zero-width spike has no proper crossing and positive area but does not triangulate, and is refused; the anticlockwise rectangle is accepted. Rings at the far origin, turned 23° [E]
+    Expected: false
+      Actual: <true>
+    test/opening_kink_test.dart 403:5                   main.<fn>
+  00:02 +6 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `KJ6`, line 403 (the clockwise rectangle accepted). On every generated piece the fix wave found, either half of the predicate refuses what the other refuses; `KJ6` tells them apart on hand rings.
+
+### ffw-validNoTri — the piece predicate without the triangulation
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-validNoTri-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  515c515
+  <   return triangles != null && triangles.isNotEmpty;
+  ---
+  >   return true;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_kink_test.dart)` (exit 1; log `ffw-validNoTri.log`)
+
+  ```
+  00:02 +6 -1: KJ6 (ffw-validNoSimple, ffw-validNoTri) the piece predicate is both checks: a clockwise rectangle triangulates but is refused; a ring with an exact zero-width spike has no proper crossing and positive area but does not triangulate, and is refused; the anticlockwise rectangle is accepted. Rings at the far origin, turned 23° [E]
+    Expected: false
+      Actual: <true>
+    test/opening_kink_test.dart 407:5                   main.<fn>
+  00:02 +6 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `KJ6`, line 407 (the exact zero-width spike accepted).
+
+### ffw-memoAlways — the admission's memo answers "valid" for every piece
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-memoAlways-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  320c320
+  <     if (valid.contains(p.span)) return true;
+  ---
+  >     return true;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_kink_test.dart)` (exit 1; log `ffw-memoAlways.log`)
+
+  ```
+  00:00 +1 -1: KJ1 (ffw-validPiece) a 1e-6° kink (A 200 left, B 150 centre): the end cap zigzags across the jamb (a cap vertex lies on it), so no end piece is valid; a window clamped against the end is no-fit, and the edit lands in one step instead of being refused [E]
+    test/opening_kink_test.dart 222:18                               main.<fn>
+  00:02 +6 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `KJ1 (ffw-validPiece)`, line 222.
+
+### ffw-noFitRaw — the tool stores a no-fit position raw (the final review's m1 restored)
+
+- **file:** `apps/floor_planner/lib/parametric/opening_tool.dart`; backup `ffw-noFitRaw-opening_tool.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  344c344
+  <         ? (u < 0 ? 0.0 : (u > f.len ? f.len : u))
+  ---
+  >         ? u
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_tool_test.dart --plain-name "OT1 (ffw-noFitRaw)")` (exit 1; log `ffw-noFitRaw.log`)
+
+  ```
+  00:00 +0 -1: OT1 (ffw-noFitRaw) a no-fit position is stored clamped to [0, L], as the slide grip stores it (D6; the final review's m1): D on a 700 wall, too short for a 900 door, clicked just inside each end where object snap resolves the click to a line's end 6 mm past it [E]
+    Expected: <700.0000000005143>
+      Actual: <705.9999999991544>
+    test/opening_tool_test.dart 437:7                   main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_tool.dart`; `diff` exit 0.
+- **result:** KILLED by `OT1 (ffw-noFitRaw)`, line 437 (the click past the end stores 706).
+
+### ffw-noFitLow — the tool clamps a no-fit position at `L` only
+
+- **file:** `apps/floor_planner/lib/parametric/opening_tool.dart`; backup `ffw-noFitLow-opening_tool.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  344c344
+  <         ? (u < 0 ? 0.0 : (u > f.len ? f.len : u))
+  ---
+  >         ? (u > f.len ? f.len : u)
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_tool_test.dart --plain-name "OT1 (ffw-noFitRaw)")` (exit 1; log `ffw-noFitLow.log`)
+
+  ```
+  00:00 +0 -1: OT1 (ffw-noFitRaw) a no-fit position is stored clamped to [0, L], as the slide grip stores it (D6; the final review's m1): D on a 700 wall, too short for a 900 door, clicked just inside each end where object snap resolves the click to a line's end 6 mm past it [E]
+    Expected: <0.0>
+      Actual: <-6.0000000004487415>
+    test/opening_tool_test.dart 437:7                   main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_tool.dart`; `diff` exit 0.
+- **result:** KILLED by `OT1 (ffw-noFitRaw)`, line 437 (the click before the start stores −6).
+
+### ffw-obstacleLive — the document adapter's neighbour liveness check removed
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-obstacleLive-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  723c723
+  <         if (h != host && _isLiveGroup(doc, h))
+  ---
+  >         if (h != host)
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/opening_geometry_test.dart)` (exit 1; log `ffw-obstacleLive.log`)
+
+  ```
+  00:00 +8 -1: HF9 (fr-X7, ffw-obstacleLive) the document adapter sees live walls only: a hand-built WallParams on a group nested under a plain root group, and one on a handle with no node, both crossing a live host, are neither hosts nor obstacles [E]
+    Expected: empty
+      Actual: [5100, 5200]
+    test/opening_geometry_test.dart 460:5               main.<fn>
+  00:00 +8 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** KILLED by `HF9`, line 460 (both strays are neighbours).
+
+### ffw-startBound — the band cache ignores the start bound
+
+- **file:** `apps/floor_planner/lib/parametric/wall_bands.dart`; backup `ffw-startBound-wall_bands.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  64d63
+  <           along < -tol ||
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/wall_bands_test.dart)` (exit 1; log `ffw-startBound.log`)
+
+  ```
+  00:00 +0 -1: WB1 (fr-X9) a point on a wall's centreline line beyond either end, or in its band's width beyond an end, is in no band: it neither joins nor hosts; just inside an end it joins that end, bit for bit, and hosts [E]
+    Expected: null
+      Actual: <1000>
+    test/wall_bands_test.dart 40:7                      main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/wall_bands.dart`; `diff` exit 0.
+- **result:** KILLED by `WB1`, line 40 (a point before the start hosts).
+
 ## Equivalent mutants, fired
 
-The ledger and the carry name these as equivalent. Each was fired against the whole file(s) its argument concerns. Seven survive; two are killed on this tree and are counted killed.
+The ledger and the carry name these as equivalent. Each was fired against the whole file(s) its argument concerns. Seven survive; two are killed on this tree and are counted killed. The final fix wave's `EQ-ffw-memoNever` is the eighth survivor, fired against the whole app suite.
 
 ### EQ-X9-adapterDesc — the document adapter's walls in descending order
 
@@ -6322,9 +6661,30 @@ The ledger and the carry name these as equivalent. Each was fired against the wh
 
 ---
 
+### EQ-ffw-memoNever — the admission's memo never consulted
+
+- **file:** `apps/floor_planner/lib/parametric/opening_geometry.dart`; backup `ffw-memoNever-opening_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  320c320
+  <     if (valid.contains(p.span)) return true;
+  ---
+  >     if (false && valid.contains(p.span)) return true;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test)` (exit 0; log `ffw-memoNever.log`)
+
+  ```
+  00:45 +244: All tests passed!
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/opening_geometry.dart`; `diff` exit 0.
+- **result:** EQUIVALENT: the memo changes the cost, not the outcome; the whole app suite passes (`00:45 +244: All tests passed!`).
+
 ## Survivors and findings
 
-None survive after fix round 1.
+None survive after fix round 1. The final review's `fr-X4`, `fr-X7`,
+`fr-X8` and `fr-X9` survived at `5739442`; the final fix wave's `HF8`,
+`HF9`, `SG7` and `WB1` kill them (their entries).
 
 - **`t11-apertureDir-grip` (F1).** Survived `opening_grips_test.dart`
   and the whole app suite in the first run; the tool's copy
@@ -6415,6 +6775,30 @@ app      (apps/floor_planner)           CI=true flutter test       00:44 +232: A
 
 `+232`: the new `SG6 (own-defaultMovable)`. The four gate lines and the
 web build are run again on the final tree by Task 16 (the results note).
+
+**The final fix wave** (all four lines and the web build, on the fix
+wave's code tree; logs `plan08/ffw/ffw-g-*.log`):
+
+```
+engine   (packages/jet_cad_2d)          CI=true dart test          00:12 +1014 -2: Some tests failed.   (exit 1)
+         the two standing failures: test/testing/generate_document_test.dart
+         dart analyze                    No issues found!                      (exit 0)
+         dart format --set-exit-if-changed   Formatted 147 files (0 changed)   (exit 0)
+render   (packages/jet_cad_2d_flutter)  CI=true flutter test       00:43 +936 ~1 -7: Some tests failed. (exit 1)
+         the seven standing failures: text ladder rungs 1-5, text lod ladder rungs 1-2
+         flutter analyze                 No issues found! (ran in 1.2s)         (exit 0)
+         dart format --set-exit-if-changed   Formatted 177 files (0 changed)   (exit 0)
+harness  (apps/dev_harness_2d)          CI=true flutter test --concurrency=1   00:32 +82: All tests passed!   (exit 0)
+         flutter analyze                 No issues found! (ran in 0.8s)         (exit 0)
+         dart format --set-exit-if-changed   Formatted 22 files (0 changed)    (exit 0)
+app      (apps/floor_planner)           CI=true flutter test       00:44 +244: All tests passed!        (exit 0)
+         flutter analyze                 No issues found! (ran in 0.9s)         (exit 0)
+         dart format --set-exit-if-changed   Formatted 54 files (0 changed)    (exit 0)
+         flutter build web --release     ✓ Built build/web                      (exit 0)
+```
+
+`+244`: the fix wave's twelve tests (`KJ1` twice, `KJ2`–`KJ6`, `OT1
+(ffw-noFitRaw)`, `HF8`, `HF9`, `SG7`, `WB1`).
 
 ## Appendix: M-08a's scratch diff
 

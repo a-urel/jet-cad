@@ -9,7 +9,9 @@ table). The other thirteen open questions were accepted as written.
 ran are marked in place, "amended at execution (controller, …)" (D7, D8,
 D10, D12, D17). The paragraphs headed "**Amended at execution (Plan 08)**"
 record the rest: where the build departed from this text, or made it
-precise. They rewrite nothing above them. Results:
+precise. They rewrite nothing above them. The final whole-branch review's
+fixes are marked "**Amended at execution (final fix wave)**" (D6, D7, D8,
+D9). Results:
 [2026-09-25-plan-08-results.md](../notes/2026-09-25-plan-08-results.md).
 **Sub-project:** `roadmap/08-openings.md`. **Size:** M.
 **Branch:** `spec-08/openings`, cut from `main` at `357bea6`; this revision
@@ -575,6 +577,14 @@ missing host does not.
 **Pinned by:** `OP1` (round trip, `==`, key order); the position's meaning
 by `OG1`, `OR1` (M-08b, M-08a); the width by `OG1` (M-08c).
 
+**Amended at execution (final fix wave):** the tools and the slide grip
+**stay in `[0, L]`**, no-fit included. Where the opening fits, both store
+the centre of its cut, which lies in the straight span. Where it is no-fit,
+both store the projected position **clamped to `[0, L]`**: the slide grip
+always did; the tools stored the raw projection, so a click that object
+snap resolved to a point a few mm past the wall's end stored a position
+past `L` (the final review's m1). `OT1 (ffw-noFitRaw)` pins both ends.
+
 ### D7 — The host frame: straight span, obstacles, stretches
 
 Everything in D7–D9 is computed **in the host's group-local space**, where
@@ -657,6 +667,25 @@ two known limits.
   transform, and `HostFrame` also carries the stored end `e` (D9's
   amendment).
 
+**Amended at execution (final fix wave):** a known limit, and the adapters.
+- **Known limit: acute and folded joints shrink the span.** The straight
+  span follows 07's caps, whatever they are. At an acute joint (about 12°
+  or less between the two walls) 07's mitre and lobe walk reach far along
+  the host, and at a folded wall (a wall doubling back on another) the cap
+  can cover most of it. There the span shrinks: an opening near that end
+  is drawn clamped farther from the node, or is no-fit, and the span can
+  be empty, so every opening on the wall is no-fit. This is D7 as
+  written, not a new rule; the final review's fuzz set aside 93 oracle
+  disagreements at such joints, each app-correct by this section.
+- **Only live walls.** The document adapter (`wallsInDocument`) sees
+  live wall objects only, a root-level group carrying `WallParams`, as
+  the host and as its neighbours; a stray `WallParams` on a nested group
+  or on a handle with no node is neither a host nor an obstacle (`HF9`).
+- **The local-space fallback** (07's final review I1) is taken by the
+  frame too: caps simple in world whose local image is not are replaced
+  by the free caps computed in local space, and the frame falls back
+  (`HF8`).
+
 ### D8 — Where an opening cuts: clamp, no-fit, overlap
 
 For an opening with stored centre `c` and width `w` on a host frame:
@@ -711,6 +740,34 @@ For an opening with stored centre `c` and width `w` on a host frame:
 **Costs:** an opening can be drawn far from its stored position when a
 narrow stretch holds it; `opening.clamped` says so. **Pinned by:** `OG2`,
 `OG5` (M-08w), `OG6` (M-08m), `OG7`, `OG9`.
+
+**Amended at execution (final fix wave; the final review's I1):** **every
+piece left is valid.** The admission above admits an opening only when
+the pieces its cut leaves (D9) are **all valid** — at least three
+vertices, simple, anticlockwise, and, closed as the wall stores them, with
+a non-empty triangulation: the very check the engine's planner makes on a
+generated region (07 D8, `triangulationFor`), so the app never generates
+a region the engine refuses. An opening whose admission would leave an
+invalid piece is **no-fit**, exactly as one that would leave no piece.
+- **Why:** an opening clamped against the end of a slightly kinked joint
+  (a bend of 0.25° to 12°, either way, into a wall of another thickness
+  or justification) left an end piece that the triangulator refused, so
+  the whole edit was refused: the Window tool placed nothing, the slide
+  grip's `ArgumentError` escaped the select tool's pointer-up, and a
+  neighbour's end drag that swung into such a joint was refused. 79 of
+  1,620 cases of the review's sweep were refused; `OG9`'s generator
+  reaches no such joint.
+- **Most such cuts are not no-fit:** D9's back-tracking cleanup (below)
+  makes the piece valid, and the sweep now refuses none and makes none
+  no-fit. What the check still catches, in the fix wave's search of 7,776
+  kinked joints, is 8 cases at a 1e-6° kink, where an end cap vertex falls
+  on the cut's jamb: those openings are no-fit.
+- **Pinned by** `KJ1` (the review's repro; the 1e-6° case), `KJ2` (the
+  1,620-case sweep: none refused, none no-fit), `KJ3`–`KJ5` (the Window
+  tool, the slide grip and a neighbour's end drag, through the shell),
+  and the mutants `ffw-validPiece` and `ffw-dropBacktrack`.
+- **The slide grip reads the admission** (`SG7`): of two windows that
+  together cover a wall, the yielded one's grip sits at its stored centre.
 
 ### D9 — The wall's pieces and its split centreline (amends 07 D3)
 
@@ -782,6 +839,26 @@ the uncut path.
 - **A wall never loses its last piece:** D8's "a wall keeps a piece" (Task
   4's finding: a cut spanning a whole free wall dropped both pieces and
   left a childless, unpickable wall group).
+
+**Amended at execution (final fix wave; the final review's I1):**
+- **The back-tracking vertex is dropped.** At a joint kinked a little into
+  a wall of another thickness or justification, 07's end cap runs from
+  the right face out to a lobe, back to the endpoint on the centreline and
+  on to the left face. A cut clamped against `uE` snaps both of its face
+  points onto the cap's first and last vertices, so the end piece is the
+  cap alone, and its closing edge runs from the left face straight back
+  over the endpoint to the right face: a zero-width spike, which the
+  triangulator refuses. **Rule:** after `simplifyRing`, a vertex `v`
+  between `p` and `q` where one neighbour lies within `wallJoin.linear` of
+  the segment from `v` to the other (the ring runs out to `v` and back
+  along the same line, or `v` nearly repeats a neighbour) is removed,
+  until none is left or three vertices remain. The end piece becomes the
+  lobe's triangle; each removal changes the area by at most half of
+  `wallJoin.linear` times the removed edges' length. The vertex removed is the spike's tip (the left face
+  point), not the endpoint: removing the endpoint would add the lobe's
+  triangle to the piece.
+- **Every stored piece is valid** is now enforced, not only asserted: D8's
+  admission judges every piece before it admits an opening.
 
 ### D10 — The opening's symbols, space and colour
 
@@ -1736,6 +1813,18 @@ the reviews).
   - `EP5`–`EP9`;
   - `SG3`–`SG6`: re-seating, a fill with a door, a no-fit window, a box;
   - `SP6`.
+
+**Amended at execution (final fix wave):** the final review's tests.
+- `KJ1`–`KJ5` (`opening_kink_test.dart`): an opening clamped against a
+  slightly kinked joint (D8, D9 as amended): the review's repro, a 1e-6°
+  kink that is no-fit, the 1,620-case sweep, and the Window tool, the
+  slide grip and a neighbour's end drag through the shell;
+- `OT1 (ffw-noFitRaw)`: a no-fit tool position clamped to `[0, L]` (D6);
+- `HF8`: the frame's local-space fallback; `HF9`: the document adapter's
+  live walls (D7);
+- `SG7`: the slide grip reads the admission (D8);
+- `WB1` (`wall_bands_test.dart`, new, so that 07's six wall test files
+  stay unedited): a band is bounded along the centreline.
 
 ### Named mutants
 

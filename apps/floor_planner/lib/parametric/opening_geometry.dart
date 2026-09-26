@@ -286,15 +286,24 @@ List<(double, double)> mergeCuts(List<(double, double)> cuts) {
 /// [stretches] and [frame] are the host's.
 ///
 /// Each opening is placed on its own ([placeCut]): no opening's placement
-/// depends on another's. Then **a wall keeps a piece** (D8 as amended at
-/// execution, revised after Task 5's review): the fitting openings are
-/// admitted in ascending handle order; each one's cut is added to the
-/// admitted cuts and merged ([mergeCuts]), and if that would leave [frame]
-/// no piece longer than `wallJoin.linear` (a cut spanning the whole span,
-/// cuts covering it together, or cuts leaving only slivers), this opening
-/// is made no-fit and left out; otherwise it is kept. So a cut wall always
-/// generates a piece, the outcome is deterministic, and an opening yields
-/// only when admitting it is what would empty the wall.
+/// depends on another's. Then the **admission** (D8 as amended at
+/// execution, revised after Task 5's review and the final review's I1):
+/// the fitting openings are admitted in ascending handle order; each one's
+/// cut is added to the admitted cuts and merged ([mergeCuts]), and this
+/// opening is made no-fit and left out when that would leave [frame]
+/// - **no piece** longer than `wallJoin.linear` (a cut spanning the whole
+///   span, cuts covering it together, or cuts leaving only slivers): **a
+///   wall keeps a piece**; or
+/// - **a piece that is not valid** ([isValidPiece]: simple, anticlockwise
+///   and triangulable, the engine's own region check): an opening clamped
+///   against a slightly kinked joint can leave an end piece that is a
+///   sliver of the cap's lobe, and storing a piece the engine refuses
+///   would refuse the whole edit.
+///
+/// Otherwise it is kept. So a cut wall always generates a piece, every
+/// piece it generates is one the engine accepts, the outcome is
+/// deterministic, and an opening yields only when admitting it is what
+/// would empty the wall or leave it a piece it cannot store.
 ///
 /// `cuts[i]` is null when opening `i` does not fit, from the start or by
 /// that rule; `merged` is the admitted cuts merged, empty when nothing cuts
@@ -304,11 +313,22 @@ List<(double, double)> mergeCuts(List<(double, double)> cuts) {
   final cuts = [for (final (c, w) in openings) placeCut(stretches, c, w)];
   final admitted = <(double, double)>[];
   var merged = const <(double, double)>[];
+  // A piece's ring is a function of its span on [frame], so a span judged
+  // valid once is not triangulated again by a later trial.
+  final valid = <(double, double)>{};
+  bool ok(_Piece p) {
+    if (valid.contains(p.span)) return true;
+    if (!isValidPiece(p.ring)) return false;
+    valid.add(p.span);
+    return true;
+  }
+
   for (var i = 0; i < cuts.length; i++) {
     final c = cuts[i];
     if (c == null) continue;
     final trial = mergeCuts([...admitted, (c.a, c.b)]);
-    if (_pieces(frame, trial).isEmpty) {
+    final pieces = _pieces(frame, trial);
+    if (pieces.isEmpty || !pieces.every(ok)) {
       cuts[i] = null;
     } else {
       admitted.add((c.a, c.b));
@@ -369,8 +389,14 @@ double? edgeSnap(List<(double, double)> stretches,
 }
 
 /// One piece of a cut wall's band (spec 08 D9): its anticlockwise ring and
-/// its centreline's two points, in the host's local space.
-typedef _Piece = ({List<Vector2> ring, List<Vector2> line});
+/// its centreline's two points, in the host's local space, and the span of
+/// `u` between the cuts that bound it (`-∞` before the first, `+∞` after
+/// the last), which alone decides the ring on one frame.
+typedef _Piece = ({
+  List<Vector2> ring,
+  List<Vector2> line,
+  (double, double) span,
+});
 
 /// The pieces of [f]'s band between the cuts [merged] (sorted and merged,
 /// as [mergeCuts] gives them, all inside the straight span), start piece
@@ -386,12 +412,22 @@ typedef _Piece = ({List<Vector2> ring, List<Vector2> line});
 /// vertex, that vertex is the piece's corner and the recomputed point is left
 /// out. A piece no longer than `wallJoin.linear` along the centreline (an
 /// opening clamped against a square cap) is dropped, and its centreline with
-/// it; [simplifyRing] guards every ring.
+/// it; [simplifyRing] and then [_dropBacktracks] guard every ring.
+///
+/// A ring may still be invalid (the final review's I1: at a joint kinked a
+/// little, the end cap's lobe alone is longer than `wallJoin.linear` and
+/// its piece a sliver); [cutsOf] judges each one with [isValidPiece] before
+/// admitting an opening.
 List<_Piece> _pieces(HostFrame f, List<(double, double)> merged) {
   final out = <_Piece>[];
-  void add(List<Vector2> ring, double extent, Vector2 from, Vector2 to) {
+  void add(List<Vector2> ring, double extent, Vector2 from, Vector2 to,
+      (double, double) span) {
     if (!(extent > wallJoin.linear)) return;
-    out.add((ring: simplifyRing(ring), line: [from, to]));
+    out.add((
+      ring: _dropBacktracks(simplifyRing(ring)),
+      line: [from, to],
+      span: span,
+    ));
   }
 
   bool on(Vector2 capVertex, double u) =>
@@ -399,23 +435,84 @@ List<_Piece> _pieces(HostFrame f, List<(double, double)> merged) {
   // The start cap runs from the left face to the right face, the end cap
   // from the right face to the left face (07's `cap`).
   final a0 = merged.first.$1;
-  add([
-    if (!on(f.startCap.last, a0)) f.right(a0),
-    if (!on(f.startCap.first, a0)) f.left(a0),
-    ...f.startCap,
-  ], a0 - f.startCap.map(f.uOf).reduce(math.min), f.s, f.at(a0, 0));
+  add(
+      [
+        if (!on(f.startCap.last, a0)) f.right(a0),
+        if (!on(f.startCap.first, a0)) f.left(a0),
+        ...f.startCap,
+      ],
+      a0 - f.startCap.map(f.uOf).reduce(math.min),
+      f.s,
+      f.at(a0, 0),
+      (double.negativeInfinity, a0));
   for (var i = 0; i + 1 < merged.length; i++) {
     final b = merged[i].$2, a = merged[i + 1].$1;
     add([f.right(a), f.left(a), f.left(b), f.right(b)], a - b, f.at(b, 0),
-        f.at(a, 0));
+        f.at(a, 0), (b, a));
   }
   final bn = merged.last.$2;
-  add([
-    ...f.endCap,
-    if (!on(f.endCap.last, bn)) f.left(bn),
-    if (!on(f.endCap.first, bn)) f.right(bn),
-  ], f.endCap.map(f.uOf).reduce(math.max) - bn, f.at(bn, 0), f.e);
+  add(
+      [
+        ...f.endCap,
+        if (!on(f.endCap.last, bn)) f.left(bn),
+        if (!on(f.endCap.first, bn)) f.right(bn),
+      ],
+      f.endCap.map(f.uOf).reduce(math.max) - bn,
+      f.at(bn, 0),
+      f.e,
+      (bn, double.infinity));
   return out;
+}
+
+/// [ring] with every vertex where it **doubles back** removed (the final
+/// review's I1): a vertex `v` between `p` and `q` where one neighbour lies
+/// within `wallJoin.linear` of the segment from `v` to the other, so the
+/// ring runs out to `v` and back along the same line (or `v` nearly
+/// repeats a neighbour). The spike it makes has no area, and the
+/// triangulator refuses it. It arises when the cap-vertex snap drops both
+/// of a cut's face points at a joint whose end cap runs from the right
+/// face out to a lobe, back to the endpoint on the centreline and on to
+/// the left face: that cap's last edge runs back over its endpoint to its
+/// first vertex. Removed until none is left or three vertices remain; each
+/// removal changes the area by at most half of `wallJoin.linear` times the
+/// removed edges' length. The tip goes, not the endpoint it runs back
+/// over: removing the endpoint would add the lobe's triangle to the piece.
+List<Vector2> _dropBacktracks(List<Vector2> ring) {
+  final r = [...ring];
+  bool within(Vector2 x, Vector2 a, Vector2 b) {
+    final ab = b - a;
+    final l2 = ab.length2;
+    final t = l2 > 0 ? ((x - a).dot(ab) / l2).clamp(0.0, 1.0) : 0.0;
+    return (a + ab * t - x).length <= wallJoin.linear;
+  }
+
+  var changed = true;
+  while (changed && r.length > 3) {
+    changed = false;
+    for (var i = 0; i < r.length; i++) {
+      final p = r[(i - 1 + r.length) % r.length];
+      final v = r[i];
+      final q = r[(i + 1) % r.length];
+      if (within(p, v, q) || within(q, p, v)) {
+        r.removeAt(i);
+        changed = true;
+        break;
+      }
+    }
+  }
+  return r;
+}
+
+/// Whether [ring] is a piece the engine stores (spec 08 D9; 07 D6's
+/// invariant, per piece): at least three vertices, simple and anticlockwise
+/// ([isSimpleCcw]), and, closed as the wall stores it, with a non-empty
+/// triangulation ([triangulationFor]: the very check the engine's planner
+/// makes on a generated region, so the app never generates one it refuses).
+bool isValidPiece(List<Vector2> ring) {
+  if (ring.length < 3 || !isSimpleCcw(ring)) return false;
+  final triangles = triangulationFor(
+      EntityKind.polyline, polylinePayload(ring, closed: true));
+  return triangles != null && triangles.isNotEmpty;
 }
 
 /// The rings of [f]'s band cut at [merged] (spec 08 D9), in `u` order, start

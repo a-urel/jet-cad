@@ -405,6 +405,40 @@ void main() {
   });
 
   test(
+      'OT1 (ffw-noFitRaw) a no-fit position is stored clamped to [0, L], as '
+      'the slide grip stores it (D6; the final review\'s m1): D on a 700 '
+      'wall, too short for a 900 door, clicked just inside each end where '
+      'object snap resolves the click to a line\'s end 6 mm past it', () {
+    final doc = wallDoc();
+    final a = addWallFromSeed(doc, plan(0, 0), plan(700, 0), 200, centre);
+    final f = oracleFrameOf(doc, a);
+    // Two lines along the wall, off its centreline, each with an end 6 mm
+    // past one of the wall's ends: in a 10 mm aperture of a click 1 mm
+    // inside that end.
+    for (final (from, to) in [(706.0, 1606.0), (-6.0, -906.0)]) {
+      doc.commands.execute(addDrafted(doc, EntityKind.line,
+          linePayload(oracleAt(f, from, 80), oracleAt(f, to, 80))));
+    }
+    doc.commands.clearHistory();
+    final p = doc.components.get<WallParams>(a)!;
+    final l = (p.end - p.start).length;
+    final rig = directRig(doc, OpeningKind.door);
+    for (final (u, want) in [(699.0, l), (1.0, 0.0)]) {
+      final before = openings(doc);
+      pressAt(rig, oracleAt(f, u, 80));
+      final h = added(doc, before);
+      final o = doc.components.get<OpeningParams>(h)!;
+      expect(o.width, 900);
+      expect(
+          diagnosticsOf(doc)
+              .any((d) => d.code == 'opening.nofit' && d.handles.contains(h)),
+          isTrue,
+          reason: 'too short: no-fit');
+      expect(o.position, want, reason: 'a click at $u, resolved 6 mm past');
+    }
+  });
+
+  test(
       'OT2 (M-08z, M-08z2, M-08z3) a door swings out of the clicked side of '
       'the band\'s midline and hangs on the nearer end\'s jamb: on a centred '
       '200 host, clicks 30 mm either side at 0.3·L and 0.7·L; on a '

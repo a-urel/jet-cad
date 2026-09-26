@@ -18,7 +18,10 @@
   commit.
 - Task 16: `6b3b944` (the Task 14 review's minors), then the commit that
   adds this note.
-- After it come the final whole-branch review, then the ledger archive
+- After it came the final whole-branch review ("With fixes", ledger) at
+  `5739442`, and its **final fix wave**: the commit that adds the
+  "Final fix wave" paragraphs of this note (code, tests and documents).
+  Then comes the ledger archive
   (`docs/superpowers/ledgers/2026-09-25-openings/`) as the branch's last
   commit.
 - The human authorised two pushes, at `c71d3b1` (after Task 6) and at
@@ -119,6 +122,39 @@ lines in the same transcript name all seven failures:
 **`flutter build macos --release` is OWED:** the container cannot build
 macOS (Ruling 08-20).
 
+### The final fix wave's gate lines
+
+Run by the fix wave, in full, with `CI=true`, on its code tree (the
+working tree of the fix-wave commit), each command separately with its
+output in its own log (`plan08/ffw/ffw-g-*.log` in the session
+scratchpad). `git status --short` afterwards listed only the fix wave's
+own files: no `analysis_options.yaml`.
+
+```
+engine   CI=true dart test          00:12 +1014 -2: Some tests failed.   (exit 1)
+           the two standing failures: test/testing/generate_document_test.dart
+             "both text fractions default to zero and change nothing"
+             "the default document is the one Plan 2 measured, byte for byte"
+         dart analyze               No issues found!                                  (exit 0)
+         dart format                Formatted 147 files (0 changed) in 0.46 seconds.  (exit 0)
+render   CI=true flutter test       00:43 +936 ~1 -7: Some tests failed.              (exit 1)
+           the seven standing failures: text_ladder rungs 1-5, text_lod_ladder rungs 1-2
+         flutter analyze            No issues found! (ran in 1.2s)                    (exit 0)
+         dart format                Formatted 177 files (0 changed) in 0.54 seconds.  (exit 0)
+harness  CI=true flutter test --concurrency=1   00:32 +82: All tests passed!          (exit 0)
+         flutter analyze            No issues found! (ran in 0.8s)                    (exit 0)
+         dart format                Formatted 22 files (0 changed) in 0.09 seconds.   (exit 0)
+app      CI=true flutter test       00:44 +244: All tests passed!                     (exit 0)
+         flutter analyze            No issues found! (ran in 0.9s)                    (exit 0)
+         dart format                Formatted 54 files (0 changed) in 0.33 seconds.   (exit 0)
+         flutter build web --release   Compiling lib/main.dart for the Web... 37.8s
+                                       ✓ Built build/web                              (exit 0)
+```
+
+App `+244` = 232 + 12: `KJ1` (two tests), `KJ2`–`KJ6`, `OT1
+(ffw-noFitRaw)`, `HF8`, `HF9`, `SG7`, `WB1`. The engine, the render
+layer and the harness are unchanged by the fix wave.
+
 ### Branch-point and final counts, and why they moved
 
 The branch-point counts are the ledger's (its "Branch-point counts": the
@@ -159,14 +195,16 @@ Each step below is the ledger's count after the task named.
   | 13, both commits | 229, 230 | +3, +1 |
   | 14's fix round | 231 | +1 |
   | 16's first commit (`SG6`) | 232 | +1 |
+  | the final fix wave | 244 | +12 |
 
   The test IDs on the tree:
-  - `OP1`, `HF1`–`HF7`;
+  - `OP1`, `HF1`–`HF9`;
   - `OG1`–`OG11` (`OG11` in four tests);
   - `OD1`, `OR1`–`OR8`, `RD1`, `DF1`, `RC3`;
   - `EP1`–`EP9` (`EP5` in two tests);
   - `OT1`–`OT5`;
-  - `SG1`–`SG6` (`SG1` in three tests, `SG3` in two);
+  - `SG1`–`SG7` (`SG1` in three tests, `SG3` in two);
+  - `KJ1`–`KJ6` (`KJ1` in two), `WB1` (the final fix wave);
   - `OS1`–`OS4` (`OS1` in two);
   - `SP1`–`SP6`.
 
@@ -272,6 +310,21 @@ OG9: 1817 walls (300 T stems, 300 X walls, 1151 obstacles), 3235 openings (0 ref
 
 - **Every assertion held:** 0 refused edits, 0 tiling violations, 0
   childless walls, every piece simple, anticlockwise and triangulable.
+- **On `OG9`'s generator only** (the final review's I1). Its joints are
+  2–4-way nodes at random angles, T stems and X crossings; it never makes
+  a slightly kinked joint into a wall of another thickness or
+  justification with an opening clamped against it. There, at
+  `5739442`, the final review's sweep refused **79 of 1,620** edits (bends
+  of 0.25°–12°, both ways; 0° never). The fix wave's `KJ2` runs that
+  sweep: **0 refused, 0 no-fit** (`KJ2: 1620 cases, 0 refused, 0 no-fit`,
+  printed in the gate above). A wider search the fix wave ran as a
+  scratch probe (7,776 kinked joints from 1e-7° to 179.9°, both ways,
+  four thickness pairs, nine justification pairs, both ends, two widths)
+  refused 238 at `5739442` and **0** after; 8 of its cases, all at a
+  1e-6° kink, are now no-fit by the validity check (`KJ1`'s second
+  test).
+- **The fix wave's run of `OG9`** prints the same counts, bit for bit
+  (10,929 ms): no `OG9` case changed.
 - **Diagnostics:** `diagnostics()` equals the oracle's in every trial.
 - **Symbols:** every one is on the oracle, and no fitting symbol lies
   inside its host's pieces.
@@ -388,10 +441,11 @@ comments and no import (Task 15, ledger).
 
 ### Mutation tally
 
-From [plan-08-mutation-log.md](plan-08-mutation-log.md): **214 fired,
-207 killed, 0 survived; 7 equivalent (fired, and they survive as
+From [plan-08-mutation-log.md](plan-08-mutation-log.md): **228 fired,
+220 killed, 0 survived; 8 equivalent (fired, and they survive as
 argued); 8 N/A.** Two controls survive, as the spec says they must, and
-are not counted.
+are not counted. Before the final fix wave it stood at 214 fired, 207
+killed, 7 equivalent; the fix wave fired 14 (below).
 
 - **The spec's 37 named mutants: 50 fires, one per site or form, all
   killed** (Ruling 08-21).
@@ -418,6 +472,25 @@ are not counted.
   successors are fired.
 - **Independent re-fire:** the Task 14 reviewer re-fired 31 log entries
   and reproduced every value and line (ledger).
+- **The final review** (ledger) re-fired ten log entries, all killed, and
+  fired ten of its own, `fr-X1`–`fr-X10`: six killed, and **`fr-X4`,
+  `fr-X7`, `fr-X8`, `fr-X9` survived** the whole app suite at `5739442`.
+- **The final fix wave fired 14,** each on its final code, all logged:
+  - the four survivors, now killed: `fr-X4` by `HF8`, `fr-X7` by `HF9`,
+    `fr-X8` by `SG7`, `fr-X9` by `WB1`;
+  - I1's: `ffw-validPiece` (the validity check removed) red on `KJ1`'s
+    1e-6° test and nowhere else in the app suite; `ffw-dropBacktrack`
+    (the cleanup removed) red on `KJ1`, `KJ2` (79 no-fit), `KJ3`, `KJ4`
+    and `KJ5`, **and it refuses nothing anywhere**: without the cleanup
+    those openings become no-fit, not refused; `ffw-validNoSimple` and
+    `ffw-validNoTri` (either half of the predicate) red on `KJ6`;
+    `ffw-memoAlways` red on `KJ1`;
+  - m1's: `ffw-noFitRaw` and `ffw-noFitLow` red on `OT1 (ffw-noFitRaw)`;
+  - m2's siblings: `ffw-obstacleLive` red on `HF9`, `ffw-startBound` red
+    on `WB1`;
+  - **one equivalent,** `ffw-memoNever` (the admission's memo never
+    consulted): it changes the cost, not the outcome, and the whole app
+    suite passes.
 
 ### A capture observation (Task 13 review, ruled into this note)
 
@@ -448,12 +521,12 @@ The spec's seventeen criteria and where each is witnessed:
 | 6 | save → load → save byte-identical; `drift()` empty after load; a dangling reference reported, not repaired | `OR2` (fractional values), `SP6`, `DR2`, `OD1` | PASS |
 | 7 | two openings cut correctly; overlapping ones cut their union, reported once per pair | `OG1`, `OG2`, `OG6` (with the nested door-in-window case) | PASS |
 | 8 | clamping, obstacles and no-fit as D7, D8 and D11 say, diagnosed as D17 says, and only those | `OG2`–`OG7`, `OG11` (a)–(d), `OD1`, `HF3`–`HF6`; `OG9` compares `diagnostics()` with the oracle in every trial (0 differ) | PASS |
-| 9 | every stored piece triangulates; the property run refuses nothing and finds no tiling violation | `OG9`: 0 refused, 0 tiling violations, 0 non-triangulable pieces, 0 childless walls | PASS |
+| 9 | every stored piece triangulates; the property run refuses nothing and finds no tiling violation | `OG9`: 0 refused, 0 tiling violations, 0 non-triangulable pieces, 0 childless walls. **At `5739442` this held on `OG9`'s generator only:** the final review's kink sweep refused 79 of 1,620 (I1). **After the final fix wave** (D8: every piece left valid; D9: the back-tracking vertex dropped): `KJ2`, that sweep, 0 refused and 0 no-fit; `KJ1` the review's repro lands and a 1e-6° kink is no-fit, not refused; `KJ3`–`KJ5` through the shell | PASS |
 | 10 | the two-hop case regenerates (`drift()` empty) | `RF4`, `OR4` | PASS |
 | 11 | the references survey is O(n), measured and pinned by its counter | `RC1` (exactly 1,200 calls, 0 overlap tests); `RC2` and `RC3` printed above | PASS |
 | 12 | the allocation invariants pass unchanged | the invariants' diff against `e30386a` is empty; both pass in the gates | PASS |
 | 13 | draw order ascending; an opening's children keep their handles; a fitting symbol is not covered by its host's pieces | `RD1` (pixels), `OR8`, `OG7`, `OG10`; `OG9`: 0 fitting symbols inside their host's pieces | PASS |
-| 14 | the tools, the slide grip, the Opening section, and no move or rotate for openings | `OT1`–`OT5`, `SG1`–`SG6`, `MV1`–`MV4`, `OS1`–`OS4`, `B12` | PASS |
+| 14 | the tools, the slide grip, the Opening section, and no move or rotate for openings | `OT1`–`OT5` (with `OT1 (ffw-noFitRaw)`: a no-fit tool position in `[0, L]`), `SG1`–`SG7`, `MV1`–`MV4`, `OS1`–`OS4`, `B12`, `WB1` | PASS |
 | 15 | the sample plan as D18 says; the carried-over tests pass; `drift()` and `diagnostics()` empty | `SP1`–`SP6`, the shell's three sample-plan tests; Task 13's probe matched every D18 figure | PASS |
 | 16 | every named mutant killed, M-08a structurally, all logged | the log: 37 names, 50 fires, all killed | PASS |
 | 17 | the human's look on macOS, in Chrome and in Firefox | see below | **OWED** |
@@ -560,6 +633,23 @@ Recorded, not defects, each by a ruling:
   tests should use a fractional translation.
 - **A 600-wall line draw costs about 5 ms** (`RC3`), the two surveys'
   O(n). A plain edit among many walls is linear in the plan's size.
+- **Acute joints and folded walls shrink the straight span** (spec D7's
+  final-fix-wave amendment; the final review's m3). The span follows 07's
+  caps: at a joint of about 12° or less between the walls, or at a wall
+  folded back on another, the cap reaches far along the host, so an
+  opening there is drawn clamped farther away, or is no-fit, and the span
+  can be empty. The final review's fuzz set 93 such oracle disagreements
+  aside, each app-correct by D7.
+- **A hairline kink makes an end opening no-fit** (spec D8's
+  final-fix-wave amendment). At a 1e-6° kink an end cap's vertex falls on
+  the cut's jamb, and no valid end piece exists; an opening clamped
+  against that end is no-fit rather than cut (`KJ1`'s second test). The
+  fix wave's search found 8 such cases in 7,776, all at 1e-6°.
+- **The admission now triangulates** each piece it has not yet judged
+  (within one admission, a span judged valid is not judged again). A thickness edit on a wall with
+  50 openings measured about 3.5–4.2 ms median against 2.8–3.5 ms at
+  `5739442`, 61 repetitions, three runs each (a scratch probe, not a
+  test; noisy).
 
 ## Debt
 
@@ -584,6 +674,9 @@ One line each. None is fixed by this plan.
   re-review).
 - **`DF1`'s bitwise comparison adds little beyond `drift()`**, and its
   history-order mutants are equivalent (Task 7 review, Minor 2).
+- **07's (pre-existing): a 1.6° three-wall node reached by an end drag
+  stores a ~10.4 m zero-width spike along a face line** (the final
+  review's m4). The outline is 07's; 08 inherits it through the caps.
 
 ---
 
@@ -733,6 +826,26 @@ log.
 
 **Task 15:** done by the Task 14 reviewer, read-only. No defect.
 
+**The final whole-branch review** (opus, at `5739442`; the first attempt
+was interrupted by an API limit and re-dispatched), from the ledger.
+- **Verdict:** With fixes. A fuzz of 41,892 steps (31,997 undo/redo
+  pairs, 2,306 save/loads, 4,692 tool placements, 1,999 slides, 1,913
+  cascade deletes) found 0 drift and 0 exceptions.
+- **I1 (Important):** an opening clamped against a slightly kinked joint
+  left a non-triangulable end piece, and the edit was refused: the Window
+  tool placed nothing, the slide grip's `ArgumentError` escaped
+  pointer-up, a neighbour's end drag was refused. 79 of 1,620 in its
+  sweep. **Fixed** by the final fix wave: D8's admission checks every
+  piece left (`isValidPiece`), and D9 drops the back-tracking vertex.
+- **m1:** the tools stored a no-fit position outside `[0, L]`. **Fixed**
+  (`OT1 (ffw-noFitRaw)`).
+- **m2:** `fr-X4`, `fr-X7`, `fr-X8`, `fr-X9` survived. **Killed** by
+  `HF8`, `HF9`, `SG7`, `WB1`.
+- **m3:** criterion 9's caveat, D6's wording, D7's acute joints.
+  **Written** (above, and in the spec).
+- **m4:** 07's zero-width spike at a 1.6° three-wall node. **Recorded as
+  07's debt.**
+
 ### The plan's own rulings
 
 08-1 to 08-23 are in the plan, each with its cost. Those this task wrote
@@ -800,6 +913,20 @@ execution (Plan 08)**" at the end of the section it amends:
 - **Open questions:** each one's end. 1 resolved; 2, 3, 5–12 and 14
   built as written; 4 with D13's amendment; 13 resolved by the memo.
 
+**Written by the final fix wave,** each a paragraph beginning
+"**Amended at execution (final fix wave)**":
+- **Header:** a pointer to them.
+- **D6:** the tools and the slide grip stay in `[0, L]`, no-fit included
+  (m1).
+- **D7:** the known limit on acute and folded joints (m3); the document
+  adapter's live walls; the frame's local-space fallback.
+- **D8:** every piece left is valid; an opening that would leave an
+  invalid piece is no-fit (I1); the slide grip reads the admission.
+- **D9:** the back-tracking vertex is dropped; "every stored piece is
+  valid" enforced, not only asserted (I1).
+- **Testing, tests by area:** `KJ1`–`KJ6`, `OT1 (ffw-noFitRaw)`, `HF8`,
+  `HF9`, `SG7`, `WB1`.
+
 ## Plan amendments
 
 In [2026-09-25-openings.md](../plans/2026-09-25-openings.md), each a
@@ -863,3 +990,20 @@ paragraph beginning "**Amended at execution (Plan 08)**":
   "Resume here".
 - `roadmap/08-openings.md`: the status line.
 - `roadmap/00-README.md`: the 08 row and the summary under the table.
+
+**The final fix wave** (one commit):
+- `apps/floor_planner/lib/parametric/opening_geometry.dart`: the
+  back-tracking cleanup (`_dropBacktracks`), the piece predicate
+  (`isValidPiece`), the admission's validity check and its span memo.
+- `apps/floor_planner/lib/parametric/opening_tool.dart`: a no-fit
+  position clamped to `[0, L]`.
+- `apps/floor_planner/test/opening_kink_test.dart` (new): `KJ1`–`KJ6`.
+- `apps/floor_planner/test/wall_bands_test.dart` (new): `WB1`.
+- `apps/floor_planner/test/opening_geometry_test.dart`: `HF8`, `HF9`.
+- `apps/floor_planner/test/opening_grips_test.dart`: `SG7`.
+- `apps/floor_planner/test/opening_tool_test.dart`: `OT1
+  (ffw-noFitRaw)`.
+- `docs/superpowers/specs/2026-09-25-openings-design.md`,
+  `docs/superpowers/notes/plan-08-mutation-log.md`, this note,
+  `STATUS.md`.
+- 07's six wall test files are unedited.

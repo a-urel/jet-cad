@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-25. **Plan 08 (openings) is EXECUTED on
+**Last updated:** 2026-09-26. **Plan 08 (openings) is EXECUTED on
 `plan-08/openings`, NOT MERGED.** The merge is the human's, `--no-ff`.
 **Exit gate 15 of 17: criterion 1's macOS half (`flutter build macos
 --release` and the four lines on macOS) and criterion 17 (the look) are
@@ -25,17 +25,23 @@ OWED.**
   - engine 1,014 (+ the two standing Linux-only hash tests);
   - render layer 936 + 1 skip + 7 standing goldens;
   - harness 82;
-  - app 232;
+  - app 244;
   - `flutter build web --release` `✓ Built`.
-- **Mutants:** 214 fired, 207 killed, 0 survived; 7 equivalent; 8 N/A. The
+- **Mutants:** 228 fired, 220 killed, 0 survived; 8 equivalent; 8 N/A. The
   spec's 37 named mutants took 50 fires, one per site, and all were killed.
+- **The final whole-branch review** ("With fixes", at `5739442`) and its
+  **final fix wave** are done: an opening clamped against a slightly
+  kinked joint no longer refuses the edit (D8: every piece left is valid;
+  D9: the back-tracking vertex dropped; the review's sweep went from 79
+  of 1,620 refused to 0), a no-fit tool position stays in `[0, L]`, and
+  the review's four surviving mutants are killed.
 - **Owed:**
   - `flutter build macos --release` and the gate lines on macOS: the
     human's machine;
   - the look: eleven items per platform, on macOS, in Chrome and in
     Firefox.
 - **Next:**
-  1. the final whole-branch review;
+  1. the fix wave's review, if the controller calls one;
   2. the ledger archive, as the branch's last commit;
   3. the human's macOS build and look;
   4. the merge.
@@ -2251,19 +2257,21 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the final whole-branch review of Plan 08
-(openings), on `plan-08/openings`.**
-- Tasks 1–14 are done (`328df0b..de66cd2`), Task 15 needed no commit, and
-  Task 16 is `6b3b944` plus the commit that writes this paragraph.
+**Immediate next step: the ledger archive of Plan 08 (openings), on
+`plan-08/openings`, after the final fix wave** (the final whole-branch
+review returned "With fixes" at `5739442`; the fix wave is the commit
+that writes this sentence).
+- Tasks 1–14 are done (`328df0b..de66cd2`), Task 15 needed no commit,
+  Task 16 is `6b3b944`, `6ea2d70` and the controller's `5739442`, and the
+  final fix wave is the commit that writes this sentence.
 - The four gate lines are green on Linux: engine 1,014 + 2 standing;
-  render layer 936 + 1 skip + 7 standing; harness 82; app 232; web `✓
+  render layer 936 + 1 skip + 7 standing; harness 82; app 244; web `✓
   Built`.
-- 214 mutants were fired: 207 killed, 0 survived, 7 equivalent.
+- 228 mutants were fired: 220 killed, 0 survived, 8 equivalent.
 
 **What resumes here, in order:**
-1. the final whole-branch review, and its fix wave if any. Its brief
-   carries the capture observation: a whole-pixel camera translation
-   drops 1-px strokes in `flutter_test`, which is not a render defect;
+1. a review of the final fix wave, if the controller calls one (the
+   final whole-branch review and its fix wave are done);
 2. the ledger archive (`docs/superpowers/ledgers/2026-09-25-openings/`)
    as the branch's last commit;
 3. the human's `flutter build macos --release`, the gate lines on macOS,

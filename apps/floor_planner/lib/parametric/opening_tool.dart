@@ -60,7 +60,9 @@ typedef _Placement = ({OpeningParams params, Cut? cut});
 ///   edges ([edgeSnap]) puts that edge on it, outright. What is
 ///   stored is the centre of the cut the opening would get there (D8): `u`
 ///   itself when it fits there, the clamped centre ([storedCentreOf]) when
-///   it had to move into a stretch, `u` itself when it is no-fit.
+///   it had to move into a stretch, and `u` clamped to `[0, L]` when it
+///   is no-fit (D6: the tools only produce positions on the wall; the slide
+///   grip clamps the same way).
 /// - **A door's swing** is the side of the band's **midline** the raw
 ///   click lies on (D14 as amended, Ruling 08-23): `left` when
 ///   `(p − s)·n − (lOff + rOff)/2 ≥ 0`. **Its hinge** is `start` when the
@@ -338,9 +340,11 @@ class OpeningTool extends PlacementTool {
     _marker.setFrom(_toWorld!.transformPoint(f.at(u, 0)));
     _onHost = true;
     final cut = _cutAmong(layout, u, w, self);
-    final c = cut == null || !cut.clamped
-        ? u
-        : storedCentreOf(layout.stretches, cut, w);
+    final c = cut == null
+        ? (u < 0 ? 0.0 : (u > f.len ? f.len : u))
+        : !cut.clamped
+            ? u
+            : storedCentreOf(layout.stretches, cut, w);
     // The raw click's side of the band's midline (D14 as amended, Ruling
     // 08-23): exactly on it swings left.
     final side =
