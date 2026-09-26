@@ -208,6 +208,10 @@ class GripCache extends ChangeNotifier {
 
   /// Some selected key with an outline is [movableKey]; set per rebuild.
   bool _movable = false;
+
+  /// The selected keys with an outline that are [movableKey]; rebuilt with
+  /// the rest of the cache, read per frame by [isMovable].
+  final Set<SelectionKey> _movableKeys = <SelectionKey>{};
   Transform2 _frame = const Transform2(1, 0, 0, 1, 0, 0);
   Vector2? _pivot;
   Transform2? _carry;
@@ -241,12 +245,21 @@ class GripCache extends ChangeNotifier {
   /// `DocChange` will consume it, and the next unrelated one must not.
   void dropCarry() => _carry = null;
 
-  /// A rotation grip is drawn and hit (spec D6). A fill has no outline of
-  /// its own, so a non-null box already means a non-fill key
-  /// (Ruling 03-15). Some key with an outline must also be movable
+  /// A rotation grip is drawn and hit (spec D6). A fill whose boundary is
+  /// drawn has no outline of its own, so a non-null box already means some
+  /// other key (Ruling 03-15). A fill whose boundary is hidden is outlined
+  /// (spec 10 D24); no pick or band selects one alone. Some key with an outline must also be movable
   /// ([movableKey], spec 08 D16): a selection of openings alone has nothing
   /// to rotate.
   bool get rotatable => _box != null && _movable;
+
+  /// Whether a move or rotate of the selection moves [key]: a selected key
+  /// with an outline that is [movableKey] (spec 08 D16), as of the last
+  /// rebuild. The move and rotate preview draws only these (spec 10 D24,
+  /// R-31), so a key the move leaves behind does not appear to move.
+  ///
+  /// One set lookup, no allocation: the overlay asks it per key per frame.
+  bool isMovable(SelectionKey key) => _movableKeys.contains(key);
 
   /// Index into [grips] of the hovered or grabbed grip, or -1.
   ///
@@ -316,6 +329,7 @@ class GripCache extends ChangeNotifier {
     _moveCount = 0;
     hot = -1;
     _movable = false;
+    _movableKeys.clear();
     var box = Aabb2.empty();
     final keys = selection.keys.toList()
       ..sort((a, b) => a.target.value.compareTo(b.target.value));
@@ -323,7 +337,9 @@ class GripCache extends ChangeNotifier {
       final bounds = outlines.worldBoundsOf(key);
       if (bounds != null) {
         box = box.union(bounds);
-        if (!_movable) _movable = movableKey(document, key, objects);
+        // Every key is asked, not only until the first movable one: the
+        // preview needs each key's answer (spec 10 D24).
+        if (movableKey(document, key, objects)) _movableKeys.add(key);
       }
       final slot = document.entities.slotOf(key.target);
       if (slot == null) {
@@ -351,6 +367,7 @@ class GripCache extends ChangeNotifier {
         if (list[i].role == GripRole.move) _moveCount++;
       }
     }
+    _movable = _movableKeys.isNotEmpty;
     if (_grips.length > kMaxGrips) {
       _grips.clear();
       _moveCount = 0;

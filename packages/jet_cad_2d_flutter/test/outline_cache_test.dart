@@ -1,14 +1,27 @@
+import 'dart:convert' show jsonDecode, jsonEncode;
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' show Size;
 
+import 'package:flutter/rendering.dart' show RenderCustomPaint;
+import 'package:flutter/widgets.dart'
+    show
+        Center,
+        CustomPaint,
+        Directionality,
+        Listenable,
+        SizedBox,
+        TextDirection;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart' show kDefaultOriginX;
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart'
-    show rebaseOriginFor;
+    show CameraController, rebaseOriginFor;
 import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
+import 'package:jet_cad_2d_flutter/src/select_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
+import 'package:jet_cad_2d_flutter/src/selection_overlay.dart';
+import 'package:jet_cad_2d_flutter/src/tool.dart';
 import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
@@ -28,6 +41,73 @@ GeometryPayload payload(List<double> coords, List<double> scalars) =>
       coords: Float64List.fromList(coords),
       scalars: Float64List.fromList(scalars),
     );
+
+// ---- Spec 10 D24: a drawn fill whose boundary is not drawn ---------------
+
+/// The corpus far origin, turned 23° and scaled 1.5: a non-identity
+/// similarity, so a dropped rotation, scale or translation shows (OL1).
+final Transform2 kFarGroup = Transform2.translation(4500000, 1200000)
+    .multiply(Transform2.rotation(23 * math.pi / 180))
+    .multiply(Transform2.scale(1.5, 1.5));
+
+/// A closed pentagon in local space, fractional and with no symmetry; the
+/// first point is repeated as the last (closedness, 05 D11).
+const List<double> kLoop = [
+  12.5, -7.25, 310.75, 4.5, 280.125, 190.375, //
+  96.625, 240.875, -20.25, 160.625, 12.5, -7.25,
+];
+
+/// A region under [owner], built by [AddRegionCommand]: its fill keeps
+/// layer zero unless [fillLayer] is given; its boundary carries
+/// [boundaryFlags] and, when given, [boundaryLayer].
+({Handle fill, Handle boundary}) addRegion(
+    DraftDocument doc, Handle owner, EntityKind kind, List<double> coords,
+    {List<double> scalars = const [],
+    int boundaryFlags = 0,
+    Handle? fillLayer,
+    Handle? boundaryLayer}) {
+  final r = AddRegionCommand.allocate(
+    seed: doc.handleSeed,
+    owner: owner,
+    boundaryKind: kind,
+    boundaryPayload: payload(coords, scalars),
+    layer: ReservedHandles.layerZero,
+    fillColor: const TrueColor(0x3366CC),
+    boundaryColor: const ByLayerColor(),
+    fillTransparency: 64,
+  );
+  doc.commands.execute(AddRegionCommand(
+    fill: r.fill.copyWith(layer: fillLayer),
+    boundary: r.boundary.copyWith(flags: boundaryFlags, layer: boundaryLayer),
+    boundaryPayload: r.boundaryPayload,
+  ));
+  return (fill: r.fill.handle, boundary: r.boundary.handle);
+}
+
+/// Whether the canvas draws the leaf [h]: `QueryFilter.rendering()`, asked
+/// the way the outline cache asks it.
+bool drawn(DraftDocument doc, Handle h) => FilterEvaluator(doc)
+    .acceptsEntity(doc.entities.slotOf(h)!, const QueryFilter.rendering());
+
+/// [local]'s points mapped by [t], interleaved.
+List<double> mapped(Transform2 t, List<double> local) => [
+      for (var i = 0; i + 1 < local.length; i += 2)
+        ...() {
+          final p = t.transformPoint(Vector2(local[i], local[i + 1]));
+          return [p.x, p.y];
+        }(),
+    ];
+
+/// [actual] equals [expected] pairwise within [tolerance].
+void expectCoords(Float64List? actual, List<double> expected,
+    {double tolerance = 1e-6, String? reason}) {
+  expect(actual, isNotNull, reason: reason);
+  expect(actual!.length, expected.length, reason: reason);
+  for (var i = 0; i < expected.length; i++) {
+    expect(actual[i], closeTo(expected[i], tolerance),
+        reason: '${reason ?? ''} [$i]');
+  }
+}
 
 void main() {
   test('the path is built in rebased space', () {
@@ -418,6 +498,207 @@ void main() {
     expect(cache.worldBoundsOf(SelectionKey.root(line))!.maxY, 3060);
     expect(
         cache.worldBoundsOf(SelectionKey.root(const Handle(999999))), isNull);
+  });
+
+  test(
+      'OL1 a selected group with a fill whose boundary is invisible '
+      'outlines the boundary\'s loop, under a rotated, translated, scaled '
+      'group at the corpus far origin', () {
+    final doc = DraftDocument.empty();
+    final group = addGroup(doc, doc.rootHandle, kFarGroup);
+    final loop = addRegion(doc, group, EntityKind.polyline, kLoop,
+        boundaryFlags: EntityFlags.invisible);
+    final disc = addRegion(doc, group, EntityKind.circle, [150.25, 90.75],
+        scalars: [40.5], boundaryFlags: EntityFlags.invisible);
+    // Premises: the fills are drawn, their boundaries are not, and the tree
+    // carries exactly the placement the oracle uses.
+    for (final r in [loop, disc]) {
+      expect(drawn(doc, r.fill), isTrue);
+      expect(drawn(doc, r.boundary), isFalse);
+    }
+    List<double> six(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+    expect(six(doc.tree.accumulatedTransform(group)), six(kFarGroup));
+    final (selection, cache) = wire(doc);
+    final key = SelectionKey.root(group);
+    selection.replace([key]);
+
+    // The loop: the boundary's local points through the group, closed.
+    final segments = cache.debugWorldSegmentsOf(key);
+    expectCoords(segments, mapped(kFarGroup, kLoop),
+        reason: 'the boundary loop under the group transform');
+    expect(segments![0], segments[segments.length - 2]);
+    expect(segments[1], segments[segments.length - 1]);
+    // Not the untransformed loop: the far origin is load-bearing.
+    expect(segments[0], greaterThan(4400000));
+
+    // A circle boundary gives its whole circle, as the circle arm does.
+    final centre = kFarGroup.transformPoint(Vector2(150.25, 90.75));
+    expectCoords(cache.debugWorldArcsOf(key),
+        [centre.x, centre.y, 40.5 * 1.5, 0, 2 * math.pi],
+        tolerance: 1e-9, reason: 'the circle boundary');
+
+    // The selection box follows (worldBoundsOf reads the same records).
+    final box = cache.worldBoundsOf(key)!;
+    final xs = [
+      for (var i = 0; i < segments.length; i += 2) segments[i],
+    ];
+    expect(box.minX, closeTo(xs.reduce(math.min), 1e-6));
+    expect(box.maxX, closeTo(xs.reduce(math.max), 1e-6));
+  });
+
+  test(
+      'OL2 a visible boundary is outlined once; a hidden fill, a missing '
+      'boundary and a boundary with another owner outline nothing; a visible '
+      'fill whose boundary sits on a hidden layer outlines its loop', () {
+    Transform2 placement(int i) =>
+        Transform2.translation(4500000 + 1000.5 * i, 1200000 - 700.25 * i)
+            .multiply(Transform2.rotation(0.4 + 0.15 * i))
+            .multiply(Transform2.scale(1.5, 1.5));
+    final built = DraftDocument.empty();
+    final hidden = addLayer(built, 'Hidden', visible: false);
+    final groups = [
+      for (var i = 0; i < 6; i++)
+        addGroup(built, built.rootHandle, placement(i)),
+    ];
+    final [visible, hiddenFill, missing, foreign, onHidden, other] = groups;
+    addRegion(built, visible, EntityKind.polyline, kLoop);
+    addRegion(built, hiddenFill, EntityKind.polyline, kLoop,
+        fillLayer: hidden, boundaryFlags: EntityFlags.invisible);
+    final lost = addRegion(built, missing, EntityKind.polyline, kLoop,
+        boundaryFlags: EntityFlags.invisible);
+    final moved = addRegion(built, foreign, EntityKind.polyline, kLoop,
+        boundaryFlags: EntityFlags.invisible);
+    final layered = addRegion(built, onHidden, EntityKind.polyline, kLoop,
+        boundaryLayer: hidden);
+    // A line of its own, so `other` has an outline of its own to compare.
+    addEntity(built, other, EntityKind.line, [0.5, 0.25, 30.75, 10.5], []);
+
+    // The malformed cases by an edited encoding (05's loaders keep them):
+    // one boundary dropped, one boundary moved to another owner.
+    final json =
+        (jsonDecode(jsonEncode(DraftDocumentCodec.encode(built))) as Map)
+            .cast<String, Object?>();
+    final entities = json['entities']! as List;
+    Map<String, Object?> recordOf(Object? e) =>
+        ((e! as Map)['record']! as Map).cast<String, Object?>();
+    entities.removeWhere(
+        (e) => Handle.fromJson(recordOf(e)['handle']) == lost.boundary);
+    for (final e in entities) {
+      final record = recordOf(e);
+      if (Handle.fromJson(record['handle']) == moved.boundary) {
+        (e! as Map)['record'] = {...record, 'owner': other.toJson()};
+      }
+    }
+    final doc = DraftDocumentCodec.decode(json);
+
+    // Premises, read from the loaded document.
+    final codes = {
+      for (final d in doc.validate())
+        if (d.code.startsWith('fill.')) (d.code, d.handles.first),
+    };
+    expect(codes, {
+      (ValidationCodes.fillBoundaryMissing, lost.fill),
+      (ValidationCodes.fillBoundaryForeignOwner, moved.fill),
+    });
+    expect(doc.entities.ownerAt(doc.entities.slotOf(moved.boundary)!), other);
+    expect(drawn(doc, moved.fill), isTrue);
+    expect(drawn(doc, moved.boundary), isFalse);
+    expect(drawn(doc, layered.fill), isTrue);
+    expect(drawn(doc, layered.boundary), isFalse,
+        reason: 'the boundary is rejected by its layer alone');
+    expect(doc.entities.flagsAt(doc.entities.slotOf(layered.boundary)!), 0,
+        reason: 'not by its flag: a rule keyed on the flag misses this case');
+
+    final (selection, cache) = wire(doc);
+    selection.replace([for (final g in groups) SelectionKey.root(g)]);
+    Float64List? of(Handle g) =>
+        cache.debugWorldSegmentsOf(SelectionKey.root(g));
+
+    expectCoords(of(visible), mapped(placement(0), kLoop),
+        reason: 'a visible boundary: its own leaf, once');
+    expect(of(hiddenFill), isEmpty, reason: 'a hidden fill');
+    expect(of(missing), isEmpty, reason: 'a missing boundary');
+    expect(of(foreign), isEmpty, reason: 'a boundary with another owner');
+    expectCoords(of(onHidden), mapped(placement(4), kLoop),
+        reason: 'a visible fill whose boundary sits on a hidden layer');
+    expectCoords(of(other), mapped(placement(5), [0.5, 0.25, 30.75, 10.5]),
+        reason: 'the foreign boundary is drawn by nobody: invisible');
+  });
+
+  testWidgets(
+      'OL3 steady state: a selected group with an invisible-boundary fill '
+      'rebuilds no path across frames', (tester) async {
+    final doc = DraftDocument.empty();
+    final group = addGroup(doc, doc.rootHandle, kFarGroup);
+    addRegion(doc, group, EntityKind.polyline, kLoop,
+        boundaryFlags: EntityFlags.invisible);
+    final selection = SelectionController(doc);
+    final cache = OutlineCache(doc, selection);
+    final index = SpatialIndex(doc);
+    final world = Aabb2.raw(4499500, 1199500, 4501000, 1201000);
+    const size = Size(400, 300);
+    final camera = CameraController(ViewportTransform.fit(world, size));
+    final context = ToolContext(
+        document: doc, index: index, camera: camera, selection: selection);
+    final tools = ToolController(initial: SelectTool(), context: context);
+    addTearDown(() {
+      tools.dispose();
+      camera.dispose();
+      index.dispose();
+      cache.dispose();
+      selection.dispose();
+    });
+    var paints = 0;
+    await tester.pumpWidget(Directionality(
+      textDirection: TextDirection.ltr,
+      child: Center(
+        child: SizedBox(
+          width: size.width,
+          height: size.height,
+          child: CustomPaint(
+            painter: SelectionOverlayPainter(
+              selection: selection,
+              tools: tools,
+              camera: camera,
+              outlines: cache,
+              repaint: Listenable.merge([selection, tools, camera, cache]),
+              onPaintForTest: () => paints++,
+            ),
+            size: size,
+          ),
+        ),
+      ),
+    ));
+    addTearDown(() => tester.pumpWidget(const SizedBox()));
+    final key = SelectionKey.root(group);
+    selection.replace([key]);
+    await tester.pump();
+
+    final origin = Vector2.copy(cache.origin);
+    expect(origin.x, isNot(0.0), reason: 'the rebase origin is non-zero');
+    final path = cache.pathFor(key, origin);
+    expect(path, isNotNull);
+    expect(path!.getBounds().width, greaterThan(100),
+        reason: 'the ring is outlined: the premise of a steady state');
+    final rebuilds = cache.debugRebuilds;
+    expect(rebuilds, greaterThan(0));
+
+    for (var i = 0; i < 10; i++) {
+      expect(identical(cache.pathFor(key, origin), path), isTrue);
+    }
+    expect(cache.debugRebuilds, rebuilds, reason: 'ten pathFor calls');
+
+    final render = tester.renderObject<RenderCustomPaint>(
+        find.byWidgetPredicate(
+            (w) => w is CustomPaint && w.painter is SelectionOverlayPainter));
+    final before = paints;
+    for (var i = 0; i < 10; i++) {
+      render.markNeedsPaint();
+      await tester.pump();
+    }
+    expect(paints, before + 10, reason: 'ten frames were painted');
+    expect(cache.debugRebuilds, rebuilds, reason: 'ten pumped frames');
+    expect(identical(cache.pathFor(key, origin), path), isTrue);
   });
 }
 

@@ -127,7 +127,8 @@ class OutlineCache extends ChangeNotifier {
   }
 
   /// The world AABB of [key]'s outline, in doubles (spec D6); null when
-  /// [key] is not cached or its outline is empty (a fill, a hidden leaf).
+  /// [key] is not cached or its outline is empty (a fill whose boundary is
+  /// drawn, a hidden leaf).
   ///
   /// Computed from the world records, **never** from a `ui.Path`. The
   /// reason: `Path.getBounds` answers an arc's control-point bounds (see
@@ -376,7 +377,45 @@ class OutlineCache extends ChangeNotifier {
     final filters = _filters ??= FilterEvaluator(document);
     if (!filters.acceptsEntity(slot, const QueryFilter.rendering())) return;
     final kind = document.entities.kindAt(slot);
-    if (kind == EntityKind.fill) return; // a fill has no coordinates (D8)
+    if (kind == EntityKind.fill) {
+      _addFill(out, slot, t, filters);
+      return;
+    }
+    _addGeometry(out, slot, kind, t);
+  }
+
+  /// A drawn fill's area (spec 10 D24, R-30), still a statement about what
+  /// is drawn.
+  ///
+  /// A fill has no coordinates of its own (D8): it is drawn from its
+  /// boundary's geometry **whatever the boundary's flag** — the painter never
+  /// reads it. So a fill that passed `rendering()` (checked by the caller)
+  /// whose boundary `rendering()` rejects — its own invisible flag, or its
+  /// layer hidden while the fill's is not — has a drawn extent that no other
+  /// leaf outlines, and its boundary's loop is added here, carried by the
+  /// fill's transform exactly as the boundary's own leaf would be.
+  ///
+  /// Otherwise nothing is added:
+  /// - a boundary `rendering()` accepts is outlined by its own leaf, and
+  ///   adding it here would outline the loop twice;
+  /// - a missing boundary draws nothing;
+  /// - a boundary with another owner (a loaded file can carry one) does not
+  ///   live in the fill's space, so the fill's transform cannot place it.
+  void _addFill(
+      List<_Outline> out, int slot, Transform2 t, FilterEvaluator filters) {
+    final entities = document.entities;
+    final boundary = entities.slotOf(
+        boundaryHandleOf(document.geometry.peek(entities.geomIndexAt(slot))));
+    if (boundary == null) return;
+    if (entities.ownerAt(boundary) != entities.ownerAt(slot)) return;
+    if (filters.acceptsEntity(boundary, const QueryFilter.rendering())) return;
+    _addGeometry(out, boundary, entities.kindAt(boundary), t);
+  }
+
+  /// The outline of the leaf at [slot], of [kind], carried by [t]. The
+  /// caller has already decided that it is drawn.
+  void _addGeometry(
+      List<_Outline> out, int slot, EntityKind kind, Transform2 t) {
     final payload = document.geometry.peek(document.entities.geomIndexAt(slot));
     switch (kind) {
       case EntityKind.point:
@@ -442,7 +481,7 @@ class OutlineCache extends ChangeNotifier {
         }
         out.add(_Segments(coords));
       case EntityKind.fill:
-        return;
+        return; // no coordinates (D8): `_addFill` reads its boundary
     }
   }
 }

@@ -8,6 +8,8 @@ import 'package:jet_cad_2d/testing.dart' show kDefaultOriginX;
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
 import 'package:jet_cad_2d_flutter/src/draft_canvas.dart';
 import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
+import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
+import 'package:jet_cad_2d_flutter/src/grip_drag.dart' show DragKind;
 import 'package:jet_cad_2d_flutter/src/interaction_layer.dart'
     show kPickRadiusPixels;
 import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
@@ -100,6 +102,29 @@ Float64List matrixOf(SpyCanvas spy) =>
 /// `(x, y)` mapped through a recorded column-major 4x4.
 Offset through(Float64List m, double x, double y) =>
     Offset(m[0] * x + m[4] * y + m[12], m[1] * x + m[5] * y + m[13]);
+
+/// Spec 10 D24's fake: no grips, no reshape; [movable] is false for the
+/// groups in [immovable] only, as a room's provider answers for a room.
+final class _Movability implements ObjectGripProvider {
+  _Movability([this.immovable = const {}]);
+
+  final Set<Handle> immovable;
+
+  @override
+  bool movable(DraftDocument d, Handle group) => !immovable.contains(group);
+
+  @override
+  List<Grip> gripsOf(DraftDocument d, Handle group) => const [];
+
+  @override
+  DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) =>
+      null;
+
+  @override
+  List<(EntityKind, GeometryPayload)> preview(
+          DraftDocument d, Handle group, Grip grip, Vector2 world) =>
+      const [];
+}
 
 void main() {
   testWidgets('a selection change repaints the overlay and not the canvas',
@@ -542,5 +567,139 @@ void main() {
     final doc = DraftDocument.empty();
     final r = rig(doc);
     expect(r.overlay().shouldRepaint(r.overlay()), isFalse);
+  });
+
+  test('OL5 the move preview strokes only the keys the move moves', () {
+    // Spec 10 D24, R-31. Three root-level groups, each turned and off the
+    // origin: A and B own a line, P owns a lone point (its preview is a
+    // cross, not a path). A drag on A's body moves the selection; a key the
+    // provider calls immovable stays behind, so its outline must not ride
+    // the drag's `T`.
+    const view = Size(800, 600);
+    ({
+      Handle a,
+      Handle b,
+      Handle p,
+      List<RecordedCall> previewPaths,
+      List<RecordedCall> previewLines,
+      Map<Handle, Path?> paths,
+      Offset crossAt,
+    }) dragOnA(ObjectGripProvider? objects, {required bool withCache}) {
+      final doc = DraftDocument.empty();
+      Handle group(double x, double y, double turn) => addGroup(
+          doc,
+          doc.rootHandle,
+          Transform2.translation(x, y).multiply(Transform2.rotation(turn)));
+      final a = group(7010.5, 3020.25, 0.35);
+      addEntity(doc, a, EntityKind.line, [0, 0, 120.5, 0], []);
+      final b = group(7250.75, 3160.5, -0.6);
+      addEntity(doc, b, EntityKind.line, [0, 0, 90.25, 0], []);
+      final p = group(7120.25, 3260.75, 1.1);
+      addEntity(doc, p, EntityKind.point, [4.5, -2.25], []);
+      doc.commands.clearHistory();
+
+      final index = SpatialIndex(doc);
+      final selection = SelectionController(doc);
+      final outlines = OutlineCache(doc, selection);
+      final grips = withCache
+          ? GripCache(doc, selection, outlines, objects: objects)
+          : null;
+      final camera = CameraController(ViewportTransform(
+          worldToScreenMatrix: Transform2.translation(400.37, 300.61)
+              .multiply(Transform2.rotation(0.2))
+              .multiply(Transform2.scale(1.3, -1.3))
+              .multiply(Transform2.translation(-7150, -3150))));
+      final tool = SelectTool();
+      final context = ToolContext(
+          document: doc,
+          index: index,
+          camera: camera,
+          selection: selection,
+          grips: grips);
+      final tools = ToolController(initial: tool, context: context);
+      addTearDown(() {
+        tools.dispose();
+        grips?.dispose();
+        outlines.dispose();
+        camera.dispose();
+        selection.dispose();
+        index.dispose();
+      });
+
+      final keys = [SelectionKey.root(a), SelectionKey.root(b)];
+      selection.replace([...keys, SelectionKey.root(p)]);
+      final body =
+          doc.tree.accumulatedTransform(a).transformPoint(Vector2(60.25, 0));
+      final press = camera.value.worldToScreen(body);
+      final from = Offset(press.x, press.y);
+      tool.onPointerDown(ev(camera, from), context);
+      tool.onPointerMove(ev(camera, from + const Offset(60, -35)), context);
+      expect(tool.dragKind, DragKind.move, reason: 'a move drag on A');
+      expect(tool.selectionPreviewTransform, isNotNull);
+
+      final spy = SpyCanvas();
+      SelectionOverlayPainter(
+        selection: selection,
+        tools: tools,
+        camera: camera,
+        outlines: outlines,
+      ).paint(spy, view);
+      final origin = rebaseOriginFor(camera.value.visibleWorld(view));
+      bool preview(RecordedCall c) =>
+          c.color?.toARGB32() == kPreviewColor.toARGB32();
+      // The select tool's own guide line shares the colour at 1 px; a
+      // point's preview cross is stroked at the preview width.
+      bool cross(RecordedCall c) =>
+          preview(c) && c.strokeWidth == kPreviewStrokePixels;
+      final dot = tool.selectionPreviewTransform!.transformPoint(
+          doc.tree.accumulatedTransform(p).transformPoint(Vector2(4.5, -2.25)));
+      final dotOnScreen = camera.value.worldToScreen(dot);
+      return (
+        a: a,
+        b: b,
+        p: p,
+        previewPaths: spy.named('drawPath').where(preview).toList(),
+        previewLines: spy.named('drawLine').where(cross).toList(),
+        crossAt: Offset(dotOnScreen.x, dotOnScreen.y),
+        paths: {
+          for (final h in [a, b, p])
+            h: outlines.pathFor(SelectionKey.root(h), origin),
+        },
+      );
+    }
+
+    List<Path?> drawnPaths(List<RecordedCall> calls) =>
+        [for (final c in calls) c.args[0] as Path?];
+
+    // B and P immovable: A's path alone, and no cross for P.
+    final some = dragOnA(_Movability({}), withCache: true);
+    final mixed = dragOnA(_Movability({some.b, some.p}), withCache: true);
+    expect(mixed.paths.values, everyElement(isNotNull));
+    expect(drawnPaths(mixed.previewPaths), hasLength(1));
+    expect(
+        identical(drawnPaths(mixed.previewPaths).single, mixed.paths[mixed.a]),
+        isTrue,
+        reason: "the preview strokes A's path and nothing else");
+    expect(mixed.previewLines, isEmpty, reason: "P's cross stays behind");
+
+    // The controls: a provider calling every group movable, and no grip
+    // cache at all, preview all three.
+    for (final (name, run) in [
+      ('a provider calling all movable', some),
+      ('no grip cache', dragOnA(null, withCache: false)),
+    ]) {
+      final drawn = drawnPaths(run.previewPaths);
+      expect(drawn, hasLength(3), reason: name);
+      for (final h in [run.a, run.b, run.p]) {
+        expect(drawn.where((d) => identical(d, run.paths[h])), hasLength(1),
+            reason: '$name: ${h.toHex()}');
+      }
+      expect(run.previewLines, hasLength(2), reason: "$name: P's cross");
+      for (final line in run.previewLines) {
+        final mid = ((line.args[0] as Offset) + (line.args[1] as Offset)) / 2;
+        expect((mid - run.crossAt).distance, lessThan(1e-6),
+            reason: "$name: the cross sits on P's point under T");
+      }
+    }
   });
 }
