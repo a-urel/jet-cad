@@ -23,6 +23,9 @@ typedef Fixture = (
   List<(double, double)> seeds,
 );
 
+/// The fixture whose separator only D7's margin brings into `C`.
+const marginCase = 'a separator 0.5 um outside a face';
+
 /// Every seed of every tracer fixture (RT1-RT9, the triangle, FB, the thin
 /// L): rooms, courtyards, seeds in bands and on separators, and seeds no
 /// ring closes around.
@@ -114,6 +117,18 @@ final List<Fixture> fixtures = [
     ],
     const [],
     const [(2000, 2000), (5500, 1300)],
+  ),
+  (
+    // A separator 0.5 um outside the south face, inside the south band:
+    // within roomTrace.linear of the face, so the all-inputs trace splits
+    // the face at its ends and the ring's south edge carries it too. At the
+    // unturned placements its box misses the room's ring box by 0.5 um:
+    // only D7's 1 mm margin brings it into C.
+    marginCase,
+    boxWalls,
+    const [(1000, 99.9999995, 2000, 99.9999995)],
+    const [],
+    const [(4000, 2000)],
   ),
   ('TR', trWalls, const [], const [], const [trSeed]),
   ('FB', fbWalls, const [], const [], const [fbSeed, (-1000, 1000)]),
@@ -218,7 +233,7 @@ void main() {
   test(
       'LZ1 the localised trace equals the all-inputs trace bit for bit on '
       'every fixture at every placement, with and without 200 far walls', () {
-    var compared = 0, traced = 0;
+    var compared = 0, traced = 0, marginChecked = 0;
     for (final place in placements) {
       for (final fixture in fixtures) {
         for (final clutter in [false, true]) {
@@ -256,11 +271,26 @@ void main() {
               traced++;
               // Premise: localised. A room's trace never reads a far wall.
               expect(source.asked.intersection(far), isEmpty, reason: at);
+              if (fixture.$1 == marginCase && place.deg == 0) {
+                // Premises: the separator carries the south edge, and its
+                // box misses the ring's box by 0.5 um.
+                final sep = plan.seps.single;
+                expect(want.ringSources.any((s) => s.contains(sep)), isTrue,
+                    reason: at);
+                expect(
+                    inputs
+                        .placeBoxOf(sep)!
+                        .intersects(Aabb2.fromPoints(want.ring)),
+                    isFalse,
+                    reason: at);
+                marginChecked++;
+              }
             }
           }
         }
       }
     }
+    expect(marginChecked, 4, reason: 'two unturned placements, two clutters');
     // ignore: avoid_print
     print('LZ1: $compared comparisons, $traced seeds traced a room');
   });
