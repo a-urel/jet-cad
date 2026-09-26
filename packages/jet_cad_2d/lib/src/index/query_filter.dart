@@ -80,6 +80,11 @@ class FilterEvaluator {
       if (!_visibleContainer(document.entities.ownerAt(slot))) return false;
     }
     if (filter.excludeLocked && _lockedLayer(layer)) return false;
+    // SPIKE 10 (decision 4): the picking filter skips an unpickable entity.
+    if (filter.excludeLocked &&
+        document.entities.flagsAt(slot) & EntityFlags.unpickable != 0) {
+      return false;
+    }
     return true;
   }
 

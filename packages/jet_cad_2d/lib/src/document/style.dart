@@ -117,4 +117,7 @@ abstract final class ReservedHandles {
 abstract final class EntityFlags {
   /// DXF group code 60: the entity exists but is not drawn.
   static const int invisible = 1 << 0;
+
+  /// SPIKE 10 (decision 4): drawn, never picked. Not DXF: a room's tint.
+  static const int unpickable = 1 << 1;
 }

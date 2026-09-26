@@ -35,7 +35,11 @@ int debugReferenceCalls = 0;
 /// an edit with no seeds asks for none.
 final class _Survey {
   _Survey(this.objects, this.reach, this.children, this.owned, this.declared,
-      this.references, this.referrers);
+      this.references, this.referrers, this.page);
+
+  /// SPIKE 10: the page at this moment, compared by value (a stored value)
+  /// between the two surveys of an edit.
+  final PageComponent? page;
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -137,9 +141,17 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       (referrers[x] ??= []).add(h);
     }
   }
-  return _Survey(objects, reach, children, owned, declared, references, {
-    for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
-  });
+  return _Survey(
+      objects,
+      reach,
+      children,
+      owned,
+      declared,
+      references,
+      {
+        for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
+      },
+      t.components.get<PageComponent>(t.tree.root));
 }
 
 /// The objects an edit regenerates, as a sorted list of live objects (spec
@@ -180,6 +192,18 @@ List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
   }.where(after.objects.containsKey).toList()
     ..sort(_byValue);
 }
+
+/// SPIKE 10: [draftRecord] with [g]'s creation-time attributes.
+EntityRecord _recordOf(Handle h, Handle owner, EntityKind kind, Generated g,
+        {bool boundary = false}) =>
+    draftRecord(h, owner, kind,
+            color: g.color, text: kind == EntityKind.text ? g.text : '')
+        .copyWith(
+            transparency: g.transparency,
+            flags: boundary ? g.boundaryFlags : g.flags,
+            linetype: g.linetype,
+            lineweight: g.lineweight,
+            textAttrs: g.textAttrs);
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
@@ -242,6 +266,14 @@ List<DraftCommand> _plan(
   var reserved = t.handleSeed.current.value;
   final out = <DraftCommand>[];
   for (final h in closure) {
+    // SPIKE 10 (decision 10): a dissolving object is deleted here, in the
+    // edit, as the cascade deletes a doomed referrer, and its component
+    // detached as 06 D8's cleanup detaches a lost object's.
+    if (s.objects[h]!.dissolves(view, h)) {
+      out.addAll(_subtreeRemoval(t, s, h));
+      out.add(s.objects[h]!.detach(h));
+      continue;
+    }
     final generated = s.objects[h]!.generate(view, h);
     final children = s.children[h] ?? const <Handle>[];
     final boundaries = <Handle>{
@@ -273,11 +305,10 @@ List<DraftCommand> _plan(
       } else {
         // Fill first: `AddRegionCommand` requires the lower handle on it.
         out.add(AddRegionCommand(
-            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill,
-                color: g.color),
-            boundary: draftRecord(
-                Handle.checked(++reserved), h, EntityKind.polyline,
-                color: g.color),
+            fill: _recordOf(Handle.checked(++reserved), h, EntityKind.fill, g),
+            boundary: _recordOf(
+                Handle.checked(++reserved), h, EntityKind.polyline, g,
+                boundary: true),
             boundaryPayload: g.payload));
       }
     }
@@ -292,10 +323,14 @@ List<DraftCommand> _plan(
             t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
           out.add(SetEntityGeometryCommand(existing[i], g.payload));
         }
+        // SPIKE 10: a matched TEXT's string is rewritten, a stored-value
+        // comparison; its other attributes stay as added.
+        if (g.kind == EntityKind.text && t.entities.read(slot).text != g.text) {
+          out.add(SetEntityTextCommand(existing[i], g.text, ''));
+        }
       } else {
         out.add(AddEntityCommand(
-            record: draftRecord(Handle.checked(++reserved), h, g.kind,
-                color: g.color),
+            record: _recordOf(Handle.checked(++reserved), h, g.kind, g),
             payload: g.payload));
       }
     }
@@ -382,13 +417,15 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
   final touched = <Handle>{...r0.touched};
   try {
     while (true) {
+      // SPIKE 10 (decision 13): the policy is the referrer's for this
+      // referent, not its type's.
       final doomed = <Handle>{
         for (final e in before.referrers.entries)
           if (!_isObject(t, types, e.key))
             for (final d in e.value)
-              if (before.objects[d]!.type.referencePolicy ==
-                      ReferencePolicy.cascade &&
-                  _isObject(t, types, d))
+              if (_isObject(t, types, d) &&
+                  before.objects[d]!.policyFor(t, d, e.key) ==
+                      ReferencePolicy.cascade)
                 d,
       }.toList()
         ..sort(_byValue);
@@ -502,17 +539,15 @@ List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
 /// ascending (seed, referent) order, is thrown. Reads the survey's declared
 /// lists and never calls `references` again (Ruling 08-3). Only seeds are
 /// checked, so an unrelated edit never trips over a bad object elsewhere.
-void _checkDangling(Set<Handle> seeds, _Survey after) {
+void _checkDangling(CommandTarget t, Set<Handle> seeds, _Survey after) {
   if (seeds.isEmpty || after.declared.isEmpty) return;
   for (final s in seeds.toList()..sort(_byValue)) {
     final declared = after.declared[s];
-    if (declared == null ||
-        after.objects[s]!.type.referencePolicy != ReferencePolicy.cascade) {
-      continue;
-    }
+    if (declared == null) continue;
     Handle? first;
     for (final x in declared) {
       if (!after.objects.containsKey(x) &&
+          after.objects[s]!.policyFor(t, s, x) == ReferencePolicy.cascade &&
           (first == null || x.value < first.value)) {
         first = x;
       }
@@ -578,7 +613,14 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       ],
       ...lost,
     };
-    _checkDangling(seeds, after);
+    // SPIKE 10 (decision 6/7): a changed page seeds every object whose
+    // type reads it.
+    if (before.page != after.page) {
+      for (final e in after.objects.entries) {
+        if (e.value.type.readsPage) seeds.add(e.key);
+      }
+    }
+    _checkDangling(t, seeds, after);
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.

@@ -9,6 +9,7 @@ import '../document/component.dart';
 import '../document/draft_document.dart';
 import '../document/drafting.dart';
 import '../document/node.dart';
+import '../document/page_component.dart';
 import '../document/style.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/transform2.dart';
@@ -56,6 +57,21 @@ abstract class ParametricType<T extends Component> {
   /// What happens to a live object of this type when an object it
   /// references stops being a live object (spec 08 D4). Default: cascade.
   ReferencePolicy get referencePolicy => ReferencePolicy.cascade;
+
+  /// SPIKE 10 (decision 13): the policy for one declared [referent] of
+  /// [params]. Default: the type's [referencePolicy] for every referent.
+  ReferencePolicy policyFor(T params, Handle referent) => referencePolicy;
+
+  /// SPIKE 10 (decision 10): true when [self] must be deleted in this edit
+  /// instead of regenerated (a room whose ring broke). Asked of every
+  /// object of a closure before it is generated, with the same view.
+  /// Default: never.
+  bool dissolves(ParametricView view, Handle self) => false;
+
+  /// SPIKE 10 (decision 6/7): true when [generate] reads
+  /// [ParametricView.page]; every such object regenerates in an edit that
+  /// changes the page. Default: false.
+  bool get readsPage => false;
 }
 
 /// A referrer's fate when its referent stops being a live object (spec 08
@@ -83,8 +99,16 @@ enum ReferencePolicy {
 /// and never its record (06 D11), so a client must keep its colours fixed
 /// for an object's life. ByLayer by default.
 final class Generated {
-  Generated(this.kind, this.payload, {this.color = const ByLayerColor()})
-      : filled = false {
+  Generated(this.kind, this.payload,
+      {this.color = const ByLayerColor(),
+      this.transparency = kByLayer,
+      this.flags = 0,
+      this.linetype = ReservedHandles.byLayerLinetype,
+      this.lineweight = kByLayer})
+      : filled = false,
+        boundaryFlags = flags,
+        text = '',
+        textAttrs = 0 {
     if (kind == EntityKind.fill) {
       throw ArgumentError.value(
           kind, 'kind', 'a fill cannot be generated (spec 06 D3)');
@@ -99,9 +123,42 @@ final class Generated {
   /// generates it throws `ArgumentError` and is rolled back.
   ///
   /// [color] is the fill's and the boundary's both.
-  Generated.region(this.payload, {this.color = const ByLayerColor()})
-      : kind = EntityKind.polyline,
-        filled = true;
+  Generated.region(this.payload,
+      {this.color = const ByLayerColor(),
+      this.transparency = kByLayer,
+      this.flags = 0,
+      int? boundaryFlags})
+      : boundaryFlags = boundaryFlags ?? flags,
+        kind = EntityKind.polyline,
+        filled = true,
+        linetype = ReservedHandles.byLayerLinetype,
+        lineweight = kByLayer,
+        text = '',
+        textAttrs = 0;
+
+  /// SPIKE 10: a TEXT whose string the planner writes on add and rewrites
+  /// on a match (`SetEntityTextCommand`); [textAttrs] is fixed at creation
+  /// like [color].
+  Generated.text(this.payload, this.text,
+      {this.color = const ByLayerColor(), this.textAttrs = 0, this.flags = 0})
+      : kind = EntityKind.text,
+        filled = false,
+        boundaryFlags = flags,
+        transparency = kByLayer,
+        linetype = ReservedHandles.byLayerLinetype,
+        lineweight = kByLayer;
+
+  /// SPIKE 10: record attributes written on add only, like [color]. For a
+  /// region, [transparency] and [flags] go on the fill and the boundary.
+  final int transparency;
+  final int flags;
+
+  /// SPIKE 10: a region's boundary record's flags (its fill takes [flags]).
+  final int boundaryFlags;
+  final Handle linetype;
+  final int lineweight;
+  final String text;
+  final int textAttrs;
 
   /// [EntityKind.polyline] for a region: the kind of its boundary.
   final EntityKind kind;
@@ -168,6 +225,11 @@ final class ParametricView {
   /// Ascending handles of the objects whose reach overlaps [h]'s, computed
   /// on the first call for [h] and memoised (spec 07 D10). Unmodifiable.
   List<Handle> neighbours(Handle h) => _survey.neighboursOf(h);
+
+  /// SPIKE 10 (decision 6/7): the document's page, or null. A type that
+  /// reads it declares [ParametricType.readsPage].
+  PageComponent? get page =>
+      _target.components.get<PageComponent>(_target.tree.root);
 
   /// Ascending handles of the live objects whose
   /// [ParametricType.references] name [h] (spec 08 D2): a wall lists its
@@ -303,24 +365,29 @@ class ParametricSystem {
 
   /// [h]'s declared handles that are not live objects of [s], each once,
   /// in declared order (spec 08 D17).
-  static List<Diagnostic> _unresolved(_Survey s, Handle h) {
+  List<Diagnostic> _unresolved(_Survey s, Handle h) {
     final declared = s.declared[h];
     if (declared == null) return const [];
-    final cascade =
-        s.objects[h]!.type.referencePolicy == ReferencePolicy.cascade;
     return [
       for (final x in {...declared})
         if (!s.objects.containsKey(x))
-          Diagnostic(
-            severity:
-                cascade ? DiagnosticSeverity.error : DiagnosticSeverity.warning,
-            code: cascade ? 'parametric.dangling' : 'parametric.orphan',
-            message: '${h.toHex()} references ${x.toHex()}, which is not a '
-                'live parametric object',
-            handles: [h, x],
-          ),
+          _unresolvedOne(
+              h,
+              x,
+              s.objects[h]!.policyFor(document, h, x) ==
+                  ReferencePolicy.cascade),
     ];
   }
+
+  static Diagnostic _unresolvedOne(Handle h, Handle x, bool cascade) =>
+      Diagnostic(
+        severity:
+            cascade ? DiagnosticSeverity.error : DiagnosticSeverity.warning,
+        code: cascade ? 'parametric.dangling' : 'parametric.orphan',
+        message: '${h.toHex()} references ${x.toHex()}, which is not a '
+            'live parametric object',
+        handles: [h, x],
+      );
 
   DraftCommand _expand(DraftCommand command) {
     if (_applying) {
@@ -439,6 +506,9 @@ final class _Registration<T extends Component> {
       type.reach(t.components.get<T>(h) as T, _worldOf(t, h));
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);
+  bool dissolves(ParametricView v, Handle h) => type.dissolves(v, h);
+  ReferencePolicy policyFor(CommandTarget t, Handle h, Handle referent) =>
+      type.policyFor(t.components.get<T>(h) as T, referent);
 
   /// [h]'s declared referents. Every call counts in [debugReferenceCalls]
   /// (Ruling 08-3): the survey is its only caller, once per object.
