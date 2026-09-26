@@ -1,5 +1,18 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-26. **Plan 08 (openings) is MERGED into `main`
+at `b96ed12`**, `--no-ff`, on the human's decision, and pushed by the
+human. The human reported "merged and pushed main"; no macOS build or
+itemised look was reported, so criterion 1's macOS half and criterion 17
+(the look) stay **OWED**, and nothing was simulated to fill them in.
+- **Next:** the human's choice. Options: the rotate-about-a-base-point
+  follow-up (a general transform feature, from the human's 2026-09-24
+  look); the Text tool's web alt-tab `fix/` (from fix/post-07's debt);
+  sub-project 10 (rooms), from a brainstorm, after reading 08's results
+  note (its debt and known limits). See [Resume here](#resume-here).
+
+*Earlier, 2026-09-26:*
+
 **Last updated:** 2026-09-26. **Plan 08 (openings) is EXECUTED on
 `plan-08/openings`, NOT MERGED.** The merge is the human's, `--no-ff`.
 **Exit gate 15 of 17: criterion 1's macOS half (`flutter build macos
@@ -2257,7 +2270,23 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's macOS build and look at Plan 08
+**Immediate next step: the human's choice of what comes after 08.**
+`main` is at `b96ed12`: Plan 08 (openings) merged, pushed by the human.
+Its macOS build and look were not reported and stay OWED. **The options:**
+1. rotate about a chosen base point (the human asked on 2026-09-24 about
+   rotating a door about its hinge; 08 D16 keeps openings out of
+   move/rotate, so this is a general transform feature, extending 03);
+2. a `fix/` branch for the Text tool's pending entry lost on a web alt-tab
+   (fix/post-07's debt);
+3. sub-project 10 (rooms), from a brainstorm — read 08's results note
+   first: rooms should be derived from faces and centrelines (07's spike),
+   and 08's reference policy already offers `orphan` for a room that
+   outlives a wall.
+
+Plan 06's itemised look is still OWED; so are 07's and 08's itemised looks
+(the human reported "it works" for 07). Nothing was simulated.
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's macOS build and look at Plan 08
 (openings), on `plan-08/openings`, then the merge.**
 - Tasks 1–14 are done (`328df0b..de66cd2`), Task 15 needed no commit,
   Task 16 is `6b3b944`, `6ea2d70` and the controller's `5739442`.

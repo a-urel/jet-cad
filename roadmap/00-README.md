@@ -255,14 +255,14 @@ cheap; learning it from a half-executed Plan is not.
 | 05 | drawing tools | [2026-09-23](../docs/superpowers/specs/2026-09-23-drawing-tools-design.md) (rev 2, amended at execution) | [2026-09-23](../docs/superpowers/plans/2026-09-23-drawing-tools.md) | [2026-09-23](../docs/superpowers/notes/2026-09-23-plan-05-results.md) (MERGED into `main` at `fb0f87d`. Gate 14/14: the look was LGTM on 2026-09-24, after `fix/counter-doorway`, `1a352cc`) |
 | 06 | parametric layer | [2026-09-24](../docs/superpowers/specs/2026-09-24-parametric-layer-design.md) (rev 2, amended at execution) | [2026-09-24](../docs/superpowers/plans/2026-09-24-parametric-layer.md) | [2026-09-24](../docs/superpowers/notes/2026-09-24-plan-06-results.md) (MERGED at `a6837d0`; gate 13/14; look OWED) |
 | 07 | walls | [2026-09-24](../docs/superpowers/specs/2026-09-24-walls-design.md) (rev 1, amended at execution) | [2026-09-24](../docs/superpowers/plans/2026-09-24-walls.md) | [2026-09-24](../docs/superpowers/notes/2026-09-24-plan-07-results.md) (merged `63c3878`; its deferred defects fixed on `fix/post-07`, merged `1ae83f9`) |
-| 08 | openings | [2026-09-25](../docs/superpowers/specs/2026-09-25-openings-design.md) (rev 1, amended at execution) | [2026-09-25](../docs/superpowers/plans/2026-09-25-openings.md) | [2026-09-25](../docs/superpowers/notes/2026-09-25-plan-08-results.md) (executed on `plan-08/openings`, NOT merged; gate 15/17; macOS build and look OWED) |
+| 08 | openings | [2026-09-25](../docs/superpowers/specs/2026-09-25-openings-design.md) (rev 1, amended at execution) | [2026-09-25](../docs/superpowers/plans/2026-09-25-openings.md) | [2026-09-25](../docs/superpowers/notes/2026-09-25-plan-08-results.md) (merged `b96ed12`; macOS build and look OWED) |
 | 09 | symbol library | — | — | — |
 | 10 | rooms and area | — | — | — |
 | 11 | dimensions | — | — | — |
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED; 07 is merged (`63c3878`), with its deferred defects fixed on `fix/post-07` (`1ae83f9`); 08 is executed on `plan-08/openings` and not merged, its macOS build and look OWED**; the other five have not started. Update
+**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED; 07 is merged (`63c3878`), with its deferred defects fixed on `fix/post-07` (`1ae83f9`); 08 is merged (`b96ed12`), its macOS build and look OWED**; the other five have not started. Update
 this table as specs and plans land; `STATUS.md` at the repo root stays the
 authority on what is in flight. The render line's own plan table lives there,
 not here: six of seven merged, Plan G (web) unwritten, see the section above.
