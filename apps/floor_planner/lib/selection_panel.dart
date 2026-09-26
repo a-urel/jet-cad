@@ -8,10 +8,12 @@ import 'panel_focus.dart';
 import 'parametric/box.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
+import 'parametric/room.dart';
 import 'parametric/wall.dart';
 import 'parametric/wall_tool.dart';
 
-/// Spec 06 D13, 07 D11 and 08 D16: the right panel's parametric sections.
+/// Spec 06 D13, 07 D11, 08 D16 and 10 D21: the right panel's parametric
+/// sections.
 ///
 /// - **Box:** one selected box's width and height.
 /// - **Wall:** one selected wall's thickness and justification, or -- while
@@ -20,15 +22,18 @@ import 'parametric/wall_tool.dart';
 ///   Flip hinge and Flip swing; or -- while the Door, Window or Gap tool is
 ///   active, even with an opening selected -- that tool's [OpeningSettings]
 ///   (its width only) for the next opening.
+/// - **Room:** one selected room's name, a free-text field, and its area,
+///   read-only: the area label's stored string (10 R-25).
 ///
 /// Each commit to an object is one `SetComponentCommand`, which the
 /// parametric system turns into one undo step with its regeneration. 12
 /// builds the real inspector.
 ///
-/// Every numeric field follows 06 D13's amendment (F1/F2): it owns a
+/// Every field -- the numeric ones and the Name field, the one text field
+/// (10 D21, R-23) -- follows 06 D13's amendment (F1/F2): it owns a
 /// `FocusNode` and commits on its own focus loss, whatever took the focus;
-/// Enter commits too; an invalid value reverts the field instead; a reload
-/// never writes into a focused field.
+/// Enter commits too; an invalid value (an empty name, 10 R-24) reverts the
+/// field instead; a reload never writes into a focused field.
 ///
 /// **The commit target is pinned at focus gain (07 D11).** A field records
 /// its section's target when it gains focus, and its commit goes to that
@@ -69,17 +74,20 @@ class SelectionPanel extends StatefulWidget {
   State<SelectionPanel> createState() => _SelectionPanelState();
 }
 
-/// Which quantity a numeric field edits.
-enum _Kind { width, height, thickness, openingWidth, position }
+/// Which quantity a field edits: a number, or -- [name], the text kind (10
+/// D21) -- a room's name.
+enum _Kind { width, height, thickness, openingWidth, position, name }
 
-/// One numeric field's state.
+/// One field's state.
 ///
-/// A target is a `Handle`: a box, a wall or an opening, [_toolSettings] for
-/// the Wall tool's settings, or [_openingToolSettings] for an opening tool's.
-/// [pinned] is the target recorded at focus gain (07 D11);
-/// [loadedTarget] and [loadedValue] are what the field last showed, so a
-/// reload can tell a real model change from a notification that carries
-/// none (06 D13's F1: hover and unrelated edits both notify).
+/// A target is a `Handle`: a box, a wall, an opening or a room,
+/// [_toolSettings] for the Wall tool's settings, or [_openingToolSettings]
+/// for an opening tool's. [pinned] is the target recorded at focus gain (07
+/// D11); [loadedTarget] and [loadedValue] are what the field last showed, so
+/// a reload can tell a real model change from a notification that carries
+/// none (06 D13's F1: hover and unrelated edits both notify). A value is a
+/// `double` for a numeric kind and a `String` for the text kind, compared
+/// with `==` either way.
 final class _Field {
   _Field(this.kind);
 
@@ -88,7 +96,9 @@ final class _Field {
   final PanelFieldFocusNode focus = PanelFieldFocusNode();
   Handle? pinned;
   Handle? loadedTarget;
-  double? loadedValue;
+  Object? loadedValue;
+
+  bool get isText => kind == _Kind.name;
 
   void dispose() {
     text.dispose();
@@ -118,14 +128,23 @@ class _SelectionPanelState extends State<SelectionPanel> {
   final _Field _thickness = _Field(_Kind.thickness);
   final _Field _openingWidth = _Field(_Kind.openingWidth);
   final _Field _position = _Field(_Kind.position);
+  final _Field _name = _Field(_Kind.name);
   late final List<_Field> _fields = [
     _width,
     _height,
     _thickness,
     _openingWidth,
     _position,
+    _name,
   ];
   late final StreamSubscription<DocChange> _changes;
+
+  /// The Area line's memo (10 R-25): the room [_areaText] was read for, or
+  /// null. Every document change clears it -- a page change rewrites the
+  /// area label's string in place (D12) -- and nothing else does, so the
+  /// selection's hover notifications never rescan the document.
+  Handle? _areaRoom;
+  String? _areaText;
 
   /// Whether the Wall tool was active at the last check: the tool
   /// controller forwards every hover of the active tool, and only a switch
@@ -140,7 +159,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
   void initState() {
     super.initState();
     widget.selection.addListener(_sync);
-    _changes = widget.document.commands.changes.listen((_) => _sync());
+    _changes = widget.document.commands.changes.listen((_) {
+      _areaRoom = null;
+      _sync();
+    });
     widget.tools?.addListener(_onTools);
     widget.wallSettings?.addListener(_sync);
     for (final s in _openingSettingsList) {
@@ -202,7 +224,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   }
 
   /// Under runtime permissions every section is read-only (06 D13, 07
-  /// D11, 08 D16): a commit is a `SetComponentCommand`, which needs
+  /// D11, 08 D16, 10 D21): a commit is a `SetComponentCommand`, which needs
   /// `Capability.components`, and its regeneration needs the type's
   /// `editCapability` (final review m4).
   bool _editable(_Kind kind) {
@@ -214,7 +236,19 @@ class _SelectionPanelState extends State<SelectionPanel> {
           _Kind.position =>
             const OpeningType().editCapability,
           _Kind.width || _Kind.height => const BoxType().editCapability,
+          _Kind.name => const RoomType().editCapability,
         });
+  }
+
+  /// [f]'s text as the value to commit at [target], or null when the field
+  /// reverts instead: for the text kind the text trimmed, unless that leaves
+  /// it empty (10 R-24: a nameless room could not be told apart); for a
+  /// numeric kind the number it parses to, when [_valid].
+  Object? _parse(_Field f, Handle target) {
+    final t = f.text.text.trim();
+    if (f.isText) return t.isEmpty ? null : t;
+    final value = double.tryParse(t);
+    return value != null && _valid(f.kind, target, value) ? value : null;
   }
 
   /// Whether [value] may be committed as [kind] at [target], which [_read]
@@ -240,6 +274,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         if (host == null) return false;
         final l = (host.end - host.start).length;
         return value.isFinite && value >= 0 && value <= l;
+      case _Kind.name:
+        throw StateError('the name is text: _parse reads it');
     }
   }
 
@@ -276,6 +312,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
         null => _selected<OpeningParams>(),
       };
 
+  /// The Room section's room, or null when it is hidden (10 D21).
+  Handle? get _room => _selected<RoomParams>();
+
   /// The target [kind]'s section shows now, or null. The position has none
   /// in tool mode: the tools place at the click.
   Handle? _targetOf(_Kind kind) => switch (kind) {
@@ -284,11 +323,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
         _Kind.openingWidth => _opening,
         _Kind.position =>
           _openingToolMode == null ? _selected<OpeningParams>() : null,
+        _Kind.name => _room,
       };
 
-  /// [kind]'s value at [target], or null when [target] is no longer a live
-  /// object of the field's type.
-  double? _read(_Kind kind, Handle target) {
+  /// [kind]'s value at [target] -- a `double`, or the name's `String` --
+  /// or null when [target] is no longer a live object of the field's type.
+  Object? _read(_Kind kind, Handle target) {
     switch (kind) {
       case _Kind.width:
       case _Kind.height:
@@ -310,13 +350,26 @@ class _SelectionPanelState extends State<SelectionPanel> {
         if (!_isObject<OpeningParams>(target)) return null;
         final o = widget.document.components.get<OpeningParams>(target)!;
         return kind == _Kind.openingWidth ? o.width : o.position;
+      case _Kind.name:
+        if (!_isObject<RoomParams>(target)) return null;
+        return widget.document.components.get<RoomParams>(target)!.name;
     }
   }
 
   /// Stores [value] as [kind] at [target], which [_read] just found live:
-  /// one command for an object, nothing when the value is unchanged.
-  void _write(_Kind kind, Handle target, double value) {
+  /// one command for an object, nothing when the value is unchanged. A name
+  /// is one `SetComponentCommand<RoomParams>`, whose regeneration rewrites
+  /// the name label in place (10 D12, D21).
+  void _write(_Kind kind, Handle target, Object value) {
     final doc = widget.document;
+    if (kind == _Kind.name) {
+      final p = doc.components.get<RoomParams>(target)!;
+      final next = p.copyWith(name: value as String);
+      if (next == p) return;
+      doc.commands.execute(SetComponentCommand<RoomParams>(target, next));
+      return;
+    }
+    value as double;
     switch (kind) {
       case _Kind.width:
       case _Kind.height:
@@ -349,6 +402,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
             : p.copyWith(position: value);
         if (next == p) return;
         doc.commands.execute(SetComponentCommand<OpeningParams>(target, next));
+      case _Kind.name:
+        throw StateError('unreachable: the name is written above');
     }
   }
 
@@ -376,12 +431,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
     _commit(f);
   }
 
-  /// Commits [f]'s text to its pinned target (07 D11), then shows the
-  /// current target's value in it.
+  /// Commits [f]'s text to its pinned target (07 D11, 10 D21), then shows
+  /// the current target's value in it.
   ///
   /// The text is discarded when the pinned target is no longer a live
   /// object of the field's type, and reverted when it is not a valid value
-  /// ([_valid]), the edit is not allowed, or the document refuses the edit
+  /// ([_parse]), the edit is not allowed, or the document refuses the edit
   /// (an `ArgumentError` or `StateError` from `execute` -- a loaded file
   /// the regeneration cannot honour, say -- or, spec 08 D5, a
   /// `DanglingReferenceError` for a loaded opening whose host is gone;
@@ -399,8 +454,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
   void _commit(_Field f) {
     final target = f.pinned;
     if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
-      final value = double.tryParse(f.text.text.trim());
-      if (value != null && _valid(f.kind, target, value)) {
+      final value = _parse(f, target);
+      if (value != null) {
         try {
           _write(f.kind, target, value);
         } on ArgumentError {
@@ -425,8 +480,28 @@ class _SelectionPanelState extends State<SelectionPanel> {
     f.loadedTarget = value == null ? null : target;
     f.loadedValue = value;
     if (value == null) return;
-    final t = _number(value);
+    final t = value is String ? value : _number(value as double);
     if (f.text.text != t) f.text.text = t;
+  }
+
+  /// The Area line of [room] (10 D21, R-25): its area label's stored
+  /// string, exactly as drawn, or null when it has none (a file's room with
+  /// no children). The labels are the room's TEXT children, the name then
+  /// the area in handle order (D9, D18), so the area is the second.
+  /// Recomputing the area here would trace on every rebuild; this reads
+  /// the document once per room shown and per document change
+  /// ([_areaRoom]).
+  String? _areaOf(Handle room) {
+    if (room == _areaRoom) return _areaText;
+    final entities = widget.document.entities;
+    final labels = <(Handle, int)>[
+      for (final slot in entities.liveSlots)
+        if (entities.ownerAt(slot) == room &&
+            entities.kindAt(slot) == EntityKind.text)
+          (entities.handleAt(slot), slot),
+    ]..sort((a, b) => a.$1.value.compareTo(b.$1.value));
+    _areaRoom = room;
+    return _areaText = labels.length < 2 ? null : entities.textAt(labels[1].$2);
   }
 
   /// Copies the model into the fields; no rebuild.
@@ -520,8 +595,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
         controller: f.text,
         focusNode: f.focus,
         readOnly: !editable,
-        decoration: InputDecoration(labelText: label, suffixText: 'mm'),
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        decoration: InputDecoration(
+            labelText: label, suffixText: f.isText ? null : 'mm'),
+        keyboardType: f.isText
+            ? TextInputType.text
+            : const TextInputType.numberWithOptions(decimal: true),
         // While the Wall tool is active every valid keystroke reaches its
         // settings at once (07 D11, review round 1): a canvas click
         // accepts its point before the field's focus-loss commit runs, so
@@ -556,14 +634,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final box = _box, wall = _wall, opening = _opening;
-    if (box == null && wall == null && opening == null) {
+    final box = _box, wall = _wall, opening = _opening, room = _room;
+    if (box == null && wall == null && opening == null && room == null) {
       return const SizedBox.shrink();
     }
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
     final wallEditable = _editable(_Kind.thickness);
     final openingEditable = _editable(_Kind.openingWidth);
+    final roomEditable = _editable(_Kind.name);
     final OpeningParams? openingParams = opening == null
         ? null
         : widget.document.components.get<OpeningParams>(opening);
@@ -647,6 +726,18 @@ class _SelectionPanelState extends State<SelectionPanel> {
                   ],
                 ),
               ],
+            ],
+            if (room != null) ...[
+              if (box != null || wall != null || opening != null)
+                const SizedBox(height: 12),
+              Text('Room', key: const Key('room-section'), style: title),
+              _field('room-name', 'Name', _name, roomEditable),
+              // Read-only (10 R-25): the area label's string as drawn.
+              InputDecorator(
+                decoration: const InputDecoration(
+                    labelText: 'Area', border: InputBorder.none),
+                child: Text(_areaOf(room) ?? '—', key: const Key('room-area')),
+              ),
             ],
           ],
         ),
