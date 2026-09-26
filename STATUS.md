@@ -2257,7 +2257,32 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the ledger archive of Plan 08 (openings), on
+**Immediate next step: the human's macOS build and look at Plan 08
+(openings), on `plan-08/openings`, then the merge.**
+- Tasks 1–14 are done (`328df0b..de66cd2`), Task 15 needed no commit,
+  Task 16 is `6b3b944`, `6ea2d70` and the controller's `5739442`.
+- The final whole-branch review returned "With fixes" at `5739442` (I1:
+  a non-triangulable piece at a slightly kinked joint refused the edit);
+  the fix wave `ce8497c` was re-reviewed **"Ready to merge"** (the
+  reviewer's repro lands, its 1,620-case sweep refuses 0, its UI probes
+  pass, ~30,000 fuzz steps with 0 refusals, 0 exceptions, 0 drift).
+- The four gate lines are green on Linux: engine 1,014 + 2 standing;
+  render layer 936 + 1 skip + 7 standing; harness 82; app 244; web `✓
+  Built`.
+- 228 mutants were fired: 220 killed, 0 survived, 8 equivalent.
+- The ledger is archived at `docs/superpowers/ledgers/2026-09-25-openings/`
+  as the branch's last commit.
+
+**What resumes here, in order:**
+1. the human's `flutter build macos --release`, the gate lines on macOS,
+   and the look (eleven items per platform, from
+   [2026-09-25-plan-08-results.md](docs/superpowers/notes/2026-09-25-plan-08-results.md));
+2. the merge, the human's decision, `--no-ff`, from the main checkout;
+3. then the human's choice of next work: the rotate-about-a-base-point
+   follow-up (a general transform feature), the Text tool's web alt-tab
+   `fix/`, or sub-project 10 (rooms) — see the results note's debt list.
+
+*Before the final re-review, this paragraph read:* **Immediate next step: the ledger archive of Plan 08 (openings), on
 `plan-08/openings`, after the final fix wave** (the final whole-branch
 review returned "With fixes" at `5739442`; the fix wave is the commit
 that writes this sentence).

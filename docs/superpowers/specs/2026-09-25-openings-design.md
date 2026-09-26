@@ -848,15 +848,18 @@ the uncut path.
   points onto the cap's first and last vertices, so the end piece is the
   cap alone, and its closing edge runs from the left face straight back
   over the endpoint to the right face: a zero-width spike, which the
-  triangulator refuses. **Rule:** after `simplifyRing`, a vertex `v`
+  triangulator can refuse (the final review's I1; on a piece that is
+  already valid, removing it only stops a hairline being stroked — the
+  final re-review measured area changes of at most 7.8e-8 mm²). **Rule:** after `simplifyRing`, a vertex `v`
   between `p` and `q` where one neighbour lies within `wallJoin.linear` of
   the segment from `v` to the other (the ring runs out to `v` and back
   along the same line, or `v` nearly repeats a neighbour) is removed,
   until none is left or three vertices remain. The end piece becomes the
   lobe's triangle; each removal changes the area by at most half of
   `wallJoin.linear` times the removed edges' length. The vertex removed is the spike's tip (the left face
-  point), not the endpoint: removing the endpoint would add the lobe's
-  triangle to the piece.
+  point), not the endpoint: removing the endpoint would add the triangle
+  lobe–endpoint–tip, on the far side of the jamb (about the lobe's area),
+  to the piece.
 - **Every stored piece is valid** is now enforced, not only asserted: D8's
   admission judges every piece before it admits an opening.
 

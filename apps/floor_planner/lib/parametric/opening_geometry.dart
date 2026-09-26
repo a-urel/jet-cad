@@ -468,15 +468,18 @@ List<_Piece> _pieces(HostFrame f, List<(double, double)> merged) {
 /// review's I1): a vertex `v` between `p` and `q` where one neighbour lies
 /// within `wallJoin.linear` of the segment from `v` to the other, so the
 /// ring runs out to `v` and back along the same line (or `v` nearly
-/// repeats a neighbour). The spike it makes has no area, and the
-/// triangulator refuses it. It arises when the cap-vertex snap drops both
+/// repeats a neighbour). The spike it makes has no area; the
+/// triangulator can refuse it (it did in the final review's I1), and on a
+/// piece that is already valid removing it only stops a hairline being
+/// stroked. It arises when the cap-vertex snap drops both
 /// of a cut's face points at a joint whose end cap runs from the right
 /// face out to a lobe, back to the endpoint on the centreline and on to
 /// the left face: that cap's last edge runs back over its endpoint to its
 /// first vertex. Removed until none is left or three vertices remain; each
 /// removal changes the area by at most half of `wallJoin.linear` times the
 /// removed edges' length. The tip goes, not the endpoint it runs back
-/// over: removing the endpoint would add the lobe's triangle to the piece.
+/// over: removing the endpoint would add the triangle lobe–endpoint–tip,
+/// on the far side of the jamb, to the piece.
 List<Vector2> _dropBacktracks(List<Vector2> ring) {
   final r = [...ring];
   bool within(Vector2 x, Vector2 a, Vector2 b) {
