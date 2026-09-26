@@ -434,11 +434,18 @@ changes marked.
 7. **The seed's face** is the anticlockwise cycle (positive area) of
    **least** area that holds the seed. None: `Unbounded`.
 8. **Holes** (D6).
-9. **Clean-up:** spikes (`u → v → u`, a dangling separator end) are
-   removed, then vertices collinear within `roomTrace.linear` (between
-   their neighbours); holes are reversed to anticlockwise, their sources
-   moving with their edges. Areas are the shoelace in the local frame; the
-   net area is the outer area minus the hole areas.
+9. **Clean-up:** **doubled edges are split out** **[amended at
+   execution, Plan 10, decision 29; D9]**: wherever a face's walk takes a
+   half-edge and, later, its twin, both are removed and the walk between
+   them becomes a loop of its own, until no loop holds a half-edge and its
+   twin. A spike (`u → v → u`, a dangling separator end) is the case with
+   nothing between them. The outer cycle leaves the outer ring (its loop
+   of greatest area) and a hole per island tied to it; a hole's contour
+   leaves a hole per island it ties together. Then vertices collinear
+   within `roomTrace.linear` (between their neighbours) are removed; holes
+   are reversed to anticlockwise, their sources moving with their edges.
+   Areas are the shoelace in the local frame; the net area is the outer
+   area minus the hole areas.
 
 - **`roomTrace = Tolerance(linear: 1e-6, angular: 1e-12)`** **[spec
   ruling]** (R-6). The linear part is 07's `wallJoin.linear`, so a joint
@@ -480,6 +487,17 @@ mutants M-10a, M-10b, M-10seedface, M-10local, M-10tol, M-10sep.
   two cases is diagnosed (decision 25).
 - **Decision 23** is superseded in its "otherwise ignored and diagnosed":
   a touching column is now part of the boundary, not ignored.
+- **Amended at execution (Plan 10, decision 29): a tied island is a
+  hole.** An island tied to the ring, or to another island, by zero-width
+  inputs only (a separator, a chain or a tree of them) is a **hole**,
+  subtracted and cut out of the tint as a freestanding island is: the tie
+  has no thickness and no area, and the doubled edge it puts in the walk
+  is split out (D5 step 9; the rule, where it runs and what follows from
+  it are in D9's paragraph). A wall touching the boundary (a column
+  against a wall, a stub wall with its thickness) is still walked around:
+  a band has two faces, so it makes no doubled edge. The hole test above
+  reads the outer cycle as walked, before the split, so a component inside
+  a tied island's courtyard stays outside the face.
 
 **Pinned by:** `RT3` (column), `RT4` (hollow column, courtyard not a hole),
 `RT6` (a column pushed against the ring); M-10holes, M-10holesign,
@@ -646,6 +664,69 @@ never change while the tint keeps its form):
   than the labels (06 D12's accepted cost; invisible in practice, since
   the tint is translucent). Every form keeps **every outer-ring vertex among
   the stored points**, which D16's read box relies on.
+
+**Amended at execution (Plan 10, decision 29): a doubled edge is split
+into a hole before the tint is cut.** A separator (or a chain or tree of
+them, or any zero-width input) that ties a freestanding island — a column,
+a kitchen island, a triangle of separators — to the ring, or islands to
+each other, is walked out and back by the face: the walk carries a
+**doubled edge**, one edge in both directions. That is an exact keyhole
+with a slit of 0, which the engine's triangulator refuses; the tint fell
+through steps 1 and 2 to step 3, and the room showed an unfilled outline
+and `room.tint`. Users hit it with a single tie from a wall to a column,
+and transiently while drawing wall → column → wall (Task 14's review; 60
+of `FZ1`'s tint checks at seed 1010).
+
+- **The rule.** Wherever a face's walk takes a half-edge and, later, its
+  twin, both halves are removed and the walk between them becomes a loop of
+  its own, until no loop holds a half-edge and its twin. The outer cycle
+  leaves one anticlockwise loop, the **outer ring** (its loop of greatest
+  area), and one clockwise loop per tied island, which is a **hole**; a
+  hole's contour leaves one clockwise loop per island it ties together; an
+  empty loop, and a free separator tree, leave nothing (D6: no area, no
+  hole). A spike (`u → v → u`) is the case with nothing between the two
+  halves, so D5's spike removal is this rule's special case. On a face's
+  walk the doubled pairs nest, so the loops do not depend on the order of
+  the splits or on where the walk starts: the output stays canonical
+  (Ruling 10-7) and `LZ1`'s bit-for-bit agreement holds.
+- **Where it runs: the tracer's clean-up (D5 step 9), not the tint
+  builder.** The tracer holds the half-edges, so a doubled edge is an
+  identity — a half-edge and its twin in one walk — decided exactly, with
+  no tolerance and no geometry; a point ring after collinear removal can no
+  longer show one reliably (a doubled edge merged into a longer collinear
+  edge), and two inputs overlapping are already one edge carrying both
+  sources (D5 step 5), walked once, never mistaken for a doubled one. And
+  every reader of the trace — the tint, the label pole, `room.shared`, the
+  Room tool's occupied-face test, the selected ring (D24) — sees one face:
+  a simple outer ring and its holes, the holes a freestanding island
+  gives.
+- **What follows.** `Traced.ring` is the outer ring without the ties; the
+  island is among `Traced.holes`, its sources moving with its edges and
+  ordered with the other holes by Ruling 10-7; a tie is in no source set.
+  **The area is unchanged:** a doubled edge encloses nothing (its two
+  halves' shoelace terms cancel), so outer area minus hole areas is the
+  walk's own area, to rounding in the seed-relative frame far below the
+  1e-2 mm² of every oracle. **The label pole** (D10) reads the outer ring
+  and the holes, so it avoids the island, as it did when the ring walked
+  round it; a tie, which bounds nothing, is no obstacle to it, as a free
+  separator is not. `tintOf` keyholes the island as any hole: **step 1**,
+  and **D22's `room.tint` is not reported** for a tie.
+- **What remains for step 3:** an outer ring that touches itself at a
+  vertex (a pinch: a column touching the ring at a corner, two bands
+  meeting at a single corner; `RG2`'s turned column). A tied island that
+  is itself pinched (two columns touching at a corner) is one pinched
+  hole, whose keyholed ring does not triangulate: step 2, reported, as the
+  same island untied. `FZ1` at seed 1010 now takes step 1 in all 1,855 of
+  its tint checks.
+
+**Pinned by:** `DE1` (the trace: one tie, a chain, a T-branch, a tie drawn
+twice, a separator along a face, two ties, two islands tied, a triangle of
+separators tied, a pinched island tied; six placements), `DE2` (the room:
+step 1, the area, no `room.tint`, the label clear of the column; the
+pinched island's step 2; six placements), `DE3` (the Separator tool's
+transient), `LZ1` (the same fixtures, localised against all-inputs, bit for
+bit), `FZ1` (the census); mutants X14b-noSplit, X14b-oneHalf,
+X14b-dropInner, X14b-noSources, X14b-coincident.
 
 **The labels' attributes:** ByLayer on layer 0 (the foreground, like 08's
 symbols), `STANDARD` text style, justification **centre, middle**
