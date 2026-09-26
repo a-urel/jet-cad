@@ -28,9 +28,9 @@ typedef Fixture = (
 /// The fixture whose separator only D7's margin brings into `C`.
 const marginCase = 'a separator 0.5 nm outside a face';
 
-/// Every seed of every tracer fixture (RT1-RT9, the triangle, FB, the thin
-/// L): rooms, courtyards, seeds in bands and on separators, and seeds no
-/// ring closes around.
+/// Every seed of every tracer fixture (RT1-RT9, DE1, the triangle, FB, the
+/// thin L): rooms, courtyards, islands tied by separators, seeds in bands
+/// and on separators, and seeds no ring closes around.
 final List<Fixture> fixtures = [
   (
     'the sample plan, its openings, separator and column',
@@ -132,6 +132,68 @@ final List<Fixture> fixtures = [
     const [],
     const [(4000, 2000)],
   ),
+  // Decision 29's doubled edges (DE1): islands tied to the ring or to each
+  // other by separators, split out into holes. Seeds west of the islands,
+  // east of them, in the column, on a tie, and in the triangle.
+  (
+    'a column tied by one separator',
+    [...boxWalls, const W(5000, 2000, 5400, 2000, 400)],
+    const [(5200.5, 100, 5200.5, 1800)],
+    const [],
+    const [(2000.5, 2000.25), (7000.25, 3000.5), (5200, 2000), (5200.5, 900)],
+  ),
+  (
+    'a column tied by a chain and a T-branch',
+    [...boxWalls, const W(5000, 2000, 5400, 2000, 400)],
+    const [
+      (5200.5, 100, 5200.5, 900.25),
+      (5200.5, 900.25, 5200.5, 1800),
+      (5200.5, 900.25, 6200.25, 900.25),
+    ],
+    const [],
+    const [(2000.5, 2000.25), (7000.25, 3000.5)],
+  ),
+  (
+    'wall, column, wall',
+    [...boxWalls, const W(5000, 2000, 5400, 2000, 400)],
+    const [(5200.5, 100, 5200.5, 1800), (5200.5, 2200, 5200.5, 3900)],
+    const [],
+    const [(2000.5, 2000.25), (7000.25, 3000.5)],
+  ),
+  (
+    'two columns tied to each other and to the wall',
+    [
+      ...boxWalls,
+      const W(5000, 2000, 5400, 2000, 400),
+      const W(6500, 2000, 6900, 2000, 400),
+    ],
+    const [(5200.5, 100, 5200.5, 1800), (5400, 2000.5, 6500, 2000.5)],
+    const [],
+    const [(2000.5, 2000.25), (7000.25, 3000.5)],
+  ),
+  (
+    'a pinched island tied',
+    [
+      ...boxWalls,
+      const W(5000, 2000, 5400, 2000, 400),
+      const W(5400, 2400, 5800, 2400, 400),
+    ],
+    const [(5200.5, 100, 5200.5, 1800)],
+    const [],
+    const [(2000.5, 2000.25)],
+  ),
+  (
+    'a triangle of separators tied',
+    boxWalls,
+    const [
+      (5000, 1000, 6000, 1000),
+      (6000, 1000, 5500, 2000),
+      (5500, 2000, 5000, 1000),
+      (5500.5, 100, 5500.5, 1000),
+    ],
+    const [],
+    const [(2000.5, 2000.25), (5500.25, 1300.5)],
+  ),
   ('TR', trWalls, const [], const [], const [trSeed]),
   ('FB', fbWalls, const [], const [], const [fbSeed, (-1000, 1000)]),
   (
@@ -195,40 +257,6 @@ final class Recording implements PlaceSource {
 
   @override
   Aabb2? get bounds => inner.bounds;
-}
-
-/// Asserts that [got] is [want], bit for bit: the same kind; the same
-/// source for [SeedInWall]; for [Traced], every point with `==` on both
-/// coordinates, every source set in its order, and every area.
-void expectSameTrace(TraceResult got, TraceResult want, String what) {
-  expect(got.runtimeType, want.runtimeType, reason: '$what: $got vs $want');
-  switch ((got, want)) {
-    case (SeedInWall(source: final a), SeedInWall(source: final b)):
-      expect(a, b, reason: '$what: the source');
-    case (final Traced a, final Traced b):
-      void samePoints(List<Vector2> p, List<Vector2> q, String ring) {
-        expect(p.length, q.length, reason: '$what: $ring');
-        for (var i = 0; i < p.length; i++) {
-          expect((p[i].x, p[i].y), (q[i].x, q[i].y),
-              reason: '$what: $ring point $i');
-        }
-      }
-      void sameSources(List<Set<Handle>> p, List<Set<Handle>> q, String ring) {
-        expect([for (final s in p) s.toList()], [for (final s in q) s.toList()],
-            reason: '$what: $ring sources');
-      }
-      samePoints(a.ring, b.ring, 'ring');
-      sameSources(a.ringSources, b.ringSources, 'ring');
-      expect(a.outerArea, b.outerArea, reason: '$what: outer area');
-      expect(a.holes.length, b.holes.length, reason: '$what: holes');
-      for (var k = 0; k < a.holes.length; k++) {
-        samePoints(a.holes[k], b.holes[k], 'hole $k');
-        sameSources(a.holeSources[k], b.holeSources[k], 'hole $k');
-        expect(a.holeAreas[k], b.holeAreas[k], reason: '$what: hole $k area');
-      }
-      expect(a.area, b.area, reason: '$what: area');
-    default:
-  }
 }
 
 /// A place source over a fixed list of inputs, which an isolate can take.

@@ -14,6 +14,7 @@ import 'package:floor_planner/parametric/room_inputs.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
 import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/parametric/wall.dart';
+import 'package:flutter_test/flutter_test.dart' show expect;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -715,3 +716,40 @@ List<Diagnostic> codedAs(List<Diagnostic> diagnostics, String prefix) => [
       for (final d in diagnostics)
         if (d.code.startsWith(prefix)) d,
     ];
+
+// ---------------------------------------------------------------------------
+// Traces compared (LZ1, DF1, FZ1, DE4).
+
+/// Asserts that [got] is [want], bit for bit: the same kind; the same
+/// source for [SeedInWall]; for [Traced], every point with `==` on both
+/// coordinates, every source set in its order, and every area.
+void expectSameTrace(TraceResult got, TraceResult want, String what) {
+  expect(got.runtimeType, want.runtimeType, reason: '$what: $got vs $want');
+  switch ((got, want)) {
+    case (SeedInWall(source: final a), SeedInWall(source: final b)):
+      expect(a, b, reason: '$what: the source');
+    case (final Traced a, final Traced b):
+      void samePoints(List<Vector2> p, List<Vector2> q, String ring) {
+        expect(p.length, q.length, reason: '$what: $ring');
+        for (var i = 0; i < p.length; i++) {
+          expect((p[i].x, p[i].y), (q[i].x, q[i].y),
+              reason: '$what: $ring point $i');
+        }
+      }
+      void sameSources(List<Set<Handle>> p, List<Set<Handle>> q, String ring) {
+        expect([for (final s in p) s.toList()], [for (final s in q) s.toList()],
+            reason: '$what: $ring sources');
+      }
+      samePoints(a.ring, b.ring, 'ring');
+      sameSources(a.ringSources, b.ringSources, 'ring');
+      expect(a.outerArea, b.outerArea, reason: '$what: outer area');
+      expect(a.holes.length, b.holes.length, reason: '$what: holes');
+      for (var k = 0; k < a.holes.length; k++) {
+        samePoints(a.holes[k], b.holes[k], 'hole $k');
+        sameSources(a.holeSources[k], b.holeSources[k], 'hole $k');
+        expect(a.holeAreas[k], b.holeAreas[k], reason: '$what: hole $k area');
+      }
+      expect(a.area, b.area, reason: '$what: area');
+    default:
+  }
+}

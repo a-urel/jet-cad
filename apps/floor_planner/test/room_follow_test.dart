@@ -29,7 +29,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'room_localise_test.dart' show expectSameTrace;
 import 'support/room_fixture.dart';
 
 /// The two-room fixture's left and right seeds, plan mm (fractional).
@@ -779,7 +778,7 @@ void main() {
 
   test(
       'FZ1 a seeded random run: no edit is refused because of rooms, drift() '
-      'stays empty, every tint triangulates', () {
+      'stays empty, every tint triangulates and is step 1', () {
     const place = corpusGroups;
     // The plan with its rooms, and its twin without them: the same walls,
     // separators and openings, in the same groups.
@@ -912,6 +911,11 @@ void main() {
       }
       expect(driftOf(a), isEmpty, reason: 'step $step, with rooms');
       expect(driftOf(b), isEmpty, reason: 'step $step, the twin');
+      // D22's room.tint, by room: why its tint is not the face as traced.
+      final tinted = {
+        for (final d in codedAs(diagnosticsOf(a), 'room.tint'))
+          d.handles.single: d.message,
+      };
       final inputs = RoomInputs(a);
       try {
         final all = [
@@ -964,6 +968,12 @@ void main() {
             count(kindOf(a, children.first) == EntityKind.fill
                 ? 'tint region checked'
                 : 'tint region checked, above its labels');
+            // The step census (decision 29): step 2 covers the holes.
+            count(switch (tinted[h]) {
+              null => 'tint step 1, exact',
+              final m when m.contains('covers its holes') => 'tint step 2',
+              _ => 'tint step 1, a hole left out',
+            });
           } else {
             count('tint outline (step 3) checked');
           }
@@ -978,6 +988,16 @@ void main() {
     // ignore: avoid_print
     print('FZ1 seed 1010, 200 steps at $place: '
         '${(counts.entries.toList()..sort((x, y) => x.key.compareTo(y.key))).map((e) => '${e.key} ${e.value}').join('; ')}');
+    // Decision 29: every tint of the run is D9's step 1, every hole cut
+    // out. Before the tracer split doubled edges out of its walk, 60 of
+    // these checks found step 3's outline: a separator tying a column to
+    // the ring.
+    expect(counts['tint outline (step 3) checked'], isNull,
+        reason: 'no step 3');
+    expect(counts['tint step 1, exact'], counts['tint region checked'],
+        reason: 'every region is step 1, exact');
+    expect(counts['tint region checked'], greaterThan(1000),
+        reason: 'the premise: the run checks tints');
   }, timeout: const Timeout(Duration(minutes: 10)));
 }
 

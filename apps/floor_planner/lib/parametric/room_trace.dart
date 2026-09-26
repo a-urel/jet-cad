@@ -130,14 +130,19 @@ int debugTracedSegments = 0;
 ///    the seed. None: [Unbounded].
 /// 8. **Holes** (D6): every other connected component whose outer contour
 ///    (its most negative cycle) lies inside the outer ring and inside no
-///    bounded face of a third component that does not hold the seed. A
-///    component with no area (a free separator, or a free tree of them) is
-///    not a hole: its contour, spikes removed, has fewer than three
-///    vertices.
-/// 9. **Clean-up**: spikes (`u → v → u`, a dangling separator end), then
-///    vertices collinear within `roomTrace.linear`; holes reversed to
-///    anticlockwise, their sources moving with their edges; the canonical
-///    order of Ruling 10-7; areas by the shoelace in the local frame.
+///    bounded face of a third component that does not hold the seed.
+/// 9. **Clean-up**: doubled edges split out (decision 29): a half-edge and
+///    its twin in one walk are both removed and the walk between them is a
+///    loop of its own. A spike (`u → v → u`, a dangling separator end) is
+///    the case with nothing between them. The outer cycle leaves the outer
+///    ring (its loop of greatest area) and a clockwise loop for each island
+///    tied to the ring by zero-width edges only, which is a hole; a hole's
+///    contour leaves a clockwise loop per island it ties together; a
+///    component with no area (a free separator, or a free tree of them)
+///    leaves nothing and is not a hole. Then vertices collinear within
+///    `roomTrace.linear`; holes reversed to anticlockwise, their sources
+///    moving with their edges; the canonical order of Ruling 10-7; areas by
+///    the shoelace in the local frame.
 TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
   final tol = roomTrace.linear;
 
@@ -395,29 +400,8 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
   }
 
   // 9. Clean-up and the canonical order.
-  _Ring clean(List<int> cycle) {
-    // Spikes: a half-edge followed by its twin.
-    final hs = [...cycle];
-    var changed = true;
-    while (changed && hs.length > 2) {
-      changed = false;
-      for (var i = 0; i < hs.length; i++) {
-        final j = (i + 1) % hs.length;
-        if (hs[j] == (hs[i] ^ 1)) {
-          if (j > i) {
-            hs
-              ..removeAt(j)
-              ..removeAt(i);
-          } else {
-            hs
-              ..removeAt(i)
-              ..removeAt(j);
-          }
-          changed = true;
-          break;
-        }
-      }
-    }
+  double areaOf(List<int> loop) => shoelace(pointsOf(loop));
+  _Ring clean(List<int> hs) {
     final ring = _rotated((
       pts: [for (final h in hs) verts[from[h]]],
       src: [
@@ -428,7 +412,7 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
     // Collinear vertices, scanned from the canonical start.
     final pts = [...ring.pts];
     final src = [...ring.src];
-    changed = true;
+    var changed = true;
     while (changed && pts.length > 3) {
       changed = false;
       for (var i = 0; i < pts.length; i++) {
@@ -448,16 +432,30 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
     return _rotated((pts: pts, src: src));
   }
 
-  final ring = clean(cycles[outer]);
+  // Doubled edges (decision 29). The outer cycle, split, leaves one loop
+  // walked anticlockwise, the outer ring, and a clockwise loop for each
+  // island tied to it by zero-width edges only: a hole, as a freestanding
+  // island is. A hole's contour, split, leaves a clockwise loop per island
+  // it ties together. A free separator, or a free tree of them, is doubled
+  // edges only and leaves nothing: a component with no area is not a hole
+  // (D6), whatever the sign of its walk's shoelace residue. The hole test
+  // above reads the cycle as walked, so an island's courtyard stays
+  // outside the face.
+  final outerLoops = _splitDoubled(cycles[outer]);
+  var ringLoop = outerLoops.first;
+  for (final l in outerLoops) {
+    if (areaOf(l) > areaOf(ringLoop)) ringLoop = l;
+  }
+  final ring = clean(ringLoop);
   final holes = <_Ring>[];
-  for (final c in holeCycles) {
-    final r = clean(cycles[c]);
+  for (final loop in [
+    for (final l in outerLoops)
+      if (!identical(l, ringLoop)) l,
+    for (final c in holeCycles) ..._splitDoubled(cycles[c]),
+  ]) {
+    if (!(areaOf(loop) < 0)) continue;
+    final r = clean(loop);
     final n = r.pts.length;
-    // A component with no area (a free separator, or a free tree of them)
-    // walks out and back: with its spikes removed, fewer than three
-    // vertices are left. It is not a hole (D6), whatever the sign of its
-    // shoelace residue.
-    if (n < 3) continue;
     // Walked clockwise (the face lies outside it): reversed to
     // anticlockwise, each source moving with its edge.
     holes.add(_rotated((
@@ -465,7 +463,7 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
       src: [for (var i = n - 1; i >= 0; i--) r.src[(i - 1 + n) % n]],
     )));
   }
-  holes.sort((a, b) => _lex(a.pts.first, b.pts.first));
+  holes.sort(_byPoints);
 
   return Traced(
     [for (final p in ring.pts) p + o],
@@ -802,6 +800,52 @@ int _byT((double, Vector2) p, (double, Vector2) q) {
 int _lex(Vector2 a, Vector2 b) {
   final c = a.x.compareTo(b.x);
   return c != 0 ? c : a.y.compareTo(b.y);
+}
+
+/// Holes in Ruling 10-7's order: by their first vertex, then by the
+/// vertices that follow it, then the shorter first. Two holes of one trace
+/// never share a vertex (they would be one pinched loop), so the first
+/// vertex decides; the rest only makes the order total.
+int _byPoints(_Ring a, _Ring b) {
+  final n = math.min(a.pts.length, b.pts.length);
+  for (var k = 0; k < n; k++) {
+    final c = _lex(a.pts[k], b.pts[k]);
+    if (c != 0) return c;
+  }
+  return a.pts.length.compareTo(b.pts.length);
+}
+
+/// [cycle], a face's walk (half-edges; `h ^ 1` is `h`'s twin), split at its
+/// doubled edges (spec 10 D5 step 9, decision 29): wherever the walk takes a
+/// half-edge and, later, its twin, both are removed, and the walk between
+/// them becomes a loop of its own; again, until no loop holds a half-edge
+/// and its twin. A spike (`u → v → u`, a dangling separator end) is the
+/// case with nothing between them. Empty loops are dropped.
+///
+/// A doubled edge has the face on both sides: removing it leaves the face
+/// as it was, and its area unchanged, since the two halves' shoelace terms
+/// cancel. On a face walk the doubled pairs nest (the part of the boundary
+/// beyond a doubled edge is walked whole between its two halves), so the
+/// loops do not depend on which pair is split first, nor on where the walk
+/// starts.
+List<List<int>> _splitDoubled(List<int> cycle) {
+  final loops = <List<int>>[];
+  final work = [cycle];
+  while (work.isNotEmpty) {
+    final hs = work.removeLast();
+    final at = {for (var k = 0; k < hs.length; k++) hs[k]: k};
+    var whole = true;
+    for (var i = 0; i < hs.length && whole; i++) {
+      final j = at[hs[i] ^ 1];
+      if (j == null || j < i) continue;
+      work
+        ..add([...hs.sublist(0, i), ...hs.sublist(j + 1)])
+        ..add(hs.sublist(i + 1, j));
+      whole = false;
+    }
+    if (whole && hs.isNotEmpty) loops.add(hs);
+  }
+  return loops;
 }
 
 /// [r] turned to start at its least rotation in `(x, y)` order: its least
