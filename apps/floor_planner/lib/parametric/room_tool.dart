@@ -97,7 +97,10 @@ class RoomTool extends PlacementTool {
   int _generation = -1;
   Traced? _face;
   _Verdict _faceVerdict = _Verdict.none;
-  String? _occupant;
+
+  /// The cached face's notice, `Already a room: <name>`, built once per
+  /// face, or null.
+  String? _occupied;
   List<GeometryPayload> _facePreview = const [];
   List<Vector2>? _band;
 
@@ -186,8 +189,7 @@ class RoomTool extends PlacementTool {
   void _show(_Verdict verdict) {
     _preview = verdict == _Verdict.room ? _facePreview : const [];
     if (!_disposed) {
-      _notice.value =
-          verdict == _Verdict.occupied ? 'Already a room: $_occupant' : null;
+      _notice.value = verdict == _Verdict.occupied ? _occupied : null;
     }
   }
 
@@ -197,7 +199,7 @@ class RoomTool extends PlacementTool {
       _generation = inputs.generation;
       _face = null;
       _faceVerdict = _Verdict.none;
-      _occupant = null;
+      _occupied = null;
       _facePreview = const [];
       _band = null;
     }
@@ -225,17 +227,17 @@ class RoomTool extends PlacementTool {
   /// names it), and, when none does, its preview.
   void _cacheFace(Traced f) {
     _face = f;
-    _occupant = null;
+    _occupied = null;
     final doc = inputs.document;
     for (final h in liveObjectsOf<RoomParams>(doc)) {
       final r = doc.components.get<RoomParams>(h)!;
       final s = doc.tree.accumulatedTransform(h).transformPoint(r.seed);
       if (s.x.isFinite && s.y.isFinite && _inFace(s, f)) {
-        _occupant = r.name;
+        _occupied = 'Already a room: ${r.name}';
         break;
       }
     }
-    if (_occupant != null) {
+    if (_occupied != null) {
       _faceVerdict = _Verdict.occupied;
       _facePreview = const [];
       return;
