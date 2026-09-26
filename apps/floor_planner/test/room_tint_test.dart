@@ -3,6 +3,7 @@
 // frame would: placed at each of the six placements and taken relative to
 // a seed, so the holes' order, their rightmost vertices and the bridges are
 // decided on turned coordinates too.
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:floor_planner/parametric/room_inputs.dart';
@@ -72,6 +73,40 @@ Vector2 rightmostOf(List<Vector2> hole) {
         reason: '$what: to the bridge\'s right');
   }
   return (v, [...points]..removeRange(at, at + cw.length + 2));
+}
+
+/// [points]' keyhole to [hole], read back: `V` (the bridge's far end), `H'`
+/// and `V'` (the slit's ends) and the ring point after `V'`.
+({Vector2 v, Vector2 hs, Vector2 vs, Vector2 next}) keyholeEnds(
+    List<Vector2> points, List<Vector2> hole) {
+  final h = rightmostOf(hole);
+  final at = points.indexWhere((p) => p.x == h.x && p.y == h.y);
+  final n = hole.length;
+  return (
+    v: points[at - 1],
+    hs: points[at + n],
+    vs: points[at + n + 1],
+    next: points[(at + n + 2) % points.length],
+  );
+}
+
+/// The anticlockwise sweep, degrees, from direction [from] to direction
+/// [to].
+double sweepDeg(Vector2 from, Vector2 to) {
+  var a = (math.atan2(to.y, to.x) - math.atan2(from.y, from.x)) * 180 / math.pi;
+  while (a <= 0) {
+    a += 360;
+  }
+  return a;
+}
+
+/// The point [kSlit] from [o] on the bisector of the sector anticlockwise
+/// from [from] to [to]: the unit directions' sum, turned about when the
+/// sector is wider than 180°.
+Vector2 onBisector(Vector2 o, Vector2 from, Vector2 to) {
+  var b = from.normalized() + to.normalized();
+  if (sweepDeg(from, to) > 180) b = -b;
+  return o + b.normalized() * kSlit;
 }
 
 /// Asserts that the closed ring [r] is simple: no two points within 1e-6
@@ -305,9 +340,15 @@ void main() {
       // (1,700, 544.5) -> (2,605.25, 1,410.75) -> (1,779.5, 834.75), in
       // the box. Its rightmost vertex H (2,605.25, 1,410.75) is acute, and
       // the whole triangle lies below the line from the nearest ring vertex
-      // V0 (100, 100) to H. That bridge is clear, but its slit runs 0.5 mm
-      // to the bridge's right, into the wedge at H: its return edge meets
-      // the hole's edge beside H. The next vertex is tried: step 1, simple.
+      // V0 (100, 100) to H. That bridge is clear, but with its slit 0.5 mm
+      // to the bridge's right the keyhole crosses itself (the premise, the
+      // 14b review). So each end of the slit goes inside its own sector,
+      // on the bisector, 0.5 mm out: at H the sector from H -> V0
+      // anticlockwise to the hole's last edge sweeps a few degrees (the
+      // bridge runs beside that edge), and at V0 (a box corner) the sector
+      // from its next edge to the bridge less than 90°, so the
+      // perpendicular point lies outside both. The keyhole to V0 is then
+      // simple: step 1.
       // Shoelace: 1,700 x 576 + 2,605.25 x 290.25 - 1,779.5 x 866.25 =
       // 979,200 + 756,173.8125 - 1,541,491.875 = 193,881.9375, halved
       // 96,940.96875; the room 29,640,000 - 96,940.96875 =
@@ -358,9 +399,20 @@ void main() {
       expect(t.step, 1, reason: '$what: $t');
       expect(t.isExact, isTrue, reason: what);
       expectOuterKept(t.points, acuteRing, what);
-      final (v, _) = expectKeyhole(t.points, triangle, what);
-      expect((v - acuteRing[v0]).length, greaterThan(1),
-          reason: '$what: bridged to another vertex than V0');
+      final ends = keyholeEnds(t.points, triangle);
+      expect(ends.v, acuteRing[v0], reason: '$what: bridged to V0');
+      final lastEdge = cw[(hi + cw.length - 1) % cw.length] - h;
+      expect(sweepDeg(ends.v - h, lastEdge), lessThan(90),
+          reason: '$what: the premise at H');
+      expect(sweepDeg(ends.next - ends.v, h - ends.v), lessThan(90),
+          reason: '$what: the premise at V0');
+      expect((ends.hs - onBisector(h, ends.v - h, lastEdge)).length,
+          lessThan(1e-9),
+          reason: '$what: H\' on its sector\'s bisector');
+      expect(
+          (ends.vs - onBisector(ends.v, ends.next - ends.v, h - ends.v)).length,
+          lessThan(1e-9),
+          reason: '$what: V\' on its sector\'s bisector');
       expectSimple(t.points, what);
       expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
       // And the room: its fill, its area, no room.tint.
@@ -423,6 +475,192 @@ void main() {
         for (final p in square) (p.x, p.y)
       ], reason: what);
       expect(t.holesLeftOut, isEmpty, reason: what);
+
+      // 8 and 9. Traced, far from everything (the 14c review's fuzz, seed
+      // 1414): holes 85-278 mm from any edge that the perpendicular slit
+      // alone left out. 8 is its plan t107, an acute triangle and an
+      // arrowhead of separators; 9 its plan t0, two triangles of
+      // separators and two thin turned walls, whose keyhole needs V' in
+      // its own sector (the V side). Every hole is cut out: step 1, simple.
+      for (final (label, walls, seps) in <(String, List<W>, List<S>)>[
+        (
+          'the far fuzz plan t107',
+          const [],
+          const [
+            (
+              5808.297745275523,
+              3123.3438309116273,
+              5411.505471293784,
+              2250.1514098526395
+            ),
+            (
+              5411.505471293784,
+              2250.1514098526395,
+              6426.1079485577375,
+              1263.091615493714
+            ),
+            (
+              6426.1079485577375,
+              1263.091615493714,
+              5808.297745275523,
+              3123.3438309116273
+            ),
+            (
+              6634.753446619458,
+              2276.6033910495235,
+              6728.173258929942,
+              925.7606874139218
+            ),
+            (
+              6728.173258929942,
+              925.7606874139218,
+              6989.875843987623,
+              1540.6045926336483
+            ),
+            (
+              6989.875843987623,
+              1540.6045926336483,
+              7634.017933903327,
+              1362.8344072516627
+            ),
+            (
+              7634.017933903327,
+              1362.8344072516627,
+              6634.753446619458,
+              2276.6033910495235
+            ),
+          ],
+        ),
+        (
+          'the far fuzz plan t0 (the V side)',
+          const [
+            W(4552.734427700173, 1684.6198305486557, 4355.033950671604,
+                1836.754693385062, 61.337528160458234),
+            W(7197.265600844875, 2708.021919605868, 6714.314577599572,
+                3117.5721713919907, 62.59206803616255),
+          ],
+          const [
+            (
+              4637.656035948521,
+              1280.4623072780582,
+              4837.50137549628,
+              1470.9287301582578
+            ),
+            (
+              4837.50137549628,
+              1470.9287301582578,
+              4678.907974422088,
+              2215.1995155338786
+            ),
+            (
+              4678.907974422088,
+              2215.1995155338786,
+              4637.656035948521,
+              1280.4623072780582
+            ),
+            (
+              1576.7218557918952,
+              1619.117725562984,
+              1106.9765238728735,
+              1985.769349077893
+            ),
+            (
+              1106.9765238728735,
+              1985.769349077893,
+              526.4122885134552,
+              2018.4972254222807
+            ),
+            (
+              526.4122885134552,
+              2018.4972254222807,
+              1576.7218557918952,
+              1619.117725562984
+            ),
+          ],
+        ),
+      ]) {
+        what = '$label at $place';
+        final far =
+            buildPlan([...boxWalls, ...walls], seps: seps, place: place);
+        final farInputs = RoomInputs(far.doc);
+        addTearDown(farInputs.dispose);
+        final farSeed = far.at(250.25, 250.5);
+        final farFace = traceRoomAmong(farSeed, farInputs) as Traced;
+        expect(farFace.holes, hasLength(greaterThanOrEqualTo(2)), reason: what);
+        final farRing = [for (final p in farFace.ring) p - farSeed];
+        final farHoles = [
+          for (final h in farFace.holes) [for (final p in h) p - farSeed],
+        ];
+        t = tintOf(farRing, farHoles);
+        expect(t.step, 1, reason: '$what: $t');
+        expect(t.holesLeftOut, isEmpty, reason: '$what: every hole cut out');
+        expect(t.isExact, isTrue, reason: what);
+        expect(
+            t.points,
+            hasLength(farRing.length +
+                [for (final h in farHoles) h.length + 2]
+                    .reduce((a, b) => a + b)),
+            reason: what);
+        expectOuterKept(t.points, farRing, what);
+        expectSimple(t.points, what);
+        expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
+      }
+
+      // 10 and 11. The slit against a hole not yet joined (the 14c
+      // review's m-1 and m-2). A triangle A, H (2,000, 4,000), P (1,990,
+      // 5,000), (1,000, 3,500), in the 10 m square: its nearest vertex is
+      // V (0, 0), whose bridge is clear, and at H the sector from the
+      // bridge to the last edge H -> P sweeps between 90° and 270°, so H'
+      // is H + s either way; at V (a corner) V' is V + s first, then on
+      // its sector's bisector. A small triangle B lies to the bridge's
+      // right, by its middle, and joins later (its rightmost x is less
+      // than H's). 10: B's first vertex 0.3 mm from the bridge, so both
+      // slits cross B's edges. 11: B's first vertex exactly on the second
+      // slit's return edge, B beyond it, so it crosses the first slit and
+      // only touches the second. Either way the keyhole to V is not
+      // simple and the next vertex is taken: step 1, every hole cut out,
+      // simple.
+      final triA = rel(place, const [(2000, 4000), (1990, 5000), (1000, 3500)]);
+      final hA = triA[0], vA = square[0];
+      expect(rightmostOf(triA), hA, reason: 'the premise at $place: H');
+      final bridge = hA - vA;
+      final right = Vector2(bridge.y, -bridge.x).normalized();
+      final slitH = hA + right * kSlit, slitV = vA + right * kSlit;
+      final sectorV = onBisector(vA, square[1] - vA, bridge);
+      for (final (label, first) in [
+        ('a slit across a later hole', vA + bridge * 0.5 + right * 0.3),
+        ('a slit touching a later hole', (slitH + sectorV) * 0.5),
+      ]) {
+        what = '$label at $place';
+        final along = bridge.normalized();
+        var triB = [
+          first,
+          first + right * 60 + along * 10,
+          first + right * 40 - along * 30
+        ];
+        if (shoelace(triB) < 0) triB = triB.reversed.toList();
+        // The premises: B joins after A; it lies to the bridge's right,
+        // clear of the bridge; it crosses the first slit's return edge;
+        // for 11, its first vertex is on the second's.
+        expect(triB.map((p) => p.x).reduce(math.max), lessThan(hA.x),
+            reason: '$what: B joins later');
+        expect(distToSegment(first, vA, hA), greaterThan(0.25), reason: what);
+        expect(crossings([slitH, slitV, ...triB], const [0]), isNotEmpty,
+            reason: '$what: B crosses the first slit');
+        if (label.contains('touching')) {
+          expect(distToSegment(first, slitH, sectorV), lessThan(1e-9),
+              reason: '$what: B touches the second slit');
+          expect(crossings([slitH, sectorV, ...triB], const [0]), isEmpty,
+              reason: '$what: B does not cross the second slit');
+        }
+        t = tintOf(square, [triA, triB]);
+        expect(t.step, 1, reason: '$what: $t');
+        expect(t.holesLeftOut, isEmpty, reason: what);
+        expect(keyholeEnds(t.points, triA).v, isNot(vA),
+            reason: '$what: bridged to another vertex than V');
+        expectSimple(t.points, what);
+        expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
+      }
     }
   });
 }

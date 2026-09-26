@@ -718,22 +718,37 @@ of `FZ1`'s tint checks at seed 1010).
   hole, whose keyholed ring does not triangulate: step 2, reported, as the
   same island untied. `FZ1` at seed 1010 now takes step 1 in all 1,855 of
   its tint checks.
-- **The slit is checked as well as the bridge (Task 14c, the 14b
-  review).** "The return edge runs 0.5 mm to the bridge's right, so the
-  ring stays simple" held only if the slit crossed nothing, and nothing
-  checked it: at an acute rightmost vertex whose wedge the bridge runs
-  along, the return edge crossed the hole's edge beside it, the keyholed
-  ring was not simple, and a simple hole took step 2. A vertex now
-  qualifies only when its bridge is clear **and** the slit's three edges
-  (the hole's last edge into `H + s`, the return, and `V + s` onward) cross
-  and touch no other edge of the ring or of a hole not yet joined;
-  otherwise the next nearest vertex is tried, and a hole with none is left
-  out as above. The fallback order is unchanged. Step 2 is then reached by
-  a pinched hole only (the 14b review's fuzz: 16 step-2 cases on simple
-  holes before, none after); a hole within the slit's width of the ring
-  can be left out (`RG2`, unturned). **Pinned by:** `TN1` (the acute
-  hole, six placements; the pinched hole's step 2), `RG2`; mutant
-  X14c-noSlitCheck.
+- **The slit is checked as well as the bridge, and each of its ends sits
+  in its own sector (Task 14c, the 14b and 14c reviews).** "The return
+  edge runs 0.5 mm to the bridge's right, so the ring stays simple" held
+  only if the slit crossed nothing, and nothing checked it: at an acute
+  rightmost vertex whose wedge the bridge runs along, the return edge
+  crossed the hole's edge beside it, the keyholed ring was not simple, and
+  a simple hole took step 2. A vertex now qualifies only when its bridge
+  is clear **and** the slit's three edges (the hole's last edge into `H'`,
+  the return `H' → V'`, and `V'` onward) cross and touch no other edge of
+  the ring or of a hole not yet joined. The slit is first `H' = H + s`,
+  `V' = V + s`, 0.5 mm to the bridge's right; if that is not clear, each
+  end goes inside its own sector, 0.5 mm from its vertex: `H'` in the
+  sector from `H → V` anticlockwise to the hole's last edge, `V'` in the
+  sector from `V`'s next ring edge anticlockwise to `V → H`, at the
+  perpendicular point when the sector sweeps between 90° and 270°, else on
+  its bisector (under 90° the perpendicular point lies outside it; over
+  270° the edge from its far side cuts back across the bridge). Otherwise
+  the next nearest vertex is tried, and a hole with none is left out as
+  above. The fallback order is unchanged.
+- **What remains.** Step 2 is reached by a pinched hole only (the 14b
+  review's fuzz: 16 step-2 cases on simple holes before, none after). A
+  hole is left out only within the slit's width (0.5 mm) of the ring or of
+  another hole, where no placement of a 0.5 mm slit is clear (`RG2`'s
+  column 0.2 mm off two faces, unturned; the 14c review's fuzz, seed 1414:
+  12 holes left out, all within 0.5 mm, against 12 more 85-278 mm from
+  everything before the sector placement). **Pinned by:** `TN1` (the acute
+  hole bridged to its nearest vertex with both ends on their bisectors;
+  the far fuzz plans t107 and t0; a slit crossing and a slit touching a
+  hole not yet joined; the pinched hole's step 2; six placements), `RG2`;
+  mutants X14c-noSlitCheck, X14c-noSectorH, X14c-noSectorV,
+  rv14c-noLater, rv14c-noTouch.
 
 **Pinned by:** `DE1` (the trace: one tie, a chain, a T-branch, a tie drawn
 twice, a separator along a face, two ties, two islands tied, a triangle of

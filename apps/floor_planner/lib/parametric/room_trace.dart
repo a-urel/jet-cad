@@ -622,11 +622,13 @@ final class Tint {
   /// ray to the right from a hole's rightmost vertex H meets the growing
   /// ring first (the holes not yet joined lie at x ≤ H.x, the joined ones
   /// are part of the ring), and a vertex of the ring is visible from H
-  /// (Eberly's argument). But the slit must be clear too: a hole within
-  /// the slit's 0.5 mm of the ring, whose every visible bridge puts the slit
-  /// through the ring or the hole, is left out (`RG2`'s column 0.2 mm off
-  /// two faces, unturned). A ring and holes that are not a trace's reach
-  /// it too, as `TN1`'s hole outside the ring and its overlapping holes.
+  /// (Eberly's argument). But the slit must be clear too. With each of its
+  /// ends inside its own sector, a slit is cut off only by an edge within
+  /// its 0.5 mm: a hole left out lies within the slit's width of the ring
+  /// or of another hole (`RG2`'s column 0.2 mm off two faces, unturned;
+  /// the 14c review's fuzz, seed 1414, found no other). A ring and holes
+  /// that are not a trace's reach it too, as `TN1`'s hole outside the ring
+  /// and its overlapping holes.
   final List<int> holesLeftOut;
 
   /// Whether the tint shows the face as traced: step 1, every hole cut out.
@@ -651,14 +653,17 @@ final class Tint {
 /// ring whose bridge properly crosses no edge of that ring and no edge of
 /// any hole not yet joined, this one included (ties to the earlier vertex),
 /// **and whose slit is clear** (decision 29's note, Task 14c). The hole is
-/// walked clockwise from `H`, and the return edge runs [kSlit] to the
-/// bridge's right, from `H` to `V` both moved; the slit's three edges (the
-/// hole's last edge into `H + s`, the return, and `V + s` onward) must
-/// cross nothing and touch nothing either, so the ring stays simple: at an
-/// acute `H` whose wedge the bridge runs along, the return can cross the
-/// hole's edge beside `H` though the bridge is clear. A hole with no such
-/// vertex is left out (the tint covers it) and named in
-/// [Tint.holesLeftOut].
+/// walked clockwise from `H` and ends at `H'`; the return edge runs from
+/// `H'` to `V'`. First `H' = H + s` and `V' = V + s`, [kSlit] to the
+/// bridge's right; if that slit is not clear, each end goes inside its own
+/// sector ([_slitEnd]): `H'` between the bridge and the hole's last edge,
+/// `V'` between the ring's next edge and the bridge. The slit's three edges
+/// (the hole's last edge into `H'`, the return, and `V'` onward) must cross
+/// nothing and touch nothing, against the ring and the holes not yet
+/// joined, so the ring stays simple: at an acute `H` or `V` the
+/// perpendicular slit can cross the hole's edge beside `H`, or the bridge,
+/// though the bridge is clear. A hole with no such vertex is left out (the
+/// tint covers it) and named in [Tint.holesLeftOut].
 ///
 /// **The fallback chain**, so an edit is never refused because of a tint:
 /// 1. the keyholed ring, if it triangulates (`triangulationFor` non-empty);
@@ -715,16 +720,30 @@ Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes,
       if (_blocked(h, v, obstacles)) continue;
       final d = (h - v).normalized();
       final slit = Vector2(d.y, -d.x) * kSlit; // to the bridge's right
-      final candidate = [...keyholed]..insertAll(i + 1, [
-          for (var j = 0; j < n; j++) hole[(hi + j) % n],
-          h + slit,
-          v + slit,
-        ]);
-      // The slit's three edges, the hole's last edge into H + s, the return
-      // H + s → V + s and V + s onward, 0.5 mm off the bridge: at an acute
-      // H they can cross the hole's edges beside H, or the bridge, though
-      // the bridge itself is clear. Then the next vertex is tried.
-      if (!_clear(candidate, [i + n, i + n + 1, i + n + 2], later)) continue;
+      List<Vector2> keyhole(Vector2 hs, Vector2 vs) =>
+          [...keyholed]..insertAll(i + 1, [
+              for (var j = 0; j < n; j++) hole[(hi + j) % n],
+              hs,
+              vs,
+            ]);
+      // The slit's three edges, the hole's last edge into H', the return
+      // H' → V' and V' onward, must cross and touch nothing, though the
+      // bridge itself is clear. First H' = H + s and V' = V + s, 0.5 mm to
+      // the bridge's right. Failing that, each end inside its own sector:
+      // H' between the bridge and the hole's last edge (anticlockwise from
+      // H → V to H → P), V' between the ring's next edge and the bridge
+      // (anticlockwise from V → next to V → H); at an acute H or V the
+      // perpendicular point lies outside it, or an edge from it cuts back
+      // across the bridge. Failing that too, the next vertex is tried.
+      var candidate = keyhole(h + slit, v + slit);
+      if (!_clear(candidate, [i + n, i + n + 1, i + n + 2], later)) {
+        final hs = _slitEnd(h, v - h, hole[(hi + n - 1) % n] - h, slit);
+        final vs =
+            _slitEnd(v, keyholed[(i + 1) % keyholed.length] - v, h - v, slit);
+        if (hs == h + slit && vs == v + slit) continue;
+        candidate = keyhole(hs, vs);
+        if (!_clear(candidate, [i + n, i + n + 1, i + n + 2], later)) continue;
+      }
       joined = candidate;
       break;
     }
@@ -767,6 +786,33 @@ bool _blocked(Vector2 h, Vector2 v, List<List<Vector2>> rings) {
     }
   }
   return false;
+}
+
+/// Where the slit meets the vertex [o] (spec 10 D9, Task 14c): the point
+/// [kSlit] from it inside the sector of the face that runs anticlockwise
+/// from the direction [from] to the direction [to], the side of the bridge
+/// the slit's new edges leave from.
+///
+/// That is [o] + [perp], 0.5 mm to the bridge's right, when the sector
+/// sweeps between 90° and 270°: [perp] lies inside it, and each edge at the
+/// point stays within 180° of the sector's side it runs beside, so neither
+/// cuts back across the bridge. Otherwise it is the point on the sector's
+/// bisector: a sector under 90° (the bridge runs beside the hole's last
+/// edge at an acute `H`, or into a corner of the ring at `V`) would leave
+/// [perp] outside it, and one over 270° would let the edge from its far
+/// side cut back across the bridge.
+Vector2 _slitEnd(Vector2 o, Vector2 from, Vector2 to, Vector2 perp) {
+  final a = math.atan2(from.y, from.x);
+  var sweep = math.atan2(to.y, to.x) - a;
+  while (sweep <= 0) {
+    sweep += 2 * math.pi;
+  }
+  while (sweep > 2 * math.pi) {
+    sweep -= 2 * math.pi;
+  }
+  if (sweep > math.pi / 2 && sweep < 1.5 * math.pi) return o + perp;
+  final b = a + sweep / 2;
+  return o + Vector2(math.cos(b), math.sin(b)) * kSlit;
 }
 
 /// Whether the edges [edges] of the closed ring [r] (edge `e` runs from
