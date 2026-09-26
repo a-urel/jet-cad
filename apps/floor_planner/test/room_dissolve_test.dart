@@ -342,6 +342,87 @@ void main() {
           'two columns at $place');
       expect(roomDiagnostics(two.doc), isEmpty, reason: '$place');
       expect(driftOf(two.doc), isEmpty, reason: '$place');
+
+      // --- Honest fallbacks, no seam (Ruling 10-16's candidate). Step 2:
+      // two 400 × 400 columns 0.2 mm off the faces, x 100.2..500.2, y
+      // 3,499.8..3,899.8 by the north-west corner, and x 7,499.8..7,899.8,
+      // y 1,800.5..2,200.5 by the east wall. A bridge from one of them is
+      // shorter than the slit is wide at every placement, so the keyholed
+      // ring is not simple and the outer ring alone is the tint.
+      final near = buildPlan([
+        ...boxWalls,
+        const W(100.2, 3699.8, 500.2, 3699.8, 400),
+        const W(7499.8, 2000.5, 7899.8, 2000.5, 400),
+      ], place: place);
+      attachPage(near.doc, PageComponent());
+      final nearRoom = addRoom(near.doc, near.at(1000.25, 2500.5), 'Room 1');
+      // 29,640,000 − 2 × 160,000 = 29,320,000 (29.32, 0.005 from the ties).
+      expect(labelStrings(near.doc, nearRoom), ['Room 1', '29.32 m²'],
+          reason: '$place');
+      expect(
+          kindsOf(near.doc, nearRoom),
+          [
+            EntityKind.fill,
+            EntityKind.polyline,
+            EntityKind.text,
+            EntityKind.text,
+          ],
+          reason: 'honest step 2 at $place');
+      expectTintRect(
+          near,
+          nearRoom,
+          const [(100, 100), (7900, 100), (7900, 3900), (100, 3900)],
+          'honest step 2 at $place');
+      expect(
+          roomDiagnostics(near.doc),
+          [
+            Diagnostic(
+              severity: DiagnosticSeverity.warning,
+              code: 'room.tint',
+              message: 'room ${nearRoom.toHex()} ("Room 1"): its tint covers '
+                  'its holes: the keyholed ring does not triangulate',
+              handles: [nearRoom],
+            ),
+          ],
+          reason: 'honest step 2 at $place');
+      expect(driftOf(near.doc), isEmpty, reason: '$place');
+
+      // Step 3: a 400 × 400 column turned 45°, its top vertex on the north
+      // face (y 3,900). It touches the ring, so the ring walks round it
+      // (D6) and passes that vertex twice: pinched, neither ring
+      // triangulates.
+      final half = 200 * math.sqrt2, d = 100 * math.sqrt2;
+      final pinched = buildPlan([
+        ...boxWalls,
+        W(4000 - d, 3900 - half - d, 4000 + d, 3900 - half + d, 400),
+      ], place: place);
+      attachPage(pinched.doc, PageComponent());
+      final seed3 = pinched.at(1000.25, 2500.5);
+      final face3 = faceAt(pinched.doc, seed3) as Traced;
+      expect(
+          face3.ring.where((q) => (q - pinched.at(4000, 3900)).length < 1e-6),
+          hasLength(2),
+          reason: 'the premise: pinched at $place');
+      final pinchedRoom = addRoom(pinched.doc, seed3, 'Room 1');
+      // 29,640,000 − 400 × 400 = 29,480,000 (29.48, 0.005 from the ties).
+      expect(labelStrings(pinched.doc, pinchedRoom), ['Room 1', '29.48 m²'],
+          reason: '$place');
+      expect(kindsOf(pinched.doc, pinchedRoom),
+          [EntityKind.polyline, EntityKind.text, EntityKind.text],
+          reason: 'honest step 3 at $place');
+      expect(
+          roomDiagnostics(pinched.doc),
+          [
+            Diagnostic(
+              severity: DiagnosticSeverity.warning,
+              code: 'room.tint',
+              message: 'room ${pinchedRoom.toHex()} ("Room 1"): its tint is '
+                  'an unfilled outline: its face does not triangulate',
+              handles: [pinchedRoom],
+            ),
+          ],
+          reason: 'honest step 3 at $place');
+      expect(driftOf(pinched.doc), isEmpty, reason: '$place');
     }
   });
 
