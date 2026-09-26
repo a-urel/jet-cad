@@ -1065,24 +1065,36 @@ final class SlabType extends ParametricType<Slab> {
 /// ([ax], [ay]) to ([bx], [by]) in its own local space. Its reach and its
 /// place box are the segment's world box, independent of its neighbours. It
 /// generates nothing; a [Lens] draws its segment.
+///
+/// When [exact] is set, its place input is its world segment, compared
+/// element-wise (SD9, SD11); otherwise it keeps the default, "always
+/// changed" (T-2).
 final class Rod implements Component {
-  const Rod(this.ax, this.ay, this.bx, this.by);
+  const Rod(this.ax, this.ay, this.bx, this.by, {this.exact = false});
   static const String id = 'test.rod';
   final double ax, ay, bx, by;
+  final bool exact;
   @override
   String get typeId => id;
   @override
-  Map<String, Object?> toJson() => {'ax': ax, 'ay': ay, 'bx': bx, 'by': by};
+  Map<String, Object?> toJson() =>
+      {'ax': ax, 'ay': ay, 'bx': bx, 'by': by, 'exact': exact};
   static Rod fromJson(Map<String, Object?> j) => Rod(
       (j['ax']! as num).toDouble(),
       (j['ay']! as num).toDouble(),
       (j['bx']! as num).toDouble(),
-      (j['by']! as num).toDouble());
+      (j['by']! as num).toDouble(),
+      exact: j['exact'] as bool? ?? false);
   @override
   bool operator ==(Object o) =>
-      o is Rod && o.ax == ax && o.ay == ay && o.bx == bx && o.by == by;
+      o is Rod &&
+      o.ax == ax &&
+      o.ay == ay &&
+      o.bx == bx &&
+      o.by == by &&
+      o.exact == exact;
   @override
-  int get hashCode => Object.hash(ax, ay, bx, by);
+  int get hashCode => Object.hash(ax, ay, bx, by, exact);
 
   /// The segment's two ends, in world.
   (Vector2, Vector2) worldEnds(Transform2 toWorld) => (
@@ -1111,6 +1123,16 @@ final class RodType extends ParametricType<Rod> {
   Aabb2? placeBox(ParametricView view, Handle self) {
     final p = view.paramsOf<Rod>(self);
     return p == null ? null : _box(p, view.toWorld(self));
+  }
+
+  /// With [Rod.exact], the world segment as a record: `==` element by
+  /// element. Otherwise the default, a fresh object ("always changed").
+  @override
+  Object placeInput(ParametricView view, Handle self) {
+    final p = view.paramsOf<Rod>(self);
+    if (p == null || !p.exact) return super.placeInput(view, self);
+    final (a, b) = p.worldEnds(view.toWorld(self));
+    return (a.x, a.y, b.x, b.y);
   }
 
   @override

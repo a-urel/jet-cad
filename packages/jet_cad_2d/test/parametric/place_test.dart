@@ -119,6 +119,37 @@ bool neighbours(Aabb2 a, Aabb2 b) {
 
 Aabb2 slabReach(Slab p, Transform2 at) => const SlabType().reach(p, at);
 
+Aabb2 rodBox(Rod p, Transform2 at) {
+  final (a, b) = p.worldEnds(at);
+  return Aabb2.fromPoints([a, b]);
+}
+
+/// The place-box and read-box calls [edit] makes (spec 10 D16.6).
+(int, int) counted(void Function() edit) {
+  final p = debugPlaceBoxCalls, r = debugReadBoxCalls;
+  edit();
+  return (debugPlaceBoxCalls - p, debugReadBoxCalls - r);
+}
+
+/// The select tool's delete of one object: its children, then its node.
+DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
+      for (final k in kids(doc, g)) RemoveEntityCommand(k),
+      RemoveNodeCommand(g),
+    ], label: 'Delete');
+
+/// A root LINE, owned by no object.
+DraftCommand rootLine(DraftDocument doc) => AddEntityCommand(
+    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line),
+    payload:
+        linePayload(Vector2(-4000.25, 9000.5), Vector2(-3500.75, 9300.25)));
+
+/// Exact: the same bits, for a premise that a box did not move at all.
+bool sameBox(Aabb2 a, Aabb2 b) =>
+    a.minX == b.minX &&
+    a.minY == b.minY &&
+    a.maxX == b.maxX &&
+    a.maxY == b.maxY;
+
 /// A test-local type with both roles (SD8).
 final class _BothType extends ParametricType<Slab> {
   const _BothType();
@@ -369,5 +400,268 @@ void main() {
     roles.registerComponents(doc.components);
     expect(doc.components.isRegistered<Slab>(), isTrue);
     expect(doc.components.isRegistered<Lens>(), isTrue);
+  });
+
+  test(
+      'SD5b placedIn lists two contributors of one kind in ascending '
+      'handle order, not in creation order', () {
+    const hR = Handle(1000), hS1 = Handle(3000), hS2 = Handle(4000);
+    const slab2 = Slab(-40.75, 15.5, 600.25, 300.5);
+    final f = field();
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hR, atR, lens));
+    // The higher handle first, then the lower: both inside the field, their
+    // boxes apart, so the order R draws them in is visible.
+    final t2 = cornerAt(slab2, f.minX + 1200.5, f.minY + 900.25, -0.2);
+    final t1 = cornerAt(slab, f.minX + 300.25, f.minY + 250.75, 0.15);
+    final b1 = slabBox(slab, t1), b2 = slabBox(slab2, t2);
+    expect(b1.intersects(f) && b2.intersects(f), isTrue);
+    expect(b1.intersects(b2), isFalse);
+    expect(neighbours(slabReach(slab, t1), slabReach(slab2, t2)), isFalse);
+    doc.commands.execute(create(doc, hS2, t2, slab2));
+    expect(listedBoxes(doc, hR), [boxNear(b2)]);
+    doc.commands.execute(create(doc, hS1, t1, slab));
+    // Two POLYLINE children, matched by index in generation order: the
+    // first (lower handle) holds the lower-handle Slab's box.
+    expect(listedBoxes(doc, hR), [boxNear(b1), boxNear(b2)]);
+    expect(drift(doc), isEmpty);
+  });
+
+  test(
+      'SD6 the trigger\'s counts: no seeds, no call; a '
+      'non-contributor edit, no call; a contributor edit, one place box per '
+      'contributor of K live before and one per contributor live after, and '
+      'one read box per live reader; the first placedIn, c minus the after '
+      'boxes already held', () {
+    const hR = Handle(1000), hFar = Handle(2000), hS = Handle(3000);
+    const hS4 = Handle(4000), hT = Handle(5000), hC = Handle(6000);
+    const hS2 = Handle(7000);
+    const rod = Rod(0.5, 0.25, 700.75, 300.5);
+    const clip = ClipRect(400.5, 300.25);
+    final t0 = onA(-6000.5, -4000.25, 0.35);
+    final atS4 = onA(-3000.5, 6000.25, 0.5);
+    final atT = onA(9000.5, -6000.25, 0.1);
+    final atC = onA(-2000.25, 5000.5, -0.2);
+    final atC1 = onA(-2600.75, 5400.25, 0.3);
+    final atS2 = onA(-9000.75, -1000.5, -0.15);
+    Aabb2 clipReach(Transform2 at) => rectReach(clip, at);
+
+    /// Two Lenses, R at [atR] and one parked, and contributors S, S4 and T
+    /// and the ClipRect C, all far from each other.
+    DraftDocument scene() {
+      final doc = paramDoc();
+      doc.commands.execute(create(doc, hR, atR, lens));
+      doc.commands.execute(create(doc, hFar, parked, lens));
+      doc.commands.execute(create(doc, hS, t0, slab));
+      doc.commands.execute(create(doc, hS4, atS4, slab));
+      doc.commands.execute(create(doc, hT, atT, rod));
+      doc.commands.execute(create(doc, hC, atC, clip));
+      return doc;
+    }
+
+    {
+      // A fixture where no reader regenerates: every Lens far from the edit.
+      final doc = scene();
+      final fields = [field(), lensField(lens, parked)];
+      final t1 = onA(-6300.25, -3700.75, 0.45);
+      // Premises: both Lenses are empty, so a read box is a field; no Slab
+      // box meets a Lens field; no edited object has a contributor
+      // neighbour, before or after.
+      expect(kids(doc, hR), isEmpty);
+      expect(kids(doc, hFar), isEmpty);
+      for (final b in [
+        slabBox(slab, t0),
+        slabBox(slab, t1),
+        slabBox(slab, atS2),
+      ]) {
+        for (final f in fields) {
+          expect(b.intersects(f), isFalse);
+        }
+      }
+      final others = [
+        slabReach(slab, atS4),
+        rectReach(clip, atC),
+        rectReach(clip, atC1),
+        rodBox(rod, atT),
+      ];
+      for (final a in [
+        slabReach(slab, t0),
+        slabReach(slab, t1),
+        slabReach(slab, atS2),
+      ]) {
+        for (final o in others) {
+          expect(neighbours(a, o), isFalse);
+        }
+      }
+      for (final c in [clipReach(atC), clipReach(atC1)]) {
+        for (final o in [
+          slabReach(slab, t0),
+          slabReach(slab, atS4),
+          rodBox(rod, atT),
+        ]) {
+          expect(neighbours(c, o), isFalse);
+        }
+      }
+      final r0 = calls(hR), far0 = calls(hFar);
+
+      // No seeds: the early return.
+      expect(counted(() => doc.commands.execute(rootLine(doc))), (0, 0));
+      // A ClipRect moved: K holds no contributor, so L is empty.
+      expect(
+          counted(() => doc.commands.execute(TransformNodeCommand(hC, atC1))),
+          (0, 0));
+      // S moved: its before and its after box; one read box per Lens.
+      expect(counted(() => doc.commands.execute(TransformNodeCommand(hS, t1))),
+          (2, 2));
+      // S2 added: its after box only.
+      expect(counted(() => doc.commands.execute(create(doc, hS2, atS2, slab))),
+          (1, 2));
+      // S2 deleted: its before box only.
+      expect(
+          counted(() => doc.commands.execute(deleteObject(doc, hS2))), (1, 2));
+      expect(calls(hR), r0, reason: 'no reader regenerates');
+      expect(calls(hFar), far0);
+      expect(drift(doc), isEmpty);
+    }
+    {
+      // Separately, a fixture where a reader regenerates: S into R's field.
+      final doc = scene();
+      final f = field();
+      final t1 = cornerAt(slab, f.minX + 400.25, f.minY + 350.5, 0.15);
+      expect(slabBox(slab, t1).intersects(f), isTrue);
+      for (final o in [slabReach(slab, atS4), rectReach(clip, atC)]) {
+        expect(neighbours(slabReach(slab, t1), o), isFalse);
+      }
+      expect(neighbours(slabReach(slab, t1), rodBox(rod, atT)), isFalse);
+      expect(kids(doc, hR), isEmpty);
+      final r0 = calls(hR), far0 = calls(hFar);
+      // c: the live contributors after the edit, S, S4 and T.
+      const c = 3;
+      expect(counted(() => doc.commands.execute(TransformNodeCommand(hS, t1))),
+          (2 + (c - 1), 2));
+      expect(calls(hR), r0 + 1, reason: 'R regenerated');
+      expect(calls(hFar), far0);
+      expect(listedBoxes(doc, hR), [boxNear(slabBox(slab, t1))]);
+      expect(drift(doc), isEmpty);
+    }
+  });
+
+  test(
+      'SD9 an unchanged neighbour in K adds nothing: a contributor '
+      'moved away from a reader, whose unchanged neighbour touches the '
+      'reader, regenerates no reader', () {
+    for (final exact in [true, false]) {
+      generateCalls.clear();
+      const hR = Handle(1000), hN = Handle(2000), hS = Handle(3000);
+      final f = field();
+      final rod = Rod(0.5, 0.25, 1500.75, 900.5, exact: exact);
+      // N from inside R's field, up and right out of it.
+      final atN = Transform2.translation(f.maxX - 300.25, f.maxY - 200.5)
+          .multiply(Transform2.rotation(0.3));
+      final nb = rodBox(rod, atN);
+      // S's first corner half a millimetre above N's box: its reach overlaps
+      // N's; its rectangle, turned by 0.25, lies wholly above it.
+      final t0 = cornerAt(slab, nb.maxX - 400.25, nb.maxY + 0.5, 0.25);
+      final t1 = cornerAt(slab, nb.maxX + 1100.5, nb.maxY + 2500.25, 0.25);
+
+      final doc = paramDoc();
+      doc.commands.execute(create(doc, hR, atR, lens));
+      doc.commands.execute(create(doc, hN, atN, rod));
+      doc.commands.execute(create(doc, hS, t0, slab));
+      expect(listedSegments(doc, hR), hasLength(1), reason: 'R draws N');
+      expect(listedBoxes(doc, hR), isEmpty);
+      expect(drift(doc), isEmpty);
+
+      // Premises: N is S's neighbour before the move and not after; N's box
+      // touches R's read box; S's before and after boxes miss it.
+      final read = readBoxOf(doc, hR, lens);
+      expect(neighbours(slabReach(slab, t0), rodBox(rod, atN)), isTrue);
+      expect(neighbours(slabReach(slab, t1), rodBox(rod, atN)), isFalse);
+      expect(nb.intersects(read), isTrue);
+      expect(slabBox(slab, t0).intersects(read), isFalse);
+      expect(slabBox(slab, t1).intersects(read), isFalse);
+
+      final r0 = calls(hR);
+      doc.commands.execute(TransformNodeCommand(hS, t1));
+      if (exact) {
+        expect(calls(hR), r0, reason: 'N unchanged adds nothing');
+      } else {
+        // The control: with the default place input N always counts as
+        // changed, and its box finds R.
+        expect(calls(hR), r0 + 1);
+      }
+      expect(listedSegments(doc, hR), hasLength(1));
+      expect(drift(doc), isEmpty);
+    }
+  });
+
+  test(
+      'SD10 a document with no live reader makes no place-box call on a '
+      'contributor edit', () {
+    const hS = Handle(1000), hT = Handle(2000), hR = Handle(3000);
+    const rod = Rod(0.5, 0.25, 700.75, 300.5);
+    final t0 = onA(-6000.5, -4000.25, 0.35);
+    final t1 = onA(-6300.25, -3700.75, 0.45);
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hS, t0, slab));
+    doc.commands.execute(create(doc, hT, onA(9000.5, -6000.25, 0.1), rod));
+    expect(counted(() => doc.commands.execute(TransformNodeCommand(hS, t1))),
+        (0, 0));
+    expect(counted(() => doc.commands.execute(TransformNodeCommand(hS, t0))),
+        (0, 0));
+    expect(drift(doc), isEmpty);
+
+    // A Lens far away: the same move makes SD6's calls.
+    doc.commands.execute(create(doc, hR, parked, lens));
+    final f = lensField(lens, parked);
+    expect(slabBox(slab, t0).intersects(f), isFalse);
+    expect(slabBox(slab, t1).intersects(f), isFalse);
+    expect(counted(() => doc.commands.execute(TransformNodeCommand(hS, t1))),
+        (2, 1));
+    expect(kids(doc, hR), isEmpty);
+    expect(drift(doc), isEmpty);
+  });
+
+  test(
+      'SD11 the diagonal flip: a contributor whose segment changes '
+      'inside an unchanged box regenerates the reader it splits, with the '
+      'default placeInput and with an override', () {
+    const hR = Handle(1000), hT = Handle(2000);
+    final f = field();
+    // A quarter turn with exact entries, off the origin at a binary fraction,
+    // so both diagonals map to one world box, bit for bit.
+    final atT = Transform2(0, 1, -1, 0, (f.center.x * 4).roundToDouble() / 4,
+        (f.center.y * 4).roundToDouble() / 4);
+    for (final exact in [false, true]) {
+      generateCalls.clear();
+      final from = Rod(0, 0, 10, 10, exact: exact);
+      final to = Rod(0, 10, 10, 0, exact: exact);
+      // Premises: the box is unchanged, exactly, and inside R's field; the
+      // segment is not.
+      expect(sameBox(rodBox(from, atT), rodBox(to, atT)), isTrue);
+      expect(rodBox(from, atT).intersects(f), isTrue);
+      final (a0, b0) = from.worldEnds(atT);
+      final (a1, b1) = to.worldEnds(atT);
+      expect([a0.x, a0.y, b0.x, b0.y] == [a1.x, a1.y, b1.x, b1.y], isFalse);
+
+      final doc = paramDoc();
+      doc.commands.execute(create(doc, hR, atR, lens));
+      doc.commands.execute(create(doc, hT, atT, from));
+      expect(listedSegments(doc, hR), [
+        [
+          for (final v in [a0.x, a0.y, b0.x, b0.y]) closeTo(v, 1e-6)
+        ],
+      ]);
+
+      final r0 = calls(hR);
+      doc.commands.execute(SetComponentCommand<Rod>(hT, to));
+      expect(calls(hR), r0 + 1, reason: 'exact: $exact');
+      expect(listedSegments(doc, hR), [
+        [
+          for (final v in [a1.x, a1.y, b1.x, b1.y]) closeTo(v, 1e-6)
+        ],
+      ]);
+      expect(drift(doc), isEmpty);
+    }
   });
 }

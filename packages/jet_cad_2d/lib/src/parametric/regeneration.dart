@@ -27,6 +27,18 @@ int debugOverlapTests = 0;
 @visibleForTesting
 int debugReferenceCalls = 0;
 
+/// Calls into a type's `ParametricType.placeBox` (spec 10 D16.6, Ruling
+/// 10-6), for tests that pin the trigger's cost: counted in
+/// `_Registration.placeBoxOf`, the only caller, so a view's memo hit is not
+/// a call (T-4). Never reset by the library.
+@visibleForTesting
+int debugPlaceBoxCalls = 0;
+
+/// Calls into a type's `ParametricType.readBox` (spec 10 D16.6), counted in
+/// `_Registration.readBoxOf`, the only caller. Never reset by the library.
+@visibleForTesting
+int debugReadBoxCalls = 0;
+
 /// Everything the planner reads about the parametric objects at one moment.
 ///
 /// Neighbours are not surveyed (spec 07 D10): [neighboursOf] computes one
@@ -34,8 +46,18 @@ int debugReferenceCalls = 0;
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
 /// an edit with no seeds asks for none.
 final class _Survey {
-  _Survey(this.objects, this.params, this.toWorld, this.reach, this.children,
-      this.owned, this.declared, this.references, this.referrers, this.page);
+  _Survey(
+      this.objects,
+      this.params,
+      this.toWorld,
+      this.reach,
+      this.children,
+      this.owned,
+      this.declared,
+      this.references,
+      this.referrers,
+      this.page,
+      this.readers);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -79,6 +101,11 @@ final class _Survey {
   /// surveys' pages by value.
   final PageComponent? page;
 
+  /// How many live objects of this survey read places (spec 10 D16.2,
+  /// S-4), counted as the survey registers them: the trigger runs only when
+  /// the after-survey holds one, an O(1) check.
+  final int readers;
+
   final Map<Handle, List<Handle>> _neighbours = {};
 
   /// [h]'s neighbours, ascending (spec 06 D3): the objects whose reach
@@ -117,6 +144,10 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   }
   final order = found.keys.toList()..sort(_byValue);
   final objects = {for (final h in order) h: found[h]!};
+  var readers = 0;
+  for (final r in objects.values) {
+    if (r.type.readsPlaces) readers++;
+  }
   // Spec 10 D16.1: the snapshots are the component and the transform
   // `reach` already reads, one read each, and no new client call.
   final params = {for (final h in order) h: objects[h]!.componentOf(t, h)};
@@ -170,7 +201,8 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       {
         for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
       },
-      t.components.get<PageComponent>(t.tree.root));
+      t.components.get<PageComponent>(t.tree.root),
+      readers);
 }
 
 /// The objects a page change seeds (spec 10 D14): every live object in
@@ -210,19 +242,27 @@ Aabb2 _storedBox(CommandTarget t, _Survey s, Handle r) {
 /// live reader in [after], not itself a seed, whose
 /// [ParametricType.readBox] touches (closed) a box of `L`.
 ///
+/// Nothing at all when [seeds] is empty or [after] holds no live reader
+/// (S-4: [_Survey.readers], O(1)); no view is built and no type is asked.
+///
 /// `K` is the spatial part of the core, the seeds and their neighbours
-/// before and after. `L` holds, for each contributor of `K` in ascending
-/// order, its place box in the **before-view** if it was live before (the
-/// snapshot: where it was, although the edit has applied) and in
-/// [afterView] if it is live after. For now every contributor of `K` adds
-/// both boxes (Ruling 10-3's staging: it can only over-rebuild). The
-/// before-view is built here, the only place that reads it; [afterView] is
-/// the one [_plan] receives (Ruling 10-5).
+/// before and after. For each contributor of `K`, in ascending order, its
+/// before place is its place box in the **before-view** if it was live
+/// before (the snapshot: where it was, although the edit has applied), and
+/// its after place its box in [afterView] if it is live after. It is
+/// **changed** when exactly one of the two exists, or both exist and its
+/// [ParametricType.placeInput] of the two views differs (exact `==`, S-4,
+/// T-2). Only a changed contributor adds its boxes, both, to `L`: an
+/// unchanged neighbour of a seed contributes what it contributed before,
+/// so it can change no reader. `placeInput` is asked only when both boxes
+/// exist, once per view. The before-view is built here, the only place
+/// that reads it; [afterView] is the one [_plan] receives (Ruling 10-5).
 ///
 /// A reader's `stored` box is [_storedBox] over the after-survey. When `L`
 /// is empty no read box is asked.
 List<Handle> _triggered(CommandTarget t, Set<Handle> seeds, _Survey before,
     _Survey after, ParametricView afterView) {
+  if (seeds.isEmpty || after.readers == 0) return const [];
   final k = {
     ...seeds,
     for (final s in seeds) ...before.neighboursOf(s),
@@ -230,12 +270,20 @@ List<Handle> _triggered(CommandTarget t, Set<Handle> seeds, _Survey before,
   }.toList()
     ..sort(_byValue);
   final beforeView = ParametricView._(t, before);
-  final boxes = <Aabb2>[
-    for (final h in k) ...[
-      if (beforeView.placeBoxOf(h) case final b?) b,
-      if (afterView.placeBoxOf(h) case final b?) b,
-    ],
-  ];
+  final boxes = <Aabb2>[];
+  for (final h in k) {
+    final was = beforeView.placeBoxOf(h);
+    final now = afterView.placeBoxOf(h);
+    if (was == null && now == null) continue;
+    if (was != null &&
+        now != null &&
+        before.objects[h]!.type.placeInput(beforeView, h) ==
+            after.objects[h]!.type.placeInput(afterView, h)) {
+      continue;
+    }
+    if (was != null) boxes.add(was);
+    if (now != null) boxes.add(now);
+  }
   if (boxes.isEmpty) return const [];
   final out = <Handle>[];
   for (final MapEntry(key: h, value: r) in after.objects.entries) {
@@ -263,8 +311,8 @@ List<Handle> _triggered(CommandTarget t, Set<Handle> seeds, _Survey before,
 /// ```
 ///
 /// [triggered] is [_triggered]'s: the live readers whose read box touches a
-/// place box of the spatial core, joined to the core before the referrer
-/// step, so a reader's referrers follow it.
+/// place box of a changed contributor of the spatial core, joined to the
+/// core before the referrer step, so a reader's referrers follow it.
 ///
 /// Neighbours are asked for the seeds only (spec 07 D10); references and
 /// referrers are map lookups. The referent direction brings in what a
@@ -698,8 +746,9 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///    objects of every type whose page key changed, unchecked for dangling
 ///    references, Ruling 10-4), the early return, the after-view, the
 ///    spatial trigger ([_triggered], spec 10 D16.2: the readers whose read
-///    box touches a before or after place box of the spatial core; the
-///    before-view is built there), the closure and the plan (a dissolving
+///    box touches a before or after place box of a contributor of the
+///    spatial core whose place changed, and nothing when no reader is live;
+///    the before-view is built there), the closure and the plan (a dissolving
 ///    object's removal and detach included, spec 10 D15), which receives
 ///    the trigger's after-view (Ruling 10-5). Any failure applies
 ///    `r.inverse`, the cascade's included, so a refused edit leaves the

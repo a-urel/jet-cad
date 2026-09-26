@@ -105,14 +105,44 @@ abstract class ParametricType<T extends Component> {
   /// contributors of the edit's spatial core, and for every live
   /// contributor on a view's first [ParametricView.placedIn]; once per
   /// object per view.
+  ///
+  /// **What it may read** (the assumption D16.4's no-drift proof rests on):
+  /// this box, and [placeInput], may read only [self] and its reach
+  /// neighbours ([ParametricView.neighbours], 07's one hop), never a
+  /// referent, a referrer or a second-hop neighbour. The trigger looks for a
+  /// changed place among an edit's seeds and their neighbours only, so a
+  /// place that read one hop further could change without its readers
+  /// regenerating.
   Aabb2? placeBox(ParametricView view, Handle self) => null;
+
+  /// What this object contributes (spec 10 D16, T-2), compared with `==`
+  /// between an edit's before- and after-views to tell whether it changed
+  /// (a wall: its uncut band's world ring; a separator: its world segment).
+  /// Called only when [contributesPlace], only for objects of an edit's
+  /// spatial core, only when [placeBox] is not null in both views, and once
+  /// per view; it reads what [placeBox] may read, and must not mutate.
+  ///
+  /// Only a contributor whose place changed adds its before and after boxes
+  /// to the boxes the trigger tests readers against, so an unchanged
+  /// neighbour of an edited wall regenerates no reader (S-4). Its input is
+  /// a stored-value style comparison of two deterministic computations: any
+  /// bit difference counts as a change, which only ever regenerates more.
+  ///
+  /// Default: a fresh `Object()`, equal to nothing, so a contributor that
+  /// does not override it always counts as changed. That is safe: it can
+  /// only over-rebuild. A default of the place box would not be: a segment
+  /// flipped from one diagonal of its box to the other keeps its box, and
+  /// its readers would stay stale. Nor is it abstract: a Dart abstract
+  /// member would bind every type, contributor or not.
+  Object placeInput(ParametricView view, Handle self) => Object();
 
   /// Spec 10 D16: this type's generate reads contributors by place
   /// ([ParametricView.placedIn]). Default false.
   ///
   /// An edit regenerates every live reader, not itself a seed, whose
   /// [readBox] touches the before or after [placeBox] of a contributor in
-  /// the edit's spatial core.
+  /// the edit's spatial core whose [placeInput] changed. A document with no
+  /// live reader pays nothing for places.
   bool get readsPlaces => false;
 
   /// The world box whose contributors this object's current output depends
@@ -660,9 +690,11 @@ final class _Registration<T extends Component> {
   Aabb2 reachOf(Component params, Transform2 toWorld) =>
       type.reach(params as T, toWorld);
 
-  /// The only caller of [ParametricType.placeBox] (Ruling 10-6): a box with
-  /// a non-finite coordinate, the empty box included, is no box.
+  /// The only caller of [ParametricType.placeBox] (Ruling 10-6): each call
+  /// counts in [debugPlaceBoxCalls]; a box with a non-finite coordinate, the
+  /// empty box included, is no box.
   Aabb2? placeBoxOf(ParametricView v, Handle h) {
+    debugPlaceBoxCalls++;
     final box = type.placeBox(v, h);
     if (box == null) return null;
     return box.minX.isFinite &&
@@ -673,9 +705,13 @@ final class _Registration<T extends Component> {
         : null;
   }
 
-  /// [ParametricType.readBox] with [params] cast to this type.
-  Aabb2 readBoxOf(Component params, Transform2 toWorld, Aabb2 stored) =>
-      type.readBox(params as T, toWorld, stored);
+  /// [ParametricType.readBox] with [params] cast to this type, its only
+  /// caller: each call counts in [debugReadBoxCalls].
+  Aabb2 readBoxOf(Component params, Transform2 toWorld, Aabb2 stored) {
+    debugReadBoxCalls++;
+    return type.readBox(params as T, toWorld, stored);
+  }
+
   List<Generated> generate(ParametricView v, Handle h) => type.generate(v, h);
   bool dissolves(ParametricView v, Handle h) => type.dissolves(v, h);
   List<Diagnostic> diagnose(ParametricView v, Handle h) => type.diagnose(v, h);
