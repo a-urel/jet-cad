@@ -81,23 +81,34 @@ enum ReferencePolicy {
 /// TEXT or an ATTRIB: a TEXT is generated with [Generated.text], which
 /// carries its string.
 ///
-/// [color], [text], [textAttrs] and [flags] are written into the record
-/// when the child is **added**, and only then: a regeneration rewrites a
-/// matched child's payload in place, and a matched TEXT's string (spec 10
-/// D12), and never the rest of its record (06 D11), so a client must keep
-/// its colours, its text attributes and its flags fixed for an object's
-/// life. ByLayer by default.
+/// Every record attribute here -- [color], [transparency], [flags],
+/// [boundaryFlags], [linetype], [lineweight], [textAttrs] and [text] -- is
+/// written into the record when the child is **added**, and only then
+/// (spec 10 D13): a regeneration rewrites a matched child's payload in
+/// place, and a matched TEXT's string (spec 10 D12), and never the rest of
+/// its record (06 D11). So a client must keep every attribute but a TEXT's
+/// string fixed for an object's life. Each defaults to what `draftRecord`
+/// writes: ByLayer, flags 0. There is no "unpickable" flag (spec 10 R-10):
+/// a fill whose boundary is invisible is not picked already.
 final class Generated {
   /// Throws `ArgumentError` for [EntityKind.fill] (see the class comment),
   /// and for [EntityKind.text] and [EntityKind.attrib] (spec 10 D12, R-15):
   /// a TEXT without its string is exactly the defect 10's research found,
   /// a label the planner would add empty; an ATTRIB needs a tag nobody
   /// generates.
-  Generated(this.kind, this.payload, {this.color = const ByLayerColor()})
+  ///
+  /// [transparency], [flags], [linetype] and [lineweight] are written on
+  /// add only (spec 10 D13).
+  Generated(this.kind, this.payload,
+      {this.color = const ByLayerColor(),
+      this.transparency = kByLayer,
+      this.flags = 0,
+      this.linetype = ReservedHandles.byLayerLinetype,
+      this.lineweight = kByLayer})
       : filled = false,
         text = '',
         textAttrs = 0,
-        flags = 0 {
+        boundaryFlags = flags {
     if (kind == EntityKind.fill) {
       throw ArgumentError.value(
           kind, 'kind', 'a fill cannot be generated (spec 06 D3)');
@@ -118,23 +129,38 @@ final class Generated {
   /// be a closed polyline with a non-empty triangulation, or the edit that
   /// generates it throws `ArgumentError` and is rolled back.
   ///
-  /// [color] is the fill's and the boundary's both.
-  Generated.region(this.payload, {this.color = const ByLayerColor()})
+  /// [color] and [transparency] are the fill's and the boundary's both.
+  /// [flags] is the fill's; [boundaryFlags] is the boundary's and defaults
+  /// to [flags] (spec 10 D13), so an invisible boundary around a drawn fill
+  /// is `boundaryFlags: EntityFlags.invisible`. A region takes no linetype
+  /// or lineweight: its boundary is the fill's outline. All written on add
+  /// only.
+  Generated.region(this.payload,
+      {this.color = const ByLayerColor(),
+      this.transparency = kByLayer,
+      this.flags = 0,
+      int? boundaryFlags})
       : kind = EntityKind.polyline,
         filled = true,
         text = '',
         textAttrs = 0,
-        flags = 0;
+        boundaryFlags = boundaryFlags ?? flags,
+        linetype = ReservedHandles.byLayerLinetype,
+        lineweight = kByLayer;
 
   /// A TEXT whose string the planner owns (spec 10 D12): [payload] is a
   /// `textPayload`, [text] is written into the record on add and rewritten
   /// on a match (`SetEntityTextCommand`) whenever it differs. [textAttrs]
-  /// (`packTextAttrs`) is fixed at creation, like [color]: a type that must
-  /// change a label's justification needs a new child.
+  /// (`packTextAttrs`) is fixed at creation, like [color] and [flags]: a
+  /// type that must change a label's justification needs a new child.
   Generated.text(this.payload, this.text,
       {this.color = const ByLayerColor(), this.textAttrs = 0, this.flags = 0})
       : kind = EntityKind.text,
-        filled = false;
+        filled = false,
+        boundaryFlags = flags,
+        transparency = kByLayer,
+        linetype = ReservedHandles.byLayerLinetype,
+        lineweight = kByLayer;
 
   /// [EntityKind.polyline] for a region: the kind of its boundary.
   final EntityKind kind;
@@ -153,8 +179,25 @@ final class Generated {
   /// 0 for every other form.
   final int textAttrs;
 
-  /// The record's `flags`, written on add only.
+  /// The record's `flags` (`EntityFlags`), written on add only; a region's
+  /// fill's.
   final int flags;
+
+  /// A region's boundary record's `flags`, written on add only; [flags] for
+  /// every other form, where it is not read.
+  final int boundaryFlags;
+
+  /// The record's transparency, written on add only (both records of a
+  /// region); ByLayer for a TEXT.
+  final int transparency;
+
+  /// The record's linetype handle, written on add only; ByLayer for a
+  /// region and a TEXT.
+  final Handle linetype;
+
+  /// The record's lineweight, written on add only; ByLayer for a region and
+  /// a TEXT.
+  final int lineweight;
 }
 
 /// A direct edit of a generated entity (spec D6). Propagates like

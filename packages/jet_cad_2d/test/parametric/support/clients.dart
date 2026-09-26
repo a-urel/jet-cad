@@ -623,6 +623,141 @@ final class CaptionType extends ParametricType<Caption> {
   }
 }
 
+/// An attributes client (spec 10 D13, Ruling 10-2): a 400 x 300 region, a
+/// plain LINE and two TEXTs at ([x], [y]) in its own local space, each
+/// record with attributes read from its parameters, so a test can tell
+/// "written on add" from "rewritten on a match".
+///
+/// [inherit] leaves the region's `boundaryFlags` unset and gives its fill
+/// `EntityFlags.invisible`, so the boundary must take the fill's flags
+/// (D13's default). Otherwise the fill's flags are 0 and the boundary's are
+/// `invisible`, which tells them apart.
+///
+/// The two TEXTs' strings, [first] and [second], change independently, so
+/// matching the i-th generated TEXT to the i-th existing one is observable
+/// (Task 1's review, rv1-idx). The first TEXT's flags are `invisible`, so
+/// a builder that drops the flags is observable on a TEXT too (rv1-flags).
+final class Swatch implements Component {
+  const Swatch(this.x, this.y, this.alpha, this.weight,
+      {this.first = 'Oak', this.second = 'Ash', this.inherit = false});
+  static const String id = 'test.swatch';
+  final double x, y;
+
+  /// The transparency of the region's two records and of the LINE.
+  final int alpha;
+
+  /// The LINE's lineweight.
+  final int weight;
+  final String first, second;
+  final bool inherit;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {
+        'x': x,
+        'y': y,
+        'alpha': alpha,
+        'weight': weight,
+        'first': first,
+        'second': second,
+        'inherit': inherit,
+      };
+  static Swatch fromJson(Map<String, Object?> j) => Swatch(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      j['alpha']! as int,
+      j['weight']! as int,
+      first: j['first']! as String,
+      second: j['second']! as String,
+      inherit: j['inherit']! as bool);
+  @override
+  bool operator ==(Object o) =>
+      o is Swatch &&
+      o.x == x &&
+      o.y == y &&
+      o.alpha == alpha &&
+      o.weight == weight &&
+      o.first == first &&
+      o.second == second &&
+      o.inherit == inherit;
+  @override
+  int get hashCode => Object.hash(x, y, alpha, weight, first, second, inherit);
+
+  static const double width = 400, height = 300;
+
+  /// Its TEXTs' cap height, model mm.
+  static const double textHeight = 60;
+
+  /// The first TEXT's justification: centre, middle (0x21).
+  static final int firstAttrs =
+      packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.middle);
+
+  /// The second TEXT's justification: right, top (0x32).
+  static final int secondAttrs =
+      packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
+}
+
+/// A [Swatch]'s rectangle, closed, in its own local space.
+GeometryPayload swatchLoop(Swatch p) => polylinePayload([
+      Vector2(p.x, p.y),
+      Vector2(p.x + Swatch.width, p.y),
+      Vector2(p.x + Swatch.width, p.y + Swatch.height),
+      Vector2(p.x, p.y + Swatch.height),
+    ], closed: true);
+
+/// A [Swatch]'s LINE: the rectangle's diagonal.
+GeometryPayload swatchLine(Swatch p) => linePayload(
+    Vector2(p.x, p.y), Vector2(p.x + Swatch.width, p.y + Swatch.height));
+
+/// A [Swatch]'s two TEXT payloads: at the centre, and below the rectangle.
+GeometryPayload swatchFirstText(Swatch p) => textPayload(
+    Vector2(p.x + Swatch.width / 2, p.y + Swatch.height / 2),
+    Swatch.textHeight);
+GeometryPayload swatchSecondText(Swatch p) =>
+    textPayload(Vector2(p.x + Swatch.width, p.y - 20), Swatch.textHeight);
+
+final class SwatchType extends ParametricType<Swatch> {
+  const SwatchType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// The rectangle, in world.
+  @override
+  Aabb2 reach(Swatch params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [
+          (0.0, 0.0),
+          (Swatch.width, 0.0),
+          (Swatch.width, Swatch.height),
+          (0.0, Swatch.height)
+        ])
+          toWorld.transformPoint(Vector2(params.x + dx, params.y + dy)),
+      ]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Swatch>(self)!;
+    return [
+      p.inherit
+          ? Generated.region(swatchLoop(p),
+              transparency: p.alpha, flags: EntityFlags.invisible)
+          : Generated.region(swatchLoop(p),
+              transparency: p.alpha,
+              flags: 0,
+              boundaryFlags: EntityFlags.invisible),
+      Generated(EntityKind.line, swatchLine(p),
+          transparency: p.alpha,
+          flags: EntityFlags.invisible,
+          linetype: ReservedHandles.continuousLinetype,
+          lineweight: p.weight),
+      Generated.text(swatchFirstText(p), p.first,
+          textAttrs: Swatch.firstAttrs, flags: EntityFlags.invisible),
+      Generated.text(swatchSecondText(p), p.second,
+          textAttrs: Swatch.secondAttrs),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -635,4 +770,5 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Post>(Post.id, Post.fromJson, const PostType())
   ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
   ..register<Tag>(Tag.id, Tag.fromJson, const TagType())
-  ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType());
+  ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType())
+  ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType());

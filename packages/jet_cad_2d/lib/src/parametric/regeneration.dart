@@ -183,15 +183,20 @@ List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
 
 /// The record of a child the plan adds (spec 10 D13): the one builder for
 /// every add in [_plan], a region's fill and boundary and a plain or TEXT
-/// child alike. [g]'s colour, string, `textAttrs` and flags are written
-/// here and nowhere else (06 D11, 10 D12); `draftRecord`'s defaults stand
-/// for everything a [Generated] does not set. [boundary] marks a region's
-/// boundary record, which Task 2's attributes tell apart from its fill.
+/// child alike. [g]'s colour, transparency, flags, linetype, lineweight,
+/// `textAttrs` and string are written here and nowhere else (06 D11, 10
+/// D12, D13); `draftRecord`'s defaults stand for everything a [Generated]
+/// does not set. [boundary] marks a region's boundary record, which takes
+/// [Generated.boundaryFlags] instead of the fill's [Generated.flags].
 EntityRecord _recordOf(
         Handle handle, Handle owner, EntityKind kind, Generated g,
         {bool boundary = false}) =>
-    draftRecord(handle, owner, kind, color: g.color, text: g.text)
-        .copyWith(textAttrs: g.textAttrs, flags: g.flags);
+    draftRecord(handle, owner, kind, color: g.color, text: g.text).copyWith(
+        transparency: g.transparency,
+        flags: boundary ? g.boundaryFlags : g.flags,
+        linetype: g.linetype,
+        lineweight: g.lineweight,
+        textAttrs: g.textAttrs);
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
@@ -309,9 +314,10 @@ List<DraftCommand> _plan(
         }
         // Spec 10 D12: a matched TEXT's string is a stored value, compared
         // by exact `==` after the payload and rewritten in place when it
-        // differs. Nothing else of the record is read or rewritten:
-        // `textAttrs` is fixed at creation, like the colour (06 D11).
-        if (g.kind == EntityKind.text && t.entities.read(slot).text != g.text) {
+        // differs. Nothing else of the record is read or rewritten: every
+        // other attribute is fixed at creation, like the colour (06 D11,
+        // 10 D13).
+        if (g.kind == EntityKind.text && t.entities.textAt(slot) != g.text) {
           out.add(SetEntityTextCommand(existing[i], g.text, ''));
         }
       } else {
