@@ -366,6 +366,9 @@ final class ParametricView {
   /// [placedIn].
   List<(Handle, Aabb2)>? _placed;
 
+  /// [objectsOf]'s lists, by the component type asked for.
+  final Map<Type, List<Handle>> _objectsOf = {};
+
   /// [h]'s component of type [U], or null, and null for any handle that is
   /// not a live object of the survey this view was built over (inside an
   /// edit, `drift()` and `diagnostics()` alike). An object an edit lost
@@ -400,16 +403,41 @@ final class ParametricView {
   /// Ascending live contributors whose place box touches [box] (spec 10
   /// D16; closed: touching counts, no tolerance). Computes every
   /// contributor's box on the first call per view, then scans. Unmodifiable.
+  ///
+  /// A place box may read its object's neighbours, so the first call first
+  /// fills the survey's neighbour memo for every object with one
+  /// sort-and-sweep pass (spec 10 D16.5), O(n log n + pairs) instead of one
+  /// O(n) search per contributor. Only contributors are asked for a box. An
+  /// edit that regenerates no reader never calls this and pays for neither.
   List<Handle> placedIn(Aabb2 box) {
-    final placed = _placed ??= [
-      for (final h in _survey.objects.keys)
-        if (placeBoxOf(h) case final b?) (h, b),
-    ];
+    final placed = _placed ??= _placeAll();
     return List.unmodifiable([
       for (final (h, b) in placed)
         if (b.intersects(box)) h,
     ]);
   }
+
+  List<(Handle, Aabb2)> _placeAll() {
+    _survey.sweepNeighbours();
+    return [
+      for (final MapEntry(key: h, value: r) in _survey.objects.entries)
+        if (r.type.contributesPlace)
+          if (placeBoxOf(h) case final b?) (h, b),
+    ];
+  }
+
+  /// Ascending live objects of this view's survey whose registered component
+  /// is a [U] (spec 10 D16, S-3: a room's `diagnose` finds the other rooms
+  /// with it). Read from the survey's snapshot, so an object an edit lost,
+  /// re-parented or deleted is not listed although its component may still
+  /// be attached, and a component on a group that is not root-level never
+  /// is. The first call per view and type is one pass over the survey;
+  /// later calls return the same list. Unmodifiable.
+  List<Handle> objectsOf<U extends Component>() =>
+      _objectsOf[U] ??= List.unmodifiable([
+        for (final MapEntry(key: h, value: c) in _survey.params.entries)
+          if (c is U) h,
+      ]);
 
   /// Ascending handles of the objects whose reach overlaps [h]'s, computed
   /// on the first call for [h] and memoised (spec 07 D10). Unmodifiable.

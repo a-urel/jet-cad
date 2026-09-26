@@ -44,7 +44,10 @@ int debugReadBoxCalls = 0;
 /// Neighbours are not surveyed (spec 07 D10): [neighboursOf] computes one
 /// object's list on demand, against this survey's own [reach] snapshot, and
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
-/// an edit with no seeds asks for none.
+/// an edit with no seeds asks for none. A view's first
+/// `ParametricView.placedIn`, which needs every contributor's place box and
+/// so every contributor's neighbours, fills the memo for every object at
+/// once with [sweepNeighbours] (spec 10 D16.5).
 final class _Survey {
   _Survey(
       this.objects,
@@ -132,6 +135,52 @@ final class _Survey {
     }
     // Unmodifiable: the memo is shared by every caller of this survey.
     return _neighbours[h] = List.unmodifiable(out);
+  }
+
+  bool _swept = false;
+
+  /// Fills the neighbour memo for **every** object of this survey (spec 10
+  /// D16.5), once: one sort-and-sweep over the [reach] boxes instead of one
+  /// O(n) [neighboursOf] search per object, so O(n log n + pairs) rather
+  /// than O(n²).
+  ///
+  /// The boxes are sorted by `minX`. A box `a` is tested against each later
+  /// box `b` only while `b.minX < a.maxX - Tolerance.standard.linear`: that
+  /// is the predicate's own bound on `b.minX`, and every box after the first
+  /// that fails it starts no earlier, so fails it too. The window is one
+  /// conjunct of the predicate, so each pair inside it is tested for the
+  /// other three, the same strict comparisons as [neighboursOf], and counted
+  /// once in [debugOverlapTests]. An empty reach (`Aabb2.empty()`, `minX`
+  /// infinite) sorts last and has no neighbours, as in [neighboursOf].
+  ///
+  /// The lists are the ones [neighboursOf] gives: ascending and
+  /// unmodifiable. An object whose list is memoised already keeps it.
+  void sweepNeighbours() {
+    if (_swept) return;
+    _swept = true;
+    const tol = Tolerance.standard;
+    final boxes = reach.entries.toList()
+      ..sort((p, q) => p.value.minX.compareTo(q.value.minX));
+    final found = <Handle, List<Handle>>{};
+    for (var i = 0; i < boxes.length; i++) {
+      final MapEntry(key: ha, value: a) = boxes[i];
+      final bound = a.maxX - tol.linear;
+      for (var j = i + 1; j < boxes.length; j++) {
+        final MapEntry(key: hb, value: b) = boxes[j];
+        if (!(b.minX < bound)) break;
+        debugOverlapTests++;
+        if (a.minX < b.maxX - tol.linear &&
+            a.minY < b.maxY - tol.linear &&
+            b.minY < a.maxY - tol.linear) {
+          (found[ha] ??= []).add(hb);
+          (found[hb] ??= []).add(ha);
+        }
+      }
+    }
+    for (final h in reach.keys) {
+      _neighbours[h] ??= List.unmodifiable(
+          (found[h] ?? const <Handle>[]).toList()..sort(_byValue));
+    }
   }
 }
 

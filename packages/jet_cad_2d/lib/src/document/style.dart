@@ -108,6 +108,18 @@ abstract final class ReservedHandles {
   static const Handle continuousLinetype = Handle(4);
   static const Handle standardTextStyle = Handle(5);
 
+  /// Reserved for an application's DASHED record; not in the default tables
+  /// (spec 10 D17).
+  ///
+  /// A parametric type's `generate` writes a linetype handle into the
+  /// records it adds and cannot read the tables, so a DASHED line it draws
+  /// needs a handle that is the same in every document. The application
+  /// writes the record at this handle itself; the engine's default tables,
+  /// and so the default document's bytes, do not change. 6 to 15 are the
+  /// engine's reserved range: an application claiming one of them silently
+  /// would collide with the engine's next use.
+  static const Handle dashedLinetype = Handle(6);
+
   /// The document's handle seed is raised to at least this value, so no
   /// allocated handle can ever collide with a reserved one.
   static const Handle firstFree = Handle(16);

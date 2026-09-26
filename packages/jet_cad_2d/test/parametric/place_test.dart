@@ -159,6 +159,69 @@ bool sameTransform(Transform2 a, Transform2 b) =>
     a.e == b.e &&
     a.f == b.f;
 
+/// SD7's per-object oracle: a component whose type records, from
+/// `diagnostics()`, what `view.neighbours(h)` answers for every handle in
+/// [_OracleType.of]. A diagnostics view never calls `placedIn`, so each list
+/// is the per-object `neighboursOf` search.
+final class _Oracle implements Component {
+  const _Oracle();
+  static const String id = 'test.sd7.oracle';
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => const {};
+  static _Oracle fromJson(Map<String, Object?> j) => const _Oracle();
+  @override
+  bool operator ==(Object o) => o is _Oracle;
+  @override
+  int get hashCode => id.hashCode;
+}
+
+final class _OracleType extends ParametricType<_Oracle> {
+  _OracleType();
+  final List<Handle> of = [];
+  final Map<Handle, List<Handle>> seen = {};
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(_Oracle params, Transform2 toWorld) => Aabb2.empty();
+  @override
+  List<Generated> generate(ParametricView view, Handle self) => const [];
+  @override
+  List<Diagnostic> diagnose(ParametricView view, Handle self) {
+    for (final h in of) {
+      seen[h] = List.of(view.neighbours(h));
+    }
+    return const [];
+  }
+}
+
+/// SD7's grid: neighbour_cost_test.dart's spread grid (20 columns, every
+/// other object raised a little, each turned by 0.01 × (i mod 3), at the
+/// corpus's far origin turned 30°), spaced for the Slab's 2 mm reach
+/// instead of a 1,000 mm segment's.
+final Transform2 far = Transform2.translation(4500000, 1200000)
+    .multiply(Transform2.rotation(math.pi / 6));
+Transform2 slabCell(int i) => far
+    .multiply(Transform2.translation(
+        2.25 * (i % 20) + 0.125, 1.75 * (i ~/ 20) + 0.0625 * (i % 2)))
+    .multiply(Transform2.rotation(0.01 * (i % 3)));
+
+/// [p] turned by [turn], its reach's `minX` equal to [minX] exactly, its
+/// group's origin at height [y].
+Transform2 reachStartingAt(Slab p, double minX, double y, double turn) {
+  Transform2 at(double x) =>
+      Transform2.translation(x, y).multiply(Transform2.rotation(turn));
+  var x = minX;
+  x += minX - slabReach(p, at(x)).minX;
+  for (var i = 0; i < 10000; i++) {
+    final m = slabReach(p, at(x)).minX;
+    if (m == minX) return at(x);
+    x = nextAfter(x, up: m < minX);
+  }
+  throw StateError('no reach starting at $minX');
+}
+
 /// A test-local type with both roles (SD8).
 final class _BothType extends ParametricType<Slab> {
   const _BothType();
@@ -387,6 +450,126 @@ void main() {
     expect(listedBoxes(doc, hR1), [boxNear(b1)]);
     expect(listedBoxes(doc, hR2), [boxNear(b1)]);
     expect(drift(doc), isEmpty);
+  });
+
+  test(
+      'SD7 the bulk pass gives every object the lists neighboursOf '
+      'gives, with fewer than n²/4 overlap tests on a spread layout', () {
+    const n = 200;
+    const tol = Tolerance.standard;
+    const tile = Slab(0.5, 0.25, 0.75, 0.5);
+    final oracleType = _OracleType();
+    final cat = testCatalog()
+      ..register<_Oracle>(_Oracle.id, _Oracle.fromJson, oracleType);
+    final doc = DraftDocument.empty();
+    ParametricSystem(doc, cat).install();
+
+    // 196 Slabs on the grid, and two pairs far from it, whose reaches meet
+    // at the predicate's bound: P overlaps along x by one ulp, not more
+    // than the tolerance (no neighbours); Q by two ulps, more than it
+    // (neighbours). Their y ranges overlap by far more.
+    const grid = n - 4;
+    final at = <Transform2>[for (var i = 0; i < grid; i++) slabCell(i)];
+    final p1 = Transform2.translation(4500200.25, 1200100.5)
+        .multiply(Transform2.rotation(0.3));
+    final p1Reach = slabReach(tile, p1);
+    final p2 = reachStartingAt(
+        tile, nextAfter(p1Reach.maxX, up: false), 1200100.75, -0.2);
+    final q1 = Transform2.translation(4500200.25, 1200200.5)
+        .multiply(Transform2.rotation(0.3));
+    final q1Reach = slabReach(tile, q1);
+    final q2 = reachStartingAt(
+        tile,
+        nextAfter(nextAfter(q1Reach.maxX, up: false), up: false),
+        1200200.75,
+        -0.2);
+    at.addAll([p1, p2, q1, q2]);
+    final slabs = [for (var i = 0; i < n; i++) doc.handleSeed.next()];
+    doc.commands.execute(CompoundCommand([
+      for (var i = 0; i < n; i++) ...[
+        AddNodeCommand(GroupNode(
+            handle: slabs[i],
+            parent: doc.rootHandle,
+            transform: at[i],
+            children: const [])),
+        SetComponentCommand<Slab>(slabs[i], tile),
+      ],
+    ], label: 'Slabs'));
+    final hL = doc.handleSeed.next();
+    final atL = Transform2.translation(4500400.5, 1200300.25)
+        .multiply(Transform2.rotation(0.2));
+    const lensL = Lens(0.5, 0.25, 50.5, 40.75);
+    doc.commands.execute(create(doc, hL, atL, lensL));
+    final hO = doc.handleSeed.next();
+    doc.commands.execute(create(doc, hO, parked, const _Oracle()));
+    oracleType.of.addAll([...slabs, hL, hO]);
+
+    // Moved into the Lens's field: grid object 150.
+    final moved = slabs[150];
+    final fL = lensField(lensL, atL);
+    final to = cornerAt(tile, fL.minX + 10.25, fL.minY + 12.5, 0.15);
+    expect(slabBox(tile, to).intersects(fL), isTrue);
+    expect(kids(doc, hL), isEmpty);
+
+    // Premises, from the world reaches computed here: the grid is spread
+    // (every object has a handful of neighbours, before and after the
+    // move; the moved one too); P is one ulp deep and no pair, Q two ulps
+    // deep and one; the pairs meet nothing else.
+    List<Handle> expected(Handle h, Transform2 Function(Handle) atOf) => [
+          for (final o in slabs)
+            if (o != h &&
+                neighbours(slabReach(tile, atOf(h)), slabReach(tile, atOf(o))))
+              o,
+        ];
+    Transform2 before(Handle h) => at[slabs.indexOf(h)];
+    Transform2 after(Handle h) => h == moved ? to : before(h);
+    for (final atOf in [before, after]) {
+      final lists = {for (final h in slabs) h: expected(h, atOf)};
+      final gridCounts = [for (final h in slabs.take(grid)) lists[h]!.length];
+      expect(gridCounts.where((c) => c == 0), hasLength(atOf == after ? 1 : 0),
+          reason: 'only the moved object, once moved, has none');
+      expect(gridCounts.reduce(math.max), inInclusiveRange(4, 12));
+      expect(lists[slabs[grid]], isEmpty);
+      expect(lists[slabs[grid + 1]], isEmpty);
+      expect(lists[slabs[grid + 2]], [slabs[grid + 3]]);
+      expect(lists[slabs[grid + 3]], [slabs[grid + 2]]);
+    }
+    expect(expected(moved, before), isNotEmpty);
+    final p2Reach = slabReach(tile, p2), q2Reach = slabReach(tile, q2);
+    expect(p2Reach.minX, lessThan(p1Reach.maxX));
+    expect(p1Reach.maxX - p2Reach.minX, lessThanOrEqualTo(tol.linear));
+    expect(q1Reach.maxX - q2Reach.minX, greaterThan(tol.linear));
+    expect(q1Reach.maxX - q2Reach.minX, lessThan(2 * tol.linear));
+
+    Slab.placeCalls.clear();
+    final tests0 = debugOverlapTests;
+    doc.commands.execute(TransformNodeCommand(moved, to));
+    final tests = debugOverlapTests - tests0;
+    print('SD7 n=$n overlap tests in the edit: $tests '
+        '(n²/4 = ${n * n ~/ 4})');
+    expect(tests, lessThan(n * n ~/ 4));
+    expect(listedBoxes(doc, hL), [boxNear(slabBox(tile, to))],
+        reason: 'the Lens regenerated');
+
+    // The after-view's calls: the last call's view, one call per Slab.
+    final view = Slab.placeCalls.last.view;
+    final seen = {
+      for (final c in Slab.placeCalls)
+        if (identical(c.view, view)) c.self: c.neighbours,
+    };
+    expect(seen.keys.toSet(), slabs.toSet());
+    expect(Slab.placeCalls.where((c) => identical(c.view, view)), hasLength(n));
+
+    ParametricSystem(doc, cat).diagnostics();
+    expect(oracleType.seen.keys.toSet(), {...slabs, hL, hO});
+    for (final h in slabs) {
+      expect(seen[h], oracleType.seen[h], reason: h.toHex());
+      expect(seen[h], expected(h, after), reason: h.toHex());
+      expect(() => seen[h]!.add(h), throwsUnsupportedError);
+    }
+    expect(oracleType.seen[hL], isEmpty);
+    expect(oracleType.seen[hO], isEmpty);
+    expect(ParametricSystem(doc, cat).drift(), isEmpty);
   });
 
   test(

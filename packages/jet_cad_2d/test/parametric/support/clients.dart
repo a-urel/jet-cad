@@ -969,12 +969,16 @@ final class FuseType extends ParametricType<Fuse> {
   }
 }
 
-/// One [SlabType.placeBox] call, as the view answered it (SV1-SV3).
+/// One [SlabType.placeBox] call, as the view answered it (SV1-SV3), and
+/// the neighbour list the view answered for [self] (SD7: the list itself,
+/// not a copy).
 typedef SlabCall = ({
   ParametricView view,
+  Handle self,
   Slab? params,
   Transform2 toWorld,
   PageComponent? page,
+  List<Handle> neighbours,
 });
 
 /// A place contributor (spec 10 D16, Ruling 10-2): a [w] x [h] rectangle at
@@ -1045,13 +1049,18 @@ final class SlabType extends ParametricType<Slab> {
   Aabb2? placeBox(ParametricView view, Handle self) {
     final p = view.paramsOf<Slab>(self);
     final toWorld = view.toWorld(self);
-    Slab.placeCalls
-        .add((view: view, params: p, toWorld: toWorld, page: view.page));
+    final neighbours = view.neighbours(self);
+    Slab.placeCalls.add((
+      view: view,
+      self: self,
+      params: p,
+      toWorld: toWorld,
+      page: view.page,
+      neighbours: neighbours,
+    ));
     if (p == null) return null;
     return slabBox(p, toWorld,
-        grown: view
-            .neighbours(self)
-            .any((n) => view.paramsOf<ClipRect>(n) != null));
+        grown: neighbours.any((n) => view.paramsOf<ClipRect>(n) != null));
   }
 
   @override
