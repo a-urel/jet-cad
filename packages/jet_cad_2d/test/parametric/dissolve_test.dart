@@ -219,6 +219,23 @@ void main() {
     final redoReplay = undoReplay.apply(copy).inverse;
     expect(copy.components.get<Fuse>(hF), fuse);
     expect(fuseSets(redoReplay), [null]);
+    // D15's order: F's leaves, fills first (the select tool's order), then
+    // its node, then the detach. The state cannot tell where the detach
+    // sits (the component store is independent of the tree and the
+    // entities: X4-order is state-equal), so the replay is read.
+    expect([
+      for (final k in flatten(redoReplay))
+        if (k is RemoveEntityCommand)
+          'entity ${k.handle.value}'
+        else if (k is RemoveNodeCommand)
+          'node ${k.handle.value}'
+        else if (k is SetComponentCommand<Fuse>)
+          'detach ${k.handle.value}',
+    ], [
+      for (final k in handles) 'entity ${k.value}',
+      'node ${hF.value}',
+      'detach ${hF.value}',
+    ]);
 
     // The parameter edit: `burnt` dissolves F the same way, one undo step.
     final depth2 = doc.commands.undoDepth;
