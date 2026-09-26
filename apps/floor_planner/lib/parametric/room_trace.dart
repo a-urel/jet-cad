@@ -131,7 +131,9 @@ int debugTracedSegments = 0;
 /// 8. **Holes** (D6): every other connected component whose outer contour
 ///    (its most negative cycle) lies inside the outer ring and inside no
 ///    bounded face of a third component that does not hold the seed. A
-///    component with no area (a free separator) is not a hole.
+///    component with no area (a free separator, or a free tree of them) is
+///    not a hole: its contour, spikes removed, has fewer than three
+///    vertices.
 /// 9. **Clean-up**: spikes (`u → v → u`, a dangling separator end), then
 ///    vertices collinear within `roomTrace.linear`; holes reversed to
 ///    anticlockwise, their sources moving with their edges; the canonical
@@ -377,7 +379,7 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
   final outerPoints = pointsOf(cycles[outer]);
   final holeCycles = <int>[];
   for (final MapEntry(key: component, value: c) in contour.entries) {
-    if (!(areas[c] < 0)) continue; // a free separator: no area
+    if (!(areas[c] < 0)) continue; // no area: not a contour
     final p = verts[from[cycles[c].first]];
     if (!pointInRing(p, outerPoints)) continue;
     var nested = false;
@@ -447,19 +449,23 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
   }
 
   final ring = clean(cycles[outer]);
-  final holes = [
-    for (final c in holeCycles)
-      () {
-        // Walked clockwise (the face lies outside it): reversed to
-        // anticlockwise, each source moving with its edge.
-        final r = clean(cycles[c]);
-        final n = r.pts.length;
-        return _rotated((
-          pts: [for (var i = n - 1; i >= 0; i--) r.pts[i]],
-          src: [for (var i = n - 1; i >= 0; i--) r.src[(i - 1 + n) % n]],
-        ));
-      }(),
-  ]..sort((a, b) => _lex(a.pts.first, b.pts.first));
+  final holes = <_Ring>[];
+  for (final c in holeCycles) {
+    final r = clean(cycles[c]);
+    final n = r.pts.length;
+    // A component with no area (a free separator, or a free tree of them)
+    // walks out and back: with its spikes removed, fewer than three
+    // vertices are left. It is not a hole (D6), whatever the sign of its
+    // shoelace residue.
+    if (n < 3) continue;
+    // Walked clockwise (the face lies outside it): reversed to
+    // anticlockwise, each source moving with its edge.
+    holes.add(_rotated((
+      pts: [for (var i = n - 1; i >= 0; i--) r.pts[i]],
+      src: [for (var i = n - 1; i >= 0; i--) r.src[(i - 1 + n) % n]],
+    )));
+  }
+  holes.sort((a, b) => _lex(a.pts.first, b.pts.first));
 
   return Traced(
     [for (final p in ring.pts) p + o],

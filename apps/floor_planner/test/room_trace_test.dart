@@ -3,6 +3,8 @@
 // `RoomInputs`, the document adapter the tools use (RI1 made it equal to
 // the view adapter). Every expected area is worked by hand next to its
 // assertion, to 1e-2 mm2.
+import 'dart:math' as math;
+
 import 'package:floor_planner/parametric/room_inputs.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,6 +90,59 @@ void expectRing(Plan plan, List<Vector2> ring, List<(double, double)> expected,
 List<(double, double)> rect(double x0, double y0, double x1, double y1) =>
     [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
 
+/// Asserts that each edge of [ring] carries exactly the sources that
+/// [expected] gives for the side whose plan midpoint is nearest the edge's.
+void expectEdgeSources(Plan plan, List<Vector2> ring, List<Set<Handle>> sources,
+    Map<(double, double), Set<Handle>> expected, String what) {
+  final mids = {
+    for (final MapEntry(key: (x, y), value: s) in expected.entries)
+      plan.at(x, y): s,
+  };
+  for (var i = 0; i < ring.length; i++) {
+    final m = (ring[i] + ring[(i + 1) % ring.length]) * 0.5;
+    var best = mids.keys.first;
+    for (final k in mids.keys) {
+      if ((k - m).length < (best - m).length) best = k;
+    }
+    expect((best - m).length, lessThan(1e-3), reason: '$what: edge $i');
+    expect(sources[i].toList(), mids[best]!.toList(),
+        reason: '$what: edge $i\'s sources, ascending');
+  }
+}
+
+/// Whether [a] and [b] are the same trace, bit for bit: points, sources in
+/// their order, and areas.
+bool sameTraced(Traced a, Traced b) {
+  bool samePts(List<Vector2> p, List<Vector2> q) =>
+      p.length == q.length &&
+      [for (var i = 0; i < p.length; i++) p[i].x == q[i].x && p[i].y == q[i].y]
+          .every((e) => e);
+  bool sameSrc(List<Set<Handle>> p, List<Set<Handle>> q) =>
+      p.length == q.length &&
+      [
+        for (var i = 0; i < p.length; i++)
+          p[i].length == q[i].length &&
+              [
+                for (var k = 0; k < p[i].length; k++)
+                  p[i].elementAt(k) == q[i].elementAt(k)
+              ].every((e) => e)
+      ].every((e) => e);
+  if (!samePts(a.ring, b.ring) ||
+      !sameSrc(a.ringSources, b.ringSources) ||
+      a.outerArea != b.outerArea ||
+      a.holes.length != b.holes.length) {
+    return false;
+  }
+  for (var k = 0; k < a.holes.length; k++) {
+    if (!samePts(a.holes[k], b.holes[k]) ||
+        !sameSrc(a.holeSources[k], b.holeSources[k]) ||
+        a.holeAreas[k] != b.holeAreas[k]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// Wall [h]'s stored fills: one per piece of its band.
 int fillsOf(Plan plan, Handle h) => [
       for (final k in kids(plan.doc, h))
@@ -153,8 +208,10 @@ void main() {
         final err = expectArea(r, hand, what);
         if (err > worst) worst = err;
         expect(r.holes, isEmpty, reason: what);
-        // Four ring points: the T butts split into the through faces are
-        // removed again as collinear.
+        // Four ring points: every T butt split into a through face is a
+        // corner of the room on that side, so no ring here passes straight
+        // through a split vertex (X10-collinear is killed by RT8's short
+        // separator, not here).
         expectRing(plan, r.ring, corners, what);
         final (x, y) = sampleSeeds[name]!;
         expectCanonical(plan.at(x, y), r, what);
@@ -272,6 +329,19 @@ void main() {
       expectRing(plan, r.holes.single, rect(4950, 1450, 5650, 2150), what);
       expect({for (final s in r.holeSources.single) ...s}, column,
           reason: what);
+      // Each hole edge carries its own wall's outer face: the column's four
+      // walls are south, east, north and west, in that order.
+      expectEdgeSources(
+          plan,
+          r.holes.single,
+          r.holeSources.single,
+          {
+            (5300, 1450): {plan.walls[4]},
+            (5650, 1800): {plan.walls[5]},
+            (5300, 2150): {plan.walls[6]},
+            (4950, 1800): {plan.walls[7]},
+          },
+          what);
       expectCanonical(plan.at(7000, 2000), r, what);
       // The courtyard is its own face: 500 x 500 = 250,000, no hole (the
       // room's walls are outside it).
@@ -341,6 +411,75 @@ void main() {
       expect(r.ringSources.where((s) => s.contains(column)), hasLength(3),
           reason: what);
       expectCanonical(plan.at(6500, 2000), r, what);
+
+      // Two triangles each touching the ring at one inner corner, (100,
+      // 100) and (100, 3,900): the ring walks around each and passes the
+      // touching corner twice. Whichever placement, the least vertex is one
+      // of those pinches, so the start is decided by the vertices that
+      // follow it (Ruling 10-7). The box as four mitred bands, crafted
+      // inputs in plan mm: 7,800 x 3,800 = 29,640,000, less two triangles
+      // of |500 x 500 - 200 x 200| / 2 = 105,000 each: 29,430,000.
+      RoomInput band(int h, List<(double, double)> xy) =>
+          RoomInput(Handle(h), [for (final (x, y) in xy) place.at(x, y)],
+              closed: true);
+      const shapes = [
+        [(-100.0, -100.0), (8100.0, -100.0), (7900.0, 100.0), (100.0, 100.0)],
+        [(8100.0, -100.0), (8100.0, 4100.0), (7900.0, 3900.0), (7900.0, 100.0)],
+        [(8100.0, 4100.0), (-100.0, 4100.0), (100.0, 3900.0), (7900.0, 3900.0)],
+        [(-100.0, 4100.0), (-100.0, -100.0), (100.0, 100.0), (100.0, 3900.0)],
+        [(100.0, 100.0), (600.0, 300.0), (300.0, 600.0)],
+        [(100.0, 3900.0), (300.0, 3400.0), (600.0, 3700.0)],
+      ];
+      final seed = place.at(4000, 2000);
+      final pinched = traceRoom(seed, [
+        for (var i = 0; i < shapes.length; i++) band(10 + i, shapes[i]),
+      ]) as Traced;
+      var pinch = 'pinch at $place';
+      expect(pinched.area, closeTo(29430000, 1e-2), reason: pinch);
+      expect(pinched.holes, isEmpty, reason: pinch);
+      expect(pinched.ring, hasLength(10), reason: pinch);
+      expectCanonical(seed, pinched, pinch);
+
+      // The same shapes under other handles, shuffled, with far bands 50 m
+      // off (handles 1-9 below the room's, 1,000 and up above it): the
+      // handles decide the arrangement's vertex and half-edge order, and so
+      // where the walk of the face starts, but not the output. The ring's
+      // points and the area are bit for bit the same, and each edge
+      // carries the same shapes.
+      RoomInput far(int h, int j) => band(h, [
+            (60000.0 + 1300 * j, 60000),
+            (60800.0 + 1300 * j, 60000),
+            (60800.0 + 1300 * j, 60150),
+            (60000.0 + 1300 * j, 60150),
+          ]);
+      final rnd = math.Random(3);
+      for (var k = 0; k < 20; k++) {
+        pinch = 'pinch at $place, variant $k';
+        final handles = [for (var i = 0; i < shapes.length; i++) 10 + i]
+          ..shuffle(rnd);
+        final shapeOf = {
+          for (var i = 0; i < shapes.length; i++) Handle(handles[i]): i,
+        };
+        final other = traceRoom(
+            seed,
+            [
+              for (var i = 0; i < shapes.length; i++)
+                band(handles[i], shapes[i]),
+              for (var j = 0; j < k % 10; j++) far(1 + j, j),
+              for (var j = 0; j < k ~/ 2; j++) far(1000 + j, 10 + j),
+            ]..shuffle(rnd)) as Traced;
+        expect([
+          for (final p in other.ring) (p.x, p.y)
+        ], [
+          for (final p in pinched.ring) (p.x, p.y)
+        ], reason: pinch);
+        expect(other.outerArea, pinched.outerArea, reason: pinch);
+        expect([
+          for (final s in other.ringSources) {for (final h in s) shapeOf[h]}
+        ], [
+          for (final s in pinched.ringSources) {for (final h in s) h.value - 10}
+        ], reason: pinch);
+      }
     }
   });
 
@@ -377,6 +516,35 @@ void main() {
           (250.0, 3850.0),
         ]);
       }
+
+      // The north side drawn as two collinear walls joined end to end, the
+      // west half first (so the lower handle): 7,800 x 3,800 = 29,640,000.
+      // The ring walks the east half's face, then the west half's; the
+      // vertex between them is collinear and removed, and the merged edge
+      // carries both walls, ascending.
+      plan = buildPlan(const [
+        W(0, 0, 8000, 0, 200),
+        W(8000, 0, 8000, 4000, 200),
+        W(4000, 4000, 0, 4000, 200), // north, west half
+        W(8000, 4000, 4000, 4000, 200), // north, east half
+        W(0, 4000, 0, 0, 200),
+      ], place: place);
+      what = 'a split north side at $place';
+      r = traceAt(plan, inputsOf(plan), (4000, 2000), 'split');
+      expectArea(r, 29640000, what);
+      expectRing(plan, r.ring, rect(100, 100, 7900, 3900), what);
+      expect(plan.walls[2].value, lessThan(plan.walls[3].value));
+      expectEdgeSources(
+          plan,
+          r.ring,
+          r.ringSources,
+          {
+            (4000, 100): {plan.walls[0]},
+            (7900, 2000): {plan.walls[1]},
+            (4000, 3900): {plan.walls[2], plan.walls[3]},
+            (100, 2000): {plan.walls[4]},
+          },
+          what);
     }
   });
 
@@ -423,6 +591,71 @@ void main() {
         expect(r.holes, isEmpty, reason: what);
         expect(r.ringSources.any((s) => s.contains(plan.seps.first)), isFalse,
             reason: what);
+      }
+
+      // A free tree of two separators sharing an end (the review's case):
+      // no area, so not a hole, whatever the sign of its walk's shoelace
+      // residue (at the origin it came back as a two-point hole of area
+      // 0.0). The room is the whole box, 29,640,000.
+      final tree = buildPlan(boxWalls,
+          seps: const [
+            (
+              1476.9157974874054,
+              2289.0131972203035,
+              1881.3690635069213,
+              2760.8488119065564
+            ),
+            (
+              1881.3690635069213,
+              2760.8488119065564,
+              2979.0947358906415,
+              3192.7374418753357
+            ),
+          ],
+          place: place);
+      final treeRoom = traceAt(tree, inputsOf(tree), (7000, 3500), 'tree');
+      expectArea(treeRoom, 29640000, 'a free tree at $place');
+      expect(treeRoom.holes, isEmpty, reason: 'a free tree at $place');
+
+      // Centreline to centreline across the south-west corner, (0, 2,000)
+      // to (4,000, 0), crossing the faces at about 26.57 and 63.43 deg: y =
+      // 2,000 - x / 2 meets x = 100 at y 1,950 and y = 100 at x 3,800, a
+      // triangle of 3,700 x 1,850 / 2 = 3,422,500; the rest 29,640,000 -
+      // 3,422,500 = 26,217,500.
+      final diagonal =
+          buildPlan(boxWalls, seps: const [(0, 2000, 4000, 0)], place: place);
+      final diagonalInputs = inputsOf(diagonal);
+      var d = traceAt(diagonal, diagonalInputs, (500, 500), 'diagonal');
+      expectArea(d, 3422500, 'the corner at $place');
+      expectRing(diagonal, d.ring, const [(100, 100), (3800, 100), (100, 1950)],
+          'the corner at $place');
+      d = traceAt(diagonal, diagonalInputs, (4000, 2000), 'diagonal');
+      expectArea(d, 26217500, 'the rest at $place');
+
+      // Separators 0.5 um short of both faces: within roomTrace.linear, so
+      // each still ends on the faces and splits the box (D5 step 4).
+      // Vertical at x 3,000: 2,900 x 3,800 = 11,020,000 and 4,900 x 3,800 =
+      // 18,620,000. Horizontal at y 2,000: 7,800 x 1,900 = 14,820,000 each.
+      for (final (label, sep, seeds, areas) in [
+        (
+          'vertical',
+          (3000.0, 100.0000005, 3000.0, 3899.9999995),
+          const [(1500.0, 2000.0), (7000.0, 2000.0)],
+          const [11020000.0, 18620000.0],
+        ),
+        (
+          'horizontal',
+          (100.0000005, 2000.0, 7899.9999995, 2000.0),
+          const [(4000.0, 1000.0), (4000.0, 3000.0)],
+          const [14820000.0, 14820000.0],
+        ),
+      ]) {
+        final near = buildPlan(boxWalls, seps: [sep], place: place);
+        final nearInputs = inputsOf(near);
+        for (var k = 0; k < 2; k++) {
+          final r = traceAt(near, nearInputs, seeds[k], label);
+          expectArea(r, areas[k], '$label 0.5 um short at $place, $k');
+        }
       }
     }
   });
