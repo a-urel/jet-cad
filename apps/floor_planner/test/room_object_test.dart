@@ -383,6 +383,37 @@ void main() {
     }
   });
 
+  test(
+      'RG7 a room\'s read box reaches past a stored tint that rounds inside '
+      'its face: a separator moved away from it rebuilds it', () {
+    // The reviewer's case (review of 54431ab, I-1): a face-to-face separator
+    // at a fractional x, the room to its right, at the origin in an
+    // identity group. The tint goes through `ring − seed_w`, then `seed +
+    // …`; with seed.x > 2 · ring.x that subtraction is inexact, and the
+    // stored tint's west edge rounds to strictly east of the separator. Only
+    // the read box's 2 mm margin then reaches the separator's box.
+    const s = 1963.9993935195212;
+    final plan = buildPlan(boxWalls, seps: const [(s, 100, s, 3900)]);
+    final doc = plan.doc;
+    attachPage(doc, PageComponent());
+    final room = addRoom(doc, plan.at(6512.25, 2012.5), 'Room 1');
+    // x s..7,900, 3,800 tall: (7,900 − 1,963.9993935…) × 3,800 =
+    // 5,936.0006064… × 3,800 = 22,556,802.30 (22.56, 0.0018 from 22.555).
+    expect(stringsOf(doc, room), ['Room 1', '22.56 m²']);
+    // Premise: the stored tint lies strictly east of the separator.
+    final sepX = plan.at(s, 100).x;
+    final minX = worldTintOf(doc, room).map((q) => q.x).reduce(math.min);
+    expect(minX, greaterThan(sepX),
+        reason: 'the stored tint rounds past the separator');
+
+    doc.commands.execute(SetComponentCommand<SeparatorParams>(
+        plan.seps.single, const SeparatorParams(s - 100, 100, s - 100, 3900)));
+    // (7,900 − 1,863.9993935…) × 3,800 = 6,036.0006064… × 3,800 =
+    // 22,936,802.30 (22.94, 0.0018 from 22.935).
+    expect(stringsOf(doc, room), ['Room 1', '22.94 m²']);
+    expect(driftOf(doc), isEmpty);
+  });
+
   test('RL3 a label offset rides with the pole across a wall move', () {
     for (final place in [origin, corpusGroups]) {
       final plan = twoRooms(place);
@@ -396,6 +427,10 @@ void main() {
       // its pole.
       final store = addRoom(doc, seedAt(plan, rightSeed), 'Store',
           label: (double.infinity, 5.5));
+      // Either component alone non-finite is auto: a second room in the
+      // same face, its dy NaN, anchors at the same pole.
+      final pantry = addRoom(doc, plan.at(6800.25, 1000.5), 'Pantry',
+          label: (5.5, double.nan));
       final offset = Vector2(label.$1, label.$2);
 
       void expectRides(String when) {
@@ -410,7 +445,9 @@ void main() {
         expect(stringsOf(doc, room).first, 'Kitchen area');
         final storePole = poleAt(doc, seedAt(plan, rightSeed));
         expect((anchorOf(doc, store) - storePole).length, lessThan(1e-6),
-            reason: 'a non-finite offset is auto $when at $place');
+            reason: 'a non-finite dx is auto $when at $place');
+        expect((anchorOf(doc, pantry) - storePole).length, lessThan(1e-6),
+            reason: 'a non-finite dy is auto $when at $place');
       }
 
       expectRides('placed');
@@ -435,7 +472,8 @@ void main() {
     final plan = twoRooms(corpus);
     final doc = plan.doc;
     final seed = seedAt(plan, leftSeed);
-    final room = addRoom(doc, seed, 'Room 1');
+    const label = (37.25, -21.75);
+    final room = addRoom(doc, seed, 'Room 1', label: label);
     // A hand-built similarity about the seed (only a file makes one, D21):
     // 23°, scale 1.5, and a far-origin translation, so the seed stays put.
     final m = Transform2.translation(seed.x, seed.y)
@@ -470,7 +508,15 @@ void main() {
     // The tint is still the face, through the scaled, turned group.
     expectTintRect(plan, room,
         const [(100, 100), (2950, 100), (2950, 3900), (100, 3900)], 'RL4');
-    final a = toPlan(plan, anchorOf(doc, room));
+    // The offset is local (D10): it reaches world through the group's turn
+    // and scale, `anchor − pole == toWorld(label)` as a direction.
+    final pole = poleAt(doc, seed);
+    final offsetW = toWorld.transformDirection(Vector2(label.$1, label.$2));
+    // Premise: the world offset is not the local one.
+    expect((offsetW - Vector2(label.$1, label.$2)).length, greaterThan(10));
+    expect((anchorOf(doc, room) - pole - offsetW).length, lessThan(1e-6),
+        reason: 'anchor − pole == toWorld(label)');
+    final a = toPlan(plan, pole);
     expect([a.x - 100, 2950 - a.x, a.y - 100, 3900 - a.y].reduce(math.min),
         greaterThanOrEqualTo(1425 - 10));
     expect(driftOf(doc), isEmpty);
