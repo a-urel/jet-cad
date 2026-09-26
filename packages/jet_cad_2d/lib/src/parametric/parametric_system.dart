@@ -124,9 +124,22 @@ abstract class ParametricType<T extends Component> {
   ///
   /// Only a contributor whose place changed adds its before and after boxes
   /// to the boxes the trigger tests readers against, so an unchanged
-  /// neighbour of an edited wall regenerates no reader (S-4). Its input is
-  /// a stored-value style comparison of two deterministic computations: any
-  /// bit difference counts as a change, which only ever regenerates more.
+  /// neighbour of an edited wall regenerates no reader (S-4).
+  ///
+  /// **The contract** (what spec 10 D16.4's no-drift proof rests on): two
+  /// equal inputs must mean an equal place box **and** equal everything a
+  /// reader reads of this object. So the input is what the object
+  /// contributes as a reader sees it, not what it is made from: a wall's is
+  /// its joined ring, after 07's joints and the short-wall fallback, never
+  /// its parameters, which can stay equal while a neighbour reshapes its
+  /// band. An input equal across the two views while a reader-visible part
+  /// changed leaves that reader stale.
+  ///
+  /// A change is an `==` difference: a stored-value style comparison of two
+  /// deterministic computations, never a tolerance. Two inputs that `==`
+  /// calls equal are unchanged even when their bits differ (`+0.0 == -0.0`),
+  /// and anything `==` tells apart counts as a change, which only ever
+  /// regenerates more.
   ///
   /// Default: a fresh `Object()`, equal to nothing, so a contributor that
   /// does not override it always counts as changed. That is safe: it can

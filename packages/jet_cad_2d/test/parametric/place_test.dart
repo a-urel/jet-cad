@@ -150,6 +150,15 @@ bool sameBox(Aabb2 a, Aabb2 b) =>
     a.maxX == b.maxX &&
     a.maxY == b.maxY;
 
+/// Exact: the same six entries.
+bool sameTransform(Transform2 a, Transform2 b) =>
+    a.a == b.a &&
+    a.b == b.b &&
+    a.c == b.c &&
+    a.d == b.d &&
+    a.e == b.e &&
+    a.f == b.f;
+
 /// A test-local type with both roles (SD8).
 final class _BothType extends ParametricType<Slab> {
   const _BothType();
@@ -620,6 +629,19 @@ void main() {
         (2, 1));
     expect(kids(doc, hR), isEmpty);
     expect(drift(doc), isEmpty);
+
+    // One edit that deletes the only Lens and moves S: the reader check
+    // reads the after-survey, which holds no reader, so no place box is
+    // asked although the before-survey held one.
+    expect(
+        counted(() => doc.commands.execute(CompoundCommand([
+              deleteObject(doc, hR),
+              TransformNodeCommand(hS, t0),
+            ], label: 'Delete R, move S'))),
+        (0, 0));
+    expect(doc.tree[hR], isNull);
+    expect(sameTransform(doc.tree.accumulatedTransform(hS), t0), isTrue);
+    expect(drift(doc), isEmpty);
   });
 
   test(
@@ -642,7 +664,7 @@ void main() {
       expect(rodBox(from, atT).intersects(f), isTrue);
       final (a0, b0) = from.worldEnds(atT);
       final (a1, b1) = to.worldEnds(atT);
-      expect([a0.x, a0.y, b0.x, b0.y] == [a1.x, a1.y, b1.x, b1.y], isFalse);
+      expect([a0.x, a0.y, b0.x, b0.y], isNot(equals([a1.x, a1.y, b1.x, b1.y])));
 
       final doc = paramDoc();
       doc.commands.execute(create(doc, hR, atR, lens));
@@ -661,6 +683,53 @@ void main() {
           for (final v in [a1.x, a1.y, b1.x, b1.y]) closeTo(v, 1e-6)
         ],
       ]);
+      expect(drift(doc), isEmpty);
+    }
+  });
+  test(
+      'SD11b an exact contributor moved into, across and out of a reader\'s '
+      'field regenerates the reader each time: its input is its world '
+      'segment, read from each view\'s snapshot transform', () {
+    const hR = Handle(1000), hT = Handle(2000);
+    final f = field();
+    const rod = Rod(0.5, 0.25, 500.75, 200.5, exact: true);
+    final inside = Transform2.translation(f.minX + 400.5, f.minY + 300.25)
+        .multiply(Transform2.rotation(0.35));
+    final across = Transform2.translation(f.minX + 900.25, f.minY + 700.75)
+        .multiply(Transform2.rotation(-0.45));
+    final out = Transform2.translation(f.maxX + 1500.75, f.minY + 300.25)
+        .multiply(Transform2.rotation(0.35));
+    List<Matcher> seg(Transform2 at) {
+      final (a, b) = rod.worldEnds(at);
+      return [
+        for (final v in [a.x, a.y, b.x, b.y]) closeTo(v, 1e-6)
+      ];
+    }
+
+    final doc = paramDoc();
+    doc.commands.execute(create(doc, hR, atR, lens));
+    doc.commands.execute(create(doc, hT, parked, rod));
+    expect(kids(doc, hR), isEmpty);
+    // Premises: parked and out, T's box misses R's read box; inside and
+    // across, it lies in the field; the component never changes, so only
+    // the transform tells the two views' inputs apart.
+    final read = readBoxOf(doc, hR, lens);
+    expect(rodBox(rod, parked).intersects(read), isFalse);
+    expect(rodBox(rod, out).intersects(read), isFalse);
+    expect(rodBox(rod, inside).intersects(f), isTrue);
+    expect(rodBox(rod, across).intersects(f), isTrue);
+    expect(sameTransform(inside, across), isFalse);
+
+    for (final (at, listed) in [
+      (inside, [seg(inside)]),
+      (across, [seg(across)]),
+      (out, <List<Matcher>>[]),
+    ]) {
+      final r0 = calls(hR);
+      doc.commands.execute(TransformNodeCommand(hT, at));
+      expect(doc.components.get<Rod>(hT), rod);
+      expect(calls(hR), r0 + 1, reason: 'R regenerates');
+      expect(listedSegments(doc, hR), listed);
       expect(drift(doc), isEmpty);
     }
   });
