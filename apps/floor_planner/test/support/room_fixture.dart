@@ -17,7 +17,7 @@ import 'package:floor_planner/parametric/wall.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'wall_fixture.dart' show kids, kindOf, payloadOf;
+import 'wall_fixture.dart' show enc, kids, kindOf, payloadOf;
 
 export 'wall_fixture.dart'
     show kids, kindOf, payloadOf, driftOf, diagnosticsOf, canon, reload, enc;
@@ -647,3 +647,69 @@ DraftDocument reloadWithPage(String s) {
   installParametric(doc);
   return doc;
 }
+
+// ---------------------------------------------------------------------------
+// Dissolving and diagnostics (Task 13).
+
+/// The select tool's group delete (`select_tool.dart` `_groupCascade`, as
+/// `opening_fixture.dart` has it): every leaf except a fill whose boundary
+/// goes too, then the node.
+DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
+      for (final k in kids(doc, g))
+        if (kindOf(doc, k) != EntityKind.fill) RemoveEntityCommand(k),
+      RemoveNodeCommand(g),
+    ], label: 'Delete');
+
+/// D23's plan at [place] with the app's opening page and its seven rooms,
+/// added in the table's order: the rooms by name.
+Map<String, Handle> addSampleRooms(Plan plan) {
+  attachPage(plan.doc, PageComponent());
+  return {
+    for (final MapEntry(key: name, value: (x, y)) in sampleSeeds.entries)
+      name: addRoom(plan.doc, plan.at(x, y), name),
+  };
+}
+
+/// [doc] saved with what [add] adds to a copy of it that has no parametric
+/// system: the commands land as given and nothing is generated, as a file
+/// written by another program may hold a room or a separator with no child.
+/// The copy is decoded with `PageComponent` and the floor planner's
+/// factories.
+String staleFile(DraftDocument doc, void Function(DraftDocument bare) add) {
+  final bare = DraftDocumentCodec.decode(
+      jsonDecode(enc(doc)) as Map<String, Object?>, registerComponents: (r) {
+    PageComponent.register(r);
+    parametricCatalog.registerComponents(r);
+  });
+  add(bare);
+  return enc(bare);
+}
+
+/// [room]'s name to [name], one command, its other parameters kept.
+DraftCommand renameRoom(DraftDocument doc, Handle room, String name) =>
+    SetComponentCommand<RoomParams>(
+        room, doc.components.get<RoomParams>(room)!.copyWith(name: name));
+
+/// [room]'s name and area strings.
+List<String> labelStrings(DraftDocument doc, Handle room) =>
+    [for (final h in labelsOf(doc, room)) textOf(doc, h)];
+
+/// The kinds of [h]'s children, ascending by handle.
+List<EntityKind> kindsOf(DraftDocument doc, Handle h) =>
+    [for (final k in kids(doc, h)) kindOf(doc, k)];
+
+/// The face around world [seed] through the document adapter.
+TraceResult faceAt(DraftDocument doc, Vector2 seed) {
+  final inputs = RoomInputs(doc);
+  try {
+    return traceRoomAmong(seed, inputs);
+  } finally {
+    inputs.dispose();
+  }
+}
+
+/// [diagnostics] whose code starts with [prefix] (`room.`, `separator.`).
+List<Diagnostic> codedAs(List<Diagnostic> diagnostics, String prefix) => [
+      for (final d in diagnostics)
+        if (d.code.startsWith(prefix)) d,
+    ];

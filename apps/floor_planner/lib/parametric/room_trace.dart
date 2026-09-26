@@ -660,7 +660,15 @@ final class Tint {
 /// 2. else the outer ring alone, if it triangulates;
 /// 3. else the outer ring, which the room stores as an invisible, unfilled
 ///    closed polyline.
-Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes) {
+///
+/// [accepts], when given, is the caller's own condition on the form of
+/// step 1 or 2, asked only once that form triangulates here: `accepts(step,
+/// points)` false takes the chain's next step. The room passes its check of
+/// the points it will store, in its local frame, and its test seam
+/// (`debugTintFailedSteps`, Ruling 10-16) through it, so the chain has one
+/// owner.
+Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes,
+    {bool Function(int step, List<Vector2> points)? accepts}) {
   final keyholed = <Vector2>[...ring];
   final order = List<int>.generate(holes.length, (i) => i);
   double rightmost(List<Vector2> r) =>
@@ -716,8 +724,10 @@ Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes) {
     ]);
   }
   leftOut.sort();
-  if (_triangulates(keyholed)) return Tint(1, keyholed, leftOut);
-  if (_triangulates(ring)) return Tint(2, ring, leftOut);
+  bool takes(int step, List<Vector2> r) =>
+      _triangulates(r) && (accepts == null || accepts(step, r));
+  if (takes(1, keyholed)) return Tint(1, keyholed, leftOut);
+  if (takes(2, ring)) return Tint(2, ring, leftOut);
   return Tint(3, ring, leftOut);
 }
 

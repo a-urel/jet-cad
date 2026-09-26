@@ -463,6 +463,28 @@ void main() {
           lessThan(1e-6),
           reason: 'the anchor moves by the pole\'s move at $place');
       expect(driftOf(doc), isEmpty, reason: '$place');
+      // Store and Pantry share the right face (D22): the lower handle
+      // reports the pair once; each reports its non-finite offset.
+      Diagnostic degenerate(Handle h, String name) => Diagnostic(
+            severity: DiagnosticSeverity.warning,
+            code: 'room.degenerate',
+            message: 'room ${h.toHex()} ("$name") has a label offset that is '
+                'not finite: its labels sit at the pole',
+            handles: [h],
+          );
+      expect(
+          codedAs(diagnosticsOf(doc), 'room.'),
+          [
+            Diagnostic(
+              severity: DiagnosticSeverity.warning,
+              code: 'room.shared',
+              message: 'Store and Pantry share a space',
+              handles: [store, pantry],
+            ),
+            degenerate(store, 'Store'),
+            degenerate(pantry, 'Pantry'),
+          ],
+          reason: '$place');
     }
   });
 

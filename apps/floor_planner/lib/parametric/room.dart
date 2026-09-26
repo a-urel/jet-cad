@@ -139,8 +139,16 @@ final PageComponent _defaultPage = PageComponent();
 @visibleForTesting
 int debugRoomGenerates = 0;
 
+/// The tint steps (1 or 2) a room's tint builder treats as failing to
+/// triangulate (Ruling 10-16): no honest room fixture takes D9's step 2 or
+/// 3, so `RG2` and `DG3` set it. Null in the library, which never sets it;
+/// tests restore it to null in `tearDown`.
+@visibleForTesting
+Set<int>? debugTintFailedSteps;
+
 /// Each view's room traces, by handle (spec 10 D15): one trace per room per
-/// view, shared by [RoomType.dissolves] and [RoomType.generate].
+/// view, shared by [RoomType.dissolves], [RoomType.generate] and
+/// [RoomType.diagnose].
 final Expando<Map<Handle, TraceResult>> _tracesByView =
     Expando('roomTraceInView');
 
@@ -153,7 +161,32 @@ TraceResult _traceOf(ParametricView view, Handle self) {
       placeSourceInView(view));
 }
 
-/// The room (spec 10 D2, D9-D11, D14-D16).
+/// The tint [RoomType.generate] stores for [trace] (spec 10 D9), and its
+/// points in the room's local space: the one decision both `generate` and
+/// `diagnose`'s `room.tint` read, so the step reported is the step stored.
+///
+/// [tintOf] decides in the trace's seed-relative frame (the ring less the
+/// world seed [seedW]); a point `q` there is `seed + toLocal(q)` in local
+/// space, as a direction. The chain (D9) is [tintOf]'s, with the room's own
+/// condition on each region form: the points it will store triangulate in
+/// local space too, as the engine checks them, so the map never costs a
+/// region its triangulation and the engine never refuses the edit (an edit
+/// is never refused because of a tint). [debugTintFailedSteps] fails a step
+/// there.
+({Tint tint, List<Vector2> local}) _storedTint(
+    Traced trace, Vector2 seed, Vector2 seedW, Transform2 toLocal) {
+  List<Vector2> relative(List<Vector2> r) => [for (final q in r) q - seedW];
+  List<Vector2> local(List<Vector2> r) =>
+      [for (final q in r) seed + toLocal.transformDirection(q)];
+  final tint = tintOf(
+      relative(trace.ring), [for (final h in trace.holes) relative(h)],
+      accepts: (step, points) =>
+          !(debugTintFailedSteps?.contains(step) ?? false) &&
+          _triangulates(local(points)));
+  return (tint: tint, local: local(tint.points));
+}
+
+/// The room (spec 10 D2, D9-D11, D14-D16, D22).
 ///
 /// - [reach] is `Aabb2.empty()` and it names no reference: a room is
 ///   nobody's neighbour; it reaches its walls and separators by place.
@@ -163,9 +196,8 @@ TraceResult _traceOf(ParametricView view, Handle self) {
 /// - [pageKey]: the page's unit and scale, which its labels read.
 /// - [dissolves] when its seed lies in a wall or no bounded face holds it
 ///   (D8).
-///
-/// Its `diagnose` is the default, nothing, until D22's codes land (Ruling
-/// 10-15).
+/// - [diagnose] reports D22's `room.shared`, `room.broken`, `room.tint` and
+///   `room.degenerate`.
 final class RoomType extends ParametricType<RoomParams> {
   const RoomType();
 
@@ -241,25 +273,8 @@ final class RoomType extends ParametricType<RoomParams> {
     final toLocal = toWorld.invert();
     final seedW = toWorld.transformPoint(p.seed);
 
-    // The tint, decided in the seed-relative frame, then taken to local
-    // space through the seed: `seed_l + toLocal(q)` as a direction.
-    List<Vector2> relative(List<Vector2> r) => [for (final q in r) q - seedW];
-    Vector2 local(Vector2 q) => p.seed + toLocal.transformDirection(q);
-    final ring = relative(trace.ring);
-    final tint = tintOf(ring, [for (final h in trace.holes) relative(h)]);
-    var step = tint.step;
-    var points = [for (final q in tint.points) local(q)];
-    // D9's chain is decided in the seed-relative frame; the local points are
-    // a similarity of them. Should the map ever cost a region its
-    // triangulation, the room takes the chain's next step rather than let
-    // the engine refuse the edit (an edit is never refused because of a
-    // tint).
-    if (step == 1 && !_triangulates(points)) {
-      step = 2;
-      points = [for (final q in ring) local(q)];
-    }
-    if (step == 2 && !_triangulates(points)) step = 3;
-    final boundary = polylinePayload(points, closed: true);
+    final (:tint, :local) = _storedTint(trace, p.seed, seedW, toLocal);
+    final boundary = polylinePayload(local, closed: true);
 
     // The labels, placed in world.
     final page = view.page ?? _defaultPage;
@@ -279,7 +294,7 @@ final class RoomType extends ParametricType<RoomParams> {
     }
 
     return [
-      if (step == 3)
+      if (tint.step == 3)
         Generated(EntityKind.polyline, boundary,
             color: kRoomTintColor, flags: EntityFlags.invisible)
       else
@@ -296,6 +311,108 @@ final class RoomType extends ParametricType<RoomParams> {
           textAttrs: kRoomLabelAttrs),
     ];
   }
+
+  /// D22's codes for [self], over the same per-view trace as [generate]:
+  ///
+  /// - `room.broken`, severity error: the trace is [SeedInWall] or
+  ///   [Unbounded]. An edit never leaves one (D8 dissolves it); only a file
+  ///   does, and `drift()` names it too;
+  /// - `room.tint`: the stored tint ([_storedTint], the very decision
+  ///   [generate] takes) is D9's step 2 or 3, or left a hole out;
+  /// - `room.shared`, once per pair, by the lower handle: each live room
+  ///   with a higher handle whose world seed lies in [self]'s face (inside
+  ///   the outer ring and inside no hole), found with `objectsOf` (D16,
+  ///   S-3); handles `[self, other]`;
+  /// - `room.degenerate`: a label offset with a non-finite component (D2);
+  ///   the labels sit at the pole.
+  ///
+  /// Severity warning unless stated. Each code at most once per room, but
+  /// `room.shared` once per pair: the lowest of three rooms in one face
+  /// reports two entries.
+  @override
+  List<Diagnostic> diagnose(ParametricView view, Handle self) {
+    final p = view.paramsOf<RoomParams>(self)!;
+    final who = 'room ${self.toHex()} ("${p.name}")';
+    final trace = _traceOf(view, self);
+    return [
+      if (trace case SeedInWall(:final source))
+        Diagnostic(
+          severity: DiagnosticSeverity.error,
+          code: 'room.broken',
+          message: '$who has its seed in ${source.toHex()}, a wall or a '
+              'separator: it has no face',
+          handles: [self, source],
+        )
+      else if (trace is Unbounded)
+        Diagnostic(
+          severity: DiagnosticSeverity.error,
+          code: 'room.broken',
+          message: '$who has no bounded face around its seed',
+          handles: [self],
+        )
+      else if (trace is Traced) ...[
+        if (_tintReport(view, self, p, trace) case final why?)
+          Diagnostic(
+            severity: DiagnosticSeverity.warning,
+            code: 'room.tint',
+            message: '$who: $why',
+            handles: [self],
+          ),
+        ..._sharing(view, self, p, trace),
+      ],
+      if (p.label case (final dx, final dy) when !dx.isFinite || !dy.isFinite)
+        Diagnostic(
+          severity: DiagnosticSeverity.warning,
+          code: 'room.degenerate',
+          message: '$who has a label offset that is not finite: its labels '
+              'sit at the pole',
+          handles: [self],
+        ),
+    ];
+  }
+}
+
+/// Why [self]'s stored tint does not show its face as traced (D22's
+/// `room.tint`), or null when it does.
+String? _tintReport(
+    ParametricView view, Handle self, RoomParams p, Traced trace) {
+  final toWorld = view.toWorld(self);
+  final (:tint, local: _) = _storedTint(
+      trace, p.seed, toWorld.transformPoint(p.seed), toWorld.invert());
+  if (tint.isExact) return null;
+  return switch (tint.step) {
+    2 => 'its tint covers its holes: the keyholed ring does not triangulate',
+    3 => 'its tint is an unfilled outline: its face does not triangulate',
+    _ => 'its tint covers ${tint.holesLeftOut.length} of its holes: no '
+        'bridge reaches them',
+  };
+}
+
+/// D22's `room.shared` entries [self] reports: one for each live room with a
+/// higher handle whose world seed lies in [trace]'s face, inside the outer
+/// ring and inside no hole, tested relative to [self]'s world seed.
+List<Diagnostic> _sharing(
+    ParametricView view, Handle self, RoomParams p, Traced trace) {
+  final seedW = view.toWorld(self).transformPoint(p.seed);
+  List<Vector2> relative(List<Vector2> r) => [for (final q in r) q - seedW];
+  final ring = relative(trace.ring);
+  final holes = [for (final h in trace.holes) relative(h)];
+  final found = <Diagnostic>[];
+  for (final other in view.objectsOf<RoomParams>()) {
+    if (other.value <= self.value) continue;
+    final o = view.paramsOf<RoomParams>(other)!;
+    final q = view.toWorld(other).transformPoint(o.seed) - seedW;
+    if (!q.x.isFinite || !q.y.isFinite) continue;
+    if (!pointInRing(q, ring)) continue;
+    if (holes.any((h) => pointInRing(q, h))) continue;
+    found.add(Diagnostic(
+      severity: DiagnosticSeverity.warning,
+      code: 'room.shared',
+      message: '${p.name} and ${o.name} share a space',
+      handles: [self, other],
+    ));
+  }
+  return found;
 }
 
 /// [p]'s label offset, local: `(0, 0)` when auto or when a component is not

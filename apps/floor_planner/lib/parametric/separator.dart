@@ -58,8 +58,7 @@ final class SeparatorParams implements Component {
 /// The room separator (spec 10 D3): one dashed open polyline, and an input
 /// to rooms (its world segment, D4).
 ///
-/// Its `diagnose` is the default, nothing, until `separator.degenerate`
-/// lands (spec 10 D22; Ruling 10-15).
+/// Its [diagnose] reports `separator.degenerate` (spec 10 D22).
 final class SeparatorType extends ParametricType<SeparatorParams> {
   const SeparatorType();
 
@@ -101,6 +100,23 @@ final class SeparatorType extends ParametricType<SeparatorParams> {
           linetype: ReservedHandles.dashedLinetype, lineweight: 35),
     ];
   }
+
+  /// `separator.degenerate`, severity error (spec 10 D22): [self] is no
+  /// longer than `roomTrace.linear`, or an end is not finite, in world, so
+  /// it has no input to rooms and draws nothing. Only a file makes one. The
+  /// rule is [roomInputOf]'s, the one that drops its input.
+  @override
+  List<Diagnostic> diagnose(ParametricView view, Handle self) => [
+        if (roomInputInView(view, self) == null)
+          Diagnostic(
+            severity: DiagnosticSeverity.error,
+            code: 'separator.degenerate',
+            message: 'separator ${self.toHex()} is no longer than the trace '
+                'tolerance or has an end that is not finite: it splits no '
+                'room and draws nothing',
+            handles: [self],
+          ),
+      ];
 }
 
 /// The DASHED linetype a separator draws with (spec 10 D3, R-4; Ruling
