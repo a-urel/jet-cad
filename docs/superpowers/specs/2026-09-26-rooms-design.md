@@ -1,11 +1,15 @@
 # Rooms and area — design
 
-**Date:** 2026-09-26. **Status:** design, **revision 1**, not yet reviewed.
-An independent reviewer checks it before the plan (decision 19).
+**Date:** 2026-09-26. **Status:** design, **revision 2**. Revision 1
+(`5015828`) was reviewed independently (decision 19): "Ready with
+amendments", findings S-1 to S-19. Revision 2 applies them, and the
+human's answers to revision 1's open questions (decisions 26–28); see
+[Revision 2](#revision-2).
 **Sub-project:** `roadmap/10-rooms-and-area.md`. **Size:** L (the roadmap's
-M, grown by five engine changes).
+M, grown by the engine changes and one render-layer change).
 **Branch:** `spec-10/rooms`, cut from `main` at `418d4c7`; this revision is
-written on top of `3054616` (the spike's findings note and renders).
+written on top of `3054616` (the spike's findings note and renders);
+revision 2 on top of `5015828`.
 **Depends on:** 06 (the parametric layer), 07 (walls), 08 (openings,
 merged at `b96ed12`).
 **Blocks:** nothing. 13 (export and print) inherits one line from it:
@@ -29,7 +33,8 @@ spec 07 ([2026-09-24-walls-design.md](2026-09-24-walls-design.md)) and
 spec 08 ([2026-09-25-openings-design.md](2026-09-25-openings-design.md)).
 
 **Decisions the human made on 2026-09-26**, numbered as in the brainstorm
-record (1–19 before the spike, 20–25 after it). **Later decisions supersede
+record (1–19 before the spike, 20–25 after it, 26–28 the answers to
+revision 1's open questions). **Later decisions supersede
 earlier ones where they say so:** 20 over 1, 24 over 9 (and over 1's stored
 bounding walls), 25 over 13 and qualifying 23.
 
@@ -60,6 +65,9 @@ bounding walls), 25 over 13 and qualifying 23.
 | 23 | Island touching or leaving the ring | *Qualified by 25* (was: cut only while wholly inside; otherwise ignored and diagnosed) | D6 |
 | 24 | Wall deleted or moved | **One rule:** every change re-traces; a room is deleted only when its seed lands in an unbounded face, inside a wall or on a separator. Two rooms in one face both survive; `diagnose` reports that they share a space. Supersedes 9 and the stored bounding walls | D8, D22 |
 | 25 | Islands live | Any wall component wholly inside the face is a hole, found on every re-trace; no island list is stored. Supersedes 13; no per-reference policy. A column touching the ring is part of its boundary; a column outside the face is not in it; neither is diagnosed | D6 |
+| 26 | Room tool click in a face that already has a room | Nothing happens; the status line says so | D19 |
+| 27 | What a selected room shows | Its labels **and its inner-face ring**, outlined in the selection colour; a render-layer change | D21, D24 |
+| 28 | The tint | The page's foreground at about 10% | D9 |
 
 **The controller's "net engine changes" list** (a)–(e) is checked against
 the code and the spike in
@@ -69,15 +77,19 @@ spike's `unpickable` flag; (c) is right, refined to a per-type page key;
 **(e) is incomplete** — it needs a before-edit view, a place query for
 `generate`, and the seeds' neighbours in its trigger, or it drifts two hops
 away; and a small sixth change, **(f)**, reserves the separator's linetype
-handle.
+handle. Decision 27 adds one render-layer change, **(g)**: the selection
+outline of a fill whose boundary is invisible (D24).
 
 **Where this spec had to resolve something the decisions leave open**, the
 paragraph is tagged **[spec ruling]**; the tags are indexed in
-[Spec rulings](#spec-rulings). Choices only the human can make are in
-[Open questions for the human](#open-questions-for-the-human).
+[Spec rulings](#spec-rulings). Revision 1's three open questions are
+answered (decisions 26–28); [Open questions for the human](#open-questions-for-the-human)
+is empty.
 
 **Numbers.** Every measured number below is quoted from the spike note
-(which quotes its own runs on `spike/10-rooms`) and says so. Areas are
+(which quotes its own runs on `spike/10-rooms`) and says so; revision 2
+also cites the independent review's runs, as "the review's run", where
+they settle a finding. Areas are
 worked by hand for this spec, with the arithmetic shown; no test output was
 produced for this document.
 
@@ -127,7 +139,7 @@ tree at `418d4c7` (code) on 2026-09-26, or from `spike/10-rooms` at
   skip fills (`spatial_index.dart:392`); the select tool's window band
   skips fills and picking-rejected leaves (`select_tool.dart:445-518`); the
   selection outline skips what `rendering()` rejects and every fill
-  (`outline_cache.dart:377-379`).
+  (`outline_cache.dart:377-379`); D24 changes the fill arm.
 - **Linetypes** (`document/style.dart:104-114`, `document/tables.dart`):
   handles 1–5 are reserved and filled (layer 0, BYLAYER, BYBLOCK,
   CONTINUOUS, STANDARD); `firstFree` is 16, so **6–15 are reserved and
@@ -183,7 +195,8 @@ tree at `418d4c7` (code) on 2026-09-26, or from `spike/10-rooms` at
 3. **Two tools:** Room (**M**, one click inside a face) and Separator
    (**S**, two clicks).
 4. **A Room section** in the Selection panel with a free-text **Name** field
-   and the area; a **label grip**; end grips on a separator.
+   and the area; a **label grip**; end grips on a separator; a selected
+   room outlines its labels **and its ring** (decision 27).
 5. **Diagnostics:** two rooms sharing one face, a room whose seed no longer
    lies in a room (from a file), a tint that could not show its holes.
 6. **The sample plan** gains its seven rooms, the Living | Dining separator
@@ -191,7 +204,9 @@ tree at `418d4c7` (code) on 2026-09-26, or from `spike/10-rooms` at
 7. **Engine changes to 06's mechanism**, all generic: generated text with
    its string; generated record attributes; reading the page; a dissolve
    verdict; spatial dependencies (a before-edit view, place contributors and
-   place readers); one reserved linetype handle.
+   place readers, `objectsOf`); one reserved linetype handle. **One
+   render-layer change:** the selection outline of a fill whose boundary is
+   invisible (D24).
 
 ## Non-goals
 
@@ -294,7 +309,8 @@ three new pure files).
   which would cost time and change nothing.
 - **It is a place contributor** (D16): `placeBox` is the world box of its
   segment, or `null` when its length is not more than `roomTrace.linear`
-  (degenerate).
+  or an endpoint is not finite (degenerate); `placeInput` is its world
+  segment.
 - **`generate`:** one open two-point POLYLINE from `start` to `end`, added
   with (D13):
   - **colour ByLayer** on layer 0: the foreground, black on light paper,
@@ -303,8 +319,11 @@ three new pure files).
   - **lineweight 35** (0.35 mm) **[spec ruling]** (R-3). Decision 15 asks
     for a thin line; the spike found that an exactly axis-aligned
     default-weight line can paint no pixel in the test rasteriser and that
-    35 draws (finding 4). 35 is the lightest weight with evidence. The
-    render-layer follow-up (R-17) may let 10 go thinner.
+    35 draws (finding 4). 35 is the lightest weight with evidence
+    (controller's ruling on S-15: the thinnest weight shown to render in a
+    cited run stands; the vanishing hairline stays in R-17's render-layer
+    follow-up, which may let 10 go thinner). Whether 0.35 mm reads as
+    "thin" on the real renderers is part of the human's look (gate 17).
   A degenerate separator generates nothing (a childless group, 06's
   ghost, `separator.degenerate` in D22).
 - **The DASHED record.** `LinetypeRecord(handle: dashedLinetype, name:
@@ -317,6 +336,12 @@ three new pure files).
   - **It enters a document's tables outside the history**, as the page's
     registration does: the sample plan writes it when it builds its
     document (D23), and test fixtures through `ensureDashedLinetype(doc)`.
+    `TableSection.add` throws on a duplicate handle or a duplicate name
+    (case-insensitive; `tables.dart:113-118`), so
+    `ensureDashedLinetype` is a **no-op when handle 6 already holds a
+    record**, and when another handle already carries the name `DASHED` it
+    adds nothing and keeps that record: the separator still names handle 6
+    and draws continuous there.
     `installParametric` does **not** write it: on a loaded file that would
     change the document outside the history, and load → save would no
     longer be byte-identical. **A document without the record draws its
@@ -362,6 +387,11 @@ record, the empty reach), `RR4` (dashed pixels).
   predicate (reach overlap by more than `Tolerance.standard.linear` on both
   axes). **They agree bit for bit** (08's `HF7` precedent), pinned by `RI1`
   on every fixture at every placement.
+- **A wall's place** (D16): `placeBox` is the box of this world ring and
+  `placeInput` the ring itself, as a value with element-wise exact `==`;
+  a separator's are its segment's box and the segment. A ring with a
+  non-finite coordinate gives `null` (not placed; S-6), which 07's
+  `fromJson` makes possible only from a file (recorded, 07 D2's debt).
 - **A wall's input is memoised per view** (an `Expando` on the view, 08's
   `hostCutsInView` precedent), so `placeBox` (D16) and every room's trace in
   one plan compute each band once.
@@ -464,12 +494,18 @@ room needs only the inputs near its face. D7 finds them exactly.
   `inputOf(h)`:
   1. **Growth.** `B = seed ⊕ r`, `r = 1,000 mm`. Trace among
      `placedIn(B)`. `SeedInWall` is final (the wall holding the seed
-     touches `B`). `Unbounded`: double `r` and repeat, until `placedIn(B)`
-     is every contributor, when `Unbounded` is final.
+     touches `B`). `Unbounded`: double `r` and repeat, until `B` contains
+     `U`, the union of every contributor's **finite** place box (a place
+     box with a non-finite coordinate is treated as `null`: not placed, so
+     it can neither stall the loop nor be traced; S-6); then `Unbounded` is
+     final. With no contributor at all, `Unbounded` at once.
   2. **Certificate.** On `Traced(F)`: let `C = placedIn(box(F) ⊕ m)`, `m =
      1 mm`. If `C` holds a contributor not yet traced, add it and trace
      again (the face can only shrink or gain holes); repeat until `C` adds
-     nothing.
+     nothing. **One round always suffices:** the re-traced face `F′ ⊆ F`,
+     so `box(F′) ⊕ m ⊆ box(F) ⊕ m` and nothing new can touch it; the loop
+     is written as a loop only so that its exit condition is the
+     certificate itself.
   3. **Canonical trace.** Trace once more among exactly `C`, and return
      that.
 - **Why exact.** Edges disjoint from the closed face grown by `m` do not
@@ -496,8 +532,13 @@ room needs only the inputs near its face. D7 finds them exactly.
 (a room about to dissolve) traces every contributor once. **Pinned by:**
 `LZ1` (localised equals all, bit for bit, every fixture and placement, and
 with far clutter added), `LZ2` (the triangle: a hole beyond the first
-face's box), `LZ3` (the traced-segment counter); M-10cand, M-10cert,
-M-10grow.
+growth box `B`), `LZ3` (`debugTracedSegments`, below); M-10cand,
+M-10cert, M-10grow.
+- **The counter:** `debugTracedSegments` in `room_trace.dart`,
+  `@visibleForTesting`, never reset by the library, counts the segments
+  each `traceRoom` call takes in (step 3 of D5). `LZ3` pins an upper bound
+  per rebuild on the sample plan, set from the plan's own run and recorded
+  with it.
 
 ### D8 — When a room dissolves (the ring-breaks rule)
 
@@ -529,7 +570,7 @@ one undo step.
 | partition moved onto the left seed (x = 1,500) | left deleted; right 24.13 m² | the same: the left seed is in the partition's band |
 | west wall shortened 1,000 at its south end | left deleted; right unchanged | the same: the left face is unbounded |
 | partition end pulled back 60 mm, still in the south wall's band | both survive | the same |
-| partition end pulled back 150 mm (a 50 mm gap) | both deleted | **both survive**, one face of 29.64 m² (7,800 × 3,800), `room.shared` |
+| partition end pulled back 160 mm (a 60 mm gap; the spike pulled 150) | both deleted | **both survive**, one face: the partition keeps its T at the north end and its band, 100 × (3,900 − 160) = 374,000, stands in the merged face, so 7,800 × 3,800 − 374,000 = 29,640,000 − 374,000 = **29,266,000** (`29.27 m²`), `room.shared` |
 | decision 16's separator pulled 50 mm short | Dining and Living deleted | **both survive**, one face, `room.shared` |
 | the sample plan's E4 deleted | Hall deleted (cascade) | **Hall and Bedroom 1 dissolve**: both faces open to the outside |
 | the column deleted | Living kept, hole gone, `parametric.orphan` | Living kept, hole gone, **no diagnostic** |
@@ -551,30 +592,41 @@ never change while the tint keeps its form):
   black on White, Ivory and Grey paper, white on Blueprint, resolved **at
   paint time** by the resolver the shell rebuilds on a paper change
   (fix/post-07). That is decision 21's mechanism: no rebuild, no new
-  colour model. **[spec ruling]** (R-8): explicit ACI 7, not ByLayer, so a
-  later change to layer 0's colour does not recolour tints;
-- **transparency 229 on the fill** (alpha 26 of 255, about 10%)
-  **[spec ruling]** (R-9): black at 10% over white is `#E6E6E6`, a light
-  grey; white at 10% lifts Blueprint visibly (the spike's fixed blue at
-  25% all but vanished there: finding 5). The look is owed (Open question
-  3);
+  colour model. Decision 28 confirms the foreground. **[spec ruling]**
+  (R-8): explicit ACI 7, not ByLayer, so a later change to layer 0's colour
+  does not recolour tints;
+- **transparency 229 on the fill** (alpha 26 of 255, about 10%; decision
+  28, "the page's foreground at about 10%"): black at alpha 26 over white
+  is 255 − 26 = 229, **`#E5E5E5`**, a light grey; white at 10% lifts
+  Blueprint visibly (the spike's fixed blue at 25% all but vanished there:
+  finding 5);
 - **the boundary is invisible** (`EntityFlags.invisible` on the boundary
   record only). An invisible boundary is dropped by picking and rendering
   (`query_filter.dart:72-79`), the painter still draws the fill from the
-  boundary's geometry, bands skip fills, and the selection outline skips
-  both. So **the tint is never pickable, band-selectable or snappable, and
-  its edges are never stroked** (the spike's slit and separator-overdraw
+  boundary's geometry, and bands skip fills. So **the tint is never
+  pickable, band-selectable or snappable, and its edges are never stroked
+  by the painter**. Only the selection overlay outlines them, and only
+  while the room is selected or hovered (decision 27, D24) (the spike's slit and separator-overdraw
   artefacts, finding 2). **No `unpickable` flag** **[spec ruling]**
   (R-10): the spike showed either mechanism alone suffices (M-unpick and
   M-visible both survived there); one mechanism is simpler, needs no
   non-DXF bit that an export must strip, and M-10visible now kills.
 
 **The tint's shape** (spike open decision 5):
-- **Holes are cut by a keyhole with a slit** **[spec ruling]** (R-11):
-  each hole, in descending order of its rightmost `x`, joins the ring
-  through a bridge from its rightmost vertex to the nearest ring vertex it
-  can see; the return edge runs **0.5 mm** to the bridge's right, so the
-  ring stays simple. The engine's triangulator refuses an exact keyhole
+- **Holes are cut by a keyhole with a slit** **[spec ruling]** (R-11),
+  computed by one pure function, `tintOf(ring, holes)`, **in the trace's
+  seed-relative frame** (D5 step 1) before the result is mapped to the
+  room's local space:
+  - the holes are taken in descending order of their rightmost `x` in
+    that frame;
+  - each hole joins the **growing keyholed ring** (the outer ring with
+    the holes already joined) through a bridge from its rightmost vertex
+    to the nearest vertex of that ring whose bridge properly crosses no
+    edge of that ring and no edge of any hole not yet joined;
+  - the return edge runs **0.5 mm** to the bridge's right, so the ring
+    stays simple;
+  - **a hole with no such vertex is left out** of the tint (the tint
+    covers it) and `room.tint` reports it (D22); the area is unaffected. The engine's triangulator refuses an exact keyhole
   (two coincident edges: 0 triangles, spike Q5, M-slit); the slit version
   of the spike's Living triangulated (11 stored points, 8 triangles). The
   tint is then short of the true region by 0.5 mm × the bridge's length;
@@ -584,7 +636,9 @@ never change while the tint keeps its form):
   2. else **the outer ring alone** as the region (holes tinted over), if it
      triangulates;
   3. else **an invisible, unfilled closed POLYLINE** of the outer ring, in
-     place of the region.
+     place of the region (reachable when the outer ring touches itself at a
+     vertex, which a face walk can produce where two bands meet at a single
+     corner; `tintOf` is tested directly on such a pinched ring).
   Steps 2 and 3 are reported `room.tint` (D22). Step 3 changes the child's
   kind, so a later return to a region adds it with fresh, higher handles
   than the labels (06 D12's accepted cost; invisible in practice, since
@@ -597,7 +651,8 @@ symbols), `STANDARD` text style, justification **centre, middle**
 its labels** (decision 4), and a label over furniture wins the click
 (decision 22; the spike's lamp, `Q6`).
 
-**Pinned by:** `RG1` (children, order, attributes), `RG2` (holes and the
+**Pinned by:** `TN1` (`tintOf`: the keyhole rules and step 3), `RG1`
+(children, order, attributes), `RG2` (holes and the
 fallback chain), `RR1`–`RR4` (renders and picks); M-10slit, M-10visible,
 M-10tintcolour, M-10tintalpha.
 
@@ -635,7 +690,10 @@ M-10tintcolour, M-10tintalpha.
 - **The label may lie outside the face** when dragged there; nothing is
   reported.
 
-**Pinned by:** `RL1` (thin L, three placements), `RL2` (the column),
+**Pinned by:** `RL1` (thin L, three placements: the asserted value is the
+pole's **distance** to the boundary, 585.786 by hand, within the 10 mm
+precision at every placement, and at the origin also the pole's
+**coordinates**, (685.786, 685.786) by hand, within 10 mm), `RL2` (the column),
 `RL3` (offset rides with the pole), `RL4` (a rotated room group);
 M-10c, M-10centroid, M-10offset, M-10offsetref.
 
@@ -722,7 +780,11 @@ match), `RG1`, `SR2`.
   `null`: the part of the page this type's `generate` reads, compared with
   `==`. The room returns the record `(unit, scaleDenominator)` of the page,
   or of `PageComponent()`'s defaults when `page` is null.
-- **Seeds on a page change.** In `_run`, after the seeds are formed: when
+- **Seeds on a page change.** In `_run`, after the seeds are formed and
+  **before the early return** (`regeneration.dart:585` returns when the
+  seeds and the cleanup are both empty, and a page-only edit touches the
+  root, which is not an object, so its seeds are otherwise empty; S-12):
+  when
   `before.page != after.page` (value equality; a stored value), for each
   registered type whose `pageKey(before.page) != pageKey(after.page)`,
   every live object of that type joins the seeds. **[spec ruling]**
@@ -739,7 +801,9 @@ match), `RG1`, `SR2`.
 **Pinned by:** `PG1` (engine client), `RA2` (a room: metres 1:50 → ft-in
 1:100 in one command reads `116.57 ft²` and heights 250 and 200, one undo
 step, undo restores `10.83 m²`; the spike's `Q5 a page change`), `PG2`
-(a paper-colour change plans nothing for rooms); M-10page, M-10pagekey.
+(a paper-colour or grid change calls no `generate` of a page-key client:
+the client counts its calls, since a seeded object with an unchanged key
+plans nothing either way); M-10page, M-10pagekey.
 
 ### D15 — Engine (d): the dissolve verdict
 
@@ -795,8 +859,15 @@ makes it exact.
 bool get contributesPlace => false;
 /// The world box of what this object contributes, from the view (a wall:
 /// its uncut band's box; a separator: its segment's), or null for nothing.
-/// Called only when [contributesPlace]; must not mutate.
+/// Called only when [contributesPlace]; must not mutate. A box with a
+/// non-finite coordinate is treated as null (not placed).
 Aabb2? placeBox(ParametricView view, Handle self) => null;
+/// What this object contributes, compared with `==` between the before-
+/// and after-views to tell whether it changed (a wall: its uncut band's
+/// world ring; a separator: its world segment). Called only when
+/// [contributesPlace], only for objects of an edit's spatial core, and
+/// only when [placeBox] is not null. Default: the box itself.
+Object placeInput(ParametricView view, Handle self) => placeBox(view, self)!;
 /// Spec 10 D16: this type's generate reads contributors by place. Default false.
 bool get readsPlaces => false;
 /// The world box whose contributors this object's current output depends
@@ -811,7 +882,17 @@ Aabb2 readBox(T params, Transform2 toWorld, Aabb2 stored) => stored;
 List<Handle> placedIn(Aabb2 box);
 /// [h]'s place box in this view, or null.
 Aabb2? placeBoxOf(Handle h);
+/// Ascending live objects of this view's survey whose registered component
+/// is a [U] (S-3: a room's `diagnose` finds the other rooms with it).
+/// Read from the survey's snapshot; memoised per view and type.
+List<Handle> objectsOf<U extends Component>();
 ```
+
+`objectsOf` is generic and survey-backed: the survey already holds every
+live object with its registration, so the first call per type is one O(n)
+pass and later calls are free. A room has an empty reach, no references
+and is not a contributor, so nothing else in the view can find another
+room (S-3).
 
 `ParametricCatalog.register` throws `ArgumentError` for a type that both
 contributes and reads: the rule below gives one hop, and a type that did
@@ -833,17 +914,33 @@ per object per survey and no client call (08's `RC1` count of
 `references` calls is unchanged).
 
 **2. The trigger.** Inside `_run`'s `try`, after the seeds and the
-dangling check, when the seeds are non-empty:
+dangling check, when the seeds are non-empty **and the after-survey holds
+at least one live reader** (the survey counts readers as it registers
+objects, so the check is O(1); S-4):
 - `K = seeds ∪ neighbours_before(seeds) ∪ neighbours_after(seeds)` — the
   spatial part of 08 D3's core, already computed;
-- `L` = the non-null boxes `placeBox(beforeView, k)` for `k ∈ K` live
-  before, and `placeBox(afterView, k)` for `k ∈ K` live after, over the
-  contributors in `K`;
+- for each contributor `k ∈ K`: its before place (box and input, from the
+  before-view) if `k` was live before, and its after place (from the
+  after-view) if it is live after. **`k` is changed** when exactly one of
+  the two exists, or both exist and their inputs differ (`placeInput`,
+  exact `==`: a stored-value style comparison of two deterministic
+  computations; any bit difference counts as a change, which only ever
+  rebuilds more). **Only a changed `k` adds its boxes (before and after)
+  to `L`** (S-4): an unchanged neighbour's band is the same as before, so
+  it can change no room;
 - if `L` is empty, nothing more. Otherwise, **every live reader `R` (after)
   that is not a seed and whose `readBox(params, toWorld, stored)` touches
-  any box of `L` joins the core**, before 08 D3's referrer step. `stored` is
-  the world box of the coordinates of `R`'s children's payloads, from the
-  after-survey's children.
+  any box of `L` joins the core**, before 08 D3's referrer step.
+- **`stored`** (S-14) is formed by the engine: every `(x, y)` pair of the
+  `coords` of each of `R`'s children's payloads (from the after-survey's
+  children; a fill's payload has none), mapped by `toWorld(R)` (the
+  snapshot), and boxed. It is a box of **defining points**, not of drawn
+  extents: a reader whose output has arcs, circles or text extents that
+  matter must grow it in its own `readBox`. The room's tint boundary holds
+  every outer-ring vertex (D9), so its points suffice.
+- **The after-view is the one `_plan` receives** (S-12): the trigger and
+  the plan share one `ParametricView` object, so D4's band memo and the
+  bulk neighbour pass are computed once per edit.
 
 The room's `readBox` is `stored`, grown to include the seed, then grown by
 **2 mm** **[spec ruling]** (R-7): twice D7's `m`, so rounding in the
@@ -873,8 +970,10 @@ file, trusted by 06 D10):
 - An input can change only if its object is in `K`: a separator's depends
   on itself (a seed); a wall's on itself and its neighbours (07's one-hop,
   the argument 06 D4 step 6 makes for walls' own drift-freedom).
-- For each changed `k`, its before and after boxes miss `readBox(R) ⊇
-  box(F_before) ⊕ m`. So no member of `C_before` changed, no changed input
+- `L` holds exactly the boxes of the changed `k` (point 2), and for each,
+  its before and after boxes miss `readBox(R) ⊇ box(F_before) ⊕ m`. The
+  proof reads only changed inputs, so restricting `L` to them (S-4) leaves
+  it whole. So no member of `C_before` changed, no changed input
   touches `box(F_before) ⊕ m` after, and by D7's lemma the face after is
   `F_before`, `C_after = C_before` with the same inputs, and the canonical
   trace returns the same bits. ∎
@@ -895,26 +994,46 @@ over the reach boxes (the same predicate, the same ascending lists as
 `neighboursOf`, each pair test counted in `debugOverlapTests`). A plan that
 regenerates no reader never calls `placedIn` and pays nothing.
 
-**6. Cost bound, per edit:**
+**6. Cost bound, per edit** (restated after S-4):
 - a plain entity edit (no seeds): nothing (the early return);
+- a document with no live reader: nothing beyond 08's closure (the O(1)
+  check);
 - an edit whose `K` holds no contributor (a door, a box, a room's own
   rename): nothing beyond 08's closure;
-- an edit whose `K` holds contributors: `2 × |K ∩ contributors|` place-box
-  calls, O(|K| · n) overlap tests (07 D10's order), and one read box per
-  live reader (O(its stored points));
-- **the rooms rebuilt:** those whose read box touches a changed
-  contributor's before or after box: for a wall move, the rooms on both
-  sides of it and of its joint partners;
-- if any room regenerates: one bulk pass, O(n log n + pairs), and one place
-  box per contributor, O(n) band computations, once per edit; then D7's
-  localised traces per room.
+- an edit whose `K` holds contributors, with readers present: **one
+  place-box call per `k ∈ K ∩ contributors` live before plus one per such
+  `k` live after** (an added or deleted contributor has one, not two;
+  S-13), with the same number of `placeInput` calls (both read D4's band
+  memo, so each band is computed once per view), O(|K| · n) overlap tests
+  (07 D10's order), and one read box per live reader (O(its stored
+  points));
+- **the rooms rebuilt:** exactly those whose read box touches the before
+  or after box of a contributor **whose input changed**. For a wall move
+  that is the rooms along the moved wall and along any joint partner whose
+  band the move reshapes (an L or node partner; never a through wall the
+  moved wall merely tees into, whose band does not depend on its stems).
+  The review's example — moving P5 10 mm, whose reach neighbours E1 and P3
+  are unchanged — rebuilds the two rooms P5 bounds (Kitchen, Bath), not
+  the five whose read boxes E1's and P3's bands touch (worked from the
+  plan's coordinates for this revision: P5's band, x 21,440–21,560 between
+  E1's and P3's near faces, touches only those two read boxes; `RK2`
+  measures it);
+- if any room regenerates: one bulk pass, O(n log n + pairs), and **one
+  more place box per contributor** (the first `placedIn` of the view; the
+  after boxes of `K` are memoised and not recomputed), O(n) band
+  computations, once per edit; then D7's localised traces per room.
 - **Counters,** `@visibleForTesting`, never reset by the library:
-  `debugPlaceBoxCalls` and `debugReadBoxCalls`.
+  `debugPlaceBoxCalls` (every `placeBox` call the engine makes, the bulk
+  pass included) and `debugReadBoxCalls`. `SD6` pins the trigger's counts
+  on a fixture where no reader regenerates, and the bulk pass's count
+  separately (S-13).
 
-**Pinned by:** `SV1`–`SV3` (the before-view), `SD1`–`SD8` (engine clients:
-the trigger, two hops, before and after, readers, the counters, the bulk
-pass), `RS1`–`RS6` (rooms: c1–c4, `Q3e`, `FB`), `RK1`, `RK2`; M-10nbr,
-M-10before, M-10snap, M-10e, M-10bulk, M-10cand.
+**Pinned by:** `SV1`–`SV3` (the before-view), `SD1`–`SD10` (engine
+clients: the trigger, two hops, before and after, readers, the counters,
+the bulk pass, an unchanged neighbour adding nothing, no readers,
+`objectsOf`), `RS1`–`RS6` (rooms: c1–c4, `Q3e`, `FB`), `RK1`, `RK2`;
+M-10nbr, M-10before, M-10snap, M-10e, M-10bulk, M-10cand, M-10allK,
+M-10objects.
 
 ### D17 — Engine (f): the dashed linetype's handle
 
@@ -943,8 +1062,9 @@ One row per change; "—" means the change does not touch that guarantee.
 | (b) attributes | `Generated`, `Generated.region`; `_recordOf` | — | — | written by the add, removed by its inverse | persisted with the record | — | the resolver already maps transparency and linetype; nothing new per frame |
 | (c) page | `ParametricType.pageKey`, `ParametricView.page`; the survey's page; `_run`'s page seeds | — | — | the page edit and its regeneration are one step | the page is a component, as before | regenerated children keep their handles | — |
 | (d) dissolve | `ParametricType.dissolves`; `_plan` | never meets it (planned commands) | the dissolve detaches its own component; `lost` never holds it | one step; the node is re-linked last (state-equal, root order normalised) | — | handles restored, so unchanged | — |
-| (e) place | `contributesPlace`, `placeBox`, `readsPlaces`, `readBox`, `placedIn`, `placeBoxOf`; the survey's snapshots; `_closure`'s trigger; the bulk pass | — | — | only decides the closure; replay never regenerates | — | — | — (edit time only) |
+| (e) place | `contributesPlace`, `placeBox`, `placeInput`, `readsPlaces`, `readBox`, `placedIn`, `placeBoxOf`, `objectsOf`; the survey's snapshots and reader count; `_closure`'s trigger; the bulk pass | — | — | only decides the closure; replay never regenerates | — | — | — (edit time only) |
 | (f) handle | `ReservedHandles.dashedLinetype` | — | — | — | the default tables are unchanged; the app's record persists | — | — |
+| (g) ring outline (render layer, D24) | `OutlineCache._addLeaf`'s fill arm | — | — | — (the outline follows the document) | — | — (overlay only) | built at selection, hover and `DocChange` rate, never per frame; painted from the cached path |
 
 ### D18 — Draw order, undo, save and load
 
@@ -991,9 +1111,17 @@ One row per change; "—" means the change does not touch that guarantee.
   shows is what the room gets (`RI1`, `TT2`).
 - **No room is made** (no preview, the click does nothing) when the trace
   is `SeedInWall` or `Unbounded`, **or when the face already holds a live
-  room's seed** **[spec ruling]** (R-19; Open question 1): decision 24's
-  shared space is for faces that later edits merge, not one the tool
-  should create.
+  room's seed** (decision 26; R-19): decision 24's shared space is for
+  faces that later edits merge, not one the tool should create.
+- **The status line says so** (decision 26). `RoomTool` exposes
+  `ValueListenable<String?> notice`: while the hovered face already holds
+  a room, and after a click there, it reads `Already a room: <name>`
+  (the lowest-handle room whose seed is in the face); it is `null`
+  otherwise, and cleared when the tool deactivates. The shell merges it
+  into `_status` (`main.dart:247`) and `_statusLine` (287) appends
+  ` — <notice>` when it is non-null **[spec ruling]** (R-29: the wording
+  and the hover-time notice; decision 26 fixes only that the status line
+  tells).
 - **The name** is `Room N`, `N` the lowest positive integer such that no
   live room's name is exactly `Room N` (`^Room ([1-9][0-9]*)$`): with
   `Room 1`, `Room 3` and `Kitchen` live, the next is `Room 2`.
@@ -1006,10 +1134,19 @@ One row per change; "—" means the change does not touch that guarantee.
   when the pointer leaves the cached face (a point-in-face test,
   allocation-free) or the cache goes stale; painted from cached payloads,
   so the frame path gains no allocation.
+- **Hovering outside a room** (S-5). D7 reaches `Unbounded` only after
+  growing over every contributor, so the tool **short-circuits**: a
+  pointer outside `U`, the union of every contributor's place box (kept
+  with the cache), is `Unbounded` without a trace. A `SeedInWall` verdict
+  is cached with its wall's band and reused while the pointer stays inside
+  that band (a point-in-ring test). An `Unbounded` point inside `U` (a
+  courtyard open to the outside) is re-traced per move; its cost is
+  measured by `TT6` at 600 walls, printed.
 - **Refused commits:** an `ArgumentError` or `StateError` from `execute`
   is caught and nothing is placed, as 07's and 08's tools do.
 
-**Pinned by:** `TT1`–`TT6`; M-10name, M-10occupied, M-10seedsnap.
+**Pinned by:** `TT1`–`TT7`; M-10name, M-10occupied, M-10seedsnap,
+M-10notice.
 
 ### D20 — The Separator tool (S)
 
@@ -1044,10 +1181,12 @@ One row per change; "—" means the change does not touch that guarantee.
 **Selecting a room.** A click on either label selects the room's group
 (`resolveHit`, topmost group); a window band selects it when its labels are
 inside, a crossing band when it crosses them. The tint never answers
-(D9). **What selection shows:** the labels' outlines (the selection
-overlay draws what is rendered, and the tint's boundary is invisible), the
-**label grip**, and the **Room section**. The ring itself is not outlined
-(Open question 2).
+(D9). **What selection shows** (decision 27): the labels' outlines **and
+the room's inner-face ring (with its holes), outlined in the selection
+colour** by the selection overlay (D24), the **label grip**, and the
+**Room section**. Hovering a label outlines the same in the hover colour.
+The selection box (`GripCache.box`, the union of `worldBoundsOf`) grows to
+the ring's box; no rotation grip is drawn, since a room is not movable.
 
 **No move or rotate by the select tool** **[spec ruling]** (R-22):
 `RoomGrips.movable` is false, as 08's openings. A group move would carry
@@ -1084,12 +1223,19 @@ delete; 06 D8 detaches the component; nothing else changes.
   (R-25): it is the derived value exactly as drawn, and recomputing it in
   the panel would trace on every rebuild.
 
-**The label grip** (`room_grips.dart`):
-- one `stretch` grip at the anchor, in world: the name TEXT's stored
-  insertion point minus `(0, 0.7 · h_name)`, mapped by `toWorld(room)`;
-- `drag(point)` resolves through the chain, then stores `label = toLocal(p)
-  − toLocal(pole)`, where `pole = anchor − label` from the stored values;
-  **a drop within the snap aperture of the pole stores `null`** (auto)
+**The label grip** (`room_grips.dart`), every step in a named frame
+(S-10):
+- one `stretch` grip at the anchor, in world: `anchor_w =
+  toWorld(room)(q) − (0, 0.7 · h_name_w)`, where `q` is the name TEXT's
+  stored insertion point (local) and `h_name_w` the name's **world**
+  height (D11: `2.5 mm × scaleDenominator`), since D10 offsets the lines
+  in world directions;
+- the pole in local space: `pole_l = toLocal(anchor_w) − label` (with
+  `label = (0, 0)` when auto), `toLocal = toWorld(room)⁻¹`;
+- `drag(p_w)` (the point the select tool has already resolved through the
+  chain, 08 Ruling 08-15) stores `label = toLocal(p_w) − pole_l`;
+  **a drop within the snap aperture of the pole** (`|p_w −
+  toWorld(pole_l)|`, in world) **stores `null`** (auto)
   **[spec ruling]** (R-26: the one way back to auto, with no extra
   control); a drop that stores what is stored returns null. One undo step;
 - `preview`: a line from the pole to the would-be anchor;
@@ -1103,8 +1249,9 @@ rotates with the select tool like any line).
 **`ObjectGrips`** dispatches `RoomParams` → `RoomGrips`, `SeparatorParams`
 → `SeparatorGrips`; `movable` stays one rule (08's F2).
 
-**Pinned by:** `RN1`–`RN6` (the section), `GR1`–`GR5` (grips, movable);
-M-10pin, M-10movable, M-10offset.
+**Pinned by:** `RN1`–`RN6` (the section), `GR1`–`GR6` (grips, movable,
+the grip under a rotated, scaled room group), `OL4` (the ring in the
+shell); M-10pin, M-10movable, M-10offset, M-10gripframe, M-10ring.
 
 ### D22 — Diagnostics
 
@@ -1112,24 +1259,26 @@ M-10pin, M-10movable, M-10offset.
 per object, severity `warning` unless stated:
 
 - **`room.shared`** (decision 24) — two live rooms whose seeds lie in one
-  face. **Once per pair, by the lower handle** (08 R2's rule): the lower
+  face. The room finds the other rooms with `view.objectsOf<RoomParams>()`
+  (D16, S-3). **Once per pair, by the lower handle** (08 R2's rule): the lower
   room reports each higher room whose seed lies inside its face (in the
   outer ring, in no hole). Handles `[lower, higher]`; message `"<name A>
   and <name B> share a space"`.
 - **`room.broken`**, severity `error` — the trace is `SeedInWall` or
   `Unbounded`. An edit never leaves one (D8 dissolves it); only a file
   does, and `drift()` names it too.
-- **`room.tint`** — D9's fallback step 2 or 3 was taken.
+- **`room.tint`** — D9's fallback step 2 or 3 was taken, or a hole was
+  left out of the keyhole (no visible bridge vertex).
 - **`room.degenerate`** — a non-finite `label` component (D2).
 - **`separator.degenerate`**, severity `error` — a separator of length
-  `≤ roomTrace.linear` (from a file only).
+  `≤ roomTrace.linear`, or with a non-finite endpoint (from a file only).
 - **Not reported** (decision 25): a column touching the ring, a column
   outside the face.
 
 `diagnose` traces with the diagnostics view (D7's source), memoised per
 view, so O(rooms) traces plus O(rooms²) point tests, off the edit path.
 
-**Pinned by:** `DG1`–`DG4`; M-10share2.
+**Pinned by:** `DG1`–`DG4`; M-10share2, M-10objects.
 
 ### D23 — The sample plan
 
@@ -1150,10 +1299,10 @@ Decision 16, on 08 D18's plan (coordinates relative to `x0 = 12000, y0 =
    **[spec ruling]** (R-27): the rooms then read the real page, not D11's
    fallback. `PageComponent.register` moves up with it; the page's origin
    is centred on the extents, which the rooms do not change;
-4. **seven rooms** **[spec ruling]** (R-28: decision 16 names six spaces
-   and a separator that splits "Living from a Dining area"; the Dining
-   area is a room, or it is an untinted, unlabelled half), each by a
-   `RoomParams` whose seed is below:
+4. **seven rooms**, each by a `RoomParams` whose seed is below. Decision
+   16 names six spaces **and** a separator that splits "Living from a
+   Dining area", so the Dining area is a room within the decision
+   (controller's ruling on S-16; revision 1's R-28 is withdrawn):
 
 | Room | Seed | Area by hand (mm²) | Label |
 |---|---|---|---|
@@ -1166,9 +1315,14 @@ Decision 16, on 08 D18's plan (coordinates relative to `x0 = 12000, y0 =
 | Dining | (19,000, 16,000) | (21,500 − 17,060) × 5,190 = 4,440 × 5,190 = 23,043,600 | `23.04 m²` |
 | Total | | 111,138,800 (the spike's six, 111,298,800, less the column's 160,000) | |
 
-  The first five and the separated pair are the spike's measured values
-  (`Q2`: `21996100.0 mm2` … and Dining 23,043,600, Living with the column
-  21,897,500), every one from the real plan with its fifteen openings. The
+  The first five are the spike's measured values from the real plan with
+  its fifteen openings (`Q2`: `21996100.0 mm2` …); Dining 23,043,600 and
+  Living with the column 21,897,500 are the spike's measured values from
+  its decision-16 fixture, the plan's nine walls **rebuilt** from
+  `startup_plan.dart`'s numbers with the separator and the column (spike
+  Q2, "The other fixtures"; S-19). The review's run over the real 07 walls
+  with the separator and column read the same seven areas, total
+  `111138800.0`. The
   seeds lie in no band, no furniture matters (furniture is not a wall),
   and the Living seed avoids the column. Then the system is disposed and
   the history cleared, as today;
@@ -1180,8 +1334,9 @@ Decision 16, on 08 D18's plan (coordinates relative to `x0 = 12000, y0 =
   28 room children + 1 separator child + 3 column children); the plan
   confirms or corrects it by running `SP1`, never by assuming it;
 - `SP1`–`SP4` unchanged in intent; the column stands clear of every
-  doorway's 900 mm approach (the nearest door, P3's kitchen/living door at
-  x 23,150–23,850, reaches y 12,460; the column starts at y 13,800);
+  doorway's 900 mm approach (the nearest door, P3's **bath/living** door
+  at x 23,150–23,850 (x > 21,560 is the Bath; S-19), reaches y 12,460; the
+  column starts at y 13,800);
 - **`SP5` is extended:** ten walls (the column the tenth), one separator,
   seven rooms with the table's names and seeds, compared exactly; each
   room's area label as the table says; `drift()` and `diagnostics()`
@@ -1191,6 +1346,70 @@ Decision 16, on 08 D18's plan (coordinates relative to `x0 = 12000, y0 =
   heights 125 and 100, and the pole inside its face.
 
 **Pinned by:** `SP1`–`SP7`.
+
+### D24 — Render layer (g): the selected room's ring (decision 27)
+
+Decision 27: a selected room shows its labels **and** its inner-face ring,
+outlined in the selection colour. Today the ring is not outlined:
+`OutlineCache._addLeaf` (`jet_cad_2d_flutter/lib/src/outline_cache.dart:
+372-380`) skips a leaf that `QueryFilter.rendering()` rejects — the tint's
+boundary, which is invisible (D9) — and returns on every fill ("a fill has
+no coordinates"). The selection and hover outlines are built only from
+that cache (`selection_overlay.dart:152-160`).
+
+- **The mechanism: a drawn fill outlines its area.** In `_addLeaf`'s fill
+  arm, instead of returning: when the fill itself passes `rendering()`
+  (already checked above it) and its boundary (`boundaryHandleOf(payload)`)
+  is a live entity **whose own flags carry `EntityFlags.invisible`**, the
+  boundary's geometry is added to the key's outline with the fill's
+  transform (a fill and its boundary share their owner, `AddRegionCommand`),
+  exactly as a visible boundary leaf of that kind is added today (the
+  polyline arm, or a circle's arc). Otherwise the fill adds nothing, as now.
+  - **Why this rule:** the arm's own comment says the outline "is a
+    statement about what is drawn". A fill **is** drawn from its boundary's
+    geometry whatever the boundary's flag (the painter never reads it,
+    `draft_painter.dart:700-760`), so a drawn fill whose stroke is hidden
+    has a drawn extent the outline was missing. A visible boundary is
+    already outlined by its own leaf, so it is not added twice; a hidden
+    fill (its layer or container hidden) is rejected before the arm, as
+    today. **[spec ruling]** (R-30).
+  - **Generic, not a room rule.** Nothing in the render layer knows rooms.
+    Today only the room tint produces a filled region with an invisible
+    boundary, so no existing outline changes (walls, openings, furniture,
+    boxes: visible boundaries). The hover outline, the same cache, gains
+    the ring too.
+  - **What else follows:** `worldBoundsOf(key)` is computed from the same
+    world records, so a room's selection box (`grip_cache.dart:323`) covers
+    its ring. Band selection, picking and snapping are untouched (they do
+    not read the outline cache), so the tint stays unpickable (D9).
+  - **Holes:** the stored tint is the keyholed ring (D9), so the outline
+    shows the holes and the 0.5 mm slit's two close edges; at any zoom
+    where a room reads, the slit is below a pixel (0.5 mm is 0.01 mm on
+    paper at 1:50). Under fallback step 2 the holes are not outlined;
+    under step 3 the tint is an invisible POLYLINE leaf, not a fill, and
+    the rule does not reach it, so the ring is **not** outlined there —
+    recorded with `room.tint`, which reports that case.
+- **The frame path** (the non-negotiable). The outline cache is walked at
+  selection-change, hover-change and `DocChange` rate, never per frame
+  (02 D9); the new arm adds one `Float64List` segment record per selected
+  or hovered room at that rate. Per frame the overlay only calls
+  `pathFor(key, origin)`, which returns the cached `ui.Path` unless the
+  rebase origin moved (then every path is rebuilt from the cached doubles,
+  as for any outline). Nothing new is allocated per frame or per entity;
+  `paint_allocation_test.dart` stays unedited and green, and `OL3` repeats
+  02's steady-state check (`debugRebuilds` unchanged across frames) with a
+  room selected.
+- **The colour:** the overlay's existing selected and hover paints
+  (`selection_overlay.dart`), unchanged: "the selection colour".
+
+**Pinned by:** `OL1` (a selected group with a fill whose boundary is
+invisible outlines the boundary's loop, by coordinates, under a rotated
+group transform at the corpus far origin), `OL2` (a fill with a visible
+boundary is outlined exactly once; a fill whose layer is hidden, none; a
+fill whose boundary is missing, none), `OL3` (steady state: no path
+rebuild across frames with a room selected, `debugRebuilds` unchanged), `OL4`
+(app: selecting a sample-plan room outlines its labels and its ring; the
+Living room's outline shows the column hole); M-10ring, M-10ringdup.
 
 ## The controller's engine list, checked
 
@@ -1206,6 +1425,8 @@ changes. Checked against the code at `418d4c7` and the spike:
 | (e) a room rebuilds when a wall or separator **changed in the edit** has a before/after extent touching the room's extent (last generated extent and seed); no two-hop drift | **Incomplete.** (1) "Changed in the edit" must be the seeds **and their neighbours** before and after, or a neighbour's band changed at a far end drifts (`FB`, M-10nbr). (2) "Before extent" needs a **before-view**: today every view reads the live stores, so after `inner` a before-extent is the after one (M-10snap). (3) Re-tracing among all walls needs a **place query** on the view, and it must be exact, which rules out reach-based bounds (D16.5). (4) The room's extent is its stored points, grown by a margin (the read box). | D16 |
 | Dropped: references for rooms, per-reference policy | **Agreed.** Also dropped: the spike's `unpickable` flag and `readsPage` | — |
 | (f) — | **Missing from the list:** the separator's linetype needs a reserved handle (D17) | D17 |
+| (g) — | **Added by decision 27:** the selection outline of a fill whose boundary is invisible (render layer) | D24 |
+| (e), revision 2 | **Also:** only a contributor whose input changed adds its boxes (S-4), no reader means no trigger, and `objectsOf` lets a room's `diagnose` find the other rooms (S-3) | D16 |
 
 ## What the roadmap and the spike asked 10 to decide
 
@@ -1257,16 +1478,21 @@ changes. Checked against the code at `418d4c7` and the spike:
   - `lib/src/document/style.dart`: `ReservedHandles.dashedLinetype` (D17);
   - `test/parametric/`: `text_test.dart`, `attributes_test.dart`,
     `page_test.dart`, `dissolve_test.dart`, `place_test.dart`,
-    `before_view_test.dart`, with **test-only clients**: a text client, a
+    `before_view_test.dart`, `objects_of_test.dart`, with **test-only
+  clients**: a text client, a
     page-key client, a dissolving client, a contributor whose place box
     depends on its neighbours (for the two-hop test), and a reader that
     lists the contributors placed in a stored field.
-- **Render layer, `packages/jet_cad_2d_flutter`:** **no `lib` change.**
+- **Render layer, `packages/jet_cad_2d_flutter`:** **one `lib` change**,
+  `lib/src/outline_cache.dart`'s fill arm (D24, decision 27), with tests
+  in `test/outline_cache_test.dart` and `test/selection_overlay_test.dart`.
   Translucent fills, ACI 7's foreground, dashed polylines and invisible
-  boundaries all exist. Its gate must stay green unchanged.
+  boundaries all exist already. Its gate stays green with only its
+  standing failures.
 - **App, `apps/floor_planner`:** D1's files; `object_grips.dart`,
   `catalog.dart`, `selection_panel.dart` (the text field kind and the Room
-  section), `main.dart` (two tools, keys, the grips), `shortcut_guard.dart`
+  section), `main.dart` (two tools, keys, the grips, the Room tool's
+  notice in the status line), `shortcut_guard.dart`
   (M, S), `startup_plan.dart` (D23); tests.
 - **Roadmap:** `roadmap/13-export-and-print.md` gains, under "Decisions
   already made": "**Room separators do not plot** (10, decision 15): a
@@ -1288,12 +1514,14 @@ changes. Checked against the code at `418d4c7` and the spike:
 | 07 D10 (neighbour search) | D16.5 | a bulk sweep, used only when a place reader regenerates |
 | 08 D3 (the closure) | D16.2 | place readers join the core before the referrer step |
 | 08 D4's amendment (the view hides a lost object) | D16.1 | kept, and extended to the snapshot |
+| 02 D9 (the overlay's outline cache: "a statement about what is drawn") | D24 | a drawn fill whose boundary is invisible contributes its boundary's loop |
 
 ### Invariants
 
 - **The frame path allocates nothing new.** Traces, poles and previews
-  run on edits and pointer moves; the tint is one more fill per room. The
-  allocation tests stay green, unedited.
+  run on edits and pointer moves; the tint is one more fill per room; the
+  ring outline (D24) is one more cached segment list, built off the frame
+  path. The allocation tests stay green, unedited.
 - **Draw order is ascending handle value;** a room's children keep their
   handles (D18).
 - **Decisions use `roomTrace` and `wallJoin`; stored values use `==`**
@@ -1365,6 +1593,21 @@ box), so it cannot silently become degenerate.
 
 Identifiers are this spec's; the plan may renumber, keeping the kills.
 
+**Placements per test** (S-18), so the degenerate-fixture trap is closed
+here and not left to the plan:
+- **all six placements** (the origin; the corpus's far origin turned 23°;
+  the same in own groups; +1e9 mm turned, unturned, and turned in own
+  groups): every tracer fixture (`RT1`–`RT9`, `RI1`, `LZ1`, `LZ2`), `RL1`,
+  `RL2`, and the room-object tests `RG1`, `RG2`, `RS5`, `RS6`;
+- **at least the origin and the corpus far origin in own groups**: every
+  relational edit (`RG3`–`RG6`, `RD1`–`RD8`, `RS1`–`RS4`, `RA2`, `GR1`,
+  `GR2`, `ST2`, `ST4`, `DG1`);
+- **`RL4`, `GR6` and `OL1`** use a non-identity similarity on the room's
+  (or the fill's) group, at the corpus far origin;
+- renders (`RR1`–`RR4`, `OL4`) and the sample plan (`SP1`–`SP7`) at the
+  sample plan's own placement, which is off-origin and not symmetric by
+  construction (08 D18).
+
 - **Engine (test-only clients):**
   - `TX1` a text client: added with its string and `textAttrs`; a
     parameter change rewrites the string in place (same handle), one undo
@@ -1373,8 +1616,9 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
   - `AT1` each attribute written on add, none rewritten on a match; a
     region's boundary flags apart from its fill's;
   - `PG1` a page-key client: a page change seeds exactly the types whose
-    key changed; one undo step; `PG2` a change outside every key plans
-    nothing;
+    key changed; one undo step; a **page-only** edit (seeds otherwise
+    empty) still regenerates (S-12); `PG2` a paper-colour and a grid
+    change: the client's `generate` call count is unchanged (S-8);
   - `DV1` a dissolving client: removed in the edit, component detached,
     one undo step, undo restores handles (root order normalised);
     `drift()` names a loaded one;
@@ -1383,13 +1627,22 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
   - `SD1` a contributor moved into a reader's field regenerates the reader;
     `SD2` moved out of it (before box); `SD3` moved far (before-view); `SD4`
     the two-hop: a contributor's neighbour's place box changes; `SD5` two
-    readers touched by one contributor both regenerate; `SD6` counters:
-    no seeds → 0 place and read box calls; a non-contributor edit → 0; a
-    contributor edit → exactly `2 × |K ∩ contributors|` place boxes
-    (before and after) and one read box per live reader; `SD7` the bulk
-    pass gives the same neighbour lists as `neighboursOf`, its overlap
-    tests counted and below n²/4 on a spread layout; `SD8` the catalog
-    refuses a type with both roles.
+    readers touched by one contributor both regenerate; `SD6` counters,
+    on a fixture where no reader regenerates: no seeds → 0 place and read
+    box calls; a non-contributor edit → 0; a contributor edit → exactly
+    one place box per `k ∈ K ∩ contributors` live before plus one per
+    such `k` live after (a moved, an added and a deleted contributor), and
+    one read box per live reader; the bulk pass's count (one per
+    contributor) pinned separately on a fixture where a reader does
+    regenerate (S-13); `SD7` the bulk pass gives the same neighbour lists
+    as `neighboursOf`, its overlap tests counted and below n²/4 on a
+    spread layout; `SD8` the catalog refuses a type with both roles;
+    `SD9` an **unchanged** neighbour in `K` adds nothing: a contributor
+    moved away from a reader, whose unchanged neighbour's box touches the
+    reader, regenerates no reader (the reader's `generate` count; S-4);
+    `SD10` a document with no live reader makes no place-box call on a
+    contributor edit; `objectsOf<U>()` lists exactly the live objects of
+    `U`, ascending, and not a lost or re-parented one (S-3).
 - **Tracer and inputs (app, pure):**
   - `RI1` the view and document adapters agree bit for bit;
   - `RT1` the sample plan's six rooms, 15 openings, six placements (the
@@ -1400,17 +1653,26 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
     `JM`; `RT8` separators face to face, into the bands, 50 mm short;
     `RT9` `SeedInWall` and `Unbounded`;
   - `LZ1` localised equals all, bit for bit, with 200 far walls added;
-    `LZ2` the triangle; `LZ3` traced segments per rebuild on the sample
-    plan, pinned.
+    `LZ2` the triangle: the column lies beyond the first growth box and
+    must be found by the certificate (32.77 m², not 32.93); `LZ3`
+    `debugTracedSegments` per rebuild on the sample plan, below a bound
+    set from the plan's run;
+  - `TN1` `tintOf` directly: a pinched outer ring (touching itself at one
+    vertex) takes step 3; a two-hole ring where the second hole's view of
+    the ring is blocked by the first bridges it to the growing keyholed
+    ring (S-11); a hole with no visible vertex is left out and reported.
 - **The room object (app):**
   - `RP1` `RoomParams`; `RP2` the default tables unchanged;
   - `RG1` children, order, attributes; `RG2` holes and the fallback chain
-    (a forced step 2 and step 3); `RG3` the shared partition of the two-room fixture moved
+    in a room: the column (step 1), two columns in one room (step 1, two
+    bridges), and step 2 with its `room.tint`; `RG3` the shared partition of the two-room fixture moved
     500 mm: both rooms' areas and labels follow, same handles, one step,
     undo, redo; `RG4` handles across undo, redo,
     purge; `RG5` save → load → save; `RG6` same state + same edit;
   - `RL1` the thin L at the origin, the corpus and +1e9 mm placements:
-    the pole inside, against 685.786 by hand, to the 10 mm precision;
+    the pole inside; its distance to the boundary against 585.786 by hand
+    at every placement, and at the origin its coordinates against
+    (685.786, 685.786) by hand, both within the 10 mm precision;
     `RL2` a column at the box centre moves the pole off it; `RL3` an
     offset rides with the pole across a wall move (`anchor − pole ==
     label`, and the anchor is not `seed + label`); `RL4` a room group at a
@@ -1421,8 +1683,8 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
     reads 1:50 and metres;
   - `RD1` the seed covered by a moved wall; `RD2` a face opened; `RD3` E4
     deleted (Hall and Bedroom 1 dissolve, one step); `RD4` the column
-    deleted (Living kept); `RD5` the partition pulled 150 mm (both
-    survive, `room.shared`); `RD6` the separator pulled 50 mm short;
+    deleted (Living kept); `RD5` the partition pulled back 160 mm (both
+    survive, one face of 29,266,000 mm² by area, `room.shared`; S-2); `RD6` the separator pulled 50 mm short;
     `RD7` a dissolve's undo; `RD8` a separator moved 60 m
     away (its two rooms merge, `room.shared`);
   - `RS1`–`RS4` the spike's c1–c4 (the right room clicked, then: c1 a
@@ -1434,13 +1696,17 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
   - `RK1` a line draw among the sample plan: 0 place and read box calls;
     `RK2` timing (06's NC4 method, JIT, median of five, printed, not
     asserted) for a wall move at 100, 300 and 600 walls with a room per
-    four walls, recorded in the results note.
+    four walls, **at the origin and at the corpus rotation, and on a
+    layout with long exterior walls that many partitions tee into** (S-4),
+    printing also the number of rooms rebuilt per move; recorded in the
+    results note.
 - **Renders and picks (app, the shell in `flutter_test`):**
   - `RR1` a click on a furniture fill inside a room picks the furniture;
     on a wall's face 5 mm inside, the wall; on bare floor, nothing;
     on a label, the room (the spike's Q6 probes);
-  - `RR2` the tint's pixel over white paper and over furniture: the
-    foreground at ~10% over what is there; `RR3` the same on Blueprint;
+  - `RR2` the tint's pixel over white paper (`#E5E5E5` to the
+    rasteriser's rounding) and over furniture: the foreground at ~10% over
+    what is there; `RR3` the same on Blueprint;
   - `RR4` the separator paints dashed pixels at 1:50.
 - **The separator (app):** `SR1` `SeparatorParams` round trip, key
   order, `==`; `SR2` one open polyline, ByLayer, linetype
@@ -1452,7 +1718,13 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
     `TT2` preview equals the generated ring; `TT3` no room in a wall, an
     unbounded face or an occupied face; `TT4` the name's lowest unused N;
     `TT5` the seed is the raw point with F3 on near a vertex; `TT6` the
-    hover allocates nothing in steady state;
+    hover allocates nothing in steady state; a hover outside every place
+    box traces nothing (`debugTracedSegments` unchanged; S-5), and inside
+    a wall's band re-uses the cached verdict; timing of an `Unbounded`
+    hover inside the plan at 600 walls, printed; `TT7` a click in an
+    occupied face makes nothing and the status line reads
+    `Already a room: <name>` (decision 26); hovering there shows it too;
+    it clears on leaving the face and on deactivation;
   - `ST1` S places one separator in two clicks, one undo step; `ST2` band
     trimming, F3 on and off; `ST3` both ends in one band: nothing; `ST4`
     the new separator splits its room (one side keeps the room);
@@ -1463,7 +1735,11 @@ Identifiers are this spec's; the plan may renumber, keeping the kills.
   - `GR1` the label grip: at the anchor, a drag stores the offset, one
     step; `GR2` a drop on the pole stores null; `GR3` not hit under
     runtime; `GR4` a body drag on a selected room moves nothing, no
-    rotation grip for rooms alone; `GR5` separator end grips, trimmed.
+    rotation grip for rooms alone; `GR5` separator end grips, trimmed;
+    `GR6` `GR1` and `GR2` under a room group at a rotated, translated,
+    scaled similarity (S-10).
+- **Render layer (`jet_cad_2d_flutter`):** `OL1`–`OL3` (D24).
+- **The ring highlight in the shell (app):** `OL4` (D24).
 - **Diagnostics:** `DG1` `room.shared` once per pair by the lower handle,
   three rooms in one face give three entries; `DG2` `room.broken` from a
   file; `DG3` `room.tint`; `DG4` `separator.degenerate` and
@@ -1481,7 +1757,7 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | Mutant | What it breaks | Must be killed by |
 |---|---|---|
 | M-10a | centrelines traced instead of the uncut bands | `RT1`, `RT7` (four thicknesses: 20,000,000 against 18,093,750), `SP7` |
-| M-10b | the outer ring chosen as the cycle of least **absolute** area (a winding error) | `RT1`, `RT2` (the mixed-direction L); spike: `+8 −71` |
+| M-10b | **redefined** (S-1): cycles of **either sign** accepted and the least **signed** area wins, so the most negative cycle holding the seed — the building's outer contour — is taken as the room (the spike's M-10b). The roadmap's "shoelace without the absolute value" has no meaning here: a face's orientation is structural in the half-edge walk. Revision 1's "least absolute area" is equivalent (a negative cycle holding the seed encloses the seed's positive face, so its |area| is larger; the review's run: `+84: All tests passed!` with it fired) and is dropped | `RT1`, `RT2` (the mixed-direction L); spike: `+8 −71` |
 | M-10c | the label at the ring's box centre | `RL1` (thin L) |
 | M-10d | the stored cut pieces traced instead of the uncut bands | `RT1` (15 openings: the Hall leaks out, spike `Actual: <Instance of 'Unbounded'>`), `RT2` |
 | M-10e | **redefined** (the roadmap's "a shared wall belongs to one room" has no stored ownership left to break): the trigger adds only the **lowest-handle** reader each contributor touches | `RG3` (the shared partition moved 500 mm: both rooms must follow; `drift()` names the higher one), `SD5` |
@@ -1511,10 +1787,18 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | Mutant | What it breaks | Must be killed by |
 |---|---|---|
 | M-10nbr | the trigger's `K` is the seeds only | `RS6` (`FB`), `SD4` |
+| M-10allK | every contributor in `K` adds its boxes, changed or not (revision 1's rule) | `SD9` |
+| M-10objects | `objectsOf` answers only `self` (no other room found) | `DG1` |
+| M-10pagelate | page seeds added after the early return | `PG1` (the page-only edit) |
+| M-10hover | the Room tool's hover never short-circuits | `TT6` (the traced-segment counter) |
+| M-10notice | the Room tool sets no status notice | `TT7` |
+| M-10gripframe | the label grip subtracts the world line offset from the local insertion point (revision 1's frames) | `GR6` |
+| M-10ring | `OutlineCache`'s fill arm returns on every fill (today's behaviour) | `OL1`, `OL4` |
+| M-10ringdup | the fill arm also adds a **visible** boundary's geometry | `OL2` (the loop outlined twice) |
 | M-10before | the trigger uses after boxes only | `SD2`; `RD4` (the column, which has no neighbour, deleted: Living keeps its hole without the before box); `RD8` (a separator moved 60 m away: the two rooms it split must merge). A partition's own neighbours mask it, so partition fixtures cannot kill it |
 | M-10snap | the before-view reads the live stores (no snapshot) | `SV1`–`SV3`, `SD3` |
 | M-10cand | `placedIn` by reach instead of place box | `SD1`, `RG1`, `SP7` (a band's faces lie outside its wall's reach, so every room traces `Unbounded` and dissolves) |
-| M-10cert | D7 stops at the first `Traced` face (no certificate) | `LZ2` (the triangle's column is missed: 32.93 against 32.77) |
+| M-10cert | D7 **returns its first `Traced` result** (steps 2 and 3 skipped; S-7) | `LZ2` (the triangle's column is missed: 32.93 against 32.77) |
 | M-10grow | no growth: straight to every contributor | `LZ3` (the segment counter) |
 | M-10bulk | the bulk pass replaced by per-object `neighboursOf` | `SD7` (the overlap-test count) |
 | M-10pagekey | every page change seeds every room | `PG2` |
@@ -1571,24 +1855,28 @@ mechanism now).
    change regenerates in one step; a paper change regenerates no room.
 9. Save → load → save is byte-identical; `drift()` is empty after load.
 10. The tint is translucent, follows the paper at paint time, and is never
-    picked, band-selected or stroked.
+    picked, band-selected or stroked by the painter; a selected or hovered
+    room outlines its labels and its ring (decision 27, D24).
 11. The separator is dashed, splits a face, and is trimmed to faces.
-12. The Room and Separator tools, the Room section (focus hand-back,
-    pinned target, free text), the label grip and the separator grips
-    behave as D19–D21 say.
+12. The Room and Separator tools (the status notice included), the Room
+    section (focus hand-back, pinned target, free text), the label grip
+    and the separator grips behave as D19–D21 say.
 13. The spatial trigger is exact (the proof's tests) and its cost is
     pinned by counters; the timing is recorded.
-14. The allocation invariants pass unchanged; the render layer's `lib` is
-    unchanged.
+14. The allocation invariants pass unchanged; the render layer's `lib`
+    changes only in `outline_cache.dart`'s fill arm (D24), and its gate is
+    green with only its standing failures.
 15. The sample plan is D23's; its tests pass; `drift()` and
     `diagnostics()` are empty.
 16. Every named mutant is killed, logged in `plan-10-mutation-log.md`;
     `roadmap/13` carries "separators do not plot".
 17. **The human's look — owed by the human, never simulated:** on macOS,
     in Chrome and in Firefox: the Room and Separator tools and their
-    previews; the sample plan's tints and labels on White and on Blueprint;
-    moving and deleting walls around rooms, and undo; the label grip; the
-    Room section's name field.
+    previews; the Room tool's status notice; the sample plan's tints and
+    labels on White and on Blueprint; a selected room's ring and labels in
+    the selection colour; the separator's dashes and whether 0.35 mm reads
+    as thin (S-15); moving and deleting walls around rooms, and undo; the
+    label grip; the Room section's name field.
 
 ## Spec rulings
 
@@ -1604,8 +1892,10 @@ Every place this spec resolved something the decisions leave open.
 - **R-6** (D5) — `roomTrace = Tolerance(linear: 1e-6, angular: 1e-12)`.
 - **R-7** (D7, D16) — growth from 1,000 mm, doubling; the certificate
   margin 1 mm; the room's read box grown by 2 mm.
-- **R-8** (D9) — the tint's colour is explicit ACI 7.
-- **R-9** (D9) — the tint's transparency is 229 (about 10%).
+- **R-8** (D9) — the tint's colour is explicit ACI 7 (the foreground is
+  decision 28's; explicit rather than ByLayer is the ruling).
+- **R-9** (D9) — the tint's transparency is 229 (about 10%): **now decision
+  28**; kept here for the number only.
 - **R-10** (D9, D13) — no `unpickable` flag; the invisible boundary alone.
 - **R-11** (D9) — holes cut by a 0.5 mm slit keyhole, with a three-step
   fallback.
@@ -1617,7 +1907,8 @@ Every place this spec resolved something the decisions leave open.
 - **R-17** (Non-goals, D3) — dash patterns in paper units and the
   axis-aligned hairline go to a render-layer follow-up.
 - **R-18** (D19) — the seed is the raw pointer.
-- **R-19** (D19) — the Room tool makes no room in an occupied face.
+- **R-19** (D19) — the Room tool makes no room in an occupied face:
+  **now decision 26**.
 - **R-20** (D20) — the Separator tool is not chained.
 - **R-21** (D20) — band trimming of separator ends, gated on F3.
 - **R-22** (D21) — rooms are not moved or rotated by the select tool.
@@ -1626,19 +1917,60 @@ Every place this spec resolved something the decisions leave open.
 - **R-25** (D21) — the Room section's area is the label's stored string.
 - **R-26** (D21) — a label dropped on the pole returns to auto.
 - **R-27** (D23) — the sample plan sets its page before its rooms.
-- **R-28** (D23) — the sample plan has seven rooms, Dining included.
+- **R-28** — *withdrawn*: the seventh room, Dining, is within decision 16
+  (controller's ruling on S-16).
+- **R-29** (D19) — the status notice reads `Already a room: <name>`, and
+  also shows while hovering an occupied face.
+- **R-30** (D24) — a drawn fill whose boundary is invisible outlines its
+  boundary's geometry in the selection overlay.
 
 ## Open questions for the human
 
-Only product-visible choices the decisions do not settle; each has a
-default above that the plan follows unless the human rules otherwise.
+**None.** Revision 1's three were answered by the human on 2026-09-26:
+1 (a click in an occupied face) by decision 26, 2 (what a selected room
+outlines) by decision 27, 3 (the tint's strength) by decision 28. The
+controller ruled that the Dining room (S-16) is within decision 16 and
+that the separator's weight (S-15) stays at the thinnest weight with
+evidence; gate 17's look covers whether it reads as thin.
 
-1. **A Room tool click in a face that already has a room** (R-19). Default:
-   nothing happens. Alternative: a second room is made and reported as
-   sharing the space.
-2. **What a selected room outlines.** Default: its labels only, as the
-   overlay draws what is rendered and the tint's boundary is invisible.
-   Alternative: the ring outlined too, which needs a render-layer change
-   (the overlay drawing a selected group's invisible boundaries).
-3. **The tint's strength** (R-9): the foreground at about 10%. The look
-   decides; any value is one constant.
+
+## Revision 2
+
+The independent review of revision 1 (`5015828`; "Ready with amendments",
+S-1 to S-19, four major) and the human's decisions 26–28. Each finding was
+checked against the code or the arithmetic before it was applied.
+
+| Finding | Outcome |
+|---|---|
+| S-1 (major) M-10b equivalent | **Adopted.** My own check agrees: a negative cycle holding the seed encloses the seed's positive face. M-10b is now the spike's (either sign, least signed area); the roadmap's shoelace-sign mutant is recorded as meaningless here |
+| S-2 (major) the 150 mm pull-back area | **Adopted, 160 mm.** The partition keeps its north T, so its band stays in the merged face: 29,640,000 − 100 × 3,740 = 29,266,000 (`29.27 m²`, 0.001 from a tie). D8's row and `RD5` (asserting the area) changed |
+| S-3 (major) `room.shared` has no way to find other rooms | **Adopted.** `ParametricView.objectsOf<U>()`, survey-backed and memoised (D16), listed in the engine tables; `SD10`, M-10objects |
+| S-4 (major) the trigger rebuilds rooms along unchanged neighbours | **Adopted in full.** `placeInput` compared before and after; only a changed contributor adds its boxes; no reader, no trigger; the cost bound restated (D16.2, D16.6); `SD9`, M-10allK; `RK2` at the corpus rotation and on long exterior walls. The no-drift proof reads only changed inputs and stands |
+| S-5 hover outside a face re-traces everything | **Adopted, partly.** A pointer outside the union of place boxes short-circuits to `Unbounded`; a `SeedInWall` verdict is cached with its band. An `Unbounded` point inside the plan (an open courtyard) has no cheap containment test and is re-traced per move, measured in `TT6` (D19); M-10hover |
+| S-6 growth loop may not terminate | **Adopted.** A non-finite place box is `null`; the loop ends when `B` contains the union of the finite boxes (D7); separators with a non-finite endpoint are degenerate |
+| S-7 M-10cert ambiguous | **Adopted the definition** (return the first `Traced`). **Not adopted: the two-round fixture.** One certificate round always suffices (the re-traced face lies inside the first, so its grown box does too; now stated in D7), so no fixture can need two; `LZ2` kills the mutant as defined |
+| S-8 `PG2` cannot see M-10pagekey | **Adopted:** `PG2` counts `generate` calls |
+| S-9 the counter unnamed | **Adopted:** `debugTracedSegments` (D7) |
+| S-10 label grip frames | **Adopted:** every step in a named frame (D21); `GR6`, M-10gripframe |
+| S-11 keyhole rules and `RG2` seam | **Adopted:** `tintOf` in the seed-relative frame, bridges to the growing keyholed ring, a hole with no visible vertex left out and reported (D9); `TN1` tests `tintOf` directly with a pinched ring (step 3) and a blocked second hole |
+| S-12 page seeds and the early return | **Adopted:** page seeds join before the early return (D14); the trigger and the plan share one after-view (D16.2); M-10pagelate |
+| S-13 `SD6`'s "exactly" | **Adopted:** one box per `k` live before plus one per `k` live after, on a fixture where no reader regenerates; the bulk pass counted separately |
+| S-14 how `stored` is formed | **Adopted** (D16.2) |
+| S-15 0.35 mm as "thin" | **Controller's ruling:** the thinnest weight shown to render in a cited run stands, so 0.35 mm (spike finding 4); the hairline stays in R-17's follow-up. Not an open question; gate 17's look includes it (D3) |
+| S-16 the seventh room | **Controller's ruling:** within decision 16; R-28 withdrawn, D23 cites decision 16 |
+| S-17 `ensureDashedLinetype` duplicates | **Adopted,** after checking `tables.dart:113-118` (D3) |
+| S-18 placements per test | **Adopted:** a placements paragraph at the head of "Tests by area" |
+| S-19 small accuracy items | **Adopted:** `#E5E5E5`; the bath/living door; Dining and Living from the spike's rebuilt decision-16 walls; `LZ2` "beyond the first growth box"; `RL1` asserts the distance at every placement and the coordinates at the origin |
+
+**The human's decisions:**
+- **26** — a Room tool click in an occupied face does nothing and the
+  status line says so: R-19 now cites it; `RoomTool.notice` and the shell's
+  status line (D19, R-29); `TT7`, M-10notice.
+- **27** — a selected room outlines its labels and its inner-face ring in
+  the selection colour: **D24**, a render-layer change to
+  `OutlineCache._addLeaf`'s fill arm (a drawn fill whose boundary is
+  invisible contributes its boundary's geometry), built off the frame path;
+  D21 updated; `OL1`–`OL4`, M-10ring, M-10ringdup; gates 10, 14 and 17.
+- **28** — the tint is the page's foreground at about 10%: R-8 and R-9 now
+  cite it (D9).
+- **Open questions for the human:** none left.
