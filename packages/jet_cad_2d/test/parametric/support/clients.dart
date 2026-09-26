@@ -85,7 +85,8 @@ RectParams? rectOf(ParametricView v, Handle h) =>
     v.paramsOf<Post>(h);
 
 /// `generate` calls per handle, counted by [RectType], [PostType],
-/// [PinType] and [TagType] (Ruling 08-2). Tests clear it.
+/// [PinType], [TagType] (Ruling 08-2) and the plan-10 clients (Ruling
+/// 10-2). Tests clear it.
 final Map<Handle, int> generateCalls = {};
 
 void _counted(Handle h) => generateCalls[h] = (generateCalls[h] ?? 0) + 1;
@@ -561,6 +562,67 @@ final class TagType extends ParametricType<Tag> {
   }
 }
 
+/// A text client (spec 10 D12, Ruling 10-2): one generated TEXT holding
+/// [text], centred on its insertion point ([x], [y]) in its own local
+/// space.
+final class Caption implements Component {
+  const Caption(this.text, this.x, this.y);
+  static const String id = 'test.caption';
+  final String text;
+  final double x, y;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'text': text, 'x': x, 'y': y};
+  static Caption fromJson(Map<String, Object?> j) => Caption(
+      j['text']! as String,
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Caption && o.text == text && o.x == x && o.y == y;
+  @override
+  int get hashCode => Object.hash(text, x, y);
+
+  /// Its TEXT's cap height, model mm.
+  static const double height = 250;
+
+  /// Its TEXT's justification: centre, middle (Ruling 10-14's literal).
+  static final int attrs =
+      packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.middle);
+}
+
+/// A [Caption]'s TEXT payload, in its own local space.
+GeometryPayload captionPayload(Caption p) =>
+    textPayload(Vector2(p.x, p.y), Caption.height);
+
+final class CaptionType extends ParametricType<Caption> {
+  const CaptionType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// A 1 mm box centred on the insertion point, in world.
+  @override
+  Aabb2 reach(Caption params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [
+          (-.5, -.5),
+          (.5, -.5),
+          (.5, .5),
+          (-.5, .5)
+        ])
+          toWorld.transformPoint(Vector2(params.x + dx, params.y + dy)),
+      ]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Caption>(self)!;
+    return [
+      Generated.text(captionPayload(p), p.text, textAttrs: Caption.attrs),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -572,4 +634,5 @@ ParametricCatalog testCatalog() => ParametricCatalog()
       RegionRect.id, RegionRect.fromJson, const RegionRectType())
   ..register<Post>(Post.id, Post.fromJson, const PostType())
   ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
-  ..register<Tag>(Tag.id, Tag.fromJson, const TagType());
+  ..register<Tag>(Tag.id, Tag.fromJson, const TagType())
+  ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType());

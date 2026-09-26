@@ -181,6 +181,18 @@ List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
     ..sort(_byValue);
 }
 
+/// The record of a child the plan adds (spec 10 D13): the one builder for
+/// every add in [_plan], a region's fill and boundary and a plain or TEXT
+/// child alike. [g]'s colour, string, `textAttrs` and flags are written
+/// here and nowhere else (06 D11, 10 D12); `draftRecord`'s defaults stand
+/// for everything a [Generated] does not set. [boundary] marks a region's
+/// boundary record, which Task 2's attributes tell apart from its fill.
+EntityRecord _recordOf(
+        Handle handle, Handle owner, EntityKind kind, Generated g,
+        {bool boundary = false}) =>
+    draftRecord(handle, owner, kind, color: g.color, text: g.text)
+        .copyWith(textAttrs: g.textAttrs, flags: g.flags);
+
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
       a.scalars.length != b.scalars.length) {
@@ -237,6 +249,10 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 /// order, so a new object's handles run fill < boundary < later children.
 /// A fill child and the boundary it names are one region, matched through
 /// the fill; the boundary is never matched as a plain POLYLINE.
+///
+/// A matched child's payload is rewritten when it differs; a matched
+/// TEXT's string too (spec 10 D12). Every added record comes from
+/// [_recordOf].
 List<DraftCommand> _plan(
     CommandTarget t, List<Handle> closure, _Survey s, ParametricView view) {
   var reserved = t.handleSeed.current.value;
@@ -273,11 +289,10 @@ List<DraftCommand> _plan(
       } else {
         // Fill first: `AddRegionCommand` requires the lower handle on it.
         out.add(AddRegionCommand(
-            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill,
-                color: g.color),
-            boundary: draftRecord(
-                Handle.checked(++reserved), h, EntityKind.polyline,
-                color: g.color),
+            fill: _recordOf(Handle.checked(++reserved), h, EntityKind.fill, g),
+            boundary: _recordOf(
+                Handle.checked(++reserved), h, EntityKind.polyline, g,
+                boundary: true),
             boundaryPayload: g.payload));
       }
     }
@@ -292,10 +307,16 @@ List<DraftCommand> _plan(
             t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
           out.add(SetEntityGeometryCommand(existing[i], g.payload));
         }
+        // Spec 10 D12: a matched TEXT's string is a stored value, compared
+        // by exact `==` after the payload and rewritten in place when it
+        // differs. Nothing else of the record is read or rewritten:
+        // `textAttrs` is fixed at creation, like the colour (06 D11).
+        if (g.kind == EntityKind.text && t.entities.read(slot).text != g.text) {
+          out.add(SetEntityTextCommand(existing[i], g.text, ''));
+        }
       } else {
         out.add(AddEntityCommand(
-            record: draftRecord(Handle.checked(++reserved), h, g.kind,
-                color: g.color),
+            record: _recordOf(Handle.checked(++reserved), h, g.kind, g),
             payload: g.payload));
       }
     }

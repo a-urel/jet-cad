@@ -72,22 +72,42 @@ enum ReferencePolicy {
   orphan,
 }
 
-/// One generated entity (spec D3), or one generated region (spec 07 D8).
+/// One generated entity (spec D3), one generated region (spec 07 D8), or
+/// one generated TEXT (spec 10 D12).
 ///
 /// The plain form is never a fill: a fill's payload is a reference to its
 /// boundary, not geometry, and `SetEntityGeometryCommand` refuses it. A
-/// filled area is generated with [Generated.region] instead.
+/// filled area is generated with [Generated.region] instead. Nor is it a
+/// TEXT or an ATTRIB: a TEXT is generated with [Generated.text], which
+/// carries its string.
 ///
-/// [color] is written into the record when the child is **added**, and
-/// only then: a regeneration rewrites a matched child's payload in place
-/// and never its record (06 D11), so a client must keep its colours fixed
-/// for an object's life. ByLayer by default.
+/// [color], [text], [textAttrs] and [flags] are written into the record
+/// when the child is **added**, and only then: a regeneration rewrites a
+/// matched child's payload in place, and a matched TEXT's string (spec 10
+/// D12), and never the rest of its record (06 D11), so a client must keep
+/// its colours, its text attributes and its flags fixed for an object's
+/// life. ByLayer by default.
 final class Generated {
+  /// Throws `ArgumentError` for [EntityKind.fill] (see the class comment),
+  /// and for [EntityKind.text] and [EntityKind.attrib] (spec 10 D12, R-15):
+  /// a TEXT without its string is exactly the defect 10's research found,
+  /// a label the planner would add empty; an ATTRIB needs a tag nobody
+  /// generates.
   Generated(this.kind, this.payload, {this.color = const ByLayerColor()})
-      : filled = false {
+      : filled = false,
+        text = '',
+        textAttrs = 0,
+        flags = 0 {
     if (kind == EntityKind.fill) {
       throw ArgumentError.value(
           kind, 'kind', 'a fill cannot be generated (spec 06 D3)');
+    }
+    if (kind == EntityKind.text || kind == EntityKind.attrib) {
+      throw ArgumentError.value(
+          kind,
+          'kind',
+          'a TEXT is generated with Generated.text, and an ATTRIB '
+              'cannot be generated (spec 10 D12)');
     }
   }
 
@@ -101,7 +121,20 @@ final class Generated {
   /// [color] is the fill's and the boundary's both.
   Generated.region(this.payload, {this.color = const ByLayerColor()})
       : kind = EntityKind.polyline,
-        filled = true;
+        filled = true,
+        text = '',
+        textAttrs = 0,
+        flags = 0;
+
+  /// A TEXT whose string the planner owns (spec 10 D12): [payload] is a
+  /// `textPayload`, [text] is written into the record on add and rewritten
+  /// on a match (`SetEntityTextCommand`) whenever it differs. [textAttrs]
+  /// (`packTextAttrs`) is fixed at creation, like [color]: a type that must
+  /// change a label's justification needs a new child.
+  Generated.text(this.payload, this.text,
+      {this.color = const ByLayerColor(), this.textAttrs = 0, this.flags = 0})
+      : kind = EntityKind.text,
+        filled = false;
 
   /// [EntityKind.polyline] for a region: the kind of its boundary.
   final EntityKind kind;
@@ -112,6 +145,16 @@ final class Generated {
 
   /// The colour an added child's record gets (both records of a region).
   final DraftColor color;
+
+  /// A TEXT's string (spec 10 D12); `''` for every other form.
+  final String text;
+
+  /// A TEXT's packed justification and override bits, written on add only;
+  /// 0 for every other form.
+  final int textAttrs;
+
+  /// The record's `flags`, written on add only.
+  final int flags;
 }
 
 /// A direct edit of a generated entity (spec D6). Propagates like
