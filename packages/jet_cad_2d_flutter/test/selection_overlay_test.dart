@@ -701,5 +701,33 @@ void main() {
             reason: "$name: the cross sits on P's point under T");
       }
     }
+
+    // The answer is the last rebuild's: a key the provider stops calling
+    // movable leaves the set at the next rebuild, and a key that left the
+    // selection is not movable.
+    final doc = DraftDocument.empty();
+    final a = addGroup(doc, doc.rootHandle, Transform2.translation(7010, 3020));
+    addEntity(doc, a, EntityKind.line, [0, 0, 120.5, 0], []);
+    final b = addGroup(doc, doc.rootHandle, Transform2.translation(7250, 3160));
+    addEntity(doc, b, EntityKind.line, [0, 0, 90.25, 0], []);
+    final immovable = <Handle>{};
+    final selection = SelectionController(doc);
+    final outlines = OutlineCache(doc, selection);
+    final grips =
+        GripCache(doc, selection, outlines, objects: _Movability(immovable));
+    addTearDown(() {
+      grips.dispose();
+      outlines.dispose();
+      selection.dispose();
+    });
+    final ka = SelectionKey.root(a), kb = SelectionKey.root(b);
+    selection.replace([ka, kb]);
+    expect(grips.isMovable(kb), isTrue);
+    immovable.add(b);
+    selection.replace([ka]);
+    expect(grips.isMovable(kb), isFalse, reason: 'no longer selected');
+    selection.replace([ka, kb]);
+    expect(grips.isMovable(ka), isTrue);
+    expect(grips.isMovable(kb), isFalse, reason: 'immovable since');
   });
 }
