@@ -399,8 +399,11 @@ class OutlineCache extends ChangeNotifier {
   /// - a boundary `rendering()` accepts is outlined by its own leaf, and
   ///   adding it here would outline the loop twice;
   /// - a missing boundary draws nothing;
-  /// - a boundary with another owner (a loaded file can carry one) does not
-  ///   live in the fill's space, so the fill's transform cannot place it.
+  /// - a boundary with another owner (only a loaded file can carry one,
+  ///   and `validate()` reports it) is left out, on spec 10 T-6's ruling.
+  ///   The painter still draws such a fill, with the boundary's local points
+  ///   under the fill's own placement; the outline does not follow it there,
+  ///   because the boundary's own leaf, if drawn, sits under its owner's.
   void _addFill(
       List<_Outline> out, int slot, Transform2 t, FilterEvaluator filters) {
     final entities = document.entities;

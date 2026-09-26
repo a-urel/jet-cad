@@ -246,17 +246,18 @@ class GripCache extends ChangeNotifier {
   void dropCarry() => _carry = null;
 
   /// A rotation grip is drawn and hit (spec D6). A fill whose boundary is
-  /// drawn has no outline of its own, so a non-null box already means some
-  /// other key (Ruling 03-15). A fill whose boundary is hidden is outlined
-  /// (spec 10 D24); no pick or band selects one alone. Some key with an outline must also be movable
-  /// ([movableKey], spec 08 D16): a selection of openings alone has nothing
-  /// to rotate.
+  /// drawn has no outline of its own (Ruling 03-15); one whose boundary is
+  /// hidden is outlined (spec 10 D24) but is never movable, as a move never
+  /// captures a fill (03 D4). Some key with an outline must be movable
+  /// ([movableKey], spec 08 D16): a selection of openings alone, or of a
+  /// fill alone, has nothing to rotate.
   bool get rotatable => _box != null && _movable;
 
   /// Whether a move or rotate of the selection moves [key]: a selected key
-  /// with an outline that is [movableKey] (spec 08 D16), as of the last
-  /// rebuild. The move and rotate preview draws only these (spec 10 D24,
-  /// R-31), so a key the move leaves behind does not appear to move.
+  /// with an outline that is [movableKey] (spec 08 D16) and not a fill leaf
+  /// (a move never captures a fill, 03 D4), as of the last rebuild. The
+  /// move and rotate preview draws only these (spec 10 D24, R-31), so a key
+  /// the move leaves behind does not appear to move.
   ///
   /// One set lookup, no allocation: the overlay asks it per key per frame.
   bool isMovable(SelectionKey key) => _movableKeys.contains(key);
@@ -334,14 +335,18 @@ class GripCache extends ChangeNotifier {
     final keys = selection.keys.toList()
       ..sort((a, b) => a.target.value.compareTo(b.target.value));
     for (final key in keys) {
+      final slot = document.entities.slotOf(key.target);
       final bounds = outlines.worldBoundsOf(key);
       if (bounds != null) {
         box = box.union(bounds);
         // Every key is asked, not only until the first movable one: the
-        // preview needs each key's answer (spec 10 D24).
-        if (movableKey(document, key, objects)) _movableKeys.add(key);
+        // preview needs each key's answer (spec 10 D24). A fill leaf is
+        // outlined when its boundary is hidden, but `GripDrag` never
+        // captures a fill (03 D4), so it is not movable here either.
+        final fill =
+            slot != null && document.entities.kindAt(slot) == EntityKind.fill;
+        if (!fill && movableKey(document, key, objects)) _movableKeys.add(key);
       }
-      final slot = document.entities.slotOf(key.target);
       if (slot == null) {
         // A group or an instance: no leaf grips (D3). A root-level group's
         // grips are its provider's, when there is one (07 D11).

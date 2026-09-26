@@ -126,6 +126,33 @@ final class _Movability implements ObjectGripProvider {
       const [];
 }
 
+/// A root-level region whose boundary is invisible: its fill key is
+/// outlined (spec 10 D24) but a move never captures a fill (03 D4).
+Handle addHiddenBoundaryRegion(DraftDocument doc, List<double> coords) {
+  final r = AddRegionCommand.allocate(
+    seed: doc.handleSeed,
+    owner: doc.rootHandle,
+    boundaryKind: EntityKind.polyline,
+    boundaryPayload: GeometryPayload(
+        coords: Float64List.fromList(coords), scalars: Float64List(0)),
+    layer: ReservedHandles.layerZero,
+    fillColor: const TrueColor(0x3366CC),
+    boundaryColor: const ByLayerColor(),
+  );
+  doc.commands.execute(AddRegionCommand(
+    fill: r.fill,
+    boundary: r.boundary.copyWith(flags: EntityFlags.invisible),
+    boundaryPayload: r.boundaryPayload,
+  ));
+  return r.fill.handle;
+}
+
+/// A fractional quadrilateral clear of every other OL5 fixture.
+const List<double> kFillLoop = [
+  7300.5, 2980.25, 7385.75, 2992.5, 7370.25, 3045.75, 7310.125, 3038.5, //
+  7300.5, 2980.25,
+];
+
 void main() {
   testWidgets('a selection change repaints the overlay and not the canvas',
       (tester) async {
@@ -580,6 +607,7 @@ void main() {
       Handle a,
       Handle b,
       Handle p,
+      Handle f,
       List<RecordedCall> previewPaths,
       List<RecordedCall> previewLines,
       Map<Handle, Path?> paths,
@@ -596,6 +624,8 @@ void main() {
       addEntity(doc, b, EntityKind.line, [0, 0, 90.25, 0], []);
       final p = group(7120.25, 3260.75, 1.1);
       addEntity(doc, p, EntityKind.point, [4.5, -2.25], []);
+      // F: a root-level fill whose boundary is hidden, selected directly.
+      final f = addHiddenBoundaryRegion(doc, kFillLoop);
       doc.commands.clearHistory();
 
       final index = SpatialIndex(doc);
@@ -627,7 +657,7 @@ void main() {
       });
 
       final keys = [SelectionKey.root(a), SelectionKey.root(b)];
-      selection.replace([...keys, SelectionKey.root(p)]);
+      selection.replace([...keys, SelectionKey.root(p), SelectionKey.root(f)]);
       final body =
           doc.tree.accumulatedTransform(a).transformPoint(Vector2(60.25, 0));
       final press = camera.value.worldToScreen(body);
@@ -658,11 +688,12 @@ void main() {
         a: a,
         b: b,
         p: p,
+        f: f,
         previewPaths: spy.named('drawPath').where(preview).toList(),
         previewLines: spy.named('drawLine').where(cross).toList(),
         crossAt: Offset(dotOnScreen.x, dotOnScreen.y),
         paths: {
-          for (final h in [a, b, p])
+          for (final h in [a, b, p, f])
             h: outlines.pathFor(SelectionKey.root(h), origin),
         },
       );
@@ -675,6 +706,8 @@ void main() {
     final some = dragOnA(_Movability({}), withCache: true);
     final mixed = dragOnA(_Movability({some.b, some.p}), withCache: true);
     expect(mixed.paths.values, everyElement(isNotNull));
+    expect(mixed.paths[mixed.f]!.getBounds().width, greaterThan(10),
+        reason: "the premise: F's fill key is outlined");
     expect(drawnPaths(mixed.previewPaths), hasLength(1));
     expect(
         identical(drawnPaths(mixed.previewPaths).single, mixed.paths[mixed.a]),
@@ -682,15 +715,16 @@ void main() {
         reason: "the preview strokes A's path and nothing else");
     expect(mixed.previewLines, isEmpty, reason: "P's cross stays behind");
 
-    // The controls: a provider calling every group movable, and no grip
-    // cache at all, preview all three.
-    for (final (name, run) in [
-      ('a provider calling all movable', some),
-      ('no grip cache', dragOnA(null, withCache: false)),
+    // The controls: a provider calling every group movable previews all
+    // three groups, and never the fill F, which the move does not capture;
+    // with no grip cache every key is drawn, F too, as before 10.
+    for (final (name, run, moved) in [
+      ('a provider calling all movable', some, 3),
+      ('no grip cache', dragOnA(null, withCache: false), 4),
     ]) {
       final drawn = drawnPaths(run.previewPaths);
-      expect(drawn, hasLength(3), reason: name);
-      for (final h in [run.a, run.b, run.p]) {
+      expect(drawn, hasLength(moved), reason: name);
+      for (final h in [run.a, run.b, run.p, if (moved == 4) run.f]) {
         expect(drawn.where((d) => identical(d, run.paths[h])), hasLength(1),
             reason: '$name: ${h.toHex()}');
       }
@@ -721,6 +755,17 @@ void main() {
       selection.dispose();
     });
     final ka = SelectionKey.root(a), kb = SelectionKey.root(b);
+    // A fill key alone is outlined but not movable, so there is nothing to
+    // rotate; beside a movable group the rotation grip is back.
+    final kf = SelectionKey.root(addHiddenBoundaryRegion(doc, kFillLoop));
+    selection.replace([kf]);
+    expect(grips.box, isNotNull, reason: 'the premise: the fill is outlined');
+    expect(grips.isMovable(kf), isFalse);
+    expect(grips.rotatable, isFalse, reason: 'a fill alone');
+    selection.replace([ka, kf]);
+    expect(grips.isMovable(ka), isTrue);
+    expect(grips.isMovable(kf), isFalse);
+    expect(grips.rotatable, isTrue, reason: 'a movable group beside it');
     selection.replace([ka, kb]);
     expect(grips.isMovable(kb), isTrue);
     immovable.add(b);

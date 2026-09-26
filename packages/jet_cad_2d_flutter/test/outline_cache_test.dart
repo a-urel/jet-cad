@@ -549,18 +549,21 @@ void main() {
   test(
       'OL2 a visible boundary is outlined once; a hidden fill, a missing '
       'boundary and a boundary with another owner outline nothing; a visible '
-      'fill whose boundary sits on a hidden layer outlines its loop', () {
+      'fill whose boundary sits on a hidden layer outlines its loop; a '
+      'visible boundary on a locked layer is outlined once', () {
     Transform2 placement(int i) =>
         Transform2.translation(4500000 + 1000.5 * i, 1200000 - 700.25 * i)
             .multiply(Transform2.rotation(0.4 + 0.15 * i))
             .multiply(Transform2.scale(1.5, 1.5));
     final built = DraftDocument.empty();
     final hidden = addLayer(built, 'Hidden', visible: false);
+    final locked = addLayer(built, 'Locked', locked: true);
     final groups = [
-      for (var i = 0; i < 6; i++)
+      for (var i = 0; i < 7; i++)
         addGroup(built, built.rootHandle, placement(i)),
     ];
-    final [visible, hiddenFill, missing, foreign, onHidden, other] = groups;
+    final [visible, hiddenFill, missing, foreign, onHidden, other, onLocked] =
+        groups;
     addRegion(built, visible, EntityKind.polyline, kLoop);
     addRegion(built, hiddenFill, EntityKind.polyline, kLoop,
         fillLayer: hidden, boundaryFlags: EntityFlags.invisible);
@@ -570,6 +573,8 @@ void main() {
         boundaryFlags: EntityFlags.invisible);
     final layered = addRegion(built, onHidden, EntityKind.polyline, kLoop,
         boundaryLayer: hidden);
+    final lockedRegion = addRegion(built, onLocked, EntityKind.polyline, kLoop,
+        boundaryLayer: locked);
     // A line of its own, so `other` has an outline of its own to compare.
     addEntity(built, other, EntityKind.line, [0.5, 0.25, 30.75, 10.5], []);
 
@@ -608,6 +613,16 @@ void main() {
         reason: 'the boundary is rejected by its layer alone');
     expect(doc.entities.flagsAt(doc.entities.slotOf(layered.boundary)!), 0,
         reason: 'not by its flag: a rule keyed on the flag misses this case');
+    // A locked layer is drawn but not picked: `rendering()` accepts the
+    // boundary where `picking()` would reject it, so a rule asking the wrong
+    // filter outlines this loop twice.
+    expect(drawn(doc, lockedRegion.boundary), isTrue);
+    expect(
+        FilterEvaluator(doc).acceptsEntity(
+            doc.entities.slotOf(lockedRegion.boundary)!,
+            const QueryFilter.picking()),
+        isFalse,
+        reason: 'the premise: picking rejects a locked leaf');
 
     final (selection, cache) = wire(doc);
     selection.replace([for (final g in groups) SelectionKey.root(g)]);
@@ -623,6 +638,8 @@ void main() {
         reason: 'a visible fill whose boundary sits on a hidden layer');
     expectCoords(of(other), mapped(placement(5), [0.5, 0.25, 30.75, 10.5]),
         reason: 'the foreign boundary is drawn by nobody: invisible');
+    expectCoords(of(onLocked), mapped(placement(6), kLoop),
+        reason: 'a visible boundary on a locked layer: its own leaf, once');
   });
 
   testWidgets(
