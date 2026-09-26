@@ -5,6 +5,7 @@
 // decided on turned coordinates too.
 import 'dart:typed_data';
 
+import 'package:floor_planner/parametric/room_inputs.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -71,6 +72,46 @@ Vector2 rightmostOf(List<Vector2> hole) {
         reason: '$what: to the bridge\'s right');
   }
   return (v, [...points]..removeRange(at, at + cw.length + 2));
+}
+
+/// Asserts that the closed ring [r] is simple: no two points within 1e-6
+/// of each other, no two edges that do not share a point properly
+/// crossing, and no point within 1e-6 of an edge it is not an end of.
+void expectSimple(List<Vector2> r, String what) {
+  final n = r.length;
+  double side(Vector2 o, Vector2 p, Vector2 q) =>
+      (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  double segDist(Vector2 p, Vector2 a, Vector2 b) {
+    final d = b - a;
+    final t = ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0);
+    return (p - (a + d * t)).length;
+  }
+
+  for (var i = 0; i < n; i++) {
+    for (var j = i + 1; j < n; j++) {
+      expect((r[i] - r[j]).length, greaterThan(1e-6),
+          reason: '$what: points $i and $j apart');
+    }
+  }
+  for (var i = 0; i < n; i++) {
+    final a = r[i], b = r[(i + 1) % n];
+    for (var k = 0; k < n; k++) {
+      if (k == i || k == (i + 1) % n) continue;
+      expect(segDist(r[k], a, b), greaterThan(1e-6),
+          reason: '$what: point $k off edge $i');
+    }
+    for (var j = i + 2; j < n; j++) {
+      if (i == 0 && j == n - 1) continue;
+      final c = r[j], d = r[(j + 1) % n];
+      final d1 = side(c, d, a), d2 = side(c, d, b);
+      final d3 = side(a, b, c), d4 = side(a, b, d);
+      expect(
+          ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+              ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)),
+          isFalse,
+          reason: '$what: edges $i and $j cross');
+    }
+  }
 }
 
 void main() {
@@ -168,6 +209,13 @@ void main() {
       // (5,000 / 11,000) ~ 24.4 deg), inside the triangle's own wedge, so
       // every bridge crosses the triangle's west edge. It is left out and
       // reported; A still joins, and the tint takes step 1.
+      //
+      // This branch is defensive: a real trace never reaches it. Holes join
+      // in descending order of their rightmost x, so a ray to the right
+      // from a hole's rightmost vertex H meets the growing ring first (the
+      // holes not yet joined lie at x <= H.x; the joined ones are part of
+      // the ring), and some ring vertex is visible from H (Eberly's
+      // argument). A hole outside the ring is a unit-level stand-in.
       what = 'the hidden hole at $place';
       final square = rel(place, const [
         (0, 0),
@@ -193,7 +241,41 @@ void main() {
       }
       expect(triangles(t.points), isNotEmpty, reason: what);
 
-      // 4. Two holes that overlap (a file's, never a trace's): C's rightmost
+      // 4. Traced: a column (x 3,800..4,200, y 1,800..2,200) whose east face
+      // is flush with the west face of a stub below it (x 4,200..4,320, y
+      // 100..1,000). Unturned, the column's top-right corner H (4,200,
+      // 2,200) sees the stub's corner (4,200, 1,000) along its own east
+      // edge, through its corner (4,200, 1,800): no proper crossing, yet
+      // the bridge would lie on that edge and the ring would not be simple
+      // (the review's I-1, step 2 before the fix). A vertex strictly inside
+      // the bridge blocks it: step 1, the ring simple and triangulable.
+      what = 'a column flush with a stub below it at $place';
+      final plan = buildPlan([
+        ...boxWalls,
+        const W(4260, 0, 4260, 1000, 120),
+        const W(3800, 2000, 4200, 2000, 400),
+      ], place: place);
+      final inputs = RoomInputs(plan.doc);
+      addTearDown(inputs.dispose);
+      final seed = plan.at(1000, 3000);
+      final traced = traceRoomAmong(seed, inputs) as Traced;
+      // 7,800 x 3,800 - 120 x 900 - 400 x 400 = 29,640,000 - 108,000 -
+      // 160,000 = 29,372,000.
+      expect(traced.area, closeTo(29372000, 1e-2), reason: what);
+      expect(traced.holes, hasLength(1), reason: what);
+      final ringRel = [for (final p in traced.ring) p - seed];
+      final column = [for (final p in traced.holes.single) p - seed];
+      t = tintOf(ringRel, [column]);
+      expect(t.step, 1, reason: '$what: $t');
+      expect(t.holesLeftOut, isEmpty, reason: what);
+      expect(t.isExact, isTrue, reason: what);
+      expectOuterKept(t.points, ringRel, what);
+      expect(t.points, hasLength(ringRel.length + 4 + 2), reason: what);
+      expectKeyhole(t.points, column, what);
+      expectSimple(t.points, what);
+      expect(triangles(t.points), isNotEmpty, reason: '$what: triangulates');
+
+      // 5. Two holes that overlap (a file's, never a trace's): C's rightmost
       // vertices lie inside A2, so C joins at one of A2's corners and its
       // edges cross A2's. The keyholed ring does not triangulate; the outer
       // ring alone does: step 2, the outer ring as given.

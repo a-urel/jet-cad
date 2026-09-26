@@ -4,6 +4,8 @@
 // of every fixture at every placement, with and without 200 far walls, and
 // through both place sources (the document's and the view's). LZ2 is the
 // triangle whose column lies beyond the first growth box.
+import 'dart:async';
+import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/room_inputs.dart';
@@ -24,7 +26,7 @@ typedef Fixture = (
 );
 
 /// The fixture whose separator only D7's margin brings into `C`.
-const marginCase = 'a separator 0.5 um outside a face';
+const marginCase = 'a separator 0.5 nm outside a face';
 
 /// Every seed of every tracer fixture (RT1-RT9, the triangle, FB, the thin
 /// L): rooms, courtyards, seeds in bands and on separators, and seeds no
@@ -119,11 +121,11 @@ final List<Fixture> fixtures = [
     const [(2000, 2000), (5500, 1300)],
   ),
   (
-    // A separator 0.5 um outside the south face, inside the south band:
-    // within roomTrace.linear of the face, so the all-inputs trace splits
-    // the face at its ends and the ring's south edge carries it too. At the
-    // unturned placements its box misses the room's ring box by 0.5 um:
-    // only D7's 1 mm margin brings it into C.
+    // A separator 0.5 nm (100 - 99.9999995 = 5e-7 mm) outside the south
+    // face, inside the south band: within roomTrace.linear of the face, so
+    // the all-inputs trace splits the face at its ends and the ring's south
+    // edge carries it too. At the unturned placements its box misses the
+    // room's ring box by 0.5 nm: only D7's 1 mm margin brings it into C.
     marginCase,
     boxWalls,
     const [(1000, 99.9999995, 2000, 99.9999995)],
@@ -229,6 +231,62 @@ void expectSameTrace(TraceResult got, TraceResult want, String what) {
   }
 }
 
+/// A place source over a fixed list of inputs, which an isolate can take.
+final class ListSource implements PlaceSource {
+  ListSource(List<RoomInput> inputs)
+      : inputs = [...inputs]
+          ..sort((a, b) => a.source.value.compareTo(b.source.value));
+
+  final List<RoomInput> inputs;
+
+  @override
+  List<Handle> placedIn(Aabb2 box) => [
+        for (final i in inputs)
+          if (i.box.intersects(box)) i.source,
+      ];
+
+  @override
+  RoomInput? inputOf(Handle h) {
+    for (final i in inputs) {
+      if (i.source == h) return i;
+    }
+    return null;
+  }
+
+  @override
+  Aabb2? get bounds {
+    var u = Aabb2.empty();
+    for (final i in inputs) {
+      u = u.union(i.box);
+    }
+    return u.isEmpty ? null : u;
+  }
+}
+
+void _traceIn((SendPort, List<RoomInput>, double, double) m) {
+  final (port, inputs, x, y) = m;
+  port.send(traceRoomAmong(Vector2(x, y), ListSource(inputs)).toString());
+}
+
+/// `traceRoomAmong(seed, ListSource(inputs))` run in its own isolate, its
+/// answer as a string, or null when it has not answered within [limit] (the
+/// isolate is then killed): a trace that never ends is a red test, not a
+/// hung run.
+Future<String?> traceWithin(
+    List<RoomInput> inputs, Vector2 seed, Duration limit) async {
+  final port = ReceivePort();
+  final isolate =
+      await Isolate.spawn(_traceIn, (port.sendPort, inputs, seed.x, seed.y));
+  try {
+    return await port.first.timeout(limit) as String;
+  } on TimeoutException {
+    return null;
+  } finally {
+    isolate.kill(priority: Isolate.immediate);
+    port.close();
+  }
+}
+
 void main() {
   test(
       'LZ1 the localised trace equals the all-inputs trace bit for bit on '
@@ -273,7 +331,7 @@ void main() {
               expect(source.asked.intersection(far), isEmpty, reason: at);
               if (fixture.$1 == marginCase && place.deg == 0) {
                 // Premises: the separator carries the south edge, and its
-                // box misses the ring's box by 0.5 um.
+                // box misses the ring's box by 0.5 nm.
                 final sep = plan.seps.single;
                 expect(want.ringSources.any((s) => s.contains(sep)), isTrue,
                     reason: at);
@@ -350,4 +408,53 @@ void main() {
       expect(alone.holes, isEmpty, reason: what);
     }
   });
+
+  test(
+      'LZ4 a seed with a non-finite coordinate, and a source with nothing '
+      'placed, trace Unbounded at once', () async {
+    for (final place in placements) {
+      final what = 'the box at $place';
+      final plan = buildPlan(boxWalls, place: place);
+      final inputs = RoomInputs(plan.doc);
+      addTearDown(inputs.dispose);
+      final all = [
+        for (final h in inputs.placedIn(everywhere)) inputs.inputOf(h)!,
+      ];
+      // Premise: a room at a finite seed, so U is not null.
+      final inside = plan.at(4000, 2000);
+      expect(await traceWithin(all, inside, const Duration(seconds: 20)),
+          startsWith('Traced'),
+          reason: what);
+      // No box around a non-finite seed ever holds U: without the guard,
+      // the growth never ends.
+      for (final seed in [
+        Vector2(double.nan, inside.y),
+        Vector2(inside.x, double.nan),
+        Vector2(double.infinity, inside.y),
+        Vector2(inside.x, double.negativeInfinity),
+      ]) {
+        expect(await traceWithin(all, seed, const Duration(seconds: 5)),
+            'Unbounded()',
+            reason: '$what, seed $seed');
+      }
+    }
+    // Nothing placed: a document with no wall or separator, and one whose
+    // only separator is degenerate. U is null; Unbounded at once, nothing
+    // traced.
+    final empty = buildPlan(const []);
+    final degenerate =
+        buildPlan(const [], seps: const [(1000, 1000, 1000, 1000.0000005)]);
+    for (final plan in [empty, degenerate]) {
+      final inputs = RoomInputs(plan.doc);
+      addTearDown(inputs.dispose);
+      expect(inputs.bounds, isNull);
+      final before = debugTracedSegments;
+      expect(
+          traceRoomAmong(Vector2(1000.5, 2000.25), inputs), isA<Unbounded>());
+      expect(debugTracedSegments, before, reason: 'nothing traced');
+      final seen = probeView(plan.doc, seeds: [Vector2(1000.5, 2000.25)]);
+      expect(seen.bounds, isNull);
+      expect(seen.traces.single, isA<Unbounded>());
+    }
+  }, timeout: const Timeout(Duration(minutes: 2)));
 }

@@ -619,6 +619,14 @@ final class Tint {
 
   /// Indices into [tintOf]'s holes of those that found no bridge: step 1's
   /// region covers them. Steps 2 and 3 cover every hole anyway.
+  ///
+  /// Defensive: a real trace never fills it. Holes are joined in descending
+  /// order of their rightmost x, so a ray to the right from a hole's
+  /// rightmost vertex H meets the growing ring first (the holes not yet
+  /// joined lie at x ≤ H.x, the joined ones are part of the ring), and a
+  /// vertex of the ring is visible from H (Eberly's argument). Only a ring
+  /// and holes that are not a trace's, as `TN1`'s hole outside the ring,
+  /// reach it.
   final List<int> holesLeftOut;
 
   /// Whether the tint shows the face as traced: step 1, every hole cut out.
@@ -713,11 +721,26 @@ Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes) {
   return Tint(3, ring, leftOut);
 }
 
-/// Whether the bridge [h]–[v] properly crosses an edge of any of [rings].
+/// Whether the bridge [h]–[v] is blocked by any of [rings]: it properly
+/// crosses one of their edges, or one of their vertices lies strictly
+/// inside it (within `roomTrace.linear` of the bridge and farther than that
+/// from both its ends). The second rule catches a bridge that runs along an
+/// edge or through a vertex, which no proper crossing sees: on an
+/// axis-aligned plan a column's top-right corner would otherwise bridge
+/// straight down the column's own east edge to a corner below it, and the
+/// keyholed ring would not be simple.
 bool _blocked(Vector2 h, Vector2 v, List<List<Vector2>> rings) {
+  final tol = roomTrace.linear;
   for (final r in rings) {
     for (var e = 0; e < r.length; e++) {
       if (_properlyCross(h, v, r[e], r[(e + 1) % r.length])) return true;
+    }
+    for (final p in r) {
+      if (distToSegment(p, h, v) <= tol &&
+          (p - h).length > tol &&
+          (p - v).length > tol) {
+        return true;
+      }
     }
   }
   return false;
