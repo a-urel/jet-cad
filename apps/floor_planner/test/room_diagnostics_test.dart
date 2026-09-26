@@ -128,6 +128,31 @@ void main() {
         expect(driftOf(doc), isEmpty, reason: '$order at $place');
       }
 
+      // Another room's seed is read through its own group: a room in a
+      // turned, translated group (a file's), its world seed at plan
+      // (4,000.75, 2,000.25), shares the box with Den.
+      {
+        final plan = buildPlan(boxWalls, place: place);
+        final doc = plan.doc;
+        attachPage(doc, PageComponent());
+        final den = addRoom(doc, plan.at(1000.25, 1000.5), 'Den');
+        final g = place.m
+            .multiply(Transform2.translation(9000.5, -1200.25))
+            .multiply(Transform2.rotation(0.61));
+        final bay = addRoom(doc, plan.at(4000.75, 2000.25), 'Bay', at: g);
+        // Premise: the stored (local) seed, read as a world point, lies
+        // outside the face, so only the group's map puts it inside.
+        final local = doc.components.get<RoomParams>(bay)!.seed;
+        final face = faceAt(doc, plan.at(1000.25, 1000.5)) as Traced;
+        expect(pointInRing(local, face.ring), isFalse,
+            reason: 'the premise: local seed $local at $place');
+        expect(pointInRing(plan.at(4000.75, 2000.25), face.ring), isTrue);
+        expect(labelStrings(doc, bay), ['Bay', '29.64 m²'], reason: '$place');
+        expect(roomDiagnostics(doc), [shared(den, 'Den', bay, 'Bay')],
+            reason: 'a turned group at $place');
+        expect(driftOf(doc), isEmpty, reason: '$place');
+      }
+
       // A seed in a hole is not in the face: a room in the hollow column's
       // courtyard (x 5,050..5,550, y 1,550..2,050) and the room around the
       // column, the lower handle, share nothing.
@@ -226,6 +251,41 @@ void main() {
             ),
           ],
           reason: '$place');
+
+      // A broken room shares no face: a file's room seeded within
+      // roomTrace.linear inside the partition's west face (x 2,950), so
+      // inside the left room's ring yet SeedInWall (the review's P5).
+      final plan2 = buildPlan(twoRoomWalls, place: place);
+      attachPage(plan2.doc, PageComponent());
+      final left = addRoom(plan2.doc, plan2.at(1512.5, 1987.25), 'Room 1');
+      for (final off in [2e-7, 5e-7, 9e-7]) {
+        final seed = plan2.at(2950 - off, 2000.5);
+        late final Handle edge;
+        final doc2 = reloadWithPage(staleFile(plan2.doc, (bare) {
+          edge = addRoom(bare, seed, 'Edge');
+        }));
+        // Premises: the seed is inside the left face's ring, and in a wall.
+        final face = faceAt(doc2, plan2.at(1512.5, 1987.25)) as Traced;
+        expect(pointInRing(seed, face.ring), isTrue,
+            reason: 'the premise: in the ring, $off at $place');
+        final inWall = faceAt(doc2, seed);
+        expect(inWall, isA<SeedInWall>(), reason: '$off at $place');
+        final source = (inWall as SeedInWall).source;
+        expect(
+            roomDiagnostics(doc2),
+            [
+              Diagnostic(
+                severity: DiagnosticSeverity.error,
+                code: 'room.broken',
+                message: 'room ${edge.toHex()} ("Edge") has its seed in '
+                    '${source.toHex()}, a wall or a separator: it has no face',
+                handles: [edge, source],
+              ),
+            ],
+            reason: 'no room.shared with a broken room, $off at $place');
+        expect(driftOf(doc2), [edge], reason: '$off at $place');
+        expect(labelStrings(doc2, left), ['Room 1', '10.83 m²']);
+      }
     }
   });
 

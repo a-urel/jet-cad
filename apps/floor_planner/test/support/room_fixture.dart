@@ -557,17 +557,19 @@ void attachPage(DraftDocument doc, PageComponent page) {
 /// A room at world [seed], named [name], with label offset [label]: the
 /// commit the Room tool will make, a root-level group at the identity and
 /// its `RoomParams`, one compound. Returns the room's handle.
+///
+/// With [at], the group has that transform instead (only a file makes one,
+/// D21) and the stored seed is [seed] taken back through it.
 Handle addRoom(DraftDocument doc, Vector2 seed, String name,
-    {(double, double)? label}) {
+    {(double, double)? label, Transform2? at}) {
   final h = doc.handleSeed.next();
+  final g = at ?? Transform2.identity();
+  final s = at == null ? seed : g.invert().transformPoint(seed);
   doc.commands.execute(CompoundCommand([
     AddNodeCommand(GroupNode(
-        handle: h,
-        parent: doc.rootHandle,
-        transform: Transform2.identity(),
-        children: const [])),
+        handle: h, parent: doc.rootHandle, transform: g, children: const [])),
     SetComponentCommand<RoomParams>(
-        h, RoomParams(seed.x, seed.y, name, label: label)),
+        h, RoomParams(s.x, s.y, name, label: label)),
   ], label: 'Add room'));
   return h;
 }

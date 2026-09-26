@@ -140,9 +140,11 @@ final PageComponent _defaultPage = PageComponent();
 int debugRoomGenerates = 0;
 
 /// The tint steps (1 or 2) a room's tint builder treats as failing to
-/// triangulate (Ruling 10-16): no honest room fixture takes D9's step 2 or
-/// 3, so `RG2` and `DG3` set it. Null in the library, which never sets it;
-/// tests restore it to null in `tearDown`.
+/// triangulate (Ruling 10-16). Honest rooms reach D9's steps 2 and 3 (`RG2`
+/// has both); the seam exists to exercise the room's local-frame
+/// triangulation guard ([_storedTint]), which no honest fixture reaches:
+/// `RG2` and `DG3` set it. Null in the library, which never sets it; tests
+/// restore it to null in `tearDown`.
 @visibleForTesting
 Set<int>? debugTintFailedSteps;
 
@@ -390,7 +392,8 @@ String? _tintReport(
 
 /// D22's `room.shared` entries [self] reports: one for each live room with a
 /// higher handle whose world seed lies in [trace]'s face, inside the outer
-/// ring and inside no hole, tested relative to [self]'s world seed.
+/// ring and inside no hole, tested relative to [self]'s world seed, and
+/// which is not itself broken.
 List<Diagnostic> _sharing(
     ParametricView view, Handle self, RoomParams p, Traced trace) {
   final seedW = view.toWorld(self).transformPoint(p.seed);
@@ -405,6 +408,10 @@ List<Diagnostic> _sharing(
     if (!q.x.isFinite || !q.y.isFinite) continue;
     if (!pointInRing(q, ring)) continue;
     if (holes.any((h) => pointInRing(q, h))) continue;
+    // A broken room shares no face: its seed may lie within
+    // `roomTrace.linear` inside this face's edge and still be `SeedInWall`
+    // (D22 reports it `room.broken`). The trace is memoised per view.
+    if (_traceOf(view, other) is! Traced) continue;
     found.add(Diagnostic(
       severity: DiagnosticSeverity.warning,
       code: 'room.shared',
