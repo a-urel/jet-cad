@@ -20,6 +20,7 @@ import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';
+import 'package:floor_planner/parametric/room_label.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
 import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/parametric/wall.dart';
@@ -28,6 +29,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'room_localise_test.dart' show expectSameTrace;
 import 'support/room_fixture.dart';
 
 /// The two-room fixture's left and right seeds, plan mm (fractional).
@@ -628,8 +630,11 @@ void main() {
             wallTo(doc, w[9], at(23200.5, 14300.25), at(23600.5, 14300.25)))
       ),
       (
-        'P5\'s south end dragged 150.25 west along E1',
-        () => doc.commands.execute(dragEnd(doc, w[8], 0, at(21650.25, 8125))!)
+        'P5 moved 1,699.75 east, still T-joined into E1 and P3: its band '
+            '(x 23,440.25..23,560.25) covers the Bath\'s seed, so the Bath '
+            'dissolves and the Kitchen grows east to that band',
+        () => doc.commands
+            .execute(wallTo(doc, w[8], at(23500.25, 8125), at(23500.25, 11500)))
       ),
       (
         'the Living | Dining separator moved 99.5 west',
@@ -671,15 +676,30 @@ void main() {
       ),
     ];
     expect(edits, hasLength(20));
+    final dissolvedAt = <String, int>{};
     for (final (i, (what, edit)) in edits.indexed) {
       final depth = doc.commands.undoDepth;
+      final alive = liveRooms(doc);
       edit();
       expect(doc.commands.undoDepth, depth + 1, reason: 'edit $i: $what');
       expect(driftOf(doc), isEmpty, reason: 'edit $i: $what');
+      for (final MapEntry(key: name, value: h) in rooms.entries) {
+        if (alive.contains(h) && !liveRooms(doc).contains(h)) {
+          dissolvedAt[name] = i;
+        }
+      }
     }
-    // The script dissolves no room, and leaves one shared space.
-    expect(liveRooms(doc),
-        [...rooms.values]..sort((a, b) => a.value.compareTo(b.value)));
+    // The script dissolves the Bath at edit 11, eight edits before its end,
+    // and leaves one shared space.
+    expect(dissolvedAt, {'Bath': 11});
+    final bath = rooms['Bath']!;
+    expect(doc.tree[bath], isNull, reason: 'the Bath dissolved');
+    expect(
+        liveRooms(doc),
+        [
+          for (final h in rooms.values)
+            if (h != bath) h
+        ]..sort((a, b) => a.value.compareTo(b.value)));
     expect(roomDiagnostics(doc), [
       shared(rooms['Hall']!, 'Hall', rooms['Bedroom 2']!, 'Bedroom 2'),
     ]);
@@ -719,8 +739,23 @@ void main() {
     expect(diagnosticsOf(fresh), diagnosticsOf(doc), reason: 'from scratch');
     expect(liveRooms(fresh), liveRooms(doc));
     var points = 0;
+    final inputs = RoomInputs(doc);
+    addTearDown(inputs.dispose);
+    final all = [
+      for (final h in inputs.placedIn(everywhere)) inputs.inputOf(h)!,
+    ];
+    final unit = pageOf(doc).displayUnit;
     for (final r in liveRooms(doc)) {
       final name = doc.components.get<RoomParams>(r)!.name;
+      // The localised trace is the all-inputs trace, bit for bit (as LZ1),
+      // and the area label is that trace's area in the page's unit (ft²
+      // since edit 8): both documents hold what every wall says.
+      final seed = worldSeedOf(doc, r);
+      final want = traceRoom(seed, all);
+      expectSameTrace(traceRoomAmong(seed, inputs), want, name);
+      expect(
+          labelStrings(doc, r), [name, formatArea((want as Traced).area, unit)],
+          reason: name);
       expect(kindsOf(fresh, r), kindsOf(doc, r), reason: name);
       expect(labelStrings(fresh, r), labelStrings(doc, r), reason: name);
       // Exactly: the same world tint points and label points, bit for bit.
@@ -734,7 +769,8 @@ void main() {
       ], reason: name);
     }
     // ignore: avoid_print
-    print('DF1: 20 edits, ${liveRooms(doc).length} rooms, $points tint points '
+    print('DF1: 20 edits, dissolved $dissolvedAt, ${liveRooms(doc).length} '
+        'rooms, $points tint points '
         'equal bit for bit; diagnostics '
         '${[for (final d in diagnosticsOf(doc)) d.message]}; labels ${{
       for (final r in liveRooms(doc)) labelStrings(doc, r).join(' ')
@@ -787,8 +823,11 @@ void main() {
         }
       }
 
+      // Refused or not, never the messages: they name handles, which
+      // differ between the two documents.
       final ra = run(a, true), rb = run(b, false);
-      expect(ra, rb, reason: '$what: lands on both or on neither');
+      expect(ra == null, rb == null,
+          reason: '$what: lands on both or on neither ($ra | $rb)');
       if (ra == null) {
         count(what);
         landed?.call();
@@ -875,24 +914,56 @@ void main() {
       expect(driftOf(b), isEmpty, reason: 'step $step, the twin');
       final inputs = RoomInputs(a);
       try {
+        final all = [
+          for (final h in inputs.placedIn(everywhere)) inputs.inputOf(h)!,
+        ];
+        final unit = pageOf(a).displayUnit;
         for (final h in liveRooms(a)) {
           final seed = worldSeedOf(a, h);
           final face = traceRoomAmong(seed, inputs);
           expect(face, isA<Traced>(), reason: 'step $step: room $h');
           face as Traced;
+          // The localised trace is the all-inputs trace, bit for bit (as
+          // LZ1), and the room's stored area label is that trace's area in
+          // the page's unit: the room holds what a trace among every wall
+          // and separator says, not only what its own reads found.
+          final want = traceRoom(seed, all);
+          expectSameTrace(face, want, 'step $step: room $h');
+          expect(
+              labelStrings(a, h),
+              [
+                a.components.get<RoomParams>(h)!.name,
+                formatArea((want as Traced).area, unit),
+              ],
+              reason: 'step $step: room $h\'s labels');
           expect(pointInRing(seed, face.ring), isTrue,
               reason: 'step $step: room $h\'s seed in its face');
           expect(face.holes.any((hole) => pointInRing(seed, hole)), isFalse,
               reason: 'step $step: room $h\'s seed in no hole');
+          // The tint's form by kind, never by position: a room whose tint
+          // went to step 3 and came back to a region has its new fill and
+          // boundary above its labels.
           final children = kids(a, h);
-          if (kindOf(a, children.first) == EntityKind.fill) {
-            final boundary =
-                Handle(payloadOf(a, children.first).scalars[0].toInt());
+          final fills = [
+            for (final c in children)
+              if (kindOf(a, c) == EntityKind.fill) c,
+          ];
+          final lines = [
+            for (final c in children)
+              if (kindOf(a, c) == EntityKind.polyline) c,
+          ];
+          expect(fills.length, lessThanOrEqualTo(1), reason: 'step $step');
+          expect(lines, hasLength(1), reason: 'step $step: room $h');
+          if (fills case [final fill]) {
+            final boundary = Handle(payloadOf(a, fill).scalars[0].toInt());
+            expect(boundary, lines.single, reason: 'step $step: room $h');
             expect(
                 triangulationFor(EntityKind.polyline, payloadOf(a, boundary)),
                 isNotEmpty,
                 reason: 'step $step: room $h\'s tint triangulates');
-            count('tint region checked');
+            count(kindOf(a, children.first) == EntityKind.fill
+                ? 'tint region checked'
+                : 'tint region checked, above its labels');
           } else {
             count('tint outline (step 3) checked');
           }

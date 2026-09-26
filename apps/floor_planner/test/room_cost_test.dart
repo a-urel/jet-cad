@@ -117,80 +117,96 @@ void main() {
   test(
       'RK2 a wall move among 100, 300 and 600 walls with a room per four '
       'walls, printed, not asserted', () {
-    for (final (layout, walls) in [
-      ('grid', gridWalls),
-      ('strips of long exterior walls', stripWalls),
-    ]) {
-      for (final place in [origin, corpus]) {
-        for (final n in [100, 300, 600]) {
-          // The layout's size whose wall count is nearest n: a grid has
-          // 2rc + r + c walls, strips r + 1 + r(c + 1); rows ≈ columns for
-          // the grid, strips of 10 cells.
-          var best = (0, 0, 1 << 30);
-          for (var r = 1; r < 80; r++) {
-            for (var c = 1; c < 30; c++) {
-              if (layout == 'grid' && c != r && c != r + 1) continue;
-              if (layout != 'grid' && c != 10) continue;
-              final count = walls(r, c).length;
-              if ((count - n).abs() < (best.$3 - n).abs()) {
-                best = (r, c, count);
-              }
-            }
+    /// One configuration: the layout [walls] with about [n] walls at
+    /// [place], its rooms, the wall move timed; the line RK2 prints.
+    String measure(String layout, List<W> Function(int, int) walls,
+        Placement place, int n) {
+      // The layout's size whose wall count is nearest n: a grid has
+      // 2rc + r + c walls, strips r + 1 + r(c + 1); rows ≈ columns for
+      // the grid, strips of 10 cells.
+      var best = (0, 0, 1 << 30);
+      for (var r = 1; r < 80; r++) {
+        for (var c = 1; c < 30; c++) {
+          if (layout == 'grid' && c != r && c != r + 1) continue;
+          if (layout != 'grid' && c != 10) continue;
+          final count = walls(r, c).length;
+          if ((count - n).abs() < (best.$3 - n).abs()) {
+            best = (r, c, count);
           }
-          final (rows, cols, count) = best;
-          final plan = buildPlan(walls(rows, cols), place: place);
-          attachPage(plan.doc, PageComponent());
-          final doc = plan.doc;
-          // The moved wall: the vertical wall nearest the middle, between
-          // two rooms; 20 mm east and back, perpendicular to itself.
-          final movedRow = rows ~/ 2, movedCol = cols ~/ 2;
-          // A room in every `every`-th cell: one room per four walls.
-          final every = (rows * cols * 4 / count).round().clamp(1, 1 << 20);
-          final rooms =
-              addRooms(plan, roomCells(rows, cols, every, movedRow, movedCol));
-          final index = [
-            for (var i = 0; i < plan.walls.length; i++)
-              if (walls(rows, cols)[i] case W(:final sx, :final sy, :final ex)
-                  when sx == movedCol * cell &&
-                      ex == movedCol * cell &&
-                      sy == movedRow * cell)
-                i,
-          ].single;
-          final moved = plan.walls[index];
-          final home = (doc.tree[moved]! as GroupNode).transform;
-          final d = plan.at(20, 0) - plan.at(0, 0);
-          final away = Transform2.translation(d.x, d.y).multiply(home);
-          final rebuilt = <int>[];
-          double time(int k) {
-            final before = debugRoomGenerates;
-            final sw = Stopwatch()..start();
-            doc.commands
-                .execute(TransformNodeCommand(moved, k.isEven ? away : home));
-            sw.stop();
-            rebuilt.add(debugRoomGenerates - before);
-            return sw.elapsedMicroseconds / 1000;
-          }
-
-          // Four untimed warm-ups for the JIT: an even number, so the wall
-          // ends back home and every timed move is real.
-          for (final k in [-4, -3, -2, -1]) {
-            time(k);
-          }
-          rebuilt.clear();
-          final moves = [for (var k = 0; k < 5; k++) time(k)];
-          expect(driftOf(doc), isEmpty, reason: '$layout $place n=$n');
-          expect([
-            for (final h in rooms)
-              if (doc.components.get<RoomParams>(h) == null) h,
-          ], isEmpty, reason: 'every room lives');
-          // ignore: avoid_print
-          print('RK2 $layout at $place: $count walls ($rows × $cols), '
-              '${rooms.length} rooms; move median '
-              '${median(moves).toStringAsFixed(2)} ms '
-              '${moves.map((x) => x.toStringAsFixed(2)).toList()}; rooms '
-              'rebuilt per move $rebuilt');
         }
       }
+      final (rows, cols, count) = best;
+      final plan = buildPlan(walls(rows, cols), place: place);
+      attachPage(plan.doc, PageComponent());
+      final doc = plan.doc;
+      // The moved wall: the vertical wall nearest the middle, between
+      // two rooms; 20 mm east and back, perpendicular to itself.
+      final movedRow = rows ~/ 2, movedCol = cols ~/ 2;
+      // A room in every `every`-th cell: one room per four walls.
+      final every = (rows * cols * 4 / count).round().clamp(1, 1 << 20);
+      final rooms =
+          addRooms(plan, roomCells(rows, cols, every, movedRow, movedCol));
+      final index = [
+        for (var i = 0; i < plan.walls.length; i++)
+          if (walls(rows, cols)[i] case W(:final sx, :final sy, :final ex)
+              when sx == movedCol * cell &&
+                  ex == movedCol * cell &&
+                  sy == movedRow * cell)
+            i,
+      ].single;
+      final moved = plan.walls[index];
+      final home = (doc.tree[moved]! as GroupNode).transform;
+      final d = plan.at(20, 0) - plan.at(0, 0);
+      final away = Transform2.translation(d.x, d.y).multiply(home);
+      final rebuilt = <int>[];
+      double time(int k) {
+        final before = debugRoomGenerates;
+        final sw = Stopwatch()..start();
+        doc.commands
+            .execute(TransformNodeCommand(moved, k.isEven ? away : home));
+        sw.stop();
+        rebuilt.add(debugRoomGenerates - before);
+        return sw.elapsedMicroseconds / 1000;
+      }
+
+      // Four untimed warm-ups for the JIT: an even number, so the wall
+      // ends back home and every timed move is real.
+      for (final k in [-4, -3, -2, -1]) {
+        time(k);
+      }
+      rebuilt.clear();
+      final moves = [for (var k = 0; k < 5; k++) time(k)];
+      expect(driftOf(doc), isEmpty, reason: '$layout $place n=$n');
+      expect([
+        for (final h in rooms)
+          if (doc.components.get<RoomParams>(h) == null) h,
+      ], isEmpty, reason: 'every room lives');
+      return 'RK2 $layout at $place: $count walls ($rows × $cols), '
+          '${rooms.length} rooms; move median '
+          '${median(moves).toStringAsFixed(2)} ms '
+          '${moves.map((x) => x.toStringAsFixed(2)).toList()}; rooms '
+          'rebuilt per move $rebuilt';
+    }
+
+    final sweep = [
+      for (final (layout, walls) in [
+        ('grid', gridWalls),
+        ('strips of long exterior walls', stripWalls),
+      ])
+        for (final place in [origin, corpus])
+          for (final n in [100, 300, 600]) (layout, walls, place, n),
+    ];
+    // A throwaway pass over every configuration first, untimed and
+    // unprinted: otherwise the first configurations run cold (the JIT is
+    // still compiling the trace, the planner and the regeneration: the
+    // 97-wall grid at the origin measured 12-25 ms cold, 5-9 ms after one
+    // throwaway configuration, and about 2.5 ms after this pass).
+    for (final (layout, walls, place, n) in sweep) {
+      measure(layout, walls, place, n);
+    }
+    for (final (layout, walls, place, n) in sweep) {
+      // ignore: avoid_print
+      print(measure(layout, walls, place, n));
     }
   }, timeout: const Timeout(Duration(minutes: 10)));
 }
