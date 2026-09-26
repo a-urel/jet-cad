@@ -442,7 +442,7 @@ The spec's seventeen criteria and where each is witnessed:
 |---|---|---|---|
 | 1 | the four gate lines on the human's macOS machine; `flutter build macos --release` and `flutter build web --release` | Linux half: the four lines above, with only the standing failures (the engine's 2 hash tests; the render layer's 5 `text_ladder` and 2 Linux-only `text_lod_ladder` goldens, and its skip), and `✓ Built build/web`. **The macOS build and the macOS run of the four lines: the human's machine** | **OWED** |
 | 2 | both faces cut at the documented position and width; non-axis-aligned, rotated group, far origin, non-central | `OG1` (both faces' gap corners against the oracle; the door's leaf and arc), `OG9` | PASS |
-| 3 | moving or rotating the host moves its openings; one undo step; exact undo and redo; a far move included | `OR1` (60 m move, then a rotate), `EP4`, `RF3`, `SG2` (a wall and its door moved together) | PASS |
+| 3 | moving or rotating the host moves its openings; one undo step; exact undo and redo; a far move included | `OR1` (75 m move, then a rotate), `EP4`, `RF3`, `SG2` (a wall and its door moved together) | PASS |
 | 4 | an end drag keeps openings put; a whole-wall move keeps stored positions | `EP1`–`EP9` (`EP7`–`EP9`: the re-seat and its neighbour half) | PASS |
 | 5 | deleting the host cascades in one step, whatever deleted it; undo restores every child handle; `orphan` keeps and regenerates | `CS1`–`CS12`, `LV1`, `LV2`, `OR5`; the shell's "cmd+Z undoes a Delete" (E1 and its front door) | PASS |
 | 6 | save → load → save byte-identical; `drift()` empty after load; a dangling reference reported, not repaired | `OR2` (fractional values), `SP6`, `DR2`, `OD1` | PASS |

@@ -91,8 +91,9 @@ and fix round 1 inserted 45 lines at line 278, so at `de66cd2` each is
 and 505 → 550 (`t12-gripOld`), 549 → 594 (`rv11-fillMovable`); the
 assertions and the values are unchanged (the review counted the first
 five). Lines up to 276, and the fix round's own entries (320, 415), are
-at `de66cd2` already; Task 16's `SG6` sits at the file's end and moves
-none of them.
+at `de66cd2` already. Task 16's `6b3b944` adds `SG6` at the file's end
+but also one import at the top, so from `6b3b944` on every line cited
+here sits one lower still (e.g. 353 → 354, 415 → 416).
 
 **Procedure, per mutant.** The driver is `t14-fire.py` in the session
 scratchpad (`/tmp/claude-0/-home-user-jet-cad/b8151ae2-5006-5f50-b81d-c013381534fe/scratchpad/plan08/t14/`);
