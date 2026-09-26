@@ -846,6 +846,38 @@ was interrupted by an API limit and re-dispatched), from the ledger.
 - **m4:** 07's zero-width spike at a 1.6° three-wall node. **Recorded as
   07's debt.**
 
+### The final fix wave's re-review: Ready to merge
+
+The final reviewer (opus, the same one) re-reviewed `ce8497c`. **Verdict:
+Ready to merge.** From its report (ledger):
+
+- **I1 re-run:** its repro lands clamped in one step; its 1,620-case sweep
+  `0 of 1620 refused, 0 no-fit, 1602 clamped, 0 invalid-or-drift`; the
+  slide grip to the kinked end and the neighbour's end drag to 2° each
+  give one step and no exception; the Window tool near a 2° kinked end
+  places one opening; m1's probe stores exactly L.
+- **Fuzz on the clean tree:** 4 seeds × 150 trials × 40 steps (23,932
+  steps; 18,237 undo/redo pairs; 1,326 save/loads; 2,716 tool placements,
+  0 clamped at birth; 1,114 slides) and the 16-op variant (6,000 steps):
+  0 refused, 0 exceptions, 0 drift, 0 childless walls; the one tiling
+  failure is the fixture oracle's known false positive at a 0.03° folded L.
+- **`_dropBacktracks`:** fires on no app test outside `opening_kink_test`;
+  the largest area change it makes anywhere is 7.8e-8 mm²; the tip, not
+  the endpoint, is the right vertex (its own mutant `fr2-dropEndpoint` is
+  killed by `KJ1`).
+- **Mutants:** `ffw-validPiece`, `ffw-dropBacktrack`, `fr-X4`, `fr-X8`,
+  `fr-X9` re-fired red; its own `fr2-dropEndpoint`, `fr2-oneSide`,
+  `fr2-tolZero` red.
+- **Two wording minors**, fixed by the controller in `78e7539`: the spike
+  is not always refused by the triangulator (on an already-valid piece
+  its removal only stops a hairline being stroked), and removing the
+  endpoint would add the triangle lobe–endpoint–tip, on the far side of
+  the jamb.
+- **Not verified by the reviewer:** the fix wave's 7,776-joint search and
+  its 50-opening timing (scratch-only figures).
+- **Gates:** engine `+1014 -2`, render `+936 ~1 -7`, harness `+82`, app
+  `+244`, web `✓ Built`.
+
 ### The plan's own rulings
 
 08-1 to 08-23 are in the plan, each with its cost. Those this task wrote
