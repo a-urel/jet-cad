@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';
+import 'package:floor_planner/parametric/room_trace.dart';
 import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -224,6 +225,13 @@ typedef ViewInputs = ({
 
   /// `view.placedIn` of the whole plane.
   List<Handle> placedAll,
+
+  /// [placeSourceInView]'s `U`.
+  Aabb2? bounds,
+
+  /// `traceRoomAmong(seed, placeSourceInView(view))` for each of
+  /// [probeView]'s seeds, in their order.
+  List<TraceResult> traces,
 });
 
 /// The whole plane, as a box.
@@ -242,6 +250,7 @@ final class _ProbeParams implements Component {
 }
 
 ViewInputs? _seen;
+List<Vector2> _probeSeeds = const [];
 
 /// A test-only type whose `diagnose` records what its view says about every
 /// live wall and separator (Ruling 10-12): a `ParametricView` exists only
@@ -278,6 +287,11 @@ final class _Probe extends ParametricType<_ProbeParams> {
           ],
       },
       placedAll: view.placedIn(everywhere),
+      bounds: placeSourceInView(view).bounds,
+      traces: [
+        for (final seed in _probeSeeds)
+          traceRoomAmong(seed, placeSourceInView(view)),
+      ],
     );
     return const [];
   }
@@ -286,8 +300,9 @@ final class _Probe extends ParametricType<_ProbeParams> {
 /// [doc]'s walls and separators through the view adapter: a catalog of the
 /// Wall, the Opening, the Separator and [_Probe], a system over [doc], and
 /// one probe object (a root group, added as one command) whose `diagnose`
-/// records its view. The probe relates to nothing: its reach is empty.
-ViewInputs probeView(DraftDocument doc) {
+/// records its view, and traces a room at each of [seeds] through the
+/// view's place source. The probe relates to nothing: its reach is empty.
+ViewInputs probeView(DraftDocument doc, {List<Vector2> seeds = const []}) {
   final catalog = ParametricCatalog()
     ..register<WallParams>(
         WallParams.componentTypeId, WallParams.fromJson, const WallType())
@@ -308,7 +323,12 @@ ViewInputs probeView(DraftDocument doc) {
     SetComponentCommand<_ProbeParams>(h, const _ProbeParams()),
   ], label: 'Add probe'));
   _seen = null;
-  system.diagnostics();
+  _probeSeeds = seeds;
+  try {
+    system.diagnostics();
+  } finally {
+    _probeSeeds = const [];
+  }
   final seen = _seen!;
   _seen = null;
   return seen;

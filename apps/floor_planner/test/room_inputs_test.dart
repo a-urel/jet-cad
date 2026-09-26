@@ -225,7 +225,7 @@ void main() {
     final partition = plan.walls[4];
     final before = inputs.inputOf(partition)!;
     expect(inputs.debugRebuilds, 1);
-    expect(inputs.bounds.isEmpty, isFalse);
+    expect(inputs.bounds, isNotNull);
     expect(inputs.debugRebuilds, 1, reason: 'no change, no rebuild');
     final p = plan.doc.components.get<WallParams>(partition)!;
     plan.doc.commands.execute(SetComponentCommand<WallParams>(

@@ -617,6 +617,36 @@ void main() {
       expectArea(treeRoom, 29640000, 'a free tree at $place');
       expect(treeRoom.holes, isEmpty, reason: 'a free tree at $place');
 
+      // A triangle of three separators, (5,000, 1,000) -> (6,000, 1,000) ->
+      // (5,500, 2,000) -> back, free inside the box: a component with area,
+      // so a hole, and exactly three vertices (the fewest a hole can keep).
+      // Base 1,000, height 1,000: 1,000 x 1,000 / 2 = 500,000; the room
+      // 29,640,000 - 500,000 = 29,140,000. Inside it, its own face.
+      final triangle = buildPlan(boxWalls,
+          seps: const [
+            (5000, 1000, 6000, 1000),
+            (6000, 1000, 5500, 2000),
+            (5500, 2000, 5000, 1000),
+          ],
+          place: place);
+      final triangleInputs = inputsOf(triangle);
+      var tri = 'a triangle of separators at $place';
+      final around = traceAt(triangle, triangleInputs, (2000, 2000), tri);
+      expectArea(around, 29140000, tri);
+      expectRing(triangle, around.ring, rect(100, 100, 7900, 3900), tri);
+      expect(around.holes, hasLength(1), reason: tri);
+      expectRing(triangle, around.holes.single,
+          const [(5000, 1000), (6000, 1000), (5500, 2000)], tri);
+      expect(around.holeAreas.single, closeTo(500000, 1e-2), reason: tri);
+      expect({
+        for (final s in around.holeSources.single) ...s
+      }, triangle.seps.toSet(), reason: tri);
+      expectCanonical(triangle.at(2000, 2000), around, tri);
+      tri = 'inside the triangle of separators at $place';
+      final inside = traceAt(triangle, triangleInputs, (5500, 1300), tri);
+      expectArea(inside, 500000, tri);
+      expect(inside.holes, isEmpty, reason: tri);
+
       // Centreline to centreline across the south-west corner, (0, 2,000)
       // to (4,000, 0), crossing the faces at about 26.57 and 63.43 deg: y =
       // 2,000 - x / 2 meets x = 100 at y 1,950 and y = 100 at x 3,800, a

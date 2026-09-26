@@ -481,6 +481,267 @@ TraceResult traceRoom(Vector2 seed, List<RoomInput> inputs) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// The localised trace (spec 10 D7).
+
+/// What [traceRoomAmong] traces among (spec 10 D7): the live walls and
+/// separators, by place box. `RoomInputs` (the document adapter) and
+/// `placeSourceInView` (the view's) implement it.
+abstract interface class PlaceSource {
+  /// The contributors whose place box touches [box] (closed: touching
+  /// counts), ascending.
+  List<Handle> placedIn(Aabb2 box);
+
+  /// [h]'s input, or null when [h] is not a contributor with one.
+  RoomInput? inputOf(Handle h);
+
+  /// `U`: the union of every contributor's finite place box; null when
+  /// nothing is placed.
+  Aabb2? get bounds;
+}
+
+/// D7's first growth radius, mm (R-7): a room is metres across, so one or
+/// two doublings find its walls.
+const double kGrowthStart = 1000;
+
+/// D7's certificate margin, mm (R-7): 10⁶ × `roomTrace.linear`, far above
+/// any rounding, so no vertex merge or split reaches across it.
+const double kCertificateMargin = 1;
+
+/// The room around [seed] among every contributor [source] holds, tracing
+/// only those near its face (spec 10 D7). The result is, bit for bit,
+/// `traceRoom(seed, every input)` (`LZ1`):
+///
+/// 1. **Growth.** Trace among `placedIn(B)`, `B = seed ⊕ r`, from `r =`
+///    [kGrowthStart]. [SeedInWall] is final: the wall holding the seed
+///    touches `B`. [Unbounded]: double `r` and repeat until `B` contains
+///    `U` ([PlaceSource.bounds]); then [Unbounded] is final. With nothing
+///    placed at all, [Unbounded] at once.
+/// 2. **Certificate.** On `Traced(F)`, `C = placedIn(box(F) ⊕ m)`, `m =`
+///    [kCertificateMargin]. While `C` holds a contributor not yet traced,
+///    add it and trace again. The face can only shrink or gain holes, so one
+///    round always suffices; the loop's exit is the certificate itself.
+/// 3. **Canonical trace.** The trace among exactly `C`: a function of `C`
+///    and the seed only, whatever growth rounds led there (D16's no-drift
+///    proof needs this). When the last trace was already among exactly `C`,
+///    it is that trace: the same inputs give the same bits.
+///
+/// Why exact: every contributor outside `C` is disjoint from the closed
+/// face grown by `m`, and so changes nothing inside it.
+///
+/// A seed with a non-finite coordinate is [Unbounded]: no box around it
+/// ever contains `U`.
+TraceResult traceRoomAmong(Vector2 seed, PlaceSource source) {
+  final u = source.bounds;
+  if (u == null || !seed.x.isFinite || !seed.y.isFinite) {
+    return const Unbounded();
+  }
+  List<RoomInput> inputsOf(Iterable<Handle> hs) => [
+        for (final h in hs)
+          if (source.inputOf(h) case final input?) input,
+      ];
+
+  // 1. Growth.
+  var r = kGrowthStart;
+  List<Handle> traced;
+  Traced face;
+  while (true) {
+    final b = Aabb2.raw(seed.x - r, seed.y - r, seed.x + r, seed.y + r);
+    traced = source.placedIn(b);
+    final result = traceRoom(seed, inputsOf(traced));
+    if (result is Traced) {
+      face = result;
+      break;
+    }
+    if (result is SeedInWall || _holds(b, u)) return result;
+    r *= 2;
+  }
+
+  // 2. The certificate.
+  Aabb2 grown(Traced f) =>
+      Aabb2.fromPoints(f.ring).expandedBy(kCertificateMargin);
+  final set = {...traced};
+  var c = source.placedIn(grown(face));
+  while (!c.every(set.contains)) {
+    set.addAll(c);
+    traced = [...set]..sort((a, b) => a.value.compareTo(b.value));
+    final result = traceRoom(seed, inputsOf(traced));
+    // Unreachable (D7: more inputs only shrink the face, and the wall
+    // holding the seed would have touched B), but never a wrong answer.
+    if (result is! Traced) return result;
+    face = result;
+    c = source.placedIn(grown(face));
+  }
+
+  // 3. The canonical trace, among exactly C.
+  if (_sameHandles(traced, c)) return face;
+  return traceRoom(seed, inputsOf(c));
+}
+
+/// Whether [b] contains [u] (closed).
+bool _holds(Aabb2 b, Aabb2 u) =>
+    b.minX <= u.minX &&
+    b.minY <= u.minY &&
+    b.maxX >= u.maxX &&
+    b.maxY >= u.maxY;
+
+bool _sameHandles(List<Handle> a, List<Handle> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// The tint's shape (spec 10 D9).
+
+/// The width of the tint's slit to each hole, mm (spec 10 D9, R-11): the
+/// engine's triangulator refuses an exact keyhole, whose bridge is two
+/// coincident edges (the spike's Q5, M-slit).
+const double kSlit = 0.5;
+
+/// [tintOf]'s answer: which form of D9's fallback chain the tint takes, its
+/// ring, and the holes the keyhole could not bridge.
+final class Tint {
+  Tint(this.step, List<Vector2> points, List<int> holesLeftOut)
+      : points = List.unmodifiable(points),
+        holesLeftOut = List.unmodifiable(holesLeftOut);
+
+  /// 1: the keyholed ring, a region; 2: the outer ring alone, a region (the
+  /// holes tinted over); 3: the outer ring as an invisible, unfilled closed
+  /// polyline (neither ring triangulates).
+  final int step;
+
+  /// The ring, in the frame [tintOf] was given, no closing duplicate. Every
+  /// outer-ring vertex is among them, whatever the step.
+  final List<Vector2> points;
+
+  /// Indices into [tintOf]'s holes of those that found no bridge: step 1's
+  /// region covers them. Steps 2 and 3 cover every hole anyway.
+  final List<int> holesLeftOut;
+
+  /// Whether the tint shows the face as traced: step 1, every hole cut out.
+  /// Otherwise the room reports `room.tint` (D22).
+  bool get isExact => step == 1 && holesLeftOut.isEmpty;
+
+  @override
+  String toString() => 'Tint(step $step, ${points.length} points, '
+      'holes left out $holesLeftOut)';
+}
+
+/// The tint of the face [ring] minus [holes] (spec 10 D9), both
+/// anticlockwise as [Traced] gives them, **in the trace's seed-relative
+/// frame** (the caller subtracts the seed, and maps [Tint.points] to the
+/// room's local space after): so the bridges and the slit are decided on
+/// numbers the size of a building, not of the far origin.
+///
+/// **The keyhole.** The holes are taken in descending order of their
+/// rightmost `x` (ties in the order given). Each joins the **growing
+/// keyholed ring** (the outer ring with the holes already joined) through a
+/// bridge from its rightmost vertex `H` to the nearest vertex `V` of that
+/// ring whose bridge properly crosses no edge of that ring and no edge of
+/// any hole not yet joined, this one included (ties to the earlier vertex).
+/// The hole is walked clockwise from `H`, and the return edge runs [kSlit]
+/// to the bridge's right, from `H` to `V` both moved, so the ring stays
+/// simple. A hole with no such vertex is left out (the tint covers it) and
+/// named in [Tint.holesLeftOut].
+///
+/// **The fallback chain**, so an edit is never refused because of a tint:
+/// 1. the keyholed ring, if it triangulates (`triangulationFor` non-empty);
+/// 2. else the outer ring alone, if it triangulates;
+/// 3. else the outer ring, which the room stores as an invisible, unfilled
+///    closed polyline.
+Tint tintOf(List<Vector2> ring, List<List<Vector2>> holes) {
+  final keyholed = <Vector2>[...ring];
+  final order = List<int>.generate(holes.length, (i) => i);
+  double rightmost(List<Vector2> r) =>
+      r.fold(double.negativeInfinity, (m, p) => math.max(m, p.x));
+  final right = [for (final h in holes) rightmost(h)];
+  order.sort((a, b) {
+    final c = right[b].compareTo(right[a]);
+    return c != 0 ? c : a.compareTo(b);
+  });
+  final leftOut = <int>[];
+  for (var k = 0; k < order.length; k++) {
+    // Clockwise inside the ring: the region lies to its left.
+    final hole = holes[order[k]].reversed.toList();
+    if (hole.length < 3) {
+      leftOut.add(order[k]);
+      continue;
+    }
+    var hi = 0;
+    for (var i = 1; i < hole.length; i++) {
+      if (hole[i].x > hole[hi].x) hi = i;
+    }
+    final h = hole[hi];
+    final byDistance = List<int>.generate(keyholed.length, (i) => i)
+      ..sort((a, b) {
+        final c =
+            (keyholed[a] - h).length2.compareTo((keyholed[b] - h).length2);
+        return c != 0 ? c : a.compareTo(b);
+      });
+    final obstacles = [
+      keyholed,
+      for (var j = k; j < order.length; j++) holes[order[j]],
+    ];
+    int? vi;
+    for (final i in byDistance) {
+      final v = keyholed[i];
+      if ((v - h).length2 == 0) continue;
+      if (!_blocked(h, v, obstacles)) {
+        vi = i;
+        break;
+      }
+    }
+    if (vi == null) {
+      leftOut.add(order[k]);
+      continue;
+    }
+    final v = keyholed[vi];
+    final d = (h - v).normalized();
+    final slit = Vector2(d.y, -d.x) * kSlit; // to the bridge's right
+    keyholed.insertAll(vi + 1, [
+      for (var j = 0; j < hole.length; j++) hole[(hi + j) % hole.length],
+      h + slit,
+      v + slit,
+    ]);
+  }
+  leftOut.sort();
+  if (_triangulates(keyholed)) return Tint(1, keyholed, leftOut);
+  if (_triangulates(ring)) return Tint(2, ring, leftOut);
+  return Tint(3, ring, leftOut);
+}
+
+/// Whether the bridge [h]–[v] properly crosses an edge of any of [rings].
+bool _blocked(Vector2 h, Vector2 v, List<List<Vector2>> rings) {
+  for (final r in rings) {
+    for (var e = 0; e < r.length; e++) {
+      if (_properlyCross(h, v, r[e], r[(e + 1) % r.length])) return true;
+    }
+  }
+  return false;
+}
+
+/// Whether segment [a]–[b] properly crosses [c]–[d]: each strictly
+/// separates the other's ends, so touching at an end is not a crossing.
+bool _properlyCross(Vector2 a, Vector2 b, Vector2 c, Vector2 d) {
+  double side(Vector2 o, Vector2 p, Vector2 q) =>
+      (p.x - o.x) * (q.y - o.y) - (p.y - o.y) * (q.x - o.x);
+  final d1 = side(c, d, a), d2 = side(c, d, b);
+  final d3 = side(a, b, c), d4 = side(a, b, d);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+      ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+
+/// Whether the closed ring [r] is a region the engine can fill: its
+/// triangulation, as `AddRegionCommand` computes it, is not empty.
+bool _triangulates(List<Vector2> r) =>
+    r.length >= 3 &&
+    (triangulationFor(EntityKind.polyline, polylinePayload(r, closed: true))
+            ?.isNotEmpty ??
+        false);
+
 /// A ring in the local frame: its points and, for each, the sources of the
 /// edge that leaves it.
 typedef _Ring = ({List<Vector2> pts, List<Set<Handle>> src});

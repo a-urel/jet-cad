@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'opening_geometry.dart' show wallsInView;
+import 'room_trace.dart' show PlaceSource;
 import 'separator.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
@@ -147,6 +148,42 @@ RoomInput? _inputInView(ParametricView view, Handle h) {
 Aabb2? placeBoxInView(ParametricView view, Handle h) =>
     roomInputInView(view, h)?.box;
 
+/// The whole plane, as a box: `placedIn` of it lists every contributor.
+const Aabb2 _everywhere = Aabb2.raw(double.negativeInfinity,
+    double.negativeInfinity, double.infinity, double.infinity);
+
+/// Each view's [placeSourceInView], so `U` is computed once per view.
+final Expando<PlaceSource> _sourceByView = Expando('placeSourceInView');
+
+/// What a room traces among inside `generate` and `diagnose` (spec 10 D7):
+/// the view's `placedIn`, [roomInputInView], and `U` the union of
+/// `placeBoxOf(h)` over `placedIn` of the whole plane (Ruling 10-13), the
+/// engine having already turned a non-finite box into null. Memoised per
+/// [view], `U` included.
+PlaceSource placeSourceInView(ParametricView view) =>
+    _sourceByView[view] ??= _ViewSource(view);
+
+final class _ViewSource implements PlaceSource {
+  _ViewSource(this.view);
+
+  final ParametricView view;
+
+  @override
+  List<Handle> placedIn(Aabb2 box) => view.placedIn(box);
+
+  @override
+  RoomInput? inputOf(Handle h) => roomInputInView(view, h);
+
+  @override
+  late final Aabb2? bounds = () {
+    var u = Aabb2.empty();
+    for (final h in view.placedIn(_everywhere)) {
+      if (view.placeBoxOf(h) case final b?) u = u.union(b);
+    }
+    return u.isEmpty ? null : u;
+  }();
+}
+
 // ---------------------------------------------------------------------------
 // The document adapter.
 
@@ -171,7 +208,10 @@ final double _engineNeighbourOverlap = Tolerance.standard.linear;
 /// Marked stale on each of the document's changes (its `changes` stream,
 /// which delivers after the task that made the change) and on [invalidate],
 /// and rebuilt at the next query.
-final class RoomInputs {
+///
+/// It is the tools' [PlaceSource] (spec 10 D7, D19): `traceRoomAmong(seed,
+/// roomInputs)` traces what a room there would.
+final class RoomInputs implements PlaceSource {
   RoomInputs(this.document) {
     _changes = document.changes.listen((_) => invalidate());
   }
@@ -201,13 +241,14 @@ final class RoomInputs {
 
   /// Every contributor with an input, ascending, and its place box.
   final List<(Handle, Aabb2)> _placed = [];
-  Aabb2 _bounds = Aabb2.empty();
+  Aabb2? _bounds;
 
   /// How many times the cache was rebuilt. Never reset.
   int debugRebuilds = 0;
 
   /// [h]'s input, or null when [h] is not a live wall or separator or is
   /// degenerate.
+  @override
   RoomInput? inputOf(Handle h) {
     _refresh();
     return _inputs[h];
@@ -225,6 +266,7 @@ final class RoomInputs {
 
   /// The live walls and separators, ascending, whose place box touches
   /// [box] (closed: touching counts), as `ParametricView.placedIn` answers.
+  @override
   List<Handle> placedIn(Aabb2 box) {
     _refresh();
     return List.unmodifiable([
@@ -234,8 +276,9 @@ final class RoomInputs {
   }
 
   /// `U` (spec 10 D7): the bounding box of every place box, all of them
-  /// finite. Empty when nothing is placed.
-  Aabb2 get bounds {
+  /// finite. Null when nothing is placed.
+  @override
+  Aabb2? get bounds {
     _refresh();
     return _bounds;
   }
@@ -273,7 +316,7 @@ final class RoomInputs {
         u = u.union(input.box);
       }
     }
-    _bounds = u;
+    _bounds = u.isEmpty ? null : u;
   }
 
   /// Each wall's wall neighbours, ascending: one sort-and-sweep over the
