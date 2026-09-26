@@ -106,10 +106,12 @@ final class Plan {
   Vector2 at(double x, double y) => place.at(x, y);
 }
 
-/// Builds [walls], then [seps], then [openings] (hosted by the walls they
-/// index), each object one command, at [place].
+/// Builds [walls], then [seps], then [wallsAfter] (walls whose handles come
+/// after the separators'), then [openings] (hosted by the walls they index
+/// in `[...walls, ...wallsAfter]`), each object one command, at [place].
 Plan buildPlan(List<W> walls,
     {List<S> seps = const [],
+    List<W> wallsAfter = const [],
     List<O> openings = const [],
     Placement place = origin}) {
   final doc = DraftDocument.empty();
@@ -117,24 +119,32 @@ Plan buildPlan(List<W> walls,
   ensureDashedLinetype(doc);
   final wh = <Handle>[], sh = <Handle>[], oh = <Handle>[];
   var k = 0;
-  for (final w in walls) {
-    final h = doc.handleSeed.next();
-    final g = place.groups ? _groupFor(place, k++) : Transform2.identity();
-    final inv = g.invert();
-    final s = inv.transformPoint(place.at(w.sx, w.sy));
-    final e = inv.transformPoint(place.at(w.ex, w.ey));
-    doc.commands.execute(CompoundCommand([
-      AddNodeCommand(GroupNode(
-          handle: h, parent: doc.rootHandle, transform: g, children: const [])),
-      SetComponentCommand<WallParams>(
-          h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j)),
-    ], label: 'Add wall'));
-    wh.add(h);
+  void addWalls(List<W> ws) {
+    for (final w in ws) {
+      final h = doc.handleSeed.next();
+      final g = place.groups ? _groupFor(place, k++) : Transform2.identity();
+      final inv = g.invert();
+      final s = inv.transformPoint(place.at(w.sx, w.sy));
+      final e = inv.transformPoint(place.at(w.ex, w.ey));
+      doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: h,
+            parent: doc.rootHandle,
+            transform: g,
+            children: const [])),
+        SetComponentCommand<WallParams>(
+            h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j)),
+      ], label: 'Add wall'));
+      wh.add(h);
+    }
   }
+
+  addWalls(walls);
   for (final (sx, sy, ex, ey) in seps) {
     sh.add(addSeparator(doc, place.at(sx, sy), place.at(ex, ey),
         at: place.groups ? _groupFor(place, k++) : null));
   }
+  addWalls(wallsAfter);
   for (final (i, position, width, kind, swing) in openings) {
     oh.add(addOpening(
         doc, OpeningParams(wh[i], position, width, kind, swing: swing)));

@@ -169,16 +169,32 @@ final double _engineNeighbourOverlap = Tolerance.standard.linear;
 /// gives, bit for bit (`RI1`).
 ///
 /// Marked stale on each of the document's changes (its `changes` stream,
-/// which delivers after the task that made the change) and rebuilt at the
-/// next query.
+/// which delivers after the task that made the change) and on [invalidate],
+/// and rebuilt at the next query.
 final class RoomInputs {
   RoomInputs(this.document) {
-    _changes = document.changes.listen((_) => _stale = true);
+    _changes = document.changes.listen((_) => invalidate());
   }
 
   final DraftDocument document;
   StreamSubscription<DocChange>? _changes;
   bool _stale = true;
+  int _generation = 0;
+
+  /// Bumped whenever the cache goes stale: on each of the document's
+  /// changes and on [invalidate]. A tool that caches something derived from
+  /// the inputs (a traced preview) compares it with the value it built at.
+  int get generation => _generation;
+
+  /// The next query rebuilds the cache. The document's `changes` stream
+  /// delivers only after the task that made a change, so a tool that has
+  /// just committed (the Room and Separator tools, the separator grips)
+  /// calls this right after its `execute`: it must never read an input the
+  /// document no longer has.
+  void invalidate() {
+    _stale = true;
+    _generation++;
+  }
 
   final Map<Handle, RoomInput?> _inputs = {};
   final Map<Handle, List<Handle>> _neighbours = {};

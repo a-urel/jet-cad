@@ -2,8 +2,10 @@
 // adapter, agree bit for bit (RI1); a wall whose local ring falls back is
 // traced as drawn (RT5).
 import 'dart:math' as math;
+import 'dart:typed_data' show ByteData;
 
 import 'package:floor_planner/parametric/room_inputs.dart';
+import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,7 +14,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/room_fixture.dart';
 import 'support/wall_fixture.dart'
-    show addWall, far, polar, wallDoc, worldWallOf;
+    show addWall, addWallLocal, far, polar, wallDoc, worldWallOf;
 
 /// Asserts that [RoomInputs] over [doc] and the view adapter, seen through
 /// [probeView], give the same contributors, inputs, place boxes, wall
@@ -57,6 +59,13 @@ Handle boundaryOfWall(DraftDocument doc, Handle h) {
   return Handle(payloadOf(doc, fill).scalars[0].toInt());
 }
 
+/// The double one ulp farther from zero than [x] (the next bit pattern).
+double ulpAway(double x) {
+  final b = ByteData(8)..setFloat64(0, x);
+  b.setInt64(0, b.getInt64(0) + 1);
+  return b.getFloat64(0);
+}
+
 List<List<double>> xy(List<Vector2> ps) => [
       for (final p in ps) [p.x, p.y]
     ];
@@ -72,6 +81,14 @@ void main() {
     'the box, the hollow column and the separator': boxAndSeparatorPlan,
     'TR': (p) => buildPlan(trWalls, place: p),
     'FB': (p) => buildPlan(fbWalls, place: p),
+    // A wall added after a separator: its handle is above the separator's,
+    // so the inputs' handle order is not the order they were read in.
+    'the sample plan with its column added after the separator': (p) =>
+        buildPlan(sampleWalls(),
+            seps: const [sampleSeparator],
+            wallsAfter: const [sampleColumn],
+            openings: sampleOpenings,
+            place: p),
   };
 
   test(
@@ -84,10 +101,66 @@ void main() {
         final plan = build(place);
         final seen = expectAdaptersAgree(plan.doc, what);
         expectPlaced(plan, seen, what);
-        expect(seen.placedAll, [...plan.walls, ...plan.seps],
+        final ascending = [...plan.walls, ...plan.seps]
+          ..sort((a, b) => a.value.compareTo(b.value));
+        expect(seen.placedAll, ascending,
             reason: '$what: every wall and separator, ascending, and only '
                 'those (no opening)');
       }
+    }
+    // Premise of the column-last fixture: a wall's handle above a
+    // separator's.
+    final columnLast = buildPlan(sampleWalls(),
+        seps: const [sampleSeparator], wallsAfter: const [sampleColumn]);
+    expect(
+        columnLast.walls.last.value, greaterThan(columnLast.seps.single.value));
+    final lateInputs = RoomInputs(columnLast.doc);
+    addTearDown(lateInputs.dispose);
+    expect(lateInputs.placedIn(everywhere), [
+      ...columnLast.walls.take(9),
+      columnLast.seps.single,
+      columnLast.walls.last
+    ]);
+
+    // 07's wide node cluster (Ruling 07-3): B's start is the anchor, A's
+    // and C's ends lie within wallJoin.linear of it on either side but
+    // about 2e-6 apart, so A and C are node members of each other's joint
+    // yet not reach neighbours. A's band is the one its neighbours shape,
+    // never one shaped by every wall. At the identity, and in own groups
+    // each turned an exact quarter turn about (1234.5, -678.25).
+    for (final (label, at) in [
+      ('identity', Transform2.identity()),
+      (
+        'own groups, quarter turn',
+        const Transform2(0, 1, -1, 0, 1234.5, -678.25)
+      ),
+    ]) {
+      const hB = Handle(100), hA = Handle(200), hC = Handle(300);
+      const d = 1e-6 - 1e-12;
+      final doc = wallDoc();
+      ensureDashedLinetype(doc);
+      doc.commands.execute(CompoundCommand([
+        addWallLocal(doc, hB,
+            const WallParams(0, 0, 0, 3000, 200, Justification.centre), at),
+        addWallLocal(doc, hA,
+            const WallParams(d, 0, 3000, 0, 200, Justification.centre), at),
+        addWallLocal(doc, hC,
+            const WallParams(-d, 0, -3000, 0, 200, Justification.centre), at),
+      ], label: 'Add cluster'));
+      final a = worldWallOf(doc, hA),
+          b = worldWallOf(doc, hB),
+          c = worldWallOf(doc, hC);
+      // Premises: A's and C's ends join B's start, A and C are not reach
+      // neighbours, and C would change A's band.
+      expect((a.s - b.s).length, lessThanOrEqualTo(wallJoin.linear));
+      expect((c.s - b.s).length, lessThanOrEqualTo(wallJoin.linear));
+      final seen = expectAdaptersAgree(doc, 'wide cluster, $label');
+      expect(seen.neighbours[hA], [hB], reason: label);
+      expect(seen.neighbours[hC], [hB], reason: label);
+      expect(seen.neighbours[hB], [hA, hC], reason: label);
+      expect(xy(localOutlineOf(a, [b]).ring),
+          isNot(xy(localOutlineOf(a, [b, c]).ring)),
+          reason: '$label: C would reshape A');
     }
 
     // Live objects only (08's final review m5): a WallParams on a group
@@ -161,6 +234,62 @@ void main() {
     expect(inputs.debugRebuilds, 2);
     expectAdaptersAgree(plan.doc, 'after an edit');
     expect(inputs.inputOf(partition), probeView(plan.doc).inputs[partition]);
+
+    // A tool that has just committed calls invalidate(): the next query
+    // sees the edit without waiting for the document's `changes`.
+    await Future<void>.delayed(Duration.zero);
+    final seenBefore = inputs.inputOf(partition)!;
+    final generation = inputs.generation;
+    final q = plan.doc.components.get<WallParams>(partition)!;
+    plan.doc.commands.execute(SetComponentCommand<WallParams>(
+        partition, q.copyWith(thickness: 140.25)));
+    expect(inputs.inputOf(partition), seenBefore,
+        reason: 'premise: the stream has not delivered yet');
+    inputs.invalidate();
+    expect(inputs.generation, greaterThan(generation));
+    final now = inputs.inputOf(partition)!;
+    expect(now, isNot(seenBefore));
+    final fresh = RoomInputs(plan.doc);
+    addTearDown(fresh.dispose);
+    expect(now, fresh.inputOf(partition));
+  });
+
+  test(
+      'RI2 a RoomInput is equal only to the same source, kind and points, '
+      'bit for bit; equal inputs hash alike', () {
+    // Off the origin and fractional: one ulp here is ~9.3e-10.
+    List<Vector2> pts() => [
+          Vector2(4501234.5625, 1200678.125),
+          Vector2(4503456.25, 1201876.375),
+          Vector2(4502345.75, -1203210.5),
+        ];
+    final base = RoomInput(const Handle(40), pts(), closed: true);
+    final same = RoomInput(const Handle(40), pts(), closed: true);
+    expect(same, base);
+    expect(same.hashCode, base.hashCode);
+    for (var i = 0; i < 3; i++) {
+      for (final axis in [0, 1]) {
+        final p = pts();
+        final v = axis == 0 ? p[i].x : p[i].y;
+        final w = ulpAway(v);
+        expect(w, isNot(v), reason: 'premise: one ulp is a different double');
+        if (axis == 0) {
+          p[i].x = w;
+        } else {
+          p[i].y = w;
+        }
+        expect(RoomInput(const Handle(40), p, closed: true) == base, isFalse,
+            reason: 'point $i, axis $axis moved one ulp');
+      }
+    }
+    expect(RoomInput(const Handle(41), pts(), closed: true) == base, isFalse,
+        reason: 'another source');
+    expect(RoomInput(const Handle(40), pts(), closed: false) == base, isFalse,
+        reason: 'open');
+    expect(
+        RoomInput(const Handle(40), pts().sublist(0, 2), closed: true) == base,
+        isFalse,
+        reason: 'fewer points');
   });
 
   test(
