@@ -197,15 +197,17 @@ final class _OracleType extends ParametricType<_Oracle> {
 }
 
 /// SD7's grid: neighbour_cost_test.dart's spread grid (20 columns, every
-/// other object raised a little, each turned by 0.01 × (i mod 3), at the
-/// corpus's far origin turned 30°), spaced for the Slab's 2 mm reach
-/// instead of a 1,000 mm segment's.
+/// other object raised a little, at the corpus's far origin turned 30°),
+/// spaced for the Slab's 2 mm reach instead of a 1,000 mm segment's. Each
+/// object is turned by 0.25 × (i mod 4) rather than 0.01 × (i mod 3): the
+/// world reaches then differ in width, so sorting them by `maxX` is not the
+/// same order as by `minX` (a sweep keyed on the wrong end goes red).
 final Transform2 far = Transform2.translation(4500000, 1200000)
     .multiply(Transform2.rotation(math.pi / 6));
 Transform2 slabCell(int i) => far
     .multiply(Transform2.translation(
         2.25 * (i % 20) + 0.125, 1.75 * (i ~/ 20) + 0.0625 * (i % 2)))
-    .multiply(Transform2.rotation(0.01 * (i % 3)));
+    .multiply(Transform2.rotation(0.25 * (i % 4)));
 
 /// [p] turned by [turn], its reach's `minX` equal to [minX] exactly, its
 /// group's origin at height [y].

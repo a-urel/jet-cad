@@ -141,16 +141,19 @@ final class _Survey {
 
   /// Fills the neighbour memo for **every** object of this survey (spec 10
   /// D16.5), once: one sort-and-sweep over the [reach] boxes instead of one
-  /// O(n) [neighboursOf] search per object, so O(n log n + pairs) rather
-  /// than O(n²).
+  /// O(n) [neighboursOf] search per object, so O(n log n + pairs whose x
+  /// ranges overlap) rather than O(n²). The pairs whose x ranges overlap can
+  /// exceed the true neighbour pairs: long horizontal walls stacked one above
+  /// another all overlap along x.
   ///
   /// The boxes are sorted by `minX`. A box `a` is tested against each later
   /// box `b` only while `b.minX < a.maxX - Tolerance.standard.linear`: that
   /// is the predicate's own bound on `b.minX`, and every box after the first
   /// that fails it starts no earlier, so fails it too. The window is one
   /// conjunct of the predicate, so each pair inside it is tested for the
-  /// other three, the same strict comparisons as [neighboursOf], and counted
-  /// once in [debugOverlapTests]. An empty reach (`Aabb2.empty()`, `minX`
+  /// other three, the same strict comparisons as [neighboursOf]. Every
+  /// evaluation of the window, the one that closes it included, is a pair
+  /// test and counted once in [debugOverlapTests]. An empty reach (`Aabb2.empty()`, `minX`
   /// infinite) sorts last and has no neighbours, as in [neighboursOf].
   ///
   /// The lists are the ones [neighboursOf] gives: ascending and
@@ -167,8 +170,10 @@ final class _Survey {
       final bound = a.maxX - tol.linear;
       for (var j = i + 1; j < boxes.length; j++) {
         final MapEntry(key: hb, value: b) = boxes[j];
-        if (!(b.minX < bound)) break;
+        // Counted before the window check: the check is the predicate's
+        // first conjunct, so every evaluation of it is a pair test.
         debugOverlapTests++;
+        if (!(b.minX < bound)) break;
         if (a.minX < b.maxX - tol.linear &&
             a.minY < b.maxY - tol.linear &&
             b.minY < a.maxY - tol.linear) {
