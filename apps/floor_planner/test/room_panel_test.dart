@@ -149,6 +149,10 @@ void main() {
     expect(tester.widget<Text>(section).data, 'Room');
     expect(fieldText(tester), 'Kitchen');
     expect(areaText(tester), '10.83 m²');
+    // A free-text field (Task 16's review M3): a text keyboard and no unit.
+    final field = tester.widget<TextField>(name);
+    expect(field.keyboardType, TextInputType.text);
+    expect(field.decoration!.suffixText, isNull);
     await select(tester, view, [r.b]);
     expect(fieldText(tester), 'Room 2');
     expect(areaText(tester), '12.16 m²');
@@ -195,6 +199,19 @@ void main() {
       expect(doc.commands.undoDepth, 1, reason: '"$same"');
       expect(fieldText(tester), 'Pantry');
     }
+
+    // An undo with the room still selected reloads the field (Task 16's
+    // review M2): the same target, a new value; a redo reloads it back.
+    doc.commands.undo();
+    await tester.pump();
+    await tester.pump();
+    expect(view.selection.keys, [SelectionKey.root(r.a)]);
+    expect(fieldText(tester), 'Kitchen', reason: 'reloaded after undo');
+    doc.commands.redo();
+    await tester.pump();
+    await tester.pump();
+    expect(fieldText(tester), 'Pantry', reason: 'reloaded after redo');
+    expect(doc.commands.undoDepth, 1);
 
     // Escape reaches the canvas: it clears the selection.
     await press(tester, LogicalKeyboardKey.escape);
@@ -484,5 +501,33 @@ void main() {
     expect(areaText(tester), '11.97 m²');
     expect(areaText(tester), textOf(doc, labelsOf(doc, r.a)[1]));
     expect(driftOf(doc), isEmpty);
+
+    // A room whose area TEXT lands in a lower slot than its name (Task 16's
+    // review M1): four lines deleted in one step leave four free slots,
+    // reused last-in first-out. The Area line is the second label in
+    // handle order, never in slot order.
+    final lines = <Handle>[];
+    for (var i = 0; i < 4; i++) {
+      final h = doc.handleSeed.next();
+      doc.commands.execute(AddEntityCommand(
+          record: draftRecord(h, doc.rootHandle, EntityKind.line),
+          payload: linePayload(place.at(-2000.25 + 300 * i, -3000.5),
+              place.at(-1500.75, -2700.25))));
+      lines.add(h);
+    }
+    doc.commands.execute(CompoundCommand(
+        [for (final h in lines) RemoveEntityCommand(h)],
+        label: 'Delete'));
+    // C, between the separator and the east wall: x 6,250.5..7,900, 1,649.5
+    // × 3,800 = 6,268,100 mm², 6.2681 m² (the tie 6.265 is 0.0031 away).
+    final c = addRoom(doc, place.at(7000.25, 2000.5), 'Store');
+    await tester.pump();
+    final [cName, cArea] = labelsOf(doc, c);
+    expect(doc.entities.slotOf(cArea)!, lessThan(doc.entities.slotOf(cName)!),
+        reason: 'premise: the area TEXT sits in the lower slot');
+    await select(tester, view, [c]);
+    expect(fieldText(tester), 'Store');
+    expect(areaText(tester), '6.27 m²');
+    expect(areaText(tester), textOf(doc, cArea));
   });
 }

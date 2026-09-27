@@ -55,7 +55,11 @@ final RegExp _roomN = RegExp(r'^Room ([1-9][0-9]*)$');
 ///     ([pointInRingXY]), so a point they answer is `Unbounded` for the
 ///     tracer too, bar a point within rounding of `roomTrace.linear` of an
 ///     input, which the tracer calls `SeedInWall`: no room either way. A
-///     point inside a contour, a courtyard included, is traced;
+///     point inside a contour, a courtyard included, is traced. **Hovers
+///     only**: a click and the re-read after a document change skip this
+///     step and trace (Task 15's review), since each runs among inputs just
+///     invalidated and needs only the trace ([debugContourBuilds] is
+///     unchanged across them);
 ///   - otherwise `traceRoomAmong(p, inputs)`, the trace `generate` makes
 ///     (`RI1`, `LZ1`), and cached.
 ///
@@ -184,7 +188,7 @@ class RoomTool extends PlacementTool {
   @override
   void accept(Vector2 point, ToolContext ctx) {
     inputs.invalidate();
-    final verdict = _verdictAt(_raw);
+    final verdict = _verdictAt(_raw, contours: false);
     _show(verdict);
     if (verdict != _Verdict.room) return;
     final seed = _raw.clone();
@@ -213,7 +217,7 @@ class RoomTool extends PlacementTool {
     }
     // The pointer still hovers the face, which now holds the new room.
     inputs.invalidate();
-    _show(_verdictAt(_raw));
+    _show(_verdictAt(_raw, contours: false));
   }
 
   /// The preview and the notice for [verdict].
@@ -225,7 +229,15 @@ class RoomTool extends PlacementTool {
   }
 
   /// Spec 10 D19's verdict for [p], hover and click alike.
-  _Verdict _verdictAt(Vector2 p) {
+  ///
+  /// With [contours] false the outer-contour step is skipped and a point it
+  /// would answer is traced instead, to the same verdict: a click, and the
+  /// re-read after a document change, run once per event among inputs just
+  /// invalidated, so building every contour for them (tens of milliseconds
+  /// at 600 walls) would cost more than the one trace it could spare (Task
+  /// 15's review). Hovers keep the step: they run per pointer move among
+  /// the same inputs, where the contours pay for themselves.
+  _Verdict _verdictAt(Vector2 p, {bool contours = true}) {
     if (inputs.generation != _generation) {
       _generation = inputs.generation;
       _face = null;
@@ -241,7 +253,7 @@ class RoomTool extends PlacementTool {
     if (band != null && pointInRing(p, band)) return _Verdict.none;
     final face = _face;
     if (face != null && _inFace(p, face)) return _faceVerdict;
-    if (!_inAnyContour(p, u)) return _Verdict.none;
+    if (contours && !_inAnyContour(p, u)) return _Verdict.none;
     debugTraces++;
     switch (traceRoomAmong(p, inputs)) {
       case final Traced f:
@@ -354,7 +366,7 @@ class RoomTool extends PlacementTool {
   void _onDocumentChange() {
     if (_disposed || (_preview.isEmpty && _notice.value == null)) return;
     inputs.invalidate();
-    _show(_verdictAt(_pointer));
+    _show(_verdictAt(_pointer, contours: false));
     notifyListeners();
   }
 

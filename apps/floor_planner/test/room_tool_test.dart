@@ -829,6 +829,48 @@ void main() {
         'the closed strip');
   });
 
+  test(
+      'TT9 a click and the re-read after a document change build no outer '
+      'contours: a click needs only the trace (Task 15\'s review)', () async {
+    for (final place in [origin, corpusGroups]) {
+      final plan = samplePlan(place);
+      final doc = plan.doc;
+      final rig = roomRig(doc);
+      final tool = rig.tool;
+      final kitchen = plan.at(19000.5, 10000.25);
+      hoverTo(rig, kitchen);
+      final builds = tool.debugContourBuilds;
+      expect(builds, 1, reason: 'premise: the hover built them, $place');
+      expect(tool.debugPreview, hasLength(1), reason: 'premise, $place');
+
+      // The click: invalidated inputs, a trace, the commit, the re-read.
+      final traces = tool.debugTraces;
+      pressAt(rig, kitchen);
+      expect(rooms(doc), hasLength(1), reason: 'placed, $place');
+      expect(tool.debugTraces, greaterThan(traces), reason: 'traced, $place');
+      expect(tool.notice.value, 'Already a room: Room 1');
+      expect(tool.debugContourBuilds, builds, reason: 'the click, $place');
+      // The change listener re-reads the notice's face.
+      await Future<void>.delayed(Duration.zero);
+      expect(tool.notice.value, 'Already a room: Room 1');
+      expect(tool.debugContourBuilds, builds,
+          reason: 'the listener\'s re-read, $place');
+      // An undo: the listener re-reads to a free face, and shows it.
+      doc.commands.undo();
+      await Future<void>.delayed(Duration.zero);
+      expect(tool.notice.value, isNull, reason: 'the re-read ran, $place');
+      expect(tool.debugPreview, hasLength(1), reason: 'free again, $place');
+      expect(tool.debugContourBuilds, builds,
+          reason: 'the listener\'s re-read after undo, $place');
+
+      // The control: a hover in another face still takes the contour step,
+      // once per generation.
+      hoverTo(rig, plan.at(24500.5, 16000.25));
+      expect(tool.debugContourBuilds, builds + 1,
+          reason: 'a hover builds them, $place');
+    }
+  });
+
   testWidgets(
       'SG1 M and S typed into a text entry switch no tool (the shell\'s '
       'guard, X15-guardMS)', (tester) async {

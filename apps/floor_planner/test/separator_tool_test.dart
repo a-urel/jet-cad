@@ -109,6 +109,16 @@ double distToLine(Vector2 p, Vector2 a, Vector2 b) {
   return best!;
 }
 
+/// A chamfered box of 200 mm walls, centred (Task 15's re-review): south,
+/// chamfer, east, north, west.
+const List<W> chamferWalls = [
+  W(0, 0, 7000, 0, 200),
+  W(7000, 0, 7400, 400, 200),
+  W(7400, 400, 7400, 4000, 200),
+  W(7400, 4000, 0, 4000, 200),
+  W(0, 4000, 0, 0, 200),
+];
+
 /// Places a separator from [a] to [b] with [rig]: two presses, hovering to
 /// each first.
 void draw(Rig rig, Vector2 a, Vector2 b) {
@@ -368,8 +378,8 @@ void main() {
   });
 
   test(
-      'ST5 an end trimmed through a mitre lies on the inner face the walk '
-      'entered by, not in the wall', () {
+      'ST5 an end trimmed through a mitre, or through two joints, lies on '
+      'the face the walk entered by, with no wall behind it', () {
     for (final place in placements) {
       // From inside the box to the south-east corner's east half (x + y >
       // 8,000, beyond the mitre from (7,900, 100) to (8,100, -100)): the
@@ -398,6 +408,48 @@ void main() {
         expect(local.x, lessThan(7900), reason: '$why: short of the corner');
         expect(driftOf(plan.doc), isEmpty);
       }
+
+      // Two joints (Task 15's re-review): a chamfered box, the south wall
+      // to (7,000, 0), a chamfer to (7,400, 400), then the east wall up. The
+      // end lies in the east wall's band; the walk from a start below the
+      // building enters the south wall's band by its outer face, y −100,
+      // at x 6,648.23 + 750.15 · 336.61 / 880.23 ≈ 6,935.10 (short of the
+      // outer mitre corner, 7,000 + 100 · tan 22.5° ≈ 7,041.42), passes
+      // through the south|chamfer mitre into the chamfer's band and through
+      // the chamfer|east mitre into the east wall's: three rounds.
+      final why = 'the chamfer, $place';
+      final plan = buildPlan(chamferWalls, place: place);
+      final rig = separatorRig(plan.doc);
+      final a = place.at(6648.23, -436.61), b = place.at(7398.38, 443.62);
+      final bands = [
+        for (final h in plan.walls) rig.inputs.inputOf(h)!.points,
+      ];
+      expect([
+        for (final r in bands) pointInRing(b, r)
+      ], [
+        false,
+        false,
+        true,
+        false,
+        false
+      ], reason: 'premise: the end is in the east wall\'s band only, $why');
+      expect(bands.any((r) => pointInRing(a, r)), isFalse,
+          reason: 'premise: the start is in open space, $why');
+      draw(rig, a, b);
+      final p = plan.doc.components
+          .get<SeparatorParams>(separators(plan.doc).single)!;
+      expect((p.start.x, p.start.y), (a.x, a.y), reason: why);
+      final end = p.end;
+      expect(distToLine(end, place.at(0, -100), place.at(7000, -100)),
+          lessThan(1e-6),
+          reason: '$why: on the south wall\'s outer face');
+      expect(distToLine(end, a, b), lessThan(1e-6),
+          reason: '$why: on the drawn segment');
+      // Nothing behind it: 1e-3 back toward the start is open space.
+      final back = end + (a - end).normalized() * 1e-3;
+      expect(bands.any((r) => pointInRing(back, r)), isFalse,
+          reason: '$why: no wall behind the end');
+      expect(driftOf(plan.doc), isEmpty);
     }
   });
 
