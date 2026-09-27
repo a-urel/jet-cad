@@ -7,6 +7,15 @@
 amendments", findings S-1 to S-19. Revision 2 applies them, and the
 human's answers to revision 1's open questions (decisions 26–28); see
 [Revision 2](#revision-2).
+**Amended at execution (Plan 10):** Tasks 14b and 14c (decision 29, added
+in flight) amended D5 step 9, D6 and D9 themselves; those paragraphs are
+marked "amended at execution, Plan 10, decision 29" and "Task 14c" in
+place. The paragraphs headed "**Amended at execution (Plan 10)**" record
+the rest: the plan's rulings that fill this spec's gaps (10-1, 10-3, 10-4,
+10-7, 10-10, 10-13, 10-14, 10-16, 10-17, 10-18, 10-23, 10-24, 10-27), the
+controller's rulings in flight, and where the build departed from this
+text or made it precise. They rewrite nothing above them. Results:
+[2026-09-26-plan-10-results.md](../notes/2026-09-26-plan-10-results.md).
 **Sub-project:** `roadmap/10-rooms-and-area.md`. **Size:** L (the roadmap's
 M, grown by the engine changes and one render-layer change).
 **Branch:** `spec-10/rooms`, cut from `main` at `418d4c7`; this revision is
@@ -362,6 +371,18 @@ three new pure files).
 **Pinned by:** `SR1`–`SR4` (params, generate and attributes, the missing
 record, the empty reach), `RR4` (dashed pixels).
 
+**Amended at execution (Plan 10):**
+- **`ensureDashedLinetype`'s duplicate rules** (handle 6 taken; the name
+  `DASHED` on another handle) are pinned by **`SR5`**, a test the plan
+  added (Ruling 10-1); `X9-dupName` is red on it.
+- **The record's description** is `'Dashed __ __ __'`
+  (`LinetypeRecord` requires one; Ruling 10-14).
+- **"Not more than `roomTrace.linear`" is exact at the boundary:** a
+  separator exactly `roomTrace.linear` long is degenerate, and a wall
+  ring with a non-finite coordinate contributes nothing; `DG4` pins both
+  (the Task 9 review's `rv9-sepLenGe` and `rv9-wallFinite`, carried to
+  Task 13).
+
 ### D4 — What a room traces: uncut bands and separator segments
 
 - **A wall's input is its uncut band:** the ring 07 stores for the wall
@@ -400,6 +421,40 @@ record, the empty reach), `RR4` (dashed pixels).
 
 **Pinned by:** `RI1` (adapters), `RT2` (openings, M-10d), `RT5` (the
 local-ring fallback).
+
+**Amended at execution (Plan 10):**
+- **One local ring** (Ruling 10-8): 07's `_localOutlineOf` is now a thin
+  wrapper over a pure `localOutlineOf(WorldWall self, List<WorldWall>
+  neighbours)` in `wall_geometry.dart`, so the wall's own generate and
+  both room adapters compute one ring. The wall's stored children are
+  unchanged bit for bit; 07's and 08's tests pass unedited.
+- **The document adapter's predicate** (Ruling 10-10) is one named
+  constant in `room_inputs.dart`, the only `Tolerance.standard` in the
+  room files; its neighbour pass is a sort-and-sweep. **The adapter is
+  `RoomInputs`** (Ruling 10-11), live objects only, stale on each
+  `doc.changes` event; it gained **`invalidate()` and a generation** (as
+  08's `WallBands`), so a tool that commits can query the edited document
+  before `doc.changes` arrives (Task 9 review m-3): the Room tool calls it
+  at every click, the Separator tool at the second click and after its
+  execute, the separator grips at release.
+- **How `RI1` sees the view adapter** (Ruling 10-12): a test-only
+  catalog whose `_Probe` object's `diagnose` records `roomInputInView` and
+  `view.neighbours` for every contributor, compared with `RoomInputs` by
+  `==`. **`RI1` holds 07's wide node cluster** (members within
+  `wallJoin.linear` of the anchor, about 2e-6 mm from a wall's end), where
+  a trace among all walls and one among reach neighbours differ (Task 9
+  review I-1; at the identity and an exact quarter turn, whose premise a
+  23° turn cannot hold), and a wall added after a separator (ascending
+  lists).
+- **`RoomInput`'s `==` is exact and pinned:** `RI2`, a test the plan
+  added (Task 9 review I-2): one ulp in any single coordinate, a different
+  source, `closed`, or one point fewer breaks `==`, and equal inputs hash
+  alike.
+- **Known edge, 08's:** `wallsInDocument` (08's document adapter) passes
+  every live wall as a wall's neighbours, not the engine's reach list; the
+  two give the same ring except inside 07's wide node cluster, where the
+  Task 9 review's probe shows a different one (the review's observation).
+  Rooms do not use it; it is recorded as a 07/08 edge.
 
 ### D5 — The tracer
 
@@ -465,6 +520,46 @@ changes marked.
 O(s²) loop took 134.115 µs over the sample plan's nine walls (36 segments,
 94 pairs past the box test; JIT, spike Q1). **Pinned by:** `RT1`–`RT9`;
 mutants M-10a, M-10b, M-10seedface, M-10local, M-10tol, M-10sep.
+
+**Amended at execution (Plan 10):**
+- **The output is canonical** (Ruling 10-7). Each ring, the outer and
+  each hole, starts at its least vertex in `(x, y)` order in the
+  seed-relative frame and runs anticlockwise; where a ring passes through
+  that vertex more than once (a pinch), at the start whose following
+  vertices are least. Holes are ordered by their first vertex in the same
+  order; sources move with their edges, each set ascending by handle;
+  areas are summed in that order. `SeedInWall` names the lowest-handle
+  input that holds the seed. The start is applied before and after the
+  collinear clean-up (Task 10). D7's "a function of `C` and the seed"
+  needs nothing more.
+- **Ruling 10-7's premise, corrected** (Task 11). The ruling said far
+  inputs shift vertex indices and so could move a ring's start, which
+  `LZ1` would see. They do not: far inputs never move the walk's start,
+  and `LZ1` stays green without the canonical order (the mutant
+  X11-canonical; the Task 11 review's adversarial probe, 420 comparisons,
+  all equal). What the order pins is the output against a **relabelling**
+  of the inputs' handles, which does move the start: X11-canonical is
+  killed by `RT2`, `RT3`, `RT4`, `RT6`, `RT7` and `RT8`. The ruling
+  stands; its reason is this one.
+- **A hole needs three vertices** (Task 10 review I-1): a free tree of two
+  or more separators could come back as a two-point, zero-area "hole",
+  its sign depending on where the cycle started. A cleaned contour of
+  fewer than three vertices is not a hole. Since step 9's split (decision
+  29) a free tree leaves no loop at all, so the rule is subsumed (its
+  removal is now equivalent); a triangle of separators is a hole (`RT8`).
+- **Tolerances in the pair search:** the sweep's window and the box
+  reject on `y` both use `roomTrace.linear` (separators 0.5 nm short of a
+  face still join it, `RT8`), and the parallel test is the angular one (a
+  diagonal centreline-to-centreline separator, `RT8`).
+- **Sources:** a hole's edges carry their own walls (`RT4`), and a face
+  along two collinear joined walls keeps both, ascending (`RT7`).
+- **Where M-10d is fired:** `RoomInputs._refresh`, the document adapter
+  (`roomInputOf` takes no document, and the view cannot expose stored
+  pieces). **X10-collinear's killer is `RT8`,** not `RT1`: the sample
+  plan's T-butt splits are room corners, not collinear vertices.
+- **`debugTracedSegments`** is not annotated `@visibleForTesting`: the
+  pure file takes no `package:meta` dependency (as
+  `RoomInputs.debugRebuilds`).
 
 ### D6 — The room's face: outer ring, holes, islands
 
@@ -560,6 +655,35 @@ M-10cert, M-10grow.
   per rebuild on the sample plan, set from the plan's own run and recorded
   with it.
 
+**Amended at execution (Plan 10):**
+- **`U` for the view source** (Ruling 10-13): the view has no "every
+  contributor" query, so `U` is the union of `placeBoxOf(h)` over
+  `placedIn` of an infinite box, computed once per view and memoised with
+  the room's trace memo. The first `placedIn` computes every box anyway.
+- **Step 3's trace is skipped** when the certificate's last trace was
+  already among exactly `C`: the same set gives the same bits.
+- **The margin is pinned at 0.5 nm:** `LZ1` holds a separator 0.5 nm
+  (5e-7 mm) outside a face, which only the 1 mm margin brings into `C`
+  (margin 0 is red). Commit `9eb913e`'s subject says "0.5 um"; the case is
+  0.5 nm, and the test's name and comments say so (Task 11 review m-1).
+- **A non-finite seed** is `Unbounded` and the loop ends; so is any seed
+  in an empty or degenerate-only document, on both sources: **`LZ4`**, a
+  test the plan added (Task 11 review m-2), each trace in its own isolate
+  so a loop that never ends fails on time.
+- **`LZ1`** runs 1,440 comparisons, the tied-island fixtures of decision
+  29 included (Task 14b).
+- **`LZ3`'s bound, from the plan's run** (Ruling 10-20): **50 segments
+  per rebuilt room.** Moving P5 10 mm rebuilds the Kitchen and the Bath,
+  99 segments in all; their localised traces take in 49 and 50 (growth
+  to r = 4,000 mm, the certificate, the canonical trace among four
+  walls). One trace among every contributor would take in 41: on a plan
+  of 11 contributors the growth costs more than tracing everything, and
+  what it buys is a cost that does not grow with the plan. `LZ3`'s
+  second case adds 40 walls 40 m east and asserts the same counts. The
+  bound has no headroom; it is deterministic.
+- **M-10cert's app-level killers** are `FZ1` and `LZ2`, not `DF1`: every
+  face in `DF1`'s script closes in its first tracing box (the Task 14
+  re-review).
 ### D8 — When a room dissolves (the ring-breaks rule)
 
 Decision 24's one rule, made exact. In every edit that regenerates a room,
@@ -596,6 +720,19 @@ one undo step.
 | the column deleted | Living kept, hole gone, `parametric.orphan` | Living kept, hole gone, **no diagnostic** |
 
 **Pinned by:** `RD1`–`RD8`; M-10dissolve, M-10shared.
+
+**Amended at execution (Plan 10):** the rule as built, and one
+consequence in the shell.
+- **Deleting an outer wall of the sample plan dissolves the rooms whose
+  faces open to the outside,** in the same step, as this section says.
+  The shell's two wall-delete undo tests (`planner_shell_test.dart`, 08's)
+  counted children before rooms existed; they now name the rooms the
+  delete dissolves and check that the undo restores them (Ruling 10-22,
+  `2eb2da6`, accepted by the controller). No other 07 or 08 test changed.
+- **The undo of a dissolve is content-exact;** the order of a restored
+  room's children in the tree can differ from before, which is 06's and
+  08's pre-existing undo behaviour (the Task 18 review; the same at
+  `10894c6`). Draw order follows handles and is unaffected (D18).
 
 ### D9 — The room's children: the tint and the two labels
 
@@ -785,6 +922,61 @@ its labels** (decision 4), and a label over furniture wins the click
 fallback chain), `RR1`–`RR4` (renders and picks); M-10slit, M-10visible,
 M-10tintcolour, M-10tintalpha.
 
+**Amended at execution (Plan 10):** the slit's real error, the bridge
+rule, step 3's handles and the test seam. Decision 29's and Task 14c's
+paragraphs above stand; this adds what they do not say.
+- **The slit's error, measured** (Task 13's finding, its review's m-3;
+  this replaces "the tint is then short of the true region by 0.5 mm ×
+  the bridge's length"). The slit's return point can sit **up to 0.5 mm
+  outside the face**, on either side of the bridge: into a wall's band,
+  across a separator into the neighbouring room's face, or through a wall
+  thinner than 0.5 mm. Where bridges chain, each adds at most 0.5 mm
+  (Task 14c's paragraph: about 1 mm in the reviews' fuzz). So the tint's
+  error against the true region has **either sign**, and it scales with
+  the ring edges at `V` and `H` (about 0.25 mm × edge length), not with
+  the bridge. The area label is the trace's and is unaffected. D16's 2 mm
+  read margin still covers the stored box: an overshoot only grows it.
+  D18's "the tint never covers a wall's band" is amended to match.
+- **A bridge through a vertex is blocked** (Task 11 review I-1). On
+  axis-aligned plans a bridge could run along the hole's own edge, or
+  through a vertex of an obstacle, and `_blocked` rejected only proper
+  crossings: the keyholed ring was not simple and the tint fell to step
+  2 (a column flush below a partition's face). A bridge is also blocked
+  when any obstacle-ring vertex lies strictly inside it (collinear,
+  between its ends). `TN1`'s case 4 (that column through the real trace,
+  six placements) takes step 1.
+- **"No vertex whose bridge is clear" is unreachable from a real trace:**
+  the rightward ray from `H` meets the ring first (Eberly), so that
+  branch is defensive, and `TN1` reaches it with a hole outside the ring.
+  A hole **is** left out, reachably, when no clear keyhole (bridge and
+  slit) reaches it, as Task 14c's paragraph says; `room.tint` reports
+  "no clear keyhole reaches them" (D22).
+- **Step 3 and handles** (Task 13). Step 3's POLYLINE is a new kind, so
+  it is added with fresh handles above the labels, and a later return to
+  a region adds the fill and boundary above the labels too. From then on
+  **the tint draws over its own labels** (translucent at about 10%, so
+  they still read); D18's "the labels draw over the tint" holds while the
+  tint keeps its first form. At Task 14, before decision 29, `FZ1` at seed
+  1010 found 465 of its region checks in that state.
+- **Ruling 10-16's seam stays,** for a different reason. Honest fixtures
+  for both steps exist (Task 13): step 2, columns 0.2 mm off two faces
+  (since Task 14c, a pinched free island); step 3, a column turned 45°
+  pinching the ring. `RG2` runs them without the seam. `room.dart` also
+  re-checks, in `generate`, that the tint **mapped to the room's local
+  frame** still triangulates, and steps down the chain rather than let the
+  engine refuse the edit (Task 12; the controller kept it: this section
+  forbids refusing an edit over a tint). That guard is practically
+  unreachable (a 0.5 mm slit against ulp(1e9)), and `debugTintFailedSteps`
+  is the only way to exercise it, so the seam stays, null in the library
+  and reset in `tearDown`; removing the guard without the seam is
+  equivalent by unreachability.
+- **One helper for both readers:** `generate`'s stored step and
+  `diagnose`'s `room.tint` come from one function (the relative `tintOf`
+  and the local guard), so they cannot disagree (Task 12 review m-4).
+- **The labels' "centre, middle"** is `packTextAttrs(h:
+  TextJustifyH.centre, v: TextJustifyV.middle)`, not `TextJustifyH.middle`,
+  which is DXF's other "middle" (Ruling 10-14).
+
 ### D10 — The label point and the stored offset
 
 - **The pole of inaccessibility** of the face (outer ring minus holes):
@@ -826,6 +1018,22 @@ precision at every placement, and at the origin also the pole's
 `RL3` (offset rides with the pole), `RL4` (a rotated room group);
 M-10c, M-10centroid, M-10offset, M-10offsetref.
 
+**Amended at execution (Plan 10):**
+- **A mirrored room group is not covered.** "Horizontal and sized on
+  paper under any similarity" holds for similarities without a
+  reflection. Under a mirrored room group (only a file makes one) the
+  labels are not kept horizontal (the Task 12 review's observation; no
+  action, recorded as a known limit).
+- **Measured** (`RL1`, this plan's final gate run): the pole's distance
+  to the boundary is 583.40 mm at the origin and +1e9 mm unturned, and
+  583.24 mm at the four turned placements, against 585.786 by hand:
+  within the 10 mm precision, as asserted.
+- **`RL3` and `RL4` pin the offset's frame** (Task 12 review m-1, m-2):
+  a fractional label under `RL4`'s turned, scaled group satisfies `anchor
+  − pole == toWorld.transformDirection(label)`, and a room whose offset is
+  `(5.5, NaN)` is treated as auto (D2), so both components' finiteness
+  counts.
+
 ### D11 — The area, its format, and the label heights
 
 - **The area** is the trace's net area (outer minus holes), in mm², from
@@ -846,6 +1054,17 @@ M-10c, M-10centroid, M-10offset, M-10offsetref.
   fixtures is at least 0.0005 m² from a tie, checked by hand.
 
 **Pinned by:** `RA1` (every unit), `RA2` (page change), `RX1`.
+
+**Amended at execution (Plan 10):**
+- **One tie on purpose.** `RA1` holds a room of 1,524 × 1,714.5 mm =
+  2,612,898 mm², exactly 28.125 ft². `304.8 × 304.8` in double arithmetic
+  is 92,903.04000000001, a little above the true square foot, so the
+  quotient falls just below the tie and reads **`28.12 ft²`**; squaring
+  3,048 as integers first would give the tie itself and `28.13`. The case
+  pins the double form this section specifies (the mutant X11-feet; Task
+  19's audit). Every other expected label keeps the 0.0005 m² clearance.
+- **A tie follows the binary value** (the Task 11 review: 29,265,000 mm²
+  reads `29.27`); `-0.00` is unreachable (an area is never negative).
 
 ### D12 — Engine (a): generated text
 
@@ -879,6 +1098,18 @@ M-10c, M-10centroid, M-10offset, M-10offsetref.
 (engine client: add, match, rewrite, undo, the guard), `RG3` (the room's
 labels follow a wall move); M-10f, M-10textadd, M-10attrs.
 
+**Amended at execution (Plan 10):**
+- **The engine's test clients** (Ruling 10-2) are `Caption` (`TX1`) and
+  `Swatch` (`AT1`), in `test/parametric/support/clients.dart`.
+- **The match by ordinal is pinned:** `Swatch` generates two TEXTs whose
+  strings change independently, so matching the i-th generated TEXT to
+  the i-th existing one goes red under an index mistake (the Task 1
+  review's `rv1-idx`), in the engine (`AT1`) and in a room (`RG3`,
+  `RG4`). The match reads the string through the column accessor
+  `textAt`, not a record read.
+- **`TX1` runs at fractional values** (its fixture at `(1234.5,
+  -310.25)`, turned 0.4).
+
 ### D13 — Engine (b): the record attributes a client sets on add
 
 - **`Generated`** (plain) gains `transparency` (default `kByLayer`),
@@ -899,6 +1130,18 @@ labels follow a wall move); M-10f, M-10textadd, M-10attrs.
 
 **Pinned by:** `AT1` (engine client: each attribute on add, none on a
 match), `RG1`, `SR2`.
+
+**Amended at execution (Plan 10):**
+- **Every attribute must differ from its default in a fixture,** or
+  dropping it from `_recordOf` is invisible: `Swatch` sets non-zero
+  `flags` on its TEXT and plain children (`rv1-flags`), and its inherit
+  variant sets its fill's flags to invisible so that `boundaryFlags`'
+  default (`?? flags`) is observable (X2-default; the plan's fill flags
+  of 0 would have let it survive).
+- **A re-add in place of a match** is caught by handle equality
+  (`rv2-readd`). No command sets a record's attributes, so nothing
+  rewrites one under a match (the Task 2 review's minor on the
+  add-versus-match contrast, not taken).
 
 ### D14 — Engine (c): the page
 
@@ -933,6 +1176,24 @@ step, undo restores `10.83 m²`; the spike's `Q5 a page change`), `PG2`
 (a paper-colour or grid change calls no `generate` of a page-key client:
 the client counts its calls, since a seeded object with an unchanged key
 plans nothing either way); M-10page, M-10pagekey.
+
+**Amended at execution (Plan 10):**
+- **Where the page seeds sit** (Ruling 10-4): in `_run`, **after
+  `_checkDangling`** and before the early return. Before the dangling
+  check (the spike's place), a loaded `cascade` referrer with a dead
+  reference whose type reads the page would refuse every page change;
+  08's rule is that only seeds are checked, and a page-seeded object was
+  not edited. `PG1` has the case (a `Gauge` with a dead `host`).
+- **The guard is at the call site:** `if (before.page != after.page)
+  seeds.addAll(_pageSeeds(...))`, so `pageKey` is never called on any
+  other edit. A call counter on the `Gauge` client pins it (the Task 3
+  review's `rv3-noShort`), and one `PG1` step changes the scale and the
+  unit in one command (1:50 m → 1:100 ft-in) and expects both `Gauge` and
+  `Dial` to regenerate (`rv3-firstType`).
+- **M-10pagekey is read as "every type with a non-null key seeds"**;
+  X3-allTypes (every registered type) is red at `PG1`.
+- **The engine's clients** are `Gauge` (scale) and `Dial` (unit)
+  (Ruling 10-2).
 
 ### D15 — Engine (d): the dissolve verdict
 
@@ -972,6 +1233,23 @@ plans nothing either way); M-10page, M-10pagekey.
 
 **Pinned by:** `DV1` (engine client: dissolve, one step, undo, component
 detached, the guard untouched), `RD1`–`RD4`; M-10dissolve, M-10detach.
+
+**Amended at execution (Plan 10):**
+- **The plan's order has no state consequence.** "The subtree removal,
+  then the detach" leaves the same state and the same undo in either
+  order; `DV1` reads the order from the plan's replay, which is its only
+  witness (X4-order is red only there, and the replay line also kills the
+  Task 4 review's `rv4-noFills`). The order is kept as a convention (the
+  Task 4 review's ruling).
+- **`DV1` also plans past a dissolve:** one command dissolves a `Fuse`
+  and changes a second `Fuse` later in the closure; `drift()` stays
+  empty (`rv4-break`). A throwing verdict rolls the whole edit back.
+- **Known limit: a referrer of a dissolving object.** "No other object
+  reads a room" holds for everything 10 makes, but 08 D17 lets an opening
+  name a live non-wall host. **Only a loaded file whose opening names a
+  room as its host** reaches it: when that room dissolves, the opening is
+  left with a dead reference, reported `parametric.dangling`, and an edit
+  of the opening is refused (the Task 4 review's probe). No code in 10.
 
 ### D16 — Engine (e): spatial dependencies
 
@@ -1183,6 +1461,72 @@ the bulk pass, an unchanged neighbour adding nothing, no readers,
 `Q3e`, `FB`), `RK1`, `RK2`; M-10nbr, M-10before, M-10snap, M-10e,
 M-10bulk, M-10cand, M-10allK, M-10objects, M-10inputbox.
 
+**Amended at execution (Plan 10):**
+- **Staged in three tasks** (Ruling 10-3): the roles, the before-view and
+  the trigger together (the before-view is read by nothing but the
+  trigger, so `SV1`–`SV3` observe it through the trigger's `placeBox`
+  calls), then the changed-input filter and the counters, then the bulk
+  pass. One after-view is shared by the trigger and `_plan` (Ruling 10-5);
+  the place memo lives on the view, and `_Registration.placeBoxOf` is the
+  only caller of a type's `placeBox` (Ruling 10-6).
+- **`paramsOf` on a view is narrowed to the registered component** (D16.1
+  as written: the snapshot answers only the type's own component).
+- **Point 2's "any bit difference", corrected:** a change is an **`==`
+  difference**. `placeInput` values are compared with `==`, so `+0.0` and
+  `-0.0` compare equal and count as unchanged although their bits differ;
+  anything `==` tells apart counts as a change (the Task 6 review;
+  `placeInput`'s doc says so).
+- **`placeInput`'s contract** (Task 6 review, now in its doc): two equal
+  inputs must mean an equal place box **and** equal everything a reader
+  reads of the object. A wall's input is therefore its **joined ring**,
+  after 07's joints and the short-wall fallback, never its parameters,
+  which can stay equal while a neighbour reshapes its band.
+- **Point 4's one-hop assumption** is now stated where a type author
+  reads it, in `placeBox`'s doc (Task 5 review m-2): a place box, and
+  `placeInput`, may read only the object itself and its reach neighbours,
+  never a referent, a referrer or a second-hop neighbour.
+- **Point 5's bound, corrected** (Task 7 review m-2): the sweep is
+  **O(n log n + pairs whose x ranges overlap)**, not O(n log n + pairs).
+  Its window is on x only, and a pair whose x ranges overlap is tested
+  even when its y ranges miss; each window evaluation counts as a pair
+  test in `debugOverlapTests` (Task 7 review I-1). The sweep's lists equal
+  `neighboursOf`'s term by term (the review's check).
+- **Point 6: "at most" the same number of `placeInput` calls.**
+  `placeInput` is asked only for a contributor whose place box is not null
+  in both views (an added or deleted contributor, or one whose box is
+  null on one side, is changed without it), so the count is an upper
+  bound (Task 6).
+- **`SD7`'s count, split** (Task 7 review m-1): at Task 7, of 5,162
+  overlap tests at n = 200, about 3,200 were the trigger's per-object
+  neighbour searches and about 1,950 the sweep; since the fix round counts
+  each window evaluation, the edit makes **5,408** (this plan's final run),
+  against n²/4 = 10,000. The
+  grid was re-spaced (2.25 × 1.75 mm; the neighbour-cost grid gives no
+  neighbours at a 2 mm reach) and each cell turned by `0.25 × (i % 4)` so
+  that a sweep sorted by `maxX` differs (`rv7-sortMax`). One size shows
+  it is not quadratic at n = 200; the plan's design, accepted.
+- **`FB`'s after-box premise holds unturned only** (Task 14): X's after
+  place box misses R2's read box at 0°, not at every placement, so `RS6`
+  asserts that premise at 0°.
+- **M-10before is not masked by a T-joined partition** (Task 14): the
+  shared partition of `RG3`, T-joined at both ends, kills it, so the named
+  mutants' "partition fixtures cannot kill it" is too strong. **M-10e
+  dies in `RG3` at 23°** (not at `RG3`'s origin), and at the origin in
+  `RS4`.
+- **`RK1` has no single-site killer:** three short circuits (`_run`'s
+  early return, `_triggered`'s seed guard, its empty-`L` return) back each
+  other up; removed together they are red at `RK1` (X14-noShortCircuit).
+  The empty-`L` return removed alone is `X6-readAlways`, red at `SD6`; the
+  other two alone only cost time (accepted, Task 19).
+- **Point 6's example, measured:** P5 moved 10 mm on the sample plan
+  rebuilds the Kitchen and the Bath (`LZ3`'s premise), and `RK2` counts
+  the rooms rebuilt per move (below, and in the results note).
+- **The test clients** are `Slab`, `Rod` and `Lens` (Ruling 10-2); `SD4`
+  runs in two steps (onto `W` and off it), because its premise cannot
+  hold in the plan's one direction; `SD5b` and `SD11b` are the plan's
+  additions (two contributors of one kind listed in ascending order; an
+  exact `Rod` moved by `TransformNodeCommand`).
+
 ### D17 — Engine (f): the dashed linetype's handle
 
 - **`ReservedHandles.dashedLinetype = Handle(6)`**, a named constant in the
@@ -1199,6 +1543,12 @@ M-10bulk, M-10cand, M-10allK, M-10objects, M-10inputbox.
 
 **Pinned by:** `SR2` (the separator's record names it), `RP2` (the
 default tables unchanged).
+
+**Amended at execution (Plan 10):** `RP2` is an **engine** test
+(`test/document/reserved_handles_test.dart`; Ruling 10-1): it pins D17,
+an engine property, where the default document is built. The default
+document's linetypes are at handles 2, 3 and 4 (BYLAYER, BYBLOCK,
+CONTINUOUS), unchanged, and handle 6 is free in it.
 
 ### The engine changes against 06's guarantees
 
@@ -1242,6 +1592,25 @@ One row per change; "—" means the change does not touch that guarantee.
 
 **Pinned by:** `RG4` (undo, redo, handles), `RG5` (round trip),
 `RG6` (determinism: a document and its reload, the same edit).
+
+**Amended at execution (Plan 10):**
+- **"The tint never covers a wall's band" is amended:** the tint's outer
+  ring is the bands' faces, but a keyhole's slit end can sit up to 0.5 mm
+  outside the face, so into a band (or across a separator, or through a
+  wall thinner than 0.5 mm), at most 0.5 mm per chained bridge (D9's
+  amendments). At any zoom where a room reads that is below a pixel.
+- **"The labels draw over the tint"** holds while the tint keeps its
+  first form: after D9's step 3, and after a return from it, the tint's
+  handles are above the labels' and it draws over them, translucent (D9's
+  amendment).
+- **The undo of a dissolve** restores the content exactly; the restored
+  children's tree order can differ (D8's amendment).
+- **`RG7`**, a test the plan added (Task 12 review I-1), pins the read
+  box's 2 mm margin: a room right of a separator at a fractional x, whose
+  stored tint's least x rounds past the separator by 4.5e-13 mm; the
+  separator moved 100 mm away must rebuild the room (`drift()` empty;
+  labels 22.56 → 22.94 m², each 0.0018 from a tie). With margin 0 it
+  drifts.
 
 ### D19 — The Room tool (M)
 
@@ -1301,6 +1670,53 @@ One row per change; "—" means the change does not touch that guarantee.
 **Pinned by:** `TT1`–`TT7`; M-10name, M-10occupied, M-10seedsnap,
 M-10notice, M-10hover, M-10hoverunion.
 
+**Amended at execution (Plan 10):** the re-review's T-8 cache is
+adopted, and the tool as built.
+- **The outer-contour cache** (the Task 15 review's Minor 1: an
+  `Unbounded` hover inside the bounds re-traced every move, 9.9 ms among
+  600 walls and 12.4 ms outside a connected 636-wall plan, about 2,000 ×
+  the Wall tool's hover; any non-rectangular footprint pays it). The
+  tracer's arrangement is factored out (`_arrange`), and `RoomInputs`
+  keeps, per generation, **every component's outer contour** (its most
+  negative cycle; free trees kept) from the all-inputs arrangement,
+  built lazily and box-rejected. The hover's verdict order is: **the
+  bounds → a cached band → the cached face → the contours → a trace.** A
+  point in the bounds but outside every outer contour is `Unbounded`
+  without a trace; a point inside one still traces. Measured by `TT6` in
+  this plan's run: **19.0 µs** per courtyard hover among 600 free walls
+  and **11.6 µs** outside a connected 636-wall plan (the first hover,
+  which builds the contours, 6.6 ms and 8.3 ms). `TT8`, a test the plan
+  added, compares the cached and the uncached verdicts over a 36 × 36
+  hover grid on four plans (the sample, the hollow column with its
+  separator, the L, a connected grid with a garden wall) at six
+  placements.
+- **The bounding-box short-circuit now saves the contour build, not a
+  trace** (Task 19's finding F1): once the contours exist, a hover outside
+  the box gets the same verdict from them. `TT6` therefore hovers outside
+  the box on a fresh generation first and asserts no trace **and no
+  contour build**; M-10hover is red there (`ee610fd`).
+- **A click, and the tool's change listener, build no contours** (the
+  Task 15 re-review's Minor B): a click needs only the trace. `TT9`, a
+  test the plan added, counts `RoomTool.debugContourBuilds`.
+- **`RoomInputs.invalidate()`** is called at every click, so a click right
+  after another sees the first room; the tool re-reads its verdict on each
+  document change, so an undo updates the notice; the notice is set right
+  after a placement. `RoomTool.debugTraces` joins the counters.
+- **No snap marker:** the seed is the raw pointer, so the overlay draws
+  nothing at it (the plain, no-snap glyph).
+- **A refused commit:** a `DuplicateHandleError` would escape the catch;
+  the real tool allocates inside the build and cannot raise it.
+- **Known limits, both hover-only:** the warm face cache answers a point
+  within about 1e-6 mm of a face edge from the cached face, where a fresh
+  trace might not (the click re-traces); and a click rebuilds
+  `RoomInputs` three times, about 22 ms per click at 636 walls (the Task
+  15 review's nit; not taken, correctness first).
+- **`TT5`'s geometry:** the plan's "a vertex 30 px away" lies outside the
+  10 px aperture; the test puts the raw point 30 mm (7.5 px at 0.25 px/mm)
+  from the face vertex, inside the 40 mm aperture. **`TT2`** compares the
+  preview with the room's ring bit for bit after the room's store map
+  (world to local and back), and includes a tied island (decision 29).
+
 ### D20 — The Separator tool (S)
 
 - **A `PlacementTool` of two clicks per separator**, not chained
@@ -1328,6 +1744,23 @@ M-10notice, M-10hover, M-10hoverunion.
 - **Preview:** the rubber-band segment, trimmed as it would be stored.
 
 **Pinned by:** `ST1`–`ST4`; M-10trim.
+
+**Amended at execution (Plan 10):**
+- **Trimming repeats** (the Task 15 review's Minor 2): at a mitred corner
+  the walk from the other end can cross another wall's face and then pass
+  through the mitre into the band that holds the end, so one trim left
+  the end 39 mm inside the south wall. `trimSeparator` re-trims while the
+  trimmed end lies in, or within `roomTrace.linear` of, a band it has not
+  used; each step moves toward the start, so it ends. **`ST5`**, a test
+  the plan added, pins the mitred corner and a two-joint chamfer (whose
+  end lands on the south wall's **outer** face, the face the walk entered
+  by, which is correct D20) at six placements; **`ST6`**, also added,
+  pins "the first point where the segment enters the band" with an end in
+  two crossing walls. The Task 15 re-review ran 39,161 random trims: no
+  end with a wall behind it.
+- **One function** (Ruling 10-9): `trimSeparator` in `room_inputs.dart`,
+  called by the tool and the grips, so M-10trim has one site, red at
+  `ST2` and `GR5`.
 
 ### D21 — Editing: selection, the Room section, the grips
 
@@ -1406,6 +1839,31 @@ rotates with the select tool like any line).
 the grip under a rotated, scaled room group), `OL4` (the ring in the
 shell); M-10pin, M-10movable, M-10offset, M-10gripframe, M-10ring.
 
+**Amended at execution (Plan 10):**
+- **The return to auto is not gated on F3** (Ruling 10-17): `RoomGrips`
+  takes the aperture from the shell (`kSnapAperturePixels / scale`)
+  whatever F3 says; it is a reset gesture, not a snap, and with F3 off it
+  would otherwise be unreachable. The distance is taken in world (`GR6`
+  drops 1.2 apertures from the pole under a group scaled 1.5 and expects
+  a label; `rv17-apertureLocal`), and `GR1` has a 1:100 ft-in page case.
+- **A drop exactly on the grip returns null** (no command): the local →
+  world → local round trip is not bit-exact, so an offset recomputed from
+  that point would not equal the stored one (Task 17's reading).
+- **The grips invalidate `RoomInputs` at release** (they never execute
+  themselves; the select tool does).
+- **The Room section as built** (Task 16): the Name field is a text
+  keyboard with no unit suffix (`RN1`); the area line is the area TEXT's
+  stored string, found by kind and handle order (the engine matches TEXTs
+  by index in handle order; `RN6` holds a room whose area TEXT sits in a
+  lower slot than its name), cached per room and document change: the
+  lookup is linear in the document per change, off the frame path.
+  `RN5`'s "refused edit" is two cases: a pinned room removed (the text is
+  discarded) and a real refusal, from a file whose fill names another
+  object's boundary (the text reverts). `RN2` checks the field after an
+  undo with the room still selected. `RN3` takes its letter list from the
+  shell; `SG1`, a test the plan added, types M and S into a text entry
+  and switches no tool (`X15-guardMS`).
+
 ### D22 — Diagnostics
 
 `RoomType.diagnose` and `SeparatorType.diagnose` report, each at most once
@@ -1432,6 +1890,28 @@ per object, severity `warning` unless stated:
 view, so O(rooms) traces plus O(rooms²) point tests, off the edit path.
 
 **Pinned by:** `DG1`–`DG4`; M-10share2, M-10objects.
+
+**Amended at execution (Plan 10):**
+- **`room.shared` is once per pair, not once per room.** "Each at most
+  once per object" holds for every code but `room.shared`: the lower room
+  reports one entry **per** higher room in its face, so a room shares
+  with two others twice (`DG1`: three rooms in one face give three
+  entries) (Task 13).
+- **Another room's seed is read through its own group** (the Task 13
+  review's I-1): `DG1` holds a room, Bay, in a turned, translated group
+  whose local seed lies outside the face.
+- **A broken other room is skipped:** `room.shared` ignores a room whose
+  own trace is not `Traced` (it reports `room.broken`): a file with a
+  second room within `roomTrace.linear` inside a face edge gives that
+  room's `room.broken` and no `room.shared` (`DG2`).
+- **`room.tint`'s messages** name the step: step 2, "its tint covers its
+  holes: the keyholed ring does not triangulate"; step 3, "its tint is an
+  unfilled outline: its face does not triangulate"; a hole left out, "its
+  tint covers n of its holes: no clear keyhole reaches them" (D9's
+  amendments).
+- **`M-10objects`' site is the room's call** (Ruling 10-27): `objectsOf`
+  takes no `self`, so "answers only self" is `RoomType.diagnose`'s call
+  replaced by `[self]`, killed by `DG1`; `OB1` pins `objectsOf` itself.
 
 ### D23 — The sample plan
 
@@ -1499,6 +1979,17 @@ Decision 16, on 08 D18's plan (coordinates relative to `x0 = 12000, y0 =
   heights 125 and 100, and the pole inside its face.
 
 **Pinned by:** `SP1`–`SP7`.
+
+**Amended at execution (Plan 10):** Task 18's probe (Ruling 10-20)
+measured **every figure above**: 581 entities (549 + 28 + 1 + 3); the
+seven areas to the square millimetre and their labels; total 111,138,800;
+every tint at step 1; `diagnostics()` and `drift()` empty; the column
+1,340 mm clear of the nearest door's approach. The review recomputed all
+seven areas from the coordinates. Setting the page after the rooms
+(X18-pageLate) is equivalent **on this plan**, since its page is 1:50 m,
+the fallback's: the bytes are identical; `SP5`'s `drift()` catches R-27's
+hazard as soon as the page differs (the review's probe at 1:100). The
+pixel tests hide the page grid except `RR1` and `OL4`.
 
 ### D24 — Render layer (g): the selected room's ring (decision 27)
 
@@ -1592,6 +2083,26 @@ rebuild across frames with a room selected, `debugRebuilds` unchanged), `OL4`
 (app: selecting a sample-plan room outlines its labels and its ring; the
 Living room's outline shows the column hole); M-10ring, M-10ringdup.
 
+**Amended at execution (Plan 10):**
+- **No kind check on the boundary** (the rule as written): a malformed
+  file whose fill names a boundary of a kind the painter cannot fill from
+  may outline a fill the painter skips; `validate` reports such files.
+- **A fill leaf is never movable** (the Task 8 review's M2): `GripCache`
+  does not put a fill leaf's key in the movable set, as `GripDrag`
+  never captures a fill (03 D4), so `isMovable` agrees with the move, and
+  a hidden-boundary fill selected alone shows no rotation grip.
+- **`OL2` also holds a visible boundary on a locked layer,** outlined once
+  (rendering accepts it, picking rejects it; `rv8-picking`).
+- **Known limit: an ATTRIB key.** `GripCache` excludes a fill leaf from
+  the movable set but not an ATTRIB leaf, although a move carries an
+  attribute only with its host (a path older than D24). No pick or band
+  yields an ATTRIB key, so no user reaches it (the controller's ruling,
+  not taken).
+- **`OL3` is at the render layer** (Ruling 10-24): "a room selected" is a
+  root group holding a fill whose boundary is invisible. The Task 8 review
+  measured the frame path with the VM's allocation tracer: `isMovable`'s
+  hash allocates only while cold, nothing warm.
+
 ## The controller's engine list, checked
 
 The decision record ends with the controller's reading of the engine
@@ -1684,6 +2195,32 @@ changes. Checked against the code at `418d4c7` and the spike:
   `SeparatorParams`' group, or 13 adds a plot flag." `roadmap/10` is marked
   done at the merge, as usual.
 
+**Amended at execution (Plan 10):** the files as built.
+- **Engine:** the three `lib` files named above, no other
+  (`document/style.dart` for D17). Tests: `text_test.dart`,
+  `attributes_test.dart`, `page_test.dart`, `dissolve_test.dart`,
+  `before_view_test.dart`, `place_test.dart`, `objects_of_test.dart`, and
+  `test/document/reserved_handles_test.dart` (`RP2`, Ruling 10-1). The
+  clients (Ruling 10-2), `Caption`, `Swatch`, `Gauge`, `Dial`, `Fuse`,
+  `Slab`, `Rod` and `Lens`, are in `test/parametric/support/clients.dart`;
+  `SD8`'s two-role type is built inside its test.
+- **Render layer:** exactly the three `lib` files named above.
+- **App:** D1's files. `room.dart` imports `package:flutter/foundation.dart`
+  for `@visibleForTesting` (`debugRoomGenerates`, Ruling 10-19;
+  `debugTintFailedSteps`, Ruling 10-16); it is not one of the three pure
+  files. `wall.dart` and `wall_geometry.dart` change for Ruling 10-8 only.
+  Tests, all new files (Ruling 10-1): `room_inputs_test`, `room_trace_test`,
+  `room_localise_test`, `room_tint_test`, `room_label_test`,
+  `room_object_test`, `room_dissolve_test`, `room_diagnostics_test`,
+  `room_follow_test`, `room_cost_test`, `room_tie_test` (decision 29),
+  `room_tool_test`, `room_panel_test`, `room_grips_test`,
+  `room_paint_test`, `separator_test`, `separator_tool_test`, and
+  `test/support/room_fixture.dart`. Of 07's and 08's app tests only
+  `startup_plan_test.dart` (D23) and `planner_shell_test.dart` (Ruling
+  10-22, D8's amendment) changed.
+- **Roadmap:** `roadmap/13-export-and-print.md` carries the line above, as
+  its fourth "Decision already made" (Task 20).
+
 ### Amendments to 06, 07 and 08
 
 | Section | Amended by | What changes |
@@ -1700,6 +2237,11 @@ changes. Checked against the code at `418d4c7` and the spike:
 | 08 D4's amendment (the view hides a lost object) | D16.1 | kept, and extended to the snapshot |
 | 02 D9 (the overlay's outline cache: "a statement about what is drawn") | D24 | a drawn fill whose boundary is not drawn, with the fill's owner, contributes its boundary's loop |
 | 03 D7 (the move and rotate preview) | D24, R-31 | non-movable keys are left out of the preview, as 08 D16 leaves them out of the move |
+
+**Amended at execution (Plan 10):** one row more. **07 D6 (the wall's
+local ring)**, by D4 and Ruling 10-8: `_localOutlineOf` is a wrapper over
+a pure `localOutlineOf` in `wall_geometry.dart`; the wall's stored
+children are unchanged bit for bit.
 
 ### Invariants
 
@@ -1938,6 +2480,45 @@ here and not left to the plan:
   `room.degenerate`.
 - **The sample plan:** `SP1`–`SP7` (D23).
 
+**Amended at execution (Plan 10):** identifiers as built.
+- **Ruling 10-1:** `SD10` is split: its first half stays `SD10` (no live
+  reader, no place-box call), its second (`objectsOf`) is **`OB1`**, in
+  `objects_of_test.dart`. `RP2` is an engine test (D17's amendment).
+- **Tests the plan and its rulings added**, each with a mutant red on it:
+  - `SR5` (`ensureDashedLinetype`, D3), `DF1` (the Differential check),
+    `FZ1` (a seeded random run: no edit refused because of rooms; Ruling
+    10-1);
+  - `RI2` (`RoomInput`'s exact `==`, D4), `LZ4` (non-finite seeds and empty
+    documents, D7), `RG7` (the read box's margin, D18), `SD5b` and `SD11b`
+    (D16);
+  - `DE1`–`DE3` (decision 29's tied islands, `room_tie_test.dart`; `DE1`
+    holds a star of 1,002 columns tied to one column, which a split pass
+    that stops at 1,000 loops gets wrong, `rv14b-splitOnce`);
+  - `TT8` (the contour cache against a trace), `TT9` (a click builds no
+    contour), `SG1` (M and S typed into a text entry), `ST5` (re-trimming),
+    `ST6` (the first crossing) (D19–D21).
+- **Cases added inside existing tests:** `TN1` grew beyond the spec's
+  three cases (the flush column, the acute slit, the far holes of the fuzz
+  plans t107, t0 and t92, a slit crossing and a slit touching a hole not
+  yet joined, a pinched hole's step 2); `RT6`'s pinch with 20 relabelled
+  variants; `RT8`'s free tree, diagonal and 0.5 nm-short separators and
+  the triangle hole; `RA1`'s ft² tie (D11's amendment).
+- **Ruling 10-23:** `RR1` also runs a window band over bare floor
+  (selects nothing) and over a label (selects the room), and `RR2` also
+  samples the keyhole's bridge in Living (the tint's colour, not a
+  stroke): gate 10's "band-selected or stroked".
+- **Ruling 10-18:** "the hover allocates nothing" is read as counters
+  (`debugTracedSegments`, `RoomTool.debugPreviewBuilds`, and since the
+  contour cache `debugTraces` and `debugContourBuilds`); the render
+  layer's allocation tests stay unedited.
+- **Ruling 10-21:** `DF1` runs its twenty edits on the fixture's rebuild
+  of the sample plan at the corpus far origin in own groups; one edit
+  dissolves the Bath (the Task 14 review's m-4). In this plan's run it
+  compared 60 tint points of six rooms bit for bit.
+- **Ruling 10-28:** the pixel tests frame with `fit` or a fractional
+  translation and sample the brightest or darkest of a 3 × 3
+  neighbourhood.
+
 ### Named mutants
 
 Each is fired with a `cp` backup, restored with `cp`, then `diff` against
@@ -2015,6 +2596,25 @@ references), M-rule4 (no rule 4; M-10shared covers the wrong-deletion
 direction), M-unpick and M-unpick2 (no flag; M-10visible is the one
 mechanism now).
 
+**Amended at execution (Plan 10):** the mutants as fired
+([plan-10-mutation-log.md](../notes/plan-10-mutation-log.md)).
+- **All 51 killed, at 60 fires** (one per site or form, Ruling 10-26):
+  M-10dissolve at three (the engine's planner in two forms,
+  `RoomType.dissolves`), M-10pagekey, M-10offset, M-10sep and M-10preview
+  at two each, M-10grow and M-10pin in two forms each, M-10inputbox's
+  literal form besides its value form. M-10inputbox's literal form
+  (`placeBoxOf ?? Object()`) is equivalent: `Aabb2` has no `==`, so its
+  identity never matches; the value form is killed by `SD11`.
+- **Killers that differ from the tables:** X11-canonical is killed by the
+  tracer tests, not `LZ1` (D5's amendment); M-10before by `RG3` too (D16's
+  amendment); M-10cert's app-level killers are `FZ1` and `LZ2`, not `DF1`;
+  M-10offset's grip site is killed by `GR1`, not `RL3` (a model-level
+  test); M-10pagekey's room site by `RA2`. **M-10hover** survived `TT6`
+  once the contour cache existed and was killed after a fixture fix
+  (`ee610fd`; D19's amendment).
+- **The tally** (362 fired, 331 killed, 26 equivalent, 5 accepted as cost
+  only, 0 surviving) is in the results note.
+
 ### Differential check
 
 - **`drift()` is empty** after every edit in every relational test.
@@ -2025,6 +2625,14 @@ mechanism now).
 - **The localised trace equals the all-inputs trace, bit for bit**
   (`LZ1`), on every fixture at every placement, with and without far
   clutter.
+
+**Amended at execution (Plan 10):** the second item is `DF1` (Ruling
+10-21; the tests' amendment), and `FZ1` and `DF1`'s end also compare
+`traceRoomAmong` with the all-inputs `traceRoom` over every input, bit
+for bit, and each area label with `formatArea` of the all-inputs area
+(the Task 14 review's m-1). `DF1`'s own bitwise comparison
+(`expectSameTrace`) has no killer: every face in its script closes in its
+first tracing box.
 
 ## Exit gate
 
@@ -2073,6 +2681,11 @@ mechanism now).
     the selection colour; the separator's dashes and whether 0.35 mm reads
     as thin (S-15); moving and deleting walls around rooms, and undo; the
     label grip; the Room section's name field.
+
+**Amended at execution (Plan 10):** criterion 10's witnesses include
+`RR1`'s window bands and `RR2`'s bridge sample (Ruling 10-23).
+Criteria 1's macOS half and 17 stay owed by the human; the results note
+lists the look as an unticked checklist per item and platform.
 
 ## Spec rulings
 
@@ -2131,6 +2744,11 @@ outlines) by decision 27, 3 (the tint's strength) by decision 28. The
 controller ruled that the Dining room (S-16) is within decision 16 and
 that the separator's weight (S-15) stays at the thinnest weight with
 evidence; gate 17's look covers whether it reads as thin.
+
+**Amended at execution (Plan 10):** one question arose in flight and the
+human answered it. **Decision 29** (2026-09-26, after Task 14's review):
+the tint lost to a separator tying an island to the ring is fixed in 10,
+by a new task after Task 14 (Tasks 14b and 14c; D5 step 9, D6 and D9).
 
 
 ## Revision 2

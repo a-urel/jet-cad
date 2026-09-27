@@ -1,5 +1,61 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-27. **Plan 10 (rooms and area) is EXECUTED on
+`plan-10/rooms`, NOT MERGED.** The merge is the human's, `--no-ff`. **Exit
+gate 15 of 17: criterion 1's macOS half (`flutter build macos --release`
+and the four lines on macOS) and criterion 17 (the look) are OWED: the
+human's, never simulated.**
+- **What landed:**
+  - rooms in the floor planner. A room is its own parametric object
+    storing a seed point, a name and an optional label offset. It
+    regenerates from every live wall and separator: the face of the plan
+    that holds its seed, bounded by the walls' uncut inner faces (doorways
+    never break it) and the separators, minus the walls standing inside
+    it. It draws a translucent tint (the page's foreground at about 10%)
+    and two labels, its name and its net area in the page's unit (m² or
+    ft²), at the face's pole of inaccessibility. It dissolves in the same
+    undo step when its seed ends up in a wall or in an unbounded face;
+  - room separators: a free two-point line, dashed, that splits a face as
+    a zero-thickness wall would; a separator tying an island to the ring
+    makes that island a hole (decision 29, added in flight);
+  - the Room tool (M) and the Separator tool (S); a Room section with a
+    free-text Name field; a label grip and separator end grips; a selected
+    room outlines its labels and its ring; diagnostics (`room.shared`,
+    `room.broken`, `room.tint`, `room.degenerate`,
+    `separator.degenerate`);
+  - the sample plan's seven rooms, the Living | Dining separator and a
+    column;
+  - in the engine: generated text, record attributes on add, the page on
+    the view with a per-type page key, a dissolve verdict, spatial
+    dependencies (a true before-view, place contributors and readers, an
+    exact trigger, a bulk neighbour pass, `objectsOf`), and a reserved
+    DASHED linetype handle. In the render layer: a drawn fill with a
+    hidden boundary outlines its area, and the move preview skips keys the
+    move leaves behind.
+- **Gates on the final tree (Linux container):**
+  - engine 1,037 (+ the two standing Linux-only hash tests);
+  - render layer 940 + 1 skip + 7 standing goldens;
+  - harness 82;
+  - app 348;
+  - `flutter build web --release` `✓ Built`.
+- **Mutants:** 362 fired: 331 killed, 26 equivalent, 5 accepted as
+  cost-only, 0 surviving; 16 N/A. The spec's 51 named mutants took 60
+  fires and all 51 are killed.
+- **Owed:**
+  - `flutter build macos --release` and the gate lines on macOS: the
+    human's machine;
+  - the look: twelve items per platform, on macOS, in Chrome and in
+    Firefox (the results note's checklist, unticked).
+- **Next step: the human's choice.** The plan's own order is the final
+  whole-branch review (and its fix wave, if any), then the ledger archive
+  as the branch's last commit, then the human's macOS build and look, then
+  the merge. Each is the human's to call, as is any push.
+
+See [Plan 10](#plan-10--rooms-and-area-executed-on-plan-10rooms-not-merged)
+and [Resume here](#resume-here).
+
+*Earlier, 2026-09-26:*
+
 **Last updated:** 2026-09-26. **Plan 08 (openings) is MERGED into `main`
 at `b96ed12`**, `--no-ff`, on the human's decision, and pushed by the
 human. The human reported "merged and pushed main"; no macOS build or
@@ -431,6 +487,139 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 10 — rooms and area (executed on `plan-10/rooms`, not merged)
+
+**Plan 10 gives the floor planner its rooms.** A room is its own
+parametric object: a root-level group carrying `RoomParams` (a seed point,
+a name, and a label offset or null).
+- **It reads every live wall and separator by place,** not by reference:
+  its face is traced from the walls' uncut inner faces (so doorways never
+  break it) and the separators, as a planar arrangement walked as
+  half-edge faces, localised exactly to the inputs near the face and
+  canonical, so a trace among a few inputs equals the trace among all of
+  them bit for bit.
+- **It draws a tint and two labels:** one translucent region (ACI 7 at
+  transparency 229, resolved against the paper at paint time) with its
+  holes keyholed through a 0.5 mm slit, and the name and the net area at
+  the face's pole of inaccessibility, sized from the page's scale.
+- **It dissolves** in the same edit when its seed lands in a wall or an
+  unbounded face; two rooms in one face both survive and are reported.
+- **A separator** is a free two-point dashed line that splits a face; an
+  island tied to the ring by separators is a hole (decision 29).
+
+**Where it stands.** `plan-10/rooms` was cut from `spec-10/rooms` at
+`d4167e2` (`origin/main` `418d4c7` + spike note `3054616` + spec revisions
+`5015828`, `6163da8`, `9fad8ab` + plan `d4167e2`), in the worktree
+`.claude/worktrees/plan-rooms`. **The base for every diff is `418d4c7`.**
+- Tasks 1–19, their fix rounds and Tasks 14b and 14c (added in flight by
+  the human's decision 29) are at `abc7e7b..fe22430`.
+- Task 20 is `962c402` (a fixture comment, so the `spike_rooms` grep is
+  empty) and the commit that adds this section (the results note, the
+  spec and plan amendments, this file, the roadmap).
+- The human authorised pushes at `76d3803`, `6fe558e` and `02130fc`.
+
+**NOT MERGED.** Next, in the plan's order and each the human's to call:
+the final whole-branch review and its fix wave if any, the ledger archive
+(`docs/superpowers/ledgers/2026-09-26-rooms/`) as the branch's last
+commit, the human's macOS build and look, and the merge (`--no-ff`).
+
+**Documents:**
+- **Spec:** [2026-09-26-rooms-design.md](docs/superpowers/specs/2026-09-26-rooms-design.md),
+  revision 3.
+  - Amended in flight by Tasks 14b and 14c: D5 step 9, D6 and D9
+    (decision 29).
+  - Amended at execution by Task 20: the header, D3–D5, D7–D24, the Files,
+    the 06/07/08 table, the tests by area, the named mutants, the
+    Differential check, the exit gate and the open questions.
+- **Plan:** [2026-09-26-rooms.md](docs/superpowers/plans/2026-09-26-rooms.md),
+  with "Amended at execution" notes on the header, Tasks 1–19 and the
+  mutant assignment.
+- **Results:** [2026-09-26-plan-10-results.md](docs/superpowers/notes/2026-09-26-plan-10-results.md).
+- **Mutation log:** [plan-10-mutation-log.md](docs/superpowers/notes/plan-10-mutation-log.md).
+  **362 fired, 331 killed, 26 equivalent, 5 accepted (cost), 0
+  surviving; 16 N/A.**
+- **Spike:** [2026-09-26-rooms-spike-findings.md](docs/superpowers/notes/2026-09-26-rooms-spike-findings.md)
+  (`spike/10-rooms` at `d30bce5`, kept as the record, never to be merged).
+
+**Delivered:**
+- **In `jet_cad_2d`,** changing only `parametric_system.dart`,
+  `regeneration.dart` and `document/style.dart`:
+  - `Generated.text`; `transparency`, `flags`, `boundaryFlags`,
+    `linetype`, `lineweight` on `Generated`, written on add by one
+    `_recordOf`; a matched TEXT's string rewritten;
+  - `ParametricView.page` and `ParametricType.pageKey`, page seeds after
+    the dangling check;
+  - `ParametricType.dissolves`, planned inside the edit with its own
+    detach;
+  - `contributesPlace`, `placeBox`, `placeInput`, `readsPlaces`,
+    `readBox`; a snapshotting survey (a true before-view); the trigger;
+    `placedIn` with a bulk sort-and-sweep neighbour pass; `placeBoxOf`;
+    `objectsOf`; `debugPlaceBoxCalls` and `debugReadBoxCalls`;
+  - `ReservedHandles.dashedLinetype` (`Handle(6)`); the default tables are
+    unchanged.
+- **In `jet_cad_2d_flutter`:** `OutlineCache`'s fill arm (a drawn fill
+  whose boundary is not drawn, with the fill's owner, outlines its
+  boundary); `GripCache.isMovable`; `_paintPreview` skips immovable keys.
+- **In `apps/floor_planner`:**
+  - `room.dart`, `room_trace.dart`, `room_label.dart`, `room_inputs.dart`
+    (the last three pure Dart), `separator.dart`, `room_tool.dart`,
+    `separator_tool.dart`, `room_grips.dart`, `separator_grips.dart`;
+  - `wall_geometry.dart`'s shared `localOutlineOf` (Ruling 10-8);
+  - the Room section and a text field kind in `selection_panel.dart`; M
+    and S in the shell and the shortcut guard; the sample plan's rooms.
+
+**Rulings a reader must know** (all of them, with costs, are in the
+results note):
+- **Rooms follow every wall by place, exactly:** the trigger rebuilds a
+  room when a wall or separator whose input changed has a before or after
+  box touching the room's read box (its stored tint's points, its seed,
+  2 mm); a wall's input is its joined ring, compared with `==`.
+- **The tint never refuses an edit:** keyholed ring, else the outer ring
+  alone, else an unfilled outline, each fallback reported `room.tint`; the
+  area label comes from the trace, never the tint.
+- **Rooms are not moved or rotated by the select tool;** the label grip
+  moves the labels, and a drop on the pole returns them to auto, whatever
+  F3 says.
+- **The Room tool's hover** short-circuits outside the plan's bounds and
+  answers from cached outer contours inside them (the re-review's T-8,
+  adopted after Task 15's review).
+
+### What Plan 10 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **1,037** pass and the 2 standing Linux-only hash tests (`00:12 +1037 -2`, exit 1); analyze and format clean. 1,014 at the branch point |
+| `packages/jet_cad_2d_flutter` | **940** pass, 1 skip, 7 standing goldens (`00:40 +940 ~1 -7`, exit 1); analyze and format clean. 936 at the branch point |
+| `apps/dev_harness_2d` | **82** (`00:27 +82: All tests passed!`, exit 0), unchanged |
+| `apps/floor_planner` | **348** (`01:19 +348: All tests passed!`, exit 0); analyze and format clean; `flutter build web --release` `✓ Built`. 244 at the branch point |
+| areas (`RT1`) | the sample plan's six rooms at six placements: worst error 0.0016 mm² (+1e9 mm, turned, own groups), against 1e-2 |
+| the sample plan (`SP1`–`SP7`) | 581 entities; seven areas as D23, total 111,138,800 mm²; every tint at step 1; `drift()` and `diagnostics()` empty |
+| a wall move (`RK2`, JIT) | about 8.7 ms at 612 walls and 146 rooms (grid), 6.5 ms at 601 walls and 168 rooms (strips); 2–6 rooms rebuilt per move whatever the size |
+| the Room tool's hover (`TT6`) | 19.0 µs per courtyard hover among 600 walls, 11.6 µs outside a 636-wall plan (9.9 and 12.4 ms before the contour cache) |
+| the bulk pass (`SD7`) | 5,408 overlap tests at n = 200, against n²/4 = 10,000 |
+| a rebuild's trace (`LZ3`) | at most 50 segments per rebuilt room on the sample plan, unchanged by 40 far walls |
+| random run (`FZ1`) | 200 steps, no refusal; 1,855 tint checks, all step 1 (60 were outlines before decision 29) |
+| mutations | **362 fired, 331 killed, 0 surviving** |
+| the allocation invariants | green and unedited since `418d4c7` |
+| the look | **OWED** (twelve items per platform) |
+
+**Exit gate: 15 of 17.** Criteria 2–16 PASS. Criterion 1 is green on
+Linux, and its macOS half is OWED. Criterion 17 is OWED.
+
+**Known limits and debt, one line each** (the full lists are in the
+results note):
+- only a loaded file can make an opening whose host room dissolves; it is
+  left dangling;
+- a mirrored room group's labels are not kept horizontal (file-only);
+- the slit's end can tint up to 0.5 mm of a wall per chained bridge;
+- after a step-3 outline, a room's tint draws over its labels;
+- a click rebuilds the room inputs three times (about 22 ms at 636 walls);
+- a wall move costs about 7–9 ms at 600 walls, the per-edit survey's O(n);
+- dash patterns in paper units and the hairline: a render follow-up;
+  separators do not plot (13's line).
 
 ---
 
@@ -2102,7 +2291,17 @@ into a standing test. Full account:
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
 | `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **MERGED at `fb0f87d`.** The worktree is the session that ran the plan; remove it and `git branch -d plan-05/drawing-tools` when that session closes. The pre-merge state, for the record: **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**In flight: `plan-08/openings`** (Plan 08, openings), in the worktree
+**In flight: `plan-10/rooms`** (Plan 10, rooms and area), in the worktree
+`.claude/worktrees/plan-rooms`, cut from `spec-10/rooms` at `d4167e2`. It
+is executed and not merged; see
+[Plan 10](#plan-10--rooms-and-area-executed-on-plan-10rooms-not-merged).
+`spec-10/rooms` holds the spike note, the spec and the plan commits, and
+`spike/10-rooms` (`d30bce5`) is the spike's record, never to be merged.
+The review worktree `.claude/worktrees/plan-rooms-review` (detached) is
+the reviewers'. The local `main` ref here is stale (`22957d1`); Plan 10
+diffs against `418d4c7`.
+
+*Before Plan 10 ran, this paragraph read:* **In flight: `plan-08/openings`** (Plan 08, openings), in the worktree
 `.claude/worktrees/plan-openings`, cut from `spec-08/openings` at
 `e30386a`. It is executed and not merged; see
 [Plan 08](#plan-08--openings-executed-on-plan-08openings-not-merged).
@@ -2270,7 +2469,33 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice of what comes after 08.**
+**Immediate next step: the human's choice, on `plan-10/rooms`** (Plan 10,
+rooms and area, executed and NOT MERGED).
+- Tasks 1–19, their fix rounds and Tasks 14b and 14c are done
+  (`abc7e7b..fe22430`); Task 20 is `962c402` and the commit that writes
+  this paragraph.
+- The four gate lines are green on Linux: engine 1,037 + 2 standing;
+  render layer 940 + 1 skip + 7 standing; harness 82; app 348; web `✓
+  Built`.
+- 362 mutants were fired: 331 killed, 0 surviving, 26 equivalent, 5
+  accepted as cost-only.
+- **OWED, never simulated:** `flutter build macos --release`, the gate
+  lines on macOS, and the look (twelve items per platform, from
+  [2026-09-26-plan-10-results.md](docs/superpowers/notes/2026-09-26-plan-10-results.md)).
+
+**What the plan has next, in order; the human decides each:**
+1. the final whole-branch review, and its fix wave if any;
+2. the ledger archive (`docs/superpowers/ledgers/2026-09-26-rooms/`) as
+   the branch's last commit;
+3. the human's `flutter build macos --release`, the gate lines on macOS,
+   and the look;
+4. the merge, `--no-ff`, from the main checkout.
+
+Plan 06's itemised look is still OWED; so are 07's and 08's itemised
+looks. Nothing was simulated to fill in any look. See
+[Plan 10](#plan-10--rooms-and-area-executed-on-plan-10rooms-not-merged).
+
+*Before Plan 10 ran, this paragraph read:* **Immediate next step: the human's choice of what comes after 08.**
 `main` is at `b96ed12`: Plan 08 (openings) merged, pushed by the human.
 Its macOS build and look were not reported and stay OWED. **The options:**
 1. rotate about a chosen base point (the human asked on 2026-09-24 about
