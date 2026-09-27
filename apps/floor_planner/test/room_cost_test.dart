@@ -2,10 +2,17 @@
 // entity drawn among them asks no type for a place box or a read box
 // (RK1); a wall move among many walls and rooms is timed and its rebuilt
 // rooms counted (RK2, 06's NC4 method, printed, not asserted: the results
-// note records it).
+// note records it); a room's rebuild on the sample plan traces no more
+// segments than the bound its own run set (LZ3, spec 10 D7).
+import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/room.dart';
+import 'package:floor_planner/parametric/room_inputs.dart';
+import 'package:floor_planner/parametric/room_trace.dart';
+import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'support/room_fixture.dart';
 
@@ -71,7 +78,100 @@ List<Handle> addRooms(Plan plan, List<(int, int)> cells) {
   return handles;
 }
 
+/// `LZ3`'s bound: the segments one room's rebuild may trace on the sample
+/// plan (spec 10 D7). Set from the plan's own run (Task 18's probe, Ruling
+/// 10-20): P5 moved 10 mm east rebuilds the Kitchen and the Bath, 99
+/// segments in all; through the document adapter the Kitchen's localised
+/// trace takes in 49 and the Bath's 50 (growth to r = 4,000 mm, the
+/// certificate, the canonical trace among its four walls). One trace among
+/// every contributor takes in 41 (ten bands of 4 segments and the
+/// separator's 1), so the growth costs more than tracing everything on a
+/// plan of 11 contributors; what it buys is a cost that does not grow with
+/// the plan, which `LZ3`'s clutter case pins.
+const int kSampleRebuildSegments = 50;
+
 void main() {
+  test(
+      'LZ3 a room\'s rebuild on the sample plan traces fewer segments than '
+      'the bound set from the plan\'s run', () {
+    final m = FlutterTextMeasurer();
+    addTearDown(m.clear);
+
+    /// The sample plan's P5 moved 10 mm east, with [clutter] walls placed
+    /// far east of the plan first: the rooms rebuilt, and the segments
+    /// their rebuild traced.
+    (int, int) moveP5({required int clutter}) {
+      final doc = startupPlan(m);
+      final system = installParametric(doc);
+      addTearDown(system.dispose);
+      for (var i = 0; i < clutter; i++) {
+        // 3 m walls in a row 40 m east of the plan, 1 m apart, 200 thick:
+        // contributors that touch nothing near any room.
+        final h = doc.handleSeed.next();
+        doc.commands.execute(CompoundCommand([
+          AddNodeCommand(GroupNode(
+              handle: h,
+              parent: doc.rootHandle,
+              transform: Transform2.identity(),
+              children: const [])),
+          SetComponentCommand<WallParams>(
+              h,
+              WallParams(66000.5 + 4000 * i, 12000.25, 69000.5 + 4000 * i,
+                  12000.25, 200, Justification.centre)),
+        ], label: 'Add wall'));
+      }
+      final walls = doc.components.withComponent<WallParams>().toList()
+        ..sort((a, b) => a.value.compareTo(b.value));
+      final p5 = walls[8];
+      final w = doc.components.get<WallParams>(p5)!;
+      expect(
+          w,
+          const WallParams(
+              21500, 8125, 21500, 11500, 120, Justification.centre),
+          reason: 'premise: P5');
+      final rooms = {
+        for (final r in doc.components.withComponent<RoomParams>())
+          doc.components.get<RoomParams>(r)!.name: r,
+      };
+      final generates = debugRoomGenerates, segments = debugTracedSegments;
+      doc.commands.execute(SetComponentCommand<WallParams>(
+          p5,
+          WallParams(
+              w.sx + 10, w.sy, w.ex + 10, w.ey, w.thickness, w.justification)));
+      final rebuilt = debugRoomGenerates - generates;
+      final traced = debugTracedSegments - segments;
+      // The premise, by hand: the Kitchen grows by 10 mm and the Bath
+      // shrinks by 10 mm, (4,380 ± 10) × 3,190 = 14,004,100 ("14.00 m²")
+      // and 13,334,200 ("13.33 m²"), each at least 0.0005 m² from a tie.
+      expect(labelStrings(doc, rooms['Kitchen']!), ['Kitchen', '14.00 m²']);
+      expect(labelStrings(doc, rooms['Bath']!), ['Bath', '13.33 m²']);
+      expect(driftOf(doc), isEmpty);
+
+      // Each rebuilt room's own trace, through the document adapter: the
+      // same growth, certificate and canonical trace as its view's.
+      final inputs = RoomInputs(doc);
+      addTearDown(inputs.dispose);
+      for (final name in ['Kitchen', 'Bath']) {
+        final before = debugTracedSegments;
+        final face = traceRoomAmong(
+            doc.components.get<RoomParams>(rooms[name]!)!.seed, inputs);
+        expect(face, isA<Traced>(), reason: name);
+        expect(debugTracedSegments - before,
+            lessThanOrEqualTo(kSampleRebuildSegments),
+            reason: '$name, clutter $clutter');
+      }
+      return (rebuilt, traced);
+    }
+
+    final (rebuilt, traced) = moveP5(clutter: 0);
+    expect(rebuilt, 2, reason: 'premise: the Kitchen and the Bath');
+    expect(traced, lessThanOrEqualTo(kSampleRebuildSegments * rebuilt));
+    // Forty walls far away change nothing a rebuild traces: the growth
+    // never reaches them. Traced among every contributor, each room would
+    // take in 160 segments more.
+    expect(moveP5(clutter: 40), (rebuilt, traced));
+  });
+
   test(
       'RK1 a line drawn among the sample plan\'s rooms makes no place-box or '
       'read-box call', () {

@@ -339,11 +339,11 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void initState() {
     super.initState();
-    // Spec 06 D13, Ruling 06-12, spec 08 D18: the document arrives built.
-    // startupPlan builds its walls and openings through a parametric system
-    // of its own and disposes it before returning, so this one installs over
-    // a finished document and trusts its geometry, as it would a loaded file
-    // (06 D10).
+    // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
+    // arrives built. startupPlan builds its walls, openings, separator and
+    // rooms through a parametric system of its own and disposes it before
+    // returning, so this one installs over a finished document and trusts
+    // its geometry, as it would a loaded file (06 D10).
     _parametric = installParametric(_document);
     _page.addListener(_onPage);
   }

@@ -7,11 +7,15 @@
 // line stays something a person can check by eye: do the walls close, does
 // the door swing into the room, is the tile grid square.
 //
-// **Walls and openings are parametric objects** (spec 08 D18): nine 07
-// walls and fifteen 08 openings, at the places the hand-drawn double lines
-// and symbols stood before. The plan builds them through its own parametric
-// system, disposes it, and hands the shell a finished document, which the
-// shell's system trusts as it would a loaded file (06 D10).
+// **Walls, openings, a separator and rooms are parametric objects** (spec
+// 08 D18, spec 10 D23): nine 07 walls and fifteen 08 openings, at the
+// places the hand-drawn double lines and symbols stood before; a 400 mm
+// column in the living room, a tenth wall; the Living | Dining separator;
+// and seven rooms, one per space. The plan builds them through its own
+// parametric system, sets the page through it before the rooms (so they
+// read the real page), disposes it, and hands the shell a finished
+// document, which the shell's system trusts as it would a loaded file
+// (06 D10).
 //
 // **Off-origin and not axis-symmetric, by construction.** A drawing centred
 // on (0, 0) is the degenerate fixture this repository keeps rediscovering,
@@ -24,6 +28,8 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'parametric/catalog.dart';
 import 'parametric/opening.dart';
+import 'parametric/room.dart';
+import 'parametric/separator.dart';
 import 'parametric/wall.dart';
 
 /// Zoom bounds for the product camera, in logical pixels per world unit
@@ -49,10 +55,14 @@ const DraftColor _finishColor = TrueColor(0xBBBBBB);
 /// one the app owns.
 DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   final doc = DraftDocument.empty(measurer: measurer);
+  // Spec 10 D3, D23: the DASHED record enters the tables when the document
+  // is made, outside the history, before any separator names it.
+  ensureDashedLinetype(doc);
   final p = _Pen(doc);
-  // Spec 08 D18: the walls and openings regenerate through this system as
-  // they are added; it is disposed before the page is set, so the shell can
-  // install its own over the finished document.
+  // Spec 08 D18, spec 10 D23: the walls, openings, separator and rooms
+  // regenerate through this system as they are added; it is disposed once
+  // the rooms are placed, so the shell can install its own over the
+  // finished document.
   final system = installParametric(doc);
 
   // --- Walls (spec 08 D18's table): each in its own root-level group at the
@@ -157,16 +167,44 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   p.circleRegion(x0 + 7600, y0 + 6200, 350); // lamp, after the table
   p.circleRegion(x0 + 10300, y0 + 1200, 220); // basin
 
-  // Spec 08 D18: the plan is finished; the shell installs its own system.
-  system.dispose();
+  // --- Spec 10 D23: a column, the Living | Dining separator, the page and
+  // seven rooms, in that order, after the furniture. ---
+  // The column: a 400 x 400 square in the living room, x 23,500-23,900,
+  // y 13,800-14,200, a tenth wall. After the finishes, so its band draws
+  // over the parquet it stands on. It stands clear of every doorway's
+  // 900 mm approach: the nearest, the bath/living door in P3, reaches
+  // y 12,460.
+  p.wall(x0 + 11500, y0 + 6000, x0 + 11900, y0 + 6000, 400);
+  // The separator at x = 21,500, from P3's north face (y 11,560) to E3's
+  // inner face (y 16,750), both ends on faces: it splits the living room
+  // from a dining area, clear of the sofa (ending at x 21,000) and the
+  // table.
+  p.separator(x0 + 9500, y0 + 3560, x0 + 9500, y0 + 8750);
 
   // Spec 04 D12 and Ruling 04-1: the page is document data, attached
-  // through the log like everything else, and then the history is cleared
-  // so a fresh document has none — as a loaded one has none.
+  // through the log like everything else. Spec 10 D23 (R-27): it is set
+  // through the plan's system before the rooms, so they read the real page,
+  // not the fallback (10 D11). Centred on the extents, which the rooms do
+  // not change.
   PageComponent.register(doc.components);
   doc.header.units = DrawingUnits.millimeters;
   doc.commands.execute(SetComponentCommand<PageComponent>(
       doc.rootHandle, startupPage(doc.extents)));
+
+  // Seven rooms (spec 10 D23's table): the six spaces, and the dining area
+  // the separator splits off the living room. Each seed lies in no band.
+  p.room(14500, 10500, 'Hall');
+  p.room(13300, 15000, 'Bedroom 1');
+  p.room(15800, 15000, 'Bedroom 2');
+  p.room(19000, 10000, 'Kitchen');
+  p.room(23500, 10000, 'Bath');
+  p.room(24500, 16000, 'Living');
+  p.room(19000, 16000, 'Dining');
+
+  // Spec 08 D18: the plan is finished; the shell installs its own system.
+  // Then the history is cleared, so a fresh document has none — as a loaded
+  // one has none.
+  system.dispose();
   doc.commands.clearHistory();
   return doc;
 }
@@ -261,6 +299,34 @@ class _Pen {
           children: const [])),
       SetComponentCommand<OpeningParams>(h, o),
     ], label: 'Add ${o.kind.name}'));
+  }
+
+  /// Spec 10 D23: a separator from (`sx`, `sy`) to (`ex`, `ey`), in its own
+  /// root-level group at the identity, as the Separator tool adds one.
+  void separator(double sx, double sy, double ex, double ey) {
+    final h = doc.handleSeed.next();
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          children: const [])),
+      SetComponentCommand<SeparatorParams>(h, SeparatorParams(sx, sy, ex, ey)),
+    ], label: 'Add separator'));
+  }
+
+  /// Spec 10 D23: a room seeded at (`x`, `y`), named [name], auto label, in
+  /// its own root-level group at the identity, as the Room tool adds one.
+  void room(double x, double y, String name) {
+    final h = doc.handleSeed.next();
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          children: const [])),
+      SetComponentCommand<RoomParams>(h, RoomParams(x, y, name)),
+    ], label: 'Add room'));
   }
 
   /// Hairline tile joints inside a rectangle.

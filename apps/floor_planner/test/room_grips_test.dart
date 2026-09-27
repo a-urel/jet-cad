@@ -304,6 +304,27 @@ void main() {
       final gs = objects.gripsOf(doc, store).single;
       expect((at(gs) - anchorOf(doc, store)).length, lessThan(1e-6),
           reason: '$place: the anchor read from the name');
+
+      // A non-default page, ft-in at 1:100 (Task 17's review): the name's
+      // world height is 2.5 mm × 100 = 250, so the grip, which takes
+      // 0.7 · h_name_w off in world, reads the root's page, not the app's
+      // opening page. 10,830,000 / 92,903.04 = 116.5737… ("116.57 ft²",
+      // 0.0013 from a tie).
+      doc.commands.execute(SetComponentCommand<PageComponent>(
+          doc.rootHandle,
+          pageOf(doc).copyWith(
+              displayUnit: DisplayUnit.feetInches, scaleDenominator: 100)));
+      expect(labelStrings(doc, f.kitchen), ['Kitchen', '116.57 ft²'],
+          reason: '$place: premise, the page');
+      final g100 = objects.gripsOf(doc, f.kitchen).single;
+      expect((at(g100) - anchorOf(doc, f.kitchen)).length, lessThan(1e-6),
+          reason: '$place: at the anchor at 1:100');
+      final p100 = f.plan.at(1100.29, 1400.67);
+      expect((p100 - at(g100)).length, greaterThan(3 * ap), reason: 'premise');
+      doc.commands.execute(objects.drag(doc, f.kitchen, g100, p100)!);
+      expect((anchorOf(doc, f.kitchen) - p100).length, lessThan(1e-6),
+          reason: '$place: the labels moved there at 1:100');
+      expect(driftOf(doc), isEmpty);
     }
   });
 
@@ -642,6 +663,26 @@ void main() {
     expect(roomOf(doc, f.kitchen).label, isNull);
     expect((anchorOf(doc, f.kitchen) - pole).length, lessThan(1e-6),
         reason: 'the labels at the pole');
+    expect(driftOf(doc), isEmpty);
+    doc.commands.undo();
+    expect(roomOf(doc, f.kitchen), before);
+
+    // The aperture is measured in world (Task 17's review): a drop 1.2
+    // apertures from the pole in world is 0.8 of one in the group's local
+    // space (scale 1.5), and stores an offset.
+    final beyond = pole + Vector2(0.72 * ap, -0.96 * ap); // |·| = 1.2 ap
+    expect((beyond - pole).length, closeTo(1.2 * ap, 1e-9), reason: 'premise');
+    final toLocal = g.invert();
+    expect(
+        (toLocal.transformPoint(beyond) - toLocal.transformPoint(pole)).length,
+        lessThan(ap),
+        reason: 'premise: inside the aperture in local space');
+    final wantBeyond = labelFor(doc, f.kitchen, at(grip), beyond);
+    expect(objects.preview(doc, f.kitchen, grip, beyond), isNotEmpty);
+    doc.commands.execute(objects.drag(doc, f.kitchen, grip, beyond)!);
+    expect(roomOf(doc, f.kitchen).label, wantBeyond);
+    expect((anchorOf(doc, f.kitchen) - beyond).length, lessThan(1e-6),
+        reason: 'the labels moved there');
     expect(driftOf(doc), isEmpty);
   });
 }
