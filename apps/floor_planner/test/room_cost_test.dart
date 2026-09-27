@@ -140,6 +140,9 @@ void main() {
               w.sx + 10, w.sy, w.ex + 10, w.ey, w.thickness, w.justification)));
       final rebuilt = debugRoomGenerates - generates;
       final traced = debugTracedSegments - segments;
+      expect(rebuilt, 2, reason: 'premise: the Kitchen and the Bath');
+      expect(traced, lessThanOrEqualTo(kSampleRebuildSegments * rebuilt),
+          reason: 'the rebuild, clutter $clutter');
       // The premise, by hand: the Kitchen grows by 10 mm and the Bath
       // shrinks by 10 mm, (4,380 ± 10) × 3,190 = 14,004,100 ("14.00 m²")
       // and 13,334,200 ("13.33 m²"), each at least 0.0005 m² from a tie.
@@ -164,8 +167,6 @@ void main() {
     }
 
     final (rebuilt, traced) = moveP5(clutter: 0);
-    expect(rebuilt, 2, reason: 'premise: the Kitchen and the Bath');
-    expect(traced, lessThanOrEqualTo(kSampleRebuildSegments * rebuilt));
     // Forty walls far away change nothing a rebuild traces: the growth
     // never reaches them. Traced among every contributor, each room would
     // take in 160 segments more.
