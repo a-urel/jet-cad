@@ -1,5 +1,6 @@
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';
@@ -31,6 +32,13 @@ List<Handle> openingsOf(DraftDocument doc, Handle wall) => [
       for (final o in doc.components.withComponent<OpeningParams>())
         if (doc.components.get<OpeningParams>(o)!.host == wall) o
     ]..sort((a, b) => a.value.compareTo(b.value));
+
+/// The sample plan's rooms named [names] (spec 10 D23), in that order.
+List<Handle> roomsNamed(DraftDocument doc, List<String> names) => [
+      for (final name in names)
+        doc.components.withComponent<RoomParams>().singleWhere(
+            (r) => doc.components.get<RoomParams>(r)!.name == name),
+    ];
 
 /// [group]'s children, ascending.
 List<Handle> childrenOf(DraftDocument doc, Handle group) => [
@@ -270,6 +278,15 @@ void main() {
     expect(lowestY(doc, e4), kPlanOriginY, reason: 'E4 mitres with E1');
     final removed = childrenOf(doc, e1).length + childrenOf(doc, door).length;
     expect(removed, 6 + 2, reason: 'two pieces, and a leaf and an arc');
+    // Spec 10 D8, D23: E1's inner face bounds the Hall, the Kitchen and the
+    // Bath from the south; with E1 gone their faces open to the outside, so
+    // they dissolve in the same step, a tint and two labels each.
+    final rooms = roomsNamed(doc, ['Hall', 'Kitchen', 'Bath']);
+    var dissolved = 0;
+    for (final r in rooms) {
+      dissolved += childrenOf(doc, r).length;
+    }
+    expect(dissolved, 3 * 4, reason: 'a fill, its boundary and two TEXTs');
     // The startup plan is itself built through the log, so the counts below
     // are what pin the undo to exactly one command: the Delete.
     final liveBefore = doc.entities.liveCount;
@@ -283,8 +300,11 @@ void main() {
     // neighbours' corners square.
     expect(doc.tree[e1], isNull);
     expect(doc.tree[door], isNull, reason: 'the cascade');
+    for (final r in rooms) {
+      expect(doc.tree[r], isNull, reason: 'room $r dissolves (10 D8)');
+    }
     expect(doc.commands.undoDepth, 1, reason: 'one step');
-    expect(doc.entities.liveCount, liveBefore - removed);
+    expect(doc.entities.liveCount, liveBefore - removed - dissolved);
     expect(lowestY(doc, e2), closeTo(kPlanOriginY + 125, 1e-9),
         reason: 'E2\'s corner squares');
     expect(lowestY(doc, e4), closeTo(kPlanOriginY + 125, 1e-9),
@@ -299,6 +319,9 @@ void main() {
 
     expect(doc.tree[e1], isA<GroupNode>(), reason: 'the wall is back');
     expect(doc.tree[door], isA<GroupNode>(), reason: 'its door too');
+    for (final r in rooms) {
+      expect(doc.tree[r], isA<GroupNode>(), reason: 'room $r is back');
+    }
     expect(doc.entities.liveCount, liveBefore,
         reason: 'exactly one command came off the log, not the plan under it');
     expect(liveHandles(doc), handlesBefore, reason: 'every child handle');
@@ -334,8 +357,12 @@ void main() {
     final e1 = e1Of(doc), e4 = e4Of(doc);
     final objects = [e1, e4, ...openingsOf(doc, e1), ...openingsOf(doc, e4)];
     expect(objects, hasLength(5), reason: 'a door and two windows');
+    // Spec 10 D8, D23: E1 bounds the Hall, the Kitchen and the Bath, and E4
+    // the Hall and Bedroom 1; with both gone those four faces open to the
+    // outside, and the rooms dissolve in the same step.
+    final rooms = roomsNamed(doc, ['Hall', 'Bedroom 1', 'Kitchen', 'Bath']);
     var removed = 0;
-    for (final o in objects) {
+    for (final o in [...objects, ...rooms]) {
       removed += childrenOf(doc, o).length;
     }
     await tester.tapAt(at(Vector2(kPlanOriginX + 3000, kPlanOriginY)));
@@ -357,7 +384,7 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
     await tester.pump();
 
-    for (final o in objects) {
+    for (final o in [...objects, ...rooms]) {
       expect(doc.tree[o], isNull, reason: 'object $o, with its wall');
     }
     expect(doc.commands.undoDepth, 1, reason: 'one step');
@@ -371,7 +398,7 @@ void main() {
 
     expect(doc.entities.liveCount, liveBefore,
         reason: 'one ctrl+Z restores both walls, not one');
-    for (final o in objects) {
+    for (final o in [...objects, ...rooms]) {
       expect(doc.tree[o], isA<GroupNode>(), reason: 'object $o is back');
     }
     expect(liveHandles(doc), handlesBefore, reason: 'every child handle');
