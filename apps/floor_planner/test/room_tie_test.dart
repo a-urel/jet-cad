@@ -365,6 +365,72 @@ void main() {
       expect((r.holeAreas.single - 320000).abs(), lessThanOrEqualTo(1e-2),
           reason: what);
     }
+
+    // A star (Task 19's audit; rv14b-splitOnce): one freestanding column
+    // with 1,002 small columns each tied straight to it by a separator. The
+    // hole's walk holds 1,002 doubled pairs, one per tie, so splitting it
+    // leaves more than 1,000 loops. Traced from crafted inputs (the tracer
+    // alone, as RT6's pinch), their world points placed at each of the six
+    // placements (the own-groups ones place a crafted input as their plain
+    // twins do): about 0.3 s each, 1.9 s for all six in this container.
+    for (final place in placements) {
+      const n = 1002;
+      const w = 1000.0 + n * 60 + 1000, h = 10000.0; // 62,120 × 10,000
+      var next = 10;
+      RoomInput band(List<(double, double)> xy) =>
+          RoomInput(Handle(next++), [for (final (x, y) in xy) place.at(x, y)],
+              closed: true);
+      RoomInput sep((double, double) a, (double, double) b) => RoomInput(
+          Handle(next++), [place.at(a.$1, a.$2), place.at(b.$1, b.$2)],
+          closed: false);
+      final inputs = [
+        // Four mitred 200 mm bands: inner faces x 100..62,020, y 100..9,900.
+        band([(-100, -100), (w + 100, -100), (w - 100, 100), (100, 100)]),
+        band([
+          (w + 100, -100),
+          (w + 100, h + 100),
+          (w - 100, h - 100),
+          (w - 100, 100)
+        ]),
+        band([
+          (w + 100, h + 100),
+          (-100, h + 100),
+          (100, h - 100),
+          (w - 100, h - 100)
+        ]),
+        band([(-100, h + 100), (-100, -100), (100, 100), (100, h - 100)]),
+        // The column: x 1,000..61,120, y 4,950..5,050.
+        band([
+          (1000, 4950),
+          (1000.0 + n * 60, 4950),
+          (1000.0 + n * 60, 5050),
+          (1000, 5050)
+        ]),
+        for (var k = 0; k < n; k++) ...[
+          // A 20 × 20 column at x 1,020 + 60k, y 5,990..6,010, tied from
+          // its south face to the column's north face.
+          band([
+            (1020.0 + 60 * k, 5990),
+            (1040.0 + 60 * k, 5990),
+            (1040.0 + 60 * k, 6010),
+            (1020.0 + 60 * k, 6010),
+          ]),
+          sep((1030.0 + 60 * k, 5050), (1030.0 + 60 * k, 5990)),
+        ],
+      ];
+      final what = 'the star at $place';
+      final r = traceRoom(place.at(500.5, 500.25), inputs);
+      expect(r, isA<Traced>(), reason: what);
+      r as Traced;
+      // By hand: the inner faces 61,920 × 9,800 = 606,816,000; less the
+      // column 60,120 × 100 = 6,012,000 and 1,002 × 400 = 400,800:
+      // 600,403,200. The ties add nothing.
+      expect(r.holes, hasLength(n + 1), reason: '$what: every island a hole');
+      expect((r.area - 600403200).abs(), lessThanOrEqualTo(1e-2),
+          reason: '$what: ${r.area}');
+      expect((r.outerArea - 606816000).abs(), lessThanOrEqualTo(1e-2),
+          reason: what);
+    }
   });
 
   test(

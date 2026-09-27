@@ -176,5 +176,22 @@ void main() {
       }
     }
     expect(DisplayUnit.values, hasLength(5));
+
+    // One tie on purpose (Task 19's audit; X11-feet): a 5 ft × 5 ft 7.5 in
+    // room, 1,524 × 1,714.5 = 2,612,898 mm², is exactly 28.125 ft² (premise:
+    // 2,612,898 × 100,000 = 28,125 × 9,290,304, in integers). D11 divides by
+    // 304.8 × 304.8 in double arithmetic, which is 92,903.04000000001, a
+    // little above the true square foot, so the quotient falls just below
+    // the tie and reads 28.12. Squaring 3,048 as integers first (/ 100)
+    // gives 92,903.04 and the tie itself, which reads 28.13. In metres it is
+    // 2.612898 m² (0.0021 from 2.615): 2.61.
+    const tieMm2 = 1524.0 * 1714.5;
+    expect(tieMm2, 2612898.0, reason: 'premise: exact in doubles');
+    expect(2612898 * 100000, 28125 * 9290304, reason: 'premise: a tie');
+    expect(304.8 * 304.8, isNot(92903.04),
+        reason: 'premise: the double product is not the decimal one');
+    expect(formatArea(tieMm2, DisplayUnit.feetInches), '28.12 ft²');
+    expect(formatArea(tieMm2, DisplayUnit.inches), '28.12 ft²');
+    expect(formatArea(tieMm2, DisplayUnit.meters), '2.61 m²');
   });
 }
