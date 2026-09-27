@@ -532,6 +532,30 @@ void main() {
           previews: tool.debugPreviewBuilds,
         );
 
+    // First, on a fresh generation, outside the bounding box of every
+    // place box: nothing traced, and no outer contour built either. The box
+    // test answers before the contour cache (spec 10 D19), which would
+    // otherwise answer the same verdict only after building every
+    // component's contour (M-10hover, Task 19: the contour cache masked it
+    // once any hover had built the contours).
+    const outside = [
+      (11000.5, 12000.25),
+      (19000.25, 7000.5),
+      (27000.75, 16000.5),
+      (19000.5, 18000.25),
+    ];
+    final fresh = counters();
+    for (final (x, y) in outside) {
+      final p = plan.at(x, y);
+      expect(rig.inputs.bounds!.containsPoint(p), isFalse,
+          reason: 'premise: ($x, $y) outside the bounding box');
+      hoverTo(rig, p);
+      expect(tool.debugPreview, isEmpty);
+    }
+    expect((counters(), tool.debugContourBuilds), (fresh, 0),
+        reason: 'outside the box on a fresh generation: no trace, no '
+            'contour');
+
     // The Kitchen seed, (19,000, 10,000): outside every place box (T-1: E1
     // reaches y 8,250, P3 starts at y 11,440, P1 ends at x 17,060, P5
     // starts at x 21,440), inside their bounding box.
@@ -571,12 +595,7 @@ void main() {
 
     // Outside the bounding box of every place box: nothing traced, no
     // preview.
-    for (final (x, y) in const [
-      (11000.5, 12000.25),
-      (19000.25, 7000.5),
-      (27000.75, 16000.5),
-      (19000.5, 18000.25),
-    ]) {
+    for (final (x, y) in outside) {
       hoverTo(rig, plan.at(x, y));
       expect(tool.debugPreview, isEmpty);
       expect(counters(), c, reason: 'outside the box, ($x, $y)');
