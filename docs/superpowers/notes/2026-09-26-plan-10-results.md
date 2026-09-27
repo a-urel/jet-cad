@@ -649,6 +649,13 @@ Recorded, not defects, each by a ruling or a review:
 - **`DF1`'s own bitwise comparison has no killer:** every face of its
   script closes in its first tracing box; `FZ1` and `LZ2` kill M-10cert
   (the Task 14 re-review; the log's F3).
+- **An undo restores content, not the root's child order.** After a
+  dissolve (or any delete) is undone, the restored groups are re-linked
+  last among the root's children and the entity slots can differ; every
+  handle, record and component comes back, draw order (by handle) is
+  unchanged, and save→load→save is byte-identical in every state. This is
+  06's and 08's undo, the same before rooms (the Task 18 review; the final
+  review's probe D; spec D8's amendment).
 - **The dissolve's plan order** (removals, then the detach) has no state
   consequence; `DV1`'s replay line is its only witness (the Task 4
   review).

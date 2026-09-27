@@ -729,10 +729,13 @@ consequence in the shell.
   counted children before rooms existed; they now name the rooms the
   delete dissolves and check that the undo restores them (Ruling 10-22,
   `2eb2da6`, accepted by the controller). No other 07 or 08 test changed.
-- **The undo of a dissolve is content-exact;** the order of a restored
-  room's children in the tree can differ from before, which is 06's and
-  08's pre-existing undo behaviour (the Task 18 review; the same at
-  `10894c6`). Draw order follows handles and is unaffected (D18).
+- **The undo of a dissolve is content-exact;** what can differ from
+  before is the root's child order (a restored group is re-linked last
+  among the root's children) and the entity slot order; every handle and
+  each room's own children are restored exactly, which is 06's and 08's
+  pre-existing undo behaviour (the Task 18 review; the same at
+  `10894c6`; the final review's probe D). Draw order follows handles and
+  is unaffected (D18); save→load→save is byte-identical in every state.
 
 ### D9 — The room's children: the tint and the two labels
 
@@ -1706,11 +1709,11 @@ adopted, and the tool as built.
   nothing at it (the plain, no-snap glyph).
 - **A refused commit:** a `DuplicateHandleError` would escape the catch;
   the real tool allocates inside the build and cannot raise it.
-- **Known limits, both hover-only:** the warm face cache answers a point
+- **Known limits:** on hover, the warm face cache answers a point
   within about 1e-6 mm of a face edge from the cached face, where a fresh
-  trace might not (the click re-traces); and a click rebuilds
-  `RoomInputs` three times, about 22 ms per click at 636 walls (the Task
-  15 review's nit; not taken, correctness first).
+  trace might not (the click re-traces); on a click, `RoomInputs` is
+  rebuilt three times, about 22 ms per click at 636 walls (the Task 15
+  review's nit; not taken, correctness first).
 - **`TT5`'s geometry:** the plan's "a vertex 30 px away" lies outside the
   10 px aperture; the test puts the raw point 30 mm (7.5 px at 0.25 px/mm)
   from the face vertex, inside the 40 mm aperture. **`TT2`** compares the
