@@ -1,6 +1,17 @@
 # 10 — Rooms and area
 
-**Status:** not started
+**Status:** EXECUTED on `plan-10/rooms`, NOT MERGED (2026-09-27). The
+merge is the human's, `--no-ff`, after the final whole-branch review and
+the human's macOS build and look. Exit gate 15 of 17: criterion 1's macOS
+half and criterion 17 (the look) are OWED. Spec
+[2026-09-26-rooms-design.md](../docs/superpowers/specs/2026-09-26-rooms-design.md)
+(rev 3, amended at execution), plan
+[2026-09-26-rooms.md](../docs/superpowers/plans/2026-09-26-rooms.md),
+results
+[2026-09-26-plan-10-results.md](../docs/superpowers/notes/2026-09-26-plan-10-results.md).
+See [STATUS.md](../STATUS.md#plan-10--rooms-and-area-executed-on-plan-10rooms-not-merged).
+
+*Before Plan 10 ran, this line read:* **Status:** not started
 **Depends on:** 07, and 08 (a doorway must not break a room)
 **Blocks:** nothing
 **Size:** M

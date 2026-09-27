@@ -56,6 +56,9 @@ A floor plan that cannot leave the application is not a deliverable.
    tile boundaries have their own open seam question (gap G1).
 3. **Export renders the page, not the viewport.** The camera used for export is
    derived from the page, not from what the user is looking at.
+4. **Room separators do not plot** (10, decision 15): a separator is a screen
+   aid; an export skips entities carrying `SeparatorParams`' group, or 13 adds
+   a plot flag.
 
 ## Open questions — these are the spec
 

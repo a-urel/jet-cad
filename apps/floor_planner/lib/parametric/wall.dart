@@ -2,6 +2,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'opening_geometry.dart';
+import 'room_inputs.dart';
 import 'wall_geometry.dart';
 
 /// Which side of the centreline a wall's body lies on, looking from `start`
@@ -119,42 +120,15 @@ WorldWall? _worldWall(ParametricView view, Handle h) {
   return p == null ? null : WorldWall(h, p, view.toWorld(h));
 }
 
-/// [self]'s world outline among its wall neighbours (spec 07 D4-D6).
-/// Neighbours that are not walls are ignored.
-({List<Vector2> ring, bool fellBack, List<Handle>? hole}) _outlineOf(
-    ParametricView view, WorldWall self) {
-  final others = [
-    for (final n in view.neighbours(self.handle))
-      if (_worldWall(view, n) case final w?) w,
-  ];
-  return outline(self, others);
-}
-
-/// [self]'s outline in group-local space: what [WallType.generate] stores
-/// and [WallType.diagnose] reports on, one decision for both.
-///
-/// The world ring (D4-D6) is taken to local space through
-/// `toWorld(self).invert()`. `outline` judged it simple in world, but the
-/// mapping rounds, and a folded mitre spike that clears a crossing by
-/// ~1e-10 can cross after it (final review I1). A local ring that is not
-/// simple and anticlockwise is replaced by [self]'s free rectangle computed
-/// in local space -- the wall at the identity with no neighbours -- and
-/// counts as a fallback: storing it would fail the planner's triangulation
-/// check and refuse the edit.
+/// [self]'s outline in group-local space among its wall neighbours in
+/// [view] (neighbours that are not walls are ignored): what
+/// [WallType.generate] stores and [WallType.diagnose] reports on, one
+/// decision for both. A thin wrapper over [localOutlineOf] (Ruling 10-8),
+/// which the rooms' trace inputs call too (spec 10 D4).
 ({List<Vector2> ring, bool fellBack, List<Handle>? hole}) _localOutlineOf(
-    ParametricView view, Handle self, WallParams p) {
-  final o = _outlineOf(view, _worldWall(view, self)!);
-  if (o.ring.isEmpty) return o;
-  final toLocal = view.toWorld(self).invert();
-  final local = [for (final q in o.ring) toLocal.transformPoint(q)];
-  if (isSimpleCcw(local)) {
-    return (ring: local, fellBack: o.fellBack, hole: o.hole);
-  }
-  return (
-    ring: outline(WorldWall(self, p, Transform2.identity()), const []).ring,
-    fellBack: true,
-    hole: o.hole,
-  );
+    ParametricView view, Handle self) {
+  final w = wallsInView(view, self)!;
+  return localOutlineOf(w.host, w.walls);
 }
 
 /// The wall (spec 07 D3, D4, D12): a region (the outline and its fill) and
@@ -175,6 +149,25 @@ final class WallType extends ParametricType<WallParams> {
         toWorld.transformPoint(params.end),
       ]).expandedBy(wallJoin.linear);
 
+  /// A wall is an input to rooms (spec 10 D4, D16): its uncut band.
+  @override
+  bool get contributesPlace => true;
+
+  /// The world box of [self]'s uncut band ([roomInputInView]), or null for
+  /// a degenerate wall or a band with a non-finite coordinate.
+  @override
+  Aabb2? placeBox(ParametricView view, Handle self) =>
+      placeBoxInView(view, self);
+
+  /// [self]'s uncut band in world, a [RoomInput]: its joined ring after 07's
+  /// joints, the short-wall fallback and the local-ring fallback, never its
+  /// parameters, so equal inputs mean an equal band (the engine's contract).
+  /// The engine asks only when [placeBox] is not null; a fresh `Object()`
+  /// otherwise counts as changed, which can only regenerate more.
+  @override
+  Object placeInput(ParametricView view, Handle self) =>
+      roomInputInView(view, self) ?? Object();
+
   /// A wall with no fitting cut (spec 08 D9: no openings, none that fits, or
   /// a degenerate wall) takes 07's path unchanged: in this order, fixed at
   /// creation (spec 07 D3), the region, whose outline is [_localOutlineOf]
@@ -191,7 +184,7 @@ final class WallType extends ParametricType<WallParams> {
     final centreline = Generated(
         EntityKind.polyline, polylinePayload([p.start, p.end]),
         color: kWallColor);
-    final ring = _localOutlineOf(view, self, p).ring;
+    final ring = _localOutlineOf(view, self).ring;
     if (ring.isEmpty) return [centreline];
     return [
       Generated.region(polylinePayload(ring, closed: true), color: kWallColor),
@@ -249,7 +242,7 @@ final class WallType extends ParametricType<WallParams> {
         ),
       ];
     }
-    final o = _localOutlineOf(view, self, view.paramsOf<WallParams>(self)!);
+    final o = _localOutlineOf(view, self);
     return [
       if (o.hole case final members?)
         Diagnostic(

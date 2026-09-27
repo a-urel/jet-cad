@@ -452,6 +452,36 @@ double sweep(End x, End y) {
   return (ring: ring, fellBack: false, hole: hole);
 }
 
+/// [self]'s outline in its group-local space among [neighbours] (spec 07
+/// D4-D6; Ruling 10-8): what `WallType` stores and diagnoses, and what a
+/// room traces once it is taken back to world (spec 10 D4, R-5). One
+/// function, so the wall and both of the rooms' adapters compute one ring.
+///
+/// The world ring ([outline]) is taken to local space through
+/// `self.toWorld.invert()`. [outline] judged it simple in world, but the
+/// mapping rounds, and a folded mitre spike that clears a crossing by
+/// ~1e-10 can cross after it (07's final review I1). A local ring that is
+/// not simple and anticlockwise is replaced by [self]'s free rectangle
+/// computed in local space -- the wall at the identity with no neighbours --
+/// and counts as a fallback: storing it would fail the planner's
+/// triangulation check and refuse the edit. Empty for a degenerate wall.
+({List<Vector2> ring, bool fellBack, List<Handle>? hole}) localOutlineOf(
+    WorldWall self, List<WorldWall> neighbours) {
+  final o = outline(self, neighbours);
+  if (o.ring.isEmpty) return o;
+  final toLocal = self.toWorld.invert();
+  final local = [for (final q in o.ring) toLocal.transformPoint(q)];
+  if (isSimpleCcw(local)) {
+    return (ring: local, fellBack: o.fellBack, hole: o.hole);
+  }
+  return (
+    ring: outline(WorldWall(self.handle, self.params, Transform2.identity()),
+        const []).ring,
+    fellBack: true,
+    hole: o.hole,
+  );
+}
+
 /// [outline]'s two caps kept apart (spec 08 D7), in world space: the end
 /// cap, from the wall's right face to its left face, and the start cap,
 /// from its left face to its right face — `[...endCap, ...startCap]` is

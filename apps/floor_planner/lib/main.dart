@@ -9,6 +9,9 @@ import 'parametric/catalog.dart';
 import 'parametric/object_grips.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
+import 'parametric/room_inputs.dart';
+import 'parametric/room_tool.dart';
+import 'parametric/separator_tool.dart';
 import 'parametric/wall_bands.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
@@ -122,6 +125,11 @@ class _PlannerShellState extends State<PlannerShell> {
     for (final k in OpeningKind.values)
       k: OpeningTool(k, _openingSettings[k]!, bands: _bands),
   };
+  // Spec 10 D19-D21, Ruling 10-11: one room-input cache, shared by the
+  // Room tool, the Separator tool and the separator grips.
+  late final RoomInputs _roomInputs = RoomInputs(_document);
+  late final RoomTool _room = RoomTool(_roomInputs);
+  late final SeparatorTool _separator = SeparatorTool(_roomInputs);
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -191,6 +199,20 @@ class _PlannerShellState extends State<PlannerShell> {
         tool: _openingTools[OpeningKind.gap]!,
         drawing: true),
     PaletteEntry(
+        keyName: 'tool-room',
+        label: 'Room',
+        shortcut: 'M',
+        logicalKey: LogicalKeyboardKey.keyM,
+        tool: _room,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-separator',
+        label: 'Separator',
+        shortcut: 'S',
+        logicalKey: LogicalKeyboardKey.keyS,
+        tool: _separator,
+        drawing: true),
+    PaletteEntry(
         keyName: 'tool-circle',
         label: 'Circle',
         shortcut: 'C',
@@ -227,12 +249,20 @@ class _PlannerShellState extends State<PlannerShell> {
   //   slide grip come from `ObjectGrips`, which also tells the select tool
   //   not to move or rotate an opening. The slide grip's edge snaps follow
   //   object snap (F3) at the camera's current aperture (Ruling 08-15).
+  // - Spec 10 D21: a room's label grip, which the select tool neither
+  //   moves nor rotates (R-22), returns the label to auto on a drop within
+  //   the snap aperture of its pole whatever F3 says (Ruling 10-17); a
+  //   separator's end grips band-trim through the shared room inputs while
+  //   F3 is on (D20).
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   late final GripCache _grips = GripCache(_document, _selection, _outlines,
       objects: ObjectGrips(
           edgeAperture: () => _snap.objectSnap
               ? kSnapAperturePixels / _camera.value.scale
-              : null));
+              : null,
+          labelAperture: () => kSnapAperturePixels / _camera.value.scale,
+          roomInputs: _roomInputs,
+          objectSnap: () => _snap.objectSnap));
 
   late final ToolContext _context = ToolContext(
       document: _document,
@@ -244,7 +274,9 @@ class _PlannerShellState extends State<PlannerShell> {
       grips: _grips);
   late final ToolController _tools =
       ToolController(initial: _select, context: _context);
-  late final Listenable _status = Listenable.merge([_selection, _tools]);
+  // Spec 10 D19, R-29: the Room tool's notice joins the status line.
+  late final Listenable _status =
+      Listenable.merge([_selection, _tools, _room.notice]);
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -284,9 +316,14 @@ class _PlannerShellState extends State<PlannerShell> {
     if (!identical(_tools.active, _select)) _activate(_select);
   }
 
+  /// The active tool, the selection's size when it is not empty, and the
+  /// Room tool's notice when it has one (spec 10 D19, R-29).
   String _statusLine() {
     final base = _tools.active.name;
-    return _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+    final line =
+        _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+    final notice = _room.notice.value;
+    return notice == null ? line : '$line — $notice';
   }
 
   String _zoomLine() {
@@ -302,11 +339,11 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void initState() {
     super.initState();
-    // Spec 06 D13, Ruling 06-12, spec 08 D18: the document arrives built.
-    // startupPlan builds its walls and openings through a parametric system
-    // of its own and disposes it before returning, so this one installs over
-    // a finished document and trusts its geometry, as it would a loaded file
-    // (06 D10).
+    // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
+    // arrives built. startupPlan builds its walls, openings, separator and
+    // rooms through a parametric system of its own and disposes it before
+    // returning, so this one installs over a finished document and trusts
+    // its geometry, as it would a loaded file (06 D10).
     _parametric = installParametric(_document);
     _page.addListener(_onPage);
   }
@@ -323,6 +360,7 @@ class _PlannerShellState extends State<PlannerShell> {
       s.dispose();
     }
     _bands.dispose();
+    _roomInputs.dispose();
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();

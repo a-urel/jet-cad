@@ -27,18 +27,52 @@ int debugOverlapTests = 0;
 @visibleForTesting
 int debugReferenceCalls = 0;
 
+/// Calls into a type's `ParametricType.placeBox` (spec 10 D16.6, Ruling
+/// 10-6), for tests that pin the trigger's cost: counted in
+/// `_Registration.placeBoxOf`, the only caller, so a view's memo hit is not
+/// a call (T-4). Never reset by the library.
+@visibleForTesting
+int debugPlaceBoxCalls = 0;
+
+/// Calls into a type's `ParametricType.readBox` (spec 10 D16.6), counted in
+/// `_Registration.readBoxOf`, the only caller. Never reset by the library.
+@visibleForTesting
+int debugReadBoxCalls = 0;
+
 /// Everything the planner reads about the parametric objects at one moment.
 ///
 /// Neighbours are not surveyed (spec 07 D10): [neighboursOf] computes one
 /// object's list on demand, against this survey's own [reach] snapshot, and
 /// memoises it. An edit asks only for its seeds and its closure, O(k·n);
-/// an edit with no seeds asks for none.
+/// an edit with no seeds asks for none. A view's first
+/// `ParametricView.placedIn`, which needs every contributor's place box and
+/// so every contributor's neighbours, fills the memo for every object at
+/// once with [sweepNeighbours] (spec 10 D16.5).
 final class _Survey {
-  _Survey(this.objects, this.reach, this.children, this.owned, this.declared,
-      this.references, this.referrers);
+  _Survey(
+      this.objects,
+      this.params,
+      this.toWorld,
+      this.reach,
+      this.children,
+      this.owned,
+      this.declared,
+      this.references,
+      this.referrers,
+      this.page,
+      this.readers);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
+
+  /// Each object's registered component at this moment (spec 10 D16.1): the
+  /// snapshot every view built over this survey reads. A component is
+  /// immutable, so the reference is the snapshot.
+  final Map<Handle, Component> params;
+
+  /// Each object's accumulated transform at this moment (spec 10 D16.1),
+  /// the one its [reach] was computed with.
+  final Map<Handle, Transform2> toWorld;
 
   /// Each object's reach at this moment, one call per object.
   final Map<Handle, Aabb2> reach;
@@ -63,6 +97,17 @@ final class _Survey {
   /// Each live referent's live referrers, ascending (spec 08 D2); absent
   /// when none. Unmodifiable: `ParametricView.referrers` hands them out.
   final Map<Handle, List<Handle>> referrers;
+
+  /// The root's `PageComponent` at this moment (spec 10 D14), or null when
+  /// none is attached or `PageComponent` is not registered. A component is
+  /// immutable, so the reference is the snapshot; `_run` compares the two
+  /// surveys' pages by value.
+  final PageComponent? page;
+
+  /// How many live objects of this survey read places (spec 10 D16.2,
+  /// S-4), counted as the survey registers them: the trigger runs only when
+  /// the after-survey holds one, an O(1) check.
+  final int readers;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -91,6 +136,57 @@ final class _Survey {
     // Unmodifiable: the memo is shared by every caller of this survey.
     return _neighbours[h] = List.unmodifiable(out);
   }
+
+  bool _swept = false;
+
+  /// Fills the neighbour memo for **every** object of this survey (spec 10
+  /// D16.5), once: one sort-and-sweep over the [reach] boxes instead of one
+  /// O(n) [neighboursOf] search per object, so O(n log n + pairs whose x
+  /// ranges overlap) rather than O(n²). The pairs whose x ranges overlap can
+  /// exceed the true neighbour pairs: long horizontal walls stacked one above
+  /// another all overlap along x.
+  ///
+  /// The boxes are sorted by `minX`. A box `a` is tested against each later
+  /// box `b` only while `b.minX < a.maxX - Tolerance.standard.linear`: that
+  /// is the predicate's own bound on `b.minX`, and every box after the first
+  /// that fails it starts no earlier, so fails it too. The window is one
+  /// conjunct of the predicate, so each pair inside it is tested for the
+  /// other three, the same strict comparisons as [neighboursOf]. Every
+  /// evaluation of the window, the one that closes it included, is a pair
+  /// test and counted once in [debugOverlapTests]. An empty reach (`Aabb2.empty()`, `minX`
+  /// infinite) sorts last and has no neighbours, as in [neighboursOf].
+  ///
+  /// The lists are the ones [neighboursOf] gives: ascending and
+  /// unmodifiable. An object whose list is memoised already keeps it.
+  void sweepNeighbours() {
+    if (_swept) return;
+    _swept = true;
+    const tol = Tolerance.standard;
+    final boxes = reach.entries.toList()
+      ..sort((p, q) => p.value.minX.compareTo(q.value.minX));
+    final found = <Handle, List<Handle>>{};
+    for (var i = 0; i < boxes.length; i++) {
+      final MapEntry(key: ha, value: a) = boxes[i];
+      final bound = a.maxX - tol.linear;
+      for (var j = i + 1; j < boxes.length; j++) {
+        final MapEntry(key: hb, value: b) = boxes[j];
+        // Counted before the window check: the check is the predicate's
+        // first conjunct, so every evaluation of it is a pair test.
+        debugOverlapTests++;
+        if (!(b.minX < bound)) break;
+        if (a.minX < b.maxX - tol.linear &&
+            a.minY < b.maxY - tol.linear &&
+            b.minY < a.maxY - tol.linear) {
+          (found[ha] ??= []).add(hb);
+          (found[hb] ??= []).add(ha);
+        }
+      }
+    }
+    for (final h in reach.keys) {
+      _neighbours[h] ??= List.unmodifiable(
+          (found[h] ?? const <Handle>[]).toList()..sort(_byValue));
+    }
+  }
 }
 
 _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
@@ -102,8 +198,18 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   }
   final order = found.keys.toList()..sort(_byValue);
   final objects = {for (final h in order) h: found[h]!};
+  var readers = 0;
+  for (final r in objects.values) {
+    if (r.type.readsPlaces) readers++;
+  }
+  // Spec 10 D16.1: the snapshots are the component and the transform
+  // `reach` already reads, one read each, and no new client call.
+  final params = {for (final h in order) h: objects[h]!.componentOf(t, h)};
+  final toWorld = {for (final h in order) h: _worldOf(t, h)};
   // Ascending, like [objects]: `neighboursOf` walks it in handle order.
-  final reach = {for (final h in order) h: objects[h]!.reachOf(t, h)};
+  final reach = {
+    for (final h in order) h: objects[h]!.reachOf(params[h]!, toWorld[h]!),
+  };
   final children = <Handle, List<Handle>>{};
   final owned = <Handle, Handle>{};
   for (final slot in t.entities.liveSlots) {
@@ -137,19 +243,130 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       (referrers[x] ??= []).add(h);
     }
   }
-  return _Survey(objects, reach, children, owned, declared, references, {
-    for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
-  });
+  return _Survey(
+      objects,
+      params,
+      toWorld,
+      reach,
+      children,
+      owned,
+      declared,
+      references,
+      {
+        for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
+      },
+      t.components.get<PageComponent>(t.tree.root),
+      readers);
+}
+
+/// The objects a page change seeds (spec 10 D14): every live object in
+/// [after] of each registered type whose [ParametricType.pageKey] of the
+/// two pages differs. `_run` calls it only when the page differs between
+/// [before] and [after] (value equality, a stored value), so an edit that
+/// leaves the page alone pays one `==` and never calls a `pageKey`.
+Iterable<Handle> _pageSeeds(CommandTarget t,
+    List<_Registration<Component>> types, _Survey before, _Survey after) sync* {
+  for (final r in types) {
+    if (r.type.pageKey(before.page) == r.type.pageKey(after.page)) continue;
+    for (final h in r.handles(t)) {
+      if (after.objects.containsKey(h)) yield h;
+    }
+  }
+}
+
+/// The world box of the defining points of [r]'s stored children in [s]
+/// (spec 10 D16.2, S-14): every `(x, y)` pair of each child payload's
+/// `coords` (a fill's payload has none), mapped by [r]'s snapshot transform.
+/// Empty when [r] has no child with a point.
+Aabb2 _storedBox(CommandTarget t, _Survey s, Handle r) {
+  final m = s.toWorld[r]!;
+  var box = Aabb2.empty();
+  for (final c in s.children[r] ?? const <Handle>[]) {
+    final coords =
+        t.geometry.peek(t.entities.geomIndexAt(t.entities.slotOf(c)!)).coords;
+    for (var i = 0; i + 1 < coords.length; i += 2) {
+      box = box
+          .expandedToPoint(m.transformPoint(Vector2(coords[i], coords[i + 1])));
+    }
+  }
+  return box;
+}
+
+/// The live readers an edit regenerates by place (spec 10 D16.2): every
+/// live reader in [after], not itself a seed, whose
+/// [ParametricType.readBox] touches (closed) a box of `L`.
+///
+/// Nothing at all when [seeds] is empty or [after] holds no live reader
+/// (S-4: [_Survey.readers], O(1)); no view is built and no type is asked.
+///
+/// `K` is the spatial part of the core, the seeds and their neighbours
+/// before and after. For each contributor of `K`, in ascending order, its
+/// before place is its place box in the **before-view** if it was live
+/// before (the snapshot: where it was, although the edit has applied), and
+/// its after place its box in [afterView] if it is live after. It is
+/// **changed** when exactly one of the two exists, or both exist and its
+/// [ParametricType.placeInput] of the two views differs (exact `==`, S-4,
+/// T-2). Only a changed contributor adds its boxes, both, to `L`: an
+/// unchanged neighbour of a seed contributes what it contributed before,
+/// so it can change no reader. `placeInput` is asked only when both boxes
+/// exist, once per view. The before-view is built here, the only place
+/// that reads it; [afterView] is the one [_plan] receives (Ruling 10-5).
+///
+/// A reader's `stored` box is [_storedBox] over the after-survey. When `L`
+/// is empty no read box is asked.
+List<Handle> _triggered(CommandTarget t, Set<Handle> seeds, _Survey before,
+    _Survey after, ParametricView afterView) {
+  if (seeds.isEmpty || after.readers == 0) return const [];
+  final k = {
+    ...seeds,
+    for (final s in seeds) ...before.neighboursOf(s),
+    for (final s in seeds) ...after.neighboursOf(s),
+  }.toList()
+    ..sort(_byValue);
+  final beforeView = ParametricView._(t, before);
+  final boxes = <Aabb2>[];
+  for (final h in k) {
+    final was = beforeView.placeBoxOf(h);
+    final now = afterView.placeBoxOf(h);
+    if (was == null && now == null) continue;
+    if (was != null &&
+        now != null &&
+        before.objects[h]!.type.placeInput(beforeView, h) ==
+            after.objects[h]!.type.placeInput(afterView, h)) {
+      continue;
+    }
+    if (was != null) boxes.add(was);
+    if (now != null) boxes.add(now);
+  }
+  if (boxes.isEmpty) return const [];
+  final out = <Handle>[];
+  for (final MapEntry(key: h, value: r) in after.objects.entries) {
+    if (!r.type.readsPlaces || seeds.contains(h)) continue;
+    final read = r.readBoxOf(
+        after.params[h]!, after.toWorld[h]!, _storedBox(t, after, h));
+    for (final b in boxes) {
+      if (read.intersects(b)) {
+        out.add(h);
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 /// The objects an edit regenerates, as a sorted list of live objects (spec
-/// 06 D4 step 6, as amended by spec 08 D3):
+/// 06 D4 step 6, as amended by spec 08 D3 and spec 10 D16.2):
 ///
 /// ```
 /// core    = seeds ∪ neighbours before and after (seeds)
 ///                 ∪ references before and after (seeds)
+///                 ∪ triggered
 /// closure = core ∪ referrers before and after (core)
 /// ```
+///
+/// [triggered] is [_triggered]'s: the live readers whose read box touches a
+/// place box of a changed contributor of the spatial core, joined to the
+/// core before the referrer step, so a reader's referrers follow it.
 ///
 /// Neighbours are asked for the seeds only (spec 07 D10); references and
 /// referrers are map lookups. The referent direction brings in what a
@@ -165,13 +382,15 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
 /// it is two hops from B (seed B → neighbour A → referrer). One extra hop
 /// closes it for a type that reads no further than its referents'
 /// neighbours (spec 08 D3).
-List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
+List<Handle> _closure(
+    Set<Handle> seeds, _Survey before, _Survey after, List<Handle> triggered) {
   final core = {
     ...seeds,
     for (final s in seeds) ...before.neighboursOf(s),
     for (final s in seeds) ...after.neighboursOf(s),
     for (final s in seeds) ...?before.references[s],
     for (final s in seeds) ...?after.references[s],
+    ...triggered,
   };
   return {
     ...core,
@@ -180,6 +399,23 @@ List<Handle> _closure(Set<Handle> seeds, _Survey before, _Survey after) {
   }.where(after.objects.containsKey).toList()
     ..sort(_byValue);
 }
+
+/// The record of a child the plan adds (spec 10 D13): the one builder for
+/// every add in [_plan], a region's fill and boundary and a plain or TEXT
+/// child alike. [g]'s colour, transparency, flags, linetype, lineweight,
+/// `textAttrs` and string are written here and nowhere else (06 D11, 10
+/// D12, D13); `draftRecord`'s defaults stand for everything a [Generated]
+/// does not set. [boundary] marks a region's boundary record, which takes
+/// [Generated.boundaryFlags] instead of the fill's [Generated.flags].
+EntityRecord _recordOf(
+        Handle handle, Handle owner, EntityKind kind, Generated g,
+        {bool boundary = false}) =>
+    draftRecord(handle, owner, kind, color: g.color, text: g.text).copyWith(
+        transparency: g.transparency,
+        flags: boundary ? g.boundaryFlags : g.flags,
+        linetype: g.linetype,
+        lineweight: g.lineweight,
+        textAttrs: g.textAttrs);
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
@@ -237,12 +473,33 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 /// order, so a new object's handles run fill < boundary < later children.
 /// A fill child and the boundary it names are one region, matched through
 /// the fill; the boundary is never matched as a plain POLYLINE.
+///
+/// A matched child's payload is rewritten when it differs; a matched
+/// TEXT's string too (spec 10 D12). Every added record comes from
+/// [_recordOf].
+///
+/// Each object is first asked whether it dissolves (spec 10 D15), with the
+/// same [view], before its `generate`. A dissolving object is not
+/// generated: its plan is [_subtreeRemoval] (the select tool's order), then
+/// the detach of its own component. The detach is planned here because
+/// nothing else would plan it: 06 D8's cleanup detaches only `lost`
+/// objects, and `lost` is computed from the after-survey, where a
+/// dissolving object is still live. For the same reason it is never
+/// detached twice. The removals are planned commands, never in the edit's
+/// `touched`, so 06 D6's guard does not see them.
 List<DraftCommand> _plan(
     CommandTarget t, List<Handle> closure, _Survey s, ParametricView view) {
   var reserved = t.handleSeed.current.value;
   final out = <DraftCommand>[];
   for (final h in closure) {
-    final generated = s.objects[h]!.generate(view, h);
+    final registration = s.objects[h]!;
+    if (registration.dissolves(view, h)) {
+      out
+        ..addAll(_subtreeRemoval(t, s, h))
+        ..add(registration.detach(h));
+      continue;
+    }
+    final generated = registration.generate(view, h);
     final children = s.children[h] ?? const <Handle>[];
     final boundaries = <Handle>{
       for (final c in children)
@@ -273,11 +530,10 @@ List<DraftCommand> _plan(
       } else {
         // Fill first: `AddRegionCommand` requires the lower handle on it.
         out.add(AddRegionCommand(
-            fill: draftRecord(Handle.checked(++reserved), h, EntityKind.fill,
-                color: g.color),
-            boundary: draftRecord(
-                Handle.checked(++reserved), h, EntityKind.polyline,
-                color: g.color),
+            fill: _recordOf(Handle.checked(++reserved), h, EntityKind.fill, g),
+            boundary: _recordOf(
+                Handle.checked(++reserved), h, EntityKind.polyline, g,
+                boundary: true),
             boundaryPayload: g.payload));
       }
     }
@@ -292,10 +548,17 @@ List<DraftCommand> _plan(
             t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
           out.add(SetEntityGeometryCommand(existing[i], g.payload));
         }
+        // Spec 10 D12: a matched TEXT's string is a stored value, compared
+        // by exact `==` after the payload and rewritten in place when it
+        // differs. Nothing else of the record is read or rewritten: every
+        // other attribute is fixed at creation, like the colour (06 D11,
+        // 10 D13).
+        if (g.kind == EntityKind.text && t.entities.textAt(slot) != g.text) {
+          out.add(SetEntityTextCommand(existing[i], g.text, ''));
+        }
       } else {
         out.add(AddEntityCommand(
-            record: draftRecord(Handle.checked(++reserved), h, g.kind,
-                color: g.color),
+            record: _recordOf(Handle.checked(++reserved), h, g.kind, g),
             payload: g.payload));
       }
     }
@@ -438,6 +701,9 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
 /// [d]'s own leaves are the survey's (an edit cannot add into a live
 /// object, 06 D6); a nested group's are found by one scan of the live
 /// slots, paid only when [d] has nested groups.
+///
+/// Two callers: [_cascade], with the before-survey, for a doomed referrer;
+/// [_plan], with the after-survey, for a dissolving object (spec 10 D15).
 List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
   final groups = <Handle>[];
   void collect(Handle g) {
@@ -529,10 +795,18 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 /// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
 ///    by the removals, its inverse included;
 /// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
-///    seeds, the dangling-reference check ([_checkDangling]), the early
-///    return, the closure and the plan. Any failure applies `r.inverse`,
-///    the cascade's included, so a refused edit leaves the document byte
-///    for byte as it was;
+///    seeds, the dangling-reference check ([_checkDangling]), the page
+///    seeds ([_pageSeeds], spec 10 D14: a changed page adds the live
+///    objects of every type whose page key changed, unchecked for dangling
+///    references, Ruling 10-4), the early return, the after-view, the
+///    spatial trigger ([_triggered], spec 10 D16.2: the readers whose read
+///    box touches a before or after place box of a contributor of the
+///    spatial core whose place changed, and nothing when no reader is live;
+///    the before-view is built there), the closure and the plan (a dissolving
+///    object's removal and detach included, spec 10 D15), which receives
+///    the trigger's after-view (Ruling 10-5). Any failure applies
+///    `r.inverse`, the cascade's included, so a refused edit leaves the
+///    document byte for byte as it was;
 /// 6. the apply loop, whose inverse wraps `r.inverse`.
 ///
 /// The after-survey never sees a doomed referrer, so the plan never
@@ -579,12 +853,28 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       ...lost,
     };
     _checkDangling(seeds, after);
+    // Spec 10 D14, Ruling 10-4: after the dangling-reference check, which
+    // checks only what the edit touched (a page-seeded object was not
+    // edited, so a loaded one with a dead reference must not refuse a page
+    // change), and before the early return (a page-only edit touches the
+    // root, which is not an object, so its seeds are otherwise empty).
+    // Guarded here, so no other edit builds the iterable or calls a
+    // `pageKey`.
+    if (before.page != after.page) {
+      seeds.addAll(_pageSeeds(t, types, before, after));
+    }
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
     if (seeds.isEmpty && cleanup.isEmpty) return r;
+    // Ruling 10-5: one after-view, for the trigger and the plan alike.
+    final view = ParametricView._(t, after);
     plan = _plan(
-        t, _closure(seeds, before, after), after, ParametricView._(t, after));
+        t,
+        _closure(
+            seeds, before, after, _triggered(t, seeds, before, after, view)),
+        after,
+        view);
   } catch (error) {
     _undoInner(t, edit.label, r, error);
     rethrow;

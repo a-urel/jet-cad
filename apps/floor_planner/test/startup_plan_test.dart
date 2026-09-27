@@ -4,12 +4,26 @@ import 'dart:ui' show Size;
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/room.dart';
+import 'package:floor_planner/parametric/room_trace.dart';
+import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'support/room_fixture.dart'
+    show
+        anchorOf,
+        kids,
+        kindOf,
+        labelsOf,
+        labelStrings,
+        payloadOf,
+        probeView,
+        worldPoints;
 
 /// Even-odd ray casting: a geometric decision (Tolerance is not needed --
 /// the boundary case never arises for the sampled points below).
@@ -106,7 +120,7 @@ void main() {
 
   test(
       'SP1 the furniture is eight root-owned filled regions with the '
-      'furniture outline; the plan holds 549 entities', () {
+      'furniture outline; the plan holds 581 entities', () {
     final doc = startupPlan(measurer);
     final boundaries = furnitureOf(doc);
     expect(boundaries, hasLength(8));
@@ -125,21 +139,32 @@ void main() {
     // pieces for E1–E4, 3 + 2 + 3 + 2 + 1 for P1–P5, one more than each
     // wall's openings), 14 for the doors (2 each) and 24 for the windows
     // (3 each). Measured (Task 13, Ruling 08-18), not assumed.
-    expect(doc.entities.liveCount, 549);
+    //
+    // Spec 10 D23: 549 + 28 room children (seven rooms, each a tint fill,
+    // its boundary, a name TEXT and an area TEXT) + 1 separator child (its
+    // dashed POLYLINE) + 3 column children (one wall piece, 3 as above) =
+    // 581. Measured (Task 18's probe, Ruling 10-20), as D23 expected.
+    expect(doc.entities.liveCount, 581);
   });
 
   test(
       'SP2 every furniture fill draws over every floor-finish line (M-05r); '
-      'the walls\' pieces are built first, below both (08 D18)', () {
+      'the nine walls\' pieces are built first, below both (08 D18); the '
+      'column, the separator and the rooms come after the furniture, in '
+      'that order (10 D23)', () {
     final doc = startupPlan(measurer);
     var maxFinish = 0, minFinish = 1 << 62, minFill = 1 << 62;
+    var maxFill = 0;
     var maxWallChild = 0;
+    // Spec 10 D23: the column is the tenth wall, the last one built.
+    final column = (doc.components.withComponent<WallParams>().toList()
+          ..sort((a, b) => a.value.compareTo(b.value)))
+        .last;
     for (final slot in doc.entities.liveSlots) {
       final r = doc.entities.read(slot);
-      if (r.kind == EntityKind.fill &&
-          r.owner == doc.rootHandle &&
-          r.handle.value < minFill) {
-        minFill = r.handle.value;
+      if (r.kind == EntityKind.fill && r.owner == doc.rootHandle) {
+        if (r.handle.value < minFill) minFill = r.handle.value;
+        if (r.handle.value > maxFill) maxFill = r.handle.value;
       }
       if (r.kind == EntityKind.line &&
           r.color == const TrueColor(0xBBBBBB) &&
@@ -152,6 +177,7 @@ void main() {
         minFinish = r.handle.value;
       }
       if (doc.components.get<WallParams>(r.owner) != null &&
+          r.owner != column &&
           r.handle.value > maxWallChild) {
         maxWallChild = r.handle.value;
       }
@@ -163,6 +189,22 @@ void main() {
     // the highest: a grid built before the walls would interleave them.
     expect(maxWallChild, lessThan(minFinish),
         reason: 'every wall child lies below every finish line');
+
+    // Spec 10 D23: after the furniture, the column (so its band draws over
+    // the parquet it stands on), then the separator, then the rooms, each
+    // object's handle and its children's above everything before it.
+    final separator = doc.components.withComponent<SeparatorParams>().single;
+    final rooms = doc.components.withComponent<RoomParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final order = [column, separator, ...rooms];
+    var floor = maxFill;
+    for (final g in order) {
+      final children = [for (final k in kids(doc, g)) k.value]..sort();
+      expect(children, isNotEmpty, reason: 'object $g draws');
+      expect(g.value, greaterThan(floor), reason: 'object $g after the last');
+      expect(children.first, greaterThan(g.value));
+      floor = children.last;
+    }
   });
 
   test(
@@ -248,8 +290,8 @@ void main() {
   });
 
   test(
-      'SP4 every doorway is clear of furniture for 900 mm on both sides '
-      '(Ruling F-8)', () {
+      'SP4 every doorway is clear of furniture and of the column for 900 mm '
+      'on both sides (Ruling F-8, 10 D23)', () {
     final doc = startupPlan(measurer);
 
     final polygons = <List<Vector2>>[];
@@ -265,6 +307,21 @@ void main() {
         ]);
       }
     }
+    // Spec 10 D23: the column (the tenth wall, one piece) is an obstacle
+    // too, its outline as drawn.
+    final column = (doc.components.withComponent<WallParams>().toList()
+          ..sort((a, b) => a.value.compareTo(b.value)))
+        .last;
+    // Its piece's region: the fill, drawn from the boundary it names.
+    final columnFill = [
+      for (final k in kids(doc, column))
+        if (kindOf(doc, k) == EntityKind.fill) k,
+    ].single;
+    final columnOutline = worldPoints(
+        doc, Handle(payloadOf(doc, columnFill).scalars[0].toInt()),
+        closed: true);
+    expect(columnOutline, hasLength(4), reason: 'premise: a square');
+    polygons.add(columnOutline);
     bool insideFurniture(Vector2 p) =>
         circles.any((c) => (p - c.$1).length <= c.$2) ||
         polygons.any((poly) => _pointInPolygon(p, poly));
@@ -321,7 +378,8 @@ void main() {
 
   test(
       'SP5 the sample plan is nine walls, seven doors and eight windows, '
-      'exactly as spec 08 D18\'s tables say; no gap, no box; drift() and '
+      'exactly as spec 08 D18\'s tables say, then a column, a separator and '
+      'seven rooms as spec 10 D23 says; no gap, no box; drift() and '
       'diagnostics() are empty', () {
     final doc = startupPlan(measurer);
     const x0 = kPlanOriginX, y0 = kPlanOriginY;
@@ -338,6 +396,8 @@ void main() {
       WallParams(x0 + 5000, y0 + 3500, x1 - 125, y0 + 3500, 120, c),
       WallParams(x0 + 2600, y0 + 5000, x0 + 2600, y1 - 125, 120, c),
       WallParams(x0 + 9500, y0 + 125, x0 + 9500, y0 + 3500, 120, c),
+      // Spec 10 D23: the column, 400 x 400, the tenth wall.
+      WallParams(x0 + 11500, y0 + 6000, x0 + 11900, y0 + 6000, 400, c),
     ];
     final ws = doc.components.withComponent<WallParams>().toList()
       ..sort((a, b) => a.value.compareTo(b.value));
@@ -347,7 +407,7 @@ void main() {
       expect(doc.tree[w]!.parent, doc.rootHandle);
       expect((doc.tree[w]! as GroupNode).transform, Transform2.identity());
     }
-    final [e1, e2, e3, e4, p1, p2, p3, p4, _] = ws;
+    final [e1, e2, e3, e4, p1, p2, p3, p4, p5, column] = ws;
     const start = HingeEnd.start;
     const left = SwingSide.left, right = SwingSide.right;
     const door = OpeningKind.door, window = OpeningKind.window;
@@ -376,13 +436,56 @@ void main() {
       expect(doc.tree[o]!.parent, doc.rootHandle);
       expect((doc.tree[o]! as GroupNode).transform, Transform2.identity());
     }
-    expect(os.first.value, greaterThan(ws.last.value),
-        reason: 'the walls, then the openings');
+    expect(os.first.value, greaterThan(p5.value),
+        reason: 'the nine walls, then the openings');
+    expect(column.value, greaterThan(os.last.value),
+        reason: 'then the column (10 D23)');
     expect(doc.components.withComponent<BoxParams>(), isEmpty);
+
+    // Spec 10 D23: the separator, x = 21,500 from P3's north face to E3's
+    // inner face, then the seven rooms in the table's order, each a
+    // root-level group at the identity with an auto label.
+    final [separator] =
+        doc.components.withComponent<SeparatorParams>().toList();
+    expect(doc.components.get<SeparatorParams>(separator),
+        const SeparatorParams(x0 + 9500, y0 + 3560, x0 + 9500, y0 + 8750));
+    expect(separator.value, greaterThan(column.value));
+    final rooms = doc.components.withComponent<RoomParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    expect([
+      for (final r in rooms) doc.components.get<RoomParams>(r)
+    ], const [
+      RoomParams(14500, 10500, 'Hall'),
+      RoomParams(13300, 15000, 'Bedroom 1'),
+      RoomParams(15800, 15000, 'Bedroom 2'),
+      RoomParams(19000, 10000, 'Kitchen'),
+      RoomParams(23500, 10000, 'Bath'),
+      RoomParams(24500, 16000, 'Living'),
+      RoomParams(19000, 16000, 'Dining'),
+    ]);
+    expect(rooms.first.value, greaterThan(separator.value));
+    for (final g in [separator, ...rooms]) {
+      expect(doc.tree[g]!.parent, doc.rootHandle);
+      expect((doc.tree[g]! as GroupNode).transform, Transform2.identity());
+    }
+    // Each room's labels: its name and D23's area label, the page's metres.
+    expect([
+      for (final r in rooms) labelStrings(doc, r)
+    ], const [
+      ['Hall', '22.00 m²'],
+      ['Bedroom 1', '8.45 m²'],
+      ['Bedroom 2', '8.41 m²'],
+      ['Kitchen', '13.97 m²'],
+      ['Bath', '13.37 m²'],
+      ['Living', '21.90 m²'],
+      ['Dining', '23.04 m²'],
+    ]);
+
     final system = ParametricSystem(doc, parametricCatalog);
     expect(system.drift(), isEmpty);
     expect(system.diagnostics(), isEmpty,
-        reason: 'no clamp, no overlap, no no-fit, no dangling reference');
+        reason: 'no clamp, no overlap, no no-fit, no dangling reference; no '
+            'room.shared, no room.tint, no separator.degenerate');
   });
 
   test(
@@ -408,5 +511,63 @@ void main() {
           doc.components.get<WallParams>(w));
     }
     expect(DraftDocumentCodec.encodeToString(loaded), saved);
+  });
+
+  test(
+      'SP7 each sample-plan room\'s net area matches the table to 1e-2 '
+      'mm², its labels are 125 and 100 high, and its label point lies in its '
+      'face', () {
+    final doc = startupPlan(measurer);
+    // Spec 10 D23's table, by hand from the inner faces: exterior faces at
+    // x 12,250 and 25,750, y 8,250 and 16,750; partitions ±60 about their
+    // centrelines (P1 x 17,000, P2 y 13,000, P3 y 11,500, P4 x 14,600, P5
+    // x 21,500); the separator at x 21,500; the column 400 x 400.
+    final table = {
+      'Hall': (16940.0 - 12250) * (12940 - 8250), // 21,996,100
+      'Bedroom 1': (14540.0 - 12250) * (16750 - 13060), // 8,450,100
+      'Bedroom 2': (16940.0 - 14660) * (16750 - 13060), // 8,413,200
+      'Kitchen': (21440.0 - 17060) * (11440 - 8250), // 13,972,200
+      'Bath': (25750.0 - 21560) * (11440 - 8250), // 13,366,100
+      // 22,057,500 − 160,000 = 21,897,500
+      'Living': (25750.0 - 21500) * (16750 - 11560) - 400 * 400,
+      'Dining': (21500.0 - 17060) * (16750 - 11560), // 23,043,600
+    };
+    // The labels (SP5) sit at least 0.0005 m² from a rounding tie: 22.0
+    // (21.9961), 8.4501, 8.4132, 13.9722, 13.3661, 21.8975, 23.0436.
+    expect(table.values.fold<double>(0, (a, b) => a + b), 111138800,
+        reason: 'D23\'s total');
+    final rooms = doc.components.withComponent<RoomParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    expect([for (final r in rooms) doc.components.get<RoomParams>(r)!.name],
+        table.keys.toList());
+    final seeds = [
+      for (final r in rooms)
+        doc.tree
+            .accumulatedTransform(r)
+            .transformPoint(doc.components.get<RoomParams>(r)!.seed),
+    ];
+    // The rooms' own path: each face traced through a view of the plan, as
+    // `RoomType.generate` traces it.
+    final traces = probeView(doc, seeds: seeds).traces;
+    for (final (i, r) in rooms.indexed) {
+      final name = doc.components.get<RoomParams>(r)!.name;
+      final face = traces[i] as Traced;
+      expect(face.area, closeTo(table[name]!, 1e-2), reason: name);
+      expect(face.holes, hasLength(name == 'Living' ? 1 : 0),
+          reason: '$name: the column is Living\'s one hole');
+      // The heights at 1:50 (spec 10 D11): 2.5 and 2.0 mm on paper.
+      final [nameText, areaText] = labelsOf(doc, r);
+      expect(payloadOf(doc, nameText).scalars[0], 125.0, reason: name);
+      expect(payloadOf(doc, areaText).scalars[0], 100.0, reason: name);
+      // The label point, the anchor the name and the area sit about: inside
+      // the outer ring and inside no hole.
+      final a = anchorOf(doc, r) - seeds[i];
+      List<Vector2> relative(List<Vector2> ring) =>
+          [for (final q in ring) q - seeds[i]];
+      expect(pointInRing(a, relative(face.ring)), isTrue, reason: name);
+      for (final h in face.holes) {
+        expect(pointInRing(a, relative(h)), isFalse, reason: name);
+      }
+    }
   });
 }

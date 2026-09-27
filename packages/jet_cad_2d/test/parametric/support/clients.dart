@@ -85,7 +85,8 @@ RectParams? rectOf(ParametricView v, Handle h) =>
     v.paramsOf<Post>(h);
 
 /// `generate` calls per handle, counted by [RectType], [PostType],
-/// [PinType] and [TagType] (Ruling 08-2). Tests clear it.
+/// [PinType], [TagType] (Ruling 08-2) and the plan-10 clients (Ruling
+/// 10-2). Tests clear it.
 final Map<Handle, int> generateCalls = {};
 
 void _counted(Handle h) => generateCalls[h] = (generateCalls[h] ?? 0) + 1;
@@ -561,6 +562,683 @@ final class TagType extends ParametricType<Tag> {
   }
 }
 
+/// A text client (spec 10 D12, Ruling 10-2): one generated TEXT holding
+/// [text], centred on its insertion point ([x], [y]) in its own local
+/// space.
+final class Caption implements Component {
+  const Caption(this.text, this.x, this.y);
+  static const String id = 'test.caption';
+  final String text;
+  final double x, y;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'text': text, 'x': x, 'y': y};
+  static Caption fromJson(Map<String, Object?> j) => Caption(
+      j['text']! as String,
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Caption && o.text == text && o.x == x && o.y == y;
+  @override
+  int get hashCode => Object.hash(text, x, y);
+
+  /// Its TEXT's cap height, model mm.
+  static const double height = 250;
+
+  /// Its TEXT's justification: centre, middle (Ruling 10-14's literal).
+  static final int attrs =
+      packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.middle);
+}
+
+/// A [Caption]'s TEXT payload, in its own local space.
+GeometryPayload captionPayload(Caption p) =>
+    textPayload(Vector2(p.x, p.y), Caption.height);
+
+final class CaptionType extends ParametricType<Caption> {
+  const CaptionType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// A 1 mm box centred on the insertion point, in world.
+  @override
+  Aabb2 reach(Caption params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [
+          (-.5, -.5),
+          (.5, -.5),
+          (.5, .5),
+          (-.5, .5)
+        ])
+          toWorld.transformPoint(Vector2(params.x + dx, params.y + dy)),
+      ]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Caption>(self)!;
+    return [
+      Generated.text(captionPayload(p), p.text, textAttrs: Caption.attrs),
+    ];
+  }
+}
+
+/// An attributes client (spec 10 D13, Ruling 10-2): a 400 x 300 region, a
+/// plain LINE and two TEXTs at ([x], [y]) in its own local space, each
+/// record with attributes read from its parameters, so a test can tell
+/// "written on add" from "rewritten on a match".
+///
+/// [inherit] leaves the region's `boundaryFlags` unset and gives its fill
+/// `EntityFlags.invisible`, so the boundary must take the fill's flags
+/// (D13's default). Otherwise the fill's flags are 0 and the boundary's are
+/// `invisible`, which tells them apart.
+///
+/// The two TEXTs' strings, [first] and [second], change independently, so
+/// matching the i-th generated TEXT to the i-th existing one is observable
+/// (Task 1's review, rv1-idx). The first TEXT's flags are `invisible`, so
+/// a builder that drops the flags is observable on a TEXT too (rv1-flags).
+final class Swatch implements Component {
+  const Swatch(this.x, this.y, this.alpha, this.weight,
+      {this.first = 'Oak', this.second = 'Ash', this.inherit = false});
+  static const String id = 'test.swatch';
+  final double x, y;
+
+  /// The transparency of the region's two records and of the LINE.
+  final int alpha;
+
+  /// The LINE's lineweight.
+  final int weight;
+  final String first, second;
+  final bool inherit;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {
+        'x': x,
+        'y': y,
+        'alpha': alpha,
+        'weight': weight,
+        'first': first,
+        'second': second,
+        'inherit': inherit,
+      };
+  static Swatch fromJson(Map<String, Object?> j) => Swatch(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      j['alpha']! as int,
+      j['weight']! as int,
+      first: j['first']! as String,
+      second: j['second']! as String,
+      inherit: j['inherit']! as bool);
+  @override
+  bool operator ==(Object o) =>
+      o is Swatch &&
+      o.x == x &&
+      o.y == y &&
+      o.alpha == alpha &&
+      o.weight == weight &&
+      o.first == first &&
+      o.second == second &&
+      o.inherit == inherit;
+  @override
+  int get hashCode => Object.hash(x, y, alpha, weight, first, second, inherit);
+
+  static const double width = 400, height = 300;
+
+  /// Its TEXTs' cap height, model mm.
+  static const double textHeight = 60;
+
+  /// The first TEXT's justification: centre, middle (0x21).
+  static final int firstAttrs =
+      packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.middle);
+
+  /// The second TEXT's justification: right, top (0x32).
+  static final int secondAttrs =
+      packTextAttrs(h: TextJustifyH.right, v: TextJustifyV.top);
+}
+
+/// A [Swatch]'s rectangle, closed, in its own local space.
+GeometryPayload swatchLoop(Swatch p) => polylinePayload([
+      Vector2(p.x, p.y),
+      Vector2(p.x + Swatch.width, p.y),
+      Vector2(p.x + Swatch.width, p.y + Swatch.height),
+      Vector2(p.x, p.y + Swatch.height),
+    ], closed: true);
+
+/// A [Swatch]'s LINE: the rectangle's diagonal.
+GeometryPayload swatchLine(Swatch p) => linePayload(
+    Vector2(p.x, p.y), Vector2(p.x + Swatch.width, p.y + Swatch.height));
+
+/// A [Swatch]'s two TEXT payloads: at the centre, and below the rectangle.
+GeometryPayload swatchFirstText(Swatch p) => textPayload(
+    Vector2(p.x + Swatch.width / 2, p.y + Swatch.height / 2),
+    Swatch.textHeight);
+GeometryPayload swatchSecondText(Swatch p) =>
+    textPayload(Vector2(p.x + Swatch.width, p.y - 20), Swatch.textHeight);
+
+final class SwatchType extends ParametricType<Swatch> {
+  const SwatchType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// The rectangle, in world.
+  @override
+  Aabb2 reach(Swatch params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [
+          (0.0, 0.0),
+          (Swatch.width, 0.0),
+          (Swatch.width, Swatch.height),
+          (0.0, Swatch.height)
+        ])
+          toWorld.transformPoint(Vector2(params.x + dx, params.y + dy)),
+      ]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Swatch>(self)!;
+    return [
+      p.inherit
+          ? Generated.region(swatchLoop(p),
+              transparency: p.alpha, flags: EntityFlags.invisible)
+          : Generated.region(swatchLoop(p),
+              transparency: p.alpha,
+              flags: 0,
+              boundaryFlags: EntityFlags.invisible),
+      Generated(EntityKind.line, swatchLine(p),
+          transparency: p.alpha,
+          flags: EntityFlags.invisible,
+          linetype: ReservedHandles.continuousLinetype,
+          lineweight: p.weight),
+      Generated.text(swatchFirstText(p), p.first,
+          textAttrs: Swatch.firstAttrs, flags: EntityFlags.invisible),
+      Generated.text(swatchSecondText(p), p.second,
+          textAttrs: Swatch.secondAttrs),
+    ];
+  }
+}
+
+/// A 1 mm box centred on ([x], [y]) in an object's local space, in world:
+/// the reach of the page-key clients, which never reaches a neighbour's in
+/// the page tests.
+Aabb2 dotReach(double x, double y, Transform2 toWorld) => Aabb2.fromPoints([
+      for (final (dx, dy) in const [(-.5, -.5), (.5, -.5), (.5, .5), (-.5, .5)])
+        toWorld.transformPoint(Vector2(x + dx, y + dy)),
+    ]);
+
+/// A page-key client keyed on the page's scale (spec 10 D14, Ruling 10-2):
+/// one LINE from ([x], [y]) along its own local x axis, `10 x` the scale
+/// denominator long (500 with no page). [host], when set, is declared in
+/// `references` (policy `cascade`) and otherwise ignored, so a loaded
+/// Gauge can name a dead handle (Ruling 10-4).
+final class Gauge implements Component {
+  const Gauge(this.x, this.y, {this.host});
+  static const String id = 'test.gauge';
+  final double x, y;
+  final Handle? host;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'host': host?.toJson()};
+  static Gauge fromJson(Map<String, Object?> j) =>
+      Gauge((j['x']! as num).toDouble(), (j['y']! as num).toDouble(),
+          host: j['host'] == null ? null : Handle.fromJson(j['host']));
+  @override
+  bool operator ==(Object o) =>
+      o is Gauge && o.x == x && o.y == y && o.host == host;
+  @override
+  int get hashCode => Object.hash(x, y, host);
+
+  /// The key: the page's scale denominator, 50 with no page.
+  static double keyOf(PageComponent? page) => page?.scaleDenominator ?? 50;
+
+  /// [GaugeType.pageKey] calls, never reset: tests read deltas (spec 10
+  /// D14: a `pageKey` is called on a page-changing edit only; Task 3's
+  /// review, rv3-noShort).
+  static int pageKeyCalls = 0;
+}
+
+final class GaugeType extends ParametricType<Gauge> {
+  const GaugeType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Gauge params, Transform2 toWorld) =>
+      dotReach(params.x, params.y, toWorld);
+  @override
+  Iterable<Handle> references(Gauge params) =>
+      [if (params.host case final host?) host];
+  @override
+  Object? pageKey(PageComponent? page) {
+    Gauge.pageKeyCalls++;
+    return Gauge.keyOf(page);
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Gauge>(self)!;
+    final length = 10 * Gauge.keyOf(view.page);
+    return [
+      Generated(EntityKind.line,
+          linePayload(Vector2(p.x, p.y), Vector2(p.x + length, p.y))),
+    ];
+  }
+}
+
+/// A page-key client keyed on the page's display unit (spec 10 D14, Ruling
+/// 10-2): one LINE from ([x], [y]) along its own local x axis,
+/// `100 x (unit.index + 1)` long (300 with no page: metres).
+final class Dial implements Component {
+  const Dial(this.x, this.y);
+  static const String id = 'test.dial';
+  final double x, y;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y};
+  static Dial fromJson(Map<String, Object?> j) =>
+      Dial((j['x']! as num).toDouble(), (j['y']! as num).toDouble());
+  @override
+  bool operator ==(Object o) => o is Dial && o.x == x && o.y == y;
+  @override
+  int get hashCode => Object.hash(x, y);
+
+  /// The key: the page's display unit, metres with no page.
+  static DisplayUnit keyOf(PageComponent? page) =>
+      page?.displayUnit ?? DisplayUnit.meters;
+}
+
+final class DialType extends ParametricType<Dial> {
+  const DialType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Dial params, Transform2 toWorld) =>
+      dotReach(params.x, params.y, toWorld);
+  @override
+  Object? pageKey(PageComponent? page) => Dial.keyOf(page);
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Dial>(self)!;
+    final length = 100.0 * (Dial.keyOf(view.page).index + 1);
+    return [
+      Generated(EntityKind.line,
+          linePayload(Vector2(p.x, p.y), Vector2(p.x + length, p.y))),
+    ];
+  }
+}
+
+/// A dissolving client (spec 10 D15, Ruling 10-2): a [w] x [h] rectangle
+/// at ([x], [y]) in its own local space. It generates a region on the
+/// rectangle and a LINE on its diagonal, and dissolves when [burnt] is set
+/// or when a [ClipRect] neighbour covers its world centre: a verdict read
+/// from the after-view, as a room's is.
+final class Fuse implements Component {
+  const Fuse(this.x, this.y, this.w, this.h, {this.burnt = false});
+  static const String id = 'test.fuse';
+  final double x, y, w, h;
+  final bool burnt;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() =>
+      {'x': x, 'y': y, 'w': w, 'h': h, 'burnt': burnt};
+  static Fuse fromJson(Map<String, Object?> j) => Fuse(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['w']! as num).toDouble(),
+      (j['h']! as num).toDouble(),
+      burnt: j['burnt']! as bool);
+  @override
+  bool operator ==(Object o) =>
+      o is Fuse &&
+      o.x == x &&
+      o.y == y &&
+      o.w == w &&
+      o.h == h &&
+      o.burnt == burnt;
+  @override
+  int get hashCode => Object.hash(x, y, w, h, burnt);
+
+  /// [FuseType.dissolves] calls per handle. Tests clear it.
+  static final Map<Handle, int> dissolvesCalls = {};
+
+  /// When set, [FuseType.dissolves] throws (DV1's rollback case). Tests
+  /// reset it.
+  static bool fault = false;
+
+  /// The rectangle's corners, anticlockwise, in its own local space.
+  List<Vector2> get corners => [
+        Vector2(x, y),
+        Vector2(x + w, y),
+        Vector2(x + w, y + h),
+        Vector2(x, y + h),
+      ];
+
+  /// The rectangle's centre, in its own local space.
+  Vector2 get centre => Vector2(x + w / 2, y + h / 2);
+}
+
+final class FuseType extends ParametricType<Fuse> {
+  const FuseType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// The rectangle, in world.
+  @override
+  Aabb2 reach(Fuse params, Transform2 toWorld) => Aabb2.fromPoints(
+      [for (final c in params.corners) toWorld.transformPoint(c)]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Fuse>(self)!;
+    final c = p.corners;
+    return [
+      Generated.region(polylinePayload(c, closed: true)),
+      Generated(EntityKind.line, linePayload(c[0], c[2])),
+    ];
+  }
+
+  /// [Fuse.burnt], or a [ClipRect] neighbour holds the world centre
+  /// strictly inside (by `Tolerance.standard.linear`), read in the
+  /// neighbour's own local space.
+  @override
+  bool dissolves(ParametricView view, Handle self) {
+    Fuse.dissolvesCalls[self] = (Fuse.dissolvesCalls[self] ?? 0) + 1;
+    if (Fuse.fault) throw StateError('fuse fault');
+    final p = view.paramsOf<Fuse>(self);
+    if (p == null) return false;
+    if (p.burnt) return true;
+    final centre = view.toWorld(self).transformPoint(p.centre);
+    const tol = Tolerance.standard;
+    for (final n in view.neighbours(self)) {
+      final r = view.paramsOf<ClipRect>(n);
+      if (r == null) continue;
+      final q = view.toWorld(n).invert().transformPoint(centre);
+      if (q.x > tol.linear &&
+          q.x < r.width - tol.linear &&
+          q.y > tol.linear &&
+          q.y < r.height - tol.linear) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+/// One [SlabType.placeBox] call, as the view answered it (SV1-SV3), and
+/// the neighbour list the view answered for [self] (SD7: the list itself,
+/// not a copy).
+typedef SlabCall = ({
+  ParametricView view,
+  Handle self,
+  Slab? params,
+  Transform2 toWorld,
+  PageComponent? page,
+  List<Handle> neighbours,
+});
+
+/// A place contributor (spec 10 D16, Ruling 10-2): a [w] x [h] rectangle at
+/// ([x], [y]) in its own local space. Its reach is a 2 mm box centred on its
+/// first corner ([x], [y]); its place box is its whole rectangle's world box,
+/// grown by [Slab.growth] on every side while any neighbour is a
+/// [ClipRect]. So its place box differs from its reach (M-10cand) and depends
+/// on its neighbours at an end far from them (the two-hop, M-10nbr). It
+/// generates nothing.
+final class Slab implements Component {
+  const Slab(this.x, this.y, this.w, this.h);
+  static const String id = 'test.slab';
+  final double x, y, w, h;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'w': w, 'h': h};
+  static Slab fromJson(Map<String, Object?> j) => Slab(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['w']! as num).toDouble(),
+      (j['h']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Slab && o.x == x && o.y == y && o.w == w && o.h == h;
+  @override
+  int get hashCode => Object.hash(x, y, w, h);
+
+  /// How far a [ClipRect] neighbour grows the place box, mm.
+  static const double growth = 1000;
+
+  /// Every [SlabType.placeBox] call, in order. Tests clear it.
+  static final List<SlabCall> placeCalls = [];
+
+  /// The rectangle's corners, anticlockwise, in its own local space.
+  List<Vector2> get corners => [
+        Vector2(x, y),
+        Vector2(x + w, y),
+        Vector2(x + w, y + h),
+        Vector2(x, y + h),
+      ];
+}
+
+/// [p]'s rectangle, in world, grown by [Slab.growth] when [grown].
+Aabb2 slabBox(Slab p, Transform2 toWorld, {bool grown = false}) {
+  final box =
+      Aabb2.fromPoints([for (final c in p.corners) toWorld.transformPoint(c)]);
+  return grown ? box.expandedBy(Slab.growth) : box;
+}
+
+final class SlabType extends ParametricType<Slab> {
+  const SlabType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// A 2 mm box centred on the first corner, in world.
+  @override
+  Aabb2 reach(Slab params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [(-1, -1), (1, -1), (1, 1), (-1, 1)])
+          toWorld.transformPoint(Vector2(params.x + dx, params.y + dy)),
+      ]);
+
+  @override
+  bool get contributesPlace => true;
+
+  /// [slabBox], grown while any neighbour is a [ClipRect]. Records the call.
+  @override
+  Aabb2? placeBox(ParametricView view, Handle self) {
+    final p = view.paramsOf<Slab>(self);
+    final toWorld = view.toWorld(self);
+    final neighbours = view.neighbours(self);
+    Slab.placeCalls.add((
+      view: view,
+      self: self,
+      params: p,
+      toWorld: toWorld,
+      page: view.page,
+      neighbours: neighbours,
+    ));
+    if (p == null) return null;
+    return slabBox(p, toWorld,
+        grown: neighbours.any((n) => view.paramsOf<ClipRect>(n) != null));
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    return const [];
+  }
+}
+
+/// A place contributor that is a segment (spec 10 D16, Ruling 10-2), from
+/// ([ax], [ay]) to ([bx], [by]) in its own local space. Its reach and its
+/// place box are the segment's world box, independent of its neighbours. It
+/// generates nothing; a [Lens] draws its segment.
+///
+/// When [exact] is set, its place input is its world segment, compared
+/// element-wise (SD9, SD11); otherwise it keeps the default, "always
+/// changed" (T-2).
+final class Rod implements Component {
+  const Rod(this.ax, this.ay, this.bx, this.by, {this.exact = false});
+  static const String id = 'test.rod';
+  final double ax, ay, bx, by;
+  final bool exact;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() =>
+      {'ax': ax, 'ay': ay, 'bx': bx, 'by': by, 'exact': exact};
+  static Rod fromJson(Map<String, Object?> j) => Rod(
+      (j['ax']! as num).toDouble(),
+      (j['ay']! as num).toDouble(),
+      (j['bx']! as num).toDouble(),
+      (j['by']! as num).toDouble(),
+      exact: j['exact'] as bool? ?? false);
+  @override
+  bool operator ==(Object o) =>
+      o is Rod &&
+      o.ax == ax &&
+      o.ay == ay &&
+      o.bx == bx &&
+      o.by == by &&
+      o.exact == exact;
+  @override
+  int get hashCode => Object.hash(ax, ay, bx, by, exact);
+
+  /// The segment's two ends, in world.
+  (Vector2, Vector2) worldEnds(Transform2 toWorld) => (
+        toWorld.transformPoint(Vector2(ax, ay)),
+        toWorld.transformPoint(Vector2(bx, by)),
+      );
+}
+
+final class RodType extends ParametricType<Rod> {
+  const RodType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  Aabb2 _box(Rod p, Transform2 toWorld) {
+    final (a, b) = p.worldEnds(toWorld);
+    return Aabb2.fromPoints([a, b]);
+  }
+
+  @override
+  Aabb2 reach(Rod params, Transform2 toWorld) => _box(params, toWorld);
+
+  @override
+  bool get contributesPlace => true;
+
+  @override
+  Aabb2? placeBox(ParametricView view, Handle self) {
+    final p = view.paramsOf<Rod>(self);
+    return p == null ? null : _box(p, view.toWorld(self));
+  }
+
+  /// With [Rod.exact], the world segment as a record: `==` element by
+  /// element. Otherwise the default, a fresh object ("always changed").
+  @override
+  Object placeInput(ParametricView view, Handle self) {
+    final p = view.paramsOf<Rod>(self);
+    if (p == null || !p.exact) return super.placeInput(view, self);
+    final (a, b) = p.worldEnds(view.toWorld(self));
+    return (a.x, a.y, b.x, b.y);
+  }
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    return const [];
+  }
+}
+
+/// A place reader (spec 10 D16, Ruling 10-2) with a stored field: the
+/// rectangle [w] x [h] at ([x], [y]) in its own local space. It generates,
+/// for each contributor `view.placedIn` returns for its world field, a
+/// [Rod]'s segment as a LINE, or any other contributor's place box as a
+/// closed POLYLINE, world to its own local. Its reach is empty: no spatial
+/// relation finds it, only the trigger does. Its read box is `stored` and
+/// its world field, so an empty Lens still reads its field.
+final class Lens implements Component {
+  const Lens(this.x, this.y, this.w, this.h);
+  static const String id = 'test.lens';
+  final double x, y, w, h;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'w': w, 'h': h};
+  static Lens fromJson(Map<String, Object?> j) => Lens(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['w']! as num).toDouble(),
+      (j['h']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Lens && o.x == x && o.y == y && o.w == w && o.h == h;
+  @override
+  int get hashCode => Object.hash(x, y, w, h);
+}
+
+/// [p]'s field, in world.
+Aabb2 lensField(Lens p, Transform2 toWorld) => Aabb2.fromPoints([
+      for (final c in [
+        Vector2(p.x, p.y),
+        Vector2(p.x + p.w, p.y),
+        Vector2(p.x + p.w, p.y + p.h),
+        Vector2(p.x, p.y + p.h),
+      ])
+        toWorld.transformPoint(c),
+    ]);
+
+final class LensType extends ParametricType<Lens> {
+  const LensType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  @override
+  Aabb2 reach(Lens params, Transform2 toWorld) => Aabb2.empty();
+
+  @override
+  bool get readsPlaces => true;
+
+  @override
+  Aabb2 readBox(Lens params, Transform2 toWorld, Aabb2 stored) =>
+      stored.union(lensField(params, toWorld));
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Lens>(self)!;
+    final toWorld = view.toWorld(self);
+    final toLocal = toWorld.invert();
+    return [
+      for (final h in view.placedIn(lensField(p, toWorld)))
+        if (view.paramsOf<Rod>(h) case final rod?)
+          () {
+            final (a, b) = rod.worldEnds(view.toWorld(h));
+            return Generated(
+                EntityKind.line,
+                linePayload(
+                    toLocal.transformPoint(a), toLocal.transformPoint(b)));
+          }()
+        else
+          () {
+            final box = view.placeBoxOf(h)!;
+            return Generated(
+                EntityKind.polyline,
+                polylinePayload([
+                  for (final c in [
+                    Vector2(box.minX, box.minY),
+                    Vector2(box.maxX, box.minY),
+                    Vector2(box.maxX, box.maxY),
+                    Vector2(box.minX, box.maxY),
+                  ])
+                    toLocal.transformPoint(c),
+                ], closed: true));
+          }(),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -572,4 +1250,12 @@ ParametricCatalog testCatalog() => ParametricCatalog()
       RegionRect.id, RegionRect.fromJson, const RegionRectType())
   ..register<Post>(Post.id, Post.fromJson, const PostType())
   ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
-  ..register<Tag>(Tag.id, Tag.fromJson, const TagType());
+  ..register<Tag>(Tag.id, Tag.fromJson, const TagType())
+  ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType())
+  ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType())
+  ..register<Gauge>(Gauge.id, Gauge.fromJson, const GaugeType())
+  ..register<Dial>(Dial.id, Dial.fromJson, const DialType())
+  ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType())
+  ..register<Slab>(Slab.id, Slab.fromJson, const SlabType())
+  ..register<Rod>(Rod.id, Rod.fromJson, const RodType())
+  ..register<Lens>(Lens.id, Lens.fromJson, const LensType());

@@ -190,15 +190,17 @@ class SelectionOverlayPainter extends CustomPainter {
     if (hoverOnly != null) {
       _drawPointCross(canvas, hoverOnly, m, _hover, 3 * kHoverStrokePixels);
     }
+    final grips = tools.context.grips;
     if (preview != null) {
-      // A point has no path; its preview is its cross at T(p) (spec D7).
+      // A point has no path; its preview is its cross at T(p) (spec D7). A
+      // key the move leaves behind is not previewed (spec 10 D24, R-31).
       _previewPaint.strokeWidth = kPreviewStrokePixels;
       for (final key in selection.keys) {
+        if (grips?.isMovable(key) == false) continue;
         _drawPointCross(
             canvas, key, m, _previewPaint, 3 * kSelectionStrokePixels, preview);
       }
     }
-    final grips = tools.context.grips;
     if (grips != null) _paintGrips(canvas, grips, m, preview);
     tool.paintOverlay(canvas, cam, size);
     canvas.restore();
@@ -221,7 +223,12 @@ class SelectionOverlayPainter extends CustomPainter {
     canvas.save();
     canvas.clipRect(Offset.zero & size);
     canvas.transform(_preview);
+    // Only the keys the move moves (spec 10 D24, R-31): a key the grip cache
+    // calls immovable stays where it is, so its outline does not ride `T`.
+    // With no grip cache every key is drawn. One set lookup per key.
+    final grips = tools.context.grips;
     for (final key in selection.keys) {
+      if (grips?.isMovable(key) == false) continue;
       final path = outlines.pathFor(key, origin);
       if (path != null) canvas.drawPath(path, _previewPaint);
     }
