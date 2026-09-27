@@ -230,10 +230,11 @@ final class RoomInputs implements PlaceSource {
   /// The next query rebuilds the cache. The document's `changes` stream
   /// delivers only after the task that made a change, so whatever reads
   /// the cache in the task of an edit calls this first: it must never read
-  /// an input the document no longer has. The Room and Separator tools call
-  /// it at each click and again right after their `execute`; the separator
-  /// grips call it at release, before they trim, since they never execute
-  /// (the select tool executes the command they return).
+  /// an input the document no longer has. The Room tool calls it at its
+  /// click and again right after its `execute`; the Separator tool at its
+  /// second click, before the trim, and again right after its `execute`;
+  /// the separator grips at release, before they trim, since they never
+  /// execute (the select tool executes the command they return).
   void invalidate() {
     _stale = true;
     _generation++;

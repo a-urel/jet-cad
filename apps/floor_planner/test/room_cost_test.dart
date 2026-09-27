@@ -92,8 +92,8 @@ const int kSampleRebuildSegments = 50;
 
 void main() {
   test(
-      'LZ3 a room\'s rebuild on the sample plan traces fewer segments than '
-      'the bound set from the plan\'s run', () {
+      'LZ3 a room\'s rebuild on the sample plan traces no more segments '
+      'than the bound set from the plan\'s run', () {
     final m = FlutterTextMeasurer();
     addTearDown(m.clear);
 
