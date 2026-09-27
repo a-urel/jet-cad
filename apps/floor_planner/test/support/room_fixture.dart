@@ -1,9 +1,9 @@
-// Fixtures for rooms (spec 10's Testing section), ported from the spike's
-// `test/spike_rooms/support.dart`: plans written in plan millimetres, placed
-// at six placements (the origin, the corpus's far origin and +1e9 mm, turned
-// and not, with every wall and separator at the identity or in its own
-// rotated, translated group). Expected areas are hand arithmetic in the
-// tests; nothing here calls the tracer.
+// Fixtures for rooms (spec 10's Testing section), ported from the fixture
+// support file of branch `spike/10-rooms`: plans written in plan
+// millimetres, placed at six placements (the origin, the corpus's far origin
+// and +1e9 mm, turned and not, with every wall and separator at the identity
+// or in its own rotated, translated group). Expected areas are hand
+// arithmetic in the tests; nothing here calls the tracer.
 import 'dart:convert' show jsonDecode;
 import 'dart:math' as math;
 
