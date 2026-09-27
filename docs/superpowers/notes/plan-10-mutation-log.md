@@ -1,16 +1,43 @@
 # Plan 10 mutation log -- the spec's 51 mutants, the plan-owned additions and the tasks' extras
 
-**Tally: 361 mutants fired at `749c277` (Task 18, approved), each edit
-defined afresh against that tree and re-fired there, none copied from the
-ledger: 328 killed, 33 equivalent (fired, and they survive as argued or as
-ruled), 0 surviving at HEAD.** One spec mutant, `M-10hover`, survived at
-`749c277` and is killed after this task's fixture fix (`ee610fd`). Plus 4
-controls (M-10b's least-absolute-area form, and the degenerate rectangle
-under M-10a, M-10b and M-10c), which behave as the spec says, and 5
-re-fires after the first run (4 at the killer the first run's command
-missed, including `M-10hover` at the fixed `TT6`; 1 wider equivalence
-probe). 370 fires in all; 370 restores, every one `diff` exit 0 and
-`git diff --quiet` exit 0.
+**Tally, after fix round 1: 362 mutants fired, each edit defined afresh
+against `749c277` (Task 18, approved) and fired there, none copied from the
+ledger: 331 killed, 26 equivalent (fired, and they survive as argued or as
+ruled), 5 accepted (cost) (fired, green; they change only what the code
+costs, and a ruling accepts each), 0 surviving at HEAD, no false
+equivalent.** Four kills came after a fixture fix, each in its own commit:
+`M-10hover` (`ee610fd`, `TT6`), and, in fix round 1 (the audit of
+`d1a81d8`), `X11-feet` and `rv14b-splitOnce` (`4b12f65`, `RA1` and `DE1`),
+with `X14-sc-boxGuard` re-fired at the killer the first run missed
+(`SD6`). Plus 4 controls (M-10b's least-absolute-area form, and the
+degenerate rectangle under M-10a, M-10b and M-10c), which behave as the
+spec says, and 8 re-fires (5 after the first run: 4 at the killer the first
+run's command missed, including `M-10hover` at the fixed `TT6`, and 1 wider
+equivalence probe; 3 in fix round 1). 374 fires in all; 374 restores, every
+one `diff` exit 0 and `git diff --quiet` exit 0.
+
+**Fix round 1** (the audit of `d1a81d8`, which found no fabrication: its 69
+re-fires reproduced at the logged test and line). Its findings, fixed:
+
+- **I-1, three false equivalents.** `X14-sc-boxGuard` is byte-identical to
+  `X6-readAlways`, killed at `SD6` (`place_test.dart 704`, `(0, 2)` against
+  `(0, 0)`); the first run fired it at `RK1` only. `X11-feet` is not a
+  one-ulp no-op: at a tie it moves the label (28.12 against 28.13 ft² for
+  1,524 × 1,714.5 mm, exactly 28.125 ft²); `RA1` gains the case, red at
+  `room_label_test.dart 193`. `rv14b-splitOnce` is reached by a star of
+  1,002 small columns tied to one column; `DE1` gains it at all six
+  placements (1.9 s for the six, so all six were kept), red at
+  `room_tie_test.dart 428` (1,004 holes against 1,003).
+- **m-1.** `rv16-noMemo` is plan-10 code (the Room section's Area memo),
+  not a probe of 07/08 code: fired, green, accepted (cost). N/A is 16.
+- **m-2.** Cost-only survivors are listed as "accepted (cost)", each with
+  its ruling, not as equivalents.
+- **m-3.** The index repeated the spec table; fixed.
+
+The app gate after fix round 1, at `4b12f65` with this log's edit
+uncommitted: `01:24 +348: All tests passed!` (the new cases sit inside
+`RA1` and `DE1`); `flutter analyze` `No issues found!`; `dart format`
+81 files, 0 changed; `✓ Built build/web`; line exit 0.
 
 - **The spec's 51 named mutants:** one per site or form (Ruling
   10-26): M-10dissolve at three (the engine's planner in the spec's form
@@ -45,16 +72,16 @@ probe). 370 fires in all; 370 restores, every one `diff` exit 0 and
 - **The plan-owned additions** (decision 29, Tasks 14b and 14c): every
   `X14b-*` and `X14c-*` is killed (`DE1` for the 14b set, `TN1` for the
   14c set; `RG2` also kills `X14c-noSlitCheck`), and their reviewers'
-  extras are killed or equivalent as ruled.
-- **The tasks' extras:** 301 fired (the plan's `X1-` to `X18-` and every
+  extras are killed, equivalent or accepted (cost) as ruled.
+- **The tasks' extras:** 302 fired (the plan's `X1-` to `X18-` and every
   implementer's and reviewer's mutant the ledger names whose edit exists or
-  whose name determines it): 269 killed, 32 equivalent.
+  whose name determines it): 272 killed, 25 equivalent, 5 accepted (cost).
 - **Controls** (not counted): the degenerate rectangle under M-10a, M-10b
   and M-10c, and M-10b's least-absolute-area form. See "Controls".
-- **N/A, not fired: 17** mutants the ledger names whose edits were never
+- **N/A, not fired: 16** mutants the ledger names whose edits were never
   written down and whose names do not determine them (the Task 15 review's
   `O2`-`O9`, four variants of the Task 15 re-review, the Task 16 review's
-  five probes of pre-existing numeric-field code), and the reviews' probes
+  four probes of pre-existing numeric-field code), and the reviews' probes
   and proposed fixes, which are not mutants. See "N/A".
 
 **Reconciled with the ledger** (every ruling honoured, and where this run
@@ -89,7 +116,8 @@ disagrees with what the ledger recorded):
   - `rv13-degDxOnly` was fired first at `DG1` and the diagnostics file,
     and survived; its Task 13 review killer is `RL3` (the room with a
     `(5.5, NaN)` offset). Re-fired there: red.
-- **Two re-sited rules that are equivalent at HEAD:**
+- **A re-sited rule that is equivalent at HEAD, and a first-run
+  equivalence the audit refuted:**
   - `t10-holeLen` (Task 10's "a hole with fewer than 3 vertices is not a
     hole") became, in Task 14b, `if (!(areaOf(loop) < 0)) continue;`.
     Removing it survives `RT8`, and survives the whole trace, tie, tint,
@@ -101,10 +129,11 @@ disagrees with what the ledger recorded):
     equivalent too. `rv10-holeLen4` (the triangle hole), re-sited at the
     same rule, is killed (`RT8 635`).
   - `rv14b-splitOnce` (a loop that is not whole is kept only past 1,000
-    loops) survives `DE1`-`DE3` and the trace suite: it differs from the
-    code only on a walk that splits into more than 1,000 loops, which no
-    plan of this feature reaches. Equivalent by argument; no ruling
-    recorded it before.
+    loops) survived `DE1`-`DE3` and the trace suite at `749c277`, and the
+    first run argued it equivalent: "no plan of this feature reaches"
+    1,000 loops in one walk. That was wrong -- a room is not bounded in
+    islands, and a star of 1,002 tied columns reaches it in about 0.3 s a
+    placement. `DE1` now holds that star (`4b12f65`); the mutant is red.
 
 **Findings for the controller** (none changes code in `packages/`):
 
@@ -294,7 +323,7 @@ still sees M-10a and M-10b on it, which is the roadmap's M-10a trap turned
 round: the oracle, not the fixture, does the work there. The entries are
 under "Controls: the degenerate rectangle".
 
-## Equivalents (33, fired, green)
+## Equivalents (26, fired, green)
 
 Each fired against its task's killers or the whole file named, green; the
 ruling that made it so is named. None is new except where marked.
@@ -304,26 +333,40 @@ ruling that made it so is named. None is new except where marked.
 | `rv3-noLive`, `rv3-beforeLive` | Task 3 ruling: the `lost`/`touched`/`_closure` filter drops what the live filter would |
 | `X5-referrerFirst` | planned equivalent (Task 5), ruled |
 | `M-10inputbox (literal form)` | `Aabb2` has identity `==`: never equal, always changed (Task 6 ruling) |
-| `rv7-wide` | a cost mutant under `SD7`'s bound; Task 7 m-1 accepted ("one size proves not quadratic") |
-| `t7-noContribFilter` | a memo entry only (Task 7) |
+| `t7-noContribFilter` | a memo entry only: `placeBoxOf` never asks a non-contributor's type (Task 7) |
 | `rv8-askAll` | the preview only asks keys with an outline (Task 8 review) |
 | `X10-noSweepReject` | no answer changes (planned, Task 10) |
 | `t10-freeSep`, `rv10-noSign` | subsumed by the vertex-count rule, then by Task 14b's split (Task 10 re-review) |
 | `rv10-noPreRotate`, `rv10-collinearNoAlong` | Task 10 review |
 | `t10-holeLen` (re-sited) | **new at HEAD**: argued in the header; green over seven commands |
-| `X11-feet` | a one-ulp difference no label shows (planned, Task 11) |
 | `t11-noFinal` (= `t14f-firstCert`) | equivalent on every fixture (Tasks 11 and 14) |
 | `rv12-tintSeedW` | exact up to rounding (Task 12 review) |
 | `rv13-noFiniteSkip`, `rv13-sharedNoSelfSeedW`, `rv13-tintReportLocalSeed` | Task 13 review |
 | `t13-noLocalTri` | unreachable honestly (Task 13 ruling; the seam exercises the guard) |
-| `X14-sc-runReturn`, `X14-sc-seedGuard`, `X14-sc-boxGuard` | each alone: the other two guards back it up (Task 14 finding); the three together are killed (`RK1`) |
 | `rv14b-holesPositive`, `rv14b-holeSortFirst` | Task 14b review |
-| `rv14b-splitOnce` | **new at HEAD**: argued in the header |
-| `rv14c-endOnEndAOnly`, `rv14c-endOnEndBOnly`, `rv14c-noSkipSame` | Task 14c re-reviews (the last a cost) |
+| `rv14c-endOnEndAOnly`, `rv14c-endOnEndBOnly` | Task 14c re-review |
 | `rv15f-worldFrame`, `rv15f-dropTrees` | Task 15 re-review |
 | `X18-pageLate`, `rv18-pageAfterDispose` | byte-identical encoding: the fallback page is 1:50 m (Task 18 and its review) |
 
-**Reclassified killed:** `rv13-exactStep` (see the header).
+## Accepted (cost) (5, fired, green)
+
+Each changes what the code costs, not what it answers; no test pins that
+cost, and a ruling accepts it.
+
+| mutant | the cost | ruling |
+|---|---|---|
+| `rv7-wide` | the sweep's window 1.5 mm wider: more pair tests, under `SD7`'s bound | Task 7 m-1 ("one size proves not quadratic") |
+| `X14-sc-runReturn` | an edit that touches no object builds the after-view and plans an empty closure | Task 14's finding (the three guards back each other up; the three together are killed at `RK1`), fix round 1's m-2 |
+| `X14-sc-seedGuard` | an edit with no seeds builds the before-view and walks an empty K | the same |
+| `rv14c-noSkipSame` | the same slit is checked twice | Task 14c re-review |
+| `rv16-noMemo` | the Room section scans the live slots for the Area on every rebuild | fix round 1's m-1 |
+
+**Reclassified killed:** `rv13-exactStep` (see the header), and, in fix
+round 1 (the audit of `d1a81d8`), three the first run called equivalent:
+`X14-sc-boxGuard` (the same edit as `X6-readAlways`; red at `SD6`, which
+the first run did not fire), `X11-feet` (not a no-op at a tie; `4b12f65`
+adds `RA1`'s tie case, red) and `rv14b-splitOnce` (a star of 1,002 tied
+columns reaches it; `4b12f65` adds it to `DE1`, red).
 
 ## N/A (not fired)
 
@@ -338,8 +381,10 @@ command line that was not kept):
   forms `t15f-parity`, `rv15f-onePass`, `t15f-singlePass` are fired and
   killed);
 - the Task 16 review's `numNoValid`, `isTextPos`, `numShowStr`,
-  `loadNoValue`, `noMemo` (5): probes of the numeric fields' pre-existing
-  code (07/08 `SE`, `WS`, `OS` tests), not of a plan-10 rule.
+  `loadNoValue` (4): probes of the numeric fields' pre-existing code (07/08
+  `SE`, `WS`, `OS` tests), not of a plan-10 rule. (Its `noMemo` is plan-10
+  code, the Room section's Area memo: fired in fix round 1, accepted
+  (cost).)
 
 Not mutants, and so not fired: the reviews' probes and proposed fixes --
 `rv7-countFirst`/`countFirstCont` (Task 7 I-1's fix, adopted),
@@ -362,6 +407,12 @@ sits 24 lower and one from 580 on sits 19 lower (e.g. `M-10hoverunion`'s
 `TT5`) do not move. `d255acb` adds one line to `room_inputs.dart` at 233,
 so an edit's diff line there from 234 on sits one lower; no test line
 moves (`LZ3`'s rename keeps its line count).
+
+Fix round 1's `4b12f65` inserts 17 lines into `room_label_test.dart` after
+line 178 (`RA1`'s end; no line cited above moves) and 66 into
+`room_tie_test.dart` after line 367 (`DE1`'s end): a cited
+`room_tie_test.dart` line from 368 on sits 66 lower (`DE2`'s 379 is 445,
+`DE3`'s 505 is 571). The fix round's own red lines are read at `4b12f65`.
 
 ## Part B -- invariants and greps
 
@@ -481,63 +532,10 @@ The engine's two reds are the standing hash tests
 standing `text_ladder` rungs 1-5 and `text_lod_ladder` rungs 1-2, plus its
 one skip: nothing else.
 
-## Every other mutant, indexed (301 extras)
+## Every other mutant, indexed (302 extras)
 
 The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is a kill; `EQUIV-*` = expected green), each command, and the final disposition. Their entries follow, by task.
 
-| # | mutant | first fired (task) | killers the plan names | fired at 749c277: site / form -> each command, exit, first red location | status |
-|---|---|---|---|---|---|
-| 1 | M-10f | 1 | RG3, TX1, RA2 | `M-10f` KILLED: RG3 red (room_follow_test.dart 266), TX1 red (text_test.dart 73), RA2 red (room_object_test.dart 559) | killed |
-| 2 | M-10textadd | 1 | TX1, RG1 | `M-10textadd` KILLED: TX1 red (text_test.dart 39), RG1 red (room_object_test.dart 209) | killed |
-| 3 | M-10attrs | 2 | AT1, RG1 | `M-10attrs` KILLED: AT1 red (attributes_test.dart 124), RG1 red (room_object_test.dart 203) | killed |
-| 4 | M-10page | 3 | PG1, RA2 | `M-10page` KILLED: PG1 red (page_test.dart 146), RA2 red (room_object_test.dart 578) | killed |
-| 5 | M-10pagekey | 3 | PG2 (engine); RA2 (room, Task 12) | `M-10pagekey@engine` KILLED: PG2 red (page_test.dart 334)<br>`M-10pagekey@room` PARTIAL: RA2 red (room_object_test.dart 589), room_object_test.dart red (room_object_test.dart 589), RN6 green | killed |
-| 6 | M-10pagelate | 3 | PG1 | `M-10pagelate` KILLED: PG1 red (page_test.dart 146) | killed |
-| 7 | M-10dissolve | 4 | DV1, RD1-RD3 | `M-10dissolve@engine` KILLED: DV1 red (dissolve_test.dart 187), RD1 red (room_dissolve_test.dart 533), RD2 red (room_dissolve_test.dart 567), RD3 red (room_dissolve_test.dart 602)<br>`M-10dissolve@engine-noAsk` KILLED: DV1 red (dissolve_test.dart 172)<br>`M-10dissolve@room` KILLED: RD1 red (room_dissolve_test.dart 533), RD2 red (room_dissolve_test.dart 567), RD3 red (room_dissolve_test.dart 602), DF1 red (room_follow_test.dart 693) | killed |
-| 8 | M-10detach | 4 | DV1 | `M-10detach` KILLED: DV1 red (dissolve_test.dart 187) | killed |
-| 9 | M-10snap | 5 | SV1-SV3, SD3 | `M-10snap` KILLED: SV1 red (before_view_test.dart 92), SV2 red (before_view_test.dart 118), SV3 red (before_view_test.dart 140), SD3 red (place_test.dart 368) | killed |
-| 10 | M-10nbr | 5 | RS6, SD4 | `M-10nbr@engine` KILLED: RS6 red (room_follow_test.dart 537), SD4 red (place_test.dart 416) | killed |
-| 11 | M-10before | 5 | SD2, RD4, RD8 | `M-10before@engine` KILLED: SD2 red (place_test.dart 346), RD4 red (room_dissolve_test.dart 633), RD8 red (room_dissolve_test.dart 764) | killed |
-| 12 | M-10e | 5 | RG3, SD5 | `M-10e` KILLED: RG3 red (room_follow_test.dart 267), SD5 red (place_test.dart 453) | killed |
-| 13 | M-10cand | 5 | SD1, RG1, SP7 | `M-10cand` KILLED: SD1 red (place_test.dart 306), RG1 red (room_object_test.dart 173), SP7 red (startup_plan_test.dart 541) | killed |
-| 14 | M-10allK | 6 | SD9 | `M-10allK` KILLED: SD9 red (place_test.dart 781) | killed |
-| 15 | M-10inputbox | 6 | SD11 | `M-10inputbox` KILLED: SD11 red (place_test.dart 865)<br>`M-10inputbox (literal form)` EQUIV-GREEN: place_test.dart green | killed (the spec's value form); the literal form is equivalent (Aabb2 has identity ==, ruled at Task 6) |
-| 16 | M-10bulk | 7 | SD7 | `M-10bulk` KILLED: SD7 red (place_test.dart 552) | killed |
-| 17 | M-10ring | 8 | OL1, OL4 | `M-10ring@render` KILLED: OL1 red (outline_cache_test.dart 527), OL4 red (room_paint_test.dart 578) | killed |
-| 18 | M-10ringdup | 8 | OL2 | `M-10ringdup` KILLED: OL2 red (outline_cache_test.dart 632) | killed |
-| 19 | M-10preview | 8 | OL5 | `M-10preview@path` KILLED: OL5 red (selection_overlay_test.dart 711)<br>`M-10preview@cross` KILLED: OL5 red (selection_overlay_test.dart 716) | killed |
-| 20 | M-10a | 10 | RT1, RT7, SP7 | `M-10a` KILLED: RT1 red (room_trace_test.dart 208), RT7 red (room_trace_test.dart 497), SP7 red (startup_plan_test.dart 555) | killed |
-| 21 | M-10b | 10 | RT1, RT2 | `M-10b` KILLED: RT1 red (room_trace_test.dart 208), RT2 red (room_trace_test.dart 257)<br>`M-10b-abs (control: revision 1's least absolute area)` EQUIV-GREEN: RT1 green, RT2 green | killed; the least-absolute-area form is the spec's equivalent control, green as the spec says |
-| 22 | M-10d | 10 | RT1, RT2 | `M-10d` KILLED: RT1 red (room_trace_test.dart 29), RT2 red (room_trace_test.dart 29) | killed |
-| 23 | M-10holes | 10 | RT3, RT4, SP7 | `M-10holes` KILLED: RT3 red (room_trace_test.dart 275), RT4 red (room_trace_test.dart 326), SP7 red (startup_plan_test.dart 555) | killed |
-| 24 | M-10holesign | 10 | RT3 | `M-10holesign` KILLED: RT3 red (room_trace_test.dart 275) | killed |
-| 25 | M-10seedface | 10 | RT4 | `M-10seedface` KILLED: RT4 red (room_trace_test.dart 350) | killed |
-| 26 | M-10local | 10 | RT1 | `M-10local` KILLED: RT1 red (room_trace_test.dart 208) | killed |
-| 27 | M-10tol | 10 | RT1 | `M-10tol` KILLED: RT1 red (room_trace_test.dart 208) | killed |
-| 28 | M-10sep | 10 | RT8, SP7 | `M-10sep@tracer` KILLED: RT8 red (room_trace_test.dart 566), SP7 red (startup_plan_test.dart 555)<br>`M-10sep@inputs` KILLED: RT8 red (room_trace_test.dart 566), SP7 red (startup_plan_test.dart 555) | killed |
-| 29 | M-10cert | 11 | LZ2 (app level: FZ1, LZ2, ruling at Task 14's re-review; DF1 fired, green as ruled) | `M-10cert` PARTIAL: LZ2 red (room_localise_test.dart 424), FZ1 red (room_follow_test.dart 935), DF1 green | killed (LZ2, FZ1); DF1 green, as ruled at Task 14's re-review |
-| 30 | M-10c | 11 | RL1 | `M-10c` KILLED: RL1 red (room_label_test.dart 88) | killed |
-| 31 | M-10centroid | 11 | RL1 | `M-10centroid` KILLED: RL1 red (room_label_test.dart 88) | killed |
-| 32 | M-10tintcolour | 12 | RR3, RG1 | `M-10tintcolour` KILLED: RR3 red (room_paint_test.dart 459), RG1 red (room_object_test.dart 189) | killed |
-| 33 | M-10offset | 12 | GR1, RL3 | `M-10offset@generate` KILLED: GR1 red (room_grips_test.dart 264), RL3 red (room_object_test.dart 441)<br>`M-10offset@grip` PARTIAL: GR1 red (room_grips_test.dart 252), RL3 green | killed at both sites (RL3 reaches only the generate site, as expected) |
-| 34 | M-10offsetref | 12 | RL3 | `M-10offsetref` KILLED: RL3 red (room_object_test.dart 441) | killed |
-| 35 | M-10slit | 13 | RG2, SP5 | `M-10slit` KILLED: RG2 red (room_dissolve_test.dart 195), SP5 red (startup_plan_test.dart 486) | killed |
-| 36 | M-10shared | 13 | RS4, RD5 | `M-10shared` KILLED: RS4 red (room_follow_test.dart 400), RD5 red (room_dissolve_test.dart 669) | killed |
-| 37 | M-10share2 | 13 | DG1 | `M-10share2` KILLED: DG1 red (room_diagnostics_test.dart 99) | killed |
-| 38 | M-10objects | 13 | DG1 | `M-10objects` KILLED: DG1 red (room_diagnostics_test.dart 99) | killed |
-| 39 | M-10name | 15 | TT4 | `M-10name` KILLED: TT4 red (room_tool_test.dart 485) | killed |
-| 40 | M-10occupied | 15 | TT3 | `M-10occupied` KILLED: TT3 red (room_tool_test.dart 444) | killed |
-| 41 | M-10seedsnap | 15 | TT5 | `M-10seedsnap` KILLED: TT5 red (room_tool_test.dart 512) | killed |
-| 42 | M-10notice | 15 | TT7 | `M-10notice` KILLED: TT7 red (room_tool_test.dart 700) | killed |
-| 43 | M-10hover | 15 | TT6 | `M-10hover` SURVIVED: TT6 green<br>`M-10hover (after TT6's fix)` KILLED: TT6 red (room_tool_test.dart 555) | killed after Task 19's TT6 fix (`ee610fd`); survived TT6 at 749c277 |
-| 44 | M-10hoverunion | 15 | TT6 | `M-10hoverunion` KILLED: TT6 red (room_tool_test.dart 548) | killed |
-| 45 | M-10trim | 15 | ST2 (the tool), GR5 (the grips) | `M-10trim (trimSeparator: the tool and the grips)` KILLED: ST2 red (separator_tool_test.dart 260), GR5 red (room_grips_test.dart 532) | killed |
-| 46 | M-10pin | 16 | RN4 | `M-10pin (the shared _commit site)` KILLED: RN4 red (room_panel_test.dart 293), RN5 red (room_panel_test.dart 382), OS2 red (opening_panel_test.dart 371), WS7 red (selection_panel_test.dart 557)<br>`M-10pin (Room-only variant)` KILLED: RN4 red (room_panel_test.dart 293) | killed |
-| 47 | M-10movable | 17 | GR4 | `M-10movable` KILLED: GR4 red (room_grips_test.dart 436) | killed |
-| 48 | M-10gripframe | 17 | GR6 | `M-10gripframe` KILLED: GR6 red (room_grips_test.dart 636) | killed |
-| 49 | M-10grow | 18 | LZ3 | `M-10grow (all-inputs form)` KILLED: LZ3 red (room_cost_test.dart 144)<br>`M-10grow (infinite first box)` KILLED: LZ3 red (room_cost_test.dart 144) | killed |
-| 50 | M-10visible | 18 | RR1 | `M-10visible` KILLED: RR1 red (room_paint_test.dart 358) | killed |
-| 51 | M-10tintalpha | 18 | RR2 | `M-10tintalpha` KILLED: RR2 red (room_paint_test.dart 432) | killed |
 | mutant | verdict at 749c277 | each command: exit, first red location | final |
 |---|---|---|---|
 | `X1-plain` | KILLED | TX1 red (text_test.dart 123) | killed |
@@ -606,7 +604,7 @@ The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is
 | `rv7-sortMax` | KILLED | SD7 red (place_test.dart 568) | killed |
 | `rv7-le` | KILLED | SD7 red (place_test.dart 568) | killed |
 | `rv7-objAll` | KILLED | OB1 red (objects_of_test.dart 111) | killed |
-| `rv7-wide` | EQUIV-GREEN | SD7 green | equivalent (green, as ruled) |
+| `rv7-wide` | EQUIV-GREEN | SD7 green | accepted (cost): Task 7 ruling m-1 |
 | `t7-sweepNarrow` | KILLED | SD7 red (place_test.dart 568) | killed |
 | `t7-sweepNoY` | KILLED | SD7 red (place_test.dart 568) | killed |
 | `t7-sweepOneSide` | KILLED | SD7 red (place_test.dart 568) | killed |
@@ -684,7 +682,7 @@ The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is
 | `X11-noUnion` | KILLED | LZ1 red (room_localise_test.dart 353); room_localise_test.dart red (room_localise_test.dart 353) | killed |
 | `X11-ringOnly` | KILLED | TN1 red (room_tint_test.dart 335) | killed |
 | `X11-comma` | KILLED | RA1 red (room_label_test.dart 175) | killed |
-| `X11-feet` | EQUIV-GREEN | RA1 green; RA2 green | equivalent (green, as ruled) |
+| `X11-feet` | EQUIV-GREEN | RA1 green; RA2 green | killed after `4b12f65`: RA1's tie case red (room_label_test.dart 193) |
 | `t11-viewBoundsNull` | KILLED | room_localise_test.dart red (room_localise_test.dart 346) | killed |
 | `t11-docBoundsNull` | KILLED | room_localise_test.dart red (room_localise_test.dart 346) | killed |
 | `t11-slitLeft` | KILLED | room_tint_test.dart red (room_tint_test.dart 259) | killed |
@@ -748,9 +746,9 @@ The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is
 | `t13-noStep2` | KILLED | RG2 red (room_dissolve_test.dart 218); room_tint_test.dart red (room_tint_test.dart 471) | killed |
 | `t13-noRingTest` | KILLED | room_diagnostics_test.dart red (room_diagnostics_test.dart 241); room_dissolve_test.dart red (room_dissolve_test.dart 211) | killed |
 | `X14-noShortCircuit (three sites)` | KILLED | RK1 red (room_cost_test.dart 210) | killed |
-| `X14-sc-runReturn` | EQUIV-GREEN | RK1 green | equivalent (green, as ruled) |
-| `X14-sc-seedGuard` | EQUIV-GREEN | RK1 green | equivalent (green, as ruled) |
-| `X14-sc-boxGuard` | EQUIV-GREEN | RK1 green | equivalent (green, as ruled) |
+| `X14-sc-runReturn` | EQUIV-GREEN | RK1 green | accepted (cost): Task 14 finding (the guards back each other up), fix round 1's ruling m-2 |
+| `X14-sc-seedGuard` | EQUIV-GREEN | RK1 green | accepted (cost): Task 14 finding, fix round 1's ruling m-2 |
+| `X14-sc-boxGuard` | EQUIV-GREEN | RK1 green | killed: re-fired at SD6, red (place_test.dart 704); = `X6-readAlways` |
 | `rv14-noStep3` | SURVIVED | FZ1 green | killed (re-fire: TN1, RG2, DG3) |
 | `t14f-unit` | KILLED | DF1 red (room_follow_test.dart 755); RA2 red (room_object_test.dart 559) | killed |
 | `t14f-outerArea` | KILLED | DF1 red (room_follow_test.dart 755); FZ1 red (room_follow_test.dart 936); RS2 red (room_follow_test.dart 335) | killed |
@@ -764,7 +762,7 @@ The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is
 | `rv14b-noOuterSplit` | KILLED | DE1 red (room_tie_test.dart 192); DE2 red (room_tie_test.dart 379); DE3 red (room_tie_test.dart 505); room_trace_test.dart red (room_trace_test.dart 590) | killed |
 | `rv14b-noHoleSplit` | PARTIAL | DE1 red (room_tie_test.dart 291); DE2 green; DE3 green; room_trace_test.dart red (room_trace_test.dart 618) | killed |
 | `rv14b-holeSortFirst` | EQUIV-GREEN | DE1 green; DE2 green; DE3 green; room_trace_test.dart green | equivalent (green, as ruled) |
-| `rv14b-splitOnce` | SURVIVED | DE1 green; DE2 green; DE3 green; room_trace_test.dart green | equivalent (argued: needs over 1,000 loops) |
+| `rv14b-splitOnce` | SURVIVED | DE1 green; DE2 green; DE3 green; room_trace_test.dart green | killed after `4b12f65`: DE1's star red (room_tie_test.dart 428) |
 | `X14c-noSlitCheck` | KILLED | TN1 red (room_tint_test.dart 399); RG2 red (room_dissolve_test.dart 396) | killed |
 | `X14c-noSectorH` | PARTIAL | TN1 red (room_tint_test.dart 403); RG2 green | killed |
 | `X14c-noSectorV` | PARTIAL | TN1 red (room_tint_test.dart 412); RG2 green | killed |
@@ -776,7 +774,7 @@ The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is
 | `rv14c-endOnEndTight` | PARTIAL | TN1 red (room_tint_test.dart 660); RG2 green | killed |
 | `rv14c-noSecondClear` | KILLED | TN1 red (room_tint_test.dart 446) | killed |
 | `rv14c-bisectAlways` | KILLED | TN1 red (room_tint_test.dart 714) | killed |
-| `rv14c-noSkipSame` | EQUIV-GREEN | TN1 green; RG2 green | equivalent (green, as ruled) |
+| `rv14c-noSkipSame` | EQUIV-GREEN | TN1 green; RG2 green | accepted (cost): Task 14c re-review |
 | `X15-stale` | KILLED | TT6 red (room_tool_test.dart 607) | killed |
 | `X15-predict` | KILLED | TT1 red (room_tool_test.dart 78) | killed |
 | `X15-guardMS` | KILLED | SG1 red (room_tool_test.dart 888); RN3 red (room_panel_test.dart 248) | killed |
@@ -811,6 +809,7 @@ The verdict at `749c277` from the driver (`PARTIAL` = some command red, which is
 | `rv16-loadNoValueRoom` | KILLED | RN2 red (room_panel_test.dart 209) | killed |
 | `rv16-suffixMm` | KILLED | RN1 red (room_panel_test.dart 155) | killed |
 | `rv16-numKbd` | KILLED | RN1 red (room_panel_test.dart 154) | killed |
+| `rv16-noMemo` | EQUIV-GREEN (fix round 1) | room_panel_test.dart green | accepted (cost): fix round 1's ruling m-1 |
 | `X17-autoGate` | KILLED | GR2 red (room_grips_test.dart 379) | killed |
 | `X17-noNull` | KILLED | GR1 red (room_grips_test.dart 279) | killed |
 | `X17-moveSep` | KILLED | GR5 red (room_grips_test.dart 492) | killed |
@@ -3224,7 +3223,7 @@ The Task 6 review's `rv6-o-slabIn`/`rv6-n-slabIn` fragments.
   00:00 +1: All tests passed!
   ```
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** EQUIV-GREEN (0 of 1 commands red).
+- **result:** EQUIV-GREEN (0 of 1 commands red). Final: accepted (cost), Task 7 ruling m-1.
 
 #### t7-sweepNarrow — the window narrowed by one tolerance
 
@@ -5929,7 +5928,7 @@ Task 11's `t11-sites/` fragment, re-applied at HEAD.
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_label.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
 
-#### X11-feet — 304.8 squared as an integer product (equivalent, planned: a one-ulp difference no label shows)
+#### X11-feet — 304.8 squared as an integer product (planned equivalent; killed after fix round 1)
 
 Task 11's `t11-sites/` fragment, re-applied at HEAD.
 
@@ -5953,7 +5952,7 @@ Task 11's `t11-sites/` fragment, re-applied at HEAD.
   00:00 +1: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_label.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** EQUIV-GREEN (0 of 2 commands red).
+- **result:** EQUIV-GREEN (0 of 2 commands red). The planned "one-ulp difference no label shows" is wrong at a tie (fix round 1, the audit's I-1): re-fired at `RA1`'s new tie case, red (`r1-X11-feet`). Final: killed.
 
 #### t11-viewBoundsNull — the view source's U is null
 
@@ -8087,7 +8086,7 @@ Task 14's `t14-mutants.json` entry.
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
 
-#### X14-sc-runReturn — `_run`'s early return removed alone (equivalent alone: the other two guards back it up, Task 14 finding)
+#### X14-sc-runReturn — `_run`'s early return removed alone (accepted (cost): the other two guards back it up, Task 14 finding)
 
 - **file:** `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; backup `t19-X14-sc-runReturn-regeneration.dart`
 - **edit** (`diff <backup> <file>`):
@@ -8102,9 +8101,9 @@ Task 14's `t14-mutants.json` entry.
   00:00 +1: All tests passed!
   ```
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** EQUIV-GREEN (0 of 1 commands red).
+- **result:** EQUIV-GREEN (0 of 1 commands red). Final: accepted (cost): Task 14's finding, fix round 1's ruling m-2.
 
-#### X14-sc-seedGuard — `_triggered`'s seed guard removed alone (equivalent alone, Task 14 finding)
+#### X14-sc-seedGuard — `_triggered`'s seed guard removed alone (accepted (cost), Task 14 finding)
 
 - **file:** `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; backup `t19-X14-sc-seedGuard-regeneration.dart`
 - **edit** (`diff <backup> <file>`):
@@ -8121,9 +8120,9 @@ Task 14's `t14-mutants.json` entry.
   00:00 +1: All tests passed!
   ```
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** EQUIV-GREEN (0 of 1 commands red).
+- **result:** EQUIV-GREEN (0 of 1 commands red). Final: accepted (cost): Task 14's finding, fix round 1's ruling m-2.
 
-#### X14-sc-boxGuard — `_triggered`'s empty-L return removed alone (equivalent alone, Task 14 finding)
+#### X14-sc-boxGuard — `_triggered`'s empty-L return removed alone (called equivalent at Task 14; = X6-readAlways, killed at SD6)
 
 - **file:** `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; backup `t19-X14-sc-boxGuard-regeneration.dart`
 - **edit** (`diff <backup> <file>`):
@@ -8138,7 +8137,7 @@ Task 14's `t14-mutants.json` entry.
   00:00 +1: All tests passed!
   ```
 - **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** EQUIV-GREEN (0 of 1 commands red).
+- **result:** EQUIV-GREEN (0 of 1 commands red). Not equivalent: the edit is `X6-readAlways`'s; re-fired at `SD6`, red (`r1-X14-sc-boxGuard`). Final: killed.
 
 #### rv14-noStep3 — step 3 reported as step 2 (Task 14 review: FZ1's sole killer)
 
@@ -8742,7 +8741,7 @@ The Task 14b review's `rv14b-mutants.json` entry.
   00:00 +8: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_trace.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** SURVIVED (0 of 4 commands red). Equivalent by argument: it differs only past 1,000 loops in one walk. Final: equivalent.
+- **result:** SURVIVED (0 of 4 commands red). Not equivalent (fix round 1, the audit's I-1): re-fired at `DE1`'s new star, red (`r1-rv14b-splitOnce`). Final: killed.
 
 #### X14c-noSlitCheck — the slit's clear check dropped (plan-owned, Task 14c)
 
@@ -9067,7 +9066,7 @@ Reconstructed at HEAD from its name and the ledger (the edit was passed on the c
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_trace.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** KILLED (1 of 1 commands red).
 
-#### rv14c-noSkipSame — the same slit re-checked (equivalent: cost only, Task 14c re-review)
+#### rv14c-noSkipSame — the same slit re-checked (accepted (cost), Task 14c re-review)
 
 Reconstructed at HEAD from its name and the ledger (the edit was passed on the command line and not kept).
 
@@ -9089,7 +9088,7 @@ Reconstructed at HEAD from its name and the ledger (the edit was passed on the c
   00:00 +1: All tests passed!
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_trace.dart`; `diff` exit 0; `git diff --quiet` exit 0.
-- **result:** EQUIV-GREEN (0 of 2 commands red).
+- **result:** EQUIV-GREEN (0 of 2 commands red). Final: accepted (cost), Task 14c re-review.
 
 
 ### Tasks 15-18 -- the app: tools, the Room section, grips, the sample plan
@@ -11624,4 +11623,109 @@ Fix: TT6 first hovers its four points outside the bounding box on a fresh genera
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_label.dart`; `diff` exit 0; `git diff --quiet` exit 0.
 - **result:** SURVIVED (0 of 2 commands red).
+
+### Fix round 1 (the audit of `d1a81d8`)
+
+Fired at `4b12f65` (the two new test cases committed; the library files as at `749c277`), with a clean worktree before and after. Each command was baselined on that tree (`t19-baseline-r1.txt`): all five exit 0, each narrowed one `+1`, `room_panel_test.dart` `+8`.
+
+#### r1-X14-sc-boxGuard (at SD6; = X6-readAlways) — `_triggered`'s empty-L return removed, re-fired at SD6 (fix round 1, the audit's I-1)
+
+Byte-identical to `X6-readAlways`, killed at `SD6` in Task 6. The first run fired it at `RK1` only, and so called it equivalent.
+
+- **file:** `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; backup `t19-r1-X14-sc-boxGuard__at_SD6____X6-readAlways_-regeneration.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  341d340
+  <   if (boxes.isEmpty) return const [];
+  ```
+- **command:** `(cd packages/jet_cad_2d && CI=true dart test test/parametric/place_test.dart --plain-name 'SD6 ')` (exit 1; log `t19-r1-X14-sc-boxGuard__at_SD6____X6-readAlways_-run1.log`)
+
+  ```
+  00:00 +0 -1: SD6 the trigger's counts: no seeds, no call; a non-contributor edit, no call; a contributor edit, one place box per contributor of K live before and one per contributor live after, and one read box per live reader; the first pl [cut; the full line is in the log]
+    Expected: (int, int):<(0, 0)>
+      Actual: (int, int):<(0, 2)>
+    test/parametric/place_test.dart 704:7  main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/room_cost_test.dart --plain-name 'RK1 ')` (exit 0; log `t19-r1-X14-sc-boxGuard__at_SD6____X6-readAlways_-run2.log`)
+
+  ```
+  00:00 +1: All tests passed!
+  ```
+- **restore:** `cp` the backup to `packages/jet_cad_2d/lib/src/parametric/regeneration.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** PARTIAL (1 of 2 commands red).
+
+#### r1-X11-feet (at RA1 with the tie case) — 304.8 squared as an integer product, re-fired at RA1 with its new tie case (fix round 1, the audit's I-1)
+
+`4b12f65` adds to `RA1` a 1,524 × 1,714.5 mm room, exactly 28.125 ft², its tie premises asserted: D11's double product reads 28.12, the integer square 28.13.
+
+- **file:** `apps/floor_planner/lib/parametric/room_label.dart`; backup `t19-r1-X11-feet__at_RA1_with_the_tie_case_-room_label.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  171c171
+  <         '${(mm2 / (304.8 * 304.8)).toStringAsFixed(2)} ft²',
+  ---
+  >         '${(mm2 / (3048 * 3048 / 100)).toStringAsFixed(2)} ft²',
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/room_label_test.dart --plain-name 'RA1 ')` (exit 1; log `t19-r1-X11-feet__at_RA1_with_the_tie_case_-run1.log`)
+
+  ```
+  00:00 +0 -1: RA1 the area format in each of the five units [E]
+    Expected: '28.12 ft²'
+      Actual: '28.13 ft²'
+       Which: is different.
+              Expected: 28.12 ft²
+                Actual: 28.13 ft²
+    test/room_label_test.dart 193:5                     main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_label.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** KILLED (1 of 1 commands red).
+
+#### r1-rv14b-splitOnce (at DE1 with the star) — a loop that is not whole kept only past 1,000 loops, re-fired at DE1 with its new star (fix round 1, the audit's I-1)
+
+`4b12f65` adds to `DE1` a star: a column with 1,002 small columns tied to it by separators, traced at all six placements (about 1.9 s in all): 1,003 holes, 600,403,200 mm² by hand. The mutant keeps one loop too many (1,004).
+
+- **file:** `apps/floor_planner/lib/parametric/room_trace.dart`; backup `t19-r1-rv14b-splitOnce__at_DE1_with_the_star_-room_trace.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  1047c1047
+  <     if (whole && hs.isNotEmpty) loops.add(hs);
+  ---
+  >     if (hs.isNotEmpty && (whole || loops.length > 1000)) loops.add(hs);
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/room_tie_test.dart --plain-name 'DE1 ')` (exit 1; log `t19-r1-rv14b-splitOnce__at_DE1_with_the_star_-run1.log`)
+
+  ```
+  00:00 +0 -1: DE1 a doubled edge is split out of the walk: the island it ties is a hole, the area unchanged, the ties in no source set, at six placements [E]
+    Expected: an object with length of <1003>
+      Actual: [
+       Which: has length of <1004>
+    test/room_tie_test.dart 428:7                       main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/room_trace.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** KILLED (1 of 1 commands red).
+
+#### rv16-noMemo — the Room section's Area memo dropped (`if (room == _areaRoom) return _areaText;`, `selection_panel.dart:495`): accepted (cost)
+
+Plan-10 code (Task 16), not a probe of 07/08 code as the first run said: the memo saves a scan of the live slots per rebuild; the Area line reads the same string either way. Fix round 1's ruling (m-1): accepted (cost).
+
+- **file:** `apps/floor_planner/lib/selection_panel.dart`; backup `t19-rv16-noMemo-selection_panel.dart`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  495d494
+  <     if (room == _areaRoom) return _areaText;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test test/room_panel_test.dart)` (exit 0; log `t19-rv16-noMemo-run1.log`)
+
+  ```
+  00:04 +8: All tests passed!
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/selection_panel.dart`; `diff` exit 0; `git diff --quiet` exit 0.
+- **result:** EQUIV-GREEN (0 of 1 commands red).
 
