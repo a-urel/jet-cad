@@ -125,8 +125,8 @@ class _PlannerShellState extends State<PlannerShell> {
     for (final k in OpeningKind.values)
       k: OpeningTool(k, _openingSettings[k]!, bands: _bands),
   };
-  // Spec 10 D19, D20, Ruling 10-11: one room-input cache, shared by the
-  // Room tool and the Separator tool.
+  // Spec 10 D19-D21, Ruling 10-11: one room-input cache, shared by the
+  // Room tool, the Separator tool and the separator grips.
   late final RoomInputs _roomInputs = RoomInputs(_document);
   late final RoomTool _room = RoomTool(_roomInputs);
   late final SeparatorTool _separator = SeparatorTool(_roomInputs);
@@ -249,12 +249,20 @@ class _PlannerShellState extends State<PlannerShell> {
   //   slide grip come from `ObjectGrips`, which also tells the select tool
   //   not to move or rotate an opening. The slide grip's edge snaps follow
   //   object snap (F3) at the camera's current aperture (Ruling 08-15).
+  // - Spec 10 D21: a room's label grip, which the select tool neither
+  //   moves nor rotates (R-22), returns the label to auto on a drop within
+  //   the snap aperture of its pole whatever F3 says (Ruling 10-17); a
+  //   separator's end grips band-trim through the shared room inputs while
+  //   F3 is on (D20).
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   late final GripCache _grips = GripCache(_document, _selection, _outlines,
       objects: ObjectGrips(
           edgeAperture: () => _snap.objectSnap
               ? kSnapAperturePixels / _camera.value.scale
-              : null));
+              : null,
+          labelAperture: () => kSnapAperturePixels / _camera.value.scale,
+          roomInputs: _roomInputs,
+          objectSnap: () => _snap.objectSnap));
 
   late final ToolContext _context = ToolContext(
       document: _document,
