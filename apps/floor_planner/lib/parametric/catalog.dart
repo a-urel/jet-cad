@@ -1,6 +1,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'box.dart';
+import 'dimension.dart';
 import 'opening.dart';
 import 'room.dart';
 import 'separator.dart';
@@ -23,7 +24,10 @@ final ParametricCatalog parametricCatalog = ParametricCatalog()
   ..register<SeparatorParams>(SeparatorParams.componentTypeId,
       SeparatorParams.fromJson, const SeparatorType())
   ..register<RoomParams>(
-      RoomParams.componentTypeId, RoomParams.fromJson, const RoomType());
+      RoomParams.componentTypeId, RoomParams.fromJson, const RoomType())
+  // SPIKE 11: the dimension.
+  ..register<DimensionParams>(DimensionParams.componentTypeId,
+      DimensionParams.fromJson, const DimensionType());
 
 /// Builds and installs the document's parametric system.
 ParametricSystem installParametric(DraftDocument doc) =>
