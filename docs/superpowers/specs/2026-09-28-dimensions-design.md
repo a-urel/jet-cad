@@ -101,11 +101,13 @@ runs, as "the review's run", where they settle a finding.
 **Numbers.** Every measured number below is quoted from the spike note
 (which quotes its own runs on `spike/11-dimensions`) and says so, or from
 **this spec's own runs**: the lineweight sweeps of D7, in three capture
-set-ups, run on the spike's code extracted to the session's scratchpad
-(never committed anywhere), quoted with their command. Lengths and
-formatted values are worked by hand for this spec, with the arithmetic
-shown; the sample plan's values were also recomputed with a small python
-reimplementation of D9's rules in the scratchpad. No test output was produced for this document otherwise.
+set-ups, and (revision 4) the flush-opening probe of D10, run on the
+spike's code extracted to the session's scratchpad (never committed
+anywhere), quoted with their command. Lengths and formatted values are
+worked by hand for this spec, with the arithmetic shown; the sample plan's
+values were also recomputed with a small python reimplementation of D9's
+rules in the scratchpad. No test output was produced for this document
+otherwise.
 
 **Evidence of record.** Every claim about what exists was read from the
 tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
@@ -400,8 +402,10 @@ alone) they did, in 07's final-review I1 case (an acute L rotated about its
 node, 07's `WR13`), where 07 stores the local free rectangle while `capsOf`
 still gives the joined corner, and a snap on the drawn corner matched
 nothing (spike open item 12). With R-5 the attach point is the drawn free
-corner: the stored local corner mapped to world, bit for bit the point
-the index holds for it.
+corner: the stored local corner mapped to world, equal to the point the
+index holds for it to rounding, well inside `dimAttach.linear` (the snap
+composes its transforms in its own order, `_composeLeafTransform`; `AP2`
+checks the distance; S-16).
 `localOutlineOf` itself is not edited: 07's stored children stay bit for
 bit, and 07's, 08's and 10's tests pass unedited. `AP2` pins that
 `drawnCapsOf`'s `fellBack` equals `localOutlineOf`'s on every fixture.
@@ -897,20 +901,72 @@ need the snapped entity (the render layer stays frozen, D1).
   attach point attaches, whether an object snap or the grid put it there;
   with F3 off, none, so every end is fixed. The tool and the grips see only
   the resolved point, so they behave the same;
-- the walls: every live root-level group carrying `WallParams` that owns a
-  child whose stored world box touches the square `q ± dimAttach.linear`
-  (`SpatialIndex.forEachInRect` with `QueryFilter.rendering()`, the spike's
-  (B)). A wall's attach points are vertices of its stored ring or its
-  centreline's ends (D4, R-5), so its stored boxes hold them; no bound from
-  reach would be safe (an acute mitre reaches far past a wall's reach, 10
-  D16.5);
-- **a vertex pre-filter** **[amended, revision 2, S-7]**: of those walls,
-  only the ones with a stored child point (a ring vertex, or a centreline
-  piece's end, from the child payloads mapped to world) within
-  `dimAttach.linear` of `q` go on. Every attach point is such a stored
-  point (D4, R-5), so the filter loses none (`AM1` compares with brute
-  force); a hover over the middle of a wall, where a band's box holds the
-  pointer but no vertex is near, stops here and builds no `WorldWall`;
+- **the candidate walls** **[amended, revision 4, S-13]**, from two
+  index rect queries (`SpatialIndex.forEachInRect` with
+  `QueryFilter.rendering()`, the spike's (B)):
+  - every live root-level group carrying `WallParams` that owns a child
+    whose stored world box touches the square `q ± dimAttach.linear`;
+  - **and the host** (`OpeningParams.host`, when it is a live wall) of
+    every opening that owns a child whose stored world box touches the
+    square `q ± (dimAttach.linear + T)`, `T` the thickness of the thickest
+    live wall (the tool keeps it per document change; a grip drop computes
+    it, one pass over the walls).
+
+  **Why the hosts:** revision 1 to 3 assumed a wall's attach points are
+  vertices of its stored ring or its centreline's ends. They are not when
+  an opening is **flush** with a flat end (a T butt or a free end): 08's
+  `_pieces` (`opening_geometry.dart:421-465`) keeps no piece shorter than
+  `wallJoin.linear`, so the end's ring and centreline pieces are gone, and
+  `placeCut` clamps a door placed near a T to exactly that position, the
+  **normal** result (the review's run: on spike C5 with a 900 mm door at c
+  = 450, clamped flush to C's face, and at c = 550, and on a free wall
+  with the door at c = 450, none of the end's three points is stored;
+  nothing is diagnosed). The wall's own children then do not reach the
+  corner, and decision 23 would be broken there. **Why the grown box:** an
+  opening's children do not reach every corner of its cut either. A door's
+  leaf and arc stand on its swing face, so only that face's jamb corner is
+  in their box; the centreline point and the other face's corner lie up to
+  a wall thickness away. **This spec's probe** (the spike's code in the
+  scratchpad, `test/spike_dims/spec11_flush_probe_test.dart`, `CI=true
+  flutter test --no-pub test/spike_dims/spec11_flush_probe_test.dart`; per
+  point, `wall` when a child of the host is in the tight box, `host` when
+  an opening child of the host is in the box; "tight" `q ± 1e-5`, "grown"
+  `q ± (1e-5 + T)`), abridged to the origin (the corpus far origin in own
+  groups printed the same rows):
+
+  ```
+  origin | T c=450.0 swing left: S/0/left tight -/host grown -/host; S/0/centre tight -/- grown -/host; S/0/right tight -/- grown -/host
+  origin | T c=550.0 swing left: S/0/left tight -/host grown -/host; S/0/centre tight -/- grown -/host; S/0/right tight -/- grown -/host
+  origin | T c=450.0 swing right: S/0/left tight -/- grown -/host; S/0/centre tight -/- grown -/host; S/0/right tight -/host grown -/host
+  origin | T c=550.0 swing right: S/0/left tight -/- grown -/host; S/0/centre tight -/- grown -/host; S/0/right tight -/host grown -/host
+  origin | free c=450 swing left: A/0/left tight -/host grown -/host; A/0/centre tight -/- grown -/host; A/0/right tight -/- grown -/host
+  origin | free c=450 swing right: A/0/left tight -/- grown -/host; A/0/centre tight -/- grown -/host; A/0/right tight -/host grown -/host
+  ```
+
+  (`00:00 +1: All tests passed!`; the probe asserts nothing.) So the
+  hosts from the tight box alone (the review's wording) find only the
+  swing-face corner; the grown box finds all three, on both swings, at
+  both placements. `T` bounds it: every corner of a cut lies within the
+  host's thickness of its swing face, and a window's lines and a gap's
+  threshold lie inside the band;
+- **an O(1) line test** **[amended, revision 4, S-13; replaces revision
+  2's vertex pre-filter]**: a candidate wall `W` goes on only if `q` lies
+  within `dimAttach.linear` of one of its three lines, the left face line,
+  the centreline or the right face line: in world, `|(q − s) · n − o| ≤
+  dimAttach.linear` for `o` in `{lOff, 0, rOff}` (`WorldWall.offsets`, the
+  frame `drawnCapsOf` computes in), `s` the wall's world start and `n` its
+  left normal; and, for a wall whose group is not a rigid motion (a scaled
+  group, file only), also in its local frame with `WallParams`' offsets,
+  where D4 step 2's free rectangle lies. A degenerate wall (length ≤
+  `wallJoin.linear`) goes on when `q` lies within `dimAttach.linear` of an
+  endpoint. **Every attach point lies on one of these lines**: a mitre,
+  T-butt, node or lobe corner is the meeting of two face lines (a node's
+  are taken through its hub, within `wallJoin.linear` of the wall's own,
+  07 D5), a clamped or squared cap and the free rectangle lie on the face
+  lines, and the centre point on the centreline. So the test loses none
+  (`AM1`, `AM6` compare with brute force); a hover over a wall's band
+  passes only on those three exact lines, and builds no `WorldWall`
+  otherwise. It reads `WallParams` and the transform only, no payload;
 - each remaining wall's six points among `wallsInDocument(doc, W)`'s walls
   (08's document adapter); a candidate is every `(W, k, side)` whose point
   lies within **`dimAttach.linear` = 1e-5 mm** of `q`, Euclidean.
@@ -954,7 +1010,7 @@ timing; the measure made exact** **[spec ruling]** (R-17: the measure
   document as it is then. On `AM3`'s outer corner the two timings differ:
   decided at the second click (`u` the pair's) it would store B/0/right,
   at the commit with Shift-horizontal it stores A/1/right; decision 22
-  chose the second;
+  chose the commit (A/1/right);
 - **by an end-grip drop, for the dropped end only**, with the dimension's
   current kind and, for aligned, the other end's **current** world point.
   **The other end keeps its stored reference**: an edit of one end never
@@ -976,16 +1032,17 @@ walls whose points it is, `Q3d`), a T's butt corner (the stem's point,
 `Q3d`), an X crossing (no snap at all, `Q3c`), furniture and drafted
 geometry (fixed).
 
-**Costs:** per call, one index rect query and the vertex pre-filter over
-the touched walls' stored points; then, per wall that passes, one
-`wallsInDocument` and six points: `Q3g (B) per click, 9 walls, 15
-openings: 60.93 us (JIT)` (spike, without the pre-filter). The O(walls)
-part runs only near a wall's vertex. The tool calls it at most once per
+**Costs:** per call, two index rect queries and the O(1) line test per
+candidate wall; then, per wall that passes, one `wallsInDocument` and six
+points: `Q3g (B) per click, 9 walls, 15 openings: 60.93 us (JIT)` (spike,
+without the line test). The O(walls) part runs only on a wall's three
+lines. The tool calls it at most once per
 distinct resolved point (D12); `AM5` prints a click and `TL8` a hover path
 at 600 walls.
-**Pinned by:** `AM1`–`AM5`, `GE3`, `TL8`; M-11nearest, M-11attachtol,
+**Pinned by:** `AM1`–`AM6`, `GE3`, `TL8`; M-11nearest, M-11attachtol,
 M-11parallel, M-11lineardir, M-11centrefirst, M-11otherend, M-11snapoff,
-M-11snaponly, M-11reachcull, M-11ownerring, M-11prefilter.
+M-11snaponly, M-11reachcull, M-11ownerring, M-11prefilter,
+M-11openinghost, M-11hostbox.
 
 ### D11 — Move and rotate; the linear axes
 
@@ -1121,13 +1178,16 @@ M-11fixedworld, M-11attachedmoves, M-11scale.
   **attaches**, as an object snap there does. With F3 off every end is
   fixed (decision 4). No point ever snaps to an extension line (D19).
 - **Costs:** a hover computes at most one attach search per distinct
-  resolved point (`DimensionTool.debugAttachSearches`), which the vertex
-  pre-filter (D10) stops before any `WorldWall` unless the point is near
-  a stored vertex, and the preview's layout per pointer move. `TL8` walks
-  a hover path along the middle of a wall among 600 walls and asserts that
-  no wall passes the pre-filter there (a counter), and prints the time per
-  move, **recorded against a budget of 1 ms per move** (printed, not
-  asserted; the plan records the figure).
+  resolved point (`DimensionTool.debugAttachSearches`), which D10's line
+  test stops before any `WorldWall` unless the point lies on a candidate
+  wall's face line or centreline, and the preview's layout per pointer
+  move. `TL8` walks a hover path among 600 walls across a wall's band,
+  **between** its centreline and its faces (a quarter of the thickness in
+  from a face), past a door in it, and asserts that no wall passes the line
+  test there (a counter, `debugLineTestPasses`), then one hover **on** the
+  face line, which passes; and it prints the time per move, **recorded
+  against a budget of 1 ms per move** (printed, not asserted; the plan
+  records the figure).
 
 **Pinned by:** `TL1`–`TL8`; M-11shift, M-11dragside, M-11zerokind,
 M-11ortho3, M-11snapoff, M-11snaponly, M-11notice, M-11degeneratepair,
@@ -1407,7 +1467,9 @@ drawn but unpicked:
 - **Save and load:** `EntityRecord.toJson` writes `flags` as one int and
   `fromJson` reads it back (`store/entity_store.dart:145`, `173`), and the
   column stores it at add (`419`), so the bit round-trips byte for byte;
-  `validate` reads no flags. `QF3` pins it.
+  `validate` reads no flags. **No schema version change** (S-16): `flags`
+  was already a free int in every schema version, and a document without
+  bit 1 is written as before. `QF3` pins it.
 
 **Where it is tested: one field on `QueryFilter`** (`index/query_filter.dart`):
 
@@ -1436,7 +1498,12 @@ every tool and the select tool's grip drags go through it), passes no
 filter. So a flag skipped by `picking()` alone would still be snapped to.
 **`snapInto`'s default becomes `QueryFilter.snapping()`**
 **[spec ruling]** (R-37): what `rendering()` accepts, minus not-pickable
-entities, so locked geometry still snaps. The filter reaches every snap
+entities, so locked geometry still snaps. The plan rewrites `snapInto`'s
+doc comment (`spatial_index.dart:1446-1458`) and, with it, the reason
+string of `test/index/snap_centre_index_test.dart:521-525`, which says
+"snapInto defaults to QueryFilter.rendering()"; that test still passes
+(hidden layers are still excluded) and only its wording changes (S-16).
+The filter reaches every snap
 path already: `_descend` for leaf and centre candidates and
 `_considerIntersections` (`spatial_index.dart:1548`) take it. **So a snap
 near an extension line's end does not snap to it**: a pointer at an
@@ -1513,8 +1580,8 @@ M-11flagdraws.
 ### Files
 
 - **Engine, `packages/jet_cad_2d`** (D19, decision 25):
-  `lib/src/document/style.dart` (`EntityFlags.unpickable`), `lib/src/index/query_filter.dart`
-  (`excludeUnpickable`, `QueryFilter.snapping()`, the test in
+  `lib/src/document/style.dart` (`EntityFlags.unpickable`),
+  `lib/src/index/query_filter.dart` (`excludeUnpickable`, `QueryFilter.snapping()`, the test in
   `acceptsEntity`), `lib/src/index/spatial_index.dart` (`snapInto`'s
   default filter and its doc comment), and the doc comment in
   `lib/src/parametric/parametric_system.dart`. Tests beside the filter's:
@@ -1662,8 +1729,10 @@ groups for every other relational test; the sample plan's own placement
   premise, C9's A falls back in step 1 (`capsOf(...).fellBack` true), so
   M-11fallback's site is reached (S-2); and a C11 variant whose wall groups
   are also scaled 1.5 (file-only): the points are still the stored
-  rectangle's corners (S-5); `AP3` every face point is a vertex of the
-  stored ring, in world, within 1e-9 of it at the far origin in own groups.
+  rectangle's corners (S-5); `AP3` every face point **of a wall with no
+  flush opening** is a vertex of the stored ring, in world, within 1e-9 of
+  it at the far origin in own groups (a flush opening removes the end's
+  pieces, D10; S-13).
 - **Identification:** `AM1` all 60 wall end points of `samplePlan`
   (`room_fixture.dart`: ten walls, the column's free-wall points included,
   fifteen openings; S-9), each snapped through the real `snapInto` from 5 mm
@@ -1673,8 +1742,8 @@ groups for every other relational test; the sample plan's own placement
   set, for a horizontal and a vertical `u`; `AM2` the jamb (fixed), the Y
   lobe vertex (B/0/left and C/0/right found), the T butt corner (the
   stem's), the X crossing (no snap, fixed), with the candidates taken
-  through the index, not from the snap's owner; `AM3` decision 19: an L whose **vertical** wall
-  B has the **lower** handle — along A (horizontal or aligned) the corner
+  through the index, not from the snap's owner; `AM3` decision 19: an L
+  whose **vertical** wall B has the **lower** handle — along A (horizontal or aligned) the corner
   is A's, along B it is B's; the outer corner (4100, −100) to (3000, 3000):
   aligned stores B/0/right (`u` = (−1,100, 3,100) / 3,289.4, so `σ` is 0.334
   against B and 0.942 against A), Shift-horizontal
@@ -1687,7 +1756,16 @@ groups for every other relational test; the sample plan's own placement
   (E1/0/right for a horizontal dimension); with F3 **off** the same point
   gives no candidate and stays fixed; `AM5` the
   attach search per click among 600 walls (JIT, median of five, printed,
-  not asserted).
+  not asserted); **`AM6` flush openings** (S-13), at the six placements:
+  spike C5 (C (0,0)→(6000,0) 200, S (2500,0)→(2500,3000) 100) with a 900 mm
+  door on S at c = 450 (clamped flush to C's face) and at c = 550, each
+  with the swing on either side, and a free wall A (0,0)→(4000,0) 200
+  with the same door at c = 450; premise asserted: none of the end's
+  three points is a stored vertex (the review's run); then S/0/left,
+  S/0/centre, S/0/right (and A/0's three) are each candidates (the set
+  equals the brute-force set), attaching by position with F3 on, and
+  S/0/left attaches through the door's own jamb snap (`snapInto` at the
+  jamb corner, then the tool's click).
 - **Layout and value (pure and object):** `DL1` the pair (0, 0), (3000,
   1200): aligned `3231` (√(3000² + 1200²) = 3,231.1), horizontal `3000`,
   vertical `1200`; `DL2` the outermost rule (spike `Q4d`: the line 2,400
@@ -1764,10 +1842,15 @@ groups for every other relational test; the sample plan's own placement
   end is fixed; Enter with points pending does nothing; `TL7` I switches
   to the tool, and typing I in a panel text field does not; `TL8` hover
   cost at 600 walls, printed, and one attach search per distinct resolved
-  point (`debugAttachSearches`); `TL9` (D19) a hover at the Hall
-  dimension's extension line's far end, (12,250, 9,250), with nothing else
-  within the aperture but that line, gives no object snap there: the
-  resolved point is the grid's or the raw one.
+  point (`debugAttachSearches`); `TL9` (D19) **at a pinned camera of 0.3
+  px/mm** (a 10 px aperture is 33 mm; S-14: at the whole-plan zoom the
+  192 mm aperture would reach the Hall's dimension-line end Q0 (12,250,
+  9,150), 100 mm away, and the slash ends), with the page's grid snap off:
+  a hover 5 mm off the Hall dimension's extension line's far end, at
+  (12,253, 9,254), gives no object snap (`objectKind` null) and the
+  resolved point is the raw one, not (12,250, 9,250); **premise asserted**:
+  `snapInto` at that raw point with `QueryFilter.rendering()` snaps to
+  (12,250, 9,250).
 - **Grips:** `GE1` three grips at the line's midpoint and the two
   measured points, in world, under a turned group; `GE2` the offset grip
   (outermost, between band, sign bit, kind unchanged, one step, no-change
@@ -1777,7 +1860,10 @@ groups for every other relational test; the sample plan's own placement
   dimension whose corner end is stored on A, switched to vertical in the
   panel, then its **other** end dragged: the corner end stays A/1/left;
   `GE4` a degenerate drop and a runtime document return null or are not
-  hit; `GE5` the preview equals the committed lines.
+  hit; `GE5` the preview equals the committed lines **on a horizontal
+  dimension over DL1's non-axis pair (0, 0)–(3000, 1200)**, for an offset
+  grip drag and an end grip drag (S-15: on an axis-aligned pair aligned and
+  horizontal draw the same lines, so M-11previewkind could not show).
 - **The panel:** `PN1` the section shows for exactly one dimension, with
   the value as the TEXT reads; `PN2` each kind click is one step with the
   ends and offset unchanged, and switching back restores the children bit
@@ -1891,7 +1977,9 @@ and M-11e above, all 22 of the spike's mutants are carried):
 | M-11degenerate | `dimension.degenerate` never reported | `DD1` |
 | M-11broken | a broken end generates from a fallback point instead of nothing | `DD2` |
 | M-11snaponly | an end attaches only when an object snap won, never a grid point on a wall end point (the rule decision 23 replaced) | `AM4`, `TL6` |
-| M-11prefilter | the vertex pre-filter drops a wall whose attach point is a stored vertex (the filter run on ring vertices only, not centreline ends) | `AM1` (every centre point), `TL8` (the counter) |
+| M-11prefilter | **redefined (revision 4, S-13):** D10's line test omits the centreline (face lines only) | `AM1` (every centre point), `AM6` (S/0/centre) |
+| M-11openinghost | opening hosts not gathered as candidate walls (revision 1 to 3's query) | `AM6` |
+| M-11hostbox | opening hosts gathered from the tight box `q ± dimAttach.linear` only, not `q ± (dimAttach.linear + T)` (the review's wording) | `AM6` (S/0/centre and the far face's corner) |
 | M-11reachcull | candidate walls by reach instead of stored boxes | `AM1` (the outer corners lie outside every wall's reach) |
 | M-11ownerring | candidate walls from the snapped entity's owner only (the spike's (A)) | `AM2` (the Y lobe vertex) |
 | M-11negzero | the offset compared with `==` (the zero's sign lost) and `toJson` writing `offset.abs()` (two fired forms) | `DP1`, `DO3` |
@@ -2012,8 +2100,11 @@ Every place this spec resolved something the decisions leave open.
 - **R-15** (D9) — fractions reduced; inches bare; feet-inches keep `'` and
   `"`.
 - **R-16** (D10) — attach points re-derived through the index at the
-  resolved point, a vertex pre-filter first (revision 2, S-7), within
-  1e-5 mm; when an end may attach is decision 23's.
+  resolved point, within 1e-5 mm; candidate walls are the walls with a
+  child in `q ± 1e-5` and the hosts of openings with a child in `q ± (1e-5
+  + T)`, then an O(1) test on the wall's three lines (revision 4, S-13;
+  replaces revision 2's vertex pre-filter); when an end may attach is
+  decision 23's.
 - **R-17** (D10) — decision 19's parallel measure made exact: `σ = |u ×
   d_W|` with the committed kind's `u`, and a 1e-9 band around the minimum.
   *Revision 1's timing half (at the commit, the dropped end only, never by
@@ -2082,7 +2173,7 @@ it was applied.
 | S-4 imperial over-rounding, far-origin margin | **Adopted.** D9 records both directions with the review's cases; the 1e-6 mm tolerance is kept as R-32, with the reason; D18 lists it; `DF2` gains 3450.5 − 0.9e-6 → `3451` and (0, 0)–(2124, 1731) → `9'-0"`; `DF3` gains a half between two computed corners at six placements |
 | S-5 step 2's free corners under a scaled group | **Adopted, the first option.** Step 2 takes the stored local free rectangle mapped through the wall's transform, so the attach point is the drawn corner at any similarity; `AP2` gains a scaled-group variant; a mirrored wall group is listed in D18 |
 | S-6 the cost bound's opening and hub-wall cases | **Adopted.** D5 states the bound as every referrer of every wall in the core and names the wall, partition-through-wall, opening and dimension cases; `DN4` prints the counts for a door move and a partition change on a wall carrying N dimensions |
-| S-7 the hover attach search per move | **Adopted.** A vertex pre-filter on the stored child points near `q` runs before any `WorldWall` is built (D10); `TL8` asserts that a hover along a wall's middle passes no wall through it and prints the time against a 1 ms budget; new M-11prefilter |
+| S-7 the hover attach search per move | **Adopted.** A vertex pre-filter on the stored child points near `q` runs before any `WorldWall` is built (D10); `TL8` asserts that a hover along a wall's middle passes no wall through it and prints the time against a 1 ms budget; new M-11prefilter. *Replaced in revision 4 by the line test (S-13)* |
 | S-8 tool details | **Adopted.** Shift is recorded from the pointer events and `onKey` before `super`; Enter does nothing (R-33); the notice is the value alone, so the status line reads `Dimension — 4.69`, and `TL5` expects that; R-18's threshold is `|angle| ≥ 0.05°` on the number, with a `PN3` row; no ring during a grip drag, by ruling (R-34) |
 | S-9 AM1's 54 points | **Adopted.** `AM1` names `samplePlan` (ten walls, 60 points, the column included); `DZ1` names `sampleWalls()` (nine walls) |
 | S-10 tests with no named mutant | **Adopted.** Sixteen mutants added (M-11negzero, M-11vertex, M-11colour, M-11axesline, M-11endlabel, M-11sectionmulti, M-11panelrw, M-11key, M-11twosteps, M-11gripplace, M-11runtime, M-11previewkind, M-11reachcull, M-11ownerring, and S-3's and S-7's M-11snaponly and M-11prefilter); M-11nearest defined with ties to the lowest handle; `RR2`, `AM5`, `TL8`'s time and `DN4`'s counts are marked measurements of record; `DO4`, `DO5` and `SP1` are marked carried gate pins |
@@ -2108,3 +2199,20 @@ human then chose a not-pickable entity flag.
 | Mutants M-11pickflag, M-11snapflag, M-11extflag, M-11flagdraws: 69 → 73 | Named mutants |
 | Gate 13 names the engine and render suites, the four engine files and both allocation invariants; gate 15 adds `roadmap/13`'s line | Exit gate |
 | `roadmap/13` gains "the not-pickable bit is not DXF" | Files, header |
+
+## Revision 4
+
+The independent review of revision 3 (`17e7eda`; round 2, "Ready with
+amendments": 1 major, 3 minor, S-13 to S-16; S-1 to S-12 all closed, the
+engine flag verified). Each finding was checked against the code or a run
+before it was applied.
+
+| Finding | Outcome |
+|---|---|
+| S-13 (major) a flush opening undraws a wall end's corners, so D10 never offered that end, against decision 23 | **Adopted, the review's fix (a), made to work.** D10's candidates add the hosts of openings with a child near `q`, and **this spec's probe** showed that the review's tight box finds only the swing-face corner, so the openings' box is grown by `T`, the thickest wall; the vertex pre-filter is replaced by an O(1) test on the wall's face lines and centreline (in world, and in local for a scaled group); new `AM6` (C5 with a door at c = 450 and 550, both swings, and a free end, six placements); `AP3` reworded; M-11prefilter redefined; new M-11openinghost and M-11hostbox; `TL8` hovers between the lines and past a door, and once on a face line |
+| S-14 `TL9`'s aperture | **Adopted.** Pinned at 0.3 px/mm with the grid snap off, a hover 5 mm off the end, asserting no object snap and the raw point, with the `rendering()` premise |
+| S-15 `GE5`'s fixture | **Adopted.** A horizontal dimension over DL1's non-axis pair, with an offset and an end grip drag |
+| S-16 wording | **Adopted.** "Decision 22 chose the commit (A/1/right)"; D4's "to rounding, well inside `dimAttach.linear`"; the payload read is gone with the pre-filter (the line test reads `WallParams`, no payload); D19 states no schema change and the plan's rewording of `snap_centre_index_test.dart:521-525` with `snapInto`'s doc comment |
+
+Mutants: 73 → 75 (M-11openinghost, M-11hostbox; M-11prefilter
+redefined).
