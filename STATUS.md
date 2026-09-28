@@ -1,5 +1,24 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-28. **Plan 10 (rooms and area) is MERGED into
+`main` at `84c4a08`**, on the human's decision ("LGTM"), pushed by the
+human. Before the merge the final whole-branch review returned **"Ready to
+merge"**. Its two doc findings landed at `8a3e9bb`, and the ledger archive
+(`docs/superpowers/ledgers/2026-09-26-rooms/`) is the branch's last commit,
+`b852b63`. No macOS build or itemised look was reported, so criterion 1's
+macOS half and criterion 17 (the look) stay **OWED**. Nothing was simulated
+to fill them in.
+- **Housekeeping, 2026-09-28:** every merged branch and worktree is
+  deleted, local and remote. The three spike branches (`spike/07-walls`
+  `45aecb6`, `spike/08-openings` `634fa7c`, `spike/10-rooms` `d30bce5`)
+  were merged into `main` with the `ours` strategy (`f81c585`), on the
+  human's decision. This keeps their commits reachable without taking any
+  of their code: `main`'s tree did not change. Only `main` remains.
+- **Next: sub-project 11 (dimensions)**, from a brainstorm, on the human's
+  word. See [Resume here](#resume-here).
+
+*Earlier, 2026-09-27:*
+
 **Last updated:** 2026-09-27. **Plan 10 (rooms and area) is EXECUTED on
 `plan-10/rooms`, NOT MERGED.** The merge is the human's, `--no-ff`. **Exit
 gate 15 of 17: criterion 1's macOS half (`flutter build macos --release`
@@ -2291,7 +2310,13 @@ into a standing test. Full account:
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
 | `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **MERGED at `fb0f87d`.** The worktree is the session that ran the plan; remove it and `git branch -d plan-05/drawing-tools` when that session closes. The pre-merge state, for the record: **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**In flight: `plan-10/rooms`** (Plan 10, rooms and area), in the worktree
+**In flight: nothing.** `main` (`f81c585`) is the only branch, local and
+remote, and the main checkout is the only worktree. Plan 10 merged at
+`84c4a08`. The spikes `spike/07-walls`, `spike/08-openings` and
+`spike/10-rooms` are recorded in `main`'s history by `ours` merges
+(`f81c585`), and none of their code is in the tree.
+
+*Before the merge, this paragraph read:* **In flight: `plan-10/rooms`** (Plan 10, rooms and area), in the worktree
 `.claude/worktrees/plan-rooms`, cut from `spec-10/rooms` at `d4167e2`. It
 is executed and not merged; see
 [Plan 10](#plan-10--rooms-and-area-executed-on-plan-10rooms-not-merged).
@@ -2469,7 +2494,31 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice, on `plan-10/rooms`** (Plan 10,
+**Immediate next step: sub-project 11 (dimensions), from a brainstorm.**
+`main` is at `f81c585`. Plan 10 (rooms and area) is merged at `84c4a08`,
+and the spikes are recorded in history only. 10's macOS build and look
+were not reported and stay OWED.
+- **Read first:** [roadmap/11-dimensions.md](roadmap/11-dimensions.md)
+  (its reference model is the hard problem) and 10's results note
+  [2026-09-26-plan-10-results.md](docs/superpowers/notes/2026-09-26-plan-10-results.md)
+  (Known limits and Debt).
+- **What 11 can build on from 10:**
+  - generated text that keeps its string and attributes;
+  - the page on the view (display unit and scale), with a per-type page
+    key;
+  - label heights from the page scale;
+  - `formatArea`'s unit handling;
+  - the dissolve verdict;
+  - spatial (place) dependencies alongside 08's references.
+- **Options still open from earlier debt:**
+  - rotate about a chosen base point (08's debt);
+  - the Text tool's web alt-tab `fix/` (fix/post-07's debt);
+  - dash patterns in paper units (10's R-17).
+
+Plan 06's itemised look is still OWED; so are 07's, 08's and 10's itemised
+looks. Nothing was simulated.
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's choice, on `plan-10/rooms`** (Plan 10,
 rooms and area, executed and NOT MERGED).
 - Tasks 1–19, their fix rounds and Tasks 14b and 14c are done
   (`abc7e7b..fe22430`); Task 20 is `962c402` and the commit that writes

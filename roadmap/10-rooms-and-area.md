@@ -1,6 +1,14 @@
 # 10 — Rooms and area
 
-**Status:** EXECUTED on `plan-10/rooms`, NOT MERGED (2026-09-27). The
+**Status:** MERGED into `main` at `84c4a08` (2026-09-27). Its macOS
+build and look were not reported and stay OWED. Spec
+[2026-09-26-rooms-design.md](../docs/superpowers/specs/2026-09-26-rooms-design.md)
+(rev 3, amended at execution), plan
+[2026-09-26-rooms.md](../docs/superpowers/plans/2026-09-26-rooms.md),
+results
+[2026-09-26-plan-10-results.md](../docs/superpowers/notes/2026-09-26-plan-10-results.md).
+
+*Before the merge, this line read:* EXECUTED on `plan-10/rooms`, NOT MERGED (2026-09-27). The
 merge is the human's, `--no-ff`, after the final whole-branch review and
 the human's macOS build and look. Exit gate 15 of 17: criterion 1's macOS
 half and criterion 17 (the look) are OWED. Spec
