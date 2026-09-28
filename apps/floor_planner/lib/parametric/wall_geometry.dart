@@ -503,6 +503,54 @@ double sweep(End x, End y) {
   return (endCap: ce, startCap: cs, fellBack: false);
 }
 
+/// [w]'s caps as they are **drawn** (spec 11 D4, R-5): the caps whose
+/// points are the corners of the outline the wall stores, in world. Null for
+/// a degenerate wall (07 D2). Two steps, 07's two fallbacks:
+///
+/// 1. [capsOf]: the joined caps, or both free caps when 07 D6's short-wall
+///    fallback applies (the world ring is not simple). When it fell back,
+///    that is the answer.
+/// 2. Otherwise the ring `simplifyRing([...endCap, ...startCap])` is taken
+///    to [w]'s group-local space through `w.toWorld.invert()`. When that
+///    image is not [isSimpleCcw], the answer is the free caps **of the
+///    stored ring**: the caps of `WorldWall(w.handle, w.params,
+///    Transform2.identity())` among no walls (the local free rectangle
+///    [localOutlineOf] stores), each point mapped through `w.toWorld`, with
+///    `fellBack` true.
+///
+/// Step 2 is exactly [localOutlineOf]'s decision: the same ring, the same
+/// mapping, the same test. So a face point is always the drawn corner, at
+/// any similarity: under a scaled group the stored rectangle is `t · s`
+/// thick in world, while a free cap recomputed in world would be `t` thick
+/// (spec 11 S-5). Step 1 stays for the reverse rounding edge (spec 11 S-2):
+/// a world ring that is not simple whose local image is. [localOutlineOf]
+/// falls back there (in world), and step 2 alone would not; 07's `WR13`
+/// sweep reaches it (the 3° L, right/left, turned 299°), so with step 1 the
+/// decision is [localOutlineOf]'s bit for bit.
+///
+/// [localOutlineOf] is not edited, so 07's, 08's and 10's stored children
+/// stay bit for bit.
+({List<Vector2> endCap, List<Vector2> startCap, bool fellBack})? drawnCapsOf(
+    WorldWall w, List<WorldWall> others) {
+  final caps = capsOf(w, others);
+  if (caps == null || caps.fellBack) return caps;
+  final toLocal = w.toWorld.invert();
+  final local = [
+    for (final q in simplifyRing([...caps.endCap, ...caps.startCap]))
+      toLocal.transformPoint(q),
+  ];
+  if (isSimpleCcw(local)) return caps;
+  final stored = WorldWall(w.handle, w.params, Transform2.identity());
+  final m = w.toWorld;
+  List<Vector2> toWorld(List<Vector2> ps) =>
+      [for (final q in ps) m.transformPoint(q)];
+  return (
+    endCap: toWorld(cap(End(stored, 1), const Free()).points),
+    startCap: toWorld(cap(End(stored, 0), const Free()).points),
+    fellBack: true,
+  );
+}
+
 /// The signed area of a closed ring, anticlockwise positive.
 double signedArea(List<Vector2> r) {
   var a = 0.0;
