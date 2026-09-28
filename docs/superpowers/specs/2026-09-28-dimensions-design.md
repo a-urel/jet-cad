@@ -1,24 +1,29 @@
 # Dimensions — design
 
-**Date:** 2026-09-28. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-09-28. **Status:** design, **revision 3**. Revision 1
 (`a2ba486`) was reviewed independently: "Ready with amendments", 0
-blocking, 3 major and 9 minor findings (S-1 to S-12). Revision 2 applies
-them and the human's answers to the two that were theirs, decisions 22 and
-23; see [Revision 2](#revision-2).
+blocking, 3 major and 9 minor findings (S-1 to S-12). Revision 2
+(`4fcf228`) applies them and the human's answers to the two that were
+theirs, decisions 22 and 23; see [Revision 2](#revision-2). Revision 3
+applies decisions 24 and 25, which overturn revision 2's R-35: extension
+lines never take clicks, through one small engine change, a not-pickable
+entity flag (D19); see [Revision 3](#revision-3).
 **Amended at execution:** nothing yet. The plan's last task adds
 paragraphs headed "**Amended at execution (Plan 11)**" under each section
 it makes precise or departs from, in 10's form; they rewrite nothing above
 them.
-**Sub-project:** `roadmap/11-dimensions.md`. **Size:** M, application code
-only (D1).
+**Sub-project:** `roadmap/11-dimensions.md`. **Size:** M: application
+code, and one small engine change (D1, D19).
 **Branch:** `spec-11/dimensions`, cut from `main` at `9774a55`; revision
 1 is written on top of `ccd5345` (the spike's findings note and renders,
-brought over unchanged), revision 2 on top of `a2ba486`.
+brought over unchanged), revision 2 on top of `a2ba486`, revision 3 on
+top of `4fcf228`.
 **Depends on:** 06 (the parametric layer), 07 (walls), 08 (references,
 cascade), 10 (generated text, the page on the view, the page key), all
 merged.
 **Blocks:** nothing. 12 (the app shell) inherits two lines: a dimension
-style table and a dimensions layer (Files).
+style table and a dimensions layer; 13 (export and print) inherits one: a
+DXF export strips the not-pickable bit (Files, D19).
 **Brainstormed with the human on 2026-09-28**, on `main`, followed by a
 throwaway spike whose findings are the evidence for most decisions below:
 [2026-09-28-dimensions-spike-findings.md](../notes/2026-09-28-dimensions-spike-findings.md)
@@ -39,12 +44,15 @@ spec follows.
 
 **Decisions the human made on 2026-09-28**, numbered as in the brainstorm
 record: 1–16 before the spike, 17–21 after it, 22–23 the answers to
-revision 1's review. **Later decisions refine earlier ones where they say
+revision 1's review, 24–25 the human's overturn of revision 2's R-35.
+**Later decisions refine earlier ones where they say
 so:** 17 pins 12's rotation question, 18 pins the offset's units, 19 pins
 which wall a shared point stores, 20 pins the lineweight and 21 the
 collisions; **22 supersedes 19's timing** (the choice is made at the
 commit, not the second click), and 23 pins how a point attaches (by
-position, while F3 is on).
+position, while F3 is on); **24 supersedes R-35** (extension lines never
+take clicks) and 25 chooses its mechanism (a not-pickable entity flag in
+the engine), which qualifies D1.
 
 | # | Question | Answer | Here |
 |---|---|---|---|
@@ -71,6 +79,8 @@ position, while F3 is on).
 | 21 | Collisions | Accepted; the user drags to fix (the offset grip, 10's label grip). A known limit; no diagnostic | D18 |
 | 22 | When decision 19 chooses (review S-1) | **At the commit** (the third click), with the direction the committed dimension measures: aligned, or the group-local x or y for horizontal or vertical; at an end-grip drop, for the dropped end, with the dimension's current kind. Supersedes 19's "second click". Revision 1's R-17 timing, now the human's | D10, D12, D13 |
 | 23 | How a point attaches (review S-3) | **By position.** While F3 is on, any end that lands within the attach tolerance of a wall's attach point attaches, whether an object snap or the grid put it there; the tool and the grips behave the same, since they see only the resolved point | D10, D12, D13 |
+| 24 | Extension lines and clicks (overturns R-35) | **Extension lines never take clicks**, like 10's room tint: a dimension is selected by its dimension line, its slashes or its text; a wall face under an extension line stays clickable. The mechanism must be one the engine has, verified by the spec | D7, D18, D19 |
+| 25 | The mechanism (qualifies 24 and D1) | **A "not pickable" entity flag in the engine.** No existing mechanism keeps a plain LINE drawn but unpicked (the tint's needs a fill; `invisible` also stops drawing; a locked layer needs a layer on `Generated`; 10 R-10 declined such a flag). One small engine change: a new `EntityFlags` bit that `QueryFilter.picking()` and snapping skip while `rendering()` still draws, set on the extension-line children on add (10 D13's record-attribute path), with its own tests and mutants, a save/load round trip, and the frame path checked untouched | D1, D7, D19 |
 
 **The controller's readings** of the decision record are checked in
 [The controller's readings, checked](#the-controllers-readings-checked). In
@@ -94,8 +104,8 @@ runs, as "the review's run", where they settle a finding.
 set-ups, run on the spike's code extracted to the session's scratchpad
 (never committed anywhere), quoted with their command. Lengths and
 formatted values are worked by hand for this spec, with the arithmetic
-shown; the sample plan's values were also recomputed with a small python reimplementation of D9's rules in
-the scratchpad. No test output was produced for this document otherwise.
+shown; the sample plan's values were also recomputed with a small python
+reimplementation of D9's rules in the scratchpad. No test output was produced for this document otherwise.
 
 **Evidence of record.** Every claim about what exists was read from the
 tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
@@ -191,8 +201,9 @@ tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
 6. **Diagnostics:** a dimension that measures zero; one whose end a file
    broke.
 7. **The sample plan** gains five dimensions: every kind, both end states.
-8. **No change to the engine or the render layer** (D1): `git diff 9774a55
-   -- packages/` stays empty.
+8. **One small engine change and none in the render layer** (D1, D19): a
+   not-pickable entity flag, skipped by picking and snapping and drawn by
+   the renderer, so an extension line never takes a click or a snap.
 
 ## Non-goals
 
@@ -239,20 +250,31 @@ tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
     `selection_panel.dart` the Dimension section; `main.dart` the tool, its
     key, its notice and the grips' index; `shortcut_guard.dart` the key;
     `startup_plan.dart` the five dimensions.
-- **No engine change.** Checked against `packages/jet_cad_2d/lib/src/parametric/`
-  at `9774a55` (evidence above), as the spike found (`git diff f81c585
-  HEAD --stat -- packages` empty on the spike): `Generated(EntityKind.line,
-  …, lineweight:)`, `Generated.text`, `ParametricView.page`, `pageKey`,
-  `references`, `ReferencePolicy.cascade` and the closure that takes
-  referrers of the whole core are all on `main`. D5 states the invariant
-  that makes them sufficient.
+- **No change to the parametric layer.** Checked against
+  `packages/jet_cad_2d/lib/src/parametric/` at `9774a55` (evidence above),
+  as the spike found (`git diff f81c585 HEAD --stat -- packages` empty on
+  the spike): `Generated(EntityKind.line, …, lineweight:, flags:)`,
+  `Generated.text`, `ParametricView.page`, `pageKey`, `references`,
+  `ReferencePolicy.cascade` and the closure that takes referrers of the
+  whole core are all on `main`. D5 states the invariant that makes them
+  sufficient. Only a doc comment there changes (D19).
+- **One small engine change, in the index and the style constants**
+  (decision 25, D19; revision 1 to 2 said "no engine change"): a
+  not-pickable `EntityFlags` bit, a `QueryFilter` field that picking and
+  snapping set, and `snapInto`'s default filter. Four files:
+  `document/style.dart`, `index/query_filter.dart`,
+  `index/spatial_index.dart` and a comment in
+  `parametric/parametric_system.dart`.
 - **No render-layer change** (decision 20 freezes it): the tool is a
   `PlacementTool` subclass in the app, the grips an `ObjectGripProvider`,
   and nothing needs a new render-layer API (D10 explains why the snapped
-  entity is not needed).
+  entity is not needed). The select tool already asks the engine with
+  `QueryFilter.picking()` for clicks, hovers and bands (D19), so the flag
+  reaches it with no edit there.
 
-**Pinned by:** the exit gate's `git diff` (gate 13) and the import grep for
-the two pure files (10's pattern).
+**Pinned by:** the exit gate's `git diff` (gate 13: the engine's four
+files only, nothing in the render layer) and the import grep for the two
+pure files (10's pattern).
 
 ### D2 — `DimensionParams`
 
@@ -636,7 +658,13 @@ the same way on the page.
 
 **Record attributes, all written on add and fixed** (10 D13): ByLayer
 colour on layer 0 (the paper's foreground, as 08's symbols; decision 1's
-"placed like drafting"), ByLayer linetype, flags 0; the five LINEs at
+"placed like drafting"), ByLayer linetype; **flags 0 on the dimension
+line, the slashes and the text, and `EntityFlags.unpickable` on the two
+extension lines** (decisions 24 and 25, D19), through `Generated`'s
+`flags`, written on add only, as every attribute is (10 D13): a drawn
+extension line never takes a click, a hover, a band's membership or a
+snap, and a dimension is selected by its line, slashes or text; the five
+LINEs at
 **lineweight 25 (0.25 mm)**, decision 20's value (below); the TEXT
 with `packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.bottom)`.
 
@@ -1091,7 +1119,7 @@ M-11fixedworld, M-11attachedmoves, M-11scale.
   dimension, the middle of a face) gives a fixed end, however it was
   resolved; a grid point that lands exactly on a wall end point
   **attaches**, as an object snap there does. With F3 off every end is
-  fixed (decision 4).
+  fixed (decision 4). No point ever snaps to an extension line (D19).
 - **Costs:** a hover computes at most one attach search per distinct
   resolved point (`DimensionTool.debugAttachSearches`), which the vertex
   pre-filter (D10) stops before any `WorldWall` unless the point is near
@@ -1311,14 +1339,10 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
   jump.
 - **Interior corner-to-corner extension lines lie on the perpendicular
   walls' faces** (finding 2), drawn along the band's edge and not seen.
-  **And they take the wall's clicks there** **[spec ruling]** (R-35, S-12):
-  `pickInto` returns the topmost entity in the pick radius
-  (`spatial_index.dart:733`), and a dimension added after its walls draws
-  above them, so a click on the Hall's extension line along E4's inner face
-  (x 12,250, y 8,325 to 9,250) selects the Hall dimension, not E4. Kept: the
-  wall is selected anywhere else along its band, and draw order stays
-  ascending handle value (CLAUDE.md). `SL1` pins it; gate 16's look shows
-  it.
+  They take no clicks there: revision 2's R-35 (the dimension, drawn above,
+  won a click on E4's face under the Hall's extension line) is superseded
+  by decisions 24 and 25; the extension lines carry the not-pickable flag
+  (D7, D19), so that click selects E4 (`SL1`).
 - **No along-face or crossing points** (decision 4): an X crossing gives no
   snap (spike `Q3c`), a mid-face click is fixed.
 - **Drafted geometry is not followed** (decision 1): an end on furniture
@@ -1344,7 +1368,108 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
   the text readable, and under a mirrored **wall** group (file only) a
   stored `side` names the face on the other hand in world (S-5); a scaled
   wall group is covered (R-5). And the lineweight is measured in the test
-  rasteriser with a capture matched to the view (D7), not on a device: the look judges it.
+  rasteriser with a capture matched to the view (D7), not on a device:
+  the look judges it.
+
+### D19 — Engine: a not-pickable entity flag (decisions 24, 25)
+
+Decision 24: extension lines never take clicks. Decision 25: through a new
+engine flag, since nothing the engine had on `9774a55` keeps a plain LINE
+drawn but unpicked:
+
+- `EntityFlags.invisible` (`document/style.dart:131`) is read by
+  `FilterEvaluator.acceptsEntity` under `visibleOnly`
+  (`index/query_filter.dart:72-79`), which `rendering()` and `picking()`
+  both set (22-29): an invisible LINE is neither picked nor drawn;
+- 10's tint stays out of picks because it is a **fill** (never picked:
+  `spatial_index.dart:392`, `569`, `1325-1339`) drawn from an invisible
+  boundary (`room.dart:299-313`), which a line cannot be;
+- a locked layer is drawn and not picked (`query_filter.dart:27-29`, `82`),
+  but every generated record goes on layer 0 (`draftRecord`,
+  `document/drafting.dart:31-46`; `_recordOf` sets no layer) and
+  `Generated` has no layer;
+- 10 R-10 declined an "unpickable" flag (`parametric_system.dart:203`).
+
+**The flag** **[spec ruling]** (R-36: its name and value):
+
+- **`EntityFlags.unpickable = 1 << 1`** (value 2), in
+  `document/style.dart` beside `invisible` (131). The flags column is a
+  `Uint8List` (`store/entity_store.dart:265`), so the engine has bits 0–7;
+  bit 0 is `invisible` and no other bit is defined or read anywhere in
+  `packages/` or `apps/` (the column's readers are `query_filter.dart:76`
+  and `jet_cad_2d_flutter/lib/src/reference_walk.dart:119`, both for
+  `invisible` only). **DXF:** bit 0 is group code 60's "not drawn"; group
+  code 70 is per entity kind and is not stored in this column; DXF has no
+  "not pickable" entity code. So bit 1 collides with nothing, and it is
+  **not a DXF code**: a DXF export (13, which does not exist yet) strips it
+  (roadmap 13 gains the line, Files). That was 10 R-10's objection to such
+  a flag; decision 25 accepts its cost.
+- **Save and load:** `EntityRecord.toJson` writes `flags` as one int and
+  `fromJson` reads it back (`store/entity_store.dart:145`, `173`), and the
+  column stores it at add (`419`), so the bit round-trips byte for byte;
+  `validate` reads no flags. `QF3` pins it.
+
+**Where it is tested: one field on `QueryFilter`** (`index/query_filter.dart`):
+
+- `QueryFilter` gains **`final bool excludeUnpickable`**, a named
+  constructor parameter defaulting to false (existing callers compile
+  unchanged); `all()` and `rendering()` false, **`picking()` true**, and a
+  new preset **`QueryFilter.snapping()`**: `visibleOnly` true,
+  `excludeLocked` false, `excludeUnpickable` true. `isPassthrough` also
+  requires it false;
+- `FilterEvaluator.acceptsEntity` adds, before its layer lookups:
+  `if (filter.excludeUnpickable && document.entities.flagsAt(slot) &
+  EntityFlags.unpickable != 0) return false;` — one bool test when the
+  filter does not ask (rendering, every frame), one column read when it
+  does. O(1), no allocation, no map lookup. The frame path's filter is
+  `rendering()`, so what the painter draws and costs is unchanged; the
+  allocation invariants (`query_allocation_test.dart`,
+  `paint_allocation_test.dart`) stay green, unedited (gate 13);
+- `acceptsNode` is unchanged: the flag is an entity's, not a node's.
+
+**Snapping does not honour the pick filter** (the snap finding).
+`SpatialIndex.snapInto` defaults to **`QueryFilter.rendering()`**, on
+purpose (`index/spatial_index.dart:1446-1467`: a locked layer is snapped
+to, "how you draw relative to a locked reference"), and
+`resolveDragPoint`, the one snap caller in `lib` (`index/drag_snap.dart:72`;
+every tool and the select tool's grip drags go through it), passes no
+filter. So a flag skipped by `picking()` alone would still be snapped to.
+**`snapInto`'s default becomes `QueryFilter.snapping()`**
+**[spec ruling]** (R-37): what `rendering()` accepts, minus not-pickable
+entities, so locked geometry still snaps. The filter reaches every snap
+path already: `_descend` for leaf and centre candidates and
+`_considerIntersections` (`spatial_index.dart:1548`) take it. **So a snap
+near an extension line's end does not snap to it**: a pointer at an
+extension line's far end snaps to whatever else is there, the dimension
+line's end, the slash, or the wall's corner, and never to the extension
+line's own endpoint or midpoint.
+
+**What already honours it through `picking()`, with no edit:** the select
+tool's click and hover (`jet_cad_2d_flutter/lib/src/select_tool.dart:109`),
+its window and crossing bands (`453`, `474`) and the band's group
+membership (`_everyLeafIn`, `498`, which **skips** a leaf `picking()`
+rejects, so a window around a dimension's line, slashes and text selects
+it without its extension lines). The outline cache and the painter use
+`rendering()` (`outline_cache.dart:378`, `414`; `draft_painter.dart:357`,
+`369`), so a selected or hovered dimension still outlines its extension
+lines, and they draw. The render layer's grips are object grips for a
+dimension (D13), not leaf grips, and its reference walk tests `invisible`
+only. **Nothing in the render layer changes.**
+
+**Where the flag is set:** only on D7's two extension-line children, by
+`Generated(EntityKind.line, …, lineweight: 25, flags:
+EntityFlags.unpickable)`, written on add (10 D13); a matched child is
+never rewritten, so the flag is fixed for the child's life.
+
+**The parametric layer's comment** (`parametric_system.dart:196-204`,
+"There is no 'unpickable' flag (spec 10 R-10)") is rewritten: an
+`EntityFlags.unpickable` flag exists (spec 11 D19); a fill whose boundary
+is invisible needs neither it nor anything else to stay out of picks.
+
+**Costs:** one field per filter, one bool test per accepted entity per
+query, one column read when a pick or snap asks. **Pinned by:** `QF1`–`QF4`
+(engine), `SL1`, `TL9`, `DO1`; M-11pickflag, M-11snapflag, M-11extflag,
+M-11flagdraws.
 
 ## The controller's readings, checked
 
@@ -1387,7 +1512,16 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
 
 ### Files
 
-- **Engine, `packages/jet_cad_2d`:** no change.
+- **Engine, `packages/jet_cad_2d`** (D19, decision 25):
+  `lib/src/document/style.dart` (`EntityFlags.unpickable`), `lib/src/index/query_filter.dart`
+  (`excludeUnpickable`, `QueryFilter.snapping()`, the test in
+  `acceptsEntity`), `lib/src/index/spatial_index.dart` (`snapInto`'s
+  default filter and its doc comment), and the doc comment in
+  `lib/src/parametric/parametric_system.dart`. Tests beside the filter's:
+  `test/index/query_filter_test.dart` (`QF1`, and its "three presets" test
+  becomes four), `test/index/snap_test.dart` (`QF2`),
+  `test/codec/json_codec_test.dart` (`QF3`),
+  `test/parametric/attributes_test.dart` (`QF4`).
 - **Render layer, `packages/jet_cad_2d_flutter`:** no change (decision
   20). Its gate stays green with only its standing failures.
 - **App, `apps/floor_planner`:** D1's files. `dimension_geometry.dart` and
@@ -1416,6 +1550,10 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
     painting no pixel) was measured with a capture below the view's device
     pixel ratio, and it is re-measured with a matched capture before the
     render layer changes;
+  - `roadmap/13-export-and-print.md` gains, under "Decisions already
+    made": "**The not-pickable bit is not DXF** (11 D19): a DXF export
+    writes group code 60 from `EntityFlags.invisible` only and strips
+    `EntityFlags.unpickable`";
   - `roadmap/11` is marked done at the merge, as usual.
 
 ### Amendments to earlier specs
@@ -1427,14 +1565,17 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
 | 08 D2, D3 (references) | D3, D5 | a second referrer type; a wall's `generate` already filters its referrers to `OpeningParams` (`openingsInView`), so it ignores dimensions |
 | 08 D16 (movable) | D11, R-19 | a dimension is movable; the one movable rule (08's F2) is unchanged |
 | 10 D19, R-29 (the status notice) | D12, R-24 | the status line merges a second tool's notice |
+| 10 R-10 (no `unpickable` flag) | D19, decision 25 | the flag exists, for a drawn line that must not be picked; 10's tint keeps its invisible boundary and needs no flag |
+| the engine's snap default (`snapInto`, `spatial_index.dart:1446-1467`) | D19, R-37 | the default filter is `QueryFilter.snapping()`: `rendering()` minus not-pickable entities; locked geometry still snaps |
 
 ### Invariants
 
 - **The frame path allocates nothing new.** Attach searches, layouts,
   previews and the panel run on edits, pointer moves and selection
   changes; the preview and the attach rings are painted from cached
-  geometry. The render layer is untouched and its allocation tests stay
-  green, unedited.
+  geometry. The render layer is untouched, the engine's new filter test is
+  one bool when `rendering()` asks (D19), and both allocation invariants
+  stay green, unedited.
 - **Draw order is ascending handle value;** a dimension's children keep
   their handles (D16).
 - **Decisions use `dimAttach`, `dimFormat` and `wallJoin`; stored values
@@ -1442,7 +1583,9 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
 - **Generation reads parameters, never geometry,** and only what D5's
   invariant lists.
 - **An edit never leaves a dimension naming a dead wall** (cascade, D3).
-- **`packages/` is untouched** (`git diff 9774a55 -- packages/` empty).
+- **`packages/` changes only in D19's four engine files**; the render
+  layer is untouched (`git diff 9774a55 -- packages/jet_cad_2d_flutter/`
+  empty).
 
 ## Testing
 
@@ -1494,6 +1637,18 @@ for `AM1` and `DN1`; at least the origin and the corpus far origin in own
 groups for every other relational test; the sample plan's own placement
 (off-origin, not symmetric, 08 D18) for `SP*`, `SL1` and the renders.
 
+- **Engine, the not-pickable flag** (`jet_cad_2d`, beside the filter's
+  tests; D19): `QF1` an entity carrying `EntityFlags.unpickable` passes
+  `all()` and `rendering()` and fails `picking()` and `snapping()`, and an
+  invisible one still fails all but `all()`; the four presets differ
+  exactly as documented; `QF2` a LINE carrying the flag, alone within the
+  aperture, gives no snap from `snapInto` with its default filter (no
+  endpoint, midpoint or intersection), a second LINE beside it still
+  snaps, and `pickInto` with `picking()` skips it for a plain LINE behind
+  it; `QF3` save → load → save of a document holding the flag is
+  byte-identical and the flag comes back; `QF4` a test client's
+  `Generated(..., flags: EntityFlags.unpickable)` child is added carrying
+  it and keeps it across a match (10 D13's rule).
 - **Parameters:** `DP1` round trip, key order, both end shapes, exact
   `==`, `-0.0` ≠ `+0.0` in `==` and kept through save → load → save,
   `references` deduplicated.
@@ -1517,8 +1672,8 @@ groups for every other relational test; the sample plan's own placement
   equals decision 19's rule restated in the test over the brute-force
   set, for a horizontal and a vertical `u`; `AM2` the jamb (fixed), the Y
   lobe vertex (B/0/left and C/0/right found), the T butt corner (the
-  stem's), the X crossing (no snap, fixed), with the candidates taken through the index,
-  not from the snap's owner; `AM3` decision 19: an L whose **vertical** wall
+  stem's), the X crossing (no snap, fixed), with the candidates taken
+  through the index, not from the snap's owner; `AM3` decision 19: an L whose **vertical** wall
   B has the **lower** handle — along A (horizontal or aligned) the corner
   is A's, along B it is B's; the outer corner (4100, −100) to (3000, 3000):
   aligned stores B/0/right (`u` = (−1,100, 3,100) / 3,289.4, so `σ` is 0.334
@@ -1561,6 +1716,7 @@ groups for every other relational test; the sample plan's own placement
   A/1/left = 3,550.5 − 100 = 3,450.5 → `3451` at all six placements, the
   distance from the half printed (the far-origin margin).
 - **The object:** `DO1` children kinds and order (`line` × 5, `text`),
+  the flags (`EntityFlags.unpickable` on children 2 and 3 only),
   lineweight 25, ByLayer, layer 0, the TEXT's `textAttrs`, at the corpus
   far origin in own groups; `DO2` a page change 1:50 m → 1:100 ft-in in one
   command (`Q5a`: `13'-1 1/2"`, height 250, the same child handles, one
@@ -1608,7 +1764,10 @@ groups for every other relational test; the sample plan's own placement
   end is fixed; Enter with points pending does nothing; `TL7` I switches
   to the tool, and typing I in a panel text field does not; `TL8` hover
   cost at 600 walls, printed, and one attach search per distinct resolved
-  point (`debugAttachSearches`).
+  point (`debugAttachSearches`); `TL9` (D19) a hover at the Hall
+  dimension's extension line's far end, (12,250, 9,250), with nothing else
+  within the aperture but that line, gives no object snap there: the
+  resolved point is the grid's or the raw one.
 - **Grips:** `GE1` three grips at the line's midpoint and the two
   measured points, in world, under a turned group; `GE2` the offset grip
   (outermost, between band, sign bit, kind unchanged, one step, no-change
@@ -1632,9 +1791,11 @@ groups for every other relational test; the sample plan's own placement
   (the diagonal's fixed end moves, its attached end stays); a rotation
   grip shows for a dimension alone; walls selected with their dimensions
   move and every value stays; deleting a dimension; deleting E1 deletes
-  the width, Hall and diagonal dimensions in one step; a click on E4's
+  the width, Hall and diagonal dimensions in one step; **a click on E4's
   inner face at (12,250, 8,800), under the Hall's extension line, selects
-  the Hall dimension (R-35, S-12).
+  E4, and a click on the Hall's dimension line at (14,000, 9,150) selects
+  the Hall dimension** (decisions 24, 25); a window band around the Hall
+  dimension's line, slashes and text, not its extension lines, selects it.
 - **Diagnostics:** `DD1` `dimension.degenerate`; `DD2` `dimension.broken`
   from a file (a live box as a wall, `k = 2`, a NaN point, a NaN offset),
   childless, and a dead wall handle reported `parametric.dangling` only.
@@ -1745,6 +1906,10 @@ and M-11e above, all 22 of the spike's mutants are carried):
 | M-11gripplace | the offset grip at `Q0` instead of the line's midpoint | `GE1` |
 | M-11runtime | the grips hit without `components` and `geometry` | `GE4` |
 | M-11previewkind | a grip preview laid out as aligned whatever the kind | `GE5` |
+| M-11pickflag | engine: `picking()` ignores the not-pickable flag | `QF1`, `SL1` (the click on E4's face selects the dimension) |
+| M-11snapflag | engine: snapping ignores the flag (`snapInto`'s default back to `rendering()`) | `QF2`, `TL9` |
+| M-11extflag | the extension lines generated without the flag | `DO1`, `SL1` |
+| M-11flagdraws | engine: the flag also stops rendering (`rendering()` excludes it) | `QF1`, `RR1` (the extension line's ink) |
 
 **Retired from the spike:** its option-(b) switch
 (`debugDimensionReadsPlaces`; not adopted, D5). Revision 1 also retired
@@ -1794,14 +1959,17 @@ M-11b-cam, a render-layer mutant (S-11).
     say, decisions 19, 22 and 23 included.
 12. The dimension lines are 0.25 mm, and `RR2`, captured at the view's
     device pixel ratio, shows no drop-out at the look's zooms.
-13. `git diff 9774a55 -- packages/` is empty; the allocation invariants
+13. The engine and render-layer suites are green (gate 1), the engine's
+    `QF1`–`QF4` among them; `packages/` differs from `9774a55` only in D19's
+    four engine files (`git diff 9774a55 -- packages/jet_cad_2d_flutter/`
+    empty); `query_allocation_test.dart` and `paint_allocation_test.dart`
     pass unedited.
 14. The sample plan is D17's: five dimensions with their values, 611
     entities, `drift()` and `diagnostics()` empty.
 15. Every named mutant is killed and logged in `plan-11-mutation-log.md`
     (M-11b-cam fired in the render layer and restored; M-11fallback as
     redefined in revision 2);
-    `roadmap/12` carries its two lines.
+    `roadmap/12` carries its two lines and `roadmap/13` its one.
 16. **The human's look — owed by the human, never simulated:** on macOS,
     in Chrome and in Firefox: the Dimension tool's three clicks, its
     preview, Shift's linear choice, the attach rings and the status value;
@@ -1812,8 +1980,8 @@ M-11b-cam, a render-layer mutant (S-11).
     rotating the plan with its dimensions, and one linear dimension alone;
     the offset and end grips, and a grid drop on a corner attaching; the
     Dimension section's switch and end lines; the collisions decision 21
-    accepts, and a click on a wall face under an extension line selecting
-    the dimension (R-35).
+    accepts; a click on a wall face under an extension line selecting the
+    wall, and on the dimension line selecting the dimension (decision 24).
 
 ## Spec rulings
 
@@ -1879,8 +2047,13 @@ Every place this spec resolved something the decisions leave open.
 - **R-33** (D12, revision 2, S-8) — Enter with points pending does
   nothing.
 - **R-34** (D13, revision 2, S-8) — no attach ring during a grip drag.
-- **R-35** (D18, revision 2, S-12) — an extension line lying on a wall's
-  face takes that stretch's clicks (topmost pick, draw order kept).
+- **R-35** — *superseded by decisions 24 and 25* (revision 3). Revision
+  2's ruling that an extension line on a wall's face takes that stretch's
+  clicks.
+- **R-36** (D19, revision 3) — the flag is `EntityFlags.unpickable = 1 <<
+  1`, set on the two extension lines only.
+- **R-37** (D19, revision 3) — `snapInto`'s default filter becomes
+  `QueryFilter.snapping()`, since snapping does not honour `picking()`.
 
 ## Open questions for the human
 
@@ -1889,8 +2062,8 @@ decision (17–23) or a ruling above. Revision 1's two findings that were
 the human's (S-1, S-3) are answered by decisions 22 and 23. Each ruling a
 person sees — the between band (R-7), the kind switch keeping the offset
 (R-27), the drag-side tie (R-21), the panel's wording (R-18, R-28), the
-sample's on-sheet offsets and basin end (R-30), a face click under an
-extension line (R-35) — is part of gate 16's look, where the human can
+sample's on-sheet offsets and basin end (R-30) — is part of gate 16's
+look, where the human can
 overturn it. Decision 20's lineweight question was a measurement, made
 (D7).
 
@@ -1914,4 +2087,24 @@ it was applied.
 | S-9 AM1's 54 points | **Adopted.** `AM1` names `samplePlan` (ten walls, 60 points, the column included); `DZ1` names `sampleWalls()` (nine walls) |
 | S-10 tests with no named mutant | **Adopted.** Sixteen mutants added (M-11negzero, M-11vertex, M-11colour, M-11axesline, M-11endlabel, M-11sectionmulti, M-11panelrw, M-11key, M-11twosteps, M-11gripplace, M-11runtime, M-11previewkind, M-11reachcull, M-11ownerring, and S-3's and S-7's M-11snaponly and M-11prefilter); M-11nearest defined with ties to the lowest handle; `RR2`, `AM5`, `TL8`'s time and `DN4`'s counts are marked measurements of record; `DO4`, `DO5` and `SP1` are marked carried gate pins |
 | S-11 M-11b's camera half is writable | **Adopted.** M-11b-cam, a render-layer mutant fired with a `cp` backup and restored, killed by `RR1` |
-| S-12 extension lines take the wall's clicks | **Adopted, recorded and kept** (R-35): D18, gate 16's look, and an `SL1` row pinning that a click on E4's face at (12,250, 8,800) selects the Hall dimension |
+| S-12 extension lines take the wall's clicks | **Adopted, recorded and kept** (R-35): D18, gate 16's look, and an `SL1` row pinning that a click on E4's face at (12,250, 8,800) selects the Hall dimension. *Superseded in revision 3 by decisions 24 and 25: the click now selects E4* |
+
+## Revision 3
+
+The human's decisions 24 and 25 (2026-09-28), overturning revision 2's
+R-35. Revision 3's first attempt found that no existing engine mechanism
+keeps a plain LINE drawn but unpicked (D19 lists the four it checked); the
+human then chose a not-pickable entity flag.
+
+| Change | Where |
+|---|---|
+| Decisions 24 and 25 added; the header's supersession note and size | header, decision table |
+| D1: "no engine change" becomes one small engine change in four files; the render layer still untouched | D1, What this delivers, Files, Invariants |
+| **D19, new:** `EntityFlags.unpickable = 1 << 1` (R-36), checked against the `Uint8List` column, bit 0 and DXF; `QueryFilter.excludeUnpickable` and `snapping()`; the O(1) test in `acceptsEntity`; `snapInto`'s default filter (R-37), because snapping does not honour `picking()`; save/load; what already honours it; 10 R-10's comment rewritten | D19 |
+| The two extension lines carry the flag; a dimension is selected by its line, slashes or text | D7 |
+| R-35's known limit dropped and R-35 marked superseded; the look now checks the wall-face click selecting the wall | D18, gate 16, Spec rulings, Open questions |
+| No point snaps to an extension line | D12, D19 |
+| `SL1`: the click on E4's face selects E4, the dimension line's click selects the dimension, and a band without the extension lines selects it; `DO1` checks the flags; new `TL9` and engine `QF1`–`QF4` | Testing |
+| Mutants M-11pickflag, M-11snapflag, M-11extflag, M-11flagdraws: 69 → 73 | Named mutants |
+| Gate 13 names the engine and render suites, the four engine files and both allocation invariants; gate 15 adds `roadmap/13`'s line | Exit gate |
+| `roadmap/13` gains "the not-pickable bit is not DXF" | Files, header |
