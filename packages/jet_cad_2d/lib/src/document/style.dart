@@ -129,4 +129,14 @@ abstract final class ReservedHandles {
 abstract final class EntityFlags {
   /// DXF group code 60: the entity exists but is not drawn.
   static const int invisible = 1 << 0;
+
+  /// The entity is drawn, but never picked, band-selected or snapped to
+  /// (spec 11 D19): `QueryFilter.picking()` and `QueryFilter.snapping()`
+  /// skip it, while `QueryFilter.rendering()` still accepts it. A
+  /// dimension's extension lines carry it.
+  ///
+  /// Not a DXF code: DXF has no "not pickable" entity flag, so a DXF export
+  /// strips this bit (roadmap 13). Bit 0 is [invisible]; the flags column is
+  /// a `Uint8List`, so bits 0-7 are all the engine has.
+  static const int unpickable = 1 << 1;
 }

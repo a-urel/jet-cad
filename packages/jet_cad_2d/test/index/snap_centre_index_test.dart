@@ -521,8 +521,9 @@ void main() {
     index.snapInto(Vector2(0.1, 0.1), 1.0, SnapMask.all, byDefault);
     expect(byDefault.found, isFalse,
         reason: 'snapping the cursor onto something the user cannot see is a '
-            'bug; snapInto defaults to QueryFilter.rendering() for that '
-            'reason, matching what pickInto already did');
+            'bug; snapInto defaults to QueryFilter.snapping(), which refuses '
+            'hidden layers as rendering() does, matching what pickInto '
+            'already did');
 
     final unfiltered = SnapResult();
     index.snapInto(Vector2(0.1, 0.1), 1.0, SnapMask.all, unfiltered,

@@ -209,4 +209,73 @@ void main() {
     }
     expect(drift(loaded), isEmpty);
   });
+
+  test(
+      'QF4 a generated child added with EntityFlags.unpickable carries '
+      'it, and keeps it across a match', () {
+    final doc = paramDoc();
+    // Off the origin, turned on A's turned frame; fractional stored values.
+    final at = onA(1234.5, -310.25, 0.4);
+    const w0 = Whisker(125.5, -40.25, 610.75);
+    doc.commands.execute(create(doc, hA, at, w0));
+
+    // Handles run in generation order: the flagged LINE, then the plain.
+    final created = kids(doc, hA);
+    expect(created, hasLength(2));
+    final [alongX, alongY] = created;
+    expect(recordOf(doc, alongX).kind, EntityKind.line);
+    expect(recordOf(doc, alongY).kind, EntityKind.line);
+    expect(generateCalls[hA], 1);
+
+    // Premise: the whisker sits off the origin in world, turned.
+    final m = doc.tree.accumulatedTransform(hA);
+    final start = m.transformPoint(Vector2(125.5, -40.25));
+    final want = at.transformPoint(Vector2(125.5, -40.25));
+    expect(start.x, closeTo(want.x, 1e-9));
+    expect(start.y, closeTo(want.y, 1e-9));
+    expect(start.length, greaterThan(1000));
+    expect(at.transformDirection(Vector2(1, 0)).y, isNot(closeTo(0, 1e-3)));
+
+    // On add: the first child carries the flag (2), the second flags 0;
+    // every other attribute is draftRecord's default.
+    expect(attrsOf(recordOf(doc, alongX)), expected(flags: 2),
+        reason: 'the LINE along local x: EntityFlags.unpickable');
+    expect(attrsOf(recordOf(doc, alongY)), expected(),
+        reason: 'the LINE along local y: flags 0');
+    expect(payloadOf(doc, alongX), whiskerAlongX(w0));
+    expect(payloadOf(doc, alongY), whiskerAlongY(w0));
+    expect(drift(doc), isEmpty);
+
+    // A match: moved, and its length changed. Both payloads are rewritten;
+    // both records, flags included, stay exactly as added.
+    final records = {for (final k in created) k: recordOf(doc, k)};
+    final beforeMatch = canon(doc);
+    final depth = doc.commands.undoDepth;
+    const w1 = Whisker(-210.75, 95.5, 880.25);
+    doc.commands.execute(SetComponentCommand<Whisker>(hA, w1));
+    expect(generateCalls[hA], greaterThan(1), reason: 'regenerated');
+    expect(kids(doc, hA), created, reason: 'both children matched in place');
+    for (final k in created) {
+      expect(recordOf(doc, k), records[k], reason: '${k.toHex()} as added');
+    }
+    expect(recordOf(doc, alongX).flags, 2);
+    expect(recordOf(doc, alongY).flags, 0);
+    expect(payloadOf(doc, alongX), whiskerAlongX(w1));
+    expect(payloadOf(doc, alongY), whiskerAlongY(w1));
+    expect(payloadOf(doc, alongX), isNot(whiskerAlongX(w0)));
+    expect(payloadOf(doc, alongY), isNot(whiskerAlongY(w0)));
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(drift(doc), isEmpty);
+    final afterMatch = canon(doc);
+
+    // Undo and redo are exact.
+    doc.commands.undo();
+    expect(canon(doc), beforeMatch);
+    expect(drift(doc), isEmpty);
+    doc.commands.redo();
+    expect(canon(doc), afterMatch);
+    expect(recordOf(doc, alongX).flags, 2);
+    expect(recordOf(doc, alongY).flags, 0);
+    expect(drift(doc), isEmpty);
+  });
 }
