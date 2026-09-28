@@ -252,8 +252,11 @@ void main() {
     final beforeMatch = canon(doc);
     final depth = doc.commands.undoDepth;
     const w1 = Whisker(-210.75, 95.5, 880.25);
+    // Counted just before the command: `drift()` above generates too.
+    final callsBefore = generateCalls[hA]!;
     doc.commands.execute(SetComponentCommand<Whisker>(hA, w1));
-    expect(generateCalls[hA], greaterThan(1), reason: 'regenerated');
+    expect(generateCalls[hA], callsBefore + 1,
+        reason: 'the match regenerates the Whisker once');
     expect(kids(doc, hA), created, reason: 'both children matched in place');
     for (final k in created) {
       expect(recordOf(doc, k), records[k], reason: '${k.toHex()} as added');

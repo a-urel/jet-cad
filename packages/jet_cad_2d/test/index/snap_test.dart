@@ -602,8 +602,10 @@ void main() {
 
   test(
       'QF2 snapInto by default gives no endpoint, midpoint or '
-      'intersection snap on a not-pickable LINE; a LINE beside it still '
-      'snaps; pickInto with picking() skips it for the LINE behind it', () {
+      'intersection snap on a not-pickable LINE, nor a centre snap on a '
+      'not-pickable CIRCLE; a LINE or CIRCLE beside it still snaps; '
+      'pickInto with picking() skips it for the LINE behind it; a band '
+      'with picking() leaves it out, at the root and in an instance', () {
     // Everything sits on a frame turned 0.4 rad on A's turned frame, off
     // the origin; coordinates are fractional. [local] is in that frame.
     final frame = onA(1234.5, -310.25, 0.4);
@@ -702,6 +704,185 @@ void main() {
           isTrue);
       expect(hit.entity, onTop,
           reason: '$label: premise, rendering() takes the higher handle');
+    }
+
+    // Centre snaps: a flagged CIRCLE and a plain one, at the root (world
+    // coordinates) and in the group at [frame] (local). The centre-snap walk
+    // (`visitSnapCentre`) must refuse the flagged centre; the plain one
+    // still snaps. The query sits 0.36 mm from a centre, far inside the
+    // aperture, and each circle's radius (150.25) keeps its stroke out of it.
+    for (final inGroup in [false, true]) {
+      final label = inGroup ? 'in a turned group' : 'at the root';
+      final doc = DraftDocument.empty();
+      var owner = doc.rootHandle;
+      if (inGroup) {
+        owner = const Handle(100);
+        doc.commands.execute(AddNodeCommand(GroupNode(
+            handle: owner,
+            parent: doc.rootHandle,
+            transform: frame,
+            children: const [])));
+      }
+      List<double> at(double x, double y) {
+        if (inGroup) return [x, y];
+        final p = world(x, y);
+        return [p.x, p.y];
+      }
+
+      const radius = 150.25;
+      expect(radius - 0.36, greaterThan(r), reason: 'premise: no stroke');
+      addEntity(doc, owner, EntityKind.circle, at(300.5, 200.75), [radius],
+          flags: flagged);
+      final plainCircle = addEntity(
+          doc, owner, EntityKind.circle, at(900.25, 200.75), [radius]);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final out = SnapResult();
+
+      // Both walks: the fused leaf-and-centre one (every kind) and the
+      // centre-only one.
+      for (final mask in [
+        SnapMask.all,
+        SnapMask.none.with_(SnapKind.center),
+      ]) {
+        final nearFlagged = world(300.5 + 0.3, 200.75 - 0.2);
+        index.snapInto(nearFlagged, r, mask, out);
+        expect(out.found, isFalse,
+            reason: '$label, mask ${mask.bits}: no snap at a not-pickable '
+                'centre');
+        index.snapInto(nearFlagged, r, mask, out,
+            filter: const QueryFilter.rendering());
+        expect(out.found, isTrue, reason: '$label: premise, rendering()');
+        expect(out.kind, SnapKind.center);
+        expect(out.point.x, closeTo(world(300.5, 200.75).x, 1e-6));
+        expect(out.point.y, closeTo(world(300.5, 200.75).y, 1e-6));
+
+        final nearPlain = world(900.25 + 0.3, 200.75 - 0.2);
+        index.snapInto(nearPlain, r, mask, out);
+        expect(out.found, isTrue, reason: '$label: the plain centre snaps');
+        expect(out.kind, SnapKind.center);
+        expect(out.entity, plainCircle);
+        expect(out.point.x, closeTo(world(900.25, 200.75).x, 1e-6));
+        expect(out.point.y, closeTo(world(900.25, 200.75).y, 1e-6));
+      }
+    }
+
+    // Bands: a flagged LINE is no band member under picking() and is one
+    // under rendering(), at the root (`forEachLeafInBand`) and inside an
+    // instance (`_bandDescend`).
+    {
+      final doc = DraftDocument.empty();
+      List<double> seg(double ax, double ay, double bx, double by) {
+        final a = world(ax, ay), b = world(bx, by);
+        return [a.x, a.y, b.x, b.y];
+      }
+
+      final rootFlagged = addEntity(doc, doc.rootHandle, EntityKind.line,
+          seg(100.5, 100.25, 400.75, 100.25), [],
+          flags: flagged);
+      final rootPlain = addEntity(doc, doc.rootHandle, EntityKind.line,
+          seg(100.5, 160.25, 400.75, 160.25), []);
+
+      // Definition "only": one flagged LINE. Definition "mixed": a plain
+      // LINE and a flagged one that runs far out of the window band.
+      const onlyDef = Handle(200), mixedDef = Handle(201);
+      const onlyInstance = Handle(400), mixedInstance = Handle(401);
+      doc.tree.addDefinition(Definition(
+          handle: onlyDef,
+          name: 'Only',
+          basePoint: Vector2.zero(),
+          children: const []));
+      doc.tree.addDefinition(Definition(
+          handle: mixedDef,
+          name: 'Mixed',
+          basePoint: Vector2.zero(),
+          children: const []));
+      addEntity(doc, onlyDef, EntityKind.line, [10.5, 20.25, 110.75, 20.25], [],
+          flags: flagged);
+      addEntity(
+          doc, mixedDef, EntityKind.line, [10.5, 20.25, 110.75, 20.25], []);
+      addEntity(
+          doc, mixedDef, EntityKind.line, [10.5, 40.25, 5010.75, 40.25], [],
+          flags: flagged);
+      final onlyAt = frame.multiply(Transform2.translation(1500.5, 100.25));
+      final mixedAt = frame.multiply(Transform2.translation(1500.5, 600.25));
+      for (final (h, def, m) in [
+        (onlyInstance, onlyDef, onlyAt),
+        (mixedInstance, mixedDef, mixedAt),
+      ]) {
+        doc.commands.execute(AddNodeCommand(InstanceNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: m,
+          definition: def,
+          layer: ReservedHandles.layerZero,
+        )));
+      }
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+
+      List<Handle> leaves(Aabb2 band, BandMode mode, QueryFilter f) {
+        final out = <Handle>[];
+        index.forEachLeafInBand(
+            band, mode, f, (slot) => out.add(doc.entities.handleAt(slot)));
+        return out;
+      }
+
+      List<Handle> instances(Aabb2 band, BandMode mode, QueryFilter f) {
+        final out = <Handle>[];
+        index.forEachInstanceInBand(band, mode, f, out.add);
+        return out;
+      }
+
+      Aabb2 boxOf(List<Vector2> points, double pad) {
+        final b = Aabb2.fromPoints(points);
+        return Aabb2.raw(
+            b.minX - pad, b.minY - pad, b.maxX + pad, b.maxY + pad);
+      }
+
+      // The root pair: both LINEs enclosed.
+      final rootBand = boxOf([
+        world(100.5, 100.25),
+        world(400.75, 100.25),
+        world(100.5, 160.25),
+        world(400.75, 160.25),
+      ], 5);
+      for (final mode in BandMode.values) {
+        expect(leaves(rootBand, mode, const QueryFilter.picking()), [rootPlain],
+            reason: 'root, $mode: the flagged LINE is no member');
+        expect(leaves(rootBand, mode, const QueryFilter.rendering()),
+            [rootFlagged, rootPlain],
+            reason: 'root, $mode: premise, rendering() takes both');
+      }
+
+      // "Only": a band around its one flagged LINE.
+      final onlyBand = boxOf([
+        onlyAt.transformPoint(Vector2(10.5, 20.25)),
+        onlyAt.transformPoint(Vector2(110.75, 20.25)),
+      ], 5);
+      for (final mode in BandMode.values) {
+        expect(instances(onlyBand, mode, const QueryFilter.picking()), isEmpty,
+            reason: 'instance, $mode: its only leaf is not pickable');
+        expect(instances(onlyBand, mode, const QueryFilter.rendering()),
+            [onlyInstance],
+            reason: 'instance, $mode: premise, rendering() takes it');
+      }
+
+      // "Mixed": a window around its plain LINE only; the flagged LINE runs
+      // 4900 mm out of it. picking() judges the plain LINE alone and takes
+      // the instance; rendering() sees the flagged LINE leave and refuses.
+      final mixedBand = boxOf([
+        mixedAt.transformPoint(Vector2(10.5, 20.25)),
+        mixedAt.transformPoint(Vector2(110.75, 20.25)),
+        mixedAt.transformPoint(Vector2(10.5, 40.25)),
+      ], 5);
+      expect(instances(mixedBand, BandMode.window, const QueryFilter.picking()),
+          [mixedInstance],
+          reason: 'window: the flagged LINE is no member');
+      expect(
+          instances(mixedBand, BandMode.window, const QueryFilter.rendering()),
+          isEmpty,
+          reason: 'window: premise, rendering() sees the flagged LINE leave');
     }
 
     // Intersection: root-level LINEs only (`_considerIntersections`), in
