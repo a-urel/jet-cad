@@ -1,16 +1,19 @@
 # Dimensions — design
 
-**Date:** 2026-09-28. **Status:** design, **revision 1**, for an
-independent review before the plan is written.
+**Date:** 2026-09-28. **Status:** design, **revision 2**. Revision 1
+(`a2ba486`) was reviewed independently: "Ready with amendments", 0
+blocking, 3 major and 9 minor findings (S-1 to S-12). Revision 2 applies
+them and the human's answers to the two that were theirs, decisions 22 and
+23; see [Revision 2](#revision-2).
 **Amended at execution:** nothing yet. The plan's last task adds
 paragraphs headed "**Amended at execution (Plan 11)**" under each section
 it makes precise or departs from, in 10's form; they rewrite nothing above
 them.
 **Sub-project:** `roadmap/11-dimensions.md`. **Size:** M, application code
 only (D1).
-**Branch:** `spec-11/dimensions`, cut from `main` at `9774a55`; this
-revision is written on top of `ccd5345` (the spike's findings note and
-renders, brought over unchanged).
+**Branch:** `spec-11/dimensions`, cut from `main` at `9774a55`; revision
+1 is written on top of `ccd5345` (the spike's findings note and renders,
+brought over unchanged), revision 2 on top of `a2ba486`.
 **Depends on:** 06 (the parametric layer), 07 (walls), 08 (references,
 cascade), 10 (generated text, the page on the view, the page key), all
 merged.
@@ -35,10 +38,13 @@ spec 07 ([2026-09-24-walls-design.md](2026-09-24-walls-design.md)), spec 08
 spec follows.
 
 **Decisions the human made on 2026-09-28**, numbered as in the brainstorm
-record: 1–16 before the spike, 17–21 after it. **Later decisions refine
-earlier ones where they say so:** 17 pins 12's rotation question, 18 pins
-the offset's units, 19 pins which wall a shared point stores, 20 pins the
-lineweight and 21 the collisions.
+record: 1–16 before the spike, 17–21 after it, 22–23 the answers to
+revision 1's review. **Later decisions refine earlier ones where they say
+so:** 17 pins 12's rotation question, 18 pins the offset's units, 19 pins
+which wall a shared point stores, 20 pins the lineweight and 21 the
+collisions; **22 supersedes 19's timing** (the choice is made at the
+commit, not the second click), and 23 pins how a point attaches (by
+position, while F3 is on).
 
 | # | Question | Answer | Here |
 |---|---|---|---|
@@ -60,9 +66,11 @@ lineweight and 21 the collisions.
 | 16 | Process | Spike first, on a throwaway branch | this header |
 | 17 | Linear axes | The dimension's own (group-local) axes. Rotating a plan keeps every value; a both-ends-attached linear dimension rotated alone turns its axis (the spike's 4000 → 3464), and the panel shows it as rotated | D6, D11, D14 |
 | 18 | The offset's units | A model length: the line stays where it was placed when the page scale changes; only the paper constants grow or shrink | D2, D6 |
-| 19 | A shared point | Attaches to the wall the dimension runs along: decided once both ends are known (the second click, or an end-grip drop), the candidate wall most nearly parallel to the measuring direction, then the lowest handle, then face before centre, k, left before right. A wall-length dimension stays on that wall's ends | D10 |
+| 19 | A shared point | Attaches to the wall the dimension runs along: the candidate wall most nearly parallel to the measuring direction, then the lowest handle, then face before centre, k, left before right. A wall-length dimension stays on that wall's ends. *Its timing, "once both ends are known (the second click, or an end-grip drop)", is superseded by 22* | D10 |
 | 20 | Lineweight | 0.25 mm; the spec measures whether 0.25 survives the rasteriser's axis-aligned drop-out at the look's zooms and raises it to 0.30 if not. The render-layer fix stays a separate follow-up (10's R-17); the render package stays frozen in 11 | D7 |
 | 21 | Collisions | Accepted; the user drags to fix (the offset grip, 10's label grip). A known limit; no diagnostic | D18 |
+| 22 | When decision 19 chooses (review S-1) | **At the commit** (the third click), with the direction the committed dimension measures: aligned, or the group-local x or y for horizontal or vertical; at an end-grip drop, for the dropped end, with the dimension's current kind. Supersedes 19's "second click". Revision 1's R-17 timing, now the human's | D10, D12, D13 |
+| 23 | How a point attaches (review S-3) | **By position.** While F3 is on, any end that lands within the attach tolerance of a wall's attach point attaches, whether an object snap or the grid put it there; the tool and the grips behave the same, since they see only the resolved point | D10, D12, D13 |
 
 **The controller's readings** of the decision record are checked in
 [The controller's readings, checked](#the-controllers-readings-checked). In
@@ -77,15 +85,16 @@ paragraph is tagged **[spec ruling]**; the tags are indexed in
 [Spec rulings](#spec-rulings). Every item of the spike's "Open decisions
 for 11's spec" is closed there or in the decision it names; the
 [Open questions for the human](#open-questions-for-the-human) section is
-empty, and says why.
+empty, and says why. **Revision 2** also cites the independent review's
+runs, as "the review's run", where they settle a finding.
 
 **Numbers.** Every measured number below is quoted from the spike note
 (which quotes its own runs on `spike/11-dimensions`) and says so, or from
 **this spec's own runs**: the lineweight sweeps of D7, in three capture
 set-ups, run on the spike's code extracted to the session's scratchpad
 (never committed anywhere), quoted with their command. Lengths and
-formatted values are worked by hand for this spec, with the arithmetic shown; the sample plan's values
-were also recomputed with a small python reimplementation of D9's rules in
+formatted values are worked by hand for this spec, with the arithmetic
+shown; the sample plan's values were also recomputed with a small python reimplementation of D9's rules in
 the scratchpad. No test output was produced for this document otherwise.
 
 **Evidence of record.** Every claim about what exists was read from the
@@ -288,7 +297,7 @@ the two pure files (10's pattern).
   (D15); `generate` makes nothing for them. The tool, the grips and the
   panel produce none of them.
 
-**Pinned by:** `DP1`.
+**Pinned by:** `DP1`, `DO3`; M-11negzero.
 
 ### D3 — `DimensionType`: reach, references, cascade, page key
 
@@ -351,8 +360,16 @@ open item 12). `drawnCapsOf(w, others)`, new in `wall_geometry.dart`:
    short-wall fallback applies (the world ring is not simple);
 2. when step 1 did not fall back: the ring `simplifyRing([...endCap,
    ...startCap])` is taken to `w`'s local space through
-   `w.toWorld.invert()`; when that image is not `isSimpleCcw`, **both free
-   caps** (in world) and `fellBack` true.
+   `w.toWorld.invert()`; when that image is not `isSimpleCcw`, the free
+   caps **of the stored ring**: the caps of `WorldWall(w.handle, w.params,
+   Transform2.identity())` among no walls (the local free rectangle
+   `localOutlineOf` stores, `wall_geometry.dart:478-483`), each point mapped
+   through `w.toWorld`; `fellBack` true. **[amended, revision 2, S-5]**:
+   revision 1 recomputed the free caps in world, whose thickness is the
+   stored `t` (`WorldWall` does not scale it), while the drawn rectangle is
+   the local one mapped, `t · s` thick under a scaled group; taking the
+   stored rectangle makes the attach point the drawn corner at any
+   similarity.
 
 Step 2 is **exactly `localOutlineOf`'s decision** (`wall_geometry.dart:468-485`:
 the same ring, the same mapping, the same test). So the attach point and
@@ -361,11 +378,24 @@ alone) they did, in 07's final-review I1 case (an acute L rotated about its
 node, 07's `WR13`), where 07 stores the local free rectangle while `capsOf`
 still gives the joined corner, and a snap on the drawn corner matched
 nothing (spike open item 12). With R-5 the attach point is the drawn free
-corner computed in world, which equals the stored local corner mapped to
-world to rounding (≈1e-7 mm at 1e9 mm, far inside D10's 1e-5).
+corner: the stored local corner mapped to world, bit for bit the point
+the index holds for it.
 `localOutlineOf` itself is not edited: 07's stored children stay bit for
 bit, and 07's, 08's and 10's tests pass unedited. `AP2` pins that
 `drawnCapsOf`'s `fellBack` equals `localOutlineOf`'s on every fixture.
+
+**The two steps under mutation** (review S-2). Step 2 re-tests every ring
+step 1 let through, so removing step 1 **alone** is equivalent on every
+fixture: an affine image of a world ring that is not simple is not simple
+either, and step 2 then returns the same free rectangle (the review's run:
+`drawnCapsOf` with and without step 1 over all 43 walls of the spike's Q1
+cases at the six placements, `points compared 258, differing under
+M-11fallback 0, fellBack differing 0` at each). Step 1 stays: it makes the
+decision `localOutlineOf`'s bit for bit in the reverse rounding edge (a
+world ring that is not simple whose local image is), which no fixture
+reaches. So the named mutant **M-11fallback** removes **both** steps (the
+joined caps always), killed by `AP1`'s C9 (A/0/left becomes (100, 100)
+instead of (0, 100)), and M-11localring removes step 2 alone (`AP2`).
 
 **The hand-worked cases** (the spike's Q1 table, plan coordinates, mm; a
 wall's left normal is `(−d.y, d.x)`: +y for a wall running east, −x for
@@ -397,8 +427,8 @@ is **bitwise one point** for both walls (07 computes a wedge corner once):
 **Costs:** per point, one `drawnCapsOf`: two `classify` among the wall's
 neighbours, two caps, one `isSimpleCcw` in world and at most one more in
 local space, on rings of a handful of points. **Pinned by:** `AP1`–`AP3`;
-M-11nbrs, M-11swap, M-11swapjust, M-11fallback, M-11centremid,
-M-11localring, M-11d, M-11d2.
+M-11nbrs, M-11swap, M-11swapjust, M-11fallback (both steps, S-2),
+M-11centremid, M-11localring, M-11d, M-11d2, M-11vertex.
 
 ### D5 — What a dimension reads, and why today's closure is enough
 
@@ -448,10 +478,23 @@ its reach neighbours; its known edge, a node cluster spread over up to
 2 × `wallJoin.linear` (07 D4's amendment), is 07's own drift edge,
 unreachable by snapping, and dimensions inherit it without widening it.
 
-**Cost bound per edit.** The closure adds, for every seed wall `S`, the
-dimensions referencing any wall of `{S} ∪ neighbours(S)`; for every seed
-dimension, its walls (as references) and **their** referrers, the openings
-and the other dimensions on them, which regenerate with empty plans. Each
+**Cost bound per edit** **[amended, revision 2, S-6]**. The dimensions an
+edit regenerates are **every referrer of every wall in the core**, where
+the core holds the seeds, their neighbours before and after, and their
+references (`_closure`). Named cases, each unbounded in the number of
+dimensions per wall and none drifting:
+
+- a **wall** edit: the dimensions on the wall and on each of its reach
+  neighbours; a **partition** edit reaches its T's **through wall** as a
+  neighbour, so every dimension on that exterior wall regenerates, though
+  a T in the middle never moves the through wall's ends;
+- an **opening** edit (a door slid along its wall): the host is the
+  opening's reference, so every dimension on the host regenerates, though
+  no wall end point moved;
+- a **dimension** edit (an offset drag): its walls are its references, so
+  they, their openings and every other dimension on them regenerate.
+
+The regenerated objects whose inputs did not change plan nothing. Each
 dimension's `generate` is O(the neighbour count of its at most two walls)
 plus a constant layout. **No edit pays anything for a dimension whose
 walls it does not reach**: there is no per-edit pass over dimensions and
@@ -459,11 +502,14 @@ no read box. The spike's option (b) (dimensions as place readers, 10 D16)
 also held but cost more for nothing on today's engine: 300 fuzz edits made
 **1,466** generates and 0 read-box calls under (a), **1,585** generates and
 **717** read-box calls under (b) (spike `Q2e`); **not adopted** (spike item
-15). An edit of a dimension regenerates its walls and their referrers;
-`DN4` pins both halves of this bound with `debugDimensionGenerates`.
+15). `DN4` pins the bound's two ends with `debugDimensionGenerates` (no
+generate for an unreached dimension; exactly its walls' dimensions for an
+offset change) and prints the counts for a door move and for a partition
+thickness change on a wall that carries N dimensions.
 
 **The drift fuzz and its oracle** (`DZ1`, the spike's `Q2e`, extended):
-the sample plan's nine walls at the corpus far origin, every wall in its
+the sample plan's nine walls (`room_fixture.dart`'s `sampleWalls()`, no
+column; S-9) at the corpus far origin, every wall in its
 own rotated group, page in mm, and fourteen dimensions (random wall end
 points, a fifth of the ends fixed, all three kinds, a third of the groups
 rotated). Then 300 seeded edits (seed 11): a thickness, a justification,
@@ -690,8 +736,9 @@ reads a default; none is defined.
 M.invert()`, so the children are relative to `P0` in the local frame (the
 room's seed pattern, 10 D10).
 
-**Pinned by:** `DO1`, `DL3`, `DL5`, `RR1`, `RR2`; M-11lw, M-11slash,
-M-11extpage, M-11stable.
+**Pinned by:** `DO1`, `DL3`, `DL5`, `RR1`, `RR3`; M-11lw, M-11slash,
+M-11extpage, M-11stable, M-11colour. `RR2` is D7's measurement of record
+(S-10), not a test a mutant can fail.
 
 ### D8 — The text
 
@@ -766,6 +813,28 @@ unit symbol, `.` as the decimal separator, no grouping:
   `3450.499999984674` at +1e9 mm, both `3451`. M-11e (truncate) is red
   everywhere, even on whole values (`Expected: '3900' Actual: '3899'` at
   the far origin).
+- **What the tolerance costs, both ways** **[amended, revision 2, S-4]**.
+  *Upwards:* a true length within 1e-6 mm **below** a half prints rounded
+  up. For integer-millimetre geometry this cannot happen in mm, cm or m
+  below 125 m (a true value below a half needs `|N − H²| ≥ 0.25` for mm and
+  cm, so a distance of at least 0.125 / L; at least 1 for m), and the
+  review's exhaustive search found none up to 20 m. In inches and
+  feet-inches the half `(2n + 1) · 127/80` mm is not a multiple of 1/4 mm,
+  so near-misses occur at room sizes: the review's run found the aligned
+  pair (0, 0)–(2124, 1731), √(2124² + 1731²) = 2,740.02499988595 mm, 1.14e-7
+  mm below 107 7/8", which prints `9'-0"` where exact half-up gives
+  `8'-11 3/4"`, and (0, 0)–(4160, 2697) in inches, 6.46e-7 mm below a half,
+  which prints `195 1/4`. A one-quantum difference on a sub-micron
+  question. *Downwards:* an intended half computed between two attach
+  points at +1e9 mm can be off by twice the spike's worst attach error,
+  about 7.5e-7 mm (Q1: 3.77e-7 per point), so there the tolerance's margin
+  is about 1.3×. **The tolerance stays at 1e-6 mm** **[spec ruling]**
+  (R-32): exact arithmetic decides the intended halves wrongly (the spike's
+  `Q5c`: 3/16", 1005 mm in metres, the 3-4-5 triangle), a smaller tolerance
+  would drop the far-origin halves below that 1.3× margin, and a larger one
+  would widen the imperial over-rounding band in proportion; the cost is a
+  sub-micron over-rounding in inch units, recorded in D18 and pinned by
+  `DF2`'s rows.
 - **The cm trailing zero is kept** **[spec ruling]** (R-14): `345.0`, not
   `345`. Every unit then shows its plan precision in a fixed number of
   decimals, as metres keep `3.40`; a dimension's text does not change
@@ -795,8 +864,11 @@ need the snapped entity (the render layer stays frozen, D1).
 
 `attachCandidates(doc, index, q)` in `dimension_attach.dart`:
 
-- **only while object snap (F3) is on**; with F3 off, none, so every end is
-  fixed (decision 9: an end attaches "when the snap lands on one");
+- **only while object snap (F3) is on**, and then **by position**
+  (decision 23): any resolved point within the attach tolerance of a wall's
+  attach point attaches, whether an object snap or the grid put it there;
+  with F3 off, none, so every end is fixed. The tool and the grips see only
+  the resolved point, so they behave the same;
 - the walls: every live root-level group carrying `WallParams` that owns a
   child whose stored world box touches the square `q ± dimAttach.linear`
   (`SpatialIndex.forEachInRect` with `QueryFilter.rendering()`, the spike's
@@ -804,9 +876,16 @@ need the snapped entity (the render layer stays frozen, D1).
   centreline's ends (D4, R-5), so its stored boxes hold them; no bound from
   reach would be safe (an acute mitre reaches far past a wall's reach, 10
   D16.5);
-- each such wall's six points among `wallsInDocument(doc, W)`'s walls (08's
-  document adapter); a candidate is every `(W, k, side)` whose point lies
-  within **`dimAttach.linear` = 1e-5 mm** of `q`, Euclidean.
+- **a vertex pre-filter** **[amended, revision 2, S-7]**: of those walls,
+  only the ones with a stored child point (a ring vertex, or a centreline
+  piece's end, from the child payloads mapped to world) within
+  `dimAttach.linear` of `q` go on. Every attach point is such a stored
+  point (D4, R-5), so the filter loses none (`AM1` compares with brute
+  force); a hover over the middle of a wall, where a band's box holds the
+  pointer but no vertex is near, stops here and builds no `WorldWall`;
+- each remaining wall's six points among `wallsInDocument(doc, W)`'s walls
+  (08's document adapter); a candidate is every `(W, k, side)` whose point
+  lies within **`dimAttach.linear` = 1e-5 mm** of `q`, Euclidean.
 
 **The attach tolerance, 1e-5 mm:** the snapped point is the stored local
 ring mapped to world, the attach point is computed in world, and they
@@ -815,8 +894,9 @@ groups (spike `Q3a`), a 23× margin; M-attach-tol (1e-9) is red. Nothing a
 person draws is 1e-5 mm apart. `dimAttach = Tolerance(linear: 1e-5,
 angular: 1e-9)`.
 
-**The choice among candidates: decision 19, made exact** **[spec ruling]**
-(R-17):
+**The choice among candidates: decision 19's order, with decision 22's
+timing; the measure made exact** **[spec ruling]** (R-17: the measure
+`σ` and its band; the timing is no longer a ruling but decision 22):
 
 1. **The parallel measure:** for each candidate wall with world unit
    direction `d_W` (start to end), `σ_W = |u × d_W|`, the sine of the angle
@@ -836,15 +916,17 @@ angular: 1e-9)`.
    a left-justified wall's right face is its centreline, so at a free end
    `(k, right)` and `(k, centre)` coincide, and `right` is stored.
 
-**When it is decided:**
+**When it is decided** (decision 22, which supersedes decision 19's
+"the second click"):
 
 - **by the tool, at the commit** (the third click), for both ends, from the
-  two resolved points and the committed kind's `u`. For aligned that is
-  the answer the second click could already give (`u` is known once both
-  points are); for a linear kind the axis is known only at the third click,
-  when Shift says which kind is committed, so deciding then is the only way
-  to use the measuring direction decision 19 names. The candidates are
-  gathered at the commit, against the document as it is then;
+  two resolved points and the committed kind's `u`: aligned, the pair's
+  direction; horizontal or vertical, the group's local x or y (at the tool,
+  world x or y). The candidates are gathered at the commit, against the
+  document as it is then. On `AM3`'s outer corner the two timings differ:
+  decided at the second click (`u` the pair's) it would store B/0/right,
+  at the commit with Shift-horizontal it stores A/1/right; decision 22
+  chose the second;
 - **by an end-grip drop, for the dropped end only**, with the dimension's
   current kind and, for aligned, the other end's **current** world point.
   **The other end keeps its stored reference**: an edit of one end never
@@ -866,12 +948,16 @@ walls whose points it is, `Q3d`), a T's butt corner (the stem's point,
 `Q3d`), an X crossing (no snap at all, `Q3c`), furniture and drafted
 geometry (fixed).
 
-**Costs:** per call, one index rect query and, per candidate wall, one
+**Costs:** per call, one index rect query and the vertex pre-filter over
+the touched walls' stored points; then, per wall that passes, one
 `wallsInDocument` and six points: `Q3g (B) per click, 9 walls, 15
-openings: 60.93 us (JIT)` (spike). The tool calls it at most once per
-distinct resolved point (D12); `AM5` prints it at 600 walls.
-**Pinned by:** `AM1`–`AM5`, `GE3`; M-11nearest, M-11attachtol,
-M-11parallel, M-11lineardir, M-11centrefirst, M-11otherend, M-11snapoff.
+openings: 60.93 us (JIT)` (spike, without the pre-filter). The O(walls)
+part runs only near a wall's vertex. The tool calls it at most once per
+distinct resolved point (D12); `AM5` prints a click and `TL8` a hover path
+at 600 walls.
+**Pinned by:** `AM1`–`AM5`, `GE3`, `TL8`; M-11nearest, M-11attachtol,
+M-11parallel, M-11lineardir, M-11centrefirst, M-11otherend, M-11snapoff,
+M-11snaponly, M-11reachcull, M-11ownerring, M-11prefilter.
 
 ### D11 — Move and rotate; the linear axes
 
@@ -898,9 +984,11 @@ M-11parallel, M-11lineardir, M-11centrefirst, M-11otherend, M-11snapoff.
     turns.
 - **What the panel shows after a rotation** **[spec ruling]** (R-18,
   decision 17's "shows it as rotated"): for a linear kind whose group's
-  world rotation, `atan2(M.b, M.a)` in degrees normalised to (−180°, 180°]
-  and printed to one decimal, is not `0.0`, the Dimension section adds a
-  read-only line **`Axes turned 30.0°`** under the switch; the switch
+  world rotation, `atan2(M.b, M.a)` in degrees normalised to (−180°, 180°],
+  satisfies `|angle| ≥ 0.05°` (the rounded number, not the printed string:
+  `(-0.04).toStringAsFixed(1)` is `-0.0`; S-8), the Dimension section adds
+  a read-only line **`Axes turned 30.0°`**, the angle to one decimal, under
+  the switch; the switch
   still reads Horizontal or Vertical. An aligned dimension shows no such
   line (its direction is its points').
 - **A dimension selected with its walls** moves with them and every value
@@ -931,7 +1019,12 @@ M-11fixedworld, M-11attachedmoves, M-11scale.
   - at the **third** click, Shift means **linear** (decision 9) and ortho
     is off: `orthoBase` returns null once two points are placed, because an
     ortho-pinned third point would decide the drag side from the pinned
-    point, not from where the person dragged (M-11ortho3).
+    point, not from where the person dragged (M-11ortho3);
+  - **how the tool knows Shift** (S-8): `accept` and `hovered` do not
+    carry it and `PlacementTool`'s `_lastShift` is private, so
+    `DimensionTool` records `e.shift` in `onPointerMove` and
+    `onPointerDown`, and the Shift key's down and up in `onKey`, each
+    before calling `super`.
 - **Click 1** stores `P0`, the resolved point. **Click 2** stores `P1`,
   unless the pair is **degenerate** **[spec ruling]** (R-23): `|P1 − P0| ≤
   wallJoin.linear`, or the two points' attach candidate sets share a wall
@@ -966,7 +1059,9 @@ M-11fixedworld, M-11attachedmoves, M-11scale.
   placed, as 07's, 08's and 10's tools do.
 - **Esc** (decision 9, 05 D5): with one or two points placed it drops them
   and places nothing; with none, the shell returns to the select tool.
-  Undo and redo are swallowed while points are pending (05 D3).
+  Undo and redo are swallowed while points are pending (05 D3). **Enter**
+  with one or two points pending does nothing (`finish` stays the default
+  no-op) **[spec ruling]** (R-33, S-8): a dimension needs its third click.
 - **The preview** **[spec ruling]** (R-24):
   - after click 1: the rubber band from `P0` to the resolved hover point,
     as the Line tool;
@@ -981,20 +1076,34 @@ M-11fixedworld, M-11attachedmoves, M-11scale.
     same `attachCandidates`, memoised per distinct resolved point and
     document change, and only while F3 is on;
   - **the would-be value in the status line:** `DimensionTool` exposes
-    `ValueListenable<String?> notice`, `Dimension: <value>` (D9's string
-    in the page's unit, exactly what the TEXT will read) while two points
-    are placed, null otherwise and on deactivation; the shell merges it
-    into the status line as 10's Room tool notice (`main.dart:277-279`).
-    No text is drawn in the canvas preview (the overlay has no text path).
-- **Unsnapped points:** a grid or raw point, or an object snap on anything
-  that is not a wall end point (a jamb, furniture, another dimension, the
-  middle of a face), gives a fixed end (decision 4).
+    `ValueListenable<String?> notice`: the value alone, D9's string in the
+    page's unit, exactly what the TEXT will read (`4.69`), while two points
+    are placed; null otherwise and on deactivation. The tool's name is
+    `Dimension`, and the shell's `_statusLine` (`main.dart:321-326`) builds
+    `'$base — $notice'`, so the status line reads **`Dimension — 4.69`**
+    (S-8: revision 1's `Dimension: <value>` notice would have read
+    `Dimension — Dimension: 4.69`). The shell merges the notice as 10's
+    Room tool notice (`main.dart:277-279`). No text is drawn in the canvas
+    preview (the overlay has no text path).
+- **Fixed points** (decision 23, rewording revision 1's "unsnapped
+  points", S-3): with F3 on, a resolved point that is not within
+  `dimAttach.linear` of a wall end point (a jamb, furniture, another
+  dimension, the middle of a face) gives a fixed end, however it was
+  resolved; a grid point that lands exactly on a wall end point
+  **attaches**, as an object snap there does. With F3 off every end is
+  fixed (decision 4).
 - **Costs:** a hover computes at most one attach search per distinct
-  resolved point (`DimensionTool.debugAttachSearches`), and the preview's
-  layout per pointer move; `TL8` prints the hover at 600 walls.
+  resolved point (`DimensionTool.debugAttachSearches`), which the vertex
+  pre-filter (D10) stops before any `WorldWall` unless the point is near
+  a stored vertex, and the preview's layout per pointer move. `TL8` walks
+  a hover path along the middle of a wall among 600 walls and asserts that
+  no wall passes the pre-filter there (a counter), and prints the time per
+  move, **recorded against a budget of 1 ms per move** (printed, not
+  asserted; the plan records the figure).
 
 **Pinned by:** `TL1`–`TL8`; M-11shift, M-11dragside, M-11zerokind,
-M-11ortho3, M-11snapoff, M-11notice, M-11degeneratepair.
+M-11ortho3, M-11snapoff, M-11snaponly, M-11notice, M-11degeneratepair,
+M-11twosteps, M-11key, M-11prefilter.
 
 ### D13 — Grips
 
@@ -1010,8 +1119,9 @@ through the chain (08 Ruling 08-15). Ordinals **[spec ruling]** (R-26):
    kind, which the grip never changes; one `SetComponentCommand`, one undo
    step; null when the new offset `compareTo`s equal to the stored one;
 1. **the end grip at `a`**, at `P0`; 2. **the end grip at `b`**, at `P1`:
-   `drag(q)` makes the dropped end D10's choice at `q` (with the
-   dimension's kind and the other end's current point; the other end kept),
+   `drag(q)` makes the dropped end D10's choice at `q` (decisions 22 and
+   23: by position, with the dimension's current kind and the other end's
+   current point; the other end kept),
    or `FixedEnd(toLocal(q))` when there is no candidate (F3 off, or no
    wall end point there): an end **attaches, detaches or moves to another
    wall end point** (decision 11). The offset is kept, so the line keeps
@@ -1020,9 +1130,15 @@ through the chain (08 Ruling 08-15). Ordinals **[spec ruling]** (R-26):
    points within `wallJoin.linear`, or the same wall end point).
 
 `preview` draws the would-be five lines, in world, computed once per
-pointer move. A broken dimension (D15) has no grips.
+pointer move. **No attach ring during a grip drag** **[spec ruling]**
+(R-34, S-8): `preview` returns entities in world and knows no camera, so it
+cannot size a screen-sized ring, and the render layer is frozen (D1); the
+select tool's own snap marker shows where the drop resolves, and the
+Dimension section's end lines (D14) show the result. A broken dimension
+(D15) has no grips.
 
-**Pinned by:** `GE1`–`GE5`; M-11otherend, M-11gripoffset.
+**Pinned by:** `GE1`–`GE5`; M-11otherend, M-11gripoffset, M-11gripplace,
+M-11runtime, M-11previewkind.
 
 ### D14 — The Dimension section
 
@@ -1054,7 +1170,8 @@ the Dimension tool has no settings.
   `dimension-aligned`, `dimension-horizontal`, `dimension-vertical`,
   `dimension-axes`, `dimension-end-1`, `dimension-end-2`.
 
-**Pinned by:** `PN1`–`PN5`; M-11kindoffset.
+**Pinned by:** `PN1`–`PN5`; M-11kindoffset, M-11sectionmulti, M-11axesline,
+M-11endlabel, M-11panelrw.
 
 ### D15 — Diagnostics
 
@@ -1194,6 +1311,14 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
   jump.
 - **Interior corner-to-corner extension lines lie on the perpendicular
   walls' faces** (finding 2), drawn along the band's edge and not seen.
+  **And they take the wall's clicks there** **[spec ruling]** (R-35, S-12):
+  `pickInto` returns the topmost entity in the pick radius
+  (`spatial_index.dart:733`), and a dimension added after its walls draws
+  above them, so a click on the Hall's extension line along E4's inner face
+  (x 12,250, y 8,325 to 9,250) selects the Hall dimension, not E4. Kept: the
+  wall is selected anywhere else along its band, and draw order stays
+  ascending handle value (CLAUDE.md). `SL1` pins it; gate 16's look shows
+  it.
 - **No along-face or crossing points** (decision 4): an X crossing gives no
   snap (spike `Q3c`), a mid-face click is fixed.
 - **Drafted geometry is not followed** (decision 1): an end on furniture
@@ -1204,12 +1329,22 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
   wall is deleted (spike `Q3e`); decision 19 makes it the wall the
   dimension runs along.
 - **An edit of a dimension regenerates its walls and their other
-  referrers** (D5's cost bound), with empty plans.
+  referrers** (D5's cost bound), with empty plans; so does an opening edit
+  for the dimensions on its host, and a partition edit for those on its
+  through wall.
+- **The half-up tolerance, both ways** (D9, R-32): in inches and
+  feet-inches a true length within 1e-6 mm below a half prints rounded up
+  (the review's `(0, 0)–(2124, 1731)`: `9'-0"` for a true 8'-11 3/4" and a
+  hair); at +1e9 mm an intended half computed between two attach points
+  keeps a margin of only about 1.3× on the tolerance. `DF2` and `DF3` pin
+  both.
 - **Inherited:** 07's wide node cluster (the document adapter the tool uses
   and the view `generate` uses can differ there; unreachable by snapping,
-  10 D4's amendment); a mirrored group (file only) does not keep the text
-  readable. And the lineweight is measured in the test rasteriser with a
-  capture matched to the view (D7), not on a device: the look judges it.
+  10 D4's amendment); a mirrored dimension group (file only) does not keep
+  the text readable, and under a mirrored **wall** group (file only) a
+  stored `side` names the face on the other hand in world (S-5); a scaled
+  wall group is covered (R-5). And the lineweight is measured in the test
+  rasteriser with a capture matched to the view (D7), not on a device: the look judges it.
 
 ## The controller's readings, checked
 
@@ -1233,8 +1368,8 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
 | Roadmap: text scales with camera or paper | Paper (decision 6; D8) |
 | Roadmap decision 1 (a component holds what is measured and the style) | What is measured, yes; the style, no (constants) |
 | Spike 1: the centre point | The stored centreline end (R-4) |
-| Spike 2: which wall a shared point stores | Decision 19, made exact (R-17) |
-| Spike 3: how the tool identifies the point | Re-derive through the index (R-16) |
+| Spike 2: which wall a shared point stores | Decision 19's order, decision 22's timing, the measure made exact (R-17) |
+| Spike 3: how the tool identifies the point | Re-derive through the index, by position (R-16; decision 23) |
 | Spike 4: the attach tolerance | 1e-5 mm (R-16) |
 | Spike 5: linear axes, the panel, rotating alone | Local axes (decision 17); the axes line (R-18); allowed (D11) |
 | Spike 6: the offset | From the outermost point, the side its sign bit, model units (R-2, R-6, R-7; decision 18) |
@@ -1368,24 +1503,34 @@ groups for every other relational test; the sample plan's own placement
   and differ from `capsOf`'s joined corner by more than 1 mm (premises
   asserted: A's world outline simple, its local image not, A reports
   `wall.fallback`), and `drawnCapsOf`'s `fellBack` equals
-  `localOutlineOf`'s on every `AP1` fixture and 07's `WR13` sweep; `AP3`
-  every face point is a vertex of the stored ring,
-  in world, within 1e-9 of it at the far origin in own groups.
-- **Identification:** `AM1` all 54 wall end points of the sample plan
-  (fifteen openings), each snapped through the real `snapInto` from 5 mm
+  `localOutlineOf`'s on every `AP1` fixture and 07's `WR13` sweep; as a
+  premise, C9's A falls back in step 1 (`capsOf(...).fellBack` true), so
+  M-11fallback's site is reached (S-2); and a C11 variant whose wall groups
+  are also scaled 1.5 (file-only): the points are still the stored
+  rectangle's corners (S-5); `AP3` every face point is a vertex of the
+  stored ring, in world, within 1e-9 of it at the far origin in own groups.
+- **Identification:** `AM1` all 60 wall end points of `samplePlan`
+  (`room_fixture.dart`: ten walls, the column's free-wall points included,
+  fifteen openings; S-9), each snapped through the real `snapInto` from 5 mm
   away: the candidate set through the index equals the brute-force set
   (every wall, every point within `dimAttach.linear`), and the decided end
   equals decision 19's rule restated in the test over the brute-force
   set, for a horizontal and a vertical `u`; `AM2` the jamb (fixed), the Y
-  lobe vertex (B/0/left and C/0/right found), the T butt corner (the stem's), the X
-  crossing (no snap, fixed); `AM3` decision 19: an L whose **vertical** wall
+  lobe vertex (B/0/left and C/0/right found), the T butt corner (the
+  stem's), the X crossing (no snap, fixed), with the candidates taken through the index,
+  not from the snap's owner; `AM3` decision 19: an L whose **vertical** wall
   B has the **lower** handle — along A (horizontal or aligned) the corner
   is A's, along B it is B's; the outer corner (4100, −100) to (3000, 3000):
   aligned stores B/0/right (`u` = (−1,100, 3,100) / 3,289.4, so `σ` is 0.334
   against B and 0.942 against A), Shift-horizontal
   A/1/right; two collinear walls end to end, the lower handle; a
-  left-justified wall's free end, `right` before `centre`; `AM4` F3 off: no
-  candidates, and a grid point exactly on a corner stays fixed; `AM5` the
+  left-justified wall's free end, `right` before `centre`; `AM4` decision
+  23 (S-3): a page with a fixed 500 mm grid and a pointer placed so that
+  no object lies within the snap aperture and the grid resolves it to the
+  sample's outer corner (12,000, 8,000) (the review's case: at 0.052 px/mm
+  the aperture is 10 px = 192 mm); with F3 **on** that grid point attaches
+  (E1/0/right for a horizontal dimension); with F3 **off** the same point
+  gives no candidate and stays fixed; `AM5` the
   attach search per click among 600 walls (JIT, median of five, printed,
   not asserted).
 - **Layout and value (pure and object):** `DL1` the pair (0, 0), (3000,
@@ -1407,8 +1552,14 @@ groups for every other relational test; the sample plan's own placement
   measured horizontally: six children, `0`, `dimension.degenerate`.
 - **Format:** `DF1` D9's table in every unit (the spike's `Q5b` rows,
   `345.0`, `136 1/2`, `12'-0"`, `0'-0 1/2"`, a carry to the next foot);
-  `DF2` the `Q5c` rows; `DF3` `Q5d` through the object at all six
-  placements.
+  `DF2` the `Q5c` rows and the tolerance's contract both ways (S-4):
+  3450.5 − 0.9e-6 mm → `3451` beside 3450.5 − 2e-6 → `3450`, and the
+  review's aligned pair (0, 0)–(2124, 1731) in ft-in → `9'-0"`, the
+  recorded over-rounding (R-32); `DF3` `Q5d` through the object at all six
+  placements, and a half between **two computed corners** (S-4): A
+  (0, 0)→(3550.5, 0) and B north from A's end, both 200, A/0/left →
+  A/1/left = 3,550.5 − 100 = 3,450.5 → `3451` at all six placements, the
+  distance from the half printed (the far-origin margin).
 - **The object:** `DO1` children kinds and order (`line` × 5, `text`),
   lineweight 25, ByLayer, layer 0, the TEXT's `textAttrs`, at the corpus
   far origin in own groups; `DO2` a page change 1:50 m → 1:100 ft-in in one
@@ -1427,7 +1578,10 @@ groups for every other relational test; the sample plan's own placement
   `3100` → `3000`; undo restores every handle and owner); `DN4` the cost
   bound: an edit of a wall that is neither a referenced wall nor a
   neighbour of one calls no dimension `generate`; an offset change of one
-  dimension regenerates exactly the dimensions on its walls.
+  dimension regenerates exactly the dimensions on its walls; and, printed
+  not asserted (S-6), the generate counts for a door slid along a wall that
+  carries N = 1, 10, 50 dimensions and for a thickness change of a
+  partition T-joined to it.
 - **The fuzz:** `DZ1`, D5's.
 - **Move and rotate:** `DR1` `Q4a` at six placements (fixed-fixed, 30°:
   `3000` and `3231`, the line at the placement's angle + 30°); `DR2` `Q4b`;
@@ -1446,9 +1600,12 @@ groups for every other relational test; the sample plan's own placement
   one and after two points places nothing, and Esc again returns to the
   select tool; a second click on the first point is ignored; `TL5` the
   preview's five lines equal the committed children in world within 1e-9;
-  the notice reads `Dimension: 4.69` over the Hall's corners and clears
+  the status line reads `Dimension — 4.69` (the notice `4.69`) over the
+  Hall's corners, and the notice clears
   after the commit and on deactivation; attach rings appear only at
-  attaching points; `TL6` with F3 off every end is fixed; `TL7` I switches
+  attaching points; `TL6` decision 23 through the tool: with F3 on
+  a grid point landing on a corner attaches (as `AM4`), with F3 off every
+  end is fixed; Enter with points pending does nothing; `TL7` I switches
   to the tool, and typing I in a panel text field does not; `TL8` hover
   cost at 600 walls, printed, and one attach search per distinct resolved
   point (`debugAttachSearches`).
@@ -1467,26 +1624,35 @@ groups for every other relational test; the sample plan's own placement
   ends and offset unchanged, and switching back restores the children bit
   for bit; the current kind issues nothing; `PN3` `Axes turned 30.0°` after
   a 30° rotation of a linear dimension, none for aligned, none at 0°;
-  `PN4` the end lines for an attached and a fixed end; `PN5` read-only
+  a rotation of 0.04° shows none and 0.06° shows `Axes turned 0.1°`
+  (S-8); `PN4` the end lines for an attached and a fixed end; `PN5` read-only
   under runtime; a refused edit leaves the switch on the model's kind.
 - **The select tool:** `SL1` through the real select tool on the sample
   plan: a click on a dimension's line selects it; a body drag moves it
   (the diagonal's fixed end moves, its attached end stays); a rotation
   grip shows for a dimension alone; walls selected with their dimensions
   move and every value stays; deleting a dimension; deleting E1 deletes
-  the width, Hall and diagonal dimensions in one step.
+  the width, Hall and diagonal dimensions in one step; a click on E4's
+  inner face at (12,250, 8,800), under the Hall's extension line, selects
+  the Hall dimension (R-35, S-12).
 - **Diagnostics:** `DD1` `dimension.degenerate`; `DD2` `dimension.broken`
   from a file (a live box as a wall, `k = 2`, a NaN point, a NaN offset),
   childless, and a dead wall handle reported `parametric.dangling` only.
 - **Renders (the shell in `flutter_test`):** `RR1` the text's world height
   the same at 0.15 and 0.3 px/mm, and doubled at 1:100 (the spike's `R2`,
-  `R2c`), a slash inked, the extension gap; `RR2` D7's sweep on the built
+  `R2c`), a slash inked, the extension gap; it is M-11b's camera half's
+  killer (S-11); `RR2` D7's sweep on the built
   dimension at 0.25 mm, captured at the view's device pixel ratio: no
   frame loses a line. `RR2` is **the measurement of record** for decision
   20, asserted and printed; no mutant of the product can make a matched
   capture lose a line (set-ups 2 and 3 kept even 0.18 mm), so the weight
   itself is pinned by `DO1`'s record check (M-11lw); `RR3` on Blueprint paper
   the dimension ink is the foreground.
+- **Recorded measurements, not tests** (S-10): `RR2`, `AM5`, `TL8`'s time
+  and `DN4`'s printed counts are measurements of record, printed and kept
+  in the results note; no mutant is owed for them. `DO4`, `DO5` and `SP1`
+  are carried gate pins (06 D11's determinism, 06 D12's handles, 10 D23's
+  entity count), whose mutants belong to those plans.
 - **The sample plan:** `SP1`, `SP5`, `SP8`, `SP9` (D17).
 
 ### Named mutants
@@ -1500,7 +1666,8 @@ the backup and `git diff --quiet` (never `git checkout`), and logged in
 | Mutant | What it breaks | Must be killed by |
 |---|---|---|
 | M-11a | aligned computed as the axis-projected distance | `DL1` (3000 for 3231), `SP8` (the diagonal `3.45`), `DZ1` |
-| M-11b | **redefined:** the text height not multiplied by the page's scale (the paper half; spike M-page-height). The roadmap's camera half cannot be written: `generate` never sees the camera; `RR1` witnesses the paper-not-camera property at two camera scales | `DO2`, `RR1` |
+| M-11b | **the paper half:** the text height not multiplied by the page's scale (spike M-page-height) | `DO2`, `RR1` |
+| M-11b-cam | **the camera half, as the roadmap states it** (S-11): a **render-layer** mutant, the painter's TEXT height divided by the camera's scale in `jet_cad_2d_flutter`'s text path (the plan names the site), fired with a `cp` backup and restored, as M-11closure and M-11text are fired in the frozen engine; the render package's `lib` is unchanged at the gate | `RR1` (the text's world height at 0.15 and 0.3 px/mm) |
 | M-11c | the value computed once per dimension and reused (a memo by handle), never recomputed | `DN1`, `DN2`, `DZ1` |
 | M-11d | **redefined for `(wall, k, side)`:** an attached end resolved by its wall handle and side only, `k` ignored (always the start) | `AP1` (every `k = 1` row), `SP8` (E1/1/right) |
 | M-11d2 | **new, the other half of "by handle only":** `side` ignored (always the centreline end) | `AP1`, `SP8` |
@@ -1514,12 +1681,12 @@ and M-11e above, all 22 of the spike's mutants are carried):
 | M-11nbrs | the neighbours ignored (`capsOf(w, const [])`), also the raw face end | `AP1`, `DN1` |
 | M-11swap | the `k = 1` swap of outgoing sides dropped | `AP1` |
 | M-11swapjust | left and right swapped for right-justified walls | `AP1` (C4) |
-| M-11fallback | 07's short-wall fallback ignored | `AP1` (C9) |
+| M-11fallback | **redefined (S-2):** no fallback at all in `drawnCapsOf`, both steps returning the joined caps. Step 1 alone removed is equivalent on every fixture (D4; the review's run: 0 of 258 points differ) and is not fired | `AP1` (C9: A/0/left (100, 100) for (0, 100)) |
 | M-11centremid | centre = the cap's midpoint | `AP1` (C4, C5, C5c) |
 | M-11closure | engine: referrers of the seeds only (08's brief rule) | `DN1`, `DN2`, `DZ1` |
 | M-11refs | the dimension references nothing | `DN1`, `DN3` |
 | M-11text | engine: a matched TEXT's string never rewritten (10's M-10f site, M-11c's effect) | `DO2`, `DN1` |
-| M-11nearest | the nearest candidate instead of decision 19's rule | `AM1` (the far placements), `AM3` (an L corner is bitwise one point for both walls, so the nearest ties and the lower handle wins) |
+| M-11nearest | the nearest candidate instead of decision 19's rule, **ties to the lowest handle** (S-10: an L corner is bitwise one point for both walls, so the nearest ties) | `AM1` (the far placements), `AM3` (the L whose lower handle is the vertical wall) |
 | M-11attachtol | attach tolerance 1e-9 | `AM1` (+1e9 mm) |
 | M-11axisworld | linear axes in world, not the group's | `DR1`, `DR3`, `DR4`, `DZ1` |
 | M-11offsetp0 | the offset from the first point, not the outermost | `DL2` |
@@ -1562,10 +1729,27 @@ and M-11e above, all 22 of the spike's mutants are carried):
 | M-11marks | feet-inches without `'` and `"` | `DF1` |
 | M-11degenerate | `dimension.degenerate` never reported | `DD1` |
 | M-11broken | a broken end generates from a fallback point instead of nothing | `DD2` |
+| M-11snaponly | an end attaches only when an object snap won, never a grid point on a wall end point (the rule decision 23 replaced) | `AM4`, `TL6` |
+| M-11prefilter | the vertex pre-filter drops a wall whose attach point is a stored vertex (the filter run on ring vertices only, not centreline ends) | `AM1` (every centre point), `TL8` (the counter) |
+| M-11reachcull | candidate walls by reach instead of stored boxes | `AM1` (the outer corners lie outside every wall's reach) |
+| M-11ownerring | candidate walls from the snapped entity's owner only (the spike's (A)) | `AM2` (the Y lobe vertex) |
+| M-11negzero | the offset compared with `==` (the zero's sign lost) and `toJson` writing `offset.abs()` (two fired forms) | `DP1`, `DO3` |
+| M-11vertex | a face point taken from its cap's second point, not its first or last | `AP3`, `AP1` |
+| M-11colour | the lines and text generated in a `TrueColor`, not ByLayer | `RR3`, `DO1` |
+| M-11axesline | the axes line never shown | `PN3` |
+| M-11endlabel | the end lines print `k` swapped (start for end) | `PN4` |
+| M-11sectionmulti | the section shown with two dimensions selected | `PN1` |
+| M-11panelrw | the kind switch enabled under runtime permissions | `PN5` |
+| M-11key | I missing from `kShellLetterKeys` | `TL7` |
+| M-11twosteps | the tool commits the node and the component as two commands | `TL1` (two undo steps) |
+| M-11gripplace | the offset grip at `Q0` instead of the line's midpoint | `GE1` |
+| M-11runtime | the grips hit without `components` and `geometry` | `GE4` |
+| M-11previewkind | a grip preview laid out as aligned whatever the kind | `GE5` |
 
 **Retired from the spike:** its option-(b) switch
-(`debugDimensionReadsPlaces`; not adopted, D5) and the roadmap's camera
-half of M-11b (not writable, above).
+(`debugDimensionReadsPlaces`; not adopted, D5). Revision 1 also retired
+M-11b's camera half as "not writable"; revision 2 carries it as
+M-11b-cam, a render-layer mutant (S-11).
 
 ### Differential check
 
@@ -1607,25 +1791,29 @@ half of M-11b (not writable, above).
 10. Linear axes are the group's: rotating a plan keeps every value, a
     linear dimension rotated alone turns its axis, and the panel says so.
 11. The Dimension tool (I), its grips and its section behave as D10–D14
-    say, decision 19 included.
+    say, decisions 19, 22 and 23 included.
 12. The dimension lines are 0.25 mm, and `RR2`, captured at the view's
     device pixel ratio, shows no drop-out at the look's zooms.
 13. `git diff 9774a55 -- packages/` is empty; the allocation invariants
     pass unedited.
 14. The sample plan is D17's: five dimensions with their values, 611
     entities, `drift()` and `diagnostics()` empty.
-15. Every named mutant is killed and logged in `plan-11-mutation-log.md`;
+15. Every named mutant is killed and logged in `plan-11-mutation-log.md`
+    (M-11b-cam fired in the render layer and restored; M-11fallback as
+    redefined in revision 2);
     `roadmap/12` carries its two lines.
 16. **The human's look — owed by the human, never simulated:** on macOS,
     in Chrome and in Firefox: the Dimension tool's three clicks, its
     preview, Shift's linear choice, the attach rings and the status value;
     the sample plan's five dimensions at 1:50 and at 1:100, on White and on
     Blueprint; whether 0.25 mm reads, and never vanishes, beside the
-    walls; the slashes, the text's size and its side on a vertical dimension; moving a wall, a
-    joint breaking, deleting a wall, and undo; rotating the plan with its
-    dimensions, and one linear dimension alone; the offset and end grips;
-    the Dimension section's switch and end lines; the collisions decision
-    21 accepts.
+    walls; the slashes, the text's size and its side on a vertical
+    dimension; moving a wall, a joint breaking, deleting a wall, and undo;
+    rotating the plan with its dimensions, and one linear dimension alone;
+    the offset and end grips, and a grid drop on a corner attaching; the
+    Dimension section's switch and end lines; the collisions decision 21
+    accepts, and a click on a wall face under an extension line selecting
+    the dimension (R-35).
 
 ## Spec rulings
 
@@ -1656,11 +1844,14 @@ Every place this spec resolved something the decisions leave open.
 - **R-15** (D9) — fractions reduced; inches bare; feet-inches keep `'` and
   `"`.
 - **R-16** (D10) — attach points re-derived through the index at the
-  resolved point, within 1e-5 mm, only while F3 is on.
-- **R-17** (D10) — decision 19 made exact: `σ = |u × d_W|` with the
-  committed kind's `u`, a 1e-9 band around the minimum, decided at the
-  commit and for the dropped end only, never by a kind switch.
-- **R-18** (D11, D14) — `Axes turned N°` for a turned linear dimension.
+  resolved point, a vertex pre-filter first (revision 2, S-7), within
+  1e-5 mm; when an end may attach is decision 23's.
+- **R-17** (D10) — decision 19's parallel measure made exact: `σ = |u ×
+  d_W|` with the committed kind's `u`, and a 1e-9 band around the minimum.
+  *Revision 1's timing half (at the commit, the dropped end only, never by
+  a kind switch) is now decision 22.*
+- **R-18** (D11, D14) — `Axes turned N°` for a turned linear dimension,
+  shown when `|angle| ≥ 0.05°` (revision 2, S-8).
 - **R-19** (D11) — dimensions are movable by the select tool.
 - **R-20** (D12) — Shift is ortho at the second click and linear at the
   third, where ortho is off.
@@ -1682,13 +1873,45 @@ Every place this spec resolved something the decisions leave open.
 - **R-31** (D7) — the rasteriser is measured with a capture at the view's
   device pixel ratio; so measured, 0.25 mm survives and decision 20's
   fallback is not taken.
+- **R-32** (D9, revision 2, S-4) — the half-up tolerance stays 1e-6 mm,
+  accepting a sub-micron over-rounding in inch units and a 1.3× margin at
+  +1e9 mm, both recorded and pinned.
+- **R-33** (D12, revision 2, S-8) — Enter with points pending does
+  nothing.
+- **R-34** (D13, revision 2, S-8) — no attach ring during a grip drag.
+- **R-35** (D18, revision 2, S-12) — an extension line lying on a wall's
+  face takes that stretch's clicks (topmost pick, draw order kept).
 
 ## Open questions for the human
 
 **None.** Every item of the spike's open-decision list is closed by a
-decision (17–21) or a ruling above, and each ruling that a person sees —
-the between band (R-7), the kind switch keeping the offset (R-27), the
-drag-side tie (R-21), the panel's wording (R-18, R-28), the sample's
-on-sheet offsets and basin end (R-30) — is part of gate 16's look, where
-the human can overturn it. Decision 20's lineweight question was a
-measurement, made (D7).
+decision (17–23) or a ruling above. Revision 1's two findings that were
+the human's (S-1, S-3) are answered by decisions 22 and 23. Each ruling a
+person sees — the between band (R-7), the kind switch keeping the offset
+(R-27), the drag-side tie (R-21), the panel's wording (R-18, R-28), the
+sample's on-sheet offsets and basin end (R-30), a face click under an
+extension line (R-35) — is part of gate 16's look, where the human can
+overturn it. Decision 20's lineweight question was a measurement, made
+(D7).
+
+## Revision 2
+
+The independent review of revision 1 (`a2ba486`; "Ready with amendments",
+0 blocking, 3 major, 9 minor) and the human's decisions 22 and 23. Each
+finding was checked against the spec, the code or the review's runs before
+it was applied.
+
+| Finding | Outcome |
+|---|---|
+| S-1 (major) decision 19's timing re-decided as a ruling | **Answered by the human: decision 22.** The choice is made at the commit with the committed kind's direction, and at an end-grip drop for the dropped end with the current kind. R-17 keeps only the measure `σ` and its band; decision row 19 is marked superseded in its timing, row 22 added; D10's "When it is decided" cites decision 22 and shows the two timings' outcomes on `AM3`'s fixture; D13 cites it |
+| S-2 (major) M-11fallback equivalent under R-5 | **Adopted, the first option.** M-11fallback now removes both steps of `drawnCapsOf` (killed by `AP1`'s C9); step 1 removed alone is recorded as equivalent with the review's run as evidence, and why step 1 stays; `AP2` asserts C9's step-1 fallback as a premise. Gate 15 is meetable |
+| S-3 (major) grid point on a corner: attached or fixed | **Answered by the human: decision 23, attach by position** while F3 is on. D10's F3 bullet cites it; D12's "unsnapped points" is reworded as "fixed points"; `AM4` and `TL6` gain the F3-on grid row; new M-11snaponly |
+| S-4 imperial over-rounding, far-origin margin | **Adopted.** D9 records both directions with the review's cases; the 1e-6 mm tolerance is kept as R-32, with the reason; D18 lists it; `DF2` gains 3450.5 − 0.9e-6 → `3451` and (0, 0)–(2124, 1731) → `9'-0"`; `DF3` gains a half between two computed corners at six placements |
+| S-5 step 2's free corners under a scaled group | **Adopted, the first option.** Step 2 takes the stored local free rectangle mapped through the wall's transform, so the attach point is the drawn corner at any similarity; `AP2` gains a scaled-group variant; a mirrored wall group is listed in D18 |
+| S-6 the cost bound's opening and hub-wall cases | **Adopted.** D5 states the bound as every referrer of every wall in the core and names the wall, partition-through-wall, opening and dimension cases; `DN4` prints the counts for a door move and a partition change on a wall carrying N dimensions |
+| S-7 the hover attach search per move | **Adopted.** A vertex pre-filter on the stored child points near `q` runs before any `WorldWall` is built (D10); `TL8` asserts that a hover along a wall's middle passes no wall through it and prints the time against a 1 ms budget; new M-11prefilter |
+| S-8 tool details | **Adopted.** Shift is recorded from the pointer events and `onKey` before `super`; Enter does nothing (R-33); the notice is the value alone, so the status line reads `Dimension — 4.69`, and `TL5` expects that; R-18's threshold is `|angle| ≥ 0.05°` on the number, with a `PN3` row; no ring during a grip drag, by ruling (R-34) |
+| S-9 AM1's 54 points | **Adopted.** `AM1` names `samplePlan` (ten walls, 60 points, the column included); `DZ1` names `sampleWalls()` (nine walls) |
+| S-10 tests with no named mutant | **Adopted.** Sixteen mutants added (M-11negzero, M-11vertex, M-11colour, M-11axesline, M-11endlabel, M-11sectionmulti, M-11panelrw, M-11key, M-11twosteps, M-11gripplace, M-11runtime, M-11previewkind, M-11reachcull, M-11ownerring, and S-3's and S-7's M-11snaponly and M-11prefilter); M-11nearest defined with ties to the lowest handle; `RR2`, `AM5`, `TL8`'s time and `DN4`'s counts are marked measurements of record; `DO4`, `DO5` and `SP1` are marked carried gate pins |
+| S-11 M-11b's camera half is writable | **Adopted.** M-11b-cam, a render-layer mutant fired with a `cp` backup and restored, killed by `RR1` |
+| S-12 extension lines take the wall's clicks | **Adopted, recorded and kept** (R-35): D18, gate 16's look, and an `SL1` row pinning that a click on E4's face at (12,250, 8,800) selects the Hall dimension |
