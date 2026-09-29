@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/page_panel.dart';
+import 'package:floor_planner/panel_number.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_tool.dart';
 import 'package:floor_planner/planner_view.dart';
-import 'package:floor_planner/selection_panel.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -789,6 +789,10 @@ void main() {
       0.0, -0.0, 1.0, 200.0, -40.0, 262.5, 0.1, 1e-12, 5e-324, //
       two53 - 1, two53, two53 + 2, 9223372036854775807.0, 1e20, 1e300,
       -1e300, double.maxFinite,
+      // In [2^63, 2^64) in magnitude: an integer text there saturates, on
+      // the VM, to 2^63 - 1 or -2^63, which parse back to +-2^63 (Q4
+      // review m1).
+      1e19, -1.8e19,
     ];
     for (final v in values) {
       final text = panelNumberText(v);

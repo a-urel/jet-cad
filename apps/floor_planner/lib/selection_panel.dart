@@ -6,6 +6,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'panel_focus.dart';
+import 'panel_number.dart';
 import 'parametric/box.dart';
 import 'parametric/dimension.dart';
 import 'parametric/opening.dart';
@@ -13,23 +14,6 @@ import 'parametric/opening_tool.dart';
 import 'parametric/room.dart';
 import 'parametric/wall.dart';
 import 'parametric/wall_tool.dart';
-
-/// [v] as a Selection panel field shows it: text the fields' parser
-/// (`double.tryParse`) reads back as exactly [v], sign of zero included,
-/// so a focus-loss commit of a shown value writes nothing. A whole number
-/// below 2^53 in magnitude shows without ".0" ("200"); anything else is
-/// Dart's shortest round-trip form ("0.1", "100000000000000000000.0",
-/// "1e+300", "-0.0").
-///
-/// Not `v.round()` (fix/post-11): on the VM it saturates at 2^63 - 1, so
-/// 1e20 showed "9223372036854775807" and the focus loss after Enter wrote
-/// a second, silent undo step storing 9.22e18.
-@visibleForTesting
-String panelNumberText(double v) => v.abs() < 9007199254740992 && // 2^53
-        v == v.truncateToDouble() &&
-        !(v == 0 && v.isNegative)
-    ? v.toInt().toString()
-    : v.toString();
 
 /// Spec 06 D13, 07 D11, 08 D16 and 10 D21: the right panel's parametric
 /// sections.

@@ -3,6 +3,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'panel_focus.dart';
+import 'panel_number.dart';
 
 /// The smallest panel that lets a human change the page (spec D12). Every
 /// control executes one `SetComponentCommand`; the panel rebuilds from the
@@ -51,7 +52,7 @@ class _PagePanelState extends State<PagePanel> {
     final document = widget.document;
     final page = document.components.get<PageComponent>(document.rootHandle);
     if (page == null) return;
-    final text = _number(page.scaleDenominator);
+    final text = panelNumberText(page.scaleDenominator);
     if (_scale.text != text) _scale.text = text;
   }
 
@@ -88,9 +89,6 @@ class _PagePanelState extends State<PagePanel> {
     _scaleFocus.handBack();
     _syncScale();
   }
-
-  static String _number(double v) =>
-      v == v.roundToDouble() ? v.round().toString() : v.toString();
 
   void _set(PageComponent next) => widget.document.commands.execute(
       SetComponentCommand<PageComponent>(widget.document.rootHandle, next));

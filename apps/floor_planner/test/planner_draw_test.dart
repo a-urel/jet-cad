@@ -774,4 +774,52 @@ void main() {
         20);
     expect(doc.commands.undoDepth, depth);
   });
+
+  testWidgets(
+      "A26 a scale of 1e20 committed by Enter in the page panel, then Enter "
+      'again on the unchanged text, is one undo step storing exactly 1e20: '
+      'the field shows text that parses back to it (post-11 m3)',
+      (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    double model() =>
+        doc.components.get<PageComponent>(doc.rootHandle)!.scaleDenominator;
+    final depth = doc.commands.undoDepth;
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.enterText(scale(), '1e20');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(model(), 1e20);
+    expect(doc.commands.undoDepth, depth + 1);
+    final shown = scaleText(tester);
+    expect(double.parse(shown), 1e20, reason: 'the field shows "$shown"');
+    // Enter again on the text the field shows: nothing to write.
+    await tester.tap(scale());
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(model(), 1e20);
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(scaleText(tester), shown);
+  });
+
+  testWidgets(
+      "A27 the status line's scale for a 1:1e20 page parses back to exactly "
+      '1e20 (post-11 m3)', (tester) async {
+    final view = await pumpDraw(tester, drawDoc(FlutterTextMeasurer()).doc);
+    final doc = view.document;
+    final page = doc.components.get<PageComponent>(doc.rootHandle)!;
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle, page.copyWith(scaleDenominator: 1e20)));
+    // The shell hears of the page from `document.changes`, an asynchronous
+    // stream: the first pump delivers it, the second rebuilds the line.
+    await tester.pump();
+    await tester.pump();
+    final text = tester.widget<Text>(find.byKey(const Key('zoom-text'))).data!;
+    expect(text, startsWith('1:'));
+    final scaleText = text.substring(2, text.indexOf(' · '));
+    expect(double.parse(scaleText), 1e20,
+        reason: 'the status line reads "$text"');
+  });
 }
