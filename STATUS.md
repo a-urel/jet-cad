@@ -1,8 +1,9 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-29. **`fix/phantom-intersection-snap` is
-EXECUTED, NOT MERGED** (the first post-11 `fix/` branch, on the human's
-"başla"). The merge is the human's, `--no-ff`.
+**Last updated:** 2026-09-29. **`fix/phantom-intersection-snap` is MERGED
+into `main` at `f8a7752`**, `--no-ff`, on the human's decision (the first
+post-11 `fix/` branch, started on the human's "başla"). No look was
+reported; the one glance the note suggests stays the human's.
 - **What it fixes** (the Plan 11 results note's found item (a)): the
   engine's intersection snap measured and intersected a grouped leaf's
   stored coordinates as world, so after a group was moved or turned it
@@ -23,10 +24,10 @@ EXECUTED, NOT MERGED** (the first post-11 `fix/` branch, on the human's
   fix correct), P1b "Approved".
 - **Debt:** the allocation case catches a per-segment `Vector2` only when
   its file runs in order (alone, the JIT hides it).
-- **Next, each the human's to call:** the `--no-ff` merge; then the next
-  post-11 `fix/` (the orphan-component guard in `ParametricEdit`, 07's
-  throw at turned placements, `wall_grips.dart`'s liveness filter, the
-  palette's `drawing` flag); then sub-project 12.
+- **Next, each the human's to call:** the next post-11 `fix/` (the
+  orphan-component guard in `ParametricEdit`, 07's throw at turned
+  placements, `wall_grips.dart`'s liveness filter, the palette's `drawing`
+  flag); then sub-project 12.
 
 *Earlier, 2026-09-29 (the Plan 11 merge):*
 
@@ -2742,12 +2743,15 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice, on
+**Immediate next step: the human's choice.** `main` is at the
+`fix/phantom-intersection-snap` merge (`f8a7752`) and its STATUS record:
+the next post-11 `fix/` branch (below, item 1 without the phantom snap),
+or sub-project 12.
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's choice, on
 `fix/phantom-intersection-snap`** (executed, NOT MERGED; its ledger is
-archived as the branch's last commit):
-1. the human's merge, `--no-ff`, from the main checkout;
-2. the next post-11 `fix/` branch (below, item 1 without the phantom
-   snap), or sub-project 12.
+archived as the branch's last commit): the human's merge, then the next
+post-11 `fix/` branch or sub-project 12.
 
 *Before this branch ran, this paragraph read:* **Immediate next step: the human's choice.** `main` is at the Plan 11
 merge (`b7fe2eb`) and the post-merge docs; every Plan 11 branch and
