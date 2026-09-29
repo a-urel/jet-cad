@@ -175,9 +175,9 @@ final class DimensionType extends ParametricType<DimensionParams> {
   ///
   /// **Nothing** for a broken dimension (D7, D15): an end [endPointInView]
   /// finds broken, a non-finite offset, or a dimension [layoutDimension]
-  /// cannot lay out in doubles (its one guard, which every caller inherits),
-  /// so no value reaches the format non-finite. [diagnose] reports each of
-  /// them `dimension.broken`.
+  /// cannot lay out in finite numbers (its one guard, which every caller
+  /// inherits), so no value reaches the format non-finite or too large to
+  /// print. [diagnose] reports each of them `dimension.broken`.
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     debugDimensionGenerates++;
@@ -226,12 +226,14 @@ final class DimensionType extends ParametricType<DimensionParams> {
   ///   object that is not a wall, or has a `k` outside {0, 1}, or a fixed
   ///   end has a coordinate that is not finite, or the offset is not finite,
   ///   or both ends resolve and [layoutDimension] cannot lay the dimension
-  ///   out in doubles ("the measured length is not finite": an aligned pair
-  ///   whose distance overflows, or an attached wall's non-finite end point).
-  ///   The layout is tried with a zero offset when the offset is not finite,
-  ///   so that reason is the length's, not the offset's. [generate] makes
+  ///   out ("it cannot be laid out in finite numbers": an aligned pair whose
+  ///   distance overflows, a value above [kDimMaxValueMm], an attached wall's
+  ///   non-finite end point, or a page so large that a paper length
+  ///   overflows). The layout is tried with a zero offset when the offset is
+  ///   not finite, so that reason is never the offset's. [generate] makes
   ///   nothing for a broken dimension (D7). One diagnostic names every
-  ///   reason, in the order `a`, `b`, the offset, the measured length.
+  ///   reason, in the order `a`, `b`, the offset, the layout. A broken
+  ///   dimension is never also `dimension.degenerate`.
   /// - **`dimension.degenerate`**, a warning, when D6's value is ≤
   ///   `wallJoin.linear` (R-29): the two points coincide for aligned, or the
   ///   component is zero for a linear kind. It still draws (D7). The value
@@ -254,7 +256,7 @@ final class DimensionType extends ParametricType<DimensionParams> {
       ..._brokenEnd(view, 'b', p.b),
       if (!p.offset.isFinite) 'the offset is not finite',
       if (p0 != null && p1 != null && l == null)
-        'the measured length is not finite',
+        'it cannot be laid out in finite numbers',
     ];
     if (why.isNotEmpty) {
       return [

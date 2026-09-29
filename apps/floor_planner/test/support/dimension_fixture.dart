@@ -10,7 +10,9 @@
 // (`wall_regen_test.dart`); the flush-door fixtures from spec 11's flush
 // probe (D10, S-13); `dimGridWalls` from 10's `room_cost_test.dart`;
 // `addDimension`, `fixedAt`, `dimText`, `dimLines`, `dimTextGeometry` and
-// `mmPage` from the spike's support file and its `rotate_test.dart`.
+// `mmPage` from the spike's support file and its `rotate_test.dart`;
+// `oracleEnd` and `oracleFailures` from its support file and its
+// `drift_test.dart`, the oracle widened to every child (spec 11 D5).
 import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/dimension.dart';
@@ -417,4 +419,92 @@ List<(Vector2, Vector2)> dimLines(DraftDocument doc, Handle h) {
     p.scalars[0] * m.scaleMagnitude,
     p.scalars[1] + math.atan2(m.b, m.a),
   );
+}
+
+// ---------------------------------------------------------------------------
+// The all-walls oracle (Task 8; spec 11 D5, the Differential check).
+
+/// The world point of [end] of dimension [dim] as the oracle reads it
+/// (spec 11 D5): an attached end among **every** live wall of [doc] (the
+/// document adapter, `wallsInDocument`, not the view's reach neighbours),
+/// a fixed end through the dimension's group. Null where D7 calls the end
+/// broken: a wall that is not a live wall, a `k` outside {0, 1}, a
+/// non-finite fixed coordinate. Ported from the spike's `oracleEnd`.
+Vector2? oracleEnd(DraftDocument doc, Handle dim, DimEnd end) {
+  switch (end) {
+    case FixedEnd(:final x, :final y):
+      if (!x.isFinite || !y.isFinite) return null;
+      return doc.tree.accumulatedTransform(dim).transformPoint(end.point);
+    case AttachedEnd(:final wall, :final k, :final side):
+      if (k != 0 && k != 1) return null;
+      final ws = wallsInDocument(doc, wall);
+      if (ws == null) return null;
+      return wallEndPoint(ws.host, ws.walls, k, side);
+  }
+}
+
+/// Every live dimension of [doc] (a root-level group carrying
+/// `DimensionParams`) checked against the all-walls oracle (spec 11 D5):
+/// its ends from [oracleEnd], re-laid out by `layoutDimension` (Ruling
+/// 11-3) on the page [pageOf] gives, then compared with its stored
+/// children:
+///
+/// - the TEXT's string exactly;
+/// - every LINE's two world points, and the TEXT's world insertion point,
+///   within 1e-6 mm;
+/// - the TEXT's world height and rotation within 1e-9;
+/// - no child at all where the oracle finds the dimension broken (an end,
+///   the offset, or no layout).
+///
+/// The layout is shared with the code under test, so this is differential
+/// for the closure (which dimensions rebuild, from which walls), not for
+/// the layout (D5). Returns one line per failure, empty when all agree.
+List<String> oracleFailures(DraftDocument doc) {
+  final out = <String>[];
+  final page = pageOf(doc);
+  final dims = doc.components.withComponent<DimensionParams>().toList()
+    ..sort((a, b) => a.value.compareTo(b.value));
+  for (final h in dims) {
+    final node = doc.tree[h];
+    if (node is! GroupNode || node.parent != doc.tree.root) continue;
+    final p = doc.components.get<DimensionParams>(h)!;
+    final name = h.toHex();
+    final p0 = oracleEnd(doc, h, p.a), p1 = oracleEnd(doc, h, p.b);
+    final m = doc.tree.accumulatedTransform(h);
+    final want = p0 == null || p1 == null || !p.offset.isFinite
+        ? null
+        : layoutDimension(p0, p1, p.kind, m, p.offset, page);
+    final ks = kids(doc, h);
+    if (want == null) {
+      if (ks.isNotEmpty) out.add('$name: ${ks.length} children, want none');
+      continue;
+    }
+    if (ks.length != 6) {
+      out.add('$name: ${ks.length} children, want 6');
+      continue;
+    }
+    final text = dimText(doc, h);
+    if (text != want.text) out.add('$name: text $text, want ${want.text}');
+    final lines = dimLines(doc, h);
+    final pairs = [
+      (want.q0, want.q1),
+      want.ext0,
+      want.ext1,
+      want.slash0,
+      want.slash1,
+    ];
+    for (var i = 0; i < pairs.length; i++) {
+      final err = math.max((lines[i].$1 - pairs[i].$1).length,
+          (lines[i].$2 - pairs[i].$2).length);
+      if (!(err <= 1e-6)) out.add('$name: line $i off by $err mm');
+    }
+    final (at, height, angle) = dimTextGeometry(doc, h);
+    final atErr = (at - want.textAt).length;
+    if (!(atErr <= 1e-6)) out.add('$name: text point off by $atErr mm');
+    final hErr = (height - want.textHeight).abs();
+    if (!(hErr <= 1e-9)) out.add('$name: text height off by $hErr');
+    final aErr = (angle - want.textAngle).abs();
+    if (!(aErr <= 1e-9)) out.add('$name: text angle off by $aErr');
+  }
+  return out;
 }

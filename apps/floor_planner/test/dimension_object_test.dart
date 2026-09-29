@@ -641,7 +641,7 @@ void main() {
         for (final x in diagnosticsOf(doc))
           if (x.handles.contains(wide)) x,
       ], [
-        broken(wide, 'the measured length is not finite')
+        broken(wide, 'it cannot be laid out in finite numbers')
       ]);
       expect(driftOf(doc), isEmpty);
     });
@@ -695,7 +695,7 @@ void main() {
       expect(kids(doc, ho), hoKids);
       expect(dimText(doc, ho), '0');
       expect(dimDiagnostics(doc), [
-        broken(al, 'the measured length is not finite'),
+        broken(al, 'it cannot be laid out in finite numbers'),
         degenerate(ho),
       ]);
       expect(driftOf(doc), isEmpty);
@@ -705,6 +705,131 @@ void main() {
       expect(kids(doc, ho), hoKids);
       expect(dimText(doc, al), '200');
       expect(dimText(doc, ho), '0');
+      expect(dimDiagnostics(doc), [degenerate(ho)]);
+      expect(driftOf(doc), isEmpty);
+    });
+  }
+
+  for (final place in [origin, corpusGroups]) {
+    test(
+        'DD4 a page so large that the text height overflows makes a 4000 mm '
+        'dimension broken ("it cannot be laid out in finite numbers"); a NaN '
+        'offset on a coincident pair is broken only, never also degenerate, '
+        'at $place', () {
+      // Task 7's re-review (m1, m2). A (0, 0) → (4000, 0), 200.
+      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
+      final doc = plan.doc;
+      attachPage(doc, mmPage);
+      final [a] = plan.walls;
+      final g = place.m;
+
+      // --- 1:1e308. A/0/left (0, 100) → A/1/left (4000, 100), aligned:
+      // 4000, finite and small. The page's paper lengths are not: the text
+      // height is 2.5 × 1e308 and the overshoot 2 × 1e308, both beyond a
+      // double's 1.8e308. So the dimension cannot be laid out, though its
+      // value can.
+      final dim = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
+          offset: 600.5, at: g);
+      expect(dimText(doc, dim), '4000');
+      final ks = kids(doc, dim);
+      expect(ks, hasLength(6));
+      expect(dimDiagnostics(doc), isEmpty);
+      expect((kDimTextPaperMm * 1e308).isFinite, isFalse);
+      expect((kDimExtOvershootPaperMm * 1e308).isFinite, isFalse);
+      doc.commands
+          .execute(setPage(doc, (p) => p.copyWith(scaleDenominator: 1e308)));
+      expect(pageOf(doc).scaleDenominator, 1e308);
+      expect(kids(doc, dim), isEmpty);
+      expect(dimDiagnostics(doc),
+          [broken(dim, 'it cannot be laid out in finite numbers')]);
+      expect(driftOf(doc), isEmpty);
+      doc.commands.undo();
+      expect(kids(doc, dim), ks);
+      expect(dimText(doc, dim), '4000');
+      expect(dimDiagnostics(doc), isEmpty);
+      expect(driftOf(doc), isEmpty);
+
+      // --- A coincident aligned pair, the fixed plan point (1234.5,
+      // −310.25) twice: it measures 0 and is degenerate. Its offset made
+      // NaN: broken, and only broken. (The layout the diagnosis tries with a
+      // zero offset still measures 0; that is not reported.)
+      final zero = addDimension(doc, fixedAt(plan.at(1234.5, -310.25), g),
+          fixedAt(plan.at(1234.5, -310.25), g),
+          offset: 600.5, at: g);
+      final zks = kids(doc, zero);
+      expect(zks, hasLength(6));
+      expect(dimText(doc, zero), '0');
+      expect(dimDiagnostics(doc), [degenerate(zero)]);
+      doc.commands
+          .execute(setDim(doc, zero, (p) => p.copyWith(offset: double.nan)));
+      expect(doc.components.get<DimensionParams>(zero)!.offset.isNaN, isTrue);
+      expect(kids(doc, zero), isEmpty);
+      expect(dimDiagnostics(doc), [broken(zero, 'the offset is not finite')]);
+      expect(driftOf(doc), isEmpty);
+      doc.commands.undo();
+      expect(kids(doc, zero), zks);
+      expect(dimDiagnostics(doc), [degenerate(zero)]);
+      expect(driftOf(doc), isEmpty);
+    });
+  }
+
+  for (final place in [origin, corpusAxis]) {
+    test(
+        'DD5 a value above kDimMaxValueMm (1e15 mm) is not laid out: an '
+        'aligned dimension across a wall made 1e20 thick is broken and draws '
+        'nothing, while a horizontal one on the same points still reads 0, '
+        'at $place', () {
+      // Task 7's re-review (m3). The bound's two sides, through the one
+      // layout: 9.99e14 mm prints; 1.01e15 mm is not laid out.
+      final o = Vector2(1234.5, -310.25);
+      expect(kDimMaxValueMm, 1e15);
+      expect(
+          layoutDimension(o, o + Vector2(9.99e14, 0), DimKind.aligned,
+                  Transform2.identity(), 600.5, mmPage)!
+              .text,
+          '999000000000000');
+      expect(
+          layoutDimension(o, o + Vector2(1.01e15, 0), DimKind.aligned,
+              Transform2.identity(), 600.5, mmPage),
+          isNull);
+      // The premise the bound answers: the format cannot print 1e20 mm.
+      expect(formatDimension(1e20, DisplayUnit.millimeters),
+          isNot('100000000000000000000'));
+
+      // A (0, 0) → (4000, 0), 200, unturned (07's region check refuses a
+      // turned wall at an absurd thickness, DD3). Both dimensions A/0/left
+      // (0, 100) → A/0/right (0, −100): aligned 200, horizontal 0.
+      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
+      final doc = plan.doc;
+      attachPage(doc, mmPage);
+      final [a] = plan.walls;
+      final al = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
+          offset: 300.25, at: place.m);
+      final ho = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
+          kind: DimKind.horizontal, offset: 300.25, at: place.m);
+      expect(dimText(doc, al), '200');
+      expect(dimText(doc, ho), '0');
+      final alKids = kids(doc, al), hoKids = kids(doc, ho);
+      expect(dimDiagnostics(doc), [degenerate(ho)]);
+
+      // The thickness to 1e20 through the panel's command: the faces lie
+      // ±5e19 off the centreline, so the aligned value is 1e20, finite and
+      // above 1e15; the horizontal component is still exactly 0.
+      doc.commands.execute(SetComponentCommand<WallParams>(
+          a, doc.components.get<WallParams>(a)!.copyWith(thickness: 1e20)));
+      expect(doc.components.get<WallParams>(a)!.thickness, 1e20);
+      expect(kids(doc, al), isEmpty);
+      expect(kids(doc, ho), hoKids);
+      expect(dimText(doc, ho), '0');
+      expect(dimDiagnostics(doc), [
+        broken(al, 'it cannot be laid out in finite numbers'),
+        degenerate(ho),
+      ]);
+      expect(driftOf(doc), isEmpty);
+
+      doc.commands.undo();
+      expect(kids(doc, al), alKids);
+      expect(dimText(doc, al), '200');
       expect(dimDiagnostics(doc), [degenerate(ho)]);
       expect(driftOf(doc), isEmpty);
     });

@@ -265,6 +265,23 @@ const int kDimLineweight = 25;
 final int kDimTextAttrs =
     packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.bottom);
 
+/// The largest value, mm, a dimension lays out (spec 11 D9, D15): 1e15 mm,
+/// 1,000,000 km. Above it [layoutDimension] gives null and the dimension is
+/// `dimension.broken`, as for a value that is not finite.
+///
+/// **Why 1e15.** [formatDimension] counts whole quanta in a double, then an
+/// `int` ([roundHalfUp]). Below 2^50 mm (about 1.13e15) a double still
+/// resolves 1/8 mm, so every quantum (1 mm the finest) and its half are
+/// exact, and the count is right. From 2^52 mm (about 4.5e15) the spacing
+/// is 1 mm, so `n + 0.5 == n` and every value reads as a half; from 2^63
+/// quanta (about 9.2e18 mm) `toInt` saturates and the half's `+ 1` wraps,
+/// so 1e19 prints `-9223372036854775808`. 1e15 is a round bound below the
+/// first failure, and a million times any plan: the corpus far origin is
+/// 4.5e6 mm, and a value is a length, which the +1e9 mm placement does not
+/// make large. Only a wall made absurdly thick (a panel-legal 1e20 mm) or a
+/// file reaches it.
+const double kDimMaxValueMm = 1e15;
+
 /// One dimension's geometry in **world** (spec 11 D6-D8), from
 /// [layoutDimension]:
 ///
@@ -315,19 +332,28 @@ typedef DimLayout = ({
 /// Every paper constant is multiplied by `page.scaleDenominator` here, and
 /// nowhere else.
 ///
-/// **Null when the dimension cannot be laid out in doubles** (the one guard
-/// every caller inherits, Ruling 11-3): when the value for [kind], or any
-/// point, the text's height or its angle, is not finite. The value is
-/// checked before it is formatted: [formatDimension] formats only a finite
-/// value (a non-finite one throws there). This happens for a non-finite end
-/// point (an attached wall's `1e999` from a file), a non-finite [offset], or
-/// finite points so far apart that a length overflows: an aligned pair
-/// beyond about 1.3e154 mm, where the distance's square does. A linear kind
-/// whose component stays finite still lays out: a horizontal dimension
-/// between two points 1.5e154 apart along its local y measures 0 and draws.
-/// `generate` makes no child for null, and D15 reports the dimension
-/// `dimension.broken` ("the measured length is not finite"): a dimension
-/// either draws its six children or is broken, never silently empty (D7).
+/// **Null when the dimension cannot be laid out in finite numbers** (the one
+/// guard every caller inherits, Ruling 11-3): when the value for [kind] is
+/// not finite or is above [kDimMaxValueMm], or any point, the text's height
+/// or its angle is not finite. The value is checked before it is formatted:
+/// [formatDimension] formats only a finite value (a non-finite one throws
+/// there) and misprints one above [kDimMaxValueMm]. This happens for:
+///
+/// - a non-finite end point (an attached wall's `1e999` from a file), or a
+///   non-finite [offset];
+/// - finite points so far apart that a length overflows: an aligned pair
+///   beyond about 1.3e154 mm, where the distance's square does;
+/// - a finite value above [kDimMaxValueMm] (an aligned pair across a wall
+///   1e20 mm thick);
+/// - a page so large that a paper constant overflows (1:1e308: the text's
+///   height, 2.5 × 1e308, is not finite, though the value is 4000).
+///
+/// A linear kind whose component stays finite and small still lays out: a
+/// horizontal dimension between two points 1.5e154 apart along its local y
+/// measures 0 and draws. `generate` makes no child for null, and D15 reports
+/// the dimension `dimension.broken` ("it cannot be laid out in finite
+/// numbers"): a dimension either draws its six children or is broken, never
+/// silently empty (D7).
 DimLayout? layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
     double offset, PageComponent page) {
   final d = p1 - p0;
@@ -365,6 +391,7 @@ DimLayout? layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
   final textHeight = kDimTextPaperMm * scale;
   bool finite(Vector2 w) => w.x.isFinite && w.y.isFinite;
   if (!value.isFinite ||
+      value > kDimMaxValueMm ||
       !textAngle.isFinite ||
       !textHeight.isFinite ||
       ![
