@@ -1014,7 +1014,8 @@ class SpatialIndex {
   }
 
   /// The six coefficients of the last transform [_composeLeafTransform]
-  /// built, read straight back by [_descend]'s two visitors.
+  /// built, read straight back by [_descend]'s two visitors, by
+  /// [_leafPasses], and by [_collectNearSegments].
   ///
   /// Fields rather than a returned record or `Transform2`: this is computed
   /// once per *candidate*, and either of those would allocate one object per
@@ -1423,9 +1424,10 @@ class SpatialIndex {
   /// point for the classical two-tangent-lines construction -- see
   /// [_tangentPoints]'s doc comment for why, since this method has no
   /// separate "point I am drawing from" parameter. `intersection` is
-  /// handled separately by [_considerIntersections], root-level entities
-  /// only -- see its doc comment for the scope and the ordering guarantee
-  /// on [kIntersectionCandidateCap].
+  /// handled separately by [_considerIntersections], over the root
+  /// container's leaves only (a flattened group's included, mapped through
+  /// its transform) -- see its doc comment for the scope and the ordering
+  /// guarantee on [kIntersectionCandidateCap].
   ///
   /// **No-hit contract:** [out] is reset unconditionally at the start of
   /// *every* call, the same way [pickInto] resets [HitPath] -- see
@@ -1506,12 +1508,20 @@ class SpatialIndex {
   /// crossing found through [_considerSnapCandidate] exactly as any other
   /// snap candidate.
   ///
-  /// **Root-level only, deliberately** -- the same restriction
-  /// [forEachInRect]'s doc comment states and for the same reason: this
-  /// reuses [forEachInRect]'s exact broad-phase shape (root container,
-  /// world-space query rectangle, [_scratch] as the result buffer, sorted
-  /// by handle) rather than [_descend]'s instance-aware walk, so a leaf
-  /// inside an instance is never a candidate here. Only
+  /// **The root container's leaves only, deliberately** -- the same
+  /// restriction [forEachInRect]'s doc comment states and for the same
+  /// reason: this reuses [forEachInRect]'s exact broad-phase shape (root
+  /// container, world-space query rectangle, [_scratch] as the result
+  /// buffer, sorted by handle) rather than [_descend]'s instance-aware walk,
+  /// so a leaf inside an instance is never a candidate here. A leaf inside a
+  /// flattened group **is** one: the root container indexes it, and its
+  /// stored coordinates are in the group's space, so [_collectNearSegments]
+  /// maps every segment through the leaf's own group transform
+  /// ([ContainerIndex.transformOfLeaf]; the root container's space is
+  /// world) before measuring it, and the pair loop intersects only those
+  /// mapped segments. Reading the stored coordinates as world instead put
+  /// intersection snaps where nothing crosses once a group was moved or
+  /// turned, and missed the real crossings (post-11 found item (a)). Only
   /// [EntityKind.line] and [EntityKind.polyline] segments are tested; a
   /// circle or arc is never an intersection candidate for this task.
   ///
@@ -1566,25 +1576,20 @@ class SpatialIndex {
     // very same pair.
     final first = _scratch.length - n;
     final end = _scratch.length;
-    _collectNearSegments(world, radius, first, end);
+    _collectNearSegments(root, world, radius, first, end);
+    final near = _nearSegmentWorld;
 
     for (var i = first; i < end; i++) {
       final aFrom = _nearSegmentStart[i - first];
       final aTo = _nearSegmentStart[i - first + 1];
       if (aFrom == aTo) continue;
       final slotA = _scratch[i];
-      final payloadA =
-          document.geometry.peek(document.entities.geomIndexAt(slotA));
-      final coordsA = payloadA.coords;
 
       for (var j = i + 1; j < end; j++) {
         final bFrom = _nearSegmentStart[j - first];
         final bTo = _nearSegmentStart[j - first + 1];
         if (bFrom == bTo) continue;
         final slotB = _scratch[j];
-        final payloadB =
-            document.geometry.peek(document.entities.geomIndexAt(slotB));
-        final coordsB = payloadB.coords;
 
         // SnapResult.entity names whichever of the pair was drawn later
         // (the greater handle) -- an intersection point genuinely belongs
@@ -1596,14 +1601,16 @@ class SpatialIndex {
         final handleB = document.entities.handleAt(slotB);
         final winningSlot = handleA.value > handleB.value ? slotA : slotB;
 
+        // World endpoints, already mapped through each leaf's own group
+        // transform by [_collectNearSegments] -- never the stored ones.
         for (var p = aFrom; p < aTo; p++) {
-          final sa = _nearSegment[p];
-          _isectA1.setValues(coordsA[sa * 2], coordsA[sa * 2 + 1]);
-          _isectA2.setValues(coordsA[sa * 2 + 2], coordsA[sa * 2 + 3]);
+          final pa = p * 4;
+          _isectA1.setValues(near[pa], near[pa + 1]);
+          _isectA2.setValues(near[pa + 2], near[pa + 3]);
           for (var q = bFrom; q < bTo; q++) {
-            final sb = _nearSegment[q];
-            _isectB1.setValues(coordsB[sb * 2], coordsB[sb * 2 + 1]);
-            _isectB2.setValues(coordsB[sb * 2 + 2], coordsB[sb * 2 + 3]);
+            final pb = q * 4;
+            _isectB1.setValues(near[pb], near[pb + 1]);
+            _isectB2.setValues(near[pb + 2], near[pb + 3]);
             final hit = segmentIntersection(
                 _isectA1, _isectA2, _isectB1, _isectB2, _isectOut);
             if (hit == null) continue;
@@ -1617,18 +1624,37 @@ class SpatialIndex {
     }
   }
 
-  /// Segment indices, per intersection candidate, of the segments that come
-  /// within the query radius. [_nearSegmentStart] holds one offset per
-  /// candidate plus a final end marker, so candidate `k`'s segments are
-  /// `_nearSegment[_nearSegmentStart[k] .. _nearSegmentStart[k + 1])`.
+  /// The near segments of every intersection candidate, as world
+  /// endpoints. [_nearSegmentStart] holds one offset per candidate plus a
+  /// final end marker, counted in segments, so candidate `k`'s segments are
+  /// `[_nearSegmentStart[k], _nearSegmentStart[k + 1])`, and segment `p`'s
+  /// endpoints are `_nearSegmentWorld[4p .. 4p + 4)`: `x1, y1, x2, y2`.
+  ///
+  /// World endpoints rather than segment indices into the stored payload:
+  /// the pair loop must intersect exactly the segments the near test
+  /// measured, in the space it measured them in, and storing them mapped is
+  /// what makes the two unable to disagree. Each segment is mapped once
+  /// here, not once per pair it takes part in.
   ///
   /// Grow-once scratch, never `clear()`ed, for the same reason as every
   /// other buffer in this class.
   Int32List _nearSegmentStart = Int32List(kIntersectionCandidateCap + 1);
-  Int32List _nearSegment = Int32List(64);
+  Float64List _nearSegmentWorld = Float64List(256);
 
-  /// Records, for each intersection candidate in `_scratch[from..to)`, which
-  /// of its segments come within [radius] of [world].
+  /// Records, for each intersection candidate in `_scratch[from..to)`, the
+  /// world endpoints of those of its segments that come within [radius] of
+  /// [world], into [_nearSegmentWorld].
+  ///
+  /// **Transform first, measure second.** A candidate is a leaf of [root],
+  /// the root container, whose space is world; a leaf inside a flattened
+  /// group stores its coordinates in the group's space, and
+  /// [ContainerIndex.transformOfLeaf] (null for the identity) carries them
+  /// to the root's. Every point is mapped with the raw coefficients
+  /// [_composeLeafTransform] leaves in [_lta]..[_ltf] -- no `Transform2`
+  /// and no `Vector2` per candidate or per segment -- and only then is the
+  /// segment measured, exactly as [_considerLeaf] does. Measuring the stored
+  /// segment would keep the wrong segments of a moved group's polyline, and
+  /// its crossings would be sought where the group used to be.
   ///
   /// **This changes no result, only the work.** An accepted crossing lies on
   /// both segments and within [radius] of [world], so each of those segments
@@ -1646,7 +1672,8 @@ class SpatialIndex {
   /// polyline may be near the cursor and the other four nowhere near it,
   /// while the quadratic loop tested all of them against all of the other
   /// candidate's.
-  void _collectNearSegments(Vector2 world, double radius, int from, int to) {
+  void _collectNearSegments(
+      ContainerIndex root, Vector2 world, double radius, int from, int to) {
     final count = to - from;
     if (_nearSegmentStart.length < count + 1) {
       _nearSegmentStart = Int32List(count + 1);
@@ -1654,19 +1681,39 @@ class SpatialIndex {
     var written = 0;
     for (var k = 0; k < count; k++) {
       _nearSegmentStart[k] = written;
-      final payload = document.geometry
-          .peek(document.entities.geomIndexAt(_scratch[from + k]));
+      final slot = _scratch[from + k];
+      final payload =
+          document.geometry.peek(document.entities.geomIndexAt(slot));
       final coords = payload.coords;
       final points = payload.pointCount;
-      for (var s = 0; s + 1 < points; s++) {
-        _isectA1.setValues(coords[s * 2], coords[s * 2 + 1]);
-        _isectA2.setValues(coords[s * 2 + 2], coords[s * 2 + 3]);
-        if (distanceToSegment(world, _isectA1, _isectA2) > radius) continue;
-        if (written == _nearSegment.length) {
-          _nearSegment = Int32List(_nearSegment.length * 2)
-            ..setRange(0, written, _nearSegment);
+      if (points < 2) continue;
+      // The root container's own placement is the identity (a const
+      // instance, not an allocation), so this leaves the leaf's group
+      // transform -- or the identity when it has none -- in _lta.._ltf.
+      _composeLeafTransform(Transform2.identity(), root.transformOfLeaf(slot));
+      final a = _lta, b = _ltb, c = _ltc, d = _ltd, e = _lte, f = _ltf;
+      var x1 = a * coords[0] + c * coords[1] + e;
+      var y1 = b * coords[0] + d * coords[1] + f;
+      for (var s = 1; s < points; s++) {
+        final lx = coords[s * 2], ly = coords[s * 2 + 1];
+        final x2 = a * lx + c * ly + e;
+        final y2 = b * lx + d * ly + f;
+        _isectA1.setValues(x1, y1);
+        _isectA2.setValues(x2, y2);
+        if (distanceToSegment(world, _isectA1, _isectA2) <= radius) {
+          final at = written * 4;
+          if (at + 4 > _nearSegmentWorld.length) {
+            _nearSegmentWorld = Float64List(_nearSegmentWorld.length * 2)
+              ..setRange(0, at, _nearSegmentWorld);
+          }
+          _nearSegmentWorld[at] = x1;
+          _nearSegmentWorld[at + 1] = y1;
+          _nearSegmentWorld[at + 2] = x2;
+          _nearSegmentWorld[at + 3] = y2;
+          written++;
         }
-        _nearSegment[written++] = s;
+        x1 = x2;
+        y1 = y2;
       }
     }
     _nearSegmentStart[count] = written;

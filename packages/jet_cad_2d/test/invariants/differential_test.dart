@@ -13,6 +13,12 @@
 // reused across all 200 trials rather than recomputed per trial -- the
 // document does not change between queries in this harness, so nothing is
 // lost by not recomputing it.
+//
+// Random points almost never land on a crossing, so intersection snapping
+// is also checked at points *aimed* at every crossing and phantom the
+// oracle's leaf list yields (`_crossingTargets`); the random-point snap test
+// alone passed on `groupedCrossings` against an engine that intersected
+// stored coordinates as world (post-11 found item (a)).
 
 import 'dart:math' as math;
 
@@ -85,6 +91,67 @@ void _expectClose(double actual, double expected, String reason) {
   final scale = math.max(1.0, expected.abs());
   expect(actual, closeTo(expected, scale * 1e-6), reason: reason);
 }
+
+/// The points an intersection snap can be right or wrong about, derived from
+/// the oracle's own leaf list ([allLeavesInWorld]) rather than from any
+/// index structure: every crossing, in world, of two root-level line or
+/// polyline leaves (each through its own `toWorld`), and every **phantom**
+/// -- where the same two leaves' *stored* coordinates cross, for a pair
+/// with a non-identity transform on either side (an identity pair's stored
+/// crossing is its world one).
+///
+/// Random points almost never land within the snap radius of a crossing,
+/// which is how an engine that intersected stored coordinates as world
+/// agreed with this oracle across the whole corpus (post-11 found item (a)).
+List<Vector2> _crossingTargets(DraftDocument doc, List<LeafCandidate> leaves) {
+  final lineLike = [
+    for (final leaf in leaves)
+      if (leaf.root == doc.entities.handleAt(leaf.slot) &&
+          (doc.entities.kindAt(leaf.slot) == EntityKind.line ||
+              doc.entities.kindAt(leaf.slot) == EntityKind.polyline))
+        (
+          toWorld: leaf.toWorld,
+          stored: doc.geometry.peek(doc.entities.geomIndexAt(leaf.slot)),
+        ),
+  ];
+  final out = <Vector2>[];
+  for (var i = 0; i < lineLike.length; i++) {
+    final a = lineLike[i];
+    for (var j = i + 1; j < lineLike.length; j++) {
+      final b = lineLike[j];
+      final mapped = !a.toWorld.isIdentity || !b.toWorld.isIdentity;
+      for (var sa = 0; sa + 1 < a.stored.pointCount; sa++) {
+        for (var sb = 0; sb + 1 < b.stored.pointCount; sb++) {
+          final a1 = a.stored.pointAt(sa), a2 = a.stored.pointAt(sa + 1);
+          final b1 = b.stored.pointAt(sb), b2 = b.stored.pointAt(sb + 1);
+          final world = segmentIntersectionTol(
+              a.toWorld.transformPoint(a1),
+              a.toWorld.transformPoint(a2),
+              b.toWorld.transformPoint(b1),
+              b.toWorld.transformPoint(b2),
+              Tolerance.standard);
+          if (world != null) out.add(world);
+          if (!mapped) continue;
+          final phantom =
+              segmentIntersectionTol(a1, a2, b1, b2, Tolerance.standard);
+          if (phantom != null) out.add(phantom);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/// Offsets from each crossing target, all within the aimed test's 2.0
+/// radius: the target itself, then three points around it in different
+/// directions, so the nearest-crossing decision is exercised off the
+/// crossing as well as on it.
+final List<Vector2> _aimOffsets = [
+  Vector2.zero(),
+  Vector2(0.7, -0.4),
+  Vector2(-1.3, 0.9),
+  Vector2(0.2, 1.6),
+];
 
 void main() {
   for (final fixture in buildCorpus()) {
@@ -197,6 +264,50 @@ void main() {
               expect(out.entity, expected.entity, reason: reason);
               _expectClose(out.point.x, expected.point.x, reason);
               _expectClose(out.point.y, expected.point.y, reason);
+            }
+          }
+        }
+      });
+
+      test('snap matches brute force at and around every crossing and phantom',
+          () {
+        final fresh = _fresh(fixture);
+        addTearDown(fresh.index.dispose);
+        final out = SnapResult(32);
+        final leaves = allLeavesInWorld(fresh.doc);
+        final targets = _crossingTargets(fresh.doc, leaves);
+        if (fixture.name == 'groupedCrossings') {
+          expect(targets.length, greaterThanOrEqualTo(20),
+              reason: 'premise: the fixture built to be aimed at has '
+                  'crossings and phantoms to aim at');
+        }
+
+        for (final target in targets) {
+          for (final offset in _aimOffsets) {
+            final point = target + offset;
+            // Intersection alone first: under every wider mask a cheap kind
+            // or `perpendicular` outranks `intersection` wherever a line is
+            // in reach, which is at every crossing. The drag mask (the app's)
+            // and `SnapMask.all` then check the ranking against it.
+            for (final mask in [
+              const SnapMask(0).with_(SnapKind.intersection),
+              kDragSnapMask,
+              SnapMask.all,
+            ]) {
+              fresh.index.snapInto(point, 2.0, mask, out,
+                  filter: const QueryFilter.all());
+              final expected =
+                  referenceSnap(fresh.doc, point, 2.0, mask, leaves);
+
+              final reason = '${fixture.name} aimed at $target, query $point '
+                  'mask=${mask.bits}';
+              expect(out.found, expected != null, reason: reason);
+              if (expected != null) {
+                expect(out.kind, expected.kind, reason: reason);
+                expect(out.entity, expected.entity, reason: reason);
+                _expectClose(out.point.x, expected.point.x, reason);
+                _expectClose(out.point.y, expected.point.y, reason);
+              }
             }
           }
         }

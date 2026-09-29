@@ -909,6 +909,177 @@ CorpusDocument _regionFill() => CorpusDocument('regionFill', () {
       return doc;
     });
 
+/// One line-like leaf as [_groupedCrossings] built it: its stored points,
+/// the transform it was placed under (worked out in the builder from the
+/// group transforms it chose, not read back from the document or any index),
+/// and which group it sits in (`'root'` for none).
+typedef _BuiltSegments = ({String group, List<Vector2> stored, Transform2 m});
+
+/// Every crossing between segments of two different entries of [built],
+/// through each entry's own transform when [world] is true and in stored
+/// coordinates when it is false, with the pair's group names and the two
+/// segment parameters. `segmentIntersectionTol`'s arithmetic restated with
+/// the parameters kept, since the builder's premises need them.
+List<({Vector2 p, String a, String b, double t, double u})> _crossingsOf(
+    List<_BuiltSegments> built,
+    {required bool world}) {
+  List<Vector2> pts(_BuiltSegments e) =>
+      world ? [for (final p in e.stored) e.m.transformPoint(p)] : e.stored;
+  final out = <({Vector2 p, String a, String b, double t, double u})>[];
+  for (var i = 0; i < built.length; i++) {
+    final pa = pts(built[i]);
+    for (var j = i + 1; j < built.length; j++) {
+      final pb = pts(built[j]);
+      for (var sa = 0; sa + 1 < pa.length; sa++) {
+        for (var sb = 0; sb + 1 < pb.length; sb++) {
+          final r = pa[sa + 1] - pa[sa], s = pb[sb + 1] - pb[sb];
+          final den = r.x * s.y - r.y * s.x;
+          if (den == 0) continue;
+          final qp = pb[sb] - pa[sa];
+          final t = (qp.x * s.y - qp.y * s.x) / den;
+          final u = (qp.x * r.y - qp.y * r.x) / den;
+          if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+          out.add((
+            p: pa[sa] + r * t,
+            a: built[i].group,
+            b: built[j].group,
+            t: t,
+            u: u,
+          ));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/// Crossing lines and polylines in root-level groups at non-degenerate
+/// transforms (post-11 found item (a)).
+///
+/// Before this fixture, the corpus's only root-level groups (`groot`,
+/// `groot2` in [_groupsInDefinitions]) held a single circle, so the
+/// intersection pass never met a grouped segment and the differential snap
+/// test agreed with an engine that intersected stored coordinates as world.
+/// Here: a rotated-and-moved group, a non-uniformly scaled one, a mirrored
+/// one, a group nested in a group (both holding leaves), and ungrouped root
+/// lines, laid across each other so that every kind of pair crosses in
+/// world -- within one group, between two groups, grouped against
+/// ungrouped. The differential test aims its snap queries at those
+/// crossings and at the stored-coordinate (phantom) ones.
+CorpusDocument _groupedCrossings() => CorpusDocument('groupedCrossings', () {
+      final doc = DraftDocument.empty();
+      final built = <_BuiltSegments>[];
+      void add(String group, Handle owner, Transform2 m, EntityKind kind,
+          List<double> coords) {
+        _addEntity(doc, owner: owner, kind: kind, coords: coords);
+        built.add((
+          group: group,
+          stored: [
+            for (var i = 0; i < coords.length; i += 2)
+              Vector2(coords[i], coords[i + 1]),
+          ],
+          m: m,
+        ));
+      }
+
+      // Ungrouped root leaves: the group transform is null on this side.
+      final root = doc.rootHandle;
+      final id = Transform2.identity();
+      add('root', root, id, EntityKind.line, [10, 12, 92, 83]);
+      add('root', root, id, EntityKind.line, [15, 88, 88, 9]);
+      add('root', root, id, EntityKind.polyline,
+          [5, 50, 40, 58, 70, 42, 97, 55]);
+
+      // A: turned and moved.
+      final ma =
+          Transform2.translation(30, 35).multiply(Transform2.rotation(0.5));
+      final ga = _addGroup(doc, parent: root, transform: ma);
+      add('A', ga, ma, EntityKind.line, [0, 0, 30, 4]);
+      add('A', ga, ma, EntityKind.line, [5, -10, 12, 22]);
+      add('A', ga, ma, EntityKind.polyline, [-8, 8, 10, -6, 25, 14, 38, -3]);
+
+      // B: a non-uniform scale between a turn and a move.
+      final mb = Transform2.translation(20, 60)
+          .multiply(Transform2.scale(1.8, 0.55))
+          .multiply(Transform2.rotation(0.3));
+      final gb = _addGroup(doc, parent: root, transform: mb);
+      add('B', gb, mb, EntityKind.line, [0, 0, 25, 10]);
+      add('B', gb, mb, EntityKind.line, [10, -15, 18, 30]);
+      add('B', gb, mb, EntityKind.polyline, [0, 20, 15, -10, 30, 25]);
+
+      // C: mirrored.
+      final mc = Transform2.translation(75, 30)
+          .multiply(Transform2.scale(-1.3, 0.9))
+          .multiply(Transform2.rotation(-0.7));
+      final gc = _addGroup(doc, parent: root, transform: mc);
+      add('C', gc, mc, EntityKind.line, [0, 0, 20, 5]);
+      add('C', gc, mc, EntityKind.line, [4, -12, 9, 14]);
+      add('C', gc, mc, EntityKind.polyline, [-5, -5, 6, 10, 18, -8]);
+
+      // D holds a line and E, a group nested in it holding two more.
+      final md =
+          Transform2.translation(55, 70).multiply(Transform2.rotation(-0.4));
+      final gd = _addGroup(doc, parent: root, transform: md);
+      add('D', gd, md, EntityKind.line, [-15, 0, 20, 6]);
+      final me = Transform2.rotation(1.1).multiply(Transform2.scale(1.2, 0.7));
+      final ge = _addGroup(doc, parent: gd, transform: me);
+      final mde = md.multiply(me);
+      add('E', ge, mde, EntityKind.line, [0, -8, 4, 12]);
+      add('E', ge, mde, EntityKind.polyline, [-10, 2, 3, -4, 14, 9]);
+
+      // The transforms are what the fixture claims.
+      expect(ma.a.abs(), greaterThan(0.01));
+      expect(ma.b.abs(), greaterThan(0.01), reason: 'A is not axis-aligned');
+      expect(mb.anisotropyRatio, greaterThan(1.5),
+          reason: 'B scales non-uniformly');
+      expect(mc.determinant, lessThan(0), reason: 'C mirrors');
+      expect(mc.b, isNot(closeTo(mc.c, 0.01)),
+          reason: 'C is not symmetric, so a transposed linear part differs');
+      expect((doc.tree[gd]! as GroupNode).children, contains(ge));
+      expect(doc.tree[gd]!.parent, root);
+      expect(me.isIdentity, isFalse);
+
+      final worldX = _crossingsOf(built, world: true);
+      bool has(bool Function(String a, String b) pair) =>
+          worldX.any((x) => pair(x.a, x.b));
+      expect(has((a, b) => a == b && a != 'root'), isTrue,
+          reason: 'two leaves of one group cross');
+      expect(has((a, b) => a != b && a != 'root' && b != 'root'), isTrue,
+          reason: 'leaves of two different groups cross');
+      expect(has((a, b) => (a == 'root') != (b == 'root')), isTrue,
+          reason: 'a grouped leaf crosses an ungrouped one');
+      for (final g in const ['A', 'B', 'C', 'D', 'E']) {
+        expect(has((a, b) => a == g || b == g), isTrue,
+            reason: 'group $g takes part in a world crossing');
+      }
+      // No crossing sits on a segment's end, and no two crossings meet, so
+      // the engine's and the oracle's clamps and tie-breaks cannot part on
+      // rounding.
+      for (final x in worldX) {
+        expect(math.min(x.t, 1 - x.t), greaterThan(1e-6), reason: '${x.p}');
+        expect(math.min(x.u, 1 - x.u), greaterThan(1e-6), reason: '${x.p}');
+      }
+      for (var i = 0; i < worldX.length; i++) {
+        for (var j = i + 1; j < worldX.length; j++) {
+          expect((worldX[i].p - worldX[j].p).length, greaterThan(1e-3),
+              reason: 'crossings ${worldX[i].p} and ${worldX[j].p} coincide');
+        }
+      }
+      // At least one phantom (a stored-coordinate crossing involving a
+      // grouped leaf) lies further than the differential test's snap radius
+      // from every world crossing, so an engine that finds it disagrees
+      // with the oracle rather than hiding behind a nearby real crossing.
+      final phantoms = [
+        for (final x in _crossingsOf(built, world: false))
+          if (x.a != 'root' || x.b != 'root') x.p,
+      ];
+      expect(phantoms.where((p) => worldX.every((x) => (x.p - p).length > 2.0)),
+          isNotEmpty);
+      expect(worldX.length, greaterThanOrEqualTo(10),
+          reason: 'enough crossings to aim at: ${worldX.length}');
+      return doc;
+    });
+
 CorpusDocument _nearMissIntersection() =>
     CorpusDocument('nearMissIntersection', () {
       final doc = DraftDocument.empty();
@@ -959,8 +1130,8 @@ class _Aabb2Matcher extends Matcher {
 }
 
 /// The fixed corpus. One builder per row of the task-16 brief's table, in
-/// the brief's own order, plus [_nearMissIntersection] -- see its own doc
-/// comment for why it was added.
+/// the brief's own order, plus [_nearMissIntersection] and
+/// [_groupedCrossings] -- see their own doc comments for why each was added.
 List<CorpusDocument> buildCorpus() => [
       _empty(),
       _single(),
@@ -981,4 +1152,5 @@ List<CorpusDocument> buildCorpus() => [
       _textLaidOut(),
       _regionFill(),
       _nearMissIntersection(),
+      _groupedCrossings(),
     ];
