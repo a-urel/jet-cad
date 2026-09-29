@@ -419,23 +419,43 @@ void main() {
     // world whose local image is (step 1 decides; D4 expected no fixture to
     // reach it, and the WR13 sweep does).
     var walls = 0, localOnly = 0, reverse = 0;
+    bool reverseEdge(WorldWall w, List<WorldWall> o) {
+      if (w.degenerate) return false;
+      final joined = outline(w, o, fallback: false).ring;
+      final toLocal = w.toWorld.invert();
+      return !isSimpleCcw(joined) &&
+          isSimpleCcw([for (final p in joined) toLocal.transformPoint(p)]);
+    }
+
     void agree(String name, List<WorldWall> ws) {
-      for (final w in ws) {
+      for (final (i, w) in ws.indexed) {
         final o = othersOf(w, ws);
         walls++;
+        if (reverseEdge(w, o)) {
+          reverse++;
+          // The reverse edge's points, not only its flag: through the real
+          // system, each face point is a vertex of the outline the wall
+          // stores, taken to world (07 falls back in world here, so that is
+          // the world free rectangle; the joined caps lie ~87 mm off it).
+          final (doc, _) = docOfWalls(ws);
+          final all = allWorldWalls(doc);
+          final dw = all[i], dwo = othersOf(dw, all);
+          expect(reverseEdge(dw, dwo), isTrue,
+              reason: '$name wall ${w.handle.value}: the premise in the '
+                  'document');
+          final ring = worldOutline(doc, dw.handle);
+          expect(ring, hasLength(4), reason: '$name: the stored rectangle');
+          for (final (k, side, p) in wallEndPoints(dw, dwo)) {
+            if (side == c) continue;
+            expect(nearest(ring, p), lessThan(dimAttach.linear),
+                reason: '$name wall ${w.handle.value} $k ${side.name}: $p, '
+                    'the stored ring $ring');
+          }
+        }
         final drawn = drawnFellBack(w, o);
         expect(drawn, localOutlineOf(w, o).fellBack,
             reason: '$name wall ${w.handle.value}');
         if (drawn && !capsOf(w, o)!.fellBack) localOnly++;
-        if (!w.degenerate) {
-          final joined = outline(w, o, fallback: false).ring;
-          final toLocal = w.toWorld.invert();
-          if (!isSimpleCcw(joined) &&
-              isSimpleCcw(
-                  [for (final p in joined) toLocal.transformPoint(p)])) {
-            reverse++;
-          }
-        }
       }
     }
 
