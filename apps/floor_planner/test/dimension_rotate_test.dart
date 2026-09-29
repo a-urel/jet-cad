@@ -349,6 +349,41 @@ void main() {
       doc.commands.undo();
       expect(dimText(doc, dim), '4000');
       expectFollows(doc, 'the undo');
+
+      // The left-face row (Task 13's review, carried): A/0/left (0, 100) →
+      // A/1/left (4000, 100), both attached, offset +600.5, so k = 1 and
+      // both face sides appear here. Unturned: h1 = 0, the line at 100 +
+      // 600.5 = 700.5.
+      expect(bruteCandidates(doc, plan.at(0, 100)), [AttachedEnd(a, 0, l)],
+          reason: 'premise: A/0/left');
+      expect(bruteCandidates(doc, plan.at(4000, 100)), [AttachedEnd(a, 1, l)],
+          reason: 'premise: A/1/left');
+      final left = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 1, l),
+          kind: DimKind.horizontal, offset: 600.5, at: place.m);
+      expect(dimText(doc, left), '4000');
+      (q0, q1) = lineOf(doc, left);
+      expectNear(q0, plan.at(0, 700.5), 'left unturned q0');
+      expectNear(q1, plan.at(4000, 700.5), 'left unturned q1');
+      expectFollows(doc, 'the left add');
+
+      // Turned alone 30° about (2000, 0), the right-face dimension left
+      // where it was: the value is 4000 cos 30° = 3464.10 again. h1 = (4000,
+      // 0) · n = −2000, so hi = 0; the sign bit clear, c = hi + 600.5 =
+      // 600.5. So q0 = P0 + c n = (0 − 300.25, 100 + 520.05), and q1 = P1 +
+      // (c − h1) n = P1 + 2600.5 n = (4000 − 1300.25, 100 + 2252.10).
+      transformAll(doc, [left], rotAbout(plan.at(2000, 0), 30));
+      expect(dimText(doc, left), '3464');
+      expect(dimText(doc, dim), '4000', reason: 'the other stays');
+      (q0, q1) = lineOf(doc, left);
+      expectNear(q0, plan.at(-600.5 * sn, 100 + 600.5 * cs), 'left turned q0');
+      expectNear(
+          q1, plan.at(4000 - 2600.5 * sn, 100 + 2600.5 * cs), 'left turned q1');
+      expect(lineAngle(doc, left), closeTo(rad(place.deg + 30), 1e-9));
+      expectFollows(doc, 'the left turn');
+
+      doc.commands.undo();
+      expect(dimText(doc, left), '4000');
+      expectFollows(doc, 'the left undo');
     });
   }
 
