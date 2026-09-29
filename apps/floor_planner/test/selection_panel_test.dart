@@ -7,6 +7,7 @@ import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_tool.dart';
 import 'package:floor_planner/planner_view.dart';
+import 'package:floor_planner/selection_panel.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -778,6 +779,65 @@ void main() {
       expect(driftOf(doc), isEmpty);
     });
   }
+
+  test(
+      'SE18 every finite value shows as text that parses back to exactly '
+      'it, sign of zero included; whole numbers below 2^53 without ".0" '
+      '(post-11 _number)', () {
+    const two53 = 9007199254740992.0;
+    final values = [
+      0.0, -0.0, 1.0, 200.0, -40.0, 262.5, 0.1, 1e-12, 5e-324, //
+      two53 - 1, two53, two53 + 2, 9223372036854775807.0, 1e20, 1e300,
+      -1e300, double.maxFinite,
+    ];
+    for (final v in values) {
+      final text = panelNumberText(v);
+      final back = double.parse(text);
+      expect(back, v, reason: '$v shows "$text"');
+      expect(back.isNegative, v.isNegative, reason: '$v shows "$text"');
+    }
+    expect([
+      for (final v in [0.0, 1.0, 200.0, -40.0, two53 - 1]) panelNumberText(v)
+    ], [
+      '0',
+      '1',
+      '200',
+      '-40',
+      '9007199254740991'
+    ]);
+  });
+
+  testWidgets(
+      'SE17 a Box width of 1e20 committed with Enter, then focus loss, is '
+      'one undo step storing 1e20: the shown text parses back to it '
+      '(post-11 _number)', (tester) async {
+    final view = await pumpBoxes(tester);
+    final doc = view.document;
+    final b = boxes(doc).first;
+    final height = doc.components.get<BoxParams>(b)!.height;
+    await select(tester, view, [b]);
+    await tester.tap(width);
+    await tester.pump();
+    final depth = doc.commands.undoDepth;
+    // Enter commits, and hands focus back to the canvas: the focus loss
+    // commits the shown text again.
+    await enterAndSubmit(tester, width, '1e20');
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(doc.components.get<BoxParams>(b), BoxParams(1e20, height));
+    expect(double.parse(textOf(tester, width)), 1e20);
+    // Another focus loss, by a tap outside: still nothing to write.
+    await tester.tap(width);
+    await tester.pump();
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('selection-panel')),
+        matching: find.text('Box')));
+    await tester.pump();
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(doc.components.get<BoxParams>(b)!.width, 1e20);
+    doc.commands.undo();
+    await tester.pump();
+    expect(doc.components.get<BoxParams>(b)!.width, isNot(1e20));
+  });
 
   testWidgets(
       'WS11 a wall thickness one ulp above kWallMaxThickness is refused on a '
