@@ -168,6 +168,28 @@ void main() {
     // Not over-reaching: 2e-6 below a half is below it.
     row('3450.5 − 2e-6', 3450.5 - 2e-6, 1, 3450, mm, '3450');
 
+    // --- The half is decided in millimetres (R-13), not in quanta. ---
+    // At a quantum of 1 mm the two coincide, so these rows sit at non-unit
+    // quanta: 2e-6 mm below the half is outside dimFormat.linear in mm, but
+    // inside it measured in quanta (2e-6 / 6.35 = 3.15e-7 quarters, 2e-6 /
+    // 10 = 2e-7 hundredths), where a rule deciding in quanta would round up.
+    // 431.5 quarters = 431.5 × 25.4 / 4 = 2,740.025 mm; 2e-6 below it is
+    // 431 quarters = 107.75" = 8 × 12 + 11.75 = 8'-11 3/4".
+    const quarterBelow = 431.5 * 25.4 / 4 - 2e-6;
+    expect(431.5 * qu - quarterBelow,
+        greaterThan(dimFormat.linear)); // premise: outside it in mm …
+    expect(431.5 - quarterBelow / qu,
+        lessThan(dimFormat.linear)); // … inside it in quanta
+    row('431.5 quarters − 2e-6 mm', quarterBelow, qu, 431, ftIn, "8'-11 3/4\"");
+    // 1005 mm = 100.5 hundredths of a metre; 2e-6 below it is 100
+    // hundredths = 1.00.
+    const hundredthBelow = 1005 - 2e-6;
+    expect(1005 - hundredthBelow,
+        greaterThan(dimFormat.linear)); // premise: outside it in mm …
+    expect(100.5 - hundredthBelow / 10,
+        lessThan(dimFormat.linear)); // … inside it in quanta
+    row('1005 − 2e-6 mm in m', hundredthBelow, 10, 100, m, '1.00');
+
     // --- The tolerance's contract, both ways (S-4). ---
     // 0.9e-6 below the half, inside 1e-6: on it, up.
     const nearBelow = 3450.5 - 0.9e-6;
