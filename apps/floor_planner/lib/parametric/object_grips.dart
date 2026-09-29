@@ -2,6 +2,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'dimension.dart';
+import 'dimension_grips.dart';
 import 'opening.dart';
 import 'opening_grips.dart';
 import 'room.dart';
@@ -20,13 +22,15 @@ import 'wall_grips.dart';
 /// - `RoomParams` → [rooms] (spec 10 D21's label grip);
 /// - `SeparatorParams` → [separators] (spec 10 D21's end grips), when the
 ///   shell handed over its `RoomInputs`;
+/// - `DimensionParams` → [dimensions] (spec 11 D13's offset grip and end
+///   grips), when the shell handed over its `SpatialIndex`;
 /// - anything else → no grips, no drag and no preview.
 ///
 /// [movable] is the dispatched provider's answer: [openings] says false
 /// for an opening and [rooms] for a room, which the select tool neither
-/// moves nor rotates, and [walls] and [separators] true; a group with none
-/// of these components is movable. One rule per provider, not a copy of it
-/// here (Task 14 F2).
+/// moves nor rotates, and [walls], [separators] and [dimensions] true; a
+/// group with none of these components is movable. One rule per provider,
+/// not a copy of it here (Task 14 F2).
 final class ObjectGrips implements ObjectGripProvider {
   /// [edgeAperture] is the slide grip's edge-snap aperture in world, or null
   /// with object snap off (Ruling 08-15).
@@ -38,17 +42,25 @@ final class ObjectGrips implements ObjectGripProvider {
   /// [roomInputs] and [objectSnap] drive the separator grips' band trimming
   /// (spec 10 D20, D21); without [roomInputs] a separator has no grips.
   /// [objectSnap] defaults to on.
+  ///
+  /// [index] and [objectSnap] drive a dimension's end grips, which attach by
+  /// position while F3 is on (spec 11 D13, D10); without [index] a
+  /// dimension has no grips.
   ObjectGrips(
       {required double? Function() edgeAperture,
       double Function()? labelAperture,
       RoomInputs? roomInputs,
+      SpatialIndex? index,
       bool Function()? objectSnap})
       : openings = OpeningGrips(edgeAperture: edgeAperture),
         rooms = RoomGrips(aperture: labelAperture ?? _noAperture),
         separators = roomInputs == null
             ? null
             : SeparatorGrips(
-                inputs: roomInputs, objectSnap: objectSnap ?? _snapOn);
+                inputs: roomInputs, objectSnap: objectSnap ?? _snapOn),
+        dimensions = index == null
+            ? null
+            : DimensionGrips(index: index, objectSnap: objectSnap ?? _snapOn);
 
   static double _noAperture() => 0;
   static bool _snapOn() => true;
@@ -57,6 +69,7 @@ final class ObjectGrips implements ObjectGripProvider {
   final OpeningGrips openings;
   final RoomGrips rooms;
   final SeparatorGrips? separators;
+  final DimensionGrips? dimensions;
 
   ObjectGripProvider? _of(DraftDocument d, Handle group) {
     final c = d.components;
@@ -64,6 +77,7 @@ final class ObjectGrips implements ObjectGripProvider {
     if (c.get<OpeningParams>(group) != null) return openings;
     if (c.get<RoomParams>(group) != null) return rooms;
     if (c.get<SeparatorParams>(group) != null) return separators;
+    if (c.get<DimensionParams>(group) != null) return dimensions;
     return null;
   }
 

@@ -264,6 +264,8 @@ class _PlannerShellState extends State<PlannerShell> {
   //   the snap aperture of its pole whatever F3 says (Ruling 10-17); a
   //   separator's end grips band-trim through the shared room inputs while
   //   F3 is on (D20).
+  // - Spec 11 D13: a dimension's offset grip and end grips; an end grip
+  //   attaches through the shared index while F3 is on (D10).
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   late final GripCache _grips = GripCache(_document, _selection, _outlines,
       objects: ObjectGrips(
@@ -272,6 +274,7 @@ class _PlannerShellState extends State<PlannerShell> {
               : null,
           labelAperture: () => kSnapAperturePixels / _camera.value.scale,
           roomInputs: _roomInputs,
+          index: _index,
           objectSnap: () => _snap.objectSnap));
 
   late final ToolContext _context = ToolContext(

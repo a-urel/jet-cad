@@ -1142,7 +1142,8 @@ void main() {
         'TL5 on a 1:100 ft-in page the preview and the notice are the '
         'committed dimension\'s; a page change heard off the canvas re-reads '
         'the notice; an unlayable hover previews nothing; a re-activated tool '
-        'reads the document afresh, at $place', () async {
+        'reads the document afresh; a neighbour edit, its undo and its redo '
+        'each re-read the ring, at $place', () async {
       // The Hall's diagonal, E1/0/left (12,250, 8,250) to P2/1/right
       // (16,940, 12,940), as the first TL5; each click 5 mm off.
       final c0 = place.at(12250, 8250), d = place.at(16940, 12940);
@@ -1206,8 +1207,6 @@ void main() {
         expect(rig.tool.hoverVisible, isFalse, reason: 'premise: off');
         attachPage(doc, page.copyWith(displayUnit: DisplayUnit.millimeters));
         await Future<void>.delayed(Duration.zero);
-        expect(rig.ctx.page!.value!.displayUnit, DisplayUnit.millimeters,
-            reason: 'premise: the page notifier heard it');
         expect(rig.tool.notice.value, '6633', reason: 'the new unit');
         final spy = RingSpy();
         rig.tool.paintWorldOverlay(spy, Vector2.zero(), 0.3);
@@ -1296,6 +1295,54 @@ void main() {
           expect((preview[i].$1 - lines[i].$1).length, lessThan(1e-9),
               reason: 're-activated, line $i');
         }
+      }
+
+      // -- A neighbour edit, its undo and its redo (Task 10's review, m1):
+      // the memo is dropped on every change heard, an undo and a redo
+      // included. The L of C2, its outer corner (4100, −100) A/1/right and
+      // B/0/right; a hover 5 mm off snaps there, at x. The edit moves B's
+      // group 2,000.5 east along the plan's x, so A's end is free: its
+      // corners (4000, ±100) lie 100 mm from x, beyond the 33.3 mm aperture,
+      // and nothing attaches at x. The undo joins B again, the redo parts
+      // it. After each (heard at a pump) a hover at x rings exactly when a
+      // fresh attachCandidates there is not empty, and that set flips at
+      // each step, so a memo kept across any of them shows.
+      {
+        final plan = buildPlan(c2Walls, place: place);
+        final doc = plan.doc;
+        final [_, b] = plan.walls;
+        final rig = dimRig(doc); // 0.3 px/mm: a 33.3 mm aperture
+        hoverTo(rig, plan.at(4103, -104));
+        final x = Vector2.copy(rig.tool.hoverPoint);
+        expect((x - plan.at(4100, -100)).length, lessThan(dimAttach.linear),
+            reason: 'premise: onto the outer corner');
+        void ringAtX(String why, {required bool attaches}) {
+          hoverTo(rig, x);
+          expect([rig.tool.hoverPoint.x, rig.tool.hoverPoint.y], [x.x, x.y],
+              reason: '$why: premise: the same resolved point');
+          final fresh = attachCandidates(doc, rig.ctx.index, x,
+              objectSnap: true, thickest: thickestWall(doc));
+          expect(fresh.isNotEmpty, attaches,
+              reason: '$why: premise: the fresh candidates');
+          expect(ringsOf(rig), hasLength(fresh.isEmpty ? 0 : 1),
+              reason: '$why: the ring is the fresh candidates\'');
+        }
+
+        ringAtX('joined', attaches: true);
+        final shift = turnedBy(place, 2000.5, 0);
+        doc.commands.execute(TransformNodeCommand(
+            b,
+            Transform2.translation(shift.x, shift.y)
+                .multiply(doc.tree[b]!.transform)));
+        await Future<void>.delayed(Duration.zero);
+        ringAtX('B moved away', attaches: false);
+        doc.commands.undo();
+        await Future<void>.delayed(Duration.zero);
+        ringAtX('undone', attaches: true);
+        doc.commands.redo();
+        await Future<void>.delayed(Duration.zero);
+        ringAtX('redone', attaches: false);
+        expect(driftOf(doc), isEmpty);
       }
     });
   }

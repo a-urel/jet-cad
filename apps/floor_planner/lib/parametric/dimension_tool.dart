@@ -429,10 +429,20 @@ class DimensionTool extends PlacementTool {
     final m = Transform2.identity();
     final w0 = _wouldBe(ctx, p0, p1, kind, m);
     final w1 = _wouldBe(ctx, p1, p0, kind, m);
+    // The page as `generate`'s view reads it, from the document's root, so
+    // the preview and the notice never depend on whether the shell's page
+    // notifier has heard a change before the tool.
     final l = w0 == null || w1 == null
         ? null
-        : layoutDimension(w0, w1, kind, m, offsetFor(q, p0, p1, kind, m),
-            ctx.page?.value ?? _defaultPage);
+        : layoutDimension(
+            w0,
+            w1,
+            kind,
+            m,
+            offsetFor(q, p0, p1, kind, m),
+            ctx.document.components
+                    .get<PageComponent>(ctx.document.rootHandle) ??
+                _defaultPage);
     if (l == null) {
       _hasPreview = false;
       if (!_disposed) _notice.value = null;
