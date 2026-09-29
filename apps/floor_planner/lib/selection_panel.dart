@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -6,6 +7,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'panel_focus.dart';
 import 'parametric/box.dart';
+import 'parametric/dimension.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
 import 'parametric/room.dart';
@@ -24,6 +26,11 @@ import 'parametric/wall_tool.dart';
 ///   (its width only) for the next opening.
 /// - **Room:** one selected room's name, a free-text field, and its area,
 ///   read-only: the area label's stored string (10 R-25).
+/// - **Dimension** (11 D14): one selected dimension's value, read-only (its
+///   TEXT child's stored string), its kind (Aligned | Horizontal |
+///   Vertical), the axes line of a turned linear dimension (D11, R-18) and
+///   its two end lines (R-28). No tool mode: the Dimension tool has no
+///   settings.
 ///
 /// Each commit to an object is one `SetComponentCommand`, which the
 /// parametric system turns into one undo step with its regeneration. 12
@@ -146,6 +153,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
   Handle? _areaRoom;
   String? _areaText;
 
+  /// The Value line's memo (11 D14), as the Area line's: the dimension
+  /// [_valueText] was read for, or null. Every document change clears it: a
+  /// wall edit or a page change rewrites the value's string in place.
+  Handle? _valueDim;
+  String? _valueText;
+
   /// Whether the Wall tool was active at the last check: the tool
   /// controller forwards every hover of the active tool, and only a switch
   /// in or out of the Wall tool concerns the panel.
@@ -161,6 +174,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     widget.selection.addListener(_sync);
     _changes = widget.document.commands.changes.listen((_) {
       _areaRoom = null;
+      _valueDim = null;
       _sync();
     });
     widget.tools?.addListener(_onTools);
@@ -314,6 +328,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// The Room section's room, or null when it is hidden (10 D21).
   Handle? get _room => _selected<RoomParams>();
+
+  /// The Dimension section's dimension, or null when it is hidden (11 D14:
+  /// exactly one selected key, 10 D21's rule).
+  Handle? get _dimension => _selected<DimensionParams>();
 
   /// The target [kind]'s section shows now, or null. The position has none
   /// in tool mode: the tools place at the click.
@@ -504,6 +522,128 @@ class _SelectionPanelState extends State<SelectionPanel> {
     return _areaText = labels.length < 2 ? null : entities.textAt(labels[1].$2);
   }
 
+  /// The Value line of dimension [dim] (11 D14): its TEXT child's stored
+  /// string, exactly as drawn, or null when it has none -- a broken
+  /// dimension generates no child (D7, D15), so its value is never
+  /// formatted here. Read once per dimension shown and per document change
+  /// ([_valueDim]), as [_areaOf].
+  String? _valueOf(Handle dim) {
+    if (dim == _valueDim) return _valueText;
+    final entities = widget.document.entities;
+    String? text;
+    for (final slot in entities.liveSlots) {
+      if (entities.ownerAt(slot) == dim &&
+          entities.kindAt(slot) == EntityKind.text) {
+        text = entities.textAt(slot);
+        break;
+      }
+    }
+    _valueDim = dim;
+    return _valueText = text;
+  }
+
+  /// Whether the Dimension section edits (11 D14, 07 WS8): a kind switch is
+  /// a `SetComponentCommand`, which needs `components`, and its
+  /// regeneration the type's `editCapability`, `geometry`.
+  bool get _dimensionEditable {
+    final permissions = widget.document.commands.permissions;
+    return permissions.allows(Capability.components) &&
+        permissions.allows(const DimensionType().editCapability);
+  }
+
+  /// 11 D14, R-27: dimension [target]'s kind to [kind], one
+  /// `SetComponentCommand` with only the kind changed -- the ends and the
+  /// offset are kept, and no end is re-decided (D10). A click on the kind
+  /// it has issues nothing. [target] is the dimension the section showed
+  /// when it was clicked: nothing is issued when it is no longer a live
+  /// dimension (its group removed before the panel rebuilt), so no
+  /// component lands on a dead handle. An edit the document refuses is
+  /// caught, as the justification toggle's: nothing changed, so the switch
+  /// keeps showing the model's kind.
+  void _setKind(Handle target, DimKind kind) {
+    if (!_dimensionEditable || !_isObject<DimensionParams>(target)) return;
+    final p = widget.document.components.get<DimensionParams>(target)!;
+    final next = p.copyWith(kind: kind);
+    if (next == p) return;
+    try {
+      widget.document.commands
+          .execute(SetComponentCommand<DimensionParams>(target, next));
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// The axes line of dimension [p] in group [dim] (11 D11, R-18), or null:
+  /// for a linear kind whose group's world rotation, `atan2(M.b, M.a)` in
+  /// degrees normalised to (−180°, 180°], is at least 0.05° either way --
+  /// the number, not its printed string, which is `-0.0` at −0.04° (S-8).
+  String? _axesOf(Handle dim, DimensionParams p) {
+    if (p.kind == DimKind.aligned) return null;
+    final m = widget.document.tree.accumulatedTransform(dim);
+    var angle = math.atan2(m.b, m.a) * 180 / math.pi;
+    if (angle <= -180) angle += 360;
+    if (angle.abs() < 0.05) return null;
+    return 'Axes turned ${angle.toStringAsFixed(1)}°';
+  }
+
+  /// An end line (11 D14, R-28): for an attached end, `Wall`, its wall's
+  /// handle in hex, `start` or `end` for its `k`, and `left face`,
+  /// `centreline` or `right face` for its side (`Wall 1A, end, left face`);
+  /// `Fixed` for a fixed end.
+  static String _endLine(DimEnd end) => switch (end) {
+        FixedEnd() => 'Fixed',
+        AttachedEnd(:final wall, :final k, :final side) =>
+          'Wall ${wall.toHex()}, ${k == 0 ? 'start' : 'end'}, '
+              '${switch (side) {
+            WallSide.left => 'left face',
+            WallSide.centre => 'centreline',
+            WallSide.right => 'right face',
+          }}',
+      };
+
+  /// The Dimension section's widgets for dimension [dim] (11 D14).
+  List<Widget> _dimensionSection(Handle dim, TextStyle? title) {
+    final p = widget.document.components.get<DimensionParams>(dim)!;
+    final editable = _dimensionEditable;
+    final axes = _axesOf(dim, p);
+    Widget line(String key, String label, String text) => InputDecorator(
+          decoration:
+              InputDecoration(labelText: label, border: InputBorder.none),
+          child: Text(text, key: Key(key)),
+        );
+    return [
+      Text('Dimension', key: const Key('dimension-section'), style: title),
+      // Read-only (decision 13): the value as drawn.
+      line('dimension-value', 'Value', _valueOf(dim) ?? '—'),
+      const SizedBox(height: 8),
+      SegmentedButton<DimKind>(
+        key: const Key('dimension-kind'),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+              value: DimKind.aligned,
+              label: Text('Aligned', key: Key('dimension-aligned'))),
+          ButtonSegment(
+              value: DimKind.horizontal,
+              label: Text('Horizontal', key: Key('dimension-horizontal'))),
+          ButtonSegment(
+              value: DimKind.vertical,
+              label: Text('Vertical', key: Key('dimension-vertical'))),
+        ],
+        selected: {p.kind},
+        onSelectionChanged: editable ? (s) => _setKind(dim, s.single) : null,
+      ),
+      if (axes != null) ...[
+        const SizedBox(height: 8),
+        Text(axes, key: const Key('dimension-axes')),
+      ],
+      line('dimension-end-1', 'End 1', _endLine(p.a)),
+      line('dimension-end-2', 'End 2', _endLine(p.b)),
+    ];
+  }
+
   /// Copies the model into the fields; no rebuild.
   ///
   /// A field reloads only when its target, or the target's value, changed
@@ -635,7 +775,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
   @override
   Widget build(BuildContext context) {
     final box = _box, wall = _wall, opening = _opening, room = _room;
-    if (box == null && wall == null && opening == null && room == null) {
+    final dimension = _dimension;
+    if (box == null &&
+        wall == null &&
+        opening == null &&
+        room == null &&
+        dimension == null) {
       return const SizedBox.shrink();
     }
     final title = Theme.of(context).textTheme.titleSmall;
@@ -738,6 +883,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
                     labelText: 'Area', border: InputBorder.none),
                 child: Text(_areaOf(room) ?? '—', key: const Key('room-area')),
               ),
+            ],
+            if (dimension != null) ...[
+              if (box != null ||
+                  wall != null ||
+                  opening != null ||
+                  room != null)
+                const SizedBox(height: 12),
+              ..._dimensionSection(dimension, title),
             ],
           ],
         ),

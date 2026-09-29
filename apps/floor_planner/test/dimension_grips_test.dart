@@ -525,7 +525,9 @@ void main() {
     test(
         'GE5 the preview equals the committed lines on a horizontal '
         'dimension over the non-axis pair, for an offset drag and an end '
-        'drag, on a 1:50 mm page and a 1:100 ft-in page, at $place', () {
+        'drag, on a 1:50 mm page and a 1:100 ft-in page; after another '
+        'dimension\'s drag abandoned the preview equals a fresh provider\'s, '
+        'at $place', () {
       // The page's paper lengths enter the lines (D7): at 1:100 the
       // extension line's overshoot is 2 × 100 = 200 mm and a slash 3 × 100
       // = 300 mm, twice 1:50's, so a preview laid out on another page than
@@ -572,6 +574,50 @@ void main() {
         }
         expect(driftOf(doc), isEmpty);
       }
+
+      // -- A drag abandoned for another dimension's (Task 11's re-review):
+      // X's grip previewed, then Y's with no drop and no document change
+      // in between, as after an Esc-cancelled drag. Y's previews equal a
+      // fresh provider's, point for point, so no memo of X's leaks into Y.
+      // X is aligned and fixed-fixed; Y horizontal with b attached to B's
+      // end corner, so the two lay out differently at every drop point.
+      final plan = buildPlan(c2Walls, place: place);
+      final doc = plan.doc;
+      attachPage(doc, mmPage);
+      final [_, b] = plan.walls;
+      final (memo, index) = gripsFor(doc);
+      DimensionGrips fresh() =>
+          DimensionGrips(index: index, objectSnap: () => true);
+      final g = turned(place, 30);
+      final x = addDimension(doc, fixedAt(plan.at(500.25, 1500.5), g),
+          fixedAt(plan.at(2500.75, 2200.25), g),
+          kind: DimKind.aligned, offset: 250.5, at: g);
+      final y = addDimension(
+          doc, AttachedEnd(b, 1, l), fixedAt(plan.at(1200.5, 2600.25), g),
+          kind: DimKind.horizontal, offset: -180.25, at: g);
+      final qs = [
+        plan.at(4100, -100),
+        plan.at(1700.5, 900.25),
+        plan.at(3900, 100),
+      ];
+      List<double> flat(List<(EntityKind, GeometryPayload)> p) =>
+          [for (final (_, pl) in p) ...pl.coords];
+      void same(Handle h, int ordinal, String why) {
+        for (final q in qs) {
+          final gr = gripOf(memo, doc, h, ordinal);
+          final got = flat(memo.preview(doc, h, gr, q));
+          expect(got, hasLength(20), reason: '$why at $q: five lines');
+          expect(got, flat(fresh().preview(doc, h, gr, q)),
+              reason: '$why at $q');
+        }
+      }
+
+      final depth = doc.commands.undoDepth;
+      same(x, 1, 'X grip 1');
+      same(y, 1, 'Y grip 1 after X\'s drag abandoned');
+      same(y, 2, 'Y grip 2');
+      same(x, 0, 'X grip 0');
+      expect(doc.commands.undoDepth, depth, reason: 'no document change');
     });
   }
 
