@@ -63,10 +63,10 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // is made, outside the history, before any separator names it.
   ensureDashedLinetype(doc);
   final p = _Pen(doc);
-  // Spec 08 D18, spec 10 D23: the walls, openings, separator and rooms
-  // regenerate through this system as they are added; it is disposed once
-  // the rooms are placed, so the shell can install its own over the
-  // finished document.
+  // Spec 08 D18, spec 10 D23, spec 11 D17: the walls, openings, separator,
+  // rooms and dimensions regenerate through this system as they are added;
+  // it is disposed after the dimensions, the last objects placed, so the
+  // shell can install its own over the finished document.
   final system = installParametric(doc);
 
   // --- Walls (spec 08 D18's table): each in its own root-level group at the

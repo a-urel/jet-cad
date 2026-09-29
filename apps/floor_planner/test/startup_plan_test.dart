@@ -650,8 +650,13 @@ void main() {
 
     // The click (the plan's Ruling 11-24): the select tool's pick —
     // `pickInto` with `picking()` and a radius of kPickRadiusPixels over the
-    // camera's px/mm — at a quarter of the way along each dimension line,
-    // on the camera the shell fits to this plan at 1440 x 900.
+    // camera's px/mm — at a quarter of the way along each dimension line.
+    // The camera is the plan's extents fitted to a 1440 x 900 surface
+    // (0.08857 px/mm, a radius of about 68 mm). It is not the shell's
+    // startup camera, which fits the page to the drawing area inside the
+    // chrome: 0.0573 px/mm at a 1440 x 900 window, a radius of about 104.7
+    // mm. The smaller radius here is the stricter pick; `SL1`
+    // (dimension_shell_test.dart) makes the click through the real shell.
     final fit = ViewportTransform.fit(doc.extents, const Size(1440, 900));
     final radius = kPickRadiusPixels / fit.scale;
     expect(radius, inInclusiveRange(50, 100), reason: 'premise: about 68 mm');
