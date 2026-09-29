@@ -160,17 +160,23 @@ controller); the harness's is 10's merge figure (no task touched it).
   | 14 | 479 | +2 |
   | 15 | 484 | +5 |
   | 16's fix round | 486 | +2 |
+  | the final fix wave (`fd762cc`) | 490 | +4 |
+
+  The final fix wave, after this note's run, adds `SL2` and `DO6` (three
+  placements): the app is **+490** at the final tree (`02:38 +490: All
+  tests passed!`); the other three suites are unchanged.
 
 - **The test IDs on the tree:**
   - engine: `QF1`–`QF4`;
   - app: `AP1`–`AP3`, `AM1`–`AM6`, `AM6b`, `DF1`–`DF3`, `DP1`,
-    `DL1`–`DL5`, `DL2b`, `DO1`–`DO5`, `DD1`–`DD5`, `DN1`–`DN4`, `DZ1`,
+    `DL1`–`DL5`, `DL2b`, `DO1`–`DO6`, `DD1`–`DD5`, `DN1`–`DN4`, `DZ1`,
     `TL1`–`TL9`, `GE1`–`GE5`, `GE5b`, `PN1`–`PN5`, `DR1`–`DR5`, `SP1`,
-    `SP5`, `SP8`, `SP9`, `SL1`, `RR1`–`RR3`.
+    `SP5`, `SP8`, `SP9`, `SL1`, `SL2`, `RR1`–`RR3`.
   - **Added by the plan and its rulings, beyond the spec's 66:** `DL2b`
     (Task 7), `DD3` (Task 7's fix round), `DD4`, `DD5` (Task 8), `GE5b`
-    (Task 11's fix round), `AM6b` (Task 16's fix round). Each is a
-    plan-own clause, not a spec identifier.
+    (Task 11's fix round), `AM6b` (Task 16's fix round), `DO6` and `SL2`
+    (the final fix wave). Each is a plan-own clause, not a spec
+    identifier.
   - 07's, 08's and 10's app test files are unedited but two. **Only
     `planner_shell_test.dart` differs from `9774a55` by exactly Ruling
     11-14's edits** (two counts less `3 × 6`, the three dimensions
@@ -238,10 +244,11 @@ DF3 two corners at +1e9 mm (1e6 m), 23 deg, own groups: measured 3450.4999999846
 ```
 
 **D18 reconciled with the measurement** (the Task 7 review's Minor 3): the
-worst distance from the half is −1.53e-8 mm, about 65 times inside
-`dimFormat.linear` (1e-6 mm), not the "about 1.3×" D9 and D18 estimated
-from twice the spike's worst attach error. The spec's D18 is amended to
-say so.
+worst distance from the half is −1.53e-8 mm, at the two turned +1e9 mm
+placements (23°, and 23° in own groups; 0° gives 0.0), about 65 times
+inside `dimFormat.linear` (1e-6 mm), not the "about 1.3×" D9 and D18
+estimated from twice the spike's worst attach error. The spec's D18 is
+amended to say so.
 
 ### DN4 and DZ1 — the closure and the fuzz
 
@@ -423,16 +430,24 @@ From [plan-11-mutation-log.md](plan-11-mutation-log.md):
   to Task 16, where it exposed the hidden-host defect) and
   `X16-hostVisible`, both red at `AM6b`.
 - **The tasks' extras**, copied from the ledger, not re-fired (the plan's
-  rule). By this note's count of the log's table, **199 names: 185 killed,
-  9 equivalent** (`R-noSimplify`, `rv8-noTriggered`, `rv9-otherIsSelf`,
-  `rv10r-clickPassesMap`, `t11-noEqualOther`, `rv11-noOffsetGuard`,
-  `rv11r-keyNoOrdinal`, `rv12-strictThreshold`, `rv12-noNormalise`), **1
-  accepted** (`rv6-alignedH1`, rounding-sized), **1 accepted as nearly
-  equivalent** (M-3, `rv9-shiftNotFromPointerDown`), **2 surviving as
-  unreachable in the shell** (`rv11r-keyNoDoc`, `rv11r-dropNoCancel`:
-  the select tool swallows keys mid-drag and captures the pointer; the
-  Task 11 re-reviewer's reading, no further ruling), and **1 control**
-  (`X8-noOracle`).
+  rule), with the Task 16 reviewer's five (`rv16-`) and the final
+  review's seven (`rvF-`). By the log's recount of its table, **210
+  names: 193 killed, 11 equivalent** (`R-noSimplify`, `rv8-noTriggered`,
+  `rv9-otherIsSelf`, `rv10r-clickPassesMap`, `t11-noEqualOther`,
+  `rv11-noOffsetGuard`, `rv11r-keyNoOrdinal`, `rv12-strictThreshold`,
+  `rv12-noNormalise`, `rvF-previewFirstCandidate`,
+  `rvF-commitNoGenBump`), **1 accepted** (`rv6-alignedH1`,
+  rounding-sized), **1 accepted as nearly equivalent** (M-3,
+  `rv9-shiftNotFromPointerDown`), **2 surviving as unreachable in the
+  shell** (`rv11r-keyNoDoc`, `rv11r-dropNoCancel`: the select tool
+  swallows keys mid-drag and captures the pointer; the Task 11
+  re-reviewer's reading, no further ruling), **1 surviving as an
+  inherited gap** (`rvF-paletteNotDrawing`, a post-11 follow-up), and
+  **1 control** (`X8-noOracle`). The final review's two survivors it
+  answers, `rvF-mainNoIndex` and `rvF-textAngleNoZero`, are killed by
+  the final fix wave's `SL2` and `DO6` (`fd762cc`). This note first gave
+  199 names (185 killed) before the review's twelve: that count took
+  `R3-bandDropFlag`'s two sites as two names; the table held 198.
 - **Controls:** the degenerate fixture (a horizontal dimension along a
   free, centred wall at the origin, centre to centre, at the identity) is
   green under M-11a, M-11axisworld, M-11d2, M-11swap, M-11attachedmoves
@@ -609,6 +624,12 @@ are frozen after Task 1, Ruling 11-20).
   `picking()` rejects as "hidden, or on a locked layer"; since D19 a
   not-pickable leaf is skipped the same way. Recorded; the render layer is
   frozen.
+- **An unpinned palette flag** (the final review's Minor 5c, inherited):
+  `rvF-paletteNotDrawing` sets `drawing: false` on the Dimension tool's
+  palette entry and survives the planner_draw, tool and shell tests
+  (`+55`); `A12` checks `tool-line` only, so 07's, 08's and 10's entries
+  are equally unpinned; the review notes the commit is refused by
+  `needs` anyway. A post-11 follow-up across the tools, not fixed in 11.
 
 ---
 
@@ -767,6 +788,14 @@ task's `6ed9688`); the RR1 sweep accepted (3); the Ruling 11-14 wording
 
 **Task 17** (`6ed9688` and this note's commit): the gates, this note, the
 amendments, the log's Part B, STATUS and the roadmap.
+
+**The final whole-branch review** (on `0838c87`). **Ready with fixes** (0
+Important, 5 Minor), all five answered by the final fix wave: an
+offset-grip drag through the shell (`SL2`, kills `rvF-mainNoIndex`) and a
+right-to-left text angle stored +0.0 (`DO6`, kills `rvF-textAngleNoZero`),
+both in `fd762cc`; D18's placement count; the log's extras (the `rv16-`
+and `rvF-` rows, the tally recounted); the D7 wrap, the `[points]`
+comment in `attachCandidates`, and the palette gap recorded above.
 
 ---
 

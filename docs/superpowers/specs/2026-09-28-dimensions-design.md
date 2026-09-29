@@ -841,8 +841,9 @@ M-11extpage, M-11stable, M-11colour. `RR2` is D7's measurement of record
   value exceeds `kDimMaxValueMm` (D9's amendment). `layoutDimension`
   returns null then, and `generate`, the tool's preview and notice and
   the grips' preview all read that one null (the plan's Ruling 11-3: one
-  site); the panel shows `—` for a broken dimension. A horizontal dimension measuring exactly 0 between huge
-  finite points is laid out: six children, `dimension.degenerate`.
+  site); the panel shows `—` for a broken dimension. A horizontal
+  dimension measuring exactly 0 between huge finite points is laid out:
+  six children, `dimension.degenerate`.
   **Not only a file makes one:** a wall thickness of 1.5e154 (or 1e20)
   typed into the Selection panel on an unturned wall makes an aligned
   dimension on it broken in one undo step (`DD3`, `DD5`).
@@ -1680,10 +1681,10 @@ stored exactly `SP5`'s five `DimensionParams`.
 - **The half-up tolerance's far-origin margin is far larger than "about
   1.3×".** `DF3` measured the half between two computed corners at all
   six placements; the worst distance from the exact half was
-  −1.53e-8 mm (the three turned +1e9 mm placements), some 65 times inside
-  `dimFormat.linear` (the Task 7 review's
-  Minor 3; the results note prints each placement). The 1.3× was an
-  estimate from twice the spike's worst attach error.
+  −1.53e-8 mm (the two turned +1e9 mm placements, 23° and 23° in own
+  groups; at 0° it is 0.0), some 65 times inside `dimFormat.linear` (the
+  Task 7 review's Minor 3; the results note prints each placement). The
+  1.3× was an estimate from twice the spike's worst attach error.
 - **The first touch of a wall per generation** (the Task 10 re-review's
   Minor 3): a hover or grip preview that first reaches a wall's line lays
   out every live wall once (one O(n) `wallsInDocument`), about 0.6–1 ms

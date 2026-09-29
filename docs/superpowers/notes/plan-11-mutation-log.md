@@ -298,9 +298,11 @@ table below: equivalent `R-noSimplify`, `rv8-noTriggered`,
 nearly equivalent `M-3` (`rv9-shiftNotFromPointerDown`); accepted
 `rv6-alignedH1` (rounding-sized). `rv11r-keyNoDoc` and `rv11r-dropNoCancel`
 survive as the Task 11 re-reviewer recorded them (unreachable or
-unobservable in the shell) with no further ruling in the ledger. N/A: the
-Task 10 review's "three near-equivalent" survivors are not named in the
-ledger.
+unobservable in the shell) with no further ruling in the ledger. From the
+final review: equivalent `rvF-previewFirstCandidate` and
+`rvF-commitNoGenBump`; `rvF-paletteNotDrawing` survives as an inherited
+gap (a post-11 follow-up). N/A: the Task 10 review's "three
+near-equivalent" survivors are not named in the ledger.
 
 
 ## The spec's 75, one row per fire (the plan's Mutant assignment, after the rulings)
@@ -594,6 +596,13 @@ task entry it comes from; "red" means killed where the ledger says. Where a
 survivor was fixed, the row names the fixing commit and the killer after it.
 None is re-counted in the 75.
 
+The last rows come after Task 16: the Task 16 reviewer's own five (the
+ledger's Task 16 review entry) and the final whole-branch review's seven
+(`rvF-`, as that review records them). The final fix wave fired the two
+`rvF-` survivors it answers, `rvF-mainNoIndex` and `rvF-textAngleNoZero`,
+against its new clauses (`SL2`, `DO6`): both red, each restored (`cp`
+back, `diff` exit 0).
+
 | mutant | task (ledger) | result as recorded |
 |---|---|---|
 | X1-passthrough, X1-bit, X1-underVisible | 1 (99ab3ac) | red (QF1 169, 94, 170) |
@@ -675,6 +684,28 @@ None is re-counted in the 75.
 | rv15-textbelow, rv15-slash, rv15-textGap1.2, rv15-textH2.3, rv15-extpage, rv15-extGap1.3 | 15 review | red (RR1); textH 2.3 and textGap 1.2 re-fired here after the RR1 edit |
 | rv15 fixedworld / attachedmoves | 15 review | red (SL1 split clauses 3 and 5) |
 | rv15-orphanPolicy | 15 review | red (SL1 split clause 6) |
+| rv16-q1all, rv16-q2all, rv16-hostIsOpening, rv16-hostParent, rv16-crossCallCache | 16 review | red at `AM6b` (`dimension_attach_test.dart`): q1all at 900 on P1; q2all at 934 on P3; hostIsOpening and hostParent at 934 on P2; crossCallCache at 934 on the control |
+| rvF-gripsNoKCheck | final review | red (GE4 `dimension_grips_test.dart` 519:7, both placements) |
+| rvF-07noLocalFallback | final review | red (AP2 354:25 via 399:5) |
+| rvF-previewFirstCandidate | final review | **equivalent** (the reviewer's "equivalent in effect": every candidate lies within 1e-5 mm of q, so the previewed point is the same to rounding) |
+| rvF-commitNoGenBump | final review | **equivalent** (the reviewer's: a dimension add changes no wall point and no T, and the `DocChange` bumps the generation anyway) |
+| rvF-mainNoIndex | final review: survived (`+486`) → killed in the final fix wave (`fd762cc`) | red (SL2 `dimension_shell_test.dart` line 519: offset 900, not 1150) |
+| rvF-textAngleNoZero | final review: survived (`+486`) → killed in the final fix wave (`fd762cc`) | red (DO6 `dimension_object_test.dart` 350:7 at all three unturned placements) |
+| rvF-paletteNotDrawing | final review | survives (`+55`, planner_draw, tool, shell): an inherited gap, 07's, 08's and 10's palette entries alike (`A12` checks `tool-line` only); a post-11 follow-up, not fixed in 11 |
+
+**The extras' tally** (recounted from the table above, one name per
+mutant: a multi-site mutant written with its sites in parentheses,
+`R3-bandDropFlag (root, descend)`, counts once; `rv15 fixedworld /
+attachedmoves` counts two): **210 names: 193 killed, 11 equivalent** (the
+nine listed under "Equivalent, accepted (cost) and N/A", plus
+`rvF-previewFirstCandidate` and `rvF-commitNoGenBump`), **1 accepted**
+(`rv6-alignedH1`), **1 accepted as nearly equivalent** (M-3), **2
+surviving as unreachable in the shell** (`rv11r-keyNoDoc`,
+`rv11r-dropNoCancel`), **1 surviving as an inherited gap**
+(`rvF-paletteNotDrawing`, a post-11 follow-up) and **1 control**
+(`X8-noOracle`). Before the final review the table held 198 names (184
+killed), not the 199 (185 killed) the results note first gave: that count
+took `R3-bandDropFlag`'s two sites as two names.
 
 ## The entries
 

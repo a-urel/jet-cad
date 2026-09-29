@@ -30,17 +30,20 @@ OWED: the human's, never simulated.**
   - engine 1,041 (+ the two standing Linux-only hash tests);
   - render layer 940 + 1 skip + 7 standing goldens;
   - harness 82;
-  - app 486;
+  - app 490 (486 at Task 17; the final fix wave adds `SL2` and `DO6`);
   - `flutter build web --release` `✓ Built`.
 - **Mutants:** the spec's 75 named mutants all killed (81 fires, 127
-  killer commands, 122 red); the tasks' extras, 199 by the results
-  note's count: 185 killed, 9 equivalent, 2 surviving as unreachable in
-  the shell, 3 accepted or controls.
+  killer commands, 122 red); the tasks' extras, 210 by the log's
+  recount (with the Task 16 and final reviews' own): 193 killed, 11
+  equivalent, 2 surviving as unreachable in the shell, 1 surviving as an
+  inherited gap (`rvF-paletteNotDrawing`, post-11), 3 accepted or
+  controls.
 - **Found, not fixed** (post-11 follow-ups): the engine's phantom
   intersection snap in moved groups (a `fix/` branch after 11 merges, the
   human's ruling); `SetComponentCommand` on a dead handle; 07's throw at
   turned placements; `wall_grips.dart`'s liveness filter; a tapered piece
-  under a scaled group (file only).
+  under a scaled group (file only); the tool palette's `drawing` flag
+  unpinned for 07's, 08's, 10's and 11's entries (`rvF-paletteNotDrawing`).
 - **Owed:**
   - `flutter build macos --release` and the gate lines on macOS: the
     human's machine;
@@ -658,7 +661,7 @@ and the results note):
 | `packages/jet_cad_2d` | **1,041** pass and the 2 standing Linux-only hash tests (`00:19 +1041 -2`; the test command exits 1); analyze and format clean. 1,037 at the branch point |
 | `packages/jet_cad_2d_flutter` | **940** pass, 1 skip, 7 standing goldens (`01:00 +940 ~1 -7`; the test command exits 1); analyze and format clean; unchanged |
 | `apps/dev_harness_2d` | **82** (`00:42 +82: All tests passed!`), unchanged |
-| `apps/floor_planner` | **486** (`02:34 +486: All tests passed!`); analyze and format clean; `flutter build web --release` `✓ Built`. 348 at the branch point |
+| `apps/floor_planner` | **490** (`02:38 +490: All tests passed!`, after the final fix wave; 486 at Task 17); analyze and format clean; `flutter build web --release` `✓ Built`. 348 at the branch point |
 | attach points (`AP1`) | worst 3.77e-7 mm at +1e9 mm in own groups, against 1e-6 |
 | the half through the object (`DF3`) | worst −1.53e-8 mm from the half at +1e9 mm, 65× inside the 1e-6 tolerance |
 | the fuzz (`DZ1`) | 300 edits, 0 failures, 3,045 generates, 10 neighbour-only edits; reload byte-identical |
@@ -2690,7 +2693,8 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 - Tasks 1–16 and their fix rounds are done (`99ab3ac..75f04d7`); Task 17
   is `6ed9688` and the commit that writes this paragraph.
 - The four gate lines are green on Linux: engine 1,041 + 2 standing;
-  render layer 940 + 1 skip + 7 standing; harness 82; app 486; web `✓
+  render layer 940 + 1 skip + 7 standing; harness 82; app 490 (486 at
+  Task 17, then the final fix wave's `SL2` and `DO6`); web `✓
   Built`.
 - The spec's 75 named mutants are all killed (81 fires).
 - **OWED, never simulated:** `flutter build macos --release`, the gate

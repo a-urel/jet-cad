@@ -105,9 +105,10 @@ double thickestWall(DraftDocument doc) {
 /// **[points]**, when given, memoises each wall's six points: a wall found
 /// in it is not laid out again, and one laid out is stored in it. The
 /// result is the same, bit for bit, since the points are the same
-/// computation's. Its owner (the Dimension tool's hover memo) clears it
-/// whenever the document may have changed; a click, a commit and a grip
-/// drop pass none, and gather afresh (the plan's Ruling 11-8).
+/// computation's. Its owner, the Dimension tool's hover memo or
+/// `DimensionGrips`' per-drag memo (a grip's preview), clears it whenever
+/// the document may have changed; a click, a commit and a grip drop pass
+/// none, and gather afresh (the plan's Ruling 11-8).
 List<AttachedEnd> attachCandidates(
     DraftDocument doc, SpatialIndex index, Vector2 q,
     {required bool objectSnap,
