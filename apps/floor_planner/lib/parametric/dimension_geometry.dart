@@ -1,7 +1,7 @@
-// Pure dimension geometry (spec 11 D1, D2, D4, D6; the plan's Ruling 11-2):
-// the wall attach points, the dimension tolerances, the value types of a
-// dimension's ends and kind, and the measuring direction. Later tasks add
-// the ends' JSON, the layout and the value's format here.
+// Pure dimension geometry (spec 11 D1, D2, D4, D6, D9; the plan's Ruling
+// 11-2): the wall attach points, the dimension tolerances, the value types
+// of a dimension's ends and kind, the measuring direction and the value's
+// format. Later tasks add the ends' JSON and the layout here.
 // No Flutter import: this file is Dart over `package:jet_cad_2d` and
 // `vector_math` only, and imports only pure files.
 //
@@ -160,4 +160,74 @@ Vector2 measuringDirection(DimKind kind, Vector2 p0, Vector2 p1, Transform2 m) {
     case DimKind.vertical:
       return m.transformDirection(Vector2(0, 1)).normalized();
   }
+}
+
+/// [mm] in whole quanta of [quantumMm], round-half-up, the half decided
+/// robustly (spec 11 D9, R-13): with `x = mm / quantum` and `n = floor(x)`,
+/// a value within [dimFormat]`.linear` mm of `(n + 0.5) · quantum` is on the
+/// half and gives `n + 1`; any other value gives `round(x)`.
+///
+/// The half is decided in millimetres, the unit the geometry has. A length
+/// meant to end on a half arrives as a computed double a few ulps off it,
+/// below it about half the time, and an imperial half has no exact double
+/// (3/16" is 4.762499999999999 mm), so neither the naive `round` nor exact
+/// arithmetic on the stored double decides those halves as intended (the
+/// spike's `Q5c`). The cost, recorded in D18 and pinned by `DF2`: a true
+/// length within 1e-6 mm below a half prints rounded up (R-32).
+int roundHalfUp(double mm, double quantumMm) {
+  final x = mm / quantumMm;
+  final n = x.floorToDouble();
+  if ((mm - (n + 0.5) * quantumMm).abs() <= dimFormat.linear) {
+    return n.toInt() + 1;
+  }
+  return x.round();
+}
+
+/// A dimension's text for a length of [mm] in the page's display [unit]
+/// (spec 11 D9, decision 7): no unit symbol, `.` as the decimal separator,
+/// no grouping, each unit at its plan precision:
+///
+/// - **mm**, to 1 mm: the integer (`3450`);
+/// - **cm**, to 0.1 cm: one decimal, **always** (`345.0`, R-14);
+/// - **m**, to 0.01 m: two decimals, always (`3.45`, `14.00`);
+/// - **inches**, to 1/8": whole inches then a reduced fraction, **no mark**
+///   (`136 3/8`, `136`, `0 1/4`, R-15);
+/// - **feet-inches**, to 1/4": `F'-I"` or `F'-I N/D"`, the fraction reduced
+///   (`11'-4 1/4"`, `12'-0"`, `0'-0 1/2"`); the marks are the notation that
+///   separates feet from inches, not a unit symbol (R-15).
+///
+/// The total is rounded ([roundHalfUp]) in quanta of the precision before
+/// it is split into whole units and a fraction, so a carry reaches the next
+/// unit: 143 7/8" is 575.5 quarters and prints `12'-0"`, never `11'-12"`.
+/// The magnitude of [mm] is formatted.
+String formatDimension(double mm, DisplayUnit unit) {
+  final v = mm.abs();
+  switch (unit) {
+    case DisplayUnit.millimeters:
+      return '${roundHalfUp(v, 1)}';
+    case DisplayUnit.centimeters:
+      final n = roundHalfUp(v, 1); // millimetres, tenths of a cm
+      return '${n ~/ 10}.${n % 10}';
+    case DisplayUnit.meters:
+      final n = roundHalfUp(v, 10); // hundredths of a metre
+      return '${n ~/ 100}.${(n % 100).toString().padLeft(2, '0')}';
+    case DisplayUnit.inches:
+      final n = roundHalfUp(v, 25.4 / 8); // eighths of an inch
+      return '${n ~/ 8}${_fraction(n % 8, 8)}';
+    case DisplayUnit.feetInches:
+      final n = roundHalfUp(v, 25.4 / 4); // quarters of an inch
+      final feet = n ~/ 48, rest = n % 48;
+      return "$feet'-${rest ~/ 4}${_fraction(rest % 4, 4)}\"";
+  }
+}
+
+/// ` N/D`, [num] / [den] reduced ([den] a power of two), or nothing for 0.
+String _fraction(int num, int den) {
+  if (num == 0) return '';
+  var n = num, d = den;
+  while (n.isEven) {
+    n ~/= 2;
+    d ~/= 2;
+  }
+  return ' $n/$d';
 }
