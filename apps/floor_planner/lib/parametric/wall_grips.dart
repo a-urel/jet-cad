@@ -150,8 +150,9 @@ final class WallGrips implements ObjectGripProvider {
   ///
   /// The walls are [wallsInDocument]'s: live wall objects only, root-level
   /// groups, as the engine's survey reads them. A stray `WallParams` a file
-  /// brings in (on a handle with no node, or on a nested group) is not a
-  /// wall, so it does not follow; writing it would be refused (spec 06 D5).
+  /// brings in (on any holder that is not a root-level group: a handle with
+  /// no node, a nested group, a root-level instance) is not a wall, so it
+  /// does not follow; writing it would be refused (spec 06 D5).
   static List<(Handle, int)> _endsAt(DraftDocument d, Handle group, Grip grip) {
     final walls = wallsInDocument(d, group);
     if (walls == null) return const [];

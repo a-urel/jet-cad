@@ -609,6 +609,8 @@ are frozen after Task 1, Ruling 11-20).
   dimensions; the edit rolls back. Follow-up: check whether the panel
   catches it. (A huge finite value's `toInt` also saturates on the VM,
   which 11 guards with `kDimMaxValueMm`.)
+  *Fixed on `fix/post-11`; see
+  [2026-09-29-fix-post-11.md](2026-09-29-fix-post-11.md).*
 - **(d) An orphan component** (Task 12; confirmed on `main` at `9774a55`
   by its reviewer): `SetComponentCommand` on a handle with no node
   attaches the component (no throw); `parametric.misplaced` warns; it
@@ -619,11 +621,15 @@ are frozen after Task 1, Ruling 11-20).
   handle that is not a live root-level group is refused), not a naive
   guard in `SetComponentCommand` (it would break undo of deletes, whose
   replay re-attaches before restoring the node).
+  *Fixed on `fix/post-11`; see
+  [2026-09-29-fix-post-11.md](2026-09-29-fix-post-11.md).*
 - **(e) A missing liveness filter** (the Task 12 review's side finding;
   07): `wall_grips.dart`'s `_endsAt` loops over
   `withComponent<WallParams>()` without a liveness filter, so an orphan
   `WallParams` (from a file) joins a wall-end drag and draws a phantom
   preview; the comment at `wall_bands.dart:124-127` is inaccurate.
+  *Fixed on `fix/post-11`; see
+  [2026-09-29-fix-post-11.md](2026-09-29-fix-post-11.md).*
 - **A loaded infinite value cannot be saved again** (Ruling 11-12): a
   file may carry `1e999`, which `jsonDecode` reads as Infinity; the
   dimension is then `dimension.broken`, but `jsonEncode` throws on the
@@ -634,12 +640,16 @@ are frozen after Task 1, Ruling 11-20).
   `picking()` rejects as "hidden, or on a locked layer"; since D19 a
   not-pickable leaf is skipped the same way. Recorded; the render layer is
   frozen.
+  *Fixed on `fix/post-11`; see
+  [2026-09-29-fix-post-11.md](2026-09-29-fix-post-11.md).*
 - **An unpinned palette flag** (the final review's Minor 5c, inherited):
   `rvF-paletteNotDrawing` sets `drawing: false` on the Dimension tool's
   palette entry and survives the planner_draw, tool and shell tests
   (`+55`); `A12` checks `tool-line` only, so 07's, 08's and 10's entries
   are equally unpinned; the review notes the commit is refused by
   `needs` anyway. A post-11 follow-up across the tools, not fixed in 11.
+  *Fixed on `fix/post-11`; see
+  [2026-09-29-fix-post-11.md](2026-09-29-fix-post-11.md).*
 
 ---
 

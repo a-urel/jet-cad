@@ -373,8 +373,8 @@ was, and its inverse is the plain inverse.
   covers a component on a leaf, on a nested group or on an instance.
   `ParametricSystem.diagnostics()` reports each one (D10). The engine's
   `validate()` cannot: it does not know which component types are
-  parametric. An edit that writes one is refused (D6, amended by
-  fix/post-11); a file can still bring one in.
+  parametric. An edit the expander wraps that writes one is refused (D6,
+  amended by fix/post-11); a file can still bring one in.
 
 ### D6 — Generated geometry is not directly editable (human: refuse)
 
@@ -441,9 +441,15 @@ stays, since loading does not pass through the guard. Not in
 restores the node. Cost if wrong: a hand-built command that parks a
 component on a non-object is refused. One app path reaches it: a wall-end
 drag whose end meets a file's orphan `WallParams` (post-11 (e): `_endsAt`
-has no liveness filter) is now refused instead of moving the orphan along;
-(e)'s filter closes it.
-Pinned by `MP1`–`MP9` (`misplaced_test.dart`); mutants M-Q3a–M-Q3l.
+had no liveness filter) was refused instead of moving the orphan along;
+(e)'s filter, on the same branch, closes it.
+**Not covered** (the Q3 review's m1, both pre-existing): an edit D2's fast
+path does not wrap — on a document holding no parametric component, a
+command that writes one without being a `SetComponentCommand<T>`, or a
+`ParametricReplay` a client executes directly — and a command that
+under-reports `touched`.
+Pinned by `MP1`–`MP9` (`misplaced_test.dart`); mutants M-Q3a–e, g–j and l
+killed, M-Q3f (every handle, with the value comparison) equivalent.
 
 ### D7 — Permissions: derived geometry inherits (human)
 
