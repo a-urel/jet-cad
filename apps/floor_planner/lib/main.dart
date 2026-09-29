@@ -132,7 +132,7 @@ class _PlannerShellState extends State<PlannerShell> {
   late final RoomTool _room = RoomTool(_roomInputs);
   late final SeparatorTool _separator = SeparatorTool(_roomInputs);
   // Spec 11 D12: the Dimension tool (I).
-  final DimensionTool _dimension = DimensionTool();
+  late final DimensionTool _dimension = DimensionTool();
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();

@@ -294,6 +294,55 @@ void main() {
       expect(paramsOf(doc, h3).b, AttachedEnd(f, 0, c),
           reason: 'F\'s start, moved there after the second click');
       expect(driftOf(doc), isEmpty);
+
+      // -- Decision 22 through the tool: the shared corner is decided at
+      // the commit, with the committed kind's direction. AM3's L, B drawn
+      // first (the lower handle): B (4000, 0) → (4000, 3000) and A (0, 0)
+      // → (4000, 0), 200 centred, mitred at (4000, 0). The outer corner
+      // (4100, −100) is B/0/right (B runs north, its right face x 4,100)
+      // and A/1/right (A runs east, its right face y −100). The first click
+      // 5 mm off it, the second at (3000, 3000), free.
+      for (final shift in [false, true]) {
+        final why = 'the outer corner, Shift $shift, $place';
+        final lp = buildPlan(const [
+          W(4000, 0, 4000, 3000, 200),
+          W(0, 0, 4000, 0, 200),
+        ], place: place);
+        final ld = lp.doc;
+        final [wb, wa] = lp.walls;
+        final lr = dimRig(ld);
+        final outer = lp.at(4100, -100), far = lp.at(3000, 3000);
+        expect(
+            attachCandidates(ld, lr.ctx.index, outer,
+                objectSnap: true, thickest: thickestWall(ld)),
+            [AttachedEnd(wb, 0, r), AttachedEnd(wa, 1, r)],
+            reason: '$why: premise: both walls\' points');
+        clickAt(lr, lp.at(4103, -104));
+        expect(lr.tool.hoverKind, isNotNull, reason: '$why: premise: snaps');
+        expect((lr.tool.hoverPoint - outer).length, lessThan(dimAttach.linear),
+            reason: '$why: premise: onto the corner');
+        clickAt(lr, far);
+        expectFree(lr, far, why);
+        final p0 = lr.tool.points[0];
+        // Aligned: u runs (−1100, 3100) in the plan, sin to A's direction
+        // 3100 / 3289.4 ≈ 0.94, to B's 1100 / 3289.4 ≈ 0.33: B, B/0/right.
+        // Shift, the third click 1500 below both points in world, inside
+        // their x span: e_y 1500 > e_x 0, horizontal, u = world x: σ_A =
+        // sin 0° or sin 23°, σ_B = cos 0° or cos 23°: A, A/1/right, though
+        // B has the lower handle.
+        final q = shift
+            ? Vector2((p0.x + far.x) / 2, math.min(p0.y, far.y) - 1500)
+            : lp.at(1500.5, 1500.25);
+        clickAt(lr, q, shift: shift);
+        expectFree(lr, q, why);
+        final got = paramsOf(ld, dims(ld).single);
+        expect(got.kind, shift ? DimKind.horizontal : DimKind.aligned,
+            reason: why);
+        expect(got.a, shift ? AttachedEnd(wa, 1, r) : AttachedEnd(wb, 0, r),
+            reason: why);
+        expect(got.b, FixedEnd(far.x, far.y), reason: why);
+        expect(driftOf(ld), isEmpty);
+      }
     });
   }
 
@@ -357,6 +406,21 @@ void main() {
       final pair = place3((0, 0), (0, 3000), (0, 3600), shift3: true);
       expect(pair.kind, DimKind.vertical, reason: 'the zero kind swapped');
       expect(pair.offset, 0.0);
+      // The same within the tolerance: a pair 5e-7 mm apart in x (not
+      // exactly 0, but ≤ wallJoin.linear, 1e-6) dragged above is vertical.
+      final (rigT, docT) = fresh();
+      final t0 = place.at(0, 0), t1 = t0 + Vector2(5e-7, 3000);
+      clickAt(rigT, t0);
+      clickAt(rigT, t1);
+      expect(rigT.tool.points, hasLength(2));
+      final tdx = rigT.tool.points[1].x - rigT.tool.points[0].x;
+      expect(tdx, isNot(0.0), reason: 'premise: dx is not exactly 0');
+      expect(tdx, lessThanOrEqualTo(wallJoin.linear), reason: 'premise');
+      final tq = t0 + Vector2(0, 3600);
+      clickAt(rigT, tq, shift: true);
+      expectFree(rigT, tq, 'the near-vertical pair');
+      expect(paramsOf(docT, dims(docT).single).kind, DimKind.vertical,
+          reason: 'the zero kind within the tolerance swapped');
 
       // Ortho is off at the third click: a raw (1500, 1400) with Shift is
       // horizontal with the line at y 1,400, offset 1400 − 1200 = +200. An
@@ -517,23 +581,40 @@ void main() {
       expect(doc.commands.undoDepth, depth);
       await press(tester, LogicalKeyboardKey.escape);
 
-      // The same wall end point 5 µm away. The camera at 1e7 px/mm (an
-      // aperture of 10 / 1e7 = 1e-6 mm, past the shell's zoom bound, so
-      // that no snap moves a point 5 µm from the corner onto it): the
-      // first click exactly on the corner snaps to its stored vertex; the
-      // second, 5e-6 mm east, is free. 5e-6 > wallJoin.linear (1e-6), but
-      // both points' candidates hold E1/0/left, 5e-6 < dimAttach.linear
-      // (1e-5): the click is ignored.
-      await centreOn(tester, view, corner, 1e7);
-      await tapWorld(tester, view, corner);
-      expect(tool.hoverKind, isNotNull, reason: 'premise: the vertex snaps');
+      // The same wall end point 5 µm away, at a legal zoom (0.052 px/mm:
+      // the aperture is 10 / 0.052 = 192.3 mm). A fixed 500 mm grid, snap
+      // on, whose origin is a node 5e-6 mm east of the outer corner
+      // (12,000, 8,000), E1/0/right (E1's right face y 8,125 − 125 meets
+      // E4's x 12,125 − 125). The first click, 5 mm off the corner, snaps
+      // onto it (an object snap beats the grid). The second, (−170, −170)
+      // from the corner in the plan's frame (240.4 mm, beyond the
+      // aperture; turned 23°, about (−90, −223) in world, within 250 of
+      // the node on both axes), resolves by the grid to the node.
+      // 5e-6 > wallJoin.linear (1e-6), but both points' candidates hold
+      // E1/0/right, 5e-6 < dimAttach.linear (1e-5): the click is ignored.
+      final outer = plan.at(12000, 8000);
+      final node = outer + Vector2(5e-6, 0);
+      final page = PageComponent(
+          originX: node.x, originY: node.y, gridStepMm: 500, snapToGrid: true);
+      attachPage(doc, page);
+      await tester.pump();
+      await tester.pump();
+      expect(view.page.value, page, reason: 'premise: the shell reads it');
+      const pxPerMm = 0.052;
+      expect(kSnapAperturePixels / pxPerMm, closeTo(192.3, 0.05));
+      expect(dragGridStepMm(page, pxPerMm), 500);
+      await centreOn(tester, view, outer, pxPerMm);
+      await tapWorld(tester, view, outer + turnedBy(place, -3, -4));
+      expect(tool.hoverKind, isNotNull, reason: 'premise: the corner snaps');
       final p0 = Vector2.copy(tool.points.single);
-      final beside = corner + Vector2(5e-6, 0);
-      await tapWorld(tester, view, beside);
-      expect(tool.hoverKind, isNull, reason: 'premise: 5 µm off is free');
+      expect((p0 - outer).length, lessThan(1e-7),
+          reason: 'premise: onto the corner');
+      final raw1 = outer + turnedBy(place, -170, -170);
+      expect((raw1 - outer).length, closeTo(240.4, 0.05));
+      await tapWorld(tester, view, raw1);
+      expect(tool.hoverKind, isNull, reason: 'premise: no object snap');
       final p1 = Vector2.copy(tool.hoverPoint);
-      expect((p1 - beside).length, lessThan(1e-7),
-          reason: 'premise: the raw point');
+      expect([p1.x, p1.y], [node.x, node.y], reason: 'premise: the grid node');
       expect((p1 - p0).length, greaterThan(wallJoin.linear),
           reason: 'premise: not the same point');
       final index = SpatialIndex(doc);
@@ -544,8 +625,8 @@ void main() {
           attachCandidates(doc, index, p1, objectSnap: true, thickest: t);
       index.dispose();
       final e1 = plan.walls[0];
-      expect(at0, contains(AttachedEnd(e1, 0, l)), reason: 'premise');
-      expect(at1, contains(AttachedEnd(e1, 0, l)), reason: 'premise');
+      expect(at0, contains(AttachedEnd(e1, 0, r)), reason: 'premise');
+      expect(at1, contains(AttachedEnd(e1, 0, r)), reason: 'premise');
       expect(tool.points, [p0], reason: 'the same wall end point: ignored');
 
       // Esc drops it; Esc again returns to Select.
@@ -555,7 +636,7 @@ void main() {
       await press(tester, LogicalKeyboardKey.escape);
       expect(status(tester), 'Select');
       expect(dims(doc), isEmpty);
-      expect(doc.commands.undoDepth, depth);
+      expect(doc.commands.undoDepth, depth + 1, reason: 'the page alone');
     }
   });
 
