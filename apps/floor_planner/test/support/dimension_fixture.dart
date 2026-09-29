@@ -10,6 +10,9 @@
 // (`wall_regen_test.dart`).
 import 'dart:math' as math;
 
+import 'package:floor_planner/parametric/dimension_geometry.dart';
+import 'package:floor_planner/parametric/opening_geometry.dart'
+    show wallsInDocument;
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -250,3 +253,24 @@ List<WorldWall> allWorldWalls(DraftDocument doc) => [
         WorldWall(h, doc.components.get<WallParams>(h)!,
             doc.tree.accumulatedTransform(h)),
     ];
+
+/// The brute-force attach candidates at world point [q] (spec 11 D10's
+/// oracle, Tasks 3 and 4): every live wall of [doc] (a root-level group
+/// carrying `WallParams`), each of its six points computed among every
+/// other live wall (the document adapter, `wallsInDocument`), and every
+/// `(W, k, side)` whose point lies within `dimAttach.linear` of [q],
+/// Euclidean. Ascending by wall handle, then `k`, then side (left, centre,
+/// right). No index, no line test.
+List<AttachedEnd> bruteCandidates(DraftDocument doc, Vector2 q) {
+  final out = <AttachedEnd>[];
+  final hs = doc.components.withComponent<WallParams>().toList()
+    ..sort((a, b) => a.value.compareTo(b.value));
+  for (final h in hs) {
+    final ws = wallsInDocument(doc, h);
+    if (ws == null) continue;
+    for (final (k, side, p) in wallEndPoints(ws.host, ws.walls)) {
+      if ((p - q).length <= dimAttach.linear) out.add(AttachedEnd(h, k, side));
+    }
+  }
+  return out;
+}
