@@ -1,15 +1,16 @@
 # 11 — Dimensions
 
-**Status:** EXECUTED on `plan-11/dimensions`, NOT MERGED (2026-09-29). The
-merge is the human's, `--no-ff`, after the final whole-branch review, the
-ledger archive and the human's macOS build and look. Exit gate 14 of 16:
-criterion 1's macOS half and criterion 16 (the look) are OWED. Spec
+**Status:** MERGED into `main` at `b7fe2eb` (2026-09-29), `--no-ff`, on
+the human's decision ("LGTM"). The human reports the macOS build, the gate
+lines on macOS and the look done with no problems: exit gate 16 of 16 by
+the human's report. Spec
 [2026-09-28-dimensions-design.md](../docs/superpowers/specs/2026-09-28-dimensions-design.md)
 (rev 4, amended at execution), plan
 [2026-09-28-dimensions.md](../docs/superpowers/plans/2026-09-28-dimensions.md),
 results
-[2026-09-28-plan-11-results.md](../docs/superpowers/notes/2026-09-28-plan-11-results.md).
-See [STATUS.md](../STATUS.md#plan-11--dimensions-executed-on-plan-11dimensions-not-merged).
+[2026-09-28-plan-11-results.md](../docs/superpowers/notes/2026-09-28-plan-11-results.md),
+ledger `docs/superpowers/ledgers/2026-09-28-dimensions/`.
+See [STATUS.md](../STATUS.md).
 
 *Before Plan 11 ran, this line read:* **Status:** not started
 **Depends on:** 06, 03
