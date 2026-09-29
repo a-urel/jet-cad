@@ -258,11 +258,11 @@ cheap; learning it from a half-executed Plan is not.
 | 08 | openings | [2026-09-25](../docs/superpowers/specs/2026-09-25-openings-design.md) (rev 1, amended at execution) | [2026-09-25](../docs/superpowers/plans/2026-09-25-openings.md) | [2026-09-25](../docs/superpowers/notes/2026-09-25-plan-08-results.md) (merged `b96ed12`; macOS build and look OWED) |
 | 09 | symbol library | — | — | — |
 | 10 | rooms and area | [2026-09-26](../docs/superpowers/specs/2026-09-26-rooms-design.md) (rev 3, amended at execution) | [2026-09-26](../docs/superpowers/plans/2026-09-26-rooms.md) | [2026-09-26](../docs/superpowers/notes/2026-09-26-plan-10-results.md) (merged `84c4a08`; macOS build and look OWED) |
-| 11 | dimensions | [2026-09-28](../docs/superpowers/specs/2026-09-28-dimensions-design.md) (rev 4, amended at execution) | [2026-09-28](../docs/superpowers/plans/2026-09-28-dimensions.md) | [2026-09-28](../docs/superpowers/notes/2026-09-28-plan-11-results.md) (executed on `plan-11/dimensions`, **NOT MERGED**; macOS build and look OWED) |
+| 11 | dimensions | [2026-09-28](../docs/superpowers/specs/2026-09-28-dimensions-design.md) (rev 4, amended at execution) | [2026-09-28](../docs/superpowers/plans/2026-09-28-dimensions.md) | [2026-09-28](../docs/superpowers/notes/2026-09-28-plan-11-results.md) (merged `b7fe2eb`; macOS build and look done, the human's report) |
 | 12 | app shell | — | — | — |
 | 13 | export and print | — | — | — |
 
-**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED; 07 is merged (`63c3878`), with its deferred defects fixed on `fix/post-07` (`1ae83f9`); 08 is merged (`b96ed12`), its macOS build and look OWED; 10 is merged (`84c4a08`), its macOS build and look OWED; 11 is executed on `plan-11/dimensions` and NOT MERGED, its macOS build and look OWED**; the other three have not started. Update
+**01–05 are executed, merged and looked at; 06 is merged (`a6837d0`) with its look OWED; 07 is merged (`63c3878`), with its deferred defects fixed on `fix/post-07` (`1ae83f9`); 08 is merged (`b96ed12`), its macOS build and look OWED; 10 is merged (`84c4a08`), its macOS build and look OWED; 11 is merged (`b7fe2eb`), its macOS build and look done by the human's report**; the other three have not started. Update
 this table as specs and plans land; `STATUS.md` at the repo root stays the
 authority on what is in flight. The render line's own plan table lives there,
 not here: six of seven merged, Plan G (web) unwritten, see the section above.

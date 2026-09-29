@@ -516,6 +516,14 @@ The plan's nine, each with its test (all green in the app gate above):
 
 ## OWED by the human
 
+**Reported by the human, 2026-09-29 (after the archive, recorded on
+`main`):** asked what their "LGTM" covered, the human answered that the
+macOS build, the gate lines on macOS and the look were all done with no
+problems ("Hepsi yapıldı, sorun yok"), and merged. No per-item or
+per-platform results were given, so the boxes below stay as they were
+written; this paragraph is the record of the human's statement.
+Criteria 1 and 16 are **PASS by the human's report**; exit gate 16 of 16.
+
 **Nothing below is ticked on the human's behalf.**
 
 ### Criterion 1's macOS half

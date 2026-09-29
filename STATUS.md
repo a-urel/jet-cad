@@ -1,5 +1,19 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-29. **Plan 11 (dimensions) is MERGED into
+`main` at `b7fe2eb`**, `--no-ff`, on the human's decision ("LGTM"), after
+the final whole-branch review's fix wave and the ledger archive
+(`00207c9`, the branch's last commit). Asked what the LGTM covered, the
+human reported the macOS build, the gate lines on macOS and the look done
+with no problems ("Hepsi yapıldı, sorun yok"); no per-item results were
+given, so the results note records the statement and leaves its boxes
+as written. **Exit gate 16 of 16 by the human's report.**
+- **Next, on the human's word:** the post-11 `fix/` branches, the
+  engine's phantom intersection snap in moved groups first (the human's
+  ruling); then sub-project 12. See [Resume here](#resume-here).
+
+*Earlier, 2026-09-29 (before the merge):*
+
 **Last updated:** 2026-09-29. **Plan 11 (dimensions) is EXECUTED on
 `plan-11/dimensions`, NOT MERGED.** The merge is the human's, `--no-ff`.
 **Exit gate 14 of 16: criterion 1's macOS half (`flutter build macos
@@ -2698,7 +2712,23 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice, on `plan-11/dimensions`** (Plan
+**Immediate next step: the human's choice.** `main` is at the Plan 11
+merge (`b7fe2eb`) and the post-merge docs; every Plan 11 branch and
+worktree is cleaned up, and `spike/11-dimensions` (`675f997`) is kept in
+history only by an `ours` merge, as the earlier spikes were.
+1. The post-11 `fix/` branches, from the results note's found items
+   ([2026-09-28-plan-11-results.md](docs/superpowers/notes/2026-09-28-plan-11-results.md)):
+   the engine's phantom intersection snap in moved or turned groups
+   first (`SpatialIndex._considerIntersections` and
+   `_collectNearSegments` read payload coordinates as world; the human's
+   ruling), then the orphan-component guard in `ParametricEdit`, 07's
+   throw at turned placements, `wall_grips.dart`'s liveness filter, and
+   the tool palette's `drawing` flag unpinned.
+2. Sub-project 12 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)),
+   from a brainstorm; its open questions now carry 11's dimension style
+   table and dimension layer.
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's choice, on `plan-11/dimensions`** (Plan
 11, dimensions, executed and NOT MERGED).
 - Tasks 1–16 and their fix rounds are done (`99ab3ac..75f04d7`); Task 17
   is `6ed9688` and `0838c87`; the final whole-branch review's fix wave is
