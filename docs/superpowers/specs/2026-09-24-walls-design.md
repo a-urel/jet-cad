@@ -571,6 +571,25 @@ than a single speed-up factor.
 - **Read-only unless both `components` and the type's `editCapability` are
   allowed:** a commit is a `SetComponentCommand`. `WS8`.
 
+**Amended by fix/post-11:** thickness also has a **ceiling**,
+`kWallMaxThickness` = 1e7 mm (10 km): `isWallThickness(t)` is finite,
+`> wallJoin.linear` and `<= kWallMaxThickness`, so the Wall section refuses
+a larger value for a wall and for the tool's settings (keystroke writes
+included) the same way it refuses one at the floor: the field reverts, no
+step. Above some thickness a wall that is not parallel to its group's axes
+collapses in floating point: its length drops below an ulp of its corner
+coordinates, the corners round to two points, the unchecked local fallback
+rectangle is not triangulable, and D8's region check throws. The panel
+caught that throw, but the Wall tool's commit (a keystroke-written setting
+of 1e100, then a diagonal click) and the grips did not: an `ArgumentError`
+out of the pointer handler, a handle consumed per click. The post-11 probe
+found the smallest collapsing thickness at 1.33e10 mm over its sweep, and
+none at or below 1e10; 1e7 leaves a margin of about 1,300 and sits under
+2^53, so the field shows it exactly. **Known limit:** a loaded file may
+still hold a thicker wall (`fromJson` accepts any value), and a
+regenerating edit through the Wall tool or a grip can still throw there;
+the panel's edits stay caught. `WS10`, `WS11`, `WP5`.
+
 ### D12 — Diagnostics
 
 - **`ParametricType` gains `List<Diagnostic> diagnose(ParametricView view,

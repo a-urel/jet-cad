@@ -737,6 +737,75 @@ void main() {
     expect(doc.commands.undoDepth, 1);
   });
 
+  // 1e100 is the probe's; 1e25 sits under a bound far too high (1e30) and
+  // still collapses this ~1504 mm band.
+  for (final typed in ['1e100', '1e25']) {
+    testWidgets(
+        'WS10 a tool-mode thickness above kWallMaxThickness ($typed) typed '
+        'without Enter never reaches the settings: a diagonal click lands a '
+        'wall at the kept 200, one step, no exception (post-11 (c))',
+        (tester) async {
+      final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+      final doc = view.document;
+      await press(tester, LogicalKeyboardKey.keyW);
+      final tool = view.tools.active as WallTool;
+      await tester.tap(thickness);
+      await tester.pump();
+      // One keystroke event carrying the whole text: `onChanged` sees it
+      // alone, no prefix of it, so the settings keep the last valid value.
+      await tester.enterText(thickness, typed);
+      await tester.pump();
+      final n0 = walls(doc).length;
+      final seed0 = doc.handleSeed.current.value;
+      // Off-axis (the plan is turned 23 degrees) and at the far origin: the
+      // wall's local direction is not axis-aligned, which the typed value
+      // needs to collapse its band.
+      await clickWorld(tester, view, plan(400, 900));
+      await clickWorld(tester, view, plan(1900, 800));
+      // A throw out of the pointer handler would be reported here.
+      expect(tester.takeException(), isNull);
+      expect(walls(doc), hasLength(n0 + 1));
+      final w = walls(doc).last;
+      expect(doc.components.get<WallParams>(w)!.thickness, 200);
+      expect(doc.commands.undoDepth, 1);
+      // The seed moved by that wall's handles alone: its group and the
+      // children generated under it, nothing a refused attempt consumed.
+      expect([w, ...kids(doc, w)].map((h) => h.value).toSet(),
+          {for (var v = seed0 + 1; v <= doc.handleSeed.current.value; v++) v});
+      expect(tool.settings.value.thickness, 200);
+      expect(textOf(tester, thickness), '200',
+          reason: 'the focus loss reverts');
+      expect(driftOf(doc), isEmpty);
+    });
+  }
+
+  testWidgets(
+      'WS11 a wall thickness one ulp above kWallMaxThickness is refused on a '
+      'turned wall, by Enter and by focus loss: the field reverts and the '
+      'document is byte-identical (post-11 (c))', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final before = enc(doc);
+    final over = nextUp(kWallMaxThickness);
+    expect(double.parse('$over'), over);
+    await select(tester, view, [wa]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await enterAndSubmit(tester, thickness, '$over');
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '200');
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '$over');
+    await tester.pump();
+    await tester.tap(wallSection);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '200');
+    expect(doc.commands.undoDepth, 0);
+    expect(enc(doc), before);
+  });
+
   /// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.
   FocusNode canvasFocus(WidgetTester tester) => tester
       .widget<Focus>(find

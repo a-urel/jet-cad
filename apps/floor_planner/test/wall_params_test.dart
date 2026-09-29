@@ -2,6 +2,8 @@ import 'package:floor_planner/parametric/wall.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'support/wall_fixture.dart' show nextUp;
+
 void main() {
   // Far-origin, non-round values: a key-order or field swap cannot hide.
   const p = WallParams(
@@ -82,5 +84,18 @@ void main() {
   test('WP4 fromJson of an unknown justification throws', () {
     final j = p.toJson()..['justification'] = 'center';
     expect(() => WallParams.fromJson(j), throwsArgumentError);
+  });
+
+  test(
+      'WP5 isWallThickness holds at kWallMaxThickness and fails one ulp '
+      'above it, and above the floor (post-11 (c))', () {
+    expect(kWallMaxThickness, 1e7);
+    expect(isWallThickness(kWallMaxThickness), isTrue);
+    expect(isWallThickness(nextUp(kWallMaxThickness)), isFalse);
+    expect(isWallThickness(nextUp(wallJoin.linear)), isTrue);
+    expect(isWallThickness(wallJoin.linear), isFalse);
+    for (final t in [1e10, 1e100, double.maxFinite, double.infinity]) {
+      expect(isWallThickness(t), isFalse, reason: '$t');
+    }
   });
 }
