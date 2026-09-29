@@ -370,4 +370,97 @@ void main() {
     await undoKey(tester);
     expectMitre(doc, wa, wb);
   });
+
+  testWidgets(
+      "EG6 (post-11 (e)) an L's corner drag moves the live walls only: a "
+      "file's stray WallParams with an end on the joint, on a handle with no "
+      'node and on a group nested in a turned group, is left alone; one undo '
+      'step', (tester) async {
+    // Built by hand: no tool makes these; only a file brings them in.
+    const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
+    final doc = gripDoc(FlutterTextMeasurer(), (doc) {
+      addL(doc);
+      doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: plain,
+            parent: doc.rootHandle,
+            transform: Transform2.translation(ox + 700.25, oy - 310.5)
+                .multiply(Transform2.rotation(1.1)),
+            children: const [])),
+        AddNodeCommand(GroupNode(
+            handle: nested,
+            parent: plain,
+            transform: Transform2.translation(-250.5, 480.75)
+                .multiply(Transform2.rotation(-0.6)),
+            children: const [])),
+      ], label: 'Add groups'));
+    });
+    // Written straight into the store, as a file brings them in: the bare
+    // stray's start and the nested stray's end sit on the corner in world.
+    final toNested = doc.tree.accumulatedTransform(nested).invert();
+    final nestedStart = toNested.transformPoint(polar(lCorner, 23 - 60, 1800));
+    final nestedEnd = toNested.transformPoint(lCorner);
+    final strayBare = WallParams(lCorner.x, lCorner.y, lCorner.x + 900.5,
+        lCorner.y - 1200.25, 120, Justification.left);
+    final strayNested = WallParams(nestedStart.x, nestedStart.y, nestedEnd.x,
+        nestedEnd.y, 90, Justification.right);
+    doc.components
+      ..attach<WallParams>(bare, strayBare)
+      ..attach<WallParams>(nested, strayNested);
+    expect(doc.tree[bare], isNull, reason: 'no node');
+    expect(doc.tree[nested], isA<GroupNode>());
+    expect((strayNested.end - lCorner).length, greaterThan(1000),
+        reason: 'the nested group is not at the identity');
+    final corner = endOf(doc, wa, 1);
+    for (final (h, k) in [(bare, 0), (nested, 1)]) {
+      expect((endOf(doc, h, k) - corner).length, lessThan(wallJoin.linear),
+          reason: '${h.toHex()} is on the joint in world: only liveness '
+              'excludes it');
+    }
+
+    final view = await pumpGrips(tester, doc, lCorner);
+    final before = canon(doc);
+    final diagnostics = diagnosticsOf(doc);
+    final pa = doc.components.get<WallParams>(wa)!;
+    final pb = doc.components.get<WallParams>(wb)!;
+    await selectWall(tester, view, wa);
+    final q = gridOf(doc, plan(3500, -400));
+    await dragWorld(tester, view, corner, q);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    for (final (h, k) in [(wa, 1), (wb, 0)]) {
+      expect((endOf(doc, h, k) - q).length, lessThan(1e-6),
+          reason: '${h.toHex()} follows');
+    }
+    expect(xy(doc.components.get<WallParams>(wa)!.start), xy(pa.start));
+    expect(xy(doc.components.get<WallParams>(wb)!.end), xy(pb.end));
+    expect(doc.components.get<WallParams>(bare), strayBare);
+    expect(doc.components.get<WallParams>(nested), strayNested);
+    expectMitre(doc, wa, wb);
+    expect(driftOf(doc), isEmpty);
+    expect(diagnosticsOf(doc), diagnostics);
+    await undoKey(tester);
+    expect(canon(doc), before);
+    expect(doc.components.get<WallParams>(bare), strayBare);
+    expect(doc.components.get<WallParams>(nested), strayNested);
+
+    // The provider directly: the command and the preview name A and B only.
+    final grips = WallGrips();
+    final g = grips.gripsOf(doc, wa)[1];
+    final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
+    expect([
+      for (final m in c.children) (m as SetComponentCommand<WallParams>).handle
+    ], [
+      wa,
+      wb
+    ]);
+    final pieces = grips.preview(doc, wa, g, q);
+    expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
+    final [a0, a1] = pointsOf(pieces[0].$2);
+    final [b0, b1] = pointsOf(pieces[1].$2);
+    expect((a0 - lStart).length, lessThan(1e-6));
+    for (final p in [a1, b0]) {
+      expect((p - q).length, lessThan(1e-6));
+    }
+    expect((b1 - lEnd).length, lessThan(1e-6));
+  });
 }
