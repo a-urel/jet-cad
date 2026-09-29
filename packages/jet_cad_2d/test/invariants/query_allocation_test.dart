@@ -457,10 +457,24 @@ DraftDocument _manyRootInstancesDocument(int count) {
 /// work at all -- the premise below that an intersection is found is what
 /// rules that out.
 ///
-/// **What it catches, measured by mutation:** a `Vector2` per mapped segment
-/// (3.9 per call) or per mapped point (1.2 per call), both over the tight
-/// budget. **What it does not:** a `Transform2` built per segment or per
-/// candidate and never let escape (`Transform2(a, ..).a`, or
+/// **What it catches, measured by mutation -- and only when this file runs
+/// in order.** A `Vector2` per mapped segment
+/// (`_isectA1.setFrom(Vector2(x1, y1))`) read 0.95 to 5.49 per call over 15
+/// full-file runs, red every time against the 0.5 budget; a `Vector2` per
+/// mapped point (each point through
+/// `Transform2(..).transformPoint(Vector2(lx, ly))`) read 0.30 to 13.26 over
+/// 13, red 12 times -- the one green run read 0.30. The margin is thin:
+/// the lowest red readings are 0.95 and 0.59. **Run alone** (`--plain-name`)
+/// the same case passes both mutants (5 runs of 5 and 3 of 3) at 0.014 per
+/// call, the unmutated reading: the JIT scalar-replaces even these `Vector2`s
+/// when the earlier tests in this file have not shaped its state first. So
+/// the kill depends on the order of this file. The gate runs the file
+/// whole: under `dart test` over the package the per-segment mutant read
+/// 1.02 to 3.76, red 3 runs of 3. Making the case order-independent is a
+/// harness question, not settled here.
+///
+/// **What it does not catch in any order:** a `Transform2` built per
+/// segment or per candidate and never let escape (`Transform2(a, ..).a`, or
 /// `Transform2.identity().multiply(group)` read back into six doubles)
 /// read 0.12 per call, the same as no mutation at all -- the JIT evidently
 /// scalar-replaces it, and this profiler cannot see what was never
@@ -782,9 +796,10 @@ void main() {
       expect(value / iters, lessThan(_perCallBudget),
           reason: '$name: ${value / iters} per call over $iters calls, '
               'against 48 grouped intersection candidates and 72 mapped '
-              'segments -- a Vector2 per mapped segment measured 3.9 per '
-              'call here, a Vector2 per mapped point 1.2 (the profiler '
-              'undercounts, but not to under this budget)');
+              'segments -- a Vector2 per mapped segment measured 0.95-5.49 '
+              'per call here in file order (the profiler undercounts; run '
+              'alone, the JIT hides it entirely -- see the doc comment on '
+              '_groupedCrossingDocument)');
     }
     for (final name in _depthBoundClasses) {
       final value = counts[name]!;

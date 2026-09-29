@@ -525,9 +525,12 @@ void main() {
       // placement: it maps a root-level group's pieces to world before
       // intersecting them (post-11 found item (a); before that fix it read
       // stored coordinates as world and found nothing in own groups). The
-      // point it reports is the crossing within rounding -- exactly q at
-      // the origin, 1.2e-9 off it at the far turned placement -- so the
-      // premise is an intersection within 1e-5 of the crossing. Neither
+      // point it reports is the crossing within rounding: exactly q at the
+      // origin, 1.16e-9 off it at the far turned placement in own groups
+      // (measured). So the premise is exact `==` at the origin and, at the
+      // far placement, an intersection within 1e-8 of the crossing -- the
+      // bound spec 11 sets for AP3 at the same placement, where rounding
+      // near 4.5e6 is about one ulp (9.3e-10) plus the round trip. Neither
       // the crossing nor the resolved point matches an attach point: fixed.
       {
         final plan = buildPlan(c6Walls, place: place);
@@ -538,9 +541,12 @@ void main() {
         expect(
             res != null &&
                 res.kind == SnapKind.intersection &&
-                (res.point - q).length < 1e-5,
+                (place == origin
+                    ? res.point == q
+                    : (res.point - q).length < 1e-8),
             isTrue,
-            reason: 'premise: an intersection at the crossing '
+            reason: 'premise: an intersection at the crossing, exactly at '
+                'the origin, within 1e-8 elsewhere '
                 '(${res?.kind} ${res?.point}, q $q)');
         expect(bruteCandidates(plan.doc, q), isEmpty,
             reason: 'premise: no attach point at the crossing');

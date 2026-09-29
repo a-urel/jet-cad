@@ -330,4 +330,42 @@ void main() {
     _expectIntersectionAt(
         _snap(index, 0.1, 0.1, 2.0), 0, 0.3, 'A x B, after the growth');
   });
+
+  test(
+      'a one-point polyline among the candidates leaves the crossing pair '
+      'and its name alone', () {
+    // G: rotation cos 0.8, sin 0.6, translation (100, 50). L1 local (0, 0)-
+    // (10, 0) and L2 local (4, -3)-(4, 5) cross at local (4, 0), world
+    // (103.2, 52.4). P: a root polyline with a single point (103, 52),
+    // drawn last, so it has the greatest handle and sits last among the
+    // candidates (its box is the point itself, inside the query square
+    // (102.5, 51.1)-(104.5, 53.1)). It has no segment, so it contributes
+    // no near segment and takes part in no pair: the crossing is L1 x L2,
+    // and it is named by L2, the later-drawn of that pair -- not by P,
+    // whose handle is greater still. A candidate that skipped writing its
+    // own start offset would inherit a stale one and claim other
+    // candidates' segments as its own.
+    final doc = DraftDocument.empty();
+    final g = _group(doc, const Transform2(0.8, 0.6, -0.6, 0.8, 100, 50));
+    _line(doc, g, [0, 0, 10, 0]);
+    final l2 = _line(doc, g, [4, -3, 4, 5]);
+    final p = _leaf(doc, doc.rootHandle, EntityKind.polyline, [103, 52]);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    expect(p.value, greaterThan(l2.value),
+        reason: 'premise: the one-point polyline is drawn last');
+    final seen = <Handle>[];
+    index.rootIndex.searchLeavesRaw(102.5, 51.1, 104.5, 53.1,
+        (slot) => seen.add(doc.entities.handleAt(slot)));
+    expect(seen, contains(p),
+        reason: 'premise: the one-point polyline is an intersection '
+            'candidate at this query');
+
+    final out = _snap(index, 103.5, 52.1, 1.0);
+    _expectIntersectionAt(out, 103.2, 52.4, 'L1 x L2, next to P');
+    expect(out.entity, l2,
+        reason: 'the later-drawn line of the crossing pair names it, not '
+            'the one-point polyline drawn after both');
+  });
 }

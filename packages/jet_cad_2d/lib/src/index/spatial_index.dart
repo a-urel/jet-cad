@@ -1502,8 +1502,9 @@ class SpatialIndex {
     }
   }
 
-  /// Considers every pairwise crossing among the root-level line and
-  /// polyline entities within [radius] of [world], among the
+  /// Considers every pairwise crossing among the line and polyline leaves of
+  /// the root container -- a flattened group's included, an instance's
+  /// never -- within [radius] of [world], among the
   /// [kIntersectionCandidateCap] with the greatest handle values, feeding each
   /// crossing found through [_considerSnapCandidate] exactly as any other
   /// snap candidate.
