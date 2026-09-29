@@ -1,14 +1,167 @@
-// Which wall end point a dimension's end is (spec 11 D10): decision 19's
-// choice among the candidates, with decision 22's timing. Task 4 adds the
-// candidates themselves (through the index, with the opening hosts and the
-// line test). No Flutter import: this file is Dart over `package:jet_cad_2d`
+// Which wall end point a dimension's end is (spec 11 D10): the attach
+// candidates at a resolved point (through the index, with the opening hosts
+// and the line test), and decision 19's choice among them, with decision
+// 22's timing. No Flutter import: this file is Dart over `package:jet_cad_2d`
 // and `vector_math` only, and imports only pure files (the plan's Ruling
 // 11-2).
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'dimension_geometry.dart';
+import 'opening.dart' show OpeningParams;
+import 'opening_geometry.dart' show wallsInDocument;
 import 'wall.dart';
+
+/// How many walls have passed [attachCandidates]' line test, ever. For
+/// tests only, which read the difference across a call (`TL8`: a hover
+/// inside a wall's band passes none); a plain counter, as 10's
+/// `debugTracedSegments` (the plan's Ruling 11-2).
+int debugLineTestPasses = 0;
+
+/// `T` (spec 11 D10): the largest **world** thickness of a live wall of
+/// [doc], each wall's stored thickness times its group's `scaleMagnitude`
+/// (so a scaled group, file only, is covered); 0 with no live wall. One pass
+/// over the walls. A live wall is a root-level group carrying `WallParams`
+/// (the plan's Ruling 11-4).
+double thickestWall(DraftDocument doc) {
+  var t = 0.0;
+  for (final h in doc.components.withComponent<WallParams>()) {
+    if (!_isLiveGroup(doc, h)) continue;
+    final w = doc.components.get<WallParams>(h)!.thickness *
+        doc.tree.accumulatedTransform(h).scaleMagnitude;
+    if (w > t) t = w;
+  }
+  return t;
+}
+
+/// The attach candidates at world point [q] (spec 11 D10, R-16; decision
+/// 23; S-13): every `(W, k, side)` of a live wall `W` whose point
+/// ([wallEndPoint], among every other live wall: `wallsInDocument`) lies
+/// within `dimAttach.linear` of [q], Euclidean. Ascending by wall handle,
+/// then `k`, then side (left, centre, right).
+///
+/// **Only while object snap (F3) is on**, and then **by position**
+/// (decision 23): [objectSnap] false gives none, so every end is fixed;
+/// otherwise any point attaches, whether an object snap or the grid put it
+/// at [q]. The tool and the grips see only the resolved point, so they
+/// behave the same.
+///
+/// **The candidate walls** come from two rect queries on [index], with
+/// `QueryFilter.rendering()`:
+/// 1. every live wall that owns a child whose stored world box touches the
+///    square `q ± dimAttach.linear`;
+/// 2. the host (`OpeningParams.host`, when it is a live wall) of every live
+///    opening that owns a child whose stored box touches the square
+///    `q ± (dimAttach.linear + thickest)`, [thickest] being `T`
+///    ([thickestWall]).
+///
+/// **Why the hosts (S-13):** an opening flush with a flat wall end (a T
+/// butt or a free end; `placeCut` clamps a door placed near a T to exactly
+/// there) leaves none of that end's points stored: 08's `_pieces` keeps no
+/// piece shorter than `wallJoin.linear`, so the end's ring and centreline
+/// pieces are gone, and the wall's own children do not reach the corner.
+/// **Why the box is grown by `T`:** an opening's children do not reach every
+/// corner of its cut either. A door's leaf and arc stand on its swing face,
+/// so only that face's jamb corner is inside the door's own box; the
+/// centreline point and the other face's corner lie up to a wall thickness
+/// away.
+///
+/// **The line test:** a candidate wall is kept only if [q] lies within
+/// `dimAttach.linear` of one of its three lines, the left face line, the
+/// centreline or the right face line ([_onALine]). **Every attach point
+/// lies on one of these lines**: a mitre, T-butt, node or lobe corner is the
+/// meeting of two face lines (a node's taken through its hub, within
+/// `wallJoin.linear` of the wall's own), a clamped or squared cap and the
+/// free rectangle lie on the face lines, and the centre point on the
+/// centreline. So the test loses none, and a point in a wall's band off
+/// those lines builds no `WorldWall`. Only a wall that passes is laid out
+/// (`wallsInDocument`, then its six points).
+List<AttachedEnd> attachCandidates(
+    DraftDocument doc, SpatialIndex index, Vector2 q,
+    {required bool objectSnap, required double thickest}) {
+  if (!objectSnap) return const [];
+  final walls = <Handle>{};
+  final tight = dimAttach.linear;
+  index.forEachInRect(
+      Aabb2.raw(q.x - tight, q.y - tight, q.x + tight, q.y + tight),
+      const QueryFilter.rendering(), (slot) {
+    final owner = doc.entities.ownerAt(slot);
+    if (_isLiveWall(doc, owner)) walls.add(owner);
+  });
+  final grown = dimAttach.linear + thickest;
+  index.forEachInRect(
+      Aabb2.raw(q.x - grown, q.y - grown, q.x + grown, q.y + grown),
+      const QueryFilter.rendering(), (slot) {
+    final owner = doc.entities.ownerAt(slot);
+    if (!_isLiveGroup(doc, owner)) return;
+    final host = doc.components.get<OpeningParams>(owner)?.host;
+    if (host != null && _isLiveWall(doc, host)) walls.add(host);
+  });
+  final out = <AttachedEnd>[];
+  for (final h in walls.toList()..sort((a, b) => a.value.compareTo(b.value))) {
+    if (!_onALine(doc, h, q)) continue;
+    debugLineTestPasses++;
+    final ws = wallsInDocument(doc, h)!;
+    for (final (k, side, p) in wallEndPoints(ws.host, ws.walls)) {
+      if ((p - q).length <= dimAttach.linear) out.add(AttachedEnd(h, k, side));
+    }
+  }
+  return out;
+}
+
+/// The line test (spec 11 D10): whether [q] lies within `dimAttach.linear`
+/// of one of live wall [h]'s three lines. In world, with its world start
+/// `s`, left normal `n` and face offsets `{lOff, 0, rOff}` (07 D2, as
+/// `WorldWall.offsets`): `|(q − s) · n − o| ≤ dimAttach.linear`. For a wall
+/// whose group is not a rigid motion (a scaled group, file only), also in
+/// its local frame with `WallParams`' own points and offsets, where 07's
+/// local-ring fallback stores the free rectangle (D4 step 2). A degenerate
+/// wall (length ≤ `wallJoin.linear`: no direction) passes when [q] lies
+/// within `dimAttach.linear` of an endpoint. Reads `WallParams` and the
+/// transform only: no payload, no `WorldWall`.
+bool _onALine(DraftDocument doc, Handle h, Vector2 q) {
+  final p = doc.components.get<WallParams>(h)!;
+  final m = doc.tree.accumulatedTransform(h);
+  final (lOff, rOff) = switch (p.justification) {
+    Justification.centre => (p.thickness / 2, -p.thickness / 2),
+    Justification.left => (p.thickness, 0.0),
+    Justification.right => (0.0, -p.thickness),
+  };
+  if (_nearALine(
+      q, m.transformPoint(p.start), m.transformPoint(p.end), lOff, rOff)) {
+    return true;
+  }
+  if ((m.scaleMagnitude - 1).abs() > dimAttach.angular) {
+    return _nearALine(m.invert().transformPoint(q), p.start, p.end, lOff, rOff);
+  }
+  return false;
+}
+
+/// Whether [q] lies within `dimAttach.linear` of the line at offset `lOff`,
+/// 0 or `rOff` along the left normal of `s → e`, or, when `s → e` is no
+/// longer than `wallJoin.linear`, of `s` or `e`.
+bool _nearALine(Vector2 q, Vector2 s, Vector2 e, double lOff, double rOff) {
+  final tol = dimAttach.linear;
+  final dx = e.x - s.x, dy = e.y - s.y;
+  final len = e.distanceTo(s);
+  if (!(len > wallJoin.linear)) {
+    return q.distanceTo(s) <= tol || q.distanceTo(e) <= tol;
+  }
+  final o = ((q.x - s.x) * -dy + (q.y - s.y) * dx) / len;
+  return (o - lOff).abs() <= tol || o.abs() <= tol || (o - rOff).abs() <= tol;
+}
+
+/// Whether [h] is a live object of [doc]: its node is a root-level group
+/// (`opening_geometry.dart`'s `_isLiveGroup`, the engine's survey).
+bool _isLiveGroup(DraftDocument doc, Handle h) {
+  final node = doc.tree[h];
+  return node is GroupNode && node.parent == doc.tree.root;
+}
+
+/// Whether [h] is a live wall of [doc]: a root-level group carrying
+/// `WallParams`.
+bool _isLiveWall(DraftDocument doc, Handle h) =>
+    doc.components.get<WallParams>(h) != null && _isLiveGroup(doc, h);
 
 /// The end a dimension stores for a point whose attach [candidates] are
 /// given (spec 11 D10's "The choice among candidates", R-17; decisions 19

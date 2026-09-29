@@ -7,12 +7,16 @@
 // support file (`spike/11-dimensions`,
 // `apps/floor_planner/test/spike_dims/support.dart`); the C1-C10 walls from
 // its `corner_test.dart`; C11 and the acute-L sweep from 07's `WR13`
-// (`wall_regen_test.dart`).
+// (`wall_regen_test.dart`); the flush-door fixtures from spec 11's flush
+// probe (D10, S-13); `dimGridWalls` from 10's `room_cost_test.dart`.
 import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/dimension_geometry.dart';
+import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart'
     show wallsInDocument;
+import 'package:floor_planner/parametric/separator.dart'
+    show ensureDashedLinetype;
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_geometry.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -274,3 +278,66 @@ List<AttachedEnd> bruteCandidates(DraftDocument doc, Vector2 q) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Flush openings (spec 11 D10, S-13): a door whose cut ends exactly at a
+// flat wall end, so none of that end's three points is stored.
+
+/// Spike C5's T at [place] with a 900 mm door on the stem: the through wall
+/// C (0, 0) -> (6000, 0), 200, and the stem S (2500, 0) -> (2500, 3000),
+/// 100, both centred; the door on S centred at [c] along S's centreline,
+/// swinging to [swing]. C's face is at y = 100, so S's first stretch starts
+/// at 100 along S: at `c` = 450 the cut `[0, 900]` is clamped to `[100,
+/// 1000]` (`placeCut`), and at `c` = 550 it is `[100, 1000]` itself; either
+/// way it is flush with S's butt end. `walls` is `[C, S]`, `openings` the
+/// door.
+Plan flushT(Placement place,
+        {double c = 450, SwingSide swing = SwingSide.left}) =>
+    buildPlan(c5Walls,
+        openings: [(1, c, 900, OpeningKind.door, swing)], place: place);
+
+/// A free wall A (0, 0) -> (4000, 0), 200 centred, at [place], with a 900 mm
+/// door centred at 450 along it, swinging to [swing]: the cut `[0, 900]`
+/// is flush with A's free start. `walls` is `[A]`.
+Plan flushFree(Placement place, {SwingSide swing = SwingSide.left}) =>
+    buildPlan(const [W(0, 0, 4000, 0, 200)],
+        openings: [(0, 450, 900, OpeningKind.door, swing)], place: place);
+
+/// [flushFree] with A's group scaled [scale] (file only: no gesture scales
+/// a group; the plan's `X4-thickestStored` clause): A is `scaledGroups`'
+/// image of the free wall at [place], so its world centreline is (0, 0) ->
+/// (4000, 0) and its stored thickness 200 is drawn `200 · scale` thick where
+/// 08 lays it out in the group's frame. The door is stored in A's local
+/// frame, centred 450 along it, 900 wide, so its cut starts at A's free
+/// start whatever the scale. Returns the document, A and the door.
+(DraftDocument, Handle, Handle) flushFreeScaled(Placement place,
+    {SwingSide swing = SwingSide.left, double scale = 1.5}) {
+  final (doc, hs) = docOfWalls(
+      scaledGroups(worldWalls(const [W(0, 0, 4000, 0, 200)], place), scale));
+  ensureDashedLinetype(doc);
+  final door = addOpening(
+      doc, OpeningParams(hs[0], 450, 900, OpeningKind.door, swing: swing));
+  return (doc, hs[0], door);
+}
+
+// ---------------------------------------------------------------------------
+// Cost fixtures.
+
+/// The side of a cell of [dimGridWalls], mm.
+const double dimGridCell = 3000;
+
+/// A grid of [rows] × [cols] cells of [dimGridCell], 200 mm centred walls,
+/// one wall per cell edge, so four walls meet at every inner node: `2rc + r
+/// + c` walls (17 × 17 gives 612, the grid nearest 600 walls, as 10's `RK2`
+/// picks it). Copied from 10's `gridWalls` (`room_cost_test.dart`), the
+/// plan's Ruling 11-22: a test file is never imported from another.
+List<W> dimGridWalls(int rows, int cols) => [
+      for (var r = 0; r <= rows; r++)
+        for (var c = 0; c < cols; c++)
+          W(c * dimGridCell, r * dimGridCell, (c + 1) * dimGridCell,
+              r * dimGridCell, 200),
+      for (var c = 0; c <= cols; c++)
+        for (var r = 0; r < rows; r++)
+          W(c * dimGridCell, r * dimGridCell, c * dimGridCell,
+              (r + 1) * dimGridCell, 200),
+    ];
