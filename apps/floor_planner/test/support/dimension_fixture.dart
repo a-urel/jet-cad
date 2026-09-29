@@ -8,10 +8,12 @@
 // `apps/floor_planner/test/spike_dims/support.dart`); the C1-C10 walls from
 // its `corner_test.dart`; C11 and the acute-L sweep from 07's `WR13`
 // (`wall_regen_test.dart`); the flush-door fixtures from spec 11's flush
-// probe (D10, S-13); `dimGridWalls` from 10's `room_cost_test.dart`.
+// probe (D10, S-13); `dimGridWalls` from 10's `room_cost_test.dart`;
+// `addDimension`, `fixedAt`, `dimText`, `dimLines`, `dimTextGeometry` and
+// `mmPage` from the spike's support file and its `rotate_test.dart`.
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/dimension_geometry.dart';
+import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart'
     show wallsInDocument;
@@ -341,3 +343,78 @@ List<W> dimGridWalls(int rows, int cols) => [
           W(c * dimGridCell, r * dimGridCell, c * dimGridCell,
               (r + 1) * dimGridCell, 200),
     ];
+
+// ---------------------------------------------------------------------------
+// Dimensions (Task 6).
+
+/// A page at 1:50 in millimetres: the unit whose value strings are the
+/// integer millimetres a hand value states.
+PageComponent get mmPage =>
+    PageComponent().copyWith(displayUnit: DisplayUnit.millimeters);
+
+/// A dimension from [a] to [b], of [kind], at [offset] (local units), in its
+/// own root group at [at] (default the identity): the commit the Dimension
+/// tool makes, a group and its `DimensionParams`, one compound. Its handle
+/// is allocated here, before the compound runs. Returns it.
+Handle addDimension(DraftDocument doc, DimEnd a, DimEnd b,
+    {DimKind kind = DimKind.aligned, double offset = 500, Transform2? at}) {
+  final h = doc.handleSeed.next();
+  doc.commands.execute(CompoundCommand([
+    AddNodeCommand(GroupNode(
+        handle: h,
+        parent: doc.rootHandle,
+        transform: at ?? Transform2.identity(),
+        children: const [])),
+    SetComponentCommand<DimensionParams>(
+        h, DimensionParams(a, b, kind, offset)),
+  ], label: 'Add dimension'));
+  return h;
+}
+
+/// A fixed end at world point [w] in a dimension group at [at] (default the
+/// identity): [w] taken back through the group.
+FixedEnd fixedAt(Vector2 w, [Transform2? at]) {
+  final l = (at ?? Transform2.identity()).invert().transformPoint(w);
+  return FixedEnd(l.x, l.y);
+}
+
+/// Dimension [h]'s TEXT child: its one TEXT.
+Handle dimTextHandle(DraftDocument doc, Handle h) => [
+      for (final k in kids(doc, h))
+        if (kindOf(doc, k) == EntityKind.text) k,
+    ].single;
+
+/// Dimension [h]'s value string.
+String dimText(DraftDocument doc, Handle h) =>
+    recordOf(doc, dimTextHandle(doc, h)).text;
+
+/// Dimension [h]'s LINE children, world points, ascending by handle: the
+/// dimension line, the extension lines at `a` and `b`, the slashes at `a`
+/// and `b`.
+List<(Vector2, Vector2)> dimLines(DraftDocument doc, Handle h) {
+  final m = doc.tree.accumulatedTransform(h);
+  return [
+    for (final k in kids(doc, h))
+      if (kindOf(doc, k) == EntityKind.line)
+        () {
+          final c = payloadOf(doc, k).coords;
+          return (
+            m.transformPoint(Vector2(c[0], c[1])),
+            m.transformPoint(Vector2(c[2], c[3])),
+          );
+        }(),
+  ];
+}
+
+/// Dimension [h]'s TEXT in world: its insertion point, its height (the
+/// stored height times the group's scale) and its rotation (radians, the
+/// stored rotation plus the group's world rotation).
+(Vector2, double, double) dimTextGeometry(DraftDocument doc, Handle h) {
+  final m = doc.tree.accumulatedTransform(h);
+  final p = payloadOf(doc, dimTextHandle(doc, h));
+  return (
+    m.transformPoint(Vector2(p.coords[0], p.coords[1])),
+    p.scalars[0] * m.scaleMagnitude,
+    p.scalars[1] + math.atan2(m.b, m.a),
+  );
+}

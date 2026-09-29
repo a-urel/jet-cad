@@ -1,13 +1,18 @@
-// Pure dimension geometry (spec 11 D1, D2, D4, D6, D9; the plan's Ruling
+// Pure dimension geometry (spec 11 D1, D2, D4, D6-D9; the plan's Ruling
 // 11-2): the wall attach points, the dimension tolerances, the value types
-// of a dimension's ends and kind, the measuring direction and the value's
-// format. Later tasks add the ends' JSON and the layout here.
+// of a dimension's ends and kind with their JSON, the measuring direction,
+// the placement function, the layout with its paper constants, and the
+// value's format.
 // No Flutter import: this file is Dart over `package:jet_cad_2d` and
 // `vector_math` only, and imports only pure files.
 //
 // Ported from the spike (`spike/11-dimensions`,
 // `apps/floor_planner/lib/parametric/dimension_geometry.dart`), with the
-// drawn caps ([drawnCapsOf], R-5) in place of the spike's `capsOf` alone.
+// drawn caps ([drawnCapsOf], R-5) in place of the spike's `capsOf` alone,
+// and the layout's side read from the offset's sign bit (R-2), `h1 = 0` for
+// aligned (D6) and the paper constants of R-10.
+import 'dart:math' as math;
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -84,6 +89,24 @@ enum DimKind { aligned, horizontal, vertical }
 /// CLAUDE.md).
 sealed class DimEnd {
   const DimEnd();
+
+  /// An attached end is `{"wall": h, "k": k, "side": s}`, `h` the wall's
+  /// handle as an int, `k` an int and `s` `"left"`, `"centre"` or
+  /// `"right"`; a fixed end is `{"point": [x, y]}` (spec 11 D2).
+  Map<String, Object?> toJson();
+
+  /// Either shape of [toJson]. Throws on a missing key, a wall that is not
+  /// a handle, or an unknown side name, as 07's justification does. Any
+  /// `k` int is accepted, and any coordinate (R-3): a `k` outside {0, 1} or
+  /// a non-finite coordinate is `dimension.broken` (D15), and generates
+  /// nothing (D7).
+  static DimEnd fromJson(Map<String, Object?> json) {
+    if (json['point'] case final List<Object?> p) {
+      return FixedEnd((p[0]! as num).toDouble(), (p[1]! as num).toDouble());
+    }
+    return AttachedEnd(Handle.fromJson(json['wall']), json['k']! as int,
+        WallSide.values.byName(json['side']! as String));
+  }
 }
 
 /// A wall end point (spec 11 D2, decision 4): wall [wall]'s end [k] (0 its
@@ -97,6 +120,10 @@ final class AttachedEnd extends DimEnd {
   final Handle wall;
   final int k;
   final WallSide side;
+
+  @override
+  Map<String, Object?> toJson() =>
+      {'wall': wall.toJson(), 'k': k, 'side': side.name};
 
   @override
   bool operator ==(Object other) =>
@@ -122,6 +149,15 @@ final class FixedEnd extends DimEnd {
 
   Vector2 get point => Vector2(x, y);
 
+  @override
+  Map<String, Object?> toJson() => {
+        'point': [x, y],
+      };
+
+  /// Exact `==` on the coordinates (stored values, CLAUDE.md): `-0.0` and
+  /// `0.0` are the same point, and a NaN coordinate equals nothing, itself
+  /// included. Only a dimension's offset carries a side in its sign, and is
+  /// compared with `compareTo` (`DimensionParams.==`, R-2).
   @override
   bool operator ==(Object other) =>
       other is FixedEnd && other.x == x && other.y == y;
@@ -160,6 +196,169 @@ Vector2 measuringDirection(DimKind kind, Vector2 p0, Vector2 p1, Transform2 m) {
     case DimKind.vertical:
       return m.transformDirection(Vector2(0, 1)).normalized();
   }
+}
+
+/// The placement function (spec 11 D6, R-7): the offset, in the group's
+/// local units, that puts a dimension of [kind] from world [p0] to world
+/// [p1] in a group whose local-to-world transform is [m] through world point
+/// [q]. With `u` = [measuringDirection], `n` its left normal, the heights
+/// `h0 = 0` and `h1` (0 for aligned by definition, `(p1 − p0) · n` for a
+/// linear kind), `hi`/`lo` their max and min, `hq = (q − p0) · n` and `s =
+/// m.scaleMagnitude`:
+///
+/// 1. `hq ≥ hi`: `(hq − hi) / s`, from the upper extreme (`+0.0` on it);
+/// 2. `hq ≤ lo`: `−((lo − hq) / s)`, from the lower one (`-0.0` on it);
+/// 3. between (a linear kind only): the **nearer** extreme with a zero
+///    offset, `+0.0` when `hi − hq ≤ hq − lo`, else `-0.0`.
+///
+/// The side is the result's sign bit (R-2), which [layoutDimension] reads.
+/// The tool's third click and the offset grip both place the line with it
+/// (the plan's Ruling 11-3).
+double offsetFor(
+    Vector2 q, Vector2 p0, Vector2 p1, DimKind kind, Transform2 m) {
+  final u = measuringDirection(kind, p0, p1, m);
+  final n = Vector2(-u.y, u.x);
+  final h1 = kind == DimKind.aligned ? 0.0 : (p1 - p0).dot(n);
+  final hi = math.max(0.0, h1), lo = math.min(0.0, h1);
+  final hq = (q - p0).dot(n);
+  final s = m.scaleMagnitude;
+  if (hq >= hi) return (hq - hi) / s;
+  if (hq <= lo) return -((lo - hq) / s);
+  return hi - hq <= hq - lo ? 0.0 : -0.0;
+}
+
+/// [u] (a world unit direction) or its reverse, so text along it reads
+/// from the bottom or the right of the page (spec 11 D8, R-11): reversed
+/// when `u.x < −dimFormat.angular`, or when `|u.x| ≤ dimFormat.angular` and
+/// `u.y < 0`. Text angles land in (−90°, 90°], and exactly vertical, within
+/// the tolerance, reads upwards (+90°): a group turned −90° gives `u =
+/// (6.1e-17, −1)`, which without it would read from the left.
+Vector2 readable(Vector2 u) {
+  if (u.x < -dimFormat.angular || (u.x.abs() <= dimFormat.angular && u.y < 0)) {
+    return -u;
+  }
+  return u;
+}
+
+/// The text's cap height, paper mm (spec 11 D8, R-10).
+const double kDimTextPaperMm = 2.5;
+
+/// From the dimension line to the text's bottom, paper mm (D8, R-12).
+const double kDimTextGapPaperMm = 1.0;
+
+/// A slash's whole length, paper mm (D7).
+const double kDimSlashPaperMm = 3.0;
+
+/// `g`, from the measured point to the extension line's start, paper mm
+/// (D7).
+const double kDimExtGapPaperMm = 1.5;
+
+/// `v`, the extension line past the dimension line, paper mm (D7).
+const double kDimExtOvershootPaperMm = 2.0;
+
+/// The five LINEs' lineweight, 0.25 mm (spec 11 D7, decision 20; R-31: it
+/// survives the rasteriser at a display's device pixel ratio).
+const int kDimLineweight = 25;
+
+/// The value's justification: bottom-centre, so the text sits centred above
+/// the dimension line (spec 11 D7, decision 8).
+final int kDimTextAttrs =
+    packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.bottom);
+
+/// One dimension's geometry in **world** (spec 11 D6-D8), from
+/// [layoutDimension]:
+///
+/// - [value]: what it measures, never negative; [text], its format in the
+///   page's unit;
+/// - [u], [n]: the measuring direction and its left normal;
+/// - [q0], [q1]: the dimension line's ends;
+/// - [ext0], [ext1]: the extension lines at `a` and `b`, (start, end);
+/// - [slash0], [slash1]: the slashes about [q0] and [q1];
+/// - [textAt], [textAngle] (radians), [textHeight]: the value's insertion
+///   point, world angle and cap height.
+typedef DimLayout = ({
+  double value,
+  Vector2 u,
+  Vector2 n,
+  Vector2 q0,
+  Vector2 q1,
+  (Vector2, Vector2) ext0,
+  (Vector2, Vector2) ext1,
+  (Vector2, Vector2) slash0,
+  (Vector2, Vector2) slash1,
+  Vector2 textAt,
+  double textAngle,
+  double textHeight,
+  String text,
+});
+
+/// The layout of a dimension of [kind] from world [p0] to world [p1], in a
+/// group whose local-to-world transform is [m], with [offset] its **stored
+/// local** offset, on [page] (spec 11 D6-D8; the plan's Ruling 11-3: the
+/// one layout every caller uses). All in world, computed relative to [p0]
+/// (a far origin costs nothing beyond the points' own rounding):
+///
+/// - `u` = [measuringDirection], `n = (−u.y, u.x)`; the value is `|p1 − p0|`
+///   for aligned and `|(p1 − p0) · u|` for a linear kind; `h0 = 0`, `h1 = 0`
+///   for aligned by definition and `(p1 − p0) · n` for a linear kind;
+/// - the line at height `c = hi + o` when [offset]'s sign bit is clear and
+///   `lo + o` when it is set (R-2), `o = offset · m.scaleMagnitude`: from
+///   the outermost measured point on the line's side (R-6); `Q0 = p0 + n (c
+///   − h0)`, `Q1 = p1 + n (c − h1)`;
+/// - each extension line from `P + σ n · min(g, |c − h|)` to `Q + σ n · v`,
+///   `σ` −1 when the sign bit is set, else +1;
+/// - each slash `Q ∓ t`, `t = normalize(ur + nr) · (slash / 2)`, `ur` =
+///   [readable]`(u)`, `nr = (−ur.y, ur.x)`;
+/// - the text at `(Q0 + Q1) / 2 + nr · gap`, at the world angle
+///   `atan2(ur.y, ur.x)`.
+///
+/// Every paper constant is multiplied by `page.scaleDenominator` here, and
+/// nowhere else.
+DimLayout layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
+    double offset, PageComponent page) {
+  final d = p1 - p0;
+  final u = measuringDirection(kind, p0, p1, m);
+  final n = Vector2(-u.y, u.x);
+  final value = kind == DimKind.aligned ? d.length : d.dot(u).abs();
+  const h0 = 0.0;
+  final h1 = kind == DimKind.aligned ? 0.0 : d.dot(n);
+  final hi = math.max(h0, h1), lo = math.min(h0, h1);
+  // The side is the sign bit (R-2): one read, for the line and for σ.
+  final below = offset.isNegative;
+  final c = (below ? lo : hi) + offset * m.scaleMagnitude;
+  final sigma = below ? -1.0 : 1.0;
+
+  final scale = page.scaleDenominator;
+  final g = kDimExtGapPaperMm * scale;
+  final v = kDimExtOvershootPaperMm * scale;
+
+  // Relative to p0.
+  final r0 = n * (c - h0);
+  final r1 = d + n * (c - h1);
+  (Vector2, Vector2) ext(Vector2 r, double h, Vector2 q) => (
+        p0 + r + n * (sigma * math.min(g, (c - h).abs())),
+        p0 + q + n * (sigma * v),
+      );
+
+  final ur = readable(u);
+  final nr = Vector2(-ur.y, ur.x);
+  final t = (ur + nr).normalized() * (kDimSlashPaperMm * scale / 2);
+  final textAt = (r0 + r1) * 0.5 + nr * (kDimTextGapPaperMm * scale);
+  return (
+    value: value,
+    u: u,
+    n: n,
+    q0: p0 + r0,
+    q1: p0 + r1,
+    ext0: ext(Vector2.zero(), h0, r0),
+    ext1: ext(d, h1, r1),
+    slash0: (p0 + r0 - t, p0 + r0 + t),
+    slash1: (p0 + r1 - t, p0 + r1 + t),
+    textAt: p0 + textAt,
+    textAngle: math.atan2(ur.y, ur.x),
+    textHeight: kDimTextPaperMm * scale,
+    text: formatDimension(value, page.displayUnit),
+  );
 }
 
 /// [mm] in whole quanta of [quantumMm], round-half-up, the half decided
