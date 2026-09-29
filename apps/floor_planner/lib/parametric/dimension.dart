@@ -19,6 +19,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'dimension_geometry.dart';
 import 'opening_geometry.dart' show wallsInView;
+import 'wall.dart' show WallParams, wallJoin;
 
 export 'dimension_geometry.dart';
 
@@ -132,7 +133,7 @@ Vector2? endPointInView(ParametricView view, Handle self, DimEnd end) {
 ///   deduplicated, with the default policy, `cascade`: deleting a measured
 ///   wall deletes the dimension in the same edit (decision 3).
 /// - [pageKey]: the page's unit and scale, which its text reads.
-/// - [diagnose] reports nothing yet (Task 7 adds D15's codes).
+/// - [diagnose]: D15's `dimension.broken` and `dimension.degenerate`.
 final class DimensionType extends ParametricType<DimensionParams> {
   const DimensionType();
 
@@ -173,14 +174,10 @@ final class DimensionType extends ParametricType<DimensionParams> {
   /// `[height / s, angle − atan2(M.b, M.a) + 0.0, 1, 0]` (D8).
   ///
   /// **Nothing** for a broken dimension (D7): an end [endPointInView] finds
-  /// broken, or a non-finite offset. Nor when the distance between the two
-  /// world points is not finite: an attached wall's non-finite end point (a
-  /// file's `1e999`), or two finite points so far apart that the distance
-  /// overflows (beyond about 1.3e154 mm, where its square does). The value
-  /// [formatDimension] would receive is then not finite, and it formats only
-  /// a finite one (a non-finite value throws there). So no stored value
-  /// reaches the format non-finite through [generate]; any other caller of
-  /// [layoutDimension] on stored values takes the same guard.
+  /// broken, or a non-finite offset. Nor when [layoutDimension] finds the
+  /// measured length not finite (its one guard, which every caller inherits:
+  /// an attached wall's non-finite end point, or two finite points whose
+  /// distance overflows), so no value reaches the format non-finite.
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     debugDimensionGenerates++;
@@ -189,11 +186,11 @@ final class DimensionType extends ParametricType<DimensionParams> {
     final p0 = endPointInView(view, self, p.a);
     final p1 = endPointInView(view, self, p.b);
     if (p0 == null || p1 == null) return const [];
-    if (!(p1 - p0).length.isFinite) return const [];
 
     final toWorld = view.toWorld(self);
     final page = view.page ?? _defaultPage;
     final l = layoutDimension(p0, p1, p.kind, toWorld, p.offset, page);
+    if (l == null) return const [];
 
     final toLocal = toWorld.invert();
     final base = toLocal.transformPoint(p0);
@@ -222,8 +219,76 @@ final class DimensionType extends ParametricType<DimensionParams> {
     ];
   }
 
-  /// Nothing yet: D15's `dimension.degenerate` and `dimension.broken` land
-  /// with the records (the plan's Task 7).
+  /// Spec 11 D15, each code at most once per dimension:
+  ///
+  /// - **`dimension.broken`**, an error, when an attached end names a live
+  ///   object that is not a wall, or has a `k` outside {0, 1}, or a fixed
+  ///   end has a coordinate that is not finite, or the offset is not finite.
+  ///   Only a file or a command makes one; [generate] makes nothing for it
+  ///   (D7). One diagnostic names every reason, in the order `a`, `b`, the
+  ///   offset.
+  /// - **`dimension.degenerate`**, a warning, when D6's value is ≤
+  ///   `wallJoin.linear` (R-29): the two points coincide for aligned, or the
+  ///   component is zero for a linear kind. It still draws (D7). The value
+  ///   is [layoutDimension]'s, the one layout (Ruling 11-3).
+  ///
+  /// An attached end naming a handle that is not a live object at all is
+  /// the engine's `parametric.dangling` (08 D5), and is not repeated here:
+  /// such a dimension measures nothing and reports nothing of its own. Nor
+  /// is a measured length that is not finite reported ([layoutDimension]
+  /// returns null for it): no stored value is non-finite, so it is not
+  /// broken, and the value is not ≤ the tolerance, so it is not degenerate.
   @override
-  List<Diagnostic> diagnose(ParametricView view, Handle self) => const [];
+  List<Diagnostic> diagnose(ParametricView view, Handle self) {
+    final p = view.paramsOf<DimensionParams>(self)!;
+    final why = [
+      ..._brokenEnd(view, 'a', p.a),
+      ..._brokenEnd(view, 'b', p.b),
+      if (!p.offset.isFinite) 'the offset is not finite',
+    ];
+    if (why.isNotEmpty) {
+      return [
+        Diagnostic(
+          severity: DiagnosticSeverity.error,
+          code: 'dimension.broken',
+          message: '${self.toHex()} is broken (${why.join('; ')}): it draws '
+              'nothing',
+          handles: [self],
+        ),
+      ];
+    }
+    final p0 = endPointInView(view, self, p.a);
+    final p1 = endPointInView(view, self, p.b);
+    if (p0 == null || p1 == null) return const [];
+    final l = layoutDimension(p0, p1, p.kind, view.toWorld(self), p.offset,
+        view.page ?? _defaultPage);
+    if (l == null || l.value > wallJoin.linear) return const [];
+    return [
+      Diagnostic(
+        severity: DiagnosticSeverity.warning,
+        code: 'dimension.degenerate',
+        message: '${self.toHex()} measures zero',
+        handles: [self],
+      ),
+    ];
+  }
+
+  /// Why [end] (named [name]) is broken (D15), or nothing: a dead wall
+  /// handle is not broken (it is `parametric.dangling`).
+  static List<String> _brokenEnd(ParametricView view, String name, DimEnd end) {
+    switch (end) {
+      case FixedEnd(:final x, :final y):
+        return [
+          if (!x.isFinite || !y.isFinite)
+            'end $name is a point that is not finite',
+        ];
+      case AttachedEnd(:final wall, :final k):
+        return [
+          if (view.paramsOf<Component>(wall) != null &&
+              view.paramsOf<WallParams>(wall) == null)
+            'end $name names ${wall.toHex()}, which is not a wall',
+          if (k != 0 && k != 1) 'end $name has k = $k, not 0 or 1',
+        ];
+    }
+  }
 }

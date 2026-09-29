@@ -5,9 +5,13 @@
 // spike's `engine_test.dart` (`Q5b`, `Q5c`).
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/dimension_geometry.dart';
+import 'package:floor_planner/parametric/dimension.dart';
+import 'package:floor_planner/parametric/opening_geometry.dart'
+    show wallsInDocument;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart' show DisplayUnit;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show DisplayUnit, DraftDocument;
+
+import 'support/dimension_fixture.dart';
 
 const mm = DisplayUnit.millimeters,
     cm = DisplayUnit.centimeters,
@@ -217,5 +221,56 @@ void main() {
     expect(gap2, greaterThan(6e-7)); // premise: truly below the half …
     expect(gap2, lessThan(dimFormat.linear)); // … by less than the tolerance
     row('(0, 0)–(4160, 2697) in inches', l2, e, 1562, inch, '195 1/4');
+  });
+
+  test(
+      'DF3 a half through the object rounds up at all six placements: a '
+      'free wall 3450.5 long face to face, and a half between two computed '
+      'corners', () {
+    // The measured value, for the print only: the two world points, each
+    // from the document's walls (the attach point function D4 defines).
+    double measured(DraftDocument doc, AttachedEnd e0, AttachedEnd e1) {
+      final w0 = wallsInDocument(doc, e0.wall)!;
+      final w1 = wallsInDocument(doc, e1.wall)!;
+      return (wallEndPoint(w1.host, w1.walls, e1.k, e1.side) -
+              wallEndPoint(w0.host, w0.walls, e0.k, e0.side))
+          .length;
+    }
+
+    for (final place in placements) {
+      // Q5d: A (0, 0) → (3450.5, 0), 200, free: A/0/left (0, 100) → A/1/left
+      // (3450.5, 100), aligned: 3450.5 exactly on the half: 3451.
+      final free = buildPlan(const [W(0, 0, 3450.5, 0, 200)], place: place);
+      attachPage(free.doc, mmPage);
+      final [a] = free.walls;
+      final e0 = AttachedEnd(a, 0, WallSide.left);
+      final e1 = AttachedEnd(a, 1, WallSide.left);
+      final q5d = addDimension(free.doc, e0, e1, offset: 300.25, at: place.m);
+      final v1 = measured(free.doc, e0, e1);
+      // ignore: avoid_print
+      print('DF3 free wall at $place: measured $v1, ${v1 - 3450.5} from the '
+          'half, text ${dimText(free.doc, q5d)}');
+      expect(dimText(free.doc, q5d), '3451', reason: 'free wall at $place');
+
+      // Two computed corners: A (0, 0) → (3550.5, 0) and B north from A's
+      // end, 200 each. A/0/left is the free end's face point (0, 100);
+      // A/1/left is the L's inner corner, B's left face x = 3550.5 − 100 =
+      // 3450.5 on A's left face y 100: (3450.5, 100). Aligned: 3450.5, on
+      // the half: 3451.
+      final l = buildPlan(
+          const [W(0, 0, 3550.5, 0, 200), W(3550.5, 0, 3550.5, 3000, 200)],
+          place: place);
+      attachPage(l.doc, mmPage);
+      final [la, _] = l.walls;
+      final c0 = AttachedEnd(la, 0, WallSide.left);
+      final c1 = AttachedEnd(la, 1, WallSide.left);
+      final corner = addDimension(l.doc, c0, c1, offset: 300.25, at: place.m);
+      final v2 = measured(l.doc, c0, c1);
+      // ignore: avoid_print
+      print('DF3 two corners at $place: measured $v2, ${v2 - 3450.5} from '
+          'the half, text ${dimText(l.doc, corner)}');
+      expect(dimText(l.doc, corner), '3451', reason: 'two corners at $place');
+      expect(driftOf(l.doc), isEmpty);
+    }
   });
 }

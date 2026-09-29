@@ -314,9 +314,20 @@ typedef DimLayout = ({
 ///
 /// Every paper constant is multiplied by `page.scaleDenominator` here, and
 /// nowhere else.
-DimLayout layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
+///
+/// **Null when the measured length `|p1 − p0|` is not finite** (the one
+/// guard every caller inherits, Ruling 11-3): a non-finite end point (an
+/// attached wall's `1e999` from a file), or two finite points so far apart
+/// that the distance overflows (beyond about 1.3e154 mm, where its square
+/// does). The value [formatDimension] would receive is then not finite, and
+/// it formats only a finite one (a non-finite value throws there). A caller
+/// draws nothing for null: `generate` makes no child, and D15 reports
+/// nothing, since neither of its conditions names it (the value is not ≤
+/// `wallJoin.linear`, and no stored value is non-finite).
+DimLayout? layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
     double offset, PageComponent page) {
   final d = p1 - p0;
+  if (!d.length.isFinite) return null;
   final u = measuringDirection(kind, p0, p1, m);
   final n = Vector2(-u.y, u.x);
   final value = kind == DimKind.aligned ? d.length : d.dot(u).abs();

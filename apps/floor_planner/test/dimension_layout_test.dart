@@ -233,7 +233,37 @@ void main() {
       expectSegment(ll[1], 0, 0, 0, -100, 'y 400 extension a');
       expect(driftOf(doc), isEmpty);
     });
+  }
 
+  test(
+      'DL2 offsetFor\'s boundaries: a point on the upper extreme is +0.0, '
+      'and the middle of the between band is +0.0, at the origin and at '
+      'corpusAxis', () {
+    // Task 6's review (Minor 1). Where the arithmetic is exact: the origin,
+    // and the corpus far origin unturned (4,500,000 + 600 − 4,500,000 is
+    // 600 exactly, as are 1,200 and 3,000 there).
+    for (final place in [origin, corpusAxis]) {
+      final g = place.m;
+      final w0 = g.transformPoint(Vector2(0, 0));
+      final w1 = g.transformPoint(Vector2(3000, 1200));
+      // Aligned, q = P0: hq = 0 = hi = lo (h1 = 0 by definition). Case 1
+      // (hq ≥ hi) takes it first: (0 − 0) / 1 = +0.0, not case 2's −0.0.
+      final onP0 = offsetFor(w0, w0, w1, DimKind.aligned, g);
+      expect(onP0, 0.0, reason: '$place');
+      expect(onP0.isNegative, isFalse, reason: 'on P0 at $place');
+      // Horizontal, the band lo = 0, hi = 1200, q at y 600: hi − hq = 600 ≤
+      // hq − lo = 600, a tie, which goes to the upper extreme: +0.0.
+      final q = g.transformPoint(Vector2(1500.5, 600));
+      // The premise: the heights are exact here.
+      expect((q - w0).y, 600, reason: '$place');
+      expect((w1 - w0).y, 1200, reason: '$place');
+      final mid = offsetFor(q, w0, w1, DimKind.horizontal, g);
+      expect(mid, 0.0, reason: '$place');
+      expect(mid.isNegative, isFalse, reason: 'mid-band at $place');
+    }
+  });
+
+  for (final place in [origin, corpusGroups]) {
     test(
         'DL3 the children by hand at 1:50 and 1:100, and a pair drawn '
         'right to left reads upright with its text above the line, at '
@@ -364,4 +394,77 @@ void main() {
       expect(dimText(doc, dim), '2000');
     }
   });
+
+  for (final place in [origin, corpusGroups]) {
+    test(
+        'DL5 a coincident aligned pair and a vertical pair measured '
+        'horizontally still draw six children, read 0, and report '
+        'dimension.degenerate, at $place', () {
+      final doc = dimDoc(place, mmPage);
+      // The dimensions' group at the placement, turned a further 37°: every
+      // expected point below is in its local frame.
+      final g = place.m.multiply(Transform2.rotation(37 * math.pi / 180));
+      // At 1:50: g = 75, v = 100, the slash ±75 / √2 = ±53.033 along (1, 1),
+      // the text 50 above the line.
+      final t = 75 / math.sqrt(2);
+
+      // Coincident, aligned: |P1 − P0| = 0, so u is the group's local x
+      // (R-8), n its local y; h0 = h1 = 0 and c = 400.5: Q0 = Q1 = (1234.5,
+      // −310.25 + 400.5) = (1234.5, 90.25), the dimension line zero long.
+      final co = addDimension(
+          doc, const FixedEnd(1234.5, -310.25), const FixedEnd(1234.5, -310.25),
+          offset: 400.5, at: g);
+      expect(kindsOf(doc, co), [
+        EntityKind.line,
+        EntityKind.line,
+        EntityKind.line,
+        EntityKind.line,
+        EntityKind.line,
+        EntityKind.text,
+      ]);
+      expect(dimText(doc, co), '0');
+      final cl = localLines(doc, co);
+      expectSegment(cl[0], 1234.5, 90.25, 1234.5, 90.25, 'coincident line');
+      expectSegment(cl[1], 1234.5, -310.25 + 75, 1234.5, 90.25 + 100,
+          'coincident extension a');
+      expectSegment(cl[2], 1234.5, -310.25 + 75, 1234.5, 90.25 + 100,
+          'coincident extension b');
+      expectSegment(cl[3], 1234.5 - t, 90.25 - t, 1234.5 + t, 90.25 + t,
+          'coincident slash a');
+      expectSegment(cl[4], 1234.5 - t, 90.25 - t, 1234.5 + t, 90.25 + t,
+          'coincident slash b');
+      expectAt(localTextAt(doc, co), 1234.5, 90.25 + 50, 'coincident text');
+      expect(storedRotation(doc, co), closeTo(0, 1e-12));
+
+      // A vertical pair measured horizontally: u = local x, n = local y; h1 =
+      // 3000 = hi, so c = 3000 + 400.5 = 3400.5: Q0 = (0, 3400.5) and Q1 =
+      // (0, 3000) + (0, 400.5), the same point. The component along u is 0.
+      final vh = addDimension(
+          doc, const FixedEnd(0, 0), const FixedEnd(0, 3000),
+          kind: DimKind.horizontal, offset: 400.5, at: g);
+      expect(kids(doc, vh), hasLength(6));
+      expect(dimText(doc, vh), '0');
+      final vl = localLines(doc, vh);
+      expectSegment(vl[0], 0, 3400.5, 0, 3400.5, 'vertical pair line');
+      expectSegment(vl[1], 0, 75, 0, 3500.5, 'vertical pair extension a');
+      expectSegment(vl[2], 0, 3075, 0, 3500.5, 'vertical pair extension b');
+      expectSegment(
+          vl[3], -t, 3400.5 - t, t, 3400.5 + t, 'vertical pair slash a');
+      expectSegment(
+          vl[4], -t, 3400.5 - t, t, 3400.5 + t, 'vertical pair slash b');
+      expectAt(localTextAt(doc, vh), 0, 3450.5, 'vertical pair text');
+
+      // One warning each, in ascending handle order (D15).
+      expect(codedAs(diagnosticsOf(doc), 'dimension.'), [
+        for (final h in [co, vh])
+          Diagnostic(
+            severity: DiagnosticSeverity.warning,
+            code: 'dimension.degenerate',
+            message: '${h.toHex()} measures zero',
+            handles: [h],
+          ),
+      ]);
+      expect(driftOf(doc), isEmpty);
+    });
+  }
 }
