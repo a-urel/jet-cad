@@ -36,7 +36,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/dimension_fixture.dart';
 
-const l = WallSide.left, r = WallSide.right;
+const l = WallSide.left;
 
 /// The sample plan as the app opens it. With [gridSnap] false the page's
 /// grid snap is off, so a drag or a hover resolves to its raw point: a page

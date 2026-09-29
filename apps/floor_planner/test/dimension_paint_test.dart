@@ -256,6 +256,13 @@ void main() {
         await rig.camera(Vector2(13350, 8475), px);
         final f = await rig.frame(1.0);
         final tol = 2 * f.mmPerPixel; // two device pixels, world mm
+        // The text's band takes three: the 3 × 3 darkest sample widens a
+        // glyph's ink by up to one device pixel at each edge, on top of the
+        // two (the Task 15 review measured 6.2 of 6.67 mm at 0.3 px/mm, and
+        // 12.9 of 13.3 mm at 0.15 px/mm at another sub-pixel offset). Over
+        // 36 sub-pixel offsets at each scale and zoom, the worst edge is 1.93
+        // device pixels off (Task 16's sweep).
+        final textTol = 3 * f.mmPerPixel;
         final tag = '1:${scale.toInt()} at $px px/mm';
         // The text: from half the gap above the line, upwards.
         final run = f.inkRun(
@@ -278,13 +285,14 @@ void main() {
         print('RR1 $tag: text ink ${lo.toStringAsFixed(1)}..'
             '${hi.toStringAsFixed(1)} mm above the line (want '
             '$gap..${(gap + capH / 0.7).toStringAsFixed(1)}, tol '
-            '${tol.toStringAsFixed(1)}); slash ${isInk(slash) ? 'ink' : 'paper'}'
+            '${textTol.toStringAsFixed(1)}); slash '
+            '${isInk(slash) ? 'ink' : 'paper'}'
             ', off it ${isInk(off) ? 'ink' : 'paper'}; extension line ink '
             '${extLo.toStringAsFixed(1)}..${extHi.toStringAsFixed(1)} mm below '
             'the corner (want $extGap..${500 + over}), gap '
             '${isInk(gapMid) ? 'ink' : 'paper'}');
-        expect(lo, closeTo(gap, tol), reason: '$tag: the text\'s bottom');
-        expect(hi, closeTo(gap + capH / 0.7, tol),
+        expect(lo, closeTo(gap, textTol), reason: '$tag: the text\'s bottom');
+        expect(hi, closeTo(gap + capH / 0.7, textTol),
             reason: '$tag: the text\'s top, g + h / 0.7');
         heights['$scale $px'] = hi - lo;
         expect(isInk(slash), isTrue, reason: '$tag: the slash inks');
@@ -411,7 +419,9 @@ void main() {
     expect(tester.view.devicePixelRatio, 3.0);
     final doc = samplePlan(background: blueprint);
     final [_, _, hall, _, _] = dimsOf(doc);
-    expect(dimText(doc, hall), '4.69', reason: 'no regeneration');
+    expect(dimText(doc, hall), '4.69',
+        reason: 'premise: the Hall\'s value (that a paper change regenerates '
+            'nothing is DO2\'s)');
     // ACI 7 on Blueprint is white (fix/post-07's `foregroundFor`).
     expect(foregroundFor(blueprint), 0xFFFFFF, reason: 'premise');
     final rig = await Rig.of(tester, doc);
