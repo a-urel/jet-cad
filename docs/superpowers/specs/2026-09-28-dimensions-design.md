@@ -156,6 +156,10 @@ tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
   - `SpatialIndex.forEachInRect` (`index/spatial_index.dart:294`),
     `snapInto` (1466), `_considerIntersections` (1530: root-level entities
     only);
+    *Amended by `fix/phantom-intersection-snap`:* `snapInto` is at 1473
+    and `_considerIntersections` at 1546; its scope is the root
+    container's leaves, a flattened group's included (mapped through the
+    group's transform), an instance's never;
   - `PlacementTool` (`jet_cad_2d_flutter/lib/src/draw/placement_tool.dart:34`):
     `markerPoint` (81), `orthoBase` (84: the last placed point), `hovered`
     (95), `_resolve` (105), Shift re-resolves (`onKey`), Esc cancels a
@@ -230,6 +234,10 @@ tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
 - **Intersection snaps between groups' children** (spike Q3c): an X
   crossing of two wall faces gives no snap; such an end would be fixed
   anyway (decision 4).
+  *Amended by `fix/phantom-intersection-snap`:* the "no snap" was the
+  engine defect of D10's amendment. Since the fix, an X crossing of two
+  wall faces snaps as an intersection at every placement; an end there is
+  still fixed (decision 4), because no attach point is there.
 - **Dimensions inside definitions or instances** (06 D5: parametric objects
   are root-level).
 - **Handle remapping on paste or import** (08 R4): a dimension stores wall
@@ -1179,6 +1187,15 @@ M-11openinghost, M-11hostbox.
   crossing never attaches (no wall end point is there). `AM2` asserts
   "none, or an intersection exactly at `q`" at every placement, and the
   empty candidate set.
+  *Amended by `fix/phantom-intersection-snap`* (`c7e4ac3`, `ebdf819`;
+  [the note](../notes/2026-09-29-fix-phantom-intersection-snap.md)): the
+  defect is fixed, and the intersection pass maps every segment through its
+  leaf's group transform. The snap now finds the crossing at every
+  placement: exactly at `q` at the origin, 1.16e-9 mm off it at the corpus
+  far origin turned in own groups. `AM2` asserts an intersection `==` `q` at
+  the origin and within 1e-8 mm of it elsewhere (`AP3`'s bound at the same
+  placement), and the empty candidate set at `q` and at the resolved
+  point.
 - **The hover's memo** (the Task 10 review's I-1): `attachCandidates`
   takes an optional per-generation `Map<Handle, WallPoints>` the tool
   owns, cleared with the generation; a wall found in it is not laid out
@@ -2226,7 +2243,8 @@ groups for every other relational test; the sample plan's own placement
   `dimAttach.linear` at the three +1e9 mm placements.
 - **`AM1`–`AM5`'s grid of walls** is `dimGridWalls(17, 17)`, 612 walls,
   not 600. **`AM2`'s X crossing** asserts "none, or an intersection
-  exactly at `q`" (D10's amendment). **`AM6`'s tool clause** runs in
+  exactly at `q`" (D10's amendment; *since `fix/phantom-intersection-snap`,
+  an intersection `==` `q` at the origin and within 1e-8 mm elsewhere*). **`AM6`'s tool clause** runs in
   `TL6` (Ruling 11-7). **`AM6b`** is the plan's own clause (D10's
   amendment).
 - **`DO2`** goes from 1:50 **mm** (`4000`, height 125) to 1:100 ft-in

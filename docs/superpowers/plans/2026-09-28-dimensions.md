@@ -1643,6 +1643,9 @@ round `402e42f`):
   group transforms, pre-existing on `main`; the human ruled a `fix/` branch
   after 11 merges). `AM2` asserts "none, or an intersection exactly at
   `q`", and the empty candidate set. Spec D10 amended.
+  *Later:* `fix/phantom-intersection-snap` fixed the defect and tightened
+  `AM2`'s premise; see
+  [its note](../notes/2026-09-29-fix-phantom-intersection-snap.md).
 - **The 600-wall grid is 612 walls** (`dimGridWalls(17, 17)`).
 - **Found, file only:** a scaled wall group with a flush door draws a
   tapered piece (07's world caps against 08's scaled-frame cut; found item
