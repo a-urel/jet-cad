@@ -11,6 +11,8 @@
 //   and its attached end stays; dragged with its walls every value stays
 //   (decision 12); alone it shows a rotation grip.
 // - Decision 3: deleting a wall deletes its dimensions in the same step.
+// - D13: the shell wires a dimension's grips; the Hall's offset grip
+//   dragged through the select tool moves its line, not its group (`SL2`).
 //
 // Every clause is a fresh shell over a fresh sample plan, at the sample's
 // own placement (off-origin, not symmetric). Clicks use the shell's startup
@@ -481,6 +483,70 @@ void main() {
           reason: 'its strings');
       expect(driftOf(doc), isEmpty);
     }
+  });
+
+  testWidgets(
+      'SL2 (rvF-mainNoIndex) through the select tool, the Hall\'s offset '
+      'grip dragged 250 mm up moves its line, not its group, in one undo '
+      'step: the shell hands its index to ObjectGrips (D13)', (tester) async {
+    final doc = samplePlan(gridSnap: false);
+    final [_, _, hall, _, _] = dimsOf(doc);
+    final before = doc.components.get<DimensionParams>(hall)!;
+    expect(before.offset, 900, reason: 'premise: the Hall\'s offset');
+    expect(before.kind, DimKind.horizontal, reason: 'premise');
+    final m0 = doc.tree.accumulatedTransform(hall);
+    final view = await pumpShell(tester, doc, 'offset-grip');
+    await objectSnapOff(tester);
+    // 0.15 px/mm, centred on the grip. The Hall's line runs y = 8,250 +
+    // 900 = 9,150 from x 12,250 to 16,940; its offset grip sits at the
+    // line's midpoint, x (12,250 + 16,940) / 2 = 14,595.
+    await pinCamera(tester, view, Vector2(14595, 9150), 0.15);
+    final (q0, q1) = dimLines(doc, hall)[0];
+    expect([q0.x, q0.y, q1.x, q1.y], [12250, 9150, 16940, 9150],
+        reason: 'premise: the Hall\'s line');
+    await tapWorld(tester, view, Vector2(14000, 9150));
+    expect(view.selection.keys, [SelectionKey.root(hall)]);
+    final grip = Vector2(14595, 9150);
+    final ga = globalOf(tester, view, grip);
+    final gb = globalOf(tester, view, grip + Vector2(0, 250));
+    final moved = worldAt(tester, view, gb) - worldAt(tester, view, ga);
+    expect((moved - Vector2(0, 250)).length, lessThan(1e-6), reason: 'premise');
+    await dragGlobal(tester, ga, gb);
+    // The drop at y 9,400 stores 9,400 − 8,250 = 1,150, the kind and ends
+    // kept; without the shell's index the press drags the whole group and
+    // the offset stays 900.
+    final after = doc.components.get<DimensionParams>(hall)!;
+    expect(after.offset, closeTo(900 + moved.y, 1e-6),
+        reason: 'the offset moves by the drag');
+    expect(after.offset, closeTo(1150, 1e-6));
+    expect([after.a, after.b, after.kind], [before.a, before.b, before.kind],
+        reason: 'the ends and the kind are kept');
+    final m1 = doc.tree.accumulatedTransform(hall);
+    expect([
+      m1.a,
+      m1.b,
+      m1.c,
+      m1.d,
+      m1.e,
+      m1.f
+    ], [
+      m0.a,
+      m0.b,
+      m0.c,
+      m0.d,
+      m0.e,
+      m0.f
+    ], reason: 'the group does not move');
+    final (n0, n1) = dimLines(doc, hall)[0];
+    expect((n0 - Vector2(12250, 9400)).length, lessThan(1e-6));
+    expect((n1 - Vector2(16940, 9400)).length, lessThan(1e-6));
+    expect(dimText(doc, hall), '4.69', reason: 'its value is kept');
+    expect(doc.commands.undoDepth, 1, reason: 'one undo step');
+    expect(driftOf(doc), isEmpty);
+    await undoKey(tester);
+    expect(doc.commands.undoDepth, 0);
+    expect(doc.components.get<DimensionParams>(hall), before,
+        reason: 'the undo restores 900');
   });
 
   testWidgets(

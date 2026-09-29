@@ -317,6 +317,49 @@ void main() {
     expect(enc(x.plan.doc), enc(y.plan.doc));
   });
 
+  // The -0.0 arises only in an unturned group: in a turned one the text's
+  // world angle less the group's is x − x, which is +0.0 in round-to-nearest,
+  // or a nonzero residue. So the row sits at the three unturned placements,
+  // the far ones among them.
+  for (final place in [origin, corpusAxis, km1000Axis]) {
+    test(
+        'DO6 (rvF-textAngleNoZero) a right-to-left aligned pair stores its '
+        'TEXT rotation as +0.0, not -0.0 (D8\'s "+ 0.0"), generated and '
+        'after save and load, at $place', () {
+      final doc = buildPlan(const [], place: place).doc;
+      attachPage(doc, mmPage);
+      final g = place.m;
+      // (1000, 0) → (0, 0) in the group: d = (−1000, 0), u = (−1, 0),
+      // which readable() reverses to ur = (1, −0.0); the world angle is
+      // atan2(−0.0, 1) = −0.0, and the group's atan2(0.0, 1) = +0.0, so
+      // angle − group = −0.0 − 0.0 = −0.0 before the + 0.0.
+      final dim = addDimension(
+          doc, const FixedEnd(1000, 0), const FixedEnd(0, 0),
+          offset: 400.75, at: g);
+      expect(dimText(doc, dim), '1000');
+      final l = layoutDimension(place.at(1000, 0), place.at(0, 0),
+          DimKind.aligned, g, 400.75, mmPage)!;
+      expect(l.textAngle, 0.0);
+      expect(l.textAngle.isNegative, isTrue,
+          reason: 'premise: the world angle is -0.0');
+      expect(math.atan2(g.b, g.a).isNegative, isFalse,
+          reason: 'premise: the group\'s angle is +0.0');
+
+      final rotation = payloadOf(doc, dimTextHandle(doc, dim)).scalars[1];
+      expect(rotation, 0.0);
+      expect(rotation.isNegative, isFalse,
+          reason: 'the generated TEXT stores +0.0');
+
+      final s1 = enc(doc);
+      final back = reloadWithPage(s1);
+      expect(enc(back), s1);
+      expect(driftOf(back), isEmpty);
+      final loaded = payloadOf(back, dimTextHandle(back, dim)).scalars[1];
+      expect(loaded, 0.0);
+      expect(loaded.isNegative, isFalse, reason: 'the loaded TEXT keeps +0.0');
+    });
+  }
+
   for (final place in [origin, corpusGroups]) {
     test(
         'DO5 a dimension keeps its six child handles across twenty '
