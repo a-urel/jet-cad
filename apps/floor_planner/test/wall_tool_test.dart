@@ -824,6 +824,39 @@ void main() {
     expect(doc.components.get<WallParams>(h)!.thickness, 2 * wallJoin.linear);
     expect(driftOf(doc), isEmpty);
   });
+
+  test(
+      'WT20 settings holding a thickness above kWallMaxThickness, set through '
+      "the tool's notifier, commit no wall on a diagonal click at the far "
+      'turned origin and end the chain; at the ceiling a wall lands '
+      '(post-11 (c), Q4 review m2)', () {
+    final doc = wallDoc();
+    final rig = directRig(doc);
+    // Off both axes in world, which is the wall group's local space: 1e25
+    // over this ~3,030 mm wall collapses its band (t/L ~ 3e21), and the
+    // region check would throw out of the click.
+    final s = plan(400, 900), e = plan(3400, 1300);
+    for (final t in [1e25, nextUp(kWallMaxThickness)]) {
+      rig.tool.settings.value = WallSettings(thickness: t);
+      final seed = doc.handleSeed.current;
+      final before = enc(doc);
+      pressAt(rig, s);
+      expect(rig.tool.isPending, isTrue, reason: '$t');
+      expect(() => pressAt(rig, e), returnsNormally, reason: '$t');
+      expect(walls(doc), isEmpty, reason: '$t');
+      expect(doc.handleSeed.current, seed, reason: '$t');
+      expect(enc(doc), before, reason: '$t');
+      expect(doc.commands.undoDepth, 0, reason: '$t');
+      expect(rig.tool.isPending, isFalse, reason: '$t: the chain ends');
+    }
+    rig.tool.settings.value = const WallSettings(thickness: kWallMaxThickness);
+    pressAt(rig, s);
+    pressAt(rig, e);
+    final h = walls(doc).single;
+    expect(doc.components.get<WallParams>(h)!.thickness, kWallMaxThickness);
+    expect(driftOf(doc), isEmpty);
+  });
+
   testWidgets(
       'WT19 a 3.2 mm wall, 50 thick, at georeferenced mm coordinates lands '
       'through the Wall tool: the ring keeps its winding (post-11 (B))',
