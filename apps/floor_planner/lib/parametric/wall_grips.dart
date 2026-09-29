@@ -12,7 +12,9 @@ import 'wall_geometry.dart';
 ///
 /// - **Grips:** two `stretch` grips at the wall's world endpoints, index 0
 ///   the start and 1 the end, computed as `WorldWall` computes them, so they
-///   sit bitwise where the geometry puts the ends.
+///   sit bitwise where the geometry puts the ends. None on a holder that
+///   is not a live wall object ([wallsInDocument], as [drag] and [preview]
+///   read it): a file's stray `WallParams` offers no grips.
 /// - **Drag:** one [CompoundCommand] of `SetComponentCommand<WallParams>`:
 ///   the dragged end, and every other live wall's end within
 ///   `wallJoin.linear` of it in world (a root-level group's; a file's stray
@@ -44,7 +46,7 @@ final class WallGrips implements ObjectGripProvider {
 
   @override
   List<Grip> gripsOf(DraftDocument d, Handle group) {
-    final w = _world(d, group);
+    final w = wallsInDocument(d, group)?.host;
     if (w == null) return const [];
     return [
       Grip(GripRole.stretch, 0, w.s.x, w.s.y),
@@ -141,12 +143,6 @@ final class WallGrips implements ObjectGripProvider {
 
   @override
   bool movable(DraftDocument d, Handle group) => true;
-
-  /// [h] as the geometry reads it; null when it is not a wall.
-  static WorldWall? _world(DraftDocument d, Handle h) {
-    final p = d.components.get<WallParams>(h);
-    return p == null ? null : WorldWall(h, p, d.tree.accumulatedTransform(h));
-  }
 
   /// [grip]'s end of [group], then every other live wall's end within
   /// `wallJoin.linear` of it (world), ascending by handle, then end index.

@@ -374,12 +374,19 @@ void main() {
   testWidgets(
       "EG6 (post-11 (e)) an L's corner drag moves the live walls only: a "
       "file's stray WallParams with an end on the joint, on a handle with no "
-      'node and on a group nested in a turned group, is left alone; one undo '
-      'step', (tester) async {
+      'node, on a group nested in a turned group and on a root-level '
+      'instance, is left alone and offers no grips; one undo step',
+      (tester) async {
     // Built by hand: no tool makes these; only a file brings them in.
     const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
+    const inst = Handle(5300), def = Handle(5400);
     final doc = gripDoc(FlutterTextMeasurer(), (doc) {
       addL(doc);
+      doc.tree.addDefinition(Definition(
+          handle: def,
+          name: 'D',
+          basePoint: Vector2.zero(),
+          children: const []));
       doc.commands.execute(CompoundCommand([
         AddNodeCommand(GroupNode(
             handle: plain,
@@ -393,10 +400,18 @@ void main() {
             transform: Transform2.translation(-250.5, 480.75)
                 .multiply(Transform2.rotation(-0.6)),
             children: const [])),
+        AddNodeCommand(InstanceNode(
+            handle: inst,
+            parent: doc.rootHandle,
+            transform: Transform2.translation(ox + 333.5, oy - 222.25)
+                .multiply(Transform2.rotation(0.8)),
+            definition: def,
+            layer: ReservedHandles.layerZero)),
       ], label: 'Add groups'));
     });
     // Written straight into the store, as a file brings them in: the bare
-    // stray's start and the nested stray's end sit on the corner in world.
+    // stray's start, and the nested and the instance strays' ends, sit on
+    // the corner in world.
     final toNested = doc.tree.accumulatedTransform(nested).invert();
     final nestedStart = toNested.transformPoint(polar(lCorner, 23 - 60, 1800));
     final nestedEnd = toNested.transformPoint(lCorner);
@@ -404,15 +419,25 @@ void main() {
         lCorner.y - 1200.25, 120, Justification.left);
     final strayNested = WallParams(nestedStart.x, nestedStart.y, nestedEnd.x,
         nestedEnd.y, 90, Justification.right);
+    final toInst = doc.tree.accumulatedTransform(inst).invert();
+    final instStart = toInst.transformPoint(polar(lCorner, 23 + 150, 1400.5));
+    final instEnd = toInst.transformPoint(lCorner);
+    final strayInst = WallParams(instStart.x, instStart.y, instEnd.x, instEnd.y,
+        100, Justification.left);
     doc.components
       ..attach<WallParams>(bare, strayBare)
-      ..attach<WallParams>(nested, strayNested);
+      ..attach<WallParams>(nested, strayNested)
+      ..attach<WallParams>(inst, strayInst);
     expect(doc.tree[bare], isNull, reason: 'no node');
     expect(doc.tree[nested], isA<GroupNode>());
+    expect(doc.tree[inst], isA<InstanceNode>());
+    expect(doc.tree[inst]!.parent, doc.rootHandle, reason: 'root-level');
     expect((strayNested.end - lCorner).length, greaterThan(1000),
         reason: 'the nested group is not at the identity');
+    expect((strayInst.end - lCorner).length, greaterThan(1000),
+        reason: 'the instance is not at the identity');
     final corner = endOf(doc, wa, 1);
-    for (final (h, k) in [(bare, 0), (nested, 1)]) {
+    for (final (h, k) in [(bare, 0), (nested, 1), (inst, 1)]) {
       expect((endOf(doc, h, k) - corner).length, lessThan(wallJoin.linear),
           reason: '${h.toHex()} is on the joint in world: only liveness '
               'excludes it');
@@ -435,6 +460,7 @@ void main() {
     expect(xy(doc.components.get<WallParams>(wb)!.end), xy(pb.end));
     expect(doc.components.get<WallParams>(bare), strayBare);
     expect(doc.components.get<WallParams>(nested), strayNested);
+    expect(doc.components.get<WallParams>(inst), strayInst);
     expectMitre(doc, wa, wb);
     expect(driftOf(doc), isEmpty);
     expect(diagnosticsOf(doc), diagnostics);
@@ -442,9 +468,22 @@ void main() {
     expect(canon(doc), before);
     expect(doc.components.get<WallParams>(bare), strayBare);
     expect(doc.components.get<WallParams>(nested), strayNested);
+    expect(doc.components.get<WallParams>(inst), strayInst);
 
-    // The provider directly: the command and the preview name A and B only.
+    // The provider directly: a stray offers no grips, as its drag and
+    // preview do nothing; a live wall offers its two ends, bitwise.
     final grips = WallGrips();
+    for (final h in [bare, nested, inst]) {
+      expect(grips.gripsOf(doc, h), isEmpty,
+          reason: '${h.toHex()} is not a live wall');
+    }
+    expect([
+      for (final g in grips.gripsOf(doc, wa)) (g.role, g.index, g.x, g.y)
+    ], [
+      for (final k in [0, 1])
+        (GripRole.stretch, k, endOf(doc, wa, k).x, endOf(doc, wa, k).y)
+    ]);
+    // The command and the preview name A and B only.
     final g = grips.gripsOf(doc, wa)[1];
     final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
     expect([
