@@ -6,6 +6,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
+import 'parametric/dimension_tool.dart';
 import 'parametric/object_grips.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
@@ -130,6 +131,8 @@ class _PlannerShellState extends State<PlannerShell> {
   late final RoomInputs _roomInputs = RoomInputs(_document);
   late final RoomTool _room = RoomTool(_roomInputs);
   late final SeparatorTool _separator = SeparatorTool(_roomInputs);
+  // Spec 11 D12: the Dimension tool (I).
+  final DimensionTool _dimension = DimensionTool();
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -211,6 +214,13 @@ class _PlannerShellState extends State<PlannerShell> {
         shortcut: 'S',
         logicalKey: LogicalKeyboardKey.keyS,
         tool: _separator,
+        drawing: true),
+    PaletteEntry(
+        keyName: 'tool-dimension',
+        label: 'Dimension',
+        shortcut: 'I',
+        logicalKey: LogicalKeyboardKey.keyI,
+        tool: _dimension,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-circle',

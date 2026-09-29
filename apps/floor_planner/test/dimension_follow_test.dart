@@ -168,9 +168,9 @@ void main() {
     });
 
     test(
-        'DN3 deleting a referenced wall deletes its dimensions in the same '
-        'step; the other wall\'s dimension rebuilds; undo restores every '
-        'handle and owner, at $place', () {
+        'DN3 deleting a wall carrying three dimensions deletes all three in '
+        'the same step; the other wall\'s dimensions rebuild or stay; undo '
+        'restores every handle, owner and text, at $place', () {
       final (:plan, :a, :b, :dim) = lPlan(place);
       final doc = plan.doc;
       // A second dimension on B only: B/0/right → B/1/right, B's outer face
@@ -179,10 +179,42 @@ void main() {
       final other = addDimension(
           doc, AttachedEnd(b, 0, r), AttachedEnd(b, 1, r),
           offset: -600.75, at: place.m);
-      expect(dimText(doc, dim), '3900');
+      // Two more on A, of the other kinds (Review Focus #4: three on the
+      // wall deleted), each in a group at the placement, so the hand values
+      // are in the plan's frame:
+      // - horizontal, A/0/right → A/1/right: A's outer face y = −100 from
+      //   its free start (0, −100) to the outer corner (4100, −100): 4100;
+      // - vertical, A/0/centre (0, 0) → a fixed point (500.25, 2300.75):
+      //   |2300.75 − 0| = 2300.75, which reads 2301.
+      final outer = addDimension(
+          doc, AttachedEnd(a, 0, r), AttachedEnd(a, 1, r),
+          kind: DimKind.horizontal, offset: -450.25, at: place.m);
+      final toFixed = addDimension(doc, AttachedEnd(a, 0, WallSide.centre),
+          fixedAt(plan.at(500.25, 2300.75), place.m),
+          kind: DimKind.vertical, offset: 350.5, at: place.m);
+      // And one on B that A's deletion leaves as it is: B's free end across
+      // its thickness, B/1/left (3900, 3000) → B/1/right (4100, 3000): 200.
+      final survivor = addDimension(
+          doc, AttachedEnd(b, 1, l), AttachedEnd(b, 1, r),
+          offset: 250.75, at: place.m);
+      final onA = [dim, outer, toFixed];
+      const textsOnA = ['3900', '4100', '2301'];
+      expect([for (final d in onA) dimText(doc, d)], textsOnA);
       expect(dimText(doc, other), '3100');
+      expect(dimText(doc, survivor), '200');
       expectFollows(doc, 'the L');
       final dimKids = kids(doc, dim), otherKids = kids(doc, other);
+      final onAKids = [for (final d in onA) kids(doc, d)];
+      final survivorKids = kids(doc, survivor);
+      final survivorLines = dimLines(doc, survivor);
+      final survivorText = dimTextGeometry(doc, survivor);
+      void expectSurvivorUnchanged(String when) {
+        expect(kids(doc, survivor), survivorKids, reason: when);
+        expect(dimText(doc, survivor), '200', reason: when);
+        expect(dimLines(doc, survivor), survivorLines, reason: when);
+        expect(dimTextGeometry(doc, survivor), survivorText, reason: when);
+      }
+
       final before = canon(doc, sortNodes: true);
       final entities = handlesAndOwners(doc);
       final depth = doc.commands.undoDepth;
@@ -193,11 +225,15 @@ void main() {
       doc.commands.execute(deleteObject(doc, a));
       expect(doc.commands.undoDepth, depth + 1);
       expect(doc.tree[a], isNull);
-      expect(doc.tree[dim], isNull);
-      expect(doc.components.get<DimensionParams>(dim), isNull);
-      for (final k in dimKids) {
-        expect(doc.entities.slotOf(k), isNull, reason: k.toHex());
+      for (final (i, d) in onA.indexed) {
+        expect(doc.tree[d], isNull, reason: d.toHex());
+        expect(doc.components.get<DimensionParams>(d), isNull,
+            reason: d.toHex());
+        for (final k in onAKids[i]) {
+          expect(doc.entities.slotOf(k), isNull, reason: k.toHex());
+        }
       }
+      expectSurvivorUnchanged('A deleted');
       // B's start is free now: its outer face from (4100, 0) to (4100,
       // 3000): 3000, the same six children.
       expect(dimText(doc, other), '3000');
@@ -212,8 +248,12 @@ void main() {
       expect(canon(doc, sortNodes: true), before);
       expect(handlesAndOwners(doc), entities);
       expect(kids(doc, dim), dimKids);
-      expect(dimText(doc, dim), '3900');
+      for (final (i, d) in onA.indexed) {
+        expect(kids(doc, d), onAKids[i], reason: d.toHex());
+        expect(dimText(doc, d), textsOnA[i], reason: d.toHex());
+      }
       expect(dimText(doc, other), '3100');
+      expectSurvivorUnchanged('undo');
       expectFollows(doc, 'undo');
       // ignore: avoid_print
       print('DN3 at $place: ${entities.length} entities restored with their '

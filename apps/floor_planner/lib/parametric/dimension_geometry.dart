@@ -266,7 +266,7 @@ final int kDimTextAttrs =
     packTextAttrs(h: TextJustifyH.centre, v: TextJustifyV.bottom);
 
 /// The largest value, mm, a dimension lays out (spec 11 D9, D15): 1e15 mm,
-/// 1,000,000 km. Above it [layoutDimension] gives null and the dimension is
+/// 1e9 km. Above it [layoutDimension] gives null and the dimension is
 /// `dimension.broken`, as for a value that is not finite.
 ///
 /// **Why 1e15.** [formatDimension] counts whole quanta in a double, then an
@@ -276,9 +276,10 @@ final int kDimTextAttrs =
 /// is 1 mm, so `n + 0.5 == n` and every value reads as a half; from 2^63
 /// quanta (about 9.2e18 mm) `toInt` saturates and the half's `+ 1` wraps,
 /// so 1e19 prints `-9223372036854775808`. 1e15 is a round bound below the
-/// first failure, and a million times any plan: the corpus far origin is
-/// 4.5e6 mm, and a value is a length, which the +1e9 mm placement does not
-/// make large. Only a wall made absurdly thick (a panel-legal 1e20 mm) or a
+/// first failure, and far beyond any plan: about 2.2e8 times the corpus far
+/// origin (4.5e6 mm), and a million times only against the +1e9 mm
+/// placement, which does not make a value large anyway (a value is a
+/// length). Only a wall made absurdly thick (a panel-legal 1e20 mm) or a
 /// file reaches it.
 const double kDimMaxValueMm = 1e15;
 
