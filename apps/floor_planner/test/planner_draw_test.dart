@@ -3,6 +3,7 @@ import 'dart:convert' show jsonDecode;
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/planner_view.dart';
+import 'package:floor_planner/tool_palette.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -323,6 +324,57 @@ void main() {
         isTrue);
     await press(tester, LogicalKeyboardKey.keyL);
     expect(status(tester), 'Select');
+  });
+
+  testWidgets(
+      "A12b every palette entry's drawing flag, by key: under runtime "
+      'permissions each drawing tool is disabled and Select is not; with '
+      'every permission all are enabled (Plan 11 rvF-paletteNotDrawing)',
+      (tester) async {
+    // Whether each entry is a drawing tool. The palette must carry exactly
+    // these keys: an entry missing here, or missing from the palette, fails.
+    const drawing = {
+      'tool-select': false,
+      'tool-line': true,
+      'tool-polyline': true,
+      'tool-rectangle': true,
+      'tool-box': true,
+      'tool-wall': true,
+      'tool-door': true,
+      'tool-window': true,
+      'tool-gap': true,
+      'tool-room': true,
+      'tool-separator': true,
+      'tool-dimension': true,
+      'tool-circle': true,
+      'tool-arc': true,
+      'tool-text': true,
+    };
+    // The tool tiles: the Fill toggle's inner ListTile carries no key.
+    List<String> paletteKeys() => [
+          for (final t in tester.widgetList<ListTile>(find.descendant(
+              of: find.byType(ToolPalette), matching: find.byType(ListTile))))
+            if (t.key case final ValueKey<String> k) k.value,
+        ];
+    bool enabled(String key) =>
+        tester.widget<ListTile>(find.byKey(Key(key))).enabled;
+
+    final d = drawDoc(FlutterTextMeasurer());
+    expect(d.doc.commands.permissions.allows(Capability.geometry), isTrue);
+    await pumpDraw(tester, d.doc);
+    expect(paletteKeys(), unorderedEquals(drawing.keys));
+    for (final key in drawing.keys) {
+      expect(enabled(key), isTrue, reason: '$key with every permission');
+    }
+
+    d.doc.commands.permissions = DraftPermissions.runtime;
+    expect(d.doc.commands.permissions.allows(Capability.geometry), isFalse);
+    await pumpDraw(tester, d.doc);
+    expect(paletteKeys(), unorderedEquals(drawing.keys));
+    for (final MapEntry(:key, value: isDrawing) in drawing.entries) {
+      expect(enabled(key), !isDrawing,
+          reason: isDrawing ? '$key draws: disabled' : '$key: enabled');
+    }
   });
 
   testWidgets(
