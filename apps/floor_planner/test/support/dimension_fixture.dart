@@ -346,6 +346,18 @@ List<W> dimGridWalls(int rows, int cols) => [
               (r + 1) * dimGridCell, 200),
     ];
 
+/// The wall of `dimGridWalls(17, 17)` that `TL8`'s hover path crosses: row
+/// 8's ninth horizontal wall, (24,000, 24,000) -> (27,000, 24,000), index
+/// 8 · 17 + 8 = 144 (the horizontal walls come first, row by row).
+const int dimGridPathWall = 8 * 17 + 8;
+
+/// `dimGridWalls(17, 17)`, 612 walls, at the origin, with one 900 mm door
+/// on [dimGridPathWall] centred 1,500 along it, swinging left: its cut runs
+/// x 25,050-25,950 (the plan's Ruling 11-22, `TL8`).
+Plan dimGridDoor() => buildPlan(dimGridWalls(17, 17), openings: const [
+      (dimGridPathWall, 1500, 900, OpeningKind.door, SwingSide.left),
+    ]);
+
 // ---------------------------------------------------------------------------
 // Dimensions (Task 6).
 

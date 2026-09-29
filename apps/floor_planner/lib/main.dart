@@ -284,9 +284,10 @@ class _PlannerShellState extends State<PlannerShell> {
       grips: _grips);
   late final ToolController _tools =
       ToolController(initial: _select, context: _context);
-  // Spec 10 D19, R-29: the Room tool's notice joins the status line.
+  // Spec 10 D19, R-29: the Room tool's notice joins the status line; spec
+  // 11 D12 (R-24): so does the Dimension tool's value.
   late final Listenable _status =
-      Listenable.merge([_selection, _tools, _room.notice]);
+      Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]);
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -327,12 +328,14 @@ class _PlannerShellState extends State<PlannerShell> {
   }
 
   /// The active tool, the selection's size when it is not empty, and the
-  /// Room tool's notice when it has one (spec 10 D19, R-29).
+  /// Room tool's notice (spec 10 D19, R-29) or the Dimension tool's
+  /// would-be value (spec 11 D12, S-8: `Dimension — 4.69`) when one is set.
+  /// Only the active tool sets one, and each clears on deactivation.
   String _statusLine() {
     final base = _tools.active.name;
     final line =
         _selection.isEmpty ? base : '$base — ${_selection.length} selected';
-    final notice = _room.notice.value;
+    final notice = _room.notice.value ?? _dimension.notice.value;
     return notice == null ? line : '$line — $notice';
   }
 

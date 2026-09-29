@@ -22,14 +22,16 @@ import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/dimension_attach.dart';
 import 'package:floor_planner/parametric/dimension_tool.dart';
+import 'package:floor_planner/parametric/opening.dart' show OpeningParams;
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/room_inputs.dart' show liveObjectsOf;
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';
-import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter/services.dart'
+    show KeyDownEvent, KeyUpEvent, LogicalKeyboardKey, PhysicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -172,6 +174,73 @@ Future<void> tapWorld(WidgetTester tester, PlannerView view, Vector2 p) async {
       tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y));
   await tester.pump();
 }
+
+/// A canvas that records the attach rings (circles in the preview colour)
+/// and the paths drawn, and ignores everything else.
+class RingSpy implements Canvas {
+  final List<(Offset, double)> rings = <(Offset, double)>[];
+  int paths = 0;
+
+  @override
+  void drawCircle(Offset c, double radius, Paint paint) {
+    // Paint keeps its colour as floats: compare the 32-bit value.
+    if (paint.color.toARGB32() == kPreviewColor.toARGB32()) {
+      rings.add((c, radius));
+    }
+  }
+
+  @override
+  void drawPath(Path path, Paint paint) => paths++;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+/// The rings [rig]'s tool paints now, through `paintOverlay`.
+List<(Offset, double)> ringsOf(Rig rig) {
+  final spy = RingSpy();
+  rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(1440, 900));
+  return spy.rings;
+}
+
+/// [world] on [rig]'s screen.
+Offset screenOf(Rig rig, Vector2 world) {
+  final s = rig.ctx.camera.value.worldToScreen(world);
+  return Offset(s.x, s.y);
+}
+
+/// A hover to [world] carrying its screen point, so a Shift press
+/// re-resolves at the same place (`PlacementTool` re-reads the last screen
+/// point through the camera).
+void hoverOnScreen(Rig rig, Vector2 world, {bool shift = false}) =>
+    rig.tool.onPointerMove(
+        ToolPointerEvent(
+            screen: screenOf(rig, world),
+            world: world,
+            pointer: 1,
+            buttons: 0,
+            shift: shift,
+            control: false,
+            meta: false,
+            alt: false,
+            pickRadiusWorld: 1),
+        rig.ctx);
+
+/// Shift pressed ([down]) or released on [rig]'s tool, with no pointer move.
+void shiftKey(Rig rig, {required bool down}) => rig.tool.onKey(
+    down
+        ? const KeyDownEvent(
+            physicalKey: PhysicalKeyboardKey.shiftLeft,
+            logicalKey: LogicalKeyboardKey.shiftLeft,
+            timeStamp: Duration.zero)
+        : const KeyUpEvent(
+            physicalKey: PhysicalKeyboardKey.shiftLeft,
+            logicalKey: LogicalKeyboardKey.shiftLeft,
+            timeStamp: Duration.zero),
+    rig.ctx);
+
+/// The median of [xs].
+double median(List<double> xs) => (List.of(xs)..sort())[xs.length ~/ 2];
 
 void main() {
   for (final place in const [origin, corpusGroups]) {
@@ -803,5 +872,374 @@ void main() {
     expect(tester.widget<TextField>(name).controller!.text, 'I');
     expect(status(tester), status0, reason: 'I switched no tool');
     expect(view.tools.active, isNot(isA<DimensionTool>()));
+  });
+
+  for (final place in const [origin, corpusGroups]) {
+    test(
+        'TL5 the preview\'s five lines equal the committed children in world; '
+        'the notice is the value; attach rings mark only attaching points; '
+        'a repaint rebuilds nothing and Shift alone rebuilds once, at $place',
+        () {
+      // The Hall's corners: E1/0/left (12,250, 8,250), and P2/1/right
+      // (16,940, 12,940): P2 runs east along y 13,000, 120 thick, its right
+      // face y 13,000 − 60 = 12,940, butting P1's west face x 17,000 − 60.
+      // A diagonal pair, both ends attached, so the preview decides both
+      // ends (decision 19) as the commit does.
+      final c0 = place.at(12250, 8250), d = place.at(16940, 12940);
+      // A 1:50 page in metres, its grid snap off so each hover resolves to
+      // the point given (the aperture alone decides a snap).
+      final page = PageComponent(snapToGrid: false);
+      expect(
+          (page.scaleDenominator, page.displayUnit), (50, DisplayUnit.meters));
+
+      (Plan, Rig) setUp({bool objectSnap = true}) {
+        final plan = samplePlan(place);
+        attachPage(plan.doc, page);
+        return (plan, dimRig(plan.doc, objectSnap: objectSnap)); // 0.3 px/mm
+      }
+
+      /// The two corners placed, each click 5 mm off (a 33.3 mm aperture).
+      void placeCorners(Plan plan, Rig rig) {
+        clickAt(rig, plan.at(12253, 8254));
+        expect((rig.tool.points.last - c0).length, lessThan(dimAttach.linear),
+            reason: 'premise: onto E1/0/left');
+        clickAt(rig, plan.at(16937, 12937));
+        expect(rig.tool.points, hasLength(2));
+        expect((rig.tool.points.last - d).length, lessThan(dimAttach.linear),
+            reason: 'premise: onto P2/1/right');
+      }
+
+      // -- The preview against the result, for each kind. The third point
+      // in world (the tool's group is the identity), from the placed
+      // points W0 and W1: aligned, a point in the Hall; horizontal (Shift),
+      // 700.25 above the higher point, three quarters along the x span
+      // (e_y 700.25 > e_x 0); vertical (Shift), 600.5 right of the
+      // rightmost point, 0.6 along the y span (e_x 600.5 > e_y 0). At
+      // corpusGroups the pair runs (4,690, 4,690) turned 23° = (2,484.7,
+      // 6,149.7) in world: W1 is up and right of W0 there too.
+      for (final (kind, shift) in const [
+        (DimKind.aligned, false),
+        (DimKind.horizontal, true),
+        (DimKind.vertical, true),
+      ]) {
+        final why = '${kind.name}, $place';
+        final (plan, rig) = setUp();
+        final doc = plan.doc;
+        placeCorners(plan, rig);
+        final w0 = rig.tool.points[0], w1 = rig.tool.points[1];
+        final q = switch (kind) {
+          DimKind.aligned => plan.at(14000.5, 11500.25),
+          DimKind.horizontal =>
+            Vector2(w0.x + 0.75 * (w1.x - w0.x), math.max(w0.y, w1.y) + 700.25),
+          DimKind.vertical =>
+            Vector2(math.max(w0.x, w1.x) + 600.5, w0.y + 0.6 * (w1.y - w0.y)),
+        };
+        hoverTo(rig, q, shift: shift);
+        expect(rig.tool.hoverKind, isNull, reason: '$why: premise: free');
+        expect([rig.tool.hoverPoint.x, rig.tool.hoverPoint.y], [q.x, q.y],
+            reason: '$why: premise: the raw point');
+        expect(rig.tool.debugPreviewKind, kind, reason: why);
+        final preview = rig.tool.debugPreview;
+        expect(preview, hasLength(5), reason: why);
+        final value = rig.tool.notice.value;
+        clickAt(rig, q, shift: shift);
+        final h = dims(doc).single;
+        final p = paramsOf(doc, h);
+        expect(p.kind, kind, reason: why);
+        expect(p.a, isA<AttachedEnd>(), reason: '$why: both ends attached');
+        expect(p.b, isA<AttachedEnd>(), reason: '$why: both ends attached');
+        final lines = dimLines(doc, h);
+        expect(lines, hasLength(5));
+        for (var i = 0; i < 5; i++) {
+          for (final (got, want) in [
+            (preview[i].$1, lines[i].$1),
+            (preview[i].$2, lines[i].$2),
+          ]) {
+            expect((got - want).length, lessThan(1e-9),
+                reason: '$why: line $i: $got against $want');
+          }
+        }
+        // The notice is exactly the TEXT's string.
+        expect(value, dimText(doc, h), reason: why);
+        expect(rig.tool.notice.value, isNull, reason: '$why: after the commit');
+        expect(rig.tool.debugPreview, isEmpty, reason: why);
+        if (kind == DimKind.aligned) {
+          // |(4,690, 4,690)| = 6,632.72 mm: 6.63.
+          expect(value, '6.63', reason: why);
+        }
+      }
+
+      // -- The rings, through paintOverlay. F3 on: click 1 on the Hall
+      // corner (it attaches), then a hover onto the other corner (5 mm
+      // off; it attaches): one ring at each.
+      final (plan, rig) = setUp();
+      clickAt(rig, plan.at(12253, 8254));
+      hoverTo(rig, plan.at(16937, 12937));
+      expect((rig.tool.hoverPoint - d).length, lessThan(dimAttach.linear),
+          reason: 'premise: the hover snaps onto P2/1/right');
+      var rings = ringsOf(rig);
+      expect(rings, hasLength(2), reason: 'the placed point and the hover');
+      for (final ((at, radius), want) in [
+        (rings[0], rig.tool.points[0]),
+        (rings[1], rig.tool.hoverPoint),
+      ]) {
+        expect(radius, 4);
+        expect((at - screenOf(rig, want)).distance, lessThan(1e-6));
+      }
+      // A mid-face hover: on E1's inner face (y 8,250), 595 mm from the
+      // face edge's midpoint (14,595) and 1,750 from its corner: no snap,
+      // and no wall end point there. Only the placed point's ring.
+      final face = plan.at(14000.25, 8250);
+      hoverTo(rig, face);
+      expect(rig.tool.hoverKind, isNull,
+          reason: 'premise: no snap on the face');
+      expect(
+          attachCandidates(plan.doc, rig.ctx.index, rig.tool.hoverPoint,
+              objectSnap: true, thickest: thickestWall(plan.doc)),
+          isEmpty,
+          reason: 'premise: no attach point there');
+      rings = ringsOf(rig);
+      expect(rings, hasLength(1), reason: 'none over a mid-face hover');
+      expect((rings.single.$1 - screenOf(rig, rig.tool.points[0])).distance,
+          lessThan(1e-6));
+      // Click 2 on the other corner, then a free hover: both placed points
+      // ring, the hover does not.
+      clickAt(rig, plan.at(16937, 12937));
+      final free = plan.at(14000.5, 11500.25);
+      hoverTo(rig, free);
+      expect(rig.tool.hoverKind, isNull, reason: 'premise: free');
+      rings = ringsOf(rig);
+      expect(rings, hasLength(2), reason: 'both placed points');
+      expect((rings[1].$1 - screenOf(rig, rig.tool.points[1])).distance,
+          lessThan(1e-6));
+
+      // -- No rebuild on repaint: ten frames with no pointer move paint the
+      // cached lines and build nothing.
+      final builds = rig.tool.debugPreviewBuilds;
+      final spy = RingSpy();
+      for (var i = 0; i < 10; i++) {
+        rig.tool.paintWorldOverlay(spy, Vector2.zero(), 0.3);
+        rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(1440, 900));
+      }
+      expect(spy.paths, 10, reason: 'the preview is painted each frame');
+      expect(rig.tool.debugPreviewBuilds, builds, reason: 'built on no frame');
+
+      // -- Shift alone (Review Focus #2): a hover without Shift is aligned;
+      // pressing Shift with no pointer move re-resolves and rebuilds once,
+      // linear (the free point lies inside the pair's span box: a tie,
+      // |dx| = |dy| at the origin, horizontal; turned 23° |dy| 6,149.7 >
+      // |dx| 2,484.7, vertical); releasing it rebuilds once, aligned.
+      hoverOnScreen(rig, free);
+      expect(rig.tool.debugPreviewKind, DimKind.aligned);
+      final linear = place == origin ? DimKind.horizontal : DimKind.vertical;
+      var before = rig.tool.debugPreviewBuilds;
+      shiftKey(rig, down: true);
+      expect(rig.tool.debugPreviewBuilds, before + 1, reason: 'Shift down');
+      expect(rig.tool.debugPreviewKind, linear, reason: 'Shift down');
+      before = rig.tool.debugPreviewBuilds;
+      shiftKey(rig, down: false);
+      expect(rig.tool.debugPreviewBuilds, before + 1, reason: 'Shift up');
+      expect(rig.tool.debugPreviewKind, DimKind.aligned, reason: 'Shift up');
+
+      // -- F3 off: the same clicks and hovers ring nothing at all.
+      final (planOff, rigOff) = setUp(objectSnap: false);
+      clickAt(rigOff, planOff.at(12253, 8254));
+      expect(ringsOf(rigOff), isEmpty, reason: 'F3 off: the placed point');
+      hoverTo(rigOff, planOff.at(16937, 12937));
+      expect(ringsOf(rigOff), isEmpty, reason: 'F3 off: the hover');
+      clickAt(rigOff, planOff.at(16937, 12937));
+      hoverTo(rigOff, planOff.at(14000.5, 11500.25));
+      expect(ringsOf(rigOff), isEmpty, reason: 'F3 off: two placed points');
+      expect(rigOff.tool.debugPreview, hasLength(5),
+          reason: 'the preview still shows, with fixed ends');
+    });
+  }
+
+  testWidgets(
+      'TL5 the status line reads Dimension — 4.69 over the Hall\'s corners, '
+      'and clears after the commit and on a switch to Select', (tester) async {
+    for (final place in const [origin, corpusGroups]) {
+      final plan = buildPlan([...sampleWalls(), sampleColumn],
+          seps: const [sampleSeparator],
+          openings: sampleOpenings,
+          place: place,
+          measurer: FlutterTextMeasurer());
+      attachPage(plan.doc, PageComponent(snapToGrid: false)); // 1:50 m
+      plan.system.dispose();
+      plan.doc.commands.clearHistory();
+      final doc = plan.doc;
+      final view = await pumpShell(tester, doc, place.name);
+      // E1/0/left (12,250, 8,250) and P1/0/left (16,940, 8,250); the
+      // camera at 0.12 px/mm centred between them (the aperture is 10 /
+      // 0.12 = 83.3 mm; the pair spans 4,690 × 0.12 = 563 px, inside the
+      // shell's 896 px canvas).
+      expect(tester.getSize(find.byType(InteractionLayer)).width, 896);
+      await centreOn(tester, view, plan.at(14595, 8250), 0.12);
+      await press(tester, LogicalKeyboardKey.keyI);
+      final tool = view.tools.active as DimensionTool;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      final layer = tester.getTopLeft(find.byType(InteractionLayer));
+      Future<void> hover(Vector2 w) async {
+        final s = view.camera.value.worldToScreen(w);
+        await mouse.moveTo(layer + Offset(s.x, s.y));
+        await tester.pump();
+      }
+
+      for (final commit in [true, false]) {
+        final why = '${commit ? 'commit' : 'switch'}, $place';
+        await tapWorld(tester, view, plan.at(12253, 8254));
+        await tapWorld(tester, view, plan.at(16937, 8254));
+        expect(tool.points, hasLength(2), reason: why);
+        // A hover in the Hall, 900.25 above the pair (1,400.25 the second
+        // time, clear of the first dimension's line and its midpoint snap),
+        // no Shift: aligned, 16,940 − 12,250 = 4,690 mm, 4.69 in metres.
+        final q = plan.at(14600.5, commit ? 9150.25 : 9650.25);
+        await hover(q);
+        expect(tool.hoverKind, isNull, reason: '$why: premise: free');
+        expect(tool.notice.value, '4.69', reason: why);
+        expect(status(tester), 'Dimension — 4.69', reason: why);
+        if (commit) {
+          await tapWorld(tester, view, q);
+          expect(dims(doc), hasLength(1), reason: why);
+          expect(dimText(doc, dims(doc).single), '4.69', reason: why);
+          expect(tool.notice.value, isNull, reason: '$why: after the commit');
+          expect(status(tester), 'Dimension', reason: why);
+          await tester.pump();
+          expect(status(tester), 'Dimension', reason: '$why: change heard');
+        } else {
+          await tester.tap(find.byKey(const Key('tool-select')));
+          await tester.pump();
+          expect(tool.notice.value, isNull, reason: '$why: deactivated');
+          expect(status(tester), 'Select', reason: why);
+        }
+      }
+      await mouse.removePointer();
+    }
+  });
+
+  test(
+      'TL8 hovering among 600 walls searches once per distinct resolved '
+      'point, passes no line test between a centreline and its faces or past '
+      'a door, passes one on a face line and one on a centreline, and a '
+      'commit searches afresh once per end; the time per move is printed',
+      () async {
+    final plan = dimGridDoor();
+    final doc = plan.doc;
+    expect(plan.walls, hasLength(612), reason: '17 × 17 cells: 2·289 + 34');
+    final wall = plan.walls[dimGridPathWall];
+    final door = plan.openings.single;
+    expect(doc.components.get<OpeningParams>(door)!.host, wall);
+    final rig = dimRig(doc); // 0.3 px/mm, F3 on, no page
+    final tool = rig.tool;
+    // The aperture: 10 px / 0.3 px/mm = 33.3 mm.
+    expect(kSnapAperturePixels / 0.3, closeTo(33.33, 0.01));
+    ({int searches, int passes}) counters() =>
+        (searches: tool.debugAttachSearches, passes: debugLineTestPasses);
+
+    /// A hover at [p], timed; premise: no snap, no grid, the raw point.
+    double hoverFree(Vector2 p, String why) {
+      final sw = Stopwatch()..start();
+      hoverTo(rig, p);
+      sw.stop();
+      expectFree(rig, p, why);
+      expect(tool.debugPreview.isEmpty || tool.points.length == 2, isTrue);
+      return sw.elapsedMicroseconds.toDouble();
+    }
+
+    /// Fifty hovers along the path wall at height [y]: 40 distinct points
+    /// x 24,400.25 + 55.5 i (i < 40, to 26,564.75: across the door's cut,
+    /// x 25,050-25,950, and 300 mm or more from the nodes at x 24,000 and
+    /// 27,000), and after every fourth a repeat of the point two back.
+    /// Returns each hover's time, µs.
+    List<double> path(double y, String what) {
+      final times = <double>[];
+      for (var i = 0; i < 40; i++) {
+        times.add(hoverFree(plan.at(24400.25 + 55.5 * i, y), '$what $i'));
+        if (i % 4 == 3) {
+          times.add(hoverFree(
+              plan.at(24400.25 + 55.5 * (i - 2), y), '$what repeat $i'));
+        }
+      }
+      expect(times, hasLength(50));
+      return times;
+    }
+
+    // -- The path in the band, idle: y 24,050, a quarter of the 200 mm
+    // thickness in from the left face (y 24,100): 50 mm from it and from
+    // the centreline (y 24,000), beyond the aperture. No wall passes the
+    // line test there, in the wall or in the door's cut (the door's host
+    // comes in by the grown box and fails the test), and each distinct
+    // point is searched once.
+    var c = counters();
+    final idle = path(24050, 'idle');
+    expect(counters(), (searches: c.searches + 40, passes: c.passes),
+        reason: 'one search per distinct point, no line test passed');
+
+    // -- On the lines: exactly on the left face line, 125 mm from the face
+    // edge's midpoint (24,575, 24,100), then exactly on the centreline:
+    // each passes the line test for the path wall alone; neither is an
+    // attach point.
+    c = counters();
+    final onFace = hoverFree(plan.at(24700.25, 24100), 'on the face line');
+    expect(counters(), (searches: c.searches + 1, passes: c.passes + 1),
+        reason: 'the face line');
+    final onCentre = hoverFree(plan.at(24800.75, 24000), 'on the centreline');
+    expect(counters(), (searches: c.searches + 2, passes: c.passes + 2),
+        reason: 'the centreline (M-11prefilter)');
+    expect(ringsOf(rig), isEmpty, reason: 'no attach point on either');
+
+    // -- After a document change: a command moves a far wall (the grid's
+    // first, 0.25 mm south); once the change is heard (a pump), the same
+    // point is searched again, once.
+    final far0 = plan.walls[0];
+    doc.commands.execute(SetComponentCommand<WallParams>(far0,
+        const WallParams(0, -0.25, 3000, -0.25, 200, Justification.centre)));
+    c = counters();
+    await Future<void>.delayed(Duration.zero);
+    hoverFree(plan.at(24800.75, 24000), 'after the change');
+    expect(tool.debugAttachSearches, c.searches + 1,
+        reason: 'searched again after the change');
+    hoverFree(plan.at(24800.75, 24000), 'again');
+    expect(tool.debugAttachSearches, c.searches + 1, reason: 'memoised again');
+
+    // -- Two points placed on corners of the + nodes at (9,000, 9,000) and
+    // (15,000, 12,000), each click 5 mm off; then the path again, at
+    // y 23,950.25 (a quarter in from the right face y 23,900, 50.25 from
+    // it and 49.75 from the centreline), each move rebuilding the preview.
+    clickAt(rig, plan.at(9103, 9104));
+    expect((tool.points.last - plan.at(9100, 9100)).length,
+        lessThan(dimAttach.linear),
+        reason: 'premise: onto the corner');
+    clickAt(rig, plan.at(15103, 12104));
+    expect(tool.points, hasLength(2));
+    expect(tool.notice.value, isNotNull);
+    c = counters();
+    final builds = tool.debugPreviewBuilds;
+    final pending = path(23950.25, 'two points placed');
+    expect(counters(), (searches: c.searches + 40, passes: c.passes),
+        reason: 'two points placed: one search per distinct point');
+    expect(tool.debugPreviewBuilds, builds + 50, reason: 'one per move');
+
+    // -- The commit: exactly two fresh searches, one per end (Ruling 11-8),
+    // though both points are memoised.
+    final q = plan.at(13200.5, 7700.25);
+    hoverTo(rig, q);
+    expectFree(rig, q, 'the third point');
+    c = counters();
+    rig.tool.onPointerDown(pointerAt(q, buttons: kPrimaryButton), rig.ctx);
+    expect(tool.debugAttachSearches, c.searches + 2, reason: 'the commit');
+    final h = dims(doc).single;
+    expect(paramsOf(doc, h).a, isA<AttachedEnd>());
+    expect(paramsOf(doc, h).b, isA<AttachedEnd>());
+
+    // ignore: avoid_print
+    print('TL8 ${plan.walls.length} walls, 0.3 px/mm: median per move over '
+        'the band path ${median(idle).toStringAsFixed(1)} us idle, '
+        '${median(pending).toStringAsFixed(1)} us with two points placed '
+        '(the preview rebuilt each move); on the face line '
+        '${onFace.toStringAsFixed(0)} us, on the centreline '
+        '${onCentre.toStringAsFixed(0)} us; budget 1000 us per move (D12; '
+        'printed, not asserted)');
   });
 }
