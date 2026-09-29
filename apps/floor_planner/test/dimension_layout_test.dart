@@ -236,7 +236,7 @@ void main() {
   }
 
   test(
-      'DL2 offsetFor\'s boundaries: a point on the upper extreme is +0.0, '
+      'DL2b offsetFor\'s boundaries: a point on the upper extreme is +0.0, '
       'and the middle of the between band is +0.0, at the origin and at '
       'corpusAxis', () {
     // Task 6's review (Minor 1). Where the arithmetic is exact: the origin,

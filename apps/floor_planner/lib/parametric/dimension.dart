@@ -173,11 +173,11 @@ final class DimensionType extends ParametricType<DimensionParams> {
   /// to the first end's world point `P0` (D7). The TEXT's scalars are
   /// `[height / s, angle − atan2(M.b, M.a) + 0.0, 1, 0]` (D8).
   ///
-  /// **Nothing** for a broken dimension (D7): an end [endPointInView] finds
-  /// broken, or a non-finite offset. Nor when [layoutDimension] finds the
-  /// measured length not finite (its one guard, which every caller inherits:
-  /// an attached wall's non-finite end point, or two finite points whose
-  /// distance overflows), so no value reaches the format non-finite.
+  /// **Nothing** for a broken dimension (D7, D15): an end [endPointInView]
+  /// finds broken, a non-finite offset, or a dimension [layoutDimension]
+  /// cannot lay out in doubles (its one guard, which every caller inherits),
+  /// so no value reaches the format non-finite. [diagnose] reports each of
+  /// them `dimension.broken`.
   @override
   List<Generated> generate(ParametricView view, Handle self) {
     debugDimensionGenerates++;
@@ -219,14 +219,19 @@ final class DimensionType extends ParametricType<DimensionParams> {
     ];
   }
 
-  /// Spec 11 D15, each code at most once per dimension:
+  /// Spec 11 D15, each code at most once per dimension. A dimension either
+  /// draws its six children or is broken (D7); it is never silently empty.
   ///
   /// - **`dimension.broken`**, an error, when an attached end names a live
   ///   object that is not a wall, or has a `k` outside {0, 1}, or a fixed
-  ///   end has a coordinate that is not finite, or the offset is not finite.
-  ///   Only a file or a command makes one; [generate] makes nothing for it
-  ///   (D7). One diagnostic names every reason, in the order `a`, `b`, the
-  ///   offset.
+  ///   end has a coordinate that is not finite, or the offset is not finite,
+  ///   or both ends resolve and [layoutDimension] cannot lay the dimension
+  ///   out in doubles ("the measured length is not finite": an aligned pair
+  ///   whose distance overflows, or an attached wall's non-finite end point).
+  ///   The layout is tried with a zero offset when the offset is not finite,
+  ///   so that reason is the length's, not the offset's. [generate] makes
+  ///   nothing for a broken dimension (D7). One diagnostic names every
+  ///   reason, in the order `a`, `b`, the offset, the measured length.
   /// - **`dimension.degenerate`**, a warning, when D6's value is ≤
   ///   `wallJoin.linear` (R-29): the two points coincide for aligned, or the
   ///   component is zero for a linear kind. It still draws (D7). The value
@@ -234,17 +239,22 @@ final class DimensionType extends ParametricType<DimensionParams> {
   ///
   /// An attached end naming a handle that is not a live object at all is
   /// the engine's `parametric.dangling` (08 D5), and is not repeated here:
-  /// such a dimension measures nothing and reports nothing of its own. Nor
-  /// is a measured length that is not finite reported ([layoutDimension]
-  /// returns null for it): no stored value is non-finite, so it is not
-  /// broken, and the value is not ≤ the tolerance, so it is not degenerate.
+  /// such a dimension measures nothing and reports nothing of its own.
   @override
   List<Diagnostic> diagnose(ParametricView view, Handle self) {
     final p = view.paramsOf<DimensionParams>(self)!;
+    final p0 = endPointInView(view, self, p.a);
+    final p1 = endPointInView(view, self, p.b);
+    final l = p0 == null || p1 == null
+        ? null
+        : layoutDimension(p0, p1, p.kind, view.toWorld(self),
+            p.offset.isFinite ? p.offset : 0.0, view.page ?? _defaultPage);
     final why = [
       ..._brokenEnd(view, 'a', p.a),
       ..._brokenEnd(view, 'b', p.b),
       if (!p.offset.isFinite) 'the offset is not finite',
+      if (p0 != null && p1 != null && l == null)
+        'the measured length is not finite',
     ];
     if (why.isNotEmpty) {
       return [
@@ -257,11 +267,6 @@ final class DimensionType extends ParametricType<DimensionParams> {
         ),
       ];
     }
-    final p0 = endPointInView(view, self, p.a);
-    final p1 = endPointInView(view, self, p.b);
-    if (p0 == null || p1 == null) return const [];
-    final l = layoutDimension(p0, p1, p.kind, view.toWorld(self), p.offset,
-        view.page ?? _defaultPage);
     if (l == null || l.value > wallJoin.linear) return const [];
     return [
       Diagnostic(

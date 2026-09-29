@@ -315,19 +315,22 @@ typedef DimLayout = ({
 /// Every paper constant is multiplied by `page.scaleDenominator` here, and
 /// nowhere else.
 ///
-/// **Null when the measured length `|p1 − p0|` is not finite** (the one
-/// guard every caller inherits, Ruling 11-3): a non-finite end point (an
-/// attached wall's `1e999` from a file), or two finite points so far apart
-/// that the distance overflows (beyond about 1.3e154 mm, where its square
-/// does). The value [formatDimension] would receive is then not finite, and
-/// it formats only a finite one (a non-finite value throws there). A caller
-/// draws nothing for null: `generate` makes no child, and D15 reports
-/// nothing, since neither of its conditions names it (the value is not ≤
-/// `wallJoin.linear`, and no stored value is non-finite).
+/// **Null when the dimension cannot be laid out in doubles** (the one guard
+/// every caller inherits, Ruling 11-3): when the value for [kind], or any
+/// point, the text's height or its angle, is not finite. The value is
+/// checked before it is formatted: [formatDimension] formats only a finite
+/// value (a non-finite one throws there). This happens for a non-finite end
+/// point (an attached wall's `1e999` from a file), a non-finite [offset], or
+/// finite points so far apart that a length overflows: an aligned pair
+/// beyond about 1.3e154 mm, where the distance's square does. A linear kind
+/// whose component stays finite still lays out: a horizontal dimension
+/// between two points 1.5e154 apart along its local y measures 0 and draws.
+/// `generate` makes no child for null, and D15 reports the dimension
+/// `dimension.broken` ("the measured length is not finite"): a dimension
+/// either draws its six children or is broken, never silently empty (D7).
 DimLayout? layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
     double offset, PageComponent page) {
   final d = p1 - p0;
-  if (!d.length.isFinite) return null;
   final u = measuringDirection(kind, p0, p1, m);
   final n = Vector2(-u.y, u.x);
   final value = kind == DimKind.aligned ? d.length : d.dot(u).abs();
@@ -354,20 +357,35 @@ DimLayout? layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
   final ur = readable(u);
   final nr = Vector2(-ur.y, ur.x);
   final t = (ur + nr).normalized() * (kDimSlashPaperMm * scale / 2);
-  final textAt = (r0 + r1) * 0.5 + nr * (kDimTextGapPaperMm * scale);
+  final textAt = p0 + ((r0 + r1) * 0.5 + nr * (kDimTextGapPaperMm * scale));
+  final q0 = p0 + r0, q1 = p0 + r1;
+  final ext0 = ext(Vector2.zero(), h0, r0), ext1 = ext(d, h1, r1);
+  final slash0 = (q0 - t, q0 + t), slash1 = (q1 - t, q1 + t);
+  final textAngle = math.atan2(ur.y, ur.x);
+  final textHeight = kDimTextPaperMm * scale;
+  bool finite(Vector2 w) => w.x.isFinite && w.y.isFinite;
+  if (!value.isFinite ||
+      !textAngle.isFinite ||
+      !textHeight.isFinite ||
+      ![
+        q0, q1, ext0.$1, ext0.$2, ext1.$1, ext1.$2, //
+        slash0.$1, slash0.$2, slash1.$1, slash1.$2, textAt,
+      ].every(finite)) {
+    return null;
+  }
   return (
     value: value,
     u: u,
     n: n,
-    q0: p0 + r0,
-    q1: p0 + r1,
-    ext0: ext(Vector2.zero(), h0, r0),
-    ext1: ext(d, h1, r1),
-    slash0: (p0 + r0 - t, p0 + r0 + t),
-    slash1: (p0 + r1 - t, p0 + r1 + t),
-    textAt: p0 + textAt,
-    textAngle: math.atan2(ur.y, ur.x),
-    textHeight: kDimTextPaperMm * scale,
+    q0: q0,
+    q1: q1,
+    ext0: ext0,
+    ext1: ext1,
+    slash0: slash0,
+    slash1: slash1,
+    textAt: textAt,
+    textAngle: textAngle,
+    textHeight: textHeight,
     text: formatDimension(value, page.displayUnit),
   );
 }

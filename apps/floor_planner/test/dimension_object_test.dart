@@ -185,6 +185,35 @@ void main() {
       final ks = kids(doc, dim);
       expect(ks, hasLength(6));
 
+      // The page key holds both halves (D3): a scale-only change (1:50 →
+      // 1:100 in mm: the text 250 tall, 100 above the line at (2000, 800),
+      // still 4000) and a unit-only change (mm → cm at 1:50: 4000 mm = 4000
+      // tenths of a cm, 400.0) each regenerate the text; each is undone.
+      for (final (what, change, text, height, y) in [
+        (
+          'scale only',
+          (PageComponent p) => p.copyWith(scaleDenominator: 100),
+          '4000',
+          250.0,
+          800.0
+        ),
+        (
+          'unit only',
+          (PageComponent p) => p.copyWith(displayUnit: DisplayUnit.centimeters),
+          '400.0',
+          125.0,
+          750.0
+        ),
+      ]) {
+        final n = debugDimensionGenerates;
+        doc.commands.execute(setPage(doc, change));
+        expect(debugDimensionGenerates, greaterThan(n), reason: what);
+        expectText(text, height, y, what);
+        expect(kids(doc, dim), ks, reason: what);
+        doc.commands.undo();
+        expectText('4000', 125, 750, '$what undone');
+      }
+
       // 1:50 mm → 1:100 ft-in, one command. 4000 / 25.4 = 157.48"; in
       // quarters 629.92 → 630 = 13 × 48 + 6: 13'-1 1/2". The text 2.5 × 100
       // = 250 tall, 1 × 100 = 100 above the line: (2000, 800). The line
@@ -469,7 +498,7 @@ void main() {
       // --- The file cases (Ruling 11-12): a file no program regenerated,
       // with markers where the file will carry 1e999 and -1e999.
       const pointMarker = 98765.4375, offsetMarker = 7777.125;
-      late final Handle dBox, dK2, dPoint, dOffset, dDead, ghost;
+      late final Handle dBox, dK2, dPoint, dOffset, dDead, dKm1, ghost;
       final clean = staleFile(doc, (bare) {
         dBox = addDimension(bare, AttachedEnd(box, 0, l), AttachedEnd(a, 1, l),
             offset: 600.5, at: g);
@@ -485,6 +514,8 @@ void main() {
         dDead = addDimension(
             bare, AttachedEnd(ghost, 0, l), AttachedEnd(a, 1, l),
             offset: 600.5, at: g);
+        dKm1 = addDimension(bare, AttachedEnd(a, 1, r), AttachedEnd(a, 0, l),
+            offset: 600.5, at: g);
       });
       // k = 2 by editing the JSON; then the two markers become 1e999 and
       // -1e999 in the text, which jsonDecode reads as ±Infinity.
@@ -493,6 +524,8 @@ void main() {
           ((json['components']! as Map)[DimensionParams.componentTypeId]!
               as Map)[dK2.value.toString()]! as Map;
       (dims['a']! as Map)['k'] = 2;
+      ((((json['components']! as Map)[DimensionParams.componentTypeId]!
+          as Map)[dKm1.value.toString()]! as Map)['a']! as Map)['k'] = -1;
       var file = jsonEncode(json);
       for (final m in ['$pointMarker', '$offsetMarker']) {
         expect(file.split(m), hasLength(2), reason: 'the marker $m, once');
@@ -505,6 +538,7 @@ void main() {
       DimensionParams paramsOf(Handle h) =>
           back.components.get<DimensionParams>(h)!;
       expect((paramsOf(dK2).a as AttachedEnd).k, 2);
+      expect((paramsOf(dKm1).a as AttachedEnd).k, -1);
       expect((paramsOf(dPoint).b as FixedEnd).x, double.infinity);
       expect(paramsOf(dOffset).offset, double.negativeInfinity);
       expect(back.components.get<BoxParams>(box), isNotNull);
@@ -522,6 +556,7 @@ void main() {
         broken(dK2, 'end a has k = 2, not 0 or 1'),
         broken(dPoint, 'end b is a point that is not finite'),
         broken(dOffset, 'the offset is not finite'),
+        broken(dKm1, 'end a has k = -1, not 0 or 1'),
       ];
       List<Diagnostic> reported(DraftDocument d) => [
             for (final x in diagnosticsOf(d))
@@ -529,7 +564,7 @@ void main() {
                   x.code.startsWith('parametric.'))
                 x,
           ];
-      final all = [dBox, dK2, dPoint, dOffset, dDead];
+      final all = [dBox, dK2, dPoint, dOffset, dDead, dKm1];
       expect(reported(back), want);
       expect(driftOf(back), isEmpty);
       // A page change regenerates every dimension (D3): each broken one, and
@@ -587,12 +622,11 @@ void main() {
         expect(dimDiagnostics(doc), isEmpty, reason: '$what undone');
       }
 
-      // --- Not broken, not degenerate (Task 7's ruling on D15): two finite
-      // fixed points whose world distance overflows (|x| = 1e200, the
-      // difference 2e200, its square beyond a double). No stored value is
-      // non-finite, and the value is not ≤ wallJoin.linear: layoutDimension
-      // gives nothing, generate makes no child, and diagnose reports
-      // nothing.
+      // --- Unmeasurable: two finite fixed points whose world distance
+      // overflows (|x| = 1e200, the difference 2e200, its square beyond a
+      // double). No stored value is non-finite, but the aligned value is:
+      // layoutDimension gives nothing, generate makes no child, and the
+      // dimension is broken, never silently empty (D7).
       final wide = addDimension(
           doc, const FixedEnd(1e200, 0.5), const FixedEnd(-1e200, 0.5),
           offset: 500.25, at: g);
@@ -606,7 +640,72 @@ void main() {
       expect([
         for (final x in diagnosticsOf(doc))
           if (x.handles.contains(wide)) x,
-      ], isEmpty);
+      ], [
+        broken(wide, 'the measured length is not finite')
+      ]);
+      expect(driftOf(doc), isEmpty);
+    });
+  }
+
+  for (final place in [origin, corpusAxis, corpusGroups]) {
+    test(
+        'DD3 a wall edit that overflows an aligned dimension\'s length makes '
+        'it broken, not silently empty, while a horizontal one on the same '
+        'points still draws and reads zero, at $place', () {
+      // Task 7's review (I1): A (0, 0) → (4000, 0), 200; both dimensions
+      // A/0/left (0, 100) → A/0/right (0, −100): aligned 200, horizontal 0
+      // (the pair differs along y only), each in a group at the placement.
+      final plan = buildPlan(const [W(0, 0, 4000, 0, 200)], place: place);
+      final doc = plan.doc;
+      attachPage(doc, mmPage);
+      final [a] = plan.walls;
+      final al = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
+          offset: 300.25, at: place.m);
+      final ho = addDimension(doc, AttachedEnd(a, 0, l), AttachedEnd(a, 0, r),
+          kind: DimKind.horizontal, offset: 300.25, at: place.m);
+      expect(dimText(doc, al), '200');
+      expect(dimText(doc, ho), '0');
+      final alKids = kids(doc, al), hoKids = kids(doc, ho);
+      expect(alKids, hasLength(6));
+      expect(hoKids, hasLength(6));
+      expect(dimDiagnostics(doc), [degenerate(ho)]);
+
+      // One command: the thickness to 1.5e154, which a wall accepts. The
+      // faces lie ±7.5e153 off the centreline, so the pair is 1.5e154 apart,
+      // whose square (2.25e308) is beyond a double's 1.8e308: the aligned
+      // length overflows. The horizontal component is still (0, −1.5e154) ·
+      // (1, 0) = 0, exactly, where the wall is unturned.
+      final edit = thickness(doc, a, 1.5e154);
+      if (place.deg != 0) {
+        // Turned, 07's region check refuses the wall's own outline at this
+        // thickness, and the edit rolls back whole: the premise the clause
+        // needs is unreachable there, and nothing changes.
+        final depth = doc.commands.undoDepth;
+        expect(() => doc.commands.execute(edit), throwsArgumentError);
+        expect(doc.commands.undoDepth, depth);
+        expect(doc.components.get<WallParams>(a)!.thickness, 200);
+        expect(kids(doc, al), alKids);
+        expect(kids(doc, ho), hoKids);
+        expect(dimDiagnostics(doc), [degenerate(ho)]);
+        expect(driftOf(doc), isEmpty);
+        return;
+      }
+      doc.commands.execute(edit);
+      expect(kids(doc, al), isEmpty);
+      expect(kids(doc, ho), hoKids);
+      expect(dimText(doc, ho), '0');
+      expect(dimDiagnostics(doc), [
+        broken(al, 'the measured length is not finite'),
+        degenerate(ho),
+      ]);
+      expect(driftOf(doc), isEmpty);
+
+      doc.commands.undo();
+      expect(kids(doc, al), alKids);
+      expect(kids(doc, ho), hoKids);
+      expect(dimText(doc, al), '200');
+      expect(dimText(doc, ho), '0');
+      expect(dimDiagnostics(doc), [degenerate(ho)]);
       expect(driftOf(doc), isEmpty);
     });
   }
