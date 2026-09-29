@@ -1,3 +1,5 @@
+import 'dart:async' show StreamSubscription, unawaited;
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -57,6 +59,18 @@ typedef _Dim = ({
 /// world geometry and knows no camera; the select tool's snap marker shows
 /// where the drop resolves.
 ///
+/// **The per-drag memo** (Task 11's review, M-2): the previews of one drag
+/// (one dimension, one grip) share the dimension as it stands, `T`
+/// ([thickestWall]) and each wall's six points, handed to
+/// [attachCandidates]' `points` map as the Dimension tool's hover memo does.
+/// So a drag sliding along a wall's line lays that wall out once, not once
+/// per move. The memo is made at the first preview of a drag and dropped at
+/// the drop, when a preview names another dimension or grip (a drag that
+/// was cancelled and another begun), and on any document change heard
+/// (`doc.changes`; nothing changes the document during a drag). **The drop
+/// never reads it** (the plan's Ruling 11-8): it gathers afresh against the
+/// document as it is then.
+///
 /// **A broken dimension** (D15: an end that does not resolve, an offset that
 /// is not finite, or a layout that is not finite) has no grips.
 ///
@@ -73,9 +87,19 @@ final class DimensionGrips implements ObjectGripProvider {
   /// nothing attaches (decision 4).
   final bool Function() objectSnap;
 
+  // The per-drag memo: valid for [_memoDoc]'s [_memoGroup] and grip
+  // [_memoOrdinal] while [_memoChanges] listens.
+  DraftDocument? _memoDoc;
+  Handle? _memoGroup;
+  int _memoOrdinal = -1;
+  _Dim? _memoDim;
+  double _memoThickest = 0;
+  final Map<Handle, WallPoints> _memoPoints = {};
+  StreamSubscription<DocChange>? _memoChanges;
+
   @override
   List<Grip> gripsOf(DraftDocument d, Handle group) {
-    final s = _stateOf(d, group);
+    final s = _stateOf(d, group, null);
     if (s == null) return const [];
     final mid = (s.layout.q0 + s.layout.q1) * 0.5;
     return [
@@ -85,11 +109,14 @@ final class DimensionGrips implements ObjectGripProvider {
     ];
   }
 
+  /// The drop: afresh against the document as it is now, never the memo,
+  /// which it drops (Ruling 11-8).
   @override
   DraftCommand? drag(DraftDocument d, Handle group, Grip grip, Vector2 world) {
-    final s = _stateOf(d, group);
+    _dropMemo();
+    final s = _stateOf(d, group, null);
     if (s == null) return null;
-    final next = _dropped(d, s, grip.index, world);
+    final next = _dropped(d, s, grip.index, world, thickestWall(d), null);
     if (next == null || next.params == s.params) return null;
     return SetComponentCommand<DimensionParams>(group, next.params);
   }
@@ -97,9 +124,10 @@ final class DimensionGrips implements ObjectGripProvider {
   @override
   List<(EntityKind, GeometryPayload)> preview(
       DraftDocument d, Handle group, Grip grip, Vector2 world) {
-    final s = _stateOf(d, group);
+    _syncMemo(d, group, grip.index);
+    final s = _memoDim;
     if (s == null) return const [];
-    final next = _dropped(d, s, grip.index, world);
+    final next = _dropped(d, s, grip.index, world, _memoThickest, _memoPoints);
     if (next == null) return const [];
     final p = next.params;
     final l =
@@ -114,6 +142,36 @@ final class DimensionGrips implements ObjectGripProvider {
   @override
   bool movable(DraftDocument d, Handle group) => true;
 
+  /// Makes the memo for a drag of grip [ordinal] of [group] in [d], unless
+  /// it is already that drag's.
+  void _syncMemo(DraftDocument d, Handle group, int ordinal) {
+    if (_memoChanges != null &&
+        identical(_memoDoc, d) &&
+        _memoGroup == group &&
+        _memoOrdinal == ordinal) {
+      return;
+    }
+    _dropMemo();
+    _memoDoc = d;
+    _memoGroup = group;
+    _memoOrdinal = ordinal;
+    _memoChanges = d.changes.listen((_) => _dropMemo());
+    _memoThickest = thickestWall(d);
+    _memoDim = _stateOf(d, group, _memoPoints);
+  }
+
+  /// Forgets the memo, and stops listening for the change that would.
+  void _dropMemo() {
+    final changes = _memoChanges;
+    if (changes != null) unawaited(changes.cancel());
+    _memoChanges = null;
+    _memoDoc = null;
+    _memoGroup = null;
+    _memoOrdinal = -1;
+    _memoDim = null;
+    _memoPoints.clear();
+  }
+
   /// The page [d]'s dimensions read, from the root, as `generate`'s view
   /// reads it.
   static PageComponent _pageOf(DraftDocument d) =>
@@ -121,12 +179,14 @@ final class DimensionGrips implements ObjectGripProvider {
 
   /// Dimension [group] as it stands; null when it is not a dimension or is
   /// broken (D15): an end that does not resolve, an offset that is not
-  /// finite, or a layout that is not finite.
-  static _Dim? _stateOf(DraftDocument d, Handle group) {
+  /// finite, or a layout that is not finite. [points], when given, memoises
+  /// each wall's six points.
+  static _Dim? _stateOf(
+      DraftDocument d, Handle group, Map<Handle, WallPoints>? points) {
     final p = d.components.get<DimensionParams>(group);
     if (p == null || !p.offset.isFinite) return null;
     final m = d.tree.accumulatedTransform(group);
-    final p0 = _pointOf(d, m, p.a), p1 = _pointOf(d, m, p.b);
+    final p0 = _pointOf(d, m, p.a, points), p1 = _pointOf(d, m, p.b, points);
     if (p0 == null || p1 == null) return null;
     final l = layoutDimension(p0, p1, p.kind, m, p.offset, _pageOf(d));
     if (l == null) return null;
@@ -137,25 +197,38 @@ final class DimensionGrips implements ObjectGripProvider {
   /// transform is [m], through the document (08's document adapter), or
   /// null when it is broken (D7): an attached end whose wall is not a live
   /// wall or whose `k` is outside {0, 1}, a fixed end with a coordinate that
-  /// is not finite. The layout guards the rest.
-  static Vector2? _pointOf(DraftDocument d, Transform2 m, DimEnd end) {
+  /// is not finite. The layout guards the rest. [points], when given,
+  /// memoises the wall's six points.
+  static Vector2? _pointOf(DraftDocument d, Transform2 m, DimEnd end,
+      Map<Handle, WallPoints>? points) {
     switch (end) {
       case FixedEnd(:final x, :final y):
         if (!x.isFinite || !y.isFinite) return null;
         return m.transformPoint(end.point);
       case AttachedEnd(:final wall, :final k, :final side):
         if (k != 0 && k != 1) return null;
+        final memo = points?[wall];
+        if (memo != null) return _find(memo, k, side);
         final ws = wallsInDocument(d, wall);
         if (ws == null) return null;
-        return wallEndPoint(ws.host, ws.walls, k, side);
+        if (points == null) return wallEndPoint(ws.host, ws.walls, k, side);
+        final six = points[wall] = wallEndPoints(ws.host, ws.walls);
+        return _find(six, k, side);
     }
   }
 
   /// The dimension [s] with grip [ordinal] dropped at world point [q]: the
   /// parameters it would store and their two measured world points; null
-  /// when the drop is refused as degenerate (an end grip only).
+  /// when the drop is refused as degenerate (an end grip only). [thickest]
+  /// is `T`; [points], when given, memoises each wall's six points (a
+  /// preview's; the drop passes none).
   ({DimensionParams params, Vector2 p0, Vector2 p1})? _dropped(
-      DraftDocument d, _Dim s, int ordinal, Vector2 q) {
+      DraftDocument d,
+      _Dim s,
+      int ordinal,
+      Vector2 q,
+      double thickest,
+      Map<Handle, WallPoints>? points) {
     final p = s.params;
     if (ordinal == 0) {
       // The current kind; the grip never changes it (R-26).
@@ -168,16 +241,24 @@ final class DimensionGrips implements ObjectGripProvider {
     // Decision 22: the dropped end only, at the drop, with the current kind
     // and the other end's current point, from candidates gathered now.
     final candidates = attachCandidates(d, index, q,
-        objectSnap: objectSnap(), thickest: thickestWall(d));
+        objectSnap: objectSnap(), thickest: thickest, points: points);
     final DimEnd end =
         decideEnd(d, candidates, kind: p.kind, at: q, other: otherW, m: s.m) ??
             _fixedAt(s.m, q);
     if (end == other) return null;
-    final w = _pointOf(d, s.m, end);
+    final w = _pointOf(d, s.m, end, points);
     if (w == null || (w - otherW).length <= wallJoin.linear) return null;
     return atA
         ? (params: p.copyWith(a: end), p0: w, p1: s.p1)
         : (params: p.copyWith(b: end), p0: s.p0, p1: w);
+  }
+
+  /// Point ([k], [side]) among a wall's [six].
+  static Vector2? _find(WallPoints six, int k, WallSide side) {
+    for (final (kk, s, w) in six) {
+      if (kk == k && s == side) return w;
+    }
+    return null;
   }
 
   /// World point [q] as a fixed end: in the group's local space (R-1).

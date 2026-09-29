@@ -22,6 +22,7 @@ import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/dimension_attach.dart';
 import 'package:floor_planner/parametric/dimension_grips.dart';
 import 'package:floor_planner/parametric/object_grips.dart';
+import 'package:floor_planner/parametric/wall.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -275,6 +276,66 @@ void main() {
       kept('F3 off');
       snap = true;
 
+      // -- Decision 22 in the group's axes (the review's I-2): a horizontal
+      // dimension in a group turned 90° further than the placement, so its
+      // x runs along the plan's y, along B. Its a dropped on the L's outer
+      // corner (4100, −100), A/1/right and B/0/right: u = the group's x,
+      // σ_B = 0 < σ_A = 1, so B/0/right (A has the lower handle here, so
+      // the lowest-handle step alone would store A). Decided in world axes
+      // it would be A/1/right at both placements (world x: σ_A = 0 at the
+      // origin; sin 23° = 0.39 < cos 23° = 0.92 at the far origin).
+      {
+        expect(a.value < b.value, isTrue, reason: 'premise: A is lower');
+        final outer = place.at(4100, -100);
+        expect(
+            candidatesAt(outer), [AttachedEnd(a, 1, r), AttachedEnd(b, 0, r)],
+            reason: 'premise: the outer corner is A/1/right and B/0/right');
+        final g90 = turned(place, 90);
+        final dim90 = addDimension(doc, fixedAt(place.at(1500.25, 2000.5), g90),
+            fixedAt(place.at(3000.5, 3000.25), g90),
+            kind: DimKind.horizontal, offset: 300.75, at: g90);
+        drop(grips, doc, dim90, 1, outer, 'horizontal in a turned group');
+        expect(paramsOf(doc, dim90).a, AttachedEnd(b, 0, r),
+            reason: 'along the group\'s x: B');
+      }
+
+      // -- A flush door (the review's M-1): spike C5's T, the door on the
+      // stem S at c = 450 swinging left, clamped flush with S's butt end on
+      // C's face (flushT). S/0/right, (2,500 + 50, 100), is the far jamb
+      // corner: no child of S reaches it, and the door's leaf and arc stand
+      // on its left face, 100 mm off. Only the host box grown by T (C's 200)
+      // finds S there; a drop on it attaches.
+      {
+        final plan = flushT(place);
+        final doc = plan.doc;
+        attachPage(doc, mmPage);
+        final [_, s] = plan.walls;
+        final (grips, _) = gripsFor(doc);
+        // The drop 5e-6 mm off the corner, within the attach tolerance
+        // (1e-5): it attaches, so the committed line starts on the corner,
+        // not on the drop; the preview must show the same (its own T).
+        final corner = plan.at(2550, 100) + Vector2(5e-6, 0);
+        expect(bruteCandidates(doc, corner), [AttachedEnd(s, 0, r)],
+            reason: 'premise: S/0/right alone');
+        final dim = addDimension(doc, fixedAt(plan.at(1000.25, 2000.5)),
+            fixedAt(plan.at(4000.5, 2500.25)),
+            kind: DimKind.aligned, offset: 300.75);
+        final preview =
+            grips.preview(doc, dim, gripOf(grips, doc, dim, 1), corner);
+        drop(grips, doc, dim, 1, corner, 'onto the far jamb corner');
+        final lines = dimLines(doc, dim);
+        expect((at(gripOf(grips, doc, dim, 1)) - corner).length,
+            closeTo(5e-6, 1e-7),
+            reason: 'premise: the committed end is the corner, not the drop');
+        for (var i = 0; i < 5; i++) {
+          final c = preview[i].$2.coords;
+          expectNear(Vector2(c[0], c[1]), lines[i].$1, 1e-9, 'flush, $i');
+          expectNear(Vector2(c[2], c[3]), lines[i].$2, 1e-9, 'flush, $i');
+        }
+        expect(paramsOf(doc, dim).a, AttachedEnd(s, 0, r));
+        expect(driftOf(doc), isEmpty);
+      }
+
       // -- The other end (AM3's L, B with the lower handle). B (4000, 0) ->
       // (4000, 3000), then A (0, 0) -> (4000, 0), 200 centred; the inner
       // corner (3900, 100) is B/0/left and A/1/left. The dimension's group
@@ -464,39 +525,131 @@ void main() {
     test(
         'GE5 the preview equals the committed lines on a horizontal '
         'dimension over the non-axis pair, for an offset drag and an end '
-        'drag, at $place', () {
-      final plan = buildPlan(const [], place: place);
-      final doc = plan.doc;
-      attachPage(doc, mmPage);
-      final (grips, _) = gripsFor(doc);
-      final g = turned(place, 30);
-      // Horizontal over (0, 0) and (3000, 1200): aligned would lay the line
-      // along the pair, (3000, 1200) / 3231.1, not along the group's x.
-      final dim = addDimension(
-          doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
-          kind: DimKind.horizontal, offset: 7.5, at: g);
-      for (final (ordinal, local) in [
-        (0, Vector2(1500.5, 2000.25)), // the offset: +800.25
-        (2, Vector2(3500.75, 1700.5)), // b moved, fixed
-        (1, Vector2(-400.25, -600.75)), // a moved, fixed
-      ]) {
-        final why = 'grip $ordinal to $local';
-        final q = g.transformPoint(local);
-        final gr = gripOf(grips, doc, dim, ordinal);
-        final preview = grips.preview(doc, dim, gr, q);
-        expect(preview, hasLength(5), reason: why);
-        drop(grips, doc, dim, ordinal, q, why);
-        expect(paramsOf(doc, dim).kind, DimKind.horizontal);
-        final lines = dimLines(doc, dim);
-        for (var i = 0; i < 5; i++) {
-          final (kind, payload) = preview[i];
-          expect(kind, EntityKind.line);
-          final p = payload.coords;
-          expectNear(Vector2(p[0], p[1]), lines[i].$1, 1e-9, '$why: line $i');
-          expectNear(Vector2(p[2], p[3]), lines[i].$2, 1e-9, '$why: line $i');
+        'drag, on a 1:50 mm page and a 1:100 ft-in page, at $place', () {
+      // The page's paper lengths enter the lines (D7): at 1:100 the
+      // extension line's overshoot is 2 × 100 = 200 mm and a slash 3 × 100
+      // = 300 mm, twice 1:50's, so a preview laid out on another page than
+      // the document's differs from the committed lines.
+      final ftIn100 = PageComponent()
+          .copyWith(displayUnit: DisplayUnit.feetInches, scaleDenominator: 100);
+      for (final page in [mmPage, ftIn100]) {
+        final plan = buildPlan(const [], place: place);
+        final doc = plan.doc;
+        attachPage(doc, page);
+        final (grips, _) = gripsFor(doc);
+        final g = turned(place, 30);
+        // Horizontal over (0, 0) and (3000, 1200): aligned would lay the
+        // line along the pair, (3000, 1200) / 3231.1, not along the group's
+        // x.
+        final dim = addDimension(
+            doc, const FixedEnd(0, 0), const FixedEnd(3000, 1200),
+            kind: DimKind.horizontal, offset: 7.5, at: g);
+        for (final (ordinal, local) in [
+          (0, Vector2(1500.5, 2000.25)), // the offset: +800.25
+          (2, Vector2(3500.75, 1700.5)), // b moved, fixed
+          (1, Vector2(-400.25, -600.75)), // a moved, fixed
+        ]) {
+          final why = '1:${page.scaleDenominator}, grip $ordinal to $local';
+          final q = g.transformPoint(local);
+          final gr = gripOf(grips, doc, dim, ordinal);
+          final preview = grips.preview(doc, dim, gr, q);
+          expect(preview, hasLength(5), reason: why);
+          drop(grips, doc, dim, ordinal, q, why);
+          expect(paramsOf(doc, dim).kind, DimKind.horizontal);
+          final lines = dimLines(doc, dim);
+          // Premise: the page reached the children (the extension line at
+          // a overshoots the dimension line by 2 paper mm).
+          expect((lines[1].$2 - lines[0].$1).length,
+              closeTo(2.0 * page.scaleDenominator, 1e-6),
+              reason: '$why: premise: the page');
+          for (var i = 0; i < 5; i++) {
+            final (kind, payload) = preview[i];
+            expect(kind, EntityKind.line);
+            final p = payload.coords;
+            expectNear(Vector2(p[0], p[1]), lines[i].$1, 1e-9, '$why: line $i');
+            expectNear(Vector2(p[2], p[3]), lines[i].$2, 1e-9, '$why: line $i');
+          }
         }
+        expect(driftOf(doc), isEmpty);
       }
-      expect(driftOf(doc), isEmpty);
     });
   }
+
+  test(
+      'GE5b among 612 walls the end grip\'s previews along a face line lay '
+      'each wall out once per drag, the drop lays out afresh, and a document '
+      'change starts the memo afresh; the time per preview is printed',
+      () async {
+    final plan = dimGridDoor();
+    final doc = plan.doc;
+    attachPage(doc, mmPage);
+    expect(plan.walls, hasLength(612));
+    final (grips, _) = gripsFor(doc);
+    final dim = addDimension(doc, const FixedEnd(24500.25, 25000.5),
+        const FixedEnd(26500.75, 26000.25),
+        kind: DimKind.aligned, offset: 300.5);
+    // The history is capped; start it empty so a drop's step shows.
+    doc.commands.clearHistory();
+    final g1 = gripOf(grips, doc, dim, 1);
+    // The path wall (24,000, 24,000) -> (27,000, 24,000), 200 centred: its
+    // left face line y 24,100, from x 24,300 to 26,700 in 61 moves (step
+    // 40), past the door's cut (x 25,050-25,950). Each move lies on that
+    // line, so the path wall passes the line test, and 200 mm or more from
+    // the nodes at x 24,000 and 27,000, beyond the neighbours' boxes (whose
+    // face lines y 24,100 it also lies on).
+    Vector2 on(int i) => Vector2(24300 + 40.0 * i, 24100);
+    int layouts() => debugWallPointComputations;
+
+    // -- One drag: the first preview lays the path wall out, the other 60
+    // lay out nothing; the same 61 moves again lay out nothing.
+    var w = layouts();
+    final times = <int>[];
+    for (var i = 0; i <= 60; i++) {
+      final sw = Stopwatch()..start();
+      final preview = grips.preview(doc, dim, g1, on(i));
+      sw.stop();
+      times.add(sw.elapsedMicroseconds);
+      expect(preview, hasLength(5), reason: 'move $i');
+    }
+    expect(layouts(), w + 1, reason: 'the path wall, once per drag');
+    for (var i = 60; i >= 0; i--) {
+      grips.preview(doc, dim, g1, on(i));
+    }
+    expect(layouts(), w + 1, reason: 'the way back: nothing more');
+    final first = times.first;
+    times.sort();
+
+    // -- The drop gathers afresh (Ruling 11-8): the path wall laid out
+    // again, with no memo. The end stays fixed (no wall end point there).
+    w = layouts();
+    final q = on(30);
+    drop(grips, doc, dim, 1, q, 'the drop on the face line');
+    expect(layouts(), w + 1, reason: 'the drop lays out afresh');
+    expect(paramsOf(doc, dim).a, isA<FixedEnd>());
+
+    // -- A new drag makes a new memo: once more, then nothing.
+    w = layouts();
+    final g1b = gripOf(grips, doc, dim, 1);
+    for (var i = 5; i < 15; i++) {
+      grips.preview(doc, dim, g1b, on(i));
+    }
+    expect(layouts(), w + 1, reason: 'the next drag, once');
+
+    // -- A document change (a far wall moved), heard at a pump: the memo
+    // starts afresh within the same drag.
+    doc.commands.execute(SetComponentCommand<WallParams>(plan.walls[0],
+        const WallParams(0, -0.25, 3000, -0.25, 200, Justification.centre)));
+    await Future<void>.delayed(Duration.zero);
+    w = layouts();
+    for (var i = 15; i < 25; i++) {
+      grips.preview(doc, dim, g1b, on(i));
+    }
+    expect(layouts(), w + 1, reason: 'once after the change');
+
+    // ignore: avoid_print
+    print('GE5b 612 walls: end-grip preview along a face line: first '
+        '$first us, median ${times[times.length ~/ 2]} us, worst '
+        '${times.last} us, over 1 ms ${times.where((t) => t > 1000).length}'
+        '/61 (printed, not asserted)');
+  });
 }
