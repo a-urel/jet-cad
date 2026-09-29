@@ -305,6 +305,18 @@ void main() {
         // Prints -0.0: the number decides, not the string (S-8).
         ('horizontal at −0.04°', dim(DimKind.horizontal, world(-0.04)), null),
         ('vertical at 0.06°', dim(DimKind.vertical, world(0.06)), '0.1'),
+        // Rounded to tenths, then normalised: −179.96° rounds to −180.0,
+        // which is 180.0 in (−180°, 180°], as 179.96° reads.
+        (
+          'horizontal at −179.96°',
+          dim(DimKind.horizontal, world(-179.96)),
+          '180.0'
+        ),
+        (
+          'horizontal at 179.96°',
+          dim(DimKind.horizontal, world(179.96)),
+          '180.0'
+        ),
       ];
       finish(plan);
       final view = await pumpShell(tester, doc, place.name);
@@ -408,6 +420,28 @@ void main() {
       await select(tester, view, [d]);
       expect(switchOf(tester).onSelectionChanged, isNotNull,
           reason: 'the control: editable with every permission');
+
+      // Runtime set with no rebuild: the switch still holds the callback it
+      // was built with, and a click that lands before the rebuild calls it.
+      // The edit is checked again when it runs: nothing is issued and
+      // nothing throws (the document would refuse it with a
+      // PermissionDeniedError, which the switch does not catch).
+      final stale = switchOf(tester).onSelectionChanged!;
+      doc.commands.permissions = DraftPermissions.runtime;
+      stale({DimKind.horizontal});
+      expect(paramsOf(doc, d), p0, reason: 'stale callback under runtime');
+      expect(doc.commands.undoDepth, 0, reason: 'stale callback under runtime');
+      await tester.pump();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      // A permission change alone rebuilds nothing; a reselection does.
+      await select(tester, view, [e]);
+      await select(tester, view, [d]);
+      expect(switchOf(tester).onSelectionChanged, isNull,
+          reason: 'read-only once rebuilt');
+      doc.commands.permissions = DraftPermissions.all;
+      await select(tester, view, [e]);
+      await select(tester, view, [d]);
 
       // The group removed under the panel, the click landing before the
       // panel rebuilds: nothing is issued -- no component on the dead

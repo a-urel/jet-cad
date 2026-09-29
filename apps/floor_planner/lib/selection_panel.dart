@@ -577,15 +577,18 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// The axes line of dimension [p] in group [dim] (11 D11, R-18), or null:
   /// for a linear kind whose group's world rotation, `atan2(M.b, M.a)` in
-  /// degrees normalised to (−180°, 180°], is at least 0.05° either way --
-  /// the number, not its printed string, which is `-0.0` at −0.04° (S-8).
+  /// degrees, is at least 0.05° either way -- the number, not its printed
+  /// string, which is `-0.0` at −0.04° (S-8). The angle shown is rounded to
+  /// tenths first and then normalised to (−180°, 180°], so −179.96° reads
+  /// `180.0°`, as 179.96° does, never `-180.0°`.
   String? _axesOf(Handle dim, DimensionParams p) {
     if (p.kind == DimKind.aligned) return null;
     final m = widget.document.tree.accumulatedTransform(dim);
-    var angle = math.atan2(m.b, m.a) * 180 / math.pi;
-    if (angle <= -180) angle += 360;
+    final angle = math.atan2(m.b, m.a) * 180 / math.pi;
     if (angle.abs() < 0.05) return null;
-    return 'Axes turned ${angle.toStringAsFixed(1)}°';
+    var shown = double.parse(angle.toStringAsFixed(1));
+    if (shown <= -180) shown += 360;
+    return 'Axes turned ${shown.toStringAsFixed(1)}°';
   }
 
   /// An end line (11 D14, R-28): for an attached end, `Wall`, its wall's
