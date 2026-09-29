@@ -281,6 +281,11 @@ void main() {
       }
       expect(
           back.components.get<DimensionParams>(d3)!.offset.isNegative, isTrue);
+      // The equality above tells the loaded -0.0 from +0.0 (D2: the offset
+      // by compareTo), so it is not blind to the zero's sign: d3 read back
+      // is not its +0.0 twin.
+      final d3back = back.components.get<DimensionParams>(d3)!;
+      expect(d3back == d3back.copyWith(offset: 0.0), isFalse);
       expect(
           (back.components.get<DimensionParams>(d1)!.a as AttachedEnd).wall, a);
       expect(
