@@ -72,7 +72,13 @@ double thickestWall(DraftDocument doc) {
 ///    opening's are, so a hidden layer 0 hides the opening from this query
 ///    too. So a hidden wall attaches through neither query (only a file
 ///    makes one: no command hides a group). One check per host found, its
-///    answer cached per group within the call.
+///    answer cached per group within the call. **Not covered**, a residual
+///    limit only a file reaches (no command makes either): a visible wall
+///    group whose own children sit on another, hidden layer, or carry
+///    `EntityFlags.invisible`, while its opening's children are drawn.
+///    The wall draws nothing there, yet its host test passes, so it still
+///    attaches through the opening; a group's children's layers and flags
+///    cannot be read in O(1) through the public API.
 ///
 /// **Why the hosts (S-13):** an opening flush with a flat wall end (a T
 /// butt or a free end; `placeCut` clamps a door placed near a T to exactly
