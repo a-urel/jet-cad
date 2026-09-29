@@ -56,21 +56,122 @@ Handle buildChain(DraftDocument doc, int depth,
 }
 
 void main() {
-  test('the three presets differ in exactly the documented way', () {
+  test('the four presets differ in exactly the documented way', () {
     const all = QueryFilter.all();
     const rendering = QueryFilter.rendering();
     const picking = QueryFilter.picking();
+    const snapping = QueryFilter.snapping();
 
     expect(all.visibleOnly, isFalse);
     expect(all.excludeLocked, isFalse);
+    expect(all.excludeUnpickable, isFalse);
     expect(all.isPassthrough, isTrue);
 
     expect(rendering.visibleOnly, isTrue);
     expect(rendering.excludeLocked, isFalse);
+    expect(rendering.excludeUnpickable, isFalse,
+        reason: 'a not-pickable entity still draws (spec 11 D19)');
     expect(rendering.isPassthrough, isFalse);
 
     expect(picking.visibleOnly, isTrue);
     expect(picking.excludeLocked, isTrue);
+    expect(picking.excludeUnpickable, isTrue);
+    expect(picking.isPassthrough, isFalse);
+
+    expect(snapping.visibleOnly, isTrue);
+    expect(snapping.excludeLocked, isFalse,
+        reason: 'a locked layer is still snapped to');
+    expect(snapping.excludeUnpickable, isTrue);
+    expect(snapping.isPassthrough, isFalse);
+  });
+
+  test(
+      'QF1 an entity carrying EntityFlags.unpickable passes all() and '
+      'rendering() and fails picking() and snapping(); an invisible one '
+      'still fails every preset but all(); a filter asking only for the '
+      'flag is no passthrough and rejects it', () {
+    // The bits first: bit 1, disjoint from bit 0 (invisible).
+    expect(EntityFlags.unpickable, 2);
+    expect(EntityFlags.unpickable & EntityFlags.invisible, 0);
+
+    final doc = DraftDocument.empty();
+    const locked = Handle(51);
+    doc.tables.layers.add(LayerRecord(
+      handle: locked,
+      name: 'Locked',
+      color: const IndexedColor(7),
+      linetype: ReservedHandles.continuousLinetype,
+      lineweight: kLineweightDefault,
+      transparency: 0,
+      visible: true,
+      locked: true,
+    ));
+    // Off the origin at fractional coordinates, each segment its own.
+    int addAt(Handle layer, int flags, double x, double y) {
+      final handle = doc.handleSeed.next();
+      doc.commands.execute(AddEntityCommand(
+        record: lineOn(handle, doc.rootHandle, layer, flags: flags),
+        payload: GeometryPayload(
+          coords: Float64List.fromList([x, y, x + 812.25, y - 97.5]),
+          scalars: Float64List(0),
+        ),
+      ));
+      return doc.entities.slotOf(handle)!;
+    }
+
+    final slots = {
+      for (final flags in [0, 1, 2, 3])
+        flags: addAt(ReservedHandles.layerZero, flags, 4310.5 + 100.25 * flags,
+            -2275.75 + 60.5 * flags),
+    };
+    final lockedPlain = addAt(locked, 0, 6120.25, 1340.75);
+    final lockedFlagged =
+        addAt(locked, EntityFlags.unpickable, 6120.25, 1460.75);
+    final evaluator = FilterEvaluator(doc);
+
+    Map<int, bool> accepted(QueryFilter f) => {
+          for (final e in slots.entries)
+            e.key: evaluator.acceptsEntity(e.value, f),
+        };
+
+    expect(
+        accepted(const QueryFilter.all()), {0: true, 1: true, 2: true, 3: true},
+        reason: 'all() rejects nothing');
+    expect(accepted(const QueryFilter.rendering()),
+        {0: true, 1: false, 2: true, 3: false},
+        reason: 'rendering() draws a not-pickable entity; an invisible one '
+            'is not drawn');
+    expect(accepted(const QueryFilter.picking()),
+        {0: true, 1: false, 2: false, 3: false},
+        reason: 'picking() refuses the flag and invisibility alike');
+    expect(accepted(const QueryFilter.snapping()),
+        {0: true, 1: false, 2: false, 3: false},
+        reason: 'snapping() refuses the flag and invisibility alike');
+
+    // On a locked, visible layer: snapping() keeps locked geometry and
+    // refuses only the flag; picking() refuses both.
+    expect(evaluator.acceptsEntity(lockedPlain, const QueryFilter.snapping()),
+        isTrue,
+        reason: 'how you draw relative to a locked reference');
+    expect(evaluator.acceptsEntity(lockedFlagged, const QueryFilter.snapping()),
+        isFalse);
+    expect(evaluator.acceptsEntity(lockedPlain, const QueryFilter.picking()),
+        isFalse);
+    expect(evaluator.acceptsEntity(lockedFlagged, const QueryFilter.picking()),
+        isFalse);
+    expect(
+        evaluator.acceptsEntity(lockedFlagged, const QueryFilter.rendering()),
+        isTrue);
+
+    // A filter that asks for the flag alone: no visibility, no lock.
+    const onlyFlag = QueryFilter(
+        visibleOnly: false, excludeLocked: false, excludeUnpickable: true);
+    expect(onlyFlag.isPassthrough, isFalse);
+    expect(accepted(onlyFlag), {0: true, 1: true, 2: false, 3: false},
+        reason: 'flags 1 is invisible but pickable; flags 2 and 3 carry the '
+            'flag');
+    expect(evaluator.acceptsEntity(lockedPlain, onlyFlag), isTrue);
+    expect(evaluator.acceptsEntity(lockedFlagged, onlyFlag), isFalse);
   });
 
   test('an entity on a hidden layer fails visibleOnly but passes all', () {

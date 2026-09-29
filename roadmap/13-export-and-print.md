@@ -59,6 +59,9 @@ A floor plan that cannot leave the application is not a deliverable.
 4. **Room separators do not plot** (10, decision 15): a separator is a screen
    aid; an export skips entities carrying `SeparatorParams`' group, or 13 adds
    a plot flag.
+5. **The not-pickable bit is not DXF** (11 D19): a DXF export writes group
+   code 60 from `EntityFlags.invisible` only and strips
+   `EntityFlags.unpickable`.
 
 ## Open questions — these are the spec
 

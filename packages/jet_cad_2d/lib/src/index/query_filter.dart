@@ -7,32 +7,54 @@ import '../document/style.dart';
 ///
 /// A filter is a query parameter rather than something the caller applies to
 /// the results, because applying it afterwards means the index returns work the
-/// caller throws away — at frame rate. Three callers want three answers:
+/// caller throws away — at frame rate. Four callers want four answers:
 /// "select all on this layer" wants everything, rendering wants visible,
-/// picking wants visible and unlocked.
+/// picking wants visible, unlocked and pickable, and snapping wants visible
+/// and pickable (a locked layer is still snapped to).
 final class QueryFilter {
-  const QueryFilter({required this.visibleOnly, required this.excludeLocked});
+  const QueryFilter({
+    required this.visibleOnly,
+    required this.excludeLocked,
+    this.excludeUnpickable = false,
+  });
 
-  /// Everything, hidden and locked included.
+  /// Everything, hidden, locked and not-pickable included.
   const QueryFilter.all()
       : visibleOnly = false,
-        excludeLocked = false;
+        excludeLocked = false,
+        excludeUnpickable = false;
 
-  /// What the renderer draws. A locked layer still draws.
+  /// What the renderer draws. A locked layer still draws, and so does an
+  /// entity carrying [EntityFlags.unpickable].
   const QueryFilter.rendering()
       : visibleOnly = true,
-        excludeLocked = false;
+        excludeLocked = false,
+        excludeUnpickable = false;
 
-  /// What a pointer can select.
+  /// What a pointer can select: visible, unlocked, and not carrying
+  /// [EntityFlags.unpickable].
   const QueryFilter.picking()
       : visibleOnly = true,
-        excludeLocked = true;
+        excludeLocked = true,
+        excludeUnpickable = true;
+
+  /// What the cursor can snap to: what [QueryFilter.rendering] accepts, minus
+  /// entities carrying [EntityFlags.unpickable] (spec 11 D19). A locked layer
+  /// is still snapped to: it is how you draw relative to a locked reference.
+  const QueryFilter.snapping()
+      : visibleOnly = true,
+        excludeLocked = false,
+        excludeUnpickable = true;
 
   final bool visibleOnly;
   final bool excludeLocked;
 
+  /// Rejects an entity whose flags carry [EntityFlags.unpickable].
+  final bool excludeUnpickable;
+
   /// True when this filter rejects nothing, so callers can skip evaluation.
-  bool get isPassthrough => !visibleOnly && !excludeLocked;
+  bool get isPassthrough =>
+      !visibleOnly && !excludeLocked && !excludeUnpickable;
 }
 
 /// Applies a [QueryFilter], caching what it can.
@@ -68,6 +90,13 @@ class FilterEvaluator {
 
   bool acceptsEntity(int slot, QueryFilter filter) {
     if (filter.isPassthrough) return true;
+    // One bool test when the filter does not ask (`rendering()`, every
+    // frame), one column read when it does (a pick or a snap). No
+    // allocation, no map lookup (spec 11 D19).
+    if (filter.excludeUnpickable &&
+        document.entities.flagsAt(slot) & EntityFlags.unpickable != 0) {
+      return false;
+    }
     final layer = document.entities.layerAt(slot);
     if (filter.visibleOnly) {
       // The entity's own bit first: it is a column read, where the other two

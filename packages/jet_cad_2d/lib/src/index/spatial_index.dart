@@ -1443,19 +1443,24 @@ class SpatialIndex {
   /// against the allocation harness that measures it; do not read the
   /// sentence above as a stronger guarantee than [_descend] actually
   /// provides.
-  /// **[filter] defaults to [QueryFilter.rendering], not
-  /// [QueryFilter.all].** Snapping to geometry on a hidden layer is a bug,
-  /// not a feature: the user cannot see the thing the cursor jumped to.
-  /// This method previously accepted no filter at all and hard-coded
-  /// `QueryFilter.all()`, which made it the one frame-path query that
-  /// ignored visibility while its sibling [pickInto] honoured it.
+  /// **[filter] defaults to [QueryFilter.snapping]**: what
+  /// [QueryFilter.rendering] accepts, minus entities carrying
+  /// `EntityFlags.unpickable`. Not [QueryFilter.all]: snapping to geometry
+  /// on a hidden layer is a bug, not a feature, because the user cannot see
+  /// the thing the cursor jumped to. This method previously accepted no
+  /// filter at all and hard-coded `QueryFilter.all()`, which made it the one
+  /// frame-path query that ignored visibility while its sibling [pickInto]
+  /// honoured it. A not-pickable entity never snaps (spec 11 D19, R-37): it
+  /// is drawn, but it takes no click and no snap.
   ///
-  /// Not [QueryFilter.picking], which also excludes *locked* geometry: a
-  /// locked layer still draws, and snapping to something you can see but
-  /// not select is ordinary CAD behaviour — it is how you draw *relative*
-  /// to a locked reference. Visibility and selectability are different
-  /// questions and this is the one where they part company; pass
-  /// [QueryFilter.picking] explicitly if a caller wants both.
+  /// Of the four presets, not [QueryFilter.picking], which also excludes
+  /// *locked* geometry: a locked layer still draws, and snapping to
+  /// something you can see but not select is ordinary CAD behaviour — it is
+  /// how you draw *relative* to a locked reference. Visibility and
+  /// selectability are different questions and this is the one where they
+  /// part company; pass [QueryFilter.picking] explicitly if a caller wants
+  /// both, [QueryFilter.rendering] to snap to not-pickable entities too, or
+  /// [QueryFilter.all] to snap to everything.
   ///
   /// Descends into instances and shares [pickInto]'s descent (see
   /// [_descend]'s doc comment for what "shares" means here and what it does
@@ -1464,7 +1469,7 @@ class SpatialIndex {
   /// **Not reentrant.** Shares this index's scratch state with every other
   /// query; see [forEachInRect]'s doc comment.
   void snapInto(Vector2 world, double radius, SnapMask mask, SnapResult out,
-      {QueryFilter filter = const QueryFilter.rendering()}) {
+      {QueryFilter filter = const QueryFilter.snapping()}) {
     final root = rootIndex; // throws if disposed
     _beginQuery();
     // Guard body inlined, not passed to a closure-taking helper -- see the

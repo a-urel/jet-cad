@@ -519,4 +519,64 @@ void main() {
     expect(() => DraftDocumentCodec.decode({'schemaVersion': 7}),
         throwsA(isA<SchemaVersionError>()));
   });
+
+  test(
+      'QF3 save, load and save of a document holding not-pickable '
+      'entities is byte-identical, and the bits come back', () {
+    final doc = DraftDocument.empty();
+    // Off the origin, fractional; flags 2 (not pickable) and 3 (not
+    // pickable and invisible), beside a plain LINE.
+    Handle add(int flags, double x, double y) {
+      final handle = doc.handleSeed.next();
+      doc.commands.execute(AddEntityCommand(
+        record: draftRecord(handle, doc.rootHandle, EntityKind.line)
+            .copyWith(flags: flags),
+        payload: linePayload(Vector2(x, y), Vector2(x + 612.75, y - 208.5)),
+      ));
+      return handle;
+    }
+
+    final plain = add(0, 3310.25, -1720.5);
+    final unpickable = add(EntityFlags.unpickable, 3410.5, -1650.25);
+    final both =
+        add(EntityFlags.unpickable | EntityFlags.invisible, 3520.75, -1580.5);
+    int flagsOf(DraftDocument d, Handle h) =>
+        d.entities.flagsAt(d.entities.slotOf(h)!);
+    expect([
+      flagsOf(doc, plain),
+      flagsOf(doc, unpickable),
+      flagsOf(doc, both)
+    ], [
+      0,
+      2,
+      3
+    ], reason: 'premise: the column holds the bits on add');
+
+    final first = DraftDocumentCodec.encodeToString(doc);
+    final loaded =
+        DraftDocumentCodec.decode(jsonDecode(first) as Map<String, Object?>);
+    final second = DraftDocumentCodec.encodeToString(loaded);
+    expect(second, first, reason: 'save, load and save is byte-identical');
+    expect(flagsOf(loaded, plain), 0);
+    expect(flagsOf(loaded, unpickable), 2);
+    expect(flagsOf(loaded, both), 3);
+
+    // The file carries each bit as one int in the record.
+    final records = [
+      for (final e in (jsonDecode(first) as Map<String, Object?>)['entities']!
+          as List<Object?>)
+        (e! as Map<String, Object?>)['record']! as Map<String, Object?>,
+    ];
+    expect({
+      for (final r in records) r['handle']: r['flags']
+    }, {
+      plain.value: 0,
+      unpickable.value: 2,
+      both.value: 3,
+    });
+
+    // No schema change: flags was already a free int (spec 11 D19, S-16).
+    expect(kSchemaVersion, 6);
+    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 6);
+  });
 }

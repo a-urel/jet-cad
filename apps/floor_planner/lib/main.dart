@@ -6,6 +6,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'page_panel.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
+import 'parametric/dimension_tool.dart';
 import 'parametric/object_grips.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
@@ -130,6 +131,8 @@ class _PlannerShellState extends State<PlannerShell> {
   late final RoomInputs _roomInputs = RoomInputs(_document);
   late final RoomTool _room = RoomTool(_roomInputs);
   late final SeparatorTool _separator = SeparatorTool(_roomInputs);
+  // Spec 11 D12: the Dimension tool (I).
+  late final DimensionTool _dimension = DimensionTool();
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
@@ -213,6 +216,13 @@ class _PlannerShellState extends State<PlannerShell> {
         tool: _separator,
         drawing: true),
     PaletteEntry(
+        keyName: 'tool-dimension',
+        label: 'Dimension',
+        shortcut: 'I',
+        logicalKey: LogicalKeyboardKey.keyI,
+        tool: _dimension,
+        drawing: true),
+    PaletteEntry(
         keyName: 'tool-circle',
         label: 'Circle',
         shortcut: 'C',
@@ -254,6 +264,8 @@ class _PlannerShellState extends State<PlannerShell> {
   //   the snap aperture of its pole whatever F3 says (Ruling 10-17); a
   //   separator's end grips band-trim through the shared room inputs while
   //   F3 is on (D20).
+  // - Spec 11 D13: a dimension's offset grip and end grips; an end grip
+  //   attaches through the shared index while F3 is on (D10).
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   late final GripCache _grips = GripCache(_document, _selection, _outlines,
       objects: ObjectGrips(
@@ -262,6 +274,7 @@ class _PlannerShellState extends State<PlannerShell> {
               : null,
           labelAperture: () => kSnapAperturePixels / _camera.value.scale,
           roomInputs: _roomInputs,
+          index: _index,
           objectSnap: () => _snap.objectSnap));
 
   late final ToolContext _context = ToolContext(
@@ -274,9 +287,10 @@ class _PlannerShellState extends State<PlannerShell> {
       grips: _grips);
   late final ToolController _tools =
       ToolController(initial: _select, context: _context);
-  // Spec 10 D19, R-29: the Room tool's notice joins the status line.
+  // Spec 10 D19, R-29: the Room tool's notice joins the status line; spec
+  // 11 D12 (R-24): so does the Dimension tool's value.
   late final Listenable _status =
-      Listenable.merge([_selection, _tools, _room.notice]);
+      Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]);
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -317,12 +331,14 @@ class _PlannerShellState extends State<PlannerShell> {
   }
 
   /// The active tool, the selection's size when it is not empty, and the
-  /// Room tool's notice when it has one (spec 10 D19, R-29).
+  /// Room tool's notice (spec 10 D19, R-29) or the Dimension tool's
+  /// would-be value (spec 11 D12, S-8: `Dimension — 4.69`) when one is set.
+  /// Only the active tool sets one, and each clears on deactivation.
   String _statusLine() {
     final base = _tools.active.name;
     final line =
         _selection.isEmpty ? base : '$base — ${_selection.length} selected';
-    final notice = _room.notice.value;
+    final notice = _room.notice.value ?? _dimension.notice.value;
     return notice == null ? line : '$line — $notice';
   }
 

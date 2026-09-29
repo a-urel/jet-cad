@@ -6,9 +6,11 @@ import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
 import '../document/region_command_test.dart' show region;
+import '../parametric/support/fixture.dart' show onA;
 
 Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
-    List<double> coords, List<double> scalars) {
+    List<double> coords, List<double> scalars,
+    {int flags = 0}) {
   final handle = doc.handleSeed.next();
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
@@ -22,7 +24,7 @@ Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
       color: const ByLayerColor(),
       lineweight: kByLayer,
       transparency: kByLayer,
-      flags: 0,
+      flags: flags,
     ),
     payload: GeometryPayload(
       coords: Float64List.fromList(coords),
@@ -596,5 +598,341 @@ void main() {
         reason: 'no real snap feature is within reach of the room interior; '
             'a hit here can only mean the fill supplied one it should not '
             'have');
+  });
+
+  test(
+      'QF2 snapInto by default gives no endpoint, midpoint or '
+      'intersection snap on a not-pickable LINE, nor a centre snap on a '
+      'not-pickable CIRCLE; a LINE or CIRCLE beside it still snaps; '
+      'pickInto with picking() skips it for the LINE behind it; a band '
+      'with picking() leaves it out, at the root and in an instance', () {
+    // Everything sits on a frame turned 0.4 rad on A's turned frame, off
+    // the origin; coordinates are fractional. [local] is in that frame.
+    final frame = onA(1234.5, -310.25, 0.4);
+    Vector2 world(double x, double y) => frame.transformPoint(Vector2(x, y));
+    expect(world(0, 0).length, greaterThan(1000), reason: 'off the origin');
+    expect(frame.transformDirection(Vector2(1, 0)).y.abs(), greaterThan(0.5),
+        reason: 'turned against the world axes');
+    const r = 10.0; // the aperture, world mm
+    const flagged = EntityFlags.unpickable;
+
+    // Endpoint, midpoint and the pick: the LINEs at the root (world
+    // coordinates) and in a group placed at [frame] (local coordinates).
+    for (final inGroup in [false, true]) {
+      final label = inGroup ? 'in a turned group' : 'at the root';
+      final doc = DraftDocument.empty();
+      var owner = doc.rootHandle;
+      if (inGroup) {
+        owner = const Handle(100);
+        doc.commands.execute(AddNodeCommand(GroupNode(
+            handle: owner,
+            parent: doc.rootHandle,
+            transform: frame,
+            children: const [])));
+      }
+      List<double> seg(double ax, double ay, double bx, double by) {
+        if (inGroup) return [ax, ay, bx, by];
+        final a = world(ax, ay), b = world(bx, by);
+        return [a.x, a.y, b.x, b.y];
+      }
+
+      // Parallel, 40 mm apart: the flagged one, then a plain one above it.
+      final whisker = addEntity(
+          doc, owner, EntityKind.line, seg(0.5, 0.25, 1000.75, 0.25), [],
+          flags: flagged);
+      final plain = addEntity(
+          doc, owner, EntityKind.line, seg(0.5, 40.25, 1000.75, 40.25), []);
+      // The pick's pair: a plain LINE, and the flagged one on top of it
+      // (the higher handle, the same segment).
+      final behind = addEntity(
+          doc, owner, EntityKind.line, seg(0.5, 400.5, 1000.75, 400.5), []);
+      final onTop = addEntity(
+          doc, owner, EntityKind.line, seg(0.5, 400.5, 1000.75, 400.5), [],
+          flags: flagged);
+      expect(onTop.value, greaterThan(behind.value));
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final out = SnapResult();
+
+      // Premise: the aperture at the flagged LINE never reaches the plain
+      // one, 40 mm away.
+      expect(40.0 - 0.2, greaterThan(r));
+
+      // Endpoint.
+      final nearEnd = world(0.5 + 0.3, 0.25 - 0.2);
+      index.snapInto(nearEnd, r, SnapMask.all, out);
+      expect(out.found, isFalse,
+          reason: '$label: no snap at the not-pickable endpoint');
+      index.snapInto(nearEnd, r, SnapMask.all, out,
+          filter: const QueryFilter.rendering());
+      expect(out.found, isTrue, reason: '$label: premise, rendering() snaps');
+      expect(out.kind, SnapKind.endpoint);
+      expect(out.entity, whisker);
+      expect(out.point.x, closeTo(world(0.5, 0.25).x, 1e-6));
+      expect(out.point.y, closeTo(world(0.5, 0.25).y, 1e-6));
+
+      // Midpoint: (0.5 + 1000.75) / 2 = 500.625.
+      final nearMid = world(500.625 + 0.3, 0.25 + 0.2);
+      index.snapInto(nearMid, r, SnapMask.all, out);
+      expect(out.found, isFalse,
+          reason: '$label: no snap at the not-pickable midpoint');
+      index.snapInto(nearMid, r, SnapMask.all, out,
+          filter: const QueryFilter.rendering());
+      expect(out.found, isTrue, reason: '$label: premise, rendering() snaps');
+      expect(out.kind, SnapKind.midpoint);
+      expect(out.entity, whisker);
+      expect(out.point.x, closeTo(world(500.625, 0.25).x, 1e-6));
+      expect(out.point.y, closeTo(world(500.625, 0.25).y, 1e-6));
+
+      // The plain LINE beside it still snaps by default.
+      final nearPlain = world(0.5 + 0.3, 40.25 + 0.2);
+      index.snapInto(nearPlain, r, SnapMask.all, out);
+      expect(out.found, isTrue, reason: '$label: the plain LINE snaps');
+      expect(out.kind, SnapKind.endpoint);
+      expect(out.entity, plain);
+      expect(out.point.x, closeTo(world(0.5, 40.25).x, 1e-6));
+      expect(out.point.y, closeTo(world(0.5, 40.25).y, 1e-6));
+
+      // The pick: picking() skips the flagged LINE for the one behind it;
+      // rendering() would take the flagged one, the higher handle.
+      final onPair = world(300.5, 400.5 + 0.1);
+      final hit = HitPath();
+      expect(
+          index.pickInto(onPair, r, const QueryFilter.picking(), hit), isTrue);
+      expect(hit.entity, behind, reason: '$label: the plain LINE behind');
+      expect(index.pickInto(onPair, r, const QueryFilter.rendering(), hit),
+          isTrue);
+      expect(hit.entity, onTop,
+          reason: '$label: premise, rendering() takes the higher handle');
+    }
+
+    // Centre snaps: a flagged CIRCLE and a plain one, at the root (world
+    // coordinates) and in the group at [frame] (local). The centre-snap walk
+    // (`visitSnapCentre`) must refuse the flagged centre; the plain one
+    // still snaps. The query sits 0.36 mm from a centre, far inside the
+    // aperture, and each circle's radius (150.25) keeps its stroke out of it.
+    for (final inGroup in [false, true]) {
+      final label = inGroup ? 'in a turned group' : 'at the root';
+      final doc = DraftDocument.empty();
+      var owner = doc.rootHandle;
+      if (inGroup) {
+        owner = const Handle(100);
+        doc.commands.execute(AddNodeCommand(GroupNode(
+            handle: owner,
+            parent: doc.rootHandle,
+            transform: frame,
+            children: const [])));
+      }
+      List<double> at(double x, double y) {
+        if (inGroup) return [x, y];
+        final p = world(x, y);
+        return [p.x, p.y];
+      }
+
+      const radius = 150.25;
+      expect(radius - 0.36, greaterThan(r), reason: 'premise: no stroke');
+      addEntity(doc, owner, EntityKind.circle, at(300.5, 200.75), [radius],
+          flags: flagged);
+      final plainCircle = addEntity(
+          doc, owner, EntityKind.circle, at(900.25, 200.75), [radius]);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final out = SnapResult();
+
+      // Both walks: the fused leaf-and-centre one (every kind) and the
+      // centre-only one.
+      for (final mask in [
+        SnapMask.all,
+        SnapMask.none.with_(SnapKind.center),
+      ]) {
+        final nearFlagged = world(300.5 + 0.3, 200.75 - 0.2);
+        index.snapInto(nearFlagged, r, mask, out);
+        expect(out.found, isFalse,
+            reason: '$label, mask ${mask.bits}: no snap at a not-pickable '
+                'centre');
+        index.snapInto(nearFlagged, r, mask, out,
+            filter: const QueryFilter.rendering());
+        expect(out.found, isTrue, reason: '$label: premise, rendering()');
+        expect(out.kind, SnapKind.center);
+        expect(out.point.x, closeTo(world(300.5, 200.75).x, 1e-6));
+        expect(out.point.y, closeTo(world(300.5, 200.75).y, 1e-6));
+
+        final nearPlain = world(900.25 + 0.3, 200.75 - 0.2);
+        index.snapInto(nearPlain, r, mask, out);
+        expect(out.found, isTrue, reason: '$label: the plain centre snaps');
+        expect(out.kind, SnapKind.center);
+        expect(out.entity, plainCircle);
+        expect(out.point.x, closeTo(world(900.25, 200.75).x, 1e-6));
+        expect(out.point.y, closeTo(world(900.25, 200.75).y, 1e-6));
+      }
+    }
+
+    // Bands: a flagged LINE is no band member under picking() and is one
+    // under rendering(), at the root (`forEachLeafInBand`) and inside an
+    // instance (`_bandDescend`).
+    {
+      final doc = DraftDocument.empty();
+      List<double> seg(double ax, double ay, double bx, double by) {
+        final a = world(ax, ay), b = world(bx, by);
+        return [a.x, a.y, b.x, b.y];
+      }
+
+      final rootFlagged = addEntity(doc, doc.rootHandle, EntityKind.line,
+          seg(100.5, 100.25, 400.75, 100.25), [],
+          flags: flagged);
+      final rootPlain = addEntity(doc, doc.rootHandle, EntityKind.line,
+          seg(100.5, 160.25, 400.75, 160.25), []);
+
+      // Definition "only": one flagged LINE. Definition "mixed": a plain
+      // LINE and a flagged one that runs far out of the window band.
+      const onlyDef = Handle(200), mixedDef = Handle(201);
+      const onlyInstance = Handle(400), mixedInstance = Handle(401);
+      doc.tree.addDefinition(Definition(
+          handle: onlyDef,
+          name: 'Only',
+          basePoint: Vector2.zero(),
+          children: const []));
+      doc.tree.addDefinition(Definition(
+          handle: mixedDef,
+          name: 'Mixed',
+          basePoint: Vector2.zero(),
+          children: const []));
+      addEntity(doc, onlyDef, EntityKind.line, [10.5, 20.25, 110.75, 20.25], [],
+          flags: flagged);
+      addEntity(
+          doc, mixedDef, EntityKind.line, [10.5, 20.25, 110.75, 20.25], []);
+      addEntity(
+          doc, mixedDef, EntityKind.line, [10.5, 40.25, 5010.75, 40.25], [],
+          flags: flagged);
+      final onlyAt = frame.multiply(Transform2.translation(1500.5, 100.25));
+      final mixedAt = frame.multiply(Transform2.translation(1500.5, 600.25));
+      for (final (h, def, m) in [
+        (onlyInstance, onlyDef, onlyAt),
+        (mixedInstance, mixedDef, mixedAt),
+      ]) {
+        doc.commands.execute(AddNodeCommand(InstanceNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: m,
+          definition: def,
+          layer: ReservedHandles.layerZero,
+        )));
+      }
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+
+      List<Handle> leaves(Aabb2 band, BandMode mode, QueryFilter f) {
+        final out = <Handle>[];
+        index.forEachLeafInBand(
+            band, mode, f, (slot) => out.add(doc.entities.handleAt(slot)));
+        return out;
+      }
+
+      List<Handle> instances(Aabb2 band, BandMode mode, QueryFilter f) {
+        final out = <Handle>[];
+        index.forEachInstanceInBand(band, mode, f, out.add);
+        return out;
+      }
+
+      Aabb2 boxOf(List<Vector2> points, double pad) {
+        final b = Aabb2.fromPoints(points);
+        return Aabb2.raw(
+            b.minX - pad, b.minY - pad, b.maxX + pad, b.maxY + pad);
+      }
+
+      // The root pair: both LINEs enclosed.
+      final rootBand = boxOf([
+        world(100.5, 100.25),
+        world(400.75, 100.25),
+        world(100.5, 160.25),
+        world(400.75, 160.25),
+      ], 5);
+      for (final mode in BandMode.values) {
+        expect(leaves(rootBand, mode, const QueryFilter.picking()), [rootPlain],
+            reason: 'root, $mode: the flagged LINE is no member');
+        expect(leaves(rootBand, mode, const QueryFilter.rendering()),
+            [rootFlagged, rootPlain],
+            reason: 'root, $mode: premise, rendering() takes both');
+      }
+
+      // "Only": a band around its one flagged LINE.
+      final onlyBand = boxOf([
+        onlyAt.transformPoint(Vector2(10.5, 20.25)),
+        onlyAt.transformPoint(Vector2(110.75, 20.25)),
+      ], 5);
+      for (final mode in BandMode.values) {
+        expect(instances(onlyBand, mode, const QueryFilter.picking()), isEmpty,
+            reason: 'instance, $mode: its only leaf is not pickable');
+        expect(instances(onlyBand, mode, const QueryFilter.rendering()),
+            [onlyInstance],
+            reason: 'instance, $mode: premise, rendering() takes it');
+      }
+
+      // "Mixed": a window around its plain LINE only; the flagged LINE runs
+      // 4900 mm out of it. picking() judges the plain LINE alone and takes
+      // the instance; rendering() sees the flagged LINE leave and refuses.
+      final mixedBand = boxOf([
+        mixedAt.transformPoint(Vector2(10.5, 20.25)),
+        mixedAt.transformPoint(Vector2(110.75, 20.25)),
+        mixedAt.transformPoint(Vector2(10.5, 40.25)),
+      ], 5);
+      expect(instances(mixedBand, BandMode.window, const QueryFilter.picking()),
+          [mixedInstance],
+          reason: 'window: the flagged LINE is no member');
+      expect(
+          instances(mixedBand, BandMode.window, const QueryFilter.rendering()),
+          isEmpty,
+          reason: 'window: premise, rendering() sees the flagged LINE leave');
+    }
+
+    // Intersection: root-level LINEs only (`_considerIntersections`), in
+    // world coordinates on [frame], the flagged one first and then second.
+    final onlyIntersection = SnapMask.none.with_(SnapKind.intersection);
+    for (final flaggedFirst in [true, false]) {
+      final doc = DraftDocument.empty();
+      List<double> seg(double ax, double ay, double bx, double by) {
+        final a = world(ax, ay), b = world(bx, by);
+        return [a.x, a.y, b.x, b.y];
+      }
+
+      Handle along(int flags) => addEntity(doc, doc.rootHandle, EntityKind.line,
+          seg(-500.5, 0.25, 900.25, 0.25), [],
+          flags: flags);
+      Handle across(int flags) => addEntity(doc, doc.rootHandle,
+          EntityKind.line, seg(100.75, -400.5, 100.75, 350.25), [],
+          flags: flags);
+      final Handle plain;
+      if (flaggedFirst) {
+        along(flagged);
+        plain = across(0);
+      } else {
+        plain = across(0);
+        along(flagged);
+      }
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final out = SnapResult();
+
+      // The crossing is (100.75, 0.25) in the frame.
+      final crossing = world(100.75, 0.25);
+      final near = world(100.75 + 0.3, 0.25 - 0.2);
+      index.snapInto(near, r, onlyIntersection, out);
+      expect(out.found, isFalse,
+          reason: 'flagged first: $flaggedFirst; no intersection with a '
+              'not-pickable LINE');
+      index.snapInto(near, r, onlyIntersection, out,
+          filter: const QueryFilter.rendering());
+      expect(out.found, isTrue, reason: 'premise: rendering() finds it');
+      expect(out.kind, SnapKind.intersection);
+      expect(out.point.x, closeTo(crossing.x, 1e-6));
+      expect(out.point.y, closeTo(crossing.y, 1e-6));
+
+      // With every kind, the plain LINE still answers, but not as an
+      // intersection.
+      index.snapInto(near, r, SnapMask.all, out);
+      expect(out.found, isTrue);
+      expect(out.entity, plain);
+      expect(out.kind, isNot(SnapKind.intersection));
+    }
   });
 }

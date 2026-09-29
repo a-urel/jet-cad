@@ -1,4 +1,5 @@
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/wall.dart';
@@ -39,6 +40,15 @@ List<Handle> roomsNamed(DraftDocument doc, List<String> names) => [
         doc.components.withComponent<RoomParams>().singleWhere(
             (r) => doc.components.get<RoomParams>(r)!.name == name),
     ];
+
+/// The dimensions measuring [wall] (spec 11 D3's references), ascending.
+List<Handle> dimensionsOn(DraftDocument doc, Handle wall) => [
+      for (final d in doc.components.withComponent<DimensionParams>())
+        if (const DimensionType()
+            .references(doc.components.get<DimensionParams>(d)!)
+            .contains(wall))
+          d
+    ]..sort((a, b) => a.value.compareTo(b.value));
 
 /// [group]'s children, ascending.
 List<Handle> childrenOf(DraftDocument doc, Handle group) => [
@@ -287,6 +297,15 @@ void main() {
       dissolved += childrenOf(doc, r).length;
     }
     expect(dissolved, 3 * 4, reason: 'a fill, its boundary and two TEXTs');
+    // Spec 11 D17, decision 3 (Ruling 11-14, the controller's ruling): E1
+    // carries three of the sample's dimensions -- the overall width, the
+    // Hall and the Bath diagonal -- and deleting it cascades them in the
+    // same step, six children each.
+    final dims = dimensionsOn(doc, e1);
+    expect(dims, hasLength(3), reason: 'the width, the Hall, the diagonal');
+    for (final d in dims) {
+      expect(childrenOf(doc, d), hasLength(6), reason: 'dimension $d');
+    }
     // The startup plan is itself built through the log, so the counts below
     // are what pin the undo to exactly one command: the Delete.
     final liveBefore = doc.entities.liveCount;
@@ -304,7 +323,11 @@ void main() {
       expect(doc.tree[r], isNull, reason: 'room $r dissolves (10 D8)');
     }
     expect(doc.commands.undoDepth, 1, reason: 'one step');
-    expect(doc.entities.liveCount, liveBefore - removed - dissolved);
+    for (final d in dims) {
+      expect(doc.tree[d], isNull, reason: 'dimension $d cascades (11 D3)');
+    }
+    // The three dimensions' 3 × 6 children go too.
+    expect(doc.entities.liveCount, liveBefore - removed - dissolved - 3 * 6);
     expect(lowestY(doc, e2), closeTo(kPlanOriginY + 125, 1e-9),
         reason: 'E2\'s corner squares');
     expect(lowestY(doc, e4), closeTo(kPlanOriginY + 125, 1e-9),
@@ -321,6 +344,10 @@ void main() {
     expect(doc.tree[door], isA<GroupNode>(), reason: 'its door too');
     for (final r in rooms) {
       expect(doc.tree[r], isA<GroupNode>(), reason: 'room $r is back');
+    }
+    for (final d in dims) {
+      expect(doc.tree[d], isA<GroupNode>(), reason: 'dimension $d is back');
+      expect(childrenOf(doc, d), hasLength(6), reason: 'dimension $d');
     }
     expect(doc.entities.liveCount, liveBefore,
         reason: 'exactly one command came off the log, not the plan under it');
@@ -365,6 +392,16 @@ void main() {
     for (final o in [...objects, ...rooms]) {
       removed += childrenOf(doc, o).length;
     }
+    // Spec 11 D17, decision 3 (Ruling 11-14, the controller's ruling): E1
+    // carries three of the sample's dimensions (the overall width, the Hall
+    // and the Bath diagonal), six children each, which go with it; E4
+    // carries none.
+    final dims = dimensionsOn(doc, e1);
+    expect(dims, hasLength(3), reason: 'the width, the Hall, the diagonal');
+    expect(dimensionsOn(doc, e4), isEmpty, reason: 'E4 carries none');
+    for (final d in dims) {
+      expect(childrenOf(doc, d), hasLength(6), reason: 'dimension $d');
+    }
     await tester.tapAt(at(Vector2(kPlanOriginX + 3000, kPlanOriginY)));
     await tester.pump();
     await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
@@ -388,7 +425,11 @@ void main() {
       expect(doc.tree[o], isNull, reason: 'object $o, with its wall');
     }
     expect(doc.commands.undoDepth, 1, reason: 'one step');
-    expect(doc.entities.liveCount, liveBefore - removed);
+    for (final d in dims) {
+      expect(doc.tree[d], isNull, reason: 'dimension $d cascades (11 D3)');
+    }
+    // The three dimensions' 3 × 6 children go too.
+    expect(doc.entities.liveCount, liveBefore - removed - 3 * 6);
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
@@ -400,6 +441,10 @@ void main() {
         reason: 'one ctrl+Z restores both walls, not one');
     for (final o in [...objects, ...rooms]) {
       expect(doc.tree[o], isA<GroupNode>(), reason: 'object $o is back');
+    }
+    for (final d in dims) {
+      expect(doc.tree[d], isA<GroupNode>(), reason: 'dimension $d is back');
+      expect(childrenOf(doc, d), hasLength(6), reason: 'dimension $d');
     }
     expect(liveHandles(doc), handlesBefore, reason: 'every child handle');
     expect(view.selection.isEmpty, isTrue);

@@ -85,8 +85,8 @@ RectParams? rectOf(ParametricView v, Handle h) =>
     v.paramsOf<Post>(h);
 
 /// `generate` calls per handle, counted by [RectType], [PostType],
-/// [PinType], [TagType] (Ruling 08-2) and the plan-10 clients (Ruling
-/// 10-2). Tests clear it.
+/// [PinType], [TagType] (Ruling 08-2), the plan-10 clients (Ruling 10-2)
+/// and [WhiskerType] (plan 11). Tests clear it.
 final Map<Handle, int> generateCalls = {};
 
 void _counted(Handle h) => generateCalls[h] = (generateCalls[h] ?? 0) + 1;
@@ -1239,6 +1239,63 @@ final class LensType extends ParametricType<Lens> {
   }
 }
 
+/// A not-pickable-flag client (spec 11 D19): two LINEs from ([x], [y]) in
+/// its own local space, each [length] long. The first, along local x,
+/// carries [EntityFlags.unpickable]; the second, along local y, carries
+/// flags 0. Both are written on add only (spec 10 D13), so a match keeps
+/// them.
+final class Whisker implements Component {
+  const Whisker(this.x, this.y, this.length);
+  static const String id = 'test.whisker';
+  final double x, y, length;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'y': y, 'length': length};
+  static Whisker fromJson(Map<String, Object?> j) => Whisker(
+      (j['x']! as num).toDouble(),
+      (j['y']! as num).toDouble(),
+      (j['length']! as num).toDouble());
+  @override
+  bool operator ==(Object o) =>
+      o is Whisker && o.x == x && o.y == y && o.length == length;
+  @override
+  int get hashCode => Object.hash(x, y, length);
+}
+
+/// A [Whisker]'s flagged LINE, along its local x axis.
+GeometryPayload whiskerAlongX(Whisker p) =>
+    linePayload(Vector2(p.x, p.y), Vector2(p.x + p.length, p.y));
+
+/// A [Whisker]'s plain LINE, along its local y axis.
+GeometryPayload whiskerAlongY(Whisker p) =>
+    linePayload(Vector2(p.x, p.y), Vector2(p.x, p.y + p.length));
+
+final class WhiskerType extends ParametricType<Whisker> {
+  const WhiskerType();
+  @override
+  Capability get editCapability => Capability.geometry;
+
+  /// Its two segments' box, in world.
+  @override
+  Aabb2 reach(Whisker params, Transform2 toWorld) => Aabb2.fromPoints([
+        toWorld.transformPoint(Vector2(params.x, params.y)),
+        toWorld.transformPoint(Vector2(params.x + params.length, params.y)),
+        toWorld.transformPoint(Vector2(params.x, params.y + params.length)),
+      ]);
+
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Whisker>(self)!;
+    return [
+      Generated(EntityKind.line, whiskerAlongX(p),
+          flags: EntityFlags.unpickable),
+      Generated(EntityKind.line, whiskerAlongY(p)),
+    ];
+  }
+}
+
 ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
       const RectType<ClipRect>(Capability.geometry))
@@ -1258,4 +1315,5 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType())
   ..register<Slab>(Slab.id, Slab.fromJson, const SlabType())
   ..register<Rod>(Rod.id, Rod.fromJson, const RodType())
-  ..register<Lens>(Lens.id, Lens.fromJson, const LensType());
+  ..register<Lens>(Lens.id, Lens.fromJson, const LensType())
+  ..register<Whisker>(Whisker.id, Whisker.fromJson, const WhiskerType());

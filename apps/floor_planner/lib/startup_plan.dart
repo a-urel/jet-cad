@@ -7,15 +7,18 @@
 // line stays something a person can check by eye: do the walls close, does
 // the door swing into the room, is the tile grid square.
 //
-// **Walls, openings, a separator and rooms are parametric objects** (spec
-// 08 D18, spec 10 D23): nine 07 walls and fifteen 08 openings, at the
-// places the hand-drawn double lines and symbols stood before; a 400 mm
-// column in the living room, a tenth wall; the Living | Dining separator;
-// and seven rooms, one per space. The plan builds them through its own
-// parametric system, sets the page through it before the rooms (so they
-// read the real page), disposes it, and hands the shell a finished
-// document, which the shell's system trusts as it would a loaded file
-// (06 D10).
+// **Walls, openings, a separator, rooms and dimensions are parametric
+// objects** (spec 08 D18, spec 10 D23, spec 11 D17): nine 07 walls and
+// fifteen 08 openings, at the places the hand-drawn double lines and
+// symbols stood before; a 400 mm column in the living room, a tenth wall;
+// the Living | Dining separator; seven rooms, one per space; and five
+// dimensions -- the overall width and depth outside the plan, the Hall's
+// and the Kitchen's widths corner to corner, and an aligned diagonal from a
+// wall corner to the basin's centre, a fixed end. The plan builds them
+// through its own parametric system, sets the page through it before the
+// rooms and dimensions (so they read the real page), disposes it, and
+// hands the shell a finished document, which the shell's system trusts as
+// it would a loaded file (06 D10).
 //
 // **Off-origin and not axis-symmetric, by construction.** A drawing centred
 // on (0, 0) is the degenerate fixture this repository keeps rediscovering,
@@ -27,6 +30,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'parametric/catalog.dart';
+import 'parametric/dimension.dart';
 import 'parametric/opening.dart';
 import 'parametric/room.dart';
 import 'parametric/separator.dart';
@@ -59,10 +63,10 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // is made, outside the history, before any separator names it.
   ensureDashedLinetype(doc);
   final p = _Pen(doc);
-  // Spec 08 D18, spec 10 D23: the walls, openings, separator and rooms
-  // regenerate through this system as they are added; it is disposed once
-  // the rooms are placed, so the shell can install its own over the
-  // finished document.
+  // Spec 08 D18, spec 10 D23, spec 11 D17: the walls, openings, separator,
+  // rooms and dimensions regenerate through this system as they are added;
+  // it is disposed after the dimensions, the last objects placed, so the
+  // shell can install its own over the finished document.
   final system = installParametric(doc);
 
   // --- Walls (spec 08 D18's table): each in its own root-level group at the
@@ -87,7 +91,7 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // Bedroom split at x = 2600, from y = 5000 up.
   final p4 = p.wall(x0 + 2600, y0 + 5000, x0 + 2600, y1 - h, _partition);
   // Kitchen/bath split at x = 9500, from the bottom to y = 3500.
-  p.wall(x0 + 9500, y0 + h, x0 + 9500, y0 + 3500, _partition);
+  final p5 = p.wall(x0 + 9500, y0 + h, x0 + 9500, y0 + 3500, _partition);
 
   // --- Doors (spec 08 D18's table): the hinge on the lower jamb of a
   // vertical wall and the left jamb of a horizontal one, the swing on the
@@ -200,6 +204,33 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   p.room(23500, 10000, 'Bath');
   p.room(24500, 16000, 'Living');
   p.room(19000, 16000, 'Dining');
+
+  // Spec 11 D17 (R-30): five dimensions, after the rooms (so they draw over
+  // them), through the plan's system, each in its own root-level group at
+  // the identity, as the Dimension tool adds one. Each end is what the tool
+  // would store (decision 19): a horizontal dimension takes E1 at a corner
+  // it shares with E4 or E2, a vertical one E2 at the corner it shares with
+  // E3, and the diagonal E1 at the corner it shares with E2 (its measuring
+  // direction is nearer E1's). The overall offsets keep both lines on the
+  // A4 sheet at 1:50: the width's line at y 7,500, the depth's at x 26,300.
+  const right = WallSide.right, left = WallSide.left;
+  // The overall width, 26,000 − 12,000 = 14,000: `14.00`.
+  p.dimension(AttachedEnd(e1, 0, right), AttachedEnd(e1, 1, right),
+      DimKind.horizontal, -500);
+  // The overall depth, 17,000 − 8,000 = 9,000: `9.00`.
+  p.dimension(AttachedEnd(e2, 0, right), AttachedEnd(e2, 1, right),
+      DimKind.vertical, -300);
+  // The Hall, 16,940 − 12,250 = 4,690: `4.69`.
+  p.dimension(AttachedEnd(e1, 0, left), AttachedEnd(p1, 0, left),
+      DimKind.horizontal, 900);
+  // The Kitchen, 21,440 − 17,060 = 4,380: `4.38`.
+  p.dimension(AttachedEnd(p1, 0, right), AttachedEnd(p5, 0, left),
+      DimKind.horizontal, 900);
+  // The Bath diagonal, from E1's inner corner to the basin's centre, a
+  // fixed end on drafted geometry (placed, not followed: decision 1):
+  // √(3,450² + 950²) = 3,578.4, `3.58`.
+  p.dimension(AttachedEnd(e1, 1, left), const FixedEnd(x0 + 10300, y0 + 1200),
+      DimKind.aligned, 0.0);
 
   // Spec 08 D18: the plan is finished; the shell installs its own system.
   // Then the history is cleared, so a fresh document has none — as a loaded
@@ -327,6 +358,21 @@ class _Pen {
           children: const [])),
       SetComponentCommand<RoomParams>(h, RoomParams(x, y, name)),
     ], label: 'Add room'));
+  }
+
+  /// Spec 11 D17: a dimension from [a] to [b] of [kind] at [offset], in its
+  /// own root-level group at the identity, as the Dimension tool adds one.
+  void dimension(DimEnd a, DimEnd b, DimKind kind, double offset) {
+    final h = doc.handleSeed.next();
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          children: const [])),
+      SetComponentCommand<DimensionParams>(
+          h, DimensionParams(a, b, kind, offset)),
+    ], label: 'Add dimension'));
   }
 
   /// Hairline tile joints inside a rectangle.

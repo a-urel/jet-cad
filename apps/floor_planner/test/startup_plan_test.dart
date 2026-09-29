@@ -3,6 +3,7 @@ import 'dart:ui' show Size;
 
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
+import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/room_trace.dart';
@@ -14,6 +15,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'support/dimension_fixture.dart' show dimLines, dimText, dimTextGeometry;
 import 'support/room_fixture.dart'
     show
         anchorOf,
@@ -48,6 +50,16 @@ List<Handle> furnitureOf(DraftDocument doc) => [
           doc.entities.handleAt(slot),
     ]..sort((a, b) => a.value.compareTo(b.value));
 
+/// The walls' extents: the union of every wall group's bounds (each at the
+/// identity, SP5), so the dimensions' lines outside the plan are not in it.
+Aabb2 wallExtents(DraftDocument doc) {
+  var box = Aabb2.empty();
+  for (final w in doc.components.withComponent<WallParams>()) {
+    box = box.union(doc.definitionBounds(w));
+  }
+  return box;
+}
+
 void main() {
   late FlutterTextMeasurer measurer;
   setUp(() {
@@ -74,13 +86,34 @@ void main() {
         reason: 'not square either');
   });
 
-  test('the outer walls close: the extents are the outer rectangle', () {
+  test(
+      'the outer walls close: the walls\' extents are the outer rectangle; '
+      'the document\'s reach past it to the overall dimensions', () {
     final doc = startupPlan(measurer);
-    final e = doc.extents;
+    final e = wallExtents(doc);
     expect(e.minX, kPlanOriginX);
     expect(e.minY, kPlanOriginY);
     expect(e.maxX, kPlanOriginX + kPlanWidth);
     expect(e.maxY, kPlanOriginY + kPlanHeight);
+
+    // Spec 11 D17: the overall width and depth lie outside the walls, so
+    // the document's extents reach past them (Ruling 11-14, the
+    // controller's ruling). At 1:50, the slash is 3 mm on paper, 150 mm
+    // long, at 45°: half of it reaches 75 · cos 45° = 53.033 each way; the
+    // extension lines overshoot the dimension line by 2 mm on paper, 100.
+    // - west: the width's slash at x 12,000 − 53.033 = 11,946.967;
+    // - south: the width's line at 8,000 − 500 = 7,500, its extension lines
+    //   100 past it, to 7,400 (its slashes reach only 7,446.967);
+    // - east: the depth's line at 26,000 + 300 = 26,300, its extension
+    //   lines to 26,400 (its slashes only 26,353.033);
+    // - north: the depth's slash at y 17,000 + 53.033 = 17,053.033.
+    final half = 75 * math.cos(math.pi / 4);
+    expect(half, closeTo(53.033, 1e-3));
+    final d = doc.extents;
+    expect(d.minX, closeTo(kPlanOriginX - half, 1e-6));
+    expect(d.minY, closeTo(kPlanOriginY - 500 - 100, 1e-6));
+    expect(d.maxX, closeTo(kPlanOriginX + kPlanWidth + 300 + 100, 1e-6));
+    expect(d.maxY, closeTo(kPlanOriginY + kPlanHeight + half, 1e-6));
   });
 
   // Spec D4's owed check: the constants against the document's own units.
@@ -109,7 +142,13 @@ void main() {
     expect(page.scaleDenominator, 50);
     expect(page.displayUnit, DisplayUnit.meters);
     final rect = sheetWorldRect(page);
-    final extents = doc.extents;
+    // Centred on the plan, the walls' outer rectangle (19,000, 12,500):
+    // the page is set before the rooms and dimensions, and spec 11 D17's
+    // overall dimensions, outside the walls, do not move it (Ruling 11-14,
+    // the controller's ruling).
+    final extents = wallExtents(doc);
+    expect(extents.center.x, 19000);
+    expect(extents.center.y, 12500);
     expect(rect.center.x, closeTo(extents.center.x, 1e-9));
     expect(rect.center.y, closeTo(extents.center.y, 1e-9));
     expect(rect.minX, lessThan(kPlanOriginX));
@@ -120,7 +159,7 @@ void main() {
 
   test(
       'SP1 the furniture is eight root-owned filled regions with the '
-      'furniture outline; the plan holds 581 entities', () {
+      'furniture outline; the plan holds 611 entities', () {
     final doc = startupPlan(measurer);
     final boundaries = furnitureOf(doc);
     expect(boundaries, hasLength(8));
@@ -144,7 +183,12 @@ void main() {
     // its boundary, a name TEXT and an area TEXT) + 1 separator child (its
     // dashed POLYLINE) + 3 column children (one wall piece, 3 as above) =
     // 581. Measured (Task 18's probe, Ruling 10-20), as D23 expected.
-    expect(doc.entities.liveCount, 581);
+    //
+    // Spec 11 D17: 581 + 5 × 6 dimension children (each a dimension line,
+    // two extension lines, two slashes and a value TEXT) = 611. Measured
+    // (Task 14's probe, Ruling 11-13), as D17 expected.
+    expect(doc.entities.liveCount, 581 + 5 * 6);
+    expect(doc.entities.liveCount, 611);
   });
 
   test(
@@ -379,8 +423,9 @@ void main() {
   test(
       'SP5 the sample plan is nine walls, seven doors and eight windows, '
       'exactly as spec 08 D18\'s tables say, then a column, a separator and '
-      'seven rooms as spec 10 D23 says; no gap, no box; drift() and '
-      'diagnostics() are empty', () {
+      'seven rooms as spec 10 D23 says, then spec 11 D17\'s five dimensions '
+      'above every room child; no gap, no box; drift() and diagnostics() are '
+      'empty', () {
     final doc = startupPlan(measurer);
     const x0 = kPlanOriginX, y0 = kPlanOriginY;
     const x1 = kPlanOriginX + kPlanWidth, y1 = kPlanOriginY + kPlanHeight;
@@ -481,11 +526,204 @@ void main() {
       ['Dining', '23.04 m²'],
     ]);
 
+    // Spec 11 D17 (R-30): the five dimensions, in the table's order, each a
+    // root-level group at the identity, their ends what the tool would store
+    // (decision 19): the width on E1's outer corners, the depth on E2's, the
+    // Hall from E1's inner corner to P1's west T-butt corner, the Kitchen
+    // from P1's east one to P5's west one, and the diagonal from E1's inner
+    // east corner (not E2/0/left, the spike's) to the basin's centre, a
+    // fixed end. The offsets: −500 and −300 keep the overall lines on the
+    // sheet (not the spike's 1,200); +900 inside; `+0.0` on the diagonal.
+    // `==` compares the ends and kinds exactly and the offsets with
+    // `compareTo` (D2).
+    final dims = doc.components.withComponent<DimensionParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    const r = WallSide.right, l = WallSide.left;
+    final want = [
+      DimensionParams(AttachedEnd(e1, 0, r), AttachedEnd(e1, 1, r),
+          DimKind.horizontal, -500),
+      DimensionParams(
+          AttachedEnd(e2, 0, r), AttachedEnd(e2, 1, r), DimKind.vertical, -300),
+      DimensionParams(AttachedEnd(e1, 0, l), AttachedEnd(p1, 0, l),
+          DimKind.horizontal, 900),
+      DimensionParams(AttachedEnd(p1, 0, r), AttachedEnd(p5, 0, l),
+          DimKind.horizontal, 900),
+      DimensionParams(AttachedEnd(e1, 1, l),
+          const FixedEnd(x0 + 10300, y0 + 1200), DimKind.aligned, 0.0),
+    ];
+    expect(
+        [for (final d in dims) doc.components.get<DimensionParams>(d)], want);
+    for (final (i, d) in dims.indexed) {
+      final p = doc.components.get<DimensionParams>(d)!;
+      expect(p.offset.compareTo(want[i].offset), 0, reason: 'dimension $i');
+      expect(doc.tree[d]!.parent, doc.rootHandle);
+      expect((doc.tree[d]! as GroupNode).transform, Transform2.identity());
+    }
+    // Draw order: every dimension and every dimension child lies above
+    // every room child, so the dimensions draw over the rooms' tints.
+    var maxRoomChild = 0;
+    for (final g in rooms) {
+      for (final k in kids(doc, g)) {
+        if (k.value > maxRoomChild) maxRoomChild = k.value;
+      }
+    }
+    expect(maxRoomChild, greaterThan(0));
+    for (final d in dims) {
+      final children = [for (final k in kids(doc, d)) k.value]..sort();
+      expect(children, hasLength(6), reason: 'dimension $d');
+      expect(d.value, greaterThan(maxRoomChild), reason: 'dimension $d');
+      expect(children.first, greaterThan(maxRoomChild),
+          reason: 'dimension $d\'s children above every room child');
+    }
+
     final system = ParametricSystem(doc, parametricCatalog);
     expect(system.drift(), isEmpty);
     expect(system.diagnostics(), isEmpty,
         reason: 'no clamp, no overlap, no no-fit, no dangling reference; no '
-            'room.shared, no room.tint, no separator.degenerate');
+            'room.shared, no room.tint, no separator.degenerate; no '
+            'dimension.degenerate, no dimension.broken');
+  });
+
+  /// The five dimensions of spec 11 D17, ascending: the build order.
+  List<Handle> dimensionsOf(DraftDocument doc) =>
+      doc.components.withComponent<DimensionParams>().toList()
+        ..sort((a, b) => a.value.compareTo(b.value));
+
+  test(
+      'SP8 the five dimensions read D17\'s values at 1:50 m with text 125 '
+      'high, reference the walls listed, and a click on each line selects '
+      'it', () {
+    final doc = startupPlan(measurer);
+    final dims = dimensionsOf(doc);
+    expect(dims, hasLength(5));
+    final ws = doc.components.withComponent<WallParams>().toList()
+      ..sort((a, b) => a.value.compareTo(b.value));
+    final [e1, e2, _, _, p1, _, _, _, p5, _] = ws;
+
+    // Spec 11 D17's table, by hand from the faces (exterior 250 about the
+    // rectangle (12,125, 8,125)–(25,875, 16,875), partitions ±60):
+    // - the width, E1's outer corners: 26,000 − 12,000 = 14,000 → 14.00;
+    // - the depth, E2's outer corners: 17,000 − 8,000 = 9,000 → 9.00;
+    // - the Hall, E1's inner corner to P1's west butt corner (17,000 − 60):
+    //   16,940 − 12,250 = 4,690 → 4.69;
+    // - the Kitchen, P1's east butt corner (17,000 + 60) to P5's west one
+    //   (21,500 − 60): 21,440 − 17,060 = 4,380 → 4.38;
+    // - the diagonal, (25,750, 8,250) to the basin's centre (22,300,
+    //   9,200): √(3,450² + 950²) = √12,805,000 = 3,578.4 → 3.58 (not 3.45,
+    //   its x projection).
+    expect(3450.0 * 3450 + 950 * 950, 12805000);
+    expect(math.sqrt(12805000), closeTo(3578.407, 1e-3));
+    expect([for (final d in dims) dimText(doc, d)],
+        ['14.00', '9.00', '4.69', '4.38', '3.58']);
+    // 2.5 mm on paper at 1:50: 125 mm.
+    for (final d in dims) {
+      final (_, height, _) = dimTextGeometry(doc, d);
+      expect(height, 125.0, reason: 'dimension $d');
+    }
+    // The dimension lines, by hand: the width's at 8,000 − 500 = 7,500; the
+    // depth's at 26,000 + 300 = 26,300; the Hall's and the Kitchen's at
+    // 8,250 + 900 = 9,150; the diagonal's through its two points.
+    final lines = [for (final d in dims) dimLines(doc, d)[0]];
+    final wantLines = [
+      (Vector2(12000, 7500), Vector2(26000, 7500)),
+      (Vector2(26300, 8000), Vector2(26300, 17000)),
+      (Vector2(12250, 9150), Vector2(16940, 9150)),
+      (Vector2(17060, 9150), Vector2(21440, 9150)),
+      (Vector2(25750, 8250), Vector2(22300, 9200)),
+    ];
+    for (final (i, (a, b)) in lines.indexed) {
+      expect((a - wantLines[i].$1).length, lessThan(1e-9), reason: '$i q0');
+      expect((b - wantLines[i].$2).length, lessThan(1e-9), reason: '$i q1');
+    }
+    // D17's references: E1; E2; E1 and P1; P1 and P5; E1.
+    const type = DimensionType();
+    expect([
+      for (final d in dims)
+        type.references(doc.components.get<DimensionParams>(d)!).toList()
+    ], [
+      [e1],
+      [e2],
+      [e1, p1],
+      [p1, p5],
+      [e1],
+    ]);
+
+    // The click (the plan's Ruling 11-24): the select tool's pick —
+    // `pickInto` with `picking()` and a radius of kPickRadiusPixels over the
+    // camera's px/mm — at a quarter of the way along each dimension line.
+    // The camera is the plan's extents fitted to a 1440 x 900 surface
+    // (0.08857 px/mm, a radius of about 68 mm). It is not the shell's
+    // startup camera, which fits the page to the drawing area inside the
+    // chrome: 0.0573 px/mm at a 1440 x 900 window, a radius of about 104.7
+    // mm. The smaller radius here is the stricter pick; `SL1`
+    // (dimension_shell_test.dart) makes the click through the real shell.
+    final fit = ViewportTransform.fit(doc.extents, const Size(1440, 900));
+    final radius = kPickRadiusPixels / fit.scale;
+    expect(radius, inInclusiveRange(50, 100), reason: 'premise: about 68 mm');
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final hit = HitPath();
+    for (final (i, (a, b)) in lines.indexed) {
+      final q = a + (b - a) * 0.25;
+      expect(
+          index.pickInto(q, radius, const QueryFilter.picking(), hit), isTrue,
+          reason: 'dimension $i at $q');
+      expect(resolveHit(hit, doc), SelectionKey.root(dims[i]),
+          reason: 'dimension $i at $q');
+    }
+  });
+
+  test(
+      'SP9 the page switched to 1:100 ft-in in one command reads D17\'s '
+      'ft-in column at height 250; one undo step; undo restores the metres',
+      () {
+    final doc = startupPlan(measurer);
+    final system = installParametric(doc);
+    addTearDown(system.dispose);
+    final dims = dimensionsOf(doc);
+    expect(dims, hasLength(5));
+    const metres = ['14.00', '9.00', '4.69', '4.38', '3.58'];
+    expect([for (final d in dims) dimText(doc, d)], metres);
+    final depth = doc.commands.undoDepth;
+    final page = doc.components.get<PageComponent>(doc.rootHandle)!;
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle,
+        page.copyWith(
+            scaleDenominator: 100, displayUnit: DisplayUnit.feetInches)));
+    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
+    // D17's ft-in column, in quarters of an inch (D9), by hand:
+    // - 14,000 / 25.4 = 551.18" → 2,204.72 quarters → 2,205 = 551.25" =
+    //   45 × 12 + 11.25: 45'-11 1/4";
+    // - 9,000 → 354.33" → 1,417.32 → 1,417 = 354.25" = 29 × 12 + 6.25:
+    //   29'-6 1/4";
+    // - 4,690 → 184.65" → 738.58 → 739 = 184.75" = 15 × 12 + 4.75:
+    //   15'-4 3/4";
+    // - 4,380 → 172.44" → 689.76 → 690 = 172.5" = 14 × 12 + 4.5:
+    //   14'-4 1/2";
+    // - 3,578.407 → 140.88" → 563.53 → 564 = 141" = 11 × 12 + 9: 11'-9".
+    expect([
+      for (final d in dims) dimText(doc, d)
+    ], [
+      '45\'-11 1/4"',
+      '29\'-6 1/4"',
+      '15\'-4 3/4"',
+      '14\'-4 1/2"',
+      '11\'-9"',
+    ]);
+    // 2.5 mm on paper at 1:100: 250 mm.
+    for (final d in dims) {
+      final (_, height, _) = dimTextGeometry(doc, d);
+      expect(height, 250.0, reason: 'dimension $d');
+    }
+    expect(system.drift(), isEmpty);
+
+    doc.commands.undo();
+    expect([for (final d in dims) dimText(doc, d)], metres);
+    for (final d in dims) {
+      final (_, height, _) = dimTextGeometry(doc, d);
+      expect(height, 125.0, reason: 'dimension $d undone');
+    }
+    expect(system.drift(), isEmpty);
   });
 
   test(
