@@ -49,10 +49,13 @@ OWED: the human's, never simulated.**
     human's machine;
   - the look: thirteen items per platform, on macOS, in Chrome and in
     Firefox (the results note's checklist, unticked).
-- **Next, in the plan's order, each the human's to call:** the final
-  whole-branch review; the ledger archive as the branch's last commit; the
-  human's macOS build and look; the `--no-ff` merge; then the post-11
-  `fix/` branches.
+- **Review and archive:** the final whole-branch review (opus) returned
+  "Ready with fixes" (0 Important, 5 Minor: two test gaps, three doc
+  slips); its fix wave landed (`fd762cc`, `678e348`), and the ledger is
+  archived at `docs/superpowers/ledgers/2026-09-28-dimensions/` as the
+  branch's last commit.
+- **Next, each the human's to call:** the macOS build and look; the
+  `--no-ff` merge; then the post-11 `fix/` branches.
 
 See [Plan 11](#plan-11--dimensions-executed-on-plan-11dimensions-not-merged)
 and [Resume here](#resume-here).
@@ -603,14 +606,21 @@ every diff is `9774a55`.**
   roadmap).
 - The human authorised pushes at `ed28d61`, `7d248b2` and `75f04d7`.
 
-**NOT MERGED.** Next, in the plan's order and each the human's to call:
-1. the final whole-branch review, and its fix wave if any;
-2. the ledger archive (`docs/superpowers/ledgers/2026-09-28-dimensions/`)
-   as the branch's last commit;
-3. the human's `flutter build macos --release`, the gate lines on macOS,
+- **The final whole-branch review (opus)** returned "Ready with fixes":
+  0 Important, 5 Minor. Two test gaps: the shell's index handed to the
+  dimension grips (`rvF-mainNoIndex`) and the text angle's `+ 0.0`
+  (`rvF-textAngleNoZero`), both survived the full suite; three doc slips
+  (D18's placement count, the extras table missing the Task 16
+  reviewer's five, nits). The fix wave (`fd762cc`: `SL2`, `DO6`;
+  `678e348`: docs) kills both; the controller re-fired them red. The
+  ledger archive (`docs/superpowers/ledgers/2026-09-28-dimensions/`) is
+  the branch's last commit.
+
+**NOT MERGED.** Next, each the human's to call:
+1. the human's `flutter build macos --release`, the gate lines on macOS,
    and the look (the results note's checklist);
-4. the human's `--no-ff` merge, from the main checkout;
-5. the post-11 `fix/` branches: first the engine's phantom intersection
+2. the human's `--no-ff` merge, from the main checkout;
+3. the post-11 `fix/` branches: first the engine's phantom intersection
    snap (the human's ruling), then the orphan-component guard in
    `ParametricEdit`, 07's throw at turned placements and `wall_grips.dart`'s
    liveness filter.
@@ -2691,7 +2701,8 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 **Immediate next step: the human's choice, on `plan-11/dimensions`** (Plan
 11, dimensions, executed and NOT MERGED).
 - Tasks 1–16 and their fix rounds are done (`99ab3ac..75f04d7`); Task 17
-  is `6ed9688` and the commit that writes this paragraph.
+  is `6ed9688` and `0838c87`; the final whole-branch review's fix wave is
+  `fd762cc` and `678e348`; the ledger archive is the branch's last commit.
 - The four gate lines are green on Linux: engine 1,041 + 2 standing;
   render layer 940 + 1 skip + 7 standing; harness 82; app 490 (486 at
   Task 17, then the final fix wave's `SL2` and `DO6`); web `✓
@@ -2701,14 +2712,15 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
   lines on macOS, and the look (thirteen items per platform, from
   [2026-09-28-plan-11-results.md](docs/superpowers/notes/2026-09-28-plan-11-results.md)).
 
+**Done:** the final whole-branch review ("Ready with fixes", its fix wave
+landed) and the ledger archive
+(`docs/superpowers/ledgers/2026-09-28-dimensions/`).
+
 **What the plan has next, in order; the human decides each:**
-1. the final whole-branch review, and its fix wave if any;
-2. the ledger archive (`docs/superpowers/ledgers/2026-09-28-dimensions/`)
-   as the branch's last commit;
-3. the human's `flutter build macos --release`, the gate lines on macOS,
+1. the human's `flutter build macos --release`, the gate lines on macOS,
    and the look;
-4. the human's merge, `--no-ff`, from the main checkout;
-5. the post-11 `fix/` branches: the engine's phantom intersection snap
+2. the human's merge, `--no-ff`, from the main checkout;
+3. the post-11 `fix/` branches: the engine's phantom intersection snap
    first (the human's ruling), then the orphan-component guard in
    `ParametricEdit`, 07's throw at turned placements, and
    `wall_grips.dart`'s liveness filter (the results note's found items).
