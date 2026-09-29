@@ -1,6 +1,17 @@
 # 11 — Dimensions
 
-**Status:** not started
+**Status:** EXECUTED on `plan-11/dimensions`, NOT MERGED (2026-09-29). The
+merge is the human's, `--no-ff`, after the final whole-branch review, the
+ledger archive and the human's macOS build and look. Exit gate 14 of 16:
+criterion 1's macOS half and criterion 16 (the look) are OWED. Spec
+[2026-09-28-dimensions-design.md](../docs/superpowers/specs/2026-09-28-dimensions-design.md)
+(rev 4, amended at execution), plan
+[2026-09-28-dimensions.md](../docs/superpowers/plans/2026-09-28-dimensions.md),
+results
+[2026-09-28-plan-11-results.md](../docs/superpowers/notes/2026-09-28-plan-11-results.md).
+See [STATUS.md](../STATUS.md#plan-11--dimensions-executed-on-plan-11dimensions-not-merged).
+
+*Before Plan 11 ran, this line read:* **Status:** not started
 **Depends on:** 06, 03
 **Blocks:** nothing
 **Size:** M

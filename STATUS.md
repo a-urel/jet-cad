@@ -1,5 +1,61 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-29. **Plan 11 (dimensions) is EXECUTED on
+`plan-11/dimensions`, NOT MERGED.** The merge is the human's, `--no-ff`.
+**Exit gate 14 of 16: criterion 1's macOS half (`flutter build macos
+--release` and the four lines on macOS) and criterion 16 (the look) are
+OWED: the human's, never simulated.**
+- **What landed:**
+  - associative dimensions in the floor planner. A dimension is its own
+    parametric object storing two ends (each a wall end point, `(wall, k,
+    side)`, that it follows, or a fixed point in its group's space), a
+    kind (aligned, horizontal, vertical) and a signed offset. It draws a
+    dimension line, two extension lines, two architectural slashes and
+    its value in the page's unit, 2.5 paper mm high; it regenerates in
+    the same undo step whenever a wall it measures, or a neighbour of one,
+    changes; deleting a measured wall deletes it (cascade), undo restores
+    it;
+  - the six attach points per wall from 07's drawn caps; decision 19's
+    choice of a shared corner, decided at the commit (decision 22); an
+    end attaches by position while F3 is on (decision 23);
+  - the Dimension tool (I): three clicks, Shift for linear by the side
+    dragged to, a preview, attach rings and the value in the status line;
+    grips (the offset, the two ends); a Dimension section (value, kind
+    switch, "Axes turned", end lines); `dimension.degenerate` and
+    `dimension.broken`; the sample plan's five dimensions;
+  - in the engine, one generic flag: `EntityFlags.unpickable` (picking
+    and snapping skip it, the renderer draws it), carried by the
+    extension lines. The render layer is unchanged.
+- **Gates on the final tree (Linux container):**
+  - engine 1,041 (+ the two standing Linux-only hash tests);
+  - render layer 940 + 1 skip + 7 standing goldens;
+  - harness 82;
+  - app 486;
+  - `flutter build web --release` `✓ Built`.
+- **Mutants:** the spec's 75 named mutants all killed (81 fires, 127
+  killer commands, 122 red); the tasks' extras, 199 by the results
+  note's count: 185 killed, 9 equivalent, 2 surviving as unreachable in
+  the shell, 3 accepted or controls.
+- **Found, not fixed** (post-11 follow-ups): the engine's phantom
+  intersection snap in moved groups (a `fix/` branch after 11 merges, the
+  human's ruling); `SetComponentCommand` on a dead handle; 07's throw at
+  turned placements; `wall_grips.dart`'s liveness filter; a tapered piece
+  under a scaled group (file only).
+- **Owed:**
+  - `flutter build macos --release` and the gate lines on macOS: the
+    human's machine;
+  - the look: thirteen items per platform, on macOS, in Chrome and in
+    Firefox (the results note's checklist, unticked).
+- **Next, in the plan's order, each the human's to call:** the final
+  whole-branch review; the ledger archive as the branch's last commit; the
+  human's macOS build and look; the `--no-ff` merge; then the post-11
+  `fix/` branches.
+
+See [Plan 11](#plan-11--dimensions-executed-on-plan-11dimensions-not-merged)
+and [Resume here](#resume-here).
+
+*Earlier, 2026-09-28:*
+
 **Last updated:** 2026-09-28. **Plan 10 (rooms and area) is MERGED into
 `main` at `84c4a08`**, on the human's decision ("LGTM"), pushed by the
 human. Before the merge the final whole-branch review returned **"Ready to
@@ -506,6 +562,132 @@ method and both reproduction commands.
 Results: [2026-09-01-plan-d-results.md](docs/superpowers/notes/2026-09-01-plan-d-results.md).
 Mutation log: [plan-d-mutation-log.md](docs/superpowers/notes/plan-d-mutation-log.md).
 Plan: [2026-09-01-gpu-backend-plan-d-fills.md](docs/superpowers/plans/2026-09-01-gpu-backend-plan-d-fills.md).
+
+---
+
+## Plan 11 — dimensions (executed on `plan-11/dimensions`, not merged)
+
+**Plan 11 gives the floor planner its dimensions.** A dimension is its own
+parametric object: a root-level group carrying `DimensionParams` (ends
+`a` and `b`, each an `AttachedEnd(wall, k, side)` or a `FixedEnd(x, y)` in
+the group's local space; a `DimKind`; a signed offset whose sign bit is
+its side).
+- **It reaches its walls by reference** (08's mechanism): its references
+  are its attached ends' walls, the policy is `cascade`, and today's
+  closure (referrers of the whole core) already rebuilds it when a wall
+  it measures or a neighbour of one changes (spec D5, `DZ1`'s all-walls
+  oracle over 300 seeded edits).
+- **Its attach points are 07's drawn corners:** six per wall
+  (`drawnCapsOf`, with 07's two fallbacks), identified from the resolved
+  point through the index, with the hosts of flush openings and an O(1)
+  line test; decision 19 picks the wall a shared corner is stored on, at
+  the commit (decision 22), by position while F3 is on (decision 23).
+- **Its value** follows the page's unit, half-up within a tolerance of
+  1e-6 mm decided in millimetres; its text is 2.5 paper mm, readable from
+  the bottom or the right; linear axes are the group's.
+- **Its extension lines never take a click, a hover, a band or a snap**,
+  through one engine flag, `EntityFlags.unpickable` (decisions 24, 25).
+
+**Where it stands.** `plan-11/dimensions` was cut from
+`spec-11/dimensions` at `59aa198` (`main` `9774a55` + spike note `ccd5345`
++ spec revisions `a2ba486`, `4fcf228`, `17e7eda`, `1fca97a` + plan
+`59aa198`), in the worktree `.claude/worktrees/plan-dims`. **The base for
+every diff is `9774a55`.**
+- Tasks 1–16 and their fix rounds are at `99ab3ac..75f04d7`.
+- Task 17 is `6ed9688` (a comment naming the hidden-host residual's
+  second case) and the commit that adds this section (the results note,
+  the spec and plan amendments, the log's re-run Part B, this file, the
+  roadmap).
+- The human authorised pushes at `ed28d61`, `7d248b2` and `75f04d7`.
+
+**NOT MERGED.** Next, in the plan's order and each the human's to call:
+1. the final whole-branch review, and its fix wave if any;
+2. the ledger archive (`docs/superpowers/ledgers/2026-09-28-dimensions/`)
+   as the branch's last commit;
+3. the human's `flutter build macos --release`, the gate lines on macOS,
+   and the look (the results note's checklist);
+4. the human's `--no-ff` merge, from the main checkout;
+5. the post-11 `fix/` branches: first the engine's phantom intersection
+   snap (the human's ruling), then the orphan-component guard in
+   `ParametricEdit`, 07's throw at turned placements and `wall_grips.dart`'s
+   liveness filter.
+
+**Documents:**
+- **Spec:** [2026-09-28-dimensions-design.md](docs/superpowers/specs/2026-09-28-dimensions-design.md),
+  revision 4, amended at execution by Task 17 (the header, D1, D4, D7,
+  D9, D10, D12–D15, D17–D19, the Files, the tests by area, the named
+  mutants, the Differential check, the exit gate).
+- **Plan:** [2026-09-28-dimensions.md](docs/superpowers/plans/2026-09-28-dimensions.md),
+  with "Amended at execution" notes on the header, the rulings, the
+  global constraints, Tasks 1–17, the mutant assignment and the exit gate.
+- **Results:** [2026-09-28-plan-11-results.md](docs/superpowers/notes/2026-09-28-plan-11-results.md).
+- **Mutation log:** [plan-11-mutation-log.md](docs/superpowers/notes/plan-11-mutation-log.md).
+  **The spec's 75: 81 fires, all killed.**
+- **Spike:** [2026-09-28-dimensions-spike-findings.md](docs/superpowers/notes/2026-09-28-dimensions-spike-findings.md)
+  (`spike/11-dimensions` at `675f997`, kept as the record, never to be
+  merged).
+
+**Delivered:**
+- **In `jet_cad_2d`,** changing only `document/style.dart`
+  (`EntityFlags.unpickable = 1 << 1`), `index/query_filter.dart`
+  (`excludeUnpickable`, `picking()` and the new `snapping()`),
+  `index/spatial_index.dart` (`snapInto`'s default filter) and a comment
+  in `parametric/parametric_system.dart`.
+- **In `jet_cad_2d_flutter`:** nothing.
+- **In `apps/floor_planner`:**
+  - `dimension_geometry.dart` and `dimension_attach.dart` (pure Dart),
+    `dimension.dart`, `dimension_tool.dart`, `dimension_grips.dart`;
+  - `wall_geometry.dart`'s `drawnCapsOf`; the catalog, the grips'
+    dispatch, the Dimension section, I in the shell and the shortcut
+    guard; the sample plan's five dimensions.
+
+**Rulings a reader must know** (all of them, with costs, are in the plan
+and the results note):
+- **Every click and grip drop gathers its candidates afresh;** hovers and
+  grip previews memoise per document generation (or per drag).
+- **A dimension that cannot be laid out in finite numbers** (or whose
+  value exceeds 1e15 mm) draws nothing and is `dimension.broken`; a panel
+  edit can make one.
+- **An opening's host attaches only when the host is itself drawn**
+  (Task 16's finding, fixed in 11).
+
+### What Plan 11 measured
+
+| quantity | value |
+|---|---|
+| `packages/jet_cad_2d` | **1,041** pass and the 2 standing Linux-only hash tests (`00:19 +1041 -2`; the test command exits 1); analyze and format clean. 1,037 at the branch point |
+| `packages/jet_cad_2d_flutter` | **940** pass, 1 skip, 7 standing goldens (`01:00 +940 ~1 -7`; the test command exits 1); analyze and format clean; unchanged |
+| `apps/dev_harness_2d` | **82** (`00:42 +82: All tests passed!`), unchanged |
+| `apps/floor_planner` | **486** (`02:34 +486: All tests passed!`); analyze and format clean; `flutter build web --release` `✓ Built`. 348 at the branch point |
+| attach points (`AP1`) | worst 3.77e-7 mm at +1e9 mm in own groups, against 1e-6 |
+| the half through the object (`DF3`) | worst −1.53e-8 mm from the half at +1e9 mm, 65× inside the 1e-6 tolerance |
+| the fuzz (`DZ1`) | 300 edits, 0 failures, 3,045 generates, 10 neighbour-only edits; reload byte-identical |
+| the hover (`TL8`, 612 walls) | 34 µs per move on the band path (66 µs with two points placed); a Shift slide 14 µs; the first touch of a wall per generation about 1.1 ms (up to about 3.6 ms, the Task 10 re-review) |
+| a click's attach search (`AM5`, 612 walls) | median 1.76 ms (JIT) |
+| the lineweight (`RR2`) | 0.25 mm loses no frame at 0.052, 0.15 and 0.3 px/mm with a matched capture |
+| the sample plan (`SP*`) | 611 entities; `14.00`, `9.00`, `4.69`, `4.38`, `3.58`; `drift()` and `diagnostics()` empty |
+| mutations | **the spec's 75 all killed, 81 fires** |
+| the allocation invariants | green and unedited since `9774a55` |
+| the look | **OWED** (thirteen items per platform) |
+
+**Exit gate: 14 of 16.** Criteria 2–15 PASS. Criterion 1 is green on
+Linux, and its macOS half is OWED. Criterion 16 is OWED.
+
+**Known limits and debt, one line each** (the full lists are in the
+results note):
+- the first touch of a wall per generation costs about 1 ms (up to 3.6 ms)
+  at 600 walls; follow-ups: `drawnCapsOf` once per wall, neighbours by
+  reach;
+- collisions are accepted (decision 21);
+- a hidden-host residual, file only: a visible wall group whose own
+  children are on a hidden layer or invisible still attaches through its
+  opening;
+- a loaded infinite value cannot be saved again (every component);
+- **D7's finding on 10's R-17:** the axis-aligned hairline drop-out was
+  measured with a capture below the view's device pixel ratio; `RR2`
+  loses no frame with a matched capture. Re-measure with a matched capture
+  before the render layer changes (with dash patterns in paper units);
+- the found items above: post-11 `fix/` branches.
 
 ---
 
@@ -2310,7 +2492,16 @@ into a standing test. Full account:
 | `/Users/ahmeturel/Projects/oss/jet-cad` | `main` | clean apart from the traps this file names; Plans 1/2/3a/3b/**3c**/**3d**/**3e**/3f/3g/3h/3i, **GPU Plans A, B, C and D**, and product Plans 01/02/03/04 merged |
 | `.claude/worktrees/quizzical-jemison-7537de` | `plan-05/drawing-tools` | **MERGED at `fb0f87d`.** The worktree is the session that ran the plan; remove it and `git branch -d plan-05/drawing-tools` when that session closes. The pre-merge state, for the record: **EXECUTED, NOT MERGED.** Cut from `main` at `7dac3b5`. Tasks 1–10 at `7dac3b5..3957d52`; Task 11 Steps 1–4 at `d45b5d7`; the final whole-branch review returned "With fixes" and its fix wave landed at `1d80caf..f8b4269`; this closing docs commit records the gate at that final tree. The ledger archive is the branch's last commit, next, then the human's look and the merge decision. This worktree previously hosted `fix/grip-camera-bc-swap` (Ruling P-1: this session's worktree hosts whatever branch it is dispatched to work on), which is merged at `9212793` and whose local branch can be deleted once no longer wanted |
 
-**In flight: nothing.** `main` (`f81c585`) is the only branch, local and
+**In flight: `plan-11/dimensions`** (Plan 11, dimensions), in the worktree
+`.claude/worktrees/plan-dims`, cut from `spec-11/dimensions` at `59aa198`.
+It is executed and not merged; see
+[Plan 11](#plan-11--dimensions-executed-on-plan-11dimensions-not-merged).
+`spec-11/dimensions` holds the spike note, the spec and the plan commits,
+and `spike/11-dimensions` (`675f997`) is the spike's record, never to be
+merged. The review worktree `.claude/worktrees/plan-dims-review`
+(detached) is the reviewers'. Plan 11 diffs against `9774a55` (`main`).
+
+*Before Plan 11 ran, this paragraph read:* **In flight: nothing.** `main` (`f81c585`) is the only branch, local and
 remote, and the main checkout is the only worktree. Plan 10 merged at
 `84c4a08`. The spikes `spike/07-walls`, `spike/08-openings` and
 `spike/10-rooms` are recorded in `main`'s history by `ours` merges
@@ -2494,7 +2685,45 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: sub-project 11 (dimensions), from a brainstorm.**
+**Immediate next step: the human's choice, on `plan-11/dimensions`** (Plan
+11, dimensions, executed and NOT MERGED).
+- Tasks 1–16 and their fix rounds are done (`99ab3ac..75f04d7`); Task 17
+  is `6ed9688` and the commit that writes this paragraph.
+- The four gate lines are green on Linux: engine 1,041 + 2 standing;
+  render layer 940 + 1 skip + 7 standing; harness 82; app 486; web `✓
+  Built`.
+- The spec's 75 named mutants are all killed (81 fires).
+- **OWED, never simulated:** `flutter build macos --release`, the gate
+  lines on macOS, and the look (thirteen items per platform, from
+  [2026-09-28-plan-11-results.md](docs/superpowers/notes/2026-09-28-plan-11-results.md)).
+
+**What the plan has next, in order; the human decides each:**
+1. the final whole-branch review, and its fix wave if any;
+2. the ledger archive (`docs/superpowers/ledgers/2026-09-28-dimensions/`)
+   as the branch's last commit;
+3. the human's `flutter build macos --release`, the gate lines on macOS,
+   and the look;
+4. the human's merge, `--no-ff`, from the main checkout;
+5. the post-11 `fix/` branches: the engine's phantom intersection snap
+   first (the human's ruling), then the orphan-component guard in
+   `ParametricEdit`, 07's throw at turned placements, and
+   `wall_grips.dart`'s liveness filter (the results note's found items).
+
+**Debt still open** (one line each; the results notes carry the rest):
+- rotate about a chosen base point (08's debt);
+- the Text tool's web alt-tab `fix/` (fix/post-07's debt);
+- dash patterns in paper units and the hairline (10's R-17), **with D7's
+  finding:** the axis-aligned drop-out was measured with a capture below
+  the view's device pixel ratio, so it is re-measured with a matched
+  capture before the render layer changes;
+- the hover's first touch (`drawnCapsOf` once per wall; neighbours by
+  reach).
+
+Plan 06's itemised look is still OWED; so are 07's, 08's, 10's and 11's
+itemised looks. Nothing was simulated. See
+[Plan 11](#plan-11--dimensions-executed-on-plan-11dimensions-not-merged).
+
+*Before Plan 11 ran, this paragraph read:* **Immediate next step: sub-project 11 (dimensions), from a brainstorm.**
 `main` is at `f81c585`. Plan 10 (rooms and area) is merged at `84c4a08`,
 and the spikes are recorded in history only. 10's macOS build and look
 were not reported and stay OWED.

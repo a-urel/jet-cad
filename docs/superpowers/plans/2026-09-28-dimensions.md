@@ -166,9 +166,14 @@ push.
 The ledger's first entry re-measures all four on `plan-11/dimensions`
 before Task 1.
 
-**Amended at execution:** nothing yet. Task 17 adds an "Amended at
-execution (Plan 11)" paragraph after each task and after the mutant
-assignment, in 10's form.
+**Amended at execution (Plan 11),** by Task 17 on 2026-09-29: a paragraph
+headed "**Amended at execution (Plan 11)**" closes the rulings, the global
+constraints, Tasks 1–16, the mutant assignment and the exit gate. Each
+records what the execution found the plan got wrong or made precise, with
+the ruling that decided it (the ledger's). Nothing above them is
+rewritten. Results:
+[2026-09-28-plan-11-results.md](../notes/2026-09-28-plan-11-results.md);
+the spec's own amendments are in the spec.
 
 ---
 
@@ -626,6 +631,52 @@ Rulings marked **(spec amended)** are written into the spec in Task 17.
 
   **Cost:** none.
 
+**Amended at execution (Plan 11):**
+- **Ruling 11-1, the plan's own clauses, as built.** Beyond the list
+  above, the plan and its rulings added these test identifiers, each a
+  plan-own clause and not a spec identifier: **`DL2b`** (`offsetFor`'s
+  boundaries, the Task 6 review's Minor 1, renamed at Task 7), **`DD3`**
+  (a panel thickness that cannot be laid out, Task 7's fix round),
+  **`DD4`** and **`DD5`** (Task 8: a 1:1e308 page, a NaN offset on a
+  coincident pair; `kDimMaxValueMm`), **`GE5b`** (Task 11's per-drag
+  memo), and **`AM6b`** (Task 16's fix round: an opening's host attaches
+  only when it is itself drawn; spec D10 amended). The spec's 66
+  identifiers are all present.
+- **Ruling 11-1's "test files not edited" and Ruling 11-14:** Ruling
+  11-14 named shell and paint tests only; **two `startup_plan_test.dart`
+  tests outside `SP*`** also changed their answer (`doc.extents` now
+  includes the overall dimensions; the page's centre), ruled by the
+  controller as the spec's own consequences (Task 14). At the end,
+  **only `planner_shell_test.dart` differs from `9774a55` by exactly
+  Ruling 11-14's edits**; `startup_plan_test.dart` also carries Task 14's
+  planned `SP1`, `SP5`, `SP8` and `SP9` edits.
+- **Ruling 11-3's single sites:** **M-11sign's site is
+  `layoutDimension`'s `final below = offset.isNegative;`**, not
+  `offsetFor` (`TL3` and `GE2` re-fire it there); **M-11offsetp0 has two
+  sites**, `layoutDimension` and `offsetFor` (Task 6). M-11fixedworld and
+  M-11attachedmoves have a second site in `DimensionGrips._pointOf` (Task
+  13). M-11b's site is `dimension_geometry.dart`'s `final textHeight =
+  kDimTextPaperMm * scale;` (Task 15: the recorded edit string was
+  stale).
+- **Ruling 11-4:** `attachCandidates` gained an optional
+  per-generation `Map<Handle, WallPoints>` (the Task 10 review's I-1);
+  clicks and drops pass none, so Ruling 11-8 is unchanged. The grips'
+  preview keeps a per-drag memo (the Task 11 review's M-2).
+- **Ruling 11-10:** `AP3` asserts **1e-8 mm at the corpus far origin in
+  own groups** (measured 1.04e-9 mm, one ulp of 4.5e6 plus the round
+  trip), 1e-9 mm at the origin and the corpus far origin turned, and
+  `dimAttach.linear` at +1e9 mm (Task 2's finding (3)).
+- **Ruling 11-19** was applied once to 11's own code (Task 16: the hidden
+  host, fixed in `49de0e8`). Two engine defects and two 07 findings,
+  pre-existing, went to the human and the results note (found items (a),
+  (c), (d), (e)); the engine stayed frozen.
+- **Ruling 11-21:** Task 10's time was read before review; the
+  controller's provisional acceptance of the on-line hover cost was
+  withdrawn on the review's evidence (a Shift slide along a face line is
+  on the expensive path), and the fix round memoised each wall's six
+  points per generation. The first touch per generation remains a known
+  limit (spec D18).
+
 ## Global constraints
 
 - **Never push.** The human authorises every push, branch by branch.
@@ -803,6 +854,15 @@ Rulings marked **(spec amended)** are written into the spec in Task 17.
     every tool.
   - **Tasks 2–17** also show `git diff --stat <Task 1's last commit> --
     packages/` empty (Ruling 11-20).
+
+**Amended at execution (Plan 11):**
+- **"Turned further" does not apply to `AM3`** (the Task 3 review's
+  Minor 3): Task 3's Step 5 places `AM3`'s dimension group at the
+  placement (`m = place.m`), and Step 5 stands. `DR*`, `GE1`, `PN3` and
+  `DL4` turn it further as written.
+- **The test command form:** Task 16's driver ran `flutter test --no-pub`
+  so that `pub get` could not rewrite `analysis_options.yaml` between
+  fires; the gate lines are as written.
 
 ## Review Focus
 
@@ -1142,6 +1202,18 @@ different `unpickable` mechanism, which is not ported.
   Commit `feat(engine): a not-pickable entity flag, skipped by picking and snapping (11 D19)`.
   **The packages are frozen from this commit** (Ruling 11-20).
 
+**Amended at execution (Plan 11):** as built (`99ab3ac`, fix round
+`015d95d`): `QF2` at the root and in an `onA(1234.5, −310.25, 0.4)` group;
+the intersection case at the root only (an intersection-only mask); `QF4`
+asserts the generate count rises by one from a captured count (the first
+version's `> 1` was vacuous: `drift()` also generates); `QF2` gained a
+flagged CIRCLE (the centre walk) and flagged LINEs in bands (root, an
+instance), killing the review's `R1b` and `R3`. `R6-dragSnap`
+(`resolveDragPoint` passing `rendering()`) was carried to Task 15, where
+`TL9` kills it. The render layer's `select_tool.dart` band comment (about
+lines 483–489: "hidden, or on a locked layer") omits the not-pickable
+flag; recorded, not edited (frozen).
+
 ### Task 2: The wall attach points (spec D4)
 
 **Spec:** D4 (R-4, R-5; S-2, S-5, S-16), D1's pure-file rule; 07 D2, D6;
@@ -1292,6 +1364,24 @@ the worst-error print). The spike reads `capsOf`; this task reads
 
   Commit `feat(app): the six wall attach points, from 07's drawn caps (11 D4)`.
 
+**Amended at execution (Plan 11):** what Task 2 found (`a21a124`, fix
+round `e7e9622`), each ruled by the controller and confirmed by review:
+1. **`X2-step1only` is not equivalent:** 07's `WR13` sweep (3°, right/left,
+   turned 299°) reaches the reverse rounding edge; red at `AP2`. Spec
+   D4/S-2 amended; Task 16's Controls amended.
+2. **`AP3` cannot kill M-11vertex** (every cap point is a stored vertex):
+   its killers are `AP1` and `AP2` (the mutant assignment's amendment).
+3. **`AP3`'s 1e-9 fails at the corpus far origin in own groups**
+   (1.04e-9 mm): 1e-8 there (Ruling 11-10's amendment).
+4. **`AP2`'s "each point more than 1 mm"** holds for one point: `AP2`
+   asserts that the joined hub corner is more than 1 mm from each of A's
+   four points.
+5. C11's scaled variant is turned 143°; 6. C10 gained a third wall.
+
+The review's `R-reversePoints` (the reverse edge pinned only by
+`fellBack`) was fixed by checking each reverse-edge wall's face points
+against its stored outline; `R-noSimplify` is equivalent (ruled).
+
 ### Task 3: Decision 19's choice of a shared wall end point (spec D10's choice, D6's direction)
 
 **Spec:** D10's "The choice among candidates" and "When it is decided"
@@ -1390,6 +1480,14 @@ measure.
   since Task 1. The same lines as Task 2's Step 6.
 
   Commit `feat(app): decision 19's choice of a shared wall end point (11 D10, decision 22)`.
+
+**Amended at execution (Plan 11):** as built (`b67ef83`): the collinear
+case runs in both handle orders; `decideEnd` reads `WallParams` with `!`;
+`FixedEnd`'s `==` is Dart's double `==` (`-0.0 == 0.0`), the offset alone
+compared with `compareTo`, as the code states (carried to Task 6). Carried
+from the review: `R-bandWide` to Task 4 (`AM3`'s outer corner in both
+handle orders) and `R-noR8` to Task 6 (a coincident aligned pair in a
+turned group).
 
 ### Task 4: The attach candidates (spec D10)
 
@@ -1536,6 +1634,23 @@ premise (the header's scratchpad references).
 
   Commit `feat(app): attach candidates through the index, with opening hosts and a line test (11 D10)`.
 
+**Amended at execution (Plan 11):** what Task 4 found (`31ed3b8`, fix
+round `402e42f`):
+- **`AM2`'s X-crossing premise "no snap" is false at a group at the
+  identity** (the engine's intersection snap finds the crossing); in own
+  groups an engine defect hides it (found item (a) in the results:
+  `SpatialIndex._considerIntersections` and `_collectNearSegments` ignore
+  group transforms, pre-existing on `main`; the human ruled a `fix/` branch
+  after 11 merges). `AM2` asserts "none, or an intersection exactly at
+  `q`", and the empty candidate set. Spec D10 amended.
+- **The 600-wall grid is 612 walls** (`dimGridWalls(17, 17)`).
+- **Found, file only:** a scaled wall group with a flush door draws a
+  tapered piece (07's world caps against 08's scaled-frame cut; found item
+  (b)).
+- The fix round added a left-justified brute-force clause (the review's
+  `R4-leftJust`) and ran C11's scaled clause once. `R4-filterAll` was
+  deferred to Task 16, where it found the hidden-host defect.
+
 ### Task 5: The value's format (spec D9)
 
 **Spec:** D9 (R-13, R-14, R-15, R-32; S-4), decision 7.
@@ -1601,6 +1716,13 @@ reads `dimFormat.linear`, not `kHalfTolerance`.
   The same lines as Task 2's Step 6.
 
   Commit `feat(app): dimension values at plan precision, half-up within a tolerance (11 D9)`.
+
+**Amended at execution (Plan 11):** Task 5's plan was right (the
+implementer and the review found nothing wrong). The review's
+`R5-quantaTol` (the half decided in quanta) survived, so `DF2` gained two
+rows at non-unit quanta (`b6f00a5`). The review's informational note (every
+value above about 4.5e15 mm counts as a half; `toInt` overflows) led to
+Task 6's finite guard and Task 8's `kDimMaxValueMm`.
 
 ### Task 6: The parameters, the type and the layout (spec D2, D3, D6, D7's geometry, D8)
 
@@ -1824,6 +1946,18 @@ offset, its lineweight 30, its unflagged extension lines, its
 
   Commit `feat(app): the dimension object: parameters, type and layout (11 D2, D3, D6–D8)`.
 
+**Amended at execution (Plan 11):** Task 6's five plan errors (`ed28d61`),
+agreed by the review:
+1. **M-11sign's site is `layoutDimension`** (`final below =
+   offset.isNegative;`), not `offsetFor`;
+2. **M-11offsetp0 is two-site** (`layoutDimension` and `offsetFor`);
+3. **`DL4`'s `u`** belongs to a horizontal kind in a group turned −90°;
+4. **X6-gapNoMin** is "the gap zero", not "the length zero";
+5. **`DL3`'s 1:100 page is ft-in**, as the Global constraints say.
+
+The non-finite guard moved from `generate` into `layoutDimension` at Task
+7 (Ruling 11-3's one site).
+
 ### Task 7: The records, the page, save and load, and diagnostics (spec D7's attributes, D3's page key, D9 through the object, D15, D16)
 
 **Spec:** D7 (the record attributes, R-9), D3's page key, D8's height, D9
@@ -1963,6 +2097,20 @@ the file cases (`staleFile`) and NaN by command.
 
   Commit `feat(app): dimension records, page key, save and load, diagnostics (11 D3, D7, D15, D16)`.
 
+**Amended at execution (Plan 11):** Task 7 (`f32ac75`, fix round
+`94be5e4`):
+- **Plan gap:** `DD2`'s "the children empty after load" alone cannot kill
+  M-11broken on a stale file; `drift()` after load does.
+- **A dimension that cannot be laid out is broken, not silent** (the
+  review's I1, ruled): `layoutDimension` returns null when the value, the
+  text's angle or height, or any layout point is not finite, and
+  `diagnose` reports `dimension.broken`; reachable by a panel edit
+  (`DD3`). Spec D7 and D15 amended.
+- `DO2` gained a scale-only and a unit-only step; `DD2` a `k = −1` case;
+  the carried boundary test was renamed `DL2b`.
+- **Found:** a turned wall refuses thickness 1.5e154 (07's region check
+  throws from `execute`; found item (c) in the results).
+
 ### Task 8: The closure and the drift fuzz (spec D5)
 
 **Spec:** D5 (the invariant, the argument, the cost bound, the fuzz and
@@ -2065,6 +2213,16 @@ the oracle and the fuzz driver) and its `support.dart` (`oracleEnd`,
   (M-11closure restored and diffed). The same lines as Task 2's Step 6.
 
   Commit `test(app): dimensions follow their walls' neighbours; a seeded drift fuzz (11 D5)`.
+
+**Amended at execution (Plan 11):** Task 8 (`5fff87c`):
+- **`DZ1` cannot kill M-11a or M-11axisworld**: its oracle shares
+  `layoutDimension` and `measuringDirection` (Ruling 11-3), probes green.
+  Both killer lists drop `DZ1` (the mutant assignment's amendment).
+- `DZ1` adds a "dimension added" edit (the cascade drained the
+  population); `neighbourOnly` counts edits.
+- `kDimMaxValueMm = 1e15` mm (1e9 km: the ledger's first wording, "1,000
+  km", was wrong; the comment was fixed at Task 9), the neutral broken
+  reason "it cannot be laid out in finite numbers", `DD4` and `DD5`.
 
 ### Task 9: The Dimension tool — clicks, kinds, the offset, the commit (spec D12)
 
@@ -2246,6 +2404,19 @@ D4, D5.
 
   Commit `feat(app): the Dimension tool on I: three clicks, Shift for linear (11 D12)`.
 
+**Amended at execution (Plan 11):** Task 9 (`dced8e9`, fix round
+`c8d5dd6`):
+- **`TL4`'s 5 µm case** first needed a camera past `kMaxScale`; the fix
+  round moved it to the legal-zoom grid route (0.052 px/mm, a grid node
+  5e-6 mm off the corner, through the shell). `TL4` also needs a click on
+  the same free point to kill a removal of the length rule alone.
+- **The rubber band after click 1** landed here (R-24's first bullet).
+- `TL1` gained decision 22 through the tool (the review's I-1); `TL2` a
+  `dx` of 5e-7 committed vertical.
+- **A sub-micron edge of R-21** (both `|dx|` and `|dy|` ≤ 1e-6 with
+  `|P1 − P0|` > 1e-6): recorded as a spec known limit (D12, D18).
+- M-3 (Shift from `onPointerDown`) is accepted as nearly equivalent.
+
 ### Task 10: The Dimension tool — preview, attach rings, status notice, hover cost (spec D12's preview and costs)
 
 **Spec:** D12's preview (R-24), its notice (S-8) and its costs (S-13's
@@ -2353,6 +2524,16 @@ D4, D5.
   The same lines as Task 2's Step 6.
 
   Commit `feat(app): the Dimension tool's preview, attach rings and status value (11 D12)`.
+
+**Amended at execution (Plan 11):** Task 10 (`a9c7f32`, `45f6bdf`, fix
+round `23e8bc5`):
+- **Plan wrong:** the shell camera is 0.12 px/mm (to fit both Hall
+  corners); the vertical case at the origin is a diagonal pair; `TL8`'s
+  third click is a snap point on the grid.
+- **The hover's cost** (Ruling 11-21's amendment): a per-generation memo
+  of each wall's six points; `TL8` gained a Shift slide and a repeated
+  on-line hover; `TL5` a 1:100 ft-in page, an off-canvas page change, an
+  unlayable hover and a re-activation after a delete.
 
 ### Task 11: The grips (spec D13)
 
@@ -2472,6 +2653,13 @@ D4, D5.
 
   Commit `feat(app): dimension grips: the offset and the two ends (11 D13)`.
 
+**Amended at execution (Plan 11):** Task 11's plan was right. Its review
+added `GE5` on a 1:100 ft-in page, `GE3`'s group turned 90° further and a
+flush-door drop, and a per-drag preview memo (`7d248b2`, `GE5b`).
+`t11-noEqualOther` and `rv11-noOffsetGuard` are equivalent;
+`rv11r-keyNoDoc` and `rv11r-dropNoCancel` survive as unreachable in the
+shell (the re-review).
+
 ### Task 12: The Dimension section (spec D14)
 
 **Spec:** D14 (R-18, R-27, R-28; S-8), D11's axes line; 07 `WS8`; 10 D21's
@@ -2566,6 +2754,18 @@ exactly-one rule and R-25's pattern.
 
   Commit `feat(app): the Dimension section: value, kind switch, axes, ends (11 D14)`.
 
+**Amended at execution (Plan 11):** Task 12 (`a21a55a`):
+- **`PN5`'s premise is wrong:** `SetComponentCommand` on a removed handle
+  does not throw; it attaches an orphan component (an engine defect,
+  pre-existing; found item (d)). The handler checks liveness first; the
+  real `StateError` refusal is a loaded-file case.
+- **`X12-sameKind`** needs a direct `onSelectionChanged` call (the
+  `SegmentedButton` skips the selected segment).
+- **`PN3`'s angles are world angles** (placement and turn).
+- **Found, pre-existing (07):** `wall_grips.dart`'s `_endsAt` has no
+  liveness filter; `wall_bands.dart:124-127`'s comment is inaccurate
+  (found item (e)).
+
 ### Task 13: Move and rotate; the linear axes (spec D11)
 
 **Spec:** D11 (R-19; decisions 12, 17), D6's offset × scale; the spike's
@@ -2628,6 +2828,14 @@ finds a defect; that is a finding (Ruling 11-19).
   The same lines as Task 2's Step 6.
 
   Commit `test(app): dimensions under move and rotate; linear axes are the group's (11 D11)`.
+
+**Amended at execution (Plan 11):** Task 13 (`64777ea`):
+- **1e-9° cannot hold at +1e9 mm**: `DR*` assert angles in radians
+  (1e-9 rad; one ulp there is about 4e-11 rad).
+- **No named killer for `offsetFor`'s division by the scale:** the own
+  mutant `t13-offsetForNoScale` survived until a new `DR5` clause.
+- **M-11fixedworld and M-11attachedmoves** have a second site in the
+  grips (`DimensionGrips._pointOf`).
 
 ### Task 14: The sample plan (spec D17)
 
@@ -2711,6 +2919,16 @@ finds a defect; that is a finding (Ruling 11-19).
   The same lines as Task 2's Step 6.
 
   Commit `feat(app): the sample plan's five dimensions (11 D17)`.
+
+**Amended at execution (Plan 11):** Task 14 (`2351d97`):
+- **Ruling 11-14 named only shell and paint tests;** two
+  `startup_plan_test.dart` tests outside `SP*` also changed (Ruling
+  11-1's amendment above).
+- **The startup camera** fits `doc.extents`, now framing the overall
+  dimensions: 0.0573 px/mm in the shell at 1440 × 900; the ledger's first
+  figure, 0.08857 px/mm, is the bare surface fit (corrected).
+- The probe's figures matched D17 (Ruling 11-13); `DR4` gained a
+  left-face row (carried from Task 13).
 
 ### Task 15: Through the shell — the select tool, the extension-line snap, the renders (spec D19 in the shell, D7's lineweight, D8's height, D11's movability)
 
@@ -2818,6 +3036,14 @@ own. The spec's lineweight sweep tests in the scratchpad, if present, show
 
   Commit `test(app): dimensions through the shell: picks, bands, snaps, renders (11 D7, D8, D11, D19)`.
 
+**Amended at execution (Plan 11):** Task 15 (`5ddd96f`):
+- **The band's press corner (12,050, 9,000) lies inside E4's outline**:
+  moved to (11,950, 9,000) at 0.15 px/mm, both premises asserted.
+- **M-11b's recorded edit string was stale**; the site is
+  `dimension_geometry.dart:392`.
+- **`RR1`'s extension line** is the overall width's left one (as the
+  spike's `R2`).
+
 ### Task 16: Mutation testing, invariants and greps
 
 **Part A — the mutants.** Fire every mutant in the spec's table, **75**.
@@ -2913,6 +3139,30 @@ own commit.
   (cd apps/floor_planner          && CI=true flutter test && CI=true flutter analyze && CI=true dart format --output=none --set-exit-if-changed . && CI=true flutter build web --release)
   ```
 
+**Amended at execution (Plan 11):**
+- **`X2-step1only` is not "recorded equivalent"**: it is killed at `AP2`
+  (Task 2's ruling (1); re-fired red at Task 16). The Controls bullet
+  above is wrong; the mutation log's "Controls" records the kill.
+- **The `spike_dims` grep reads, from Task 17 on:**
+
+  ```sh
+  grep -rn --exclude-dir=build "spike_dims\|SPIKE 11" apps packages ; echo "exit $?"   # one hit, exit 0: the provenance comment at apps/floor_planner/test/support/dimension_fixture.dart:8
+  ```
+
+  The comment names the spike file the fixture was ported from; no spike
+  code or test remains. Without `--exclude-dir=build` the git-ignored
+  `apps/floor_planner/build/test_cache` also matches (a binary file).
+- **`planner_shell_test.dart`** is the one file that differs from
+  `9774a55` by exactly Ruling 11-14's edits; `startup_plan_test.dart`
+  also carries Task 14's `SP*` edits.
+- **A defect found by a carried item** (`R4-filterAll`): the hidden
+  host, a defect in Task 4's code, fixed in a Task 16 fix round
+  (`49de0e8`, `AM6b`) under Ruling 11-19; spec D10 amended.
+- **`M-11negzero`'s `==` form was green at `DO3`**: fixed by the fixture
+  (`b3ef430`), re-fired red.
+- **Part B** was re-run on Task 17's final tree and re-pasted in the log
+  (the Task 16 review's Minor 1).
+
 ### Task 17: Gates, results, amendments, STATUS
 
 - [ ] Run all four gate lines and paste them with their exit codes, plus
@@ -2976,6 +3226,12 @@ own commit.
   whole-branch review follows. The ledger archive is the branch's last
   commit, after it.
 
+**Amended at execution (Plan 11):** Task 17's own work is the results
+note, these amendments, the spec's, the log's re-pasted Part B, the
+roadmap and STATUS (one commit), after a comment-only commit naming the
+hidden-host residual's second case (children carrying
+`EntityFlags.invisible`) in `attachCandidates`' doc comment (`6ed9688`).
+
 ---
 
 ## Mutant assignment
@@ -3031,6 +3287,19 @@ unassigned, and none is assigned twice.**
 M-11runtime's site is in the render layer (Ruling 11-25). The retired
 spike switch (`debugDimensionReadsPlaces`) is not fired.
 
+**Amended at execution (Plan 11):** the killer lists above, as fired in
+Task 16:
+- **M-11vertex: `AP1`, `AP2`**; `AP3` dropped (Task 2's ruling (2)).
+- **M-11a: `DL1`, `SP8`; M-11axisworld: `DR1`, `DR3`, `DR4`**; `DZ1`
+  dropped from both (Task 8's ruling).
+- **M-11fixedworld and M-11attachedmoves:** also at
+  `DimensionGrips._pointOf`, against every GE test.
+- **M-11offsetp0:** two sites. **M-11sign:** `layoutDimension`'s site.
+- **M-11fallback:** as assigned; `X2-step1only` (step 1 alone) is an
+  extra, killed at `AP2`, not equivalent.
+- Tally: 75 named mutants, 81 fires, 127 killer commands, 122 red, 0
+  surviving (the five green commands are recorded in the log).
+
 ## Exit gate
 
 The spec's sixteen criteria, and where each is witnessed:
@@ -3053,6 +3322,11 @@ The spec's sixteen criteria, and where each is witnessed:
 | 14 | the sample plan is D17's: five dimensions with their values, 611 entities, `drift()` and `diagnostics()` empty | `SP1`, `SP5`, `SP8`, `SP9` | |
 | 15 | every named mutant killed and logged in `plan-11-mutation-log.md` (M-11b-cam fired in the render layer and restored; M-11fallback as redefined); `roadmap/12` carries its two lines and `roadmap/13` its one | Task 16's log; Task 17's roadmap edits | |
 | 16 | **the human's look**, on macOS, in Chrome and in Firefox (the spec's list: the tool's clicks, preview, Shift, rings and status value; the five sample dimensions at 1:50 and 1:100 on White and Blueprint; 0.25 mm beside the walls; the slashes, the text's size and side; wall moves, joints breaking, deletion, undo; rotating the plan and one linear dimension alone; the grips and a grid drop on a corner; the section; the accepted collisions; a click on a face under an extension line and on a dimension line) | **OWED by the human, never simulated** | OWED |
+
+**Amended at execution (Plan 11):** filled in by
+[the results note](../notes/2026-09-28-plan-11-results.md): criteria 2–15
+PASS; criterion 1's Linux half green and its macOS half **OWED**;
+criterion 16 **OWED**. Nothing was simulated.
 
 ## Self-review
 

@@ -8,10 +8,16 @@ theirs, decisions 22 and 23; see [Revision 2](#revision-2). Revision 3
 applies decisions 24 and 25, which overturn revision 2's R-35: extension
 lines never take clicks, through one small engine change, a not-pickable
 entity flag (D19); see [Revision 3](#revision-3).
-**Amended at execution:** nothing yet. The plan's last task adds
-paragraphs headed "**Amended at execution (Plan 11)**" under each section
-it makes precise or departs from, in 10's form; they rewrite nothing above
-them.
+**Amended at execution (Plan 11),** 2026-09-29, on `plan-11/dimensions`:
+paragraphs headed "**Amended at execution (Plan 11)**" close D1, D4, D7,
+D9, D10, D12–D15, D17–D19, the Files, the tests by area, the named
+mutants, the Differential check and the exit gate. They record where the
+plan and its execution made this spec precise or departed from it, each
+with the ruling or the review that decided it; they rewrite nothing above
+them. The results, the tallies and the measured figures are in
+[2026-09-28-plan-11-results.md](../notes/2026-09-28-plan-11-results.md).
+(The status line above still reads "revision 3"; the text is revision 4,
+see [Revision 4](#revision-4).)
 **Sub-project:** `roadmap/11-dimensions.md`. **Size:** M: application
 code, and one small engine change (D1, D19).
 **Branch:** `spec-11/dimensions`, cut from `main` at `9774a55`; revision
@@ -278,6 +284,36 @@ tree at `9774a55` (code) on 2026-09-28, or from `spike/11-dimensions` at
 files only, nothing in the render layer) and the import grep for the two
 pure files (10's pattern).
 
+**Amended at execution (Plan 11):**
+- **The value types live in the pure file** (the plan's Ruling 11-2).
+  `dimension_geometry.dart` holds `WallSide`, `DimKind`, `DimEnd`,
+  `AttachedEnd` and `FixedEnd` with their JSON, the tolerances `dimAttach`
+  and `dimFormat`, the five paper constants, `kDimLineweight`,
+  `kDimTextAttrs`, `kDimMaxValueMm` (D9's amendment) and the pure
+  functions (`wallEndPoint(s)`, `measuringDirection`, `offsetFor`,
+  `readable`, `layoutDimension` with `DimLayout`, `roundHalfUp`,
+  `formatDimension`). `dimension.dart` holds `DimensionParams`,
+  `DimensionType` and `debugDimensionGenerates`, and re-exports the
+  geometry file, so callers import one file. **Why:** `dimension.dart`
+  imports `package:flutter/foundation.dart` for `@visibleForTesting`, as
+  `room.dart` does, and D1 puts in the pure files functions that take
+  these types; a pure file importing `dimension.dart` would depend on
+  Flutter. The import grep is read transitively (the results note).
+- **`dimension_attach.dart`** also holds `thickestWall` (the plan's Ruling
+  11-4) and `decideEnd` (Ruling 11-5), and two plain `int` counters for
+  tests, `debugLineTestPasses` and `debugWallPointComputations` (10's
+  `debugTracedSegments` pattern). `attachCandidates` takes an optional
+  per-generation map of each wall's six points, which the tool owns
+  (D10's amendment).
+- **Gate 13's "only D19's four engine files" is read for
+  `packages/jet_cad_2d/lib`.** The engine's tests changed too, in the
+  files D19 names and two more: `query_filter_test.dart`,
+  `snap_test.dart`, `json_codec_test.dart`, `attributes_test.dart`,
+  `parametric/support/clients.dart` (a test client for `QF4`) and
+  `snap_centre_index_test.dart` (a reason string only). The render layer's
+  diff against `9774a55` is empty, and `packages/` is unchanged since Task
+  1's last commit (`015d95d`).
+
 ### D2 — `DimensionParams`
 
 - **Fields**, in the dimension group's local space:
@@ -455,6 +491,27 @@ neighbours, two caps, one `isSimpleCcw` in world and at most one more in
 local space, on rings of a handful of points. **Pinned by:** `AP1`–`AP3`;
 M-11nbrs, M-11swap, M-11swapjust, M-11fallback (both steps, S-2),
 M-11centremid, M-11localring, M-11d, M-11d2, M-11vertex.
+
+**Amended at execution (Plan 11):**
+- **S-2's "step 1 removed alone is equivalent on every fixture" does not
+  hold.** 07's `WR13` sweep reaches the reverse rounding edge the
+  paragraph above says no fixture reaches: the acute L at 3°,
+  right-justified into the hub and left-justified out of it, turned 299°,
+  has a world ring that is not simple whose local image is. Without step
+  1, step 2 keeps the joined caps there while 07 stores the free
+  rectangle. The mutant `X2-step1only` (step 1 removed) is **red at
+  `AP2`** (`dimension_attach_points_test.dart` 450:13: a face point 86.96
+  mm from every stored outline vertex; Task 2, and re-fired in Task 16).
+  **Step 1 is not redundant**; the `WR13` sweep is its witness. `AP2`
+  asserts that each reverse-edge wall's four face points lie within
+  `dimAttach.linear` of a vertex of its stored outline, before comparing
+  `fellBack` (Task 2's fix round, `e7e9622`). M-11fallback still removes
+  both steps, as redefined.
+- **Every cap point is a stored vertex** at every `AP3` fixture, so
+  M-11vertex (a face point from its cap's second point) is invisible to
+  `AP3`; `AP1` and `AP2` kill it (the named mutants' amendment).
+- **C10** gained a third wall so that a degenerate wall's neighbours are
+  exercised (`X2-degenerate-b`); **C11's scaled variant** is turned 143°.
 
 ### D5 — What a dimension reads, and why today's closure is enough
 
@@ -772,6 +829,33 @@ room's seed pattern, 10 D10).
 M-11extpage, M-11stable, M-11colour. `RR2` is D7's measurement of record
 (S-10), not a test a mutant can fail.
 
+**Amended at execution (Plan 11):**
+- **A dimension has two states, restated** (the Task 7 review's I1,
+  ruled): **laid out**, six children, a zero one included (reported
+  `dimension.degenerate`, R-9); or **not laid out**, no children, a
+  childless group reported `dimension.broken` (D15). A dimension is not
+  laid out when an end is broken (D2's values, or an attached end whose
+  wall is not a live wall), **and also** when `layoutDimension` cannot
+  lay it out in finite numbers: the value for its kind, the text's angle
+  or height, or any of the layout's eleven points is not finite, or the
+  value exceeds `kDimMaxValueMm` (D9's amendment). `layoutDimension`
+  returns null then, and `generate`, the tool's preview and notice and
+  the grips' preview all read that one null (the plan's Ruling 11-3: one
+  site); the panel shows `—` for a broken dimension. A horizontal dimension measuring exactly 0 between huge
+  finite points is laid out: six children, `dimension.degenerate`.
+  **Not only a file makes one:** a wall thickness of 1.5e154 (or 1e20)
+  typed into the Selection panel on an unturned wall makes an aligned
+  dimension on it broken in one undo step (`DD3`, `DD5`).
+- **`RR2` measured decision 20 as specified:** set-ups 2 and 3 (captures
+  matched to the view's device pixel ratio) lose no frame at 0.052, 0.15
+  and 0.3 px/mm; set-up 1's drop-out reproduces and is printed, not
+  asserted (Task 15; the results note pastes the lines). The R-17
+  follow-up's re-measure with a matched capture is in STATUS's debt list.
+- **`RR1`'s text band** takes three device pixels, not two: the 3 × 3
+  darkest sample widens the ink by up to 1.93 device pixels at the top
+  over 36 sub-pixel camera offsets (Task 16's sweep, `7b55f12`); the
+  extension line's band keeps two.
+
 ### D8 — The text
 
 - **Height:** `kDimTextPaperMm × scaleDenominator` in world (10's label
@@ -884,6 +968,23 @@ unit symbol, `.` as the decimal separator, no grouping:
 
 **Pinned by:** `DF1`–`DF3`; M-11e, M-11halfnaive, M-11cmzero, M-11reduce,
 M-11marks.
+
+**Amended at execution (Plan 11):**
+- **`kDimMaxValueMm = 1e15` mm** (1e9 km, about 2.2e8 times the corpus
+  far origin; the Task 7 re-review's m3, the Task 8 review's Minor 1):
+  `layoutDimension` treats a value above it as not laid out (D7's
+  amendment). **Why:** `formatDimension` misprints huge finite values:
+  above about 4.5e15 mm `n + 0.5 == n`, so every value counts as a half,
+  and `toInt` saturates on the VM (1e19 mm printed
+  `-9223372036854775808`). A 1e20 mm panel thickness on an unturned wall
+  reached it. `formatDimension`'s only app caller is `layoutDimension`,
+  after the guard, so it never formats a non-finite or huge value.
+- **"Decided in mm" is pinned at non-unit quanta:** `DF2` gains
+  431.5 · 25.4/4 − 2e-6 mm in ft-in → `8'-11 3/4"` and 1005 − 2e-6 mm in
+  m → `1.00` (the Task 5 review's I-1; `R5-quantaTol`, the half decided in
+  quanta, is red there).
+- **The far-origin margin** R-32 estimated at "about 1.3×" was measured by
+  `DF3` far larger (D18's amendment).
 
 ### D10 — Which wall end point a point is
 
@@ -1044,6 +1145,58 @@ M-11parallel, M-11lineardir, M-11centrefirst, M-11otherend, M-11snapoff,
 M-11snaponly, M-11reachcull, M-11ownerring, M-11prefilter,
 M-11openinghost, M-11hostbox.
 
+**Amended at execution (Plan 11):**
+- **An opening's host attaches only when the host is itself drawn**
+  (Task 16's finding, ruled a defect in 11's own code and fixed in
+  `49de0e8`): the second query kept the host of every drawn opening with
+  a live-wall test alone, so a hidden wall group hosting a drawn flush
+  door attached at all three points of that end (file only: no command
+  hides a group). The host is now kept only when
+  `FilterEvaluator.acceptsNode(host, QueryFilter.rendering())` holds, its
+  group and every group above it visible: the visibility the first query
+  sees through the wall's own children. One evaluator per call, one check
+  per host, cached per group within the call; the engine's public API, no
+  package change. The plan's own clause **`AM6b`** pins it at the origin
+  and at corpusGroups against brute force (a hidden wall in an L, a
+  hidden host of a drawn flush door on both swings, a drawn host whose
+  door is hidden, a control, layer 0 hidden). **The residual limit**
+  (file only, D18's amendment): a visible wall group whose own children
+  sit on another, hidden layer, or carry `EntityFlags.invisible`, while
+  its opening's children are drawn, still attaches through the opening; a
+  group's children's layers and flags cannot be read in O(1) through the
+  public API.
+- **"An X crossing (no snap at all, `Q3c`)" is not what the engine does
+  at a group at the identity:** there the intersection snap finds the
+  crossing of the two walls' lines. The spike's "no snap" is an artifact
+  of an engine defect found in Task 4 and confirmed on `main` at
+  `9774a55` (the results note's found item (a)):
+  `SpatialIndex._considerIntersections` and `_collectNearSegments` read
+  stored payload coordinates as world and never apply the leaf's group
+  transform, so in own groups the real crossing is missed and phantom
+  intersections appear elsewhere. The human ruled it a separate `fix/`
+  branch after 11 merges; 11's engine stays frozen. Either way an X
+  crossing never attaches (no wall end point is there). `AM2` asserts
+  "none, or an intersection exactly at `q`" at every placement, and the
+  empty candidate set.
+- **The hover's memo** (the Task 10 review's I-1): `attachCandidates`
+  takes an optional per-generation `Map<Handle, WallPoints>` the tool
+  owns, cleared with the generation; a wall found in it is not laid out
+  again. The points are the same computation's, bit for bit (the
+  re-review's probe: no disagreement after a neighbour turn, undo, redo,
+  a group move, a thickness edit, a delete and its undo, a page change).
+  `thickestWall` is kept per generation for hovers. A click, a commit and
+  a grip drop pass no map and gather afresh (the plan's Ruling 11-8). The
+  first touch of a wall per generation still lays out every live wall
+  once (08's `wallsInDocument`): D18's amendment.
+- **The grips' preview** keeps a per-drag memo of `T` and each wall's six
+  points, dropped at the drop, at another drag and on any document change;
+  the drop gathers afresh (the Task 11 review's M-2).
+- **`decideEnd` reads `WallParams` with `!`:** a non-wall candidate
+  throws. `attachCandidates` yields walls only.
+- **`AM3`'s outer corner** is run in both handle orders (A lower and B
+  lower), aligned storing B/0/right both times (the Task 3 review's
+  `R-bandWide`, carried to Task 4).
+
 ### D11 — Move and rotate; the linear axes
 
 - **Dimensions are movable** by the select tool **[spec ruling]** (R-19,
@@ -1193,6 +1346,28 @@ M-11fixedworld, M-11attachedmoves, M-11scale.
 M-11ortho3, M-11snapoff, M-11snaponly, M-11notice, M-11degeneratepair,
 M-11twosteps, M-11key, M-11prefilter.
 
+**Amended at execution (Plan 11):**
+- **A sub-micron edge of R-21** (the Task 9 review's M-4): when both
+  `|dx|` and `|dy|` are at most `wallJoin.linear` but `|P1 − P0|` is not
+  (a pair between 1e-6 and about 1.41e-6 mm apart), both linear kinds
+  measure zero, so "the other kind" measures zero too, and a Shift commit
+  stores a linear dimension that reports `dimension.degenerate`. D18's
+  amendment records it.
+- **The rubber band after click 1** landed with the clicks (Task 9), the
+  preview's other parts with Task 10.
+- **The preview and the notice read the page from the document root**
+  (`PageComponent` on the root, else the defaults), as `generate`'s view
+  does, and rebuild on every document change while the tool has a
+  context, the pointer off the canvas included (the Task 10 review's M-1;
+  the Task 10 re-review's Minor 2).
+- **The hover's cost** (`TL8`, the plan's Ruling 11-21): the band path is
+  far inside the 1 ms budget; a Shift slide along a face line is
+  memoised (D10's amendment); the first touch of a wall per generation is
+  not (D18's amendment). The figures are the results note's.
+- **`TL4`'s shared-point click** runs through the shell at 0.052 px/mm
+  on a grid node 5e-6 mm off a corner (the Task 9 review's M-2), a legal
+  zoom; the plan's first version needed a camera past `kMaxScale`.
+
 ### D13 — Grips
 
 `DimensionGrips` (`dimension_grips.dart`), constructed by the shell with
@@ -1228,6 +1403,17 @@ Dimension section's end lines (D14) show the result. A broken dimension
 **Pinned by:** `GE1`–`GE5`; M-11otherend, M-11gripoffset, M-11gripplace,
 M-11runtime, M-11previewkind.
 
+**Amended at execution (Plan 11):**
+- **The end grips' preview memo** (D10's amendment): `GE5b` pins "the wall
+  laid out once per drag" with a counter; along a face line the preview
+  per move fell from a median of about 1.1 ms to tens of µs on 612 walls
+  (the first preview of a drag pays the one-time layout).
+- **`M-11fixedworld` and `M-11attachedmoves` have a second site** in
+  `DimensionGrips._pointOf`, fired against every GE test (Task 13).
+- **Removing the refusal of a drop equal to the other end's point**
+  (`t11-noEqualOther`) is equivalent: the distance check (the two points
+  within `wallJoin.linear`) already refuses the same point.
+
 ### D14 — The Dimension section
 
 In the Selection panel, shown when **exactly one** selected key is a
@@ -1261,6 +1447,21 @@ the Dimension tool has no settings.
 **Pinned by:** `PN1`–`PN5`; M-11kindoffset, M-11sectionmulti, M-11axesline,
 M-11endlabel, M-11panelrw.
 
+**Amended at execution (Plan 11):**
+- **`SetComponentCommand` on a dead handle does not throw** (Task 12's
+  finding, confirmed pre-existing on `main` at `9774a55`): it attaches an
+  orphan component to the handle, reported `parametric.misplaced`,
+  surviving save and load, never drawn. So the kind switch checks that
+  the dimension is still live before issuing its command, and `PN5`'s
+  refused edit is a loaded-file case (a `StateError` caught). The engine
+  fix is a post-11 follow-up (the results note's found item (d)).
+- **The axes line's angle is a world angle** (placement and turn); it is
+  shown when `|angle| ≥ 0.05°` on the unrounded number, rounded to
+  tenths, and 360 is added when the rounded value is ≤ −180, so −179.96°
+  reads `Axes turned 180.0°` (the Task 12 review's Minor 1).
+- **A stale callback** after a runtime permission change issues nothing
+  (`PN5`'s clause; `M-11panelrw`'s second form).
+
 ### D15 — Diagnostics
 
 `DimensionType.diagnose`, each code at most once per dimension:
@@ -1278,6 +1479,28 @@ M-11endlabel, M-11panelrw.
 - **Collisions are not reported** (decision 21).
 
 **Pinned by:** `DD1`, `DD2`; M-11degenerate, M-11broken.
+
+**Amended at execution (Plan 11):**
+- **The broken list gains a fifth reason: "it cannot be laid out in
+  finite numbers"** (D7's amendment: `layoutDimension` returns null),
+  checked only when both ends resolve, with the offset replaced by 0 for
+  that check, and named last. Every reason found is named in one
+  `dimension.broken`.
+- **"Only a file makes one" no longer holds:** a panel thickness of
+  1.5e154 (or 1e20) on an unturned wall makes one in one undo step. On a
+  turned wall 07's region check throws from `execute` and the edit rolls
+  back (the results note's found item (c)).
+- **A NaN offset on a coincident pair** reports `dimension.broken` only,
+  never also `dimension.degenerate` (`DD4`).
+- **A file cannot carry a NaN** (the plan's Ruling 11-12): `jsonDecode`
+  rejects `NaN`, but reads `1e999` as Infinity. `DD2`'s file cases use
+  `1e999` and `-1e999` and `k` = 2 and −1; its NaN point and NaN offset go
+  through a `SetComponentCommand`. **A loaded document holding an
+  infinite value cannot be saved again** (`jsonEncode` throws), for every
+  component, not dimensions alone (D18's amendment).
+- **The plan's own tests** `DD3` (the thickness edit, at the origin,
+  corpusAxis and corpusGroups), `DD4` (a 1:1e308 page; the NaN offset on a
+  coincident pair) and `DD5` (1e20 mm, both sides of `kDimMaxValueMm`).
 
 ### D16 — Draw order, undo, save and load
 
@@ -1386,6 +1609,28 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
 **Pinned by:** `SP1`, `SP5`, `SP8`, `SP9`; M-11a (the diagonal reads
 `3.45` projected on x), M-11d, M-11d2.
 
+**Amended at execution (Plan 11):** Task 14's printing probe (the plan's
+Ruling 11-13) matched every figure: 611 live entities; the five
+dimensions at handles 632, 639, 646, 653 and 660, above every room
+child, reading `14.00`, `9.00`, `4.69`, `4.38` and `3.58` at 1:50 m,
+height 125; references `[E1]`, `[E2]`, `[E1, P1]`, `[P1, P5]`, `[E1]`;
+`drift()` and `diagnostics()` empty; at 1:100 ft-in `45'-11 1/4"`,
+`29'-6 1/4"`, `15'-4 3/4"`, `14'-4 1/2"` and `11'-9"`. The Task 14
+review's differential run of the real Dimension tool at D17's points
+stored exactly `SP5`'s five `DimensionParams`.
+- **Two tests outside `SP*` changed their answer** (the plan's Ruling
+  11-14): `doc.extents` now includes the overall dimensions, so
+  `startup_plan_test.dart` pins the walls' outer rectangle and
+  `doc.extents` with its slash and overshoot arithmetic, and compares the
+  page's centre with the walls' centre (19,000, 12,500); two
+  `planner_shell_test.dart` counts subtract `3 × 6` (deleting E1 cascades
+  its three dimensions, decision 3) and assert them restored on undo.
+- **The startup camera** fits `doc.extents`, so it now frames the overall
+  dimensions: 0.0573 px/mm in the shell at 1440 × 900 (pick radius 104.7
+  mm); 0.08857 px/mm is the bare surface fit. Expected; the look judges it.
+- **The Kitchen dimension's line crosses the kitchen door's swing**
+  (the Task 14 review's render): a collision decision 21 accepts.
+
 ### D18 — Known limits
 
 - **Collisions** (decision 21): nothing avoids anything and nothing is
@@ -1430,6 +1675,34 @@ identity, as the tool adds one, in this order **[spec ruling]** (R-30):
   wall group is covered (R-5). And the lineweight is measured in the test
   rasteriser with a capture matched to the view (D7), not on a device:
   the look judges it.
+
+**Amended at execution (Plan 11):**
+- **The half-up tolerance's far-origin margin is far larger than "about
+  1.3×".** `DF3` measured the half between two computed corners at all
+  six placements; the worst distance from the exact half was
+  −1.53e-8 mm (the three turned +1e9 mm placements), some 65 times inside
+  `dimFormat.linear` (the Task 7 review's
+  Minor 3; the results note prints each placement). The 1.3× was an
+  estimate from twice the spike's worst attach error.
+- **The first touch of a wall per generation** (the Task 10 re-review's
+  Minor 3): a hover or grip preview that first reaches a wall's line lays
+  out every live wall once (one O(n) `wallsInDocument`), about 0.6–1 ms
+  typically and up to about 3.6 ms at 612 walls; every later touch in the
+  generation is memoised (tens of µs). Post-11 follow-ups: compute
+  `drawnCapsOf` once per wall in `wallEndPoints` (about half the first
+  touch) and neighbours by the wall's reach instead of every live wall
+  (which changes 07's wide node cluster's points, so it needs its own
+  proof).
+- **The hidden-host residual** (D10's amendment), file only.
+- **A loaded infinite value cannot be saved again** (D15's amendment),
+  for every component.
+- **R-21's sub-micron edge** (D12's amendment): a Shift commit on a pair
+  between 1e-6 and about 1.41e-6 mm apart can store a zero linear
+  dimension, reported `dimension.degenerate`.
+- **Collisions** (decision 21), as above: the sample's Kitchen line also
+  crosses the kitchen door's swing (D17's amendment).
+- **Mirrored groups**, as above: the Task 13 review's probe kept every
+  value under a mirror, with the text unreadable.
 
 ### D19 — Engine: a not-pickable entity flag (decisions 24, 25)
 
@@ -1538,6 +1811,24 @@ query, one column read when a pick or snap asks. **Pinned by:** `QF1`–`QF4`
 (engine), `SL1`, `TL9`, `DO1`; M-11pickflag, M-11snapflag, M-11extflag,
 M-11flagdraws.
 
+**Amended at execution (Plan 11):**
+- **As built** (Task 1, `99ab3ac`, `015d95d`): `EntityFlags.unpickable =
+  1 << 1`; `QueryFilter.excludeUnpickable` (default false), set by
+  `picking()` and by the new `snapping()` (visible, locked allowed,
+  not-pickable excluded); `isPassthrough` requires it false; the test in
+  `acceptsEntity` runs after the passthrough return and before the layer
+  lookup; `snapInto` defaults to `snapping()`. `QF2` runs at the root and
+  in a turned, translated group, with a flagged CIRCLE for the centre walk
+  and flagged LINEs in bands (the Task 1 review's `R1b` and `R3`).
+- **`resolveDragPoint`** (`packages/jet_cad_2d/lib/src/index/drag_snap.dart:72`)
+  passes `snapInto`'s default, so the flag reaches every tool's drag
+  snap; `TL9` kills `R6-dragSnap` (it passing `rendering()`).
+- **A stale comment in the frozen render layer:** `select_tool.dart`'s
+  band rule (about lines 483–489) names the leaves `picking()` rejects as
+  "hidden, or on a locked layer"; since D19 a not-pickable leaf is
+  skipped the same way (the Hall dimension's band, `SL1`). Recorded, not
+  edited (the render layer is frozen).
+
 ## The controller's readings, checked
 
 | Reading | Verdict | Where |
@@ -1622,6 +1913,21 @@ M-11flagdraws.
     writes group code 60 from `EntityFlags.invisible` only and strips
     `EntityFlags.unpickable`";
   - `roadmap/11` is marked done at the merge, as usual.
+
+**Amended at execution (Plan 11):**
+- **`SL1` and `TL9` live in a new file,
+  `apps/floor_planner/test/dimension_shell_test.dart`** (the plan's
+  Ruling 11-1): the spec named none for them, and both run through the
+  shell on the sample plan.
+- **The engine's test files** are D19's and two more (D1's amendment).
+- **07's, 08's and 10's app test files are unedited** but two:
+  `startup_plan_test.dart` carries `SP1`, `SP5`, `SP8` and `SP9` (Task
+  14's planned edits) and Ruling 11-14's two ruled edits;
+  `planner_shell_test.dart` differs from `9774a55` by exactly Ruling
+  11-14's ruled edits (D17's amendment).
+- **The roadmap lines** landed with the results: `roadmap/12`'s two open
+  questions, `roadmap/13`'s decision, and the R-17 finding in STATUS's
+  debt list.
 
 ### Amendments to earlier specs
 
@@ -1902,6 +2208,46 @@ groups for every other relational test; the sample plan's own placement
   entity count), whose mutants belong to those plans.
 - **The sample plan:** `SP1`, `SP5`, `SP8`, `SP9` (D17).
 
+**Amended at execution (Plan 11):**
+- **Placements,** as the plan's Ruling 11-9: `TL2` and `TL3` run at the
+  origin and at `corpusAxis`, the corpus far origin **unturned**, since
+  the tool places every group at the identity. **`DR*`'s angles at +1e9
+  mm** are asserted in radians (1e-9 rad), not 1e-9°, which rounding
+  cannot hold there (Task 13).
+- **`AP2`**: "differ from `capsOf`'s joined corner by more than 1 mm"
+  holds for one of A's points only, so `AP2` asserts that the joined hub
+  corner is more than 1 mm from each of A's four points (Task 2); and it
+  checks each reverse-edge wall's face points (D4's amendment).
+- **`AP3`'s bound** (the plan's Ruling 11-10, amended at Task 2): 1e-9 mm
+  at the origin and at the corpus far origin turned; **1e-8 mm at the
+  corpus far origin in own groups**, where the gap measured 1.04e-9 mm,
+  about one ulp of 4.5e6 (9.3e-10 mm) plus the round trip; and
+  `dimAttach.linear` at the three +1e9 mm placements.
+- **`AM1`–`AM5`'s grid of walls** is `dimGridWalls(17, 17)`, 612 walls,
+  not 600. **`AM2`'s X crossing** asserts "none, or an intersection
+  exactly at `q`" (D10's amendment). **`AM6`'s tool clause** runs in
+  `TL6` (Ruling 11-7). **`AM6b`** is the plan's own clause (D10's
+  amendment).
+- **`DO2`** goes from 1:50 **mm** (`4000`, height 125) to 1:100 ft-in
+  (`13'-1 1/2"`, 250), and undo restores `4000` and 125 (the plan's Ruling
+  11-11: a metres page prints `4.00`; the spike's `Q5a` used a mm page);
+  it also changes the scale alone and the unit alone (the Task 7 review's
+  M1).
+- **`DD2`** (Ruling 11-12, D15's amendment); **`DL2b`** is `offsetFor`'s
+  boundaries (the plan's own; the Task 6 review's Minor 1).
+- **`DZ1`** adds a "dimension added" edit, since the cascade drained the
+  population; `neighbourOnly` counts edits (Task 8).
+- **`TL8`** adds a Shift slide along a face line (the six points computed
+  once per generation, a counter) and an undo/redo ring clause; **`GE5b`**
+  is the grips' memo (D13's amendment); **`TL5`** runs a 1:100 ft-in page,
+  an off-canvas page change, an unlayable hover and a re-activation.
+- **`SP8`'s click** is `SpatialIndex.pickInto` with `picking()` (Ruling
+  11-24); `SL1` makes it through the real select tool, as one test whose
+  later clauses were fired on a scratch per-clause split (the Task 15
+  review's Minor 3).
+- **Plan-added test identifiers:** `DL2b`, `DD3`, `DD4`, `DD5`, `GE5b`,
+  `AM6b`. The spec's 66 are all present.
+
 ### Named mutants
 
 Each is fired with a `cp` backup, restored with `cp`, then `diff` against
@@ -2004,6 +2350,37 @@ and M-11e above, all 22 of the spike's mutants are carried):
 M-11b's camera half as "not writable"; revision 2 carries it as
 M-11b-cam, a render-layer mutant (S-11).
 
+**Amended at execution (Plan 11):** **all 75 named mutants are killed**
+(81 fires, one per site or form; 127 killer commands, 122 red), re-fired
+at Task 15's head and logged in `plan-11-mutation-log.md`. The killer
+lists differ from the tables above by these rulings:
+- **M-11snaponly: `TL6` only** (the plan's Ruling 11-6): decision 23
+  makes `attachCandidates` see only the resolved point, so `AM4` cannot
+  see whether an object snap won; the site is the tool (its end decision
+  gated on the snap kind).
+- **M-11runtime's site is the render layer** (Ruling 11-25):
+  `GripCache.leafGripsLive` returns true (`grip_cache.dart:273`), against
+  `GE4`; no app site can write "the grips hit without `components` and
+  `geometry`".
+- **M-11vertex: `AP1` and `AP2`; `AP3` dropped** (D4's amendment).
+- **M-11a and M-11axisworld: `DZ1` dropped** (the Task 8 review's Minor
+  3): `DZ1`'s oracle shares `layoutDimension` and `measuringDirection`
+  (Ruling 11-3), so it is blind to both; probes green.
+- **M-11fallback:** "Step 1 alone removed is equivalent on every fixture"
+  is wrong; that edit (`X2-step1only`) is killed at `AP2` (D4's
+  amendment). M-11fallback itself, both steps, is killed at `AP1`.
+- **M-11prefilter gains `TL8`; M-11sign and M-11between gain `GE2`** (the
+  plan's assignment). **M-11sign's site** is `layoutDimension`'s `final
+  below = offset.isNegative;`, and **M-11offsetp0 has two sites**
+  (`layoutDimension` and `offsetFor`), both fired (Task 6).
+- **Multi-site:** M-11fixedworld and M-11attachedmoves also in
+  `DimensionGrips._pointOf`; M-11negzero in two forms (its `==` form was
+  green at `DO3` until `DO3` asserted the reloaded `-0.0` dimension
+  unequal to its `+0.0` twin, `b3ef430`); M-11colour at two sites.
+- **The degenerate fixture, as the control:** green under M-11a,
+  M-11axisworld, M-11d2, M-11swap, M-11attachedmoves and M-11fixedworld;
+  red only under M-11d (both ends at `k = 0`).
+
 ### Differential check
 
 - **`drift()` is empty** after every edit in every relational test.
@@ -2013,6 +2390,14 @@ M-11b-cam, a render-layer mutant (S-11).
   loaded into a fresh system give `drift()` empty and the same children.
 - **The preview agrees with the object** (`TL5`, `GE5`): one layout
   function, compared in world.
+
+**Amended at execution (Plan 11):** `DZ1` ran 300 seeded edits with
+0 failures and neighbour-only rebuilds, and its reload agreed (the results
+note prints its tuple). `DZ1`'s oracle is differential for the closure,
+not for the layout (the plan's Ruling 11-3); the hand-worked `DL*` pin the
+layout. The Task 8 review verified the oracle's independence
+(`rv8-viewHalfNbrs`: red with the oracle, green with `drift()` alone) and
+ran seeds 1–20 with no failure.
 
 ## Exit gate
 
@@ -2070,6 +2455,16 @@ M-11b-cam, a render-layer mutant (S-11).
     Dimension section's switch and end lines; the collisions decision 21
     accepts; a click on a wall face under an extension line selecting the
     wall, and on the dimension line selecting the dimension (decision 24).
+
+**Amended at execution (Plan 11):**
+- **Gate 13** reads "`packages/jet_cad_2d/lib` differs from `9774a55`
+  only in D19's four files"; the engine's tests differ in D19's test files
+  and two more (D1's amendment); the render layer's diff is empty; the
+  allocation invariants pass, unedited.
+- **The state at the end of execution:** gates 2–15 are witnessed on
+  Linux; gate 1's Linux half is green and its macOS half, with gate 16
+  (the look), is **owed by the human, never simulated** (the results
+  note's checklist).
 
 ## Spec rulings
 

@@ -78,6 +78,10 @@ the things it wraps gets written twice.
   diagnostics; nothing displays them.
 - **Does `DraftPermissions` reach the UI**, so a read-only document greys out
   its tools?
+- **A dimension style table** (11 decision 6: 11 ships fixed paper
+  constants, D7).
+- **A layer for dimensions** (roadmap 11's fixed-layer question, deferred
+  by 11: dimensions are on layer 0).
 
 ## Exit criteria sketch
 

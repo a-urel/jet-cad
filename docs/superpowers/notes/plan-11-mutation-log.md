@@ -212,6 +212,12 @@ opening (11 D10)`):
   wall's children, not its opening's, to another hidden layer is not
   covered: a group's children's layers cannot be read in O(1) through the
   public API; recorded as a limit, not reachable from any command.)
+  **The same file-only gap** (the Task 16 review's Minor 2, added at Task
+  17): a wall whose children carry `EntityFlags.invisible` under a visible
+  group, while its opening's children are drawn, also still attaches
+  through the opening; the group passes `acceptsNode`, and a group's
+  children's flags cannot be read in O(1) either. Task 17's `6ed9688`
+  names both cases in `attachCandidates`' doc comment.
 - **Test** (`AM6b`, `dimension_attach_test.dart`, at the origin and at
   corpusGroups, against `bruteCandidates`, each hidden point asserted a
   brute-force candidate first): P1, a hidden B in an L attaches neither at
@@ -387,9 +393,17 @@ ledger.
 
 ## Part B -- invariants and greps
 
-Run from the repository root at `b3ef430` (this task's two test commits on
-`5ddd96f`), `BASE=9774a55`, `T1=015d95d` (`t16-partb.sh`, output
-`t16-partb.log`), verbatim:
+**Re-run by Task 17 on its final tree** (the Task 16 review's Minor 1;
+Task 16's own run was at `b3ef430`, N = 32, and its reviewer's at
+`75f04d7`, N = 35). From the repository root, `BASE=9774a55`,
+`T1=015d95d` (`plan11/t17-partb.sh`: `t16-partb.sh`'s lines, the
+`spike_dims` grep also run in its amended form with
+`--exclude-dir=build`, and two reads added: `startup_plan_test.dart`'s
+diff and the HEAD hash). Output `plan11/t17-partb.log`, verbatim. It ran
+at `97fafbb`, Task 17's docs commit before this paste was amended into
+it; the amend adds this paste only, so the tree the greps read and the
+count are the final ones (`git rev-list --count` is unchanged by an
+amend).
 
 ```
 $ grep -rnE "^\s*(import|export)\s+.(package:flutter|dart:ui)" packages/jet_cad_2d/lib apps/floor_planner/lib/parametric/dimension_geometry.dart apps/floor_planner/lib/parametric/dimension_attach.dart apps/floor_planner/lib/parametric/wall_geometry.dart apps/floor_planner/lib/parametric/opening_geometry.dart apps/floor_planner/lib/parametric/room_trace.dart apps/floor_planner/lib/parametric/room_label.dart apps/floor_planner/lib/parametric/room_inputs.dart ; echo "exit $?"
@@ -469,6 +483,10 @@ apps/floor_planner/test/support/dimension_fixture.dart:8:// `apps/floor_planner/
 grep: apps/floor_planner/build/test_cache/build/99f5cb803d2032707ba73bec2a719151.cache.dill.track.dill: binary file matches
 exit 0
 
+$ grep -rn --exclude-dir=build "spike_dims\|SPIKE 11" apps packages ; echo "exit $?"
+apps/floor_planner/test/support/dimension_fixture.dart:8:// `apps/floor_planner/test/spike_dims/support.dart`); the C1-C10 walls from
+exit 0
+
 $ grep -rnE "debugDimensionGenerates\s*(\+\+|\+=|=)" apps/floor_planner/lib
 apps/floor_planner/lib/parametric/dimension.dart:109:int debugDimensionGenerates = 0;
 apps/floor_planner/lib/parametric/dimension.dart:183:    debugDimensionGenerates++;
@@ -480,14 +498,21 @@ $ git diff "$BASE" --stat -- apps/floor_planner/test/planner_shell_test.dart app
  apps/floor_planner/test/planner_shell_test.dart | 49 ++++++++++++++++++++++++-
  1 file changed, 47 insertions(+), 2 deletions(-)
 
+$ git diff "$BASE" --stat -- apps/floor_planner/test/startup_plan_test.dart
+ apps/floor_planner/test/startup_plan_test.dart | 254 ++++++++++++++++++++++++-
+ 1 file changed, 246 insertions(+), 8 deletions(-)
+
+$ git rev-parse --short HEAD
+97fafbb
+
 $ git rev-list --count "$BASE"..HEAD
-32
+37
 
 $ git log --format=%B "$BASE"..HEAD | grep -c "^Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>$"
-32
+37
 
 $ git log --format=%B "$BASE"..HEAD | grep -c "^Claude-Session: https://claude.ai/code/session_013XiH3QE4FtMMNUjbASxiEv$"
-32
+37
 
 $ git log --name-only --format= "$BASE"..HEAD | grep -c "analysis_options.yaml"
 0
@@ -495,64 +520,70 @@ $ git log --name-only --format= "$BASE"..HEAD | grep -c "analysis_options.yaml"
 
 Read against each line's expected output:
 
-- The import grep: no match, exit 1. Its pattern's positive control
-  (plan): a scratch file importing `package:flutter/widgets.dart` is
-  matched:
+- **The import grep:** no match, exit 1. Its positive control, re-run
+  (`plan11/t17-posctl.log`):
 
   ```
-  $ printf "import 'package:flutter/widgets.dart';\n" > plan11/t16-posctl/x.dart
-  $ grep -rnE "^\s*(import|export)\s+.(package:flutter|dart:ui)" plan11/t16-posctl/x.dart ; echo "exit $?"
+  $ grep -rnE "^\s*(import|export)\s+.(package:flutter|dart:ui)" plan11/t17-posctl/x.dart ; echo "exit $?"
   1:import 'package:flutter/widgets.dart';
   exit 0
   ```
 
-  The two pure files import only `dart:math`,
-  `package:jet_cad_2d`, `package:vector_math` and app files; read
-  transitively (Ruling 11-2): `wall.dart` → `opening_geometry.dart`,
+  The two pure files import only `dart:math`, `package:jet_cad_2d`,
+  `package:vector_math` and app files. Read transitively (Ruling 11-2),
+  at this tree: `wall.dart` → `opening_geometry.dart`,
   `room_inputs.dart`, `wall_geometry.dart`; `wall_geometry.dart` →
   `wall.dart`; `opening.dart` → `opening_geometry.dart`, `wall.dart`;
   `opening_geometry.dart` → `opening.dart`, `wall.dart`,
-  `wall_geometry.dart`; `room_inputs.dart` → `opening_geometry.dart`,
-  `room_trace.dart`, `separator.dart`, `wall.dart`, `wall_geometry.dart`;
-  `separator.dart` → `room_inputs.dart`. Each of these imports only
-  `dart:`, `package:jet_cad_2d`, `package:vector_math` and one another; none
+  `wall_geometry.dart`; `room_inputs.dart` → `dart:async`,
+  `opening_geometry.dart`, `room_trace.dart`, `separator.dart`,
+  `wall.dart`, `wall_geometry.dart`; `room_trace.dart` →
+  `room_inputs.dart`; `separator.dart` → `room_inputs.dart`. None
   imports Flutter or `dart:ui`.
-- `lib/jet_cad_2d.dart` exports `style.dart` (line 30) and
-  `query_filter.dart` (55) and `spatial_index.dart` (58) whole, so
-  `EntityFlags.unpickable` and `QueryFilter.snapping()` are public (read).
-- Invariants 0; `packages/jet_cad_2d/lib` the four D19 files; its tests the
-  six Ruling 11-1 names; `jet_cad_2d_flutter` 0; `packages/` since `T1` 0.
+- `lib/jet_cad_2d.dart` exports `style.dart` (30), `query_filter.dart`
+  (55) and `spatial_index.dart` (58) whole, so `EntityFlags.unpickable`
+  and `QueryFilter.snapping()` are public (Task 16's read; the engine is
+  unchanged since `015d95d`, the `T1` line above).
+- Invariants 0; `packages/jet_cad_2d/lib` the four D19 files; its tests
+  the six Ruling 11-1 names; `jet_cad_2d_flutter` 0; `packages/` since
+  `T1` 0.
 - `EntityFlags.unpickable`/`excludeUnpickable` in the engine: the
-  declaration's doc (`parametric_system.dart:203`, the `Generated` comment),
-  the field and the presets, the test in `acceptsEntity` (96-97),
-  `snapInto`'s doc (1448). The declaration itself (`style.dart`) reads
-  `static const int unpickable = 1 << 1;` and does not match the pattern.
-  In the app: `dimension.dart`'s extension lines (204-205) and their doc
-  (168).
+  `Generated` doc comment (`parametric_system.dart:203`), the field and
+  the presets, the test in `acceptsEntity` (96-97), `snapInto`'s doc
+  (1448). The declaration (`style.dart`, `static const int unpickable = 1
+  << 1;`) does not match the pattern. In the app: `dimension.dart`'s
+  extension lines (204-205) and their doc (168).
 - `Tolerance.standard`, `TrueColor`, the spike's dropped names: no match,
   exit 1.
-- **`spike_dims|SPIKE 11`: two matches, exit 0 -- not the plan's "no
-  match".** (1) `apps/floor_planner/test/support/dimension_fixture.dart:8`,
-  a provenance comment naming the spike's file
-  (`apps/floor_planner/test/spike_dims/support.dart`) the fixture was
-  ported from; no spike code. (2) A binary match in
-  `apps/floor_planner/build/test_cache/` (git-ignored build output). With
-  `--exclude-dir=build`, only (1). Reported, not edited: a comment, not a
-  defect; the controller rules.
-- `debugDimensionGenerates`: the declaration (109) and one increment (183).
+- **`spike_dims|SPIKE 11`, as the plan wrote it:** two matches, exit 0:
+  the provenance comment at
+  `apps/floor_planner/test/support/dimension_fixture.dart:8` and a binary
+  match in the git-ignored `apps/floor_planner/build/test_cache/`. **As
+  amended** (Task 16's ruling; the plan's Task 16 amendment),
+  `--exclude-dir=build`: **one hit, the provenance comment, the one
+  expected hit**, exit 0.
+- `debugDimensionGenerates`: the declaration (109) and one increment
+  (183).
 - 07's, 08's and 10's test files: 0.
-- `planner_shell_test.dart`: +47 −2, exactly Ruling 11-14's ruled edits
-  (read in `git diff 9774a55`): the two `liveCount` lines (at `9774a55`'s
-  :307 and :391) subtract `3 * 6`, each with a comment deriving it from
-  decision 3's cascade; the three dimensions on E1 are asserted (six
-  children each; E4 carries none) before the delete, gone after it, and back
-  with six children each after the undo; plus the `dimensionsOn` helper and
-  its import. `planner_draw_test.dart` unchanged. `startup_plan_test.dart`
-  (outside this grep; Ruling 11-14's other two edits): :80 pins the walls'
-  outer rectangle (`wallExtents`) and `doc.extents` with its slash and
-  overshoot arithmetic; :113 compares the page's centre with the walls'
-  centre (19,000, 12,500).
-- N = 32 commits, 32 and 32 trailers, 0 `analysis_options.yaml`.
+- **`planner_shell_test.dart`** (+47 −2) is the one file that differs
+  from `9774a55` by exactly Ruling 11-14's ruled edits: the two
+  `liveCount` lines (at `9774a55`'s :307 and :391) subtract `3 * 6`,
+  each with a comment deriving it from decision 3's cascade; the three
+  dimensions on E1 asserted before the delete, gone after it and back with
+  six children each after the undo; the `dimensionsOn` helper and its
+  import. `planner_draw_test.dart` is unchanged.
+- **`startup_plan_test.dart`** (+246 −8, outside the plan's grep)
+  carries Task 14's planned `SP1`, `SP5`, `SP8` and `SP9` edits **and**
+  Ruling 11-14's two ruled edits (:80 pins the walls' outer rectangle and
+  `doc.extents` with its slash and overshoot arithmetic; :113 compares the
+  page's centre with the walls' centre (19,000, 12,500)). So it does not
+  differ from the base by Ruling 11-14's edits alone (the Task 16 review's
+  Minor 4; Task 16's paste of this section said "Ruling 11-14's other two
+  edits" only).
+- **N = 37** commits `9774a55..HEAD`: six before Task 1 (the spike note,
+  the four spec revisions and the plan), 29 for Tasks 1–16 and their fix
+  rounds (`59aa198..75f04d7`), and Task 17's two. **37 and 37 trailers**,
+  0 `analysis_options.yaml`.
 
 ## The tasks' extras, copied from the ledger (not re-fired)
 
