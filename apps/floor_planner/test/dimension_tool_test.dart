@@ -969,6 +969,69 @@ void main() {
         }
       }
 
+      // -- A resolved point within the attach tolerance but not on the wall
+      // end point: the preview still draws from the end the commit stores,
+      // not from the placed point. The grid route of TL4: a fixed 500 mm
+      // grid, snap on, whose origin, a node, is 5e-6 mm east of the outer
+      // corner (12,000, 8,000), E1/0/right (E1's right face y 8,125 − 125
+      // meets E4's x 12,125 − 125); 0.052 px/mm (the aperture 10 / 0.052 =
+      // 192.3 mm). The first pointer (−170, −170) from the corner in the
+      // plan's frame (240.4 mm, beyond the aperture; turned 23° about
+      // (−90, −223) in world, within 250 of the node on both axes) resolves
+      // by the grid to the node. The second and third points are nodes in
+      // open space south of the flat (TL6's), Shift at the third: e_y
+      // 1,500 > e_x 0, horizontal, so the corner is decided on E1.
+      {
+        final plan = samplePlan(place);
+        final outer = plan.at(12000, 8000);
+        final node = outer + Vector2(5e-6, 0);
+        final gridPage = PageComponent(
+            originX: node.x,
+            originY: node.y,
+            gridStepMm: 500,
+            snapToGrid: true);
+        attachPage(plan.doc, gridPage);
+        const pxPerMm = 0.052;
+        expect(kSnapAperturePixels / pxPerMm, closeTo(192.3, 0.05));
+        expect(dragGridStepMm(gridPage, pxPerMm), 500);
+        final rig = dimRig(plan.doc, pxPerMm: pxPerMm);
+        void onNode(Vector2 raw, Vector2 want, {bool shift = false}) {
+          hoverTo(rig, raw, shift: shift);
+          expect(rig.tool.hoverKind, isNull, reason: 'premise: no snap');
+          expect(
+              [rig.tool.hoverPoint.x, rig.tool.hoverPoint.y], [want.x, want.y],
+              reason: 'premise: the grid node');
+        }
+
+        final raw0 = outer + turnedBy(place, -170, -170);
+        onNode(raw0, node);
+        clickAt(rig, raw0);
+        final n1 = node + Vector2(3000, -1000);
+        onNode(n1 + Vector2(37.5, -52.25), n1);
+        clickAt(rig, n1 + Vector2(37.5, -52.25));
+        expect(rig.tool.points, hasLength(2));
+        final n2 = node + Vector2(1500, -2500);
+        final raw2 = n2 + Vector2(20.5, -30.25);
+        onNode(raw2, n2, shift: true);
+        expect(rig.tool.debugPreviewKind, DimKind.horizontal);
+        final preview = rig.tool.debugPreview;
+        clickAt(rig, raw2, shift: true);
+        final h = dims(plan.doc).single;
+        final e1 = plan.walls[0];
+        expect(paramsOf(plan.doc, h).a, AttachedEnd(e1, 0, r));
+        final lines = dimLines(plan.doc, h);
+        // Premise: the committed dimension line starts 5e-6 mm (in x) from
+        // where the placed point would put it.
+        expect((lines[0].$1.x - node.x).abs(), closeTo(5e-6, 1e-7),
+            reason: 'premise: the end is the corner, not the node');
+        for (var i = 0; i < 5; i++) {
+          expect((preview[i].$1 - lines[i].$1).length, lessThan(1e-9),
+              reason: 'grid, line $i start');
+          expect((preview[i].$2 - lines[i].$2).length, lessThan(1e-9),
+              reason: 'grid, line $i end');
+        }
+      }
+
       // -- The rings, through paintOverlay. F3 on: click 1 on the Hall
       // corner (it attaches), then a hover onto the other corner (5 mm
       // off; it attaches): one ring at each.
@@ -1041,13 +1104,32 @@ void main() {
       expect(rig.tool.debugPreviewBuilds, before + 1, reason: 'Shift up');
       expect(rig.tool.debugPreviewKind, DimKind.aligned, reason: 'Shift up');
 
-      // -- F3 off: the same clicks and hovers ring nothing at all.
+      // -- F3 off: nothing rings at all, even at a point that would attach
+      // with F3 on. With F3 off nothing snaps, so each click and hover is
+      // the raw point: here exactly the corners' own plan points, each
+      // within dimAttach.linear of its wall end point (a premise), so only
+      // F3 keeps their rings off.
       final (planOff, rigOff) = setUp(objectSnap: false);
-      clickAt(rigOff, planOff.at(12253, 8254));
+      for (final p in [c0, d]) {
+        expect(
+            attachCandidates(planOff.doc, rigOff.ctx.index, p,
+                objectSnap: true, thickest: thickestWall(planOff.doc)),
+            isNotEmpty,
+            reason: 'premise: $p would attach with F3 on');
+      }
+      void rawAt(Vector2 p) {
+        expect(rigOff.tool.hoverKind, isNull, reason: 'premise: F3 off');
+        expect([rigOff.tool.hoverPoint.x, rigOff.tool.hoverPoint.y], [p.x, p.y],
+            reason: 'premise: the raw point (no grid snap on this page)');
+      }
+
+      clickAt(rigOff, c0);
+      rawAt(c0);
       expect(ringsOf(rigOff), isEmpty, reason: 'F3 off: the placed point');
-      hoverTo(rigOff, planOff.at(16937, 12937));
+      hoverTo(rigOff, d);
+      rawAt(d);
       expect(ringsOf(rigOff), isEmpty, reason: 'F3 off: the hover');
-      clickAt(rigOff, planOff.at(16937, 12937));
+      clickAt(rigOff, d);
       hoverTo(rigOff, planOff.at(14000.5, 11500.25));
       expect(ringsOf(rigOff), isEmpty, reason: 'F3 off: two placed points');
       expect(rigOff.tool.debugPreview, hasLength(5),
