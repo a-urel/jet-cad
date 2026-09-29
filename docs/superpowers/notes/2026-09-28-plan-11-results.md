@@ -598,6 +598,8 @@ are frozen after Task 1, Ruling 11-20).
   needs a wall end point within 1e-5 mm). **The human ruled: a separate
   `fix/` branch after Plan 11 merges** (2026-09-29). The fix maps the
   segments through the leaf transform, in the engine.
+  *Fixed on `fix/phantom-intersection-snap`; see
+  [2026-09-29-fix-phantom-intersection-snap.md](2026-09-29-fix-phantom-intersection-snap.md).*
 - **(b) A tapered piece** (Task 4, confirmed by its reviewer), file only:
   a scaled wall group with a flush door draws a tapered piece (07's world
   caps at ±100 against 08's cut in the scaled frame at ±150).

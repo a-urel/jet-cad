@@ -521,14 +521,17 @@ void main() {
 
       // -- C6's X: A's left face y = 100 crosses B's left face x = 1,900
       // (B runs north, left normal −x). No vertex of either wall is there.
-      // Whether the engine's intersection snap finds the crossing depends
-      // on the groups (it intersects the stored coordinates of the root
-      // container's leaves: the identity at the origin, so it finds the
-      // crossing there; local coordinates in own groups, so it finds
-      // nothing there), so the premise allows either: no snap, or an
-      // intersection exactly at the crossing. Either way the resolved point
-      // is the crossing (or the raw click on it), and it matches no attach
-      // point: fixed.
+      // The engine's intersection snap finds the crossing at every
+      // placement: it maps a root-level group's pieces to world before
+      // intersecting them (post-11 found item (a); before that fix it read
+      // stored coordinates as world and found nothing in own groups). The
+      // point it reports is the crossing within rounding: exactly q at the
+      // origin, 1.16e-9 off it at the far turned placement in own groups
+      // (measured). So the premise is exact `==` at the origin and, at the
+      // far placement, an intersection within 1e-8 of the crossing -- the
+      // bound spec 11 sets for AP3 at the same placement, where rounding
+      // near 4.5e6 is about one ulp (9.3e-10) plus the round trip. Neither
+      // the crossing nor the resolved point matches an attach point: fixed.
       {
         final plan = buildPlan(c6Walls, place: place);
         final index = SpatialIndex(plan.doc);
@@ -536,16 +539,23 @@ void main() {
         final q = plan.at(1900, 100);
         final res = snapAt(index, q);
         expect(
-            res == null ||
-                (res.kind == SnapKind.intersection &&
-                    res.point.x == q.x &&
-                    res.point.y == q.y),
+            res != null &&
+                res.kind == SnapKind.intersection &&
+                (place == origin
+                    ? res.point == q
+                    : (res.point - q).length < 1e-8),
             isTrue,
-            reason: 'premise: no snap, or an intersection exactly at the '
-                'crossing (${res?.kind} ${res?.point}, q $q)');
+            reason: 'premise: an intersection at the crossing, exactly at '
+                'the origin, within 1e-8 elsewhere '
+                '(${res?.kind} ${res?.point}, q $q)');
         expect(bruteCandidates(plan.doc, q), isEmpty,
             reason: 'premise: no attach point at the crossing');
         expect(through(plan.doc, index, q), isEmpty, reason: 'the crossing');
+        final resolved = Vector2.copy(res!.point);
+        expect(bruteCandidates(plan.doc, resolved), isEmpty,
+            reason: 'premise: no attach point at the resolved point');
+        expect(through(plan.doc, index, resolved), isEmpty,
+            reason: 'the resolved point');
       }
 
       // -- C10's degenerate walls: the zero-length wall at (0, 1000) and

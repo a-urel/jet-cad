@@ -441,6 +441,88 @@ DraftDocument _manyRootInstancesDocument(int count) {
   return (doc: doc, point: point, radius: radius, textProbe: textProbe);
 }
 
+/// [groupCount] root-level groups, each at its own turned, scaled and moved
+/// transform, each holding a line and a two-segment polyline that pass close
+/// to the group's local origin -- which every transform carries near
+/// `point`. So the intersection pass sees `2 * groupCount` candidates, every
+/// one of them a root-container leaf with a **non-null**
+/// `ContainerIndex.transformOfLeaf`, and about `3 * groupCount` segments
+/// near the query point, each mapped to world before it is measured.
+///
+/// `_deepNestedDocument` cannot stand in for this: its leaves are all inside
+/// instances, which the intersection pass never considers, so no fixture
+/// here drove that pass over mapped segments before (post-11 found item
+/// (a)). The stored coordinates sit near (0, 0), far from `point`, so a pass
+/// that measured stored coordinates would find nothing near and do no pair
+/// work at all -- the premise below that an intersection is found is what
+/// rules that out.
+///
+/// **What it catches, measured by mutation -- and only when this file runs
+/// in order.** A `Vector2` per mapped segment
+/// (`_isectA1.setFrom(Vector2(x1, y1))`) read 0.95 to 5.49 per call over 15
+/// full-file runs, red every time against the 0.5 budget; a `Vector2` per
+/// mapped point (each point through
+/// `Transform2(..).transformPoint(Vector2(lx, ly))`) read 0.30 to 13.26 over
+/// 13, red 12 times -- the one green run read 0.30. The margin is thin:
+/// the lowest red readings are 0.95 and 0.59. **Run alone** (`--plain-name`)
+/// the same case passes both mutants (5 runs of 5 and 3 of 3) at 0.014 per
+/// call, the unmutated reading: the JIT scalar-replaces even these `Vector2`s
+/// when the earlier tests in this file have not shaped its state first. So
+/// the kill depends on the order of this file. The gate runs the file
+/// whole: under `dart test` over the package the per-segment mutant read
+/// 1.02 to 3.76, red 3 runs of 3. Making the case order-independent is a
+/// harness question, not settled here.
+///
+/// **What it does not catch in any order:** a `Transform2` built per
+/// segment or per candidate and never let escape (`Transform2(a, ..).a`, or
+/// `Transform2.identity().multiply(group)` read back into six doubles)
+/// read 0.12 per call, the same as no mutation at all -- the JIT evidently
+/// scalar-replaces it, and this profiler cannot see what was never
+/// allocated on the heap. Whether AOT would allocate it is not measured.
+({DraftDocument doc, Vector2 point, double radius}) _groupedCrossingDocument(
+    int groupCount) {
+  final doc = DraftDocument.empty();
+  EntityRecord record(Handle owner, EntityKind kind) => EntityRecord(
+        handle: doc.handleSeed.next(),
+        owner: owner,
+        kind: kind,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: kByLayer,
+        flags: 0,
+      );
+  for (var k = 0; k < groupCount; k++) {
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+      handle: group,
+      parent: doc.rootHandle,
+      transform: Transform2.translation(200 + 0.05 * k, 100 - 0.03 * k)
+          .multiply(Transform2.rotation(0.1 + k * 3.0 / groupCount))
+          .multiply(Transform2.scale(1 + 0.01 * k, 1)),
+      children: const [],
+    )));
+    doc.commands.execute(AddEntityCommand(
+      record: record(group, EntityKind.line),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([-10, 0.3, 10, 0.3]),
+        scalars: Float64List(0),
+      ),
+    ));
+    doc.commands.execute(AddEntityCommand(
+      record: record(group, EntityKind.polyline),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([-8, -2, 0, 1, 8, -2]),
+        scalars: Float64List(0),
+      ),
+    ));
+  }
+  return (doc: doc, point: Vector2(200, 100), radius: 3.0);
+}
+
 void main() {
   AllocationMeter? meter;
 
@@ -664,6 +746,67 @@ void main() {
           reason: '$name: ${value / iters} per call over $iters calls -- '
               'bounded, not zero-budgeted; same reasoning as the pickInto '
               'test above');
+    }
+  });
+
+  test(
+      'snapInto does not allocate in steady state, intersecting segments '
+      'mapped through their groups', () async {
+    final m = meter;
+    if (m == null) {
+      markTestSkipped(vmServiceUnavailableReason);
+      return;
+    }
+    final fixture = _groupedCrossingDocument(24);
+    final index = SpatialIndex(fixture.doc);
+    addTearDown(index.dispose);
+    final out = SnapResult(32);
+
+    // Premises: every line-like leaf is a root-container leaf with a group
+    // transform to apply, and the intersection pass genuinely finds a
+    // crossing of mapped segments at the query point.
+    var mapped = 0;
+    for (final slot in fixture.doc.entities.liveSlots) {
+      expect(index.rootIndex.transformOfLeaf(slot), isNotNull);
+      mapped++;
+    }
+    expect(mapped, 48);
+    index.snapInto(fixture.point, fixture.radius,
+        const SnapMask(0).with_(SnapKind.intersection), out);
+    expect(out.found, isTrue,
+        reason: 'the mapped segments must cross near the query point, or '
+            'this measures an intersection pass with no pair work to do');
+    expect(out.kind, SnapKind.intersection);
+
+    for (var i = 0; i < 20000; i++) {
+      index.snapInto(fixture.point, fixture.radius, SnapMask.all, out);
+    }
+
+    await m.reset();
+    const iters = 1000;
+    for (var i = 0; i < iters; i++) {
+      index.snapInto(fixture.point, fixture.radius, SnapMask.all, out);
+    }
+    // One combined call -- see the pickInto test above.
+    final counts = await m.accumulatedInstances(
+        {..._recursiveCandidateScalingClasses, ..._depthBoundClasses});
+
+    for (final name in _recursiveCandidateScalingClasses) {
+      final value = counts[name]!;
+      expect(value / iters, lessThan(_perCallBudget),
+          reason: '$name: ${value / iters} per call over $iters calls, '
+              'against 48 grouped intersection candidates and 72 mapped '
+              'segments -- a Vector2 per mapped segment measured 0.95-5.49 '
+              'per call here in file order (the profiler undercounts; run '
+              'alone, the JIT hides it entirely -- see the doc comment on '
+              '_groupedCrossingDocument)');
+    }
+    for (final name in _depthBoundClasses) {
+      final value = counts[name]!;
+      expect(value / iters, lessThan(_depthBoundBudgets[name]!),
+          reason: '$name: ${value / iters} per call over $iters calls -- '
+              'a root-only walk, so at most the one level _descend '
+              'documents (measured 0.10-0.11 Transform2, 0.05-0.06 Aabb2)');
     }
   });
 
