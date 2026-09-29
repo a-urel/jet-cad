@@ -24,7 +24,9 @@ exit 0 and `git diff --quiet -- packages/` exit 0, for all 81 fires and for
 every later fire in this log (controls, split, re-fires, the probe).
 
 **No mutant survives.** Carried item 1 (`R4-filterAll`, an extra) stopped
-on a product finding; see "Carried item 1".
+on a product finding; the fix round (`49de0e8`, the controller's ruling
+under Ruling 11-19) fixed the product and killed it, with the new
+`X16-hostVisible`. See "Carried item 1" and "Fix round".
 
 **The procedure** (the Global constraints'): a Python driver
 (`t16-fire.py`, specs in `t16-specs.py`, scratch `plan11/`) backs up each
@@ -172,6 +174,8 @@ placements, each the same.)
   stopped here: **no test was added and `R4-filterAll` stays unkilled**,
   pending the controller's ruling. Reachable only from a file (a hidden
   wall group hosting a visible opening).
+  **Resolved:** the controller ruled it a defect in Plan 11's own code and
+  it was fixed in `49de0e8`, with `AM6b`; see "Fix round".
 
 **`R4-filterAll` against the probe** (`t16-R4-filterAll@probe-run1.log`,
 restored, `diff` 0, `git diff --quiet` 0): P1 and P3 change (the hidden B
@@ -183,6 +187,62 @@ on P1 or P3 would kill it; the P2 behaviour is the open question.
 > P1 origin hidden B: B far centre index [16/1/centre] | brute [16/1/centre]
 > P3 origin visible S, hidden door left: S/0/l index [16/0/left] | brute [16/0/left]
 ```
+
+
+## Fix round: the hidden host (Ruling 11-19, the controller's ruling)
+
+**The ruling:** P2 is a defect in Plan 11's own code (Task 4): D10 gathers
+candidates with `rendering()` so that only what is drawn attaches. Fixed in
+`49de0e8` (`fix(app): a hidden wall attaches no dimension through its flush
+opening (11 D10)`):
+
+- **Lib** (`apps/floor_planner/lib/parametric/dimension_attach.dart`): the
+  opening-host query keeps a host only when
+  `FilterEvaluator.acceptsNode(host, QueryFilter.rendering())` holds (the
+  engine's public API; no package change): the host's group and every
+  group above it visible. One evaluator per call, made at the first host
+  found; one check per host, cached per group within the call; no walk
+  over the document. The doc comment's step 2 says so.
+- **The layer:** a `GroupNode` has no layer (only an `InstanceNode` does,
+  and `acceptsNode` checks it there); a wall's children and an opening's
+  are all generated on layer 0 (`draftRecord`), so a hidden layer 0 hides
+  the opening's children from the query as well as the wall's. `AM6b`
+  covers it: with layer 0 hidden nothing attaches at S's flush end or at
+  C's start, where the brute-force oracle has a point. (A file that moves a
+  wall's children, not its opening's, to another hidden layer is not
+  covered: a group's children's layers cannot be read in O(1) through the
+  public API; recorded as a limit, not reachable from any command.)
+- **Test** (`AM6b`, `dimension_attach_test.dart`, at the origin and at
+  corpusGroups, against `bruteCandidates`, each hidden point asserted a
+  brute-force candidate first): P1, a hidden B in an L attaches neither at
+  its far end's three points nor at the shared corner (index `[A/1/right]`
+  where brute force has `[A/1/right, B/0/right]`); P2, a hidden S hosting a
+  drawn flush door gives no candidate at S/0's three points, both swings;
+  P3, a drawn S with its door hidden gives none; the control with both
+  drawn gives S/0's point; layer 0 hidden gives none.
+
+**The mutants** (entries under "The entries", "Fix round"):
+
+- `R4-filterAll` (both candidate queries `rendering()` → `all()`, the Task 4
+  reviewer's; survived Task 4's suite and was deferred here): **red** at
+  `AM6b` (`dimension_attach_test.dart 900:9`, P1's corner `[12/1/right,
+  16/0/right]` for `[12/1/right]`), both placements.
+- `X16-hostVisible` (the host test dropped): **red** at `AM6b`
+  (`dimension_attach_test.dart 934:13`, P2's S/0/left `[16/0/left]` for
+  empty), both placements.
+- **Re-fired on the fix** (`49de0e8`): every mutant whose killers are in
+  `dimension_attach_test.dart` or `dimension_attach_points_test.dart`, and
+  `M-11snaponly` at `TL6`, 22 fires: `M-11nbrs`, `M-11swap`,
+  `M-11swapjust`, `M-11fallback`, `M-11centremid`, `M-11localring`,
+  `M-11vertex`, `M-11d`, `M-11d2`, `M-11nearest`, `M-11parallel`,
+  `M-11lineardir`, `M-11centrefirst`, `M-11attachtol`, `M-11snapoff`,
+  `M-11prefilter`, `M-11openinghost`, `M-11hostbox`, `M-11reachcull`,
+  `M-11ownerring`, `M-11snaponly`, `X2-step1only`. **Each killer's
+  verdict is the same as at `5ddd96f`** (the same commands red, and
+  `M-11vertex`'s `AP3` and `X2-step1only`'s `AP1` green as before).
+  `M-11openinghost` and `M-11ownerring` replace blocks that now carry the
+  host test, so their edits were re-cut to the fixed text (same rule).
+  Every restore `diff` 0, `git diff --quiet` 0, `packages/` 0.
 
 ## Controls
 
@@ -522,7 +582,8 @@ None is re-counted in the 75.
 | X4-noLocal, X4-degenerateLine, X4-thickestStored | 4 (31ed3b8) | red |
 | R4-noSort, R4-localOnly, R4-rightJust | 4 review | red |
 | R4-leftJust | 4 review: survived → fix 402e42f | red (dimension_attach_test 523:13) |
-| R4-filterAll | 4 review: survived → carried to 16 | **this task**: see "Carried item: R4-filterAll" |
+| R4-filterAll | 4 review: survived → carried to 16 | survived to Task 16's probe; the product defect it exposed fixed in `49de0e8`, and **red** at `AM6b` (fired here, "Fix round") |
+| X16-hostVisible | 16 fix round (`49de0e8`) | **red** at `AM6b` (fired here, "Fix round") |
 | X5-splitFirst, X5-tolWide, X5-noAbs | 5 (ac635a2) | red (DF1/DF2; X5-tolWide DF2 169) |
 | R5-mPad, R5-angular, R5-reduceOnce, R5-noAbsHalf, R5-tolNarrow | 5 review | red |
 | R5-quantaTol | 5 review: survived → fix b6f00a5 | red (DF2 183) |
@@ -4017,4 +4078,908 @@ The plan records it equivalent (D4, S-2); the ledger (Task 2 ruling (1), fix e7e
   ```
 - **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
 - **result:** SURVIVED (0 of 1 red). Fired at `5ddd96f`, 2026-09-29T11:39:58Z.
+
+### Fix round (`49de0e8`)
+
+#### R4-filterAll — the candidate queries' visibility filter dropped (both queries `rendering()` -> `all()`; Task 4's reviewer) (spec R4-filterAll; killers AM6b)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-R4-filterAll.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  115c115
+  <       const QueryFilter.rendering(), (slot) {
+  ---
+  >       const QueryFilter.all(), (slot) {
+  123c123
+  <       const QueryFilter.rendering(), (slot) {
+  ---
+  >       const QueryFilter.all(), (slot) {
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM6b ')` (exit 1; log `t16f-R4-filterAll-run1.log`)
+
+  ```
+  00:00 +0 -1: AM6b only a drawn wall attaches: a hidden wall neither by its own children nor as the host of a visible flush door; a hidden door makes its host no candidate; a hidden layer 0 hides every wall, at origin [E]
+    Expected: [AttachedEnd:12/1/right]
+      Actual: [AttachedEnd:12/1/right, AttachedEnd:16/0/right]
+       Which: at location [1] is [AttachedEnd:12/1/right, AttachedEnd:16/0/right] which longer than expected
+    test/dimension_attach_test.dart 900:9               main.<fn>
+  00:00 +0 -2: AM6b only a drawn wall attaches: a hidden wall neither by its own children nor as the host of a visible flush door; a hidden door makes its host no candidate; a hidden layer 0 hides every wall, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 900:9               main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:21Z.
+
+#### X16-hostVisible — the opening-host query keeps a host whether or not the renderer draws it (this round's host test dropped) (spec X16-hostVisible; killers AM6b)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-X16-hostVisible.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  131,133c131
+  <     if (drawn!.acceptsNode(host, const QueryFilter.rendering())) {
+  <       walls.add(host);
+  <     }
+  ---
+  >     walls.add(host);
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM6b ')` (exit 1; log `t16f-X16-hostVisible-run1.log`)
+
+  ```
+  00:00 +0 -1: AM6b only a drawn wall attaches: a hidden wall neither by its own children nor as the host of a visible flush door; a hidden door makes its host no candidate; a hidden layer 0 hides every wall, at origin [E]
+    Expected: empty
+      Actual: [AttachedEnd:16/0/left]
+    test/dimension_attach_test.dart 934:13              main.<fn>
+  00:00 +0 -2: AM6b only a drawn wall attaches: a hidden wall neither by its own children nor as the host of a visible flush door; a hidden door makes its host no candidate; a hidden layer 0 hides every wall, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 934:13              main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:24Z.
+
+
+### The attach re-fires on the fix (`49de0e8`)
+
+#### M-11nbrs@fix — the neighbours ignored (`drawnCapsOf(w, const [])`) (spec M-11nbrs; killers AP1, DN1)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11nbrs@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  66c66
+  <   final caps = drawnCapsOf(w, others)!;
+  ---
+  >   final caps = drawnCapsOf(w, const [])!;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11nbrs@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <100.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_follow_test.dart --plain-name 'DN1 ')` (exit 1; log `t16f-M-11nbrs@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: DN1 a neighbour's edit moves a referenced wall's corner and rebuilds the dimension once, at origin [E]
+    Expected: '3900'
+      Actual: '4000'
+       Which: is different.
+              Expected: 3900
+                Actual: 4000
+    test/dimension_follow_test.dart 80:7                main.<fn>
+  00:00 +0 -2: DN1 a neighbour's edit moves a referenced wall's corner and rebuilds the dimension once, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_follow_test.dart 80:7                main.<fn>
+  00:00 +0 -3: DN1 a neighbour's edit moves a referenced wall's corner and rebuilds the dimension once, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_follow_test.dart 80:7                main.<fn>
+  00:00 +0 -3: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (2 of 2 commands red). Fired at `49de0e8`, 2026-09-29T11:57:39Z.
+
+#### M-11swap@fix — the `k = 1` swap of outgoing sides dropped (spec M-11swap; killers AP1)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11swap@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  68c68
+  <   final outgoingLeft = (k == 0) == (side == WallSide.left);
+  ---
+  >   final outgoingLeft = side == WallSide.left;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11swap@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <200.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:42Z.
+
+#### M-11swapjust@fix — left and right swapped for right-justified walls (spec M-11swapjust; killers AP1)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11swapjust@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  68c68
+  <   final outgoingLeft = (k == 0) == (side == WallSide.left);
+  ---
+  >   final outgoingLeft = (k == 0) == ((side == WallSide.left) != (w.j.name == 'right'));
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11swapjust@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <233.23807579381202>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:46Z.
+
+#### M-11fallback@fix — no fallback at all in `drawnCapsOf`: both steps return the joined caps (S-2) (spec M-11fallback; killers AP1)
+
+- **file:** `apps/floor_planner/lib/parametric/wall_geometry.dart`; backup `t16f-M-11fallback@fix.wall_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  534a535,540
+  >   if (w.degenerate) return null;
+  >   return (
+  >     endCap: cap(End(w, 1), classify(w, 1, others)).points,
+  >     startCap: cap(End(w, 0), classify(w, 0, others)).points,
+  >     fellBack: false,
+  >   );
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11fallback@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <100.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/wall_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/wall_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:50Z.
+
+#### M-11centremid@fix — centre = the cap's midpoint (spec M-11centremid; killers AP1)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11centremid@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  65c65
+  <   if (side == WallSide.centre || w.degenerate) return w.endpoint(k);
+  ---
+  >   if (w.degenerate) return w.endpoint(k);
+  67a68
+  >   if (side == WallSide.centre) return (c.first + c.last) * 0.5;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11centremid@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <60.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:54Z.
+
+#### M-11localring@fix — the attach point ignores the local-ring fallback (`capsOf` alone): step 2 removed (spec M-11localring; killers AP2)
+
+- **file:** `apps/floor_planner/lib/parametric/wall_geometry.dart`; backup `t16f-M-11localring@fix.wall_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  542c542
+  <   if (isSimpleCcw(local)) return caps;
+  ---
+  >   return caps;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP2 ')` (exit 1; log `t16f-M-11localring@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP2 under 07's local-ring fallback the face points are the stored free rectangle's corners, at any similarity; drawnCapsOf falls back exactly when localOutlineOf does [E]
+    Expected: a value less than <0.00001>
+      Actual: <5730.741669592764>
+       Which: is not a value less than <0.00001>
+    test/dimension_attach_points_test.dart 383:9        main.<fn>.expectLocalFallback
+    test/dimension_attach_points_test.dart 399:5        main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/wall_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/wall_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:57:58Z.
+
+#### M-11vertex@fix — a face point taken from its cap's second point, not its first or last (spec M-11vertex; killers AP1, AP2, AP3)
+
+Killer list per the Task 2 ruling (2): AP1 (+AP2); AP3 dropped (every cap point is a stored vertex). AP3 fired for the record.
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11vertex@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  69c69
+  <   return outgoingLeft ? c.first : c.last;
+  ---
+  >   return outgoingLeft ? c[1] : c.last;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11vertex@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <200.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP2 ')` (exit 1; log `t16f-M-11vertex@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: AP2 under 07's local-ring fallback the face points are the stored free rectangle's corners, at any similarity; drawnCapsOf falls back exactly when localOutlineOf does [E]
+    Expected: a value less than <0.00001>
+      Actual: <200.00000000009047>
+       Which: is not a value less than <0.00001>
+    test/dimension_attach_points_test.dart 383:9        main.<fn>.expectLocalFallback
+    test/dimension_attach_points_test.dart 399:5        main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP3 ')` (exit 0; log `t16f-M-11vertex@fix-run3.log`)
+
+  ```
+  00:00 +6: All tests passed!
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (2 of 3 commands red); green: AP3. Fired at `49de0e8`, 2026-09-29T11:58:08Z.
+
+#### M-11d@fix — an attached end resolved by its wall handle and side only, `k` ignored (always the start) (spec M-11d; killers AP1, SP8)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11d@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  64a65
+  >   k = 0; // M-11d
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11d@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <4000.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/startup_plan_test.dart --plain-name 'SP8 ')` (exit 1; log `t16f-M-11d@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: SP8 the five dimensions read D17's values at 1:50 m with text 125 high, reference the walls listed, and a click on each line selects it [E]
+    Expected: ['14.00', '9.00', '4.69', '4.38', '3.58']
+      Actual: ['0.00', '0.00', '4.69', '4.38', '10.09']
+       Which: at location [0] is '0.00' instead of '14.00'
+    test/startup_plan_test.dart 616:5                   main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (2 of 2 commands red). Fired at `49de0e8`, 2026-09-29T11:58:16Z.
+
+#### M-11d2@fix — `side` ignored (always the centreline end) (spec M-11d2; killers AP1, SP8)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11d2@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  64a65
+  >   side = WallSide.centre; // M-11d2
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 1; log `t16f-M-11d2@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at origin [E]
+    Expected: a value less than <0.000001>
+      Actual: <100.0>
+       Which: is not a value less than <0.000001>
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -2: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -3: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -4: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -5: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: AP1 every wall end point of C1-C10 equals its hand value to 1e-6 mm, k = 1 and both faces included, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_points_test.dart 287:11       main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/startup_plan_test.dart --plain-name 'SP8 ')` (exit 1; log `t16f-M-11d2@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: SP8 the five dimensions read D17's values at 1:50 m with text 125 high, reference the walls listed, and a click on each line selects it [E]
+    Expected: ['14.00', '9.00', '4.69', '4.38', '3.58']
+      Actual: ['13.75', '8.75', '4.88', '4.50', '3.73']
+       Which: at location [0] is '13.75' instead of '14.00'
+    test/startup_plan_test.dart 616:5                   main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (2 of 2 commands red). Fired at `49de0e8`, 2026-09-29T11:58:25Z.
+
+#### M-11nearest@fix — the nearest candidate instead of decision 19's rule, ties to the lowest handle (spec M-11nearest; killers AM1, AM3)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11nearest@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  252a253,266
+  >   {
+  >     AttachedEnd? n;
+  >     var nd = double.infinity;
+  >     for (final e in candidates) {
+  >       final ws = wallsInDocument(doc, e.wall)!;
+  >       final dd = (wallEndPoint(ws.host, ws.walls, e.k, e.side) - at).length;
+  >       if (dd < nd || (dd == nd && _before(e, n!))) {
+  >         n = e;
+  >         nd = dd;
+  >       }
+  >     }
+  >     return n;
+  >   }
+  >   // ignore: dead_code
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM1 ')` (exit 1; log `t16f-M-11nearest@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at origin [E]
+    Expected: AttachedEnd:<1E/1/left>
+      Actual: AttachedEnd:<12/0/left>
+    test/dimension_attach_test.dart 429:13              main.<fn>
+  00:00 +0 -2: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 429:13              main.<fn>
+  00:00 +0 -3: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 429:13              main.<fn>
+  00:00 +0 -3: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM3 ')` (exit 1; log `t16f-M-11nearest@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at origin [E]
+    Expected: AttachedEnd:<16/1/left>
+      Actual: AttachedEnd:<12/0/left>
+    test/dimension_attach_test.dart 222:9               main.<fn>
+  00:00 +0 -2: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 222:9               main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (2 of 2 commands red). Fired at `49de0e8`, 2026-09-29T11:58:34Z.
+
+#### M-11parallel@fix — decision 19's parallel step skipped (the lowest handle first) (spec M-11parallel; killers AM3)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11parallel@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  262d261
+  <     if (!(sigma[e.wall]! <= least + dimAttach.angular)) continue;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM3 ')` (exit 1; log `t16f-M-11parallel@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at origin [E]
+    Expected: AttachedEnd:<16/1/left>
+      Actual: AttachedEnd:<12/0/left>
+    test/dimension_attach_test.dart 222:9               main.<fn>
+  00:00 +0 -2: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 222:9               main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:58:38Z.
+
+#### M-11lineardir@fix — a linear kind's parallel measure uses `P1 − P0` instead of its axis (spec M-11lineardir; killers AM3)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11lineardir@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  253c253
+  <   final u = measuringDirection(kind, at, other, m);
+  ---
+  >   final u = (other - at).normalized();
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM3 ')` (exit 1; log `t16f-M-11lineardir@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at origin [E]
+    Expected: AttachedEnd:<16/1/right>
+      Actual: AttachedEnd:<12/0/right>
+    test/dimension_attach_test.dart 254:9               main.<fn>
+  00:00 +0 -2: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 254:9               main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:58:41Z.
+
+#### M-11centrefirst@fix — centre before face (spec M-11centrefirst; killers AM3)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11centrefirst@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  292c292
+  < int _centreRank(WallSide side) => side == WallSide.centre ? 1 : 0;
+  ---
+  > int _centreRank(WallSide side) => side == WallSide.centre ? 0 : 1;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM3 ')` (exit 1; log `t16f-M-11centrefirst@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at origin [E]
+    Expected: AttachedEnd:<12/0/right>
+      Actual: AttachedEnd:<12/0/centre>
+    test/dimension_attach_test.dart 327:9               main.<fn>
+  00:00 +0 -2: AM3 a shared corner is stored on the wall the committed kind runs along, then on the lowest handle, then face before centre, k, left before right, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 327:9               main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:58:45Z.
+
+#### M-11attachtol@fix — attach tolerance 1e-9 (spec M-11attachtol; killers AM1)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_geometry.dart`; backup `t16f-M-11attachtol@fix.dimension_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  35c35
+  < const Tolerance dimAttach = Tolerance(linear: 1e-5, angular: 1e-9);
+  ---
+  > const Tolerance dimAttach = Tolerance(linear: 1e-9, angular: 1e-9);
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM1 ')` (exit 1; log `t16f-M-11attachtol@fix-run1.log`)
+
+  ```
+  00:00 +1 -1: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at corpus far origin, 23 deg, own groups [E]
+    Expected: [AttachedEnd:12/0/right, AttachedEnd:1E/1/right]
+      Actual: [AttachedEnd:12/0/right]
+       Which: at location [1] is [AttachedEnd:12/0/right] which shorter than expected
+    test/dimension_attach_test.dart 424:11              main.<fn>
+  00:00 +1 -2: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 423:11              main.<fn>
+  00:00 +1 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:58:49Z.
+
+#### M-11snapoff@fix — ends attach with F3 off (spec M-11snapoff; killers AM4, TL6)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11snapoff@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  110d109
+  <   if (!objectSnap) return const [];
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM4 ')` (exit 1; log `t16f-M-11snapoff@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM4 decision 23: a grid point on the sample's outer corner attaches with F3 on and stays fixed with F3 off, at origin [E]
+    Expected: empty
+      Actual: [AttachedEnd:12/0/right, AttachedEnd:1E/1/right]
+    test/dimension_attach_test.dart 720:7               main.<fn>
+  00:00 +0 -2: AM4 decision 23: a grid point on the sample's outer corner attaches with F3 on and stays fixed with F3 off, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 720:7               main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_tool_test.dart --plain-name 'TL6 ')` (exit 1; log `t16f-M-11snapoff@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: TL6 decision 23 through the tool: with F3 on a grid point on a corner attaches and a flush door's jamb snap attaches the stem's corner; with F3 off every end is fixed, at origin [E]
+    Expected: FixedEnd:<(12000.0, 8000.0)>
+      Actual: AttachedEnd:<12/0/right>
+    test/dimension_tool_test.dart 788:9                 main.<fn>
+  00:00 +0 -2: TL6 decision 23 through the tool: with F3 on a grid point on a corner attaches and a flush door's jamb snap attaches the stem's corner; with F3 off every end is fixed, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_tool_test.dart 788:9                 main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (2 of 2 commands red). Fired at `49de0e8`, 2026-09-29T11:58:57Z.
+
+#### M-11prefilter@fix — D10's line test omits the centreline (face lines only) (spec M-11prefilter; killers AM1, AM6, TL8)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11prefilter@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  195c195
+  <   return (o - lOff).abs() <= tol || o.abs() <= tol || (o - rOff).abs() <= tol;
+  ---
+  >   return (o - lOff).abs() <= tol || (o - rOff).abs() <= tol;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM1 ')` (exit 1; log `t16f-M-11prefilter@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at origin [E]
+    Expected: contains AttachedEnd:<12/0/centre>
+      Actual: []
+       Which: does not contain AttachedEnd:<12/0/centre>
+    test/dimension_attach_test.dart 423:11              main.<fn>
+  00:00 +0 -2: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 423:11              main.<fn>
+  00:00 +0 -3: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 423:11              main.<fn>
+  00:00 +0 -3: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM6 ')` (exit 1; log `t16f-M-11prefilter@fix-run2.log`)
+
+  ```
+  00:00 +0 -1: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at origin [E]
+    Expected: contains AttachedEnd:<16/0/centre>
+      Actual: []
+       Which: does not contain AttachedEnd:<16/0/centre>
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -2: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at corpus far origin, 23 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -3: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -4: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -5: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -6: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_tool_test.dart --plain-name 'TL8 ')` (exit 1; log `t16f-M-11prefilter@fix-run3.log`)
+
+  ```
+  00:01 +0 -1: TL8 hovering among 600 walls searches once per distinct resolved point, passes no line test between a centreline and its faces or past a door, passes one on a face line and one on a centreline, and a commit searches afresh once per end; the time per move is printed [E]
+    Expected: ({int passes, int searches}):<(passes: 2, searches: 42)>
+      Actual: ({int passes, int searches}):<(passes: 1, searches: 42)>
+    test/dimension_tool_test.dart 1480:5                main.<fn>
+  00:01 +0 -1: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (3 of 3 commands red). Fired at `49de0e8`, 2026-09-29T11:59:10Z.
+
+#### M-11openinghost@fix — opening hosts not gathered as candidate walls (spec M-11openinghost; killers AM6)
+
+ Edit re-cut for the fixed opening-host query (the block it replaces now carries the host test).
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11openinghost@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  119,134c119
+  <   final grown = dimAttach.linear + thickest;
+  <   FilterEvaluator? drawn;
+  <   index.forEachInRect(
+  <       Aabb2.raw(q.x - grown, q.y - grown, q.x + grown, q.y + grown),
+  <       const QueryFilter.rendering(), (slot) {
+  <     final owner = doc.entities.ownerAt(slot);
+  <     if (!_isLiveGroup(doc, owner)) return;
+  <     final host = doc.components.get<OpeningParams>(owner)?.host;
+  <     if (host == null || !_isLiveWall(doc, host)) return;
+  <     // Only a host the renderer draws (D10: what is drawn attaches): the
+  <     // opening's children passed `rendering()`, its host's group must too.
+  <     drawn ??= FilterEvaluator(doc);
+  <     if (drawn!.acceptsNode(host, const QueryFilter.rendering())) {
+  <       walls.add(host);
+  <     }
+  <   });
+  ---
+  >   // M-11openinghost: no opening-host query
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM6 ')` (exit 1; log `t16f-M-11openinghost@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at origin [E]
+    Expected: contains AttachedEnd:<16/0/left>
+      Actual: []
+       Which: does not contain AttachedEnd:<16/0/left>
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -2: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at corpus far origin, 23 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -3: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -4: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -5: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -6: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:59:15Z.
+
+#### M-11hostbox@fix — opening hosts gathered from the tight box `q ± dimAttach.linear` only (spec M-11hostbox; killers AM6)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11hostbox@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  119c119
+  <   final grown = dimAttach.linear + thickest;
+  ---
+  >   final grown = dimAttach.linear;
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM6 ')` (exit 1; log `t16f-M-11hostbox@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at origin [E]
+    Expected: contains AttachedEnd:<16/0/centre>
+      Actual: []
+       Which: does not contain AttachedEnd:<16/0/centre>
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -2: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at corpus far origin, 23 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -3: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -4: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 23 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -5: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 0 deg [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -6: AM6 a door flush with a wall end leaves none of the end's three points stored, and each still attaches by position, and through the jamb's snap, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 818:11              main.<fn>
+  00:00 +0 -6: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:59:19Z.
+
+#### M-11reachcull@fix — candidate walls by reach instead of stored boxes (spec M-11reachcull; killers AM1)
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11reachcull@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  112,118c112,118
+  <   final tight = dimAttach.linear;
+  <   index.forEachInRect(
+  <       Aabb2.raw(q.x - tight, q.y - tight, q.x + tight, q.y + tight),
+  <       const QueryFilter.rendering(), (slot) {
+  <     final owner = doc.entities.ownerAt(slot);
+  <     if (_isLiveWall(doc, owner)) walls.add(owner);
+  <   });
+  ---
+  >   for (final h in doc.components.withComponent<WallParams>()) {
+  >     if (!_isLiveWall(doc, h)) continue;
+  >     if (const WallType()
+  >         .reach(doc.components.get<WallParams>(h)!,
+  >             doc.tree.accumulatedTransform(h))
+  >         .containsPoint(q)) walls.add(h);
+  >   }
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM1 ')` (exit 1; log `t16f-M-11reachcull@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at origin [E]
+    Expected: contains AttachedEnd:<12/0/left>
+      Actual: []
+       Which: does not contain AttachedEnd:<12/0/left>
+    test/dimension_attach_test.dart 423:11              main.<fn>
+  00:00 +0 -2: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 424:11              main.<fn>
+  00:00 +0 -3: AM1 every one of the sample plan's 60 wall end points, snapped through snapInto from 5 mm away, has the brute-force candidate set and decision 19's end, at +1e9 mm (1e6 m), 23 deg, own groups [E]
+    test/dimension_attach_test.dart 424:11              main.<fn>
+  00:00 +0 -3: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:59:23Z.
+
+#### M-11ownerring@fix — candidate walls from the snapped entity's owner only (the spike's (A)) (spec M-11ownerring; killers AM2)
+
+ Edit re-cut for the fixed opening-host query (the block it replaces now carries the host test).
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_attach.dart`; backup `t16f-M-11ownerring@fix.dimension_attach.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  112,116c112,117
+  <   final tight = dimAttach.linear;
+  <   index.forEachInRect(
+  <       Aabb2.raw(q.x - tight, q.y - tight, q.x + tight, q.y + tight),
+  <       const QueryFilter.rendering(), (slot) {
+  <     final owner = doc.entities.ownerAt(slot);
+  ---
+  >   final res = SnapResult();
+  >   index.snapInto(q, dimAttach.linear, kDragSnapMask, res);
+  >   if (res.found) {
+  >     final owner = res.chainLength > 0
+  >         ? Handle(res.chain[0])
+  >         : doc.entities.ownerAt(doc.entities.slotOf(res.entity)!);
+  118,134c119
+  <   });
+  <   final grown = dimAttach.linear + thickest;
+  <   FilterEvaluator? drawn;
+  <   index.forEachInRect(
+  <       Aabb2.raw(q.x - grown, q.y - grown, q.x + grown, q.y + grown),
+  <       const QueryFilter.rendering(), (slot) {
+  <     final owner = doc.entities.ownerAt(slot);
+  <     if (!_isLiveGroup(doc, owner)) return;
+  <     final host = doc.components.get<OpeningParams>(owner)?.host;
+  <     if (host == null || !_isLiveWall(doc, host)) return;
+  <     // Only a host the renderer draws (D10: what is drawn attaches): the
+  <     // opening's children passed `rendering()`, its host's group must too.
+  <     drawn ??= FilterEvaluator(doc);
+  <     if (drawn!.acceptsNode(host, const QueryFilter.rendering())) {
+  <       walls.add(host);
+  <     }
+  <   });
+  ---
+  >   }
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_test.dart --plain-name 'AM2 ')` (exit 1; log `t16f-M-11ownerring@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AM2 a jamb is fixed, a Y lobe vertex finds both walls' points, a T butt corner is the stem's, an X crossing gives no candidate; a degenerate wall and a left-justified wall's points are found, at origin [E]
+    Expected: [AttachedEnd:16/0/left, AttachedEnd:1A/0/right]
+      Actual: [AttachedEnd:1A/0/right]
+       Which: at location [0] is AttachedEnd:<1A/0/right> instead of AttachedEnd:<16/0/left>
+    test/dimension_attach_test.dart 500:9               main.<fn>
+  00:00 +0 -2: AM2 a jamb is fixed, a Y lobe vertex finds both walls' points, a T butt corner is the stem's, an X crossing gives no candidate; a degenerate wall and a left-justified wall's points are found, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_attach_test.dart 500:9               main.<fn>
+  00:00 +0 -3: AM2 a wall group scaled 1.5 (C11, at its own far placement) has its free rectangle's corners found by the local-frame line test [E]
+    test/dimension_attach_test.dart 638:9               main.<fn>
+  00:00 +0 -3: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_attach.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_attach.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:59:26Z.
+
+#### M-11snaponly@fix — an end attaches only when an object snap won (the tool's candidate search gated on `hoverKind != null`, Ruling 11-6) (spec M-11snaponly; killers TL6)
+
+Killer TL6 only (Ruling 11-6: AM4 cannot see "an object snap won").
+
+- **file:** `apps/floor_planner/lib/parametric/dimension_tool.dart`; backup `t16f-M-11snaponly@fix.dimension_tool.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  289,290c289,290
+  <         decideEnd(doc, _candidatesAt(ctx, at, t),
+  <             kind: kind, at: at, other: other, m: m) ??
+  ---
+  >         (hoverKind != null ? decideEnd(doc, _candidatesAt(ctx, at, t),
+  >             kind: kind, at: at, other: other, m: m) : null) ??
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_tool_test.dart --plain-name 'TL6 ')` (exit 1; log `t16f-M-11snaponly@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: TL6 decision 23 through the tool: with F3 on a grid point on a corner attaches and a flush door's jamb snap attaches the stem's corner; with F3 off every end is fixed, at origin [E]
+    Expected: AttachedEnd:<12/0/right>
+      Actual: FixedEnd:<(12000.0, 8000.0)>
+    test/dimension_tool_test.dart 788:9                 main.<fn>
+  00:00 +0 -2: TL6 decision 23 through the tool: with F3 on a grid point on a corner attaches and a flush door's jamb snap attaches the stem's corner; with F3 off every end is fixed, at corpus far origin, 23 deg, own groups [E]
+    test/dimension_tool_test.dart 788:9                 main.<fn>
+  00:00 +0 -2: Some tests failed.
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/dimension_tool.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/dimension_tool.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 1 commands red). Fired at `49de0e8`, 2026-09-29T11:59:31Z.
+
+#### X2-step1only@fix — drawnCapsOf's step 1 removed alone (capsOf's own fallback skipped; step 2, the local-ring test, kept) — the plan's control (spec X2-step1only; killers AP2, AP1)
+
+The plan records it equivalent (D4, S-2); the ledger (Task 2 ruling (1), fix e7e9622) records it killed at AP2: the ledger wins.
+
+- **file:** `apps/floor_planner/lib/parametric/wall_geometry.dart`; backup `t16f-X2-step1only@fix.wall_geometry.dart.bak`
+- **edit** (`diff <backup> <file>`):
+
+  ```diff
+  535,536c535,540
+  <   final caps = capsOf(w, others);
+  <   if (caps == null || caps.fellBack) return caps;
+  ---
+  >   if (w.degenerate) return null;
+  >   final caps = (
+  >     endCap: cap(End(w, 1), classify(w, 1, others)).points,
+  >     startCap: cap(End(w, 0), classify(w, 0, others)).points,
+  >     fellBack: false,
+  >   );
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP2 ')` (exit 1; log `t16f-X2-step1only@fix-run1.log`)
+
+  ```
+  00:00 +0 -1: AP2 under 07's local-ring fallback the face points are the stored free rectangle's corners, at any similarity; drawnCapsOf falls back exactly when localOutlineOf does [E]
+    Expected: a value less than <0.00001>
+      Actual: <86.96452191368587>
+       Which: is not a value less than <0.00001>
+    test/dimension_attach_points_test.dart 450:13       main.<fn>.agree
+    test/dimension_attach_points_test.dart 473:11       main.<fn>
+  00:00 +0 -1: Some tests failed.
+  ```
+- **command:** `(cd apps/floor_planner && CI=true flutter test --no-pub test/dimension_attach_points_test.dart --plain-name 'AP1 ')` (exit 0; log `t16f-X2-step1only@fix-run2.log`)
+
+  ```
+  00:00 +6: All tests passed!
+  ```
+- **restore:** `cp` the backup to `apps/floor_planner/lib/parametric/wall_geometry.dart`; `diff` exit 0; `git diff --quiet -- apps/floor_planner/lib/parametric/wall_geometry.dart` exit 0; `git diff --quiet -- packages/` exit 0.
+- **result:** KILLED (1 of 2 commands red); green: AP1. Fired at `49de0e8`, 2026-09-29T11:59:39Z.
 
