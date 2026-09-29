@@ -373,7 +373,8 @@ was, and its inverse is the plain inverse.
   covers a component on a leaf, on a nested group or on an instance.
   `ParametricSystem.diagnostics()` reports each one (D10). The engine's
   `validate()` cannot: it does not know which component types are
-  parametric.
+  parametric. An edit that writes one is refused (D6, amended by
+  fix/post-11); a file can still bring one in.
 
 ### D6 — Generated geometry is not directly editable (human: refuse)
 
@@ -420,6 +421,29 @@ then removes one of its still-live children, in the same command, slip past
 the backstop, exactly mirroring the *edit* arm's own gap above. Cost if
 wrong: such a compound is refused even though no tool in this plan issues
 one. Killed by `P14`.
+
+**Amended by fix/post-11:** a second guard sits beside this one, after
+`inner` applies (post-11 found item (d)). A touched handle on which `inner`
+**wrote** a registered parametric component — non-null now and not `==` to
+what the before-survey held for that type on that handle — while the handle
+is not a live root-level group after `inner` is refused: `r.inverse` is
+applied and the edit throws `StateError`, before the cascade and the plan,
+so nothing enters the history. Before it, `SetComponentCommand<T>` on a
+dead, never-allocated or nested handle landed a component D5 never
+regenerates. A detach, a delete (the component is still there until step
+4's cleanup), a re-parent (spec 08 D4 keeps the component) and any edit
+that touches a file's misplaced component without writing a new value are
+not refused; undo and redo replay `ParametricReplay` and never reach it.
+Only `inner`'s touched handles are read, so a file carrying a misplaced
+component elsewhere refuses nothing, and D5's `parametric.misplaced` report
+stays, since loading does not pass through the guard. Not in
+`SetComponentCommand` itself: undo of a delete re-attaches before it
+restores the node. Cost if wrong: a hand-built command that parks a
+component on a non-object is refused. One app path reaches it: a wall-end
+drag whose end meets a file's orphan `WallParams` (post-11 (e): `_endsAt`
+has no liveness filter) is now refused instead of moving the orphan along;
+(e)'s filter closes it.
+Pinned by `MP1`–`MP9` (`misplaced_test.dart`); mutants M-Q3a–M-Q3l.
 
 ### D7 — Permissions: derived geometry inherits (human)
 

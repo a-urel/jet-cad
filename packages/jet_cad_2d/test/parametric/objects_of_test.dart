@@ -84,20 +84,19 @@ void main() {
     doc.commands.execute(create(
         doc, h5200, onA(300.5, 1200.25, 0.6), const Caption('B', 15.75, 2.5)));
     // A plain root group, and a Caption on a group nested in it: misplaced,
-    // never an object.
+    // never an object. Written straight into the store, as a file brings
+    // one in: an edit that writes it is refused (fix/post-11, spec 06 D5).
     doc.commands.execute(AddNodeCommand(GroupNode(
         handle: hG,
         parent: doc.rootHandle,
         transform: onA(-2500.5, -1800.25, 0.45),
         children: const [])));
-    doc.commands.execute(CompoundCommand([
-      AddNodeCommand(GroupNode(
-          handle: hN,
-          parent: hG,
-          transform: Transform2.translation(120.5, -40.25),
-          children: const [])),
-      SetComponentCommand<Caption>(hN, const Caption('N', 1.5, 2.25)),
-    ], label: 'Nested caption'));
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: hN,
+        parent: hG,
+        transform: Transform2.translation(120.5, -40.25),
+        children: const [])));
+    doc.components.attach<Caption>(hN, const Caption('N', 1.5, 2.25));
     doc.commands.execute(create(doc, hC, parked, const Census(1)));
     // Premises: every Caption carries its component, the nested one too.
     expect(doc.components.withComponent<Caption>().toSet(),

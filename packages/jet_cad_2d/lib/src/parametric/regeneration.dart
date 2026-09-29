@@ -60,7 +60,8 @@ final class _Survey {
       this.references,
       this.referrers,
       this.page,
-      this.readers);
+      this.readers,
+      this.stray);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -108,6 +109,15 @@ final class _Survey {
   /// S-4), counted as the survey registers them: the trigger runs only when
   /// the after-survey holds one, an O(1) check.
   final int readers;
+
+  /// Every registered component this survey found that [params] does not
+  /// snapshot, keyed by holder and registration: a misplaced one (spec D5:
+  /// its holder is not a root-level group) and, on a holder carrying two
+  /// registered types, the one whose registration does not name the
+  /// object. Empty in a document that has neither; filled by the walk the
+  /// survey makes anyway, so it costs one insertion per such component.
+  /// Read by [_written] through [_heldBefore], on the before-survey only.
+  final Map<(Handle, _Registration<Component>), Component> stray;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -191,9 +201,20 @@ final class _Survey {
 
 _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   final found = <Handle, _Registration<Component>>{};
+  final stray = <(Handle, _Registration<Component>), Component>{};
   for (final r in types) {
     for (final h in r.handles(t)) {
-      if (_isObject(t, types, h)) found[h] = r;
+      if (_isObject(t, types, h)) {
+        // The later registration names the object; the earlier one's
+        // component is kept here, so every registered component has a
+        // snapshot.
+        if (found[h] case final shadowed?) {
+          stray[(h, shadowed)] = shadowed.componentOf(t, h);
+        }
+        found[h] = r;
+      } else {
+        stray[(h, r)] = r.componentOf(t, h);
+      }
     }
   }
   final order = found.keys.toList()..sort(_byValue);
@@ -256,7 +277,8 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
         for (final e in referrers.entries) e.key: List.unmodifiable(e.value),
       },
       t.components.get<PageComponent>(t.tree.root),
-      readers);
+      readers,
+      stray);
 }
 
 /// The objects a page change seeds (spec 10 D14): every live object in
@@ -606,6 +628,54 @@ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
   return null;
 }
 
+/// [r]'s component on [h] in [s], or null when [h] carried none: from the
+/// object snapshot when [r] names [h]'s object, else from [_Survey.stray].
+Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
+    identical(s.objects[h], r) ? s.params[h] : s.stray[(h, r)];
+
+/// The first touched handle, ascending, on which the edit **wrote** a
+/// registered parametric component although the handle is not a live
+/// root-level group after the edit (spec D5, as amended by fix/post-11,
+/// post-11 found item (d)), with the registration it wrote; null when
+/// there is none. `_run` then undoes `inner` and throws `StateError`.
+///
+/// "Wrote" means: the component is non-null now and not `==` to what the
+/// before-survey held for the same type on the same handle ([_heldBefore];
+/// a stored value, compared exactly). So these are never refused, because
+/// the edit left the component as it was or removed it:
+///
+/// - a detach (`SetComponentCommand<T>(h, null)`) on any handle, dead or
+///   nested: 06 D8's cleanup plans exactly that, and a file's misplaced
+///   component must stay removable;
+/// - a delete: the removed object keeps its component until the cleanup
+///   detaches it in the same edit; undo and redo replay a
+///   `ParametricReplay` and never come here, so its re-attach before the
+///   node is restored is untouched (a guard in `SetComponentCommand` would
+///   break exactly that);
+/// - a re-parent under another group (spec 08 D4, `CS7`): the object stops
+///   being one and keeps its component, as specified;
+/// - any edit that touches a holder of a component a file brought in
+///   misplaced (a move of its line, removing its nested group) without
+///   writing a new value.
+///
+/// Only [touched] (`inner`'s own) is read, so a file carrying a misplaced
+/// component elsewhere never refuses an unrelated edit, and the cost is
+/// O(|touched| log |touched| + |touched| · types), nothing per object.
+/// Only registered types are read: any other component lands as before.
+(Handle, _Registration<Component>)? _written(CommandTarget t,
+    List<_Registration<Component>> types, _Survey before, Set<Handle> touched) {
+  for (final h in touched.toList()..sort(_byValue)) {
+    if (_isObject(t, types, h)) continue;
+    for (final r in types) {
+      final now = r.componentOrNull(t, h);
+      if (now == null) continue;
+      if (now == _heldBefore(before, r, h)) continue;
+      return (h, r);
+    }
+  }
+  return null;
+}
+
 /// Undoes [r] after a failure; if that fails too, the target is in an
 /// unknown state and the caller must know it.
 void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
@@ -791,7 +861,8 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///
 /// 1. `before`, the survey, with references and referrers;
 /// 2. `r0`, the edit;
-/// 3. 06 D6's guard on `r0.touched`: a refusal undoes `r0`;
+/// 3. 06 D6's guard on `r0.touched`, then [_written] (06 D5, amended by
+///    fix/post-11): either refusal undoes `r0`;
 /// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
 ///    by the removals, its inverse included;
 /// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
@@ -822,6 +893,20 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
   if (refused != null) {
     _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
     throw GeneratedGeometryError(refused);
+  }
+
+  // Spec D5, amended by fix/post-11: a component written off a live
+  // root-level group would never be regenerated. A client bug, like the
+  // plan's malformed-boundary refusal (`_ownBoundaryOf`), so a
+  // `StateError`: `GeneratedGeometryError` names a generated child, which
+  // this is not. Refused like 06 D6's guard: `inner` undone, nothing
+  // planned, nothing in history.
+  if (_written(t, types, before, r0.touched) case (final h, final r)?) {
+    final error = StateError('"${edit.label}": ${r.typeId} written on '
+        '${h.toHex()}, which is not a live root-level group after the edit, '
+        'would never be regenerated (spec 06 D5); the edit is refused');
+    _undoInner(t, edit.label, r0, error);
+    throw error;
   }
 
   final r = _cascade(t, types, before, r0, edit.label);
