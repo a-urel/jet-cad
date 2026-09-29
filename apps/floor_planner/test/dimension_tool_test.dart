@@ -1137,6 +1137,169 @@ void main() {
     });
   }
 
+  for (final place in const [origin, corpusGroups]) {
+    test(
+        'TL5 on a 1:100 ft-in page the preview and the notice are the '
+        'committed dimension\'s; a page change heard off the canvas re-reads '
+        'the notice; an unlayable hover previews nothing; a re-activated tool '
+        'reads the document afresh, at $place', () async {
+      // The Hall's diagonal, E1/0/left (12,250, 8,250) to P2/1/right
+      // (16,940, 12,940), as the first TL5; each click 5 mm off.
+      final c0 = place.at(12250, 8250), d = place.at(16940, 12940);
+
+      // -- A 1:100 page in feet and inches (the review's I-2): the paper
+      // constants double (text 2.5 × 100 = 250 mm, the extension line's
+      // overshoot 2 × 100 = 200), and the value reads ft-in. The aligned
+      // value 4,690 √2 = 6,632.72 mm = 261.13" = 1,044.52 quarters, 1,045:
+      // 261 1/4" = 21'-9 1/4".
+      {
+        final plan = samplePlan(place);
+        final doc = plan.doc;
+        final page = PageComponent(
+            scaleDenominator: 100,
+            displayUnit: DisplayUnit.feetInches,
+            snapToGrid: false);
+        attachPage(doc, page);
+        final rig = dimRig(doc); // 0.3 px/mm: a 33.3 mm aperture
+        expect(rig.ctx.page!.value, page, reason: 'premise: the page');
+        clickAt(rig, plan.at(12253, 8254));
+        clickAt(rig, plan.at(16937, 12937));
+        expect((rig.tool.points[0] - c0).length, lessThan(dimAttach.linear));
+        expect((rig.tool.points[1] - d).length, lessThan(dimAttach.linear));
+        final q = plan.at(14000.5, 11500.25);
+        hoverTo(rig, q);
+        expect(rig.tool.hoverKind, isNull, reason: 'premise: free');
+        final preview = rig.tool.debugPreview;
+        final value = rig.tool.notice.value;
+        expect(value, '21\'-9 1/4"');
+        clickAt(rig, q);
+        final h = dims(doc).single;
+        expect(value, dimText(doc, h), reason: 'the notice is the TEXT');
+        final lines = dimLines(doc, h);
+        for (var i = 0; i < 5; i++) {
+          expect((preview[i].$1 - lines[i].$1).length, lessThan(1e-9),
+              reason: 'ft-in 1:100, line $i start');
+          expect((preview[i].$2 - lines[i].$2).length, lessThan(1e-9),
+              reason: 'ft-in 1:100, line $i end');
+        }
+        // The extension line at a overshoots the dimension line by 2 paper
+        // mm × 100 = 200 mm (a 1:50 page would give 100).
+        expect((lines[1].$2 - lines[0].$1).length, closeTo(200, 1e-6));
+      }
+
+      // -- Off the canvas (the review's M-1): two points placed and a
+      // hover, then the pointer leaves; the page's unit changes m -> mm (a
+      // panel edit). Once the change is heard, the notice reads the new
+      // unit, 6,632.72 -> 6633; nothing is painted until the pointer
+      // returns.
+      {
+        final plan = samplePlan(place);
+        final doc = plan.doc;
+        final page = PageComponent(snapToGrid: false); // 1:50 m
+        attachPage(doc, page);
+        final rig = dimRig(doc);
+        clickAt(rig, plan.at(12253, 8254));
+        clickAt(rig, plan.at(16937, 12937));
+        hoverTo(rig, plan.at(14000.5, 11500.25));
+        expect(rig.tool.notice.value, '6.63');
+        rig.tool.onPointerExit(rig.ctx);
+        expect(rig.tool.hoverVisible, isFalse, reason: 'premise: off');
+        attachPage(doc, page.copyWith(displayUnit: DisplayUnit.millimeters));
+        await Future<void>.delayed(Duration.zero);
+        expect(rig.ctx.page!.value!.displayUnit, DisplayUnit.millimeters,
+            reason: 'premise: the page notifier heard it');
+        expect(rig.tool.notice.value, '6633', reason: 'the new unit');
+        final spy = RingSpy();
+        rig.tool.paintWorldOverlay(spy, Vector2.zero(), 0.3);
+        expect(spy.paths, 0, reason: 'nothing painted off the canvas');
+      }
+
+      // -- An unlayable hover (the review's M-2): an empty plan, the pair
+      // (0, 0) and (3000, 0) in the placement's frame, at 1 px/mm. A hover
+      // at (1500, 600) previews 3.00; one 1.5e308 mm up in world lays the
+      // line so high that the text's point, (Q0 + Q1) / 2, overflows
+      // (2 × n.y × 1.5e308 > 1.8e308 at 0° and at 23°): no preview, no
+      // value. Back at (1500, 600), 3.00 again.
+      {
+        final plan = buildPlan(const [], place: place);
+        final rig = dimRig(plan.doc, pxPerMm: 1);
+        clickAt(rig, place.at(0, 0));
+        clickAt(rig, place.at(3000, 0));
+        final ok = place.at(1500, 600);
+        hoverTo(rig, ok);
+        expectFree(rig, ok, 'a normal hover');
+        expect(rig.tool.notice.value, '3.00');
+        expect(rig.tool.debugPreview, hasLength(5));
+        final high = Vector2(ok.x, 1.5e308);
+        hoverTo(rig, high);
+        expectFree(rig, high, 'the unlayable hover');
+        expect(
+            layoutDimension(
+                rig.tool.points[0],
+                rig.tool.points[1],
+                DimKind.aligned,
+                Transform2.identity(),
+                offsetFor(high, rig.tool.points[0], rig.tool.points[1],
+                    DimKind.aligned, Transform2.identity()),
+                PageComponent()),
+            isNull,
+            reason: 'premise: it cannot be laid out');
+        expect(rig.tool.notice.value, isNull, reason: 'no value');
+        expect(rig.tool.debugPreview, isEmpty, reason: 'no preview');
+        hoverTo(rig, ok);
+        expect(rig.tool.notice.value, '3.00');
+      }
+
+      // -- Re-activation (the review's M-3): an L, A (0, 0) -> (4000, 0)
+      // and B (4000, 0) -> (4000, 3000), 200 centred, mitred; its outer
+      // corner (4100, −100) is A/1/right and B/0/right. A hover 5 mm off
+      // snaps there and rings. The tool is cancelled (a switch away), B is
+      // deleted while it is not listening, and the tool is used again: at
+      // the same point nothing attaches (A's free end's corners are
+      // (4000, ±100), 100 mm away, beyond the 33.3 mm aperture), so no
+      // ring, and the preview from there is the committed dimension's.
+      {
+        final plan = buildPlan(c2Walls, place: place);
+        final doc = plan.doc;
+        final [a, b] = plan.walls;
+        final rig = dimRig(doc);
+        final outer = plan.at(4100, -100);
+        hoverTo(rig, plan.at(4103, -104));
+        expect((rig.tool.hoverPoint - outer).length, lessThan(dimAttach.linear),
+            reason: 'premise: onto the corner');
+        final x = Vector2.copy(rig.tool.hoverPoint);
+        expect(ringsOf(rig), hasLength(1), reason: 'the corner rings');
+        rig.tool.cancel(rig.ctx);
+        doc.commands.execute(deleteObject(doc, b));
+        await Future<void>.delayed(Duration.zero);
+        hoverTo(rig, x);
+        expectFree(rig, x, 'the old corner');
+        expect(
+            attachCandidates(doc, rig.ctx.index, x,
+                objectSnap: true, thickest: thickestWall(doc)),
+            isEmpty,
+            reason: 'premise: nothing attaches there now');
+        expect(ringsOf(rig), isEmpty, reason: 'read afresh: no ring');
+        clickAt(rig, x);
+        final far = plan.at(1500.5, 1800.25);
+        clickAt(rig, far);
+        final q = plan.at(2000.25, 2500.75);
+        hoverTo(rig, q);
+        expectFree(rig, q, 'the third point');
+        final preview = rig.tool.debugPreview;
+        clickAt(rig, q);
+        final h = dims(doc).single;
+        expect(paramsOf(doc, h).a, FixedEnd(x.x, x.y));
+        expect(doc.components.get<WallParams>(a), isNotNull);
+        final lines = dimLines(doc, h);
+        for (var i = 0; i < 5; i++) {
+          expect((preview[i].$1 - lines[i].$1).length, lessThan(1e-9),
+              reason: 're-activated, line $i');
+        }
+      }
+    });
+  }
+
   testWidgets(
       'TL5 the status line reads Dimension — 4.69 over the Hall\'s corners, '
       'and clears after the commit and on a switch to Select', (tester) async {
@@ -1285,6 +1448,61 @@ void main() {
     hoverFree(plan.at(24800.75, 24000), 'again');
     expect(tool.debugAttachSearches, c.searches + 1, reason: 'memoised again');
 
+    // -- A Shift slide along a face line after click 1 (the review's I-1):
+    // ortho pins every resolved point onto the line through the first
+    // point, here the face line itself, so every move passes the line test.
+    // The first point exactly on the left face (y 9,100) of the wall
+    // (9,000, 9,000) -> (12,000, 9,000), 400 mm from its corner (9,100,
+    // 9,100) and 1,000 from its face edge's midpoint (10,500, 9,100): free.
+    // Sixty moves, raw y 9,160.5 (60.5 above the face, beyond the 33.3 mm
+    // aperture), x 9,600.5 + 31.25 i (|dx| ≥ 100.25 > |dy| 60.5: pinned
+    // horizontally), to 11,444.25, short of the next node's corner at
+    // 11,900.
+    //
+    // Each wall's six points are laid out once per generation (the tool's
+    // per-wall memo): the hover before click 1 lays this wall out once (its
+    // memoised search; click 1 itself searches nothing, and its ring reads
+    // that hover's entry); the sixty moves on the same wall lay out nothing
+    // new.
+    int computations() => debugWallPointComputations;
+    final slideBase = plan.at(9500.25, 9100);
+    var w = computations();
+    clickAt(rig, slideBase);
+    expectFree(rig, slideBase, 'the slide\'s first point');
+    expect(computations(), w + 1, reason: 'the hover\'s memoised search');
+    w = computations();
+    c = counters();
+    final slide = <double>[];
+    for (var i = 0; i < 60; i++) {
+      final raw = plan.at(9600.5 + 31.25 * i, 9160.5);
+      final sw = Stopwatch()..start();
+      hoverTo(rig, raw, shift: true);
+      sw.stop();
+      slide.add(sw.elapsedMicroseconds.toDouble());
+      expect(tool.hoverKind, isNull, reason: 'slide $i: premise: no snap');
+      expect([tool.hoverPoint.x, tool.hoverPoint.y], [raw.x, 9100.0],
+          reason: 'slide $i: premise: pinned onto the face line');
+    }
+    expect(counters(), (searches: c.searches + 60, passes: c.passes + 60),
+        reason: 'premise: every move is on the face line');
+    expect(computations(), w,
+        reason: 'the slide lays the wall out no more: once per generation');
+    // A document change (the far wall moved back), heard at a pump: the
+    // tool re-reads its ring and hover, laying the wall out once in the
+    // new generation; ten more moves along it lay out nothing.
+    doc.commands.execute(SetComponentCommand<WallParams>(
+        far0, const WallParams(0, 0, 3000, 0, 200, Justification.centre)));
+    w = computations();
+    await Future<void>.delayed(Duration.zero);
+    expect(computations(), w + 1, reason: 'once in the new generation');
+    for (var i = 0; i < 10; i++) {
+      final raw = plan.at(9615.75 + 31.25 * i, 9160.5);
+      hoverTo(rig, raw, shift: true);
+      expect(tool.hoverPoint.y, 9100.0, reason: 'premise: on the face line');
+    }
+    expect(computations(), w + 1, reason: 'nothing more along it');
+    tool.cancel(rig.ctx);
+
     // -- Two points placed on corners of the + nodes at (9,000, 9,000) and
     // (15,000, 12,000), each click 5 mm off; then the path again, at
     // y 23,950.25 (a quarter in from the right face y 23,900, 50.25 from
@@ -1321,7 +1539,10 @@ void main() {
         '${median(pending).toStringAsFixed(1)} us with two points placed '
         '(the preview rebuilt each move); on the face line '
         '${onFace.toStringAsFixed(0)} us, on the centreline '
-        '${onCentre.toStringAsFixed(0)} us; budget 1000 us per move (D12; '
+        '${onCentre.toStringAsFixed(0)} us; a Shift slide along a face line '
+        '${median(slide).toStringAsFixed(1)} us per move (worst '
+        '${slide.reduce(math.max).toStringAsFixed(0)} us); budget 1000 us '
+        'per move (D12; '
         'printed, not asserted)');
   });
 }

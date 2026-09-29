@@ -18,6 +18,17 @@ import 'wall.dart';
 /// `debugTracedSegments` (the plan's Ruling 11-2).
 int debugLineTestPasses = 0;
 
+/// How many times [attachCandidates] computed a wall's six points (one
+/// `wallsInDocument` and `wallEndPoints` each), ever. For tests only, which
+/// read the difference across calls (`TL8`: with a memo, a wall's points
+/// are computed once per generation); a plain counter, as
+/// [debugLineTestPasses].
+int debugWallPointComputations = 0;
+
+/// A wall's six attach points, `(k, side, point)`, as [wallEndPoints] gives
+/// them among every other live wall.
+typedef WallPoints = List<(int, WallSide, Vector2)>;
+
 /// `T` (spec 11 D10): the largest **world** thickness of a live wall of
 /// [doc], each wall's stored thickness times its group's `scaleMagnitude`
 /// (so a scaled group, file only, is covered); 0 with no live wall. One pass
@@ -76,9 +87,18 @@ double thickestWall(DraftDocument doc) {
 /// centreline. So the test loses none, and a point in a wall's band off
 /// those lines builds no `WorldWall`. Only a wall that passes is laid out
 /// (`wallsInDocument`, then its six points).
+///
+/// **[points]**, when given, memoises each wall's six points: a wall found
+/// in it is not laid out again, and one laid out is stored in it. The
+/// result is the same, bit for bit, since the points are the same
+/// computation's. Its owner (the Dimension tool's hover memo) clears it
+/// whenever the document may have changed; a click, a commit and a grip
+/// drop pass none, and gather afresh (the plan's Ruling 11-8).
 List<AttachedEnd> attachCandidates(
     DraftDocument doc, SpatialIndex index, Vector2 q,
-    {required bool objectSnap, required double thickest}) {
+    {required bool objectSnap,
+    required double thickest,
+    Map<Handle, WallPoints>? points}) {
   if (!objectSnap) return const [];
   final walls = <Handle>{};
   final tight = dimAttach.linear;
@@ -101,12 +121,21 @@ List<AttachedEnd> attachCandidates(
   for (final h in walls.toList()..sort((a, b) => a.value.compareTo(b.value))) {
     if (!_onALine(doc, h, q)) continue;
     debugLineTestPasses++;
-    final ws = wallsInDocument(doc, h)!;
-    for (final (k, side, p) in wallEndPoints(ws.host, ws.walls)) {
+    final six = points == null
+        ? _wallPointsOf(doc, h)
+        : (points[h] ??= _wallPointsOf(doc, h));
+    for (final (k, side, p) in six) {
       if ((p - q).length <= dimAttach.linear) out.add(AttachedEnd(h, k, side));
     }
   }
   return out;
+}
+
+/// Live wall [h]'s six points among every other live wall of [doc].
+WallPoints _wallPointsOf(DraftDocument doc, Handle h) {
+  debugWallPointComputations++;
+  final ws = wallsInDocument(doc, h)!;
+  return wallEndPoints(ws.host, ws.walls);
 }
 
 /// The line test (spec 11 D10): whether [q] lies within `dimAttach.linear`

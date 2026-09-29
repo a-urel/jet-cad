@@ -105,10 +105,12 @@ class DimensionTool extends PlacementTool {
   final Map<(double, double), List<AttachedEnd>> _memo = {};
   double _thickest = 0;
 
-  /// The world point of each attached end the preview decided, per
-  /// generation: laying out a wall among every other costs O(walls), so it
-  /// is done once per end, not per move.
-  final Map<AttachedEnd, Vector2?> _endPoints = {};
+  /// Each wall's six points, per generation, handed to [attachCandidates]
+  /// by the hover memo (the review's I-1): laying out a wall among every
+  /// other costs O(walls), so a hover sliding along a wall's line (a Shift
+  /// slide, a grid node on a wall) lays it out once per generation, not
+  /// once per move. The preview reads its decided ends from it too.
+  final Map<Handle, WallPoints> _wallPoints = {};
 
   // The rings: at the placed points and at the hover point.
   bool _ring0 = false, _ring1 = false, _ringHover = false;
@@ -341,28 +343,33 @@ class DimensionTool extends PlacementTool {
 
   /// A document change: nothing memoised before it is read again, and what
   /// the tool shows is re-read at the pointer's last point, so no ring, no
-  /// preview and no value outlives the document it was read from.
+  /// preview and no value outlives the document it was read from. With the
+  /// pointer off the canvas too (the review's M-1: a page change made in a
+  /// panel): the notice is re-read at the last hover point, though nothing
+  /// is painted until the pointer returns.
   void _onDocumentChange() {
     if (_disposed) return;
     _generation++;
     final ctx = _ctx;
-    if (ctx == null || !hoverVisible) return;
+    if (ctx == null) return;
     _refresh(ctx);
     notifyListeners();
   }
 
   /// Starts the memo afresh when the generation has moved: the candidates,
-  /// the preview's end points, and `T` read once.
+  /// each wall's six points, and `T` read once.
   void _syncMemo(ToolContext ctx) {
     if (_memoGeneration == _generation) return;
     _memoGeneration = _generation;
     _memo.clear();
-    _endPoints.clear();
+    _wallPoints.clear();
     _thickest = thickestWall(ctx.document);
   }
 
   /// [p]'s attach candidates for the hover (object snap on): one search per
-  /// distinct resolved point per generation (exact `==`).
+  /// distinct resolved point (exact `==`) once per generation, within 1,024
+  /// points (past them the memo starts afresh), each wall's six points laid
+  /// out once per generation.
   List<AttachedEnd> _memoised(ToolContext ctx, Vector2 p) {
     _syncMemo(ctx);
     final key = (p.x, p.y);
@@ -371,7 +378,7 @@ class DimensionTool extends PlacementTool {
     if (_memo.length >= _kMemoCap) _memo.clear();
     debugAttachSearches++;
     return _memo[key] = attachCandidates(ctx.document, ctx.index, p,
-        objectSnap: true, thickest: _thickest);
+        objectSnap: true, thickest: _thickest, points: _wallPoints);
   }
 
   /// Whether [p] is a placed point, exactly.
@@ -455,12 +462,18 @@ class DimensionTool extends PlacementTool {
     final end = decideEnd(ctx.document, candidates,
         kind: kind, at: at, other: other, m: m);
     if (end == null) return at;
-    return _endPoints.putIfAbsent(end, () {
+    // The wall's six points, laid out by the memoised search that found the
+    // end (the same generation), or laid out here.
+    var six = _wallPoints[end.wall];
+    if (six == null) {
       final ws = wallsInDocument(ctx.document, end.wall);
-      return ws == null
-          ? null
-          : wallEndPoint(ws.host, ws.walls, end.k, end.side);
-    });
+      if (ws == null) return null;
+      six = _wallPoints[end.wall] = wallEndPoints(ws.host, ws.walls);
+    }
+    for (final (k, side, p) in six) {
+      if (k == end.k && side == end.side) return p;
+    }
+    return null;
   }
 
   /// Every placed point is dropped, and with them the preview, the placed
