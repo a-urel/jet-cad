@@ -61,10 +61,18 @@ double thickestWall(DraftDocument doc) {
 /// `QueryFilter.rendering()`:
 /// 1. every live wall that owns a child whose stored world box touches the
 ///    square `q ± dimAttach.linear`;
-/// 2. the host (`OpeningParams.host`, when it is a live wall) of every live
-///    opening that owns a child whose stored box touches the square
-///    `q ± (dimAttach.linear + thickest)`, [thickest] being `T`
-///    ([thickestWall]).
+/// 2. the host (`OpeningParams.host`, when it is a live wall **the renderer
+///    draws**) of every live opening that owns a child whose stored box
+///    touches the square `q ± (dimAttach.linear + thickest)`, [thickest]
+///    being `T` ([thickestWall]). The host is kept only when
+///    `FilterEvaluator.acceptsNode(host, QueryFilter.rendering())` holds:
+///    its group and every group above it visible, the visibility the first
+///    query sees through each of a wall's own children. A wall group has
+///    no layer of its own; its children are generated on layer 0, as the
+///    opening's are, so a hidden layer 0 hides the opening from this query
+///    too. So a hidden wall attaches through neither query (only a file
+///    makes one: no command hides a group). One check per host found, its
+///    answer cached per group within the call.
 ///
 /// **Why the hosts (S-13):** an opening flush with a flat wall end (a T
 /// butt or a free end; `placeCut` clamps a door placed near a T to exactly
@@ -109,13 +117,20 @@ List<AttachedEnd> attachCandidates(
     if (_isLiveWall(doc, owner)) walls.add(owner);
   });
   final grown = dimAttach.linear + thickest;
+  FilterEvaluator? drawn;
   index.forEachInRect(
       Aabb2.raw(q.x - grown, q.y - grown, q.x + grown, q.y + grown),
       const QueryFilter.rendering(), (slot) {
     final owner = doc.entities.ownerAt(slot);
     if (!_isLiveGroup(doc, owner)) return;
     final host = doc.components.get<OpeningParams>(owner)?.host;
-    if (host != null && _isLiveWall(doc, host)) walls.add(host);
+    if (host == null || !_isLiveWall(doc, host)) return;
+    // Only a host the renderer draws (D10: what is drawn attaches): the
+    // opening's children passed `rendering()`, its host's group must too.
+    drawn ??= FilterEvaluator(doc);
+    if (drawn!.acceptsNode(host, const QueryFilter.rendering())) {
+      walls.add(host);
+    }
   });
   final out = <AttachedEnd>[];
   for (final h in walls.toList()..sort((a, b) => a.value.compareTo(b.value))) {

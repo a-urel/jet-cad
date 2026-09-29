@@ -7,11 +7,15 @@
 // test), against the same oracle and against hand values.
 import 'dart:math' as math;
 
+import 'package:floor_planner/parametric/catalog.dart' show installParametric;
 import 'package:floor_planner/parametric/dimension_attach.dart';
 import 'package:floor_planner/parametric/dimension_geometry.dart';
-import 'package:floor_planner/parametric/opening.dart' show SwingSide;
+import 'package:floor_planner/parametric/opening.dart'
+    show OpeningKind, OpeningParams, SwingSide;
 import 'package:floor_planner/parametric/opening_geometry.dart'
     show wallsInDocument;
+import 'package:floor_planner/parametric/separator.dart'
+    show ensureDashedLinetype;
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -103,6 +107,73 @@ List<Vector2> storedVertices(DraftDocument doc, Handle h) => [
 /// The distance from [p] to the nearest of [ps].
 double nearestOf(List<Vector2> ps, Vector2 p) =>
     ps.map((x) => (x - p).length).reduce(math.min);
+
+/// [walls], then 900 mm doors `(host index, centre, swing)` from
+/// [openings], each object one command at [place] as `buildPlan` lays them
+/// out (a wall in its own group `groupFor(place, k)` when [Placement.groups],
+/// a door at the identity), with the groups indexed in [hiddenWalls] and
+/// [hiddenOpenings] added hidden (`GroupNode.visible` false: only a file
+/// makes one, no command hides a group), and with [hiddenLayerZero] layer 0,
+/// where every generated child lies, hidden first. Returns the document, the
+/// walls and the doors.
+(DraftDocument, List<Handle>, List<Handle>) hiddenPlan(
+    List<W> walls, List<(int, double, SwingSide)> openings, Placement place,
+    {Set<int> hiddenWalls = const {},
+    Set<int> hiddenOpenings = const {},
+    bool hiddenLayerZero = false}) {
+  final doc = DraftDocument.empty();
+  if (hiddenLayerZero) {
+    final z = doc.tables.layers[ReservedHandles.layerZero]!;
+    doc.tables.layers
+      ..remove(z.handle)
+      ..add(LayerRecord(
+          handle: z.handle,
+          name: z.name,
+          color: z.color,
+          linetype: z.linetype,
+          lineweight: z.lineweight,
+          transparency: z.transparency,
+          visible: false,
+          locked: z.locked));
+  }
+  installParametric(doc);
+  ensureDashedLinetype(doc);
+  final wh = <Handle>[], oh = <Handle>[];
+  for (final (k, w) in walls.indexed) {
+    final h = doc.handleSeed.next();
+    final g = place.groups ? groupFor(place, k) : Transform2.identity();
+    final inv = g.invert();
+    final s = inv.transformPoint(place.at(w.sx, w.sy));
+    final e = inv.transformPoint(place.at(w.ex, w.ey));
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: g,
+          visible: !hiddenWalls.contains(k),
+          children: const [])),
+      SetComponentCommand<WallParams>(
+          h, WallParams(s.x, s.y, e.x, e.y, w.t, w.j)),
+    ], label: 'Add wall'));
+    wh.add(h);
+  }
+  for (final (k, (i, centre, swing)) in openings.indexed) {
+    final h = doc.handleSeed.next();
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: h,
+          parent: doc.rootHandle,
+          transform: Transform2.identity(),
+          visible: !hiddenOpenings.contains(k),
+          children: const [])),
+      SetComponentCommand<OpeningParams>(
+          h, OpeningParams(wh[i], centre, 900, OpeningKind.door, swing: swing)),
+    ], label: 'Add opening'));
+    oh.add(h);
+  }
+  expect(driftOf(doc), isEmpty, reason: 'premise: generated');
+  return (doc, wh, oh);
+}
 
 void main() {
   for (final place in const [origin, corpusGroups]) {
@@ -795,6 +866,97 @@ void main() {
           expect(got, bruteCandidates(doc, q), reason: '$name: 0/${side.name}');
         }
         expect(thickest, closeTo(300, 1e-9), reason: '$name: T');
+      }
+    });
+  }
+
+  for (final place in const [origin, corpusGroups]) {
+    test(
+        'AM6b only a drawn wall attaches: a hidden wall neither by its own '
+        'children nor as the host of a visible flush door; a hidden door '
+        'makes its host no candidate; a hidden layer 0 hides every wall, at '
+        '$place', () {
+      // Against the brute-force oracle, which knows no visibility: each
+      // hidden point is a candidate there (the premise), and the index
+      // leaves out exactly the hidden wall's (D10: the queries take
+      // `rendering()`, what is drawn).
+      List<AttachedEnd> got(DraftDocument doc, SpatialIndex index, Vector2 q) =>
+          attachCandidates(doc, index, q,
+              objectSnap: true, thickest: thickestWall(doc));
+
+      // -- P1: the L (C2), A (0, 0) → (4000, 0) drawn, B (4000, 0) →
+      // (4000, 3000) hidden, both 200 centred. The outer corner (4100,
+      // −100) is A/1/right and B/0/right; B's far end (4000, 3000) its
+      // centre, (4100, 3000) its right face, (3900, 3000) its left.
+      {
+        final (doc, [a, b], _) =
+            hiddenPlan(c2Walls, const [], place, hiddenWalls: {1});
+        final index = SpatialIndex(doc);
+        addTearDown(index.dispose);
+        final corner = place.at(4100, -100);
+        expect(bruteCandidates(doc, corner),
+            [AttachedEnd(a, 1, r), AttachedEnd(b, 0, r)],
+            reason: 'premise: B\'s corner is a point');
+        expect(got(doc, index, corner), [AttachedEnd(a, 1, r)],
+            reason: 'P1: the shared corner is A\'s alone');
+        for (final (side, x) in const [(c, 4000.0), (r, 4100.0), (l, 3900.0)]) {
+          final q = place.at(x, 3000);
+          expect(bruteCandidates(doc, q), [AttachedEnd(b, 1, side)],
+              reason: 'premise: B/1/${side.name}');
+          expect(got(doc, index, q), isEmpty,
+              reason: 'P1: hidden B/1/${side.name} does not attach');
+        }
+      }
+
+      // -- P2 and P3: spike C5's T with a 900 mm door flush with the
+      // stem's butt end (flushT's c = 450): C (0, 0) → (6000, 0), 200, S
+      // (2500, 0) → (2500, 3000), 100. S/0/left (2450, 100), S/0/centre
+      // (2500, 0), S/0/right (2550, 100); none is stored on S (AM6), so
+      // only the opening-host query reaches them.
+      const ends = {l: (2450.0, 100.0), c: (2500.0, 0.0), r: (2550.0, 100.0)};
+      for (final swing in SwingSide.values) {
+        for (final (name, hiddenS, hiddenDoor) in const [
+          ('P2 S hidden, its door drawn', true, false),
+          ('P3 S drawn, its door hidden', false, true),
+          ('control, both drawn', false, false),
+        ]) {
+          final (doc, [_, s], _) = hiddenPlan(
+              c5Walls, [(1, 450.0, swing)], place,
+              hiddenWalls: {if (hiddenS) 1},
+              hiddenOpenings: {if (hiddenDoor) 0});
+          final index = SpatialIndex(doc);
+          addTearDown(index.dispose);
+          for (final MapEntry(key: side, value: (x, y)) in ends.entries) {
+            final q = place.at(x, y);
+            final tag = '$name, swing ${swing.name}, S/0/${side.name}';
+            expect(bruteCandidates(doc, q), [AttachedEnd(s, 0, side)],
+                reason: 'premise: $tag is a point');
+            expect(got(doc, index, q),
+                hiddenS || hiddenDoor ? isEmpty : [AttachedEnd(s, 0, side)],
+                reason: tag);
+          }
+        }
+      }
+
+      // -- A hidden layer 0: every generated child, the walls' and the
+      // door's, lies on it, so nothing is drawn and nothing attaches.
+      {
+        final (doc, _, _) = hiddenPlan(
+            c5Walls, [(1, 450.0, SwingSide.left)], place,
+            hiddenLayerZero: true);
+        final index = SpatialIndex(doc);
+        addTearDown(index.dispose);
+        for (final (x, y) in const [
+          (2450.0, 100.0),
+          (2500.0, 0.0),
+          (0.0, 100.0)
+        ]) {
+          final q = place.at(x, y);
+          expect(bruteCandidates(doc, q), isNotEmpty,
+              reason: 'premise: ($x, $y) is a point of C or S');
+          expect(got(doc, index, q), isEmpty,
+              reason: 'layer 0 hidden: ($x, $y) does not attach');
+        }
       }
     });
   }
