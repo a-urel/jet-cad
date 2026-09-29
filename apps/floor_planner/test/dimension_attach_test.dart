@@ -373,8 +373,8 @@ void main() {
   for (final place in const [origin, corpusGroups]) {
     test(
         'AM2 a jamb is fixed, a Y lobe vertex finds both walls\' points, '
-        'a T butt corner is the stem\'s, an X crossing gives no snap and no '
-        'candidate; a degenerate wall and a scaled wall group are found, at '
+        'a T butt corner is the stem\'s, an X crossing gives no candidate; '
+        'a degenerate wall and a left-justified wall\'s points are found, at '
         '$place', () {
       List<AttachedEnd> through(
               DraftDocument doc, SpatialIndex index, Vector2 q) =>
@@ -450,26 +450,28 @@ void main() {
 
       // -- C6's X: A's left face y = 100 crosses B's left face x = 1,900
       // (B runs north, left normal −x). No vertex of either wall is there.
-      // The engine's intersection snap intersects the root container's
-      // line and polyline leaves in their stored coordinates: at the origin
-      // every wall's group is the identity, so it finds the crossing itself
-      // (the spec's "no snap", spike Q3c, held only in turned groups); in
-      // own groups the stored coordinates are local and nothing snaps
-      // there. Either way the resolved point is the crossing or the raw
-      // click on it, and it matches no attach point: fixed.
+      // Whether the engine's intersection snap finds the crossing depends
+      // on the groups (it intersects the stored coordinates of the root
+      // container's leaves: the identity at the origin, so it finds the
+      // crossing there; local coordinates in own groups, so it finds
+      // nothing there), so the premise allows either: no snap, or an
+      // intersection exactly at the crossing. Either way the resolved point
+      // is the crossing (or the raw click on it), and it matches no attach
+      // point: fixed.
       {
         final plan = buildPlan(c6Walls, place: place);
         final index = SpatialIndex(plan.doc);
         addTearDown(index.dispose);
         final q = plan.at(1900, 100);
         final res = snapAt(index, q);
-        if (place == origin) {
-          expect(res?.kind, SnapKind.intersection,
-              reason: 'premise: at the identity the crossing snaps');
-          expect((res!.point - q).length, lessThan(1e-9));
-        } else {
-          expect(res, isNull, reason: 'premise: no snap');
-        }
+        expect(
+            res == null ||
+                (res.kind == SnapKind.intersection &&
+                    res.point.x == q.x &&
+                    res.point.y == q.y),
+            isTrue,
+            reason: 'premise: no snap, or an intersection exactly at the '
+                'crossing (${res?.kind} ${res?.point}, q $q)');
         expect(bruteCandidates(plan.doc, q), isEmpty,
             reason: 'premise: no attach point at the crossing');
         expect(through(plan.doc, index, q), isEmpty, reason: 'the crossing');
@@ -498,45 +500,77 @@ void main() {
         }
       }
 
-      // -- C11 in groups scaled 1.5, turned 143° about the hub (file only;
-      // AP2's variant). A runs east from far(−2500, 678.25) into the hub
-      // far(1234.5, 678.25), right-justified: its left face is the
-      // centreline y = 678.25 and, stored 200 thick in a group scaled 1.5,
-      // its free rectangle's right face lies 300 below in world, y =
-      // 378.25. 07 stores that rectangle in local space (the local-ring
-      // fallback), so A/0/right and A/1/right lie on no world line at A's
-      // stored offsets (0, −200): only the local-frame line test finds
-      // them.
+      // -- 10's JM: A (0, 0) -> (6000, 0) 200 left-justified (faces at
+      // offsets (200, 0): its right face is its centreline), B 100
+      // right-justified, C 300 centred, D 250 right-justified drawn upwards.
+      // Every one of the 24 attach points, taken exactly, has brute force's
+      // candidate set through the index, and contains its own end: so the
+      // line test keeps A's left face at offset +200.
       {
-        final (doc, hs) = docOfWalls(scaledGroups(c11(turn: 143)));
-        final a = hs[0];
+        final plan = buildPlan(jmWalls, place: place);
+        final doc = plan.doc;
         final index = SpatialIndex(doc);
         addTearDown(index.dispose);
-        expect(doc.tree.accumulatedTransform(a).scaleMagnitude,
-            closeTo(1.5, 1e-12),
-            reason: 'premise: A\'s group is scaled');
-        expect([
-          for (final d in diagnosticsOf(doc))
-            if (d.code == 'wall.fallback') d.handles
-        ], anyElement(equals([a])),
-            reason: 'premise: A takes the local-ring fallback');
-        final g = turnedAbout(c11Hub, 143);
-        final corners = {
-          (0, l): g.transformPoint(far(-2500, 678.25)),
-          (0, r): g.transformPoint(far(-2500, 378.25)),
-          (1, l): g.transformPoint(far(1234.5, 678.25)),
-          (1, r): g.transformPoint(far(1234.5, 378.25)),
-        };
-        for (final MapEntry(key: (k, side), value: q) in corners.entries) {
-          final got = through(doc, index, q);
-          expect(got, contains(AttachedEnd(a, k, side)),
-              reason: 'C11 scaled A/$k/${side.name}');
-          expect(got, bruteCandidates(doc, q),
-              reason: 'C11 scaled A/$k/${side.name}');
+        expect(jmWalls[0].j, Justification.left,
+            reason: 'premise: A is left-justified');
+        var n = 0;
+        for (final h in plan.walls) {
+          final ws = wallsInDocument(doc, h)!;
+          for (final (k, side, p) in wallEndPoints(ws.host, ws.walls)) {
+            n++;
+            final want = AttachedEnd(h, k, side);
+            final got = through(doc, index, p);
+            expect(got, contains(want), reason: 'JM $want at $p');
+            expect(got, bruteCandidates(doc, p), reason: 'JM $want at $p');
+          }
         }
+        expect(n, 24);
       }
     });
   }
+
+  test(
+      'AM2 a wall group scaled 1.5 (C11, at its own far placement) has its '
+      'free rectangle\'s corners found by the local-frame line test', () {
+    // -- C11 in groups scaled 1.5, turned 143° about the hub (file only;
+    // AP2's variant). A runs east from far(−2500, 678.25) into the hub
+    // far(1234.5, 678.25), right-justified: its left face is the
+    // centreline y = 678.25 and, stored 200 thick in a group scaled 1.5,
+    // its free rectangle's right face lies 300 below in world, y =
+    // 378.25. 07 stores that rectangle in local space (the local-ring
+    // fallback), so A/0/right and A/1/right lie on no world line at A's
+    // stored offsets (0, −200): only the local-frame line test finds
+    // them.
+    {
+      final (doc, hs) = docOfWalls(scaledGroups(c11(turn: 143)));
+      final a = hs[0];
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      expect(
+          doc.tree.accumulatedTransform(a).scaleMagnitude, closeTo(1.5, 1e-12),
+          reason: 'premise: A\'s group is scaled');
+      expect([
+        for (final d in diagnosticsOf(doc))
+          if (d.code == 'wall.fallback') d.handles
+      ], anyElement(equals([a])),
+          reason: 'premise: A takes the local-ring fallback');
+      final g = turnedAbout(c11Hub, 143);
+      final corners = {
+        (0, l): g.transformPoint(far(-2500, 678.25)),
+        (0, r): g.transformPoint(far(-2500, 378.25)),
+        (1, l): g.transformPoint(far(1234.5, 678.25)),
+        (1, r): g.transformPoint(far(1234.5, 378.25)),
+      };
+      for (final MapEntry(key: (k, side), value: q) in corners.entries) {
+        final got = attachCandidates(doc, index, q,
+            objectSnap: true, thickest: thickestWall(doc));
+        expect(got, contains(AttachedEnd(a, k, side)),
+            reason: 'C11 scaled A/$k/${side.name}');
+        expect(got, bruteCandidates(doc, q),
+            reason: 'C11 scaled A/$k/${side.name}');
+      }
+    }
+  });
 
   for (final place in const [origin, corpusGroups]) {
     test(
