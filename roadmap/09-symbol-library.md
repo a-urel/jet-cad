@@ -1,6 +1,6 @@
 # 09 — Symbol library
 
-**Status:** not started
+**Status:** spec written (rev 1, in review): [2026-09-30-symbol-library-design.md](../docs/superpowers/specs/2026-09-30-symbol-library-design.md). Where it differs from this file, the spec wins: the library file is `.jetlib` (not `.json`), a symbol is placed by select-then-click (not dragged), `basePoint` is applied by the placer (the engine ignores it), and a definition is added by new undoable commands.
 **Depends on:** 02, 05
 **Blocks:** nothing, but 08 may depend on it — see 08's first open question
 **Size:** M
