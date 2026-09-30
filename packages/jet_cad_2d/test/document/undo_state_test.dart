@@ -323,4 +323,35 @@ void main() {
       });
     }
   });
+
+  test("a new dispatcher's first edit leaves its initial id", () {
+    // No Fixture: its own adds and clearHistory move the id before any other
+    // case reads it, so the id a dispatcher is born with is observed only
+    // here. A first edit that reused it would read as "no change" to anyone
+    // holding the initial id as a save point.
+    final doc = DraftDocument.empty();
+    final initial = doc.commands.stateId;
+    final handle = doc.handleSeed.next();
+    expect(doc.entities.slotOf(handle), isNull);
+
+    doc.commands.execute(AddEntityCommand(
+      record: lineRecord(handle, doc.rootHandle),
+      payload: line(1250.5, -730.25, 1810.0, -415.75),
+    ));
+    final edited = doc.commands.stateId;
+    List<double> coords() => doc.geometry
+        .read(doc.entities.geomIndexAt(doc.entities.slotOf(handle)!))
+        .coords;
+    expect(edited, isNot(initial), reason: 'the first edit is a new state');
+    expect(coords(), [1250.5, -730.25, 1810.0, -415.75]);
+
+    doc.commands.undo();
+    expect(doc.commands.stateId, initial);
+    expect(doc.entities.slotOf(handle), isNull);
+    expect(doc.commands.canUndo, isFalse);
+
+    doc.commands.redo();
+    expect(doc.commands.stateId, edited);
+    expect(coords(), [1250.5, -730.25, 1810.0, -415.75]);
+  });
 }
