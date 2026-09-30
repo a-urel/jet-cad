@@ -21,6 +21,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'support/dimension_fixture.dart' show dimLines;
 import 'support/wall_fixture.dart';
 import 'support/wall_shell.dart';
 
@@ -770,8 +771,10 @@ void main() {
     final at = Transform2.translation(ox + 820.5, oy - 1330.25)
         .multiply(Transform2.rotation(0.7));
     final toDim = at.invert();
-    final d0 = toDim.transformPoint(plan(400, 2200));
-    final d1 = toDim.transformPoint(plan(2600, 2200));
+    // Across the stray's line (below), beyond its far end: the dimension
+    // line crosses it.
+    final d0 = toDim.transformPoint(plan(4200, 1500));
+    final d1 = toDim.transformPoint(plan(6600, 1500));
     final doc = gripDoc(FlutterTextMeasurer(), (doc) {
       addL(doc);
       doc.commands.execute(CompoundCommand([
@@ -816,13 +819,36 @@ void main() {
     final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
     expect(bands.hostAt(doc, aMid.x, aMid.y), wa, reason: 'control');
 
-    // The dimension attach: T, and the candidates at the stray's far end.
+    // The dimension attach: T, and the candidates where the stray's line
+    // (offset 0) crosses the dimension line, a point of the dimension's own
+    // children, so the index's tight box reaches the dimension group and the
+    // walk's owner check decides it (as EG9's shadow tip).
     expect(thickestWall(doc), closeTo(200, 1e-9), reason: "A's, not 400");
     final index = SpatialIndex(doc);
     addTearDown(index.dispose);
-    final ends = attachCandidates(doc, index, ws.e,
+    final (a, b) = dimLines(doc, dim).first;
+    double cross(Vector2 u, Vector2 v) => u.x * v.y - u.y * v.x;
+    final t = cross(ws.s - a, ws.d) / cross(b - a, ws.d);
+    expect(t, inExclusiveRange(0.05, 0.95),
+        reason: "premise: the stray's line crosses the dimension line");
+    final hit = a + (b - a) * t;
+    expect(cross(hit - ws.s, ws.d).abs() / ws.d.length, lessThan(1e-6),
+        reason: "premise: on the stray's line");
+    final owners = <Handle>{};
+    final tight = dimAttach.linear;
+    index.forEachInRect(
+        Aabb2.raw(hit.x - tight, hit.y - tight, hit.x + tight, hit.y + tight),
+        const QueryFilter.rendering(),
+        (slot) => owners.add(doc.entities.ownerAt(slot)));
+    expect(owners, {dim},
+        reason: "premise: the tight box reaches the dimension's children");
+    final ends = attachCandidates(doc, index, hit,
         objectSnap: true, thickest: thickestWall(doc));
     expect([for (final e in ends) e.wall], isNot(contains(dim)));
+    final atCorner = attachCandidates(doc, index, corner,
+        objectSnap: true, thickest: thickestWall(doc));
+    expect([for (final e in atCorner) e.wall], containsAll([wa, wb]),
+        reason: "control: the stray's line at the joint finds A and B");
 
     // The rooms' adapter: a wall would be an input.
     final inputs = RoomInputs(doc);
