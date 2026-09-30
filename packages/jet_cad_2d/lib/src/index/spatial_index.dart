@@ -126,14 +126,17 @@ class _Placement {
 /// including definitions with no instances, since one may be placed at any
 /// moment and building on demand would put an unbounded build inside a query.
 ///
-/// **Definitions must be in place before construction, or followed by an
-/// explicit [rebuildAll].** [DocumentTree.addDefinition] and
-/// [DocumentTree.removeDefinition] are not commands — nothing calling either
-/// one emits a [DocChange], so this class has no way to hear about it. A
-/// definition added afterwards never gets a [ContainerIndex]; one removed
-/// leaves a stale entry that [rebuildContainer] would reject and only
-/// [rebuildAll] clears. A future plan that turns definition mutation into
-/// commands removes this caveat along with the gap it names.
+/// **A definition added or removed by command is heard; one changed through
+/// the tree directly is not.** [AddDefinitionCommand] and
+/// [RemoveDefinitionCommand] name the definition handle in `touched`, and a
+/// touched handle that resolves to a definition (or that no longer resolves to
+/// anything) is structural: [_onChange] rebuilds every container. Each such
+/// change costs one [rebuildAll], off the frame path, like any node added.
+/// [DocumentTree.addDefinition] and [DocumentTree.removeDefinition] called
+/// directly still emit no [DocChange]: a definition added that way never gets
+/// a [ContainerIndex] and one removed leaves a stale entry that only
+/// [rebuildAll] clears, so such a caller follows with an explicit
+/// [rebuildAll].
 ///
 /// **Editing a definition's *contents*, on the other hand, is fully
 /// incremental.** An instance is indexed in its placing container by the
