@@ -1,10 +1,12 @@
 # The document lifecycle (12a) — design
 
-**Date:** 2026-09-30. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-09-30. **Status:** design, **revision 3**. Revision 1
 (`e5a26d2`) was reviewed independently: "Not ready", 2 blocking, 11 major
 and 15 minor findings (S-1 to S-28), every one with a local fix inside the
-human's decisions. Revision 2 applies all of them; see
-[Revision 2](#revision-2) for the map.
+human's decisions. Revision 2 (`c54ca55`) applied all of them; its
+independent re-review: "Ready with amendments", 2 major and 11 minor new
+findings (T-1 to T-13), and a spot check suffices after them. Revision 3
+applies those; see [Revision 2](#revision-2) and [Revision 3](#revision-3).
 **Sub-project:** `roadmap/12-app-shell.md`, first slice (12a). **Size:** M:
 application code, one small engine change (D3), one dependency and two
 platform edits (D9, D12).
@@ -97,7 +99,9 @@ S-14).
 ### D1 — Where the pieces live
 
 - **Engine** (`packages/jet_cad_2d`): one change, the state identity of D3.
-  Nothing else changes in the engine or the render layer.
+  **Render layer:** at most one getter, `Tool.isMidShape` (D6, T-2), if the
+  plan finds no existing way to ask whether the active tool is part-way
+  through a shape. Nothing else changes in either package.
 - **App** (`apps/floor_planner/lib/`), new files:
   - `document_host.dart` — the host of D2: the current document, its
     measurer, its name, its file location, its save point, the busy flag,
@@ -168,11 +172,17 @@ camera) is `late final` over it. There is no path to swap the document.
 - **Pending input is settled before a flow reads the document** (S-4, S-5).
   Every command of D6 that reads or replaces the document (Save, Save As,
   New, Open, Open sample, and the close flows of D10 and D11) first calls
-  the shell's `settlePendingInput()`, then awaits one event-loop turn
-  (`await Future<void>.delayed(Duration.zero)`) so that focus-change
-  listeners scheduled as microtasks (`focus_manager.dart:1943-1947`) have
-  run, and only then reads the state id or encodes. The pending inputs and
-  their rules:
+  the shell's `settlePendingInput()`, which runs **synchronously** (T-4):
+  it commits an open text entry, hands a panel field back, and then calls
+  `FocusManager.instance.applyFocusChangesIfNeeded()` — public API meant for
+  "making sure no focus changes are pending before executing an action",
+  used by `MenuAnchor` for exactly this (`menu_anchor.dart:1312`) — so the
+  focus-loss listeners that would otherwise run a microtask later
+  (`focus_manager.dart:1943-1947`) have committed before the flow reads the
+  state id or encodes. No timer, no await: a `Future.delayed(Duration.zero)`
+  never fires under `tester.pump()` without a duration, and would make
+  "nothing happened" tests pass for the wrong reason. The pending inputs
+  and their rules:
   - **A Selection panel field** with typed, unsubmitted text: handed back
     (`PanelFieldFocusNode.handBack()`); its focus-loss listener commits the
     value as its own undo step (`selection_panel.dart:440-446`), before the
@@ -184,7 +194,20 @@ camera) is `late final` over it. There is no path to swap the document.
     stays for every other focus loss.
   - **The page panel's scale field**: unsubmitted text is not saved — the
     field's existing rule (`page_panel.dart:58-85`: nothing commits on focus
-    loss). Recorded (D14).
+    loss) — and the settle re-syncs the field to the stored scale, as its
+    tap-outside does (`_syncScale`, `page_panel.dart:88-90`), so the panel
+    never shows a scale the saved file does not have. Recorded (D14).
+  - **A pointer on the toolbar** must not end the text entry before the
+    flow runs (T-1): the overlay's `TextField` unfocuses on a tap outside
+    it (EditableText's default, on macOS, Windows and Linux for every
+    pointer kind, and for a mouse elsewhere, `editable_text.dart:6876-6906`),
+    and its focus loss cancels the entry (`text_entry_overlay.dart:72-78`) on
+    pointer down, before the button's `onPressed`. **The toolbar is wrapped
+    in a `TextFieldTapRegion`**, so a press on it is not outside any field;
+    the flow's settle then commits the entry for the button exactly as for
+    the key. Undo and Redo settle too (a typed panel value lands as its own
+    step before the undo, so Undo undoes that value first — the same as
+    pressing Enter and then Undo).
 
 ### D3 — Engine: a state identity on the dispatcher (decision 5)
 
@@ -251,10 +274,14 @@ the same for redo; `clear` keeps the id.
 - **New and launch** then attach **a fixed default page** (S-3): today's
   sample page parameters (A4 landscape, 1:50, metres, grid and paper
   defaults) with a **fixed origin**, not one centred on the extents — an
-  empty document's extents are infinite and their centre is NaN, which the
-  codec cannot encode (`jsonEncode` throws on NaN). The origin is
-  `(-w/2, -h/2)` for the sheet's world size `w × h`, so the sheet is
-  centred on the world origin. The page is attached through `execute` and
+  empty document's extents are infinite and their centre is NaN, which
+  `PageComponent`'s own constructor refuses (`startupPage` on an empty
+  document throws at `copyWith`, `page_component.dart:109-116`). The page
+  is exactly **`PageComponent(originX: -7425, originY: -5250)`**, every
+  other field at its default: the A4 landscape sheet at 1:50 is
+  14,850 × 10,500 world mm (`sheetWorldRect`, `page_geometry.dart:7-12`),
+  so it is centred on the world origin. The launch test compares against
+  this literal (T-11). The page is attached through `execute` and
   the history is then cleared, before the host takes the save point, so a
   fresh document has Undo disabled. Untitled, clean.
 - **Open sample** builds today's `startupPlan` flat through the same
@@ -279,6 +306,8 @@ the same for redo; `clear` keeps the id.
   `savedState`.
 - On web, "successful" is "the download was handed to the browser"
   (decision 9).
+- Writing `savedState` recomputes `dirty` at once (a save emits no document
+  change).
 - **The host subscribes to the current document's `commands.changes`**
   (the async stream; the synchronous `onAfterMutate` slot belongs to the
   index), and **cancels and re-makes the subscription with every swap**
@@ -286,8 +315,11 @@ the same for redo; `clear` keeps the id.
   shell re-reads `canUndo`/`canRedo`.
 - The dirty mark: a `•` before the document name in the top bar, and
   `Edited` in its tooltip. On web the tab title is `name — jet-cad`, with
-  `• ` prefixed when dirty (Flutter's `Title` widget; it affects only the
-  web tab, S-27).
+  `• ` prefixed when dirty. It is set through `MaterialApp.onGenerateTitle`
+  fed from the host's state, not an inner `Title` widget: `WidgetsApp`
+  wraps everything in its own `Title` (`app.dart:1810`), and a rebuild of
+  the app would reset an inner one's value (T-13). It affects only the web
+  tab (S-27).
 
 ### D6 — The command table (decision 4)
 
@@ -297,13 +329,16 @@ shortcut glyph), `List<ShortcutActivator> shortcuts`,
 
 | Command | Shortcuts (bound on every platform) | Enabled |
 |---|---|---|
-| New | Meta+N, Ctrl+N | not busy |
-| Open… | Meta+O, Ctrl+O | not busy |
-| Open sample | — | not busy |
-| Save | Meta+S, Ctrl+S | not busy (untitled runs Save As) |
-| Save As… | Meta+Shift+S, Ctrl+Shift+S | not busy |
-| Undo | Meta+Z, Ctrl+Z | not busy and `canUndo` |
-| Redo | Meta+Shift+Z, Ctrl+Shift+Z, Ctrl+Y | not busy and `canRedo` |
+| New | Meta+N, Ctrl+N | idle |
+| Open… | Meta+O, Ctrl+O | idle |
+| Open sample | — | idle |
+| Save | Meta+S, Ctrl+S | idle (untitled runs Save As) |
+| Save As… | Meta+Shift+S, Ctrl+Shift+S | idle |
+| Undo | Meta+Z, Ctrl+Z | idle and `canUndo` |
+| Redo | Meta+Shift+Z, Ctrl+Shift+Z, Ctrl+Y | idle and `canRedo` |
+
+**Idle** means: no flow is busy, and the active tool is not part-way
+through a shape (T-2).
 
 - **Both modifiers are bound everywhere** (as Z is today,
   `main.dart:398-399`); only the tooltip's glyph follows
@@ -319,18 +354,46 @@ shortcut glyph), `List<ShortcutActivator> shortcuts`,
   web, where Flutter calls `preventDefault()` only for a handled key
   (`keyboard_binding.dart:596-599`), so Cmd/Ctrl+S never opens the browser's
   Save Page, even during a busy flow.
-- **One flow at a time.** A flow sets `busy` before its first await and
-  clears it in a `finally` (S-21), on success, cancel, failure and throw.
-  While busy, every command is disabled (Undo and Redo too: an undo during
-  a save would move the state under the flow). The canvas itself stays
-  live (D5 handles an edit made during a write).
+- **Mid-shape** (T-2). Specs 03 D5 and 05 D3 and Ruling 07-1 say an undo
+  never lands on a half-placed shape; the mechanism is the pending tool
+  swallowing every key-down (`placement_tool.dart:199-204`), so today's
+  chords are already inert mid-shape. A toolbar click is a pointer event no
+  tool sees, so **every command is disabled while the active tool is
+  part-way through a shape** — a Wall chain with a wall down, a
+  Polyline or Dimension between clicks — and the buttons and the keys
+  agree. Escape (or finishing the shape) enables them again. The shell
+  listens to the `ToolController` for it. The plan decides how to ask a
+  tool: an existing per-tool pending getter (`PlacementTool.isPending`,
+  `placement_tool.dart:70`) where every such tool has one, or a new
+  `Tool.isMidShape` on the render layer's base class (default false). An
+  open text entry is **not** mid-shape: a flow commits it (D2).
+- **One flow at a time.** Busy belongs to the **outermost** flow (T-8):
+  the command wrappers set `busy` before their first await and clear it in
+  a `finally` (S-21), on success, cancel, failure and throw. Save and Save
+  As are plain steps returning success, which the replace flow (D10) and
+  the exit flow (D11) call inside their own busy span, never through the
+  guarded command. While busy, every command is disabled (Undo and Redo
+  too: an undo during a save would move the state under the flow). The
+  canvas itself stays live (D5 handles an edit made during a write).
+- **Bound above the dialogs too** (T-3). The shell's `CallbackShortcuts`
+  is inside the home route, so a dialog (D10's, the error dialog, the web
+  name prompt) is outside its focus chain, and a key it does not handle is
+  not `preventDefault`ed on web. The file chords are therefore bound once
+  more above the Navigator (a `CallbackShortcuts` in `MaterialApp.builder`,
+  below `DefaultTextEditingShortcuts`, `app.dart:1818-1823`), calling the
+  same table's `run`; disabled or busy, they match and do nothing. So
+  Cmd/Ctrl+S never opens the browser's Save Page, even with a dialog up.
 - **Text fields** (S-7). Flutter's text-editing shortcuts sit at the app
   root, above the shell (`app.dart:1823`), so the shell's bindings see a
   field's keys first; `ShellShortcutGuard` is what gives a field its own
   keys back. It lists Meta+Z and Ctrl+Z today (`shortcut_guard.dart:49-52`)
   and gains **Meta+Shift+Z, Ctrl+Shift+Z and Ctrl+Y** (a `SingleActivator`
-  matches modifiers exactly). In a focused field those stay the field's own
-  undo and redo; in the canvas they are the document's. The file shortcuts
+  matches modifiers exactly). In a focused field they **never reach the
+  document**; in the canvas they are the document's. (The guard maps them
+  to a stop-propagation intent, so the field's own text undo does not run
+  either — `DoNothingAction(consumesKey: false)`; unchanged since spec 05
+  for Cmd+Z. Mapping them to `UndoTextIntent`/`RedoTextIntent` would give
+  fields a real undo; left to a later slice, T-5.) The file shortcuts
   (Meta/Ctrl+N, O, S, Shift+S) are **not** guarded: Cmd+S in a panel field
   saves, after D2's settle step.
 - **Web reserves some shortcuts.** Browsers keep Cmd/Ctrl+N (and W, T) for
@@ -341,13 +404,15 @@ shortcut glyph), `List<ShortcutActivator> shortcuts`,
 
 - The top bar (`chrome-top`, 44 px) gains, at its left: the toolbar (seven
   icon buttons, a gap between the file group and Undo/Redo), then the
-  document name with its dirty mark, then today's status line (now
+  document name with its dirty mark (`Flexible`, ellipsis: a long file name
+  must not overflow the 44 px row, T-13), then today's status line (now
   `Flexible` with an ellipsis, so the bar does not overflow in a narrow
   window or `flutter test`'s 800 px surface, S-27), Spacer, OSNAP and zoom
   as now.
 - Buttons are `IconButton`s with tooltips, keys `toolbar-<id>`, disabled
   per D6. They never take focus from the canvas (`ExcludeFocus`, as the tool
-  palette does).
+  palette does), and the toolbar sits inside a `TextFieldTapRegion` so a
+  press does not end an open text entry first (D2, T-1).
 
 ### D8 — Opening a file
 
@@ -385,8 +450,12 @@ shortcut glyph), `List<ShortcutActivator> shortcuts`,
 - **Byte identity.** A file written by this app, opened and saved without
   an edit, is byte-identical to the file (the codec is deterministic). A
   file written by an older codec version is re-encoded in today's form.
-- **What a decode does not validate:** a decodable but out-of-range page
-  (a scale of 0, say) has no check in `PageComponent.fromJson`; a failure
+- **What a decode validates, and what not** (T-9): the page's own fields
+  are range-checked on load — `PageComponent.fromJson` goes through the
+  constructor, which refuses non-positive or non-finite sizes and scale and
+  non-finite origins (`page_component.dart:109-116, 202-216`) — so such a
+  file fails the Open cleanly (a fixture below). Unchecked: a positive but
+  absurd scale or size, and the parametric types' parameters; a failure
   after the swap has no way back (D14).
 
 ### D9 — `DocumentFiles` (decision 2)
@@ -418,8 +487,10 @@ failure is a throw.
   never imported on web). Location is the path.
 - **web** (`document_files_web.dart`): `openFile` through `file_selector`
   (`file_selector_web` implements it); the location it returns is null.
-  `saveLocation` asks for a name in an app dialog (the browser has no save
-  dialog; `file_selector_web`'s `getSaveLocation` returns a dummy
+  `saveLocation` asks for a name through a prompt the host supplies at
+  construction (`Future<String?> Function(String suggested)`, an app
+  dialog; the interface carries no `BuildContext`, T-12; an empty name is a
+  cancel; the browser has no save dialog; `file_selector_web`'s `getSaveLocation` returns a dummy
   `FileSaveLocation('')`), appends `.jetplan` when the typed name lacks it,
   and returns the name as the location. `write` downloads (S-15): a
   `package:web` `Blob` of the bytes (`application/json`),
@@ -444,8 +515,11 @@ New, Open and Open sample, when the document is dirty (after D2's settle
 step), first show an app dialog: **Save**, **Don't Save**, **Cancel**
 (default Save; Escape is Cancel).
 
-- **Save:** runs Save (D9; Save As if untitled). If the save is cancelled
-  or fails, the replacement does not happen and the document stays dirty.
+- **Save:** runs the Save step (D9; Save As if untitled) inside this flow's
+  busy span (D6). If the save is cancelled or fails, the replacement does
+  not happen and the document stays dirty. If it succeeds but an edit
+  landed while the write was pending (D5: the document is dirty again), the
+  dialog is shown again rather than replacing unsaved work (T-8).
 - **Don't Save:** the replacement proceeds.
 - **Cancel:** nothing happens.
 - A clean document is replaced without a dialog.
@@ -454,11 +528,15 @@ step), first show an app dialog: **Save**, **Don't Save**, **Cancel**
 ### D11 — Closing the app (decision 7)
 
 - **macOS.** The host registers an `AppLifecycleListener(onExitRequested:
-  …)` and disposes it with itself. Clean: `AppExitResponse.exit`. Busy (a
-  flow in progress, a dialog or a panel up): `AppExitResponse.cancel`
-  (S-17). Dirty: settle (D2), then the D10 dialog; Save then exit if the
-  save succeeds, cancel if it is cancelled or fails; Don't Save exits;
-  Cancel returns cancel.
+  …)` and disposes it with itself. **In this order** (T-7): busy (a flow
+  in progress, a dialog or a panel up, a write in flight) →
+  `AppExitResponse.cancel` (S-17); else settle (D2); then clean →
+  `AppExitResponse.exit`; else the D10 dialog: Save then exit if the save
+  succeeds and the document is still clean (else the dialog again, as
+  D10), cancel if it is cancelled or fails; Don't Save exits; Cancel
+  returns cancel. Settling before the clean check means a typed but
+  unsubmitted panel value makes the document dirty and asks, rather than
+  being lost.
   - **Cmd+Q and the app menu's Quit** reach it with no native code
     (verified in Flutter 3.47's sources, S-14):
     `FlutterAppDelegate.applicationShouldTerminate` sends
@@ -471,7 +549,10 @@ step), first show an app dialog: **Save**, **Don't Save**, **Cancel**
     (`AppDelegate.swift`), AppKit closes the window first and terminates
     after, so a cancel would leave a running app with no window.
     `MainFlutterWindow` (the nib window, whose own delegate methods AppKit
-    consults) implements `windowShouldClose(_:)` to return false and call
+    consults) implements `@objc func windowShouldClose(_ sender: NSWindow)
+    -> Bool` (the class does not adopt `NSWindowDelegate`, so the method is
+    exposed to Objective-C only when marked `@objc`, T-13) to return false
+    and call
     `NSApp.terminate(nil)`, routing the close through the same exit
     request; an allowed exit terminates, a cancelled one leaves the window
     open. The one native edit; verified on the human's Mac.
@@ -525,8 +606,10 @@ step), first show an app dialog: **Save**, **Don't Save**, **Cancel**
 - The page panel's unsubmitted scale text is not saved (D2).
 - Opening a foreign file without the DASHED record draws its separators
   continuous (D8).
-- Decode diagnostics are not shown (D8); a decodable but out-of-range page
-  is not validated (D8).
+- Decode diagnostics are not shown (D8); a positive but absurd page scale or
+  size, and parametric parameters, are not validated on load (D8).
+- Mid-shape, every command waits for Escape or the end of the shape (D6).
+- The chords in a guarded text field do nothing at all (D6, T-5).
 - A saved state evicted from the 200-step history cannot become clean by
   undoing (decision 5); correct, not a limit, and pinned.
 
@@ -566,9 +649,21 @@ step), first show an app dialog: **Save**, **Don't Save**, **Cancel**
 Widget tests pump the host with a `FakeDocumentFiles`. **No test starts
 from a clean document at depth 0 when it asserts that something did not
 change** (S-13): those start **dirty, with `undoDepth > 0`**, from an edit
-through a real tool at an off-origin, rotated placement. The documents are
-the sample flat (walls, openings, rooms, dimensions in rotated groups off
-the origin) and New documents edited through real tools.
+through a real tool at an off-origin placement, **with the tool's shape
+ended** (Escape, Select idle) before any chord is pressed — a pending tool
+swallows the key and would make a "no call" test pass for the wrong reason
+(T-6). A fixture that exercises Redo has a redo stack: two edits, one undo
+(dirty, `undoDepth > 0`, `canRedo`). The documents are the sample flat
+(walls, openings, rooms, dimensions; every object in a root-level group at
+the identity, `startup_plan.dart:305-371`) and New documents edited
+through real tools, one of which is **rotated** through the Select tool's
+rotation grip (T-10). Flows are triggered with the repository's `press()`
+(`sendKeyEvent` then `pump()`); D2's settle is synchronous, so no extra
+pump is needed (T-4). Tests of the toolbar's pointer path run with
+`debugDefaultTargetPlatformOverride = TargetPlatform.macOS` and
+`PointerDeviceKind.mouse` — `flutter test`'s default touch on Android is
+the one combination where a tap outside a field does not unfocus it
+(T-1).
 
 ### Tests by area
 
@@ -578,16 +673,19 @@ the origin) and New documents edited through real tools.
 - **Launch and New (D4):** the launch document is empty, untitled, clean,
   Undo disabled, units millimetres, handle 6 holds the DASHED record, the
   page is live (`PageNotifier.value` is the fixed default, the zoom text
-  reads `1:50 · …`, the page panel shows); New after an edit (dirty → Don't
-  Save) replaces it with the same.
+  reads `1:50 · …`, the page panel shows), and the page `==` the literal
+  `PageComponent(originX: -7425, originY: -5250)` (T-11); New after an edit
+  (dirty → Don't Save) replaces it with the same.
 - **Round trips (exit criterion):**
   - sample → Save As (the fake records bytes) → Open those bytes → Save:
     the second bytes `==` the first, **and the first bytes `==`
     `utf8.encode(DraftDocumentCodec.encodeToString(sample))` computed
     independently in the test** (S-9); the opened document's
     walls/openings/rooms/dimensions `==` the saved ones';
-  - **from New** (S-3): a wall and a room drawn through the tools far from
-    the origin → Save As → Open → Save: bytes `==`;
+  - **from New** (S-3, T-10): a wall and a room drawn through the tools far
+    from the origin, the wall's group then **rotated** through the Select
+    tool's rotation grip → Save As → Open → Save: bytes `==`, and the
+    opened wall's group transform `==` the saved one's;
   - **without DASHED** (S-20): a file encoded from an `empty` document with
     a wall and no linetype record → Open → Save: bytes `==` the file.
 - **The page after Open** (S-1): after Open of the sample's bytes, the page
@@ -597,7 +695,8 @@ the origin) and New documents edited through real tools.
   (`liveObjectsOf<WallParams>` non-empty, a wall's grips present).
 - **Open failures (D8, S-12, S-13):** from a dirty document with history →
   Open → Don't Save → the picker returns: bytes that are not UTF-8; not
-  JSON; `[]`; `{"schemaVersion": 1}` (a missing section); a schema version
+  JSON; `[]`; `{"schemaVersion": 1}` (a missing section); the sample's
+  bytes with the page's `scaleDenominator` set to 0 (T-9); a schema version
   the codec refuses; or a cancel. Each: the same document object in the
   host, the same undo depth, still dirty; the four failures show the
   dialog; after it, Cmd+O opens a picker again (busy was cleared).
@@ -616,17 +715,32 @@ the origin) and New documents edited through real tools.
 - **Undo/Redo buttons (D6, D7):** disabled on a fresh document; enabled
   after an edit (Undo) and after an undo (Redo); a tap undoes one step;
   the shortcuts, including Ctrl+Y, do the same.
-- **Disabled means no call** (S-8): a titled, dirty document with
-  `undoDepth > 0`, a `write` held pending (busy): Cmd+Z, Cmd+Shift+Z and a
-  tap on Undo leave `undoDepth` and `stateId` unchanged; a second Cmd+S
-  makes no second write.
-- **Text fields** (S-7): a Selection panel field focused, Cmd+Shift+Z →
-  `undoDepth` and `canRedo` unchanged.
+- **Mid-shape** (T-2): a Wall chain with one wall down → every toolbar
+  button is disabled and a tap on Undo leaves `undoDepth`; after Escape
+  they are enabled and a tap undoes.
+- **Above the dialogs** (T-3): with the D10 dialog up, Cmd+S is handled
+  (the key event result) and makes no write.
+- **Disabled means no call** (S-8, T-6): a titled document after two
+  edits and one undo (dirty, `undoDepth > 0`, `canRedo`), the tool's shape
+  ended, a `write` held pending (busy): Cmd+Z, Cmd+Shift+Z and taps on Undo
+  and Redo leave `undoDepth`, `canRedo` and `stateId` unchanged; a second
+  Cmd+S makes no second write.
+- **Nested flows** (T-8): dirty → New → Save with the write held → Cmd+O,
+  Cmd+S and the buttons do nothing; the write completes → the document is
+  replaced. With an edit made while the write was held → the dialog is
+  shown again.
+- **Text fields** (S-7, T-6): with a redo stack, a Selection panel field
+  focused, each of Meta+Shift+Z, Ctrl+Shift+Z and Ctrl+Y → `undoDepth` and
+  `canRedo` unchanged.
 - **Pending input** (S-4, S-5, S-19): a wall drawn off-origin **and
   selected**, its thickness typed without Enter, Cmd+S → the saved bytes
   carry the typed thickness, history has the commit as its own step, and
   the document is **clean** after the save. A text entry with typed text,
-  Cmd+S → the saved bytes contain the text entity, clean after.
+  Cmd+S → the saved bytes contain the text entity, clean after. **The same
+  through the toolbar** (T-1): macOS, mouse, a text entry with typed text,
+  a tap on `toolbar-save` → the bytes contain the text entity, clean after.
+  An unsubmitted page scale, Cmd+S → the field shows the stored scale
+  after (T-13).
 - **Replace flows (D10):** dirty + New → dialog; Cancel keeps everything;
   Don't Save replaces; Save + a cancelled save dialog keeps everything,
   dirty; Save + success writes then replaces. Clean + New → no dialog.
@@ -636,7 +750,8 @@ the origin) and New documents edited through real tools.
   are exercised): clean → exit with no dialog; **save, then exit → exit, no
   dialog** (roadmap M-12d); dirty → dialog: Cancel → cancel; Don't Save →
   exit; Save + success → exit; Save + failure → cancel; busy → cancel with
-  no second dialog.
+  no second dialog; **clean but a Selection panel value typed and not
+  submitted → the dialog appears** (T-7).
 - **Web specifics (D9, D11):** with `writesInPlace: false`, Save on a
   titled document writes without asking and marks clean; the fake
   `ExitGuard` is armed exactly while dirty, across a swap.
@@ -674,8 +789,8 @@ the origin) and New documents edited through real tools.
 - **M-12a-10:** the replace flow skips the dialog when dirty — the replace
   test goes red.
 - **M-12a-11:** a flow does not settle pending input (or settles without
-  awaiting the turn) — the pending-input test goes red (bytes, or clean
-  after).
+  applying the pending focus change) — the pending-input test goes red
+  (bytes, or clean after).
 - **M-12a-12:** busy is not set during a flow — the second-Cmd+S test goes
   red.
 - **M-12a-13:** the save point is read after the write's await — the
@@ -696,6 +811,18 @@ the origin) and New documents edited through real tools.
   after a swap goes red (S-11).
 - **M-12a-21:** the old document is not disposed after a swap — the swap
   hygiene test goes red (S-11).
+- **M-12a-22:** the toolbar is outside the `TextFieldTapRegion` — the
+  toolbar text-entry test (macOS, mouse) goes red (T-1).
+- **M-12a-23:** `enabled` ignores mid-shape — the mid-shape test goes red
+  (T-2).
+- **M-12a-24:** the file chords are not bound above the Navigator — the
+  dialog-up Cmd+S test goes red (T-3).
+- **M-12a-25:** the exit flow checks clean before settling — the
+  unsubmitted-value exit test goes red (T-7).
+- **M-12a-26:** a nested Save clears busy — the nested-flow test goes red
+  (T-8).
+- **M-12a-27:** the default page's origin from the portrait size — the
+  literal page test goes red (T-11).
 
 ## Exit gate
 
@@ -708,7 +835,8 @@ the origin) and New documents edited through real tools.
   back identically; (the known quirk: a second Cmd+Q during the dialog
   quits). **On web (Chrome, Firefox):** Open picks a file; Save downloads
   `name.jetplan`; Cmd/Ctrl+S never opens the browser's Save Page, even
-  during a pending save; closing a dirty tab warns.
+  during a pending save or with the name prompt up; closing a dirty tab
+  warns; a click on Save while typing a text entry saves the text.
 
 ## Spec rulings
 
@@ -724,6 +852,13 @@ the origin) and New documents edited through real tools.
 - **R-6 (D9, S-15):** web downloads through `package:web` directly, over
   `cross_file`'s `saveTo` (removed upstream in 0.4.0; leaks in 0.3.x).
 - **R-7 (D6):** while busy, Undo and Redo are disabled too.
+- **R-8 (D6, T-2):** mid-shape, every command is disabled, buttons and
+  keys alike, over letting the buttons act: 05 D3's "undo never lands
+  mid-shape" and the one-table invariant both hold. Cost if wrong: a person
+  mid-chain presses Escape before Save.
+- **R-9 (D2, T-1):** Undo and Redo settle pending input like the file
+  commands, over being disabled while a field has focus: a typed value is
+  then its own step, and Undo removes it first.
 
 ## Revision 2
 
@@ -760,3 +895,26 @@ Applies the independent review of revision 1
 | S-26 both modifiers; consume disabled keys | D6 |
 | S-27 known limits; overflow | D14, D7, D5 |
 | S-28 ids per dispatcher | D2, D3 |
+
+## Revision 3
+
+Applies the independent re-review of revision 2
+(`.superpowers/sdd/spec-12a-review-2.md`, archived with the plan's ledger;
+its S-1 to S-28 table marks S-4, S-7, S-8, S-13, S-26 and S-27 "partly",
+completed by the findings below):
+
+| Finding | Where |
+|---|---|
+| T-1 (major) a toolbar click cancels the text entry | D2 toolbar paragraph, D7, R-9, Testing preamble, test, M-12a-22 |
+| T-2 (major) the buttons act mid-shape | D6 idle and mid-shape, D1 render getter, R-8, D14, test, M-12a-23 |
+| T-3 disabled keys under a dialog | D6 bound above the dialogs, test, M-12a-24, exit gate |
+| T-4 the delayed settle never fires under `pump()` | D2 synchronous settle, Testing preamble, M-12a-11 |
+| T-5 guarded fields do nothing | D6 text fields, D14 |
+| T-6 three "no call" tests | Testing preamble, busy and text-field tests |
+| T-7 exit order | D11 order, test, M-12a-25 |
+| T-8 nested flows | D6 outermost busy, D10, D11, test, M-12a-26 |
+| T-9 page validation facts | D4, D8, D14, fixture |
+| T-10 no rotated fixture | Testing preamble, round trip from New |
+| T-11 the page as a literal | D4, launch test, M-12a-27 |
+| T-12 the web name prompt | D9 web |
+| T-13 `@objc`; dirty on save; tab title; long names; page scale re-sync | D11, D5, D7, D2, test |
