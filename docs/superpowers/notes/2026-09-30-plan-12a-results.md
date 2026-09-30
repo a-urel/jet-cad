@@ -187,7 +187,11 @@ allocation invariant tests are unchanged on the branch and green.
   cancel. The list is the framework's: not mitigated, not pinned.
 - Carried from earlier, untouched: the fix/live-object-rule note's list.
 
-## The human's look (owed)
+## The human's look
+
+**Done, by the human's report after the merge** (2026-09-30: "bunları test ettim sorun görünmüyor. tamamlandı olarak işaretleyebilirsin main içinde"): no
+findings. The items below stay as written, unticked item by item; no
+`macos/` plugin-integration change was reported.
 
 **macOS** (the sandboxed release build): New, Open, Save, Save As with the
 native panels; a saved `.jetplan` opens back identically; Cmd+Q and the
