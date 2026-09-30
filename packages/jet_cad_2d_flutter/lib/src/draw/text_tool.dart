@@ -36,6 +36,12 @@ class TextTool extends PlacementTool {
   @override
   bool get isPending => _pending.value != null;
 
+  /// Never mid-shape (spec 12a D6, U-1): the Text tool's pending state is
+  /// the open entry, which the shell's flows commit (spec 12a D2) rather
+  /// than wait on.
+  @override
+  bool get isMidShape => false;
+
   @override
   Vector2? get orthoBase => null;
 

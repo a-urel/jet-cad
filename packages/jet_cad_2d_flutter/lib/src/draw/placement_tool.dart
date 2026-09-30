@@ -68,6 +68,13 @@ abstract class PlacementTool extends Tool {
   MouseCursor get cursor => SystemMouseCursors.precise;
 
   bool get isPending => points.isNotEmpty;
+
+  /// Spec 12a D6: a point placed and the shape not yet finished. The paths
+  /// that change [points] here ([onPointerDown], Enter and Escape in
+  /// [onKey], [cancel]) each notify.
+  @override
+  bool get isMidShape => isPending;
+
   Vector2 get hoverPoint => _hover.point;
   bool get hoverVisible => _hoverVisible;
   SnapKind? get hoverKind => _hover.objectKind;
