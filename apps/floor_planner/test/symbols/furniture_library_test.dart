@@ -111,6 +111,104 @@ void main() {
     });
   });
 
+  group('the outline and the category of each symbol', () {
+    // Written out by hand from the drawn catalog, not derived from it: the
+    // number of closed polylines each symbol draws. Every polyline in the
+    // library is closed, so an open one is a defect.
+    const closedPolylines = {
+      'dining.table.four': 2,
+      'dining.table.six': 2,
+      'dining.table.round': 0,
+      'dining.chair': 2,
+      'dining.bench': 2,
+      'kitchen.base.600': 1,
+      'kitchen.sink': 2,
+      'kitchen.hob': 1,
+      'kitchen.fridge': 1,
+      'kitchen.island': 2,
+      'bed.double': 3,
+      'bed.single': 2,
+      'bed.nightstand': 2,
+      'bed.wardrobe': 1,
+      'sofa.three': 1,
+      'armchair': 1,
+      'table.coffee': 2,
+      'tv.unit': 1,
+      'bath.toilet': 1,
+      'bath.washbasin': 1,
+      'bath.tub': 2,
+      'bath.shower': 2,
+      'office.desk': 1,
+      'office.chair': 0,
+      'office.bookshelf': 1,
+    };
+
+    const categories = {
+      'dining.table.four': 'Dining Room',
+      'dining.table.six': 'Dining Room',
+      'dining.table.round': 'Dining Room',
+      'dining.chair': 'Dining Room',
+      'dining.bench': 'Dining Room',
+      'kitchen.base.600': 'Kitchen',
+      'kitchen.sink': 'Kitchen',
+      'kitchen.hob': 'Kitchen',
+      'kitchen.fridge': 'Kitchen',
+      'kitchen.island': 'Kitchen',
+      'bed.double': 'Bed Room',
+      'bed.single': 'Bed Room',
+      'bed.nightstand': 'Bed Room',
+      'bed.wardrobe': 'Bed Room',
+      'sofa.three': 'Living Room',
+      'armchair': 'Living Room',
+      'table.coffee': 'Living Room',
+      'tv.unit': 'Living Room',
+      'bath.toilet': 'Bathroom',
+      'bath.washbasin': 'Bathroom',
+      'bath.tub': 'Bathroom',
+      'bath.shower': 'Bathroom',
+      'office.desk': 'Office',
+      'office.chair': 'Office',
+      'office.bookshelf': 'Office',
+    };
+
+    test('the tables cover exactly the 25 shipped keys', () {
+      final keys = assetLibrary().entries.map((e) => e.key).toSet();
+      expect(keys.length, 25);
+      expect(closedPolylines.keys.toSet(), keys);
+      expect(categories.keys.toSet(), keys);
+    });
+
+    test('every polyline is closed and each symbol has its closed count', () {
+      for (final e in assetLibrary().entries) {
+        final polylines =
+            e.leaves.where((l) => l.record.kind == EntityKind.polyline);
+        for (final l in polylines) {
+          expect(isClosedPolyline(l.payload), isTrue,
+              reason: '${e.key}: an open polyline');
+        }
+        expect(polylines.length, closedPolylines[e.key], reason: e.key);
+      }
+    });
+
+    test('the outline (first leaf) is a closed polyline or a circle', () {
+      for (final e in assetLibrary().entries) {
+        final first = e.leaves.first;
+        if (first.record.kind == EntityKind.polyline) {
+          expect(isClosedPolyline(first.payload), isTrue, reason: e.key);
+        } else {
+          expect(first.record.kind, EntityKind.circle, reason: e.key);
+          expect(closedPolylines[e.key], 0, reason: e.key);
+        }
+      }
+    });
+
+    test('each key is in its own category', () {
+      for (final e in assetLibrary().entries) {
+        expect(e.category, categories[e.key], reason: e.key);
+      }
+    });
+  });
+
   group('every symbol placed', () {
     final at = Vector2(12345, -6789);
 
