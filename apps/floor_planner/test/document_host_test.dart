@@ -3,6 +3,8 @@
 // position against the save point, on the launch document and on an
 // opened one; a swap leaves nothing of the old document live, and New or
 // Open sample from a titled document forgets its file.
+import 'package:floor_planner/document_host.dart';
+import 'package:floor_planner/new_document.dart';
 import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/startup_plan.dart';
@@ -15,6 +17,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'support/document_rig.dart';
 import 'support/fake_document_files.dart';
+import 'support/fake_exit_guard.dart';
 
 /// Far from the origin and from the page, where the edits land.
 final Vector2 far = Vector2(41234.5, 27345.25);
@@ -353,4 +356,85 @@ void main() {
         reason: 'the opened file was written once, by its own Save');
     expect(files.unscriptedCalls, 0);
   });
+
+  testWidgets(
+      'DH7 a swap leaves the busy flag with the listeners it had: the old '
+      "shell's command flags let go of it (spec 12a D2, S-11)", (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final measurer = FlutterTextMeasurer();
+    final session = _CountingSession(newDocument(measurer), measurer);
+    final files = FakeDocumentFiles();
+    await tester.pumpWidget(MaterialApp(
+        home: DocumentHost(
+            session: session, files: files, exitGuard: FakeExitGuard())));
+    await tester.pump();
+    final host = tester.state<DocumentHostState>(find.byType(DocumentHost));
+    final listening = session.countingBusy.listeners;
+    expect(listening, greaterThan(1),
+        reason: 'premise: the host and the shell listen');
+
+    Future<void> swapped(String what) async {
+      await tester.pump();
+      await tester.pump();
+      expect(session.countingBusy.listeners, listening, reason: what);
+    }
+
+    final launch = session.document;
+    await host.newFlow();
+    await swapped('New');
+    expect(identical(session.document, launch), isFalse, reason: 'premise');
+    await host.openSampleFlow();
+    await swapped('Open sample');
+    files.scriptOpen(
+        name: 'flat.jetplan', bytes: sampleBytes(), location: '/p/flat');
+    await host.openFlow();
+    await swapped('Open');
+    expect(session.name, 'flat', reason: 'premise: opened');
+
+    // Busy still reaches the new shell's buttons.
+    session.busy.value = true;
+    await tester.pump();
+    expect(
+        tester
+            .widget<IconButton>(find.byKey(const Key('toolbar-save')))
+            .onPressed,
+        isNull);
+    session.busy.value = false;
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+  });
+}
+
+/// A busy notifier that counts its listeners.
+class _CountingBusy extends ValueNotifier<bool> {
+  _CountingBusy() : super(false);
+
+  final _added = <VoidCallback>[];
+
+  int get listeners => _added.length;
+
+  @override
+  void addListener(VoidCallback listener) {
+    super.addListener(listener);
+    _added.add(listener);
+  }
+
+  @override
+  void removeListener(VoidCallback listener) {
+    super.removeListener(listener);
+    _added.remove(listener);
+  }
+}
+
+/// A session whose [busy] counts its listeners.
+class _CountingSession extends DocumentSession {
+  _CountingSession(super.document, super.measurer);
+
+  final _CountingBusy countingBusy = _CountingBusy();
+
+  @override
+  ValueNotifier<bool> get busy => countingBusy;
 }

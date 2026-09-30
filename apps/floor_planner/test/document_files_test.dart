@@ -147,6 +147,39 @@ void main() {
       expect(files.heldWrites, hasLength(2));
       expect(files.writes, hasLength(3));
     });
+
+    test(
+        'DF7 failNextWrite wins over holdWrites: the write is recorded, '
+        'throws, and leaves no held write behind', () async {
+      final files = FakeDocumentFiles()..holdWrites = true;
+      files.failNextWrite(const FileSystemLikeError());
+
+      final failed =
+          files.write('/p/a.jetplan', 'a.jetplan', Uint8List.fromList([7]));
+      expect(files.writes, hasLength(1));
+      expect(files.heldWrites, isEmpty,
+          reason: 'a failed write is not also held');
+      await expectLater(failed, throwsA(isA<FileSystemLikeError>()));
+
+      // The error was used once: the next write is held again.
+      final next =
+          files.write('/p/b.jetplan', 'b.jetplan', Uint8List.fromList([8]));
+      expect(files.heldWrites, hasLength(1));
+      files.heldWrites.single.complete();
+      await next;
+      expect(files.writes, hasLength(2));
+    });
+  });
+
+  group('the platform selection (spec 12a D9)', () {
+    test(
+        'DF8 on the VM (the io library exists) the export selects the '
+        'native implementation, which writes in place, not the stub', () {
+      // The stub throws UnsupportedError here; the web one downloads
+      // (writesInPlace false).
+      final files = createDocumentFiles(askName: (_) async => null);
+      expect(files.writesInPlace, isTrue);
+    });
   });
 }
 

@@ -35,6 +35,17 @@ Future<bool> cmdS(WidgetTester tester) async {
   return handled;
 }
 
+/// Cmd+Shift+S (Save As), spelled out; whether the key-down was handled.
+Future<bool> cmdShiftS(WidgetTester tester) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+  final handled = await tester.sendKeyEvent(LogicalKeyboardKey.keyS);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  await tester.pump();
+  return handled;
+}
+
 /// The saved [bytes] decoded as the app opens a file.
 DraftDocument decoded(List<int> bytes) {
   final m = FlutterTextMeasurer();
@@ -85,60 +96,64 @@ Future<void> openEntry(WidgetTester tester, Vector2 at, String text,
 }
 
 void main() {
-  testWidgets(
-      'ST1 a selected wall\'s thickness typed without Enter, then Cmd+S: the '
-      'bytes carry it, the commit is its own step, and the document is clean '
-      'after (spec 12a D2, S-4, S-5, S-19; M-12a-11)', (tester) async {
-    final files = FakeDocumentFiles();
-    await pumpApp(tester, files);
-    final session = sessionOf(tester);
-    final doc = session.document;
-    await aimCamera(tester, far);
-    await drawWall(
-        tester, far + Vector2(-1700, -300), far + Vector2(1300, 500));
-    await drawWall(
-        tester, far + Vector2(-800, 1400), far + Vector2(1800, 2200));
-    final wall = wallsOf(doc).last;
-    final params = doc.components.get<WallParams>(wall)!;
-    expect(params.thickness, isNot(262.5), reason: 'premise');
+  for (final saveAs in [false, true]) {
+    final keys = saveAs ? 'Cmd+Shift+S' : 'Cmd+S';
+    testWidgets(
+        'ST1${saveAs ? 'b' : ''} a selected wall\'s thickness typed without '
+        'Enter, then $keys: the bytes carry it, the commit is its own step, '
+        'and the document is clean after '
+        '(spec 12a D2, S-4, S-5, S-19; M-12a-11)', (tester) async {
+      final files = FakeDocumentFiles();
+      await pumpApp(tester, files);
+      final session = sessionOf(tester);
+      final doc = session.document;
+      await aimCamera(tester, far);
+      await drawWall(
+          tester, far + Vector2(-1700, -300), far + Vector2(1300, 500));
+      await drawWall(
+          tester, far + Vector2(-800, 1400), far + Vector2(1800, 2200));
+      final wall = wallsOf(doc).last;
+      final params = doc.components.get<WallParams>(wall)!;
+      expect(params.thickness, isNot(262.5), reason: 'premise');
 
-    await clickAt(tester, far + Vector2(500, 1800));
-    expect(viewOf(tester).selection.keys, [SelectionKey.root(wall)],
-        reason: 'premise: the wall is selected');
-    final thickness = find.byKey(const Key('wall-thickness'));
-    await tester.tap(thickness);
-    await tester.pump();
-    await tester.enterText(thickness, '262.5');
-    await tester.pump();
-    expect(FocusManager.instance.primaryFocus, isA<PanelFieldFocusNode>(),
-        reason: 'premise: typed, the field still focused');
-    expect(doc.components.get<WallParams>(wall), params,
-        reason: 'premise: nothing committed yet');
-    expect(doc.commands.undoDepth, 2, reason: 'premise');
-    expect(session.dirty.value, isTrue, reason: 'premise: dirty');
+      await clickAt(tester, far + Vector2(500, 1800));
+      expect(viewOf(tester).selection.keys, [SelectionKey.root(wall)],
+          reason: 'premise: the wall is selected');
+      final thickness = find.byKey(const Key('wall-thickness'));
+      await tester.tap(thickness);
+      await tester.pump();
+      await tester.enterText(thickness, '262.5');
+      await tester.pump();
+      expect(FocusManager.instance.primaryFocus, isA<PanelFieldFocusNode>(),
+          reason: 'premise: typed, the field still focused');
+      expect(doc.components.get<WallParams>(wall), params,
+          reason: 'premise: nothing committed yet');
+      expect(doc.commands.undoDepth, 2, reason: 'premise');
+      expect(session.dirty.value, isTrue, reason: 'premise: dirty');
 
-    files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
-    expect(await cmdS(tester), isTrue);
-    await tester.pump();
+      files.scriptSaveLocation(name: 'hall.jetplan', location: '/p/hall');
+      expect(await (saveAs ? cmdShiftS(tester) : cmdS(tester)), isTrue);
+      await tester.pump();
 
-    expect(files.writes, hasLength(1));
-    final saved = files.writes.single.bytes;
-    expect(decoded(saved).components.get<WallParams>(wall),
-        params.copyWith(thickness: 262.5),
-        reason: 'the bytes carry the typed thickness');
-    expect(saved, bytesOf(doc), reason: 'encoded at the committed state');
-    expect(doc.components.get<WallParams>(wall)!.thickness, 262.5);
-    expect(doc.commands.undoDepth, 3, reason: 'the commit is its own step');
-    expect(session.dirty.value, isFalse, reason: 'clean after the save');
-    expect(session.savedState, doc.commands.stateId);
-    expect(canvasFocused(), isTrue, reason: 'handed back to the canvas');
+      expect(files.writes, hasLength(1));
+      final saved = files.writes.single.bytes;
+      expect(decoded(saved).components.get<WallParams>(wall),
+          params.copyWith(thickness: 262.5),
+          reason: 'the bytes carry the typed thickness');
+      expect(saved, bytesOf(doc), reason: 'encoded at the committed state');
+      expect(doc.components.get<WallParams>(wall)!.thickness, 262.5);
+      expect(doc.commands.undoDepth, 3, reason: 'the commit is its own step');
+      expect(session.dirty.value, isFalse, reason: 'clean after the save');
+      expect(session.savedState, doc.commands.stateId);
+      expect(canvasFocused(), isTrue, reason: 'handed back to the canvas');
 
-    // One undo takes back the commit alone.
-    await undoKey(tester);
-    expect(doc.components.get<WallParams>(wall), params);
-    expect(wallsOf(doc), hasLength(2));
-    expect(session.dirty.value, isTrue);
-  });
+      // One undo takes back the commit alone.
+      await undoKey(tester);
+      expect(doc.components.get<WallParams>(wall), params);
+      expect(wallsOf(doc), hasLength(2));
+      expect(session.dirty.value, isTrue);
+    });
+  }
 
   testWidgets(
       'ST2 a text entry with typed text, then Cmd+S: the bytes contain the '
@@ -253,8 +268,9 @@ void main() {
 
   testWidgets(
       'ST5 a text entry ended by a mouse click on the tool palette or on a '
-      'panel is cancelled, and hands the focus back to the canvas: Cmd+S '
-      'then saves (plan 12a Task 7; spec 05 D9, 12a D6)', (tester) async {
+      'panel, or by a touch on a panel, is cancelled, and hands the focus '
+      'back to the canvas: Cmd+S then saves (plan 12a Task 7; spec 05 D9, '
+      '12a D6)', (tester) async {
     final files = FakeDocumentFiles();
     await pumpApp(tester, files);
     final session = sessionOf(tester);
@@ -266,22 +282,28 @@ void main() {
     await cmdS(tester);
     expect(files.writes, hasLength(1), reason: 'premise: titled');
 
-    for (final (i, target) in [
-      find.byKey(const Key('tool-line')),
-      find.text('Page'),
+    // A mouse on the palette and on a panel; a touch on the panel, which
+    // on macOS ends the entry too (EditableText's own platform rule).
+    for (final (i, (target, kind)) in [
+      (find.byKey(const Key('tool-line')), PointerDeviceKind.mouse),
+      (find.text('Page'), PointerDeviceKind.mouse),
+      (find.text('Page'), PointerDeviceKind.touch),
     ].indexed) {
       final before = bytesOf(doc);
       await openEntry(tester, far + Vector2(-200.0 + 900 * i, 2400), 'Porch',
           mouse: true);
-      await tester.tap(target, kind: PointerDeviceKind.mouse);
+      await tester.tap(target, kind: kind);
       await tester.pump();
-      expect(entry, findsNothing, reason: '$target: the entry ended');
-      expect(bytesOf(doc), before, reason: '$target: cancelled, not committed');
-      expect(canvasFocused(), isTrue, reason: '$target: the canvas has it');
+      expect(entry, findsNothing, reason: '$target $kind: the entry ended');
+      expect(bytesOf(doc), before,
+          reason: '$target $kind: cancelled, not committed');
+      expect(canvasFocused(), isTrue,
+          reason: '$target $kind: the canvas has it');
 
-      expect(await cmdS(tester), isTrue, reason: '$target');
+      expect(await cmdS(tester), isTrue, reason: '$target $kind');
       await tester.pump();
-      expect(files.writes, hasLength(2 + i), reason: '$target: Cmd+S saves');
+      expect(files.writes, hasLength(2 + i),
+          reason: '$target $kind: Cmd+S saves');
       expect(files.writes.last.location, '/p/room');
       expect(files.writes.last.bytes, before);
       await press(tester, LogicalKeyboardKey.escape);
@@ -291,8 +313,9 @@ void main() {
 
   testWidgets(
       'ST6 a touch outside the entry on Android keeps it open with the focus, '
-      'as EditableText\'s default does: the hand-back drops the focus only '
-      'where the default would (plan 12a Task 7)', (tester) async {
+      'as EditableText\'s default does, and a mouse click ends it: the '
+      'hand-back drops the focus only where the default would '
+      '(plan 12a Task 7)', (tester) async {
     await pumpApp(tester, FakeDocumentFiles());
     final doc = sessionOf(tester).document;
     await aimCamera(tester, far);
@@ -304,5 +327,77 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(textsOf(doc), ['Stair'], reason: 'Enter still commits it');
+
+    // A mouse on Android is not a touch: the entry ends, cancelled, and
+    // the canvas has the focus.
+    final before = bytesOf(doc);
+    await openEntry(tester, far + Vector2(700, 1900), 'Porch', mouse: true);
+    await tester.tap(find.text('Page'), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(entry, findsNothing, reason: 'a mouse click ends the entry');
+    expect(bytesOf(doc), before, reason: 'cancelled, not committed');
+    expect(canvasFocused(), isTrue);
   }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets(
+      'ST7 a page scale typed and left by Tab, not by a tap, still shows the '
+      'typed text; Cmd+S re-syncs it to the stored scale all the same, with '
+      'nothing committed (plan 12a Task 7 deviation 2; spec 12a D2, D14)',
+      (tester) async {
+    final files = FakeDocumentFiles();
+    await pumpApp(tester, files);
+    final session = sessionOf(tester);
+    final doc = session.document;
+    final scale = find.byKey(const Key('page-scale'));
+    await aimCamera(tester, far);
+    await drawWall(tester, far + Vector2(-1100, 200), far + Vector2(1700, 900));
+    final stored = scaleOf(doc);
+
+    await tester.tap(scale);
+    await tester.pump();
+    await tester.enterText(scale, '40');
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.tab);
+    expect(
+        FocusManager.instance.primaryFocus, isNot(isA<PanelFieldFocusNode>()),
+        reason: 'premise: Tab left the field');
+    expect(scaleField(tester), '40', reason: 'premise: the text stays');
+    expect(scaleOf(doc), stored, reason: 'premise: nothing committed');
+
+    files.scriptSaveLocation(name: 'tab.jetplan', location: '/p/tab');
+    expect(await cmdS(tester), isTrue);
+    await tester.pump();
+
+    expect(files.writes, hasLength(1));
+    expect(scaleOf(decoded(files.writes.single.bytes)), stored);
+    expect(scaleField(tester), panelNumberText(stored),
+        reason: 'the field shows the stored scale');
+    expect(doc.commands.undoDepth, 1, reason: 'nothing committed');
+    expect(session.dirty.value, isFalse);
+  });
+
+  testWidgets(
+      'ST8 an open text entry with nothing typed, then Cmd+S: the settle '
+      'closes it, commits nothing, and the canvas has the focus (plan 12a '
+      'Task 7 deviation 6; spec 12a D2, R-5)', (tester) async {
+    final files = FakeDocumentFiles();
+    await pumpApp(tester, files);
+    final session = sessionOf(tester);
+    final doc = session.document;
+    await aimCamera(tester, far);
+    await drawWall(tester, far + Vector2(-1400, -700), far + Vector2(900, 400));
+    await openEntry(tester, far + Vector2(250, 1300), '');
+    final before = bytesOf(doc);
+
+    files.scriptSaveLocation(name: 'empty.jetplan', location: '/p/empty');
+    expect(await cmdS(tester), isTrue);
+    await tester.pump();
+
+    expect(entry, findsNothing, reason: 'the settle closed the entry');
+    expect(canvasFocused(), isTrue);
+    expect(files.writes.single.bytes, before, reason: 'nothing committed');
+    expect(textsOf(doc), isEmpty);
+    expect(doc.commands.undoDepth, 1);
+    expect(session.dirty.value, isFalse);
+  });
 }

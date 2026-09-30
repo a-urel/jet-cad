@@ -225,6 +225,11 @@ class DocumentHostState extends State<DocumentHost> {
   /// The file half of the command table (spec 12a D6), in the toolbar's
   /// order: New, Open, Open sample, Save, Save As. Each runs one flow,
   /// which sets busy for its span (T-8).
+  ///
+  /// Their `enabled` is only "no flow is running": it does **not** know
+  /// about a shape part-way, which only the shell sees (T-2, R-8). Bind
+  /// them through the shell, which re-wraps each with its own idle; a
+  /// consumer that binds this list directly would act mid-shape.
   late final List<ShellCommand> fileCommands = [
     ShellCommand(
         id: 'new',
@@ -349,7 +354,7 @@ class DocumentHostState extends State<DocumentHost> {
         _session.replace(newDocument(measurer), measurer);
       });
 
-  /// Open sample (spec 12a D4): the startup flat, untitled and clean, once
+  /// Open sample (spec 12a D4): the sample flat, untitled and clean, once
   /// the current document may go (D10).
   Future<void> openSampleFlow() => _flow(() async {
         _settlePendingInput();

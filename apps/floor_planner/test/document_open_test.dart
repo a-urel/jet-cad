@@ -305,7 +305,8 @@ void main() {
       'DO6 a file that cannot be read, from a dirty document with history '
       '(Open, then Don\'t Save): '
       'the same document, depth and dirt; a dialog naming the file and the '
-      'error; busy cleared, so Open asks again; a cancel shows nothing '
+      'error; busy cleared, so Open asks again; a cancelled picker, after '
+      'the replace dialog, shows no error dialog '
       '(spec 12a D8, S-12, S-13, T-9; M-12a-8, M-12a-16, M-12a-17)',
       (tester) async {
     final files = FakeDocumentFiles();
@@ -378,7 +379,8 @@ void main() {
     await thrown;
     expect(identical(session.document, doc), isTrue);
 
-    // A cancel: no dialog, nothing changes.
+    // A cancelled picker, after Don't Save: no error dialog, nothing
+    // changes.
     files.scriptOpenCancel();
     await discardAndRun(tester, host.openFlow());
     expect(find.byKey(const Key('document-error')), findsNothing);

@@ -59,9 +59,9 @@ const double _partition = 120.0; // interior wall thickness
 const DraftColor _furnitureColor = TrueColor(0x8A6D3B);
 const DraftColor _finishColor = TrueColor(0xBBBBBB);
 
-/// Builds the startup flat over [measurer]. `DraftCanvas` refuses a document
-/// whose measurer is not a `FlutterTextMeasurer`, so the caller supplies the
-/// one the app owns.
+/// Builds the sample flat (File > Open sample, spec 12a D4) over
+/// [measurer]. `DraftCanvas` refuses a document whose measurer is not a
+/// `FlutterTextMeasurer`, so the caller supplies one it owns.
 DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // Spec 12a D4: the set-up every document the app makes shares -- the
   // app's component types (the page's and the catalog's, once), units in
@@ -244,7 +244,9 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   return doc;
 }
 
-/// A4 landscape at 1:50 in metres, centred on [extents] (spec D4).
+/// The sample's page: A4 landscape at 1:50 in metres, centred on
+/// [extents] (spec D4). A new document's page is `defaultPage()` (spec 12a
+/// D4).
 PageComponent startupPage(Aabb2 extents) {
   final page = PageComponent();
   final w = page.effectiveWidthMm * page.scaleDenominator;

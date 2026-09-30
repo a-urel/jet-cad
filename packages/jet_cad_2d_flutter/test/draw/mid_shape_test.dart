@@ -178,6 +178,9 @@ void main() {
         expect(rig.tools.active.isMidShape, isFalse);
 
         tool.controller.text = 'Kitchen';
+        expect(tool.isMidShape, isFalse,
+            reason: 'typed text does not make the entry mid-shape');
+        expect(rig.tools.active.isMidShape, isFalse);
         expect(
             keyDown(rig, LogicalKeyboardKey.enter, PhysicalKeyboardKey.enter),
             KeyEventResult.handled);

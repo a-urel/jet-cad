@@ -590,4 +590,54 @@ void main() {
     expect(files.writes.last.location, '/p/fresh');
     expect(files.unscriptedCalls, 0);
   });
+
+  testWidgets(
+      'RP8 with the replace dialog up, each of Cmd and Ctrl with S, O, N and '
+      'Shift+S is handled and runs nothing: no write, no panel, no picker, '
+      'still one dialog; Cancel then keeps everything (spec 12a D6, T-3, '
+      'U-3; M-12a-24)', (tester) async {
+    final files = FakeDocumentFiles();
+    final host = await pumpApp(tester, files);
+    final doc = await titledDirty(tester, files);
+    final depth = doc.commands.undoDepth;
+    final opens = files.openCalls;
+
+    final flow = host.newFlow();
+    await tester.pump();
+    expect(dialog, findsOneWidget, reason: 'premise: the dialog is up');
+
+    for (final modifier in [
+      LogicalKeyboardKey.metaLeft,
+      LogicalKeyboardKey.controlLeft,
+    ]) {
+      for (final (key, shift) in [
+        (LogicalKeyboardKey.keyS, false),
+        (LogicalKeyboardKey.keyO, false),
+        (LogicalKeyboardKey.keyN, false),
+        (LogicalKeyboardKey.keyS, true),
+      ]) {
+        final what = '${modifier.keyLabel}${shift ? '+Shift' : ''}+'
+            '${key.keyLabel}';
+        await tester.sendKeyDownEvent(modifier);
+        if (shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        final handled = await tester.sendKeyEvent(key);
+        if (shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        await tester.sendKeyUpEvent(modifier);
+        await tester.pump();
+        await tester.pump();
+        expect(handled, isTrue, reason: '$what: handled');
+        expect(dialog, findsOneWidget, reason: '$what: still one dialog');
+        expect(files.writes, isEmpty, reason: '$what: no write');
+        expect(files.saveLocationCalls, isEmpty, reason: '$what: no panel');
+        expect(files.openCalls, opens, reason: '$what: no picker');
+      }
+    }
+
+    await answerReplace(tester, 'replace-cancel');
+    noDialog(tester);
+    await flow;
+    await tester.pump();
+    expectKept(tester, doc, depth, reason: 'Cancel after the chords');
+    expect(files.unscriptedCalls, 0);
+  });
 }
