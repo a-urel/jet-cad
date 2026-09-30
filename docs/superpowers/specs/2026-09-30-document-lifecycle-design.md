@@ -10,6 +10,10 @@ nit (T-1 to T-13), and a spot check suffices after them. Revision 3
 minor and 4 nits (U-1 to U-8), no further review needed. Revision 4
 applies those; see [Revision 2](#revision-2), [Revision 3](#revision-3)
 and [Revision 4](#revision-4).
+**Amended at execution (Plan 12a),** 2026-09-30, on
+`plan-12a/document-lifecycle`: see [Amended at execution](#amended-at-execution-plan-12a)
+at the end; it rewrites nothing above it. Results:
+[2026-09-30-plan-12a-results.md](../notes/2026-09-30-plan-12a-results.md).
 **Sub-project:** `roadmap/12-app-shell.md`, first slice (12a). **Size:** M:
 application code, one small engine change (D3), one dependency and two
 platform edits (D9, D12).
@@ -979,3 +983,59 @@ ledger), which found every T-n resolved:
 | U-6 D1's "not busy" | D1 |
 | U-7 quit mid-shape; Cmd+Q swallowed | D11, D14 |
 | U-8 wording | header, open-failure test, Testing preamble |
+
+## Amended at execution (Plan 12a)
+
+Where execution made this spec precise or departed from it, each with the
+ruling or review that decided it (the plan's ledger,
+`ledgers/2026-09-30-plan-12a/progress.md`):
+
+- **D2 (the settle).** The settle is `_settlePendingInput()` on the shell,
+  registered with the host through a registrar that returns a release
+  function (a keyed swap runs the new shell's `initState` before the old
+  one's `dispose`). It commits an open text entry (`finish`), hands a panel
+  field back, re-syncs the page scale unconditionally (idempotent), closes
+  an empty open entry, then applies focus changes. **The text entry's
+  tap-outside** now returns focus to the canvas
+  (`text_entry_overlay.dart`, `onTapOutside`, reproducing the framework's
+  platform rule): a plain `unfocus()` left focus on the route scope, where
+  Cmd+S did nothing (Task 6 finding, Task 7 fix).
+- **D4/D8.** The default page is a function, `defaultPage()`
+  (`PageComponent`'s constructor validates and is not const). The phrase
+  "`PageNotifier.value == startupPage(...)`" does not hold literally for
+  the sample (its page is computed before its dimensions extend the
+  extents); tests compare with an independently built sample's page.
+- **D5.** Flows **decide** from the dispatcher
+  (`DocumentSession.differsFromSave`: `stateId != savedState`); the UI
+  **shows** the `dirty` notifier, which lags a synchronous commit by one
+  microtask. Reading the notifier in the replace flows lost a value the
+  settle had just committed (Task 8 finding). Web Save writes to
+  `location ?? fileName`. `markSaved` is skipped if the document was
+  swapped during the write.
+- **D6.** Mid-shape is `Tool.isMidShape` (render layer). Idle is split:
+  the host's file commands are enabled when not busy; the shell narrows
+  them with mid-shape (`fileCommands` must be bound through the shell).
+  Shortcuts are `SingleActivator`s. Undo and Redo do not set busy (they
+  are synchronous).
+- **D7.** The layout's "`Flexible` name, `Flexible` status, Spacer" is
+  replaced: the document name and the status line share one `Expanded`;
+  the name is capped at half and takes only what it needs, the status line
+  the rest (three flex-1 children capped the status at a third, cutting
+  room notices at 1440 px).
+- **D9.** `createDocumentFiles({required askName})` per platform; web
+  `open` also revokes the picked file's object URL. The app's pubspec
+  declares `flutter: ">=3.38.0"` and keeps `sdk: ^3.5.0` (raising it
+  restyles 120 files and raises 8 lints — its own item).
+- **D10/D11.** The replace dialog is not barrier-dismissible (a `null`
+  answer would be Cancel anyway); the exit request runs as a busy flow, so
+  a second request cancels. D11's "a panel up" means the native open and
+  save panels (inside a flow); a page-panel dropdown is not busy.
+  `windowShouldClose` also makes Cmd+W ask to quit.
+- **D3 and the engine's API.** `UndoStack`'s `push`, `takeUndo`,
+  `pushRedo`, `takeRedo`, `pushUndoOnly` are removed (plan P-2); no earlier
+  spec names them (grep). The entry stays on its stack during an undo or
+  redo `apply`.
+- **Citations moved:** `placement_tool.dart:199-204` → `:206-211` (D6, D14);
+  `text_entry_overlay.dart:22-24` → `:24-26`, `:72-78` → `:80-86` (D2);
+  `text_tool.dart:53` → `:59`; `page_panel.dart:58-85` → `:67-94`,
+  `:88-90` → `:96-98`.

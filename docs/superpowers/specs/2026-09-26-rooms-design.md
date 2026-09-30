@@ -359,6 +359,8 @@ three new pure files).
     separators continuous** (the painter's missing-record fallback,
     `draft_painter.dart:656-661`) and nothing else changes. 12's file-open
     path decides whether to add it (recorded).
+    *Answered by spec 12a D8 (R-3): Open does not add it; every document
+    the app makes has it.*
 - **Non-printing** (decision 15): a statement of intent for 13; 10 has no
   export path and adds no flag.
 - **`editCapability = geometry`.**

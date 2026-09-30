@@ -1,5 +1,44 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-30. **Plan 12a (the document lifecycle, the
+first slice of sub-project 12) is executed on `plan-12a/document-lifecycle`,
+NOT MERGED** (pushed to `origin/plan-12a/document-lifecycle` on the human's
+"gerektiğinde commit ve push et"). Merge is the human's (`--no-ff`, from
+the main checkout); the macOS and web look is OWED.
+- **What it delivers** (see
+  [2026-09-30-plan-12a-results.md](docs/superpowers/notes/2026-09-30-plan-12a-results.md)):
+  the app opens on an empty document; New, Open, Open sample, Save and
+  Save As (`.jetplan`, the codec's bytes) on macOS (native panels, write in
+  place) and web (picker, download); the document swapped at runtime by a
+  keyed rebuild; dirty against a save point (a new engine state id,
+  `CommandDispatcher.stateId`); Save / Don't Save / Cancel before replacing
+  or closing a dirty document (Cmd+Q, the window's close button, the web
+  tab); a toolbar and Cmd/Ctrl shortcuts from one command table; Undo and
+  Redo buttons, Redo's chords; pending input settled before every flow.
+- **Engine:** `UndoStack` transitions and `stateId`; its old public
+  primitives removed. **Render:** `Tool.isMidShape`.
+- **Gates (Linux container):** engine 1,106 + 2 standing; render 974 + 1
+  skip + 7 standing; app 595; web `✓ Built`.
+- **Reviews:** every task Approved by an independent reviewer (Tasks 1 and
+  5 after a test-only follow-up each); the final whole-branch review is in
+  the ledger.
+- **Found on the way and fixed:** focus stranded on the route scope after
+  a text entry ended by a click (Cmd+S did nothing); replace flows reading
+  a stale dirty flag (a typed value lost); the status line capped at a
+  third of its room.
+- **Found, not fixed** (in the note): the app's language-version bump; the
+  macOS second-Cmd+Q quirk; Cmd+W asks to quit; the first macOS build's
+  plugin integration files; web download/picker-cancel/blur limits.
+- **The human's look (owed):** macOS — the native panels in the sandboxed
+  release build, Cmd+Q and the close button asking, a saved `.jetplan`
+  reopening identically, the first build's `macos/` changes to commit;
+  web (Chrome, Firefox, Safari) — Open, the download landing, Cmd/Ctrl+S
+  never opening the browser's Save Page, the tab-close warning.
+- **Next, on the human's word:** the merge; then the next 12 slice from a
+  brainstorm, or the found items.
+
+*Earlier, 2026-09-30 (the fix/live-object-rule merge):*
+
 **Last updated:** 2026-09-30. **`fix/live-object-rule` is MERGED into
 `main` at `6bf8316`**, `--no-ff`, on the human's decision ("merge et ve
 main'i push et"; started on "1 ve 5'i birlikte ele alan fix dalına başla").
@@ -2808,7 +2847,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice.** `main` is at the
+**Immediate next step: the human's choice, on `plan-12a/document-lifecycle`**
+(executed, NOT MERGED; pushed; its ledger is archived as the branch's last
+commit): the human's merge and look (macOS and web, as the results note
+lists), then the next sub-project 12 slice from a brainstorm, or the found
+items in
+[2026-09-30-plan-12a-results.md](docs/superpowers/notes/2026-09-30-plan-12a-results.md).
+
+*Before this plan ran, this paragraph read:* **Immediate next step: the human's choice.** `main` is at the
 `fix/live-object-rule` merge (`6bf8316`) and its STATUS record. Next:
 sub-project 12 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a
 brainstorm, or the found items in
