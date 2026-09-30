@@ -1,9 +1,9 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-30. **`fix/live-object-rule` is executed, NOT
-MERGED** (on the human's "1 ve 5'i birlikte ele alan fix dalına başla";
-pushed to `origin/fix/live-object-rule` on the human's "gerektiğinde commit
-ve push et"). Merge is the human's (`--no-ff`, from the main checkout).
+**Last updated:** 2026-09-30. **`fix/live-object-rule` is MERGED into
+`main` at `6bf8316`**, `--no-ff`, on the human's decision ("merge et ve
+main'i push et"; started on "1 ve 5'i birlikte ele alan fix dalına başla").
+No look was needed: nothing changes a document the app makes.
 - **What it fixes** (see
   [2026-09-30-fix-live-object-rule.md](docs/superpowers/notes/2026-09-30-fix-live-object-rule.md)):
   the app decided "is this a live wall / opening / …" seven ways, none of
@@ -25,8 +25,8 @@ ve push et"). Merge is the human's (`--no-ff`, from the main checkout).
   until regenerated; `ParametricView.objectsOf` matches by `is`; a type
   registered twice doubles misplaced reports; plus the fix/post-11 items
   still open.
-- **Next, on the human's word:** the merge; then sub-project 12 from a
-  brainstorm, or the note's found items.
+- **Next, on the human's word:** sub-project 12 from a brainstorm, or the
+  note's found items.
 
 *Earlier, 2026-09-30 (the fix/post-11 merge):*
 
@@ -2808,7 +2808,13 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice, on `fix/live-object-rule`**
+**Immediate next step: the human's choice.** `main` is at the
+`fix/live-object-rule` merge (`6bf8316`) and its STATUS record. Next:
+sub-project 12 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a
+brainstorm, or the found items in
+[2026-09-30-fix-live-object-rule.md](docs/superpowers/notes/2026-09-30-fix-live-object-rule.md).
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's choice, on `fix/live-object-rule`**
 (executed, NOT MERGED; pushed to `origin/fix/live-object-rule`; its ledger is
 archived as the branch's last commit): the human's merge, then sub-project
 12 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or
