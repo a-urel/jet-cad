@@ -661,4 +661,67 @@ void main() {
       expect(doc.tree.definitions, isEmpty);
     });
   });
+
+  group('the library entry is read-only to a placement', () {
+    /// Every field of every leaf record and payload, and the entry's own
+    /// fields, as text: a record has no `==`, a payload compares by identity.
+    List<String> snapshot(SymbolEntry e) => [
+          '${e.key}|${e.name}|${e.category}|${e.tags}|${e.version}',
+          '${e.definition.handle.value}|${e.definition.name}|'
+              '${e.definition.basePoint.x},${e.definition.basePoint.y}|'
+              '${e.definition.children}',
+          for (final l in e.leaves)
+            [
+              l.record.handle.value,
+              l.record.owner.value,
+              l.record.kind,
+              l.record.layer.value,
+              l.record.linetype.value,
+              l.record.linetypeScale,
+              l.record.geomIndex,
+              encodeColor(l.record.color),
+              l.record.lineweight,
+              l.record.transparency,
+              l.record.flags,
+              l.record.text,
+              l.record.tag,
+              l.record.textStyle.value,
+              l.record.textAttrs,
+              'coords ${l.payload.coords.toList()}',
+              'scalars ${l.payload.scalars.toList()}',
+            ].join('|'),
+        ];
+
+    test('P19 placing rotated and mirrored, twice, leaves the entry byte-equal',
+        () {
+      final entry = sofa();
+      final before = snapshot(entry);
+      expect(entry.leaves, isNotEmpty);
+      // A fresh document each (a copy) and a second placement into the first
+      // (a reuse), both rotated and mirrored, off the origin.
+      final a = target();
+      a.commands.execute(placeSymbol(a, entry,
+          at: Vector2(9000, -7000), quarterTurns: 1, mirrored: true));
+      a.commands.execute(placeSymbol(a, entry,
+          at: Vector2(-4000, 8000), quarterTurns: 3, mirrored: true));
+      final b = target();
+      b.commands.execute(placeSymbol(b, entry,
+          at: Vector2(123, 456), quarterTurns: 2, mirrored: true));
+      expect(instances(a), hasLength(2));
+      expect(a.tree.definitions, hasLength(1));
+      expect(snapshot(entry), before);
+      // The copies are the entry's values, and they are not the entry's
+      // buffers: changing a copy in the document cannot reach the library.
+      final placedLeaves = leavesOf(a, a.tree.definitions.single.handle);
+      expect(placedLeaves.length, entry.leaves.length);
+      for (var i = 0; i < entry.leaves.length; i++) {
+        expect(placedLeaves[i].payload.coords.toList(),
+            entry.leaves[i].payload.coords.toList());
+        expect(
+            identical(
+                placedLeaves[i].payload.coords, entry.leaves[i].payload.coords),
+            isFalse);
+      }
+    });
+  });
 }

@@ -335,5 +335,30 @@ void main() {
         (g) => g['scalars'] = [0.0, 0.5, 1.75], ['radius 0.0']);
     geometry('R27 an arc of zero sweep', sofaArc,
         (g) => g['scalars'] = [250.0, 0.5, 0.0], ['zero sweep']);
+    // The decision is Tolerance.standard.angular (1e-9), not exact == 0: a
+    // sweep the tolerance cannot tell from zero is refused, either sign, and
+    // the boundary itself; one just above it is a real arc.
+    final below = Tolerance.standard.angular / 2;
+    geometry('R27b an arc of tiny positive sweep below the tolerance', sofaArc,
+        (g) => g['scalars'] = [250.0, 0.5, below], ['zero sweep']);
+    geometry('R27c an arc of tiny negative sweep below the tolerance', sofaArc,
+        (g) => g['scalars'] = [250.0, 0.5, -below], ['zero sweep']);
+    geometry(
+        'R27d an arc of sweep exactly at the tolerance',
+        sofaArc,
+        (g) => g['scalars'] = [250.0, 0.5, Tolerance.standard.angular],
+        ['zero sweep']);
+    for (final sweep in [2 * Tolerance.standard.angular, -2e-9]) {
+      test('R27e an arc of sweep $sweep, just above the tolerance, loads', () {
+        final j = validLibraryJson();
+        geometryJson(j, sofaArc)['scalars'] = [250.0, 0.5, sweep];
+        final lib = SymbolLibrary.decode(bytesOfJson(j));
+        final arc = lib.entries
+            .firstWhere((e) => e.key == 'sofa.three')
+            .leaves
+            .firstWhere((l) => l.record.kind == EntityKind.arc);
+        expect(arc.payload.scalars[2], sweep);
+      });
+    }
   });
 }
