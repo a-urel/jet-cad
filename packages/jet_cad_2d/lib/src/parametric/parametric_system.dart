@@ -550,7 +550,11 @@ class ParametricSystem {
   }
 
   /// One diagnostic per parametric component on a holder that is not a
-  /// root-level group: it is not regenerated (spec D5). Then, for every live
+  /// root-level group: it is not regenerated (spec D5). An edit can no
+  /// longer write one (`_written`, fix/post-11), but a document can still
+  /// carry one: a file brings it in (loading does not go through
+  /// [ParametricEdit]), and a re-parented object keeps its component (spec
+  /// 08 D4), so this report stays. Then, for every live
   /// object in ascending handle order and every handle its `references`
   /// declared that is not a live object, in declared order and once each,
   /// `parametric.dangling` (severity error) for a `cascade` type or
@@ -724,6 +728,11 @@ final class _Registration<T extends Component> {
   }
 
   bool has(CommandTarget t, Handle h) => t.components.get<T>(h) != null;
+
+  /// [h]'s component of this type, or null.
+  Component? componentOrNull(CommandTarget t, Handle h) =>
+      t.components.get<T>(h);
+
   Iterable<Handle> handles(CommandTarget t) => t.components.withComponent<T>();
   bool owns(DraftCommand c) => c is SetComponentCommand<T>;
   DraftCommand detach(Handle h) => SetComponentCommand<T>(h, null);

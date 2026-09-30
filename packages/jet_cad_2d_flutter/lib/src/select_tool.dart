@@ -480,11 +480,12 @@ class SelectTool extends Tool {
   /// is in [passing], and there is at least one. A child *instance*'s leaves
   /// do not enter this rule — the stack only ever pushes nested groups.
   ///
-  /// A leaf the picking filter rejects — hidden, or on a locked layer — is
-  /// **skipped**, not failed on: `leavesByOwner()` is unfiltered while
-  /// [passing] only ever holds accepted slots, so counting such a leaf as a
-  /// member would make a group with one locked leaf unselectable by any
-  /// window band. This matches the engine's own `_bandDescend`, which applies
+  /// A leaf the picking filter rejects — hidden, on a locked layer, or not
+  /// pickable (`EntityFlags.unpickable`, spec 11 D19) — is **skipped**, not
+  /// failed on: `leavesByOwner()` is unfiltered while [passing] only ever
+  /// holds accepted slots, so counting such a leaf as a member would make a
+  /// group with one locked or not-pickable leaf unselectable by any window
+  /// band. This matches the engine's own `_bandDescend`, which applies
   /// `acceptsEntity` before it counts a member. A group whose leaves are all
   /// rejected has no members at all and is not selected.
   bool _everyLeafIn(DraftDocument doc, Handle group,

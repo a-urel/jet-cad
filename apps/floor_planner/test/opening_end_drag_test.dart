@@ -516,7 +516,7 @@ void main() {
             hD,
             const OpeningParams(hA, 1400.5, 900, OpeningKind.door,
                 hinge: HingeEnd.end)));
-    // Built by hand: no tool or file path makes these.
+    // Built by hand: no tool makes these; only a file brings them in.
     const plain = Handle(5000), nested = Handle(5100), bare = Handle(5200);
     const stray = OpeningParams(hA, 2600.25, 700, OpeningKind.window);
     const loose = OpeningParams(hA, 3300.75, 600, OpeningKind.gap);
@@ -533,9 +533,12 @@ void main() {
               parent: plain,
               transform: Transform2.identity(),
               children: const [])),
-          SetComponentCommand<OpeningParams>(nested, stray),
-          SetComponentCommand<OpeningParams>(bare, loose),
-        ], label: 'Add strays'));
+        ], label: 'Add groups'));
+    // Written straight into the store, as a file brings them in: an edit
+    // that writes one is refused (fix/post-11, spec 06 D5).
+    doc.components
+      ..attach<OpeningParams>(nested, stray)
+      ..attach<OpeningParams>(bare, loose);
     expect(doc.tree[nested], isA<GroupNode>());
     expect(doc.tree[bare], isNull, reason: 'no node');
     expect(doc.components.get<OpeningParams>(nested), stray);

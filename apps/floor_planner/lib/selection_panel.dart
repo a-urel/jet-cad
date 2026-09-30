@@ -6,6 +6,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'panel_focus.dart';
+import 'panel_number.dart';
 import 'parametric/box.dart';
 import 'parametric/dimension.dart';
 import 'parametric/opening.dart';
@@ -436,9 +437,6 @@ class _SelectionPanelState extends State<SelectionPanel> {
         OpeningKind.gap => 'Gap',
       };
 
-  static String _number(double v) =>
-      v == v.roundToDouble() ? v.round().toString() : v.toString();
-
   /// Records the target on focus gain; commits on focus loss (06 D13's F2,
   /// 07 D11). `??=`: a focused node that notifies again keeps its pin.
   void _onFocusChange(_Field f) {
@@ -498,7 +496,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     f.loadedTarget = value == null ? null : target;
     f.loadedValue = value;
     if (value == null) return;
-    final t = value is String ? value : _number(value as double);
+    final t = value is String ? value : panelNumberText(value as double);
     if (f.text.text != t) f.text.text = t;
   }
 

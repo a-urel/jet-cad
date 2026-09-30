@@ -12,12 +12,16 @@ import 'wall_geometry.dart';
 ///
 /// - **Grips:** two `stretch` grips at the wall's world endpoints, index 0
 ///   the start and 1 the end, computed as `WorldWall` computes them, so they
-///   sit bitwise where the geometry puts the ends.
+///   sit bitwise where the geometry puts the ends. None on a holder that
+///   is not a live wall object ([wallsInDocument], as [drag] and [preview]
+///   read it): a file's stray `WallParams` offers no grips.
 /// - **Drag:** one [CompoundCommand] of `SetComponentCommand<WallParams>`:
-///   the dragged end, and every other wall end within `wallJoin.linear` of
-///   it in world, ascending by handle, each written back in its own group's
-///   local space. Joined ends follow, in one undo step. A drag that would
-///   leave any of those walls no longer than `wallJoin.linear` is refused.
+///   the dragged end, and every other live wall's end within
+///   `wallJoin.linear` of it in world (a root-level group's; a file's stray
+///   `WallParams` does not follow), ascending by handle, each written back
+///   in its own group's local space. Joined ends follow, in one undo step.
+///   A drag that would leave any of those walls no longer than
+///   `wallJoin.linear` is refused.
 /// - **Openings stay put** (spec 08 D13): in the same compound, after the
 ///   walls' own commands, one `SetComponentCommand<OpeningParams>` per
 ///   opening of each wall whose stored `start` moved and whose `end` did
@@ -42,7 +46,7 @@ final class WallGrips implements ObjectGripProvider {
 
   @override
   List<Grip> gripsOf(DraftDocument d, Handle group) {
-    final w = _world(d, group);
+    final w = wallsInDocument(d, group)?.host;
     if (w == null) return const [];
     return [
       Grip(GripRole.stretch, 0, w.s.x, w.s.y),
@@ -140,26 +144,26 @@ final class WallGrips implements ObjectGripProvider {
   @override
   bool movable(DraftDocument d, Handle group) => true;
 
-  /// [h] as the geometry reads it; null when it is not a wall.
-  static WorldWall? _world(DraftDocument d, Handle h) {
-    final p = d.components.get<WallParams>(h);
-    return p == null ? null : WorldWall(h, p, d.tree.accumulatedTransform(h));
-  }
-
-  /// [grip]'s end of [group], then every other wall end within
+  /// [grip]'s end of [group], then every other live wall's end within
   /// `wallJoin.linear` of it (world), ascending by handle, then end index.
   /// A degenerate neighbour joins nothing (D2), so it is left where it is.
+  ///
+  /// The walls are [wallsInDocument]'s: live wall objects only, root-level
+  /// groups, as the engine's survey reads them. A stray `WallParams` a file
+  /// brings in (on any holder that is not a root-level group: a handle with
+  /// no node, a nested group, a root-level instance) is not a wall, so it
+  /// does not follow; writing it would be refused (spec 06 D5).
   static List<(Handle, int)> _endsAt(DraftDocument d, Handle group, Grip grip) {
-    final self = _world(d, group);
-    if (self == null) return const [];
-    final at = self.endpoint(grip.index);
+    final walls = wallsInDocument(d, group);
+    if (walls == null) return const [];
+    final at = walls.host.endpoint(grip.index);
     final ends = <(Handle, int)>[(group, grip.index)];
-    for (final h in d.components.withComponent<WallParams>()) {
-      if (h == group) continue;
-      final w = _world(d, h)!;
+    for (final w in walls.walls) {
       if (w.degenerate) continue;
       for (var k = 0; k < 2; k++) {
-        if ((w.endpoint(k) - at).length <= wallJoin.linear) ends.add((h, k));
+        if ((w.endpoint(k) - at).length <= wallJoin.linear) {
+          ends.add((w.handle, k));
+        }
       }
     }
     ends.sort((a, b) {

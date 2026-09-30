@@ -414,6 +414,17 @@ Room boundaries are tens of points. A thousand-point imported loop is 10⁶
 operations, once per edit, off the frame path. Winding is normalised to
 counter-clockwise so triangle orientation is consistent for every consumer.
 
+**Amended by fix/post-11:** the winding decision (the loop's signed area)
+sums the shoelace **relative to the loop's first vertex**, not over raw
+coordinates. Far from the origin the raw products `x·y` round by far more
+than a thin loop's true area: a 150 × 0.01 mm ring at 1e9 mm summed to −64
+against a true +1.5, was reversed into clockwise and yielded no triangles,
+and a floor-plan wall there (a 3.2 mm wall at georeferenced millimetres,
+07 D8's region check) was refused. The differences from one vertex keep the
+loop's own scale, as the ear test's cross products already did. Killed by
+`M-q4-absShoelace` (the raw sum back): `triangulate_test`'s far rings, and
+the floor planner's `WT19`.
+
 **Refused, and reported.** A self-intersecting loop, and any boundary the
 clipper cannot reduce, yields no triangles and the fill **is not drawn**.
 Silently drawing nothing is a failure this codebase has already paid for, so

@@ -215,7 +215,9 @@ void main() {
     doc.commands.execute(line);
     final misplaced = line.record.handle;
     expect(misplaced.value, greaterThan(h3.value));
-    doc.commands.execute(SetComponentCommand<Tag>(misplaced, const Tag(9)));
+    // Straight into the store, as a file brings one in: an edit that
+    // writes it is refused (fix/post-11, spec 06 D5).
+    doc.components.attach<Tag>(misplaced, const Tag(9));
 
     debugOverlapTests = 0;
     final d = system.diagnostics();

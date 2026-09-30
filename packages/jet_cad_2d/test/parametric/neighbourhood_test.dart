@@ -184,8 +184,14 @@ void main() {
         linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
     doc.commands.execute(line);
     final h = line.record.handle;
-    doc.commands
-        .execute(SetComponentCommand<ClipRect>(h, const ClipRect(5, 5)));
+    // Straight into the store, as a file brings one in: an edit that
+    // writes it is refused (fix/post-11, spec 06 D5).
+    doc.components.attach<ClipRect>(h, const ClipRect(5, 5));
+    // An edit of its holder that leaves the component alone: allowed, and
+    // still nothing regenerates.
+    doc.commands.execute(SetEntityGeometryCommand(
+        h, linePayload(Vector2(7020.5, 3011.75), Vector2(7140.1, 3080.9))));
+    expect(doc.components.get<ClipRect>(h), const ClipRect(5, 5));
     final d = ParametricSystem(doc, catalog).diagnostics();
     expect(d.single.code, 'parametric.misplaced');
     expect(d.single.handles, [h]);

@@ -100,11 +100,22 @@ List<int> _dedupeConsecutive(Float64List c, List<int> raw) {
 bool _samePoint(Float64List c, int a, int b) =>
     c[a * 2] == c[b * 2] && c[a * 2 + 1] == c[b * 2 + 1];
 
+/// The signed area of the loop `index` describes (the shoelace sum, halved):
+/// positive when it runs counter-clockwise.
+///
+/// Summed relative to the loop's first vertex, not over raw coordinates
+/// (fix/post-11). Far from the origin the raw products `x * y` are huge and
+/// their rounding swamps a thin ring's true area: a 150 x 0.01 mm ring at
+/// 1e9 mm summed to -64 against a true +1.5, was reversed into clockwise
+/// and found no ear. The differences from one vertex keep the ring's own
+/// scale, as `_cross` already does. The caller guarantees three entries.
 double _signedArea(Float64List c, List<int> index) {
+  final ox = c[index[0] * 2], oy = c[index[0] * 2 + 1];
   var sum = 0.0;
   for (var i = 0; i < index.length; i++) {
     final p = index[i], q = index[(i + 1) % index.length];
-    sum += c[p * 2] * c[q * 2 + 1] - c[q * 2] * c[p * 2 + 1];
+    sum += (c[p * 2] - ox) * (c[q * 2 + 1] - oy) -
+        (c[q * 2] - ox) * (c[p * 2 + 1] - oy);
   }
   return sum / 2;
 }

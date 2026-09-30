@@ -445,9 +445,12 @@ void main() {
           parent: plain,
           transform: Transform2.identity(),
           children: const [])),
-      SetComponentCommand<WallParams>(nested, across(1800)),
-      SetComponentCommand<WallParams>(bare, across(2600)),
-    ], label: 'Add strays'));
+    ], label: 'Add groups'));
+    // Written straight into the store, as a file brings them in: an edit
+    // that writes one is refused (fix/post-11, spec 06 D5).
+    doc.components
+      ..attach<WallParams>(nested, across(1800))
+      ..attach<WallParams>(bare, across(2600));
     expect(doc.tree[nested]!.parent, plain, reason: 'not root-level');
     expect(doc.tree[bare], isNull, reason: 'no node');
 

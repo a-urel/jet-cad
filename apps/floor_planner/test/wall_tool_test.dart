@@ -824,4 +824,94 @@ void main() {
     expect(doc.components.get<WallParams>(h)!.thickness, 2 * wallJoin.linear);
     expect(driftOf(doc), isEmpty);
   });
+
+  test(
+      'WT20 settings holding a thickness above kWallMaxThickness, set through '
+      "the tool's notifier, commit no wall on a diagonal click at the far "
+      'turned origin and end the chain; at the ceiling a wall lands '
+      '(post-11 (c), Q4 review m2)', () {
+    final doc = wallDoc();
+    final rig = directRig(doc);
+    // Off both axes in world, which is the wall group's local space: 1e25
+    // over this ~3,030 mm wall collapses its band (t/L ~ 3e21), and the
+    // region check would throw out of the click.
+    final s = plan(400, 900), e = plan(3400, 1300);
+    for (final t in [1e25, nextUp(kWallMaxThickness)]) {
+      rig.tool.settings.value = WallSettings(thickness: t);
+      final seed = doc.handleSeed.current;
+      final before = enc(doc);
+      pressAt(rig, s);
+      expect(rig.tool.isPending, isTrue, reason: '$t');
+      expect(() => pressAt(rig, e), returnsNormally, reason: '$t');
+      expect(walls(doc), isEmpty, reason: '$t');
+      expect(doc.handleSeed.current, seed, reason: '$t');
+      expect(enc(doc), before, reason: '$t');
+      expect(doc.commands.undoDepth, 0, reason: '$t');
+      expect(rig.tool.isPending, isFalse, reason: '$t: the chain ends');
+    }
+    rig.tool.settings.value = const WallSettings(thickness: kWallMaxThickness);
+    pressAt(rig, s);
+    pressAt(rig, e);
+    final h = walls(doc).single;
+    expect(doc.components.get<WallParams>(h)!.thickness, kWallMaxThickness);
+    expect(driftOf(doc), isEmpty);
+  });
+
+  testWidgets(
+      'WT19 a 3.2 mm wall, 50 thick, at georeferenced mm coordinates lands '
+      'through the Wall tool: the ring keeps its winding (post-11 (B))',
+      (tester) async {
+    // UTM-like millimetres, about 499 km east and 5,499 km north. Before
+    // fix/post-11 the engine's triangulator summed the shoelace over these
+    // raw coordinates; the rounding of products near 2.7e18 swamped this
+    // band's area of 160 mm^2, flipped its sign, and the edit was refused
+    // (spec 07 D8): the click threw out of the pointer handler.
+    final s = Vector2(498765432.5, 5498765432.25);
+    final e = Vector2(498765433.7503396, 5498765435.195616);
+    expect((e - s).length, closeTo(3.2, 1e-6));
+    final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
+    PageComponent.register(doc.components);
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle,
+        PageComponent(
+            scaleDenominator: 20,
+            originX: s.x - 2000,
+            originY: s.y - 2000,
+            gridStepMm: gridStep)));
+    // A survey tick out of each end, so each click snaps onto it exactly.
+    for (final (p, out) in [(s, s - (e - s) * 100), (e, e + (e - s) * 100)]) {
+      doc.commands
+          .execute(addDrafted(doc, EntityKind.line, linePayload(p, out)));
+    }
+    doc.commands.clearHistory();
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: PlannerShell(document: doc)));
+    await tester.pump();
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final size = tester.getSize(find.byType(InteractionLayer));
+    // 100 px per mm, turned: the wall is 320 px long, the aperture 0.1 mm.
+    final linear =
+        Transform2.rotation(0.35).multiply(Transform2.scale(100, 100));
+    final mid = linear.transformPoint((s + e) / 2);
+    view.camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2.translation(
+                size.width / 2 - mid.x, size.height / 2 - mid.y)
+            .multiply(linear));
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.keyW);
+    wallTool(tester).settings.value = const WallSettings(thickness: 50);
+    await clickAt(tester, view, s);
+    await clickAt(tester, view, e);
+    expect(tester.takeException(), isNull);
+    final h = walls(doc).single;
+    final p = doc.components.get<WallParams>(h)!;
+    expect(xy(p.start), xy(s));
+    expect(xy(p.end), xy(e));
+    expect(p.thickness, 50);
+    expect(doc.commands.undoDepth, 1);
+    expect(kids(doc, h).map((k) => kindOf(doc, k)),
+        [EntityKind.fill, EntityKind.polyline, EntityKind.polyline]);
+    expect(driftOf(doc), isEmpty);
+  });
 }

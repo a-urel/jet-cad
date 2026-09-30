@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/page_panel.dart';
+import 'package:floor_planner/panel_number.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/wall.dart';
@@ -735,6 +736,138 @@ void main() {
     await enterAndSubmit(tester, thickness, '120');
     expect(doc.components.get<WallParams>(wc)!.thickness, 120);
     expect(doc.commands.undoDepth, 1);
+  });
+
+  // 1e100 is the probe's; 1e25 sits under a bound far too high (1e30) and
+  // still collapses this ~1504 mm band.
+  for (final typed in ['1e100', '1e25']) {
+    testWidgets(
+        'WS10 a tool-mode thickness above kWallMaxThickness ($typed) typed '
+        'without Enter never reaches the settings: a diagonal click lands a '
+        'wall at the kept 200, one step, no exception (post-11 (c))',
+        (tester) async {
+      final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+      final doc = view.document;
+      await press(tester, LogicalKeyboardKey.keyW);
+      final tool = view.tools.active as WallTool;
+      await tester.tap(thickness);
+      await tester.pump();
+      // One keystroke event carrying the whole text: `onChanged` sees it
+      // alone, no prefix of it, so the settings keep the last valid value.
+      await tester.enterText(thickness, typed);
+      await tester.pump();
+      final n0 = walls(doc).length;
+      final seed0 = doc.handleSeed.current.value;
+      // Off-axis (the plan is turned 23 degrees) and at the far origin: the
+      // wall's local direction is not axis-aligned, which the typed value
+      // needs to collapse its band.
+      await clickWorld(tester, view, plan(400, 900));
+      await clickWorld(tester, view, plan(1900, 800));
+      // A throw out of the pointer handler would be reported here.
+      expect(tester.takeException(), isNull);
+      expect(walls(doc), hasLength(n0 + 1));
+      final w = walls(doc).last;
+      expect(doc.components.get<WallParams>(w)!.thickness, 200);
+      expect(doc.commands.undoDepth, 1);
+      // The seed moved by that wall's handles alone: its group and the
+      // children generated under it, nothing a refused attempt consumed.
+      expect([w, ...kids(doc, w)].map((h) => h.value).toSet(),
+          {for (var v = seed0 + 1; v <= doc.handleSeed.current.value; v++) v});
+      expect(tool.settings.value.thickness, 200);
+      expect(textOf(tester, thickness), '200',
+          reason: 'the focus loss reverts');
+      expect(driftOf(doc), isEmpty);
+    });
+  }
+
+  test(
+      'SE18 every finite value shows as text that parses back to exactly '
+      'it, sign of zero included; whole numbers below 2^53 without ".0" '
+      '(post-11 _number)', () {
+    const two53 = 9007199254740992.0;
+    final values = [
+      0.0, -0.0, 1.0, 200.0, -40.0, 262.5, 0.1, 1e-12, 5e-324, //
+      two53 - 1, two53, two53 + 2, 9223372036854775807.0, 1e20, 1e300,
+      -1e300, double.maxFinite,
+      // In [2^63, 2^64) in magnitude: an integer text there saturates, on
+      // the VM, to 2^63 - 1 or -2^63, which parse back to +-2^63 (Q4
+      // review m1).
+      1e19, -1.8e19,
+    ];
+    for (final v in values) {
+      final text = panelNumberText(v);
+      final back = double.parse(text);
+      expect(back, v, reason: '$v shows "$text"');
+      expect(back.isNegative, v.isNegative, reason: '$v shows "$text"');
+    }
+    expect([
+      for (final v in [0.0, 1.0, 200.0, -40.0, two53 - 1]) panelNumberText(v)
+    ], [
+      '0',
+      '1',
+      '200',
+      '-40',
+      '9007199254740991'
+    ]);
+  });
+
+  testWidgets(
+      'SE17 a Box width of 1e20 committed with Enter, then focus loss, is '
+      'one undo step storing 1e20: the shown text parses back to it '
+      '(post-11 _number)', (tester) async {
+    final view = await pumpBoxes(tester);
+    final doc = view.document;
+    final b = boxes(doc).first;
+    final height = doc.components.get<BoxParams>(b)!.height;
+    await select(tester, view, [b]);
+    await tester.tap(width);
+    await tester.pump();
+    final depth = doc.commands.undoDepth;
+    // Enter commits, and hands focus back to the canvas: the focus loss
+    // commits the shown text again.
+    await enterAndSubmit(tester, width, '1e20');
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(doc.components.get<BoxParams>(b), BoxParams(1e20, height));
+    expect(double.parse(textOf(tester, width)), 1e20);
+    // Another focus loss, by a tap outside: still nothing to write.
+    await tester.tap(width);
+    await tester.pump();
+    await tester.tap(find.descendant(
+        of: find.byKey(const Key('selection-panel')),
+        matching: find.text('Box')));
+    await tester.pump();
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(doc.components.get<BoxParams>(b)!.width, 1e20);
+    doc.commands.undo();
+    await tester.pump();
+    expect(doc.components.get<BoxParams>(b)!.width, isNot(1e20));
+  });
+
+  testWidgets(
+      'WS11 a wall thickness one ulp above kWallMaxThickness is refused on a '
+      'turned wall, by Enter and by focus loss: the field reverts and the '
+      'document is byte-identical (post-11 (c))', (tester) async {
+    final view = await pumpPanel(tester, panelDoc(FlutterTextMeasurer()));
+    final doc = view.document;
+    final before = enc(doc);
+    final over = nextUp(kWallMaxThickness);
+    expect(double.parse('$over'), over);
+    await select(tester, view, [wa]);
+    await tester.tap(thickness);
+    await tester.pump();
+    await enterAndSubmit(tester, thickness, '$over');
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '200');
+    await tester.tap(thickness);
+    await tester.pump();
+    await tester.enterText(thickness, '$over');
+    await tester.pump();
+    await tester.tap(wallSection);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(textOf(tester, thickness), '200');
+    expect(doc.commands.undoDepth, 0);
+    expect(enc(doc), before);
   });
 
   /// The canvas's own focus node: the `Focus` the `InteractionLayer` builds.

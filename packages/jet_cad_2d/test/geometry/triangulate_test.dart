@@ -102,4 +102,55 @@ void main() {
     expect(t, isNotEmpty);
     expect(areaOf(c, t), closeTo(100.0, 1e-9));
   });
+  group('a ring far from the origin keeps its winding (fix/post-11 (B))', () {
+    // The post-11 probe's ring: a wall 0.01 mm long and 150 mm thick, turned
+    // 23 degrees, a million metres out (+1e9 mm on both axes), stored
+    // anticlockwise. Its true area is 1.5 mm^2; the shoelace over raw
+    // coordinates sums products near 1e18, whose rounding (about 128 an
+    // ulp) swamps it: -64, the wrong sign, so the ring was reversed into
+    // clockwise and no ear was found.
+    const far = [
+      1000000029.3139668, 999999930.9660124, //
+      999999970.7044435, 1000000069.0418023,
+      999999970.6952384, 1000000069.037895,
+      1000000029.3047616, 999999930.962105,
+    ];
+    // The same ring moved to the origin by (-1e9, -1e9), exactly: each
+    // difference is exact (Sterbenz), so it is the same geometry bit for
+    // bit, where the raw shoelace was already right.
+    final near = [for (final v in far) v - 1e9];
+
+    /// Two anticlockwise triangles covering the ring's area, measured
+    /// relative to each triangle's own first corner.
+    void expectTwoCcw(List<double> xy) {
+      final c = loop(xy);
+      final t = triangulateSimplePolygon(c, c.length ~/ 2);
+      expect(t.length, 6);
+      expect(areaOf(c, t), closeTo(1.5, 1e-4));
+      for (var i = 0; i < t.length; i += 3) {
+        expect(cross(c, t[i], t[i + 1], t[i + 2]), greaterThan(0));
+      }
+    }
+
+    /// [xy]'s points in the opposite order: the same ring, clockwise.
+    List<double> reversed(List<double> xy) => [
+          for (var i = xy.length - 2; i >= 0; i -= 2) ...[xy[i], xy[i + 1]]
+        ];
+
+    test('at the origin, the control: two triangles, either winding', () {
+      for (final (i, v) in near.indexed) {
+        expect(v + 1e9, far[i], reason: 'the move is exact');
+      }
+      expectTwoCcw(near);
+      expectTwoCcw(reversed(near));
+    });
+
+    test('at 1e9, anticlockwise: two triangles, not none', () {
+      expectTwoCcw(far);
+    });
+
+    test('at 1e9, clockwise: reversed, then two triangles', () {
+      expectTwoCcw(reversed(far));
+    });
+  });
 }

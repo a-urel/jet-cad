@@ -124,8 +124,8 @@ final class WallBands {
     for (final h in doc.components.withComponent<WallParams>()) {
       // Live wall objects only, as the engine's survey reads one: a
       // root-level group. A stray `WallParams` (on a nested group, or on a
-      // handle with no node, which no tool or file path makes) is not a
-      // wall, and must not shadow one under it.
+      // handle with no node: no tool makes one, but a file can bring either
+      // in) is not a wall, and must not shadow one under it.
       final node = doc.tree[h];
       if (node is! GroupNode || node.parent != doc.tree.root) continue;
       final w = WorldWall(h, doc.components.get<WallParams>(h)!,

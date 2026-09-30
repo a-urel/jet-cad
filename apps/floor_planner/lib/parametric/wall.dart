@@ -18,14 +18,34 @@ enum Justification { left, centre, right }
 /// on purpose. Stored values are still compared with exact `==`.
 const Tolerance wallJoin = Tolerance(linear: 1e-6, angular: 1e-9);
 
+/// The thickest wall the Selection panel and the Wall tool accept, in mm:
+/// 1e7 (10 km), far past any floor plan (spec 07 D11, fix/post-11).
+///
+/// Above some thickness a wall's band collapses in floating point: when
+/// the wall's length falls below an ulp of its own corner coordinates
+/// (about the thickness), the four corners of a wall that is not parallel
+/// to its group's axes round to two points, every value still finite. The
+/// fallback rectangle is then not triangulable and 07 D8's region check
+/// refuses the edit, which the Wall tool and the grips do not catch. The
+/// post-11 probe's sweep (3 justifications x 120 directions x 5 lengths
+/// from just above `wallJoin.linear` to 3000 mm x 5 placements) found the
+/// smallest such thickness at 1.33e10 mm (a thickness-to-length ratio of
+/// 1.15e16), and none at or below 1e10. This bound leaves a margin of about
+/// 1,300 below it, and sits under 2^53, so the panel shows it exactly.
+const double kWallMaxThickness = 1e7;
+
 /// Whether [t] is a thickness a wall may be drawn or edited with (final
-/// review m1): finite and greater than `wallJoin.linear`. A positive
-/// thickness at or below it is a band thinner than the join tolerance, and
-/// far from the origin its faces round onto each other. The Selection
-/// panel rejects any other value, for a wall and for the Wall tool's
-/// settings, and the Wall tool does not commit with one. A loaded wall may
-/// still hold one (D2's degenerate wall is `t <= 0`).
-bool isWallThickness(double t) => t.isFinite && t > wallJoin.linear;
+/// review m1, fix/post-11): finite, greater than `wallJoin.linear` and at
+/// most [kWallMaxThickness]. A positive thickness at or below the floor is
+/// a band thinner than the join tolerance, and far from the origin its
+/// faces round onto each other; one above the ceiling can collapse the
+/// band (see [kWallMaxThickness]). The Selection panel rejects any other
+/// value, for a wall and for the Wall tool's settings, and the Wall tool
+/// does not commit with one. A loaded wall may still hold one (D2's
+/// degenerate wall is `t <= 0`; a thicker one still throws on the Wall
+/// tool's and the grips' regenerating edits, a known limit).
+bool isWallThickness(double t) =>
+    t.isFinite && t > wallJoin.linear && t <= kWallMaxThickness;
 
 /// A wedge corner farther than this many half-thicknesses of the thicker
 /// wall from the node is clamped (spec 07 D6).

@@ -1,5 +1,38 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-29. **`fix/post-11` is EXECUTED, NOT MERGED**
+(the remaining post-11 found items, on the human's "Kalan post-11
+fix'leri"). The merge is the human's, `--no-ff`.
+- **What it fixes** (see
+  [2026-09-29-fix-post-11.md](docs/superpowers/notes/2026-09-29-fix-post-11.md)):
+  - (d) the engine refuses an edit that writes a parametric component on
+    a handle that is not a live root-level group (`47a7fcb`);
+  - (e) a wall-end drag gathers only live walls, so a file's orphan at the
+    joint neither moves nor makes the drag throw (`3ccb191`, `8605d95`);
+  - (c) a wall thickness above 1e7 mm is refused by the panel and the Wall
+    tool, which threw on it at turned placements (`0f8b073`);
+  - new: the triangulator's winding decision no longer fails for thin rings
+    far from the origin (short walls at georeferenced coordinates were
+    refused; `9352103`);
+  - new: the Selection panel, the page panel's scale and the status line
+    show numbers as text that parses back exactly (a 1e20 value wrote a
+    silent 9.22e18; `1ba7b94`, `416d92b`);
+  - every palette entry's `drawing` flag pinned (`363efd0`); two stale
+    comments corrected; spec 06, 07 and 3e amended.
+- **Gates (Linux container):** engine 1,090 + 2 standing; render layer 940
+  + 1 skip + 7 standing; harness 82; app 503; web `✓ Built`.
+- **Reviews:** every commit Approved by an independent reviewer; the
+  reviews' minors landed as `8605d95`, `416d92b`, `d4e7890` and `e82b4e7`.
+- **Found, not fixed** (in the note): shadowing between two parametric
+  types on one group (file only), the five spellings of the live-object
+  rule, 06 D8's cleanup of a second type, the codec's handle seed for
+  components, the app's raw-coordinate `signedArea` (a far short wall
+  loses its joints), a fractional page scale unpinned by tests.
+- **Next, each the human's to call:** the `--no-ff` merge; then
+  sub-project 12 (or the note's found items).
+
+*Earlier, 2026-09-29 (the phantom-snap merge):*
+
 **Last updated:** 2026-09-29. **`fix/phantom-intersection-snap` is MERGED
 into `main` at `f8a7752`**, `--no-ff`, on the human's decision (the first
 post-11 `fix/` branch, started on the human's "başla"). No look was
@@ -2743,7 +2776,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice.** `main` is at the
+**Immediate next step: the human's choice, on `fix/post-11`** (executed,
+NOT MERGED; its ledger is archived as the branch's last commit): the
+human's merge, `--no-ff`, from the main checkout; then sub-project 12
+([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or
+the found items in
+[2026-09-29-fix-post-11.md](docs/superpowers/notes/2026-09-29-fix-post-11.md).
+
+*Before this branch ran, this paragraph read:* **Immediate next step: the human's choice.** `main` is at the
 `fix/phantom-intersection-snap` merge (`f8a7752`) and its STATUS record:
 the next post-11 `fix/` branch (below, item 1 without the phantom snap),
 or sub-project 12.
