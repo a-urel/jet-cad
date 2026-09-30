@@ -25,7 +25,8 @@
 //
 // **Off-origin and not axis-symmetric, by construction.** A drawing centred
 // on (0, 0) is the degenerate fixture this repository keeps rediscovering,
-// and this is the fixture a human looks at every session.
+// and this is the drawing Open sample shows a human and the fixture many
+// tests build.
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';

@@ -1,8 +1,12 @@
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'document_files.dart';
+import 'document_host.dart';
+import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_number.dart';
 import 'parametric/box_tool.dart';
@@ -19,39 +23,119 @@ import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
 import 'shortcut_guard.dart';
-import 'startup_plan.dart';
+import 'startup_plan.dart' show kMaxScale, kMinScale;
 import 'tool_palette.dart';
 
 void main() => runApp(const FloorPlannerApp());
 
-class FloorPlannerApp extends StatelessWidget {
-  const FloorPlannerApp({super.key});
+/// The app (spec 12a D5, U-4, plan 12a P-3): it owns the [DocumentSession]
+/// and the [DocumentFiles], and rebuilds [MaterialApp] from the session, so
+/// `onGenerateTitle` -- which runs above `home` and re-runs only when the
+/// app rebuilds -- follows the document's name and dirty state (the web
+/// tab's title). The [DocumentHost] in `home` runs the flows and builds the
+/// shell.
+///
+/// [files] is a test seam: the platform's implementation when null.
+class FloorPlannerApp extends StatefulWidget {
+  const FloorPlannerApp({super.key, this.files});
+
+  final DocumentFiles? files;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-        title: 'Floor planner',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
-        home: const PlannerShell(),
+  State<FloorPlannerApp> createState() => _FloorPlannerAppState();
+}
+
+class _FloorPlannerAppState extends State<FloorPlannerApp> {
+  final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
+  final DocumentSession _session = DocumentSession.untitled();
+  late final DocumentFiles _files =
+      widget.files ?? createDocumentFiles(askName: _askName);
+
+  /// The web's save-name prompt (spec 12a D9, T-12), shown over the
+  /// navigator: the files object is made above the `MaterialApp`, so it
+  /// has no `BuildContext` of its own.
+  Future<String?> _askName(String suggested) async {
+    final context = _navigator.currentContext;
+    if (context == null) return null;
+    return showDocumentNamePrompt(context, suggested);
+  }
+
+  @override
+  void dispose() {
+    _session.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: Listenable.merge([_session, _session.dirty]),
+        builder: (context, _) => MaterialApp(
+          navigatorKey: _navigator,
+          onGenerateTitle: (_) =>
+              documentTitle(_session.name, dirty: _session.dirty.value),
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
+          home: DocumentHost(session: _session, files: _files),
+        ),
       );
 }
 
-/// Owns the document, the index, the camera and -- since 03 -- the outline
-/// cache, the grip cache and the snap settings for the window's lifetime;
-/// since 05, the tools and the Fill toggle.
-/// It lays out the chrome slots.
+/// Registers the shell's synchronous settle with its host (spec 12a D2,
+/// plan 12a P-4): the host calls [settle] before a flow reads or replaces
+/// the document. Returns the function that withdraws the registration; the
+/// shell calls it on dispose, and it withdraws only [settle] itself, since
+/// a swap builds the next shell before the old one is disposed.
+typedef ShellSettleRegistrar = VoidCallback Function(VoidCallback settle);
+
+/// Owns the index, the camera and -- since 03 -- the outline cache and the
+/// grip cache for the document's lifetime; since 05, the tools and the Fill
+/// toggle. It lays out the chrome slots.
 ///
-/// [document] and [initialCamera] are a test seam (spec 03, Architecture;
-/// Ruling 03-18).
-/// - [document] replaces the startup plan, and must carry a
-///   `FlutterTextMeasurer`.
+/// Since 12a the document comes from the [DocumentHost], which keys the
+/// shell by it (spec 12a D2): a new document is a new shell. The host also
+/// passes the object-snap setting, which survives a swap, and the file
+/// state (name, dirty, busy) for the top bar of spec 12a D7.
+///
+/// A bare shell is the test seam (spec 03, Architecture; Ruling 03-18;
+/// plan 12a P-4).
+/// - [document] must carry a `FlutterTextMeasurer`, which its caller owns.
+///   Without one the shell builds the empty document of spec 12a D4
+///   ([newDocument]) over a measurer of its own, which it clears on
+///   dispose.
+/// - [snap], when given, is the host's and is **not** disposed here (spec
+///   12a D2, S-11); without one the shell owns a fresh one.
 /// - [initialCamera] replaces the nominal fit.
 /// - `PlannerView` still fits once after its first frame, so a test sets a
 ///   camera of its own after the first pump.
 class PlannerShell extends StatefulWidget {
-  const PlannerShell({super.key, this.document, this.initialCamera});
+  const PlannerShell({
+    super.key,
+    this.document,
+    this.snap,
+    this.documentName,
+    this.dirty,
+    this.busy,
+    this.onSettle,
+    this.initialCamera,
+  });
 
   final DraftDocument? document;
+  final SnapSettings? snap;
+
+  /// The document's name, for the top bar (spec 12a D7); null in a bare
+  /// shell.
+  final String? documentName;
+
+  /// Whether the document differs from its save point (spec 12a D5); null
+  /// in a bare shell.
+  final ValueListenable<bool>? dirty;
+
+  /// Whether a flow of the host is running (spec 12a D6); null in a bare
+  /// shell.
+  final ValueListenable<bool>? busy;
+
+  /// Where the shell registers its settle (spec 12a D2).
+  final ShellSettleRegistrar? onSettle;
   final ViewportTransform? initialCamera;
 
   @override
@@ -59,9 +143,11 @@ class PlannerShell extends StatefulWidget {
 }
 
 class _PlannerShellState extends State<PlannerShell> {
-  final FlutterTextMeasurer _measurer = FlutterTextMeasurer();
+  /// A bare shell's own measurer, for the document it builds itself; null
+  /// when the document was passed in (its measurer is its caller's).
+  FlutterTextMeasurer? _ownMeasurer;
   late final DraftDocument _document =
-      widget.document ?? startupPlan(_measurer);
+      widget.document ?? newDocument(_ownMeasurer = FlutterTextMeasurer());
   late final PageNotifier _page = PageNotifier(_document);
   late final SpatialIndex _index = SpatialIndex(_document);
 
@@ -98,7 +184,14 @@ class _PlannerShellState extends State<PlannerShell> {
     maxScale: kMaxScale,
   );
   final GesturePolicy _policy = GesturePolicy.forPlatform();
-  final SnapSettings _snap = SnapSettings();
+
+  /// The host's when it passed one (spec 12a D2: object snap survives a
+  /// swap), and then never disposed here (S-11).
+  late final SnapSettings _snap;
+  late final bool _ownsSnap;
+
+  /// Withdraws [_settlePendingInput]'s registration with the host.
+  VoidCallback? _releaseSettle;
 
   // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
   late final ParametricSystem _parametric;
@@ -312,6 +405,12 @@ class _PlannerShellState extends State<PlannerShell> {
     if (_document.commands.canUndo) _document.commands.undo();
   }
 
+  /// Spec 12a D2: settles input that is typed but not yet committed, before
+  /// a host flow reads or replaces the document. Synchronous. Nothing is
+  /// settled yet: the text entry, the panel fields and the page scale join
+  /// it in plan 12a's Task 7.
+  void _settlePendingInput() {}
+
   bool get _geometryAllowed =>
       _document.commands.permissions.allows(Capability.geometry);
 
@@ -353,13 +452,19 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void initState() {
     super.initState();
+    // Read once: the host keys the shell by its document and passes the
+    // same settings for the shell's whole life.
+    _ownsSnap = widget.snap == null;
+    _snap = widget.snap ?? SnapSettings();
     // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
-    // arrives built. startupPlan builds its walls, openings, separator and
-    // rooms through a parametric system of its own and disposes it before
-    // returning, so this one installs over a finished document and trusts
-    // its geometry, as it would a loaded file (06 D10).
+    // arrives built. The sample (startupPlan) builds its walls, openings,
+    // separator and rooms through a parametric system of its own and
+    // disposes it before returning, and an opened file was decoded, so this
+    // one installs over a finished document and trusts its geometry (06
+    // D10).
     _parametric = installParametric(_document);
     _page.addListener(_onPage);
+    _releaseSettle = widget.onSettle?.call(_settlePendingInput);
   }
 
   @override
@@ -378,14 +483,15 @@ class _PlannerShellState extends State<PlannerShell> {
     _grips.dispose();
     _outlines.dispose();
     _selection.dispose();
-    _snap.dispose();
+    if (_ownsSnap) _snap.dispose();
     _page
       ..removeListener(_onPage)
       ..dispose();
     _camera.dispose();
     _parametric.dispose();
     _index.dispose();
-    _measurer.clear();
+    _releaseSettle?.call();
+    _ownMeasurer?.clear();
     super.dispose();
   }
 

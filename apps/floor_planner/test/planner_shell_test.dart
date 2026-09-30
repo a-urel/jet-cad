@@ -7,6 +7,7 @@ import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter/rendering.dart' show RenderCustomPaint;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter/material.dart' show MaterialApp;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -76,10 +77,36 @@ double lowestY(DraftDocument doc, Handle wall) {
   return y;
 }
 
+/// The shell over the sample flat (spec 12a S-10): the app launches on an
+/// empty document since 12a, so the cases below that assert the flat pump
+/// it into a bare shell, as the other shell tests pump theirs.
+Future<void> pumpSample(WidgetTester tester) async {
+  final measurer = FlutterTextMeasurer();
+  addTearDown(measurer.clear);
+  await tester.pumpWidget(
+      MaterialApp(home: PlannerShell(document: startupPlan(measurer))));
+}
+
 void main() {
+  // Plan 12a P-4, spec 12a D4: a bare shell builds the empty document, with
+  // the fixed default page, as the app's launch does; no longer the flat.
+  testWidgets('a bare shell opens on the empty document and its default page',
+      (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: PlannerShell()));
+    await tester.pump();
+
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    expect(view.document.entities.liveCount, 0);
+    expect(view.document.commands.canUndo, isFalse);
+    expect(view.page.value, PageComponent(originX: -7425, originY: -5250));
+    expect(view.document.header.units, DrawingUnits.millimeters);
+    expect(tester.widget<Text>(find.byKey(const Key('zoom-text'))).data,
+        startsWith('1:50 · '));
+  });
+
   testWidgets('the shell shows a canvas over a non-empty, off-origin plan',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
 
     expect(find.byType(DraftCanvas), findsOneWidget);
@@ -98,7 +125,7 @@ void main() {
   // camera fits the page to the DraftCanvas's own size, not the extents.
   testWidgets('the camera is fitted to the real viewport on first layout',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
     final size = tester.getSize(find.byType(DraftCanvas));
@@ -113,7 +140,7 @@ void main() {
   testWidgets('the camera is fitted to the page at the drawing area\'s size',
       (tester) async {
     // M-04k. The drawing area is the RulerFrame's child, not the view.
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
     final size = tester.getSize(find.byType(DraftCanvas));
@@ -130,7 +157,7 @@ void main() {
   testWidgets(
       'the page chrome and the rulers are in the tree, under the canvas',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
     expect(find.byType(RulerFrame), findsOneWidget);
     final chrome = find.byWidgetPredicate(
@@ -143,7 +170,7 @@ void main() {
 
   testWidgets('the zoom text reads the scale and the fitted zoom',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
     final page =
@@ -158,7 +185,7 @@ void main() {
   });
 
   testWidgets('the three chrome slots are laid out', (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
     for (final key in const [
       Key('chrome-top'),
@@ -176,7 +203,7 @@ void main() {
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
     view.camera.zoomAt(const Offset(300, 200), 1.7);
@@ -194,7 +221,7 @@ void main() {
 
   testWidgets('the status text shows the tool name and follows the selection',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
 
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
@@ -220,7 +247,7 @@ void main() {
   });
 
   testWidgets('the interaction tree is in place', (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
 
     expect(find.byType(InteractionLayer), findsOneWidget);
@@ -235,7 +262,7 @@ void main() {
 
   testWidgets('a click on a wall selects it in the running shell',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
 
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
@@ -260,7 +287,7 @@ void main() {
   // A5 / spec D12: the look asks the human to delete a wall and put it back,
   // and until this binding existed the shell had no way to put it back.
   testWidgets('cmd+Z undoes a Delete through the command log', (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
 
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
@@ -361,7 +388,7 @@ void main() {
 
   testWidgets('ctrl+Z after deleting two walls brings both back in one step',
       (tester) async {
-    await tester.pumpWidget(const FloorPlannerApp());
+    await pumpSample(tester);
     await tester.pump();
 
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
