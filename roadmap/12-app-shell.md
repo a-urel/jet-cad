@@ -1,6 +1,20 @@
 # 12 — Application shell
 
-**Status:** not started
+**Status:** in progress, by slices (the human's decision, 2026-09-30).
+**Slice 12a, the document lifecycle** — New / Open / Open sample / Save /
+Save As on macOS and web, the runtime swap, dirty against a save point,
+the close prompts, the toolbar and shortcuts, Undo/Redo buttons, Redo —
+is specified in [2026-09-30-document-lifecycle-design.md](../docs/superpowers/specs/2026-09-30-document-lifecycle-design.md)
+and executed ([results](../docs/superpowers/notes/2026-09-30-plan-12a-results.md)).
+**Still open for later slices:** the menu bar (reusing 12a's command
+table), the layer panel (table edits must go through commands or mark the
+document dirty — 12a's D3), the diagnostics surface, `DraftPermissions` in
+the UI (Undo/Redo's `enabled` must read permissions), recent files,
+autosave and crash recovery, a dimension style table and a dimensions
+layer, the property panel's remaining questions, the language-version
+bump of the app's pubspec. The sections below are the original input;
+where they say "does not exist", 12a and the earlier sub-projects have
+since built part of it.
 **Depends on:** 02, 04, 05
 **Blocks:** nothing
 **Size:** L

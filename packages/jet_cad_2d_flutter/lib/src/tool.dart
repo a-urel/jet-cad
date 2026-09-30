@@ -85,6 +85,11 @@ abstract class Tool extends ChangeNotifier {
   void cancel(ToolContext ctx);
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport);
 
+  /// True while the tool is part-way through a shape; the shell disables
+  /// its commands (spec 12a D6). False by default. A tool that changes it
+  /// notifies, so a listener on [ToolController] sees every change.
+  bool get isMidShape => false;
+
   /// The pointer's cursor over the layer (spec 03 D5). `InteractionLayer`
   /// rebuilds its `MouseRegion` when the tool notifies.
   MouseCursor get cursor => MouseCursor.defer;

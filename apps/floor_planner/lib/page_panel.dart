@@ -15,10 +15,11 @@ class PagePanel extends StatefulWidget {
   final PageNotifier page;
 
   @override
-  State<PagePanel> createState() => _PagePanelState();
+  State<PagePanel> createState() => PagePanelState();
 }
 
-class _PagePanelState extends State<PagePanel> {
+/// Public for the shell's settle (spec 12a D2): [resyncScale].
+class PagePanelState extends State<PagePanel> {
   final TextEditingController _scale = TextEditingController();
   final PanelFieldFocusNode _scaleFocus = PanelFieldFocusNode();
 
@@ -55,6 +56,13 @@ class _PagePanelState extends State<PagePanel> {
     final text = panelNumberText(page.scaleDenominator);
     if (_scale.text != text) _scale.text = text;
   }
+
+  /// Shows the stored scale in the scale field, dropping any text typed and
+  /// not submitted, and commits nothing: the shell's settle (spec 12a D2)
+  /// calls it before a flow reads the document, so the panel never shows a
+  /// scale the saved file does not have (D14: unsubmitted text is not
+  /// saved).
+  void resyncScale() => _syncScale();
 
   /// The scale is committed on submit (spec 04), so a field left without
   /// Enter would go on showing a scale the page does not have. A tap outside

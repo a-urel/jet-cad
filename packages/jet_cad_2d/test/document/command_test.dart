@@ -362,11 +362,12 @@ void main() {
     });
 
     test('redo does not exhaust early when more than one redo is pending', () {
-      // The brief's own warning: redo() uses pushUndoOnly rather than push
-      // precisely because push clears the redo stack. With two undone
-      // commands, the redo stack holds two entries; if redo() used push, the
-      // first redo() would wipe the second pending entry as a side effect,
-      // and a second redo() would silently no-op instead of succeeding.
+      // redo() records its inverse through commitRedo, which, unlike
+      // recordExecute, leaves the redo stack alone. With two undone
+      // commands, the redo stack holds two entries; if redo() cleared it the
+      // way an execute does, the first redo() would wipe the second pending
+      // entry as a side effect, and a second redo() would silently no-op
+      // instead of succeeding.
       final dispatcher = CommandDispatcher(target: FakeTarget());
       dispatcher.execute(CounterCommand(Capability.geometry, const Handle(1)));
       dispatcher.execute(CounterCommand(Capability.geometry, const Handle(2)));

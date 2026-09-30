@@ -30,6 +30,21 @@ final ParametricCatalog parametricCatalog = ParametricCatalog()
   ..register<DimensionParams>(DimensionParams.componentTypeId,
       DimensionParams.fromJson, const DimensionType());
 
+/// Registers every component type the app's documents carry (spec 12a D8,
+/// S-1): [PageComponent], then the parametric catalog's types. The one
+/// registration New, the sample and Open use — pass it as
+/// `DraftDocumentCodec.decode(…, registerComponents: registerAppComponents)`.
+/// Without the page's registration a file's page loads as preserve-unknown;
+/// without the catalog's, its walls, openings, rooms and dimensions do.
+///
+/// **Call it once per registry**: `PageComponent.register` replaces the
+/// page's store unconditionally, so a second call wipes a live page. (The
+/// catalog's registrations skip a type already registered.)
+void registerAppComponents(ComponentRegistry r) {
+  PageComponent.register(r);
+  parametricCatalog.registerComponents(r);
+}
+
 /// Builds and installs the document's parametric system.
 ParametricSystem installParametric(DraftDocument doc) =>
     ParametricSystem(doc, parametricCatalog)..install();
