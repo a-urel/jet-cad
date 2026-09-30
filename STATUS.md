@@ -1,8 +1,10 @@
 # jet-cad — project status
 
-**Last updated:** 2026-09-29. **`fix/post-11` is EXECUTED, NOT MERGED**
-(the remaining post-11 found items, on the human's "Kalan post-11
-fix'leri"). The merge is the human's, `--no-ff`.
+**Last updated:** 2026-09-30. **`fix/post-11` is MERGED into `main` at
+`e1e174e`**, `--no-ff`, on the human's decision ("merge et ve main'i push
+et"; the remaining post-11 found items, started on "Kalan post-11
+fix'leri"). No look was reported; the glance the note suggests stays the
+human's.
 - **What it fixes** (see
   [2026-09-29-fix-post-11.md](docs/superpowers/notes/2026-09-29-fix-post-11.md)):
   - (d) the engine refuses an edit that writes a parametric component on
@@ -28,8 +30,8 @@ fix'leri"). The merge is the human's, `--no-ff`.
   rule, 06 D8's cleanup of a second type, the codec's handle seed for
   components, the app's raw-coordinate `signedArea` (a far short wall
   loses its joints), a fractional page scale unpinned by tests.
-- **Next, each the human's to call:** the `--no-ff` merge; then
-  sub-project 12 (or the note's found items).
+- **Next, on the human's word:** sub-project 12 from a brainstorm (or the
+  note's found items).
 
 *Earlier, 2026-09-29 (the phantom-snap merge):*
 
@@ -2776,12 +2778,16 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice, on `fix/post-11`** (executed,
-NOT MERGED; its ledger is archived as the branch's last commit): the
-human's merge, `--no-ff`, from the main checkout; then sub-project 12
+**Immediate next step: the human's choice.** `main` is at the
+`fix/post-11` merge (`e1e174e`) and its STATUS record; every post-11 found
+item but (b) is fixed. Next: sub-project 12
 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or
 the found items in
 [2026-09-29-fix-post-11.md](docs/superpowers/notes/2026-09-29-fix-post-11.md).
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's choice, on `fix/post-11`** (executed,
+NOT MERGED; its ledger is archived as the branch's last commit): the
+human's merge, then sub-project 12 or the note's found items.
 
 *Before this branch ran, this paragraph read:* **Immediate next step: the human's choice.** `main` is at the
 `fix/phantom-intersection-snap` merge (`f8a7752`) and its STATUS record:
