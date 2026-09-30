@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -6,6 +8,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'document_files.dart';
 import 'document_host.dart';
+import 'document_toolbar.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_number.dart';
@@ -22,6 +25,7 @@ import 'parametric/wall_bands.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
+import 'shell_commands.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
 import 'tool_palette.dart';
@@ -60,6 +64,9 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
     return showDocumentNamePrompt(context, suggested);
   }
 
+  /// Marks a file chord handled, and does nothing.
+  static void _consume() {}
+
   @override
   void dispose() {
     _session.dispose();
@@ -75,6 +82,19 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
               documentTitle(_session.name, dirty: _session.dirty.value),
           debugShowCheckedModeBanner: false,
           theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
+          // Spec 12a D6 (T-3, U-3, R-10): the file chords once more above
+          // the Navigator, consume-only. A dialog or a dropdown's route is
+          // outside the shell's focus chain, and on web a key nobody
+          // handles is not `preventDefault`ed: Cmd/Ctrl+S would open the
+          // browser's Save Page. Here the key is marked handled and nothing
+          // runs; the shell's own bindings run the commands whenever the
+          // home route has the focus, so no flow starts over another route.
+          builder: (context, child) => CallbackShortcuts(
+            bindings: <ShortcutActivator, VoidCallback>{
+              for (final chord in kFileChords) chord: _consume,
+            },
+            child: child!,
+          ),
           home: DocumentHost(session: _session, files: _files),
         ),
       );
@@ -93,8 +113,9 @@ typedef ShellSettleRegistrar = VoidCallback Function(VoidCallback settle);
 ///
 /// Since 12a the document comes from the [DocumentHost], which keys the
 /// shell by it (spec 12a D2): a new document is a new shell. The host also
-/// passes the object-snap setting, which survives a swap, and the file
-/// state (name, dirty, busy) for the top bar of spec 12a D7.
+/// passes the object-snap setting, which survives a swap, the file
+/// commands, and the file state (name, dirty, busy) for the top bar of
+/// spec 12a D7. Undo and Redo are the shell's own commands (D1, D6).
 ///
 /// A bare shell is the test seam (spec 03, Architecture; Ruling 03-18;
 /// plan 12a P-4).
@@ -104,6 +125,7 @@ typedef ShellSettleRegistrar = VoidCallback Function(VoidCallback settle);
 ///   dispose.
 /// - [snap], when given, is the host's and is **not** disposed here (spec
 ///   12a D2, S-11); without one the shell owns a fresh one.
+/// - With no [fileCommands] the toolbar shows Undo and Redo only.
 /// - [initialCamera] replaces the nominal fit.
 /// - `PlannerView` still fits once after its first frame, so a test sets a
 ///   camera of its own after the first pump.
@@ -112,15 +134,22 @@ class PlannerShell extends StatefulWidget {
     super.key,
     this.document,
     this.snap,
+    this.fileCommands = const <ShellCommand>[],
     this.documentName,
     this.dirty,
     this.busy,
     this.onSettle,
     this.initialCamera,
+    @visibleForTesting this.debugOnSettle,
   });
 
   final DraftDocument? document;
   final SnapSettings? snap;
+
+  /// The host's file commands (spec 12a D6): New, Open, Open sample, Save,
+  /// Save As. The shell adds its own idle condition (no shape part-way)
+  /// to each, and binds and shows them with Undo and Redo.
+  final List<ShellCommand> fileCommands;
 
   /// The document's name, for the top bar (spec 12a D7); null in a bare
   /// shell.
@@ -137,6 +166,11 @@ class PlannerShell extends StatefulWidget {
   /// Where the shell registers its settle (spec 12a D2).
   final ShellSettleRegistrar? onSettle;
   final ViewportTransform? initialCamera;
+
+  /// A test seam (plan 12a Task 6): runs at the end of the shell's settle,
+  /// standing in for input a settle commits, so a test can pin that Undo
+  /// and Redo re-read the history after it (spec 12a D6, U-2).
+  final VoidCallback? debugOnSettle;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -395,21 +429,89 @@ class _PlannerShellState extends State<PlannerShell> {
         : ViewportTransform.fit(_document.extents, const Size(1440, 900));
   }
 
-  /// Spec D12, amended at execution: cmd+Z (macOS) / ctrl+Z (everywhere
-  /// else) undoes through the command log. There is no redo in 02.
-  ///
-  /// The binding sits above the [InteractionLayer]'s `Focus`, which returns
-  /// the active tool's own `KeyEventResult`; the tool ignores Z, so the event
-  /// keeps bubbling and arrives here.
-  void _undo() {
-    if (_document.commands.canUndo) _document.commands.undo();
+  /// The host's busy flag; null in a bare shell. Read once, like [_snap].
+  late final ValueListenable<bool>? _busy;
+
+  /// Spec 12a D6: no flow is running, and the active tool is not part-way
+  /// through a shape (T-2, `Tool.isMidShape`). A toolbar click is a
+  /// pointer event no tool sees, so the commands themselves wait for the
+  /// shape to end, and the buttons and the keys agree.
+  bool get _idle => !(_busy?.value ?? false) && !_tools.active.isMidShape;
+
+  /// Everything [_idle] reads that notifies: the tools (a tool's own
+  /// notifications arrive through the controller) and busy.
+  late final List<Listenable> _idleSources = [_tools, if (_busy != null) _busy];
+
+  late final DerivedFlag _undoEnabled =
+      DerivedFlag(_idleSources, () => _idle && _document.commands.canUndo);
+  late final DerivedFlag _redoEnabled =
+      DerivedFlag(_idleSources, () => _idle && _document.commands.canRedo);
+
+  /// The history moves on the dispatcher's changes; Undo and Redo re-read
+  /// `canUndo` and `canRedo` on each (spec 12a D5).
+  StreamSubscription<DocChange>? _history;
+
+  /// The file commands, each enabled only while the host's own condition
+  /// holds and the shell is idle.
+  late final List<DerivedFlag> _fileEnabled = [
+    for (final c in widget.fileCommands)
+      DerivedFlag([c.enabled, ..._idleSources], () => c.enabled.value && _idle),
+  ];
+  late final List<ShellCommand> _fileCommands = [
+    for (var i = 0; i < widget.fileCommands.length; i++)
+      widget.fileCommands[i].withEnabled(_fileEnabled[i]),
+  ];
+
+  /// Spec 12a D6: Undo and Redo are the shell's own commands, so a bare
+  /// shell keeps them. Their bindings sit above the [InteractionLayer]'s
+  /// `Focus`, which returns the active tool's own `KeyEventResult`: an idle
+  /// tool ignores Z, so the event keeps bubbling and arrives here, and a
+  /// tool part-way through a shape swallows it (spec 05 D3).
+  late final List<ShellCommand> _editCommands = [
+    ShellCommand(
+      id: 'undo',
+      label: 'Undo',
+      icon: Icons.undo,
+      shortcuts: kUndoChords,
+      enabled: _undoEnabled,
+      run: _undo,
+    ),
+    ShellCommand(
+      id: 'redo',
+      label: 'Redo',
+      icon: Icons.redo,
+      shortcuts: kRedoChords,
+      enabled: _redoEnabled,
+      run: _redo,
+    ),
+  ];
+
+  /// Undo settles pending input first (spec 12a D2, R-9): a typed value
+  /// lands as its own step, which this undo then removes. It re-reads
+  /// `canUndo` after the settle (U-2) and never relies on the dispatcher
+  /// refusing.
+  Future<void> _undo() async {
+    _settlePendingInput();
+    if (!_document.commands.canUndo) return;
+    _document.commands.undo();
+  }
+
+  /// Redo settles first too; a value the settle committed cuts the redo
+  /// branch, exactly as pressing Enter would, and then there is nothing to
+  /// redo (spec 12a D6, U-2, R-9).
+  Future<void> _redo() async {
+    _settlePendingInput();
+    if (!_document.commands.canRedo) return;
+    _document.commands.redo();
   }
 
   /// Spec 12a D2: settles input that is typed but not yet committed, before
-  /// a host flow reads or replaces the document. Synchronous. Nothing is
+  /// a host flow or Undo/Redo reads the document. Synchronous. Nothing is
   /// settled yet: the text entry, the panel fields and the page scale join
   /// it in plan 12a's Task 7.
-  void _settlePendingInput() {}
+  void _settlePendingInput() {
+    widget.debugOnSettle?.call();
+  }
 
   bool get _geometryAllowed =>
       _document.commands.permissions.allows(Capability.geometry);
@@ -456,6 +558,7 @@ class _PlannerShellState extends State<PlannerShell> {
     // same settings for the shell's whole life.
     _ownsSnap = widget.snap == null;
     _snap = widget.snap ?? SnapSettings();
+    _busy = widget.busy;
     // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
     // arrives built. The sample (startupPlan) builds its walls, openings,
     // separator and rooms through a parametric system of its own and
@@ -465,10 +568,22 @@ class _PlannerShellState extends State<PlannerShell> {
     _parametric = installParametric(_document);
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
+    _history = _document.commands.changes.listen((_) {
+      _undoEnabled.update();
+      _redoEnabled.update();
+    });
   }
 
   @override
   void dispose() {
+    // The command flags listen to the tools and the host's busy flag: they
+    // go first.
+    _history?.cancel();
+    _undoEnabled.dispose();
+    _redoEnabled.dispose();
+    for (final f in _fileEnabled) {
+      f.dispose();
+    }
     _tools.dispose();
     for (final e in _entries) {
       e.tool.dispose();
@@ -495,14 +610,33 @@ class _PlannerShellState extends State<PlannerShell> {
     super.dispose();
   }
 
+  /// The document's name, with `• ` in front and an `Edited` tooltip while
+  /// it is dirty (spec 12a D5, D7).
+  Widget _documentName(String name) {
+    final dirty = widget.dirty;
+    Widget text(bool isDirty) => Text(isDirty ? '• $name' : name,
+        key: const Key('document-name'),
+        maxLines: 1,
+        softWrap: false,
+        overflow: TextOverflow.ellipsis);
+    if (dirty == null) return text(false);
+    return ValueListenableBuilder<bool>(
+      valueListenable: dirty,
+      builder: (_, isDirty, __) =>
+          isDirty ? Tooltip(message: 'Edited', child: text(true)) : text(false),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
-          const SingleActivator(LogicalKeyboardKey.keyZ, control: true): _undo,
+          // Spec 12a D6: the command table's chords. A disabled command's
+          // binding stays and does nothing (S-26), so the key is consumed.
+          for (final c in [..._fileCommands, ..._editCommands])
+            for (final chord in c.shortcuts) chord: c.invoke,
           // Spec 03 D10: one toggle per press, never per key repeat.
           const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
               _snap.toggleObjectSnap,
@@ -526,10 +660,26 @@ class _PlannerShellState extends State<PlannerShell> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
                   children: [
-                    ListenableBuilder(
-                      listenable: _status,
-                      builder: (_, __) =>
-                          Text(_statusLine(), key: const Key('status-text')),
+                    // Spec 12a D7: the toolbar, the document's name, then
+                    // the status line; the name and the status give way
+                    // (ellipsis) before the row would overflow.
+                    DocumentToolbar(
+                        fileCommands: _fileCommands,
+                        editCommands: _editCommands),
+                    const SizedBox(width: 16),
+                    if (widget.documentName != null) ...[
+                      Flexible(child: _documentName(widget.documentName!)),
+                      const SizedBox(width: 16),
+                    ],
+                    Flexible(
+                      child: ListenableBuilder(
+                        listenable: _status,
+                        builder: (_, __) => Text(_statusLine(),
+                            key: const Key('status-text'),
+                            maxLines: 1,
+                            softWrap: false,
+                            overflow: TextOverflow.ellipsis),
+                      ),
                     ),
                     const Spacer(),
                     ListenableBuilder(

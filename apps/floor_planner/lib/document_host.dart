@@ -16,6 +16,7 @@ import 'document_files.dart';
 import 'main.dart';
 import 'new_document.dart';
 import 'parametric/catalog.dart';
+import 'shell_commands.dart';
 import 'startup_plan.dart';
 
 /// The name of a document that has no file yet (spec 12a D4).
@@ -162,7 +163,8 @@ class DocumentSession extends ChangeNotifier {
 /// releases everything it held. Owns the object-snap setting, which
 /// survives a swap (D2).
 ///
-/// The flows are public for the command table (spec 12a D6) and the tests.
+/// The flows are public for the tests; the command table (spec 12a D6)
+/// reaches them through [DocumentHostState.fileCommands].
 /// Each sets [DocumentSession.busy] for its whole span when it is the
 /// outermost flow, and clears it in a `finally` (S-21, T-8); a flow called
 /// inside another leaves busy to the outer one.
@@ -183,6 +185,51 @@ class DocumentHostState extends State<DocumentHost> {
   VoidCallback? _settle;
 
   DocumentSession get _session => widget.session;
+
+  /// The file commands are enabled while no flow runs (spec 12a D6, R-7);
+  /// the shell adds its own half of idle, a shape part-way (T-2).
+  late final DerivedFlag _notBusy =
+      DerivedFlag([_session.busy], () => !_session.busy.value);
+
+  /// The file half of the command table (spec 12a D6), in the toolbar's
+  /// order: New, Open, Open sample, Save, Save As. Each runs one flow,
+  /// which sets busy for its span (T-8).
+  late final List<ShellCommand> fileCommands = [
+    ShellCommand(
+        id: 'new',
+        label: 'New',
+        icon: Icons.note_add_outlined,
+        shortcuts: kNewChords,
+        enabled: _notBusy,
+        run: newFlow),
+    ShellCommand(
+        id: 'open',
+        label: 'Open…',
+        icon: Icons.folder_open_outlined,
+        shortcuts: kOpenChords,
+        enabled: _notBusy,
+        run: openFlow),
+    ShellCommand(
+        id: 'open-sample',
+        label: 'Open sample',
+        icon: Icons.home_work_outlined,
+        enabled: _notBusy,
+        run: openSampleFlow),
+    ShellCommand(
+        id: 'save',
+        label: 'Save',
+        icon: Icons.save_outlined,
+        shortcuts: kSaveChords,
+        enabled: _notBusy,
+        run: saveStep),
+    ShellCommand(
+        id: 'save-as',
+        label: 'Save As…',
+        icon: Icons.save_as_outlined,
+        shortcuts: kSaveAsChords,
+        enabled: _notBusy,
+        run: saveAsStep),
+  ];
 
   VoidCallback _registerSettle(VoidCallback settle) {
     _settle = settle;
@@ -356,6 +403,7 @@ class DocumentHostState extends State<DocumentHost> {
 
   @override
   void dispose() {
+    _notBusy.dispose();
     snap.dispose();
     super.dispose();
   }
@@ -367,6 +415,7 @@ class DocumentHostState extends State<DocumentHost> {
           key: ObjectKey(_session.document),
           document: _session.document,
           snap: snap,
+          fileCommands: fileCommands,
           documentName: _session.name,
           dirty: _session.dirty,
           busy: _session.busy,
