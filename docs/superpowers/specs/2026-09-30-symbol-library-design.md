@@ -1,7 +1,9 @@
 # The symbol library (09) — design
 
-**Date:** 2026-09-30. **Status:** design, **revision 1**, awaiting its
-independent review and the human's approval.
+**Date:** 2026-09-30. **Status:** design, **revision 2**. Revision 1 (`fbf1e9a`) was reviewed
+independently: "Ready with amendments", 0 blocking, 7 major, 3 minor and
+1 nit (V-1 to V-11), each applied below; see [Revision 2](#revision-2).
+Awaiting the human's approval.
 **Sub-project:** `roadmap/09-symbol-library.md`. **Size:** L, sliced in two
 (decision 7): **09a** the core (engine commands, the library, the placer),
 **09b** the palette (gallery, thumbnails, search, the placement tool).
@@ -118,6 +120,18 @@ checked)
   are authored in mm.
 - **F-10.** `Tool.isMidShape` and `_settlePendingInput()` exist (12a); a
   pressed placement counts as mid-shape (D11).
+- **F-12.** `SnapKind.insertion` is emitted only for text and attrib
+  (`spatial_index.dart:1955-1960`); an instance's insertion point is not a
+  snap candidate, and symbols carry no text. New (V-1).
+- **F-13.** The index learns of a change through `onAfterMutate` and the
+  command's `touched` (`_onChange` → `_reconcile`, `spatial_index.dart:
+  2648-2740`): a touched handle that resolves to a definition is
+  structural and rebuilds every container. `invalidateDerived` only
+  clears the extents cache (`draft_document.dart:149`). New (V-2).
+- **F-14.** `ReservedHandles`: layer 0 = 1 (`layerZero`), BYLAYER
+  linetype = 2, BYBLOCK linetype = 3, CONTINUOUS = 4, STANDARD text style =
+  5, DASHED = 6 (app-written, absent from a default table); colour is a
+  `DraftColor`, not a handle (`style.dart:104-121`). New (V-4).
 - **F-11.** `forEachInRect` does not descend into instances (it reports
   root-level leaves); `forEachInstanceInRect` reports instances by their
   definition's bounds. Nothing in 09 relies on the former.
@@ -189,8 +203,11 @@ and search, reuse and "what version is this" need no side table.
   `DuplicateHandleError` if the handle names a definition, a node or an
   entity; requires `definition.children` empty (a v1 definition lists no
   nodes; the cycle trap of `addDefinition` is closed by refusing to write
-  edges through it); `tree.addDefinition`, `handleSeed.raiseTo`,
-  `invalidateDerived` so the spatial index builds the container (F-1);
+  edges through it); `tree.addDefinition`, `handleSeed.raiseTo`, `invalidateDerived` (the
+  extents cache, F-13); `touched` names the definition handle, which is
+  what makes the spatial index rebuild its containers (F-1, F-13); the
+  class comment of `SpatialIndex` (lines 128-136, which says a definition
+  command "removes this caveat") is updated by the plan;
   inverse `RemoveDefinitionCommand(handle)`.
 - `RemoveDefinitionCommand(handle)`: throws if the handle is not a
   definition, **or if any node or entity still names it** (an instance's
@@ -198,8 +215,11 @@ and search, reuse and "what version is this" need no side table.
   that has already removed them, so nothing is left dangling (F-6 of the
   brainstorm survey). Inverse `AddDefinitionCommand(value)`.
 - Both are `Capability.structure`, so a read-only document refuses them.
-  `touched` names the handle. The plan's first engine task measures how the
-  index learns of a definition and pins it (D10, M-09g).
+  `touched` names the handle. Each placement and each undo costs one `rebuildAll`, like any
+  `AddNode` (F-13): off the frame path. The two add commands' duplicate
+  checks still ignore definitions (`commands.dart:54, 353`); seed-allocated
+  handles never collide with one, and the placer never hands them any other
+  (known limit, D14).
 
 ### D5 — `SymbolLibrary`: the loader validates
 
@@ -213,11 +233,19 @@ and search, reuse and "what version is this" need no side table.
   document other than the root;
 - a leaf whose owner is not a definition, or whose kind is `text`, `fill`
   or `attrib`;
-- a leaf whose `layer`, `linetype`, `color` or style handles name anything
-  but a reserved handle (decision 4);
-- a leaf outside millimetre sanity (a coordinate beyond ±1e6) or a
-  non-finite coordinate;
+- a leaf whose style is not on the **allow-list** (decision 4, F-14):
+  `layer == layerZero`; `linetype` ∈ {BYLAYER, BYBLOCK, CONTINUOUS}; text
+  style (if any) = STANDARD; `color` ∈ {`ByBlockColor`, `ByLayerColor`};
+  `lineweight` and `transparency` ∈ {`kByBlock`, `kByLayer`}; `flags` with
+  neither invisible nor unpickable; `linetypeScale` finite. (DASHED, 6, is
+  refused: a default document has no such record.)
+- a leaf of kind `point`, or degenerate geometry: a coordinate that is
+  non-finite or beyond ±1e6, a zero-length line, a polyline under two
+  vertices or with a non-finite bulge, a radius ≤ 0, a zero sweep;
 - an invalid `basePoint` (non-finite).
+
+The "leaf handle in `children`" case needs hand-built JSON: the codec
+strips leaf handles on encode (`json_codec.dart:56`) (V-9).
 
 It never relies on the tree to reject a malformed library (the roadmap's
 trap). The result is `List<SymbolEntry>` in definition-handle order
@@ -232,18 +260,20 @@ int quarterTurns = 0, bool mirrored = false, InstanceStyle style})` returns
 **one `CompoundCommand`** labelled `Place <name>`. It allocates every handle
 it needs from `doc.handleSeed` at construction (F-8) and does not execute.
 
-1. **Find.** Scan `doc.tree.definitions` for a `SymbolComponent` with
-   `key == entry.key && version == entry.version`; O(definitions), once per
-   placement, never per frame.
+1. **Find.** `doc.components.withComponent<SymbolComponent>()` (or a scan of
+   `doc.tree.definitions`) for `key == entry.key && version ==
+   entry.version`; once per placement, never per frame. A found definition
+   is reused even if a person edited its leaves (known limit, D14).
 2. **Copy on first use** (none found): fresh handles for the definition and
    every leaf; the commands, in order: `AddDefinitionCommand` (name
-   `"$key@$version"`, suffixed `#2`, `#3`… while a definition of that name
-   exists that is not this symbol, F-3), `SetComponentCommand<
+   `"$key@$version"`, suffixed `#2`, `#3`… while a definition of that name exists: only a
+   foreign or non-symbol definition can hold it, since a symbol's own is
+   found in step 1), `SetComponentCommand<
    SymbolComponent>` on it, then one `AddEntityCommand` per leaf, ascending
    (the library's order, so draw order is stable, non-negotiable 2), with
    `owner` the new definition. A found definition contributes no commands.
 3. **The instance:** `AddNodeCommand(InstanceNode(handle: fresh, parent:
-   doc.rootHandle, definition, layer: ReservedHandles.layer0,
+   doc.rootHandle, definition, layer: ReservedHandles.layerZero,
    transform: placementTransform(...), color/lineweight/transparency/
    linetype/linetypeScale from style))`. `style` defaults to the instance
    defaults (BYBLOCK); it exists so 09's tests and later sub-projects can
@@ -251,8 +281,10 @@ it needs from `doc.handleSeed` at construction (F-8) and does not execute.
 4. **`placementTransform(at, basePoint, quarterTurns, mirrored)`** `=
    translation(at) · rotation(q·90°) · scale(mirrored ? -1 : 1, 1) ·
    translation(−basePoint)`: the definition's base point lands on `at`
-   (F-2). Quarter turns use exact cosine and sine (0, ±1, never `6e-17`), so
-   a placement at a quarter turn stores clean numbers. A free angle is not
+   (F-2). Mirror flips the **local** x axis whatever the turns. Quarter turns use
+   exact cosine and sine (0, ±1, never `6e-17`), and the stored matrix has
+   `-0.0` normalised to `0.0`, so a placement at a quarter turn stores
+   clean numbers in the file's bytes. A free angle is not
    offered in 09; the Select tool's rotation grip turns a placed instance
    (plan verifies its grips handle an `InstanceNode`, F-7).
 
@@ -296,7 +328,12 @@ GallerySymbol>`), a search `String`, `onSelect(String id)`, the selected
 id. A `GallerySymbol`: `id`, `label`, `tags`, `thumbnailKey` (a value),
 `DraftDocument Function() thumbnailDocument`, `Aabb2 bounds`. Collapsible
 category headers (state in the widget, collapsed state not persisted);
-rows with a thumbnail and the name; a row never takes focus
+rows with a thumbnail and the name. The widget cannot import the app's
+`PanelFieldFocusNode`: it takes an injected `searchFocusNode`,
+`onSubmitted` and `onTapOutside`, and the app passes the node its
+`_settlePendingInput` hands back (V-7). `chrome-left` is not inside
+`ShellShortcutGuard` (only the right panel is, `main.dart:784`), so the
+field wears its own guard. A row never takes focus
 (`ExcludeFocus`, like the tool palette, Ruling 05-6). The search **field**
 does take focus: it follows the page panel's pattern (`panel_focus.dart`,
 `shortcut_guard.dart`) so typing never fires a shell shortcut and
@@ -318,8 +355,10 @@ The 09a end-to-end test places a symbol in a **rotated, mirrored** placement
 with a **distinct colour and lineweight on the instance**, far from the
 origin, through `DocumentHost`'s document and the real dispatcher, then
 checks in one test: the painter's recorded stroke colours and widths (F-7),
-a pick at the instance's world position, a snap to the instance's insertion
-point (equal to `at` within `Tolerance`), the extents, `validate()` empty,
+a pick at the instance's world position, a snap onto a **named leaf
+endpoint** whose world position the test computes independently from the
+leaf's local coordinates and the expected transform (within `Tolerance`;
+the insertion point is not a candidate, F-12), the extents, `validate()` empty,
 and save → load byte identity. Whatever breaks is fixed in 09a (engine or
 render), inside the spec's bounds, or recorded as a ruling.
 
@@ -332,27 +371,52 @@ render), inside the spec's bounds, or recorded as a ruling.
   the release point** (touch has no hover: the ghost appears on press).
   After a placement the tool stays armed.
 - **Keys:** `R` rotates one quarter turn, Shift+R the other way, `M`
-  mirrors, `Esc` leaves (the Select tool comes back, as the other tools'
-  Escape). They also work mid-press.
-- **Snap:** as the wall tool resolves its pointer: object snap per F3 at
-  `kSnapAperturePixels / scale`, else grid snap, else the raw point;
-  the insertion point of the placed symbol is the snapped point.
+  mirrors. **While armed the tool consumes R and M**, which are the shell's
+  Rectangle and Room shortcuts: a tool is chosen by letter again after
+  `Esc` (cost if wrong: one key press; the alternative keys would be
+  invented). Like the drawing tools, it swallows every other key mid-press
+  and lets F and F3 bubble (`placement_tool.dart:196-215`). `Esc` idle
+  reaches the shell's `_escape` (the Select tool comes back); `Esc`
+  mid-press cancels the press only.
+- **Snap:** through `resolveDragPoint` with a `DragPoint` and `SnapResult`
+  scratch, as the drawing tools do (`placement_tool.dart:114-125`): object
+  snap per F3 at `kSnapAperturePixels / scale`, else grid snap, else the raw
+  point; the snapped point is the placement's `at`.
 - **The ghost:** the symbol's bounds, transformed by `placementTransform`,
   as an outline plus a cross at `at`, through `paintWorldOverlay`: no
   geometry is drawn through a second path.
 - **`isMidShape`** is true while a press is down (F-10). A placement is not
   executed while pending input is unsettled; the shell's settle runs first
   (`_settlePendingInput()`).
-- Permissions: the gallery rows are disabled while `Capability.structure` or
-  `geometry` is denied, like the drawing tools' entries.
+- **Permissions before handles** (Ruling 05-3, `placement_tool.dart:236`): the
+  tool checks `needs = {structure, geometry, components}` (the compound's
+  union) **before** it calls `placeSymbol`, which allocates; the gallery
+  rows are disabled while any is denied.
+- **Why not `PlacementTool`** (`draw/placement_tool.dart`, click by click):
+  a symbol is placed by press, drag and release at the release point, and
+  the name is taken; this one is `SymbolPlaceTool`, extending `Tool`.
+- The armed symbol does not survive a document swap: 12a rebuilds the shell.
 - The placed instance is not selected; the tool stays armed.
 
 ### D12 — The panel
 
 The `chrome-left` slot keeps the tool palette and gains the gallery below it,
-with the search box above the categories. Selecting a row activates the
-placement tool through `ToolController.activate`; selecting a tool clears the
-gallery's highlighted row. The exact layout is the human's look (exit gate).
+with the search box above the categories. Selecting a row goes through the shell's `_activate` (`main.dart:535-541`,
+the palette's `onSelect`), **not** `ToolController.activate` directly: it
+refuses a drawing tool while geometry is denied and clears the selection,
+whose outlines and grips the overlay paints under any tool. Selecting a tool
+clears the gallery's highlighted row. The exact layout is the human's look (exit gate).
+
+### D14 — Known limits
+
+- A found definition is reused even if a person edited its leaves.
+- `AddEntityCommand` / `AddNodeCommand` duplicate checks ignore definitions.
+- Each placement and undo rebuilds the index containers (off the frame
+  path).
+- Text in a mirrored instance draws mirrored (F-6); symbols carry none.
+- `purge` does not clean components on a definition (the plan records what
+  it does).
+- R and M are consumed while the placement tool is armed (D11).
 
 ## Architecture
 
@@ -361,6 +425,7 @@ gallery's highlighted row. The exact layout is the human's look (exit gate).
 | File | Change |
 |---|---|
 | `packages/jet_cad_2d/lib/src/document/commands.dart`, `jet_cad_2d.dart` | D4 |
+| `packages/jet_cad_2d/lib/src/index/spatial_index.dart` | class comment only (D4) |
 | `packages/jet_cad_2d/test/document/definition_commands_test.dart` (new) | D4 |
 | `apps/floor_planner/lib/symbols/*.dart`, `tool/generate_furniture_library.dart`, `assets/library/furniture.jetlib`, `pubspec.yaml` | D1–D8 |
 | `apps/floor_planner/lib/parametric/catalog.dart` | `registerAppComponents` gains `SymbolComponent` |
@@ -393,7 +458,7 @@ reviewer.
   refused; removal refused while an instance or a leaf names it; read-only
   permission refuses; `stateId` moves; a pick finds an instance of an added
   definition **without any rebuild call**, and a stale pick after undo
-  finds nothing.
+  finds nothing; the document's extents follow the add and the undo.
 - **Library (D2, D5):** the generated bytes `==` the asset; decode lists
   every definition; each rejection of D5 has its own case (a leaf handle in
   `children`, a nested instance, a non-reserved layer, a text leaf, a
@@ -432,7 +497,8 @@ reviewer.
 | M-09d | the placer drops the style fields | style reaches the instance; painter colours |
 | M-09e | the placer omits `AddDefinitionCommand` | save → load; `validate()` |
 | M-09f | the compound's undo leaves the definition | undo removes everything in one step |
-| M-09g | `AddDefinitionCommand` skips `invalidateDerived` | pick without rebuild |
+| M-09g | `AddDefinitionCommand` skips `invalidateDerived` | extents after add and undo (F-13) |
+| M-09p | `AddDefinitionCommand`'s `touched` omits the handle | **equivalent**: every alternative falls back to `rebuildAll` (`spatial_index.dart:2686, 2829`); recorded, not chased |
 | M-09h | the lookup ignores `version` | older version left alone, new copied |
 | M-09i | leaves keep the library's handles | cross-document handle collision |
 | M-09j | the loader drops a D5 rule (one mutant per rule) | its rejection case |
@@ -440,7 +506,15 @@ reviewer.
 | M-09l | search ignores tags | tag alone finds a symbol |
 | M-09m | `isMidShape` stays false during a press | mid-press commands disabled |
 | M-09n | quarter turns use `rotation(rad)` | exact 0 / ±1 |
-| M-09o | leaves added in descending order | draw order after undo, save, load |
+| M-09o | leaf handles allocated in descending library order | draw order after undo, save, load (handle-distinct fixtures) |
+| M-09q | `RemoveDefinitionCommand` drops its "named by" guard | refusal while an instance or a leaf names it |
+| M-09r | `AddDefinitionCommand` drops the non-empty-`children` or definition-duplicate check | its refusal cases |
+| M-09s | search `every` becomes `any`; search ignores the category | two terms; category alone |
+| M-09t | the `#2` suffix dropped | a foreign definition with the name |
+| M-09u | `SymbolComponent` equality or `toJson` ignores tag order | equality, byte determinism |
+| M-09v | the transform composes `R·T·S` | base point lands on `at` at a non-zero turn |
+| M-09w | the tool skips the `components` capability | denied `components` refuses, allocates nothing |
+| M-09x | the thumbnail key ignores pixel size, DPR or brightness | one case each |
 
 ## Exit gate
 
@@ -474,3 +548,15 @@ reviewer.
 - **R-5 (D7):** symbols hold no text and no fill: a mirrored text draws
   mirrored (F-6), and a fill's boundary reference would need handle remapping
   of a second kind. Cost if wrong: flat outlines; a later slice adds both.
+
+## Revision 2
+
+Applies the review of revision 1 (V-1 to V-11), all inside the human's
+decisions: V-1 the snap assertion names a leaf endpoint (D10, F-12); V-2
+M-09g retargeted to extents, M-09p recorded equivalent, the index comment
+in the files table (D4, F-13); V-3 M-09o made observable; V-4 the allow-list
+and geometry rules (D5, F-14), `layerZero` (D6); V-5 `_activate` (D12); V-6
+permissions before handles, `resolveDragPoint`, key handling (D11); V-7 R/M
+consumed while armed, the focus node injected, the field's own guard (D9,
+D11); V-8 the D6 details; V-9 the codec note and the `rebuildAll` cost (D4,
+D5); V-10 nine mutants; V-11 D14 and the tool's naming (D11).
