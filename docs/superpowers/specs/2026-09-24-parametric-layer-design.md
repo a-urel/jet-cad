@@ -390,8 +390,9 @@ It is the only rule a client may use to ask "is this a live `T`"; a spelling
 of its own (`is GroupNode && parent == root && get<T>(h) != null`) disagrees
 with the engine on a shadowed object. `T` is matched by the type argument it
 was registered with, so a supertype names nothing. Cost: O(registered types)
-per `names`; no frame path calls it. Only a file makes a shadowed object in
-the app. Killed by `LO1`–`LO5` (mutants M-L1a–M-L1h).
+per `names`; no frame path calls it. The engine admits a shadowed object
+(it is not refused); the app's own tools never write one, so in the app only
+a file brings one in. Killed by `LO1`–`LO5` (mutants M-L1a–M-L1h).
 
 ### D6 — Generated geometry is not directly editable (human: refuse)
 

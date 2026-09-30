@@ -1196,6 +1196,10 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   - It stores each wall's handle, and `hostAt` returns the lowest-handle
     wall whose band holds the point. It holds live walls only, root-level
     groups (Task 9 review m5).
+    *Amended by fix/live-object-rule:* a live wall is the engine's live
+    `WallParams` object (`ParametricCatalog.names`), asked through
+    `live_objects.dart`; a group whose `WallParams` a later-registered type
+    shadows is not one.
   - The host scan is not gated on object snap: finding the host is not a
     snap. F3 gates only 07's band joining and D15's edge snaps.
 - **"Scans nothing when no wall is near" (Ruling 08-12)** is read as

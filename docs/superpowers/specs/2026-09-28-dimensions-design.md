@@ -1024,9 +1024,10 @@ need the snapped entity (the render layer stays frozen, D1).
 
   **Amended by fix/live-object-rule:** a live wall and a live opening here
   (both queries, and `T`) are decided by the engine's object rule (06 D5,
-  as amended), asked through `live_objects.dart`: a file's group carrying `WallParams`
-  and `OpeningParams` is an opening, not a candidate wall (`EG9`), and a
-  file's separator carrying `OpeningParams` brings no host in (`AM7`).
+  as amended), asked through `live_objects.dart`: a file's group carrying
+  `WallParams` and `OpeningParams` is an opening, not a candidate wall
+  (`EG9`), and a file's separator carrying `OpeningParams` brings no host in
+  (`AM7`).
 
   **Why the hosts:** revision 1 to 3 assumed a wall's attach points are
   vertices of its stored ring or its centreline's ends. They are not when
