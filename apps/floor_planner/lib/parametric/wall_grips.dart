@@ -19,8 +19,9 @@ import 'wall_geometry.dart';
 /// - **Drag:** one [CompoundCommand] of `SetComponentCommand<WallParams>`:
 ///   the dragged end, and every other live wall's end within
 ///   `wallJoin.linear` of it in world (a live wall's, by the engine's rule;
-///   a file's stray `WallParams` does not follow), ascending by handle, each written back
-///   in its own group's local space. Joined ends follow, in one undo step.
+///   a file's stray `WallParams` does not follow), ascending by handle,
+///   each written back in its own group's local space. Joined ends follow,
+///   in one undo step.
 ///   A drag that would leave any of those walls no longer than
 ///   `wallJoin.linear` is refused.
 /// - **Openings stay put** (spec 08 D13): in the same compound, after the

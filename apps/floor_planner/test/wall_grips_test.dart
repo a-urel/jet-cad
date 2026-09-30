@@ -1,6 +1,8 @@
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/catalog.dart';
+import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/dimension_attach.dart';
+import 'package:floor_planner/parametric/dimension_grips.dart';
 import 'package:floor_planner/parametric/object_grips.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart';
@@ -754,5 +756,112 @@ void main() {
     await enter('650');
     expect(doc.components.get<OpeningParams>(shadow)!.position, 650);
     expect(doc.commands.undoDepth, 1);
+  });
+
+  testWidgets(
+      'EG10 (fix/live-object-rule, the L2 review\'s m1) a file\'s dimension '
+      'group carrying WallParams on the joint is a dimension, not a wall: '
+      'not among the adapter\'s walls, the band cache\'s or the attach\'s, '
+      'no wall grips or wall section, and the corner drag leaves it alone',
+      (tester) async {
+    // Not an opening: a fix that skips only groups carrying OpeningParams
+    // leaves this one a wall.
+    const dim = Handle(0x1A2B);
+    final at = Transform2.translation(ox + 820.5, oy - 1330.25)
+        .multiply(Transform2.rotation(0.7));
+    final toDim = at.invert();
+    final d0 = toDim.transformPoint(plan(400, 2200));
+    final d1 = toDim.transformPoint(plan(2600, 2200));
+    final doc = gripDoc(FlutterTextMeasurer(), (doc) {
+      addL(doc);
+      doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: dim,
+            parent: doc.rootHandle,
+            transform: at,
+            children: const [])),
+        SetComponentCommand<DimensionParams>(
+            dim,
+            DimensionParams(FixedEnd(d0.x, d0.y), FixedEnd(d1.x, d1.y),
+                DimKind.aligned, 350.5)),
+      ], label: 'Add dimension'));
+    });
+    expect(kids(doc, dim), isNotEmpty,
+        reason: 'premise: regenerated as a dimension');
+    // Written straight into the store, as a file brings it in: 400 thick,
+    // from the L's corner (on the joint, in world) out between B and C.
+    final ws0 = toDim.transformPoint(lCorner);
+    final we0 = toDim.transformPoint(polar(lCorner, 23 + 40, 1800));
+    final stray =
+        WallParams(ws0.x, ws0.y, we0.x, we0.y, 400, Justification.left);
+    doc.components.attach<WallParams>(dim, stray);
+    final dimP = doc.components.get<DimensionParams>(dim)!;
+    final corner = endOf(doc, wa, 1);
+    final ws = worldWallOf(doc, dim);
+    expect((ws.s - corner).length, lessThan(wallJoin.linear),
+        reason: 'premise: on the joint in world; only the rule excludes it');
+    expect((ws.s - Vector2(ox, oy)).length, greaterThan(1000));
+
+    // The document adapter: no wall, and not among A's others.
+    expect(wallsInDocument(doc, dim), isNull);
+    expect(
+        [for (final w in wallsInDocument(doc, wa)!.walls) w.handle], [wb, wc]);
+
+    // The band cache: a point in the stray's band only, and a control.
+    final bands = WallBands();
+    addTearDown(bands.dispose);
+    final n = Vector2(-ws.d.y, ws.d.x);
+    final inBand = (ws.s + ws.e) * 0.5 + n * 200;
+    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
+    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
+    expect(bands.hostAt(doc, aMid.x, aMid.y), wa, reason: 'control');
+
+    // The dimension attach: T, and the candidates at the stray's far end.
+    expect(thickestWall(doc), closeTo(200, 1e-9), reason: "A's, not 400");
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final ends = attachCandidates(doc, index, ws.e,
+        objectSnap: true, thickest: thickestWall(doc));
+    expect([for (final e in ends) e.wall], isNot(contains(dim)));
+
+    // The rooms' adapter: a wall would be an input.
+    final inputs = RoomInputs(doc);
+    addTearDown(inputs.dispose);
+    expect(inputs.inputOf(dim), isNull);
+    expect(inputs.inputOf(wa), isNotNull, reason: 'control');
+
+    // The grips: the dimension's, never the wall's.
+    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
+        [for (final g in gs) (g.role, g.index, g.x, g.y)];
+    expect(WallGrips().gripsOf(doc, dim), isEmpty);
+    final object =
+        ObjectGrips(edgeAperture: () => null, roomInputs: inputs, index: index);
+    final own = rows(
+        DimensionGrips(index: index, objectSnap: () => true).gripsOf(doc, dim));
+    expect(own, hasLength(3));
+    expect(rows(object.gripsOf(doc, dim)), own);
+
+    // The corner drag: A and B only; the dimension group as loaded.
+    final q = gridOf(doc, plan(3500, -400));
+    final g = WallGrips().gripsOf(doc, wa)[1];
+    final c = WallGrips().drag(doc, wa, g, q)! as CompoundCommand;
+    expect([for (final m in c.children) (m as dynamic).handle as Handle],
+        [wa, wb]);
+    final view = await pumpGrips(tester, doc, lCorner);
+    final before = canon(doc);
+    await selectWall(tester, view, wa);
+    await dragWorld(tester, view, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    expect(doc.components.get<WallParams>(dim), stray);
+    expect(doc.components.get<DimensionParams>(dim), dimP);
+    await undoKey(tester);
+    expect(canon(doc), before);
+
+    // The panel: the Dimension section, not the Wall section.
+    view.selection.replace([SelectionKey.root(dim)]);
+    await tester.pump();
+    expect(find.byKey(const Key('dimension-section')), findsOneWidget);
+    expect(find.byKey(const Key('wall-section')), findsNothing);
   });
 }

@@ -12,6 +12,7 @@
 // fractional, and the fixtures run at the origin and at the corpus far
 // origin with every wall and separator in its own rotated group.
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/live_objects.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';
@@ -888,6 +889,87 @@ void main() {
       hoverTo(rig, plan.at(24500.5, 16000.25));
       expect(tool.debugContourBuilds, builds + 1,
           reason: 'a hover builds them, $place');
+    }
+  });
+
+  test(
+      'TT10 (fix/live-object-rule, the L2 review\'s m2) a file\'s dimension '
+      'group carrying RoomParams is no room: its seed does not occupy the '
+      'face, and its `Room N` name is not taken', () {
+    for (final place in [origin, corpusGroups]) {
+      final plan = buildPlan(boxWalls, place: place);
+      final doc = plan.doc;
+      // Two dimensions, each made as the app makes one (regenerated through
+      // the dispatcher) in a turned, translated root-level group, then
+      // given `RoomParams` straight through the store, as a file brings it
+      // in. Dimension is registered after Room, so each is a dimension.
+      Handle dimension(Transform2 at, Vector2 a, Vector2 b) {
+        final h = doc.handleSeed.next();
+        final toLocal = at.invert();
+        final la = toLocal.transformPoint(a), lb = toLocal.transformPoint(b);
+        doc.commands.execute(CompoundCommand([
+          AddNodeCommand(GroupNode(
+              handle: h,
+              parent: doc.rootHandle,
+              transform: at,
+              children: const [])),
+          SetComponentCommand<DimensionParams>(
+              h,
+              DimensionParams(FixedEnd(la.x, la.y), FixedEnd(lb.x, lb.y),
+                  DimKind.aligned, 420.25)),
+        ], label: 'Add dimension'));
+        return h;
+      }
+
+      final atIn = Transform2.translation(
+              plan.at(-7000.5, 900.25).x, plan.at(-7000.5, 900.25).y)
+          .multiply(Transform2.rotation(0.8));
+      final inFace =
+          dimension(atIn, plan.at(1000.5, 5000.25), plan.at(6500.75, 5000.25));
+      final atOut = Transform2.translation(
+              plan.at(12000.25, -3000.5).x, plan.at(12000.25, -3000.5).y)
+          .multiply(Transform2.rotation(-1.2));
+      final outside =
+          dimension(atOut, plan.at(9500.5, -1500.25), plan.at(9500.5, 3500.75));
+      // [inFace]'s seed lies in the box's one face in world (its local
+      // seed does not); [outside]'s lies outside the box, and it is named
+      // `Room 1`.
+      final seedIn = plan.at(5200.25, 2700.5);
+      final seedOut = plan.at(-2500.75, 1800.25);
+      final localIn = atIn.invert().transformPoint(seedIn);
+      final localOut = atOut.invert().transformPoint(seedOut);
+      doc.components
+        ..attach<RoomParams>(inFace, RoomParams(localIn.x, localIn.y, 'Den'))
+        ..attach<RoomParams>(
+            outside, RoomParams(localOut.x, localOut.y, 'Room 1'));
+      for (final h in [inFace, outside]) {
+        expect(kids(doc, h), isNotEmpty,
+            reason: 'premise: regenerated as a dimension, $place');
+        expect(isLiveObject<DimensionParams>(doc, h), isTrue, reason: '$place');
+        expect(doc.tree[h]!.parent, doc.rootHandle,
+            reason: 'premise: a root-level group, $place');
+      }
+      expect(faceAt(doc, seedIn), isA<Traced>(),
+          reason: 'premise: the world seed is in the face, $place');
+      expect(faceAt(doc, localIn), isNot(isA<Traced>()),
+          reason: 'premise: the local seed is not, $place');
+      expect(faceAt(doc, seedOut), isNot(isA<Traced>()), reason: '$place');
+      expect(rooms(doc), isEmpty, reason: 'no live room, $place');
+
+      final rig = roomRig(doc);
+      final p = plan.at(2100.5, 1300.75);
+      hoverTo(rig, p);
+      expect(rig.tool.notice.value, isNull, reason: 'the face is free, $place');
+      expect(rig.tool.debugPreview, hasLength(1), reason: '$place');
+      final depth = doc.commands.undoDepth;
+      pressAt(rig, p);
+      expect(doc.commands.undoDepth, depth + 1, reason: 'one step, $place');
+      final room = rooms(doc).single;
+      expect(
+          doc.components.get<RoomParams>(room), RoomParams(p.x, p.y, 'Room 1'),
+          reason: 'Room 1 is free: no live room holds it, $place');
+      expect(rig.tool.notice.value, 'Already a room: Room 1',
+          reason: 'control: a live room occupies the face, $place');
     }
   });
 
