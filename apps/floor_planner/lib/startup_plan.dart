@@ -1,4 +1,7 @@
-// The document the app opens before sub-project 12 gives it a file.
+// The sample: the flat File > Open sample builds, untitled (spec 12a D4),
+// and the fixture the tests that need a real drawing build. The app no
+// longer opens on it; launch and New open the empty document of
+// `new_document.dart`, whose set-up helper the sample starts from.
 //
 // A hand-written flat, in millimetres: two bedrooms, a living room, a
 // kitchen, a bathroom and a hall, with walls, doors, windows, a few pieces
@@ -29,6 +32,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'new_document.dart';
 import 'parametric/catalog.dart';
 import 'parametric/dimension.dart';
 import 'parametric/opening.dart';
@@ -58,10 +62,11 @@ const DraftColor _finishColor = TrueColor(0xBBBBBB);
 /// whose measurer is not a `FlutterTextMeasurer`, so the caller supplies the
 /// one the app owns.
 DraftDocument startupPlan(FlutterTextMeasurer measurer) {
-  final doc = DraftDocument.empty(measurer: measurer);
-  // Spec 10 D3, D23: the DASHED record enters the tables when the document
-  // is made, outside the history, before any separator names it.
-  ensureDashedLinetype(doc);
+  // Spec 12a D4: the set-up every document the app makes shares -- the
+  // app's component types (the page's and the catalog's, once), units in
+  // millimetres, and the DASHED record in the tables outside the history
+  // before any separator names it (spec 10 D3, D23).
+  final doc = prepareDocument(measurer);
   final p = _Pen(doc);
   // Spec 08 D18, spec 10 D23, spec 11 D17: the walls, openings, separator,
   // rooms and dimensions regenerate through this system as they are added;
@@ -189,9 +194,7 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
   // through the log like everything else. Spec 10 D23 (R-27): it is set
   // through the plan's system before the rooms, so they read the real page,
   // not the fallback (10 D11). Centred on the extents, which the rooms do
-  // not change.
-  PageComponent.register(doc.components);
-  doc.header.units = DrawingUnits.millimeters;
+  // not change. (The page's type and the units are the set-up's.)
   doc.commands.execute(SetComponentCommand<PageComponent>(
       doc.rootHandle, startupPage(doc.extents)));
 
