@@ -176,6 +176,18 @@ void main() {
   });
 
   group('RemoveDefinitionCommand', () {
+    test('capability is structure and touched names the handle', () {
+      final doc = DraftDocument.empty();
+      final h = doc.handleSeed.next();
+      doc.commands.execute(AddDefinitionCommand(definitionAt(h)));
+      final cmd = RemoveDefinitionCommand(h);
+      expect(cmd.capability, Capability.structure);
+      final changes = <DocChange>[];
+      doc.commands.onAfterMutate = changes.add;
+      doc.commands.execute(cmd);
+      expect((changes.single as CommandApplied).touched, {h});
+    });
+
     test('refuses an unknown handle', () {
       final doc = DraftDocument.empty();
       expect(
@@ -247,6 +259,9 @@ void main() {
   });
 
   group('through the spatial index and the extents', () {
+    // The pick test proves the index is wired to command changes, not the
+    // touched-definition structural arm of its reconcile (equivalent per
+    // spec F-13: every alternative falls back to a full rebuild).
     test('a pick finds an instance of an added definition with no rebuild', () {
       final doc = DraftDocument.empty();
       final index = SpatialIndex(doc);
@@ -279,7 +294,11 @@ void main() {
 
     test('the extents follow a compound placement and its undo', () {
       final doc = DraftDocument.empty();
+      // A non-empty pre-state, so undo is compared against a real box.
+      doc.commands.execute(
+          leaf(doc.handleSeed.next(), doc.rootHandle, [100, 100, 200, 140]));
       final before = doc.extents;
+      expect(before.isEmpty, isFalse);
       final d = doc.handleSeed.next();
       final l = doc.handleSeed.next();
       final i = doc.handleSeed.next();
@@ -292,18 +311,20 @@ void main() {
 
       final placed = doc.extents;
       expect(placed.isEmpty, isFalse);
-      expect(placed.minX, closeTo(970, 1e-6));
+      expect(placed.minX, closeTo(100, 1e-6));
       expect(placed.maxX, closeTo(970, 1e-6));
-      expect(placed.minY, closeTo(520, 1e-6));
+      expect(placed.minY, closeTo(100, 1e-6));
       expect(placed.maxY, closeTo(560, 1e-6));
 
       doc.commands.undo();
-      expect(doc.commands.undoDepth, 0);
+      expect(doc.commands.undoDepth, 1);
       expect(doc.tree.definition(d), isNull);
-      expect(doc.extents.isEmpty, before.isEmpty);
+      final after = doc.extents;
+      expect([after.minX, after.minY, after.maxX, after.maxY],
+          [before.minX, before.minY, before.maxX, before.maxY]);
 
       doc.commands.redo();
-      expect(doc.extents.minY, closeTo(520, 1e-6));
+      expect(doc.extents.maxX, closeTo(970, 1e-6));
       expect(doc.extents.maxY, closeTo(560, 1e-6));
     });
   });
