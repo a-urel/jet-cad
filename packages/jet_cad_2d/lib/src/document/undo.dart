@@ -3,14 +3,27 @@ import 'dart:async';
 import 'command.dart';
 import 'doc_change.dart';
 
-/// Bounded undo and redo stacks.
+/// One history entry: the command that leaves a state, and the id of the
+/// state it returns to.
+typedef _Entry = ({DraftCommand command, int returnsTo});
+
+/// Bounded undo and redo stacks over numbered states.
 ///
 /// The depth limit exists because a runtime viewer wants recoverable edits
 /// without an unbounded history; the mechanism is identical to the designer's.
+///
+/// Every state the stacks move between has an id ([state]). An entry records
+/// the command that moves away from the current state and the id of the state
+/// that command returns to, so undo and redo restore the recorded id rather
+/// than recompute one. The mutations are whole transitions of the stack, never
+/// loose pushes and pops, so no caller can stamp an id by accident: undo and
+/// redo are take ([beginUndo]) → apply → [commitUndo] or [abortUndo].
 class UndoStack {
   final int limit;
-  final List<DraftCommand> _undo = [];
-  final List<DraftCommand> _redo = [];
+  final List<_Entry> _undo = [];
+  final List<_Entry> _redo = [];
+  int _state = 0;
+  int _next = 0;
 
   UndoStack({this.limit = 200});
 
@@ -18,26 +31,66 @@ class UndoStack {
   bool get canRedo => _redo.isNotEmpty;
   int get undoDepth => _undo.length;
 
-  /// Records a newly applied command's inverse. Clears the redo stack: once a
-  /// fresh edit lands, the previously-undone future is no longer reachable.
-  void push(DraftCommand inverse) {
-    _undo.add(inverse);
+  /// The current state's id. Opaque: only equality means anything, and an id
+  /// is never reused by this stack.
+  int get state => _state;
+
+  /// A newly applied command's [inverse] leaves a fresh state.
+  ///
+  /// Clears the redo stack: once a fresh edit lands, the previously-undone
+  /// future is no longer reachable, and neither is any state only its entries
+  /// reached. Eviction past [limit] drops the oldest entry and with it the only
+  /// way back to its recorded state.
+  void recordExecute(DraftCommand inverse) {
+    _undo.add((command: inverse, returnsTo: _state));
+    _state = ++_next;
     if (_undo.length > limit) _undo.removeAt(0);
     _redo.clear();
   }
 
-  DraftCommand takeUndo() => _undo.removeLast();
+  /// The command an undo would apply. Does not pop it: the caller applies it,
+  /// then calls [commitUndo] on success or [abortUndo] on failure.
+  DraftCommand beginUndo() => _undo.last.command;
 
-  void pushRedo(DraftCommand inverse) => _redo.add(inverse);
+  /// The undo begun by [beginUndo] applied; [redoInverse] is its inverse.
+  ///
+  /// Pops the entry, records [redoInverse] as the way back to the current
+  /// state, and moves to the state the entry returns to.
+  void commitUndo(DraftCommand redoInverse) {
+    final entry = _undo.removeLast();
+    _redo.add((command: redoInverse, returnsTo: _state));
+    _state = entry.returnsTo;
+  }
 
-  DraftCommand takeRedo() => _redo.removeLast();
+  /// The undo begun by [beginUndo] failed and mutated nothing: both stacks
+  /// and [state] stay exactly as they were, the entry with its original
+  /// return id. An explicit call so the caller's shape stays take → apply →
+  /// commit or abort.
+  void abortUndo() {}
 
-  /// Records a redo's inverse back onto the undo stack, without touching the
-  /// redo stack the way [push] would. `redo` uses this — `push` would clear
-  /// the very redo stack `redo` is in the middle of replaying, which would
-  /// make a second `redo()` in a row a no-op.
-  void pushUndoOnly(DraftCommand inverse) => _undo.add(inverse);
+  /// The command a redo would apply. Does not pop it: the caller applies it,
+  /// then calls [commitRedo] on success or [abortRedo] on failure.
+  DraftCommand beginRedo() => _redo.last.command;
 
+  /// The redo begun by [beginRedo] applied; [undoInverse] is its inverse.
+  ///
+  /// Pops the entry, records [undoInverse] on the undo stack as the way back
+  /// to the current state — without clearing the redo stack, which a second
+  /// redo in a row still needs — and moves to the state the entry returns to.
+  /// Needs no eviction: an undo moves an entry from the undo stack to the redo
+  /// stack and a redo moves it back, so their sum never exceeds [limit].
+  void commitRedo(DraftCommand undoInverse) {
+    final entry = _redo.removeLast();
+    _undo.add((command: undoInverse, returnsTo: _state));
+    _state = entry.returnsTo;
+  }
+
+  /// The redo begun by [beginRedo] failed and mutated nothing: both stacks
+  /// and [state] stay exactly as they were.
+  void abortRedo() {}
+
+  /// Drops both stacks. Keeps [state]: the document did not change, only the
+  /// way back did.
   void clear() {
     _undo.clear();
     _redo.clear();
@@ -111,6 +164,26 @@ class CommandDispatcher {
   /// How many entries `undo()` could pop. One [CompoundCommand] is one.
   int get undoDepth => _history.undoDepth;
 
+  /// The id of the state the document is in, as far as this dispatcher's
+  /// history knows it.
+  ///
+  /// Opaque: only equality between two ids read from **this** dispatcher means
+  /// anything — two dispatchers' ids are unrelated. [execute] moves to an id
+  /// never used before by this dispatcher; [undo] and [redo] return to exactly
+  /// the id recorded when the state was left, so an edit then an undo reads
+  /// the pre-edit id again. An id is never reused: an edit after an undo does
+  /// not return to the undone state's id, and a state lost to eviction or to a
+  /// cleared redo stack is never reached again. A failed [undo] or [redo]
+  /// leaves it unchanged.
+  ///
+  /// Only what goes through this dispatcher moves it. [clearHistory],
+  /// [notifyLoaded] and [notifyPurged] keep it (the way back changed, not the
+  /// document); a table edit (`TableSection.add`/`remove`),
+  /// `DraftDocument.purge` and the handle seed are not commands and do not
+  /// move it either, so equal ids mean the same history state, not
+  /// byte-equal documents.
+  int get stateId => _history.state;
+
   void execute(DraftCommand command) {
     onBeforeMutate?.call();
     _checkNotDisposed();
@@ -120,7 +193,7 @@ class CommandDispatcher {
     // throws leaves no history behind: history matches what actually
     // mutated the target, never what merely attempted to.
     final result = effective.apply(target);
-    _history.push(result.inverse);
+    _history.recordExecute(result.inverse);
     final change = CommandApplied(
         label: effective.label,
         touched: result.touched,
@@ -133,25 +206,25 @@ class CommandDispatcher {
     onBeforeMutate?.call();
     _checkNotDisposed();
     if (!_history.canUndo) return;
-    final inverse = _history.takeUndo();
+    final inverse = _history.beginUndo();
     final CommandResult result;
     try {
       _require(inverse);
       result = inverse.apply(target);
     } catch (_) {
       // Neither a denied permission check nor a failing replay may silently
-      // discard the entry: put it back exactly where it came from so a later
-      // permission grant, or a caller that catches and retries, can still
-      // undo it. DraftCommand.apply's own contract says a command "must
-      // either complete fully or leave the target unmutated" — so a throwing
-      // inverse means nothing was mutated, and restoring the entry is safe.
-      // Without this, the popped command would vanish from both stacks — a
-      // single denied or failing undo would permanently and silently strand
-      // that edit.
-      _history.pushUndoOnly(inverse);
+      // discard the entry: it stays exactly where it is, with the state id it
+      // returns to, so a later permission grant, or a caller that catches and
+      // retries, can still undo it — and lands on the right id when it does.
+      // DraftCommand.apply's own contract says a command "must either
+      // complete fully or leave the target unmutated" — so a throwing inverse
+      // means nothing was mutated, and keeping the entry is safe. Without
+      // this, the command would vanish from both stacks — a single denied or
+      // failing undo would permanently and silently strand that edit.
+      _history.abortUndo();
       rethrow;
     }
-    _history.pushRedo(result.inverse);
+    _history.commitUndo(result.inverse);
     final change = CommandUndone(
         label: inverse.label,
         touched: result.touched,
@@ -164,18 +237,18 @@ class CommandDispatcher {
     onBeforeMutate?.call();
     _checkNotDisposed();
     if (!_history.canRedo) return;
-    final inverse = _history.takeRedo();
+    final inverse = _history.beginRedo();
     final CommandResult result;
     try {
       _require(inverse);
       result = inverse.apply(target);
     } catch (_) {
-      // Same reasoning as in undo(): restore to the redo stack it was popped
-      // from, not the undo stack.
-      _history.pushRedo(inverse);
+      // Same reasoning as in undo(): the entry stays on the redo stack,
+      // with its recorded state id.
+      _history.abortRedo();
       rethrow;
     }
-    _history.pushUndoOnly(result.inverse);
+    _history.commitRedo(result.inverse);
     final change = CommandRedone(
         label: inverse.label,
         touched: result.touched,
