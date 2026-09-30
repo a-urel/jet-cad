@@ -1,7 +1,8 @@
 // Spec 12a D2, D4, D5 (plan 12a Task 5): the app launches on the empty
 // document; New and Open sample swap the document; dirty follows the undo
 // position against the save point, on the launch document and on an
-// opened one; a swap leaves nothing of the old document live.
+// opened one; a swap leaves nothing of the old document live, and New or
+// Open sample from a titled document forgets its file.
 import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/startup_plan.dart';
@@ -215,6 +216,7 @@ void main() {
     expect(view.tools.active, isNot(isA<SelectTool>()), reason: 'premise');
     expect(old.commands.expander, isNotNull, reason: 'premise: installed');
     expect(old.commands.onAfterMutate, isNotNull, reason: 'premise');
+    expect(old.commands.onBeforeMutate, isNotNull, reason: 'premise');
     expect(old.tables.debugListenerCount, greaterThan(0), reason: 'premise');
 
     files.scriptOpen(name: 'flat.jetplan', bytes: sampleBytes());
@@ -242,5 +244,115 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('osnap-text'))).data,
         'osnap off');
     expect(identical(hostOf(tester), host), isTrue);
+  });
+
+  testWidgets(
+      'DH6 New and Open sample from a titled document forget its file: '
+      'untitled, no file name, no location, and the next Save asks where '
+      'instead of writing over the old file; the old document lives until '
+      'the swap\'s frame (spec 12a D2, S-11, S-28)', (tester) async {
+    final files = FakeDocumentFiles();
+    final host = await pumpApp(tester, files);
+    final session = sessionOf(tester);
+    String shownName() =>
+        tester.widget<Text>(find.byKey(const Key('document-name'))).data!;
+
+    // Titled and saved: opened from /p/plan, edited through the Wall tool
+    // far from the origin, then Cmd+S writes in place.
+    files.scriptOpen(
+        name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
+    await host.openFlow();
+    await tester.pump();
+    await aimCamera(tester, far);
+    await drawWall(tester, far, far + Vector2(1900, -600));
+    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
+    await tester.pump();
+    final saved = session.document;
+    expect(files.writes.single.location, '/p/plan', reason: 'premise');
+    expect(files.saveLocationCalls, isEmpty, reason: 'premise: in place');
+    expect(saved.commands.undoDepth, 1, reason: 'premise: edited');
+    expect(session.dirty.value, isFalse, reason: 'premise: saved');
+    expect((
+      session.name,
+      session.fileName,
+      session.location
+    ), (
+      'plan',
+      'plan.jetplan',
+      '/p/plan'
+    ), reason: 'premise: titled');
+
+    // New. The old shell is still mounted until the frame, so the old
+    // document is not disposed yet; after the frame it is.
+    await host.newFlow();
+    expect(identical(viewOf(tester).document, saved), isTrue,
+        reason: 'premise: the old shell until the frame');
+    expect(saved.commands.isDisposed, isFalse,
+        reason: 'not disposed under the still-mounted old shell');
+    await tester.pump();
+    expect(saved.commands.isDisposed, isTrue, reason: 'disposed after it');
+    expect(identical(viewOf(tester).document, session.document), isTrue);
+    expect((session.name, session.fileName, session.location),
+        ('Untitled', null, null));
+    expect(titleOf(tester), 'Untitled — jet-cad');
+    expect(shownName(), 'Untitled');
+
+    // An edit, then Cmd+S: a Save As, not a write over /p/plan.
+    await aimCamera(tester, far);
+    await drawWall(tester, far + Vector2(0, 800), far + Vector2(-2200, 800));
+    expect(session.dirty.value, isTrue, reason: 'premise');
+    files.scriptSaveLocation(name: 'fresh.jetplan', location: '/p/fresh');
+    await chord(tester, LogicalKeyboardKey.meta, LogicalKeyboardKey.keyS);
+    await tester.pump();
+    expect(files.saveLocationCalls, ['Untitled.jetplan']);
+    expect(files.writes, hasLength(2));
+    expect(files.writes.last.location, '/p/fresh');
+    expect(files.writes.last.bytes, bytesOf(session.document));
+    expect((session.name, session.location), ('fresh', '/p/fresh'));
+    expect(session.dirty.value, isFalse);
+
+    // Titled and left clean: opened from /p/plan again, edited and undone.
+    files.scriptOpen(
+        name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
+    await host.openFlow();
+    await tester.pump();
+    final clean = session.document;
+    await aimCamera(tester, far);
+    await drawWall(tester, far + Vector2(300, -1200), far + Vector2(300, 1700));
+    await undoKey(tester);
+    expect(clean.commands.canRedo, isTrue, reason: 'premise: edited, undone');
+    expect(session.dirty.value, isFalse, reason: 'premise: clean');
+    expect((
+      session.name,
+      session.fileName,
+      session.location
+    ), (
+      'plan',
+      'plan.jetplan',
+      '/p/plan'
+    ), reason: 'premise: titled');
+
+    // Open sample: the same, and the Save step asks too.
+    await host.openSampleFlow();
+    expect(clean.commands.isDisposed, isFalse,
+        reason: 'not disposed under the still-mounted old shell');
+    await tester.pump();
+    expect(clean.commands.isDisposed, isTrue);
+    expect((session.name, session.fileName, session.location),
+        ('Untitled', null, null));
+    expect(titleOf(tester), 'Untitled — jet-cad');
+    expect(shownName(), 'Untitled');
+    files.scriptSaveLocation(name: 'flat.jetplan', location: '/p/flat');
+    final saving = host.saveStep();
+    await tester.pump();
+    expect(await saving, isTrue);
+    await tester.pump();
+    expect(files.saveLocationCalls, ['Untitled.jetplan', 'Untitled.jetplan']);
+    expect(files.writes, hasLength(3));
+    expect(files.writes.last.location, '/p/flat');
+    expect(files.writes.map((w) => w.location).where((l) => l == '/p/plan'),
+        hasLength(1),
+        reason: 'the opened file was written once, by its own Save');
+    expect(files.unscriptedCalls, 0);
   });
 }

@@ -1,7 +1,8 @@
 // Spec 12a D5, D9 (plan 12a Task 5): the save point is the state the bytes
 // were encoded at; a failed or cancelled save leaves it and clears busy;
 // an untitled Save asks where, a titled one writes in place (macOS) or
-// downloads under its name without asking (web); the web's name prompt.
+// downloads under its name without asking (web); the web's name prompt;
+// a Save As whose panel throws shows the error and changes nothing.
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/startup_plan.dart';
 import 'package:flutter/material.dart';
@@ -256,5 +257,40 @@ void main() {
     await tester.pump();
     expect(await answer, 'Bath');
     expect(find.byKey(const Key('name-prompt')), findsNothing);
+  });
+
+  testWidgets(
+      'DS7 a Save As whose panel throws, from a titled dirty document: the '
+      'dialog, false, still dirty and titled, no write, busy cleared (spec '
+      '12a D5, D8, S-21; Task 5 deviation 5)', (tester) async {
+    final files = FakeDocumentFiles();
+    final host = await titledDirty(tester, files, '/p/flat');
+    final session = sessionOf(tester);
+    final doc = session.document;
+
+    files.scriptSaveLocationThrow(StateError('the panel failed'));
+    final saving = host.saveAsStep();
+    await tester.pump();
+    await tester.pump();
+    expect(files.saveLocationCalls, ['flat.jetplan']);
+    expect(
+        tester.widget<Text>(find.byKey(const Key('document-error-title'))).data,
+        'Could not save flat');
+    expect(
+        tester.widget<Text>(find.byKey(const Key('document-error-text'))).data,
+        'Bad state: the panel failed');
+    expect(session.busy.value, isTrue, reason: 'busy under the dialog');
+    await dismissError(tester);
+    expect(await saving, isFalse);
+    expect(find.byKey(const Key('document-error')), findsNothing);
+    expect(files.writes, isEmpty);
+    expect(session.dirty.value, isTrue, reason: 'the save point stays');
+    expect(session.busy.value, isFalse, reason: 'busy cleared');
+    expect(identical(session.document, doc), isTrue);
+    expect(doc.commands.undoDepth, 1);
+    expect((session.name, session.fileName, session.location),
+        ('flat', 'flat.jetplan', '/p/flat'));
+    expect(titleOf(tester), '• flat — jet-cad');
+    expect(files.unscriptedCalls, 0);
   });
 }
