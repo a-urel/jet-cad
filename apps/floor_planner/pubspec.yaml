@@ -12,6 +12,7 @@ environment:
   flutter: ">=3.24.0"
 
 dependencies:
+  file_selector: ^1.1.0
   flutter:
     sdk: flutter
   jet_cad_2d:
@@ -20,6 +21,7 @@ dependencies:
     path: ../../packages/jet_cad_2d_flutter
   meta: ^1.18.0
   vector_math: ^2.2.0
+  web: ^1.1.0
 
 dev_dependencies:
   flutter_test:
