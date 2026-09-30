@@ -1022,6 +1022,13 @@ need the snapped entity (the render layer stays frozen, D1).
     live wall (the tool keeps it per document change; a grip drop computes
     it, one pass over the walls).
 
+  **Amended by fix/live-object-rule:** a live wall and a live opening here
+  (both queries, and `T`) are decided by the engine's object rule (06 D5,
+  as amended), asked through `live_objects.dart`: a file's group carrying
+  `WallParams` and `OpeningParams` is an opening, not a candidate wall
+  (`EG9`), and a file's separator carrying `OpeningParams` brings no host in
+  (`AM7`).
+
   **Why the hosts:** revision 1 to 3 assumed a wall's attach points are
   vertices of its stored ring or its centreline's ends. They are not when
   an opening is **flush** with a flat end (a T butt or a free end): 08's
@@ -1437,6 +1444,8 @@ M-11runtime, M-11previewkind.
 In the Selection panel, shown when **exactly one** selected key is a
 root-level group carrying `DimensionParams` (10 D21's rule). No tool mode:
 the Dimension tool has no settings.
+**Amended by fix/live-object-rule:** a live dimension by the engine's object
+rule (06 D5, as amended), asked through `live_objects.dart`.
 
 - **Value**, read-only: the dimension's TEXT child's stored string
   (decision 13's "as displayed"; 10 R-25's pattern), or `—` for a broken

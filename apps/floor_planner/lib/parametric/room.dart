@@ -8,8 +8,8 @@
 import 'dart:math' as math;
 import 'dart:typed_data' show Float64List;
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'room_inputs.dart' show placeSourceInView;

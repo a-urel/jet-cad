@@ -1,6 +1,16 @@
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/catalog.dart';
+import 'package:floor_planner/parametric/dimension.dart';
+import 'package:floor_planner/parametric/dimension_attach.dart';
+import 'package:floor_planner/parametric/dimension_grips.dart';
+import 'package:floor_planner/parametric/object_grips.dart';
+import 'package:floor_planner/parametric/opening.dart';
+import 'package:floor_planner/parametric/opening_geometry.dart';
+import 'package:floor_planner/parametric/opening_grips.dart';
+import 'package:floor_planner/parametric/room_inputs.dart';
+import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/parametric/wall.dart';
+import 'package:floor_planner/parametric/wall_bands.dart';
 import 'package:floor_planner/parametric/wall_grips.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
@@ -11,6 +21,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'support/dimension_fixture.dart' show dimLines;
 import 'support/wall_fixture.dart';
 import 'support/wall_shell.dart';
 
@@ -140,6 +151,71 @@ void addL(DraftDocument doc, {bool withC = true}) {
         150, Justification.right));
   }
 }
+
+const Handle shadow = Handle(5500), sep = Handle(5600);
+
+/// fix/live-object-rule: the L, and two root-level groups carrying two
+/// registered types each, as only a file brings them in. Each is made as
+/// the app makes an object, regenerated through the dispatcher, then given
+/// a second component straight through the store:
+/// - [shadow], a door on C (so the engine regenerated it as an opening),
+///   then `WallParams` 400 thick from the L's corner (on the joint, in
+///   world) to [shadowTip], a point of the door's own children. Opening is
+///   registered after Wall, so the engine names it an **opening**. With
+///   [dangling], its `OpeningParams` is then rewritten to name a host that
+///   does not exist (the q12 review's PR2d); otherwise its host is C (PR2).
+/// - [sep], a separator (regenerated as one), then `OpeningParams` hosted
+///   on B. Separator is registered after Opening, so it is a **separator**.
+/// Both groups translated and rotated; neither handle the lowest.
+DraftDocument shadowDoc({required bool dangling}) {
+  final doc = gripDoc(FlutterTextMeasurer(), (doc) {
+    addL(doc);
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: shadow,
+          parent: doc.rootHandle,
+          transform: Transform2.translation(ox + 100.5, oy + 50.25)
+              .multiply(Transform2.rotation(-0.4)),
+          children: const [])),
+      SetComponentCommand<OpeningParams>(
+          shadow, const OpeningParams(wc, 700, 800, OpeningKind.door)),
+    ], label: 'Add door'));
+    final at = Transform2.translation(ox - 610.75, oy + 1720.5)
+        .multiply(Transform2.rotation(0.9));
+    final toSep = at.invert();
+    final s = toSep.transformPoint(plan(600, 1800));
+    final e = toSep.transformPoint(plan(2200, 1800));
+    doc.commands.execute(CompoundCommand([
+      AddNodeCommand(GroupNode(
+          handle: sep,
+          parent: doc.rootHandle,
+          transform: at,
+          children: const [])),
+      SetComponentCommand<SeparatorParams>(
+          sep, SeparatorParams(s.x, s.y, e.x, e.y)),
+    ], label: 'Add separator'));
+  });
+  final toShadow = doc.tree.accumulatedTransform(shadow).invert();
+  final s = toShadow.transformPoint(lCorner);
+  final tip = shadowTip(doc);
+  doc.components
+    ..attach<WallParams>(
+        shadow, WallParams(s.x, s.y, tip.x, tip.y, 400, Justification.left))
+    ..attach<OpeningParams>(
+        sep, const OpeningParams(wb, 900, 700, OpeningKind.window));
+  if (dangling) {
+    doc.components.attach<OpeningParams>(shadow,
+        const OpeningParams(Handle(0x7777), 700, 800, OpeningKind.door));
+  }
+  return doc;
+}
+
+/// The first point of [shadow]'s first generated line, group-local: a
+/// point of the door's own children.
+Vector2 shadowTip(DraftDocument doc) => [
+      for (final k in kids(doc, shadow))
+        if (kindOf(doc, k) == EntityKind.line) pointsOf(payloadOf(doc, k))[0],
+    ].first;
 
 void main() {
   testWidgets(
@@ -501,5 +577,317 @@ void main() {
       expect((p - q).length, lessThan(1e-6));
     }
     expect((b1 - lEnd).length, lessThan(1e-6));
+  });
+
+  testWidgets(
+      'EG7 (fix/live-object-rule, the q12 review\'s PR2d) a file\'s group '
+      'carrying WallParams on the joint and OpeningParams naming no host is '
+      'an opening, not a wall: the corner drag of A lands one undo step, '
+      'throws nothing and leaves the group as loaded', (tester) async {
+    final doc = shadowDoc(dangling: true);
+    final wallP = doc.components.get<WallParams>(shadow)!;
+    final openingP = doc.components.get<OpeningParams>(shadow)!;
+    expect(openingP.host, const Handle(0x7777), reason: 'dangling');
+    final corner = endOf(doc, wa, 1);
+    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
+        reason: 'the shadow\'s WallParams is on the joint in world');
+    final view = await pumpGrips(tester, doc, lCorner);
+    final before = canon(doc);
+    await selectWall(tester, view, wa);
+    final q = gridOf(doc, plan(3500, -400));
+    await dragWorld(tester, view, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    for (final (h, k) in [(wa, 1), (wb, 0)]) {
+      expect((endOf(doc, h, k) - q).length, lessThan(1e-6),
+          reason: '${h.toHex()} follows');
+    }
+    expect(doc.components.get<WallParams>(shadow), wallP);
+    expect(doc.components.get<OpeningParams>(shadow), openingP);
+    await undoKey(tester);
+    expect(canon(doc), before);
+  });
+
+  testWidgets(
+      'EG8 (fix/live-object-rule, PR2) the corner drag\'s command and '
+      'preview name the real walls only: a file\'s opening carrying '
+      'WallParams on the joint does not follow, and a separator carrying '
+      'OpeningParams on B is not kept put', (tester) async {
+    final doc = shadowDoc(dangling: false);
+    final wallP = doc.components.get<WallParams>(shadow)!;
+    final openingP = doc.components.get<OpeningParams>(shadow)!;
+    final sepS = doc.components.get<SeparatorParams>(sep)!;
+    final sepO = doc.components.get<OpeningParams>(sep)!;
+    final corner = endOf(doc, wa, 1);
+    expect((endOf(doc, shadow, 0) - corner).length, lessThan(wallJoin.linear),
+        reason: 'only the rule separates the shadow from the joint');
+    final q = gridOf(doc, plan(3500, -400));
+
+    final grips = WallGrips();
+    final g = grips.gripsOf(doc, wa)[1];
+    final c = grips.drag(doc, wa, g, q)! as CompoundCommand;
+    expect([for (final m in c.children) (m as dynamic).handle as Handle],
+        [wa, wb]);
+    final pieces = grips.preview(doc, wa, g, q);
+    expect(pieces.map((p) => p.$1), [EntityKind.line, EntityKind.line]);
+    final [a0, a1] = pointsOf(pieces[0].$2);
+    final [b0, b1] = pointsOf(pieces[1].$2);
+    expect((a0 - lStart).length, lessThan(1e-6));
+    for (final p in [a1, b0]) {
+      expect((p - q).length, lessThan(1e-6));
+    }
+    expect((b1 - lEnd).length, lessThan(1e-6));
+
+    final view = await pumpGrips(tester, doc, lCorner);
+    final before = canon(doc);
+    await selectWall(tester, view, wa);
+    await dragWorld(tester, view, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    expect(doc.components.get<WallParams>(shadow), wallP);
+    expect(doc.components.get<OpeningParams>(shadow), openingP);
+    expect(doc.components.get<SeparatorParams>(sep), sepS);
+    expect(doc.components.get<OpeningParams>(sep), sepO);
+    await undoKey(tester);
+    expect(canon(doc), before);
+  });
+
+  testWidgets(
+      'EG9 (fix/live-object-rule) a file\'s group carrying WallParams and '
+      'OpeningParams is an opening everywhere and a wall nowhere; a '
+      'separator carrying OpeningParams is a separator everywhere and an '
+      'opening nowhere', (tester) async {
+    final doc = shadowDoc(dangling: false);
+    // A file's opening hosted on the shadow, which is no wall.
+    const orphan = Handle(5700);
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: orphan,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(ox + 1500.25, oy - 900.5)
+            .multiply(Transform2.rotation(1.3)),
+        children: const [])));
+    doc.commands.clearHistory();
+    doc.components.attach<OpeningParams>(
+        orphan, const OpeningParams(shadow, 300, 600, OpeningKind.window));
+    final m = doc.tree.accumulatedTransform(shadow);
+    final tipW = m.transformPoint(shadowTip(doc));
+    final ws = worldWallOf(doc, shadow);
+    expect((tipW - ws.e).length, lessThan(1e-6),
+        reason: 'premise: the shadow\'s WallParams ends on its own child');
+
+    // The document adapter (Ruling 08-8).
+    expect(wallsInDocument(doc, shadow), isNull);
+    expect(
+        [for (final w in wallsInDocument(doc, wc)!.walls) w.handle], [wa, wb]);
+    expect([for (final (h, _) in openingsInDocument(doc, wc)) h], [shadow]);
+    expect(openingsInDocument(doc, wb), isEmpty);
+
+    // The band cache: a point in the shadow's band only, and a control.
+    final bands = WallBands();
+    addTearDown(bands.dispose);
+    final n = Vector2(-ws.d.y, ws.d.x);
+    final inBand = (ws.s + ws.e) * 0.5 + n * 300;
+    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
+    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
+    expect(bands.hostAt(doc, aMid.x, aMid.y), wa);
+
+    // The dimension attach: T, and the candidates at the shadow's tip.
+    expect(thickestWall(doc), closeTo(200, 1e-9), reason: "A's, not 400");
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final ends = attachCandidates(doc, index, tipW,
+        objectSnap: true, thickest: thickestWall(doc));
+    expect([for (final e in ends) e.wall], isNot(contains(shadow)));
+    final atA = attachCandidates(doc, index, endOf(doc, wa, 0),
+        objectSnap: true, thickest: thickestWall(doc));
+    expect([for (final e in atA) e.wall], contains(wa), reason: 'control');
+
+    // The rooms' document adapter.
+    final inputs = RoomInputs(doc);
+    addTearDown(inputs.dispose);
+    expect(inputs.inputOf(shadow), isNull);
+    expect(inputs.inputOf(sep), isNotNull);
+    expect(inputs.inputOf(wa), isNotNull);
+
+    // The grips: each group's naming type's provider.
+    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
+        [for (final g in gs) (g.role, g.index, g.x, g.y)];
+    final object = ObjectGrips(edgeAperture: () => null, roomInputs: inputs);
+    final opening = rows(OpeningGrips().gripsOf(doc, shadow));
+    expect(opening, isNotEmpty);
+    expect(rows(object.gripsOf(doc, shadow)), opening);
+    expect(object.movable(doc, shadow), isFalse);
+    final separator = rows(object.separators!.gripsOf(doc, sep));
+    expect(separator, hasLength(2));
+    expect(rows(object.gripsOf(doc, sep)), separator);
+    expect(object.movable(doc, sep), isTrue);
+
+    // The panel: the Opening section for the shadow, no section for the
+    // separator.
+    final view = await pumpGrips(tester, doc, lCorner);
+    view.selection.replace([SelectionKey.root(shadow)]);
+    await tester.pump();
+    expect(find.byKey(const Key('opening-section')), findsOneWidget);
+    expect(find.byKey(const Key('wall-section')), findsNothing);
+    view.selection.replace([SelectionKey.root(sep)]);
+    await tester.pump();
+    expect(find.byKey(const Key('opening-section')), findsNothing);
+    expect(find.byKey(const Key('wall-section')), findsNothing);
+
+    // The Position field: an opening hosted on the shadow has no wall, so
+    // no position is valid (the field reverts, nothing is written); the
+    // shadow's own position, on C, commits one step.
+    Future<void> enter(String text) async {
+      await tester.enterText(find.byKey(const Key('opening-position')), text);
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+    }
+
+    final o2 = doc.components.get<OpeningParams>(orphan)!;
+    view.selection.replace([SelectionKey.root(orphan)]);
+    await tester.pump();
+    expect(find.byKey(const Key('opening-section')), findsOneWidget);
+    expect(ws.s.distanceTo(ws.e), greaterThan(50),
+        reason: "premise: 50 lies within the shadow's WallParams");
+    await enter('50');
+    expect(doc.components.get<OpeningParams>(orphan), o2);
+    expect(doc.commands.undoDepth, 0);
+    view.selection.replace([SelectionKey.root(shadow)]);
+    await tester.pump();
+    await enter('650');
+    expect(doc.components.get<OpeningParams>(shadow)!.position, 650);
+    expect(doc.commands.undoDepth, 1);
+  });
+
+  testWidgets(
+      'EG10 (fix/live-object-rule, the L2 review\'s m1) a file\'s dimension '
+      'group carrying WallParams on the joint is a dimension, not a wall: '
+      'not among the adapter\'s walls, the band cache\'s or the attach\'s, '
+      'no wall grips or wall section, and the corner drag leaves it alone',
+      (tester) async {
+    // Not an opening: a fix that skips only groups carrying OpeningParams
+    // leaves this one a wall.
+    const dim = Handle(0x1A2B);
+    final at = Transform2.translation(ox + 820.5, oy - 1330.25)
+        .multiply(Transform2.rotation(0.7));
+    final toDim = at.invert();
+    // Across the stray's line (below), beyond its far end: the dimension
+    // line crosses it.
+    final d0 = toDim.transformPoint(plan(4200, 1500));
+    final d1 = toDim.transformPoint(plan(6600, 1500));
+    final doc = gripDoc(FlutterTextMeasurer(), (doc) {
+      addL(doc);
+      doc.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: dim,
+            parent: doc.rootHandle,
+            transform: at,
+            children: const [])),
+        SetComponentCommand<DimensionParams>(
+            dim,
+            DimensionParams(FixedEnd(d0.x, d0.y), FixedEnd(d1.x, d1.y),
+                DimKind.aligned, 350.5)),
+      ], label: 'Add dimension'));
+    });
+    expect(kids(doc, dim), isNotEmpty,
+        reason: 'premise: regenerated as a dimension');
+    // Written straight into the store, as a file brings it in: 400 thick,
+    // from the L's corner (on the joint, in world) out between B and C.
+    final ws0 = toDim.transformPoint(lCorner);
+    final we0 = toDim.transformPoint(polar(lCorner, 23 + 40, 1800));
+    final stray =
+        WallParams(ws0.x, ws0.y, we0.x, we0.y, 400, Justification.left);
+    doc.components.attach<WallParams>(dim, stray);
+    final dimP = doc.components.get<DimensionParams>(dim)!;
+    final corner = endOf(doc, wa, 1);
+    final ws = worldWallOf(doc, dim);
+    expect((ws.s - corner).length, lessThan(wallJoin.linear),
+        reason: 'premise: on the joint in world; only the rule excludes it');
+    expect((ws.s - Vector2(ox, oy)).length, greaterThan(1000));
+
+    // The document adapter: no wall, and not among A's others.
+    expect(wallsInDocument(doc, dim), isNull);
+    expect(
+        [for (final w in wallsInDocument(doc, wa)!.walls) w.handle], [wb, wc]);
+
+    // The band cache: a point in the stray's band only, and a control.
+    final bands = WallBands();
+    addTearDown(bands.dispose);
+    final n = Vector2(-ws.d.y, ws.d.x);
+    final inBand = (ws.s + ws.e) * 0.5 + n * 200;
+    expect(bands.hostAt(doc, inBand.x, inBand.y), isNull);
+    final aMid = (endOf(doc, wa, 0) + endOf(doc, wa, 1)) * 0.5;
+    expect(bands.hostAt(doc, aMid.x, aMid.y), wa, reason: 'control');
+
+    // The dimension attach: T, and the candidates where the stray's line
+    // (offset 0) crosses the dimension line, a point of the dimension's own
+    // children, so the index's tight box reaches the dimension group and the
+    // walk's owner check decides it (as EG9's shadow tip).
+    expect(thickestWall(doc), closeTo(200, 1e-9), reason: "A's, not 400");
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    final (a, b) = dimLines(doc, dim).first;
+    double cross(Vector2 u, Vector2 v) => u.x * v.y - u.y * v.x;
+    final t = cross(ws.s - a, ws.d) / cross(b - a, ws.d);
+    expect(t, inExclusiveRange(0.05, 0.95),
+        reason: "premise: the stray's line crosses the dimension line");
+    final hit = a + (b - a) * t;
+    expect(cross(hit - ws.s, ws.d).abs() / ws.d.length, lessThan(1e-6),
+        reason: "premise: on the stray's line");
+    final owners = <Handle>{};
+    final tight = dimAttach.linear;
+    index.forEachInRect(
+        Aabb2.raw(hit.x - tight, hit.y - tight, hit.x + tight, hit.y + tight),
+        const QueryFilter.rendering(),
+        (slot) => owners.add(doc.entities.ownerAt(slot)));
+    expect(owners, {dim},
+        reason: "premise: the tight box reaches the dimension's children");
+    final ends = attachCandidates(doc, index, hit,
+        objectSnap: true, thickest: thickestWall(doc));
+    expect([for (final e in ends) e.wall], isNot(contains(dim)));
+    final atCorner = attachCandidates(doc, index, corner,
+        objectSnap: true, thickest: thickestWall(doc));
+    expect([for (final e in atCorner) e.wall], containsAll([wa, wb]),
+        reason: "control: the stray's line at the joint finds A and B");
+
+    // The rooms' adapter: a wall would be an input.
+    final inputs = RoomInputs(doc);
+    addTearDown(inputs.dispose);
+    expect(inputs.inputOf(dim), isNull);
+    expect(inputs.inputOf(wa), isNotNull, reason: 'control');
+
+    // The grips: the dimension's, never the wall's.
+    List<(GripRole, int, double, double)> rows(List<Grip> gs) =>
+        [for (final g in gs) (g.role, g.index, g.x, g.y)];
+    expect(WallGrips().gripsOf(doc, dim), isEmpty);
+    final object =
+        ObjectGrips(edgeAperture: () => null, roomInputs: inputs, index: index);
+    final own = rows(
+        DimensionGrips(index: index, objectSnap: () => true).gripsOf(doc, dim));
+    expect(own, hasLength(3));
+    expect(rows(object.gripsOf(doc, dim)), own);
+
+    // The corner drag: A and B only; the dimension group as loaded.
+    final q = gridOf(doc, plan(3500, -400));
+    final g = WallGrips().gripsOf(doc, wa)[1];
+    final c = WallGrips().drag(doc, wa, g, q)! as CompoundCommand;
+    expect([for (final m in c.children) (m as dynamic).handle as Handle],
+        [wa, wb]);
+    final view = await pumpGrips(tester, doc, lCorner);
+    final before = canon(doc);
+    await selectWall(tester, view, wa);
+    await dragWorld(tester, view, corner, q);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1, reason: 'the commit succeeds');
+    expect(doc.components.get<WallParams>(dim), stray);
+    expect(doc.components.get<DimensionParams>(dim), dimP);
+    await undoKey(tester);
+    expect(canon(doc), before);
+
+    // The panel: the Dimension section, not the Wall section.
+    view.selection.replace([SelectionKey.root(dim)]);
+    await tester.pump();
+    expect(find.byKey(const Key('dimension-section')), findsOneWidget);
+    expect(find.byKey(const Key('wall-section')), findsNothing);
   });
 }

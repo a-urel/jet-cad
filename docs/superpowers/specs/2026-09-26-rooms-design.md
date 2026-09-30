@@ -1788,6 +1788,8 @@ delete; 06 D8 detaches the component; nothing else changes.
 **The Room section** (the Selection panel):
 - shows when **exactly one** selected key is a root-level group carrying
   `RoomParams`;
+  **amended by fix/live-object-rule:** a live room by the engine's object
+  rule (06 D5, as amended), asked through `live_objects.dart`;
 - **Name**, a free-text field: the panel's `_Field` gains a **text kind**
   (its value a `String`, its `loadedValue` a `String`), with every
   convention of 07, 08 and fix/post-07:

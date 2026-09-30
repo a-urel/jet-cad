@@ -9,6 +9,7 @@ import 'dart:async' show StreamSubscription, unawaited;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'live_objects.dart';
 import 'opening_geometry.dart' show wallsInView;
 import 'room_trace.dart' show PlaceSource, distToSegment, pointInRing;
 import 'separator.dart';
@@ -200,8 +201,8 @@ final double _engineNeighbourOverlap = Tolerance.standard.linear;
 /// **document adapter**. The shell owns one instance and hands it to all
 /// three.
 ///
-/// It holds every **live** wall and separator (a root-level group carrying
-/// the component, as the engine's survey reads one), each wall's wall
+/// It holds every **live** wall and separator (the engine's object rule,
+/// asked through `live_objects.dart`), each wall's wall
 /// neighbours by the engine's own predicate over `WallType().reach`, each
 /// input and place box, and [bounds]. The inputs are those the view adapter
 /// gives, bit for bit (`RI1`).
@@ -361,17 +362,6 @@ final class RoomInputs implements PlaceSource {
     _changes = null;
   }
 }
-
-/// The live objects of [doc] carrying a [T], ascending: a root-level group
-/// carrying the component, as the engine's survey reads one. A component on
-/// a nested group, or on a handle with no node (a deleted object's), is not
-/// one (08's final review m5).
-List<Handle> liveObjectsOf<T extends Component>(DraftDocument doc) => [
-      for (final h in doc.components.withComponent<T>())
-        if (doc.tree[h] case final GroupNode node
-            when node.parent == doc.tree.root)
-          h,
-    ]..sort((a, b) => a.value.compareTo(b.value));
 
 // ---------------------------------------------------------------------------
 // Band trimming (spec 10 D20, R-21).

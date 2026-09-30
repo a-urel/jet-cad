@@ -8,6 +8,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'dimension_geometry.dart';
+import 'live_objects.dart';
 import 'opening.dart' show OpeningParams;
 import 'opening_geometry.dart' show wallsInDocument;
 import 'wall.dart';
@@ -32,12 +33,11 @@ typedef WallPoints = List<(int, WallSide, Vector2)>;
 /// `T` (spec 11 D10): the largest **world** thickness of a live wall of
 /// [doc], each wall's stored thickness times its group's `scaleMagnitude`
 /// (so a scaled group, file only, is covered); 0 with no live wall. One pass
-/// over the walls. A live wall is a root-level group carrying `WallParams`
-/// (the plan's Ruling 11-4).
+/// over the walls. A live wall is the engine's (the plan's Ruling 11-4, as
+/// amended by fix/live-object-rule: asked through `live_objects.dart`).
 double thickestWall(DraftDocument doc) {
   var t = 0.0;
-  for (final h in doc.components.withComponent<WallParams>()) {
-    if (!_isLiveGroup(doc, h)) continue;
+  for (final h in liveObjectsOf<WallParams>(doc)) {
     final w = doc.components.get<WallParams>(h)!.thickness *
         doc.tree.accumulatedTransform(h).scaleMagnitude;
     if (w > t) t = w;
@@ -121,7 +121,7 @@ List<AttachedEnd> attachCandidates(
       Aabb2.raw(q.x - tight, q.y - tight, q.x + tight, q.y + tight),
       const QueryFilter.rendering(), (slot) {
     final owner = doc.entities.ownerAt(slot);
-    if (_isLiveWall(doc, owner)) walls.add(owner);
+    if (isLiveObject<WallParams>(doc, owner)) walls.add(owner);
   });
   final grown = dimAttach.linear + thickest;
   FilterEvaluator? drawn;
@@ -129,9 +129,9 @@ List<AttachedEnd> attachCandidates(
       Aabb2.raw(q.x - grown, q.y - grown, q.x + grown, q.y + grown),
       const QueryFilter.rendering(), (slot) {
     final owner = doc.entities.ownerAt(slot);
-    if (!_isLiveGroup(doc, owner)) return;
-    final host = doc.components.get<OpeningParams>(owner)?.host;
-    if (host == null || !_isLiveWall(doc, host)) return;
+    if (!isLiveObject<OpeningParams>(doc, owner)) return;
+    final host = doc.components.get<OpeningParams>(owner)!.host;
+    if (!isLiveObject<WallParams>(doc, host)) return;
     // Only a host the renderer draws (D10: what is drawn attaches): the
     // opening's children passed `rendering()`, its host's group must too.
     drawn ??= FilterEvaluator(doc);
@@ -201,18 +201,6 @@ bool _nearALine(Vector2 q, Vector2 s, Vector2 e, double lOff, double rOff) {
   final o = ((q.x - s.x) * -dy + (q.y - s.y) * dx) / len;
   return (o - lOff).abs() <= tol || o.abs() <= tol || (o - rOff).abs() <= tol;
 }
-
-/// Whether [h] is a live object of [doc]: its node is a root-level group
-/// (`opening_geometry.dart`'s `_isLiveGroup`, the engine's survey).
-bool _isLiveGroup(DraftDocument doc, Handle h) {
-  final node = doc.tree[h];
-  return node is GroupNode && node.parent == doc.tree.root;
-}
-
-/// Whether [h] is a live wall of [doc]: a root-level group carrying
-/// `WallParams`.
-bool _isLiveWall(DraftDocument doc, Handle h) =>
-    doc.components.get<WallParams>(h) != null && _isLiveGroup(doc, h);
 
 /// The end a dimension stores for a point whose attach [candidates] are
 /// given (spec 11 D10's "The choice among candidates", R-17; decisions 19

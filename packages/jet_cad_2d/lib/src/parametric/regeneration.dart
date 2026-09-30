@@ -7,14 +7,29 @@ int _byValue(Handle a, Handle b) => a.value.compareTo(b.value);
 Transform2 _worldOf(CommandTarget t, Handle h) =>
     t.tree.accumulatedTransform(h);
 
-/// A root-level group carrying a registered parametric component (spec D5).
-bool _isObject(
+/// The registration that names [h]'s object in [t], or null: the engine's
+/// one object rule (spec D5, as amended by fix/live-object-rule). Null
+/// unless [h] is a `GroupNode` whose parent is the root; otherwise the
+/// **last** registration, in [types]' (catalog) order, whose component [h]
+/// carries, or null when it carries none. A root-level group carrying two
+/// registered types is the later one's object; the earlier component is a
+/// stray ([_Survey.stray]). [_isObject], [_survey] and
+/// `ParametricCatalog.names` all read this. O(types).
+_Registration<Component>? _naming(
     CommandTarget t, List<_Registration<Component>> types, Handle h) {
   final node = t.tree[h];
-  return node is GroupNode &&
-      node.parent == t.tree.root &&
-      types.any((r) => r.has(t, h));
+  if (node is! GroupNode || node.parent != t.tree.root) return null;
+  for (var i = types.length - 1; i >= 0; i--) {
+    if (types[i].has(t, h)) return types[i];
+  }
+  return null;
 }
+
+/// A root-level group carrying a registered parametric component (spec D5):
+/// some registration names it ([_naming]).
+bool _isObject(
+        CommandTarget t, List<_Registration<Component>> types, Handle h) =>
+    _naming(t, types, h) != null;
 
 /// Pairwise reach-overlap tests performed by the neighbour search (spec 07
 /// D10), for tests that pin its cost. Never reset by the library.
@@ -204,13 +219,10 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
   final stray = <(Handle, _Registration<Component>), Component>{};
   for (final r in types) {
     for (final h in r.handles(t)) {
-      if (_isObject(t, types, h)) {
-        // The later registration names the object; the earlier one's
-        // component is kept here, so every registered component has a
-        // snapshot.
-        if (found[h] case final shadowed?) {
-          stray[(h, shadowed)] = shadowed.componentOf(t, h);
-        }
+      // [_naming] decides: the later registration names the object; any
+      // other component, a shadowed one included, is kept here, so every
+      // registered component has a snapshot.
+      if (identical(_naming(t, types, h), r)) {
         found[h] = r;
       } else {
         stray[(h, r)] = r.componentOf(t, h);

@@ -24,7 +24,7 @@ import 'package:floor_planner/parametric/dimension_attach.dart';
 import 'package:floor_planner/parametric/dimension_tool.dart';
 import 'package:floor_planner/parametric/opening.dart' show OpeningParams;
 import 'package:floor_planner/parametric/room.dart';
-import 'package:floor_planner/parametric/room_inputs.dart' show liveObjectsOf;
+import 'package:floor_planner/parametric/live_objects.dart' show liveObjectsOf;
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:floor_planner/startup_plan.dart';

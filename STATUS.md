@@ -1,5 +1,35 @@
 # jet-cad — project status
 
+**Last updated:** 2026-09-30. **`fix/live-object-rule` is executed, NOT
+MERGED** (on the human's "1 ve 5'i birlikte ele alan fix dalına başla";
+pushed to `origin/fix/live-object-rule` on the human's "gerektiğinde commit
+ve push et"). Merge is the human's (`--no-ff`, from the main checkout).
+- **What it fixes** (see
+  [2026-09-30-fix-live-object-rule.md](docs/superpowers/notes/2026-09-30-fix-live-object-rule.md)):
+  the app decided "is this a live wall / opening / …" seven ways, none of
+  which knew the engine's rule that the later registration names a group
+  carrying two parametric types; a file's Wall+Opening group was a wall to
+  the app and an opening to the engine (a phantom joint follower, and with a
+  dangling host a neighbouring wall's drag threw `DanglingReferenceError`).
+  - the engine exposes its rule: `ParametricCatalog.names<T>` and
+    `objectsOf<T>`, on the same private function the survey uses
+    (`e0a56d0`);
+  - every app type decision asks it through `live_objects.dart`
+    (`980947d`); the reviews' test gaps closed (`9a4df2a`, `3ede604`);
+  - specs 06, 07, 08, 10 and 11 amended.
+- **Gates (Linux container):** engine 1,095 + 2 standing; render layer 940
+  + 1 skip + 7 standing; app 514; web `✓ Built`.
+- **Reviews:** every commit Approved by an independent reviewer.
+- **Found, not fixed** (in the note): a shadowed component is not reported
+  by `diagnostics()`; a shadowed group keeps its earlier type's children
+  until regenerated; `ParametricView.objectsOf` matches by `is`; a type
+  registered twice doubles misplaced reports; plus the fix/post-11 items
+  still open.
+- **Next, on the human's word:** the merge; then sub-project 12 from a
+  brainstorm, or the note's found items.
+
+*Earlier, 2026-09-30 (the fix/post-11 merge):*
+
 **Last updated:** 2026-09-30. **`fix/post-11` is MERGED into `main` at
 `e1e174e`**, `--no-ff`, on the human's decision ("merge et ve main'i push
 et"; the remaining post-11 found items, started on "Kalan post-11
@@ -2778,7 +2808,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice.** `main` is at the
+**Immediate next step: the human's choice, on `fix/live-object-rule`**
+(executed, NOT MERGED; pushed to `origin/fix/live-object-rule`; its ledger is
+archived as the branch's last commit): the human's merge, then sub-project
+12 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or
+the found items in
+[2026-09-30-fix-live-object-rule.md](docs/superpowers/notes/2026-09-30-fix-live-object-rule.md).
+
+*Before this branch ran, this paragraph read:* **Immediate next step: the human's choice.** `main` is at the
 `fix/post-11` merge (`e1e174e`) and its STATUS record; every post-11 found
 item but (b) is fixed. Next: sub-project 12
 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or

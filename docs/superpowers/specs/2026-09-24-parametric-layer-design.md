@@ -376,6 +376,24 @@ was, and its inverse is the plain inverse.
   parametric. An edit the expander wraps that writes one is refused (D6,
   amended by fix/post-11); a file can still bring one in.
 
+**Amended by fix/live-object-rule:** the rule names the object's type. A
+root-level `GroupNode` carrying two or more registered parametric types is
+the object of the **later** registration in catalog order; the earlier
+component is a stray: kept in the survey's `stray` snapshot, not
+regenerated, not read by `ParametricView.paramsOf`. `diagnostics()` does not
+report it today (its `parametric.misplaced` pass reads only non-objects).
+The rule lives in one private function, `_naming` (`regeneration.dart`),
+that the survey and `_isObject` read, and `ParametricCatalog` exposes it:
+`names<T>(target, h)` (is `h` a live object whose naming registration is
+exactly `T`'s) and `objectsOf<T>(target)` (every such handle, ascending).
+It is the only rule a client may use to ask "is this a live `T`"; a spelling
+of its own (`is GroupNode && parent == root && get<T>(h) != null`) disagrees
+with the engine on a shadowed object. `T` is matched by the type argument it
+was registered with, so a supertype names nothing. Cost: O(registered types)
+per `names`; no frame path calls it. The engine admits a shadowed object
+(it is not refused); the app's own tools never write one, so in the app only
+a file brings one in. Killed by `LO1`–`LO5` (mutants M-L1a–M-L1h).
+
 ### D6 — Generated geometry is not directly editable (human: refuse)
 
 - **The rule.** After `inner` applies, the command is refused if any handle
@@ -609,6 +627,8 @@ requires instead:
   section:
   - it shows only when exactly one selected key is a root-level group
     carrying `BoxParams`;
+    **amended by fix/live-object-rule:** a live box by the engine's object
+    rule (06 D5, as amended), asked through `live_objects.dart`;
   - it has two numeric fields, **Width** and **Height**, in mm;
   - Enter or focus-out commits one `SetComponentCommand<BoxParams>`, which
     is one undo step;

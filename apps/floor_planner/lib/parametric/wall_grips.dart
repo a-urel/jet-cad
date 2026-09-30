@@ -2,6 +2,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'live_objects.dart';
 import 'opening.dart';
 import 'opening_geometry.dart';
 import 'wall.dart';
@@ -17,9 +18,10 @@ import 'wall_geometry.dart';
 ///   read it): a file's stray `WallParams` offers no grips.
 /// - **Drag:** one [CompoundCommand] of `SetComponentCommand<WallParams>`:
 ///   the dragged end, and every other live wall's end within
-///   `wallJoin.linear` of it in world (a root-level group's; a file's stray
-///   `WallParams` does not follow), ascending by handle, each written back
-///   in its own group's local space. Joined ends follow, in one undo step.
+///   `wallJoin.linear` of it in world (a live wall's, by the engine's rule;
+///   a file's stray `WallParams` does not follow), ascending by handle,
+///   each written back in its own group's local space. Joined ends follow,
+///   in one undo step.
 ///   A drag that would leave any of those walls no longer than
 ///   `wallJoin.linear` is refused.
 /// - **Openings stay put** (spec 08 D13): in the same compound, after the
@@ -81,9 +83,7 @@ final class WallGrips implements ObjectGripProvider {
     }
     if (rewrite.isEmpty) return const [];
     final byHost = <Handle, List<(Handle, OpeningParams)>>{};
-    for (final o in d.components.withComponent<OpeningParams>()) {
-      final node = d.tree[o];
-      if (node is! GroupNode || node.parent != d.tree.root) continue;
+    for (final o in liveObjectsOf<OpeningParams>(d)) {
       final params = d.components.get<OpeningParams>(o)!;
       if (!rewrite.containsKey(params.host)) continue;
       byHost.putIfAbsent(params.host, () => []).add((o, params));
@@ -148,11 +148,13 @@ final class WallGrips implements ObjectGripProvider {
   /// `wallJoin.linear` of it (world), ascending by handle, then end index.
   /// A degenerate neighbour joins nothing (D2), so it is left where it is.
   ///
-  /// The walls are [wallsInDocument]'s: live wall objects only, root-level
-  /// groups, as the engine's survey reads them. A stray `WallParams` a file
-  /// brings in (on any holder that is not a root-level group: a handle with
-  /// no node, a nested group, a root-level instance) is not a wall, so it
-  /// does not follow; writing it would be refused (spec 06 D5).
+  /// The walls are [wallsInDocument]'s: live walls only, by the engine's
+  /// object rule (`live_objects.dart`). A stray `WallParams` a file brings
+  /// in (on any holder that is not a root-level group: a handle with no
+  /// node, a nested group, a root-level instance; or shadowed on a group a
+  /// later-registered type names, such as an opening) is not a wall, so it
+  /// does not follow; writing it would be refused (spec 06 D5), or would
+  /// regenerate the object it is not.
   static List<(Handle, int)> _endsAt(DraftDocument d, Handle group, Grip grip) {
     final walls = wallsInDocument(d, group);
     if (walls == null) return const [];
