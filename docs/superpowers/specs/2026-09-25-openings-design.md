@@ -681,6 +681,13 @@ two known limits.
   live wall objects only, a root-level group carrying `WallParams`, as
   the host and as its neighbours; a stray `WallParams` on a nested group
   or on a handle with no node is neither a host nor an obstacle (`HF9`).
+  **Amended by fix/live-object-rule:** a live wall is decided by the
+  engine's object rule (06 D5, as amended), asked through `live_objects.dart`
+  (`isLiveObject`, `liveObjectsOf`, over `ParametricCatalog.names` and
+  `objectsOf`), not "a root-level group carrying `WallParams`": a file's
+  group that also carries a later-registered type (an opening) is that
+  type's object, and neither a host nor a neighbour here.
+  `openingsInDocument` lists live openings by the same rule (`EG9`).
 - **The local-space fallback** (07's final review I1) is taken by the
   frame too: caps simple in world whose local image is not are replaced
   by the free caps computed in local space, and the frame falls back
@@ -1080,6 +1087,10 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
 - **Which openings.** Each live opening (a root-level group carrying
   `OpeningParams`) whose host is the wall, read once. A non-live one, made
   only by a hand-built command, is skipped (`EP6`).
+  **Amended by fix/live-object-rule:** a live opening by the engine's object
+  rule (06 D5, as amended), asked through `live_objects.dart`; a file's
+  separator that also carries `OpeningParams` is a separator, and is not
+  kept put (`EG8`).
 - **"Both moved" cannot happen.** Both ends of one wall would move only if
   the wall were no longer than its join tolerance, and the drag that would
   make it so is refused at length 0 (Task 8 review). So the rule as built
@@ -1266,6 +1277,10 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
   `OpeningParams`, or when the Door, Window or Gap tool is active. In tool
   mode it edits **that tool's** `OpeningSettings` (width only), even when an
   opening is selected (07 D11's amendment for the Wall section).
+  **Amended by fix/live-object-rule:** "carrying `OpeningParams`" means a
+  live opening by the engine's object rule (06 D5, as amended), asked
+  through `live_objects.dart`, and the Position is valid only when the host
+  is a live wall by the same rule (`EG9`).
 - **Fields and controls:**
   - **Width** (mm; must exceed `wallJoin.linear`, or `4 × wallJoin.linear`
     for a gap (D6); otherwise or unparseable, the field reverts);
@@ -1318,6 +1333,11 @@ per release. **Pinned by:** `EG1` (M-08p), `EG2`, `EG3` (M-08p2), `EG4`.
 (`main.dart:193`). `ObjectGrips` (app) implements it and dispatches by the
 group's component: `WallParams` → `WallGrips`, `OpeningParams` →
 `OpeningGrips`, anything else → no grips and no drag.
+**Amended by fix/live-object-rule:** it dispatches by the type that names
+the group's object (the engine's object rule (06 D5, as amended), asked
+through `live_objects.dart`), so a file's group carrying `WallParams` and
+`OpeningParams` gets the opening's grips (`EG9`); before, the first
+component found (the wall's) won.
 
 **No select-tool move or rotate for an opening** (decision 9). A move
 would be undone by the next regeneration anyway: the symbol is computed from

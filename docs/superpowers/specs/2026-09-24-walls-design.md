@@ -491,6 +491,9 @@ than a single speed-up factor.
 - Shows when **exactly one** selected key is a root-level group carrying
   `WallParams`, or when the Wall tool is active (then it edits the tool's
   settings).
+  **Amended by fix/live-object-rule:** a live wall by the engine's object
+  rule (06 D5, as amended), asked through `live_objects.dart`; a file's
+  group that also carries a later-registered type is not one (`EG9`).
 - **Thickness** (mm, > 0; ≤ 0 or unparseable reverts) and **Justification**
   (three-way toggle). Each commit is one `SetComponentCommand<WallParams>`,
   one undo step. Read-only under runtime permissions (`editCapability`).

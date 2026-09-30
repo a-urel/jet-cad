@@ -15,7 +15,7 @@ import 'package:floor_planner/parametric/opening.dart'
 import 'package:floor_planner/parametric/opening_geometry.dart'
     show wallsInDocument;
 import 'package:floor_planner/parametric/separator.dart'
-    show ensureDashedLinetype;
+    show SeparatorParams, ensureDashedLinetype;
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -968,6 +968,37 @@ void main() {
               reason: 'layer 0 hidden: ($x, $y) does not attach');
         }
       }
+    });
+  }
+
+  for (final place in placements) {
+    test(
+        'AM7 (fix/live-object-rule) the opening walk asks for a live opening: '
+        'AM6\'s free door, given SeparatorParams as a file would (so the '
+        'engine names it a separator), no longer brings its host\'s flush '
+        'end in, at $place', () {
+      final plan = flushFree(place);
+      final doc = plan.doc;
+      final host = plan.walls[0];
+      final door = plan.openings.single;
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final q = plan.at(0, 0);
+      final thickest = thickestWall(doc);
+      expect(
+          attachCandidates(doc, index, q, objectSnap: true, thickest: thickest),
+          contains(AttachedEnd(host, 0, c)),
+          reason: 'premise: through the live door (AM6)');
+      // Straight into the store, as a file brings it in: Separator is
+      // registered after Opening, so the group is a separator.
+      doc.components.attach<SeparatorParams>(
+          door, const SeparatorParams(10.5, -20.25, 1500.75, 300.5));
+      expect(doc.components.get<OpeningParams>(door)!.host, host);
+      expect([
+        for (final e in attachCandidates(doc, index, q,
+            objectSnap: true, thickest: thickest))
+          e.wall
+      ], isNot(contains(host)));
     });
   }
 }

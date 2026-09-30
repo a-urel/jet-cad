@@ -17,6 +17,7 @@ import 'dart:typed_data' show ByteData;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'live_objects.dart';
 import 'opening.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
@@ -695,35 +696,29 @@ HostCuts? _hostCuts(ParametricView view, Handle host) {
   );
 }
 
-/// Whether [h] is a live object of [doc] as the engine's survey reads one:
-/// its node is a root-level group.
-bool _isLiveGroup(DraftDocument doc, Handle h) {
-  final node = doc.tree[h];
-  return node is GroupNode && node.parent == doc.tree.root;
-}
-
 /// The walls the tools, the grips and the panel see around [host] (the
 /// **document adapter**, Ruling 08-8): [host] as a [WorldWall], and every
-/// other live wall object of [doc] (a root-level group carrying
-/// `WallParams`), ascending by handle. The view adapter ([wallsInView])
-/// sees only [host]'s neighbours; [classify], [cap] and [obstaclesOf]
-/// ignore a wall that does not join [host], so the extra walls change
-/// nothing (`HF7` pins that both give the same bits). Null when [host] is
-/// not a live wall.
+/// other live wall of [doc] (the engine's object rule, asked through
+/// `live_objects.dart`: a file's group that also carries a later-registered
+/// type is that type's object, not a wall), ascending by handle. The view
+/// adapter ([wallsInView]) sees only [host]'s neighbours; [classify], [cap]
+/// and [obstaclesOf] ignore a wall that does not join [host], so the extra
+/// walls change nothing (`HF7` pins that both give the same bits). Null
+/// when [host] is not a live wall.
 ///
 /// [moved] stands in for the walls it names (an end drag's walls before it
 /// is executed, spec 08 D13): each is read from it instead of [doc].
 ({WorldWall host, List<WorldWall> walls})? wallsInDocument(
     DraftDocument doc, Handle host,
     {Map<Handle, WorldWall> moved = const {}}) {
-  final p = doc.components.get<WallParams>(host);
-  if (p == null || !_isLiveGroup(doc, host)) return null;
+  if (!isLiveObject<WallParams>(doc, host)) return null;
+  final p = doc.components.get<WallParams>(host)!;
   return (
     host:
         moved[host] ?? WorldWall(host, p, doc.tree.accumulatedTransform(host)),
     walls: [
-      for (final h in doc.components.withComponent<WallParams>())
-        if (h != host && _isLiveGroup(doc, h))
+      for (final h in liveObjectsOf<WallParams>(doc))
+        if (h != host)
           moved[h] ??
               WorldWall(h, doc.components.get<WallParams>(h)!,
                   doc.tree.accumulatedTransform(h)),
@@ -747,14 +742,15 @@ HostLayout? layoutInDocument(DraftDocument doc, Handle host,
   return w == null ? null : layoutOf(w.host, w.walls);
 }
 
-/// [host]'s openings in [doc]: the live objects carrying `OpeningParams`
-/// whose host is [host], ascending by handle, with their parameters, as
-/// [openingsInView] reads them in a regeneration.
+/// [host]'s openings in [doc]: the live openings (the engine's object
+/// rule, asked through `live_objects.dart`) whose host is [host], ascending
+/// by handle, with their parameters, as [openingsInView] reads them in a
+/// regeneration.
 List<(Handle, OpeningParams)> openingsInDocument(
         DraftDocument doc, Handle host) =>
     [
-      for (final h in doc.components.withComponent<OpeningParams>())
+      for (final h in liveObjectsOf<OpeningParams>(doc))
         if (doc.components.get<OpeningParams>(h)! case final o
-            when o.host == host && _isLiveGroup(doc, h))
+            when o.host == host)
           (h, o),
     ];

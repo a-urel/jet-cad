@@ -9,6 +9,7 @@ import 'panel_focus.dart';
 import 'panel_number.dart';
 import 'parametric/box.dart';
 import 'parametric/dimension.dart';
+import 'parametric/live_objects.dart';
 import 'parametric/opening.dart';
 import 'parametric/opening_tool.dart';
 import 'parametric/room.dart';
@@ -285,8 +286,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         return isOpeningWidth(k, value);
       case _Kind.position:
         final o = widget.document.components.get<OpeningParams>(target)!;
-        final host = widget.document.components.get<WallParams>(o.host);
-        if (host == null) return false;
+        if (!_isObject<WallParams>(o.host)) return false;
+        final host = widget.document.components.get<WallParams>(o.host)!;
         final l = (host.end - host.start).length;
         return value.isFinite && value >= 0 && value <= l;
       case _Kind.name:
@@ -294,15 +295,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
     }
   }
 
-  /// [h] is a live root-level group carrying a [T].
-  bool _isObject<T extends Component>(Handle h) {
-    final node = widget.document.tree[h];
-    return node is GroupNode &&
-        node.parent == widget.document.rootHandle &&
-        widget.document.components.get<T>(h) != null;
-  }
+  /// [h] is a live [T], by the engine's object rule (`live_objects.dart`):
+  /// a file's group carrying a [T] and a later-registered type is not one.
+  bool _isObject<T extends Component>(Handle h) =>
+      isLiveObject<T>(widget.document, h);
 
-  /// The one selected key's root-level group carrying a [T], or null.
+  /// The one selected key when it is a live [T] ([_isObject]), or null.
   Handle? _selected<T extends Component>() {
     final keys = widget.selection.keys;
     if (keys.length != 1) return null;

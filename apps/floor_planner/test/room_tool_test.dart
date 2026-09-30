@@ -13,6 +13,7 @@
 // origin with every wall and separator in its own rotated group.
 import 'package:floor_planner/main.dart';
 import 'package:floor_planner/parametric/room.dart';
+import 'package:floor_planner/parametric/live_objects.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';
 import 'package:floor_planner/parametric/room_tool.dart';
 import 'package:floor_planner/parametric/room_trace.dart';

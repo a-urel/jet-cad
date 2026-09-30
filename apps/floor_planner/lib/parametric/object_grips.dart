@@ -4,6 +4,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'dimension.dart';
 import 'dimension_grips.dart';
+import 'live_objects.dart';
 import 'opening.dart';
 import 'opening_grips.dart';
 import 'room.dart';
@@ -15,7 +16,7 @@ import 'wall.dart';
 import 'wall_grips.dart';
 
 /// The shell's one object grip provider (spec 08 D16): it dispatches by the
-/// group's component.
+/// type that names the group's object ([_of]).
 ///
 /// - `WallParams` → [walls] (07 D11's end grips, 08 D13);
 /// - `OpeningParams` → [openings] (the slide grip);
@@ -71,13 +72,17 @@ final class ObjectGrips implements ObjectGripProvider {
   final SeparatorGrips? separators;
   final DimensionGrips? dimensions;
 
+  /// The provider of the type that names [group]'s object (the engine's
+  /// rule, `live_objects.dart`): a file's group carrying `WallParams` and
+  /// `OpeningParams` is an opening, so it gets [openings]. At most one
+  /// type names a group, so the order below does not matter. Null for a
+  /// group that is no live object of these types.
   ObjectGripProvider? _of(DraftDocument d, Handle group) {
-    final c = d.components;
-    if (c.get<WallParams>(group) != null) return walls;
-    if (c.get<OpeningParams>(group) != null) return openings;
-    if (c.get<RoomParams>(group) != null) return rooms;
-    if (c.get<SeparatorParams>(group) != null) return separators;
-    if (c.get<DimensionParams>(group) != null) return dimensions;
+    if (isLiveObject<WallParams>(d, group)) return walls;
+    if (isLiveObject<OpeningParams>(d, group)) return openings;
+    if (isLiveObject<RoomParams>(d, group)) return rooms;
+    if (isLiveObject<SeparatorParams>(d, group)) return separators;
+    if (isLiveObject<DimensionParams>(d, group)) return dimensions;
     return null;
   }
 

@@ -626,6 +626,8 @@ requires instead:
   section:
   - it shows only when exactly one selected key is a root-level group
     carrying `BoxParams`;
+    **amended by fix/live-object-rule:** a live box by the engine's object
+    rule (06 D5, as amended), asked through `live_objects.dart`;
   - it has two numeric fields, **Width** and **Height**, in mm;
   - Enter or focus-out commits one `SetComponentCommand<BoxParams>`, which
     is one undo step;

@@ -4,6 +4,7 @@ import 'dart:typed_data' show Float64List;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'live_objects.dart';
 import 'wall.dart';
 import 'wall_geometry.dart';
 
@@ -121,13 +122,12 @@ final class WallBands {
     _stale = false;
     _walls = 0;
     _handles.clear();
-    for (final h in doc.components.withComponent<WallParams>()) {
-      // Live wall objects only, as the engine's survey reads one: a
-      // root-level group. A stray `WallParams` (on a nested group, or on a
-      // handle with no node: no tool makes one, but a file can bring either
-      // in) is not a wall, and must not shadow one under it.
-      final node = doc.tree[h];
-      if (node is! GroupNode || node.parent != doc.tree.root) continue;
+    // Live walls only, by the engine's object rule (`live_objects.dart`). A
+    // stray `WallParams` (on a nested group, on a handle with no node, or
+    // shadowed on a group a later-registered type names: no tool makes one,
+    // but a file can bring each in) is not a wall, and must not shadow one
+    // under it. O(walls · registered types), on a rebuild only.
+    for (final h in liveObjectsOf<WallParams>(doc)) {
       final w = WorldWall(h, doc.components.get<WallParams>(h)!,
           doc.tree.accumulatedTransform(h));
       if (w.degenerate) continue;

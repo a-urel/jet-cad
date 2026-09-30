@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'live_objects.dart';
 import 'room.dart';
 import 'room_inputs.dart';
 import 'room_trace.dart';
