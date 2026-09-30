@@ -147,6 +147,39 @@ class DispatcherSpy {
       state: doc.commands.stateId,
     );
 
+/// DC12c's fixture, built at 1440 x 900: a titled document with a long
+/// name and, as a long status line, the Room tool's notice over a room
+/// with a long name. Returns the two texts, to check they are still up
+/// after the surface narrows.
+Future<({String name, String status})> longNameAndStatus(
+    WidgetTester tester) async {
+  final files = FakeDocumentFiles();
+  await pumpApp(tester, files);
+  const long = 'the ground floor of the house by the lake, third revision';
+  files.scriptOpen(
+      name: '$long.jetplan', bytes: sampleBytes(), location: '/p/long');
+  await hostOf(tester).openFlow();
+  await tester.pump();
+  final doc = sessionOf(tester).document;
+  final room = (liveObjectsOf<RoomParams>(doc).toList()
+        ..sort((a, b) => a.value.compareTo(b.value)))
+      .first;
+  final params = doc.components.get<RoomParams>(room)!;
+  const roomName = 'the living room with the bay window, the fireplace and '
+      'the door to the terrace';
+  doc.commands.execute(
+      SetComponentCommand<RoomParams>(room, params.copyWith(name: roomName)));
+  final seed = doc.tree.accumulatedTransform(room).transformPoint(params.seed);
+  await aimCamera(tester, seed);
+  await press(tester, LogicalKeyboardKey.keyM);
+  final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+  await mouse.addPointer(location: globalOf(tester, seed));
+  addTearDown(mouse.removePointer);
+  await mouse.moveTo(globalOf(tester, seed) + const Offset(1, 1));
+  await tester.pump();
+  return (name: '• $long', status: 'Room — Already a room: $roomName');
+}
+
 List<int> sampleBytes() {
   final m = FlutterTextMeasurer();
   addTearDown(m.clear);
@@ -924,7 +957,9 @@ void main() {
         reason: 'the bar has room: the notice is whole');
     expect(tester.getRect(status).left - tester.getRect(name).right, 16);
     final shared = tester.getRect(status).right - tester.getRect(name).left;
-    expect(paragraph(status).size.width, greaterThan(shared / 2),
+    // The text's own width: the paragraph's size is its Expanded slot's.
+    expect(paragraph(status).getMaxIntrinsicWidth(double.infinity),
+        greaterThan(shared / 2),
         reason: 'premise: the notice needs more than half the shared width');
 
     // A long name (Save As): cut at half of the shared width; the status
@@ -946,6 +981,40 @@ void main() {
       final r = tester.getRect(find.byKey(Key(key)));
       expect(r.right, lessThanOrEqualTo(bar.right), reason: key);
       expect(r.width, greaterThan(0), reason: key);
+    }
+  });
+
+  testWidgets(
+      'DC12c from 624 px down to 576 px wide (the old 590 px floor among '
+      'them) a titled long name and a long status line do not overflow the '
+      'top bar: the gaps give way, and OSNAP and the zoom stay on screen '
+      '(spec 12a D7, S-27)', (tester) async {
+    // 576 px is the floor measured on this layout: the toolbar, its gap,
+    // OSNAP, its gap and the zoom, with nothing left for the name and the
+    // status; at 575 px the bar overflows. On this fixture the 5998504 bar
+    // first overflowed at 591 px, Task 9's at 623 px.
+    final texts = await longNameAndStatus(tester);
+    expect(tester.takeException(), isNull);
+    final name = find.byKey(const Key('document-name'));
+    final status = find.byKey(const Key('status-text'));
+    for (var width = 624; width >= 576; width--) {
+      await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: '$width px');
+      expect(tester.widget<Text>(name).data, texts.name,
+          reason: 'premise at $width px: the long name');
+      expect(tester.widget<Text>(status).data, texts.status,
+          reason: 'premise at $width px: the long status');
+      expect(tester.getRect(name).right,
+          lessThanOrEqualTo(tester.getRect(status).left),
+          reason: '$width px');
+      final bar = tester.getRect(find.byKey(const Key('chrome-top')));
+      expect(bar.width, width, reason: 'premise');
+      for (final key in const ['osnap-text', 'zoom-text']) {
+        final r = tester.getRect(find.byKey(Key(key)));
+        expect(r.right, lessThanOrEqualTo(bar.right), reason: '$key, $width');
+        expect(r.width, greaterThan(0), reason: '$key, $width');
+      }
     }
   });
 }

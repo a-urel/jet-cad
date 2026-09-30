@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -692,16 +693,25 @@ class _PlannerShellState extends State<PlannerShell> {
                         editCommands: _editCommands),
                     const SizedBox(width: 16),
                     Expanded(
-                      child: LayoutBuilder(
-                        builder: (_, constraints) => Row(
+                      child: LayoutBuilder(builder: (_, constraints) {
+                        // In a narrow window the two 16 px gaps (after the
+                        // name, before OSNAP) shrink with the free width,
+                        // down to 0, so they never overflow the bar; the
+                        // half cap gives way to them below 32 px.
+                        final free = constraints.maxWidth;
+                        final tail = math.min(16.0, free);
+                        final shared = free - tail;
+                        final gap = math.min(16.0, shared);
+                        return Row(
                           children: [
                             if (widget.documentName != null) ...[
                               ConstrainedBox(
                                 constraints: BoxConstraints(
-                                    maxWidth: constraints.maxWidth / 2),
+                                    maxWidth:
+                                        math.min(shared / 2, shared - gap)),
                                 child: _documentName(widget.documentName!),
                               ),
-                              const SizedBox(width: 16),
+                              SizedBox(width: gap),
                             ],
                             Expanded(
                               child: ListenableBuilder(
@@ -713,11 +723,11 @@ class _PlannerShellState extends State<PlannerShell> {
                                     overflow: TextOverflow.ellipsis),
                               ),
                             ),
+                            SizedBox(width: tail),
                           ],
-                        ),
-                      ),
+                        );
+                      }),
                     ),
-                    const SizedBox(width: 16),
                     ListenableBuilder(
                       listenable: _snap,
                       builder: (_, __) => Text(
