@@ -1,6 +1,6 @@
 # The document lifecycle (12a) — design
 
-**Date:** 2026-09-30. **Status:** design, **revision 3**. Revision 1
+**Date:** 2026-09-30. **Status:** design, **revision 4**. Revision 1
 (`e5a26d2`) was reviewed independently: "Not ready", 2 blocking, 11 major
 and 15 minor findings (S-1 to S-28), every one with a local fix inside the
 human's decisions. Revision 2 (`c54ca55`) applied all of them; its
@@ -1021,7 +1021,11 @@ ruling or review that decided it (the plan's ledger,
   replaced: the document name and the status line share one `Expanded`;
   the name is capped at half and takes only what it needs, the status line
   the rest (three flex-1 children capped the status at a third, cutting
-  room notices at 1440 px).
+  room notices at 1440 px). Task 9b: the gap after the name and the gap
+  before OSNAP sit inside the shared `Expanded` and shrink to 0 in a
+  narrow window, and the half cap gives way to the gap below 32 px; the
+  bar first overflows at 575 px in `flutter test`'s font (591 px before
+  12a).
 - **D9.** `createDocumentFiles({required askName})` per platform; web
   `open` also revokes the picked file's object URL. The app's pubspec
   declares `flutter: ">=3.38.0"` and keeps `sdk: ^3.5.0` (raising it
@@ -1031,6 +1035,10 @@ ruling or review that decided it (the plan's ledger,
   a second request cancels. D11's "a panel up" means the native open and
   save panels (inside a flow); a page-panel dropdown is not busy.
   `windowShouldClose` also makes Cmd+W ask to quit.
+- **D14 (a further limit).** An exit request with a text entry open: the
+  settle disposes the entry's `EditableText`, whose `AppLifecycleListener`
+  the binding then calls from its copied observer list — a debug-only
+  framework assertion; the answer stays correct.
 - **D3 and the engine's API.** `UndoStack`'s `push`, `takeUndo`,
   `pushRedo`, `takeRedo`, `pushUndoOnly` are removed (plan P-2); no earlier
   spec names them (grep). The entry stays on its stack during an undo or

@@ -18,22 +18,27 @@ the main checkout); the macOS and web look is OWED.
 - **Engine:** `UndoStack` transitions and `stateId`; its old public
   primitives removed. **Render:** `Tool.isMidShape`.
 - **Gates (Linux container):** engine 1,106 + 2 standing; render 974 + 1
-  skip + 7 standing; app 595; web `✓ Built`.
+  skip + 7 standing; app 596; web `✓ Built`.
 - **Reviews:** every task Approved by an independent reviewer (Tasks 1 and
-  5 after a test-only follow-up each); the final whole-branch review is in
-  the ledger.
+  5 after a test-only follow-up each, Task 9 after a layout fix, 9b,
+  reviewed in the final review); the final whole-branch review: "Ready
+  with fixes" (no Important finding; its documentation corrections
+  applied, its minor recorded).
 - **Found on the way and fixed:** focus stranded on the route scope after
   a text entry ended by a click (Cmd+S did nothing); replace flows reading
   a stale dirty flag (a typed value lost); the status line capped at a
-  third of its room.
+  third of its room; the top bar overflowing sooner in a narrow window
+  (9b).
 - **Found, not fixed** (in the note): the app's language-version bump; the
   macOS second-Cmd+Q quirk; Cmd+W asks to quit; the first macOS build's
-  plugin integration files; web download/picker-cancel/blur limits.
+  plugin integration files; web download/picker-cancel/blur limits; a
+  debug-only framework assertion on exit with a text entry open.
 - **The human's look (owed):** macOS — the native panels in the sandboxed
   release build, Cmd+Q and the close button asking, a saved `.jetplan`
   reopening identically, the first build's `macos/` changes to commit;
   web (Chrome, Firefox, Safari) — Open, the download landing, Cmd/Ctrl+S
-  never opening the browser's Save Page, the tab-close warning.
+  never opening the browser's Save Page, the tab-close warning — the full
+  list is the results note's.
 - **Next, on the human's word:** the merge; then the next 12 slice from a
   brainstorm, or the found items.
 
