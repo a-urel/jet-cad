@@ -11,6 +11,7 @@ import 'document_host.dart';
 import 'document_toolbar.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
+import 'panel_focus.dart';
 import 'panel_number.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
@@ -140,7 +141,6 @@ class PlannerShell extends StatefulWidget {
     this.busy,
     this.onSettle,
     this.initialCamera,
-    @visibleForTesting this.debugOnSettle,
   });
 
   final DraftDocument? document;
@@ -166,11 +166,6 @@ class PlannerShell extends StatefulWidget {
   /// Where the shell registers its settle (spec 12a D2).
   final ShellSettleRegistrar? onSettle;
   final ViewportTransform? initialCamera;
-
-  /// A test seam (plan 12a Task 6): runs at the end of the shell's settle,
-  /// standing in for input a settle commits, so a test can pin that Undo
-  /// and Redo re-read the history after it (spec 12a D6, U-2).
-  final VoidCallback? debugOnSettle;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -505,12 +500,32 @@ class _PlannerShellState extends State<PlannerShell> {
     _document.commands.redo();
   }
 
-  /// Spec 12a D2: settles input that is typed but not yet committed, before
-  /// a host flow or Undo/Redo reads the document. Synchronous. Nothing is
-  /// settled yet: the text entry, the panel fields and the page scale join
-  /// it in plan 12a's Task 7.
+  /// The page panel, whose scale field [_settlePendingInput] re-syncs.
+  final GlobalKey<PagePanelState> _pagePanel = GlobalKey<PagePanelState>();
+
+  /// Spec 12a D2 (S-4, S-5, T-4): settles input that is typed but not yet
+  /// committed, before a host flow or Undo/Redo reads the document.
+  /// **Synchronous**, and never called in a build.
+  /// - **The text entry**, open: the Text tool's `finish` commits its typed
+  ///   text as one step, as Enter would (R-5), and closes it; the entry
+  ///   hands the focus back to the canvas. A focus loss alone would cancel
+  ///   it, and still does everywhere else.
+  /// - **A panel field** with the focus: handed back to the canvas. Its
+  ///   focus-loss listener commits a Selection panel value as its own step
+  ///   (a value that would be refused reverts, as on Enter).
+  /// - **The page scale**: an unsubmitted scale is not saved (the field's
+  ///   own rule); the field is re-synced to the stored scale, so the panel
+  ///   never shows a scale the document does not have (D14).
+  /// - Then the pending focus changes are applied **now**
+  ///   (`applyFocusChangesIfNeeded`, as `MenuAnchor` does before a menu
+  ///   item's callback): the focus-loss listeners run before the caller
+  ///   reads the state id or encodes, not a microtask later.
   void _settlePendingInput() {
-    widget.debugOnSettle?.call();
+    if (_text.isPending) _text.finish(_context);
+    final focused = FocusManager.instance.primaryFocus;
+    if (focused is PanelFieldFocusNode) focused.handBack();
+    _pagePanel.currentState?.resyncScale();
+    FocusManager.instance.applyFocusChangesIfNeeded();
   }
 
   bool get _geometryAllowed =>
@@ -750,7 +765,10 @@ class _PlannerShellState extends State<PlannerShell> {
                               openingTools: _openingTools,
                               openingSettings: _openingSettings),
                           Expanded(
-                            child: PagePanel(document: _document, page: _page),
+                            child: PagePanel(
+                                key: _pagePanel,
+                                document: _document,
+                                page: _page),
                           ),
                         ],
                       ),

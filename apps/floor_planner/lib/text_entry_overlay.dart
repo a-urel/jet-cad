@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -21,7 +23,13 @@ const Size kTextEntrySize = Size(240, 32);
 ///
 /// **Commit and cancel.** Enter commits. Any other loss of focus cancels
 /// if the placement is still pending. A canvas click has already committed
-/// synchronously in the tool, so its blur finds nothing to cancel.
+/// synchronously in the tool, so its blur finds nothing to cancel. A flow
+/// of the document host (spec 12a D2, R-5) commits the entry through the
+/// tool's `finish` before it moves the focus, so the focus loss that
+/// follows finds nothing to cancel either.
+///
+/// **Where the focus goes.** Back to the canvas, however the entry ends
+/// ([_onPending], [_onTapOutside]).
 class TextEntryOverlay extends StatefulWidget {
   const TextEntryOverlay({
     super.key,
@@ -77,6 +85,33 @@ class _TextEntryOverlayState extends State<TextEntryOverlay> {
     }
   }
 
+  /// A tap outside the field drops its focus exactly when `EditableText`'s
+  /// default would (`_EditableTextTapOutsideAction`: every pointer on
+  /// macOS, Windows, Linux and the web; all but touch on Android, iOS and
+  /// Fuchsia), and the focus loss cancels the entry ([_onFocus]). But the
+  /// default is a plain `unfocus()`, which clears the scope's focus history
+  /// and leaves the focus on the route's scope, where no key reaches the
+  /// shell: after a click on the tool palette or a panel, the tool letters
+  /// and the file chords (spec 12a D6) did nothing until a canvas click
+  /// (plan 12a Task 7). This hands the focus back to the canvas instead,
+  /// the scope's previous child (Ruling 05-7), as a panel field does
+  /// (`PanelFieldFocusNode.handBack`).
+  void _onTapOutside(PointerDownEvent event) {
+    if (!kIsWeb && event.kind == PointerDeviceKind.touch) {
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+        case TargetPlatform.iOS:
+        case TargetPlatform.fuchsia:
+          return;
+        case TargetPlatform.linux:
+        case TargetPlatform.macOS:
+        case TargetPlatform.windows:
+          break;
+      }
+    }
+    _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+  }
+
   void _submit(String s) => widget.tool.commitText(s, widget.tools.context);
 
   void _cancel() => widget.tool.cancelText(widget.tools.context);
@@ -114,6 +149,7 @@ class _TextEntryOverlayState extends State<TextEntryOverlay> {
                   // to the canvas (Ruling 05-7).
                   onEditingComplete: () {},
                   onSubmitted: _submit,
+                  onTapOutside: _onTapOutside,
                   decoration: const InputDecoration(
                       isDense: true, border: OutlineInputBorder()),
                 ),

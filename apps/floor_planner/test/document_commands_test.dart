@@ -163,13 +163,31 @@ Future<void> twoWalls(WidgetTester tester) async {
 }
 
 /// A bare shell over the empty document it builds itself, at 1440 x 900.
-Future<void> pumpBare(WidgetTester tester,
-    {VoidCallback? debugOnSettle}) async {
+Future<void> pumpBare(WidgetTester tester) async {
   await tester.binding.setSurfaceSize(const Size(1440, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(
-      MaterialApp(home: PlannerShell(debugOnSettle: debugOnSettle)));
+  await tester.pumpWidget(const MaterialApp(home: PlannerShell()));
   await tester.pump();
+}
+
+/// Selects the wall under world [on] with a canvas click, then types
+/// [text] into its thickness field without Enter: the field keeps the
+/// focus and the document is unchanged (spec 12a D2's pending input).
+Future<void> typeThickness(
+    WidgetTester tester, Vector2 on, Handle wall, String text) async {
+  final view = viewOf(tester);
+  final before = view.document.components.get<WallParams>(wall);
+  await clickAt(tester, on);
+  expect(view.selection.keys, [SelectionKey.root(wall)], reason: 'premise');
+  final thickness = find.byKey(const Key('wall-thickness'));
+  await tester.tap(thickness);
+  await tester.pump();
+  await tester.enterText(thickness, text);
+  await tester.pump();
+  expect(FocusManager.instance.primaryFocus, isA<PanelFieldFocusNode>(),
+      reason: 'premise: the field has the focus');
+  expect(view.document.components.get<WallParams>(wall), before,
+      reason: 'premise: typed, not committed');
 }
 
 void main() {
@@ -686,11 +704,10 @@ void main() {
   });
 
   testWidgets(
-      'DC10 Redo re-reads the history after the settle: a value the settle '
-      'commits cuts the branch, and Redo then makes no call (stubbed settle; '
-      'spec 12a D6, U-2; M-12a-29)', (tester) async {
-    VoidCallback? settle;
-    await pumpBare(tester, debugOnSettle: () => settle?.call());
+      'DC10 Redo after a settle: a thickness typed without Enter is committed '
+      'by the settle as its own step, which cuts the redo branch, and Redo '
+      'then makes no call (spec 12a D2, D6, U-2; M-12a-29)', (tester) async {
+    await pumpBare(tester);
     final doc = viewOf(tester).document;
     await twoWalls(tester);
     await pressChord(tester, cmdZ);
@@ -698,11 +715,8 @@ void main() {
     expect(on(tester, 'redo'), isTrue, reason: 'premise');
     final wall = wallsOf(doc).single;
     final params = doc.components.get<WallParams>(wall)!;
-    final typed = params.copyWith(thickness: 262.5);
-    expect(typed, isNot(params), reason: 'premise');
-    // What the settle will commit (spec 12a D2): a typed thickness.
-    settle = () =>
-        doc.commands.execute(SetComponentCommand<WallParams>(wall, typed));
+    await typeThickness(tester, far + Vector2(-100, -50), wall, '262.5');
+    expect(on(tester, 'redo'), isTrue, reason: 'premise: Redo can be tapped');
 
     final changes = <DocChange>[];
     final sub = doc.commands.changes.listen(changes.add);
@@ -710,35 +724,43 @@ void main() {
     final spy = DispatcherSpy(doc);
     await tapButton(tester, 'redo');
     await tester.pump();
-    expect(doc.components.get<WallParams>(wall), typed, reason: 'committed');
+    expect(
+        doc.components.get<WallParams>(wall), params.copyWith(thickness: 262.5),
+        reason: 'committed');
     expect(doc.commands.undoDepth, 2, reason: 'the commit is its own step');
     expect(doc.commands.canRedo, isFalse);
     expect(spy.calls, 1, reason: 'the settle\'s commit, and no redo call');
     expect(changes.whereType<CommandRedone>(), isEmpty);
     expect(changes.whereType<CommandApplied>(), hasLength(1));
     expect(on(tester, 'redo'), isFalse);
+    expect(
+        FocusManager.instance.primaryFocus, isNot(isA<PanelFieldFocusNode>()),
+        reason: 'handed back');
     spy.restore();
   });
 
   testWidgets(
-      'DC10b Undo settles first: the committed value is its own step, and '
-      'the undo removes it (stubbed settle; spec 12a D2, R-9)', (tester) async {
-    VoidCallback? settle;
-    await pumpBare(tester, debugOnSettle: () => settle?.call());
+      'DC10b Undo settles first: a thickness typed without Enter is committed '
+      'as its own step, and the tap on Undo removes that step, not the wall '
+      '(spec 12a D2, R-9)', (tester) async {
+    await pumpBare(tester);
     final doc = viewOf(tester).document;
     await twoWalls(tester);
     final wall = wallsOf(doc).last;
     final params = doc.components.get<WallParams>(wall)!;
     final two = doc.commands.stateId;
-    settle = () => doc.commands.execute(
-        SetComponentCommand<WallParams>(wall, params.copyWith(thickness: 90)));
+    await typeThickness(tester, far + Vector2(400, 1700), wall, '90');
+    expect(params.thickness, isNot(90), reason: 'premise');
 
-    await pressChord(tester, cmdZ);
+    await tapButton(tester, 'undo');
     expect(doc.components.get<WallParams>(wall), params,
-        reason: 'the committed value is undone');
+        reason: 'the committed value is undone, the wall stays');
     expect(doc.commands.undoDepth, 2, reason: 'the walls stay');
     expect(doc.commands.stateId, two);
     expect(doc.commands.canRedo, isTrue);
+    await tapButton(tester, 'redo');
+    expect(doc.components.get<WallParams>(wall), params.copyWith(thickness: 90),
+        reason: 'the redo branch is the committed value');
   });
 
   testWidgets(
