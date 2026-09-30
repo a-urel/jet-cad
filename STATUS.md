@@ -1,10 +1,9 @@
 # jet-cad — project status
 
 **Last updated:** 2026-09-30. **Plan 12a (the document lifecycle, the
-first slice of sub-project 12) is executed on `plan-12a/document-lifecycle`,
-NOT MERGED** (pushed to `origin/plan-12a/document-lifecycle` on the human's
-"gerektiğinde commit ve push et"). Merge is the human's (`--no-ff`, from
-the main checkout); the macOS and web look is OWED.
+first slice of sub-project 12) is MERGED into `main` at `6a9aebb`**,
+`--no-ff`, on the human's decision ("onaylıyorum"). The macOS and web look
+is still OWED: nothing was simulated to fill it in.
 - **What it delivers** (see
   [2026-09-30-plan-12a-results.md](docs/superpowers/notes/2026-09-30-plan-12a-results.md)):
   the app opens on an empty document; New, Open, Open sample, Save and
@@ -39,7 +38,7 @@ the main checkout); the macOS and web look is OWED.
   web (Chrome, Firefox, Safari) — Open, the download landing, Cmd/Ctrl+S
   never opening the browser's Save Page, the tab-close warning — the full
   list is the results note's.
-- **Next, on the human's word:** the merge; then the next 12 slice from a
+- **Next, on the human's word:** the look; the next 12 slice from a
   brainstorm, or the found items.
 
 *Earlier, 2026-09-30 (the fix/live-object-rule merge):*
@@ -2852,7 +2851,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 
 ## Resume here
 
-**Immediate next step: the human's choice, on `plan-12a/document-lifecycle`**
+**Immediate next step: the human's choice.** `main` is at the plan 12a
+merge (`6a9aebb`) and its STATUS record. Owed: the human's look (macOS and
+web, as the results note lists). Next: the next sub-project 12 slice
+([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or
+the found items in
+[2026-09-30-plan-12a-results.md](docs/superpowers/notes/2026-09-30-plan-12a-results.md).
+
+*Before the merge, this paragraph read:* **Immediate next step: the human's choice, on `plan-12a/document-lifecycle`**
 (executed, NOT MERGED; pushed; its ledger is archived as the branch's last
 commit): the human's merge and look (macOS and web, as the results note
 lists), then the next sub-project 12 slice from a brainstorm, or the found
