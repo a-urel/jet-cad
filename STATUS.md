@@ -2,8 +2,9 @@
 
 **Last updated:** 2026-09-30. **Plan 12a (the document lifecycle, the
 first slice of sub-project 12) is MERGED into `main` at `6a9aebb`**,
-`--no-ff`, on the human's decision ("onaylıyorum"). The macOS and web look
-is still OWED: nothing was simulated to fill it in.
+`--no-ff`, on the human's decision ("onaylıyorum"). **The macOS and web
+look is done, by the human's report after the merge** (2026-09-30: "bunları test ettim sorun görünmüyor. tamamlandı olarak işaretleyebilirsin main içinde"): no
+findings. The per-item checklist in the results note stays as written.
 - **What it delivers** (see
   [2026-09-30-plan-12a-results.md](docs/superpowers/notes/2026-09-30-plan-12a-results.md)):
   the app opens on an empty document; New, Open, Open sample, Save and
@@ -32,14 +33,11 @@ is still OWED: nothing was simulated to fill it in.
   macOS second-Cmd+Q quirk; Cmd+W asks to quit; the first macOS build's
   plugin integration files; web download/picker-cancel/blur limits; a
   debug-only framework assertion on exit with a text entry open.
-- **The human's look (owed):** macOS — the native panels in the sandboxed
-  release build, Cmd+Q and the close button asking, a saved `.jetplan`
-  reopening identically, the first build's `macos/` changes to commit;
-  web (Chrome, Firefox, Safari) — Open, the download landing, Cmd/Ctrl+S
-  never opening the browser's Save Page, the tab-close warning — the full
-  list is the results note's.
-- **Next, on the human's word:** the look; the next 12 slice from a
-  brainstorm, or the found items.
+- **The human's look: done** (the human's report, no findings), over the
+  results note's macOS and web list. No `macos/` plugin-integration change
+  was reported; if the first macOS build left one, it is still to commit.
+- **Next, on the human's word:** sub-project 09 (the symbol library) from a
+  brainstorm, in a new session; or the next 12 slice, or the found items.
 
 *Earlier, 2026-09-30 (the fix/live-object-rule merge):*
 
@@ -2852,6 +2850,14 @@ Test count grew 667 → 716 engine and 123 → 133 widget across Tasks 0–9.
 ## Resume here
 
 **Immediate next step: the human's choice.** `main` is at the plan 12a
+merge (`6a9aebb`) and its STATUS records; 12a's look is done by the human's
+report. Next: sub-project 09 ([roadmap/09-symbol-library.md](roadmap/09-symbol-library.md))
+from a brainstorm, in a new session (the human's plan); or the next
+sub-project 12 slice ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)),
+or the found items in
+[2026-09-30-plan-12a-results.md](docs/superpowers/notes/2026-09-30-plan-12a-results.md).
+
+*Before the look was reported, this paragraph read:* **Immediate next step: the human's choice.** `main` is at the plan 12a
 merge (`6a9aebb`) and its STATUS record. Owed: the human's look (macOS and
 web, as the results note lists). Next: the next sub-project 12 slice
 ([roadmap/12-app-shell.md](roadmap/12-app-shell.md)) from a brainstorm, or

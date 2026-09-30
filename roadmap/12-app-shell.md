@@ -5,7 +5,7 @@
 Save As on macOS and web, the runtime swap, dirty against a save point,
 the close prompts, the toolbar and shortcuts, Undo/Redo buttons, Redo —
 is specified in [2026-09-30-document-lifecycle-design.md](../docs/superpowers/specs/2026-09-30-document-lifecycle-design.md)
-and executed ([results](../docs/superpowers/notes/2026-09-30-plan-12a-results.md)); merged at `6a9aebb`, the macOS and web look owed.
+and executed ([results](../docs/superpowers/notes/2026-09-30-plan-12a-results.md)); merged at `6a9aebb`, the macOS and web look done by the human's report.
 **Still open for later slices:** the menu bar (reusing 12a's command
 table), the layer panel (table edits must go through commands or mark the
 document dirty — 12a's D3), the diagnostics surface, `DraftPermissions` in
