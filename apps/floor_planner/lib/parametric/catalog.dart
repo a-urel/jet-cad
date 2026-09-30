@@ -1,5 +1,6 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../symbols/symbol_component.dart';
 import 'box.dart';
 import 'dimension.dart';
 import 'opening.dart';
@@ -31,7 +32,8 @@ final ParametricCatalog parametricCatalog = ParametricCatalog()
       DimensionParams.fromJson, const DimensionType());
 
 /// Registers every component type the app's documents carry (spec 12a D8,
-/// S-1): [PageComponent], then the parametric catalog's types. The one
+/// S-1): [PageComponent], the parametric catalog's types, then
+/// [SymbolComponent] (spec 09 D1; not a parametric type). The one
 /// registration New, the sample and Open use — pass it as
 /// `DraftDocumentCodec.decode(…, registerComponents: registerAppComponents)`.
 /// Without the page's registration a file's page loads as preserve-unknown;
@@ -43,6 +45,7 @@ final ParametricCatalog parametricCatalog = ParametricCatalog()
 void registerAppComponents(ComponentRegistry r) {
   PageComponent.register(r);
   parametricCatalog.registerComponents(r);
+  SymbolComponent.register(r);
 }
 
 /// Builds and installs the document's parametric system.
