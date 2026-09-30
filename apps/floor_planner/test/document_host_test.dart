@@ -117,9 +117,9 @@ void main() {
   });
 
   testWidgets(
-      'DH2 New after an edit replaces the document with a fresh empty one, '
-      'untitled and clean; Open sample opens the flat untitled and clean '
-      '(spec 12a D4)', (tester) async {
+      'DH2 New after an edit (Don\'t Save) replaces the document with a '
+      'fresh empty one, untitled and clean; Open sample opens the flat '
+      'untitled and clean (spec 12a D4, D10)', (tester) async {
     final files = FakeDocumentFiles();
     final host = await pumpApp(tester, files);
     final session = sessionOf(tester);
@@ -128,8 +128,7 @@ void main() {
     final first = session.document;
     expect(session.dirty.value, isTrue, reason: 'premise');
 
-    await host.newFlow();
-    await tester.pump();
+    await discardAndRun(tester, host.newFlow());
     final fresh = session.document;
     expect(identical(fresh, first), isFalse);
     expect(identical(viewOf(tester).document, fresh), isTrue,
@@ -178,8 +177,7 @@ void main() {
     await drawWall(tester, far, far + Vector2(0, 2500));
     files.scriptOpen(
         name: 'flat.jetplan', bytes: sampleBytes(), location: '/plans/flat');
-    await host.openFlow();
-    await tester.pump();
+    await discardAndRun(tester, host.openFlow());
     final session = sessionOf(tester);
     expect(session.name, 'flat');
     expect(session.location, '/plans/flat');

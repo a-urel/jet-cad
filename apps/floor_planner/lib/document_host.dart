@@ -1,18 +1,22 @@
-// The document host (spec 12a D2, D5, D8, D13; plan 12a P-3): the session
-// that owns the current document and its file state, and the widget that
-// runs the flows over it -- New, Open sample, Open, Save and Save As -- and
-// builds the shell, keyed by the document, so a new document is a new
-// shell.
+// The document host (spec 12a D2, D5, D8, D10, D11, D13; plan 12a P-3):
+// the session that owns the current document and its file state, and the
+// widget that runs the flows over it -- New, Open sample, Open, Save and
+// Save As, asking first when unsaved work would be lost, and the app's
+// exit request -- and builds the shell, keyed by the document, so a new
+// document is a new shell.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'document_files.dart';
+import 'exit_guard.dart';
 import 'main.dart';
 import 'new_document.dart';
 import 'parametric/catalog.dart';
@@ -97,11 +101,17 @@ class DocumentSession extends ChangeNotifier {
   /// came in (spec 12a D5).
   int get savedState => _savedState;
 
+  /// Whether the document differs from its save point, read from the
+  /// dispatcher now. [dirty] follows the change stream, which delivers a
+  /// microtask after the change: a flow that has just settled pending input
+  /// (spec 12a D2), whose commit is not on [dirty] yet, reads this.
+  bool get differsFromSave => _document.commands.stateId != _savedState;
+
   void _listen() {
     _changes = _document.commands.changes.listen((_) => _recompute());
   }
 
-  void _recompute() => dirty.value = _document.commands.stateId != _savedState;
+  void _recompute() => dirty.value = differsFromSave;
 
   /// Makes [document] (built or decoded with [measurer]) the current one,
   /// named after [fileName] (untitled when null) at [location], clean: the
@@ -168,21 +178,42 @@ class DocumentSession extends ChangeNotifier {
 /// Each sets [DocumentSession.busy] for its whole span when it is the
 /// outermost flow, and clears it in a `finally` (S-21, T-8); a flow called
 /// inside another leaves busy to the outer one.
+///
+/// New, Open and Open sample ask Save / Don't Save / Cancel first when the
+/// document is dirty (D10); the app's exit request asks the same (D11,
+/// through an `AppLifecycleListener` the host owns); and [exitGuard] is
+/// armed exactly while the document is dirty (D11, the web's tab close).
 class DocumentHost extends StatefulWidget {
-  const DocumentHost({super.key, required this.session, required this.files});
+  const DocumentHost(
+      {super.key, required this.session, required this.files, this.exitGuard});
 
   final DocumentSession session;
   final DocumentFiles files;
 
+  /// The platform's guard when null (a test passes a fake). The host owns
+  /// it: it disposes it with itself.
+  final ExitGuard? exitGuard;
+
   @override
   State<DocumentHost> createState() => DocumentHostState();
 }
+
+/// The answer to the Save / Don't Save / Cancel dialog (spec 12a D10).
+enum SaveChoice { save, discard, cancel }
 
 class DocumentHostState extends State<DocumentHost> {
   /// Object snap (F3): the host's, so it survives a swap (spec 12a D2).
   final SnapSettings snap = SnapSettings();
 
   VoidCallback? _settle;
+
+  /// The app's exit request (spec 12a D11): Cmd+Q, the app menu's Quit, and
+  /// on macOS the window's close button, which `MainFlutterWindow` routes
+  /// through it. Made in [initState], disposed with the host.
+  late final AppLifecycleListener _exitListener;
+
+  /// Armed exactly while dirty (spec 12a D11).
+  late final ExitGuard _exitGuard;
 
   DocumentSession get _session => widget.session;
 
@@ -256,31 +287,88 @@ class DocumentHostState extends State<DocumentHost> {
     }
   }
 
-  /// New (spec 12a D4): the empty document, untitled and clean. Replaces
-  /// the current one unconditionally (the dirty dialog, D10, goes in front
-  /// of it later).
+  /// Whether the current document may go (spec 12a D10, D11), asked inside
+  /// the caller's flow, after its settle. Clean: yes, without a dialog.
+  /// Dirty: the Save / Don't Save / Cancel dialog. Save runs [saveStep]
+  /// inside the caller's busy span (T-8); a cancelled or failed save is a
+  /// no, and a save that succeeded while an edit landed during the write
+  /// (the document is dirty again, D5) asks again rather than lose that
+  /// edit. Don't Save: yes. Cancel: no. Dirty is read from the dispatcher,
+  /// not from [DocumentSession.dirty]: the settle's commit has not reached
+  /// the notifier yet.
+  Future<bool> _mayDiscard() async {
+    while (_session.differsFromSave) {
+      switch (await _askToSave()) {
+        case SaveChoice.save:
+          if (!await saveStep()) return false;
+        case SaveChoice.discard:
+          return true;
+        case SaveChoice.cancel:
+          return false;
+      }
+    }
+    return true;
+  }
+
+  /// The dialog of spec 12a D10: Save is the default (it has the focus, so
+  /// Enter saves), Escape is Cancel.
+  Future<SaveChoice> _askToSave() async {
+    if (!mounted) return SaveChoice.cancel;
+    final choice = await showDialog<SaveChoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _SaveChangesDialog(name: _session.name),
+    );
+    return choice ?? SaveChoice.cancel;
+  }
+
+  /// The app's exit request (spec 12a D11), in this order (T-7): a flow in
+  /// progress -- a dialog, a panel, a write in flight -- cancels, with no
+  /// second dialog (S-17); else pending input is settled, so a typed value
+  /// makes the document dirty rather than being lost; then a clean
+  /// document exits, and a dirty one asks as [_mayDiscard] does. A shape
+  /// part-way does not block the exit and is dropped (U-7): busy, not
+  /// idle.
+  Future<AppExitResponse> _onExitRequested() async {
+    if (_session.busy.value) return AppExitResponse.cancel;
+    final mayExit = await _flow(() async {
+      _settlePendingInput();
+      return _mayDiscard();
+    });
+    return mayExit ? AppExitResponse.exit : AppExitResponse.cancel;
+  }
+
+  void _armExitGuard() => _exitGuard.armed = _session.dirty.value;
+
+  /// New (spec 12a D4): the empty document, untitled and clean, once the
+  /// current one may go (D10).
   Future<void> newFlow() => _flow(() async {
         _settlePendingInput();
+        if (!await _mayDiscard()) return;
         final measurer = FlutterTextMeasurer();
         _session.replace(newDocument(measurer), measurer);
       });
 
-  /// Open sample (spec 12a D4): the startup flat, untitled and clean.
+  /// Open sample (spec 12a D4): the startup flat, untitled and clean, once
+  /// the current document may go (D10).
   Future<void> openSampleFlow() => _flow(() async {
         _settlePendingInput();
+        if (!await _mayDiscard()) return;
         final measurer = FlutterTextMeasurer();
         _session.replace(startupPlan(measurer), measurer);
       });
 
-  /// Open (spec 12a D8): pick, decode with the app's registrations and a
-  /// fresh measurer, then swap. The replacement is built before anything
-  /// is torn down: any object thrown while reading or decoding (S-12: the
-  /// loaders throw `TypeError`s and null-check errors, not only
-  /// exceptions) shows an error dialog naming the file, clears the fresh
-  /// measurer, and changes nothing else. A cancel does nothing. Open adds
-  /// no DASHED record (R-3): the bytes stay the file's.
+  /// Open (spec 12a D8): once the current document may go -- asked before
+  /// the picker, as macOS apps do (D10) -- pick, decode with the app's
+  /// registrations and a fresh measurer, then swap. The replacement is
+  /// built before anything is torn down: any object thrown while reading or
+  /// decoding (S-12: the loaders throw `TypeError`s and null-check errors,
+  /// not only exceptions) shows an error dialog naming the file, clears the
+  /// fresh measurer, and changes nothing else. A cancel does nothing. Open
+  /// adds no DASHED record (R-3): the bytes stay the file's.
   Future<void> openFlow() => _flow(() async {
         _settlePendingInput();
+        if (!await _mayDiscard()) return;
         final ({String name, Uint8List bytes, Object? location})? file;
         try {
           file = await widget.files.open();
@@ -402,7 +490,19 @@ class DocumentHostState extends State<DocumentHost> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _exitListener = AppLifecycleListener(onExitRequested: _onExitRequested);
+    _exitGuard = widget.exitGuard ?? createExitGuard();
+    _armExitGuard();
+    _session.dirty.addListener(_armExitGuard);
+  }
+
+  @override
   void dispose() {
+    _session.dirty.removeListener(_armExitGuard);
+    _exitGuard.dispose();
+    _exitListener.dispose();
     _notBusy.dispose();
     snap.dispose();
     super.dispose();
@@ -422,6 +522,49 @@ class DocumentHostState extends State<DocumentHost> {
           onSettle: _registerSettle,
         ),
       );
+}
+
+/// Save / Don't Save / Cancel for the document [name] (spec 12a D10). Pops
+/// its [SaveChoice]; Escape pops [SaveChoice.cancel]; Save has the focus.
+class _SaveChangesDialog extends StatelessWidget {
+  const _SaveChangesDialog({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    void choose(SaveChoice choice) => Navigator.of(context).pop(choice);
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            choose(SaveChoice.cancel),
+      },
+      child: AlertDialog(
+        key: const Key('replace-dialog'),
+        title:
+            Text('Save the changes to $name?', key: const Key('replace-title')),
+        content: const Text('Your changes are lost if you do not save them.'),
+        actions: [
+          TextButton(
+            key: const Key('replace-discard'),
+            onPressed: () => choose(SaveChoice.discard),
+            child: const Text("Don't Save"),
+          ),
+          TextButton(
+            key: const Key('replace-cancel'),
+            onPressed: () => choose(SaveChoice.cancel),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('replace-save'),
+            autofocus: true,
+            onPressed: () => choose(SaveChoice.save),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Asks for a file name, starting from [suggested] (spec 12a D9 web,

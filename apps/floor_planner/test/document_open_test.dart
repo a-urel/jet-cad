@@ -302,7 +302,8 @@ void main() {
   });
 
   testWidgets(
-      'DO6 a file that cannot be read, from a dirty document with history: '
+      'DO6 a file that cannot be read, from a dirty document with history '
+      '(Open, then Don\'t Save): '
       'the same document, depth and dirt; a dialog naming the file and the '
       'error; busy cleared, so Open asks again; a cancel shows nothing '
       '(spec 12a D8, S-12, S-13, T-9; M-12a-8, M-12a-16, M-12a-17)',
@@ -335,7 +336,8 @@ void main() {
       files.scriptOpen(name: name, bytes: bytes, location: '/plans/$name');
       final flow = host.openFlow();
       await tester.pump();
-      await tester.pump();
+      expect(files.openCalls, calls, reason: '$name: the dialog first');
+      await answerReplace(tester, 'replace-discard');
       expect(files.openCalls, calls + 1, reason: '$name: the picker');
       expect(find.byKey(const Key('document-error')), findsOneWidget,
           reason: name);
@@ -368,7 +370,7 @@ void main() {
     files.scriptOpenThrow(StateError('the disk went away'));
     final thrown = host.openFlow();
     await tester.pump();
-    await tester.pump();
+    await answerReplace(tester, 'replace-discard');
     expect(
         tester.widget<Text>(find.byKey(const Key('document-error-text'))).data,
         'Bad state: the disk went away');
@@ -378,8 +380,7 @@ void main() {
 
     // A cancel: no dialog, nothing changes.
     files.scriptOpenCancel();
-    await host.openFlow();
-    await tester.pump();
+    await discardAndRun(tester, host.openFlow());
     expect(find.byKey(const Key('document-error')), findsNothing);
     expect(identical(session.document, doc), isTrue);
     expect(doc.commands.undoDepth, depth);

@@ -9,6 +9,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'document_files.dart';
 import 'document_host.dart';
 import 'document_toolbar.dart';
+import 'exit_guard.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
@@ -40,11 +41,15 @@ void main() => runApp(const FloorPlannerApp());
 /// tab's title). The [DocumentHost] in `home` runs the flows and builds the
 /// shell.
 ///
-/// [files] is a test seam: the platform's implementation when null.
+/// [files] and [exitGuard] are test seams: the platform's implementations
+/// when null.
 class FloorPlannerApp extends StatefulWidget {
-  const FloorPlannerApp({super.key, this.files});
+  const FloorPlannerApp({super.key, this.files, this.exitGuard});
 
   final DocumentFiles? files;
+
+  /// Handed to the [DocumentHost], which owns it (spec 12a D11).
+  final ExitGuard? exitGuard;
 
   @override
   State<FloorPlannerApp> createState() => _FloorPlannerAppState();
@@ -96,7 +101,8 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
             },
             child: child!,
           ),
-          home: DocumentHost(session: _session, files: _files),
+          home: DocumentHost(
+              session: _session, files: _files, exitGuard: widget.exitGuard),
         ),
       );
 }

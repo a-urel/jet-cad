@@ -12,17 +12,19 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'fake_document_files.dart';
+import 'fake_exit_guard.dart';
 
 // The app pumped with a scripted `DocumentFiles` (spec 12a, Testing), and
 // the moves the document host's tests share: reading the host, the session
 // and the current shell's view, and editing through the real tools.
 
-/// The app over [files] at a 1440 x 900 surface; the host's state.
-Future<DocumentHostState> pumpApp(
-    WidgetTester tester, FakeDocumentFiles files) async {
+/// The app over [files] (and [exitGuard], the platform's no-op when null)
+/// at a 1440 x 900 surface; the host's state.
+Future<DocumentHostState> pumpApp(WidgetTester tester, FakeDocumentFiles files,
+    {FakeExitGuard? exitGuard}) async {
   await tester.binding.setSurfaceSize(const Size(1440, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(FloorPlannerApp(files: files));
+  await tester.pumpWidget(FloorPlannerApp(files: files, exitGuard: exitGuard));
   await tester.pump();
   return hostOf(tester);
 }
@@ -103,6 +105,36 @@ Future<void> drawWall(WidgetTester tester, Vector2 a, Vector2 b) async {
   await press(tester, LogicalKeyboardKey.escape);
   expect(viewOf(tester).tools.active, isA<SelectTool>(),
       reason: 'premise: the shape is ended');
+}
+
+/// Answers the Save / Don't Save / Cancel dialog (spec 12a D10) with the
+/// button keyed [key]: `replace-save`, `replace-discard` or
+/// `replace-cancel`. The dialog must be up.
+Future<void> answerReplace(WidgetTester tester, String key) async {
+  expect(find.byKey(const Key('replace-dialog')), findsOneWidget,
+      reason: 'premise: the dialog is up');
+  await tester.tap(find.byKey(Key(key)));
+  await tester.pump();
+  await tester.pump();
+}
+
+/// Fails, rather than waits forever, while a flow's dialog is still up:
+/// called before awaiting a flow that should have finished.
+void noDialog(WidgetTester tester) {
+  expect(find.byKey(const Key('replace-dialog')), findsNothing,
+      reason: 'no Save / Don\'t Save / Cancel dialog left');
+  expect(find.byKey(const Key('document-error')), findsNothing,
+      reason: 'no error dialog left');
+}
+
+/// Runs [flow] (New, Open or Open sample) from a dirty document and
+/// answers its dialog with Don't Save (spec 12a D10).
+Future<void> discardAndRun(WidgetTester tester, Future<void> flow) async {
+  await tester.pump();
+  await answerReplace(tester, 'replace-discard');
+  noDialog(tester);
+  await flow;
+  await tester.pump();
 }
 
 /// Taps the error dialog's OK.
