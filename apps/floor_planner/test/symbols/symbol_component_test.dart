@@ -123,10 +123,27 @@ void main() {
       expect(back.tags, ['sofa', 'seating', 'couch']);
     });
 
-    test('SC6 fromJson names a missing field', () {
-      expect(() => SymbolComponent.fromJson(const {'key': 'a', 'version': 1}),
-          throwsFormatException);
+    // One expectation per omitted field: a fromJson that tolerates one
+    // missing field (a default in its place) must go red on that field alone.
+    const full = <String, Object?>{
+      'key': 'sofa.three',
+      'name': 'Three-seat sofa',
+      'category': 'Living Room',
+      'tags': ['sofa', 'seating', 'couch'],
+      'version': 3,
+    };
+    test('SC6 the full map reads back (the control for the omissions)', () {
+      expect(SymbolComponent.fromJson(full), sofa());
     });
+    for (final field in full.keys) {
+      test('SC6 fromJson refuses a map without "$field"', () {
+        final json = {...full}..remove(field);
+        expect(
+            () => SymbolComponent.fromJson(json),
+            throwsA(isA<FormatException>()
+                .having((e) => e.message, 'message', contains('"$field"'))));
+      });
+    }
   });
 
   group('on a definition handle, through the codec', () {
