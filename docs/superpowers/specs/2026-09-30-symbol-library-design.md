@@ -567,3 +567,93 @@ Applies the re-review of revision 2 ("Ready with one amendment"): R-1
 M-09g recorded equivalent (the `invalidateDerived` call stays); R-2 M-09v's
 fixture named; R-3 the document-swap claim cited to 12a D2 and left to the
 plan to verify.
+
+## Amended at execution (Plan 09a)
+
+Where execution made this spec precise or departed from it, each with the
+ruling or review that decided it (the plan's ledger,
+`ledgers/2026-09-30-plan-09a/progress.md`; results:
+[2026-09-30-plan-09a-results.md](../notes/2026-09-30-plan-09a-results.md)).
+This section rewrites nothing above it.
+
+- **D4 (definition commands, `477138f`, `e96c9cc`).** `RemoveDefinitionCommand`
+  also refuses a node whose `parent` is the definition (M-09q1 covers the
+  instance and parent arms, M-09q2 the leaf-owner arm). No `CommandTarget`
+  change was needed: Remove scans `tree.nodes` and `entities.liveSlots` /
+  `ownerAt`, O(n) and off the frame path. Remove's capability and `touched`
+  are pinned by their own test (Task 1b).
+- **D5 (the loader, `f9e4c33`, `5b9237f`, `22bc83d`).** (a) "A non-finite
+  bulge" is void: this codebase has no bulge and a polyline payload carries
+  no scalars; the rule is "a polyline carries no scalars" (R20c), beside the
+  generic finite-scalar check (R-T3-1). (b) The codec repairs a definition
+  cycle silently by dropping the instance that closes it, so the loader
+  refuses any codec diagnostic (R08) in addition to the nested-instance rule
+  (R-T3-2). (c) Extra rules taken from D3: a key is lower-case with no white
+  space, and tags are lower-case (R-T3-3). (d) The zero-sweep test is
+  `abs(sweep) <= Tolerance.standard.angular`, a geometric decision; cases
+  5e-10, -5e-10 and exactly 1e-9 are refused and +-2e-9 load (R27b-e). (e) A
+  definition with no leaves is accepted; D5 does not forbid it.
+- **D7 (the content, `81a3271`, `a5e38a0`, `971eb76`).** The list is **25**
+  symbols (R-T5-1), keys lower-case and dotted, sizes in mm as w x h:
+  Dining Room: `dining.table.four` 1600x900, `dining.table.six` 2000x900,
+  `dining.table.round` d1100, `dining.chair` 450x450, `dining.bench`
+  1200x350. Kitchen: `kitchen.base.600` 600x600, `kitchen.sink` 1200x600,
+  `kitchen.hob` 600x520, `kitchen.fridge` 600x650, `kitchen.island`
+  1800x900. Bed Room: `bed.double` 1600x2000, `bed.single` 900x2000,
+  `bed.nightstand` 450x400, `bed.wardrobe` 1800x600. Living Room:
+  `sofa.three` 2000x900, `armchair` 850x850, `table.coffee` 1100x600,
+  `tv.unit` 1600x450. Bathroom: `bath.toilet` 400x700, `bath.washbasin`
+  600x450, `bath.tub` 1700x750, `bath.shower` 900x900. Office: `office.desk`
+  1400x700, `office.chair` 600x600, `office.bookshelf` 900x300. Every symbol
+  is version 1 with at least two lower-case tags and a base point off the
+  origin. The library document is `DraftDocument.empty()` +
+  `registerAppComponents` + mm, without the DASHED record (R-T5-2). The
+  generator is `tool/generate_furniture_library.dart` (plain `dart run`); the
+  asset is `assets/library/furniture.jetlib` (33,423 bytes), and a test pins
+  its bytes to the built library.
+- **BYBLOCK lineweight (R-T5-2, confirmed by Task 6, `ba812dd`).** A leaf
+  with BYBLOCK style under a default-style instance resolves to
+  `StyleContext.documentRoot`: ACI 7 and lineweight 25 (0.25 mm); an instance
+  with a colour and a lineweight overrides both. The spec left this open
+  (D6's "style defaults to the instance defaults (BYBLOCK)").
+- **D6 (placement, `478c6dc`).** (a) **Reuse requires the definition to
+  exist** (`doc.tree.definition(h) != null`): a `SymbolComponent` outlives a
+  removed definition (neither `RemoveDefinitionCommand` nor purge clears
+  it), and reusing such an orphan would leave an instance naming nothing
+  (R-T4-1; the lookup uses `withComponent<SymbolComponent>()`). (b) The
+  undo of a placement must include `SetComponentCommand<SymbolComponent>(h,
+  null)`, since removing the definition does not clear the component
+  (R-T2-2). (c) The name rule is `key@version`, then `#2`, `#3`. (d) Handles
+  are allocated at construction in the order definition, leaves ascending,
+  instance. (e) `placementTransform` reads cosine and sine from constant
+  tables indexed by `((q % 4) + 4) % 4` and stores `-0.0` as `0.0`. (f) The
+  placer's compound reports the capabilities `{structure, geometry,
+  components}` (asserted in P5), for 09b's permission check before any
+  handle is allocated; a denied `components` or a read-only document refuses
+  and changes nothing (P17, P18). (g) `AddNodeCommand` does not check that
+  the instance's definition exists, so the order is pinned by tests (R-T4-2).
+  A placement cannot mutate its library entry (`GeometryStore` copies on
+  add): pinned by P19 (`22bc83d`).
+- **F-7 is closed by the end-to-end test** (`ba812dd`, R-T6-1): one symbol,
+  rotated, mirrored and coloured, is painted (ascending handle order, the
+  transformed vertices, colour and weight), picked (each leaf, chain =
+  [instance]), snapped (leaf vertex and endpoint) and saved, loaded and saved
+  byte-identically; the Select tool moves and rotates the placed instance
+  through its grips (P-6 item 2: no defect, nothing for 09b). The fixture is
+  quarter turn 1 mirrored; the other turns are pinned by the placer tests.
+- **M-09g and M-09p are equivalent, by experiment** (Task 1): recorded, the
+  calls stay, and the gate does not claim those mutants red. M-09p's
+  variant on Add is red only through the direct `touched` assertion.
+- **Named mutants whose test is on a different side than the spec said:**
+  M-09b is red on P7, P8c, P11 and P15 (the placer tests; the obvious `if
+  (false &&` does not compile, so the mutant discards the found definition);
+  M-09t deletes the `#n` loop (the variant `name = base;` never terminates);
+  M-09f2 is expressed as attaching the component directly instead of by
+  `SetComponentCommand`, red on P5, P9, P10 and P17 (M-09f1 is the
+  instance-first ordering). M-09e, M-09h, M-09i, M-09n, M-09o, M-09v fired as
+  specified. M-09j has 29 sites, one mutant per throw.
+- **What is carried to 09b:** M-09w (the tool's permission test), search
+  (D8, M-09l, M-09s), the gallery and thumbnails (D9, M-09k, M-09x), the
+  placement tool (D11, M-09m), the panel (D12), `R`/`M` key consumption while
+  armed and the ghost through `placementTransform`, and the real `rootBundle`
+  load of the asset (the 09a tests read it from disk).
