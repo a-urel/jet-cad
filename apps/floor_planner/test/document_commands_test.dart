@@ -879,4 +879,73 @@ void main() {
       expect(r.width, greaterThan(0), reason: key);
     }
   });
+
+  testWidgets(
+      'DC12b at 1440 x 900 the status line takes the width the name leaves: '
+      'a room notice that fits is not cut, and a long name is cut at half '
+      'of the shared width (spec 12a D7, S-27)', (tester) async {
+    final files = FakeDocumentFiles();
+    await pumpApp(tester, files);
+    files.scriptOpen(
+        name: 'plan.jetplan', bytes: sampleBytes(), location: '/p/plan');
+    await hostOf(tester).openFlow();
+    await tester.pump();
+
+    final doc = sessionOf(tester).document;
+    final room = (liveObjectsOf<RoomParams>(doc).toList()
+          ..sort((a, b) => a.value.compareTo(b.value)))
+        .first;
+    final params = doc.components.get<RoomParams>(room)!;
+    const roomName = 'the living room by the bay';
+    doc.commands.execute(
+        SetComponentCommand<RoomParams>(room, params.copyWith(name: roomName)));
+    final seed =
+        doc.tree.accumulatedTransform(room).transformPoint(params.seed);
+    await aimCamera(tester, seed);
+    await press(tester, LogicalKeyboardKey.keyM);
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: globalOf(tester, seed));
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(globalOf(tester, seed) + const Offset(1, 1));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+
+    final name = find.byKey(const Key('document-name'));
+    final status = find.byKey(const Key('status-text'));
+    RenderParagraph paragraph(Finder f) => tester.renderObject<RenderParagraph>(
+        find.descendant(of: f, matching: find.byType(RichText)));
+    expect(tester.widget<Text>(status).data, 'Room — Already a room: $roomName',
+        reason: 'premise: a room notice');
+    expect(tester.widget<Text>(name).data, '• plan', reason: 'premise');
+
+    // A short name: the notice fits in what the name leaves, so it is not
+    // cut, and it starts right after the name.
+    expect(paragraph(status).didExceedMaxLines, isFalse,
+        reason: 'the bar has room: the notice is whole');
+    expect(tester.getRect(status).left - tester.getRect(name).right, 16);
+    final shared = tester.getRect(status).right - tester.getRect(name).left;
+    expect(paragraph(status).size.width, greaterThan(shared / 2),
+        reason: 'premise: the notice needs more than half the shared width');
+
+    // A long name (Save As): cut at half of the shared width; the status
+    // takes the other half and is cut in turn; OSNAP and the zoom stay.
+    final long = 'the ground floor of the house by the lake, third revision';
+    files.scriptSaveLocation(name: '$long.jetplan', location: '/p/long');
+    expect(await hostOf(tester).saveAsStep(), isTrue);
+    await tester.pump();
+    expect(tester.widget<Text>(name).data, long, reason: 'premise: saved');
+    expect(paragraph(name).didExceedMaxLines, isTrue);
+    expect(tester.getRect(name).width, closeTo(shared / 2, 0.01));
+    expect(tester.widget<Text>(status).data, 'Room — Already a room: $roomName',
+        reason: 'premise: the notice is still up');
+    expect(paragraph(status).didExceedMaxLines, isTrue);
+    expect(tester.getRect(status).right - tester.getRect(name).left,
+        closeTo(shared, 0.01));
+    final bar = tester.getRect(find.byKey(const Key('chrome-top')));
+    for (final key in const ['osnap-text', 'zoom-text']) {
+      final r = tester.getRect(find.byKey(Key(key)));
+      expect(r.right, lessThanOrEqualTo(bar.right), reason: key);
+      expect(r.width, greaterThan(0), reason: key);
+    }
+  });
 }

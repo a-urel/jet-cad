@@ -683,26 +683,41 @@ class _PlannerShellState extends State<PlannerShell> {
                   children: [
                     // Spec 12a D7: the toolbar, the document's name, then
                     // the status line; the name and the status give way
-                    // (ellipsis) before the row would overflow.
+                    // (ellipsis) before the row would overflow. The status
+                    // takes all the width the name leaves: the name is
+                    // capped at half of their shared width and takes only
+                    // what it needs below that.
                     DocumentToolbar(
                         fileCommands: _fileCommands,
                         editCommands: _editCommands),
                     const SizedBox(width: 16),
-                    if (widget.documentName != null) ...[
-                      Flexible(child: _documentName(widget.documentName!)),
-                      const SizedBox(width: 16),
-                    ],
-                    Flexible(
-                      child: ListenableBuilder(
-                        listenable: _status,
-                        builder: (_, __) => Text(_statusLine(),
-                            key: const Key('status-text'),
-                            maxLines: 1,
-                            softWrap: false,
-                            overflow: TextOverflow.ellipsis),
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (_, constraints) => Row(
+                          children: [
+                            if (widget.documentName != null) ...[
+                              ConstrainedBox(
+                                constraints: BoxConstraints(
+                                    maxWidth: constraints.maxWidth / 2),
+                                child: _documentName(widget.documentName!),
+                              ),
+                              const SizedBox(width: 16),
+                            ],
+                            Expanded(
+                              child: ListenableBuilder(
+                                listenable: _status,
+                                builder: (_, __) => Text(_statusLine(),
+                                    key: const Key('status-text'),
+                                    maxLines: 1,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 16),
                     ListenableBuilder(
                       listenable: _snap,
                       builder: (_, __) => Text(
