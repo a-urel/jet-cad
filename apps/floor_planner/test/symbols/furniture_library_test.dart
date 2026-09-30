@@ -31,6 +31,11 @@ void main() {
           reason: 'run `dart run tool/generate_furniture_library.dart`');
     });
 
+    test('the built library decodes through the loader', () {
+      expect(SymbolLibrary.decode(builtBytes()).entries.length,
+          furnitureCatalog.length);
+    });
+
     test('building twice gives identical bytes', () {
       expect(builtBytes(), orderedEquals(builtBytes()));
     });
