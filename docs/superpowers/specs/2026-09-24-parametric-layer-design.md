@@ -376,6 +376,23 @@ was, and its inverse is the plain inverse.
   parametric. An edit the expander wraps that writes one is refused (D6,
   amended by fix/post-11); a file can still bring one in.
 
+**Amended by fix/live-object-rule:** the rule names the object's type. A
+root-level `GroupNode` carrying two or more registered parametric types is
+the object of the **later** registration in catalog order; the earlier
+component is a stray: kept in the survey's `stray` snapshot, not
+regenerated, not read by `ParametricView.paramsOf`. `diagnostics()` does not
+report it today (its `parametric.misplaced` pass reads only non-objects).
+The rule lives in one private function, `_naming` (`regeneration.dart`),
+that the survey and `_isObject` read, and `ParametricCatalog` exposes it:
+`names<T>(target, h)` (is `h` a live object whose naming registration is
+exactly `T`'s) and `objectsOf<T>(target)` (every such handle, ascending).
+It is the only rule a client may use to ask "is this a live `T`"; a spelling
+of its own (`is GroupNode && parent == root && get<T>(h) != null`) disagrees
+with the engine on a shadowed object. `T` is matched by the type argument it
+was registered with, so a supertype names nothing. Cost: O(registered types)
+per `names`; no frame path calls it. Only a file makes a shadowed object in
+the app. Killed by `LO1`–`LO5` (mutants M-L1a–M-L1h).
+
 ### D6 — Generated geometry is not directly editable (human: refuse)
 
 - **The rule.** After `inner` applies, the command is refused if any handle

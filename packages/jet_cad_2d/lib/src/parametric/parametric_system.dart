@@ -484,6 +484,40 @@ class ParametricCatalog {
       t.registerInto(registry);
     }
   }
+
+  /// Whether [h] is a live object of [t] and `T`'s registration names it
+  /// (spec 06 D5, as amended by fix/live-object-rule). This is the engine's
+  /// own rule, the one the survey that drives regeneration, `drift()` and
+  /// `diagnostics()` uses: [h] is a `GroupNode` whose parent is the root,
+  /// and of the registered types whose component [h] carries, the **last
+  /// registered** is `T`. A root-level group carrying two registered types
+  /// is the later one's object; the earlier component is a stray the engine
+  /// does not regenerate. A client that asks "is this a live `T`" must ask
+  /// here, not re-spell the rule.
+  ///
+  /// `T` is matched exactly, by the type argument it was registered with:
+  /// a supertype (`Component`, a shared interface) or a subtype of a
+  /// registered type is not that type, and an unregistered `T` answers
+  /// false. When `T` is registered twice, both registrations are `T`'s and
+  /// the later names the object, so the answer is the same.
+  ///
+  /// Cost: O(registered types). Reads [t]'s tree and store only; no client
+  /// code runs.
+  bool names<T extends Component>(CommandTarget t, Handle h) =>
+      _naming(t, _types, h)?.isFor<T>() ?? false;
+
+  /// Every handle for which [names] answers true for `T` in [t], ascending
+  /// by handle value: [t]'s holders of a `T` component, filtered by the
+  /// engine's own rule (spec 06 D5), so a nested, deleted or shadowed `T`
+  /// is never listed. The order is `ComponentRegistry.withComponent`'s,
+  /// which is ascending by contract; a filter keeps it. A fresh list each
+  /// call.
+  ///
+  /// Cost: O(k · types) for k holders of a `T`, after the store's sort.
+  List<Handle> objectsOf<T extends Component>(CommandTarget t) => [
+        for (final h in t.components.withComponent<T>())
+          if (names<T>(t, h)) h,
+      ];
 }
 
 /// Regenerates parametric objects inside the edit that changes them (spec
@@ -728,6 +762,12 @@ final class _Registration<T extends Component> {
   }
 
   bool has(CommandTarget t, Handle h) => t.components.get<T>(h) != null;
+
+  /// Whether this is a registration of exactly [U]: the type argument `T`
+  /// it was registered with, compared as a `Type`, so neither a supertype
+  /// nor a subtype of `T` matches (`_Registration` is covariant in `T`, so
+  /// an `is _Registration<U>` test would accept every supertype).
+  bool isFor<U extends Component>() => U == T;
 
   /// [h]'s component of this type, or null.
   Component? componentOrNull(CommandTarget t, Handle h) =>
