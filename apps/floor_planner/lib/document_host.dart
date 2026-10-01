@@ -190,7 +190,8 @@ class DocumentHost extends StatefulWidget {
       required this.session,
       required this.files,
       this.exitGuard,
-      this.symbols});
+      this.symbols,
+      this.thumbnails});
 
   final DocumentSession session;
   final DocumentFiles files;
@@ -202,6 +203,10 @@ class DocumentHost extends StatefulWidget {
   /// The app's symbol library loader (spec 09b D2, R-4), handed to every
   /// shell this host builds; the app owns it, so a document swap keeps it.
   final SymbolLibraryLoader? symbols;
+
+  /// The app's symbol thumbnail cache (spec 09b D5), handed to every shell
+  /// with [symbols]; the app owns it.
+  final SymbolThumbnails? thumbnails;
 
   @override
   State<DocumentHost> createState() => DocumentHostState();
@@ -535,6 +540,7 @@ class DocumentHostState extends State<DocumentHost> {
           busy: _session.busy,
           onSettle: _registerSettle,
           symbols: widget.symbols,
+          thumbnails: widget.thumbnails,
         ),
       );
 }
