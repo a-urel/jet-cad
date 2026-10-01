@@ -17,6 +17,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'document_files.dart';
 import 'exit_guard.dart';
+import 'export/export_font.dart';
 import 'main.dart';
 import 'new_document.dart';
 import 'parametric/catalog.dart';
@@ -191,7 +192,8 @@ class DocumentHost extends StatefulWidget {
       required this.files,
       this.exitGuard,
       this.symbols,
-      this.thumbnails});
+      this.thumbnails,
+      this.exportFont});
 
   final DocumentSession session;
   final DocumentFiles files;
@@ -207,6 +209,11 @@ class DocumentHost extends StatefulWidget {
   /// The app's symbol thumbnail cache (spec 09b D5), handed to every shell
   /// with [symbols]; the app owns it.
   final SymbolThumbnails? thumbnails;
+
+  /// The app's export font (spec 13 D7), read once per app; the app owns
+  /// it, so a document swap keeps it. The export and print flows read
+  /// [ExportFontCache.bytes] (plan 13 Tasks 9-10).
+  final ExportFontCache? exportFont;
 
   @override
   State<DocumentHost> createState() => DocumentHostState();

@@ -11,6 +11,7 @@ import 'document_files.dart';
 import 'document_host.dart';
 import 'document_toolbar.dart';
 import 'exit_guard.dart';
+import 'export/export_font.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
@@ -37,7 +38,10 @@ import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
 import 'tool_palette.dart';
 
-void main() => runApp(const FloorPlannerApp());
+void main() {
+  registerFontLicences();
+  runApp(const FloorPlannerApp());
+}
 
 /// The app (spec 12a D5, U-4, plan 12a P-3): it owns the [DocumentSession]
 /// and the [DocumentFiles], and rebuilds [MaterialApp] from the session, so
@@ -55,7 +59,12 @@ void main() => runApp(const FloorPlannerApp());
 /// every thumbnail.
 class FloorPlannerApp extends StatefulWidget {
   const FloorPlannerApp(
-      {super.key, this.files, this.exitGuard, this.symbols, this.thumbnails});
+      {super.key,
+      this.files,
+      this.exitGuard,
+      this.symbols,
+      this.thumbnails,
+      this.exportFont});
 
   final DocumentFiles? files;
 
@@ -70,6 +79,10 @@ class FloorPlannerApp extends StatefulWidget {
   /// The symbol thumbnail cache (spec 09b D5), a test seam: when null the
   /// app makes one and disposes it; a given one is the caller's to dispose.
   final SymbolThumbnails? thumbnails;
+
+  /// The export font's bytes, read once per app (spec 13 D7), a test seam:
+  /// when null the app makes a cache over the bundled asset.
+  final ExportFontCache? exportFont;
 
   @override
   State<FloorPlannerApp> createState() => _FloorPlannerAppState();
@@ -92,6 +105,11 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   SymbolThumbnails? _ownThumbnails;
   late final SymbolThumbnails _thumbnails =
       widget.thumbnails ?? (_ownThumbnails = SymbolThumbnails());
+
+  /// The export font (spec 13 D7): above the host, so a document swap never
+  /// reads the asset again. Nothing is read until an export asks.
+  late final ExportFontCache _exportFont =
+      widget.exportFont ?? ExportFontCache();
 
   /// The web's save-name prompt (spec 12a D9, T-12), shown over the
   /// navigator: the files object is made above the `MaterialApp`, so it
@@ -146,7 +164,8 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
               files: _files,
               exitGuard: widget.exitGuard,
               symbols: _symbols,
-              thumbnails: _thumbnails),
+              thumbnails: _thumbnails,
+              exportFont: _exportFont),
         ),
       );
 }
