@@ -1,0 +1,7 @@
+# Task 3 brief — render: symbol thumbnails (spec D5, R-2, F-7, F-8, F-15)
+Read common.md first. HEAD 7bed823. Scratch prefix: /tmp/claude-0/-home-user-jet-cad/436a473c-2fd9-5dea-b1ee-ba84afc1ba81/scratchpad/b3/.
+Do plan Task 3 exactly, in packages/jet_cad_2d_flutter only (no app import; tests build two tiny DraftDocuments themselves with leaves OFF the origin, at least one leaf with ByBlockColor so the foreground matters).
+Read first: packages/jet_cad_2d_flutter/lib/src/draft_painter.dart (constructor, paint), vertices_draw_sink.dart (constructor, flush), viewport_transform.dart (fit), draft_canvas.dart:22 (kLogicalPixelsPerMm), packages/jet_cad_2d/lib/src/document/style_resolver.dart (DocumentStyleResolver foreground, foregroundFor), test/golden/stroke_width_golden_test.dart:202-241 (the PictureRecorder recipe and WHY runAsync is needed), tile_cache.dart around :2195-2210 (DPR scaling of a recorder).
+Pixel-reading tests run under tester.runAsync (plan P-4). Use Image.debugDisposed (or a counting wrapper) to observe disposal. Export from lib/jet_cad_2d_flutter.dart; in this package unused_import/unused_element are ERRORS.
+Mutants: M-09k, M-09x (size, DPR, foreground each), M-09y, M-09z, M-09b15. Gates: render (974 + new, 1 skip, 7 standing), analyze, format; the app gate too (it imports the package export; count unchanged 819); engine unchanged.
+Also confirm the two allocation invariant tests are untouched (git diff --stat on test/invariants dirs empty).
