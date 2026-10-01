@@ -216,6 +216,14 @@ final class PdfContentState {
   /// Copied by `q`, so a name set inside `q … Q` is gone after it.
   List<String> extGStates = const [];
 
+  /// The text state `Tf` and `Tz` set. It is part of the graphics state
+  /// (ISO 32000-1, 8.4.1 and 9.3.1), so `q` saves it and `Q` restores it.
+  String? fontResource;
+  double fontSize = 0;
+
+  /// `Tz`, in percent (100 initially).
+  double horizontalScale = 100;
+
   PdfContentState copy() => PdfContentState()
     ..ctm = ctm
     ..lineWidth = lineWidth
@@ -226,7 +234,10 @@ final class PdfContentState {
     ..fillRgb = fillRgb
     ..strokeAlpha = strokeAlpha
     ..fillAlpha = fillAlpha
-    ..extGStates = extGStates;
+    ..extGStates = extGStates
+    ..fontResource = fontResource
+    ..fontSize = fontSize
+    ..horizontalScale = horizontalScale;
 }
 
 /// One `TJ` or `Tj`.
@@ -234,6 +245,7 @@ final class PdfContentText {
   PdfContentText({
     required this.fontResource,
     required this.font,
+    required this.fontInfo,
     required this.size,
     required this.horizontalScale,
     required this.textMatrix,
@@ -250,6 +262,9 @@ final class PdfContentText {
 
   /// The font dictionary (indirect values resolved one level).
   final Map<String, Object?> font;
+
+  /// What [font] declares, followed through the file's references.
+  final PdfContentFontInfo fontInfo;
 
   /// `Tf`'s size.
   final double size;
@@ -285,6 +300,32 @@ final class PdfContentText {
 
   /// The run's origin in page space.
   PdfXY get origin => pageMatrix.apply(0, 0);
+}
+
+/// What a font dictionary declares about its kind and its program, with every
+/// reference followed (ISO 32000-1, 9.6 to 9.9).
+final class PdfContentFontInfo {
+  const PdfContentFontInfo({
+    required this.subtype,
+    required this.encoding,
+    required this.descendantSubtype,
+    required this.fontFile,
+  });
+
+  /// The font's `/Subtype`, e.g. `/Type0` or `/TrueType`.
+  final String? subtype;
+
+  /// The font's `/Encoding` when it is a name, e.g. `/Identity-H`.
+  final String? encoding;
+
+  /// For a `/Type0` font, its descendant's `/Subtype` (`/CIDFontType2` for
+  /// TrueType outlines); `null` otherwise.
+  final String? descendantSubtype;
+
+  /// The key under which the font descriptor embeds the font program as a
+  /// stream: `/FontFile`, `/FontFile2` or `/FontFile3`; `null` when nothing
+  /// is embedded. For a `/Type0` font the descriptor is the descendant's.
+  final String? fontFile;
 }
 
 /// A name, slash included: `/Type`.
@@ -725,9 +766,6 @@ final class _Interpreter {
   var _tm = PdfContentMatrix.identity;
   var _tlm = PdfContentMatrix.identity;
   var _inText = false;
-  String? _fontResource;
-  double _fontSize = 0;
-  double _tz = 100;
 
   static const _unsupported = {
     'Tc', 'Tw', 'Ts', 'TL', 'T*', 'TD', "'", '"', 'd', 'Do', 'BI', 'sh', //
@@ -843,10 +881,10 @@ final class _Interpreter {
         if (!_inText) throw const FormatException('ET without BT');
         _inText = false;
       case 'Tf':
-        _fontResource = (o[0] as PdfRawName).name;
-        _fontSize = _n(o, 1);
+        _state.fontResource = (o[0] as PdfRawName).name;
+        _state.fontSize = _n(o, 1);
       case 'Tz':
-        _tz = _n(o, 0);
+        _state.horizontalScale = _n(o, 0);
       case 'Td':
         _tlm = PdfContentMatrix(1, 0, 0, 1, _n(o, 0), _n(o, 1)).times(_tlm);
         _tm = _tlm;
@@ -864,6 +902,32 @@ final class _Interpreter {
         // `EMC`, `Tr` and the like move no geometry.
         break;
     }
+  }
+
+  PdfContentFontInfo _fontInfo(Map<String, Object?> font) {
+    String? name(Object? v) => (file.resolve(v) as PdfRawName?)?.name;
+    final subtype = name(font['/Subtype']);
+    final encoding = file.resolve(font['/Encoding']);
+    var holder = font;
+    String? descendantSubtype;
+    if (subtype == '/Type0') {
+      final descendants =
+          file.resolve(font['/DescendantFonts']) as List<Object?>;
+      holder = file.resolve(descendants.first) as Map<String, Object?>;
+      descendantSubtype = name(holder['/Subtype']);
+    }
+    final descriptor =
+        file.resolve(holder['/FontDescriptor']) as Map<String, Object?>?;
+    String? fontFile;
+    for (final key in const ['/FontFile', '/FontFile2', '/FontFile3']) {
+      if (file.resolve(descriptor?[key]) is PdfRawStream) fontFile = key;
+    }
+    return PdfContentFontInfo(
+      subtype: subtype,
+      encoding: encoding is PdfRawName ? encoding.name : null,
+      descendantSubtype: descendantSubtype,
+      fontFile: fontFile,
+    );
   }
 
   void _gs(String name) {
@@ -925,7 +989,7 @@ final class _Interpreter {
 
   void _show(List<Object?> items) {
     if (!_inText) throw const FormatException('text shown outside BT/ET');
-    final resource = _fontResource;
+    final resource = _state.fontResource;
     if (resource == null) throw const FormatException('no font selected');
     final fonts = file.resolve(resources['/Font']) as Map<String, Object?>?;
     final font = file.resolve(fonts?[resource]);
@@ -935,7 +999,8 @@ final class _Interpreter {
     final metrics = _FontMetrics.of(file, font);
     final codes = <int>[];
     var advance = 0.0;
-    final k = _fontSize * _tz / 100;
+    final size = _state.fontSize, tz = _state.horizontalScale;
+    final k = size * tz / 100;
     for (final item in items) {
       if (item is PdfRawString) {
         final b = item.bytes;
@@ -958,8 +1023,9 @@ final class _Interpreter {
     texts.add(PdfContentText(
       fontResource: resource,
       font: font,
-      size: _fontSize,
-      horizontalScale: _tz,
+      fontInfo: _fontInfo(font),
+      size: size,
+      horizontalScale: tz,
       textMatrix: _tm,
       ctm: _state.ctm,
       codes: codes,

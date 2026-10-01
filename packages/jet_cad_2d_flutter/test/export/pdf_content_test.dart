@@ -216,6 +216,86 @@ void main() {
       final second = c.textRuns[1].origin;
       expect([second.x, second.y], [5 + 5, 6]);
     });
+
+    test(
+        'q saves Tf and Tz and Q restores them (a reader that keeps the text '
+        'state outside the graphics state carries them past Q)', () {
+      final c = read(
+        'BT /F1 10 Tf 80 Tz ET '
+        'q BT /F1 20 Tf 50 Tz [<0001>] TJ ET Q '
+        'BT [<0001>] TJ ET',
+        resources: '/Font << /F1 5 0 R >>',
+        objects: objects,
+      );
+      final inner = c.textRuns[0], outer = c.textRuns[1];
+      expect([inner.size, inner.horizontalScale], [20, 50]);
+      expect([outer.size, outer.horizontalScale], [10, 80]);
+      // 500 / 1000 · 10 · 0.8.
+      expect(outer.advance, closeTo(4, 1e-12));
+    });
+
+    test(
+        'Tm sets the text matrix and a run\'s page matrix is Tm × CTM (a '
+        'reader that composes CTM × Tm misplaces and turns the run)', () {
+      // CTM: a quarter turn and a translation; Tm: a stretch in x and a
+      // translation. The two orders give different origins and directions.
+      final c = read(
+        '0 1 -1 0 10 20 cm BT /F1 10 Tf 2 0 0 1 3 4 Tm [<0001>] TJ ET',
+        resources: '/Font << /F1 5 0 R >>',
+        objects: objects,
+      );
+      final t = c.textRuns.single;
+      final m = t.pageMatrix;
+      // (3, 4) through the CTM: (-4 + 10, 3 + 20).
+      expect([t.origin.x, t.origin.y], [6, 23]);
+      // Text-space (1, 0): Tm gives (2, 0), the CTM (0, 2).
+      final along = m.applyToVector(1, 0);
+      expect([along.x, along.y], [0, 2]);
+      // Text-space (0, 1): Tm gives (0, 1), the CTM (-1, 0).
+      final up = m.applyToVector(0, 1);
+      expect([up.x, up.y], [-1, 0]);
+    });
+
+    test(
+        'font info follows a Type0 font to its descendant\'s descriptor and '
+        'names the embedded program (a reader that looks for the descriptor '
+        'on the Type0 dictionary, or reports a program that is not there)', () {
+      final c = read(
+        'BT /F1 10 Tf [<0001>] TJ /F2 10 Tf [<0001>] TJ /F3 10 Tf (A) Tj ET',
+        resources: '/Font << /F1 20 0 R /F2 23 0 R /F3 25 0 R >>',
+        objects: [
+          ...objects,
+          // F1: Type0 over a CIDFontType2 whose descriptor embeds FontFile2.
+          '20 0 obj\n<< /Type /Font /Subtype /Type0 /Encoding /Identity-H '
+              '/DescendantFonts [21 0 R] /ToUnicode 7 0 R >>\nendobj',
+          '21 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /W [0 8 0 R] '
+              '/FontDescriptor 22 0 R >>\nendobj',
+          '22 0 obj\n<< /Type /FontDescriptor /FontFile2 24 0 R >>\nendobj',
+          // F2: Type0 whose descriptor embeds nothing.
+          '23 0 obj\n<< /Type /Font /Subtype /Type0 /Encoding /Identity-H '
+              '/DescendantFonts [<< /Type /Font /Subtype /CIDFontType0 '
+              '/FontDescriptor << /Type /FontDescriptor >> >>] >>\nendobj',
+          '24 0 obj\n<< /Length 4 >>\nstream\nabcd\nendstream\nendobj',
+          // F3: a simple TrueType font with /FontFile2 in its own descriptor.
+          '25 0 obj\n<< /Type /Font /Subtype /TrueType /FirstChar 65 '
+              '/Widths [700] /FontDescriptor 26 0 R >>\nendobj',
+          '26 0 obj\n<< /Type /FontDescriptor /FontFile2 24 0 R >>\nendobj',
+        ],
+      );
+      final [f1, f2, f3] = [for (final t in c.textRuns) t.fontInfo];
+      expect(
+        [f1.subtype, f1.encoding, f1.descendantSubtype, f1.fontFile],
+        ['/Type0', '/Identity-H', '/CIDFontType2', '/FontFile2'],
+      );
+      expect(
+        [f2.subtype, f2.descendantSubtype, f2.fontFile],
+        ['/Type0', '/CIDFontType0', null],
+      );
+      expect(
+        [f3.subtype, f3.encoding, f3.descendantSubtype, f3.fontFile],
+        ['/TrueType', null, null, '/FontFile2'],
+      );
+    });
   });
 
   test(

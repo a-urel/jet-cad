@@ -6,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4;
 
 import '../draw_sink.dart';
+import '../flutter_text_measurer.dart';
 
 /// A [DrawSink] that writes PDF operators onto one page (spec 13 D3).
 ///
@@ -26,6 +27,12 @@ import '../draw_sink.dart';
 /// - [point] is carried through the residual by hand, never under `cm`. It
 ///   is drawn as an axis-aligned square of side `lw / 100 · u`, and nothing
 ///   is drawn at lineweight 0.
+/// - [text] is drawn under the residual, which maps glyph space (y up, origin
+///   on the baseline, size `kNominalTextPixels`) to screen space. The page
+///   set-up's flip cancels the camera's, so the glyphs stand upright in PDF
+///   text space with no further flip: `BT /F size Tf Tz 0 0 Td [<…>] TJ ET`.
+///   `Tz` stretches the run to the advance the painter laid its box out
+///   with (see [text]).
 ///
 /// The graphics state is written in full for every primitive: its colour,
 /// its width (strokes) and its alpha as an `ExtGState` whose `CA` and `ca`
@@ -37,11 +44,20 @@ import '../draw_sink.dart';
 /// The tests' tolerances are derived from that rounding.
 class PdfDrawSink implements DrawSink {
   /// Writes the page set-up onto a fresh graphics context of [page].
+  ///
+  /// [fontBytes] is the TrueType font every text is drawn in, whatever its
+  /// style's `fontFamily` (spec 13 R-3). It is embedded once, as one
+  /// `PdfTtfFont`, when the first text is drawn: a page without text embeds
+  /// no font.
   PdfDrawSink({
     required PdfDocument document,
     required PdfPage page,
     required this.pixelsPerPaperMm,
+    required Uint8List fontBytes,
+    required this.measurer,
+    required this.textStyleOf,
   })  : _document = document,
+        _fontBytes = fontBytes,
         _g = page.getGraphics() {
     final height = page.pageFormat.height;
     _g
@@ -56,6 +72,21 @@ class PdfDrawSink implements DrawSink {
 
   /// `u`: points per paper millimetre (72 / 25.4 for a true-scale page).
   final double pixelsPerPaperMm;
+
+  /// Measures a text's advance the way the painter laid its box out, so the
+  /// PDF's run is stretched to that same advance. The painter measures with
+  /// the document's measurer; the caller passes one that agrees with it.
+  final FlutterTextMeasurer measurer;
+
+  /// Resolves a text entity's style handle to the record [measurer] needs,
+  /// as `CanvasDrawSink.textStyleOf`.
+  final TextStyleRecord Function(Handle) textStyleOf;
+
+  final Uint8List _fontBytes;
+
+  /// The one embedded font, built on the first [text].
+  late final PdfTtfFont _font =
+      PdfTtfFont(_document, ByteData.sublistView(_fontBytes));
 
   // Rewritten in place for every `cm`. `setTransform` copies what it needs.
   final Matrix4 _matrix = Matrix4.identity();
@@ -229,9 +260,52 @@ class PdfDrawSink implements DrawSink {
     _g.fillPath();
   }
 
+  /// One run at `kNominalTextPixels`, its origin at glyph space's (0, 0)
+  /// under the residual.
+  ///
+  /// `Tz` is `100 · w_flutter / w_pdf`:
+  ///
+  /// - `w_flutter` is the advance [measurer] gives, the one the painter, the
+  ///   picker and `entityBounds` agree on.
+  /// - `w_pdf` is the run's advance from the `/W` widths **as the `pdf`
+  ///   package writes them**: each glyph's advance in thousandths of an em,
+  ///   truncated to an integer (`ttffont.dart`, `_buildType0`), so a viewer
+  ///   draws exactly `w_flutter`.
+  ///
+  /// When either advance is unusable (an empty run, a font with no glyph for
+  /// any of it), `Tz` is written as 100. It is always written, as every other
+  /// part of the state is.
   @override
-  void text(String text, Handle style, ResolvedStyle resolved) =>
-      throw UnimplementedError('PdfDrawSink.text: plan 13 Task 4');
+  void text(String text, Handle style, ResolvedStyle resolved) {
+    if (text.isEmpty) return;
+    _pushTransform();
+    _fillState(resolved);
+    final font = _font;
+    final pdfAdvance = _pdfTextAdvance(font, text, kNominalTextPixels);
+    final flutterAdvance =
+        measurer.measure(text: text, style: textStyleOf(style)).advanceWidth;
+    final ratio = flutterAdvance / pdfAdvance;
+    _g.drawString(
+      font,
+      kNominalTextPixels,
+      text,
+      0,
+      0,
+      scale: pdfAdvance > 0 && ratio.isFinite && ratio >= 0 ? ratio : 1.0,
+    );
+  }
+
+  /// The advance of [text] at [size] in [font] from the widths the `pdf`
+  /// package writes into the font's `/W`: per glyph,
+  /// `(advanceWidth · 1000).toInt()` thousandths of an em, as
+  /// `PdfTtfFont._buildType0` writes them.
+  static double _pdfTextAdvance(PdfTtfFont font, String text, double size) {
+    var thousandths = 0;
+    for (final rune in text.runes) {
+      thousandths += (font.glyphMetrics(rune).advanceWidth * 1000.0).toInt();
+    }
+    return thousandths / 1000 * size;
+  }
 
   /// A full circle as four 90-degree cubics from angle 0, closed.
   void _circlePath(double cx, double cy, double r) {

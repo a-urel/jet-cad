@@ -10,6 +10,7 @@ import 'package:pdf/pdf.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/export_fixture.dart';
+import '../support/export_font.dart';
 import '../support/pdf_tolerance.dart';
 
 /// Spec 13 T-3 and T-3b: `PdfDrawSink`'s geometry, read back from the bytes
@@ -20,7 +21,8 @@ import '../support/pdf_tolerance.dart';
 ///   `RecordingDrawSink(shadesDashes: false)`, so the dashes arrive as cut
 ///   spans as they will in the export. The ops are replayed into a
 ///   `PdfDrawSink` on a `PdfDocument(compress: false)`. Text ops are left
-///   out (plan 13 Task 4).
+///   out: the fixture's default measurer gives text a singular residual, and
+///   text is `pdf_draw_sink_text_test.dart`'s (T-5).
 /// - T-3b: direct calls on the sink.
 ///
 /// The named mutants are M-13b (sink level), M-13h, M-13i, M-13j, M-13k,
@@ -507,9 +509,7 @@ void main() {
       expect(await cubics(7), 4, reason: 'past a full turn: the full circle');
     });
 
-    test(
-        'beginDash and endDash throw; text is Task 4\'s; shadesDashes is '
-        'false', () async {
+    test('beginDash and endDash throw; shadesDashes is false', () async {
       await draw((sink) {
         expect(sink.shadesDashes, isFalse);
         expect(
@@ -518,10 +518,6 @@ void main() {
           throwsUnsupportedError,
         );
         expect(sink.endDash, throwsUnsupportedError);
-        expect(
-          () => sink.text('WC', ReservedHandles.standardTextStyle, red),
-          throwsUnimplementedError,
-        );
       });
     });
   });
@@ -629,13 +625,16 @@ void _replay(DrawOp op, DrawSink sink) {
     case FillCircleOp(:final cx, :final cy, :final r, :final style):
       sink.fillCircle(cx, cy, r, style);
     case TextOp():
-      // Plan 13 Task 4: the sink's text throws until then.
+      // T-5 (`pdf_draw_sink_text_test.dart`) replays text, with a measurer
+      // that gives it a regular residual.
       break;
     case BeginDashOp():
     case EndDashOp():
       throw StateError('recorded with shadesDashes: false, no dash bracket');
   }
 }
+
+final Uint8List _font = exportFontBytes();
 
 /// A one-page document of [width] × [height] pt, [body] drawn into its
 /// sink, written uncompressed with `write(PdfStream)` and read back.
@@ -646,8 +645,14 @@ Future<PdfContent> _render(
 ) async {
   final document = PdfDocument(compress: false);
   final page = PdfPage(document, pageFormat: PdfPageFormat(width, height));
-  body(
-      PdfDrawSink(document: document, page: page, pixelsPerPaperMm: 72 / 25.4));
+  body(PdfDrawSink(
+    document: document,
+    page: page,
+    pixelsPerPaperMm: 72 / 25.4,
+    fontBytes: _font,
+    measurer: FlutterTextMeasurer(),
+    textStyleOf: DraftDocument.empty().textStyleOf,
+  ));
   final out = PdfStream();
   await document.write(out);
   return PdfContent.parse(out.output(), inflate: zlib.decode);
