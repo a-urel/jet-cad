@@ -4,9 +4,11 @@
 // fixture whose first category's first symbol fails the query.
 //
 // Every single-field test first proves, over the whole library, that its
-// term hits that field and no other: a later change to the asset that makes
-// a term hit a second field fails the precondition instead of leaving the
-// test vacuous.
+// term hits that field and no other (the key counts as a field: it is not
+// searched): a later change to the asset that makes a term hit a second field
+// fails the precondition instead of leaving the test vacuous. Terms come both
+// as prefixes and mid-word, so a prefix match cannot pass for a substring
+// match.
 import 'dart:io';
 
 import 'package:floor_planner/symbols/symbol_library.dart';
@@ -31,18 +33,21 @@ List<String> categoriesOf(List<SymbolGroup> groups) =>
     [for (final g in groups) g.category];
 
 /// The fields of [e] that contain the lower-case [term] (case-insensitive),
-/// computed here independently of the code under test.
+/// computed here independently of the code under test. The key is listed
+/// although the search ignores it, so a term proven to hit only one field
+/// cannot also hit the key.
 Set<String> fieldsHit(SymbolEntry e, String term) => {
+      if (e.key.toLowerCase().contains(term)) 'key',
       if (e.name.toLowerCase().contains(term)) 'name',
       if (e.tags.any((t) => t.toLowerCase().contains(term))) 'tag',
       if (e.category.toLowerCase().contains(term)) 'category',
     };
 
-/// Proves that [term] hits [field] alone over all of [lib], and returns the
-/// ids of the symbols it hits.
-List<String> hitsOnly(SymbolLibrary lib, String term, String field) {
+/// Proves that [term] hits [field] alone over all of [entries], and returns
+/// the ids of the symbols it hits.
+List<String> hitsOnly(List<SymbolEntry> entries, String term, String field) {
   final hit = <String>[];
-  for (final e in lib.entries) {
+  for (final e in entries) {
     final fields = fieldsHit(e, term);
     expect(fields.difference({field}), isEmpty,
         reason: '"$term" must hit only the $field of ${idOf(e)}, '
@@ -76,18 +81,44 @@ void main() {
 
   group('a single field', () {
     test('the name alone finds a symbol', () {
-      // "Three-seat sofa": also proves the name is compared lower-cased.
-      expect(hitsOnly(lib, 'three', 'name'), ['sofa.three@1']);
-      final found = searchSymbols(lib.entries, 'three');
+      // "Three-seat sofa": also proves the name is compared lower-cased. The
+      // key "sofa.three" holds "three" but not "three-seat".
+      expect(hitsOnly(lib.entries, 'three-seat', 'name'), ['sofa.three@1']);
+      final found = searchSymbols(lib.entries, 'three-seat');
       expect(ids(found), ['sofa.three@1']);
       expect(categoriesOf(found), ['Living Room']);
     });
 
+    test('a term inside the name finds a symbol', () {
+      // "Square dining table, 2 seats" and its kin: "seats" ends the name.
+      const seats = [
+        'dining.table.square.two@1',
+        'dining.table.square.four@1',
+        'dining.table.rect.four@1',
+        'dining.table.rect.six@1',
+      ];
+      expect(hitsOnly(lib.entries, 'seats', 'name'), seats);
+      for (final id in seats) {
+        final e = lib.entries.firstWhere((e) => idOf(e) == id);
+        expect(e.name.toLowerCase().startsWith('seats'), isFalse);
+      }
+      expect(ids(searchSymbols(lib.entries, 'seats')), seats);
+    });
+
     test('a tag alone finds a symbol', () {
-      expect(hitsOnly(lib, 'couch', 'tag'), ['sofa.three@1']);
+      expect(hitsOnly(lib.entries, 'couch', 'tag'), ['sofa.three@1']);
       expect(ids(searchSymbols(lib.entries, 'couch')), ['sofa.three@1']);
-      expect(hitsOnly(lib, 'closet', 'tag'), ['bed.wardrobe@1']);
+      expect(hitsOnly(lib.entries, 'closet', 'tag'), ['bed.wardrobe@1']);
       expect(ids(searchSymbols(lib.entries, 'closet')), ['bed.wardrobe@1']);
+    });
+
+    test('a term inside a tag finds a symbol', () {
+      // The tag "worktop" of the kitchen island.
+      expect(hitsOnly(lib.entries, 'top', 'tag'), ['kitchen.island@1']);
+      final island = lib.entries.firstWhere((e) => e.key == 'kitchen.island');
+      expect(island.tags.any((t) => t.startsWith('top')), isFalse);
+      expect(island.tags, contains('worktop'));
+      expect(ids(searchSymbols(lib.entries, 'top')), ['kitchen.island@1']);
     });
 
     test('the category alone finds a symbol', () {
@@ -98,10 +129,52 @@ void main() {
         'table.coffee@1',
         'tv.unit@1',
       ];
-      expect(hitsOnly(lib, 'living', 'category'), living);
+      expect(hitsOnly(lib.entries, 'living', 'category'), living);
       final found = searchSymbols(lib.entries, 'living');
       expect(ids(found), living);
       expect(categoriesOf(found), ['Living Room']);
+    });
+
+    test('a term inside the category finds a symbol', () {
+      // "room" ends "Dining Room" and the rest, and sits inside "Bathroom";
+      // only Kitchen and Office lack it.
+      final rooms = hitsOnly(lib.entries, 'room', 'category');
+      expect(rooms, [
+        for (final e in lib.entries)
+          if (e.category != 'Kitchen' && e.category != 'Office') idOf(e),
+      ]);
+      for (final e in lib.entries) {
+        expect(e.category.toLowerCase().startsWith('room'), isFalse);
+      }
+      final found = searchSymbols(lib.entries, 'room');
+      expect(ids(found), rooms);
+      expect(categoriesOf(found),
+          ['Dining Room', 'Bed Room', 'Living Room', 'Bathroom']);
+    });
+  });
+
+  group('the hand-built fixture', () {
+    // "wing" is in the key only; "Reading" is a mixed-case tag.
+    final entries = [
+      entry(9500, 'lamp.arc', 'Arc lamp', 'Den', ['lamp', 'light']),
+      entry(9600, 'chair.wingback', 'Armchair', 'Den', ['Reading', 'seat']),
+    ];
+
+    test('a term in the key alone finds nothing', () {
+      expect(hitsOnly(entries, 'wing', 'key'), ['chair.wingback@1']);
+      expect(searchSymbols(entries, 'wing'), isEmpty);
+      expect(searchSymbols(entries, 'chair.wingback'), isEmpty);
+      // The symbol itself is searchable: its name finds it.
+      expect(ids(searchSymbols(entries, 'armchair')), ['chair.wingback@1']);
+    });
+
+    test('a mixed-case tag is found in any case', () {
+      expect(hitsOnly(entries, 'reading', 'tag'), ['chair.wingback@1']);
+      expect(entries[1].tags.first, 'Reading');
+      for (final query in ['reading', 'READING', 'rEaDiNg']) {
+        expect(ids(searchSymbols(entries, query)), ['chair.wingback@1'],
+            reason: query);
+      }
     });
   });
 
@@ -118,8 +191,8 @@ void main() {
 
     test('the terms may hit different fields of one symbol', () {
       // "living" hits a category only; "couch" a tag only.
-      hitsOnly(lib, 'living', 'category');
-      hitsOnly(lib, 'couch', 'tag');
+      hitsOnly(lib.entries, 'living', 'category');
+      hitsOnly(lib.entries, 'couch', 'tag');
       expect(ids(searchSymbols(lib.entries, 'couch living')), ['sofa.three@1']);
       // A pair whose terms each hit, but never the same symbol, finds none.
       expect(ids(searchSymbols(lib.entries, 'couch closet')), isEmpty);
