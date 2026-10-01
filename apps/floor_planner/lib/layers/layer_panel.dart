@@ -137,7 +137,17 @@ class LayerPanelState extends State<LayerPanel> {
 
   void _execute(DraftCommand command) => _doc.commands.execute(command);
 
-  void _setRecord(LayerRecord record) => _execute(SetLayerCommand(record));
+  /// One [SetLayerCommand] built from layer [h]'s record as the document
+  /// holds it now, not as the last build saw it: another command may have
+  /// landed since (a rename committed on blur by the same pointer-down,
+  /// Task 9 review finding 1). [f] returns null for a no-op; a layer that is
+  /// gone dispatches nothing.
+  void _update(Handle h, LayerRecord? Function(LayerRecord live) f) {
+    final live = _doc.tables.layers[h];
+    if (live == null) return;
+    final next = f(live);
+    if (next != null) _execute(SetLayerCommand(next));
+  }
 
   void _add() {
     final zero = _doc.tables.layers[ReservedHandles.layerZero]!;
@@ -188,7 +198,7 @@ class LayerPanelState extends State<LayerPanel> {
     final current = drawingLayer(_doc);
     final rows = layersInPanelOrder(layers.records);
     final title = Theme.of(context).textTheme.titleSmall;
-    final blocked = allowed ? _deleteBlocked(_selected) : null;
+    final blocked = allowed ? _deleteBlocked(_selected) : 'Read-only document';
     return Material(
       key: const Key('layers-panel'),
       color: Colors.transparent,
@@ -237,22 +247,23 @@ class LayerPanelState extends State<LayerPanel> {
                                 ? null
                                 : () =>
                                     _execute(SetCurrentLayerCommand(r.handle)),
-                            onToggleVisible: () =>
-                                _setRecord(r.copyWith(visible: !r.visible)),
-                            onToggleLocked: () =>
-                                _setRecord(r.copyWith(locked: !r.locked)),
-                            onColour: (aci) {
-                              if (r.color == IndexedColor(aci)) return;
-                              _setRecord(r.copyWith(color: IndexedColor(aci)));
-                            },
+                            onToggleVisible: () => _update(r.handle,
+                                (l) => l.copyWith(visible: !l.visible)),
+                            onToggleLocked: () => _update(
+                                r.handle, (l) => l.copyWith(locked: !l.locked)),
+                            onColour: (aci) => _update(
+                                r.handle,
+                                (l) => l.color == IndexedColor(aci)
+                                    ? null
+                                    : l.copyWith(color: IndexedColor(aci))),
                             onStartRename: () => setState(() {
                               _selected = r.handle;
                               _editing = r.handle;
                             }),
                             validate: (name) =>
                                 layerNameError(_doc, name, self: r.handle),
-                            onRename: (name) =>
-                                _setRecord(r.copyWith(name: name)),
+                            onRename: (name) => _update(
+                                r.handle, (l) => l.copyWith(name: name)),
                             onEndRename: () {
                               if (_editing == r.handle && mounted) {
                                 setState(() => _editing = null);
@@ -280,9 +291,8 @@ class LayerPanelState extends State<LayerPanel> {
                     icon: const Icon(Icons.delete_outline),
                     iconSize: 18,
                     visualDensity: VisualDensity.compact,
-                    onPressed: allowed && blocked == null
-                        ? () => _delete(_selected!)
-                        : null,
+                    onPressed:
+                        blocked == null ? () => _delete(_selected!) : null,
                   ),
                 ),
               ]),

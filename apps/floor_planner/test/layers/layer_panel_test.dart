@@ -220,35 +220,36 @@ void main() {
       expect(shownCurrent(tester, a), done);
       expect(shownCurrent(tester, ReservedHandles.layerZero), !done);
     });
+    // Each control changes its one field: the whole record is compared, so
+    // a control that also touched another field (O1, O2) is caught.
+    final beforeA = rec(doc, a),
+        beforeB = rec(doc, b),
+        beforeC = rec(doc, fx.c);
     await step('hide A', () => tester.tap(byKey('layer-eye-${hx(a)}')), (done) {
-      expect(rec(doc, a).visible, !done);
-      expect(shown(tester, a).visible, !done);
+      expect(rec(doc, a), done ? beforeA.copyWith(visible: false) : beforeA);
+      expect(shown(tester, a), rec(doc, a));
     });
     await step('show C', () => tester.tap(byKey('layer-eye-${hx(fx.c)}')),
         (done) {
-      expect(rec(doc, fx.c).visible, done);
-      expect(shown(tester, fx.c).visible, done);
+      expect(rec(doc, fx.c), done ? beforeC.copyWith(visible: true) : beforeC);
+      expect(shown(tester, fx.c), rec(doc, fx.c));
     });
     await step('lock A', () => tester.tap(byKey('layer-lock-${hx(a)}')),
         (done) {
-      expect(rec(doc, a).locked, done);
-      expect(shown(tester, a).locked, done);
+      expect(rec(doc, a), done ? beforeA.copyWith(locked: true) : beforeA);
+      expect(shown(tester, a), rec(doc, a));
     });
     await step('unlock B', () => tester.tap(byKey('layer-lock-${hx(b)}')),
         (done) {
-      expect(rec(doc, b).locked, !done);
-      expect(shown(tester, b).locked, !done);
+      expect(rec(doc, b), done ? beforeB.copyWith(locked: false) : beforeB);
+      expect(shown(tester, b), rec(doc, b));
     });
-    await step('recolour A to cyan', () => chooseColour(tester, a, 4), (done) {
-      final want = IndexedColor(done ? 4 : 1);
-      expect(rec(doc, a).color, want);
-      expect(shown(tester, a).color, want);
-      expect(swatchOf(tester, a), Color(0xFF000000 | aciToRgb(want.aci)));
+    await step('recolour B to cyan', () => chooseColour(tester, b, 4), (done) {
+      final want = IndexedColor(done ? 4 : 5);
+      expect(rec(doc, b), beforeB.copyWith(color: want));
+      expect(shown(tester, b), rec(doc, b));
+      expect(swatchOf(tester, b), Color(0xFF000000 | aciToRgb(want.aci)));
     });
-    // Every other field of the record is untouched by each control.
-    for (final h in [a, b, fx.c]) {
-      expect(rec(doc, h).name, shown(tester, h).name);
-    }
   });
 
   testWidgets(
@@ -333,6 +334,29 @@ void main() {
     expect(layerIsEmpty(doc, fx.c), isTrue, reason: 'premise');
     expect(enabled(tester, 'layers-delete'), isTrue);
     expect(doc.commands.undoDepth, 0, reason: 'selecting is not a command');
+  });
+
+  testWidgets(
+      'delete: a stored current layer that is hidden and empty is not the '
+      'effective current layer; delete is enabled and one tap removes it '
+      '(D3, O3)', (tester) async {
+    final fx = layerFixture(room: false, dimension: false);
+    final doc = fx.doc;
+    doc.commands.execute(SetCurrentLayerCommand.restore(fx.c));
+    doc.commands.clearHistory();
+    expect(doc.header.currentLayer, fx.c, reason: 'premise: stored');
+    expect(drawingLayer(doc), ReservedHandles.layerZero,
+        reason: 'premise: C is hidden, so layer 0 draws');
+    expect(layerIsEmpty(doc, fx.c), isTrue, reason: 'premise');
+    await pumpPanel(tester, doc);
+    await tester.tap(byKey('layer-row-${hx(fx.c)}'), warnIfMissed: false);
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(enabled(tester, 'layers-delete'), isTrue);
+    expect(tooltipOf(tester, 'layers-delete'), 'Delete layer');
+    await tester.tap(byKey('layers-delete'));
+    await settle(tester);
+    expect(doc.commands.undoDepth, 1);
+    expect(doc.tables.layers[fx.c], isNull);
   });
 
   testWidgets(
@@ -439,6 +463,41 @@ void main() {
       await settle(tester);
       expect(shown(tester, fx.a).name, 'A');
       expect(find.text('A'), findsOneWidget);
+    });
+
+    testWidgets(
+        'Enter on B (ACI 5, locked) changes the name only: the whole record '
+        'is the old one with the new name (O1, O2)', (tester) async {
+      final fx = layerDoc();
+      final doc = fx.doc;
+      final before = rec(doc, fx.b);
+      expect(before.locked, isTrue, reason: 'premise');
+      expect(before.color, const IndexedColor(5), reason: 'premise');
+      await pumpPanel(tester, doc);
+      await doubleTapName(tester, fx.b);
+      await tester.enterText(fieldOf(fx.b), 'Kitchen');
+      await pressEnter(tester);
+      expect(doc.commands.undoDepth, 1);
+      expect(rec(doc, fx.b), before.copyWith(name: 'Kitchen'));
+    });
+
+    testWidgets(
+        'a blur-rename then a tap on the same row\'s lock with no frame '
+        'between down and up keeps the name: the lock reads the live record '
+        '(Task 9 review finding 1)', (tester) async {
+      final fx = layerDoc();
+      final doc = fx.doc;
+      final before = rec(doc, fx.a);
+      await pumpPanel(tester, doc);
+      await doubleTapName(tester, fx.a);
+      await tester.enterText(fieldOf(fx.a), 'Hall');
+      await tester.pump();
+      // Pointer-down blurs the field (the rename commits); pointer-up, in
+      // the same frame, toggles the lock.
+      await tester.tap(byKey('layer-lock-${hx(fx.a)}'));
+      await settle(tester);
+      expect(doc.commands.undoDepth, 2);
+      expect(rec(doc, fx.a), before.copyWith(name: 'Hall', locked: true));
     });
 
     testWidgets(
@@ -663,6 +722,7 @@ void main() {
       expect(
           tester.widget<PopupMenuButton<int>>(byKey('layer-colour-$a')).enabled,
           isFalse);
+      expect(tooltipOf(tester, 'layers-delete'), 'Read-only document');
       // Tap them all anyway.
       await tester.tap(byKey('layer-row-$c'), warnIfMissed: false);
       await tester.pump(const Duration(milliseconds: 400));
