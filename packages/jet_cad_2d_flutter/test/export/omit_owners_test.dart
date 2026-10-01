@@ -29,14 +29,16 @@ void main() {
   List<DrawOp> painted(
     Set<Handle> omitOwners, {
     void Function(Handle)? onVisit,
+    DraftDocument? document,
   }) {
-    final index = SpatialIndex(doc);
+    final d = document ?? doc;
+    final index = SpatialIndex(d);
     final sink = RecordingDrawSink(shadesDashes: true);
     try {
       DraftPainter(
-        document: doc,
+        document: d,
         index: index,
-        resolver: DocumentStyleResolver(doc),
+        resolver: DocumentStyleResolver(d),
         minTextCapPixels: 0,
         omitOwners: omitOwners,
         debugOnVisit: onVisit,
@@ -47,14 +49,15 @@ void main() {
     return sink.ops;
   }
 
-  List<DrawOp> walked(Set<Handle> omitOwners) {
+  List<DrawOp> walked(Set<Handle> omitOwners, {DraftDocument? document}) {
+    final d = document ?? doc;
     final sink = RecordingDrawSink();
     referenceWalk(
-      doc,
+      d,
       sink,
       camera,
       viewport,
-      DocumentStyleResolver(doc),
+      DocumentStyleResolver(d),
       minTextCapPixels: 0,
       omitOwners: omitOwners,
     );
@@ -238,6 +241,85 @@ void main() {
         );
       });
     }
+
+    test(
+        'the painter does not report a skipped container leaf to '
+        'debugOnVisit', () {
+      // The container site's own skip: the definition's leaves are skipped
+      // inside `_drawContainer`, after the instance itself was reported.
+      final visited = <Handle>{};
+      painted({f.definition}, onVisit: visited.add);
+      for (final leaf in [
+        f.instanceLine,
+        f.instancePolyline,
+        f.pointInInstance,
+      ]) {
+        expect(visited, isNot(contains(leaf)));
+      }
+      // The instance is still reported, so the check above is not vacuous.
+      expect(visited, contains(f.instance));
+      expect(visited, contains(f.outerInstanceLeaf));
+    });
+  });
+
+  group('with an instance omitted (its attribute)', () {
+    // An ATTRIB is owned by its instance and placed in the instance's local
+    // space; it is a leaf of the instance's container (here the root), not
+    // of the definition. Omitting the instance drops the attribute and
+    // nothing of the definition, on both routes, each by its own route: the
+    // painter by the leaf's owner, the walk at its ATTRIB site.
+    final a = exportFixture();
+    final attrib = a.document.handleSeed.next();
+    a.document.commands.execute(
+      AddEntityCommand(
+        record: EntityRecord(
+          handle: attrib,
+          owner: a.instance,
+          kind: EntityKind.attrib,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.continuousLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const TrueColor(0x4E342E),
+          lineweight: 25,
+          transparency: 0,
+          flags: 0,
+          text: 'D-01',
+          tag: 'REF',
+          textStyle: ReservedHandles.standardTextStyle,
+          textAttrs: packTextAttrs(),
+        ),
+        payload: textPayload(Vector2(400, -250), 120),
+      ),
+    );
+    final painter = painted({a.instance}, document: a.document);
+    final reference = walked({a.instance}, document: a.document);
+
+    test('the painter and the reference draw the same drawing', () {
+      expectSameDrawing(painter, reference);
+    });
+
+    for (final (name, ops) in [
+      ('the painter', painter),
+      ('the reference', reference),
+    ]) {
+      test('$name drops the attribute and keeps the definition\'s leaves', () {
+        final drawn = drawnLeaves(ops);
+        expect(drawn, isNot(contains(attrib)));
+        expect(
+          drawn,
+          containsAll([a.instanceLine, a.instancePolyline, a.pointInInstance]),
+        );
+      });
+    }
+
+    test('with the default set both routes draw the attribute', () {
+      // Guards the fixture: the attribute is on the page and drawn at all.
+      expect(drawnLeaves(painted(const {}, document: a.document)),
+          contains(attrib));
+      expect(drawnLeaves(walked(const {}, document: a.document)),
+          contains(attrib));
+    });
   });
 
   test('the page viewport is the whole sheet, not a screen', () {
