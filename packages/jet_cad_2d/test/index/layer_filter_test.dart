@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
@@ -68,6 +69,54 @@ void _hideLayerZero(LayerFixture f) {
   f.doc.commands.execute(SetLayerCommand(
       f.layer(ReservedHandles.layerZero).copyWith(visible: false)));
 }
+
+/// A layer record named [name] at [handle], written straight into the
+/// table: handles are unique by convention only, and no command or loader
+/// refuses a table handle that an entity or node also carries (Task 3
+/// review, finding 1).
+void _layerAt(LayerFixture f, Handle handle, String name) {
+  final zero = f.layer(ReservedHandles.layerZero);
+  f.doc.tables.layers.add(LayerRecord(
+    handle: handle,
+    name: name,
+    color: const IndexedColor(2),
+    linetype: zero.linetype,
+    lineweight: zero.lineweight,
+    transparency: zero.transparency,
+    visible: true,
+    locked: false,
+  ));
+}
+
+/// An add of a [kind] entity on [layer] owned by [owner].
+AddEntityCommand _add(Handle handle, Handle owner, Handle layer,
+        EntityKind kind, List<double> coords, List<double> scalars,
+        {String text = ''}) =>
+    AddEntityCommand(
+      record: EntityRecord(
+        handle: handle,
+        owner: owner,
+        kind: kind,
+        layer: layer,
+        linetype: ReservedHandles.byLayerLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByLayerColor(),
+        lineweight: kByLayer,
+        transparency: kByLayer,
+        flags: 0,
+        text: text,
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList(coords),
+        scalars: Float64List.fromList(scalars),
+      ),
+    );
+
+/// An add of a line on [layer] owned by [owner], from (x1, y1) to (x2, y2).
+AddEntityCommand _addLine(Handle handle, Handle owner, Handle layer, double x1,
+        double y1, double x2, double y2) =>
+    _add(handle, owner, layer, EntityKind.line, [x1, y1, x2, y2], const []);
 
 void main() {
   group('the filter cache follows the tables (D6)', () {
@@ -192,6 +241,75 @@ void main() {
       f.doc.commands.undo();
       expect(index.rebuildCount, rebuilds + 1,
           reason: 'the removed one does not, and falls through as before');
+    });
+
+    test(
+        'an entity that shares its handle with a layer record: an edit to it '
+        'still reaches the index (Task 3 review, finding 1)', () {
+      final f = LayerFixture();
+      _layerAt(f, f.lineA, 'Shadow');
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      expect(_picked(index, f.lineAAt), f.lineA);
+      f.doc.commands.execute(SetEntityGeometryCommand(
+          f.lineA,
+          GeometryPayload(
+            coords: Float64List.fromList([300, 40, 380, 50]),
+            scalars: Float64List(0),
+          )));
+      final moved =
+          LayerFixture.groupTransform.transformPoint(Vector2(340, 45));
+      expect(_picked(index, moved), f.lineA);
+      expect(_picked(index, f.lineAAt), isNull);
+    });
+
+    test(
+        'an entity added at a layer record\'s handle is indexed (the '
+        'containsHandle guard)', () {
+      final f = LayerFixture();
+      final shared = f.doc.handleSeed.next();
+      _layerAt(f, shared, 'Shadow');
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      f.doc.commands.execute(
+          _addLine(shared, f.doc.rootHandle, f.a, -800, 250, -700, 290));
+      expect(_picked(index, Vector2(-750, 270)), shared);
+    });
+
+    test(
+        'an entity removed at a layer record\'s handle leaves the index (the '
+        'last-known-slot guard)', () {
+      final f = LayerFixture();
+      final shared = f.doc.handleSeed.next();
+      f.doc.commands.execute(
+          _addLine(shared, f.doc.rootHandle, f.a, -800, 250, -700, 290));
+      _layerAt(f, shared, 'Shadow');
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      expect(_picked(index, Vector2(-750, 270)), shared);
+      f.doc.commands.execute(RemoveEntityCommand(shared));
+      expect(_picked(index, Vector2(-750, 270)), isNull);
+    });
+
+    test(
+        'an instance added at a layer record\'s handle is indexed (the node '
+        'guard)', () {
+      final f = LayerFixture();
+      final shared = f.doc.handleSeed.next();
+      _layerAt(f, shared, 'Shadow');
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      final placed = Transform2.translation(-1400, 600)
+          .multiply(Transform2.rotation(-math.pi / 4));
+      f.doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: shared,
+        parent: f.doc.rootHandle,
+        transform: placed,
+        definition: f.table,
+        layer: f.a,
+      )));
+      expect(_instancesNear(index, placed.transformPoint(Vector2(40, 25))),
+          {shared});
     });
   });
 
@@ -391,6 +509,89 @@ void main() {
       expect(_picked(index, f.tableLineAt), isNull);
       f.doc.commands.undo();
       expect(_picked(index, f.attribProbe), f.attrib);
+      expect(_picked(index, f.tableLineAt), f.tableLine);
+    });
+
+    test(
+        'with layer 0 hidden, an ATTRIB on layer 0 owned by the nested '
+        'instance on layer 0 follows the instance on A; locking A unpicks it '
+        '(Task 3 review, finding 2)', () {
+      final f = LayerFixture();
+      final nestedAttrib = f.doc.handleSeed.next();
+      f.doc.commands.execute(_add(nestedAttrib, f.nested,
+          ReservedHandles.layerZero, EntityKind.attrib, [-50, 35], [4, 0],
+          text: 'LEG'));
+      final probe = LayerFixture.instanceTransform
+          .multiply(LayerFixture.nestedTransform)
+          .transformPoint(Vector2(-48.5, 36.5));
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      expect(_picked(index, probe), nestedAttrib);
+      _hideLayerZero(f);
+      final path = HitPath();
+      expect(_picked(index, probe, path), nestedAttrib);
+      // Indexed as a leaf of Table's container, transformed by the nested
+      // placement: the hit path names the root instance only.
+      expect(path.chainLength, 1);
+      expect(Handle(path.chain[0]), f.instance);
+      final drawn = <Handle>{};
+      // A crossing band over the glyph box's left edge, with the rendering
+      // filter (visibility, no lock).
+      index.forEachInstanceInBand(
+          _around(probe, 3), BandMode.crossing, _render, drawn.add);
+      expect(drawn, {f.instance},
+          reason: 'drawn through the instance on A, not on hidden layer 0');
+      f.doc.commands
+          .execute(SetLayerCommand(f.layer(f.a).copyWith(locked: true)));
+      expect(_picked(index, probe), isNull);
+    });
+
+    test(
+        'a line on an unlocked layer D inside Leg is unpickable once A is '
+        'locked: the nested instance on layer 0 follows A and is pruned '
+        'whole (Task 3 review, finding 3)', () {
+      final f = LayerFixture();
+      final d = f.doc.handleSeed.next();
+      _layerAt(f, d, 'D');
+      final onD = f.doc.handleSeed.next();
+      f.doc.commands.execute(_addLine(onD, f.leg, d, 5, 30, 25, 40));
+      final at = LayerFixture.instanceTransform
+          .multiply(LayerFixture.nestedTransform)
+          .transformPoint(Vector2(15, 35));
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      expect(_picked(index, at), onD);
+      f.doc.commands
+          .execute(SetLayerCommand(f.layer(f.a).copyWith(locked: true)));
+      expect(_picked(index, at), isNull);
+      expect(_snapped(index, at, _nearest), onD, reason: 'locked still snaps');
+    });
+
+    test(
+        'with layer 0 locked, the nested instance on layer 0 follows the '
+        'unlocked A: its leaves on D and on layer 0 stay pickable (Task 3 '
+        'review, finding 3; O2)', () {
+      // Locking A cannot tell O2 apart: the root instance on A is pruned
+      // before the nested one is reached. Locking layer 0 is the converse
+      // and can: a nested instance tested by its stored layer 0 would be
+      // pruned, though its effective layer is A.
+      final f = LayerFixture();
+      final d = f.doc.handleSeed.next();
+      _layerAt(f, d, 'D');
+      final onD = f.doc.handleSeed.next();
+      f.doc.commands.execute(_addLine(onD, f.leg, d, 5, 30, 25, 40));
+      final at = LayerFixture.instanceTransform
+          .multiply(LayerFixture.nestedTransform)
+          .transformPoint(Vector2(15, 35));
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      f.doc.commands.execute(SetCurrentLayerCommand(f.a));
+      f.doc.commands.execute(SetLayerCommand(
+          f.layer(ReservedHandles.layerZero).copyWith(locked: true)));
+      expect(_picked(index, f.lineZeroAt), isNull,
+          reason: 'the premise: layer 0 is locked');
+      expect(_picked(index, at), onD);
+      expect(_picked(index, f.legLineAt), f.legLine);
       expect(_picked(index, f.tableLineAt), f.tableLine);
     });
 

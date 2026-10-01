@@ -2770,8 +2770,17 @@ class SpatialIndex {
       // resolves to no entity or node and `_reconcileEntity` rebuilds
       // everything. A handle no longer in the table — a removed layer, or a
       // dangling current layer — still falls through to that one rebuild
-      // (S-4).
-      if (document.tables.layers[handle] != null) continue;
+      // (S-4). Only a handle that is *purely* a layer is skipped: handles
+      // are unique by convention, not by check (no command and no loader
+      // refuses a table handle that an entity or node also carries), and an
+      // entity edit must never be mistaken for a layer edit.
+      if (document.tables.layers[handle] != null &&
+          !document.entities.containsHandle(handle) &&
+          _lastKnownSlot[handle] == null &&
+          document.tree[handle] == null &&
+          document.tree.definition(handle) == null) {
+        continue;
+      }
       if (document.tree.definition(handle) != null) {
         structural = true;
         continue;
