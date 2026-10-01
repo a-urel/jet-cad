@@ -97,4 +97,56 @@ void main() {
       expectDrawn('undone: S on A again');
     });
   }
+
+  test(
+      'a wall whose ObjectLayer names a missing layer is on layer 0: with '
+      'layer 0 hidden it attaches through neither query (8b; reads '
+      'objectLayer, not the stored component)', () {
+    final fx = layerDoc();
+    final doc = fx.doc;
+    final [_, s] = addWallsOn(fx, c5Walls, fx.a);
+    addObjectOn(
+        doc,
+        OpeningParams(s, 450, 900, OpeningKind.door, swing: SwingSide.left),
+        fx.b);
+    // A dangling component: the object is on layer 0 (D2).
+    doc.commands.execute(
+        SetComponentCommand<ObjectLayer>(s, const ObjectLayer(Handle(0x7A7A))));
+    expect(objectLayer(doc, s), ReservedHandles.layerZero);
+    expect(doc.tables.layers[const Handle(0x7A7A)], isNull,
+        reason: 'premise: the stored layer is missing');
+    for (final k in kids(doc, s)) {
+      expect(layerOf(doc, k), ReservedHandles.layerZero,
+          reason: 'premise: S regenerated on layer 0');
+    }
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+    List<AttachedEnd> got(Vector2 q) => attachCandidates(doc, index, q,
+        objectSnap: true, thickest: thickestWall(doc));
+    final flush = {
+      l: fx.at(2450, 100),
+      c: fx.at(2500, 0),
+      r: fx.at(2550, 100),
+    };
+    final farEnd = fx.at(2500, 3000);
+    for (final MapEntry(key: side, value: q) in flush.entries) {
+      expect(got(q), [AttachedEnd(s, 0, side)],
+          reason: 'premise: layer 0 visible, S/0/${side.name} attaches');
+    }
+    expect(got(farEnd), [AttachedEnd(s, 1, c)]);
+
+    // Hide layer 0: A current first, so layer 0 is not the effective
+    // current layer (decision 7).
+    doc.commands.execute(SetCurrentLayerCommand(fx.a));
+    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+    doc.commands.execute(SetLayerCommand(zero.copyWith(visible: false)));
+    for (final MapEntry(key: side, value: q) in flush.entries) {
+      expect(bruteCandidates(doc, q), [AttachedEnd(s, 0, side)],
+          reason: 'premise: S/0/${side.name} is still a point');
+      expect(got(q), isEmpty,
+          reason: 'S on hidden layer 0: S/0/${side.name} does not attach '
+              'through its drawn door');
+    }
+    expect(got(farEnd), isEmpty);
+  });
 }

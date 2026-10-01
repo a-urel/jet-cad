@@ -29,6 +29,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../support/layer_fixture.dart';
 import '../support/symbol_fixtures.dart' show buildValidLibrary, bytesOf;
+import '../support/wall_fixture.dart' show worldWallOf;
 
 /// Every group node of [doc], by handle.
 Set<Handle> groupsOf(DraftDocument doc) =>
@@ -252,5 +253,44 @@ void main() {
     }
     doc.commands.undo();
     expect(doc.tree.nodes.whereType<InstanceNode>(), isEmpty);
+  });
+
+  test(
+      'a Wall tool click in the band of a wall on a hidden layer joins its '
+      'end exactly (decision 8: a hidden wall still joins; 8b)', () {
+    final l = layerFixture(room: false, dimension: false);
+    final doc = l.doc;
+    // A wall on its own, away from the box, on the hidden C, in its own
+    // rotated group.
+    final [hidden] =
+        addWallsOn(l, const [W(12000, 1000, 15000, 1000, 200)], l.c);
+    expect(doc.tables.layers[l.c]!.visible, isFalse, reason: 'premise');
+    for (final k in kids(doc, hidden)) {
+      expect(layerOf(doc, k), l.c, reason: 'premise: its children on C');
+    }
+    final w = worldWallOf(doc, hidden);
+    expect(doc.tree.accumulatedTransform(hidden).isIdentity, isFalse,
+        reason: 'premise: a rotated group');
+    doc.commands.clearHistory();
+    final ctx = toolContextOf(doc);
+    final settings = ValueNotifier<WallSettings>(const WallSettings());
+    final tool = WallTool(settings);
+    addTearDown(() {
+      tool.dispose();
+      settings.dispose();
+    });
+    final before = groupsOf(doc);
+    // In the band, 99.5 mm short of the end along the centreline and 40.25
+    // mm off it: within one thickness of the end.
+    final click = l.at(14900.5, 1040.25);
+    expect((click - w.e).length, greaterThan(1),
+        reason: 'premise: the click is not the end itself');
+    clickWith(tool, ctx, click);
+    clickWith(tool, ctx, l.at(14900.75, 3500.5));
+    final added = groupsOf(doc).difference(before);
+    expect(added, hasLength(1), reason: 'premise: one wall was drawn');
+    final p = doc.components.get<WallParams>(added.single)!;
+    expect([p.start.x, p.start.y], [w.e.x, w.e.y],
+        reason: 'the new wall starts bitwise at the hidden wall\'s end');
   });
 }
