@@ -25,7 +25,9 @@ const double _pointsPerMm = 72 / 25.4;
 ///   stretched to the advance `document.textMeasurer` laid its box out with.
 ///
 /// The bytes come from `PdfDocument.write`, not `save()`, so no isolate is
-/// spawned. The export reads [document] and writes nothing to it.
+/// spawned. The export reads [document] and writes nothing to it: its
+/// codec bytes, its `stateId` and its dispatcher's mutation hooks are as
+/// they were (see [_withExportIndex]), on a throw as well.
 Future<Uint8List> exportPagePdf({
   required DraftDocument document,
   required PageComponent page,
@@ -39,8 +41,7 @@ Future<Uint8List> exportPagePdf({
     pdf,
     pageFormat: PdfPageFormat(camera.size.width, camera.size.height),
   );
-  final index = SpatialIndex(document);
-  try {
+  _withExportIndex(document, (index) {
     final sink = PdfDrawSink(
       document: pdf,
       page: pdfPage,
@@ -58,10 +59,42 @@ Future<Uint8List> exportPagePdf({
       minTextCapPixels: 0.0,
       omitOwners: omitOwners,
     ).paint(sink, camera.camera, camera.size);
-  } finally {
-    index.dispose();
-  }
+  });
   final out = PdfStream();
   await pdf.write(out);
   return out.output();
+}
+
+/// Runs [body] with a `SpatialIndex` over [document], then leaves the
+/// document's mutation hooks exactly as it found them, on a throw as well.
+///
+/// `SpatialIndex(document)` takes the dispatcher's single `onAfterMutate`
+/// and `onBeforeMutate` slots, and its `dispose()` nulls them. The engine
+/// offers no index that leaves them alone, and the document an export reads
+/// is the app's live one, whose long-lived screen index owns those slots:
+/// without the restore, one export would unhook it for good. Both hooks are
+/// captured before the index is built and put back after it is disposed.
+///
+/// [body] is synchronous on purpose: no edit can run between the capture and
+/// the restore, so nothing the restore overwrites can be newer than what it
+/// captured. Shared by every export path.
+void _withExportIndex(
+  DraftDocument document,
+  void Function(SpatialIndex index) body,
+) {
+  final commands = document.commands;
+  final afterMutate = commands.onAfterMutate;
+  final beforeMutate = commands.onBeforeMutate;
+  try {
+    final index = SpatialIndex(document);
+    try {
+      body(index);
+    } finally {
+      index.dispose();
+    }
+  } finally {
+    commands
+      ..onAfterMutate = afterMutate
+      ..onBeforeMutate = beforeMutate;
+  }
 }

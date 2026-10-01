@@ -468,11 +468,9 @@ Future<PdfContent> _render(
   Uint8List fontBytes,
   TextMeasurer measurer,
   TextStyleRecord Function(Handle) textStyleOf,
-  void Function(PdfDrawSink sink) body, {
-  bool simpleTrueTypeFonts = false,
-}) async {
-  final document =
-      PdfDocument(compress: false, simpleTrueTypeFonts: simpleTrueTypeFonts);
+  void Function(PdfDrawSink sink) body,
+) async {
+  final document = PdfDocument(compress: false);
   final page = PdfPage(document, pageFormat: PdfPageFormat(width, height));
   body(PdfDrawSink(
     document: document,

@@ -234,6 +234,98 @@ void main() {
     expect(wc.advance, closeTo(70, kPdfRounding / wc.horizontalScale * 70));
   });
 
+  group('T-9: the dispatcher\'s mutation hooks are left as found', () {
+    // A region nothing in the fixture reaches, for the "screen" index's
+    // query after an edit.
+    final probe = Aabb2(Vector2(19900, 19900), Vector2(20200, 20200));
+    int count(SpatialIndex index) {
+      var n = 0;
+      index.forEachInRect(probe, const QueryFilter.all(), (_) => n++);
+      return n;
+    }
+
+    test(
+        'with a screen index on the document: the same hooks after a normal '
+        'and a throwing export, and the screen index hears the next edit',
+        () async {
+      final f = exportFixture(measurer: FlutterTextMeasurer());
+      final screen = SpatialIndex(f.document);
+      addTearDown(screen.dispose);
+      final commands = f.document.commands;
+      final after = commands.onAfterMutate, before = commands.onBeforeMutate;
+      expect([after, before], everyElement(isNotNull));
+
+      await export(f);
+      expect(commands.onAfterMutate, after, reason: 'normal export');
+      expect(commands.onBeforeMutate, before, reason: 'normal export');
+
+      // Bytes that are no font: the first text throws inside the paint.
+      await expectLater(
+        exportPagePdf(
+          document: f.document,
+          page: f.page,
+          fontBytes: Uint8List.fromList(List.filled(64, 7)),
+          compress: false,
+        ),
+        throwsA(anything),
+      );
+      expect(commands.onAfterMutate, after, reason: 'throwing export');
+      expect(commands.onBeforeMutate, before, reason: 'throwing export');
+
+      expect(count(screen), 0);
+      _addLine(f.document, [19950, 19950, 20100, 20100],
+          rgb: 0x5D4037, lineweight: 35);
+      expect(count(screen), 1, reason: 'the screen index saw the edit');
+    });
+
+    test('with no index on the document: no hook is left behind', () async {
+      final f = exportFixture(measurer: FlutterTextMeasurer());
+      final commands = f.document.commands;
+      expect([commands.onAfterMutate, commands.onBeforeMutate],
+          everyElement(isNull));
+      await export(f);
+      expect([commands.onAfterMutate, commands.onBeforeMutate],
+          everyElement(isNull));
+      await expectLater(
+        exportPagePdf(
+          document: f.document,
+          page: f.page,
+          fontBytes: Uint8List.fromList(List.filled(64, 7)),
+          compress: false,
+        ),
+        throwsA(anything),
+      );
+      expect([commands.onAfterMutate, commands.onBeforeMutate],
+          everyElement(isNull));
+    });
+  });
+
+  test(
+      'another sheet: A3 portrait at 1:100, off the origin, is a 297 × 420 mm '
+      'MediaBox with the ACI 7 line where the page puts it', () async {
+    final f = exportFixture(measurer: FlutterTextMeasurer());
+    final a3 = f.page.copyWith(
+      widthMm: 297,
+      heightMm: 420,
+      orientation: PageOrientation.portrait,
+      scaleDenominator: 100,
+    );
+    f.document.commands.execute(
+      SetComponentCommand<PageComponent>(f.document.rootHandle, a3),
+    );
+    expect([a3.originX, a3.originY], [kExportOriginX, kExportOriginY]);
+    final bytes = await exportPagePdf(
+        document: f.document, page: a3, fontBytes: fontBytes, compress: false);
+    final content = PdfContent.parse(bytes, inflate: zlib.decode);
+    expect(content.mediaBox[0], 0);
+    expect(content.mediaBox[1], 0);
+    expect(content.mediaBox[2], closeTo(297 * u, kPdfRounding));
+    expect(content.mediaBox[3], closeTo(420 * u, kPdfRounding));
+    final p = _strokesStartingAt(content, toPage(Vector2(3600, 300), 100));
+    expect(p, hasLength(1));
+    expect(p.single.state.strokeRgb, [0, 0, 0]);
+  });
+
   group('T-8 (PDF): the separator', () {
     final f = exportFixture(measurer: FlutterTextMeasurer());
     final group =
@@ -357,8 +449,8 @@ PdfXY _moveOperands(PdfContent c, PdfContentPath p) {
 }
 
 /// The residual the path was drawn under: `CTM × pageSetUp⁻¹`, and the page
-/// set-up `[1 0 0 −1 0 H]` is its own inverse. Every page here is A4
-/// landscape.
+/// set-up `[1 0 0 −1 0 H]` is its own inverse. Only its linear part is used,
+/// which H does not touch, so A4 landscape's H serves every page.
 PdfContentMatrix _residualOf(PdfContentPath p) =>
     p.state.ctm.times(const PdfContentMatrix(1, 0, 0, -1, 0, 210 * 72 / 25.4));
 
