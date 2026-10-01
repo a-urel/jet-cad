@@ -96,6 +96,12 @@ void main() {
     expect(entities.kindAt(slot(f.fill)), EntityKind.fill);
     expect(entities.textAt(slot(f.labelBig)), 'Yatak Odası');
     expect(entities.textAt(slot(f.labelWc)), 'WC');
+    final wcStyle = entities.textStyleAt(slot(f.labelWc));
+    expect(wcStyle, f.labelWcStyle);
+    expect(wcStyle, isNot(ReservedHandles.standardTextStyle));
+    final wcRecord = doc.textStyleOf(wcStyle);
+    expect([wcRecord.handle, wcRecord.name, wcRecord.fontFamily],
+        [f.labelWcStyle, 'Label', 'Arial']);
     expect(entities.linetypeAt(slot(f.dashed)), ReservedHandles.dashedLinetype);
     final dashed = doc.tables.linetypes[ReservedHandles.dashedLinetype]!;
     expect(dashed.name, 'DASHED');

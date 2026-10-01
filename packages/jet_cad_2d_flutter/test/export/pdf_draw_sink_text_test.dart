@@ -229,6 +229,122 @@ void main() {
       _expectFill(content.textRuns.single, style, text);
     });
   });
+
+  group('the advance comes from the measurer and the style it is given', () {
+    final residual = Transform2.translation(420, 310)
+        .multiply(Transform2.scale(0.05, -0.05))
+        .multiply(Transform2.rotation(-0.4));
+    const style = ResolvedStyle(
+      argb: 0xFF37474F,
+      lineweightHundredths: 35,
+      linetype: ReservedHandles.continuousLinetype,
+      linetypeScale: 1,
+    );
+    const page = (w: 841.8897637795275, h: 595.2755905511812);
+
+    test(
+        'any TextMeasurer: a MetricModelMeasurer\'s 0.55 em per glyph is the '
+        'run\'s advance (a sink that measures with its own '
+        'FlutterTextMeasurer gets Ahem\'s 1 em)', () async {
+      final measurer = MetricModelMeasurer(advanceRatio: 0.55);
+      final textStyleOf = DraftDocument.empty().textStyleOf;
+      final content = await _render(
+          page.w, page.h, fontBytes, measurer, textStyleOf, (sink) {
+        sink
+          ..beginResidual(residual)
+          ..text('Yatak Odası', ReservedHandles.standardTextStyle, style)
+          ..endResidual();
+      });
+      final run = content.textRuns.single;
+      // 11 glyphs · 0.55 em · 100.
+      expect(run.advance, closeTo(605, _advanceBound(run)));
+    });
+
+    test(
+        'the entity\'s own style record is measured, not the standard one (a '
+        'sink that measures every text under Standard gets the wrong width)',
+        () async {
+      final doc = DraftDocument.empty();
+      final labelStyle = doc.handleSeed.next();
+      doc.tables.textStyles.add(TextStyleRecord(
+          handle: labelStyle, name: 'Label', fontFamily: 'Arial'));
+      final measurer = _PerStyleMeasurer({'Standard': 0.55, 'Label': 0.35});
+      final content = await _render(
+          page.w, page.h, fontBytes, measurer, doc.textStyleOf, (sink) {
+        sink
+          ..beginResidual(residual)
+          ..text('WC', labelStyle, style)
+          ..text('WC', ReservedHandles.standardTextStyle, style)
+          ..endResidual();
+      });
+      final [label, standard] = content.textRuns;
+      // 2 glyphs · 0.35 em · 100, and 2 · 0.55 · 100.
+      expect(label.advance, closeTo(70, _advanceBound(label)));
+      expect(standard.advance, closeTo(110, _advanceBound(standard)));
+    });
+
+    test(
+        'a document that writes the font as a simple TrueType throws on the '
+        'first text, before anything is written for it (w_pdf reproduces the '
+        'CID path\'s /W only)', () async {
+      final document = PdfDocument(compress: false, simpleTrueTypeFonts: true);
+      final pdfPage =
+          PdfPage(document, pageFormat: PdfPageFormat(page.w, page.h));
+      final sink = PdfDrawSink(
+        document: document,
+        page: pdfPage,
+        pixelsPerPaperMm: 72 / 25.4,
+        fontBytes: fontBytes,
+        measurer: MetricModelMeasurer(),
+        textStyleOf: DraftDocument.empty().textStyleOf,
+      )..beginResidual(residual);
+      expect(
+        () => sink.text('WC', ReservedHandles.standardTextStyle, style),
+        throwsStateError,
+      );
+      // A stroke after it, in screen space, so the page has content (the
+      // package drops a stream that painted nothing).
+      sink
+        ..endResidual()
+        ..polyline(Float64List.fromList([10, 20, 300, 40]), 2, style,
+            closed: false);
+      final out = PdfStream();
+      await document.write(out);
+      expect(PdfContent.parse(out.output(), inflate: zlib.decode).operatorNames,
+          ['cm', 'J', 'j', 'M', 'RG', 'w', 'gs', 'm', 'l', 'S'],
+          reason: 'no q, cm, rg or gs left behind by the refused text');
+      // The same call on a default document draws (the guard is not a
+      // blanket refusal).
+      final content = await _render(page.w, page.h, fontBytes,
+          MetricModelMeasurer(), DraftDocument.empty().textStyleOf, (sink) {
+        sink
+          ..beginResidual(residual)
+          ..text('WC', ReservedHandles.standardTextStyle, style)
+          ..endResidual();
+      });
+      expect(content.textRuns.single.string, 'WC');
+      expect(content.textRuns.single.fontInfo.subtype, '/Type0');
+    });
+  });
+}
+
+/// A measurer whose advance depends on the style **record** it is given: so
+/// a sink that measures under any other style than the entity's measures a
+/// different width.
+final class _PerStyleMeasurer implements TextMeasurer {
+  _PerStyleMeasurer(this.emPerGlyph);
+
+  final Map<String, double> emPerGlyph;
+
+  @override
+  TextMetrics measure({required String text, required TextStyleRecord style}) =>
+      TextMetrics(
+        advanceWidth:
+            text.runes.length * emPerGlyph[style.name]! * kNominalTextPixels,
+        ascent: 80,
+        descent: 20,
+        capHeight: 70,
+      );
 }
 
 /// One recorded text and the residual it was drawn under.
@@ -350,11 +466,13 @@ Future<PdfContent> _render(
   double width,
   double height,
   Uint8List fontBytes,
-  FlutterTextMeasurer measurer,
+  TextMeasurer measurer,
   TextStyleRecord Function(Handle) textStyleOf,
-  void Function(PdfDrawSink sink) body,
-) async {
-  final document = PdfDocument(compress: false);
+  void Function(PdfDrawSink sink) body, {
+  bool simpleTrueTypeFonts = false,
+}) async {
+  final document =
+      PdfDocument(compress: false, simpleTrueTypeFonts: simpleTrueTypeFonts);
   final page = PdfPage(document, pageFormat: PdfPageFormat(width, height));
   body(PdfDrawSink(
     document: document,

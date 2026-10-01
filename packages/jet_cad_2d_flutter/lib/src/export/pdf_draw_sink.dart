@@ -6,7 +6,6 @@ import 'package:pdf/pdf.dart';
 import 'package:vector_math/vector_math_64.dart' show Matrix4;
 
 import '../draw_sink.dart';
-import '../flutter_text_measurer.dart';
 
 /// A [DrawSink] that writes PDF operators onto one page (spec 13 D3).
 ///
@@ -75,8 +74,9 @@ class PdfDrawSink implements DrawSink {
 
   /// Measures a text's advance the way the painter laid its box out, so the
   /// PDF's run is stretched to that same advance. The painter measures with
-  /// the document's measurer; the caller passes one that agrees with it.
-  final FlutterTextMeasurer measurer;
+  /// `document.textMeasurer`; `exportPagePdf` passes that same instance, so
+  /// the two cannot disagree. The sink calls nothing but [TextMeasurer.measure].
+  final TextMeasurer measurer;
 
   /// Resolves a text entity's style handle to the record [measurer] needs,
   /// as `CanvasDrawSink.textStyleOf`.
@@ -278,9 +278,19 @@ class PdfDrawSink implements DrawSink {
   @override
   void text(String text, Handle style, ResolvedStyle resolved) {
     if (text.isEmpty) return;
+    final font = _font;
+    // `w_pdf` below reproduces the `/W` widths of the CID (`/Type0`) path. A
+    // simple TrueType font (`simpleTrueTypeFonts`, or a font the package does
+    // not write as CID) has `/Widths` by byte code instead, and `Tz` would
+    // then be silently wrong.
+    if (!font.isCidFont) {
+      throw StateError(
+        'PdfDrawSink needs a font written as a CID /Type0 font; this '
+        'document writes it as a simple /TrueType font',
+      );
+    }
     _pushTransform();
     _fillState(resolved);
-    final font = _font;
     final pdfAdvance = _pdfTextAdvance(font, text, kNominalTextPixels);
     final flutterAdvance =
         measurer.measure(text: text, style: textStyleOf(style)).advanceWidth;

@@ -65,8 +65,13 @@ final class ExportFixture {
   late final Handle labelBig;
 
   /// "WC", 25 mm high: 0.5 mm on paper at 1:50, a cap height of 1.42 pt,
-  /// below the default level-of-detail cull of 3.
+  /// below the default level-of-detail cull of 3. Under [labelWcStyle], not
+  /// the Standard style.
   late final Handle labelWc;
+
+  /// The text style record "WC" is drawn under ("Label", family `Arial`): a
+  /// second record, so no fixture text relies on the Standard default.
+  late final Handle labelWcStyle;
 
   /// An ACI 7 line: the foreground colour, white on the dark screen page.
   late final Handle aci7Line;
@@ -180,7 +185,13 @@ ExportFixture exportFixture({
   );
   _addFill(doc, root, f);
   f.labelBig = _text(doc, root, 'Yatak Odası', 4500, 3500, 250);
-  f.labelWc = _text(doc, root, 'WC', 10500, 4500, 25);
+  f.labelWcStyle = doc.handleSeed.next();
+  doc.tables.textStyles.add(TextStyleRecord(
+    handle: f.labelWcStyle,
+    name: 'Label',
+    fontFamily: 'Arial',
+  ));
+  f.labelWc = _text(doc, root, 'WC', 10500, 4500, 25, style: f.labelWcStyle);
   f.aci7Line = _leaf(
     doc,
     root,
@@ -344,8 +355,9 @@ Handle _text(
   String text,
   double x,
   double y,
-  double height,
-) {
+  double height, {
+  Handle style = ReservedHandles.standardTextStyle,
+}) {
   final handle = doc.handleSeed.next();
   doc.commands.execute(
     AddEntityCommand(
@@ -362,7 +374,7 @@ Handle _text(
         transparency: 0,
         flags: 0,
         text: text,
-        textStyle: ReservedHandles.standardTextStyle,
+        textStyle: style,
         textAttrs: packTextAttrs(),
       ),
       payload: textPayload(Vector2(x, y), height),

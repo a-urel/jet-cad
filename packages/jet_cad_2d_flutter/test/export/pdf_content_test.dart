@@ -296,6 +296,80 @@ void main() {
         ['/TrueType', null, null, '/FontFile2'],
       );
     });
+
+    test(
+        'font info names a program only when the key resolves to a stream (a '
+        'reader that reports /FontFile2 because the key is present)', () {
+      final c = read(
+        'BT /F1 10 Tf [<0001>] TJ /F2 10 Tf [<0001>] TJ ET',
+        resources: '/Font << /F1 30 0 R /F2 33 0 R >>',
+        objects: [
+          ...objects,
+          // F1: the descendant's descriptor has /FontFile2 as a dictionary.
+          '30 0 obj\n<< /Type /Font /Subtype /Type0 /Encoding /Identity-H '
+              '/DescendantFonts [31 0 R] /ToUnicode 7 0 R >>\nendobj',
+          '31 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /W [0 8 0 R] '
+              '/FontDescriptor << /Type /FontDescriptor /FontFile2 << >> >> '
+              '>>\nendobj',
+          // F2: /FontFile2 is a reference to a number.
+          '33 0 obj\n<< /Type /Font /Subtype /Type0 /Encoding /Identity-H '
+              '/DescendantFonts [34 0 R] /ToUnicode 7 0 R >>\nendobj',
+          '34 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /W [0 8 0 R] '
+              '/FontDescriptor << /Type /FontDescriptor /FontFile2 35 0 R >> '
+              '>>\nendobj',
+          '35 0 obj\n42\nendobj',
+        ],
+      );
+      final [f1, f2] = [for (final t in c.textRuns) t.fontInfo];
+      expect([f1.descendantSubtype, f1.fontFile], ['/CIDFontType2', null]);
+      expect([f2.descendantSubtype, f2.fontFile], ['/CIDFontType2', null]);
+    });
+
+    test(
+        'a /ToUnicode destination that is not whole UTF-16BE code units '
+        'throws (a reader that drops the tail of <1F600>, as the pdf package '
+        'writes a code point above U+FFFF, reads the wrong string)', () {
+      for (final (what, map) in [
+        ('bfchar', '1 beginbfchar\n<0001> <1F600>\nendbfchar\n'),
+        ('bfrange', '1 beginbfrange\n<0001> <0002> <1F600>\nendbfrange\n'),
+        (
+          'bfrange array',
+          '1 beginbfrange\n<0001> <0001> [<00E>]\nendbfrange\n'
+        ),
+      ]) {
+        final cmap = '/CIDInit/ProcSet findresource begin\n$map end';
+        expect(
+          () => read(
+            'BT /F1 10 Tf [<0001>] TJ ET',
+            resources: '/Font << /F1 40 0 R >>',
+            objects: [
+              ...objects,
+              '40 0 obj\n<< /Type /Font /Subtype /Type0 /Encoding /Identity-H '
+                  '/DescendantFonts [6 0 R] /ToUnicode 41 0 R >>\nendobj',
+              '41 0 obj\n<< /Length ${cmap.length} >>\nstream\n$cmap\n'
+                  'endstream\nendobj',
+            ],
+          ),
+          throwsFormatException,
+          reason: what,
+        );
+      }
+      // The well-formed surrogate pair reads as the astral code point.
+      const good = '/CIDInit/ProcSet findresource begin\n'
+          '1 beginbfchar\n<0001> <D83DDE00>\nendbfchar\nend';
+      final c = read(
+        'BT /F1 10 Tf [<0001>] TJ ET',
+        resources: '/Font << /F1 40 0 R >>',
+        objects: [
+          ...objects,
+          '40 0 obj\n<< /Type /Font /Subtype /Type0 /Encoding /Identity-H '
+              '/DescendantFonts [6 0 R] /ToUnicode 41 0 R >>\nendobj',
+          '41 0 obj\n<< /Length ${good.length} >>\nstream\n$good\n'
+              'endstream\nendobj',
+        ],
+      );
+      expect(c.textRuns.single.string, '\u{1F600}');
+    });
   });
 
   test(

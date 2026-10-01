@@ -1112,12 +1112,20 @@ final class _FontMetrics {
   static Map<int, String> _parseCMap(String cmap) {
     final map = <int, String>{};
     int hexInt(String h) => int.parse(h, radix: 16);
-    String utf16(String h) {
-      final units = [
-        for (var i = 0; i + 3 < h.length; i += 4) hexInt(h.substring(i, i + 4)),
+    // A destination is UTF-16BE: whole code units of four hex digits. Any
+    // other length is malformed (the pdf package writes `<1F600>` for a code
+    // point above U+FFFF); the reader throws rather than drop the tail.
+    List<int> utf16Units(String h) {
+      if (h.isEmpty || h.length % 4 != 0) {
+        throw FormatException(
+            '/ToUnicode destination <$h> is not whole UTF-16BE code units');
+      }
+      return [
+        for (var i = 0; i < h.length; i += 4) hexInt(h.substring(i, i + 4)),
       ];
-      return String.fromCharCodes(units);
     }
+
+    String utf16(String h) => String.fromCharCodes(utf16Units(h));
 
     final hex = RegExp(r'<([0-9A-Fa-f\s]*)>');
     for (final block
@@ -1143,11 +1151,7 @@ final class _FontMetrics {
             map[c] = utf16(items[c - lo]);
           }
         } else {
-          final base = dst.substring(1, dst.length - 1);
-          final units = [
-            for (var i = 0; i + 3 < base.length; i += 4)
-              hexInt(base.substring(i, i + 4)),
-          ];
+          final units = utf16Units(dst.substring(1, dst.length - 1));
           for (var c = lo; c <= hi; c++) {
             final u = [...units];
             u[u.length - 1] += c - lo;
