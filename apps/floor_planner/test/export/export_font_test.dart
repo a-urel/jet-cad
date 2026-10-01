@@ -174,7 +174,11 @@ void main() {
       expect(start, isNonNegative, reason: 'premise: main() is found');
       final end = source.indexOf('\n}', start);
       expect(end, greaterThan(start), reason: 'premise: its body ends');
-      final body = source.substring(start, end);
+      // Comments do not run: a commented-out call is no call.
+      final body = source
+          .substring(start, end)
+          .replaceAll(RegExp(r'//[^\n]*'), '')
+          .replaceAll(RegExp(r'/\*.*?\*/', dotAll: true), '');
       final register = body.indexOf('registerFontLicences();');
       final run = body.indexOf('runApp(');
       expect(register, isNonNegative, reason: 'the licence is registered');
