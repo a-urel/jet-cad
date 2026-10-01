@@ -1,9 +1,10 @@
 # Export and print (13) — design
 
-**Date:** 2026-10-01. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-10-01. **Status:** design, **revision 3**. Revision 1
 (`054d6df`) was reviewed independently: "Ready with amendments", 0
 blocking, 10 major, 8 minor, 2 nit (W-1 to W-20), each applied below; see
-[Revision 2](#revision-2).
+[Revision 2](#revision-2). Its spot check (`818b835`): "Ready with
+amendments" (S-1 to S-7), applied in [Revision 3](#revision-3).
 **Sub-project:** `roadmap/13-export-and-print.md`. **Size:** M, one plan
 (the human's decision 9), about nine tasks.
 **Branch:** `spec-13/export-and-print`, cut from `main` at `a0a1920`.
@@ -201,7 +202,9 @@ graphics}.dart`; pub.dev's metadata for `pdf` 3.13.1 and `printing` 5.15.1.
 - Dependencies: `pdf` in the render package; `printing` in the app. The
   plan pins the newest versions this workspace resolves (at the time of
   writing `pdf ^3.13.1`, `printing ^5.15.1`), records their licences, and
-  raises the app's `flutter` bound to what `printing` requires (R-4).
+  raises the `flutter:` bounds of the app **and** of `jet_cad_2d_flutter`
+  (today `">=3.24.0"`) to what `printing` and `pdf` require; no `sdk:`
+  bound moves (R-4).
 
 ### D2 — The page camera
 
@@ -287,7 +290,7 @@ One page of the effective paper size in pt. Builds a `SpatialIndex`
 (disposed in `finally`), a `DocumentStyleResolver(document, foreground:
 0x000000)` — **the paper is white whatever `page.background` is** (F-7) —
 a `DraftPainter(minTextCapPixels: 0.0, omitOwners:)`, the page camera at
-`u = 72 / 25.4`, and a `PdfDrawSink`; paints; returns `save()`'s bytes. It
+`u = 72 / 25.4`, and a `PdfDrawSink`; paints; returns the bytes `write(PdfStream)` produced. It
 reads the document and writes nothing to it. No `DraftCanvas`, no
 `TileCache`, no `VerticesDrawSink` (D10).
 
@@ -401,7 +404,8 @@ moment of export (`liveObjectsOf` returns a list).
 - `ShellCommand(id: 'print', label: 'Print…', icon: Icons.print_outlined,
   shortcuts: Cmd/Ctrl+P)`, after `Export…`; enabled as D8.
 - Runs `exportPagePdf` once and hands those bytes to a `PagePrinter`
-  (`Future<void> print(Uint8List pdf, String name)`); the production one
+  (`Future<void> print(Uint8List pdf, String name, PdfPageFormat format)`,
+  `format` the page's size in pt); the production one
   calls `Printing.layoutPdf(onLayout: (_) async => pdf, name:, format:
   PdfPageFormat(effW · 72 / 25.4, effH · 72 / 25.4), dynamicLayout:
   false)` — without `format` the dialog opens on `PdfPageFormat.standard`
@@ -472,11 +476,20 @@ polyline, a dashed polyline, an arc of sweep −110° and a circle, a filled
 polygon with alpha 0x80, a text "Yatak Odası" 250 mm high **and a text "WC" 25 mm high** (0.5 mm
 on paper, a cap height of 1.42 pt, below the default LOD cull of 3), a
 **point entity inside the instance**, a nested group (with one line) inside
-a group that is in `omitOwners` in T-2, an instance
+a group (the "outer group") that is in `omitOwners` in T-2 and that also
+has **one line of its own** and **an instance of its own** (whose leaves
+must draw: D6), an instance
 **rotated 30°, scaled (1.5, −0.75)**, with **colour and lineweight
 overrides** (red, 0.70 mm) over a definition whose `basePoint` is not the
 origin, an ACI 7 line, a separator group, and one line wholly outside the
 sheet.
+
+**Route per test** (a mutant in `page_export.dart` is seen only by a test
+that goes through it): T-1 calls `pageCamera`; T-2 builds its own painter
+and walk; T-3 and T-3b feed `PdfDrawSink` directly (ops recorded at the
+page camera, or calls by hand); **T-4, T-5, T-6, T-8 (PDF) and T-9 call
+`exportPagePdf(compress: false)`**; **T-7, T-8 (PNG) and T-9 call
+`exportPagePng`**; T-10 goes through the app's flows.
 
 - **T-1. The page camera.** Sheet corners map to `(0, 0)`, `(W, 0)`,
   `(W, H)`, `(0, H)` within `Tolerance`; at 1:50 and 1:100, portrait and
@@ -485,7 +498,8 @@ sheet.
   `referenceWalk`, both with `omitOwners = {separator, outer group}` and
   `minTextCapPixels: 0`, into `RecordingDrawSink`, compared by
   `sink_comparison.dart`. Both lists contain the instance's leaves, both
-  texts ("WC" included) and the nested group's line, and contain no
+  texts ("WC" included), the nested group's line and the outer group's
+  instance's leaves, and contain no
   separator op, nothing of the outer group's own leaves and nothing from
   the outside line.
 - **T-3. `PdfDrawSink` geometry.** Ops recorded at the page camera replayed
@@ -518,15 +532,18 @@ sheet.
   `CIDFontType2` with a `FontFile2`; the string's advance from the written
   `/W` widths times `Tz / 100` equals the measured width within the
   5-decimal bound; the run, mapped through the CTM, starts at the box's
-  baseline origin; **the direction of text space** — the device image of
-  text-space `(0, 1)` — equals the residual's image of glyph-space
-  `(0, 1)` (an extra flip reverses it); "Yatak Odası" round-trips through
+  baseline origin; **the direction of text space** — the PDF page-space
+  image of text-space `(0, 1)` under the parsed CTM and text matrix —
+  equals `pageSetUp · residual · (0, 1)` as a direction, `pageSetUp` being
+  `[1 0 0 −1 0 H]` (an extra flip reverses it; the expected value already
+  contains the page flip, so it must not be "fixed" by adding one); "Yatak Odası" round-trips through
   the font's `/ToUnicode`; "WC" is present.
 - **T-6. Colour and alpha.** The ACI 7 line strokes black (`0 0 0 RG`) on a
   page whose screen foreground is white; the instance's leaves stroke red;
   the 0x80 fill is under an `ExtGState` with `ca` 0.50196…; the opaque op
   drawn after it is under `ca` / `CA` 1.
-- **T-7. The PNG.** Pixel sizes for A4 and A3, portrait and landscape, at
+- **T-7. The PNG.** The "WC" label's box has dark pixels at 300 dpi.
+  Pixel sizes for A4 and A3, portrait and landscape, at
   96, 150, 300 dpi; `pHYs` is present with `round(dpi / 0.0254)`; at 300
   dpi a horizontal 0.50 mm line at a known paper position is dark at its
   expected row and white at ±(width/2 + 2) px; an oblique line, sampled
@@ -545,8 +562,8 @@ sheet.
   a pumped shell whose document **contains a separator** and whose camera
   is **zoomed to 400 % and panned off the sheet** (the export API takes no
   camera, so passing the screen's is ruled out by construction; this
-  checks the whole flow); PNG flows and the PDF write run under
-  `tester.runAsync`: Export → PDF writes `<name>.pdf` whose content, read by the
+  checks the whole flow); the PNG flows run under `tester.runAsync`
+  (`toImage`); the PDF flows need it not (D4's `write`): Export → PDF writes `<name>.pdf` whose content, read by the
   reader, has the instance's first point where T-3 puts it (not where the
   screen camera would); Export → PNG at 300 dpi writes a PNG of A4's 300
   dpi size; Cancel in the dialog or the save writes nothing; Print hands
@@ -575,7 +592,7 @@ sheet.
 | M-13a | `exportPagePng` paints with `VerticesDrawSink` | T-11, T-7 (AA) |
 | M-13b | drop `pixelsPerPaperMm` (`u`) from the stroke width | T-4 |
 | M-13c | multiply the stroke width by the camera's scale | T-4 at 1:100 |
-| M-13d | `page_export.dart` builds its camera with `fitToPage(page, size)` or `ViewportTransform.fit(extents)` instead of `pageCamera` | T-3, T-10 |
+| M-13d | `page_export.dart` builds its camera with `fitToPage(page, size)` or `ViewportTransform.fit(extents)` instead of `pageCamera` | T-5 (baseline origin), T-10 |
 | M-13e | `exportPagePng` bakes through a `TileCache` | T-11 |
 | M-13f | `pageCamera` ignores `originX` / `originY` | T-1, T-3 |
 | M-13g | `pageCamera` without the y flip | T-1, T-3 |
@@ -587,7 +604,7 @@ sheet.
 | M-13m | text with an extra y flip | T-5 |
 | M-13n | the export resolver keeps the default (white) foreground | T-6 |
 | M-13o | alpha ignored in the PDF | T-6 |
-| M-13p | `minTextCapPixels` left at the default | T-2, T-5 (the label) |
+| M-13p | `page_export.dart` leaves `minTextCapPixels` at the default | T-5 ("WC"), T-7 ("WC" pixels) |
 | M-13q | the painter ignores `omitOwners` | T-2, T-8 |
 | M-13r | `omitOwners` tested on the leaf's handle, not its owner | T-2, T-8 |
 | M-13s | PNG size with `floor` instead of `round` | T-7 (A4 at 150 dpi) |
@@ -673,6 +690,16 @@ Equivalent mutants are recorded by experiment, never by argument.
   (`kDashCollapsePx = 3`, `dasher.dart:21`) is judged in output units (pt,
   or px at the chosen dpi), so a fine dash pattern may read solid in one
   output and dashed in another.
+
+## Revision 3
+
+The spot check of revision 2 (S-1 to S-7): S-1 the route per test stated
+above T-1, M-13d and M-13p remapped to tests that go through
+`page_export.dart`, T-7's "WC" check; S-2 D4 returns `write`'s bytes; S-3
+T-5's direction check written in page space; S-4 the outer group has a
+line and an instance of its own; S-5 `PagePrinter.print` takes the
+format; S-6 D1 names both `flutter:` bounds; S-7 `runAsync` for the PNG
+flows only.
 
 ## Revision 2
 
