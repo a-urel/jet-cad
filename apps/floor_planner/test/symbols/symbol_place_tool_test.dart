@@ -70,15 +70,16 @@ final Vector2 pC = Vector2(76402.6, -45518.85);
 final Vector2 origin = Vector2(70000, -40000);
 
 final class Rig {
-  Rig({bool page = true}) {
+  /// [objectSnap] non-null: a `SnapSettings` with it in the context (null:
+  /// none, object snap on). [step] null: the page has no fixed grid step,
+  /// so the drag uses the zoom-adaptive one.
+  Rig({bool page = true, bool? objectSnap, double? step = gridStep}) {
     document = prepareDocument(const InsertionPointMeasurer());
     if (page) {
       document.commands.execute(SetComponentCommand<PageComponent>(
           document.rootHandle,
           PageComponent(
-              originX: gridOriginX,
-              originY: gridOriginY,
-              gridStepMm: gridStep)));
+              originX: gridOriginX, originY: gridOriginY, gridStepMm: step)));
     }
     document.commands.execute(addDrafted(
         document, EntityKind.line, linePayload(e0, e0 + Vector2(1200, 700))));
@@ -91,12 +92,14 @@ final class Rig {
             Transform2.translation(400 - mid.x, 300 - mid.y).multiply(linear)));
     selection = SelectionController(document);
     pages = PageNotifier(document);
+    snap = objectSnap == null ? null : SnapSettings(objectSnap: objectSnap);
     ctx = ToolContext(
         document: document,
         index: index,
         camera: camera,
         selection: selection,
-        page: pages);
+        page: pages,
+        snap: snap);
     armed = CountingNotifier(chair);
     tool = SymbolPlaceTool(armed);
     tool.addListener(() => notifications.add(tool.isMidShape));
@@ -104,6 +107,7 @@ final class Rig {
       if (!disposed) tool.dispose();
       armed.dispose();
       pages.dispose();
+      snap?.dispose();
       selection.dispose();
       camera.dispose();
       index.dispose();
@@ -115,6 +119,7 @@ final class Rig {
   late final CameraController camera;
   late final SelectionController selection;
   late final PageNotifier pages;
+  late final SnapSettings? snap;
   late final ToolContext ctx;
   late final CountingNotifier armed;
   late final SymbolPlaceTool tool;
@@ -451,6 +456,38 @@ void main() {
   });
 
   group('snap', () {
+    test('with object snap off (F3), a release near E lands on the grid', () {
+      final rig = Rig(objectSnap: false);
+      final near = e0 + Vector2(60, -45);
+      rig.hover(near);
+      rig.down(near);
+      rig.up(near);
+      final placed = rig.placedAt(rig.instances.single);
+      expectAt(placed, gridOf(near), 'the grid point');
+      expect(placed == e0, isFalse, reason: 'not the endpoint');
+      expect(placed == near, isFalse, reason: 'not the raw point');
+    });
+
+    test(
+        'with no fixed grid step, a release lands on the zoom-adaptive step '
+        'of dragGridStepMm', () {
+      final rig = Rig(step: null);
+      final page = rig.pages.value!;
+      expect(page.gridStepMm, isNull);
+      final step = dragGridStepMm(page, scale)!;
+      expect(step, isNot(gridStep), reason: 'the adaptive step is not 25');
+      Vector2 adaptive(Vector2 p) => Vector2(
+          gridOriginX + ((p.x - gridOriginX) / step).roundToDouble() * step,
+          gridOriginY + ((p.y - gridOriginY) / step).roundToDouble() * step);
+      final want = adaptive(pB);
+      expect(want == pB, isFalse, reason: 'the grid moves the raw point');
+      expect(want == gridOf(pB), isFalse, reason: 'not the 25 mm grid');
+      rig.hover(pA);
+      rig.down(pA);
+      rig.up(pB);
+      expectAt(rig.placedAt(rig.instances.single), want, 'the adaptive grid');
+    });
+
     test(
         'a release within 10 px (not 10 mm) of an endpoint places on it; '
         'beyond the aperture, on the grid', () {
