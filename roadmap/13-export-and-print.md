@@ -1,6 +1,20 @@
 # 13 — Export and print
 
-**Status:** not started
+**Status:** EXECUTED on `plan-13/export-and-print`, NOT MERGED (2026-10-01).
+Merge and look pending — the human's: the merge is `--no-ff` after the final
+whole-branch review, and the macOS and web look (L-1 .. L-7 and the items
+the rulings added) is never marked done for the human. Spec
+[2026-10-01-export-and-print-design.md](../docs/superpowers/specs/2026-10-01-export-and-print-design.md)
+(rev 3, amended at execution), plan
+[2026-10-01-export-and-print.md](../docs/superpowers/plans/2026-10-01-export-and-print.md),
+results
+[2026-10-01-plan-13-results.md](../docs/superpowers/notes/2026-10-01-plan-13-results.md).
+Where this file differs from the spec, the spec wins: the PNG draws through
+`CanvasDrawSink` and the PDF through a new `PdfDrawSink` (neither through
+`VerticesDrawSink`); separators are left out by an `omitOwners` set, no
+plot flag; the macOS Flutter must be 3.44.0 or newer.
+
+*Before Plan 13 ran, this line read:* **Status:** not started
 **Depends on:** 04 (hard — "print this" is undefined without a page)
 **Blocks:** nothing
 **Size:** M

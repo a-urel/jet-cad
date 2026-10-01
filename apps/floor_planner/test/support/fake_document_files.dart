@@ -4,7 +4,12 @@ import 'dart:typed_data';
 import 'package:floor_planner/document_files.dart';
 
 /// One call to [FakeDocumentFiles.write], as it was made.
-typedef FakeWrite = ({Object location, String name, Uint8List bytes});
+typedef FakeWrite = ({
+  Object location,
+  String name,
+  Uint8List bytes,
+  FileKind kind
+});
 
 /// A scripted [DocumentFiles] for the host's tests (plan 12a P-5, spec 12a
 /// D9): no panel, no disk, no download.
@@ -36,6 +41,10 @@ class FakeDocumentFiles implements DocumentFiles {
 
   /// The `suggestedName` of every [saveLocation] call, in order.
   final saveLocationCalls = <String>[];
+
+  /// The `kind` of every [saveLocation] call, in order (one per entry of
+  /// [saveLocationCalls]).
+  final saveLocationKinds = <FileKind>[];
 
   /// Every [write] call, in order, including those that then failed or are
   /// still held.
@@ -89,9 +98,10 @@ class FakeDocumentFiles implements DocumentFiles {
   }
 
   @override
-  Future<({String name, Object location})?> saveLocation(
-      String suggestedName) async {
+  Future<({String name, Object location})?> saveLocation(String suggestedName,
+      {FileKind kind = FileKind.jetplan}) async {
     saveLocationCalls.add(suggestedName);
+    saveLocationKinds.add(kind);
     if (_saveLocations.isEmpty) {
       unscriptedCalls++;
       throw StateError('FakeDocumentFiles.saveLocation: nothing scripted');
@@ -100,9 +110,14 @@ class FakeDocumentFiles implements DocumentFiles {
   }
 
   @override
-  Future<void> write(Object location, String name, Uint8List bytes) {
-    writes.add(
-        (location: location, name: name, bytes: Uint8List.fromList(bytes)));
+  Future<void> write(Object location, String name, Uint8List bytes,
+      {FileKind kind = FileKind.jetplan}) {
+    writes.add((
+      location: location,
+      name: name,
+      bytes: Uint8List.fromList(bytes),
+      kind: kind
+    ));
     if (_writeErrors.isNotEmpty) return Future.error(_writeErrors.removeAt(0));
     if (holdWrites) {
       final held = Completer<void>();

@@ -11,6 +11,8 @@ import 'document_files.dart';
 import 'document_host.dart';
 import 'document_toolbar.dart';
 import 'exit_guard.dart';
+import 'export/export_font.dart';
+import 'export/page_printer.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
@@ -37,7 +39,10 @@ import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
 import 'tool_palette.dart';
 
-void main() => runApp(const FloorPlannerApp());
+void main() {
+  registerFontLicences();
+  runApp(const FloorPlannerApp());
+}
 
 /// The app (spec 12a D5, U-4, plan 12a P-3): it owns the [DocumentSession]
 /// and the [DocumentFiles], and rebuilds [MaterialApp] from the session, so
@@ -55,7 +60,13 @@ void main() => runApp(const FloorPlannerApp());
 /// every thumbnail.
 class FloorPlannerApp extends StatefulWidget {
   const FloorPlannerApp(
-      {super.key, this.files, this.exitGuard, this.symbols, this.thumbnails});
+      {super.key,
+      this.files,
+      this.exitGuard,
+      this.symbols,
+      this.thumbnails,
+      this.exportFont,
+      this.printer = const PrintingPagePrinter()});
 
   final DocumentFiles? files;
 
@@ -70,6 +81,14 @@ class FloorPlannerApp extends StatefulWidget {
   /// The symbol thumbnail cache (spec 09b D5), a test seam: when null the
   /// app makes one and disposes it; a given one is the caller's to dispose.
   final SymbolThumbnails? thumbnails;
+
+  /// The export font's bytes, read once per app (spec 13 D7), a test seam:
+  /// when null the app makes a cache over the bundled asset.
+  final ExportFontCache? exportFont;
+
+  /// Where Print hands the page's PDF (spec 13 D9), a test seam: the
+  /// platform's print dialog by default.
+  final PagePrinter printer;
 
   @override
   State<FloorPlannerApp> createState() => _FloorPlannerAppState();
@@ -92,6 +111,11 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   SymbolThumbnails? _ownThumbnails;
   late final SymbolThumbnails _thumbnails =
       widget.thumbnails ?? (_ownThumbnails = SymbolThumbnails());
+
+  /// The export font (spec 13 D7): above the host, so a document swap never
+  /// reads the asset again. Nothing is read until an export asks.
+  late final ExportFontCache _exportFont =
+      widget.exportFont ?? ExportFontCache();
 
   /// The web's save-name prompt (spec 12a D9, T-12), shown over the
   /// navigator: the files object is made above the `MaterialApp`, so it
@@ -146,7 +170,9 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
               files: _files,
               exitGuard: widget.exitGuard,
               symbols: _symbols,
-              thumbnails: _thumbnails),
+              thumbnails: _thumbnails,
+              exportFont: _exportFont,
+              printer: widget.printer),
         ),
       );
 }
@@ -199,8 +225,9 @@ class PlannerShell extends StatefulWidget {
   final SnapSettings? snap;
 
   /// The host's file commands (spec 12a D6): New, Open, Open sample, Save,
-  /// Save As. The shell adds its own idle condition (no shape part-way)
-  /// to each, and binds and shows them with Undo and Redo.
+  /// Save As, Export. The shell adds its own idle condition (no shape
+  /// part-way) to each, and its page to Export's (spec 13 D8), and binds
+  /// and shows them with Undo and Redo.
   final List<ShellCommand> fileCommands;
 
   /// The document's name, for the top bar (spec 12a D7); null in a bare
@@ -525,10 +552,15 @@ class _PlannerShellState extends State<PlannerShell> {
   StreamSubscription<DocChange>? _history;
 
   /// The file commands, each enabled only while the host's own condition
-  /// holds and the shell is idle.
+  /// holds and the shell is idle; Export and Print also only while the
+  /// document has a page (spec 13 D8, [kPageCommandIds]).
   late final List<DerivedFlag> _fileEnabled = [
     for (final c in widget.fileCommands)
-      DerivedFlag([c.enabled, ..._idleSources], () => c.enabled.value && _idle),
+      kPageCommandIds.contains(c.id)
+          ? DerivedFlag([c.enabled, ..._idleSources, _page],
+              () => c.enabled.value && _idle && _page.value != null)
+          : DerivedFlag(
+              [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
   ];
   late final List<ShellCommand> _fileCommands = [
     for (var i = 0; i < widget.fileCommands.length; i++)

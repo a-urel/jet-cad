@@ -64,6 +64,7 @@ class DraftPainter {
     this.minTextCapPixels = kMinTextCapPixels,
     this.debugRebaseOrigin,
     this.debugOnVisit,
+    this.omitOwners = const {},
   });
 
   final DraftDocument document;
@@ -102,6 +103,21 @@ class DraftPainter {
   /// that flipped this after the fact would be measuring a rebuilt painter,
   /// which is a different frame.
   final double minTextCapPixels;
+
+  /// Leaves whose **direct** owner is in this set are not drawn (spec 13,
+  /// D6): export passes every room separator's group here, so the page
+  /// plots without them.
+  ///
+  /// Nothing else is skipped. A nested group's leaves belong to the inner
+  /// group and an instance's to its definition, so both still draw under an
+  /// omitted group. Groups are flattened into their container's index, so a
+  /// group's leaves arrive on that container's stream and `ownerAt` names the
+  /// group itself.
+  ///
+  /// The test runs before anything is resolved for the leaf, and
+  /// [debugOnVisit] is not called for a skipped one. On the screen this is
+  /// the empty constant: one `isNotEmpty` per leaf, no allocation.
+  final Set<Handle> omitOwners;
 
   /// Overrides the rebase origin `paint` would derive from this call's visible
   /// world.
@@ -371,6 +387,7 @@ class DraftPainter {
       while (next < _instanceCount && _instances[next] < leafHandle) {
         _drawInstance(sink, camera, origin, Handle(_instances[next++]));
       }
+      if (_omitted(slot)) return;
       debugOnVisit?.call(document.entities.handleAt(slot));
       _drawLeaf(sink, camera, origin, rootIndex.transformOfLeaf(slot), slot,
           StyleContext.documentRoot);
@@ -381,6 +398,11 @@ class DraftPainter {
       _drawInstance(sink, camera, origin, Handle(_instances[next++]));
     }
   }
+
+  /// Whether the leaf at [slot] is skipped by [omitOwners].
+  bool _omitted(int slot) =>
+      omitOwners.isNotEmpty &&
+      omitOwners.contains(document.entities.ownerAt(slot));
 
   void _growInstances() {
     final grown = Uint32List(_instances.length * 2)
@@ -405,7 +427,13 @@ class DraftPainter {
       origin: origin,
       container: node.definition,
       // camera . ancestors . instance, still in Float64 and not yet rebased.
-      accumulated: node.transform,
+      // Groups are flattened into the root index, so a root-level instance
+      // may sit under one or more groups: its placement is then the root
+      // index's composed transform, not its own. The lookup is a linear
+      // scan, so only a grouped instance pays it.
+      accumulated: node.parent == document.rootHandle
+          ? node.transform
+          : index.rootIndex.transformOfInstance(instance),
       ctx: resolver.contextFor(instance, StyleContext.documentRoot),
       depth: 0,
     );
@@ -451,6 +479,7 @@ class DraftPainter {
       final leafHandle = document.entities.handleAt(slot).value;
       if (leafHandle == previous) continue; // the tree/overlay duplicate
       previous = leafHandle;
+      if (_omitted(slot)) continue;
       debugOnVisit?.call(Handle(leafHandle));
       while (next < scratch.instanceCount &&
           scratch.instanceHandles[next] < leafHandle) {

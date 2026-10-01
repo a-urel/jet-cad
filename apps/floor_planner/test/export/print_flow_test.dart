@@ -1,0 +1,374 @@
+// Spec 13 D9, T-10 (the print half), plan 13 Task 10: Print… through the
+// app. The app is pumped with a fake printer over Task 9's flat (A4
+// landscape at 1:50 off the origin, a real separator, a rotated, mirrored
+// instance with overrides, a label), the screen's camera at 400 % and
+// panned off the sheet. The printer must receive one export's bytes: their
+// content stream equals an `exportPagePdf` of the same document with the
+// separators omitted and the same font (the files themselves differ in
+// `/ID`, spec R-1), with the document's name and the page's size in pt.
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:floor_planner/export/export_flow.dart';
+import 'package:floor_planner/export/page_printer.dart';
+import 'package:floor_planner/parametric/live_objects.dart';
+import 'package:floor_planner/parametric/separator.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'
+    show LogicalKeyboardKey, MethodCall, MethodChannel;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/export_testing.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
+import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import 'package:floor_planner/shell_commands.dart';
+
+import '../support/document_rig.dart';
+import '../support/export_flat.dart';
+import '../support/fake_document_files.dart';
+import '../support/fake_page_printer.dart';
+import '../support/room_fixture.dart' show kids, worldPoints;
+
+const double ptPerMm = 72 / 25.4;
+
+Finder get printButton => find.byKey(const Key('toolbar-print'));
+
+bool printEnabled(WidgetTester tester) =>
+    tester.widget<IconButton>(printButton).onPressed != null;
+
+/// The content stream's operators, as written.
+List<String> operatorsOf(PdfContent content) =>
+    [for (final o in content.operators) o.toString()];
+
+/// What an Export → PDF of the open document makes, computed here, not by
+/// the app's helpers: `exportPagePdf` of the document's page with every
+/// live separator omitted (or [omitOwners]) and the vendored font.
+Future<PdfContent> referenceExport(WidgetTester tester,
+    {Set<Handle>? omitOwners}) async {
+  final doc = sessionOf(tester).document;
+  final bytes = await exportPagePdf(
+      document: doc,
+      page: doc.components.get<PageComponent>(doc.rootHandle)!,
+      fontBytes: File(vendoredFont).readAsBytesSync(),
+      omitOwners: omitOwners ?? liveObjectsOf<SeparatorParams>(doc).toSet());
+  return PdfContent.parse(bytes, inflate: zlib.decode);
+}
+
+void main() {
+  group('T-10 Print', () {
+    testWidgets(
+        'PR1 the button hands the printer one export: the content stream of '
+        'Export → PDF, the name, A4 landscape in pt; no separator',
+        (tester) async {
+      final files = FakeDocumentFiles();
+      final printer = FakePagePrinter();
+      await pumpFlat(tester, files, printer: printer);
+      expect(printEnabled(tester), isTrue);
+
+      await tester.tap(printButton);
+      await tester.pump();
+      await tester.pump();
+      noDialog(tester);
+      expect(printer.calls, hasLength(1), reason: 'printed once');
+      final call = printer.calls.single;
+      expect(call.name, 'flat');
+      expect(call.format.width, closeTo(297 * ptPerMm, 1e-9));
+      expect(call.format.height, closeTo(210 * ptPerMm, 1e-9));
+      expect(fontLoads, 1, reason: 'the font came from the app\'s cache');
+      expect(files.saveLocationCalls, isEmpty, reason: 'nothing is saved');
+      expect(files.writes, isEmpty);
+      expect(sessionOf(tester).busy.value, isFalse);
+
+      final printed = PdfContent.parse(call.pdf, inflate: zlib.decode);
+      final reference = await referenceExport(tester);
+      expect(operatorsOf(printed), operatorsOf(reference),
+          reason: 'the same content stream as an export');
+      expect(printed.mediaBox, reference.mediaBox);
+      expect(printed.mediaBox[2], closeTo(call.format.width, 1e-3));
+      expect(printed.mediaBox[3], closeTo(call.format.height, 1e-3));
+      expect([for (final t in printed.textRuns) t.string], [labelText],
+          reason: 'premise: the label, in the embedded font');
+
+      // The separator plots in an export that does not omit it, so the
+      // equality above says the print omits it.
+      final unomitted = await referenceExport(tester, omitOwners: const {});
+      expect(operatorsOf(unomitted), isNot(operatorsOf(reference)),
+          reason: 'premise: omitting the separator changes the stream');
+      final doc = sessionOf(tester).document;
+      final sepLeaf =
+          kids(doc, liveObjectsOf<SeparatorParams>(doc).single).single;
+      final sepWorld = worldPoints(doc, sepLeaf);
+      final a = toPdf(sepWorld[0]), b = toPdf(sepWorld[1]);
+      bool onSeparator(PdfContent c) => [
+            for (final p in c.paths)
+              for (final s in p.subpaths)
+                for (final v in s.vertices)
+                  if (pdfDistanceToSegment(v, a, b) < 1.0) v,
+          ].isNotEmpty;
+      expect(onSeparator(unomitted), isTrue,
+          reason: 'premise: the separator\'s path where the check looks');
+      expect(onSeparator(printed), isFalse, reason: 'no path at the separator');
+    });
+
+    testWidgets(
+        'PR2 an A3 portrait page: the format is 297 x 420 mm in pt, and the '
+        'printed MediaBox agrees', (tester) async {
+      final printer = FakePagePrinter();
+      await pumpFlat(tester, FakeDocumentFiles(),
+          printer: printer,
+          bytes: fixtureBytes(
+              page: PageComponent(
+                  widthMm: 297,
+                  heightMm: 420,
+                  orientation: PageOrientation.portrait,
+                  scaleDenominator: scaleDen,
+                  originX: originX,
+                  originY: originY,
+                  background: 0xFF303030)));
+      await hostOf(tester).printFlow();
+      await tester.pump();
+      final call = printer.calls.single;
+      expect(call.format.width, closeTo(297 * ptPerMm, 1e-9));
+      expect(call.format.height, closeTo(420 * ptPerMm, 1e-9));
+      final printed = PdfContent.parse(call.pdf, inflate: zlib.decode);
+      expect(printed.mediaBox[2], closeTo(297 * ptPerMm, 1e-3));
+      expect(printed.mediaBox[3], closeTo(420 * ptPerMm, 1e-3));
+      expect(operatorsOf(printed), operatorsOf(await referenceExport(tester)));
+    });
+
+    testWidgets('PR3 a throwing printer shows "Print failed"', (tester) async {
+      final printer = FakePagePrinter()
+        ..failNext = const FileSystemException('no printer');
+      await pumpFlat(tester, FakeDocumentFiles(), printer: printer);
+      await tester.tap(printButton);
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const Key('document-error')), findsOneWidget);
+      expect(
+          tester
+              .widget<Text>(find.byKey(const Key('document-error-title')))
+              .data,
+          'Print failed');
+      expect(
+          tester
+              .widget<Text>(find.byKey(const Key('document-error-text')))
+              .data,
+          contains('no printer'));
+      expect(sessionOf(tester).busy.value, isTrue,
+          reason: 'busy while the error is up');
+      await dismissError(tester);
+      expect(sessionOf(tester).busy.value, isFalse);
+      expect(printer.calls, hasLength(1));
+    });
+  });
+
+  group('T-10 Print settles and waits', () {
+    testWidgets(
+        'PR9 text typed in an open entry, then Cmd+P: the print and the '
+        'document both have it (spec 12a D2: the flow settles first)',
+        (tester) async {
+      final printer = FakePagePrinter();
+      await pumpFlat(tester, FakeDocumentFiles(), printer: printer);
+      final at = Vector2(9000, 2000); // on the sheet, away from the rest
+      await aimCamera(tester, at);
+      await press(tester, LogicalKeyboardKey.keyT);
+      await tester.tapAt(globalOf(tester, at));
+      await tester.pump();
+      expect(find.byKey(const Key('text-entry')), findsOneWidget,
+          reason: 'premise: the entry is open');
+      await tester.enterText(find.byKey(const Key('text-entry')), 'Mutfak');
+      await tester.pump();
+      expect(DraftDocumentCodec.encodeToString(sessionOf(tester).document),
+          isNot(contains('Mutfak')),
+          reason: 'premise: typed, not committed');
+      expect(
+          await chordHandled(
+              tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyP),
+          isTrue);
+      await tester.pump();
+      await tester.pump();
+      noDialog(tester);
+      final printed =
+          PdfContent.parse(printer.calls.single.pdf, inflate: zlib.decode);
+      expect([for (final t in printed.textRuns) t.string],
+          unorderedEquals([labelText, 'Mutfak']));
+      expect(DraftDocumentCodec.encodeToString(sessionOf(tester).document),
+          contains('Mutfak'),
+          reason: 'committed as Enter would');
+    });
+
+    testWidgets(
+        'PR10 busy while the print dialog is up: Print, Save and Export '
+        'disabled until it closes', (tester) async {
+      final printer = FakePagePrinter()..hold = true;
+      await pumpFlat(tester, FakeDocumentFiles(), printer: printer);
+      bool on(String id) =>
+          tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed !=
+          null;
+      expect([on('print'), on('save'), on('export')], [true, true, true],
+          reason: 'premise: idle');
+      await tester.tap(printButton);
+      await tester.pump();
+      await tester.pump();
+      expect(printer.held, hasLength(1), reason: 'premise: the dialog is up');
+      // The dialog stays up a while: the flow waits for it, not a timer.
+      await tester.pump(const Duration(seconds: 30));
+      expect(sessionOf(tester).busy.value, isTrue);
+      expect([on('print'), on('save'), on('export')], [false, false, false]);
+      await chordHandled(
+          tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyP);
+      expect(printer.calls, hasLength(1), reason: 'no second print');
+      printer.held.single.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(sessionOf(tester).busy.value, isFalse);
+      expect([on('print'), on('save'), on('export')], [true, true, true]);
+    });
+  });
+
+  group('T-10 Print enabled', () {
+    testWidgets(
+        'PR4 disabled with no page: the button, the chord, and the flow '
+        'itself prints nothing', (tester) async {
+      final printer = FakePagePrinter();
+      await pumpFlat(tester, FakeDocumentFiles(),
+          printer: printer, bytes: pagelessBytes());
+      expect(exportPageOf(sessionOf(tester).document), isNull,
+          reason: 'premise: no page');
+      expect(printEnabled(tester), isFalse);
+      expect(
+          tester
+              .widget<IconButton>(find.byKey(const Key('toolbar-save')))
+              .onPressed,
+          isNotNull,
+          reason: 'premise: idle');
+      await chordHandled(
+          tester, LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyP);
+      await tester.pump();
+      expect(printer.calls, isEmpty);
+      await hostOf(tester).printFlow();
+      await tester.pump();
+      noDialog(tester);
+      expect(printer.calls, isEmpty);
+    });
+
+    testWidgets('PR5 enabled with a page; disabled while a flow runs',
+        (tester) async {
+      final files = FakeDocumentFiles();
+      final printer = FakePagePrinter();
+      await pumpFlat(tester, files, printer: printer);
+      expect(printEnabled(tester), isTrue);
+      files
+        ..holdWrites = true
+        ..scriptSaveLocation(name: 'flat.jetplan', location: '/p/f2');
+      final saving = hostOf(tester).saveAsStep();
+      await tester.pump();
+      expect(sessionOf(tester).busy.value, isTrue, reason: 'premise: busy');
+      expect(printEnabled(tester), isFalse);
+      await chordHandled(
+          tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyP);
+      await tester.pump();
+      expect(printer.calls, isEmpty);
+      files.heldWrites.single.complete();
+      await saving;
+      await tester.pump();
+      expect(printEnabled(tester), isTrue);
+    });
+  });
+
+  testWidgets(
+      'PR7 Print… follows Export… in the file commands and the toolbar, '
+      'with its icon and chords', (tester) async {
+    await pumpFlat(tester, FakeDocumentFiles(), printer: FakePagePrinter());
+    final commands = hostOf(tester).fileCommands;
+    expect([for (final c in commands) c.id].sublist(commands.length - 2),
+        ['export', 'print']);
+    final print = commands.last;
+    expect(print.label, 'Print…');
+    expect(print.icon, Icons.print_outlined);
+    expect(print.shortcuts, kPrintChords);
+    expect(
+        tester.getRect(printButton).left,
+        greaterThan(
+            tester.getRect(find.byKey(const Key('toolbar-export'))).left));
+  });
+
+  group('T-10 Print chords', () {
+    for (final (modifier, label) in [
+      (LogicalKeyboardKey.metaLeft, 'Cmd'),
+      (LogicalKeyboardKey.controlLeft, 'Ctrl'),
+    ]) {
+      testWidgets('PR6 $label+P prints, once', (tester) async {
+        final printer = FakePagePrinter();
+        await pumpFlat(tester, FakeDocumentFiles(), printer: printer);
+        expect(await chordHandled(tester, modifier, LogicalKeyboardKey.keyP),
+            isTrue);
+        await tester.pump();
+        noDialog(tester);
+        expect(printer.calls, hasLength(1));
+        expect(printer.calls.single.name, 'flat');
+      });
+    }
+  });
+
+  testWidgets(
+      'PR8 the production printer, at printing\'s platform channel: the '
+      'name, the page in pt, no dynamic layout, and the given bytes laid out '
+      'whatever paper the dialog asks for', (tester) async {
+    // printing's method-channel protocol (printing 5.15.1,
+    // method_channel.dart): Dart asks `printPdf`, the platform calls back
+    // `onLayout` for the bytes and `onCompleted` when the dialog closes.
+    const channel = MethodChannel('net.nfet.printing');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    Map<Object?, Object?>? asked;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'printPdf') {
+        asked = call.arguments as Map<Object?, Object?>;
+        return 1;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    Future<Object?> fromPlatform(String method, Map<String, Object?> args) {
+      final reply = Completer<Object?>();
+      messenger.handlePlatformMessage(
+          channel.name,
+          channel.codec.encodeMethodCall(MethodCall(method, args)),
+          (data) => reply.complete(
+              data == null ? null : channel.codec.decodeEnvelope(data)));
+      return reply.future;
+    }
+
+    final pdf = Uint8List.fromList(List.generate(64, (i) => (i * 37) % 251));
+    const format = PdfPageFormat(1190.5, 841.75);
+    var done = false;
+    final printing = const PrintingPagePrinter()
+        .print(pdf, 'flat', format)
+        .then((_) => done = true);
+    await tester.pump();
+    expect(asked, isNotNull, reason: 'the dialog was asked for');
+    expect(asked!['name'], 'flat');
+    expect(asked!['width'], 1190.5);
+    expect(asked!['height'], 841.75);
+    expect(asked!['dynamic'], isFalse);
+    final job = asked!['job'];
+    // The dialog asks for another paper (A4 portrait): the same bytes.
+    final laid = await fromPlatform('onLayout', {
+      'job': job,
+      'width': 595.0,
+      'height': 842.0,
+      'marginLeft': 0.0,
+      'marginTop': 0.0,
+      'marginRight': 0.0,
+      'marginBottom': 0.0,
+    });
+    expect(laid, pdf);
+    expect(done, isFalse, reason: 'it waits for the dialog');
+    await fromPlatform('onCompleted', {'job': job, 'completed': true});
+    await printing;
+    expect(done, isTrue);
+  });
+}

@@ -134,9 +134,10 @@ List<DrawnItem> flatten(List<DrawOp> ops) {
       case BeginDashOp():
       case EndDashOp():
         // Neither op carries drawable geometry on its own -- it brackets the
-        // ops that follow. No sink compared through this oracle shades
-        // dashes yet, so the bracket never reaches here in practice; Task 5
-        // gives the shading sink its own differential reference.
+        // ops that follow. A shading sink (`shadesDashes: true`, as in spec
+        // 13's T-2) receives a dashed polyline whole between the two; the
+        // brackets are skipped here, so that polyline compares whole against
+        // the reference's.
         break;
     }
   }

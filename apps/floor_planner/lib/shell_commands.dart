@@ -27,6 +27,13 @@ final List<SingleActivator> kSaveChords = _chord(LogicalKeyboardKey.keyS);
 final List<SingleActivator> kSaveAsChords =
     _chord(LogicalKeyboardKey.keyS, shift: true);
 
+/// Export: Meta+E, Ctrl+E (spec 13 D8).
+final List<SingleActivator> kExportChords = _chord(LogicalKeyboardKey.keyE);
+
+/// Print: Meta+P, Ctrl+P (spec 13 D9). Bare P is the Polyline tool's
+/// letter; the chord is not.
+final List<SingleActivator> kPrintChords = _chord(LogicalKeyboardKey.keyP);
+
 /// Undo: Meta+Z, Ctrl+Z.
 final List<SingleActivator> kUndoChords = _chord(LogicalKeyboardKey.keyZ);
 
@@ -37,16 +44,24 @@ final List<SingleActivator> kRedoChords = [
 ];
 
 /// Every file command's chord: what the app binds a second time above the
-/// Navigator, consume-only (spec 12a D6, U-3, R-10).
+/// Navigator, consume-only (spec 12a D6, U-3, R-10). Export's and Print's
+/// join them (spec 13 D8, R-8): with a dialog up, Ctrl+P must not reach the
+/// browser's own print.
 final List<SingleActivator> kFileChords = [
   ...kNewChords,
   ...kOpenChords,
   ...kSaveChords,
   ...kSaveAsChords,
+  ...kExportChords,
+  ...kPrintChords,
 ];
 
+/// The file commands that need the document's page (spec 13 D8, D9): the
+/// shell enables them only while it has one, besides idle.
+const Set<String> kPageCommandIds = {'export', 'print'};
+
 /// One command of the shell (spec 12a D6): New, Open, Open sample, Save,
-/// Save As, Undo, Redo.
+/// Save As, Export, Print (spec 13 D8, D9), Undo, Redo.
 ///
 /// A command is **invoked** only through [invoke], by its toolbar button
 /// and by its shortcuts alike: a disabled command's binding stays present

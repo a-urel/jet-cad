@@ -10,7 +10,9 @@ resolution: workspace
 
 environment:
   sdk: ^3.5.0
-  flutter: ">=3.24.0"
+  # pdf 3.13.x requires Dart >= 3.12.0, which Flutter first ships in 3.44.0.
+  # Only this bound moves; `sdk:` sets the language version (spec 13 R-4).
+  flutter: ">=3.44.0"
 
 dependencies:
   flutter:
@@ -26,6 +28,8 @@ dependencies:
   # The import is off contract and pre-1.0, which is why exactly one file in
   # this package is allowed to make it.
   flutter_scene: ^0.23.0
+  # The vector PDF export's writer (spec 13 D3). Pure Dart, Apache 2.0.
+  pdf: ^3.13.1
 
 dev_dependencies:
   flutter_test:

@@ -27,6 +27,13 @@ import 'viewport_transform.dart';
 /// to the container that encloses the group and sort among that container's own
 /// leaves by handle — which is what `ContainerIndex` does when it folds them
 /// in, and what the draw order means. An instance is the recursion boundary.
+///
+/// [omitOwners] means what it means to [DraftPainter] — a leaf whose direct
+/// owner is in the set is not drawn — and is honoured **by this walk's own
+/// route** (spec 13, D6): at a node in the set its own leaves are passed over
+/// while its child nodes are still visited. The painter tests each leaf's
+/// owner instead; two routes to one meaning, so a test where they disagree
+/// is red.
 void referenceWalk(
   DraftDocument doc,
   DrawSink sink,
@@ -34,18 +41,19 @@ void referenceWalk(
   Size viewport,
   StyleResolver resolver, {
   double minTextCapPixels = kMinTextCapPixels,
+  Set<Handle> omitOwners = const {},
 }) {
   final world = camera.visibleWorld(viewport);
   final origin = rebaseOriginFor(world);
   _ReferenceWalk(doc, sink, camera, resolver, world, origin,
-          doc.leavesByOwner(), minTextCapPixels)
+          doc.leavesByOwner(), minTextCapPixels, omitOwners)
       .container(
           doc.rootHandle, Transform2.identity(), StyleContext.documentRoot, 0);
 }
 
 class _ReferenceWalk {
   _ReferenceWalk(this.doc, this.sink, this.camera, this.resolver, this.world,
-      this.origin, this.leaves, this.minTextCapPixels);
+      this.origin, this.leaves, this.minTextCapPixels, this.omitOwners);
 
   final DraftDocument doc;
   final DrawSink sink;
@@ -57,6 +65,9 @@ class _ReferenceWalk {
 
   /// On-screen cap height, in pixels, below which text is not drawn.
   final double minTextCapPixels;
+
+  /// Nodes whose own leaves are not drawn; their child nodes still are.
+  final Set<Handle> omitOwners;
 
   /// Draws one container's contents in ascending handle order.
   void container(
@@ -81,7 +92,7 @@ class _ReferenceWalk {
   /// leaves, the leaves of every group beneath it, and the instances found
   /// along the way — each with its transform composed down from [accumulated].
   void _collect(Handle handle, Transform2 accumulated, List<_Item> into) {
-    for (final slot in leaves[handle] ?? const <int>[]) {
+    for (final slot in _ownLeaves(handle)) {
       into.add(_Item(doc.entities.handleAt(slot), accumulated, slot: slot));
     }
     for (final child in _childNodesOf(handle)) {
@@ -96,7 +107,7 @@ class _ReferenceWalk {
         // rule `ContainerIndex` applies. Recursing into the definition alone
         // never reaches it, which is how it stayed invisible while text was
         // skipped.
-        for (final slot in leaves[child] ?? const <int>[]) {
+        for (final slot in _ownLeaves(child)) {
           into.add(_Item(doc.entities.handleAt(slot), composed, slot: slot));
         }
       } else {
@@ -104,6 +115,11 @@ class _ReferenceWalk {
       }
     }
   }
+
+  /// The leaves [node] owns directly, or none when it is omitted. Its child
+  /// nodes are not this method's business: `_collect` still visits them.
+  List<int> _ownLeaves(Handle node) =>
+      omitOwners.contains(node) ? const <int>[] : leaves[node] ?? const <int>[];
 
   List<Handle> _childNodesOf(Handle container) {
     final node = doc.tree[container];
