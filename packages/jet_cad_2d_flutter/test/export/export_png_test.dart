@@ -134,6 +134,46 @@ void main() {
     }
   });
 
+  testWidgets(
+      'withPhysChunk replaces a pHYs already in the PNG: exactly one remains, '
+      'right after IHDR, with the new value and every CRC valid',
+      (tester) async {
+    final f = exportFixture(measurer: FlutterTextMeasurer());
+    final exported =
+        await export(tester, f.document, f.page, dpi: ExportDpi.d96);
+    // An input that already carries a pHYs (1234 px/m, unit 0) after IHDR,
+    // built from the exported PNG's chunks with valid CRCs.
+    final input = _assemble([
+      for (final c in _chunks(exported))
+        if (c.type != 'pHYs') c,
+    ], insertAfterIhdr: (
+      type: 'pHYs',
+      data: Uint8List.fromList([0, 0, 4, 210, 0, 0, 4, 210, 0]),
+    ));
+    expect([for (final c in _chunks(input)) c.type].where((t) => t == 'pHYs'),
+        hasLength(1));
+
+    final out = withPhysChunk(input, 300);
+    final chunks = _chunks(out);
+    final types = [for (final c in chunks) c.type];
+    expect(types.where((t) => t == 'pHYs'), hasLength(1), reason: '$types');
+    expect(types.indexOf('pHYs'), 1);
+    final v = ByteData.sublistView(chunks[1].data);
+    expect([v.getUint32(0), v.getUint32(4), v.getUint8(8)], [11811, 11811, 1]);
+    for (final c in chunks) {
+      expect(c.crc, _bitwiseCrc32([...c.type.codeUnits, ...c.data]),
+          reason: c.type);
+    }
+    // Nothing but the pHYs changed.
+    expect([
+      for (final c in chunks)
+        if (c.type != 'pHYs') c.data
+    ], [
+      for (final c in _chunks(input))
+        if (c.type != 'pHYs') c.data
+    ]);
+  });
+
   group('T-7: the pixels', () {
     testWidgets(
         '"WC" (0.5 mm on paper, below the default LOD cull at 96 and 150 dpi) '
@@ -186,6 +226,15 @@ void main() {
         final x = ((worldX - 3000) / 100 * u).floor();
         expect(px.at(x, row.floor()), [0x5D, 0x40, 0x37, 0xFF],
             reason: 'on the line\'s row ${row.floor()} at x $x');
+        // The stroke's width from below: rows one pixel inside both of its
+        // edges (2419 and 2423) are fully covered too.
+        for (final inside in [
+          (row - halfWidth + 1).floor(),
+          (row + halfWidth - 1).floor(),
+        ]) {
+          expect(px.at(x, inside), [0x5D, 0x40, 0x37, 0xFF],
+              reason: 'inside the stroke, row $inside at x $x');
+        }
         expect(px.at(x, above), [255, 255, 255, 255], reason: 'row $above');
         expect(px.at(x, below), [255, 255, 255, 255], reason: 'row $below');
       }
@@ -425,6 +474,31 @@ final class _ArmedMeasurer implements TextMeasurer {
 
 final class _Boom implements Exception {
   const _Boom();
+}
+
+/// A PNG of [chunks] (each with a fresh CRC), with [insertAfterIhdr] put
+/// right after the first chunk.
+Uint8List _assemble(
+  List<({String type, Uint8List data, int crc})> chunks, {
+  required ({String type, Uint8List data}) insertAfterIhdr,
+}) {
+  final out = BytesBuilder()..add([137, 80, 78, 71, 13, 10, 26, 10]);
+  void put(String type, Uint8List data) {
+    final head = ByteData(8)..setUint32(0, data.length);
+    final h = head.buffer.asUint8List()..setAll(4, type.codeUnits);
+    final crc = ByteData(4)
+      ..setUint32(0, _bitwiseCrc32([...type.codeUnits, ...data]));
+    out
+      ..add(h)
+      ..add(data)
+      ..add(crc.buffer.asUint8List());
+  }
+
+  for (var i = 0; i < chunks.length; i++) {
+    put(chunks[i].type, chunks[i].data);
+    if (i == 0) put(insertAfterIhdr.type, insertAfterIhdr.data);
+  }
+  return out.takeBytes();
 }
 
 /// CRC-32 bit by bit (reflected polynomial 0xEDB88320), independent of the

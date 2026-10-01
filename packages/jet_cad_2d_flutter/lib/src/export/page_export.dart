@@ -142,9 +142,9 @@ Future<Uint8List> exportPagePng({
     if (data == null) {
       throw StateError('the engine encoded no PNG');
     }
-    return _withPhys(
+    return withPhysChunk(
       data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-      pixelsPerMetre: (dotsPerInch / 0.0254).round(),
+      dotsPerInch,
     );
   } finally {
     image?.dispose();
@@ -153,10 +153,15 @@ Future<Uint8List> exportPagePng({
   }
 }
 
-/// [png] with one `pHYs` chunk of [pixelsPerMetre] on both axes (unit 1,
-/// the metre) right after `IHDR`; any `pHYs` the encoder wrote is dropped,
-/// so exactly one remains.
-Uint8List _withPhys(Uint8List png, {required int pixelsPerMetre}) {
+/// [png] with one `pHYs` chunk of `round(dpi / 0.0254)` pixels per metre
+/// on both axes (unit 1, the metre) right after `IHDR`; any `pHYs` already
+/// in [png] is dropped, so exactly one remains.
+///
+/// Public only so a test can feed it a PNG that already has a `pHYs`, which
+/// the engine's encoder never writes.
+@visibleForTesting
+Uint8List withPhysChunk(Uint8List png, int dpi) {
+  final pixelsPerMetre = (dpi / 0.0254).round();
   const signatureLength = 8;
   final view = ByteData.sublistView(png);
   int chunkEnd(int at) => at + 12 + view.getUint32(at);
