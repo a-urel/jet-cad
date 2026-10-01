@@ -22,8 +22,11 @@ engine is untouched; the render layer gains `SymbolThumbnails` and
 `SymbolGallery`; everything else is in `apps/floor_planner`.
 
 Every task had a fresh implementer and an independent reviewer who re-ran
-the gates and re-fired mutants. The final whole-branch review, which
-precedes the ledger's archive, is not part of this note's source material.
+the gates and re-fired mutants. The final whole-branch review (a fresh
+reviewer, on the tip `47ccd78`): **"Ready with fixes"**, nothing blocking or
+important, no code defect; its fixes (this note, the spec's status line, a
+misplaced test doc comment) are in the commit after `47ccd78`. Its sample
+is in [Mutants](#mutants).
 
 | Task | Commits | Review |
 |---|---|---|
@@ -168,8 +171,7 @@ standing; app 790.
 The P-8 rule of 09a applies (the plan's Task 10): this table is compiled
 from each task's report and independent review, both of which fired real
 runs at the task commit; the final whole-branch review re-fires a sample on
-the tip. **That sample is not in this note** (the review had not run when it
-was written). Line numbers are at the task's commit. Every run restored the
+the tip: below the table. Line numbers are at the task's commit. Every run restored the
 file (`diff` exit 0).
 
 | Id | Where | Red test | Task |
@@ -237,6 +239,38 @@ review (`c8f7a21`). Two shell disposal mutants survived Task 9's first commit
 Precondition guards ("the fixtures are not degenerate", including the
 hairline fixture of 3c) have no mutant.
 
+**The final whole-branch review's sample** (tip `47ccd78`, one line each,
+the test file in the foreground, every restore `diff` exit 0; 17 non-equivalent
+mutants, all red; the recorded equivalent behaved as recorded):
+
+| Task | Mutant | Red |
+|---|---|---|
+| 1 | `every` → `any` (search:36) | "two terms are both required" and others |
+| 2 | `retry` no-op (loader:52) | SL6 |
+| 3 | key ignores the DPR (thumbnails:76) | the DPR key case, image size, sink DPR |
+| 4 | a cell takes focus (gallery:106) | "a cell and a header never take focus" |
+| 4 | `clone = image` (gallery:354) | the clone tests |
+| 5 | the origin not subtracted (ghost:96) | "maps the base point to at − origin…" |
+| 6 | places at the raw point (tool:178) | "a release places at the snapped release point" and others |
+| 6 | aperture not divided by the scale (:138) | two snap tests |
+| 6 | M-09b1 one-line (:176) | the release-point test |
+| 7 | R the wrong way (:215) | the key tests |
+| 7 | allocates before the permission check (:261) | `Expected: <18> Actual: <23>` |
+| 7 | `Esc` mid-press does not cancel (:227) | the Esc test |
+| 8 | the search field without `ShellShortcutGuard` (panel:217) | M-09b7 |
+| 8 | the highlight ignores the active tool (panel:159) | M-09b9 |
+| 9 | the cell tap bypasses `_activate` (main:628) | SS3 |
+| e2e | R not reaching the tool (:206) | `Expected same SymbolPlaceTool, Actual RectangleTool` |
+| e2e | aperture (:138) | the snapped translation |
+| e2e | M-09b1 one-line (:176) | **green**: the recorded equivalence R-B10-1 |
+
+The same review's cross-task hunts (a temporary test, removed) passed: a
+cell tap before any thumbnail loads, then a placement far from the origin
+under a rotated camera, then the Select tool selects the instance with its
+grip box; R with the search field focused goes to the field (after `Esc` it
+turns the symbol); a document swap disposes every cell clone (11/11) and
+leaks no listener, the app's cache surviving.
+
 ## Found, not fixed
 
 - **The ghost's cross allocates four `Offset`s per paint** (Task 6 review):
@@ -259,6 +293,11 @@ hairline fixture of 3c) have no mutant.
 - Task 8 review note 3: the empty-result Clear's focus outcome is not asserted
   directly (covered in effect by the tap-outside test).
 - The cosmetic nit at `symbol_panel_test.dart:195-196` (8b re-review).
+- **Spec F-15 does not always hold in a widget test:** with the real cache and
+  no `runAsync`, a thumbnail sometimes arrives after a few pumps (the final
+  review's first hunt run). No test depends on images never arriving.
+- **The cache holds more entries than visible cells** (17 for 11): off-screen
+  cells are built ahead. Capped at 64; harmless.
 
 ## The human's look
 

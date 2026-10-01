@@ -4,7 +4,8 @@
 independently: "Ready with amendments", 0 blocking, 5 major, 6 minor, 1 nit
 (W-1 to W-12), each applied below; see [Revision 2](#revision-2). Its
 spot check: "Ready with amendments" (S-1 to S-5, small), applied in
-[Revision 3](#revision-3). Awaiting the human's approval.
+[Revision 3](#revision-3). **Approved by the human on 2026-10-01**
+("onaylıyorum, planı yaz").
 **Sub-project:** `roadmap/09-symbol-library.md`, slice **09b** (09a, the
 core, is merged at `b4e7cdd`). **Size:** M: one render-layer widget pair,
 one app tool, one app panel, one pure function.

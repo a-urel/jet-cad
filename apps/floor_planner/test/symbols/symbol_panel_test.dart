@@ -192,8 +192,6 @@ List<String> galleryIds(WidgetTester tester) => [
         for (final s in c.symbols) s.id,
     ];
 
-/// Taps the field and checks the premise: the field, not the canvas, has
-/// the focus.
 /// Whether the button keyed [key] could take the focus (Ruling 05-6): the
 /// nearest `Focus` above [inner], a widget inside the button, is the
 /// button's own node, and an `ExcludeFocus` above it makes it refuse.
@@ -202,6 +200,8 @@ bool canTakeFocus(WidgetTester tester, String key, Finder inner) =>
             find.descendant(of: find.byKey(Key(key)), matching: inner).first))
         .canRequestFocus;
 
+/// Taps the field and checks the premise: the field, not the canvas, has
+/// the focus.
 Future<void> focusField(WidgetTester tester, Host h) async {
   await tester.tap(field);
   await tester.pump();
