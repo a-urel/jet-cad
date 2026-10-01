@@ -194,6 +194,14 @@ List<String> galleryIds(WidgetTester tester) => [
 
 /// Taps the field and checks the premise: the field, not the canvas, has
 /// the focus.
+/// Whether the button keyed [key] could take the focus (Ruling 05-6): the
+/// nearest `Focus` above [inner], a widget inside the button, is the
+/// button's own node, and an `ExcludeFocus` above it makes it refuse.
+bool canTakeFocus(WidgetTester tester, String key, Finder inner) =>
+    Focus.of(tester.element(
+            find.descendant(of: find.byKey(Key(key)), matching: inner).first))
+        .canRequestFocus;
+
 Future<void> focusField(WidgetTester tester, Host h) async {
   await tester.tap(field);
   await tester.pump();
@@ -243,6 +251,7 @@ void main() {
       expect(find.textContaining('no asset here'), findsOneWidget);
       expect(field, findsNothing);
 
+      expect(canTakeFocus(tester, 'symbol-retry', find.text('Retry')), isFalse);
       await tester.tap(find.byKey(const Key('symbol-retry')));
       await tester.pump();
       await tester.pump();
@@ -250,7 +259,8 @@ void main() {
       expect(find.byKey(const Key('symbol-failed')), findsNothing);
       expect(field, findsOneWidget);
       expect(galleryIds(tester), allIds);
-      // Retry took no focus from the canvas (Ruling 05-6).
+      // The canvas kept the focus (a button never takes it on a tap; the
+      // guard against Retry taking it is `canTakeFocus` above).
       expect(h.canvas.hasFocus, isTrue);
     });
   });
@@ -275,8 +285,14 @@ void main() {
       }
       expect(find.byKey(const Key('symbol-cell-sofa.three@1')), findsNothing);
 
+      // The x takes no focus (Ruling 05-6); the field keeps it after a tap.
+      expect(canTakeFocus(tester, 'symbol-search-clear', find.byType(Icon)),
+          isFalse);
+      await focusField(tester, h);
       await tester.tap(find.byKey(const Key('symbol-search-clear')));
       await tester.pump();
+      expect(h.searchFocus.hasFocus, isTrue);
+      expect(h.canvas.hasFocus, isFalse);
       expect(galleryIds(tester), allIds);
       expect(find.byKey(const Key('symbol-search-clear')), findsNothing);
     });
@@ -291,6 +307,9 @@ void main() {
       expect(find.byType(SymbolGallery), findsNothing);
       expect(find.text('No symbols match "bed zebra"'), findsOneWidget);
 
+      expect(
+          canTakeFocus(tester, 'symbol-search-clear-empty', find.text('Clear')),
+          isFalse);
       await tester.tap(find.byKey(const Key('symbol-search-clear-empty')));
       await tester.pump();
       expect(find.byKey(const Key('symbol-search-empty')), findsNothing);
