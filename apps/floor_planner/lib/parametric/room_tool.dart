@@ -205,6 +205,8 @@ class RoomTool extends PlacementTool {
               transform: Transform2.identity(),
               children: const [])),
           SetComponentCommand<RoomParams>(h, RoomParams(seed.x, seed.y, name)),
+          // Spec 12b D2: a new object takes the current layer.
+          SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
         ], label: 'Add room');
       }, needs: const {
         Capability.structure,

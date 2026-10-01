@@ -99,6 +99,8 @@ class SeparatorTool extends PlacementTool {
               children: const [])),
           SetComponentCommand<SeparatorParams>(
               h, SeparatorParams(s.x, s.y, e.x, e.y)),
+          // Spec 12b D2: a new object takes the current layer.
+          SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
         ], label: 'Add separator');
       }, needs: const {
         Capability.structure,

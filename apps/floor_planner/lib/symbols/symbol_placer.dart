@@ -125,7 +125,9 @@ CompoundCommand placeSymbol(
     handle: doc.handleSeed.next(),
     parent: doc.rootHandle,
     definition: definition,
-    layer: ReservedHandles.layerZero,
+    // Spec 12b D7: the instance takes the current layer; the definition's
+    // leaves stay on layer 0 (the library's rule) and follow it.
+    layer: drawingLayer(doc),
     transform: placementTransform(
       at: at,
       basePoint: entry.definition.basePoint,

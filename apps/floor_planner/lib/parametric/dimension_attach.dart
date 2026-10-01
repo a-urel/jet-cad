@@ -65,20 +65,23 @@ double thickestWall(DraftDocument doc) {
 ///    draws**) of every live opening that owns a child whose stored box
 ///    touches the square `q ± (dimAttach.linear + thickest)`, [thickest]
 ///    being `T` ([thickestWall]). The host is kept only when
-///    `FilterEvaluator.acceptsNode(host, QueryFilter.rendering())` holds:
+///    `FilterEvaluator.acceptsNode(host, QueryFilter.rendering())` holds —
 ///    its group and every group above it visible, the visibility the first
-///    query sees through each of a wall's own children. A wall group has
-///    no layer of its own; its children are generated on layer 0, as the
-///    opening's are, so a hidden layer 0 hides the opening from this query
-///    too. So a hidden wall attaches through neither query (only a file
-///    makes one: no command hides a group). One check per host found, its
+///    query sees through each of a wall's own children — **and** the
+///    host's object layer (`objectLayer`, spec 12b D6, R-7) is visible:
+///    the parametric system writes that layer on every child it generates,
+///    so it is the layer the first query sees through them. So a wall on a
+///    hidden layer, or in a hidden group, attaches through neither query,
+///    even when its opening sits on a visible layer (a layer move makes
+///    that state with commands). One check per host found, the group's
 ///    answer cached per group within the call. **Not covered**, a residual
 ///    limit only a file reaches (no command makes either): a visible wall
-///    group whose own children sit on another, hidden layer, or carry
-///    `EntityFlags.invisible`, while its opening's children are drawn.
-///    The wall draws nothing there, yet its host test passes, so it still
-///    attaches through the opening; a group's children's layers and flags
-///    cannot be read in O(1) through the public API.
+///    whose own children carry `EntityFlags.invisible`, or sit on a hidden
+///    layer other than its object layer (a file written by hand), while its
+///    opening's children are drawn. The wall draws nothing there, yet its
+///    host test passes, so it still attaches through the opening; a
+///    group's children's layers and flags cannot be read in O(1) through
+///    the public API.
 ///
 /// **Why the hosts (S-13):** an opening flush with a flat wall end (a T
 /// butt or a free end; `placeCut` clamps a door placed near a T to exactly
@@ -133,9 +136,11 @@ List<AttachedEnd> attachCandidates(
     final host = doc.components.get<OpeningParams>(owner)!.host;
     if (!isLiveObject<WallParams>(doc, host)) return;
     // Only a host the renderer draws (D10: what is drawn attaches): the
-    // opening's children passed `rendering()`, its host's group must too.
+    // opening's children passed `rendering()`, its host's group must too,
+    // and its object layer must be visible (spec 12b D6, R-7).
     drawn ??= FilterEvaluator(doc);
-    if (drawn!.acceptsNode(host, const QueryFilter.rendering())) {
+    if (drawn!.acceptsNode(host, const QueryFilter.rendering()) &&
+        _layerVisible(doc, objectLayer(doc, host))) {
       walls.add(host);
     }
   });
@@ -152,6 +157,11 @@ List<AttachedEnd> attachCandidates(
   }
   return out;
 }
+
+/// Whether [layer] is drawn (spec 12b D6): a missing record counts as
+/// visible, as `FilterEvaluator` counts it.
+bool _layerVisible(DraftDocument doc, Handle layer) =>
+    doc.tables.layers[layer]?.visible ?? true;
 
 /// Live wall [h]'s six points among every other live wall of [doc].
 WallPoints _wallPointsOf(DraftDocument doc, Handle h) {

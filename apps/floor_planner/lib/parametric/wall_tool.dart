@@ -227,6 +227,8 @@ class WallTool extends PlacementTool {
             children: const [])),
         SetComponentCommand<WallParams>(
             h, WallParams(s.x, s.y, e.x, e.y, w.thickness, w.justification)),
+        // Spec 12b D2: a new object takes the current layer.
+        SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
       ], label: 'Add wall');
     }, needs: const {
       Capability.structure,
