@@ -716,3 +716,120 @@ W-15 R-4; W-16 T-7's refinements, `clear()`; W-17 D10; W-18 T-8's band,
 T-10's separator, R-9; W-19 the licence asset (the font in the pubspec does
 not change widget tests: the reviewer's experiment); W-20 R-6. Facts
 F-2, F-3, F-4, F-10, F-15, F-16 corrected.
+
+## Amended at execution (Plan 13)
+
+Where execution made this spec precise or departed from it, each with the
+ruling or review that decided it (the plan's ledger,
+`ledgers/2026-10-01-plan-13/progress.md`, archived by a later commit;
+results: [2026-10-01-plan-13-results.md](../notes/2026-10-01-plan-13-results.md)).
+This section rewrites nothing above it.
+
+- **R-4, F-15, F-16, D1: the toolchain floor is Flutter 3.44.0 (R-13-7,
+  Task 3).** `pdf` 3.13 needs Dart 3.12, and the first stable Flutter with
+  Dart 3.12 is 3.44.0 (3.41.x ship Dart 3.11; the official releases index).
+  So the `flutter:` bound of `jet_cad_2d_flutter` (`babfcc1`) and of the app
+  (`6a726a9`) is `>=3.44.0`, not printing's 3.41. No `sdk:` bound moved. The
+  human's macOS Flutter must be 3.44.0 or newer.
+- **D3 "text", D4: the PDF measures with `document.textMeasurer`
+  (R-13-14, Task 4 review finding 1, `d3063ab`, `c134c14`).** The painter
+  lays every text box out with `document.textMeasurer`, so `PdfDrawSink`'s
+  `measurer` is typed `TextMeasurer` and `exportPagePdf` passes the
+  document's own measurer and `textStyleOf`; `w_flutter` is that measurer's
+  advance. The plan's "own `FlutterTextMeasurer` cleared in `finally`" is
+  dropped for the PDF path; D5's PNG keeps its own (`CanvasDrawSink` needs
+  `paragraphFor`). In the app both are `FlutterTextMeasurer`s over one font
+  set, so the two agree (R-13-19: the PNG differs only for a non-Flutter
+  measurer, which cannot reach the app's export). `text()` refuses a font
+  that is not on the CID path (`StateError`), and the font is built on the
+  first text (R-13-12: a page without text embeds none).
+- **D4, D5, I-3: an export leaves the dispatcher's mutation hooks as it
+  found them (R-13-17, Task 5 review finding 1, `8fe438b`).** A
+  `SpatialIndex` takes the dispatcher's single `onBeforeMutate` /
+  `onAfterMutate` hooks and nulls them on `dispose()`, which unhooked the
+  app's screen index after an export (demonstrated). The engine has no
+  detached index, so both exports paint inside `_withExportIndex`, which
+  saves both hooks, runs a **synchronous** body, disposes the index and
+  restores both hooks in `finally` (on a throw as well); `toImage` and
+  `write` run outside it. I-3 therefore reads: the codec's bytes, the
+  `stateId` **and both mutation hooks** are equal before and after. Pinned
+  by `export_pdf_test.dart`, `export_png_test.dart` and the app's EX2.
+- **D3: a page that paints nothing has no `/Contents` (R-13-9, R-13-16).**
+  The package drops a content stream that holds only the set-up and state
+  operators; nothing may expect the set-up `cm` on an empty page. "One
+  `ExtGState` object per distinct alpha" is, as written by the package, one
+  `ExtGState` dictionary with one `/aN` entry per distinct alpha (Task 3
+  report): the same meaning.
+- **Architecture, plan P-2: the reader lives in `lib/` (R-13-2).** It is
+  `packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart`,
+  exported by the separate library `package:jet_cad_2d_flutter/export_testing.dart`
+  that nothing in `lib/` imports, not `test/support/pdf_content.dart`, so
+  the app's tests read PDFs with it. It has its own tests
+  (`pdf_content_test.dart`).
+- **T-2: the comparison is `test/support/differential.dart` (R-13-5,
+  R-13-6).** `sink_comparison.dart` compares the canvas and vertices
+  backends by pixels; the painter-versus-walk oracle is
+  `expectPainterSupersetOfReference` / `flatten` in `differential.dart`,
+  with an equal-count assertion added so T-2 checks equality. The painter
+  records with `RecordingDrawSink(shadesDashes: true)` (the walk does not
+  cut dashes), so T-2 does not cover the painter's dash cutting (the
+  dasher's own tests do). T-2 also omits a definition (the container route,
+  which the plan's set never reaches) and an instance's attribute (Task 2
+  review findings 1-2, `ff0d853`).
+- **Unplanned screen fix `32d488f` (R-13-4, Task 2).** A root-level instance
+  whose parent is a group was drawn with its own transform only (groups fold
+  into the root index; the painter dropped the group's transform, while
+  culling, picking, snapping and outlines used the composed one). T-2 could
+  not pass without the fix: a grouped root instance now takes the index's
+  composed transform; an ungrouped one is unchanged. It moves an instance
+  inside a user group on screen (to where everything else already put it).
+  No golden moved; allocation-free by reading; its linear lookup per frame is
+  found-not-fixed.
+- **Testing, the fixture: `basePoint` is stored, never read (R-13-1).** No
+  renderer or engine path reads `Definition.basePoint` (the placer applies
+  it), so the fixture's (120, 45) cannot make any test red and is not a
+  coverage trait. The separator keeps the real separator's style (ByLayer,
+  DASHED, 35), the one deliberate default (R-13-3). "WC" uses its own text
+  style record (Task 4 review finding 2).
+- **Named mutants, as fired.**
+  - **M-13k, M-13y, M-13ad are red by T-3b only (R-13-8).** The painter
+    always passes `closed: false`, every fixture primitive runs in its own
+    `q … Q`, and the fixture's point sits under a translation-only residual,
+    so the T-3 replay cannot see them; the direct calls do.
+  - **M-13c** as written (the width times the camera's scale) is red at
+    both scales; the form that only 1:100 sees (a width following the
+    camera's scale, normalised to be right at 1:50) was fired as well (R-13-15).
+  - **M-13p on the PNG is red at 150 dpi only (R-13-18).** "WC" is 5.9 px
+    high at 300 dpi, above the default cull of 3; at 150 dpi it is 2.95 px.
+    T-7's "WC" check runs at 150 and 300 dpi.
+  - **M-13x** uses `SetComponentCommand<PageComponent>` (the engine has no
+    `AttachComponentCommand`); T-9's `stateId` half kills it (R-13-15).
+  - **M-13q / M-13r** were fired against T-2; T-8's omission is pinned by
+    the export's own "set not passed" mutants (Tasks 5 and 6).
+  - **M-13ac** at `fileNameFor` is red by FK1; at the web call site (the
+    spec's wording) it is red by the source test `document_files_sources_test.dart`
+    (Task 11), which also pins the web MIME type and the io type group.
+  - The print flow exporting twice (E2) is equivalent by observation: the
+    export is pure (T-9) and the font cached (R-13-24).
+- **F-11, R-7, L-1 on the web (R-13-22, Task 7 review finding 2).** The
+  web engine (CanvasKit, skwasm) already fetched Roboto from
+  `fonts.gstatic.com` when the font manifest had no `Roboto`; so on the web
+  the text was already Roboto (a newer cut). Bundling 2.137 changes the
+  version only, and start-up no longer fetches a font from Google. On macOS
+  only the drawing's text changes; the Material chrome keeps the system font.
+- **D8: the io side adds no extension (R-13-21, Task 8).** The macOS panel
+  offers the kind's type group (`saveTypeGroupsFor`) and appends the
+  extension itself; the sandbox grants exactly the returned URL, so the
+  path is returned unchanged for every kind. Extension matching is
+  case-sensitive, as `jetplanFileName` always was (`plan.PDF` downloads as
+  `plan.PDF.pdf` on the web). That the panel appends `.pdf` / `.png` is
+  Apple's behaviour and is on the human's look list.
+- **D8, D9, layout: DC12b and DC12c moved (R-13-23, R-13-24).** Two new
+  toolbar buttons (40 px each) raise 12a's narrowest top bar without
+  overflow from 576 to 656 px, and the status line's slot is 40 px narrower
+  (DC12b's room name shortened to fit). On the human's look list.
+- **D9: the app depends on `pdf` directly (R-13-24).** `PdfPageFormat`, in
+  the `PagePrinter` signature, is not re-exported by `printing`. New
+  packages: `printing` 5.15.1 and `pdf_widget_wrapper` 1.0.4 (Apache 2.0).
+  On the web, `layoutPdf` ignores `name` and `format`; the paper comes from
+  the PDF's `MediaBox` (Task 10 review).
