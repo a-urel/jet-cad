@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
@@ -269,6 +271,73 @@ void main() {
                   Vector2(f.tableLineAt.x + 200, f.tableLineAt.y + 200)),
               BandMode.window),
           {f.instance});
+    });
+
+    test(
+        'a pick and a band after a snap through an instance on locked B still '
+        'test the instance on A by A: each query writes its own depth array',
+        () {
+      final f = LayerFixture();
+      final onB = f.doc.handleSeed.next();
+      final transformB = Transform2.translation(-900, 1500)
+          .multiply(Transform2.rotation(-math.pi / 3));
+      f.doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: onB,
+        parent: f.doc.rootHandle,
+        transform: transformB,
+        definition: f.table,
+        layer: f.b,
+      )));
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      // A snap at B's nested leg line descends two levels into the instance
+      // on B (a locked layer still snaps) and leaves B as the effective
+      // layer at both depths. Each pick and band after it, with picking's
+      // filter, must test the instance on A's leaves against A, not against
+      // what the snap left behind — so each one follows a fresh snap.
+      final onBLeg = transformB
+          .multiply(LayerFixture.nestedTransform)
+          .transformPoint(Vector2(15, 10));
+      void snapOnB() => expect(_snapped(index, onBLeg, _nearest), f.legLine);
+      snapOnB();
+      expect(_picked(index, f.tableLineAt), f.tableLine);
+      snapOnB();
+      expect(_picked(index, f.legLineAt), f.legLine);
+      snapOnB();
+      expect(_banded(index, _around(f.tableLineAt, 1), BandMode.crossing),
+          {f.instance});
+      snapOnB();
+      expect(_banded(index, _around(f.legLineAt, 1), BandMode.crossing),
+          {f.instance});
+    });
+
+    test(
+        'a pick and a snap after a band through an instance on layer 0, then '
+        'layer 0 hidden, still test the instance on A by A', () {
+      final f = LayerFixture();
+      final onZero = f.doc.handleSeed.next();
+      final transformZero = Transform2.translation(2400, -700)
+          .multiply(Transform2.rotation(math.pi / 5));
+      f.doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: onZero,
+        parent: f.doc.rootHandle,
+        transform: transformZero,
+        definition: f.table,
+        layer: ReservedHandles.layerZero,
+      )));
+      final index = SpatialIndex(f.doc);
+      addTearDown(index.dispose);
+      // The band descends into the instance on layer 0 and leaves layer 0 as
+      // the effective layer one level down.
+      expect(
+          _banded(
+              index,
+              _around(transformZero.transformPoint(Vector2(40, 25)), 1),
+              BandMode.crossing),
+          {onZero});
+      _hideLayerZero(f);
+      expect(_picked(index, f.tableLineAt), f.tableLine);
+      expect(_snapped(index, f.legLineAt, _nearest), f.legLine);
     });
 
     test(
