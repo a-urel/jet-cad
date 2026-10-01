@@ -27,9 +27,14 @@ the app gains the font, `FileKind`, the two commands and the `PagePrinter`
 seam.
 
 Every task had a fresh implementer and an independent reviewer who re-ran
-the gates and re-fired mutants. **The final whole-branch review is still to
-come** (plan Task 11, after this note); its sample and its fixes will be
-recorded here by that commit.
+the gates and re-fired mutants. **The final whole-branch review** (on
+`76559cc`, in a detached worktree) re-ran every gate (all as recorded
+below), found no blocking or important defect and no cross-task defect,
+and re-fired 24 mutants on the tip (22 named: M-13a, b, c, d, f, g, i, j,
+l, m, n, p on both outputs, q, s, u, v, w, x, aa, ab, ac; the revert of
+`32d488f`; the removed hook restore), **all red**. Verdict: "Ready with
+fixes" — four documentation findings, applied in the commit that adds this
+paragraph (`final-review.md` in the ledger).
 
 | Task | Commits | Review |
 |---|---|---|
@@ -42,8 +47,8 @@ recorded here by that commit.
 | 7 The font (D7, T-12) | `f625d80` | Approved with notes (licence verified; mutant H, the registration call in `main()`, survived -> a source test owed, landed in Task 11) |
 | 8 `FileKind` (D8) | `f181afc` | Approved with notes (the io and web files' use of the kind unpinned, three survivors -> a source test owed, landed in Task 11) |
 | 9 `Export…` (D8, T-10) | `1e26b85`, `91b13ee`; `7f81838` (9b, test-only) | Approved with notes (the settle, the page-driven flag and busy over the dialog unpinned -> 9b Approved) |
-| 10 `Print…` (D9, T-10) | `6a726a9`, `3057e13`; `ff85f02` (10b, test-only) | Approved with notes (Print's settle and busy over a successful print unpinned -> 10b; its re-review ran in parallel with Task 11) |
-| 11a End to end, the owed sweep tests, this note | `2153621`, `4ede95c` (test-only); the docs commit after it | The final whole-branch review |
+| 10 `Print…` (D9, T-10) | `6a726a9`, `3057e13`; `ff85f02` (10b, test-only) | Approved with notes (Print's settle and busy over a successful print unpinned -> 10b Approved) |
+| 11a End to end, the owed sweep tests, this note | `2153621`, `4ede95c` (test-only); `76559cc` (docs) | The final whole-branch review: Ready with fixes (docs only) -> applied |
 
 No render `lib/` file changed after `d538aa2`; no app `lib/` file changed
 after `3057e13` (Tasks 9b, 10b and 11a are test-only). The engine is
@@ -274,14 +279,21 @@ Notable own mutants, all red unless marked:
 
 Notes on the table. M-13f and M-13g were fired against T-1 only (the plan's
 route: Task 1 owns them); T-3 replays ops recorded at the real camera.
-M-13q / M-13r were fired against T-2; T-8's omission in each output is
-pinned by the exports' own "set not passed" mutants (Task 5 OWN-ex-omit,
+M-13q / M-13r were fired against T-2 in Task 2; on the tip M-13q is also
+red on T-8 for the PDF (`export_pdf_test`, "no path lies on its segment",
+final review). T-8's omission in each output is also pinned by the
+exports' own "set not passed" mutants (Task 5 OWN-ex-omit,
 Task 6 OWN-omit, Task 9 C). A first M-13f/M-13g firing in the Task 1 review
 used a broken script; the file was restored from a checked backup and both
 re-fired (Task 1 review, process note).
 
 ## Found, not fixed
 
+- **A stale doc comment** (`apps/floor_planner/lib/main.dart:228-229`,
+  final review finding 4): `fileCommands`' comment lists the commands up to
+  Export and says the page gates Export's; Print is gated on the page too.
+  Comment-only; left as is because the app's `lib/` is frozen after
+  `3057e13` (a reviewed follow-up can fix it).
 - **A grouped root instance does a linear lookup per frame** (`32d488f`,
   `container_index.dart` `_instanceHandles.indexOf`): O(root instances) per
   grouped instance, allocation-free by reading; no measurement covers it

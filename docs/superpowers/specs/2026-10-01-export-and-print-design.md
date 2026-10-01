@@ -804,8 +804,15 @@ This section rewrites nothing above it.
     T-7's "WC" check runs at 150 and 300 dpi.
   - **M-13x** uses `SetComponentCommand<PageComponent>` (the engine has no
     `AttachComponentCommand`); T-9's `stateId` half kills it (R-13-15).
-  - **M-13q / M-13r** were fired against T-2; T-8's omission is pinned by
-    the export's own "set not passed" mutants (Tasks 5 and 6).
+  - **M-13q / M-13r** were fired against T-2; on the tip M-13q is also red
+    on T-8 for the PDF (final review); T-8's omission is also pinned by the
+    export's own "set not passed" mutants (Tasks 5 and 6).
+  - **D7's "read once per app with `rootBundle.load`"** became an
+    `ExportFontCache` owned by `FloorPlannerApp` and passed to
+    `DocumentHost.exportFont`, with a host-made fallback when none is given
+    and no caching of a failed read (R-13-20, Tasks 7 and 9). The licence
+    registration call in `main()` is pinned by the source test EF11
+    (`4ede95c`), not by review only.
   - **M-13ac** at `fileNameFor` is red by FK1; at the web call site (the
     spec's wording) it is red by the source test `document_files_sources_test.dart`
     (Task 11), which also pins the web MIME type and the io type group.
