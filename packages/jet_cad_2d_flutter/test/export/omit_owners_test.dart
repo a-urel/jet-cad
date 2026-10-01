@@ -26,7 +26,10 @@ void main() {
   final viewport = page.size;
   final omitted = {f.separatorGroup, f.outerGroup};
 
-  List<DrawOp> painted(Set<Handle> omitOwners) {
+  List<DrawOp> painted(
+    Set<Handle> omitOwners, {
+    void Function(Handle)? onVisit,
+  }) {
     final index = SpatialIndex(doc);
     final sink = RecordingDrawSink(shadesDashes: true);
     try {
@@ -36,6 +39,7 @@ void main() {
         resolver: DocumentStyleResolver(doc),
         minTextCapPixels: 0,
         omitOwners: omitOwners,
+        debugOnVisit: onVisit,
       ).paint(sink, camera, viewport);
     } finally {
       index.dispose();
@@ -191,6 +195,49 @@ void main() {
         {f.separatorLine, f.outerGroupLine},
       );
     });
+  });
+
+  test('the painter does not report a skipped leaf to debugOnVisit', () {
+    final visited = <Handle>{};
+    painted(omitted, onVisit: visited.add);
+    expect(visited, isNot(contains(f.separatorLine)));
+    expect(visited, isNot(contains(f.outerGroupLine)));
+    // Everything drawn is still reported, so the check above is not vacuous.
+    expect(visited, containsAll([f.line, f.nestedLine, f.outerInstanceLeaf]));
+    expect(visited, contains(f.outerGroupInstance));
+  });
+
+  group('with a definition omitted (the container route)', () {
+    // The separator and the outer group are flattened into the root index, so
+    // their leaves reach the painter on the root stream. A definition's
+    // leaves reach it inside `_drawContainer`; omitting the definition is
+    // what exercises the test there.
+    final painter = painted({f.definition});
+    final reference = walked({f.definition});
+
+    test('the painter and the reference draw the same drawing', () {
+      expectSameDrawing(painter, reference);
+    });
+
+    for (final (name, ops) in [
+      ('the painter', painter),
+      ('the reference', reference),
+    ]) {
+      test('$name draws none of the instance\'s leaves and the rest', () {
+        final drawn = drawnLeaves(ops);
+        for (final leaf in [
+          f.instanceLine,
+          f.instancePolyline,
+          f.pointInInstance,
+        ]) {
+          expect(drawn, isNot(contains(leaf)));
+        }
+        expect(
+          drawn,
+          containsAll([f.outerInstanceLeaf, f.separatorLine, f.line]),
+        );
+      });
+    }
   });
 
   test('the page viewport is the whole sheet, not a screen', () {
