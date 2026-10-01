@@ -5,6 +5,7 @@
 blocking, 10 major, 8 minor, 2 nit (W-1 to W-20), each applied below; see
 [Revision 2](#revision-2). Its spot check (`818b835`): "Ready with
 amendments" (S-1 to S-7), applied in [Revision 3](#revision-3).
+**Approved by the human on 2026-10-01** ("onaylıyorum, planı yaz").
 **Sub-project:** `roadmap/13-export-and-print.md`. **Size:** M, one plan
 (the human's decision 9), about nine tasks.
 **Branch:** `spec-13/export-and-print`, cut from `main` at `a0a1920`.
