@@ -31,6 +31,7 @@ import 'selection_panel.dart';
 import 'shell_commands.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
+import 'symbols/symbol_library_loader.dart';
 import 'tool_palette.dart';
 
 void main() => runApp(const FloorPlannerApp());
@@ -44,13 +45,22 @@ void main() => runApp(const FloorPlannerApp());
 ///
 /// [files] and [exitGuard] are test seams: the platform's implementations
 /// when null.
+///
+/// Since 09b (spec D2, R-4) the app also owns the symbol library's loader:
+/// above the host, because the shell is rebuilt per document and must not
+/// read the asset again.
 class FloorPlannerApp extends StatefulWidget {
-  const FloorPlannerApp({super.key, this.files, this.exitGuard});
+  const FloorPlannerApp({super.key, this.files, this.exitGuard, this.symbols});
 
   final DocumentFiles? files;
 
   /// Handed to the [DocumentHost], which owns it (spec 12a D11).
   final ExitGuard? exitGuard;
+
+  /// The symbol library's loader (spec 09b D2), a test seam: when null the
+  /// app makes one over the bundled asset and disposes it; a given one is
+  /// the caller's to dispose. Either way the app calls `load()` once.
+  final SymbolLibraryLoader? symbols;
 
   @override
   State<FloorPlannerApp> createState() => _FloorPlannerAppState();
@@ -61,6 +71,12 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   final DocumentSession _session = DocumentSession.untitled();
   late final DocumentFiles _files =
       widget.files ?? createDocumentFiles(askName: _askName);
+
+  /// The loader this app made itself, disposed with it; null when the
+  /// caller gave one.
+  SymbolLibraryLoader? _ownSymbols;
+  late final SymbolLibraryLoader _symbols =
+      widget.symbols ?? (_ownSymbols = SymbolLibraryLoader());
 
   /// The web's save-name prompt (spec 12a D9, T-12), shown over the
   /// navigator: the files object is made above the `MaterialApp`, so it
@@ -75,7 +91,14 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   static void _consume() {}
 
   @override
+  void initState() {
+    super.initState();
+    _symbols.load();
+  }
+
+  @override
   void dispose() {
+    _ownSymbols?.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -103,7 +126,10 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
             child: child!,
           ),
           home: DocumentHost(
-              session: _session, files: _files, exitGuard: widget.exitGuard),
+              session: _session,
+              files: _files,
+              exitGuard: widget.exitGuard,
+              symbols: _symbols),
         ),
       );
 }
@@ -148,6 +174,7 @@ class PlannerShell extends StatefulWidget {
     this.busy,
     this.onSettle,
     this.initialCamera,
+    this.symbols,
   });
 
   final DraftDocument? document;
@@ -173,6 +200,11 @@ class PlannerShell extends StatefulWidget {
   /// Where the shell registers its settle (spec 12a D2).
   final ShellSettleRegistrar? onSettle;
   final ViewportTransform? initialCamera;
+
+  /// The app's symbol library loader (spec 09b D2), passed through the
+  /// host; null in a bare shell, which shows today's panel. Not owned
+  /// here, and not used yet (plan 09b Task 9 wires it).
+  final SymbolLibraryLoader? symbols;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
