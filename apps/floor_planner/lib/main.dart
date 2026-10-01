@@ -31,6 +31,10 @@ import 'selection_panel.dart';
 import 'shell_commands.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
+import 'symbols/symbol_library.dart';
+import 'symbols/symbol_library_loader.dart';
+import 'symbols/symbol_panel.dart';
+import 'symbols/symbol_place_tool.dart';
 import 'tool_palette.dart';
 
 void main() => runApp(const FloorPlannerApp());
@@ -44,13 +48,28 @@ void main() => runApp(const FloorPlannerApp());
 ///
 /// [files] and [exitGuard] are test seams: the platform's implementations
 /// when null.
+///
+/// Since 09b (spec D2, D5, R-4) the app also owns the symbol library's
+/// loader and the thumbnail cache: above the host, because the shell is
+/// rebuilt per document and must neither read the asset again nor repaint
+/// every thumbnail.
 class FloorPlannerApp extends StatefulWidget {
-  const FloorPlannerApp({super.key, this.files, this.exitGuard});
+  const FloorPlannerApp(
+      {super.key, this.files, this.exitGuard, this.symbols, this.thumbnails});
 
   final DocumentFiles? files;
 
   /// Handed to the [DocumentHost], which owns it (spec 12a D11).
   final ExitGuard? exitGuard;
+
+  /// The symbol library's loader (spec 09b D2), a test seam: when null the
+  /// app makes one over the bundled asset and disposes it; a given one is
+  /// the caller's to dispose. Either way the app calls `load()` once.
+  final SymbolLibraryLoader? symbols;
+
+  /// The symbol thumbnail cache (spec 09b D5), a test seam: when null the
+  /// app makes one and disposes it; a given one is the caller's to dispose.
+  final SymbolThumbnails? thumbnails;
 
   @override
   State<FloorPlannerApp> createState() => _FloorPlannerAppState();
@@ -61,6 +80,18 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   final DocumentSession _session = DocumentSession.untitled();
   late final DocumentFiles _files =
       widget.files ?? createDocumentFiles(askName: _askName);
+
+  /// The loader this app made itself, disposed with it; null when the
+  /// caller gave one.
+  SymbolLibraryLoader? _ownSymbols;
+  late final SymbolLibraryLoader _symbols =
+      widget.symbols ?? (_ownSymbols = SymbolLibraryLoader());
+
+  /// The thumbnail cache this app made itself, disposed with it; null when
+  /// the caller gave one.
+  SymbolThumbnails? _ownThumbnails;
+  late final SymbolThumbnails _thumbnails =
+      widget.thumbnails ?? (_ownThumbnails = SymbolThumbnails());
 
   /// The web's save-name prompt (spec 12a D9, T-12), shown over the
   /// navigator: the files object is made above the `MaterialApp`, so it
@@ -75,7 +106,15 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   static void _consume() {}
 
   @override
+  void initState() {
+    super.initState();
+    _symbols.load();
+  }
+
+  @override
   void dispose() {
+    _ownSymbols?.dispose();
+    _ownThumbnails?.dispose();
     _session.dispose();
     super.dispose();
   }
@@ -103,7 +142,11 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
             child: child!,
           ),
           home: DocumentHost(
-              session: _session, files: _files, exitGuard: widget.exitGuard),
+              session: _session,
+              files: _files,
+              exitGuard: widget.exitGuard,
+              symbols: _symbols,
+              thumbnails: _thumbnails),
         ),
       );
 }
@@ -148,6 +191,8 @@ class PlannerShell extends StatefulWidget {
     this.busy,
     this.onSettle,
     this.initialCamera,
+    this.symbols,
+    this.thumbnails,
   });
 
   final DraftDocument? document;
@@ -173,6 +218,16 @@ class PlannerShell extends StatefulWidget {
   /// Where the shell registers its settle (spec 12a D2).
   final ShellSettleRegistrar? onSettle;
   final ViewportTransform? initialCamera;
+
+  /// The app's symbol library loader (spec 09b D2), passed through the
+  /// host; not owned here. With it the left panel has two tabs, Tools and
+  /// Symbols (D8); null in a bare shell, which shows today's panel exactly.
+  final SymbolLibraryLoader? symbols;
+
+  /// The app's symbol thumbnail cache (spec 09b D5), passed through the
+  /// host; not owned here. Read only with [symbols]: a shell given a loader
+  /// and no cache makes a cache of its own and disposes it.
+  final SymbolThumbnails? thumbnails;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -266,6 +321,22 @@ class _PlannerShellState extends State<PlannerShell> {
   late final CircleTool _circle = CircleTool(fill: _fill);
   final ArcTool _arc = ArcTool();
   final TextTool _text = TextTool();
+
+  // Spec 09b D8: the symbol placement tool and its armed symbol. Outside
+  // [_entries] (no letter: a gallery cell arms it), so disposed on its own.
+  final ValueNotifier<SymbolEntry?> _armed = ValueNotifier<SymbolEntry?>(null);
+  late final SymbolPlaceTool _symbolTool = SymbolPlaceTool(_armed);
+
+  /// The Symbols tab's search field (spec 09b D7, F-4): a panel field, so
+  /// [_settlePendingInput] hands it back.
+  final PanelFieldFocusNode _symbolSearch =
+      PanelFieldFocusNode(debugLabel: 'symbol-search');
+
+  /// A cache of the shell's own when it was given a loader and no cache.
+  SymbolThumbnails? _ownThumbnails;
+
+  /// The left panel's active tab (spec 09b D8): shell state, not persisted.
+  _LeftTab _leftTab = _LeftTab.tools;
 
   late final List<PaletteEntry> _entries = [
     PaletteEntry(
@@ -549,6 +620,14 @@ class _PlannerShellState extends State<PlannerShell> {
     _tools.activate(tool);
   }
 
+  /// Spec 09b D8: a gallery cell arms [entry] and activates the placement
+  /// tool through [_activate], which refuses it while geometry is denied
+  /// and clears the selection.
+  void _armSymbol(SymbolEntry entry) {
+    _armed.value = entry;
+    _activate(_symbolTool);
+  }
+
   /// An idle drawing tool leaves Escape unhandled; it arrives here.
   void _escape() {
     if (!identical(_tools.active, _select)) _activate(_select);
@@ -610,6 +689,11 @@ class _PlannerShellState extends State<PlannerShell> {
     for (final e in _entries) {
       e.tool.dispose();
     }
+    // The tool removes its listener from [_armed]: it goes first.
+    _symbolTool.dispose();
+    _armed.dispose();
+    _symbolSearch.dispose();
+    _ownThumbnails?.dispose();
     _fill.dispose();
     _wallSettings.dispose();
     for (final s in _openingSettings.values) {
@@ -646,6 +730,63 @@ class _PlannerShellState extends State<PlannerShell> {
       valueListenable: dirty,
       builder: (_, isDirty, __) =>
           isDirty ? Tooltip(message: 'Edited', child: text(true)) : text(false),
+    );
+  }
+
+  Widget _toolPalette() => ToolPalette(
+        entries: _entries,
+        tools: _tools,
+        fill: _fill,
+        geometryAllowed: _geometryAllowed,
+        onSelect: _activate,
+      );
+
+  /// Spec 09b D8: today's palette in a bare shell; with a loader, a tab
+  /// strip (Tools, the default, and Symbols) over the chosen tab. The
+  /// strip never takes focus (Ruling 05-6, R-5): the canvas keeps it.
+  /// Switching tabs changes no tool.
+  Widget _leftPanel() {
+    final symbols = widget.symbols;
+    if (symbols == null) return _toolPalette();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+          child: ExcludeFocus(
+            child: SegmentedButton<_LeftTab>(
+              key: const Key('left-tabs'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                    value: _LeftTab.tools,
+                    label: Text('Tools', key: Key('tab-tools'))),
+                ButtonSegment(
+                    value: _LeftTab.symbols,
+                    label: Text('Symbols', key: Key('tab-symbols'))),
+              ],
+              selected: {_leftTab},
+              onSelectionChanged: (s) => setState(() => _leftTab = s.single),
+            ),
+          ),
+        ),
+        Expanded(
+          child: switch (_leftTab) {
+            _LeftTab.tools => _toolPalette(),
+            _LeftTab.symbols => SymbolPanel(
+                loader: symbols,
+                thumbnails: widget.thumbnails ??
+                    (_ownThumbnails ??= SymbolThumbnails()),
+                tools: _tools,
+                tool: _symbolTool,
+                armed: _armed,
+                permissions: _document.commands.permissions,
+                searchFocus: _symbolSearch,
+                onSelect: _armSymbol,
+              ),
+          },
+        ),
+      ],
     );
   }
 
@@ -751,13 +892,7 @@ class _PlannerShellState extends State<PlannerShell> {
                     key: const Key('chrome-left'),
                     width: 240,
                     color: scheme.surfaceContainerLow,
-                    child: ToolPalette(
-                      entries: _entries,
-                      tools: _tools,
-                      fill: _fill,
-                      geometryAllowed: _geometryAllowed,
-                      onSelect: _activate,
-                    ),
+                    child: _leftPanel(),
                   ),
                   Expanded(
                     child: ColoredBox(
@@ -814,3 +949,6 @@ class _PlannerShellState extends State<PlannerShell> {
     );
   }
 }
+
+/// The left panel's tabs (spec 09b D8).
+enum _LeftTab { tools, symbols }
