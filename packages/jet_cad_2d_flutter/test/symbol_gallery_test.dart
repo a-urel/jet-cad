@@ -61,6 +61,8 @@ const Color kCell = Color(0xFFF4F1EA);
 
 /// The thumbnail cache, recording every future it hands out.
 class RecordingThumbnails extends SymbolThumbnails {
+  RecordingThumbnails({super.maxEntries});
+
   final List<Future<ui.Image>> requests = [];
 
   @override
@@ -88,10 +90,11 @@ class RecordingThumbnails extends SymbolThumbnails {
 }
 
 class Harness {
-  Harness(this.tester);
+  Harness(this.tester, {int maxEntries = 64})
+      : thumbnails = RecordingThumbnails(maxEntries: maxEntries);
 
   final WidgetTester tester;
-  final RecordingThumbnails thumbnails = RecordingThumbnails();
+  final RecordingThumbnails thumbnails;
   final List<String> selected = [];
   final FocusNode outside = FocusNode(debugLabel: 'canvas');
 
@@ -419,5 +422,58 @@ void main() {
     // Still selectable.
     await tester.tap(cell('bad@1'));
     expect(h.selected, ['bad@1']);
+  });
+
+  testWidgets('a rebuild with the same key requests no thumbnail again',
+      (tester) async {
+    // MUTATION: imageFor on every widget update (`if (true || ...`) -> the
+    // request count grows on a selection or an enabled change.
+    final h = Harness(tester);
+    addTearDown(h.dispose);
+    await h.pump();
+    await h.settleImages();
+    final before = h.thumbnails.requests.length;
+    expect(before, 4, reason: 'one request per cell');
+    await h.pump(selectedId: 'sofa@1');
+    await h.settleImages();
+    await h.pump(selectedId: 'sofa@1', enabled: false);
+    await h.settleImages();
+    expect(h.thumbnails.requests, hasLength(before));
+    expect(h.thumbnails.length, 4);
+    for (final id in ['chair@1', 'chair@2', 'sofa@1', 'table@1']) {
+      final image = shownImage(tester, id);
+      expect(image, isNotNull, reason: id);
+      expect(image!.debugDisposed, isFalse, reason: id);
+    }
+  });
+
+  testWidgets('a cell whose entry is evicted while pending still shows a clone',
+      (tester) async {
+    // MUTATION: the clone is taken after an await gap (`async { await null;
+    // ...`) -> the evicted image is disposed first, the cell shows nothing.
+    final h = Harness(tester, maxEntries: 1);
+    addTearDown(h.dispose);
+    final two = [
+      GalleryCategory(name: 'Pair', symbols: [
+        sym('left@1', 'Left', 1),
+        sym('right@1', 'Right', 3),
+      ]),
+    ];
+    await h.pump(categories: two);
+    // Both requested in one build: the first entry was evicted while pending.
+    expect(h.thumbnails.requests, hasLength(2));
+    expect(h.thumbnails.length, 1);
+    await h.settleImages();
+    await tester.pump();
+    final evicted = await tester.runAsync(() => h.thumbnails.requests.first);
+    expect(evicted!.debugDisposed, isTrue,
+        reason: 'the cache disposed the evicted original');
+    for (final id in ['left@1', 'right@1']) {
+      final image = shownImage(tester, id);
+      expect(image, isNotNull, reason: id);
+      expect(image!.debugDisposed, isFalse, reason: id);
+    }
+    expect(shownImage(tester, 'left@1')!.isCloneOf(evicted), isTrue);
+    expect(h.thumbnails.requests, hasLength(2), reason: 'no re-request');
   });
 }
