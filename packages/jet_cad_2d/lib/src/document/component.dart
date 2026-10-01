@@ -1,4 +1,5 @@
 import '../core/handle.dart';
+import 'object_layer.dart';
 import 'origin_component.dart';
 
 /// Extension data attached to any handle.
@@ -90,6 +91,8 @@ class ComponentRegistry {
       OriginComponent.fromJson,
       internal: true,
     );
+    // Not internal (spec 12b S-16): an object's layer is document content.
+    register<ObjectLayer>(ObjectLayer.componentTypeId, ObjectLayer.fromJson);
   }
 
   /// True when a component type must never be written to a foreign format as
