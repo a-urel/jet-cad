@@ -222,6 +222,18 @@ void main() {
     });
   });
 
+  test(
+      'each run is measured under its own style record ("WC" under "Label", '
+      'not Standard)', () async {
+    final f = exportFixture(
+        measurer: _PerStyleMeasurer({'Standard': 0.55, 'Label': 0.35}));
+    final content = await export(f);
+    final [big, wc] = content.textRuns;
+    // 11 glyphs at 0.55 em and 2 at 0.35 em, at kNominalTextPixels.
+    expect(big.advance, closeTo(605, kPdfRounding / big.horizontalScale * 605));
+    expect(wc.advance, closeTo(70, kPdfRounding / wc.horizontalScale * 70));
+  });
+
   group('T-8 (PDF): the separator', () {
     final f = exportFixture(measurer: FlutterTextMeasurer());
     final group =
@@ -255,6 +267,23 @@ void main() {
         plain.operators.map((o) => o.toString()).toList());
     expect([for (final t in packed.textRuns) t.string], ['Yatak Odası', 'WC']);
   });
+}
+
+/// A measurer whose advance depends on the style record's name.
+final class _PerStyleMeasurer implements TextMeasurer {
+  _PerStyleMeasurer(this.emPerGlyph);
+
+  final Map<String, double> emPerGlyph;
+
+  @override
+  TextMetrics measure({required String text, required TextStyleRecord style}) =>
+      TextMetrics(
+        advanceWidth:
+            text.runes.length * emPerGlyph[style.name]! * kNominalTextPixels,
+        ascent: 80,
+        descent: 20,
+        capHeight: 70,
+      );
 }
 
 /// A root line of [rgb] and [lineweight], added through a command.
