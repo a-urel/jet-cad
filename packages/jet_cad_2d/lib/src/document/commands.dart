@@ -394,6 +394,103 @@ class RemoveNodeCommand extends DraftCommand {
   }
 }
 
+/// Adds one [Definition] to the tree.
+///
+/// Refuses, before any mutation, a handle that already names a definition, a
+/// node or an entity ([DuplicateHandleError]: a handle names one thing in the
+/// document), and a definition whose `children` is not empty
+/// ([ArgumentError]). The second refusal is deliberate: [DocumentTree.
+/// addDefinition] writes containment edges without the cycle guard
+/// [DocumentTree.addNode] has, so a v1 definition lists no nodes and no edge is
+/// written through the unguarded API. Its leaves arrive afterwards, through
+/// [AddEntityCommand] with the definition as `owner`.
+///
+/// `touched` names the definition handle, which is what makes the spatial
+/// index rebuild its containers (a touched handle that resolves to a
+/// definition is structural).
+class AddDefinitionCommand extends DraftCommand {
+  final Definition definition;
+
+  AddDefinitionCommand(this.definition);
+
+  @override
+  Capability get capability => Capability.structure;
+
+  @override
+  String get label => 'Add definition';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final handle = definition.handle;
+    if (target.tree.definition(handle) != null ||
+        target.tree[handle] != null ||
+        target.entities.containsHandle(handle)) {
+      throw DuplicateHandleError(handle);
+    }
+    if (definition.children.isNotEmpty) {
+      throw ArgumentError.value(
+          definition.children,
+          'definition.children',
+          'a definition added by command lists no nodes; '
+              '${handle.toHex()} names ${definition.children.length}');
+    }
+    target.tree.addDefinition(definition);
+    target.handleSeed.raiseTo(handle);
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: RemoveDefinitionCommand(handle),
+      touched: {handle},
+    );
+  }
+}
+
+/// Removes one [Definition] from the tree.
+///
+/// Refused, before any mutation, while anything still names it: an
+/// [InstanceNode] of it, a node parented to it, or an entity owned by it.
+/// Removal is the last step of a compound that has already removed those, so
+/// nothing is left dangling. The inverse carries the definition value read
+/// before removal.
+class RemoveDefinitionCommand extends DraftCommand {
+  final Handle handle;
+
+  RemoveDefinitionCommand(this.handle);
+
+  @override
+  Capability get capability => Capability.structure;
+
+  @override
+  String get label => 'Remove definition';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final definition = target.tree.definition(handle);
+    if (definition == null) {
+      throw StateError('no definition with handle ${handle.toHex()}');
+    }
+    for (final node in target.tree.nodes) {
+      if ((node is InstanceNode && node.definition == handle) ||
+          node.parent == handle) {
+        throw StateError('definition ${handle.toHex()} is still named by '
+            'node ${node.handle.toHex()}');
+      }
+    }
+    final entities = target.entities;
+    for (final slot in entities.liveSlots) {
+      if (entities.ownerAt(slot) == handle) {
+        throw StateError('definition ${handle.toHex()} still owns entity '
+            '${entities.handleAt(slot).toHex()}');
+      }
+    }
+    target.tree.removeDefinition(handle);
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: AddDefinitionCommand(definition),
+      touched: {handle},
+    );
+  }
+}
+
 /// Attaches, replaces, or (with a null value) detaches one component.
 ///
 /// Editing component data is what a runtime is allowed to do without being

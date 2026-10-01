@@ -1,6 +1,6 @@
 # 09 — Symbol library
 
-**Status:** not started
+**Status:** spec rev 3 ([2026-09-30-symbol-library-design.md](../docs/superpowers/specs/2026-09-30-symbol-library-design.md), amended at execution); **09a (the core) is executed** on `plan-09/symbol-library-core`: plan [2026-09-30-symbol-library-core.md](../docs/superpowers/plans/2026-09-30-symbol-library-core.md), results [2026-09-30-plan-09a-results.md](../docs/superpowers/notes/2026-09-30-plan-09a-results.md); not merged, merge on the human's word. **09b (the palette: gallery, thumbnails, search, the placement tool) is unwritten.** Where this file differs from the spec, the spec wins: the library file is `.jetlib` (not `.json`), a symbol is placed by select-then-click (not dragged), `basePoint` is applied by the placer (the engine ignores it), and a definition is added by new undoable commands.
 **Depends on:** 02, 05
 **Blocks:** nothing, but 08 may depend on it — see 08's first open question
 **Size:** M

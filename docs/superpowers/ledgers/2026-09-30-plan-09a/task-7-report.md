@@ -1,0 +1,5 @@
+# Task 7 report (documentation half)
+Commit bdca1ed `docs: plan 09a results and spec amendments` (not pushed). Files: docs/superpowers/notes/2026-09-30-plan-09a-results.md (new), docs/superpowers/specs/2026-09-30-symbol-library-design.md (closing section appended), roadmap/09-symbol-library.md, roadmap/00-README.md (status row and status paragraph). STATUS.md untouched; analysis_options.yaml not staged.
+Verified: all relative links resolve except ledgers/2026-09-30-plan-09a/ (created by the archive commit, as briefed). No lib/ or test/ change. Allocation invariant dirs: empty diff vs 40157af. lib/symbols has no dart:io/flutter imports (comments only).
+Could not verify / not recorded: the final whole-branch review's mutant sample (P-8); render baseline count at 40157af; proxy facts beyond the remote-branch deletion refusal named in the plan; render and engine were last run in full at Task 6 (6c re-ran app only); web build last at 22bc83d.
+Spec text mismatch noted: none changed above the new section; spec header still says "Awaiting the human's approval".
