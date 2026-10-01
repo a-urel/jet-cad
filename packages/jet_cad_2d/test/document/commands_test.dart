@@ -28,6 +28,8 @@ class TestTarget implements CommandTarget {
   @override
   final FillIndex fills = FillIndex();
   @override
+  final DocumentHeader header = DocumentHeader();
+  @override
   void invalidateDerived() {}
 }
 

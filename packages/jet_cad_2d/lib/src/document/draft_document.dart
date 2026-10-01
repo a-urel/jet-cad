@@ -41,6 +41,7 @@ class DraftDocument implements CommandTarget {
   @override
   final FillIndex fills = FillIndex();
 
+  @override
   final DocumentHeader header;
   final RawDataStore rawData;
 

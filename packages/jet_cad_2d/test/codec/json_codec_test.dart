@@ -509,14 +509,19 @@ void main() {
     expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
   });
 
-  test('the schema version is 6, and a v7 document is refused by version', () {
-    expect(kSchemaVersion, 6);
+  test(
+      'the schema version is 7, and a future document is refused by '
+      'version', () {
+    // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
+    expect(kSchemaVersion, 7);
     // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
     // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
     // the loose matcher passed whenever N was the *current* version rather
     // than a future one. The point of this test is that the refusal comes from
     // the version guard.
-    expect(() => DraftDocumentCodec.decode({'schemaVersion': 7}),
+    // Plan 12b Task 1: the refused version follows the build's, not a literal.
+    expect(
+        () => DraftDocumentCodec.decode({'schemaVersion': kSchemaVersion + 1}),
         throwsA(isA<SchemaVersionError>()));
   });
 
@@ -576,7 +581,8 @@ void main() {
     });
 
     // No schema change: flags was already a free int (spec 11 D19, S-16).
-    expect(kSchemaVersion, 6);
-    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 6);
+    // Plan 12b Task 1: the pin moved to 7 with header.currentLayer.
+    expect(kSchemaVersion, 7);
+    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 7);
   });
 }

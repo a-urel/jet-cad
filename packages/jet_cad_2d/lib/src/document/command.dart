@@ -5,6 +5,7 @@ import '../store/entity_store.dart';
 import '../store/geometry_store.dart';
 import 'component.dart';
 import 'fill_index.dart';
+import 'header.dart';
 import 'tables.dart';
 import 'tree.dart';
 
@@ -91,6 +92,10 @@ abstract class CommandTarget {
   DocumentTables get tables;
   ComponentRegistry get components;
   HandleSeed get handleSeed;
+
+  /// Document-wide settings. A command reads and writes the stored current
+  /// layer here (spec 12b D3).
+  DocumentHeader get header;
 
   /// The fill cache and the boundary->fills map. A command that changes a
   /// boundary's geometry or removes one must keep this current; see
