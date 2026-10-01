@@ -64,16 +64,20 @@ final class QueryFilter {
 /// whenever a layer record or a node's visibility changes; [invalidate] is that
 /// hook.
 ///
-/// No command in `commands.dart` can currently cause that staleness:
-/// [AddNodeCommand] refuses to overwrite an existing handle, [TransformNodeCommand]
-/// rewrites only `transform`, and nothing rewrites [Node.visible] or a
-/// [LayerRecord]'s `visible`/`locked` at all — table records go in only through
-/// [DocumentTables], which this plan has not yet given a mutating command
-/// either. So today, [invalidate] has no caller and every cache this class
-/// builds is correct for the document's whole lifetime. **This is a fact about
-/// today's command set, not a guarantee [FilterEvaluator] enforces** — the next
-/// command that can flip a node's or a layer's visibility or lock state must
-/// call [invalidate] itself; nothing here will notice on its own.
+/// Since plan 12b the layer commands can flip a layer's `visible` and
+/// `locked`, and a direct [DocumentTables] write can too. [SpatialIndex]
+/// owns the long-lived evaluator and calls [invalidate] at the start of the
+/// first query after `DocumentTables.mutationRevision` moved (spec 12b D6),
+/// and on every full rebuild. Nothing rewrites [Node.visible] yet; the next
+/// command that can must invalidate too — nothing here notices on its own.
+///
+/// **The effective layer (spec 12b D6, plan P-4).** A leaf or a nested
+/// instance on layer 0 is tested against the layer of the context it is
+/// placed through, the style resolver's substitution rule: [acceptsEntityOnLayer]
+/// and [acceptsNodeOnLayer] take that context layer from the index's walk.
+/// [acceptsEntity] and [acceptsNode] are the root context, whose layer is
+/// layer 0 — except for a leaf owned by an [InstanceNode] (an ATTRIB), which
+/// takes its owner's layer ([_ownerLayer]).
 class FilterEvaluator {
   FilterEvaluator(this.document);
 
@@ -82,13 +86,37 @@ class FilterEvaluator {
   final Map<Handle, bool> _layerLocked = <Handle, bool>{};
   final Map<Handle, bool> _containerVisible = <Handle, bool>{};
 
+  /// Per owner handle: the owner's own layer when it is an [InstanceNode],
+  /// else [Handle.none]. Read for a layer-0 leaf not owned by the root — an
+  /// ATTRIB's owner is its instance (`node.dart`) — so the ATTRIB follows the
+  /// instance (spec 12b D6, S-2). An instance's layer changes only through a
+  /// node replacement, which the index answers with a full rebuild, and
+  /// every full rebuild calls [invalidate].
+  final Map<Handle, Handle> _ownerLayer = <Handle, Handle>{};
+
   void invalidate() {
     _layerVisible.clear();
     _layerLocked.clear();
     _containerVisible.clear();
+    _ownerLayer.clear();
   }
 
-  bool acceptsEntity(int slot, QueryFilter filter) {
+  /// [acceptsEntityOnLayer] in the root context: a leaf on layer 0 stays on
+  /// layer 0 unless an [InstanceNode] owns it (an ATTRIB), which then takes
+  /// its instance's layer.
+  bool acceptsEntity(int slot, QueryFilter filter) =>
+      acceptsEntityOnLayer(slot, filter, ReservedHandles.layerZero);
+
+  /// Whether [filter] accepts the leaf at [slot], placed through a context
+  /// whose effective layer is [context] (spec 12b D6, plan P-4).
+  ///
+  /// The layer tested is the leaf's own, unless that is layer 0: then it is
+  /// its owning instance's layer when an [InstanceNode] owns it and that
+  /// layer is not layer 0 (an ATTRIB, S-2), else [context] — the resolver's
+  /// substitution rule (`style_resolver.dart`, `styleFor`). The answers are
+  /// memoised per layer, so the substitution adds an int compare per leaf
+  /// and, for a layer-0 leaf not owned by the root, one map hit.
+  bool acceptsEntityOnLayer(int slot, QueryFilter filter, Handle context) {
     if (filter.isPassthrough) return true;
     // One bool test when the filter does not ask (`rendering()`, every
     // frame), one column read when it does (a pick or a snap). No
@@ -97,7 +125,15 @@ class FilterEvaluator {
         document.entities.flagsAt(slot) & EntityFlags.unpickable != 0) {
       return false;
     }
-    final layer = document.entities.layerAt(slot);
+    var layer = document.entities.layerAt(slot);
+    if (layer == ReservedHandles.layerZero) {
+      final owner = document.entities.ownerAt(slot);
+      final ownLayer =
+          owner == document.rootHandle ? Handle.none : _instanceLayer(owner);
+      layer = ownLayer != Handle.none && ownLayer != ReservedHandles.layerZero
+          ? ownLayer
+          : context;
+    }
     if (filter.visibleOnly) {
       // The entity's own bit first: it is a column read, where the other two
       // are map lookups, and DXF group code 60 outranks both — an entity
@@ -112,10 +148,24 @@ class FilterEvaluator {
     return true;
   }
 
-  bool acceptsNode(Handle node, QueryFilter filter) {
+  /// [acceptsNodeOnLayer] in the root context: an instance is tested
+  /// against its own layer.
+  bool acceptsNode(Handle node, QueryFilter filter) =>
+      acceptsNodeOnLayer(node, filter, ReservedHandles.layerZero);
+
+  /// Whether [filter] accepts [node], placed through a context whose
+  /// effective layer is [context]: an [InstanceNode] on layer 0 is tested
+  /// against [context] (spec 12b D6, S-7), the resolver's rule in
+  /// `contextFor`.
+  bool acceptsNodeOnLayer(Handle node, QueryFilter filter, Handle context) {
     if (filter.isPassthrough) return true;
     final resolved = document.tree[node];
     if (resolved == null) return true;
+    final layer = resolved is InstanceNode
+        ? (resolved.layer == ReservedHandles.layerZero
+            ? context
+            : resolved.layer)
+        : ReservedHandles.layerZero;
     if (filter.visibleOnly) {
       // The node's own visibility and its ancestors' are the same question
       // _visibleContainer already answers for a leaf's owner — a node is
@@ -124,16 +174,23 @@ class FilterEvaluator {
       // chain) reuses one path instead of keeping two, and gets the node's
       // own answer cached too.
       if (!_visibleContainer(node)) return false;
-      if (resolved is InstanceNode && !_visibleLayer(resolved.layer)) {
-        return false;
-      }
+      if (resolved is InstanceNode && !_visibleLayer(layer)) return false;
     }
     if (filter.excludeLocked &&
         resolved is InstanceNode &&
-        _lockedLayer(resolved.layer)) {
+        _lockedLayer(layer)) {
       return false;
     }
     return true;
+  }
+
+  /// [owner]'s own layer when it is an [InstanceNode], else [Handle.none];
+  /// memoised in [_ownerLayer].
+  Handle _instanceLayer(Handle owner) {
+    final cached = _ownerLayer[owner];
+    if (cached != null) return cached;
+    final node = document.tree[owner];
+    return _ownerLayer[owner] = node is InstanceNode ? node.layer : Handle.none;
   }
 
   /// A layer this document does not have is treated as visible and unlocked.
