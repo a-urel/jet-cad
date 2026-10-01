@@ -24,12 +24,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/document_rig.dart';
 import '../support/export_flat.dart';
 import '../support/fake_document_files.dart';
 import '../support/fake_exit_guard.dart';
-import '../support/room_fixture.dart' show kids, kindOf, recordOf, worldPoints;
+import '../support/room_fixture.dart'
+    show attachPage, kids, kindOf, recordOf, worldPoints;
 
 Finder get exportButton => find.byKey(const Key('toolbar-export'));
 
@@ -154,6 +156,45 @@ void main() {
     });
   });
 
+  group('T-10 Export settles first', () {
+    testWidgets(
+        'EX2b text typed in an open entry, then Cmd+E and Export: the PDF and '
+        'the document both have it (spec 12a D2: the flow settles first)',
+        (tester) async {
+      final files = FakeDocumentFiles();
+      await pumpFlat(tester, files);
+      final at = Vector2(9000, 2000); // on the sheet, away from the rest
+      await aimCamera(tester, at);
+      await press(tester, LogicalKeyboardKey.keyT);
+      await tester.tapAt(globalOf(tester, at));
+      await tester.pump();
+      expect(find.byKey(const Key('text-entry')), findsOneWidget,
+          reason: 'premise: the entry is open');
+      await tester.enterText(find.byKey(const Key('text-entry')), 'Mutfak');
+      await tester.pump();
+      expect(DraftDocumentCodec.encodeToString(sessionOf(tester).document),
+          isNot(contains('Mutfak')),
+          reason: 'premise: typed, not committed');
+      files.scriptSaveLocation(name: 'flat.pdf', location: '/out/flat.pdf');
+      expect(
+          await chordHandled(
+              tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyE),
+          isTrue);
+      await tester.pump();
+      expect(find.byKey(const Key('export-dialog')), findsOneWidget);
+      await tapKey(tester, 'export-ok');
+      await tester.pump();
+      noDialog(tester);
+      final content =
+          PdfContent.parse(files.writes.single.bytes, inflate: zlib.decode);
+      expect([for (final t in content.textRuns) t.string],
+          unorderedEquals([labelText, 'Mutfak']));
+      expect(DraftDocumentCodec.encodeToString(sessionOf(tester).document),
+          contains('Mutfak'),
+          reason: 'committed as Enter would');
+    });
+  });
+
   group('T-10 Export → PNG', () {
     testWidgets('EX3 at 300 dpi writes flat.png, kind png, of A4\'s size',
         (tester) async {
@@ -220,11 +261,15 @@ void main() {
   });
 
   group('T-10 cancel and failure', () {
-    testWidgets('EX5 Cancel in the dialog asks nothing and writes nothing',
-        (tester) async {
+    testWidgets(
+        'EX5 busy while the dialog is up; Cancel asks nothing and writes '
+        'nothing', (tester) async {
       final files = FakeDocumentFiles();
       await pumpFlat(tester, files);
       await openDialog(tester);
+      expect(sessionOf(tester).busy.value, isTrue,
+          reason: 'the flow is busy over its dialog (12a S-17: an exit '
+              'request is cancelled meanwhile)');
       await tapKey(tester, 'export-cancel');
       expect(find.byKey(const Key('export-dialog')), findsNothing);
       expect(files.saveLocationCalls, isEmpty);
@@ -308,6 +353,40 @@ void main() {
       expect(ended, isTrue, reason: 'the flow ended by itself');
       await flow;
       expect(files.saveLocationCalls, isEmpty);
+    });
+
+    testWidgets(
+        'EX9b Export and Print follow the page: attached, undone, redone '
+        '(the shell\'s flag listens to its PageNotifier)', (tester) async {
+      final files = FakeDocumentFiles();
+      await pumpFlat(tester, files, bytes: pagelessBytes());
+      bool printEnabled() =>
+          tester
+              .widget<IconButton>(find.byKey(const Key('toolbar-print')))
+              .onPressed !=
+          null;
+      Future<void> settle() async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
+      }
+
+      expect((exportEnabled(tester), printEnabled()), (false, false),
+          reason: 'premise: no page');
+      final doc = sessionOf(tester).document;
+      attachPage(doc, flatPage());
+      await settle();
+      expect((exportEnabled(tester), printEnabled()), (true, true),
+          reason: 'attached');
+      doc.commands.undo();
+      await settle();
+      expect(exportPageOf(doc), isNull, reason: 'premise: undone');
+      expect((exportEnabled(tester), printEnabled()), (false, false),
+          reason: 'undone');
+      doc.commands.redo();
+      await settle();
+      expect((exportEnabled(tester), printEnabled()), (true, true),
+          reason: 'redone');
     });
 
     testWidgets('EX10 enabled with a page; disabled while a flow runs',
