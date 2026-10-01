@@ -149,6 +149,7 @@ void main() {
     for (final (doc, instance) in [
       (lineSymbol(), const Handle(610)),
       (hookSymbol(), const Handle(710)),
+      (hairlineSymbol(), const Handle(810)),
     ]) {
       final def = doc.tree.definitions.single;
       expect(def.basePoint.length, greaterThan(100));
