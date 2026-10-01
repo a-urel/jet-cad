@@ -5,6 +5,9 @@
 7 minor, 1 nit (R-1 to R-19), each applied below; see
 [Revision 2](#revision-2). Its spot check (`c945986`): "Ready with
 amendments" (S-1 to S-16), applied in [Revision 3](#revision-3).
+**Approved by the human on 2026-10-01** ("onaylıyorum, devam et"), with
+the two rulings made in writing: the opening tool's host (S-11) and the
+ATTRIB style residual (S-2).
 **Sub-project:** `roadmap/12-app-shell.md`, the second slice (12b) after
 12a's document lifecycle. **Size:** M–L, one plan (the human's decision 9),
 about ten tasks.
