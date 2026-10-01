@@ -306,7 +306,14 @@ class OutlineCache extends ChangeNotifier {
     switch (node) {
       case InstanceNode():
         // A root instance is placed through the root, whose layer is
-        // layer 0: its effective layer is its own (spec 12b D6).
+        // layer 0: its effective layer is its own (spec 12b D6). The painter
+        // draws none of it when that layer is hidden, so neither does the
+        // outline — a key can be held across a direct table write, which
+        // emits no DocChange and so prunes no selection.
+        if (!(_filters ??= FilterEvaluator(document))
+            .acceptsNode(key.target, const QueryFilter.rendering())) {
+          break;
+        }
         _addInstance(out, node, document.tree.accumulatedTransform(key.target),
             null, _onLayer(node.layer, ReservedHandles.layerZero));
       case GroupNode():
@@ -406,7 +413,11 @@ class OutlineCache extends ChangeNotifier {
   void _addLeaf(List<_Outline> out, int slot, Transform2 t, Handle context) {
     // Spec D9, amended at execution: the outline is a statement about what is
     // drawn, so it skips exactly what the canvas skips — `rendering()`, which
-    // drops a hidden leaf and keeps a locked one.
+    // drops a hidden leaf and keeps a locked one. One residual (spec 12b D6):
+    // inside a definition the outline follows picking, which filters by the
+    // effective layer, while the painter's definition walk does not filter,
+    // so a definition leaf or nested instance on a hidden layer is drawn but
+    // not outlined.
     final filters = _filters ??= FilterEvaluator(document);
     if (!filters.acceptsEntityOnLayer(
         slot, const QueryFilter.rendering(), context)) {

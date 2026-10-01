@@ -35,15 +35,18 @@ import 'viewport_transform.dart';
 /// owner instead; two routes to one meaning, so a test where they disagree
 /// is red.
 ///
-/// **Layers (spec 12b D6, plan P-5), by this walk's own recursion.** A leaf
-/// or an instance whose effective layer is hidden is not drawn. The
-/// effective layer is the style resolver's layer-0 substitution, carried
-/// down the walk: the root's is layer 0; a leaf or an instance on layer 0
-/// takes the layer of the context it is placed through, anything else keeps
-/// its own; an instance's contents are placed through the instance's
-/// effective layer, and so is its ATTRIB. The index answers the same
-/// question with a per-depth array and a filter memo; this walk passes a
-/// handle down the call stack and reads the table each time. A layer the
+/// **Layers (spec 12b D6, plan P-5), by this walk's own route.** At the
+/// root, a leaf or an instance whose effective layer is hidden is not drawn.
+/// The effective layer is the style resolver's layer-0 substitution: a root
+/// leaf or instance on layer 0 is tested against layer 0, anything else
+/// against its own; an ATTRIB is placed through its instance's effective
+/// layer. Below the root nothing is filtered, because the painter's
+/// definition walk is not (D6: "The painter's definition walk stays
+/// unfiltered … Residual, recorded: a definition leaf on a non-zero hidden
+/// layer still draws"); the instance's own layer decides whether a symbol
+/// draws. An oracle stricter than the painter there would only raise a false
+/// red in a state the spec sanctions. The index answers the root question
+/// with a filter memo; this walk reads the table each time. A layer the
 /// table does not have is drawn, as the filter treats it.
 void referenceWalk(
   DraftDocument doc,
@@ -89,15 +92,18 @@ class _ReferenceWalk {
     _collect(handle, accumulated, layer, items);
     items.sort((a, b) => a.handle.value.compareTo(b.handle.value));
     for (final item in items) {
+      // Only the root filters (D6's residual: the painter's definition walk
+      // draws every leaf and nested instance of a drawn instance).
+      final root = depth == 0;
       if (item.slot != null) {
         final own = doc.entities.layerAt(item.slot!);
-        if (_hidden(_effective(own, item.context))) continue;
+        if (root && _hidden(_effective(own, item.context))) continue;
         _leaf(item.slot!, item.placement, ctx);
       } else {
         final node = doc.tree[item.handle];
         if (node is! InstanceNode) continue;
         final effective = _effective(node.layer, item.context);
-        if (_hidden(effective)) continue;
+        if (root && _hidden(effective)) continue;
         container(node.definition, item.placement,
             resolver.contextFor(item.handle, ctx), depth + 1, effective);
       }

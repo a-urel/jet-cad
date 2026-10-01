@@ -128,4 +128,36 @@ void main() {
     expect(painted, containsAll({f.regionFill, f.rootA}));
     agree();
   });
+
+  test(
+      'D6\'s residual: a nested instance on hidden C and a definition circle '
+      'on C, inside the visible instance on A, are drawn by both walks — '
+      'below the root neither filters — and the walks agree', () {
+    final f = LayerFixture();
+    f.doc.commands
+      ..execute(SetInstanceLayerCommand(f.nested, f.c))
+      ..execute(SetEntityLayerCommand(f.tableCircle, f.c));
+    final (painted, referenced, agree) = compare(f);
+    for (final h in [f.legLine, f.tableCircle]) {
+      expect(painted, contains(h), reason: 'painter ${h.toHex()}');
+      expect(referenced, contains(h), reason: 'reference ${h.toHex()}');
+    }
+    // The root still filters: C's own line stays out of both.
+    expect(painted, isNot(contains(f.lineC)));
+    expect(referenced, isNot(contains(f.lineC)));
+    agree();
+  });
+
+  test(
+      'a leaf on a layer the table does not have is drawn by both walks '
+      '(the filter\'s rule: a missing layer is visible)', () {
+    final f = LayerFixture();
+    const ghost = Handle(0x6A6A);
+    expect(f.doc.tables.layers[ghost], isNull);
+    f.doc.commands.execute(SetEntityLayerCommand.restore(f.rootA, ghost));
+    final (painted, referenced, agree) = compare(f);
+    expect(painted, contains(f.rootA));
+    expect(referenced, contains(f.rootA));
+    agree();
+  });
 }

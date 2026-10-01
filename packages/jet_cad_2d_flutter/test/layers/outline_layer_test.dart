@@ -2,6 +2,8 @@
 // definition's leaves and nested instances against their effective layer —
 // layer 0 takes the enclosing context's, recursively — so an instance on A
 // keeps its whole outline with layer 0 hidden, and loses it with A hidden.
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
@@ -125,6 +127,49 @@ void main() {
         cache.debugWorldSegmentsOf(instance),
         pairwiseCompare(
             line(placed, 10, 10, 70, 40), _close, 'within 1e-9 of'));
+  });
+
+  test(
+      'a root instance on hidden A outlines nothing, not even a definition '
+      'leaf on visible B — the painter draws none of it', () async {
+    await run(f, SetEntityLayerCommand(f.tableLine, f.b));
+    // A direct write: no DocChange, so the key is kept and the walk decides.
+    f.writeLayer(f.withState(f.a, visible: false));
+    selection.replace({instance});
+    expect(selection.keys, {instance});
+    expect(cache.debugWorldSegmentsOf(instance), isEmpty);
+    expect(cache.debugWorldArcsOf(instance), isEmpty);
+    expect(cache.worldBoundsOf(instance), isNull);
+  });
+
+  test(
+      'a region inside the definition, layer 0 hidden: its boundary is '
+      'tested in the instance\'s context, so its loop is outlined once',
+      () async {
+    final region = AddRegionCommand.allocate(
+      seed: f.doc.handleSeed,
+      owner: f.table,
+      boundaryKind: EntityKind.circle,
+      boundaryPayload: GeometryPayload(
+        coords: Float64List.fromList([50, -20]),
+        scalars: Float64List.fromList([7]),
+      ),
+      layer: ReservedHandles.layerZero,
+      fillColor: const IndexedColor(4),
+      boundaryColor: const ByLayerColor(),
+    );
+    await run(f, region);
+    selection.replace({instance});
+    // The table's circle and the region's boundary: two arcs of five.
+    final control = cache.debugWorldArcsOf(instance)!;
+    expect(control, hasLength(10));
+    await run(f, SetCurrentLayerCommand(f.b));
+    await run(
+        f,
+        SetLayerCommand(
+            f.withState(ReservedHandles.layerZero, visible: false)));
+    expect(selection.keys, {instance});
+    expect(cache.debugWorldArcsOf(instance), control);
   });
 }
 
