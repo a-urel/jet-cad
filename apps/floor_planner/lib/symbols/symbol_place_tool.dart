@@ -3,17 +3,23 @@
 // tools; press, drag, release places the symbol at the release point; one
 // undo step per placement; the tool stays armed.
 //
-// Plan 09b Task 6 (pointer, snap, ghost). Keys and the permission check are
-// Task 7's: [SymbolPlaceTool.onKey] ignores every key for now, and every
-// placement goes through the one private `_place`, where Task 7 checks the
-// permissions before `placeSymbol` allocates a handle (Ruling 05-3).
+// Plan 09b Task 6 (pointer, snap, ghost) and Task 7 (keys, F-12; the
+// permission check before `placeSymbol` allocates a handle, Ruling 05-3,
+// F-16).
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show ValueNotifier, visibleForTesting;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/services.dart'
-    show KeyEvent, MouseCursor, SystemMouseCursors;
+    show
+        HardwareKeyboard,
+        KeyDownEvent,
+        KeyEvent,
+        KeyUpEvent,
+        LogicalKeyboardKey,
+        MouseCursor,
+        SystemMouseCursors;
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -38,7 +44,9 @@ const double kGhostCrossPixels = 6.0;
 ///   moves and up (F-6): a pressed move with no live press is ignored, and an
 ///   up with no live press places nothing.
 /// - It listens to [armed]: a re-arm while active (a second gallery cell)
-///   drops the press, looks up the new ghost path and notifies.
+///   drops the press, looks up the new ghost path and notifies. The turns
+///   and the mirror are kept (Ruling R-B6-2).
+/// - Keys ([onKey]): R, Shift+R and M turn and mirror the next placement.
 class SymbolPlaceTool extends Tool {
   SymbolPlaceTool(this.armed) {
     armed.addListener(_onArmed);
@@ -63,10 +71,17 @@ class SymbolPlaceTool extends Tool {
   bool _ghostVisible = false;
   bool _pressed = false;
   int _pressPointer = -1;
-  // Final until plan Task 7's R, Shift+R and M change them; the ghost and
-  // the placement already read them.
-  final int _quarterTurns = 0;
-  final bool _mirrored = false;
+  int _quarterTurns = 0;
+  bool _mirrored = false;
+
+  /// Spec D6 Commit: every capability a placement may need. The first
+  /// placement of a symbol copies its definition (structure, geometry) and
+  /// its `SymbolComponent` (components).
+  static const Set<Capability> needs = {
+    Capability.structure,
+    Capability.geometry,
+    Capability.components,
+  };
 
   @override
   String get name => 'Symbol';
@@ -172,10 +187,58 @@ class SymbolPlaceTool extends Tool {
     notifyListeners();
   }
 
-  /// Keys are plan Task 7's; until then every key bubbles to the shell.
+  /// Spec D6 Keys, F-12. Idle (nothing armed) every key bubbles.
+  ///
+  /// - `R` turns the next placement one quarter turn counter-clockwise,
+  ///   `Shift+R` clockwise, `M` toggles the mirror; only with no Ctrl, Meta
+  ///   or Alt held (Cmd/Ctrl+R is a browser reload, Ctrl+M passes through).
+  ///   One step per key-down; a repeat is consumed with no effect. They work
+  ///   armed idle and mid-press; the ghost repaints.
+  /// - Mid-press: `Esc` cancels the press (its remaining moves and its up
+  ///   place nothing, Ruling R-B6-1); F and F3 with no modifier bubble (the
+  ///   drawing tools' rule, `placement_tool.dart`); every other key-down and
+  ///   repeat is swallowed, so undo never lands mid-placement.
+  /// - Armed, not pressed: every key but R and M bubbles (the shell's
+  ///   letters, undo and `Esc` work).
+  /// - A key-up always bubbles.
   @override
-  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
-      KeyEventResult.ignored;
+  KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    if (armed.value == null || event is KeyUpEvent) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+    final modifier = _hasModifier();
+    if (!modifier &&
+        (key == LogicalKeyboardKey.keyR || key == LogicalKeyboardKey.keyM)) {
+      if (event is KeyDownEvent) {
+        if (key == LogicalKeyboardKey.keyR) {
+          final step = HardwareKeyboard.instance.isShiftPressed ? -1 : 1;
+          _quarterTurns = (_quarterTurns + step) % 4;
+        } else {
+          _mirrored = !_mirrored;
+        }
+        notifyListeners();
+      }
+      return KeyEventResult.handled;
+    }
+    if (!_pressed) return KeyEventResult.ignored;
+    if (event is KeyDownEvent) {
+      if (key == LogicalKeyboardKey.escape) {
+        cancel(ctx);
+        return KeyEventResult.handled;
+      }
+      if ((key == LogicalKeyboardKey.f3 || key == LogicalKeyboardKey.keyF) &&
+          !modifier) {
+        return KeyEventResult.ignored;
+      }
+    }
+    return KeyEventResult.handled;
+  }
+
+  static bool _hasModifier() {
+    final hw = HardwareKeyboard.instance;
+    return hw.isControlPressed || hw.isMetaPressed || hw.isAltPressed;
+  }
 
   /// Every cancel path: the press is dropped (its up places nothing) and the
   /// ghost hides; the document is never touched. Idempotent: an idle,
@@ -190,8 +253,12 @@ class SymbolPlaceTool extends Tool {
   }
 
   /// The one commit path (spec D6): one command, one undo step. The
-  /// instance is not selected.
+  /// instance is not selected. The permissions are checked **before**
+  /// `placeSymbol` allocates a handle (Ruling 05-3): a refused placement
+  /// allocates nothing and throws nothing (F-16: the dispatcher alone would
+  /// throw after the allocation).
   void _place(ToolContext ctx, SymbolEntry entry, Vector2 at) {
+    if (!needs.every(ctx.document.commands.permissions.allows)) return;
     ctx.execute(placeSymbol(ctx.document, entry,
         at: at, quarterTurns: _quarterTurns, mirrored: _mirrored));
   }

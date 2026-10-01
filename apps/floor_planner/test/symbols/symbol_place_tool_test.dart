@@ -1,5 +1,6 @@
-// Spec 09b D6, F-5, F-6, F-14, plan 09b Task 6: the placement tool's
-// pointer, snap and ghost, driven directly with `ToolPointerEvent`s.
+// Spec 09b D6, F-5, F-6, F-12, F-14, F-16, plan 09b Tasks 6 and 7: the
+// placement tool's pointer, snap, ghost, keys and permission check, driven
+// directly with `ToolPointerEvent`s and `KeyEvent`s.
 //
 // Fixtures (plan P-3): real entries of the committed asset (every base point
 // is off the origin); a document from `prepareDocument`; a camera at 0.05
@@ -16,9 +17,21 @@ import 'package:floor_planner/symbols/symbol_component.dart';
 import 'package:floor_planner/symbols/symbol_ghost.dart';
 import 'package:floor_planner/symbols/symbol_library.dart';
 import 'package:floor_planner/symbols/symbol_place_tool.dart';
+import 'package:floor_planner/symbols/symbol_placer.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/gestures.dart' show kPrimaryButton, kSecondaryButton;
-import 'package:flutter/services.dart' show MouseCursor, SystemMouseCursors;
+import 'package:flutter/services.dart'
+    show
+        HardwareKeyboard,
+        KeyDownEvent,
+        KeyEvent,
+        KeyRepeatEvent,
+        KeyUpEvent,
+        LogicalKeyboardKey,
+        MouseCursor,
+        PhysicalKeyboardKey,
+        SystemMouseCursors;
+import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -187,7 +200,94 @@ void expectAt(Vector2 actual, Vector2 expected, String reason) {
   expect(actual.y, expected.y, reason: '$reason (y)');
 }
 
+/// A key: its logical and physical halves.
+typedef Key2 = (LogicalKeyboardKey, PhysicalKeyboardKey);
+
+const Key2 kR = (LogicalKeyboardKey.keyR, PhysicalKeyboardKey.keyR);
+const Key2 kM = (LogicalKeyboardKey.keyM, PhysicalKeyboardKey.keyM);
+const Key2 kW = (LogicalKeyboardKey.keyW, PhysicalKeyboardKey.keyW);
+const Key2 kZ = (LogicalKeyboardKey.keyZ, PhysicalKeyboardKey.keyZ);
+const Key2 kF = (LogicalKeyboardKey.keyF, PhysicalKeyboardKey.keyF);
+const Key2 kF3 = (LogicalKeyboardKey.f3, PhysicalKeyboardKey.f3);
+const Key2 kEsc = (LogicalKeyboardKey.escape, PhysicalKeyboardKey.escape);
+const Key2 kShift =
+    (LogicalKeyboardKey.shiftLeft, PhysicalKeyboardKey.shiftLeft);
+const Key2 kCtrl =
+    (LogicalKeyboardKey.controlLeft, PhysicalKeyboardKey.controlLeft);
+const Key2 kMeta = (LogicalKeyboardKey.metaLeft, PhysicalKeyboardKey.metaLeft);
+const Key2 kAlt = (LogicalKeyboardKey.altLeft, PhysicalKeyboardKey.altLeft);
+
+KeyEvent keyDown(Key2 k) =>
+    KeyDownEvent(logicalKey: k.$1, physicalKey: k.$2, timeStamp: Duration.zero);
+
+/// Runs [body] with [modifiers] held in `HardwareKeyboard.instance`, which
+/// the tool reads (as `PlacementTool._hasModifier` does).
+T holding<T>(List<Key2> modifiers, T Function() body) {
+  final hw = HardwareKeyboard.instance;
+  for (final k in modifiers) {
+    hw.handleKeyEvent(keyDown(k));
+  }
+  try {
+    return body();
+  } finally {
+    for (final k in modifiers) {
+      hw.handleKeyEvent(KeyUpEvent(
+          logicalKey: k.$1, physicalKey: k.$2, timeStamp: Duration.zero));
+    }
+  }
+}
+
+extension on Rig {
+  KeyEventResult key(Key2 k, {List<Key2> held = const []}) =>
+      holding(held, () => tool.onKey(keyDown(k), ctx));
+
+  KeyEventResult repeat(Key2 k) => tool.onKey(
+      KeyRepeatEvent(
+          logicalKey: k.$1, physicalKey: k.$2, timeStamp: Duration.zero),
+      ctx);
+
+  /// One full placement: a press at [a], a drag, a release at [b].
+  void place(Vector2 a, Vector2 b) {
+    down(a);
+    drag(pMid);
+    up(b);
+  }
+
+  /// The newest instance's transform must be exactly the independently
+  /// computed placement of the chair at the snapped [b].
+  void expectPlaced(Vector2 b, int turns, bool mirrored, String reason) {
+    final t = instances.last.transform;
+    final want = placementTransform(
+        at: gridOf(b),
+        basePoint: chair.definition.basePoint,
+        quarterTurns: turns,
+        mirrored: mirrored);
+    expect([
+      t.a,
+      t.b,
+      t.c,
+      t.d,
+      t.e,
+      t.f
+    ], [
+      want.a,
+      want.b,
+      want.c,
+      want.d,
+      want.e,
+      want.f
+    ], reason: reason);
+  }
+}
+
+/// [t]'s linear part.
+List<double> linear(Transform2 t) => [t.a, t.b, t.c, t.d];
+
 void main() {
+  // The tool reads HardwareKeyboard.instance (F-12, `_hasModifier`), which
+  // needs a bound ServicesBinding even in plain unit tests.
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('the fixtures are not degenerate', () {
     for (final e in [chair, toilet]) {
       final b = e.definition.basePoint;
@@ -466,5 +566,222 @@ void main() {
       rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
       expect(canvas.calls, isEmpty);
     });
+  });
+
+  group('keys', () {
+    test('the eight placements are distinct: each turn and mirror is seen', () {
+      final b = chair.definition.basePoint;
+      final seen = <String>{};
+      for (final m in [false, true]) {
+        for (var q = 0; q < 4; q++) {
+          seen.add(linear(placementTransform(
+                  at: gridOf(pB), basePoint: b, quarterTurns: q, mirrored: m))
+              .join(','));
+        }
+      }
+      expect(seen, hasLength(8));
+    });
+
+    test('R turns the next placement one quarter turn counter-clockwise', () {
+      final rig = Rig();
+      rig.hover(pA);
+      rig.notifications.clear();
+      expect(rig.key(kR), KeyEventResult.handled);
+      expect(rig.tool.quarterTurns, 1);
+      expect(rig.notifications, [false], reason: 'the ghost repaints');
+      rig.place(pA, pB);
+      rig.expectPlaced(pB, 1, false, 'one counter-clockwise quarter turn');
+      // Counter-clockwise: the local x axis maps to world +y.
+      expect(linear(rig.instances.single.transform), [0.0, 1.0, -1.0, 0.0]);
+    });
+
+    test('Shift+R turns it clockwise', () {
+      final rig = Rig();
+      expect(rig.key(kR, held: [kShift]), KeyEventResult.handled);
+      expect(rig.tool.quarterTurns, 3);
+      rig.place(pA, pB);
+      rig.expectPlaced(pB, -1, false, 'one clockwise quarter turn');
+      expect(linear(rig.instances.single.transform), [0.0, -1.0, 1.0, 0.0]);
+    });
+
+    test('M toggles the mirror', () {
+      final rig = Rig();
+      expect(rig.key(kM), KeyEventResult.handled);
+      expect(rig.tool.mirrored, isTrue);
+      rig.place(pA, pB);
+      rig.expectPlaced(pB, 0, true, 'mirrored');
+      expect(rig.key(kM), KeyEventResult.handled);
+      expect(rig.tool.mirrored, isFalse);
+      rig.place(pA, pC);
+      rig.expectPlaced(pC, 0, false, 'M again: not mirrored');
+    });
+
+    test('keys compose (R, R, M) and work mid-press; the tool keeps them', () {
+      final rig = Rig();
+      rig.key(kR);
+      rig.key(kR);
+      rig.key(kM);
+      rig.place(pA, pB);
+      rig.expectPlaced(pB, 2, true, 'R, R, M');
+      // Mid-press: a Shift+R between the press and the release.
+      rig.down(pA);
+      rig.notifications.clear();
+      expect(rig.key(kR, held: [kShift]), KeyEventResult.handled);
+      expect(rig.notifications, [true], reason: 'repaints mid-press');
+      expect(rig.tool.isMidShape, isTrue, reason: 'the press is kept');
+      rig.drag(pMid);
+      rig.up(pC);
+      rig.expectPlaced(pC, 1, true, 'R, R, M, Shift+R');
+      // Mid-press R from the identity: the turn applies to this placement.
+      rig.key(kM);
+      rig.key(kR);
+      rig.down(pA);
+      rig.key(kR);
+      rig.up(pB);
+      expect(rig.instances, hasLength(3));
+      rig.expectPlaced(pB, 3, false, 'R mid-press');
+      expect(rig.document.commands.undoDepth, 3);
+    });
+
+    test('Ctrl, Meta or Alt with R or M is ignored and changes nothing', () {
+      final rig = Rig();
+      rig.hover(pA);
+      rig.notifications.clear();
+      for (final (k, held) in [
+        (kR, [kCtrl]),
+        (kR, [kMeta]),
+        (kR, [kAlt]),
+        (kR, [kCtrl, kShift]),
+        (kM, [kCtrl]),
+        (kM, [kMeta]),
+        (kM, [kAlt]),
+      ]) {
+        expect(rig.key(k, held: held), KeyEventResult.ignored,
+            reason: '${held.map((h) => h.$1.keyLabel)} + ${k.$1.keyLabel}');
+      }
+      expect(rig.tool.quarterTurns, 0);
+      expect(rig.tool.mirrored, isFalse);
+      expect(rig.notifications, isEmpty);
+      rig.place(pA, pB);
+      rig.expectPlaced(pB, 0, false, 'no turn, no mirror');
+    });
+
+    test('a key repeat is consumed with no effect', () {
+      final rig = Rig();
+      rig.key(kR);
+      rig.notifications.clear();
+      expect(rig.repeat(kR), KeyEventResult.handled);
+      expect(rig.repeat(kR), KeyEventResult.handled);
+      expect(rig.repeat(kM), KeyEventResult.handled);
+      expect(rig.tool.quarterTurns, 1);
+      expect(rig.tool.mirrored, isFalse);
+      expect(rig.notifications, isEmpty);
+      rig.place(pA, pB);
+      rig.expectPlaced(pB, 1, false, 'one step for one key-down');
+    });
+
+    test('Esc mid-press cancels: the remaining moves and the up place nothing',
+        () {
+      final rig = Rig();
+      rig.key(kR);
+      final seed = rig.document.handleSeed.current;
+      rig.down(pA);
+      expect(rig.key(kEsc), KeyEventResult.handled);
+      expect(rig.tool.isMidShape, isFalse);
+      rig.drag(pMid);
+      rig.drag(pC);
+      expectAt(rig.tool.ghostAt, gridOf(pA), 'the moves are ignored');
+      rig.up(pB);
+      expect(rig.instances, isEmpty);
+      expect(rig.document.handleSeed.current, seed);
+      expect(rig.document.commands.undoDepth, 0);
+      // The next press places, still turned.
+      rig.place(pA, pC);
+      rig.expectPlaced(pC, 1, false, 'the next press places');
+    });
+
+    test('mid-press F and F3 bubble; W, Z, Ctrl+Z and Ctrl+F are swallowed',
+        () {
+      final rig = Rig();
+      rig.down(pA);
+      expect(rig.key(kF), KeyEventResult.ignored);
+      expect(rig.key(kF3), KeyEventResult.ignored);
+      expect(rig.key(kW), KeyEventResult.handled);
+      expect(rig.key(kZ), KeyEventResult.handled);
+      expect(rig.key(kZ, held: [kCtrl]), KeyEventResult.handled);
+      expect(rig.key(kZ, held: [kMeta]), KeyEventResult.handled);
+      expect(rig.key(kF, held: [kCtrl]), KeyEventResult.handled);
+      expect(rig.repeat(kW), KeyEventResult.handled);
+      expect(rig.tool.isMidShape, isTrue, reason: 'still pressed');
+      rig.up(pB);
+      rig.expectPlaced(pB, 0, false, 'the press still places');
+    });
+
+    test('armed, not pressed: every key but R and M bubbles', () {
+      final rig = Rig();
+      rig.hover(pA);
+      for (final k in [kW, kEsc, kF, kF3, kZ]) {
+        expect(rig.key(k), KeyEventResult.ignored, reason: k.$1.keyLabel);
+      }
+      expect(rig.key(kZ, held: [kCtrl]), KeyEventResult.ignored);
+      expect(rig.key(kZ, held: [kMeta, kShift]), KeyEventResult.ignored);
+      expect(rig.tool.ghostVisible, isTrue, reason: 'Esc is the shell\'s');
+      expect(
+          rig.tool.onKey(
+              KeyUpEvent(
+                  logicalKey: kR.$1,
+                  physicalKey: kR.$2,
+                  timeStamp: Duration.zero),
+              rig.ctx),
+          KeyEventResult.ignored);
+    });
+
+    test('idle (nothing armed) every key bubbles and changes nothing', () {
+      final rig = Rig();
+      rig.armed.value = null;
+      rig.notifications.clear();
+      for (final k in [kR, kM, kW, kEsc]) {
+        expect(rig.key(k), KeyEventResult.ignored, reason: k.$1.keyLabel);
+      }
+      expect(rig.tool.quarterTurns, 0);
+      expect(rig.tool.mirrored, isFalse);
+      expect(rig.notifications, isEmpty);
+    });
+  });
+
+  group('permissions', () {
+    const all = DraftPermissions.all;
+    DraftPermissions denying(Capability c) => DraftPermissions(
+        transform: true,
+        components: c != Capability.components,
+        geometry: c != Capability.geometry,
+        structure: c != Capability.structure);
+
+    for (final denied in [
+      Capability.structure,
+      Capability.geometry,
+      Capability.components,
+    ]) {
+      test(
+          'a denied ${denied.name} allocates nothing and throws nothing; '
+          'lifted, the next placement happens', () {
+        final rig = Rig();
+        rig.key(kR);
+        rig.key(kM);
+        rig.document.commands.permissions = denying(denied);
+        final seed = rig.document.handleSeed.current;
+        rig.place(pA, pB);
+        expect(rig.document.handleSeed.current, seed,
+            reason: 'no handle allocated');
+        expect(rig.instances, isEmpty);
+        expect(rig.symbolDefinitions, isEmpty);
+        expect(rig.document.commands.undoDepth, 0);
+        expect(rig.tool.isMidShape, isFalse);
+        rig.document.commands.permissions = all;
+        rig.place(pA, pB);
+        rig.expectPlaced(pB, 1, true, 'placed once allowed');
+        expect(rig.document.commands.undoDepth, 1);
+      });
+    }
   });
 }
