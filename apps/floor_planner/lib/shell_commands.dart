@@ -61,7 +61,7 @@ final List<SingleActivator> kFileChords = [
 const Set<String> kPageCommandIds = {'export', 'print'};
 
 /// One command of the shell (spec 12a D6): New, Open, Open sample, Save,
-/// Save As, Export (spec 13 D8), Undo, Redo.
+/// Save As, Export, Print (spec 13 D8, D9), Undo, Redo.
 ///
 /// A command is **invoked** only through [invoke], by its toolbar button
 /// and by its shortcuts alike: a disabled command's binding stays present

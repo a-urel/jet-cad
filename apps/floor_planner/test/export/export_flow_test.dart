@@ -5,19 +5,16 @@
 // the screen's camera is at 400 % and panned off the sheet, so an export
 // that followed the screen would put nothing where the page does. The PDF
 // is read back with the render package's reader; the PNG flows run under
-// `tester.runAsync` (Picture.toImage).
+// `tester.runAsync` (Picture.toImage). The document and its readings are
+// test/support/export_flat.dart's, shared with the Print flow's tests.
 import 'dart:convert' show utf8;
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:floor_planner/document_files.dart';
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/export/export_dialog.dart';
 import 'package:floor_planner/export/export_flow.dart';
-import 'package:floor_planner/export/export_font.dart';
-import 'package:floor_planner/main.dart';
-import 'package:floor_planner/new_document.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/live_objects.dart';
 import 'package:floor_planner/parametric/separator.dart';
@@ -27,168 +24,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/document_rig.dart';
+import '../support/export_flat.dart';
 import '../support/fake_document_files.dart';
 import '../support/fake_exit_guard.dart';
-import '../support/room_fixture.dart'
-    show addSeparator, attachPage, kids, kindOf, recordOf, worldPoints;
-
-const String vendoredFont =
-    '../../packages/jet_cad_2d_flutter/test/golden/fonts/Roboto-Regular.ttf';
-
-/// The page: A4 landscape at 1:50, its lower-left corner at (3000, -1500),
-/// a dark background.
-const double originX = 3000, originY = -1500, scaleDen = 50;
-
-/// The instance: translation, 30 degrees, scale (1.5, -0.75); red, 0.70 mm.
-final Transform2 instanceTransform = Transform2.translation(7000, 5600)
-    .multiply(Transform2.rotation(math.pi / 6))
-    .multiply(Transform2.scale(1.5, -0.75));
-
-/// The instance's line, in its definition's frame.
-final Vector2 instanceLineStart = Vector2(200, 100);
-
-/// The separator's ends in world, in a turned group of its own.
-final Vector2 sepStart = Vector2(9000, 5000), sepEnd = Vector2(11500, 5300);
-
-/// A label on the sheet, so the PDF embeds the font.
-const String labelText = 'Yatak Odası';
-
-/// The flat's file: the document above, saved by the codec.
-Uint8List fixtureBytes() {
-  final doc = prepareDocument(const InsertionPointMeasurer());
-  final system = installParametric(doc);
-  attachPage(
-      doc,
-      PageComponent(
-          orientation: PageOrientation.landscape,
-          scaleDenominator: scaleDen,
-          originX: originX,
-          originY: originY,
-          background: 0xFF303030));
-  addSeparator(doc, sepStart, sepEnd,
-      at: Transform2.translation(400, -250).multiply(Transform2.rotation(0.1)));
-  final definition = doc.handleSeed.next();
-  doc.tree.addDefinition(Definition(
-      handle: definition,
-      name: 'export-flow-symbol',
-      basePoint: Vector2(120, 45),
-      children: const []));
-  _leaf(doc, definition, [
-    instanceLineStart.x,
-    instanceLineStart.y,
-    1000,
-    400,
-  ]);
-  _leaf(doc, definition, [300, 600, 900, 700], kind: EntityKind.line);
-  doc.commands.execute(AddNodeCommand(InstanceNode(
-      handle: doc.handleSeed.next(),
-      parent: doc.rootHandle,
-      transform: instanceTransform,
-      definition: definition,
-      layer: ReservedHandles.layerZero,
-      color: const TrueColor(0xFF0000),
-      lineweight: 70)));
-  doc.commands.execute(AddEntityCommand(
-    record: EntityRecord(
-      handle: doc.handleSeed.next(),
-      owner: doc.rootHandle,
-      kind: EntityKind.text,
-      layer: ReservedHandles.layerZero,
-      linetype: ReservedHandles.continuousLinetype,
-      linetypeScale: 1.0,
-      geomIndex: 0,
-      color: const TrueColor(0x37474F),
-      lineweight: 25,
-      transparency: 0,
-      flags: 0,
-      text: labelText,
-      textStyle: ReservedHandles.standardTextStyle,
-      textAttrs: packTextAttrs(),
-    ),
-    payload: textPayload(Vector2(4500, 3500), 250),
-  ));
-  final bytes = bytesOf(doc);
-  system.dispose();
-  doc.dispose();
-  return Uint8List.fromList(bytes);
-}
-
-/// A document with no page.
-Uint8List pagelessBytes() {
-  final doc = prepareDocument(const InsertionPointMeasurer());
-  _leaf(doc, doc.rootHandle, [4000, 500, 9000, 2500],
-      color: const TrueColor(0x1565C0));
-  final bytes = bytesOf(doc);
-  doc.dispose();
-  return Uint8List.fromList(bytes);
-}
-
-Handle _leaf(DraftDocument doc, Handle owner, List<double> coords,
-    {EntityKind kind = EntityKind.line,
-    DraftColor color = const ByBlockColor(),
-    int? lineweight}) {
-  final handle = doc.handleSeed.next();
-  doc.commands.execute(AddEntityCommand(
-    record: EntityRecord(
-      handle: handle,
-      owner: owner,
-      kind: kind,
-      layer: ReservedHandles.layerZero,
-      linetype: ReservedHandles.continuousLinetype,
-      linetypeScale: 1.0,
-      geomIndex: 0,
-      color: color,
-      lineweight: lineweight ?? (owner == doc.rootHandle ? 35 : kByBlock),
-      transparency: 0,
-      flags: 0,
-    ),
-    payload: GeometryPayload(
-        coords: Float64List.fromList(coords), scalars: Float64List(0)),
-  ));
-  return handle;
-}
-
-/// The font cache the app is given: the vendored file, read by `File`.
-ExportFontCache fontCache() => ExportFontCache(load: () async {
-      fontLoads++;
-      return File(vendoredFont).readAsBytesSync();
-    });
-
-/// How many times a [fontCache] read the file.
-int fontLoads = 0;
-
-/// The app over [files] with [fontCache], at 1440 x 900; the flat opened
-/// (named `flat`) unless [bytes] says otherwise; the camera at 400 % and
-/// panned far off the sheet.
-Future<void> pumpFlat(WidgetTester tester, FakeDocumentFiles files,
-    {Uint8List? bytes}) async {
-  fontLoads = 0;
-  await tester.binding.setSurfaceSize(const Size(1440, 900));
-  addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester
-      .pumpWidget(FloorPlannerApp(files: files, exportFont: fontCache()));
-  await tester.pump();
-  files.scriptOpen(
-      name: 'flat.jetplan', bytes: bytes ?? fixtureBytes(), location: '/p/f');
-  await hostOf(tester).openFlow();
-  await tester.pump();
-  await tester.pump();
-  final page = exportPageOf(sessionOf(tester).document);
-  if (page == null) return;
-  // 400 %: 4 x the sheet at physical size on a 96-dpi screen (spec 04 D4).
-  final s = 4 * kLogicalPixelsPerMm / page.scaleDenominator;
-  viewOf(tester).camera.value = ViewportTransform(
-      worldToScreenMatrix: Transform2.translation(700, 450)
-          .multiply(Transform2.scale(s, -s))
-          .multiply(Transform2.translation(60000, -90000)));
-  await tester.pump();
-  expect(tester.widget<Text>(find.byKey(const Key('zoom-text'))).data,
-      '1:50 · 400%',
-      reason: 'premise: the screen is at 400 %');
-}
+import '../support/room_fixture.dart' show kids, kindOf, recordOf, worldPoints;
 
 Finder get exportButton => find.byKey(const Key('toolbar-export'));
 
@@ -217,30 +58,6 @@ Future<void> settleWrites(WidgetTester tester, FakeDocumentFiles files) async {
         .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
     await tester.pump();
   }
-}
-
-/// Presses [key] with [modifier]; whether the key-down was handled.
-Future<bool> chordHandled(WidgetTester tester, LogicalKeyboardKey modifier,
-    LogicalKeyboardKey key) async {
-  await tester.sendKeyDownEvent(modifier);
-  final handled = await tester.sendKeyEvent(key);
-  await tester.sendKeyUpEvent(modifier);
-  await tester.pump();
-  return handled;
-}
-
-/// World [p] in the PDF's page space (pt, y up from the sheet's bottom).
-Vector2 toPdf(Vector2 p) {
-  const k = 72 / 25.4 / scaleDen;
-  return Vector2((p.x - originX) * k, (p.y - originY) * k);
-}
-
-double distanceToSegment(PdfXY p, Vector2 a, Vector2 b) {
-  final ab = b - a;
-  final t =
-      (((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / ab.length2).clamp(0.0, 1.0);
-  final q = a + ab * t;
-  return math.sqrt(math.pow(p.x - q.x, 2) + math.pow(p.y - q.y, 2));
 }
 
 int pngWidth(Uint8List png) => ByteData.sublistView(png).getUint32(16);
@@ -305,7 +122,7 @@ void main() {
         for (final p in content.paths)
           for (final s in p.subpaths)
             for (final v in s.vertices)
-              if (distanceToSegment(v, a, b) < 1.0) v,
+              if (pdfDistanceToSegment(v, a, b) < 1.0) v,
       ];
       expect(onSeparator, isEmpty, reason: 'no path at the separator');
       expect(content.paths, isNotEmpty);
@@ -324,7 +141,8 @@ void main() {
       expect(files.writes, hasLength(1), reason: 'premise: exported');
 
       final doc = sessionOf(tester).document;
-      final added = _leaf(doc, doc.rootHandle, [-20000, -21000, -19000, -20500],
+      final added = addLeaf(
+          doc, doc.rootHandle, [-20000, -21000, -19000, -20500],
           color: const TrueColor(0x00AA00));
       await tester.pump();
       final found = <Handle>[];

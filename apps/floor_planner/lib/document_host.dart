@@ -20,6 +20,7 @@ import 'exit_guard.dart';
 import 'export/export_dialog.dart';
 import 'export/export_flow.dart';
 import 'export/export_font.dart';
+import 'export/page_printer.dart';
 import 'main.dart';
 import 'new_document.dart';
 import 'parametric/catalog.dart';
@@ -195,7 +196,8 @@ class DocumentHost extends StatefulWidget {
       this.exitGuard,
       this.symbols,
       this.thumbnails,
-      this.exportFont});
+      this.exportFont,
+      this.printer = const PrintingPagePrinter()});
 
   final DocumentSession session;
   final DocumentFiles files;
@@ -218,6 +220,10 @@ class DocumentHost extends StatefulWidget {
   /// its own over the bundled asset, which reads nothing until an export
   /// asks.
   final ExportFontCache? exportFont;
+
+  /// Where Print hands the page's PDF (spec 13 D9): the platform's print
+  /// dialog unless a test gives a fake.
+  final PagePrinter printer;
 
   @override
   State<DocumentHost> createState() => DocumentHostState();
@@ -256,12 +262,14 @@ class DocumentHostState extends State<DocumentHost> {
   ExportChoice _lastExport = ExportChoice.initial;
 
   /// The file half of the command table (spec 12a D6), in the toolbar's
-  /// order: New, Open, Open sample, Save, Save As, Export (spec 13 D8). Each
+  /// order: New, Open, Open sample, Save, Save As, Export, Print (spec 13
+  /// D8, D9). Each
   /// runs one flow, which sets busy for its span (T-8).
   ///
   /// Their `enabled` is only "no flow is running": it does **not** know
   /// about a shape part-way, which only the shell sees (T-2, R-8), nor --
-  /// for Export -- whether the document has a page ([kPageCommandIds]).
+  /// for Export and Print -- whether the document has a page
+  /// ([kPageCommandIds]).
   /// Bind them through the shell, which re-wraps each with its own idle
   /// and, for those, its page; a consumer that binds this list directly
   /// would act mid-shape.
@@ -307,6 +315,13 @@ class DocumentHostState extends State<DocumentHost> {
         shortcuts: kExportChords,
         enabled: _notBusy,
         run: exportFlow),
+    ShellCommand(
+        id: 'print',
+        label: 'Print…',
+        icon: Icons.print_outlined,
+        shortcuts: kPrintChords,
+        enabled: _notBusy,
+        run: printFlow),
   ];
 
   VoidCallback _registerSettle(VoidCallback settle) {
@@ -539,6 +554,27 @@ class DocumentHostState extends State<DocumentHost> {
               .write(place.location, place.name, bytes, kind: kind);
         } catch (e) {
           await _showError('Export failed', e);
+        }
+      });
+
+  /// Print (spec 13 D9): after the settle, the document's page -- none, and
+  /// nothing happens; then the page exported once as Export → PDF makes it
+  /// (the separators omitted, the export font), and those bytes handed to
+  /// the printer with the document's name and the page's size in pt. Any
+  /// object thrown on the way shows `Print failed`. The document is read,
+  /// never written.
+  Future<void> printFlow() => _flow(() async {
+        _settlePendingInput();
+        final document = _session.document;
+        final page = exportPageOf(document);
+        if (page == null || !mounted) return;
+        try {
+          final bytes = await exportPdfBytes(document, page,
+              fontBytes: await _exportFont.bytes);
+          await widget.printer
+              .print(bytes, _session.name, printPageFormat(page));
+        } catch (e) {
+          await _showError('Print failed', e);
         }
       });
 

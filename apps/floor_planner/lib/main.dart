@@ -12,6 +12,7 @@ import 'document_host.dart';
 import 'document_toolbar.dart';
 import 'exit_guard.dart';
 import 'export/export_font.dart';
+import 'export/page_printer.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
@@ -64,7 +65,8 @@ class FloorPlannerApp extends StatefulWidget {
       this.exitGuard,
       this.symbols,
       this.thumbnails,
-      this.exportFont});
+      this.exportFont,
+      this.printer = const PrintingPagePrinter()});
 
   final DocumentFiles? files;
 
@@ -83,6 +85,10 @@ class FloorPlannerApp extends StatefulWidget {
   /// The export font's bytes, read once per app (spec 13 D7), a test seam:
   /// when null the app makes a cache over the bundled asset.
   final ExportFontCache? exportFont;
+
+  /// Where Print hands the page's PDF (spec 13 D9), a test seam: the
+  /// platform's print dialog by default.
+  final PagePrinter printer;
 
   @override
   State<FloorPlannerApp> createState() => _FloorPlannerAppState();
@@ -165,7 +171,8 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
               exitGuard: widget.exitGuard,
               symbols: _symbols,
               thumbnails: _thumbnails,
-              exportFont: _exportFont),
+              exportFont: _exportFont,
+              printer: widget.printer),
         ),
       );
 }

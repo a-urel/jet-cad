@@ -1,12 +1,13 @@
-// What the Export flow (spec 13 D8) reads and makes, apart from its dialogs
-// and files: the document's page, the owners that must not plot, the file's
-// name and kind, and the bytes. The host (`document_host.dart`) runs the
-// flow itself, under busy, after its settle; the Print flow (Task 10) reuses
-// these.
+// What the Export and Print flows (spec 13 D8, D9) read and make, apart
+// from their dialogs, files and printer: the document's page, the owners
+// that must not plot, the file's name and kind, the page's size in pt, and
+// the bytes. The host (`document_host.dart`) runs the flows themselves,
+// under busy, after its settle.
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
 
 import '../document_files.dart';
 import '../parametric/live_objects.dart';
@@ -46,14 +47,30 @@ Future<Uint8List> exportBytes(
   ExportChoice choice, {
   required Future<Uint8List> Function() fontBytes,
 }) async {
-  final omit = exportOmitOwners(document);
   return switch (choice.format) {
-    ExportFormat.pdf => exportPagePdf(
+    ExportFormat.pdf =>
+      exportPdfBytes(document, page, fontBytes: await fontBytes()),
+    ExportFormat.png => exportPagePng(
         document: document,
         page: page,
-        fontBytes: await fontBytes(),
-        omitOwners: omit),
-    ExportFormat.png => exportPagePng(
-        document: document, page: page, dpi: choice.dpi, omitOwners: omit),
+        dpi: choice.dpi,
+        omitOwners: exportOmitOwners(document)),
   };
 }
+
+/// [page] of [document] as a vector PDF with [fontBytes]' font embedded,
+/// the separators omitted: what Export → PDF writes and what Print hands
+/// to the printer (spec 13 D8, D9).
+Future<Uint8List> exportPdfBytes(DraftDocument document, PageComponent page,
+        {required Uint8List fontBytes}) =>
+    exportPagePdf(
+        document: document,
+        page: page,
+        fontBytes: fontBytes,
+        omitOwners: exportOmitOwners(document));
+
+/// [page]'s paper in pt, as laid out (orientation applied): the size the
+/// print dialog opens on (spec 13 D9; without it the dialog opens on
+/// `PdfPageFormat.standard`).
+PdfPageFormat printPageFormat(PageComponent page) => PdfPageFormat(
+    page.effectiveWidthMm * 72 / 25.4, page.effectiveHeightMm * 72 / 25.4);

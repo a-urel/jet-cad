@@ -8,12 +8,14 @@ version: 0.0.1
 resolution: workspace
 
 environment:
-  # file_selector_web needs Flutter 3.38 (Dart 3.10); the flutter bound says
-  # so. The sdk bound stays at ^3.5.0 because it sets the language version:
-  # from 3.7 on the formatter switches to the tall style and the analyzer adds
-  # lints, which would rewrite nearly every file in the app.
+  # printing 5.15 needs Flutter 3.41, and pdf 3.13 (through printing and
+  # jet_cad_2d_flutter) needs Dart 3.12, first shipped in Flutter 3.44; the
+  # flutter bound says so (spec 13 R-4, plan 13 P-7). The sdk bound stays at
+  # ^3.5.0 because it sets the language version: from 3.7 on the formatter
+  # switches to the tall style and the analyzer adds lints, which would
+  # rewrite nearly every file in the app.
   sdk: ^3.5.0
-  flutter: ">=3.38.0"
+  flutter: ">=3.44.0"
 
 dependencies:
   file_selector: ^1.1.0
@@ -24,6 +26,10 @@ dependencies:
   jet_cad_2d_flutter:
     path: ../../packages/jet_cad_2d_flutter
   meta: ^1.18.0
+  # The app names PdfPageFormat (the print flow's page size, spec 13 D9);
+  # the same bound as jet_cad_2d_flutter's.
+  pdf: ^3.13.1
+  printing: ^5.15.1
   vector_math: ^2.2.0
   web: ^1.1.0
 
