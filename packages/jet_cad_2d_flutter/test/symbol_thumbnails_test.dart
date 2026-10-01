@@ -71,6 +71,34 @@ DraftDocument hookSymbol() {
   return doc;
 }
 
+/// A symbol drawn only in a sub-pixel stroke: 0.05 mm, about 0.19 logical
+/// pixels. Below one device pixel the sink keeps the pixel and fades the
+/// alpha by the stroke's *device* width (`vertices_draw_sink.dart`
+/// `_coveredArgb`), so its ink's alpha depends on the DPR the sink is given.
+DraftDocument hairlineSymbol() {
+  final doc = DraftDocument.empty();
+  const def = Handle(800);
+  doc.tree.addDefinition(Definition(
+      handle: def,
+      name: 'hair',
+      basePoint: Vector2(640, -275),
+      children: const []));
+  // One line, not a polyline: a join overlaps two faded strokes and would
+  // read darker than either.
+  addEntity(doc, def, const Handle(801), EntityKind.line,
+      [600, -300, 680, -250], const [],
+      color: const ByBlockColor(), lineweight: 5);
+  addInstance(
+      doc,
+      doc.rootHandle,
+      const Handle(810),
+      def,
+      Transform2.translation(-37000, -91000)
+          .multiply(Transform2.rotation(0.4))
+          .multiply(Transform2.scale(-1, 1)));
+  return doc;
+}
+
 const ui.Size kCell = ui.Size(48, 40);
 
 Future<Uint8List> rgba(ui.Image image) async =>
@@ -90,6 +118,30 @@ List<int> over(Uint8List bytes, int width, int x, int y, int background) {
     channel(bytes[i + 1], 8),
     channel(bytes[i + 2], 0),
   ];
+}
+
+/// The device-pixel box `(left, top, right, bottom)` of every pixel with
+/// non-zero alpha, inclusive.
+(int, int, int, int) inkBox(Uint8List bytes, int width, int height) {
+  var l = width, t = height, r = -1, b = -1;
+  for (var y = 0; y < height; y++) {
+    for (var x = 0; x < width; x++) {
+      if (bytes[(y * width + x) * 4 + 3] == 0) continue;
+      if (x < l) l = x;
+      if (x > r) r = x;
+      if (y < t) t = y;
+      if (y > b) b = y;
+    }
+  }
+  return (l, t, r, b);
+}
+
+int peakAlpha(Uint8List bytes) {
+  var peak = 0;
+  for (var i = 3; i < bytes.length; i += 4) {
+    if (bytes[i] > peak) peak = bytes[i];
+  }
+  return peak;
 }
 
 void main() {
@@ -386,6 +438,72 @@ void main() {
           devicePixelRatio: 2,
           foreground: 0x000000);
       expect(image.width, 96);
+    });
+  });
+
+  testWidgets('the padding keeps the ink off the border, and no further',
+      (tester) async {
+    // MUTATION (padding ignored): `pad = 0.0 * ...` -> the ink reaches the
+    // outer two device pixels. MUTATION (fit on the raw extents): the same.
+    // Too much padding instead fails the "reaches near an edge" half.
+    await tester.runAsync(() async {
+      final thumbs = SymbolThumbnails();
+      addTearDown(thumbs.dispose);
+      // `tight`: the document's extents hug the ink. The line symbol's do
+      // not: its ring's extents are its local box turned by 0.7 rad, about
+      // 1.4 times the ring, so only its border half is checked.
+      for (final (name, doc, tight) in [
+        ('line', lineSymbol, false),
+        ('hook', hookSymbol, true),
+        ('hair', hairlineSymbol, true),
+      ]) {
+        final image = await thumbs.imageFor(
+            key: '$name@1',
+            document: doc,
+            logicalSize: kCell,
+            devicePixelRatio: 2,
+            foreground: 0x000000);
+        final w = image.width, h = image.height;
+        final (l, t, r, b) = inkBox(await rgba(image), w, h);
+        final box = '$name: ink [$l, $t]..[$r, $b] in ${w}x$h';
+        expect(r, greaterThanOrEqualTo(0), reason: '$box: no ink');
+        expect([l, t], everyElement(greaterThanOrEqualTo(2)), reason: box);
+        expect([w - 1 - r, h - 1 - b], everyElement(greaterThanOrEqualTo(2)),
+            reason: box);
+        // The fit is limited by one axis: on that axis the ink comes within
+        // 15% of the image's side on both ends.
+        final nearX = l <= 0.15 * w && w - 1 - r <= 0.15 * w;
+        final nearY = t <= 0.15 * h && h - 1 - b <= 0.15 * h;
+        if (tight) {
+          expect(nearX || nearY, isTrue, reason: '$box: padded too far');
+        }
+      }
+    });
+  });
+
+  testWidgets('the sink draws at the DPR: a sub-pixel stroke fades by it',
+      (tester) async {
+    // 0.05 mm is 0.189 logical px: 0.378 device px at DPR 2 (alpha about
+    // 0.756 * 255 = 193), 0.189 at DPR 1 (about 96).
+    // MUTATION (the sink's devicePixelRatio forced to 1.0): DPR 2 draws at
+    // the DPR 1 alpha.
+    await tester.runAsync(() async {
+      final thumbs = SymbolThumbnails();
+      addTearDown(thumbs.dispose);
+      Future<int> peakAt(double dpr) async {
+        final image = await thumbs.imageFor(
+            key: 'hair@1',
+            document: hairlineSymbol,
+            logicalSize: kCell,
+            devicePixelRatio: dpr,
+            foreground: 0x000000);
+        return peakAlpha(await rgba(image));
+      }
+
+      final one = await peakAt(1);
+      final two = await peakAt(2);
+      expect(one, inInclusiveRange(80, 110), reason: 'DPR 1 peak $one');
+      expect(two, inInclusiveRange(175, 210), reason: 'DPR 2 peak $two');
     });
   });
 }
