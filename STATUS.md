@@ -1,5 +1,53 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-01. **Plan 09a (the symbol library core, the first
+slice of sub-project 09) is MERGED into `main` at `b4e7cdd`**, `--no-ff`, on
+the human's word ("2. onaylıyorum", after their decision that the dining
+tables draw their chairs). **No look is owed for 09a**: it has no UI. 09b
+(palette, search, gallery, thumbnails, the placement tool) is unwritten and
+carries the human's look.
+- **What it delivers** (see
+  [2026-09-30-plan-09a-results.md](docs/superpowers/notes/2026-09-30-plan-09a-results.md)):
+  the engine's undoable `AddDefinitionCommand` / `RemoveDefinitionCommand`;
+  `SymbolComponent` (key, name, category, tags, version) on a definition's
+  handle; the validating `SymbolLibrary` loader; `placeSymbol` (one
+  `CompoundCommand`: copies the definition on first use, reuses it by key and
+  version, applies `basePoint`, quarter turns and mirror, one undo step); a
+  27-symbol furniture library generated from Dart into
+  `apps/floor_planner/assets/library/furniture.jetlib` (the dining tables
+  draw their chairs); and an end-to-end test through paint, pick, snap and
+  the codec.
+- **Spec and plan:** [2026-09-30-symbol-library-design.md](docs/superpowers/specs/2026-09-30-symbol-library-design.md)
+  (rev 3, approved 2026-09-30, amended at execution) and
+  [2026-09-30-symbol-library-core.md](docs/superpowers/plans/2026-09-30-symbol-library-core.md).
+- **Gates (Linux container):** engine 1,121 + 2 standing; render 974 + 1 skip
+  + 7 standing; app 790; web `✓ Built`. The two allocation invariant tests
+  untouched and green.
+- **Reviews:** every task Approved by an independent reviewer (1 and 2, 3,
+  5, 6 each after or with a test-only follow-up); the final whole-branch
+  review: "Ready with fixes" (no blocking or important finding), applied. A
+  sample of 20 mutants re-fired on the final tree, all red.
+- **Found on the way:** `basePoint` is read nowhere in the engine or render
+  (the placer applies it); no engine or render defect from the first test to
+  combine a transform, a style override, paint, pick and snap (spec F-7);
+  `purge` never touches components; the codec silently repairs a definition
+  cycle (the loader refuses any codec diagnostic); `M-09g` and `M-09p` are
+  equivalent mutants (the index learns of a definition through `touched`).
+- **Found, not fixed** (in the note): the duplicate checks of
+  `AddEntityCommand` / `AddNodeCommand` ignore definitions; `AddNodeCommand`
+  does not check an instance's definition exists; a circle's radius is
+  only checked finite; the end-to-end fixture is at one quarter turn,
+  mirrored.
+- **`main` housekeeping:** the local `main` branch was an unrelated old
+  history (de962bd, `origin/main` was force-updated earlier); it was kept
+  as `main-stale-de962bd` and `main` was recreated from `origin/main`.
+- **Next, on the human's word:** 09b from a brainstorm (the palette: gallery
+  widget in `jet_cad_2d_flutter`, search, thumbnails, the placement tool; its
+  carry list and the look are in the results note), or the next 12 slice, or
+  the found items.
+
+*Earlier, 2026-09-30 (the plan 12a merge):*
+
 **Last updated:** 2026-09-30. **Plan 12a (the document lifecycle, the
 first slice of sub-project 12) is MERGED into `main` at `6a9aebb`**,
 `--no-ff`, on the human's decision ("onaylıyorum"). **The macOS and web
