@@ -261,9 +261,13 @@ void main() {
       expect(own, isNotNull);
       expect(tester.widget<DocumentHost>(find.byType(DocumentHost)).symbols,
           same(own));
+      // The production path: the app's own loader reads the declared asset
+      // through rootBundle and reaches ready (m-T2-1).
+      expect(own!.state, isA<SymbolLibraryReady>());
+      expect(keysOf(own.state), assetKeys);
 
       await tester.pumpWidget(const SizedBox());
-      expect(() => own!.addListener(() {}), throwsFlutterError,
+      expect(() => own.addListener(() {}), throwsFlutterError,
           reason: 'disposed by the app that made it');
     });
 
