@@ -20,7 +20,7 @@ void main() {
   test('E1 draftRecord carries the D2 defaults, owned by the given owner', () {
     final r = draftRecord(
         const Handle(0x51), const Handle(0x11), EntityKind.text,
-        text: 'Hall');
+        text: 'Hall', layer: ReservedHandles.layerZero);
     expect(r.handle, const Handle(0x51));
     expect(r.owner, const Handle(0x11));
     expect(r.kind, EntityKind.text);
@@ -40,7 +40,8 @@ void main() {
       () {
     final doc = _doc();
     final before = doc.handleSeed.current;
-    final cmd = addDrafted(doc, EntityKind.line, linePayload(c1, c2));
+    final cmd = addDrafted(doc, EntityKind.line, linePayload(c1, c2),
+        layer: ReservedHandles.layerZero);
     expect(cmd.record.handle.value, before.value + 1);
     expect(cmd.record.owner, doc.rootHandle);
     expect(doc.entities.liveCount, 0, reason: 'built, not executed');
@@ -53,10 +54,12 @@ void main() {
       'E3 draw, undo, draw again: the second handle is never the first '
       '(M-05d)', () {
     final doc = _doc();
-    final a = addDrafted(doc, EntityKind.line, linePayload(c1, c2));
+    final a = addDrafted(doc, EntityKind.line, linePayload(c1, c2),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(a);
     doc.commands.undo();
-    final b = addDrafted(doc, EntityKind.line, linePayload(c2, c1));
+    final b = addDrafted(doc, EntityKind.line, linePayload(c2, c1),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(b);
     expect(b.record.handle, isNot(a.record.handle),
         reason: 'handles are never reissued');
@@ -66,9 +69,11 @@ void main() {
   test('E4 undo removes a drafted entity and redo restores the same handle',
       () {
     final doc = _doc();
-    final a = addDrafted(doc, EntityKind.line, linePayload(c1, c2));
+    final a = addDrafted(doc, EntityKind.line, linePayload(c1, c2),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(a);
-    final b = addDrafted(doc, EntityKind.circle, circlePayload(c2, 40));
+    final b = addDrafted(doc, EntityKind.circle, circlePayload(c2, 40),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(b);
     final full = DraftDocumentCodec.encodeToString(doc);
     doc.commands.undo();
@@ -90,7 +95,8 @@ void main() {
     expect(p.scalars, isEmpty);
     expect(isClosedPolyline(p), isTrue);
     final doc = _doc();
-    final cmd = addDrafted(doc, EntityKind.polyline, p);
+    final cmd = addDrafted(doc, EntityKind.polyline, p,
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(cmd);
     final back = DraftDocumentCodec.decodeString(
         DraftDocumentCodec.encodeToString(doc),
@@ -120,7 +126,7 @@ void main() {
     final doc = _doc();
     const heightMm = 50.0; // 2.5 paper mm at 1:20
     final cmd = addDrafted(doc, EntityKind.text, textPayload(c1, heightMm),
-        text: 'Living');
+        text: 'Living', layer: ReservedHandles.layerZero);
     doc.commands.execute(cmd);
     final r = _record(doc, cmd.record.handle);
     final payload = _payload(doc, cmd.record.handle);
@@ -159,8 +165,9 @@ void main() {
       'not (M-05q)', () {
     final doc = _doc();
     final seed = doc.handleSeed.current;
-    final rect =
-        addDraftedRegion(doc, EntityKind.polyline, rectanglePayload(c1, c2))!;
+    final rect = addDraftedRegion(
+        doc, EntityKind.polyline, rectanglePayload(c1, c2),
+        layer: ReservedHandles.layerZero)!;
     expect(rect.fill.handle.value, lessThan(rect.boundary.handle.value),
         reason: 'the fill draws under its boundary (invariant 6)');
     expect(rect.fill.color, kDraftFillColor);
@@ -170,8 +177,9 @@ void main() {
     expect(doc.fills.fillsOf(rect.boundary.handle), [rect.fill.handle]);
     expect(doc.commands.undoDepth, 1, reason: 'one command, one undo step');
 
-    final circle =
-        addDraftedRegion(doc, EntityKind.circle, circlePayload(c2, 40));
+    final circle = addDraftedRegion(
+        doc, EntityKind.circle, circlePayload(c2, 40),
+        layer: ReservedHandles.layerZero);
     expect(circle, isNotNull,
         reason: "a circle's empty triangulation is its normal case");
 
@@ -184,11 +192,15 @@ void main() {
     ], closed: true);
     expect(triangulationFor(EntityKind.polyline, bowTie), isEmpty,
         reason: 'empty, not null: why D11 needs its own refusal');
-    expect(addDraftedRegion(doc, EntityKind.polyline, bowTie), isNull);
+    expect(
+        addDraftedRegion(doc, EntityKind.polyline, bowTie,
+            layer: ReservedHandles.layerZero),
+        isNull);
     expect(doc.handleSeed.current, before, reason: 'a refusal allocates none');
     expect(
         addDraftedRegion(
-            doc, EntityKind.polyline, polylinePayload([c1, c2, c1 + c2])),
+            doc, EntityKind.polyline, polylinePayload([c1, c2, c1 + c2]),
+            layer: ReservedHandles.layerZero),
         isNull,
         reason: 'an open polyline cannot fill');
     expect(seed.value, lessThan(doc.handleSeed.current.value));

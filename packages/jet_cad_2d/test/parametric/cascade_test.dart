@@ -436,7 +436,8 @@ void main() {
       'is accepted and reported parametric.orphan', () async {
     final doc = scene(tag: true);
     final line = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)));
+        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(line);
     final group = doc.handleSeed.next();
     doc.commands.execute(AddNodeCommand(GroupNode(
@@ -517,7 +518,8 @@ void main() {
 
     final depth = loaded.commands.undoDepth;
     loaded.commands.execute(addDrafted(loaded, EntityKind.line,
-        linePayload(Vector2(7210.5, 2150.25), Vector2(7390.75, 2290.5))));
+        linePayload(Vector2(7210.5, 2150.25), Vector2(7390.75, 2290.5)),
+        layer: ReservedHandles.layerZero));
     loaded.commands.execute(TransformNodeCommand(hC, onA(1600, -250, 0.25)));
     expect(loaded.commands.undoDepth, depth + 2);
     expect(drift(loaded), [hP1]);
@@ -646,7 +648,8 @@ void main() {
         children: const [])));
     final leaf = doc.handleSeed.next();
     doc.commands.execute(AddEntityCommand(
-        record: draftRecord(leaf, nested, EntityKind.line),
+        record: draftRecord(leaf, nested, EntityKind.line,
+            layer: ReservedHandles.layerZero),
         payload: linePayload(Vector2(10.5, 20.25), Vector2(310.75, 45.5))));
     expect(doc.validate(), isEmpty);
     expect(drift(doc), isEmpty);
@@ -725,7 +728,8 @@ void main() {
     final doc = DraftDocument.empty();
     ParametricSystem(doc, braceCatalog).install();
     final line = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)));
+        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(line);
     final low = line.record.handle;
     final high = doc.handleSeed.next();

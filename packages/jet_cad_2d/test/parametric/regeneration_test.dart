@@ -123,7 +123,8 @@ void main() {
       'command is returned as is', () {
     final doc = paramDoc();
     final add = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
+        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
+        layer: ReservedHandles.layerZero);
     expect(identical(doc.commands.expander!(add), add), isTrue);
     final box = create(doc, hA, parked, const ClipRect(10, 10));
     expect(doc.commands.expander!(box), isA<ParametricEdit>());

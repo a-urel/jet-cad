@@ -510,7 +510,8 @@ void main() {
     for (var i = 0; i < 4; i++) {
       final h = doc.handleSeed.next();
       doc.commands.execute(AddEntityCommand(
-          record: draftRecord(h, doc.rootHandle, EntityKind.line),
+          record: draftRecord(h, doc.rootHandle, EntityKind.line,
+              layer: ReservedHandles.layerZero),
           payload: linePayload(place.at(-2000.25 + 300 * i, -3000.5),
               place.at(-1500.75, -2700.25))));
       lines.add(h);

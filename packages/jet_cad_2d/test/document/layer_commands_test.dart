@@ -76,7 +76,9 @@ class _Fixture {
   Handle addLine({required Handle owner, required Handle layer}) {
     final handle = doc.handleSeed.next();
     AddEntityCommand(
-      record: draftRecord(handle, owner, EntityKind.line).copyWith(
+      record: draftRecord(handle, owner, EntityKind.line,
+              layer: ReservedHandles.layerZero)
+          .copyWith(
         layer: layer,
       ),
       payload: GeometryPayload(

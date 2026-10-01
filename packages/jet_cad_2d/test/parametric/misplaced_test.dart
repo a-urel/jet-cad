@@ -78,7 +78,8 @@ Scene scene() {
   doc.commands.execute(addGroup(dead, doc.rootHandle, onA(-900, 400, 0.8)));
   doc.commands.execute(RemoveNodeCommand(dead));
   final add = addDrafted(doc, EntityKind.line,
-      linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
+      linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
+      layer: ReservedHandles.layerZero);
   doc.commands.execute(add);
   final never = Handle(doc.handleSeed.current.value + 77);
   return Scene(doc, outer, nested, dead, add.record.handle, never);

@@ -181,7 +181,8 @@ void main() {
   test('N11 a misplaced component is reported and never regenerated', () {
     final doc = paramDoc();
     final line = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
+        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(line);
     final h = line.record.handle;
     // Straight into the store, as a file brings one in: an edit that

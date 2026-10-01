@@ -349,7 +349,8 @@ void main() {
           isEmpty,
           reason: 'premise: nothing attaches there yet');
       doc.commands.execute(addDrafted(doc, EntityKind.line,
-          linePayload(plan.at(40000.5, 30000.5), plan.at(40500.5, 30000.5))));
+          linePayload(plan.at(40000.5, 30000.5), plan.at(40500.5, 30000.5)),
+          layer: ReservedHandles.layerZero));
       doc.commands.execute(SetComponentCommand<WallParams>(
           f, WallParams(x.x, x.y, fEnd.x, fEnd.y, 200, Justification.centre)));
       final seed = doc.handleSeed.current.value;

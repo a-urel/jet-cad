@@ -37,7 +37,8 @@ List<Handle> chains(DraftDocument doc, int n) {
 
 /// A root LINE among the walls, touching none of them.
 DraftCommand line(DraftDocument doc, int k) => AddEntityCommand(
-    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line),
+    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line,
+        layer: ReservedHandles.layerZero),
     payload: linePayload(plan(-2000.0 + 3 * k, -3000), plan(-1500, -2700)));
 
 double median(List<double> xs) => (xs.toList()..sort())[xs.length ~/ 2];

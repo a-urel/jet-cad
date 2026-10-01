@@ -178,7 +178,8 @@ void main() {
         definition: definition,
         layer: ReservedHandles.layerZero)));
     final add = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
+        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(add);
     final leaf = add.record.handle;
     final live = doc.handleSeed.next();

@@ -47,7 +47,8 @@ DraftDocument gridDoc(ParametricCatalog catalog) {
 
 /// A root LINE among the objects, touching none of them.
 DraftCommand line(DraftDocument doc, int k) => AddEntityCommand(
-    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line),
+    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line,
+        layer: ReservedHandles.layerZero),
     payload: linePayload(
         Vector2(4500000.0 + 3 * k, 1190000), Vector2(4500500.0, 1190300)));
 

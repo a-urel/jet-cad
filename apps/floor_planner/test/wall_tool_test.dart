@@ -54,8 +54,9 @@ DraftDocument wallShellDoc(FlutterTextMeasurer m, {bool ticks = true}) {
     if (ticks) ...[c0, c1, c2, c3, s0]
   ]) {
     final out = (p - _centre).normalized() * 400;
-    doc.commands
-        .execute(addDrafted(doc, EntityKind.line, linePayload(p, p + out)));
+    doc.commands.execute(addDrafted(
+        doc, EntityKind.line, linePayload(p, p + out),
+        layer: ReservedHandles.layerZero));
   }
   doc.commands.clearHistory();
   return doc;
@@ -680,8 +681,8 @@ void main() {
     for (final p in g) {
       for (final off in const [4.0, -7.0]) {
         final a = p + n * off - u * 300, b = p + n * off + u * 1700;
-        doc.commands
-            .execute(addDrafted(doc, EntityKind.line, linePayload(a, b)));
+        doc.commands.execute(addDrafted(doc, EntityKind.line, linePayload(a, b),
+            layer: ReservedHandles.layerZero));
       }
     }
     doc.commands.clearHistory();
@@ -880,8 +881,8 @@ void main() {
             gridStepMm: gridStep)));
     // A survey tick out of each end, so each click snaps onto it exactly.
     for (final (p, out) in [(s, s - (e - s) * 100), (e, e + (e - s) * 100)]) {
-      doc.commands
-          .execute(addDrafted(doc, EntityKind.line, linePayload(p, out)));
+      doc.commands.execute(addDrafted(doc, EntityKind.line, linePayload(p, out),
+          layer: ReservedHandles.layerZero));
     }
     doc.commands.clearHistory();
     await tester.binding.setSurfaceSize(const Size(1440, 900));

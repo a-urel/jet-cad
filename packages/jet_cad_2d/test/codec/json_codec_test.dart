@@ -534,7 +534,8 @@ void main() {
     Handle add(int flags, double x, double y) {
       final handle = doc.handleSeed.next();
       doc.commands.execute(AddEntityCommand(
-        record: draftRecord(handle, doc.rootHandle, EntityKind.line)
+        record: draftRecord(handle, doc.rootHandle, EntityKind.line,
+                layer: ReservedHandles.layerZero)
             .copyWith(flags: flags),
         payload: linePayload(Vector2(x, y), Vector2(x + 612.75, y - 208.5)),
       ));

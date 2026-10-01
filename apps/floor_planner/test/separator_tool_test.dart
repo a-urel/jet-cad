@@ -146,7 +146,8 @@ void main() {
     final doc = plan.doc;
     final tick = plan.at(1700.25, 1300.5);
     doc.commands.execute(addDrafted(
-        doc, EntityKind.line, linePayload(tick, plan.at(1400.25, 900.5))));
+        doc, EntityKind.line, linePayload(tick, plan.at(1400.25, 900.5)),
+        layer: ReservedHandles.layerZero));
     final rig = separatorRig(doc);
     final tool = rig.tool;
     final first = plan.at(1702.75, 1303.625);

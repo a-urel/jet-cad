@@ -82,7 +82,8 @@ final class Rig {
               originX: gridOriginX, originY: gridOriginY, gridStepMm: step)));
     }
     document.commands.execute(addDrafted(
-        document, EntityKind.line, linePayload(e0, e0 + Vector2(1200, 700))));
+        document, EntityKind.line, linePayload(e0, e0 + Vector2(1200, 700)),
+        layer: ReservedHandles.layerZero));
     document.commands.clearHistory();
     index = SpatialIndex(document);
     final linear = Transform2.scale(scale, -scale);

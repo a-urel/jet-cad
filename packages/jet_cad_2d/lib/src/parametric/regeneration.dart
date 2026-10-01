@@ -444,12 +444,14 @@ List<Handle> _closure(
 EntityRecord _recordOf(
         Handle handle, Handle owner, EntityKind kind, Generated g,
         {bool boundary = false}) =>
-    draftRecord(handle, owner, kind, color: g.color, text: g.text).copyWith(
-        transparency: g.transparency,
-        flags: boundary ? g.boundaryFlags : g.flags,
-        linetype: g.linetype,
-        lineweight: g.lineweight,
-        textAttrs: g.textAttrs);
+    draftRecord(handle, owner, kind,
+            color: g.color, text: g.text, layer: ReservedHandles.layerZero)
+        .copyWith(
+            transparency: g.transparency,
+            flags: boundary ? g.boundaryFlags : g.flags,
+            linetype: g.linetype,
+            lineweight: g.lineweight,
+            textAttrs: g.textAttrs);
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||

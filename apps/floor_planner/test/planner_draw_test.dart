@@ -25,7 +25,8 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
           originY: 3000,
           snapToGrid: false)));
   final add = addDrafted(doc, EntityKind.line,
-      linePayload(Vector2(7137.3, 3161.7), Vector2(7300.9, 3190.1)));
+      linePayload(Vector2(7137.3, 3161.7), Vector2(7300.9, 3190.1)),
+      layer: ReservedHandles.layerZero);
   doc.commands.execute(add);
   doc.commands.clearHistory();
   return (doc: doc, line: add.record.handle);

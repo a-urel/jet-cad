@@ -66,7 +66,7 @@ class TextTool extends PlacementTool {
           ctx,
           () => addDrafted(ctx.document, EntityKind.text,
               textPayload(placed.point, placed.heightMm),
-              text: s));
+              text: s, layer: ReservedHandles.layerZero));
     }
     cancel(ctx);
   }

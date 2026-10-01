@@ -147,7 +147,8 @@ void main() {
       expect(rec.lineweight, lw, reason: what);
       expect(rec.textAttrs, attrs, reason: what);
       // Every other attribute is draftRecord's default.
-      final want = draftRecord(ks[i], dim, kindOf(doc, ks[i]), text: rec.text)
+      final want = draftRecord(ks[i], dim, kindOf(doc, ks[i]),
+              text: rec.text, layer: ReservedHandles.layerZero)
           .copyWith(flags: flags[i], lineweight: lw, textAttrs: attrs);
       expect(rec.toJson(), want.toJson(), reason: what);
     }

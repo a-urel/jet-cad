@@ -202,7 +202,8 @@ void main() {
     ]) {
       doc.commands.execute(AddEntityCommand(
           record: draftRecord(
-              doc.handleSeed.next(), doc.rootHandle, EntityKind.line),
+              doc.handleSeed.next(), doc.rootHandle, EntityKind.line,
+              layer: ReservedHandles.layerZero),
           payload: linePayload(s, e)));
     }
     expect(doc.commands.undoDepth, depth + 2);
