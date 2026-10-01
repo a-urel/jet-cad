@@ -61,7 +61,7 @@ Each ruling is in the ledger with its cost-if-wrong.
 - **R-T4-2:** `AddNodeCommand` does not check that the instance's definition
   exists, so a wrongly ordered compound is accepted on execute and fails only
   on undo. The placer's order is pinned by P5, P9 and P10.
-- **R-T5-1:** D7's list adds up to 25 symbols (5 Dining, 5 Kitchen, 4 Bed, 4
+- **R-T5-1:** D7's list added up to 25 symbols, 27 after Task 8 (5 Dining, 7 after Task 8, 5 Kitchen, 4 Bed, 4
   Living, 4 Bath, 3 Office), not "about 24".
 - **R-T5-2:** the library document is `DraftDocument.empty()` +
   `registerAppComponents` + mm, not `prepareDocument` (which adds the DASHED
@@ -268,7 +268,7 @@ of the spec that are not 09a's: M-09k, l, m, s, w, x are 09b's (see below).
   at the right end.
 - Carried from earlier, untouched: the live-object-rule note's list.
 
-- **The "4 seats" and "6 seats" dining tables draw no chairs** (the final
+- **FIXED by the human's decision (Task 8, commit recorded in task-8-report.md): the "4 seats" and "6 seats" dining tables drew no chairs.** They are now four tables that draw their chairs (`dining.table.square.two`, `.square.four`, `.rect.four`, `.rect.six`); the library has 27 symbols (7 Dining). Original finding (the final
   review's worst content issue): `_table` in `furniture_catalog.dart` is a
   rectangle with an inset, so the names promise seats the geometry does not
   show. The content is the human's to judge; a rename or chairs are a

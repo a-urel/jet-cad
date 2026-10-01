@@ -593,10 +593,17 @@ This section rewrites nothing above it.
   `abs(sweep) <= Tolerance.standard.angular`, a geometric decision; cases
   5e-10, -5e-10 and exactly 1e-9 are refused and +-2e-9 load (R27b-e). (e) A
   definition with no leaves is accepted; D5 does not forbid it.
-- **D7 (the content, `81a3271`, `a5e38a0`, `971eb76`).** The list is **25**
-  symbols (R-T5-1), keys lower-case and dotted, sizes in mm as w x h:
-  Dining Room: `dining.table.four` 1600x900, `dining.table.six` 2000x900,
-  `dining.table.round` d1100, `dining.chair` 450x450, `dining.bench`
+- **D7 (the content, `81a3271`, `a5e38a0`, `971eb76`).** The list is **27**
+  symbols (R-T5-1; Task 8 replaced the two chairless tables by four that
+  draw their chairs, the human's decision), keys lower-case and dotted,
+  sizes in mm as w x h: Dining Room: `dining.table.square.two` (table
+  800x800, a chair on each of two opposite sides; symbol 800x1500),
+  `dining.table.square.four` (900x900, a chair on each side; 1600x1600),
+  `dining.table.rect.four` (1400x800, two chairs on each long side;
+  1400x1500), `dining.table.rect.six` (1800x900, two chairs on each long
+  side and one at each end; 2500x1600; each chair a closed 450x450 outline
+  plus a back line, 100 mm tucked under the table; base point the table
+  centre), `dining.table.round` d1100, `dining.chair` 450x450, `dining.bench`
   1200x350. Kitchen: `kitchen.base.600` 600x600, `kitchen.sink` 1200x600,
   `kitchen.hob` 600x520, `kitchen.fridge` 600x650, `kitchen.island`
   1800x900. Bed Room: `bed.double` 1600x2000, `bed.single` 900x2000,

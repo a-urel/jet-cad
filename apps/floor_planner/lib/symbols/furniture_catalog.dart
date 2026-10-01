@@ -111,26 +111,114 @@ const String livingRoom = 'Living Room';
 const String bathroom = 'Bathroom';
 const String office = 'Office';
 
-FurnitureSymbol _table(
-        String key, String name, double w, double h, List<String> tags) =>
-    FurnitureSymbol(
-      key: key,
-      name: name,
-      category: dining,
-      tags: tags,
-      baseX: w / 2,
-      baseY: h / 2,
-      shapes: [_rect(0, 0, w, h), _inset(w, h, 50)],
-    );
+/// Which side of the table a chair sits on; the chair's back is on the far
+/// side from the table.
+enum _Side { bottom, top, left, right }
+
+const double _chairSize = 450;
+const double _chairTuck = 100; // seat depth tucked under the table edge
+const double _chairReach = _chairSize - _chairTuck; // 350 beyond the edge
+
+/// One chair: a closed 450 x 450 seat outline from (x, y) and a thin back
+/// line 60 mm in from the outer edge, on the side away from the table.
+List<FurnitureShape> _chair(double x, double y, _Side back) => [
+      _rect(x, y, _chairSize, _chairSize),
+      switch (back) {
+        _Side.bottom => LineShape(x, y + 60, x + _chairSize, y + 60),
+        _Side.top => LineShape(
+            x, y + _chairSize - 60, x + _chairSize, y + _chairSize - 60),
+        _Side.left => LineShape(x + 60, y, x + 60, y + _chairSize),
+        _Side.right => LineShape(
+            x + _chairSize - 60, y, x + _chairSize - 60, y + _chairSize),
+      },
+    ];
+
+/// A [tw] x [th] table with its chairs. The table's lower-left corner is at
+/// ([ox], [oy]); [chairs] are (side, centre along that side) pairs, the
+/// centre measured from the table's lower-left corner along the side. The
+/// base point is the table centre. Leaves: table outline, table inset, then
+/// each chair (outline, back line).
+FurnitureSymbol _diningSet(String key, String name, double tw, double th,
+    double ox, double oy, List<String> tags, List<(_Side, double)> chairs) {
+  final shapes = <FurnitureShape>[
+    _rect(ox, oy, tw, th),
+    _rect(ox + 50, oy + 50, tw - 100, th - 100),
+  ];
+  for (final (side, c) in chairs) {
+    const h = _chairSize / 2;
+    switch (side) {
+      case _Side.bottom:
+        shapes.addAll(_chair(ox + c - h, oy - _chairReach, side));
+      case _Side.top:
+        shapes.addAll(_chair(ox + c - h, oy + th - _chairTuck, side));
+      case _Side.left:
+        shapes.addAll(_chair(ox - _chairReach, oy + c - h, side));
+      case _Side.right:
+        shapes.addAll(_chair(ox + tw - _chairTuck, oy + c - h, side));
+    }
+  }
+  return FurnitureSymbol(
+    key: key,
+    name: name,
+    category: dining,
+    tags: tags,
+    baseX: ox + tw / 2,
+    baseY: oy + th / 2,
+    shapes: shapes,
+  );
+}
 
 /// The catalog, in the order the library stores it: definition handles and
 /// leaf handles ascend in this order.
 final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
   // Dining Room
-  _table('dining.table.four', 'Dining table, 4 seats', 1600, 900,
-      const ['table', 'dining', 'four']),
-  _table('dining.table.six', 'Dining table, 6 seats', 2000, 900,
-      const ['table', 'dining', 'six']),
+  _diningSet(
+      'dining.table.square.two',
+      'Square dining table, 2 seats',
+      800,
+      800,
+      0,
+      350,
+      const ['table', 'dining', 'square', 'two'],
+      const [(_Side.bottom, 400), (_Side.top, 400)]),
+  _diningSet('dining.table.square.four', 'Square dining table, 4 seats', 900,
+      900, 350, 350, const [
+    'table',
+    'dining',
+    'square',
+    'four'
+  ], const [
+    (_Side.bottom, 450),
+    (_Side.top, 450),
+    (_Side.left, 450),
+    (_Side.right, 450),
+  ]),
+  _diningSet('dining.table.rect.four', 'Rectangular dining table, 4 seats',
+      1400, 800, 0, 350, const [
+    'table',
+    'dining',
+    'rectangular',
+    'four'
+  ], const [
+    (_Side.bottom, 350),
+    (_Side.bottom, 1050),
+    (_Side.top, 350),
+    (_Side.top, 1050),
+  ]),
+  _diningSet('dining.table.rect.six', 'Rectangular dining table, 6 seats', 1800,
+      900, 350, 350, const [
+    'table',
+    'dining',
+    'rectangular',
+    'six'
+  ], const [
+    (_Side.bottom, 450),
+    (_Side.bottom, 1350),
+    (_Side.top, 450),
+    (_Side.top, 1350),
+    (_Side.left, 450),
+    (_Side.right, 450),
+  ]),
   const FurnitureSymbol(
     key: 'dining.table.round',
     name: 'Round dining table',

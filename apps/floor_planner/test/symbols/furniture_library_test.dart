@@ -51,9 +51,9 @@ void main() {
           isTrue);
     });
 
-    test('ships at about two dozen symbols in six categories', () {
+    test('ships 27 symbols in six categories', () {
       final lib = assetLibrary();
-      expect(lib.entries.length, inInclusiveRange(22, 26));
+      expect(lib.entries.length, 27);
       expect(lib.categories, [
         'Dining Room',
         'Kitchen',
@@ -116,8 +116,10 @@ void main() {
     // number of closed polylines each symbol draws. Every polyline in the
     // library is closed, so an open one is a defect.
     const closedPolylines = {
-      'dining.table.four': 2,
-      'dining.table.six': 2,
+      'dining.table.square.two': 4,
+      'dining.table.square.four': 6,
+      'dining.table.rect.four': 6,
+      'dining.table.rect.six': 8,
       'dining.table.round': 0,
       'dining.chair': 2,
       'dining.bench': 2,
@@ -144,8 +146,10 @@ void main() {
     };
 
     const categories = {
-      'dining.table.four': 'Dining Room',
-      'dining.table.six': 'Dining Room',
+      'dining.table.square.two': 'Dining Room',
+      'dining.table.square.four': 'Dining Room',
+      'dining.table.rect.four': 'Dining Room',
+      'dining.table.rect.six': 'Dining Room',
       'dining.table.round': 'Dining Room',
       'dining.chair': 'Dining Room',
       'dining.bench': 'Dining Room',
@@ -171,9 +175,9 @@ void main() {
       'office.bookshelf': 'Office',
     };
 
-    test('the tables cover exactly the 25 shipped keys', () {
+    test('the tables cover exactly the 27 shipped keys', () {
       final keys = assetLibrary().entries.map((e) => e.key).toSet();
-      expect(keys.length, 25);
+      expect(keys.length, 27);
       expect(closedPolylines.keys.toSet(), keys);
       expect(categories.keys.toSet(), keys);
     });
@@ -205,6 +209,81 @@ void main() {
     test('each key is in its own category', () {
       for (final e in assetLibrary().entries) {
         expect(e.category, categories[e.key], reason: e.key);
+      }
+    });
+  });
+
+  group('the dining tables draw their chairs', () {
+    // Written out by hand: the seats of each table. A table's leaves are its
+    // outline and inset (two closed polylines), then one closed outline and
+    // one back line per chair.
+    const seats = {
+      'dining.table.square.two': 2,
+      'dining.table.square.four': 4,
+      'dining.table.rect.four': 4,
+      'dining.table.rect.six': 6,
+    };
+
+    // Axis-aligned box (minX, minY, maxX, maxY) of a closed polyline leaf.
+    (double, double, double, double) box(GeometryPayload p) {
+      final c = p.coords;
+      var minX = c[0], minY = c[1], maxX = c[0], maxY = c[1];
+      for (var i = 0; i < p.pointCount; i++) {
+        minX = c[2 * i] < minX ? c[2 * i] : minX;
+        maxX = c[2 * i] > maxX ? c[2 * i] : maxX;
+        minY = c[2 * i + 1] < minY ? c[2 * i + 1] : minY;
+        maxY = c[2 * i + 1] > maxY ? c[2 * i + 1] : maxY;
+      }
+      return (minX, minY, maxX, maxY);
+    }
+
+    List<(double, double, double, double)> chairBoxes(String key) {
+      final e = assetLibrary().entries.firstWhere((e) => e.key == key);
+      final polylines = [
+        for (final l in e.leaves)
+          if (l.record.kind == EntityKind.polyline) l,
+      ];
+      return [for (final l in polylines.skip(2)) box(l.payload)];
+    }
+
+    test('each table draws one chair outline and back line per seat', () {
+      for (final MapEntry(:key, :value) in seats.entries) {
+        expect(chairBoxes(key).length, value, reason: key);
+        final e = assetLibrary().entries.firstWhere((e) => e.key == key);
+        final lines = e.leaves.where((l) => l.record.kind == EntityKind.line);
+        expect(lines.length, value, reason: '$key: a back line per chair');
+      }
+    });
+
+    test('every chair is 450 x 450 and tucked 100 mm under the table', () {
+      for (final key in seats.keys) {
+        final e = assetLibrary().entries.firstWhere((e) => e.key == key);
+        final table = box(e.leaves.first.payload);
+        for (final (x0, y0, x1, y1) in chairBoxes(key)) {
+          expect(x1 - x0, 450, reason: key);
+          expect(y1 - y0, 450, reason: key);
+          final ox =
+              (x1 < table.$3 ? x1 : table.$3) - (x0 > table.$1 ? x0 : table.$1);
+          final oy =
+              (y1 < table.$4 ? y1 : table.$4) - (y0 > table.$2 ? y0 : table.$2);
+          // The chair overlaps the table by 100 mm in depth and by its full
+          // 450 mm along the side.
+          expect([ox, oy]..sort(), [100, 450], reason: key);
+        }
+      }
+    });
+
+    test('the chairs of one table do not overlap each other', () {
+      for (final key in seats.keys) {
+        final boxes = chairBoxes(key);
+        for (var i = 0; i < boxes.length; i++) {
+          for (var j = i + 1; j < boxes.length; j++) {
+            final a = boxes[i], b = boxes[j];
+            final overlap =
+                a.$3 > b.$1 && b.$3 > a.$1 && a.$4 > b.$2 && b.$4 > a.$2;
+            expect(overlap, isFalse, reason: '$key: chairs $i and $j');
+          }
+        }
       }
     });
   });
