@@ -46,3 +46,10 @@ packages/jet_cad/analysis_options.yaml: never commit it.
 
 ## Closing
 Branch plan-09/symbol-library-core: tasks 1,1b,2,2b,3,4,5,6,6b,6c,7 + final review fixes; the archive of this ledger is the branch's last commit. Merge is the human's word. 09b (palette, search, gallery, thumbnails, placement tool) is unwritten. The spec's two independent reviews were conversational (their findings are the spec's Revision 2 and Revision 3 sections).
+
+## Post-final-review change requested by the human (2026-10-01)
+The human decided: dining tables WITH CHAIRS: square 2-seat, square 4-seat, rectangular 4-seat, rectangular 6-seat (replaces dining.table.four / dining.table.six). Approved the merge ("2. onaylıyorum") in the same message; the merge follows this change's independent review.
+- R-T8-1: the old keys were never shipped (version 1 stays); the four tables replace the two. Symbol count 25 -> 27 (Dining Room 5 -> 7). Cost if wrong: none (nothing consumed the old keys).
+
+| 8 dining tables with chairs (the human's decision) | 10770f8 | Approved by the final reviewer (follow-up section of final-review.md); minors applied in 8b |
+| 8b doc fixes + base-point-is-table-centre test | 2d12067 | covered by the follow-up review's own findings; the author's gates re-run by the controller: app 790, analyze/format clean, web built |

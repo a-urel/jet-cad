@@ -43,3 +43,11 @@ Web build contains the asset, cmp identical.
 5 nit spec amendment/results link ledgers/2026-09-30-plan-09a/ which does not exist until the archive commit (results note says so).
 6 nit BYBLOCK leaves under a default instance resolve to ACI 7 / white 0xFFFFFFFF with the default foreground: 09b should check contrast on a light canvas.
 No false claims found: SHAs exist, 29 throw sites, 33,423 bytes, lib/ untouched after a5e38a0, gate counts reproduced.
+
+## Task 8 follow-up (10770f8) -- in progress
+VERDICT Task 8 (10770f8): Approved with 1 minor-important doc fix + 3 nits.
+- Diff db41225..10770f8 touches only furniture_catalog.dart, asset, furniture_library_test.dart, results note, spec amendment. No other lib change.
+- app +789, analyze/format clean, web build ok (asset in build identical, 44,212 bytes); regenerate is deterministic (git status clean). Engine/render unchanged.
+- Geometry hand-computed: square.two bounds 800x1500 base (400,750); square.four 1600x1600 base (800,800); rect.four 1400x1500 base (700,750); rect.six 2500x1600 base (1250,800); chairs 450 tucked 100, none overlap; Dining Room = 7.
+- Mutants red in furniture_library_test.dart: drop rect.six chair (closed-count + seat tests), chair onto another (overlap test), chair 460 and tucked 90 (450x450/tuck test), basePoint (0,0) (off origin). SURVIVOR: base point shifted +50 off table centre stays green (centre not pinned). All restored; asset regenerated clean.
+- Findings: (1) spec amendment line ~619 still says asset is 33,423 bytes (now 44,212): false. (2) results note line 15 says "25 furniture symbols" (final is 27); lines 131/141 33,423 are historical-ish but unlabelled. (3) results R-T5-1 text garbled "(5 Dining, 7 after Task 8, ...". (4) base point = table centre not pinned.
