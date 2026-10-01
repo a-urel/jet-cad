@@ -17,6 +17,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'document_files.dart';
 import 'exit_guard.dart';
+import 'export/export_dialog.dart';
+import 'export/export_flow.dart';
 import 'export/export_font.dart';
 import 'main.dart';
 import 'new_document.dart';
@@ -212,7 +214,9 @@ class DocumentHost extends StatefulWidget {
 
   /// The app's export font (spec 13 D7), read once per app; the app owns
   /// it, so a document swap keeps it. The export and print flows read
-  /// [ExportFontCache.bytes] (plan 13 Tasks 9-10).
+  /// [ExportFontCache.bytes] (plan 13 Tasks 9-10). A host given none makes
+  /// its own over the bundled asset, which reads nothing until an export
+  /// asks.
   final ExportFontCache? exportFont;
 
   @override
@@ -243,14 +247,24 @@ class DocumentHostState extends State<DocumentHost> {
   late final DerivedFlag _notBusy =
       DerivedFlag([_session.busy], () => !_session.busy.value);
 
+  /// The export font: the app's, or the host's own when none was given.
+  late final ExportFontCache _exportFont =
+      widget.exportFont ?? ExportFontCache();
+
+  /// The Export dialog's last answer in this app session (spec 13 D8): the
+  /// host's, so a document swap keeps it; PDF, 150 dpi at first.
+  ExportChoice _lastExport = ExportChoice.initial;
+
   /// The file half of the command table (spec 12a D6), in the toolbar's
-  /// order: New, Open, Open sample, Save, Save As. Each runs one flow,
-  /// which sets busy for its span (T-8).
+  /// order: New, Open, Open sample, Save, Save As, Export (spec 13 D8). Each
+  /// runs one flow, which sets busy for its span (T-8).
   ///
   /// Their `enabled` is only "no flow is running": it does **not** know
-  /// about a shape part-way, which only the shell sees (T-2, R-8). Bind
-  /// them through the shell, which re-wraps each with its own idle; a
-  /// consumer that binds this list directly would act mid-shape.
+  /// about a shape part-way, which only the shell sees (T-2, R-8), nor --
+  /// for Export -- whether the document has a page ([kPageCommandIds]).
+  /// Bind them through the shell, which re-wraps each with its own idle
+  /// and, for those, its page; a consumer that binds this list directly
+  /// would act mid-shape.
   late final List<ShellCommand> fileCommands = [
     ShellCommand(
         id: 'new',
@@ -286,6 +300,13 @@ class DocumentHostState extends State<DocumentHost> {
         shortcuts: kSaveAsChords,
         enabled: _notBusy,
         run: saveAsStep),
+    ShellCommand(
+        id: 'export',
+        label: 'Export…',
+        icon: Icons.ios_share_outlined,
+        shortcuts: kExportChords,
+        enabled: _notBusy,
+        run: exportFlow),
   ];
 
   VoidCallback _registerSettle(VoidCallback settle) {
@@ -492,6 +513,34 @@ class DocumentHostState extends State<DocumentHost> {
     }
     return true;
   }
+
+  /// Export (spec 13 D8): after the settle, the document's page -- none,
+  /// and nothing happens; then the Export dialog, opened on the last
+  /// choice; then where to save `<name>.pdf` or `<name>.png`; then the
+  /// page, exported without the separators, written there. A cancel at
+  /// either step writes nothing; any object thrown on the way shows
+  /// `Export failed`. The document is read, never written.
+  Future<void> exportFlow() => _flow(() async {
+        _settlePendingInput();
+        final document = _session.document;
+        final page = exportPageOf(document);
+        if (page == null || !mounted) return;
+        final choice = await showExportDialog(context, _lastExport);
+        if (choice == null) return;
+        _lastExport = choice;
+        final kind = exportFileKind(choice);
+        try {
+          final place = await widget.files
+              .saveLocation(exportFileName(_session.name, choice), kind: kind);
+          if (place == null) return;
+          final bytes = await exportBytes(document, page, choice,
+              fontBytes: () => _exportFont.bytes);
+          await widget.files
+              .write(place.location, place.name, bytes, kind: kind);
+        } catch (e) {
+          await _showError('Export failed', e);
+        }
+      });
 
   /// The error dialog of a failed Open or Save (spec 12a D8): what failed
   /// and the thrown object's text. The flow waits for it, so it stays busy

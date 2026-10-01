@@ -985,19 +985,21 @@ void main() {
   });
 
   testWidgets(
-      'DC12c from 624 px down to 576 px wide (the old 590 px floor among '
-      'them) a titled long name and a long status line do not overflow the '
-      'top bar: the gaps give way, and OSNAP and the zoom stay on screen '
-      '(spec 12a D7, S-27)', (tester) async {
-    // 576 px is the floor measured on this layout: the toolbar, its gap,
+      'DC12c from 664 px down to 616 px wide a titled long name and a long '
+      'status line do not overflow the top bar: the gaps give way, and OSNAP '
+      'and the zoom stay on screen (spec 12a D7, S-27)', (tester) async {
+    // 616 px is the floor measured on this layout: the toolbar, its gap,
     // OSNAP, its gap and the zoom, with nothing left for the name and the
-    // status; at 575 px the bar overflows. On this fixture the 5998504 bar
-    // first overflowed at 591 px, Task 9's at 623 px.
+    // status; at 615 px the bar overflows. Plan 12a measured 576 px with
+    // seven buttons; plan 13 Task 9's Export button is one more, 40 px
+    // wide, which moves the floor by exactly that (the range moves with
+    // it). On this fixture the 5998504 bar first overflowed at 591 px, 12a
+    // Task 9's at 623 px (seven buttons).
     final texts = await longNameAndStatus(tester);
     expect(tester.takeException(), isNull);
     final name = find.byKey(const Key('document-name'));
     final status = find.byKey(const Key('status-text'));
-    for (var width = 624; width >= 576; width--) {
+    for (var width = 664; width >= 616; width--) {
       await tester.binding.setSurfaceSize(Size(width.toDouble(), 600));
       await tester.pump();
       expect(tester.takeException(), isNull, reason: '$width px');

@@ -218,8 +218,9 @@ class PlannerShell extends StatefulWidget {
   final SnapSettings? snap;
 
   /// The host's file commands (spec 12a D6): New, Open, Open sample, Save,
-  /// Save As. The shell adds its own idle condition (no shape part-way)
-  /// to each, and binds and shows them with Undo and Redo.
+  /// Save As, Export. The shell adds its own idle condition (no shape
+  /// part-way) to each, and its page to Export's (spec 13 D8), and binds
+  /// and shows them with Undo and Redo.
   final List<ShellCommand> fileCommands;
 
   /// The document's name, for the top bar (spec 12a D7); null in a bare
@@ -544,10 +545,15 @@ class _PlannerShellState extends State<PlannerShell> {
   StreamSubscription<DocChange>? _history;
 
   /// The file commands, each enabled only while the host's own condition
-  /// holds and the shell is idle.
+  /// holds and the shell is idle; Export and Print also only while the
+  /// document has a page (spec 13 D8, [kPageCommandIds]).
   late final List<DerivedFlag> _fileEnabled = [
     for (final c in widget.fileCommands)
-      DerivedFlag([c.enabled, ..._idleSources], () => c.enabled.value && _idle),
+      kPageCommandIds.contains(c.id)
+          ? DerivedFlag([c.enabled, ..._idleSources, _page],
+              () => c.enabled.value && _idle && _page.value != null)
+          : DerivedFlag(
+              [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
   ];
   late final List<ShellCommand> _fileCommands = [
     for (var i = 0; i < widget.fileCommands.length; i++)
