@@ -1,5 +1,44 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-01. **Plan 09b (the symbol palette, the second and
+last slice of sub-project 09) is MERGED into `main` at `6f7b69a`**, `--no-ff`,
+on the human's word ("bakışı yaptım, sorun yok. merge et"). **The macOS and
+web look is done, by the human's report before the merge** (no findings; the
+per-item checklist in the results note stays as written). **Sub-project 09 is
+complete.**
+- **What it delivers** (see
+  [2026-10-01-plan-09b-results.md](docs/superpowers/notes/2026-10-01-plan-09b-results.md)):
+  a Tools | Symbols tab strip in the left panel; the Symbols tab with a
+  search box (no shell shortcut fires while typing; Enter, a click outside
+  and Esc hand focus back), collapsible categories and a two-column grid of
+  thumbnails painted by `DraftPainter` into a per-app LRU cache; a placement
+  tool whose ghost draws the symbol's real lines (a cached local path under a
+  reused double-composed matrix, no per-paint allocation of a path or
+  matrix), press-drag-release placing at the snapped release point, R / Shift+R
+  quarter turns, M mirror (only without Ctrl/Meta/Alt), Esc, permissions
+  checked before any handle is allocated, one undo step per placement; the
+  library loaded once per app with loading and failure (Retry) states.
+- **Spec and plan:** [2026-10-01-symbol-palette-design.md](docs/superpowers/specs/2026-10-01-symbol-palette-design.md)
+  (rev 3, approved 2026-10-01, amended at execution) and
+  [2026-10-01-symbol-palette.md](docs/superpowers/plans/2026-10-01-symbol-palette.md).
+- **Gates (Linux container):** engine 1,121 + 2 standing; render 1,001 + 1
+  skip + 7 standing; app 885; web `✓ Built`. The engine is untouched; the two
+  allocation invariant tests untouched and green.
+- **Reviews:** every task Approved by an independent reviewer (1, 3, 4, 5, 6
+  and 8 after test-only follow-ups that closed surviving mutants; no code
+  defect in any task); the final whole-branch review: "Ready with fixes" (no
+  blocking or important finding), applied; its sample of 17 mutants on the
+  tip all red.
+- **Found, not fixed** (in the note): the ghost's cross allocates four
+  `Offset`s per paint (constant, not per entity); the Symbols panel rebuilds
+  per hover; the ghost does not follow a wheel zoom until the next pointer
+  event; the search text clears on a tab switch (R-B9-2, accepted by the
+  human's look).
+- **Next, on the human's word:** the next 12 slice, 13 (export and print),
+  or the found items and owed looks (06, 08, 10).
+
+*Earlier, 2026-10-01 (the plan 09a merge):*
+
 **Last updated:** 2026-10-01. **Plan 09a (the symbol library core, the first
 slice of sub-project 09) is MERGED into `main` at `b4e7cdd`**, `--no-ff`, on
 the human's word ("2. onaylıyorum", after their decision that the dining
