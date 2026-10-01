@@ -108,27 +108,6 @@ void main() {
       }
     }
 
-    /// The cubic's point at [t].
-    PdfXY bezier(PdfXY p0, PdfContentSegment s, double t) {
-      final m = 1 - t;
-      final c1 = s.controls[0], c2 = s.controls[1], p3 = s.to;
-      double at(double a, double b, double c, double d) =>
-          m * m * m * a + 3 * m * m * t * b + 3 * m * t * t * c + t * t * t * d;
-      return (
-        x: at(p0.x, c1.x, c2.x, p3.x),
-        y: at(p0.y, c1.y, c2.y, p3.y),
-      );
-    }
-
-    /// The smallest singular value of [r]'s linear part: how much a page
-    /// error can grow on the way back to local space.
-    double minStretch(Transform2? r) {
-      if (r == null) return 1;
-      final t = r.a * r.a + r.b * r.b + r.c * r.c + r.d * r.d;
-      final det = r.determinant;
-      return math.sqrt((t - math.sqrt(math.max(0, t * t - 4 * det * det))) / 2);
-    }
-
     /// Every cubic of [sub] lies on the circle ([cx], [cy], [r]) of the local
     /// frame. The bound is the rounding carried back through the residual,
     /// plus the cubic's own `2.7e-4 · r`.
@@ -138,10 +117,12 @@ void main() {
       for (final s in sub.segments) {
         expect(s.isCubic, isTrue, reason: '$what: only cubics');
         for (final t in const [0.0, 0.25, 0.5, 0.75, 1.0]) {
-          final p = bezier(p0, s, t);
+          final p = _bezier(p0, s, t);
           final q = toLocal(p, residual);
-          final page = pdfTolerance(q.x, q.y, residual) * math.sqrt2;
-          final bound = page / minStretch(residual) + 2.7e-4 * r;
+          final page = pdfTolerance(q.x, q.y, residual,
+                  pageHeight: height, operandsKnown: false) *
+              math.sqrt2;
+          final bound = page / _minStretch(residual) + 2.7e-4 * r;
           expect(
             ((q - Vector2(cx, cy)).length - r).abs(),
             lessThanOrEqualTo(bound),
@@ -208,8 +189,11 @@ void main() {
         expect(v.length, e.points.length ~/ 2, reason: e.what);
         for (var k = 0; k < v.length; k++) {
           final x = e.points[2 * k], y = e.points[2 * k + 1];
-          expectNear(v[k], toPage(x, y, e.residual),
-              pdfTolerance(x, y, e.residual), '${e.what} vertex $k');
+          expectNear(
+              v[k],
+              toPage(x, y, e.residual),
+              pdfTolerance(x, y, e.residual, pageHeight: height),
+              '${e.what} vertex $k');
         }
         expectStyle(path, e);
         checked++;
@@ -229,7 +213,10 @@ void main() {
         final a = q * math.pi / 2;
         final x = e.cx + e.r * math.cos(a), y = e.cy + e.r * math.sin(a);
         final at = q == 0 ? sub.start : sub.segments[q - 1].to;
-        expectNear(at, toPage(x, y, e.residual), pdfTolerance(x, y, e.residual),
+        expectNear(
+            at,
+            toPage(x, y, e.residual),
+            pdfTolerance(x, y, e.residual, pageHeight: height),
             'circle at ${q * 90} degrees');
       }
       expectOnCircle(sub, e.cx, e.cy, e.r, e.residual, 'circle');
@@ -253,13 +240,13 @@ void main() {
       ]) {
         final x = e.cx + e.r * math.cos(angle);
         final y = e.cy + e.r * math.sin(angle);
-        expectNear(at, toPage(x, y, e.residual), pdfTolerance(x, y, e.residual),
-            'arc $what');
+        expectNear(at, toPage(x, y, e.residual),
+            pdfTolerance(x, y, e.residual, pageHeight: height), 'arc $what');
       }
       expectOnCircle(sub, e.cx, e.cy, e.r, e.residual, 'arc');
       // The mid-point is on the side the sweep's sign says: at start +
       // sweep / 2 in the local frame, not at start - sweep / 2.
-      final mid = toLocal(bezier(sub.start, sub.segments[0], 1), e.residual);
+      final mid = toLocal(_bezier(sub.start, sub.segments[0], 1), e.residual);
       final angle = math.atan2(mid.y - e.cy, mid.x - e.cx);
       final want = e.start + e.sweep / 2;
       final diff = math.atan2(math.sin(angle - want), math.cos(angle - want));
@@ -359,6 +346,88 @@ void main() {
       // And under the residual: the same page width, through cm.
       expect(c.paths[0].deviceLineWidth,
           closeTo(0.5 * u, pdfWidthTolerance(0.5 * u, residual)));
+    });
+
+    test(
+        'a polyline and the -110 degree arc under a rotated and mirrored '
+        'residual land where the residual and the page set-up put them',
+        () async {
+      // Not diagonal and not symmetric: a sink that writes the residual
+      // transposed, or a reader that applies a matrix transposed, moves
+      // these points. T-3's fixture residuals are all translations or
+      // diagonal, which hides both.
+      // The fixture's instance placement (rotated 30 degrees, scaled
+      // (1.5, -0.75)) under a uniform scale: one mirror, so det < 0.
+      final residual = Transform2.translation(300, 200)
+          .multiply(Transform2.scale(0.8, 0.8))
+          .multiply(kExportInstanceTransform)
+          .multiply(Transform2.translation(-7000, -5600));
+      expect(residual.determinant, lessThan(0), reason: 'mirrored');
+      expect(residual.b.abs(), greaterThan(0.1), reason: 'rotated');
+      expect((residual.b - residual.c).abs(), greaterThan(0.1),
+          reason: 'not symmetric');
+      final pts = Float64List.fromList([7010, 5620, 7110, 5620, 7110, 5690]);
+      const cx = 7200.0, cy = 5700.0, r = 80.0, start = 0.4;
+      const sweep = -110 * math.pi / 180;
+      final c = await draw((sink) {
+        sink.beginResidual(residual);
+        sink.polyline(pts, 3, red, closed: false);
+        sink.arc(cx, cy, r, start, sweep, red);
+        sink.endResidual();
+      });
+      PdfXY toPage(double x, double y) {
+        final p = residual.transformPoint(Vector2(x, y));
+        return (x: p.x, y: page.h - p.y);
+      }
+
+      Vector2 toLocal(PdfXY p) =>
+          residual.invert().transformPoint(Vector2(p.x, page.h - p.y));
+
+      void near(PdfXY actual, double x, double y, String what) {
+        final want = toPage(x, y);
+        final tol = pdfTolerance(x, y, residual, pageHeight: page.h);
+        expect((actual.x - want.x).abs(), lessThanOrEqualTo(tol),
+            reason: '$what: x ${actual.x} vs ${want.x} (bound $tol)');
+        expect((actual.y - want.y).abs(), lessThanOrEqualTo(tol),
+            reason: '$what: y ${actual.y} vs ${want.y} (bound $tol)');
+      }
+
+      final v = c.paths[0].subpaths.single.vertices;
+      expect(v, hasLength(3));
+      for (var k = 0; k < 3; k++) {
+        near(v[k], pts[2 * k], pts[2 * k + 1], 'polyline vertex $k');
+      }
+
+      final arc = c.paths[1].subpaths.single;
+      expect(arc.segments, hasLength(2));
+      near(arc.start, cx + r * math.cos(start), cy + r * math.sin(start),
+          'arc start');
+      near(arc.segments.last.to, cx + r * math.cos(start + sweep),
+          cy + r * math.sin(start + sweep), 'arc end');
+      // Samples on the circle, in the local frame.
+      var p0 = arc.start;
+      for (final s in arc.segments) {
+        for (final t in const [0.25, 0.5, 0.75]) {
+          final q = toLocal(_bezier(p0, s, t));
+          final bound = pdfTolerance(q.x, q.y, residual,
+                      pageHeight: page.h, operandsKnown: false) *
+                  math.sqrt2 /
+                  _minStretch(residual) +
+              2.7e-4 * r;
+          expect(((q - Vector2(cx, cy)).length - r).abs(),
+              lessThanOrEqualTo(bound),
+              reason: 'the cubic at t $t is off its circle');
+        }
+        p0 = s.to;
+      }
+      // The mid-point is on the side the sweep's sign says.
+      final mid = toLocal(arc.segments.first.to);
+      final angle = math.atan2(mid.y - cy, mid.x - cx);
+      final want = start + sweep / 2;
+      final diff = math.atan2(math.sin(angle - want), math.cos(angle - want));
+      expect(diff.abs(), lessThan(1e-3),
+          reason: 'the mid-point is at ${angle * 180 / math.pi} degrees, '
+              'the sweep says ${want * 180 / math.pi}');
     });
 
     test('a residual with nothing drawn under it writes no q and no Q',
@@ -607,4 +676,25 @@ void _expectSquare(PdfContentPath path, PdfXY centre, double side) {
   final cy = v.map((p) => p.y).reduce((a, b) => a + b) / 4;
   expect(cx, closeTo(centre.x, tol), reason: 'centre x');
   expect(cy, closeTo(centre.y, tol), reason: 'centre y');
+}
+
+/// The cubic [s] (from [p0]) at [t].
+PdfXY _bezier(PdfXY p0, PdfContentSegment s, double t) {
+  final m = 1 - t;
+  final c1 = s.controls[0], c2 = s.controls[1], p3 = s.to;
+  double at(double a, double b, double c, double d) =>
+      m * m * m * a + 3 * m * m * t * b + 3 * m * t * t * c + t * t * t * d;
+  return (
+    x: at(p0.x, c1.x, c2.x, p3.x),
+    y: at(p0.y, c1.y, c2.y, p3.y),
+  );
+}
+
+/// The smallest singular value of [r]'s linear part: how much a page error
+/// can grow on the way back to local space.
+double _minStretch(Transform2? r) {
+  if (r == null) return 1;
+  final t = r.a * r.a + r.b * r.b + r.c * r.c + r.d * r.d;
+  final det = r.determinant;
+  return math.sqrt((t - math.sqrt(math.max(0, t * t - 4 * det * det))) / 2);
 }

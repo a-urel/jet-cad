@@ -108,14 +108,41 @@ void main() {
   });
 
   test(
-      'the device width is w times the CTM scale, mirrored or not (a reader '
-      'that reports w alone, or a signed scale)', () {
+      'a non-symmetric cm maps (x, y) to (a·x + c·y + e, b·x + d·y + f) (a '
+      'reader that applies the matrix transposed puts (10, 20) at (55, 116))',
+      () {
+    final c = read('1 2 3 4 5 6 cm 10 20 m 11 20 l S');
+    expect(xy(c.paths.single.subpaths.single.vertices), [
+      [75, 106],
+      [76, 108],
+    ]);
+  });
+
+  test(
+      'the device width is w times the CTM scale, rotated or mirrored (a '
+      'reader that reports w alone, or takes the root of a negative '
+      'determinant)', () {
     final c = read(
       'q 2 0 0 2 0 0 cm 0.5 w 0 0 m 1 0 l S Q '
-      'q 0 -3 3 0 0 0 cm 0.5 w 0 0 m 1 0 l S Q',
+      // Rotated by 90 degrees and scaled by 3: det +9.
+      'q 0 -3 3 0 0 0 cm 0.5 w 0 0 m 1 0 l S Q '
+      // Mirrored (x and y swapped) and scaled by 3: det -9.
+      'q 0 3 3 0 0 0 cm 0.5 w 0 0 m 1 0 l S Q',
     );
     expect(c.paths[0].deviceLineWidth, 1.0);
     expect(c.paths[1].deviceLineWidth, 1.5);
+    expect(c.paths[2].state.ctm.determinant, -9);
+    expect(c.paths[2].deviceLineWidth, 1.5);
+  });
+
+  test(
+      'an odd-length hex string ends in an implied 0 digit (a reader that '
+      'pads at the front reads <901FA> as 09 01 FA)', () {
+    // `ri` takes one operand and moves no geometry: the reader records it.
+    final c = read('<901FA> ri');
+    final s = c.operators.single.operands.single as PdfRawString;
+    expect(s.bytes, [0x90, 0x1F, 0xA0]);
+    expect(s.hex, isTrue);
   });
 
   group('text', () {
