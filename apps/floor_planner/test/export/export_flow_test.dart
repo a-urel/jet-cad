@@ -479,9 +479,16 @@ void main() {
           tester, LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.keyE);
       await tester.pump();
       expect(find.byKey(const Key('export-dialog')), findsNothing);
-      await hostOf(tester).exportFlow();
+      // The flow itself re-reads the page: started directly, it ends
+      // without a dialog. Not awaited first, so a flow that wrongly opened
+      // the dialog fails here rather than waiting on it.
+      var ended = false;
+      final flow = hostOf(tester).exportFlow().then((_) => ended = true);
+      await tester.pump();
       await tester.pump();
       expect(find.byKey(const Key('export-dialog')), findsNothing);
+      expect(ended, isTrue, reason: 'the flow ended by itself');
+      await flow;
       expect(files.saveLocationCalls, isEmpty);
     });
 

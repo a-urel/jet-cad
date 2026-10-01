@@ -1,7 +1,7 @@
 // The Export dialog (spec 13 D8): the format, PDF or PNG, and for a PNG its
-// resolution, 96, 150 or 300 dpi; Export or Cancel. Escape cancels.
+// resolution, 96, 150 or 300 dpi; Export or Cancel. Escape cancels: the
+// dialog's route is dismissible, and a dismissible route pops on Escape.
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show ExportDpi;
 
 /// What an export writes (spec 13 D8).
@@ -58,64 +58,59 @@ class _ExportDialogState extends State<_ExportDialog> {
   void _cancel() => Navigator.of(context).pop();
 
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-        bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.escape): _cancel,
-        },
-        child: AlertDialog(
-          key: const Key('export-dialog'),
-          title: const Text('Export'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedButton<ExportFormat>(
-                key: const Key('export-format'),
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(
-                      value: ExportFormat.pdf,
-                      label: Text('PDF', key: Key('export-format-pdf'))),
-                  ButtonSegment(
-                      value: ExportFormat.png,
-                      label: Text('PNG', key: Key('export-format-png'))),
-                ],
-                selected: {_choice.format},
-                onSelectionChanged: (s) => setState(
-                    () => _choice = _choice.copyWith(format: s.single)),
-              ),
-              if (_choice.format == ExportFormat.png) ...[
-                const SizedBox(height: 12),
-                SegmentedButton<ExportDpi>(
-                  key: const Key('export-dpi'),
-                  showSelectedIcon: false,
-                  segments: [
-                    for (final d in ExportDpi.values)
-                      ButtonSegment(
-                          value: d,
-                          label: Text('${d.value} dpi',
-                              key: Key('export-dpi-${d.value}'))),
-                  ],
-                  selected: {_choice.dpi},
-                  onSelectionChanged: (s) =>
-                      setState(() => _choice = _choice.copyWith(dpi: s.single)),
-                ),
+  Widget build(BuildContext context) => AlertDialog(
+        key: const Key('export-dialog'),
+        title: const Text('Export'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SegmentedButton<ExportFormat>(
+              key: const Key('export-format'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(
+                    value: ExportFormat.pdf,
+                    label: Text('PDF', key: Key('export-format-pdf'))),
+                ButtonSegment(
+                    value: ExportFormat.png,
+                    label: Text('PNG', key: Key('export-format-png'))),
               ],
+              selected: {_choice.format},
+              onSelectionChanged: (s) =>
+                  setState(() => _choice = _choice.copyWith(format: s.single)),
+            ),
+            if (_choice.format == ExportFormat.png) ...[
+              const SizedBox(height: 12),
+              SegmentedButton<ExportDpi>(
+                key: const Key('export-dpi'),
+                showSelectedIcon: false,
+                segments: [
+                  for (final d in ExportDpi.values)
+                    ButtonSegment(
+                        value: d,
+                        label: Text('${d.value} dpi',
+                            key: Key('export-dpi-${d.value}'))),
+                ],
+                selected: {_choice.dpi},
+                onSelectionChanged: (s) =>
+                    setState(() => _choice = _choice.copyWith(dpi: s.single)),
+              ),
             ],
-          ),
-          actions: [
-            TextButton(
-              key: const Key('export-cancel'),
-              onPressed: _cancel,
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const Key('export-ok'),
-              autofocus: true,
-              onPressed: () => Navigator.of(context).pop(_choice),
-              child: const Text('Export'),
-            ),
           ],
         ),
+        actions: [
+          TextButton(
+            key: const Key('export-cancel'),
+            onPressed: _cancel,
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('export-ok'),
+            autofocus: true,
+            onPressed: () => Navigator.of(context).pop(_choice),
+            child: const Text('Export'),
+          ),
+        ],
       );
 }
