@@ -1,9 +1,10 @@
 # The symbol palette (09b) — design
 
-**Date:** 2026-10-01. **Status:** design, **revision 2**. Revision 1 (`b6c2591`) was reviewed
+**Date:** 2026-10-01. **Status:** design, **revision 3**. Revision 1 (`b6c2591`) was reviewed
 independently: "Ready with amendments", 0 blocking, 5 major, 6 minor, 1 nit
-(W-1 to W-12), each applied below; see [Revision 2](#revision-2). Awaiting
-the human's approval.
+(W-1 to W-12), each applied below; see [Revision 2](#revision-2). Its
+spot check: "Ready with amendments" (S-1 to S-5, small), applied in
+[Revision 3](#revision-3). Awaiting the human's approval.
 **Sub-project:** `roadmap/09-symbol-library.md`, slice **09b** (09a, the
 core, is merged at `b4e7cdd`). **Size:** M: one render-layer widget pair,
 one app tool, one app panel, one pure function.
@@ -122,13 +123,15 @@ identity, select-then-click, free-standing instances, the gallery widget in
 - **F-14.** `paintWorldOverlay` paints in `world − origin` (`tool.dart:101-104`,
   Ruling 03-3); a world matrix flips y, and world angles go into
   `Path.addArc` unchanged (`outline_cache.dart:283-289`,
-  `select_tool.dart:822`); a preview composes `translate(−origin) ∘ P` in
-  doubles into a reused `Float64List(16)` (`selection_overlay.dart:211-223`).
+  `select_tool.dart:822`); a preview composes its matrix in doubles into a reused
+  `Float64List(16)` (`selection_overlay.dart:211-223`, which composes `M ∘ T ∘
+  translate(+origin)` for an already rebased path: the same technique, a
+  different composition).
   The snap marker is screen-space (`paintOverlay`,
   `placement_tool.dart:280-290`).
 - **F-15.** Under `testWidgets`, `Picture.toImage` and `toByteData` complete
   through engine callbacks that a pumped test never delivers: a pixel test
-  needs `tester.runAsync` (`stroke_width_golden_test.dart:229-235`).
+  needs `tester.runAsync` (`stroke_width_golden_test.dart:234-241`).
 - **F-16.** The dispatcher refuses a denied command by itself
   (`undo.dart:191`): a test of the tool's own permission check must look at
   the handle seed and the absence of a throw, not at "nothing placed".
@@ -281,17 +284,23 @@ the tool is inert (every pointer event ignored, the cursor deferred).
   scale)` does `canvas.save()`, `canvas.transform(_m)`, where `_m` is the
   tool's reused `Float64List(16)` holding `translate(−origin) ∘
   placementTransform(at, basePoint, turns, mirrored)` **composed in doubles**
-  (F-14, `selection_overlay.dart:211-223`), draws the cached path at
-  `kPreviewColor` with stroke `kPreviewStrokePixels / scale` (the placement is
-  rigid, so the stroke stays that wide), then a cross at `at`, and
-  `restore()`. **No `Path` or matrix is allocated per paint.** The snap marker
+  (F-14's technique), draws the cached path at `kPreviewColor` with stroke
+  `kPreviewStrokePixels / scale` (the placement is rigid, so the stroke stays
+  that wide), then **a cross at `basePoint` in local coordinates** (which
+  `_m` maps to `at − origin`), half-size `k / scale`, and `restore()`. **No
+  `Path`, `Transform2` or matrix is allocated per paint:** `P =
+  placementTransform(...)` is computed only when `at`, the turns or the mirror
+  change, and stored with its linear part already written into `_m` (`_m`
+  starts as the identity: `[0]`, `[5]`, `[10]`, `[15]` = 1); a paint writes
+  only `_m[12] = P.e − origin.x` and `_m[13] = P.f − origin.y`. The snap marker
   is screen-space and is drawn in `paintOverlay` (`drawSnapMarker`, as
   `placement_tool.dart:280-290`). The ghost hides on pointer exit and on
   `cancel` (as `PlacementTool`'s hover state does).
 - **The tool listens to `armed`**: tapping another cell while the tool is
   already active hits `ToolController.activate`'s early return
   (`tool.dart:120`), so the tool itself resets its press, rebuilds nothing
-  but its cached path lookup, and notifies so the overlay repaints. It is an overlay: nothing is added to the document and
+  but its cached path lookup, and notifies so the overlay repaints. It
+  removes that listener in its `dispose`. It is an overlay: nothing is added to the document and
   `DraftPainter`'s frame path is untouched (the allocation invariant tests
   stay unedited and green).
 - **Commit:** the tool checks `needs = {structure, geometry, components}`
@@ -318,7 +327,8 @@ the tool is inert (every pointer event ignored, the cursor deferred).
 - **While loading** the tab shows a progress indicator and "Loading
   symbols…"; **on failure** the error's message and a Retry button (key
   `symbol-retry`) calling `retry()`; **ready** shows the field and gallery.
-- The gallery's `selectedId` is the armed entry's key while the placement tool
+- The gallery's `selectedId` is the armed entry's id (`"$key@$version"`, D4)
+  while the placement tool
   is the active tool and null otherwise (the panel listens to the
   `ToolController`); `enabled` is `permissions.allows` for all three
   capabilities of D6.
@@ -460,7 +470,7 @@ origin, a camera at a non-unit scale. A test is owed a named mutant.
 | M-09b1 | the tool places at the press point | release at a different point |
 | M-09b2 | the tool allocates before the permission check | `handleSeed` unchanged on refusal |
 | M-09b3 | `R` rotates the wrong way, `Shift+R` ignored, `M` does not mirror (each) | transform reads |
-| M-09b4 | the ghost path omits the placement transform (or the mirror) | ghost bounds |
+| M-09b4 | the ghost's matrix omits the placement transform (or the mirror) | the matrix maps the base point to `at − origin` and local +x to the rotated or mirrored direction |
 | M-09b5 | `Esc` mid-press still places | nothing placed |
 | M-09b6 | the cell tap does not go through `_activate` (selection kept) | selection cleared |
 | M-09b7 | the search field has no `ShellShortcutGuard` | typing `r` does not choose Rectangle |
@@ -537,3 +547,13 @@ W-6 M-09w and M-09b6 re-signalled (F-16, M-09b22); W-7 float32 tolerance and
 cell ids `key@version` (D4); W-10 the state type and the loader split, the
 `read` seam, ownership (D1, D2); W-11 four mutants added (M-09b16 to
 M-09b19); W-12 citations and wording (F-6, F-8, F-17, D6, D8, D10).
+
+## Revision 3
+
+Applies the spot check of revision 2 ("Ready with amendments", S-1 to S-5):
+S-1 the highlight uses the `key@version` id (D7); S-2 the ghost's cross is
+drawn at the local base point (D6); S-3 the placement matrix is computed on
+change and a paint writes only the translation, `_m` starts as the identity
+(D6); S-4 F-14's precedent reworded as the same technique; S-5 M-09b4
+re-targeted to the matrix test. Also the `runAsync` citation corrected and
+the tool's `armed` listener removed in `dispose`.
