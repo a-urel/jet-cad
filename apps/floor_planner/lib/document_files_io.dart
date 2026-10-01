@@ -32,22 +32,25 @@ class IoDocumentFiles implements DocumentFiles {
     return (name: _baseName(file.path), bytes: bytes, location: file.path);
   }
 
-  /// The save panel enforces and appends the extension itself, and the
-  /// sandbox grants exactly the URL it returns, so the returned path is
-  /// the location **unchanged** (spec 12a D9, S-16): appending to it would
-  /// write outside the grant.
+  /// The panel offers [kind]'s type group ([saveTypeGroupsFor]). It
+  /// enforces and appends the extension itself, and the sandbox grants
+  /// exactly the URL it returns, so the returned path is the location
+  /// **unchanged** for every kind (spec 12a D9, S-16): appending to it
+  /// would write outside the grant.
   @override
-  Future<({String name, Object location})?> saveLocation(
-      String suggestedName) async {
+  Future<({String name, Object location})?> saveLocation(String suggestedName,
+      {FileKind kind = FileKind.jetplan}) async {
     final location = await getSaveLocation(
-        acceptedTypeGroups: const <XTypeGroup>[kJetplanTypeGroup],
+        acceptedTypeGroups: saveTypeGroupsFor(kind),
         suggestedName: suggestedName);
     if (location == null) return null;
     return (name: _baseName(location.path), location: location.path);
   }
 
+  /// The bytes are written as they are, whatever their [kind].
   @override
-  Future<void> write(Object location, String name, Uint8List bytes) async {
+  Future<void> write(Object location, String name, Uint8List bytes,
+      {FileKind kind = FileKind.jetplan}) async {
     if (location is! String) {
       throw ArgumentError.value(location, 'location', 'not a file path');
     }

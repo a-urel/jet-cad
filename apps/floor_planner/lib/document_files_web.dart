@@ -48,22 +48,24 @@ class WebDocumentFiles implements DocumentFiles {
   }
 
   /// `file_selector_web`'s `getSaveLocation` returns a dummy empty path,
-  /// so the name comes from [askName]: blank is a cancel, and `.jetplan`
-  /// is appended when missing ([jetplanFileName]).
+  /// so the name comes from [askName]: blank is a cancel, and [kind]'s
+  /// extension is appended when missing ([fileNameFor]).
   @override
-  Future<({String name, Object location})?> saveLocation(
-      String suggestedName) async {
-    final name = jetplanFileName(await askName(suggestedName));
+  Future<({String name, Object location})?> saveLocation(String suggestedName,
+      {FileKind kind = FileKind.jetplan}) async {
+    final name = fileNameFor(await askName(suggestedName), kind);
     if (name == null) return null;
     return (name: name, location: name);
   }
 
   /// Downloads [bytes] as [name] (spec 12a S-15): a `Blob`, an object URL,
-  /// an anchor with `download` set, a click, and the URL revoked.
+  /// an anchor with `download` set, a click, and the URL revoked. The blob
+  /// has [kind]'s MIME type.
   @override
-  Future<void> write(Object location, String name, Uint8List bytes) async {
+  Future<void> write(Object location, String name, Uint8List bytes,
+      {FileKind kind = FileKind.jetplan}) async {
     final blob = web.Blob(<JSUint8Array>[bytes.toJS].toJS,
-        web.BlobPropertyBag(type: 'application/json'));
+        web.BlobPropertyBag(type: kind.mimeType));
     final url = web.URL.createObjectURL(blob);
     try {
       (web.HTMLAnchorElement()
