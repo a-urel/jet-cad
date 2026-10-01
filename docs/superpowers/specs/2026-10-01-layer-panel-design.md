@@ -1,9 +1,10 @@
 # Layer panel (12b) — design
 
-**Date:** 2026-10-01. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-10-01. **Status:** design, **revision 3**. Revision 1
 (`630a311`) was reviewed independently: "Not ready", 2 blocking, 9 major,
 7 minor, 1 nit (R-1 to R-19), each applied below; see
-[Revision 2](#revision-2).
+[Revision 2](#revision-2). Its spot check (`c945986`): "Ready with
+amendments" (S-1 to S-16), applied in [Revision 3](#revision-3).
 **Sub-project:** `roadmap/12-app-shell.md`, the second slice (12b) after
 12a's document lifecycle. **Size:** M–L, one plan (the human's decision 9),
 about ten tasks.
@@ -209,9 +210,11 @@ exported from the package:
 - `CommandTarget` gains `DocumentHeader get header`; `DraftDocument`
   already has it. The two test fakes (`commands_test.dart:7`,
   `command_test.dart:7`) gain it too.
-- `touched` names the layer handle (table commands), nothing for
-  `SetCurrentLayerCommand` beyond the old and new layer handles, or the
-  edited entity or node.
+- `touched` is never empty (an empty set makes `_reconcile` rebuild and
+  `TileCache` drop everything, `spatial_index.dart:2683-2690`,
+  `tile_cache.dart:1883-1888`): the layer handle for a table command,
+  `{old, new}` for `SetCurrentLayerCommand`, the edited entity or node for
+  a move.
 - **Two capabilities, as `ParametricEdit` already splits them (R-8).**
   `capabilities` is what the dispatcher checks against permissions;
   `capability` is what a listener reads as "what moved". A layer move
@@ -253,11 +256,15 @@ exported from the package:
 
 - A new engine component `ObjectLayer(Handle layer)`, `typeId`
   `jet_cad.object_layer`, registered by `ComponentRegistry.registerBuiltIns`
-  (so every document, the app's and a test's, decodes it).
+  (so every document, the app's and a test's, decodes it), **not**
+  `internal` (S-16): it is document content a future DXF export writes.
+- `objectLayer`, `drawingLayer` and `layerNameError` take a `CommandTarget`
+  (which now carries `header`), so the commands and `_plan` can call them;
+  a `DraftDocument` is one (S-12).
 - **The stamp is the parametric system's.** D5, D8, D12 and
   `dimension_attach` read the component too (R-19); none writes it but a
   `SetComponentCommand`.
-- **The object's layer**, `objectLayer(document, group)`: the component's
+- **The object's layer**, `objectLayer(target, group)`: the component's
   layer when that layer exists, else layer 0. Absent means layer 0, which
   is every object in every file written before this slice. A component
   naming a missing layer is kept as stored (a stored value) and is
@@ -297,19 +304,20 @@ exported from the package:
   asks for: v6→v7 adds `header.currentLayer` (absent ⇒ layer 0) and the
   `jet_cad.object_layer` component; the bump exists so a v6 build refuses a
   v7 file instead of dropping the current layer and every object's layer.
-- **One engine function, `drawingLayer(document)` (R-10):** the stored
+- **One engine function, `drawingLayer(target)` (R-10):** the stored
   current layer when it names an existing, visible layer, else layer 0.
   It is the **effective** current layer, and every decision that says
   "current" uses it: decision 7's checks (D1), D5's emptiness, the tools
   (D7), the panel's mark and its disabled eye (D9). So with a stored hidden
   current layer H, H behaves as an ordinary layer (it can be shown, renamed,
-  recoloured, deleted when empty) and layer 0 is current until the user
-  picks one.
+  recoloured, deleted when empty) and layer 0 is the effective current
+  layer. **Showing H makes it current again**: the stored value was never
+  changed, and `drawingLayer` follows it (S-5).
 - The stored value round-trips exactly (a stored value), dangling or not.
 - **Validation (R-16):** `lib/src/document/validate.dart` gains two codes in
   `ValidationCodes`, `header.current_layer_unusable` (the stored current
   layer names no layer or a hidden one) and `component.object_layer_missing`
-  (an `ObjectLayer` names no layer), both **warnings** (`validate.dart` gains
+  (an `ObjectLayer`, on any handle, live or dead, names no layer), both **warnings** (`validate.dart` gains
   a `warning()` helper next to `error()`). Nothing in the app displays
   diagnostics yet (the diagnostics surface is a later slice); the tests read
   them.
@@ -323,7 +331,7 @@ exported from the package:
   characters `<`, `>`, `/`, `\`, `"`, `:`, `;`, `?`, `*`, `|`, `=` and the
   backtick, and is not a duplicate of another layer's under `toLowerCase()`
   (`TableSection`'s own folding, `tables.dart:113-122`).
-- One function, `layerNameError(document, name, {Handle? self})`, returns
+- One function, `layerNameError(target, name, {Handle? self})`, returns
   the reason or null; the command and the UI both call it.
 - A new layer from the panel's + is named `Layer N`, the smallest `N ≥ 1`
   not taken, colour ACI 7, and layer 0's linetype, lineweight and
@@ -344,8 +352,12 @@ rebuild of the whole list.
 - **A layer edit does not rebuild the index (R-1).** `_reconcile` skips a
   touched handle that names a record in `tables.layers` (a hash lookup per
   touched handle) before it reaches `_reconcileEntity`'s rebuild fallback.
-  A table command therefore costs the index nothing but D6's invalidation.
-  Gated by a `rebuildCount` assertion across a hide (M-LP-2).
+  A hide, show, lock, unlock, rename or recolour therefore costs the index
+  nothing but D6's invalidation. **A handle no longer in the table** (a
+  `RemoveLayerCommand`, the undo of an `AddLayerCommand`, a current layer
+  naming a dangling handle) still falls through to one rebuild; that is
+  rare and harmless, and is left as it is (S-4). Gated by a `rebuildCount`
+  assertion across hide, show, lock, rename and recolour (M-LP-2).
 - **`SpatialIndex` drops its filter cache when the tables change.** It keeps
   the `mutationRevision` it last saw; `_beginQuery()`, which all six query
   entry points call (`spatial_index.dart:301, 329, 380, 435, 756, 1479`),
@@ -359,13 +371,24 @@ rebuild of the whole list.
   recursive (R-11).** A leaf on layer 0 inside an instance is tested against
   the instance's effective layer, which is itself its own layer or, when
   that is layer 0, its parent instance's — the resolver's rule
-  (`style_resolver.dart:104-105, 177-178`). Applied everywhere a contained
-  leaf is filtered:
-  - picking, band selection and snapping inside instances
+  (`style_resolver.dart:104-105, 177-178`).
+  Applied everywhere a contained
+  leaf or nested instance is filtered:
+  - picking, band selection and snapping of leaves inside instances
     (`spatial_index.dart:571, 865, 881`);
+  - nested instances inside a definition, tested by `acceptsNode`
+    (`spatial_index.dart:587, 909`) (S-7);
   - `OutlineCache`'s instance walk (`outline_cache.dart:330-377`);
-  - an ATTRIB owned by an instance (a root-container leaf on layer 0 takes
-    its owning instance's effective layer).
+  - **an ATTRIB (S-2).** Its owner is the `InstanceNode` (`node.dart:148-151`)
+    and it is a root-index leaf, drawn by the painter's root
+    `forEachInRect` pass (`draft_painter.dart:385-395`). So its rule lives
+    in `FilterEvaluator.acceptsEntity`: when `ownerAt(slot)` is an
+    `InstanceNode` and the leaf is on layer 0, it is tested against the
+    owner's effective layer, memoised per owner as `_containerVisible` is
+    (no allocation in steady state). This covers rendering, picking,
+    snapping and the band at the root. An ATTRIB's **style** stays as today
+    (the root context, not substituted): a residual, recorded, out of
+    scope.
 
   The effective layer is carried down the walk in a **preallocated
   per-depth array**, as `_containerPath` is, because pick and snap run on
@@ -377,8 +400,9 @@ rebuild of the whole list.
   draws; the library refuses such a symbol, so only a hand-written file
   reaches it.
 - **The oracle learns layers.** `reference_walk` skips a root-level leaf
-  whose layer is hidden and an instance whose effective layer is hidden, so
-  the differential test covers hiding (F10).
+  whose layer is hidden (an ATTRIB by its owner's effective layer, as
+  above) and an instance whose effective layer is hidden, so the
+  differential test covers hiding (F10).
 - **Export and print** build their own `SpatialIndex` per export
   (`page_export.dart:222-240`) and therefore the same filter: a hidden layer
   does not plot. Asserted by a test, no code change expected.
@@ -387,6 +411,12 @@ rebuild of the whole list.
   visible. The file's residual (`dimension_attach.dart:68-80`), which a
   command can now reach (a wall on a hidden layer whose opening is on a
   visible one), is closed for objects; its doc comment is updated.
+- **The opening tool's host (S-11).** The tool picks its host wall by band
+  geometry over every wall, unfiltered (`opening_tool.dart:50-56`). A tool
+  acting on a wall under the pointer is selection-like, so the host must
+  have a visible and unlocked `objectLayer`; a door cannot be placed on a
+  wall the user cannot see or select. (Decision 8 is unaffected: a hidden
+  wall's existing openings still cut it.)
 
 ### D7 — Tools draw on the current layer
 
@@ -428,8 +458,10 @@ re-walks on the same change, so no outline or grip is left behind.
   a stateful widget that keeps **no copy of the layers**: it rebuilds from
   `document.tables.layers` and `drawingLayer(document)` on
   `document.commands.changes` (every edit is a command) and on
-  `tables.changes` (a load replaces the tables; the subscription is removed
-  on dispose). Permissions are read from `document.commands.permissions`,
+  `tables.changes` (for a direct table write, which no shipped code makes
+  but the engine allows; the subscription is removed on dispose). Open
+  replaces the `DraftDocument` and the shell (S-15); if the panel is ever
+  reused across documents, `didUpdateWidget` re-subscribes. Permissions are read from `document.commands.permissions`,
   as `SelectionPanel` does (R-17).
 - **Placement:** the right panel's column becomes `SelectionPanel`,
   `LayerPanel`, `Expanded(PagePanel)`; the right panel only places it.
@@ -440,8 +472,11 @@ re-walks on the same change, so no outline or grip is left behind.
 - **`LayerRow`** (`layer_row.dart`), one per layer:
   - a current-layer mark (a radio-style button; tapping makes the row
     current, disabled on a hidden layer);
-  - an eye (visible/hidden; disabled on the effective current layer, with a
-    tooltip saying why);
+  - an eye (visible/hidden; the **hide** direction is disabled on the
+    effective current layer, with a tooltip saying why; showing is always
+    enabled, so a file with a hidden layer 0 and no usable current layer is
+    not a dead end, S-6 — in that state the tools draw on the hidden
+    layer 0 until it is shown);
   - a lock;
   - a colour swatch opening a menu of the nine ACI colours (7 drawn in the
     paper's foreground, as the resolver draws it);
@@ -477,17 +512,22 @@ order.
 
 - `apps/floor_planner/lib/layers/layer_picker.dart`.
 - **Placement (R-5):** `SelectionPanel` renders the picker whenever the
-  selection is non-empty and no tool is active, **including** when no type
+  selection is non-empty and no tool-settings section shows (the panel's
+  own tool mode, `selection_panel.dart:190`, S-13), **including** when no type
   section shows (a line, a text, a symbol, a multi-selection); today it
   returns `SizedBox.shrink()` in those cases (`selection_panel.dart:304-310,
   776-786`).
 - It shows the selection's common layer, or "Mixed".
 - Choosing a layer dispatches **one** command for the whole selection, per
   key:
-  - a root entity: `SetEntityLayerCommand`; **a drafted region (R-6)** —
-    fill or boundary, whichever was picked — moves both records (the fill's
-    boundary through `document.fills`), so a region never splits across
+  - a root entity: `SetEntityLayerCommand`; **a drafted region (R-6, S-8)**
+    — fill or boundary, whichever was picked — moves every record of it:
+    from a fill, its boundary (`boundaryHandleOf(payload)`) and every fill
+    naming that boundary; from a boundary, every fill in
+    `document.fills.fillsOf(boundary)`. So a region never splits across
     layers; its layer is its boundary's;
+  - **an ATTRIB key** (a root key whose owner is an instance, S-14) is
+    mapped to its owning instance and moves it (duplicates collapse);
   - a root `InstanceNode`: `SetInstanceLayerCommand`;
   - a parametric object: `SetComponentCommand<ObjectLayer>`.
   A member already on the target layer is skipped; if all are, nothing is
@@ -565,9 +605,14 @@ Engine:
   on added ones); a neighbour edit on a moved wall; undo and redo of each;
   an object with no `ObjectLayer` keeps layer 0; an `ObjectLayer` naming a
   missing layer regenerates on layer 0 and is diagnosed; an edit that
-  leaves layers alone plans no layer command.
-- D2's detach: delete the last wall on L, then L is deletable; undo brings
-  both back.
+  leaves layers alone plans no layer command: the top undo entry's
+  `ParametricReplay.replay` holds no `SetEntityLayerCommand`, and a
+  components edit whose regeneration output is unchanged reports
+  `capability == components` (S-10).
+- D2's detach: delete the last wall on L; then
+  `components.get<ObjectLayer>(wall)` is null and `validate()` reports no
+  `component.object_layer_missing` after L is deleted; undo restores the
+  component (S-1).
 - D3: round trip with a non-zero current layer; a v6 file loads with
   layer 0 current; a file with `schemaVersion: kSchemaVersion + 1` is
   refused; a dangling and a hidden current layer round-trip, are diagnosed,
@@ -585,6 +630,13 @@ Engine:
   unpicks it.
 - `dimension_attach`: a wall on a hidden layer with its opening on a visible
   one attaches through neither query.
+- Showing a loaded hidden stored current layer makes it `drawingLayer`
+  again (S-5).
+- The opening tool finds no host on a wall whose layer is hidden, nor on
+  one whose layer is locked (S-11).
+- An instance's ATTRIB on layer 0 is not drawn, picked or snapped when the
+  instance's effective layer is hidden, and is with layer 0 hidden and the
+  instance on a visible L (S-2).
 
 Render:
 - The canvas repaints after a `SetLayerCommand` that hides a layer, and the
@@ -667,6 +719,13 @@ Named `M-LP-n` (R-19), so they do not collide with roadmap 12's M-12b.
   red.
 - **M-LP-22:** the oracle ignores layer visibility. The absolute assertion
   must go red.
+- **M-LP-23:** no ATTRIB substitution in `acceptsEntity`. The ATTRIB test
+  must go red.
+- **M-LP-24:** no substitution for nested instances in `acceptsNode`. The
+  nested-instance test must go red.
+- **M-LP-25:** the opening tool ignores its host's layer. Red.
+- **M-LP-26:** the eye disables showing on the effective current layer too.
+  The hidden-layer-0 file test must go red.
 
 ## Exit gate
 
@@ -695,7 +754,10 @@ dimension on it; the picker on a line, on a mixed selection and its
 - **Schema 7** makes files written by this build unreadable by older
   builds; that is the purpose of the bump. Pinned tests move with it
   (R-12): `json_codec_test.dart:513, 579` and
-  `instance_style_codec_test.dart:80` pin 6;
+  `instance_style_codec_test.dart:80` pin 6 (and
+  `json_codec_test.dart:580`); `json_codec_test.dart:519` decodes
+  `schemaVersion: 7` as the refused future version and moves to
+  `kSchemaVersion + 1` (S-9);
   `instance_style_codec_test.dart:191` uses 7 as the refused future version
   and moves to `kSchemaVersion + 1`; `generate_document_test.dart:59-62,
   243-246` fingerprints are re-baselined with a comment naming the header
@@ -737,3 +799,30 @@ Revision 1 (`630a311`), reviewed independently: "Not ready". Applied:
 - **R-19** — `M-LP-n`; `Handle` parameters; D2's wording; D4's UTF-16 and
   `toLowerCase()`.
 - F10's reference corrected.
+
+## Revision 3
+
+Revision 2 (`c945986`), spot-checked independently: "Ready with
+amendments". Applied:
+
+- **S-1 (major)** — the detach test reads the component and the warning;
+  D3's warning covers dead handles.
+- **S-2 (major)** — the ATTRIB rule in `acceptsEntity`, memoised per owner;
+  the oracle mirrors it; ATTRIB style recorded as a residual; M-LP-23.
+- **S-3** — `touched` never empty; `{old, new}` for the current layer.
+- **S-4** — a removed or dangling handle still rebuilds once; M-LP-2's
+  scope.
+- **S-5** — showing a stored hidden current layer makes it current again;
+  a test.
+- **S-6** — only the hide direction of the eye is disabled; M-LP-26.
+- **S-7** — nested instances through `acceptsNode`; M-LP-24.
+- **S-8** — both region directions; every fill of the boundary.
+- **S-9** — `json_codec_test.dart:519, 580` listed.
+- **S-10** — M-LP-6's observation named.
+- **S-11** — the opening tool's host must be visible and unlocked (a ruling
+  made in writing, for the human's approval with the spec); M-LP-25.
+- **S-12** — the helpers take a `CommandTarget`.
+- **S-13** — "no tool-settings section shows".
+- **S-14** — an ATTRIB key moves its instance.
+- **S-15** — `tables.changes`'s reason; `didUpdateWidget`.
+- **S-16** — `ObjectLayer` is not `internal`.
