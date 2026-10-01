@@ -405,7 +405,13 @@ class DraftPainter {
       origin: origin,
       container: node.definition,
       // camera . ancestors . instance, still in Float64 and not yet rebased.
-      accumulated: node.transform,
+      // Groups are flattened into the root index, so a root-level instance
+      // may sit under one or more groups: its placement is then the root
+      // index's composed transform, not its own. The lookup is a linear
+      // scan, so only a grouped instance pays it.
+      accumulated: node.parent == document.rootHandle
+          ? node.transform
+          : index.rootIndex.transformOfInstance(instance),
       ctx: resolver.contextFor(instance, StyleContext.documentRoot),
       depth: 0,
     );
