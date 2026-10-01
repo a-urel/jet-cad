@@ -290,6 +290,24 @@ void main() {
       f.doc.header.currentLayer = f.d;
       expect(layerIsEmpty(f.doc, f.d), isFalse);
     });
+
+    test(
+        'layer 0 is never empty and never deleted, even when it is not the '
+        'current layer (Task 2 review R1, R2)', () {
+      final f = _Fixture();
+      // A is current, so the current-layer check cannot mask layer 0's own
+      // guard; nothing in the fixture is on layer 0.
+      f.doc.header.currentLayer = f.a;
+      expect(drawingLayer(f.doc), f.a);
+      expect(layerIsEmpty(f.doc, ReservedHandles.layerZero), isFalse);
+      final before = f.bytes;
+      expect(
+          () => f.doc.commands
+              .execute(RemoveLayerCommand(ReservedHandles.layerZero)),
+          throwsA(isA<ArgumentError>().having(
+              (e) => e.message, 'message', 'Layer 0 cannot be deleted.')));
+      expect(f.bytes, before);
+    });
   });
 
   group('SetLayerCommand', () {
@@ -367,6 +385,44 @@ void main() {
       final hiddenB = f.layer(f.b).copyWith(visible: false);
       f.doc.commands.execute(SetLayerCommand(hiddenB));
       expect(f.layer(f.b), hiddenB);
+    });
+
+    test(
+        'a hidden layer 0 as the effective current layer can be recoloured '
+        'and locked (decision 7 is a transition, R-12b-4)', () {
+      final f = _Fixture();
+      // The S-6 file state: the stored current layer C is hidden, so layer 0
+      // is the effective current layer, and layer 0 itself is hidden by a
+      // direct table write.
+      f.doc.header.currentLayer = f.c;
+      final layers = f.doc.tables.layers;
+      final hiddenZero =
+          layers[ReservedHandles.layerZero]!.copyWith(visible: false);
+      layers
+        ..remove(ReservedHandles.layerZero)
+        ..add(hiddenZero);
+      expect(drawingLayer(f.doc), ReservedHandles.layerZero);
+      final recoloured = hiddenZero.copyWith(color: const IndexedColor(3));
+      f.doc.commands.execute(SetLayerCommand(recoloured));
+      expect(f.layer(ReservedHandles.layerZero), recoloured);
+      final locked = recoloured.copyWith(locked: true);
+      f.doc.commands.execute(SetLayerCommand(locked));
+      expect(f.layer(ReservedHandles.layerZero), locked);
+    });
+
+    test(
+        'the restore form refuses a name another layer took since, and keeps '
+        'the record (Task 2 review R4)', () {
+      final f = _Fixture();
+      final walls = f.layer(f.a).copyWith(name: 'Walls');
+      f.doc.commands.execute(SetLayerCommand(walls));
+      // A direct table write, between execute and undo, takes the old name.
+      f.doc.tables.layers.add(f.record(f.doc.handleSeed.next(), 'A', 2));
+      final before = f.bytes;
+      expect(() => f.doc.commands.undo(), throwsStateError);
+      expect(f.bytes, before, reason: 'the failed undo mutates nothing');
+      expect(f.layer(f.a), walls, reason: 'the record is not lost');
+      expect(f.doc.commands.canUndo, isTrue);
     });
 
     test('the effective current layer can be locked', () {
