@@ -7,6 +7,8 @@
 // sits in its own rotated group at the corpus far origin (`corpusGroups`):
 // nothing at the origin, no identity transform where one matters, no ACI 7
 // colour, and the hidden layer is not layer 0.
+import 'dart:typed_data';
+
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/opening.dart';
@@ -156,6 +158,94 @@ LayerDoc layerFixture(
   }
   doc.commands.clearHistory();
   return l;
+}
+
+/// A drafted line on [layer] from plan point ([x1], [y1]) to ([x2],
+/// [y2]), as the Line tool adds it: one command. Returns its handle.
+Handle addLineOn(
+    LayerDoc l, Handle layer, double x1, double y1, double x2, double y2) {
+  final s = l.at(x1, y1), e = l.at(x2, y2);
+  final add = addDrafted(
+      l.doc,
+      EntityKind.line,
+      GeometryPayload(
+          coords: Float64List.fromList([s.x, s.y, e.x, e.y]),
+          scalars: Float64List(0)),
+      layer: layer);
+  l.doc.commands.execute(add);
+  return add.record.handle;
+}
+
+/// A drafted region on [layer] — a circle's boundary and its fill, as the
+/// Circle tool adds a filled one — centred at plan point ([x], [y]), and a
+/// second fill naming the same boundary, also on [layer] (a file can hold
+/// one; spec 12b S-8 moves every fill of a boundary).
+({Handle fill, Handle boundary, Handle secondFill}) addRegionOn(
+    LayerDoc l, Handle layer, double x, double y, double r) {
+  final doc = l.doc;
+  final c = l.at(x, y);
+  final region = addDraftedRegion(
+      doc,
+      EntityKind.circle,
+      GeometryPayload(
+          coords: Float64List.fromList([c.x, c.y]),
+          scalars: Float64List.fromList([r])),
+      layer: layer)!;
+  doc.commands.execute(region);
+  final boundary = region.boundary.handle;
+  final second = AddEntityCommand(
+      record: draftRecord(
+          doc.handleSeed.next(), doc.rootHandle, EntityKind.fill,
+          layer: layer, color: const IndexedColor(4)),
+      payload: GeometryPayload(
+          coords: Float64List(0),
+          scalars: Float64List.fromList([boundary.value.toDouble()])));
+  doc.commands.execute(second);
+  return (
+    fill: region.fill.handle,
+    boundary: boundary,
+    secondFill: second.record.handle
+  );
+}
+
+/// A symbol as the library makes one: a definition whose line is on
+/// layer 0, an instance of it at the root on [layer] at plan point ([x],
+/// [y]), turned a little, and an ATTRIB on layer 0 owned by the instance.
+({Handle definition, Handle instance, Handle attrib}) addSymbolOn(
+    LayerDoc l, Handle layer, double x, double y) {
+  final doc = l.doc;
+  Handle leaf(
+      Handle owner, EntityKind kind, List<double> coords, List<double> scalars,
+      {String text = ''}) {
+    final add = AddEntityCommand(
+        record: draftRecord(doc.handleSeed.next(), owner, kind,
+            layer: ReservedHandles.layerZero, text: text),
+        payload: GeometryPayload(
+            coords: Float64List.fromList(coords),
+            scalars: Float64List.fromList(scalars)));
+    doc.commands.execute(add);
+    return add.record.handle;
+  }
+
+  final definition = doc.handleSeed.next();
+  doc.tree.addDefinition(Definition(
+      handle: definition,
+      name: 'Table ${definition.toHex()}',
+      basePoint: Vector2(40, 30),
+      children: const []));
+  leaf(definition, EntityKind.line, [10, 10, 610, 340], const []);
+  final at = l.at(x, y);
+  final instance = doc.handleSeed.next();
+  doc.commands.execute(AddNodeCommand(InstanceNode(
+      handle: instance,
+      parent: doc.rootHandle,
+      transform:
+          Transform2.translation(at.x, at.y).multiply(Transform2.rotation(0.4)),
+      definition: definition,
+      layer: layer)));
+  final attrib =
+      leaf(instance, EntityKind.attrib, [90, 60], [4, 0], text: 'TAG');
+  return (definition: definition, instance: instance, attrib: attrib);
 }
 
 /// Entity [h]'s stored layer.

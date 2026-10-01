@@ -165,8 +165,11 @@ void main() {
     expect(find.byKey(const Key('wall-section')), findsOneWidget);
     await select(tester, view, [r.sep]);
     expect(section, findsNothing, reason: 'a separator');
-    expect(find.byKey(const Key('selection-panel')), findsNothing,
+    // Spec 12b D12: a separator has no type section; the panel shows only
+    // the layer picker.
+    expect(find.byKey(const Key('wall-section')), findsNothing,
         reason: 'a separator has no section');
+    expect(find.byKey(const Key('layer-picker')), findsOneWidget);
     await select(tester, view, []);
     expect(section, findsNothing);
   });
