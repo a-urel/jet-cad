@@ -16,6 +16,7 @@ import 'support/fixture.dart';
 
 const Handle hT = Handle(3000); // a Caption
 const Handle hF = Handle(4000); // a Fuse
+const Handle hP = Handle(5000); // a Pin
 
 const RegionRect regions = RegionRect(900.5, 600.25, 2);
 const Caption caption = Caption('Kitchen', 120.5, 80.25);
@@ -26,6 +27,13 @@ class _Scene {
     a = _addLayer('A', 1);
     b = _addLayer('B', 5, locked: true);
     c = _addLayer('C', 3, visible: false);
+  }
+
+  /// [doc] (a reload of [of]'s document) read with [of]'s layers.
+  _Scene.over(this.doc, _Scene of) {
+    a = of.a;
+    b = of.b;
+    c = of.c;
   }
 
   final DraftDocument doc;
@@ -262,6 +270,31 @@ void main() {
   });
 
   test(
+      'OL3b a region whose fill and boundary disagree (a file\'s state) is '
+      'restamped record by record: after a save and load, a regenerating '
+      'edit moves only the boundaries onto the object\'s layer', () {
+    final s = _Scene();
+    s.add(hB, parked, regions, layer: s.a);
+    s.expectRegionsOn(hB, s.a, 2);
+    // A file's state: every boundary on layer 0, every fill on A.
+    for (final fill in s.fills(hB)) {
+      final slot = s.doc.entities.slotOf(s.boundaryOf(fill))!;
+      s.doc.entities.replace(slot,
+          s.doc.entities.read(slot).copyWith(layer: ReservedHandles.layerZero));
+    }
+    final loaded = reload(enc(s.doc));
+    final l = _Scene.over(loaded, s);
+    for (final fill in l.fills(hB)) {
+      expect(l.layerOf(fill), s.a);
+      expect(l.layerOf(l.boundaryOf(fill)), ReservedHandles.layerZero);
+    }
+    loaded.commands.execute(SetComponentCommand<RegionRect>(
+        hB, const RegionRect(950.5, 600.25, 2)));
+    l.expectRegionsOn(hB, s.a, 2);
+    l.expectOn(hB, s.a);
+  });
+
+  test(
       'OL4 a TEXT child: the move restamps it, a string edit keeps it on the '
       'layer; undo and redo', () {
     final s = _Scene();
@@ -429,6 +462,32 @@ void main() {
     expect(state(s.doc, sortNodes: true), before);
     s.doc.commands.redo();
     expect(s.doc.components.get<ObjectLayer>(hA), isNull);
+  });
+
+  test(
+      'OL9b detach on cascade loss: a Pin on A whose host Post is deleted '
+      'loses its ObjectLayer with it; undo restores it, redo detaches it', () {
+    final s = _Scene();
+    s.add(hA, atA, const Post(2000, 1000), layer: s.b);
+    s.add(hP, onA(1400.5, 2200.25, 1.1), const Pin(hA, 450), layer: s.a);
+    s.expectOn(hP, s.a);
+    s.doc.commands.clearHistory();
+    final before = state(s.doc, sortNodes: true);
+
+    s.doc.commands.execute(deleteObject(s.doc, hA));
+    expect(s.doc.tree[hP], isNull, reason: 'the cascade removed the pin');
+    expect(s.doc.components.get<Pin>(hP), isNull);
+    expect(s.doc.components.get<ObjectLayer>(hP), isNull);
+    expect(s.doc.components.get<ObjectLayer>(hA), isNull);
+    final after = state(s.doc, sortNodes: true);
+
+    s.doc.commands.undo();
+    expect(s.doc.components.get<ObjectLayer>(hP), ObjectLayer(s.a));
+    s.expectOn(hP, s.a);
+    expect(state(s.doc, sortNodes: true), before);
+    s.doc.commands.redo();
+    expect(s.doc.components.get<ObjectLayer>(hP), isNull);
+    expect(state(s.doc, sortNodes: true), after);
   });
 
   test(

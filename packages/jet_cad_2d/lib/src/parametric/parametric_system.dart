@@ -201,7 +201,11 @@ enum ReferencePolicy {
 /// (spec 10 D13): a regeneration rewrites a matched child's payload in
 /// place, and a matched TEXT's string (spec 10 D12), and never the rest of
 /// its record (06 D11). So a client must keep every attribute but a TEXT's
-/// string fixed for an object's life.
+/// string fixed for an object's life. Each defaults to what `draftRecord`
+/// writes: ByLayer, flags 0. `EntityFlags.unpickable` exists (spec 11 D19)
+/// for a drawn line that must not be picked or snapped to. A fill whose
+/// boundary is invisible needs neither it nor anything else to stay out of
+/// picks. Like every attribute, it is written on add only.
 ///
 /// **One column is the planner's, not the client's: the layer** (spec 12b
 /// D2, amending 06 D11 and 10 D13 for that column only). Every child, added
@@ -210,11 +214,7 @@ enum ReferencePolicy {
 /// child whose stored layer differs (exact `==`) is moved onto it by a
 /// `SetEntityLayerCommand.restore` in the plan, a matched region's fill and
 /// boundary each on its own. A child already on it plans nothing, so an
-/// edit that leaves layers alone plans no layer command. Each defaults to what `draftRecord`
-/// writes: ByLayer, flags 0. `EntityFlags.unpickable` exists (spec 11 D19)
-/// for a drawn line that must not be picked or snapped to. A fill whose
-/// boundary is invisible needs neither it nor anything else to stay out of
-/// picks. Like every attribute, it is written on add only.
+/// edit that leaves layers alone plans no layer command.
 final class Generated {
   /// Throws `ArgumentError` for [EntityKind.fill] (see the class comment),
   /// and for [EntityKind.text] and [EntityKind.attrib] (spec 10 D12, R-15):
