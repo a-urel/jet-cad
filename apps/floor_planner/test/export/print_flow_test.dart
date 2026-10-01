@@ -6,17 +6,22 @@
 // content stream equals an `exportPagePdf` of the same document with the
 // separators omitted and the same font (the files themselves differ in
 // `/ID`, spec R-1), with the document's name and the page's size in pt.
+import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:floor_planner/export/export_flow.dart';
+import 'package:floor_planner/export/page_printer.dart';
 import 'package:floor_planner/parametric/live_objects.dart';
 import 'package:floor_planner/parametric/separator.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter/services.dart'
+    show LogicalKeyboardKey, MethodCall, MethodChannel;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
 
 import 'package:floor_planner/shell_commands.dart';
 
@@ -242,5 +247,63 @@ void main() {
         expect(printer.calls.single.name, 'flat');
       });
     }
+  });
+
+  testWidgets(
+      'PR8 the production printer, at printing\'s platform channel: the '
+      'name, the page in pt, no dynamic layout, and the given bytes laid out '
+      'whatever paper the dialog asks for', (tester) async {
+    // printing's method-channel protocol (printing 5.15.1,
+    // method_channel.dart): Dart asks `printPdf`, the platform calls back
+    // `onLayout` for the bytes and `onCompleted` when the dialog closes.
+    const channel = MethodChannel('net.nfet.printing');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    Map<Object?, Object?>? asked;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'printPdf') {
+        asked = call.arguments as Map<Object?, Object?>;
+        return 1;
+      }
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    Future<Object?> fromPlatform(String method, Map<String, Object?> args) {
+      final reply = Completer<Object?>();
+      messenger.handlePlatformMessage(
+          channel.name,
+          channel.codec.encodeMethodCall(MethodCall(method, args)),
+          (data) => reply.complete(
+              data == null ? null : channel.codec.decodeEnvelope(data)));
+      return reply.future;
+    }
+
+    final pdf = Uint8List.fromList(List.generate(64, (i) => (i * 37) % 251));
+    const format = PdfPageFormat(1190.5, 841.75);
+    var done = false;
+    final printing = const PrintingPagePrinter()
+        .print(pdf, 'flat', format)
+        .then((_) => done = true);
+    await tester.pump();
+    expect(asked, isNotNull, reason: 'the dialog was asked for');
+    expect(asked!['name'], 'flat');
+    expect(asked!['width'], 1190.5);
+    expect(asked!['height'], 841.75);
+    expect(asked!['dynamic'], isFalse);
+    final job = asked!['job'];
+    // The dialog asks for another paper (A4 portrait): the same bytes.
+    final laid = await fromPlatform('onLayout', {
+      'job': job,
+      'width': 595.0,
+      'height': 842.0,
+      'marginLeft': 0.0,
+      'marginTop': 0.0,
+      'marginRight': 0.0,
+      'marginBottom': 0.0,
+    });
+    expect(laid, pdf);
+    expect(done, isFalse, reason: 'it waits for the dialog');
+    await fromPlatform('onCompleted', {'job': job, 'completed': true});
+    await printing;
+    expect(done, isTrue);
   });
 }
