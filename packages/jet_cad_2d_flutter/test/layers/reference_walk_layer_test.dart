@@ -18,14 +18,19 @@ Set<Handle> drawnHandles(List<DrawOp> ops) => {
     };
 
 /// Paints [f] with both walks, text never culled (the ATTRIB is small at
-/// the fitted zoom), asserts the painter draws a superset of the reference,
-/// and returns the handles each drew.
-(Set<Handle>, Set<Handle>) compare(LayerFixture f) {
+/// the fitted zoom): the handles each drew, and the differential check,
+/// which each test runs **after** its absolute assertions — so a walk that
+/// draws a hidden handle is named by them, not by the superset's first
+/// mismatch.
+(Set<Handle>, Set<Handle>, void Function()) compare(LayerFixture f) {
   final camera = ViewportTransform.fit(f.doc.extents, kViewport);
   final painter = paintToRecording(f.doc, camera, 0);
   final reference = referenceToRecording(f.doc, camera, 0);
-  expectPainterSupersetOfReference(painter, reference, kViewport);
-  return (drawnHandles(painter), drawnHandles(reference));
+  return (
+    drawnHandles(painter),
+    drawnHandles(reference),
+    () => expectPainterSupersetOfReference(painter, reference, kViewport),
+  );
 }
 
 void main() {
@@ -50,7 +55,7 @@ void main() {
       'a hidden layer: C\'s line is in neither sink, everything else on the '
       'visible layers is in both, and the walks agree', () {
     final f = LayerFixture();
-    final (painted, referenced) = compare(f);
+    final (painted, referenced, agree) = compare(f);
     final visible = {
       f.lineZero, f.lineA, f.lineB, f.rootZero, f.rootA, f.objectChild, //
       f.tableLine, f.tableCircle, f.legLine, f.attrib, f.regionFill,
@@ -60,6 +65,7 @@ void main() {
     expect(painted, containsAll(visible));
     expect(referenced, isNot(contains(f.lineC)));
     expect(painted, isNot(contains(f.lineC)));
+    agree();
   });
 
   test(
@@ -68,7 +74,7 @@ void main() {
       () {
     final f = LayerFixture();
     f.doc.commands.execute(SetLayerCommand(f.withState(f.a, visible: false)));
-    final (painted, referenced) = compare(f);
+    final (painted, referenced, agree) = compare(f);
     final hidden = {
       f.lineA, f.lineC, f.rootA, f.objectChild, f.tableLine, f.tableCircle, //
       f.legLine, f.attrib, f.regionFill, f.regionBoundary,
@@ -80,6 +86,7 @@ void main() {
     final visible = {f.lineZero, f.lineB, f.rootZero};
     expect(referenced, containsAll(visible));
     expect(painted, containsAll(visible));
+    agree();
   });
 
   test(
@@ -91,7 +98,7 @@ void main() {
       ..execute(SetCurrentLayerCommand(f.b))
       ..execute(SetLayerCommand(
           f.withState(ReservedHandles.layerZero, visible: false)));
-    final (painted, referenced) = compare(f);
+    final (painted, referenced, agree) = compare(f);
     final drawn = {f.tableLine, f.tableCircle, f.legLine, f.attrib, f.rootA};
     expect(referenced, containsAll(drawn));
     expect(painted, containsAll(drawn));
@@ -99,19 +106,26 @@ void main() {
       expect(referenced, isNot(contains(h)), reason: 'reference ${h.toHex()}');
       expect(painted, isNot(contains(h)), reason: 'painter ${h.toHex()}');
     }
+    agree();
   });
 
   test(
       'an instance moved to the hidden layer leaves both sinks with its '
-      'ATTRIB; the region on A stays', () {
+      'ATTRIB and its contents, a leaf on a visible layer included; the '
+      'region on A stays', () {
     final f = LayerFixture();
-    f.doc.commands.execute(SetInstanceLayerCommand(f.instance, f.c));
-    final (painted, referenced) = compare(f);
+    // The leg's line on B, visible: inside a hidden instance it still does
+    // not draw — the instance decides (spec 12b D6).
+    f.doc.commands
+      ..execute(SetEntityLayerCommand(f.legLine, f.b))
+      ..execute(SetInstanceLayerCommand(f.instance, f.c));
+    final (painted, referenced, agree) = compare(f);
     for (final h in [f.tableLine, f.tableCircle, f.legLine, f.attrib]) {
       expect(referenced, isNot(contains(h)), reason: 'reference ${h.toHex()}');
       expect(painted, isNot(contains(h)), reason: 'painter ${h.toHex()}');
     }
     expect(referenced, containsAll({f.regionFill, f.rootA}));
     expect(painted, containsAll({f.regionFill, f.rootA}));
+    agree();
   });
 }

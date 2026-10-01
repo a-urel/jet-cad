@@ -111,6 +111,21 @@ void main() {
             line(placed, 10, 10, 70, 40), _close, 'within 1e-9 of'));
     expect(cache.debugWorldArcsOf(instance), hasLength(5));
   });
+
+  test(
+      'a nested instance on the hidden layer takes its contents along even '
+      'when they are on a visible layer of their own, as a pick does',
+      () async {
+    selection.replace({instance});
+    await run(f, SetEntityLayerCommand(f.legLine, f.b));
+    expect(cache.debugWorldSegmentsOf(instance),
+        pairwiseCompare(wholeSegments(), _close, 'within 1e-9 of'));
+    await run(f, SetInstanceLayerCommand(f.nested, f.c));
+    expect(
+        cache.debugWorldSegmentsOf(instance),
+        pairwiseCompare(
+            line(placed, 10, 10, 70, 40), _close, 'within 1e-9 of'));
+  });
 }
 
 bool _close(double expected, double actual) =>
