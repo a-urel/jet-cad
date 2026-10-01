@@ -557,3 +557,67 @@ change and a paint writes only the translation, `_m` starts as the identity
 (D6); S-4 F-14's precedent reworded as the same technique; S-5 M-09b4
 re-targeted to the matrix test. Also the `runAsync` citation corrected and
 the tool's `armed` listener removed in `dispose`.
+
+## Amended at execution (Plan 09b)
+
+Where execution made this spec precise or departed from it, each with the
+ruling or review that decided it (the plan's ledger,
+`ledgers/2026-10-01-plan-09b/progress.md`, archived by a later commit;
+results: [2026-10-01-plan-09b-results.md](../notes/2026-10-01-plan-09b-results.md)).
+This section rewrites nothing above it.
+
+- **D2 / D5 ownership (`7d3bff7`, R-B3-1).** `FloorPlannerApp` takes an
+  optional `thumbnails` parameter beside `symbols`, makes a
+  `SymbolThumbnails` when none is given and disposes only its own; the host
+  passes it to the shell. It landed in Task 9 (which owns the app wiring),
+  not Task 3 (render only) as the plan's Task 2 said. A shell given a loader
+  but no cache makes and disposes its own (R-B9-1, a bare-shell seam).
+- **D4 (`1951d01`, R-B4-1).** The render package's `lib` imports
+  `package:flutter/material.dart` for the first time (`Material`, `InkWell`,
+  `Tooltip`, as D4 names); `Tooltip` needs an `Overlay` ancestor. The
+  highlight is observable without a golden: the cell's
+  `Semantics(selected: true)` and its `Material` colour `primaryContainer`
+  with a `primary` 2 px border.
+- **D5 (`359a70a`, `3faabd4`, R-B3-2).** The padding is **8% of the extents'
+  larger side** on every side (`kThumbnailPadding`; empty extents are not
+  padded). An entry evicted or disposed while its future is pending disposes
+  its image **one microtask after completion**, so every listener can clone
+  it first: **a holder clones in its completion callback** (the cell does;
+  pinned by 4b). A cache hit on a finished entry delivers the image a
+  microtask later; an eviction in between leaves that cell empty (R-B4-2,
+  known limit, unreachable with 64 entries and 27 symbols). Failed futures
+  stay cached; `imageFor` after `dispose()` throws `StateError`.
+- **D6, the ghost (`637a429`, R-B5-1, R-B5-2).** The function is named
+  `ghostPathFor(SymbolEntry)` (the plan's name; "`ghostPath`" above). The
+  `GhostMatrix` also **recomputes P when the base point changes** (re-arming
+  another symbol), not only on `at`, the turns or the mirror.
+- **D6, cancel (`df916b7`, R-B6-1).** There is no "cancelled" flag: a move
+  carrying the primary button with no live press is ignored and an up with no
+  live press places nothing. This covers a pointer cancel, `cancel()` from the
+  controller and `Esc` mid-press, because the layer keeps its active pointer
+  after a tool-side cancel. Re-arming keeps the turns and the mirror (R-B6-2).
+  The ghost does not follow a wheel zoom until the next pointer event
+  (R-B6-3, known limit).
+- **D6, keys as built (`67688a1`, R-B7-1).** Key-ups always pass through,
+  including R's and M's. `Shift+M` toggles the mirror (only Ctrl, Meta and
+  Alt are excluded). `Ctrl+R` / `Ctrl+M` pass through armed and not pressed,
+  and are **swallowed mid-press** (the mid-press rule wins over "pass through
+  untouched"). `Esc` mid-press is `cancel(ctx)`: it ends the press and hides
+  the ghost until the next hover.
+- **D7 (`af704cf`, R-B8-1..3).** `SymbolPanel` takes an optional `measurer`
+  (default `InsertionPointMeasurer`) for the thumbnail's `prepareDocument`;
+  permissions reach it as a `DraftPermissions` value with
+  `kSymbolPlacementNeeds` = {structure, geometry, components}; `onSelect`
+  returns the `SymbolEntry` (looked up from the gallery id); `symbolIdOf` and
+  `symbolThumbnailDocument` are top-level.
+- **D8 (`7d3bff7`, R-B9-1..4).** R-B9-1 above. **R-B9-2:** the Symbols panel
+  is unmounted when the Tools tab is shown, so **the search text clears on a
+  tab switch** (spec silent; on the human's look list). R-B9-3: the
+  document's measurer is not passed to the panel (the cache outlives the
+  shell; symbols hold no text). R-B9-4: with geometry denied a cell tap sets
+  `armed` but `_activate` refuses; the gallery is disabled then anyway and
+  nothing highlights.
+- **Named mutants (R-B10-1, R-B4-3).** M-09b1's one-line form (the up without
+  re-resolving) is equivalent end to end and red at the tool level (Task 6);
+  its two-line form is red end to end. M-09b12's red assertion is
+  `canRequestFocus` (and the traversal check), not the tap.

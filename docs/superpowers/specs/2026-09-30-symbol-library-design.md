@@ -665,3 +665,12 @@ This section rewrites nothing above it.
   placement tool (D11, M-09m), the panel (D12), `R`/`M` key consumption while
   armed and the ghost through `placementTransform`, and the real `rootBundle`
   load of the asset (the 09a tests read it from disk).
+
+## Amended at execution (Plan 09b)
+
+The 09b spec, [2026-10-01-symbol-palette-design.md](2026-10-01-symbol-palette-design.md)
+(revision 3, amended at execution), **supersedes this spec's D8 to D12 and
+R-4** for the palette (its D11 "Changes to the 09 spec"): where they differ,
+the 09b spec wins. Results:
+[2026-10-01-plan-09b-results.md](../notes/2026-10-01-plan-09b-results.md).
+This note rewrites nothing above it.
