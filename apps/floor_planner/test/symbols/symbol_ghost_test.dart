@@ -193,9 +193,49 @@ void main() {
       expectPoint(apply(g.forOrigin(origin), other.x, other.y),
           (at.x + 10 - origin.x, at.y - origin.y), 1e-9, 'new base point');
     });
+
+    test(
+        'a change of the base point\'s x alone, then of its y alone, each '
+        'recomputes P once', () {
+      final b = entry('office.chair').definition.basePoint;
+      final g = GhostMatrix()
+        ..update(at: at, basePoint: b, quarterTurns: 3, mirrored: true);
+      expect(g.computations, 1);
+      final onlyX = Vector2(b.x + 125, b.y);
+      g.update(at: at, basePoint: onlyX, quarterTurns: 3, mirrored: true);
+      expect(g.computations, 2, reason: 'base point x changed');
+      expectPoint(apply(g.forOrigin(origin), onlyX.x, onlyX.y),
+          (at.x - origin.x, at.y - origin.y), 1e-9, 'x-moved base point');
+      final onlyY = Vector2(onlyX.x, onlyX.y - 75);
+      g.update(at: at, basePoint: onlyY, quarterTurns: 3, mirrored: true);
+      expect(g.computations, 3, reason: 'base point y changed');
+      expectPoint(apply(g.forOrigin(origin), onlyY.x, onlyY.y),
+          (at.x - origin.x, at.y - origin.y), 1e-9, 'y-moved base point');
+    });
   });
 
   group('the path', () {
+    test('a closed polyline\'s contour is closed, a line\'s is not', () {
+      final e = entry('dining.table.rect.six');
+      final metrics = ghostPathFor(e).computeMetrics().toList();
+      expect(metrics.length, e.leaves.length);
+      var closed = 0, open = 0;
+      for (var i = 0; i < e.leaves.length; i++) {
+        final leaf = e.leaves[i];
+        final isClosed = leaf.record.kind == EntityKind.polyline &&
+            isClosedPolyline(leaf.payload);
+        expect(metrics[i].isClosed, isClosed,
+            reason: '${leaf.record.kind.name} leaf $i');
+        if (isClosed) {
+          closed++;
+        } else if (leaf.record.kind == EntityKind.line) {
+          open++;
+        }
+      }
+      expect(closed, 8, reason: 'closed polylines');
+      expect(open, 6, reason: 'lines');
+    });
+
     test('is cached: the same object on a second call, one per entry', () {
       final chair = entry('office.chair');
       final toilet = entry('bath.toilet');
