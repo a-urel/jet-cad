@@ -22,6 +22,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'package:floor_planner/shell_commands.dart';
 
@@ -161,6 +162,70 @@ void main() {
       await dismissError(tester);
       expect(sessionOf(tester).busy.value, isFalse);
       expect(printer.calls, hasLength(1));
+    });
+  });
+
+  group('T-10 Print settles and waits', () {
+    testWidgets(
+        'PR9 text typed in an open entry, then Cmd+P: the print and the '
+        'document both have it (spec 12a D2: the flow settles first)',
+        (tester) async {
+      final printer = FakePagePrinter();
+      await pumpFlat(tester, FakeDocumentFiles(), printer: printer);
+      final at = Vector2(9000, 2000); // on the sheet, away from the rest
+      await aimCamera(tester, at);
+      await press(tester, LogicalKeyboardKey.keyT);
+      await tester.tapAt(globalOf(tester, at));
+      await tester.pump();
+      expect(find.byKey(const Key('text-entry')), findsOneWidget,
+          reason: 'premise: the entry is open');
+      await tester.enterText(find.byKey(const Key('text-entry')), 'Mutfak');
+      await tester.pump();
+      expect(DraftDocumentCodec.encodeToString(sessionOf(tester).document),
+          isNot(contains('Mutfak')),
+          reason: 'premise: typed, not committed');
+      expect(
+          await chordHandled(
+              tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyP),
+          isTrue);
+      await tester.pump();
+      await tester.pump();
+      noDialog(tester);
+      final printed =
+          PdfContent.parse(printer.calls.single.pdf, inflate: zlib.decode);
+      expect([for (final t in printed.textRuns) t.string],
+          unorderedEquals([labelText, 'Mutfak']));
+      expect(DraftDocumentCodec.encodeToString(sessionOf(tester).document),
+          contains('Mutfak'),
+          reason: 'committed as Enter would');
+    });
+
+    testWidgets(
+        'PR10 busy while the print dialog is up: Print, Save and Export '
+        'disabled until it closes', (tester) async {
+      final printer = FakePagePrinter()..hold = true;
+      await pumpFlat(tester, FakeDocumentFiles(), printer: printer);
+      bool on(String id) =>
+          tester.widget<IconButton>(find.byKey(Key('toolbar-$id'))).onPressed !=
+          null;
+      expect([on('print'), on('save'), on('export')], [true, true, true],
+          reason: 'premise: idle');
+      await tester.tap(printButton);
+      await tester.pump();
+      await tester.pump();
+      expect(printer.held, hasLength(1), reason: 'premise: the dialog is up');
+      // The dialog stays up a while: the flow waits for it, not a timer.
+      await tester.pump(const Duration(seconds: 30));
+      expect(sessionOf(tester).busy.value, isTrue);
+      expect([on('print'), on('save'), on('export')], [false, false, false]);
+      await chordHandled(
+          tester, LogicalKeyboardKey.metaLeft, LogicalKeyboardKey.keyP);
+      expect(printer.calls, hasLength(1), reason: 'no second print');
+      printer.held.single.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(sessionOf(tester).busy.value, isFalse);
+      expect([on('print'), on('save'), on('export')], [true, true, true]);
     });
   });
 
