@@ -1,9 +1,9 @@
 # 13 — Export and print
 
-**Status:** EXECUTED on `plan-13/export-and-print`, NOT MERGED (2026-10-01).
-Merge and look pending — the human's: the merge is `--no-ff` after the final
-whole-branch review, and the macOS and web look (L-1 .. L-7 and the items
-the rulings added) is never marked done for the human. Spec
+**Status:** **MERGED** into `main` at `fea0354` (2026-10-01), `--no-ff`, on
+the human's word; the human's macOS and web look (L-1 .. L-7 and the items
+the rulings added) done by their report before the merge, no findings.
+**Sub-project 13 is complete.** Spec
 [2026-10-01-export-and-print-design.md](../docs/superpowers/specs/2026-10-01-export-and-print-design.md)
 (rev 3, amended at execution), plan
 [2026-10-01-export-and-print.md](../docs/superpowers/plans/2026-10-01-export-and-print.md),
