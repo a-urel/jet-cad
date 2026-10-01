@@ -3,7 +3,7 @@
 **Date:** 2026-09-30. **Status:** design, **revision 3**. Revision 1 (`fbf1e9a`) was reviewed
 independently: "Ready with amendments", 0 blocking, 7 major, 3 minor and
 1 nit (V-1 to V-11), each applied below; see [Revision 2](#revision-2). Its re-review: "Ready with one amendment" (R-1 to R-3), applied in [Revision 3](#revision-3).
-Awaiting the human's approval.
+**Approved by the human on 2026-09-30** ("onaylıyorum. devam edelim.").
 **Sub-project:** `roadmap/09-symbol-library.md`. **Size:** L, sliced in two
 (decision 7): **09a** the core (engine commands, the library, the placer),
 **09b** the palette (gallery, thumbnails, search, the placement tool).

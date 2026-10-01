@@ -154,6 +154,37 @@ the task-time results describe the final tree. Cost if wrong: a mutant that
 went green only because of a later test edit; the review's sample and the
 diff check bound it. **The sample and its result are not in this note.**
 
+**The P-8 sample (the final whole-branch review, on the tip `bdca1ed`, a fresh
+reviewer; 20 mutants, all red, each file restored with `diff` exit 0):**
+
+| Task | Mutant | Red tests |
+|---|---|---|
+| 1 | Remove drops the owner guard (`commands.dart:480`) | "refuses while a leaf is owned by it", "extents follow a compound placement and its undo" |
+| 1 | Add drops the children guard (`:430`) | "refuses a definition that lists children, and mutates nothing" |
+| 1 | Remove drops the instance/parent guard (`:472`) | "refuses while an instance names it", "while a node is parented to it" |
+| 1 | Add drops the duplicate-definition arm (`:425`) | "refuses a handle that names a definition, a node or an entity" |
+| 2 | registration dropped (`catalog.dart:48`) | SC7, SC8, SC9, SC10, SC11 |
+| 2 | tag-order equality ignored (`symbol_component.dart:86`) | SC1, SC2 |
+| 3 | colour allow-list drops ByLayer (`symbol_library.dart:228`) | L5 |
+| 3 | lineweight allow-list arm (`:232`) | L5 |
+| 3 | flags check dropped (`:240`) | R18, R18b |
+| 3 | children throw dropped (`:148`) | R04 |
+| 3 | zero sweep `== 0` (`:291`) | R27b, R27c, R27d |
+| 4 | M-09a no `-basePoint` (`symbol_placer.dart:51`) | P1 |
+| 4 | M-09b never reuse (`:83`) | P7, P8c, P11, P15, P19 |
+| 4 | M-09i leaves keep library handles (`:117`) | P5, P10, P11 |
+| 4 | M-09o leaves reversed (`:114`) | P16, P19, P6 |
+| 5 | a catalog radius edited, asset not regenerated | "the committed bytes equal the built library" |
+| 6 | M-09c rotation dropped (`:49`), end-to-end file | the end-to-end test and "the Select tool moves and rotates a placed, mirrored instance" |
+
+The reviewer also ran, on the tip, with a throwaway test (deleted): a symbol
+placed under an installed `ParametricSystem` and a live `SpatialIndex` gives
+no diagnostics, no drift and an empty `validate()`; undo restores the bytes,
+the container count, the entity and node counts and the extents; redo gives
+identical bytes; three placements survive `purge` with identical bytes; save,
+load, save is byte-identical; placing on the loaded document reuses both
+definitions.
+
 Red test names are the tests' own ids; "first red" lines are in each task's
 report. Spec ids first; `X-`/unnamed rows are the tasks' own extras. Every
 run restored the file (`diff` exit 0).
@@ -168,7 +199,7 @@ run restored the file (`diff` exit 0).
 | X-cap Add capability geometry | `commands.dart:417` | "capability is structure and touched names the handle" | 1 |
 | X-inv / X-inv2 / X-rmstate / X-rmunknown | `commands.dart:441, 488, 485, 469` | add/undo/redo, pick, extents, undo-value and unknown-handle tests | 1 |
 | Remove capability geometry; Remove `touched: {}` | `commands.dart:460, 489` | "RemoveDefinitionCommand capability is structure and touched names the handle" (green before 1b) | 1b |
-| M-09u-a tag order ignored by equality | `symbol_component.dart:91` | SC2 | 2 |
+| M-09u-a tag order ignored by equality | `symbol_component.dart:86` | SC2 | 2 |
 | M-09u-b toJson swaps category and key | `symbol_component.dart:58` | SC5 | 2 |
 | registration omitted; `PageComponent.register` dropped | `catalog.dart:48`, `:46` | SC7-SC12; SC9 | 2 |
 | equality drops name / version / tag length; tags not copied; version < 0 and empty key accepted; missing field tolerated | `symbol_component.dart:83, 85, 89, 44, 48, 45, 75` | SC1; SC3; SC4; SC6 | 2 |
@@ -177,7 +208,7 @@ run restored the file (`diff` exit 0).
 | SC10 (no parametric interference) | - | **unfired**: a guard with no mutant | 2 |
 | M-09j, one mutant per D5 rule (29 throw sites, 29 rules and sub-rules): unreadable bytes, codec cycle repair, instance, group, no component, duplicate key+version, key case, tag case, children, basePoint, leaf owner, text/fill/attrib, point, layer, linetype, text style, colour, lineweight, transparency, flags, linetypeScale, malformed payload, coordinate, scalar, zero-length line, polyline < 2, circle radius, arc radius, zero sweep | `symbol_library.dart:91-292` | R00, R08, R06, R07, R01, R02, R03/R03b, R03c, R04, R05, R09, R10, R11, R12-R19, R20-R20c, R21-R21d, R22-R27 (one or more each) | 3 |
 | M-09a no `translation(-basePoint)` | `symbol_placer.dart:51` | P1 | 4 |
-| M-09b every placement copies | `:84` | P7, P8c, P11, P15 | 4 |
+| M-09b every placement copies | `:83` | P7, P8c, P11, P15 | 4 |
 | M-09c rotation dropped / mirror dropped | `:49`, `:50` | P1, P2, P4 / P1, P4 | 4 |
 | M-09d colour, lineweight, transparency, linetype, linetypeScale dropped | `:135-139` | P8 (its own field) and P8c, each | 4 |
 | M-09e `AddDefinitionCommand` omitted | `:98-103` | P6-P13, P15, P16 (10 red) | 4 |
@@ -237,6 +268,15 @@ of the spec that are not 09a's: M-09k, l, m, s, w, x are 09b's (see below).
   at the right end.
 - Carried from earlier, untouched: the live-object-rule note's list.
 
+- **The "4 seats" and "6 seats" dining tables draw no chairs** (the final
+  review's worst content issue): `_table` in `furniture_catalog.dart` is a
+  rectangle with an inset, so the names promise seats the geometry does not
+  show. The content is the human's to judge; a rename or chairs are a
+  catalog change and a regenerated asset.
+- **A circle or arc radius is only checked finite**, not bounded by the
+  loader's coordinate limit (a radius of 1e300 loads): a nit, no symbol is
+  affected.
+
 ## Owed to 09b
 
 - **M-09w** (the tool skips the `components` capability): the placer's
@@ -248,6 +288,9 @@ of the spec that are not 09a's: M-09k, l, m, s, w, x are 09b's (see below).
 - **`R`/`M` key consumption while armed** and the ghost using
   `placementTransform`.
 - The real `rootBundle` load of `assets/library/furniture.jetlib`.
+- **Contrast of BYBLOCK leaves on a light canvas:** under a default-style
+  instance they resolve to ACI 7 (`0xFFFFFFFF` with the default foreground);
+  09b's thumbnails and ghost must check them on both themes.
 - **The human's look for 09b (copied from the spec's Exit gate; never marked
   done for them), macOS and web (Chrome, Firefox):** the gallery's look in
   light and dark; category collapse; the search box takes focus and typing
