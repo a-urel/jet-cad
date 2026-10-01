@@ -71,7 +71,7 @@ final class ExportFixture {
   /// An ACI 7 line: the foreground colour, white on the dark screen page.
   late final Handle aci7Line;
 
-  /// A line wholly outside the sheet.
+  /// A line wholly outside the sheet at every scale: left of its origin.
   late final Handle outsideLine;
 }
 
@@ -193,7 +193,10 @@ ExportFixture exportFixture({
     doc,
     root,
     EntityKind.line,
-    [20000, 10000, 22500, 11200],
+    // Left of the sheet's left edge (x 3000), which no scale moves: the
+    // sheet grows right and up from its origin, so a line placed beyond its
+    // right or top edge at 1:50 can fall inside it at 1:100.
+    [-6000, 2500, -3500, 3700],
     color: const TrueColor(0x795548),
     lineweight: 35,
   );

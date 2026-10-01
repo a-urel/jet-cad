@@ -131,7 +131,7 @@ void main() {
   test('everything but the outside line lies inside the sheet', () {
     final sheet = sheetWorldRect(f.page);
     final all = doc.extents;
-    expect(all.maxX, greaterThan(sheet.maxX));
+    expect(all.minX, lessThan(sheet.minX));
     final g = exportFixture();
     g.document.commands.execute(RemoveEntityCommand(g.outsideLine));
     final inside = g.document.extents;
@@ -141,5 +141,28 @@ void main() {
     expect(inside.maxY, lessThan(sheet.maxY));
     // And nothing reaches the world origin's neighbourhood.
     expect(inside.minX, greaterThan(0));
+  });
+
+  test('the outside line is wholly outside the sheet at 1:50 and 1:100', () {
+    for (final denominator in [50.0, 100.0]) {
+      final g = exportFixture(scaleDenominator: denominator);
+      final sheet = sheetWorldRect(g.page);
+      final s = g.document.entities.slotOf(g.outsideLine)!;
+      final coords =
+          g.document.geometry.peek(g.document.entities.geomIndexAt(s)).coords;
+      final box = Aabb2.raw(
+        math.min(coords[0], coords[2]),
+        math.min(coords[1], coords[3]),
+        math.max(coords[0], coords[2]),
+        math.max(coords[1], coords[3]),
+      );
+      expect(box.intersects(sheet), isFalse, reason: '1:$denominator');
+      // Clear of the sheet by a metre, so no culling slack reaches it.
+      final clear = box.maxX < sheet.minX - 1000 ||
+          box.minX > sheet.maxX + 1000 ||
+          box.maxY < sheet.minY - 1000 ||
+          box.minY > sheet.maxY + 1000;
+      expect(clear, isTrue, reason: '1:$denominator');
+    }
   });
 }
