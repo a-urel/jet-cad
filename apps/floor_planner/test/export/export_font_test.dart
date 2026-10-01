@@ -162,4 +162,24 @@ void main() {
       expect(await own!.bytes, orderedEquals(vendoredFont()));
     });
   });
+
+  group('main', () {
+    // No test runs `main()` (it calls `runApp`), so the one line that makes
+    // the licence appear in the running app is pinned by its source, as
+    // the render package's T-11 pins page_export.dart (Task 7 review,
+    // finding 1; mutant H).
+    test('EF11 main() registers the font licence before runApp', () {
+      final source = File('lib/main.dart').readAsStringSync();
+      final start = source.indexOf('void main() {');
+      expect(start, isNonNegative, reason: 'premise: main() is found');
+      final end = source.indexOf('\n}', start);
+      expect(end, greaterThan(start), reason: 'premise: its body ends');
+      final body = source.substring(start, end);
+      final register = body.indexOf('registerFontLicences();');
+      final run = body.indexOf('runApp(');
+      expect(register, isNonNegative, reason: 'the licence is registered');
+      expect(run, isNonNegative, reason: 'premise: main() runs the app');
+      expect(register, lessThan(run), reason: 'before the app runs');
+    });
+  });
 }
