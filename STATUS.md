@@ -1,5 +1,50 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-01. **Plan 13 (export and print, sub-project 13,
+one plan) is MERGED into `main` at `fea0354`**, `--no-ff`, on the human's
+word ("bakışı yaptım, sorun yok. merge et"). **The macOS and web look is
+done, by the human's report before the merge** (no findings; the per-item
+list in the results note stays as written). **Sub-project 13 is complete.**
+- **What it delivers** (see
+  [2026-10-01-plan-13-results.md](docs/superpowers/notes/2026-10-01-plan-13-results.md)):
+  `Export…` (Cmd/Ctrl+E) writes the page as a vector PDF (a new
+  `PdfDrawSink`, the bundled Roboto embedded, true scale, lineweights in
+  paper millimetres) or a PNG at 96 / 150 / 300 dpi (`CanvasDrawSink`,
+  `pHYs`), saved through the macOS panel or downloaded on the web;
+  `Print…` (Cmd/Ctrl+P) hands the same PDF to the system or browser print
+  dialog (`printing`) at the page's paper size. Only the drawing plots;
+  room separators do not (`omitOwners`). The app bundles Roboto 2.137
+  (the repository's vendored file, Apache 2.0) for the screen and the PDF.
+- **Spec and plan:** [2026-10-01-export-and-print-design.md](docs/superpowers/specs/2026-10-01-export-and-print-design.md)
+  (rev 3, approved 2026-10-01, amended at execution) and
+  [2026-10-01-export-and-print.md](docs/superpowers/plans/2026-10-01-export-and-print.md).
+- **Toolchain:** the render package and the app now need **Flutter
+  >= 3.44.0** (`pdf` 3.13 needs Dart 3.12); no `sdk:` bound moved. New
+  packages: pdf, barcode, printing, pdf_widget_wrapper (Apache-2.0), bidi
+  (MIT), qr (BSD-3).
+- **Gates (Linux container):** engine 1,121 + 2 standing (byte-unchanged);
+  render 1,154 + 1 skip + 7 standing (no golden PNG changed); app 934; web
+  `✓ Built`; dev_harness_2d analyze clean. The two allocation invariant
+  tests untouched and green.
+- **Reviews:** every task Approved by an independent reviewer (3 and 5 after
+  "Needs fixes": test gaps in 3, and in 5 a real defect — an export's
+  `SpatialIndex` unhooked the screen index from the document; fixed by
+  saving and restoring the dispatcher's hooks); the final whole-branch
+  review: "Ready with fixes" (documentation only), applied; its sample of
+  24 mutants on the tip all red.
+- **Found on the way:** the painter drew a root-level instance inside a
+  group without the group's transform (fixed, `32d488f`, unplanned).
+- **Found, not fixed** (in the note): a grouped root instance costs a
+  linear lookup per frame; latent `CanvasDrawSink` save/point issues; the
+  `pdf` package's malformed `/ToUnicode` above U+FFFF; the PNG's own text
+  measurer; the web print ignores the name and format; a stale comment in
+  `main.dart`; the top bar's floor is now 656 px.
+- **Next, on the human's word:** the next 12 slice, DXF export (a new
+  roadmap file 14, if wanted), or the found items and owed looks (06, 08,
+  10).
+
+*Earlier, 2026-10-01 (the plan 09b merge):*
+
 **Last updated:** 2026-10-01. **Plan 09b (the symbol palette, the second and
 last slice of sub-project 09) is MERGED into `main` at `6f7b69a`**, `--no-ff`,
 on the human's word ("bakışı yaptım, sorun yok. merge et"). **The macOS and
