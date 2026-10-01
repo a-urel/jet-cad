@@ -150,16 +150,63 @@ class SelectionController extends ChangeNotifier {
     }
     var changed = false;
     _keys.removeWhere((k) {
-      final dead = !_resolves(k);
+      final dead = !_resolves(k) || !_selectable(k);
       changed = changed || dead;
       return dead;
     });
-    if (_hover != null && !_resolves(_hover!)) {
+    if (_hover != null && (!_resolves(_hover!) || !_selectable(_hover!))) {
       _hover = null;
       changed = true;
     }
     if (changed) notifyListeners();
   }
+
+  /// Whether [k]'s target is on a layer picking could still select it
+  /// through: its effective layer is neither hidden nor locked (spec 12b
+  /// D8). A layer the table does not have counts as visible and unlocked,
+  /// as `FilterEvaluator` treats it. Read for a key that [_resolves].
+  ///
+  /// O(chain) per key, with no allocation: a selection change costs
+  /// O(selection), never a walk of the document.
+  bool _selectable(SelectionKey k) {
+    final layer = document.tables.layers[_effectiveLayerOf(k)];
+    return layer == null || (layer.visible && !layer.locked);
+  }
+
+  /// [k]'s effective layer (spec 12b D6, D8): the style resolver's layer-0
+  /// substitution, from the root (layer 0) down [k]'s chain of instances.
+  ///
+  /// - A root entity is on its own layer; a drafted region's fill is on its
+  ///   boundary's (D12: a region's layer is its boundary's); a leaf on
+  ///   layer 0 owned by an instance (an ATTRIB) is on its instance's.
+  /// - An instance is on its own layer.
+  /// - A group is a parametric object, on its `objectLayer`.
+  Handle _effectiveLayerOf(SelectionKey k) {
+    var context = ReservedHandles.layerZero;
+    for (final h in k.chain) {
+      context =
+          _onLayer((document.tree[Handle(h)] as InstanceNode).layer, context);
+    }
+    final node = document.tree[k.target];
+    if (node is InstanceNode) return _onLayer(node.layer, context);
+    if (node is GroupNode) return objectLayer(document, k.target);
+    if (node != null) return context;
+    final entities = document.entities;
+    var slot = entities.slotOf(k.target)!;
+    if (entities.kindAt(slot) == EntityKind.fill) {
+      final boundary = entities.slotOf(
+          boundaryHandleOf(document.geometry.peek(entities.geomIndexAt(slot))));
+      if (boundary != null) slot = boundary;
+    }
+    final own = entities.layerAt(slot);
+    if (own != ReservedHandles.layerZero) return own;
+    final owner = document.tree[entities.ownerAt(slot)];
+    return owner is InstanceNode ? _onLayer(owner.layer, context) : context;
+  }
+
+  /// [own], or [context] when [own] is layer 0.
+  static Handle _onLayer(Handle own, Handle context) =>
+      own == ReservedHandles.layerZero ? context : own;
 
   bool _resolves(SelectionKey k) {
     for (final h in k.chain) {

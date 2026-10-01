@@ -34,6 +34,17 @@ import 'viewport_transform.dart';
 /// while its child nodes are still visited. The painter tests each leaf's
 /// owner instead; two routes to one meaning, so a test where they disagree
 /// is red.
+///
+/// **Layers (spec 12b D6, plan P-5), by this walk's own recursion.** A leaf
+/// or an instance whose effective layer is hidden is not drawn. The
+/// effective layer is the style resolver's layer-0 substitution, carried
+/// down the walk: the root's is layer 0; a leaf or an instance on layer 0
+/// takes the layer of the context it is placed through, anything else keeps
+/// its own; an instance's contents are placed through the instance's
+/// effective layer, and so is its ATTRIB. The index answers the same
+/// question with a per-depth array and a filter memo; this walk passes a
+/// handle down the call stack and reads the table each time. A layer the
+/// table does not have is drawn, as the filter treats it.
 void referenceWalk(
   DraftDocument doc,
   DrawSink sink,
@@ -47,8 +58,8 @@ void referenceWalk(
   final origin = rebaseOriginFor(world);
   _ReferenceWalk(doc, sink, camera, resolver, world, origin,
           doc.leavesByOwner(), minTextCapPixels, omitOwners)
-      .container(
-          doc.rootHandle, Transform2.identity(), StyleContext.documentRoot, 0);
+      .container(doc.rootHandle, Transform2.identity(),
+          StyleContext.documentRoot, 0, ReservedHandles.layerZero);
 }
 
 class _ReferenceWalk {
@@ -69,49 +80,67 @@ class _ReferenceWalk {
   /// Nodes whose own leaves are not drawn; their child nodes still are.
   final Set<Handle> omitOwners;
 
-  /// Draws one container's contents in ascending handle order.
-  void container(
-      Handle handle, Transform2 accumulated, StyleContext ctx, int depth) {
+  /// Draws one container's contents in ascending handle order. [layer] is
+  /// the effective layer [handle] is placed through (layer 0 at the root).
+  void container(Handle handle, Transform2 accumulated, StyleContext ctx,
+      int depth, Handle layer) {
     if (depth > 64) return;
     final items = <_Item>[];
-    _collect(handle, accumulated, items);
+    _collect(handle, accumulated, layer, items);
     items.sort((a, b) => a.handle.value.compareTo(b.handle.value));
     for (final item in items) {
       if (item.slot != null) {
+        final own = doc.entities.layerAt(item.slot!);
+        if (_hidden(_effective(own, item.context))) continue;
         _leaf(item.slot!, item.placement, ctx);
       } else {
         final node = doc.tree[item.handle];
         if (node is! InstanceNode) continue;
+        final effective = _effective(node.layer, item.context);
+        if (_hidden(effective)) continue;
         container(node.definition, item.placement,
-            resolver.contextFor(item.handle, ctx), depth + 1);
+            resolver.contextFor(item.handle, ctx), depth + 1, effective);
       }
     }
   }
 
+  /// [own], or [context] when [own] is layer 0.
+  static Handle _effective(Handle own, Handle context) =>
+      own == ReservedHandles.layerZero ? context : own;
+
+  /// Whether [layer] names a hidden layer. A missing one is not hidden.
+  bool _hidden(Handle layer) => !(doc.tables.layers[layer]?.visible ?? true);
+
   /// Everything [handle] contributes to the enclosing container: its own
   /// leaves, the leaves of every group beneath it, and the instances found
-  /// along the way — each with its transform composed down from [accumulated].
-  void _collect(Handle handle, Transform2 accumulated, List<_Item> into) {
+  /// along the way — each with its transform composed down from [accumulated]
+  /// and the effective layer it is placed through: [layer] (a group has no
+  /// layer of its own), or for an ATTRIB its instance's effective layer.
+  void _collect(
+      Handle handle, Transform2 accumulated, Handle layer, List<_Item> into) {
     for (final slot in _ownLeaves(handle)) {
-      into.add(_Item(doc.entities.handleAt(slot), accumulated, slot: slot));
+      into.add(
+          _Item(doc.entities.handleAt(slot), accumulated, layer, slot: slot));
     }
     for (final child in _childNodesOf(handle)) {
       final node = doc.tree[child];
       if (node == null) continue;
       final composed = accumulated.multiply(node.transform);
       if (node is InstanceNode) {
-        into.add(_Item(child, composed));
+        into.add(_Item(child, composed, layer));
         // Attributes belong to the INSERT, not to the definition: an ATTRIB's
         // owner is the instance node and its coordinates are instance-local,
         // so it is a leaf of *this* container placed by `composed` — the same
         // rule `ContainerIndex` applies. Recursing into the definition alone
         // never reaches it, which is how it stayed invisible while text was
         // skipped.
+        final instanceLayer = _effective(node.layer, layer);
         for (final slot in _ownLeaves(child)) {
-          into.add(_Item(doc.entities.handleAt(slot), composed, slot: slot));
+          into.add(_Item(doc.entities.handleAt(slot), composed, instanceLayer,
+              slot: slot));
         }
       } else {
-        _collect(child, composed, into);
+        _collect(child, composed, layer, into);
       }
     }
   }
@@ -297,8 +326,11 @@ class _ReferenceWalk {
 }
 
 class _Item {
-  _Item(this.handle, this.placement, {this.slot});
+  _Item(this.handle, this.placement, this.context, {this.slot});
   final Handle handle;
   final Transform2 placement;
+
+  /// The effective layer this item is placed through (spec 12b D6).
+  final Handle context;
   final int? slot;
 }
