@@ -68,6 +68,7 @@ export 'src/selection_overlay.dart';
 export 'src/selection_style.dart';
 export 'src/snap_marker.dart';
 export 'src/snap_settings.dart';
+export 'src/symbol_gallery.dart';
 export 'src/symbol_thumbnails.dart';
 export 'src/tile_cache.dart';
 export 'src/tool.dart';
