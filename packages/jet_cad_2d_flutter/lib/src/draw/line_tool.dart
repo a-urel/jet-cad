@@ -43,7 +43,7 @@ class LineTool extends PlacementTool {
         ctx,
         () => addDrafted(
             ctx.document, EntityKind.line, linePayload(start, point),
-            layer: ReservedHandles.layerZero))) {
+            layer: drawingLayer(ctx.document)))) {
       _segments++;
       points
         ..clear()

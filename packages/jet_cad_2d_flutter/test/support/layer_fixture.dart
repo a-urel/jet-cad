@@ -27,9 +27,12 @@ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 ///
 /// Every geometry is built by direct command execution; the history is
 /// cleared at the end, so a test's first undo is its own. Text is laid out
-/// by [MetricModelMeasurer], so the ATTRIB has a real glyph box.
+/// by [MetricModelMeasurer] by default, so the ATTRIB has a real glyph box.
 class LayerFixture {
-  LayerFixture() : doc = DraftDocument.empty(measurer: MetricModelMeasurer()) {
+  /// [measurer] defaults to [MetricModelMeasurer]; a test that pumps a
+  /// `DraftCanvas` passes a `FlutterTextMeasurer`, which the canvas requires.
+  LayerFixture({TextMeasurer? measurer})
+      : doc = DraftDocument.empty(measurer: measurer ?? MetricModelMeasurer()) {
     a = _addLayer('A', 1);
     b = _addLayer('B', 5, locked: true);
     c = _addLayer('C', 3, visible: false);

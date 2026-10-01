@@ -248,11 +248,11 @@ abstract class PlacementTool extends Tool {
       commit(ctx, () {
         if (fillable && (fill?.value ?? false)) {
           final region = addDraftedRegion(ctx.document, kind, payload,
-              layer: ReservedHandles.layerZero);
+              layer: drawingLayer(ctx.document));
           if (region != null) return region;
         }
         return addDrafted(ctx.document, kind, payload,
-            layer: ReservedHandles.layerZero);
+            layer: drawingLayer(ctx.document));
       });
 
   void _reresolve(ToolContext ctx) {
