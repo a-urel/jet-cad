@@ -616,7 +616,8 @@ This section rewrites nothing above it.
   origin. The library document is `DraftDocument.empty()` +
   `registerAppComponents` + mm, without the DASHED record (R-T5-2). The
   generator is `tool/generate_furniture_library.dart` (plain `dart run`); the
-  asset is `assets/library/furniture.jetlib` (33,423 bytes), and a test pins
+  asset is `assets/library/furniture.jetlib` (44,212 bytes after Task 8; 33,423 bytes was the 25-symbol asset of
+  Tasks 5 and 6), and a test pins
   its bytes to the built library.
 - **BYBLOCK lineweight (R-T5-2, confirmed by Task 6, `ba812dd`).** A leaf
   with BYBLOCK style under a default-style instance resolves to

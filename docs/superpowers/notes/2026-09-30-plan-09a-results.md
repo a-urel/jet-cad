@@ -12,8 +12,8 @@ resolves only after that commit).
 
 Sub-project 09 is sliced (spec decision 7); this is 09a, the core: two
 undoable engine commands for definitions, `SymbolComponent`, the validating
-`SymbolLibrary` loader, the placer (`placeSymbol`, `placementTransform`), 25
-furniture symbols as data with a generator and the shipped `.jetlib` asset,
+`SymbolLibrary` loader, the placer (`placeSymbol`, `placementTransform`), the
+final 27 furniture symbols (25 at Task 5, 27 after Task 8) as data with a generator and the shipped `.jetlib` asset,
 and an end-to-end test that a placed symbol is painted, picked, snapped,
 saved and loaded correctly. There is **no UI** in 09a; the gallery,
 thumbnails, search and the placement tool are 09b (unwritten).
@@ -30,6 +30,7 @@ precedes the ledger's archive, is not part of this note's source material.
 | 4 The placer (D6) | `478c6dc` | Approved (info: a placement cannot mutate the library entry, unpinned, closed by 6b's P19) |
 | 5 Content, generator, asset (D7, D2) | `81a3271`, `a5e38a0` | Approved (minors: outline closedness and per-symbol category unpinned, closed by 6c) |
 | 6 End to end (F-7, P-6 item 2) | `ba812dd`, `22bc83d` (6b, test-only: sweep boundary R27b-e, read-only entry P19), `971eb76` (6c, test-only: outline and category tables) | 6 + 6b Approved (info: the end-to-end fixture is quarter turn 1 mirrored only); 6c folded into the final whole-branch review |
+| 8, 8b Dining tables that draw their chairs (the human's decision, 27 symbols) | `10770f8`, 8b (docs + table-centre base-point test; SHA in task-8-report.md) | Approved with fixes, fixed by 8b |
 
 No `lib/` file changed after `a5e38a0` (Tasks 6, 6b and 6c are test-only).
 
@@ -61,8 +62,9 @@ Each ruling is in the ledger with its cost-if-wrong.
 - **R-T4-2:** `AddNodeCommand` does not check that the instance's definition
   exists, so a wrongly ordered compound is accepted on execute and fails only
   on undo. The placer's order is pinned by P5, P9 and P10.
-- **R-T5-1:** D7's list added up to 25 symbols, 27 after Task 8 (5 Dining, 7 after Task 8, 5 Kitchen, 4 Bed, 4
-  Living, 4 Bath, 3 Office), not "about 24".
+- **R-T5-1:** D7's list added up to 25 symbols at Task 5 (5 Dining, 5 Kitchen, 4 Bed,
+  4 Living, 4 Bath, 3 Office), not "about 24"; 27 after Task 8 (Dining Room
+  7).
 - **R-T5-2:** the library document is `DraftDocument.empty()` +
   `registerAppComponents` + mm, not `prepareDocument` (which adds the DASHED
   record at handle 6; no leaf may use it). Leaf style: layer 0, BYBLOCK
@@ -128,7 +130,8 @@ baseline count was not recorded (the ledger left it to the final sweep).
   4 = 780); analyze and format clean.
 - **web** `CI=true flutter build web --release`: `Built build/web`
   (Task 6 report, after `22bc83d`; the generator asset is at
-  `build/web/assets/assets/library/furniture.jetlib`, 33,423 bytes).
+  `build/web/assets/assets/library/furniture.jetlib`, 33,423 bytes at Task 5/6 time; the final asset is
+  44,212 bytes).
 - **The two allocation invariant tests** are unedited: `git diff 40157af HEAD
   --stat` over `packages/jet_cad_2d/test/invariants` and
   `packages/jet_cad_2d_flutter/test/invariants` is empty (checked when this
@@ -138,7 +141,8 @@ baseline count was not recorded (the ledger left it to the final sweep).
   import (only comments that say so). `analysis_options.yaml` is not in
   `git diff 40157af HEAD --stat`.
 - **The asset:** `dart run tool/generate_furniture_library.dart` prints
-  `wrote assets/library/furniture.jetlib: 33423 bytes` and leaves `git
+  `wrote assets/library/furniture.jetlib: 33423 bytes` (Task 5-time size; 44212
+  after Task 8) and leaves `git
   status` clean (Task 5's review); the committed bytes equal the built
   library (a test pins it).
 

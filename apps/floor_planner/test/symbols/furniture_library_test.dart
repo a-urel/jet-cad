@@ -246,6 +246,26 @@ void main() {
       return [for (final l in polylines.skip(2)) box(l.payload)];
     }
 
+    test('each table\'s base point is its table centre', () {
+      // Written out by hand, in the symbol's own frame (the chairs shift the
+      // table off the corner on the sides that carry them).
+      const centres = {
+        'dining.table.square.two': (400.0, 750.0),
+        'dining.table.square.four': (800.0, 800.0),
+        'dining.table.rect.four': (700.0, 750.0),
+        'dining.table.rect.six': (1250.0, 800.0),
+      };
+      for (final MapEntry(:key, :value) in centres.entries) {
+        final e = assetLibrary().entries.firstWhere((e) => e.key == key);
+        expect(e.definition.basePoint, Vector2(value.$1, value.$2),
+            reason: key);
+        final t = box(e.leaves.first.payload);
+        expect(e.definition.basePoint,
+            Vector2((t.$1 + t.$3) / 2, (t.$2 + t.$4) / 2),
+            reason: '$key: the table outline\'s centre');
+      }
+    });
+
     test('each table draws one chair outline and back line per seat', () {
       for (final MapEntry(:key, :value) in seats.entries) {
         expect(chairBoxes(key).length, value, reason: key);
