@@ -1,6 +1,9 @@
 # Export and print (13) — design
 
-**Date:** 2026-10-01. **Status:** design, **revision 1**, not yet reviewed.
+**Date:** 2026-10-01. **Status:** design, **revision 2**. Revision 1
+(`054d6df`) was reviewed independently: "Ready with amendments", 0
+blocking, 10 major, 8 minor, 2 nit (W-1 to W-20), each applied below; see
+[Revision 2](#revision-2).
 **Sub-project:** `roadmap/13-export-and-print.md`. **Size:** M, one plan
 (the human's decision 9), about nine tasks.
 **Branch:** `spec-13/export-and-print`, cut from `main` at `a0a1920`.
@@ -95,10 +98,10 @@ graphics}.dart`; pub.dev's metadata for `pdf` 3.13.1 and `printing` 5.15.1.
   every primitive is either in screen space or under a residual
   `beginResidual(residual)` that maps its local coordinates to screen
   space. It needs no widget. Its `minTextCapPixels` (default 3.0) culls a
-  text whose cap height on screen is below it (`:944`); `0.0` disables
+  text whose cap height on screen is below it (`:949`); `0.0` disables
   level of detail.
-- **F-3. The sinks.** `DrawSink` (`draw_sink.dart:17`) has nine drawing
-  methods plus `shadesDashes`. `CanvasDrawSink.shadesDashes` is false
+- **F-3. The sinks.** `DrawSink` (`draw_sink.dart:17`) has eleven
+  methods plus the `shadesDashes` getter. `CanvasDrawSink.shadesDashes` is false
   (`canvas_draw_sink.dart:86`), so the painter cuts dashes into spans
   itself. Stroke width is `lineweightHundredths / 100 · pixelsPerPaperMm ·
   lineweightScale`, divided by the residual's scale magnitude; 0 is a
@@ -108,7 +111,7 @@ graphics}.dart`; pub.dev's metadata for `pdf` 3.13.1 and `printing` 5.15.1.
   **glyph space** (y up, origin on the baseline, size
   `kNominalTextPixels`) to screen (`:218-241`).
 - **F-4. The oracle.** `referenceWalk(doc, sink, camera, viewport,
-  resolver, {minTextCapPixels})` (`reference_walk.dart:31`) walks the tree
+  resolver, {minTextCapPixels})` (`reference_walk.dart:30`) walks the tree
   from the root with no `SpatialIndex`; `RecordingDrawSink` records
   `DrawOp`s; `test/support/sink_comparison.dart` compares two op lists;
   `test/differential_test.dart` runs them at screen cameras.
@@ -129,8 +132,10 @@ graphics}.dart`; pub.dev's metadata for `pdf` 3.13.1 and `printing` 5.15.1.
 - **F-9. The tile cache** is built only by `DraftCanvas`
   (`draft_canvas.dart:380`); a painter called directly never meets it.
 - **F-10. The golden suite**: 5 files under `test/golden/`, run with
-  `flutter test --tags golden`. `text_ladder_golden_test.dart` loads the
-  vendored Roboto under the family `Roboto`, which is what the Standard
+  `flutter test --tags golden`. The golden PNGs are macOS-generated
+  (`dart_test.yaml`); **7 of them fail on Linux as standing failures**
+  (STATUS.md), so the Linux gate is "the same 7, no new one".
+  `text_ladder_golden_test.dart` loads the vendored Roboto under the family `Roboto`, which is what the Standard
   text style names (`draft_document.dart:143`). Outside that test,
   `flutter_test` draws text in Ahem.
 - **F-11. The vendored font** (`test/golden/fonts/`): Roboto 2.137, 171,676
@@ -159,11 +164,20 @@ graphics}.dart`; pub.dev's metadata for `pdf` 3.13.1 and `printing` 5.15.1.
   `setGraphicState` (opacity), `drawString(font, size, s, x, y, {scale,
   …})`. **The trailer's `/ID` is SHA-256 of `DateTime.now()` and 32
   secure-random bytes** (`document.dart:180-193`): two exports of one
-  drawing differ in their bytes.
+  drawing differ in their bytes. Further: every number is written with
+  **5 decimals** (`PdfNum.precision`, `format/num.dart:26-38`);
+  `drawString` writes `[<hex>] TJ`, its `scale` a fraction written ×100
+  as `Tz` (`graphics.dart:530-620`); a Unicode TTF is written as `/Type0`
+  over a subset `CIDFontType2`, Identity-H, whose CIDs are subset indices,
+  with a `/ToUnicode` map and `/W` widths truncated to integer thousandths
+  of an em (`ttffont.dart:51-55,130-200`); `save()` runs `Isolate.run` on
+  native (`document.dart:281-289`), while `write(PdfStream)` does not
+  (`:299`). **`pdf` 3.13.x itself requires `sdk >=3.12.0`.**
 - **F-16. `printing` 5.15.1** (Apache 2.0, `sdk >=3.12.0`, **`flutter
   >=3.41.0`**) depends on `pdf`, `http`, `image`, `pdf_widget_wrapper`,
-  `web`; `Printing.layoutPdf(onLayout:, name:)` opens the system dialog on
-  macOS and the browser's on the web. The app's pubspec says `flutter:
+  `flutter_web_plugins`, `plugin_platform_interface`, `web`; `Printing.layoutPdf(onLayout:, name:, format:, dynamicLayout:)` opens
+  the system dialog on macOS and the browser's on the web; `format`
+  defaults to `PdfPageFormat.standard` (`printing.dart:52-61`). The app's pubspec says `flutter:
   ">=3.38.0"`; this container has Flutter 3.47.2 (Dart 3.13.2).
 
 ## Decisions
@@ -212,7 +226,11 @@ A `DrawSink` over one `PdfGraphics` page, in the painter's screen space
 
 - **Page set-up**, once: `cm [1 0 0 −1 0 H]` with `H` the page height in pt,
   so screen space is the PDF's user space; `J 0` (butt cap), `j 0` (miter
-  join) — `Paint`'s defaults, which `CanvasDrawSink` uses.
+  join), `4 M` (miter limit) — Skia's `Paint` defaults, which
+  `CanvasDrawSink` uses (PDF's own miter limit is 10).
+- **Precision.** The `pdf` package writes 5 decimals (F-15). Coordinates
+  stay in the painter's spaces and `cm` carries the residual; the tests'
+  tolerances are derived from the rounding (T-3), not wished smaller.
 - **`beginResidual` / `endResidual`**: `q` and `cm residual`, deferred to the
   first primitive under it as `CanvasDrawSink` defers its `save`
   (`canvas_draw_sink.dart:113-120`); `Q` only if pushed.
@@ -226,18 +244,24 @@ A `DrawSink` over one `PdfGraphics` page, in the painter's screen space
   `Canvas.drawArc` draws in the same frame. A full circle is four
   segments.
 - **`fillPolygon`** / **`fillCircle`**: the same path, `f` (non-zero).
-- **`point`**: the screen-space square `CanvasDrawSink.point` draws, outside
-  any residual.
-- **Colour**: `RG` / `rg` from the ARGB's RGB; an alpha below 255 sets an
-  `ExtGState` with `CA` and `ca` = alpha / 255, one object per distinct
-  alpha, reused.
+- **`point`**: as `CanvasDrawSink.point` (`canvas_draw_sink.dart:140-164`):
+  the point is carried through the current residual by hand (no `cm`) and
+  an axis-aligned square of side `lineweight / 100 · u` is filled around it
+  in screen space; at lineweight 0 nothing is drawn.
+- **Graphics state is written in full for every primitive**: its colour
+  (`RG` or `rg` from the ARGB's RGB), its width (`w`, strokes) and its
+  alpha as a `gs` — an `ExtGState` with `CA` and `ca` = alpha / 255, one
+  object per distinct alpha, **alpha 255 included** — so nothing a
+  previous op or a `Q` left behind is relied on. No state cache.
 - **`text`**: under the residual, which maps glyph space (y up, baseline
   origin) to screen; the page's y flip cancels the camera's, so the glyphs
-  stand upright with no further flip: `BT /F size Tf Tz 0 0 Td (…) Tj ET`,
+  stand upright with no further flip: `BT /F size Tf Tz 0 0 Td […] TJ ET`,
   `size = kNominalTextPixels`, the fill colour the entity's. **`Tz`** is
   `100 · w_flutter / w_pdf`, where `w_flutter` is the advance the painter
   laid the box out with (`FlutterTextMeasurer`, the same record) and
-  `w_pdf` the string's advance in the embedded font at `size`: the PDF's
+  `w_pdf` the string's advance at `size` **from the `/W` widths as the
+  package writes them** (integer thousandths of an em, F-15), so a viewer
+  draws exactly that advance: the PDF's
   string fills the box the painter, the picker and `entityBounds` agree on.
   The font is one `PdfTtfFont` built from the bytes the caller passes
   (D4), whatever the style's `fontFamily` (R-3).
@@ -255,6 +279,9 @@ Future<Uint8List> exportPagePdf({
   @visibleForTesting bool compress = true,
 });
 ```
+
+The bytes come from `PdfDocument.write(PdfStream)`, not `save()`, so no
+isolate is spawned (F-15) and a pumped test can drive it.
 
 One page of the effective paper size in pt. Builds a `SpatialIndex`
 (disposed in `finally`), a `DocumentStyleResolver(document, foreground:
@@ -284,28 +311,40 @@ Future<Uint8List> exportPagePng({
 - White ground (`0xFFFFFFFF`) filled first, then the drawing through a
   **`CanvasDrawSink`** (`pixelsPerPaperMm: u`, its own
   `FlutterTextMeasurer`), resolver and painter as D4, `Picture.toImage`,
-  `toByteData(format: png)`.
-- A `pHYs` chunk inserted after `IHDR`: pixels per metre
+  `toByteData(format: png)`; the export's own measurer is `clear()`ed in
+  `finally`.
+- Exactly one `pHYs` chunk, inserted after `IHDR` and before the first
+  `IDAT`: pixels per metre
   `round(dpi / 0.0254)` on both axes, unit 1, CRC-32 computed.
 - Text is drawn by Flutter in whatever font the `Roboto` family resolves
   to in the running app — the bundled one (D7).
 
 ### D6 — `omitOwners`
 
+**Meaning: a leaf whose direct owner is in the set is not drawn.** Nothing
+else is skipped: a nested group's leaves (owned by the inner group) and an
+instance under an omitted group still draw. A separator is a childless
+group with one leaf (F-8), so for the one use today the two readings
+coincide; the narrow one is chosen because both routes below can state it
+exactly.
+
 `DraftPainter` gains a constructor parameter `Set<Handle> omitOwners =
 const {}`. A leaf is skipped before anything is resolved for it when
 `omitOwners.isNotEmpty && omitOwners.contains(entities.ownerAt(slot))`, at
-the root stream and inside containers alike. On the screen the set is the
+the root stream and inside containers alike. Groups are flattened into the
+root index (`container_index.dart:186-194`), so a separator's leaf arrives
+on the root stream and `ownerAt` names the group. On the screen the set is the
 empty constant: one `isNotEmpty` per leaf, no allocation; the two
 allocation invariant tests stay untouched and green.
 
 `referenceWalk` gains the same parameter and honours it **by its own
-route**: it does not descend into a tree node whose handle is in the set
-(the walk reaches leaves through `leavesByOwner`, so it never sees them).
-Two routes, one meaning: a test where they disagree is red.
+route**: when it visits a node `h` in the set it skips `leavesByOwner[h]`
+and still recurses into `h`'s child nodes. Two routes, one meaning: a test
+where they disagree is red (T-2 includes a nested group under an omitted
+group, whose leaves must draw).
 
-The app's set: `liveObjectsOf<SeparatorParams>(document)` at the moment of
-export.
+The app's set: `liveObjectsOf<SeparatorParams>(document).toSet()` at the
+moment of export (`liveObjectsOf` returns a list).
 
 ### D7 — The font
 
@@ -319,7 +358,8 @@ export.
   assets/fonts/Roboto-Regular.ttf`. The screen's text now draws in it on
   macOS and web (look item L-1).
 - `LicenseRegistry.addLicense` registers the Apache 2.0 text under
-  `Roboto`, so it reaches Flutter's licence page.
+  `Roboto`, read through `rootBundle`, so `Roboto_LICENSE.txt` is listed
+  under `assets:` too.
 - The flows read the bytes once per app with `rootBundle.load` and pass
   them to `exportPagePdf`.
 
@@ -328,7 +368,16 @@ export.
 - A `ShellCommand(id: 'export', label: 'Export…', icon:
   Icons.ios_share_outlined, shortcuts: Cmd/Ctrl+E)` after `Save As…` in
   `fileCommands`, a flow under busy, after `_settlePendingInput`.
-- **Enabled** while not busy **and** the document has a page.
+- **Enabled** while not busy **and** the document has a page. The host
+  knows only busy (`document_host.dart:237`); the page lives in the shell
+  (`PageNotifier`, `main.dart:242`), which already re-wraps the file
+  commands (`main.dart:529-536`). The shell adds, for `export` and
+  `print` only, a `DerivedFlag` over its `PageNotifier` (`page != null`).
+  The flow re-reads the page after `_settlePendingInput` and returns
+  without effect if it is null.
+- The chords join `kFileChords` (`shell_commands.dart:41`), so they are
+  consumed above the Navigator (`main.dart:136-141`) and Ctrl+P with the
+  dialog open does not reach the browser's print.
 - The dialog: a `SegmentedButton` PDF | PNG; when PNG, a second one
   96 | 150 | 300 dpi; `Export` and `Cancel`. It opens on the last choice
   made in this app session (PDF, 150 dpi at first). `Esc` cancels.
@@ -339,7 +388,11 @@ export.
   extension, type-group label and MIME type: `saveLocation(name, {kind =
   FileKind.jetplan})`, `write(location, name, bytes, {kind =
   FileKind.jetplan})`; the web blob takes the kind's MIME type. Existing
-  callers are unchanged by the defaults.
+  callers are unchanged by the defaults. The web `saveLocation` appends
+  `.jetplan` today (`document_files_web.dart:52-56`); it calls a new
+  `fileNameFor(typed, kind)` instead (`jetplanFileName` becomes its
+  `jetplan` case), unit-tested per kind. The test fake
+  (`test/support/fake_document_files.dart`) takes and records `kind`.
 - A failure (a throw from the export or the write) is reported the way a
   failed save is today.
 
@@ -349,9 +402,11 @@ export.
   shortcuts: Cmd/Ctrl+P)`, after `Export…`; enabled as D8.
 - Runs `exportPagePdf` once and hands those bytes to a `PagePrinter`
   (`Future<void> print(Uint8List pdf, String name)`); the production one
-  calls `Printing.layoutPdf(onLayout: (_) async => pdf, name:)`, ignoring
-  the format the dialog offers (the sheet is the page's). Tests inject a
-  fake.
+  calls `Printing.layoutPdf(onLayout: (_) async => pdf, name:, format:
+  PdfPageFormat(effW · 72 / 25.4, effH · 72 / 25.4), dynamicLayout:
+  false)` — without `format` the dialog opens on `PdfPageFormat.standard`
+  (F-16). `PagePrinter.print` takes that size; tests inject a fake that
+  records the bytes, the name and the size.
 - Both entitlement files gain `com.apple.security.print`.
 
 ### D10 — What the export is not allowed to use
@@ -359,7 +414,9 @@ export.
 The export path uses no `VerticesDrawSink` (whose `drawVertices` ignores
 `isAntiAlias`, roadmap 13 decision 1) and no `TileCache` (decision 2). The
 PNG draws through `CanvasDrawSink`, the PDF through `PdfDrawSink`. Both are
-asserted (Testing, T-5 and T-11).
+asserted (T-7's anti-aliasing check and T-11). T-11 is **structural** (a
+read of the source), not the counter roadmap 13 sketched: `TileCache` is
+built only by `DraftCanvas` (F-9), which the export never builds.
 
 ### D11 — Changes to roadmap 13
 
@@ -412,7 +469,10 @@ fixture is the failure mode): a page **A4 landscape at 1:50 with
 `originX = 3,000`, `originY = −1,500`**, `background` dark grey
 (`0xFF303030`, so the screen's foreground is white); on it a line, a closed
 polyline, a dashed polyline, an arc of sweep −110° and a circle, a filled
-polygon with alpha 0x80, a text "Yatak Odası" 250 mm high, an instance
+polygon with alpha 0x80, a text "Yatak Odası" 250 mm high **and a text "WC" 25 mm high** (0.5 mm
+on paper, a cap height of 1.42 pt, below the default LOD cull of 3), a
+**point entity inside the instance**, a nested group (with one line) inside
+a group that is in `omitOwners` in T-2, an instance
 **rotated 30°, scaled (1.5, −0.75)**, with **colour and lineweight
 overrides** (red, 0.70 mm) over a definition whose `basePoint` is not the
 origin, an ACI 7 line, a separator group, and one line wholly outside the
@@ -422,50 +482,80 @@ sheet.
   `(W, H)`, `(0, H)` within `Tolerance`; at 1:50 and 1:100, portrait and
   landscape; a 1,000 mm world segment is `1000 / den · u` long.
 - **T-2. Differential at the page camera.** The painter and
-  `referenceWalk`, both with `omitOwners = {separator}` and
+  `referenceWalk`, both with `omitOwners = {separator, outer group}` and
   `minTextCapPixels: 0`, into `RecordingDrawSink`, compared by
-  `sink_comparison.dart`. Both lists contain the instance's leaves and the
-  text and contain no separator op and nothing from the outside line.
+  `sink_comparison.dart`. Both lists contain the instance's leaves, both
+  texts ("WC" included) and the nested group's line, and contain no
+  separator op, nothing of the outer group's own leaves and nothing from
+  the outside line.
 - **T-3. `PdfDrawSink` geometry.** Ops recorded at the page camera replayed
   into a `PdfDrawSink`, `compress: false`; the test reader parses the
-  content stream (`q Q cm m l c h S f w RG rg gs BT Tf Tz Td Tj ET`) and
-  composes the CTM; each path's points, carried to page space, match the
-  recorded op's points carried through the same residual, to `1e-6` pt; a
-  sampled point on each Bézier arc lies on its circle to `1e-3` pt; the
-  arc's mid-point is on the side its sweep's sign says.
+  content stream (`q Q cm m l c h S f re w J j M RG rg gs BT Tf Tz Td TJ
+  ET`) and composes the CTM; each path's points, carried to page space,
+  match the recorded op's points carried through the same residual. **The
+  tolerance is derived from the 5-decimal rule** (F-15): `1e-5` pt for an
+  op in screen space; under a residual, `5e-6 · (|x| + |y| + 1)` per
+  matrix entry and operand, propagated through the CTM (the plan writes
+  the bound as a function). A sampled point on each Bézier arc lies on its
+  circle within the same bound plus the cubic's own `2.7e-4 · r`; the
+  arc's mid-point is on the side its sweep's sign says. The point entity
+  is an axis-aligned square in device space with side `lw · u`.
+- **T-3b. `PdfDrawSink` directly.** A `polyline(…, closed: true)` writes
+  `h` before `S`, one with `closed: false` does not. The painter always
+  passes `closed: false` today (`draft_painter.dart:305,613-650`), so this
+  path is reached only by this test; it is kept because `DrawSink` has it.
+  An opaque stroke after a translucent fill runs under an `ExtGState` with
+  `CA` and `ca` 1; a stroke after a residual's `Q` writes its colour and
+  width again.
 - **T-4. Lineweight in millimetres.** The instance's 0.70 mm override is
   `0.70 · 72 / 25.4 = 1.98425…` pt in device space (the `w` operand times
   the CTM's scale), at 1:50 and at 1:100 and whatever camera the app's
   screen holds; a 0.35 mm line is `0.99213…` pt; lineweight 0 writes
   `0 w`.
-- **T-5. The text.** `Tf` size is `kNominalTextPixels`; the font object is
-  a TrueType font with a `FontFile2`; the string's PDF advance times `Tz`
-  equals the measured width to `1e-6`; the glyph run, mapped through the
-  CTM, starts at the box's baseline origin; "Yatak Odası" round-trips its
-  glyph ids through the font's `cmap`.
+- **T-5. The text.** Run with flutter_test's default font in the measurer
+  (Ahem: every glyph one em), so `Tz` is far from 100 and its omission is
+  visible. `Tf` size is `kNominalTextPixels`; the font is a `/Type0` over a
+  `CIDFontType2` with a `FontFile2`; the string's advance from the written
+  `/W` widths times `Tz / 100` equals the measured width within the
+  5-decimal bound; the run, mapped through the CTM, starts at the box's
+  baseline origin; **the direction of text space** — the device image of
+  text-space `(0, 1)` — equals the residual's image of glyph-space
+  `(0, 1)` (an extra flip reverses it); "Yatak Odası" round-trips through
+  the font's `/ToUnicode`; "WC" is present.
 - **T-6. Colour and alpha.** The ACI 7 line strokes black (`0 0 0 RG`) on a
   page whose screen foreground is white; the instance's leaves stroke red;
-  the 0x80 fill is under an `ExtGState` with `ca` 0.50196…
+  the 0x80 fill is under an `ExtGState` with `ca` 0.50196…; the opaque op
+  drawn after it is under `ca` / `CA` 1.
 - **T-7. The PNG.** Pixel sizes for A4 and A3, portrait and landscape, at
   96, 150, 300 dpi; `pHYs` is present with `round(dpi / 0.0254)`; at 300
   dpi a horizontal 0.50 mm line at a known paper position is dark at its
-  expected row and white at ±(width/2 + 2) px; an oblique line has pixels of
-  intermediate coverage (anti-aliasing); the corners outside the drawing
-  are white, not transparent.
+  expected row and white at ±(width/2 + 2) px; an oblique line, sampled
+  away from any text (text is anti-aliased on both sinks), has pixels of
+  intermediate coverage — `drawvertices_antialiasing_test.dart` pins that
+  `drawVertices` gives none under flutter_test; the corners outside the
+  drawing are white, not transparent; exactly one `pHYs`, before `IDAT`.
+  PNG tests run under `tester.runAsync` (F-6).
 - **T-8. Separators.** In the PDF and the PNG of the fixture there is no
-  trace of the separator (no path at its points; its pixels white) while
-  the screen painter, with the default set, draws it.
+  trace of the separator (no path at its points; **every pixel of its
+  segment's band** white, since a single sample can fall in a dash gap)
+  while the screen painter, with the default set, draws it.
 - **T-9. The document is untouched.** Codec bytes and `stateId` are equal
   before and after `exportPagePdf` and `exportPagePng`.
 - **T-10. The flows.** With a fake `DocumentFiles` and a fake printer, in
-  a pumped shell whose camera is **zoomed to 400 % and panned off the
-  sheet**: Export → PDF writes `<name>.pdf` whose content, read by the
+  a pumped shell whose document **contains a separator** and whose camera
+  is **zoomed to 400 % and panned off the sheet** (the export API takes no
+  camera, so passing the screen's is ruled out by construction; this
+  checks the whole flow); PNG flows and the PDF write run under
+  `tester.runAsync`: Export → PDF writes `<name>.pdf` whose content, read by the
   reader, has the instance's first point where T-3 puts it (not where the
   screen camera would); Export → PNG at 300 dpi writes a PNG of A4's 300
   dpi size; Cancel in the dialog or the save writes nothing; Print hands
   the fake printer bytes whose content stream equals an export's (F-15:
-  the bytes themselves differ in `/ID`); both commands are disabled with
-  no page and while busy; Cmd/Ctrl+E and +P invoke them.
+  the bytes themselves differ in `/ID`) and the page's size in pt, and
+  neither the export nor the print has the separator; both commands are
+  disabled with no page and while busy; Cmd/Ctrl+E and +P invoke them, and
+  are consumed with the dialog open. `fileNameFor` per kind: `plan` →
+  `plan.pdf`, `plan.png`, `plan.jetplan`; `plan.png` as PNG unchanged.
 - **T-11. What export does not use.** A test reads
   `lib/src/export/page_export.dart` and asserts it names neither
   `VerticesDrawSink` nor `TileCache` nor `DraftCanvas`, and that it names
@@ -473,8 +563,10 @@ sheet.
   behavioural half.
 - **T-12. The font.** The app's copy equals the vendored file byte for byte
   and has the recorded SHA-256; the licence file is present and equal.
-- **T-13. The goldens.** `flutter test --tags golden` passes; `git status`
-  shows no change under `test/golden/`.
+- **T-13. The goldens.** `flutter test --tags golden` on Linux fails
+  exactly the 7 standing failures recorded at `a0a1920` and no other;
+  `git diff --stat -- packages/jet_cad_2d_flutter/test/golden/` is empty.
+  A green macOS run is the human's to confirm.
 
 ## Named mutants
 
@@ -483,14 +575,14 @@ sheet.
 | M-13a | `exportPagePng` paints with `VerticesDrawSink` | T-11, T-7 (AA) |
 | M-13b | drop `pixelsPerPaperMm` (`u`) from the stroke width | T-4 |
 | M-13c | multiply the stroke width by the camera's scale | T-4 at 1:100 |
-| M-13d | the flow passes the screen camera instead of the page's | T-10 |
+| M-13d | `page_export.dart` builds its camera with `fitToPage(page, size)` or `ViewportTransform.fit(extents)` instead of `pageCamera` | T-3, T-10 |
 | M-13e | `exportPagePng` bakes through a `TileCache` | T-11 |
 | M-13f | `pageCamera` ignores `originX` / `originY` | T-1, T-3 |
 | M-13g | `pageCamera` without the y flip | T-1, T-3 |
 | M-13h | `PdfDrawSink` page set-up without `cm [1 0 0 −1 0 H]` | T-3 |
 | M-13i | `PdfDrawSink` ignores the residual | T-3 (the instance) |
 | M-13j | the Bézier arc uses `|sweep|` | T-3 (sweep −110°) |
-| M-13k | a closed polyline without `h` | T-3 |
+| M-13k | a closed polyline without `h` | T-3b |
 | M-13l | `Tz` omitted (100) | T-5 |
 | M-13m | text with an extra y flip | T-5 |
 | M-13n | the export resolver keeps the default (white) foreground | T-6 |
@@ -504,6 +596,12 @@ sheet.
 | M-13v | the print flow exports a second time with `omitOwners` empty | T-10 |
 | M-13w | export enabled without a page | T-10 |
 | M-13x | `exportPagePdf` runs a command (e.g. attaches the page) | T-9 |
+| M-13y | alpha not reset: no `gs` for an opaque op | T-3b, T-6 |
+| M-13z | state cached across a `Q` (colour and width skipped when unchanged) | T-3b |
+| M-13aa | `referenceWalk` skips the omitted node's subtree | T-2 (the nested group) |
+| M-13ab | print without `format` (the standard page) | T-10 |
+| M-13ac | the web save appends `.jetplan` to every kind | T-10 (`fileNameFor`) |
+| M-13ad | the point marker drawn under `cm` (turned with the instance) | T-3 |
 
 Equivalent mutants are recorded by experiment, never by argument.
 
@@ -511,8 +609,9 @@ Equivalent mutants are recorded by experiment, never by argument.
 
 - Engine: `dart test`, `dart analyze`, `dart format` green; the engine is
   byte-unchanged.
-- Render: `flutter test` (all tags), `flutter analyze`, `dart format` green;
-  **`flutter test --tags golden` green with no golden PNG regenerated**;
+- Render: `flutter test`, `flutter analyze`, `dart format` green, the
+  golden tag failing **only the 7 standing Linux failures**, **no golden PNG
+  regenerated** (T-13);
   the two allocation invariant tests untouched and green.
 - App: `flutter test`, `flutter analyze`, `dart format` green;
   `flutter build web` succeeds.
@@ -551,14 +650,41 @@ Equivalent mutants are recorded by experiment, never by argument.
 - **R-3. One font.** Every text style plots in the embedded Roboto. A file
   read from elsewhere naming another family looks different in the PDF than
   on a screen that has that family. Accepted for v1.
-- **R-4. `printing` needs Flutter ≥ 3.41.** The human's macOS Flutter must
-  meet it; the plan states the bound in the app's pubspec and the results
-  note.
+- **R-4. Toolchain.** `printing` needs Flutter ≥ 3.41 and `pdf` 3.13
+  needs Dart ≥ 3.12, which raises the minimum toolchain of the render
+  package and of everything that depends on it (`dev_harness_2d`
+  included). The plan raises **only the `flutter:` bounds, never `sdk:`**
+  (`sdk: ^3.5.0` sets the language version; a bump would flip `dart format`
+  to the tall style). `flutter pub get` rewrites `analysis_options.yaml`,
+  which is never committed. The human's macOS Flutter must meet the bound.
+  If staying on Flutter 3.38 matters, `printing` 5.14.3 with `pdf` ≤ 3.12
+  is the fallback.
 - **R-5. The browser may scale a print** ("fit to page"); L-6 checks 100 %.
 - **R-6. A3 at 300 dpi is 3508 × 4961 px, about 70 MB** of RGBA while it is
-  encoded; on the web this is near the limit. Accepted; 150 is the default.
+  encoded; on the web this is near the limit, and 4961 exceeds a 4096
+  maximum texture size on some WebGL GPUs, where `toImage` may fail (the
+  failure is reported as D8 says). Accepted; 150 is the default.
 - **R-7. The screen font changes** on macOS and web once Roboto is bundled;
   text metrics move with it, so labels may sit slightly differently than
   before. No golden moves (they load their own font or draw Ahem).
 - **R-8. Cmd/Ctrl+P on the web** competes with the browser's own print
-  shortcut; the shell must consume it (L-7).
+  shortcut; the shell must consume it (D8, L-7).
+- **R-9. Dashes differ between outputs.** The dasher's collapse threshold
+  (`kDashCollapsePx = 3`, `dasher.dart:21`) is judged in output units (pt,
+  or px at the chosen dpi), so a fine dash pattern may read solid in one
+  output and dashed in another.
+
+## Revision 2
+
+The independent review of revision 1 (W-1 to W-20) and where each landed:
+W-1 tolerances derived from the 5-decimal rule (D3 "Precision", T-3);
+W-2 T-3b, M-13k; W-3 the "WC" label; W-4 T-5's direction check; W-5 state
+written in full, `4 M`, M-13y, M-13z; W-6 D9's `format`, M-13ab; W-7 D6's
+meaning and the walk's route, M-13aa; W-8 M-13d restated; W-9 the Linux
+golden gate; W-10 the reader's operators, `/W` widths, `/ToUnicode`, Ahem
+in T-5; W-11 D3's `point`, M-13ad; W-12 `write(PdfStream)`, `runAsync`;
+W-13 the shell's page flag, `kFileChords`; W-14 `fileNameFor`, M-13ac;
+W-15 R-4; W-16 T-7's refinements, `clear()`; W-17 D10; W-18 T-8's band,
+T-10's separator, R-9; W-19 the licence asset (the font in the pubspec does
+not change widget tests: the reviewer's experiment); W-20 R-6. Facts
+F-2, F-3, F-4, F-10, F-15, F-16 corrected.
