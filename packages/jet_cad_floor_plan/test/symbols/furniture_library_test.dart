@@ -17,6 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../support/pre_09c_library.dart';
+
 Uint8List builtBytes() => Uint8List.fromList(
     utf8.encode(DraftDocumentCodec.encodeToString(buildFurnitureLibrary())));
 
@@ -24,14 +26,6 @@ Uint8List assetBytes() =>
     File('assets/library/furniture.jetlib').readAsBytesSync();
 
 SymbolLibrary assetLibrary() => SymbolLibrary.decode(assetBytes());
-
-/// The asset as it shipped before 09c (commit 9414208, byte-equal to `main`
-/// 4d6b78f): the 27 version-1 symbols a plan saved before 09c holds. A test
-/// fixture, not an asset: it is not declared in the pubspec.
-const pre09cLibraryPath = 'test/fixtures/furniture_pre_09c.jetlib';
-
-SymbolLibrary pre09cLibrary() =>
-    SymbolLibrary.decode(File(pre09cLibraryPath).readAsBytesSync());
 
 void main() {
   group('the asset', () {

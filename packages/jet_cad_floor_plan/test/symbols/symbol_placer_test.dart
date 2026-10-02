@@ -889,7 +889,10 @@ void main() {
 
   group('the library entry is read-only to a placement', () {
     /// Every field of every leaf record and payload, and the entry's own
-    /// fields, as text: a record has no `==`, a payload compares by identity.
+    /// fields, as text: a copy of the values taken before the placements.
+    /// Records and payloads have value `==`, but the entry's own objects
+    /// compared with themselves afterwards would hide an in-place change to
+    /// a shared buffer.
     List<String> snapshot(SymbolEntry e) => [
           '${e.key}|${e.name}|${e.category}|${e.tags}|${e.version}',
           '${e.definition.handle.value}|${e.definition.name}|'
