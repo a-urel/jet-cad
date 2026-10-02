@@ -1,10 +1,14 @@
 # Wall-aware symbols and the Symbol section (09c) — design
 
-**Date:** 2026-10-02. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-10-02. **Status:** design, **revision 3**. Revision 1
 (`24feacb`) was reviewed independently: "Ready with amendments", 2
 blocking, 6 major, 7 minor, 1 nit (W-1 to W-17,
 [the review](../notes/2026-10-02-wall-aware-symbols-spec-review-r1.md)),
-each applied; see [Revision 2](#revision-2).
+each applied; see [Revision 2](#revision-2). Revision 2 (`dad5ac0`) was
+spot-checked by a fresh reviewer: "Ready with amendments", 1 blocking, 4
+major, 4 minor, 1 nit (S-1 to S-10,
+[the spot check](../notes/2026-10-02-wall-aware-symbols-spec-review-r2.md)),
+each applied; see [Revision 3](#revision-3).
 **Sub-project:** `roadmap/09-symbol-library.md`, slice **09c** (09a, the
 core, is merged at `b4e7cdd`; 09b, the palette, at `6f7b69a`). **Size:** L,
 executed as **two plans** (decision 11): **09c-1** (wall attachment, the
@@ -192,7 +196,8 @@ they were asked:
 | `SetInstanceDefinitionCommand` (D7) | engine | `commands.dart`, `jet_cad_2d.dart` |
 | `MoveResolver` seam on `SelectTool`; `GripDrag` takes a full move transform (D8) | render | `select_tool.dart`, `grip_drag.dart`, `jet_cad_2d_flutter.dart` |
 | The symbol's local box, the wall faces, `attachToWall` (D2, D3, D4) | app | `lib/symbols/wall_attach.dart` (new), `lib/symbols/symbol_box.dart` (new) |
-| `WallBands.liveWalls`; `Obstacle`'s side (D3, D6) | app | `lib/parametric/wall_bands.dart`, `lib/parametric/opening_geometry.dart` |
+| `WallBands.liveWalls` (D3, D6) | app | `lib/parametric/wall_bands.dart` |
+| `WallFaces`, the shell-owned run and neighbour cache (D3, D4) | app | `lib/symbols/wall_attach.dart`, `main.dart` |
 | `placementTransform` generalised; `GhostMatrix` keyed on the transform (D5) | app | `symbol_placer.dart`, `symbol_ghost.dart` |
 | The placement tool attaches; camera listener (D6, D12) | app | `symbol_place_tool.dart` |
 | The Symbol section (D7) | app | `selection_panel.dart`, `lib/symbols/symbol_section.dart` (new) |
@@ -243,40 +248,55 @@ against, in world space:
   person in the room facing the wall, so a symbol's local `+x` (its right
   seen from its front) runs along `t`;
 - `a`, the run's end with the smaller `(·)·t`, and `L`, its length;
-- `w`, the wall's **world** thickness: the distance between its two faces
-  mapped through the group transform (under a scaled group this is not
-  `WorldWall.t`, which is unscaled, W-10).
+- `w`, the distance between the wall's two **drawn** face lines (below).
 
 The rule is stated in terms of `m` and `t` only; which of `±d` a face's `t`
 is depends on the group's mirror and is never assumed.
 
 - **Candidates:** the walls that pass `isUsableHost` (F-6) and are not
   degenerate, enumerated through a new public `WallBands.liveWalls(doc)`
-  (D6). A wall gives its **left** face (offset `lOff` along `n`) and its
-  **right** face (`rOff`, along `−n`), each mapped to world.
-- **A face's drawn extent** (F-7, W-9): in the wall's `HostFrame`, the
-  **left face runs from `startCap.first` to `endCap.last`**, the **right
-  face from `startCap.last` to `endCap.first`** (the outline ring is
-  `[...endCap, ...startCap]`; a node owner's cap has interior points on
-  neither face, which are not used). An L corner's inside face is
-  therefore shorter than its centreline, an outside face longer.
-- **Other walls cut a face** (W-4), from `obstaclesOf`'s data directly and
+  (D6). Each gives two faces.
+- **The face lines are the drawn ones** (W-9, S-2). In the wall's
+  `HostFrame`, the **left face** is the line through `startCap.first` and
+  `endCap.last`, the **right face** the line through `startCap.last` and
+  `endCap.first`, each point mapped to world through the wall's
+  `toWorld` (these are `drawnCapsOf`'s points). The face's extent is the
+  segment between those two points. The frame's `lOff`/`rOff` offsets are
+  **not** used: they hold the unscaled thickness in local space, which is
+  off the drawn face under a scaled group unless the outline fell back
+  (`opening_geometry.dart:91-93`, `wall_geometry.dart:468-476`, `:520-525`).
+  "Left" and "right" are the frame's (local) sides; `m` is whichever world
+  normal of the face line points away from the other face line. An L
+  corner's inside face is therefore shorter than its centreline, an outside
+  face longer. Interior cap points (a node owner's lobe) are not used.
+- **Other walls cut a face** (W-4), from `obstaclesOf`'s walls directly and
   **never through `stretchesOf`** (which clips to the straight span
   `[uS, uE]`, not to the drawn face):
   - **a T** (an end `k` of wall B strictly inside the host) cuts only the
-    face it butts: the **left** face when `End(B, k).a · n > 0` (B's body
-    lies on the host's left), else the right face;
-  - **an X** (a crossing) cuts **both** faces.
-  `Obstacle` gains a side field (`left`, `right` or `both`), set where
-  `obstaclesOf` already computes the near face (`opening_geometry.dart:144`)
-  and ignored by 08's existing call sites; a cut removes `[a, b]` from the
-  face's extent, and pieces no longer than `wallJoin.linear` are dropped.
+    face it butts. The side is decided **in the host's local frame** (S-3):
+    the left face when `(toLocal.linear · End(B, k).a) · frame.n > 0`, else
+    the right face. (`obstaclesOf` tests the **world** normal at
+    `opening_geometry.dart:144`; under a mirrored group the two disagree,
+    which is why the world test is not reused.) The cut is the `u`-range
+    of the points where B's two faces cross this face line, together with
+    B's cap points on it;
+  - **an X** (a crossing) cuts **each** face by its own interval (S-7): the
+    `u`-range of the two points where B's two faces cross **that** face
+    line, so an oblique crossing does not over-cut either face.
+  These cuts are computed in `wall_attach.dart` from the obstacle walls
+  `obstaclesOf` names; `Obstacle` itself is **not** changed, so 08's code
+  and its tests (`opening_geometry_test.dart:244-245` builds `Obstacle`
+  literals) are untouched. A cut removes its interval from the face's
+  extent; pieces no longer than `wallJoin.linear` are dropped.
 - **Openings do not cut a face** (non-goal): a wardrobe may stand in front
   of a door.
-- **Cost:** the runs are computed per wall from `wallsInDocument` and
-  cached against `WallBands.generation`, which `liveWalls` keeps current
-  (D6): recomputed only when the document changes. A pointer move over a
-  cached set is O(runs) and allocates nothing.
+- **Cost and owner** (S-8): the runs and the neighbours (D4) live in one
+  shell-owned **`WallFaces`** (in `wall_attach.dart`), built per wall from
+  `wallsInDocument` and keyed on `bands.generation`, which `liveWalls`
+  keeps current (D6); the placement tool (D6) and the move resolver (D8)
+  share it. Recomputed only when the document changes; a pointer move over
+  a cached set is O(runs) and allocates nothing (`liveWalls` returns an
+  unmodifiable **view** of the bands' handle list, not a copy).
 
 ### D4 — `attachToWall`: the one rule
 
@@ -309,7 +329,10 @@ pointer in placement (D6), the plain-moved insertion point in a move (D8).
      side to a neighbour's right end; the right side to a neighbour's left
      end. The candidate needing the smallest shift of `u` wins; a tie goes
      to the smaller resulting `u`;
-   - **clamp:** the centre is then clamped to `[W/2, L − W/2]`.
+   - **clamp:** when `W < L` the centre is then clamped to `[W/2, L −
+     W/2]`; when `W ≥ L` (a run that holds the symbol only within step 2's
+     tolerance) the centre is `L/2` (S-4: `num.clamp` throws on inverted
+     bounds).
 5. **The transform** is `translate(q)·R·S·translate(−c)` with `S =
    scale(−1, 1)` when mirrored (plain, **no pivot of its own**: after
    `translate(−c)` the box is centred on local `x = 0`, so the mirror
@@ -325,13 +348,15 @@ pointer in placement (D6), the plain-moved insertion point in a move (D8).
 **Neighbours** (decision 3) are the placed symbols standing against the
 same run: root-level instances on a visible, unlocked layer (the picking
 rule) whose definition carries a `SymbolComponent`, whose transform is
-orthonormal (W-8), whose transformed local back edge has both ends on the
+orthonormal (W-8; "orthonormal" throughout means `|a² + b² − 1|`,
+`|c² + d² − 1|` and `|ac + bd|` each at most `Tolerance.standard.linear`,
+1e-9), whose transformed local back edge has both ends on the
 run's line (distance at most `wallJoin.linear`) with their front on the
 room side, and whose interval `[uLeft, uRight]` along `t` (the projection
 of both back-edge ends, in whichever order a rotation or a mirror leaves
 them) **overlaps `[0, L]`** (W-14). They are found from the root instances
-once per run per cache generation (D6); the instance being moved (D8) is
-excluded.
+once per run per cache generation, in `WallFaces` (D3); the instance being
+moved (D8) is excluded.
 
 `captureWorld` is `kWallAttachPixels / scale`, `kWallAttachPixels = 16.0`
 (larger than the snap aperture: in placement the pointer is often the
@@ -359,8 +384,8 @@ symbol's centre, far from its back); `edgeCaptureWorld` is
 - **Keys while attached** (decision 5): `M` toggles the mirror, which D4
   applies; `R` and `Shift+R` change the turn count only.
 - **The marker:** while attached the snap marker is drawn at `q` (D4), the
-  point on the face, as the opening tool draws its marker on the centreline
-  (08 Ruling 08-14).
+  point on the face, with the `SnapKind.nearest` glyph, as the opening tool
+  draws its marker on the centreline (08 Ruling 08-14).
 - **The commit:** `placeSymbol` takes an optional `transform`, used instead
   of `placementTransform` when given. Still one compound, one undo step,
   the permissions checked before allocation (09b D6).
@@ -372,8 +397,8 @@ symbol's centre, far from its back); `edgeCaptureWorld` is
   never used the Wall or Opening tools still sees current walls. The tool
   calls `bands.invalidate()` after its own commit (Ruling 08-13's "and at
   every click"), so the next unit of a kitchen run sees the previous one at
-  once, before the change stream delivers. The face and neighbour cache
-  (D3, D4) lives in the tool and is keyed on `bands.generation`.
+  once, before the change stream delivers. The runs and neighbours come
+  from the shell's `WallFaces` (D3), keyed on `bands.generation`.
 
 ### D7 — The Symbol section and the size menu (09c-2)
 
@@ -391,7 +416,9 @@ root-level `InstanceNode` whose definition carries a `SymbolComponent`
   the transform becomes `R(θ' − θ)·A`, about the **insertion point** (the
   image of the definition's base point), so a mirror and any scale from a
   file are kept (W-8); when the result is orthonormal and `θ'` is a
-  multiple of 90°, the exact table (F-2) is used. Any finite number is
+  multiple of 90°, the linear part is `R(θ')·S` from the exact table
+  (F-2), `S = scale(−1, 1)` for a mirrored instance and the identity
+  otherwise, `-0.0` normalised. Any finite number is
   accepted and taken modulo 360; anything else reverts.
 - **Mirror** (a button): composes `scale(−1, 1)` in the **local** frame
   about the box's centre `x` (`T·translate(cx, 0)·scale(−1, 1)·
@@ -441,38 +468,57 @@ abstract interface class MoveResolver {
 }
 ```
 
-- **When it is asked** (W-6): only during a drag that began from
+- **When it is asked** (W-6, S-6): only during a drag that began from
   `PressClass.selectedBody` or `unselectedBody` (never a grip, a rotation
-  or a reshape), when `GripDrag.singleNode` (new: the node handle when the
-  drag captured exactly one `_NodeCapture` and nothing else, else null) is
-  non-null, and when Shift is up. With Shift down the plain, ortho move
-  applies. It receives the whole `ToolContext` (document, index, camera,
-  snap settings) and the plain move's delta (the translation the snap
-  chain gave).
-- **The commit is exact** (W-2): `GripDrag.moveToTransform(Transform2
-  delta, Transform2 exact)` stores `exact` (`T'`) for the single capture
-  and sets the drag's transform to `delta = T' · node.transform⁻¹` for the
-  preview (`selectionPreviewTransform`) and for `ctx.grips?.carry`.
-  `command()` then emits `TransformNodeCommand(h, T')` **verbatim**, and is
-  a no-op only when `T' == node.transform` (exact), not when the target
-  equals the base: an attached drag released at its press point still
-  turns the symbol. `_revalidate` and the camera retarget are unchanged.
-- **The guide and the marker:** while attached the snap marker is drawn at
-  the resolver's `marker` and the guide runs from the base to it.
+  or a reshape), when the selection had **exactly one key** at the drag's
+  start **and** `GripDrag.singleNode` (new: the node handle when the drag
+  captured exactly one `_NodeCapture` and nothing else, else null) is
+  non-null, and when Shift is up (with Shift down the plain, ortho move
+  applies). So a symbol selected with a door or a room (which the drag
+  skips as immovable) never attaches. It receives the whole `ToolContext`
+  (document, index, camera, snap settings) and the plain move's delta.
+- **Where it is asked** (S-5): inside `_retarget` (`select_tool.dart:347`),
+  after the plain `moveTo`, so every path that retargets asks it again: a
+  pointer move, the camera change (`_onCamera`, a wheel zoom mid-drag), a
+  Shift press or release, and the release's final `_follow`.
+- **The exact commit** (W-2, S-5): `GripDrag.moveToTransform(Vector2
+  marker, Transform2 exact)` stores `exact` (`T'`) for the single capture,
+  computes `delta = T' · node.transform⁻¹` **itself** (the caller cannot
+  hand it a plain delta) and sets the drag's transform to it for the
+  preview (`selectionPreviewTransform`) and for `ctx.grips?.carry`, and
+  sets the drag's target to `marker`, so the guide runs from the base to
+  the marker. **`moveTo` clears the stored `T'`**: a drag that attaches
+  and then leaves the face previews and commits the plain move. When `T'`
+  is set, `command()` emits `TransformNodeCommand(h, T')` **verbatim**, and
+  is a no-op only when `T'` equals `node.transform` **component-wise,
+  exactly** (`Transform2` has no `operator ==` by design,
+  `transform2.dart:124-128`), not when the target equals the base: an
+  attached drag released at its press point still turns the symbol.
+  `_revalidate` is unchanged.
+- **The marker glyph** while attached is the `SnapKind.nearest` glyph (a
+  point on an object; a null kind draws nothing unless on the grid,
+  `snap_marker.dart:13-14`), at the resolver's `marker`.
 - Without a resolver, or when it returns null, every path is today's
   bit for bit (a test compares the command, the bytes and the preview).
 
 **The app's resolver** (`symbol_move.dart`): for a root-level instance
 whose key's library entry carries `against-wall`, with
-`ctx.snap?.objectSnap` on and the library ready, and whose transform's
-linear part is **orthonormal within `Tolerance`** (else null: a scaled
-instance from a file is never attached, so its scale is never dropped,
-W-8), it calls `attachToWall` (D4) with `p` = **the plain-moved insertion
-point** `delta · node.transform · basePoint` (W-6: a sofa grabbed at one
-end does not jump to put its centre under the cursor; in placement the
-pointer **is** the insertion point, so this is "as in placement"), the
-instance's local box, its current mirror (the sign of `ad − bc`), and the
+`ctx.snap?.objectSnap` on and the library ready, and whose transform is
+orthonormal (D4; else null: a scaled instance from a file is never
+attached, so its scale is never dropped, W-8), it calls `attachToWall`
+(D4) through the shell's `WallFaces` (D3) with **`p` = the plain-moved
+back-centre** `delta · node.transform · c`, `c = ((left + right)/2, back)`
+(S-1). While the symbol is attached this point is on the face (`s ≈ 0`),
+so a drag along the wall keeps it attached whatever the zoom; to attach a
+free symbol, its back is brought within capture of a face, which is what
+"push it against the wall" means. Along the face, the back-centre's `u`
+equals the insertion point's for every catalog symbol (the base point is
+on the box's centre `x`, D9), so nothing jumps. Its other inputs: the
+instance's local box, its current mirror (the sign of `ad − bc`), the
 neighbours less itself; its `marker` is D4's `q`.
+
+(Placement keeps `p` = the raw pointer, D6: there the pointer **is** the
+ghost's insertion point and the user brings it to the face.)
 
 ### D9 — Content
 
@@ -576,6 +622,11 @@ survives a tab switch and a document change; a new app starts empty.
   placement's instance alone; purge does not remove definitions.
 - The tags are read from the library: before it is ready, a placed symbol
   neither attaches on a move nor offers sizes.
+- **Inherited (S-3):** under a **mirrored** group, a wall with a
+  non-centre justification has its `obstaclesOf` band across the
+  centreline from its drawn rectangle (the dimensions spec lists the same
+  flip, `2026-09-28-dimensions-design.md`); a T on such a wall may cut its
+  faces imprecisely. Centre-justified mirrored walls are exact and tested.
 
 ## Architecture
 
@@ -585,6 +636,7 @@ survives a tab switch and a document change; a new app starts empty.
 |---|---|---|
 | `packages/jet_cad_2d/lib/src/document/{component,commands}.dart`, `jet_cad_2d.dart` | 09c-1: D11; 09c-2: D7's command | engine |
 | `packages/jet_cad_2d_flutter/lib/src/{select_tool,grip_drag}.dart`, `jet_cad_2d_flutter.dart` | 09c-2 | D8's seam |
+| `apps/floor_planner/lib/parametric/wall_bands.dart` and its test | 09c-1 | `liveWalls` (D3, D6) |
 | `apps/floor_planner/lib/symbols/{symbol_box,wall_attach}.dart` (new) | 09c-1 | D2–D4 |
 | `apps/floor_planner/lib/symbols/{symbol_placer,symbol_ghost,symbol_place_tool,symbol_library,symbol_panel,furniture_catalog}.dart`, `assets/library/furniture.jetlib` | 09c-1 | D5, D6, D9, D10, D12, D13 |
 | `apps/floor_planner/lib/main.dart` | both | D6 (bands to the tool), D13; 09c-2: D8 wiring |
@@ -629,10 +681,24 @@ The degenerate fixtures this feature invites, and what replaces them:
 - **A size change at the identity** hides a wrong anchor: tested at 30°,
   mirrored.
 - **A rotated, translated group** hides a mirror- or scale-dependent face
-  rule (W-10): the attachment fixtures also put walls in a **mirrored**
-  group and a **scaled** group (`w` then differs from `WorldWall.t`).
+  rule (W-10, S-2, S-3): the attachment fixtures also put walls in a
+  **mirrored** group (centre-justified, with a T, so the local side test
+  is exercised where the world test would cut the wrong face) and a
+  **scaled** group, both **joined** (the drawn faces lie off the frame's
+  `lOff`/`rOff`) and **fallen back**.
+- **A move that starts free** hides the anchor (S-1): a fixture places a
+  unit by D6 at 0.2 px/mm, then drags it 500 mm along the face; it stays
+  attached and flush; a second drags a free bed until its back meets the
+  face.
+- **A run longer than the symbol** hides the clamp's inverted bounds
+  (S-4): a niche fixture whose run is `W − 2e-10` long.
+- **An oblique X** hides the over-cut (S-7): an X at 60°, an edge-snapped
+  unit flush against the crossing wall's face.
+- **A symbol alone in the selection** hides S-6: a symbol selected with a
+  door does not attach.
 - **One wall at a time** hides the tie rule and the neighbour overlap: a T
-  fixture with the pointer 1 px right of the stem (W-3), a neighbour
+  fixture with the pointer 1 px right of the stem and nearer the host face
+  than the stem's own face (W-3, S-9), a neighbour
   rotated 180°, and a back-to-back symbol on the opposite face (W-14).
 - **A fresh shell** hides the stale wall cache (W-5): a test places two
   units in a shell where no Wall or Opening tool ran; the second snaps to
@@ -694,17 +760,30 @@ Each must go red; the plan names the red test.
 | M-09c-ae | an attached move released at its press point commits nothing (the old `target == base` no-op) |
 | M-09c-af | the face tie rule without the distance-to-`[0, L]` key (W-3) |
 | M-09c-ag | a face's extent from the wrong cap end (`startCap.last` for the left face) (W-9) |
-| M-09c-ah | `s ≥ −w` / `s ≥ 0` in place of `s ≥ −w/2` (each) |
+| M-09c-ah | `s ≥ −w` / `s ≥ 0` in place of `s ≥ −w/2` (each; the `−w` variant is killed only where the far face has no run at `p`'s `u`, e.g. a T stem on the far face wider than `2·captureWorld`, S-9) |
 | M-09c-ai | arc bounds from the end points only (the toilet's front) |
 | M-09c-aj | `RemoveDefinitionCommand`'s forward capabilities without `components` (W-1) |
 | M-09c-ak | the wheel-zoom re-resolve skips the wall attachment |
 | M-09c-al | the Rotation row's commit drops the mirror / the scale (each) |
 | M-09c-am | a scaled instance attaches on a move (W-8) |
-| M-09c-an | the move resolver anchors on the raw pointer instead of the plain-moved insertion point (W-6) |
+| M-09c-an | the move resolver anchors on the insertion point or the raw pointer instead of the plain-moved back-centre (each, S-1) |
 | M-09c-ao | the resolver consulted with Shift down, or for a grip drag (each) |
 | M-09c-ap | the tool does not `invalidate()` the bands after its commit (W-5) |
 | M-09c-aq | a neighbour outside `[0, L]` counted (W-14) |
 | M-09c-ar | a family member with a different depth (the catalog test, W-16) |
+| M-09c-as | a T's side from the world normal under a mirror (S-3) |
+| M-09c-at | the face line from `lOff`/`rOff` instead of the drawn caps (S-2) |
+| M-09c-au | the clamp without the `W ≥ L` case (S-4: throws) |
+| M-09c-av | `moveTo` keeps a stored `T'` (S-5) |
+| M-09c-aw | a camera change mid-drag does not ask the resolver again (S-5) |
+| M-09c-ax | the resolver asked when the selection has two keys (S-6) |
+| M-09c-ay | an X cuts each face by the union of both faces' crossings (S-7) |
+| M-09c-az | the move resolver attaches with F3 off |
+| M-09c-ba | D11's inverse without `components` for a non-empty snapshot (a `DraftPermissions(structure: true, components: false)` undo) |
+| M-09c-bb | D12's listener not removed on hide / `cancel` / disarm (each) |
+| M-09c-bc | the render caches not updated by `SetInstanceDefinitionCommand` (W-13) |
+| M-09c-bd | D10 ignores child nodes / the leaf count (each) |
+| M-09c-be | the Size menu enabled when `geometry` is denied; Rotation read-only under runtime (each) |
 
 ## Exit gate
 
@@ -786,3 +865,35 @@ is applied; no decision of the human's was reopened.
 - **W-17:** the invariant sentence rewritten; D4 step 2 names
   `wallJoin.linear`; the edge-snap tie is stated; D12 also removes the
   listener on a disarm.
+
+## Revision 3
+
+Every finding of the
+[revision 2 spot check](../notes/2026-10-02-wall-aware-symbols-spec-review-r2.md)
+is applied; no decision of the human's was reopened.
+
+- **S-1 (blocking):** D8's resolver anchors on the plain-moved
+  **back-centre**, which is on the face while attached, so a drag along the
+  wall stays attached at any zoom; M-09c-an redefined; the move fixtures in
+  Testing.
+- **S-2:** D3's face lines are the drawn cap points mapped to world; `w` is
+  measured between them; `lOff`/`rOff` are not used. M-09c-at.
+- **S-3:** a T's side is decided in the host's local frame; the mirrored
+  fixture is centre-justified; the non-centre mirrored case is an
+  inherited limit (D14). M-09c-as.
+- **S-4:** D4's clamp sets `u = L/2` when `W ≥ L`. M-09c-au.
+- **S-5:** D8 asks the resolver inside `_retarget`; `moveToTransform(marker,
+  exact)` computes the delta itself; `moveTo` clears `T'`; the no-op test
+  is component-wise exact. M-09c-av, M-09c-aw.
+- **S-6:** D8 also requires exactly one selected key. M-09c-ax.
+- **S-7:** an X cuts each face by its own crossings; `Obstacle` is not
+  changed (the cuts are computed in `wall_attach.dart`), so 08's code and
+  tests are untouched. M-09c-ay.
+- **S-8:** the shell-owned `WallFaces` holds the runs and neighbours for
+  the tool and the resolver; `liveWalls` returns a view.
+- **S-9:** the fixtures for M-09c-af and M-09c-ah are named; mutants
+  M-09c-az to M-09c-be added.
+- **S-10:** the Files table names `wall_bands.dart`; "orthonormal" is
+  defined (`Tolerance.standard.linear`); the attached marker uses the
+  `SnapKind.nearest` glyph; D7's exact table for a mirrored instance is
+  `R(θ')·S`.
