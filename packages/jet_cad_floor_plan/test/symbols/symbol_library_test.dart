@@ -215,6 +215,45 @@ void main() {
       expectRejected(bytesOfJson(j), ['sofa.three@3', '"Seating"']);
     });
 
+    test('R03d a symbol with two family tags is refused (spec 09c D2)', () {
+      // The nightstand, not the first definition: the rule is checked per
+      // definition, and the message names this one's key and both tags.
+      final j = validLibraryJson();
+      symbolComponentJson(j, nightstandDef.value)['tags'] = [
+        'family:bed-side',
+        'nightstand',
+        'against-wall',
+        'family:table-low',
+      ];
+      expectRejected(bytesOfJson(j), [
+        'nightstand.single@2',
+        '"family:bed-side"',
+        '"family:table-low"',
+      ]);
+    });
+
+    test(
+        'R03d one family tag loads; a tag that only mentions a family is no '
+        'family tag', () {
+      final j = validLibraryJson();
+      symbolComponentJson(j, nightstandDef.value)['tags'] = [
+        'family',
+        'families:x',
+        'family:bed-side',
+        'against-wall',
+        'my-family:y',
+      ];
+      final lib = SymbolLibrary.decode(bytesOfJson(j));
+      expect(lib.entries[1].key, 'nightstand.single');
+      expect(lib.entries[1].tags, [
+        'family',
+        'families:x',
+        'family:bed-side',
+        'against-wall',
+        'my-family:y',
+      ]);
+    });
+
     test('R04 a leaf handle in children is refused', () {
       // Hand-built: the codec never writes a leaf handle there (spec V-9).
       final j = validLibraryJson();

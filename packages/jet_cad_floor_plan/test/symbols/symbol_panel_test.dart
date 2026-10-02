@@ -39,10 +39,16 @@ final List<String> allIds = [
 /// The "Bed Room" category: the only one `bed` matches (its name; and
 /// nothing outside it carries `bed` in a name, tag or category).
 const List<String> bedIds = [
+  'bed.double.1400@1',
   'bed.double@1',
+  'bed.double.1800@1',
+  'bed.single.800@1',
   'bed.single@1',
+  'bed.single.1000@1',
   'bed.nightstand@1',
+  'bed.wardrobe.1200@1',
   'bed.wardrobe@1',
+  'bed.wardrobe.2400@1',
 ];
 
 /// A tool that does nothing: the controller's other tool.

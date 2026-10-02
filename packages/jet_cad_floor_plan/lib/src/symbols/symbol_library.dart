@@ -13,6 +13,14 @@ import '../parametric/catalog.dart';
 import 'seating_component.dart';
 import 'symbol_component.dart';
 
+/// The tag a symbol stands against a wall by (spec 09c D2): it attaches to a
+/// wall's face when placed near one.
+const String againstWallTag = 'against-wall';
+
+/// The prefix of a symbol's size-family tag, `family:<id>` (spec 09c D2,
+/// D9). A symbol carries one at most (R03d).
+const String familyTagPrefix = 'family:';
+
 /// A library the loader refuses. The message names the offending key or
 /// handle and the rule it broke.
 class SymbolLibraryError implements Exception {
@@ -173,6 +181,16 @@ final class SymbolLibrary {
         if (tag != tag.toLowerCase()) {
           throw SymbolLibraryError('$who: the tag "$tag" is not lower-case');
         }
+      }
+      // R03d (spec 09c D2): a symbol is in one size family at most.
+      final families = [
+        for (final tag in component.tags)
+          if (tag.startsWith(familyTagPrefix)) tag,
+      ];
+      if (families.length > 1) {
+        throw SymbolLibraryError('$who has ${families.length} family tags '
+            '(${families.map((t) => '"$t"').join(', ')}): a symbol is in one '
+            'size family at most');
       }
       if (definition.children.isNotEmpty) {
         throw SymbolLibraryError('$who lists children '
