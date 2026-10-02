@@ -654,6 +654,60 @@ void main() {
       expect(matrix.computations, 5);
     });
 
+    test(
+        'touch: the press and the release each set the placement (spec D5, '
+        'F-6): with no hover the ghost is drawn at the press, and after a '
+        'release away from the drag it sits at the release point', () {
+      final rig = Rig();
+      Transform2 want(Vector2 p) => placementTransform(
+          at: gridOf(p),
+          basePoint: chair.definition.basePoint,
+          quarterTurns: 3,
+          mirrored: true);
+      List<double> bytes(Transform2? t) =>
+          t == null ? const [] : [t.a, t.b, t.c, t.d, t.e, t.f];
+      void paintOnce() =>
+          rig.tool.paintWorldOverlay(RecordingCanvas(), origin, scale);
+      final matrix = rig.tool.ghostMatrix;
+      final b = chair.definition.basePoint;
+
+      // Turned clockwise and mirrored, armed idle, before any pointer event.
+      rig.key(kR, held: [kShift]);
+      rig.key(kM);
+      expect(rig.tool.ghostVisible, isFalse, reason: 'no hover, no ghost');
+
+      rig.down(pA, pointer: 21);
+      expect(bytes(rig.tool.ghostPlacement), bytes(want(pA)),
+          reason: 'set by the press, with no hover');
+      paintOnce();
+      expect(matrix.computations, 1, reason: 'one paint computes once');
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
+      var (x, y) = apply(matrix.storage, b.x, b.y);
+      expect(x, closeTo(gridOf(pA).x - origin.x, 1e-9));
+      expect(y, closeTo(gridOf(pA).y - origin.y, 1e-9));
+      // q=3 mirrored: local +x to +y, local +y to +x.
+      expect([matrix.storage[0], matrix.storage[1]], [0.0, 1.0]);
+      expect([matrix.storage[4], matrix.storage[5]], [1.0, 0.0]);
+
+      rig.drag(pMid, pointer: 21);
+      expect(bytes(rig.tool.ghostPlacement), bytes(want(pMid)));
+      paintOnce();
+      expect(matrix.computations, 2);
+
+      // The up arrives at a point no move reported.
+      rig.up(pB, pointer: 21);
+      expect(bytes(rig.tool.ghostPlacement), bytes(want(pB)),
+          reason: 'set by the release, not left at the drag');
+      expect(bytes(rig.instances.single.transform), bytes(want(pB)),
+          reason: 'the ghost sits where the instance landed');
+      paintOnce();
+      expect(matrix.computations, 3);
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
+      (x, y) = apply(matrix.storage, b.x, b.y);
+      expect(x, closeTo(gridOf(pB).x - origin.x, 1e-9));
+      expect(y, closeTo(gridOf(pB).y - origin.y, 1e-9));
+    });
+
     test('hides on pointer exit and on cancel', () {
       final rig = Rig();
       rig.hover(pA);
