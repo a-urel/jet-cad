@@ -24,12 +24,14 @@ Vector2 farAt(double x, double y) => Vector2(attachX + x, attachY + y);
 const List<double> attachAngles = [30, -112.5];
 
 /// Wall [h]'s group in an attachment scene: a translation near the far
-/// point times a rotation that is never a multiple of 90°, times a mirror
+/// point times a rotation that is never a multiple of 90° ([rotation]
+/// radians when given, else one picked by [h]), times a mirror
 /// (`scale(1, −1)`) when [mirrored], times a uniform [scale].
-Transform2 attachGroup(int h, {bool mirrored = false, double scale = 1}) =>
+Transform2 attachGroup(int h,
+        {bool mirrored = false, double scale = 1, double? rotation}) =>
     Transform2.translation(
             attachX - 950 + 311.5 * (h % 7), attachY + 420 - 173.25 * (h % 5))
-        .multiply(Transform2.rotation(0.3 + 0.7 * (h % 9)))
+        .multiply(Transform2.rotation(rotation ?? 0.3 + 0.7 * (h % 9)))
         .multiply(Transform2.scale(scale, mirrored ? -scale : scale));
 
 /// One wall of a scene: world start and end, thickness, justification.
@@ -40,14 +42,20 @@ typedef SceneWall = (Vector2 s, Vector2 e, double t, Justification j);
 typedef AttachScene = ({DraftDocument doc, List<Handle> walls});
 
 /// [walls] in a fresh document, each one command in its own
-/// [attachGroup] (mirrored and scaled alike), handles ascending in order.
+/// [attachGroup] (mirrored and scaled alike; wall `i`'s group turned
+/// `rotations[i]` radians when that is given), handles ascending in order.
 AttachScene attachScene(List<SceneWall> walls,
-    {bool mirrored = false, double scale = 1}) {
+    {bool mirrored = false,
+    double scale = 1,
+    List<double?> rotations = const []}) {
   final doc = wallDoc();
   final hs = [for (final _ in walls) doc.handleSeed.next()];
   for (final (i, (s, e, t, j)) in walls.indexed) {
     doc.commands.execute(addWall(doc, hs[i], s, e, t, j,
-        at: attachGroup(hs[i].value, mirrored: mirrored, scale: scale)));
+        at: attachGroup(hs[i].value,
+            mirrored: mirrored,
+            scale: scale,
+            rotation: i < rotations.length ? rotations[i] : null)));
   }
   return (doc: doc, walls: hs);
 }
@@ -90,28 +98,34 @@ const double teeThickHost = 200, teeThickStem = 120;
 /// A T: the host along [deg], the stem from its centreline at [foot]
 /// (default [teeFoot]) along `deg + stemTurn` (so on the host's left for
 /// `0 < stemTurn < 180`), drawn towards the host (its end `k = 1` on it)
-/// when [inward].
+/// when [inward]. The host's group is turned [hostRotation] radians when
+/// given (by default its handle, 18, turns it 0.3 rad).
 AttachScene teeScene(double deg, double stemTurn,
     {Justification hostJ = Justification.centre,
     Justification stemJ = Justification.centre,
     bool inward = false,
     double foot = teeFoot,
     bool mirrored = false,
-    double scale = 1}) {
+    double scale = 1,
+    double? hostRotation}) {
   final at = polar(teeHostStart, deg, foot);
   final tip = polar(at, deg + stemTurn, teeStemLength);
-  return attachScene([
-    (
-      teeHostStart,
-      polar(teeHostStart, deg, teeHostLength),
-      teeThickHost,
-      hostJ
-    ),
-    if (inward)
-      (tip, at, teeThickStem, stemJ)
-    else
-      (at, tip, teeThickStem, stemJ),
-  ], mirrored: mirrored, scale: scale);
+  return attachScene(
+      [
+        (
+          teeHostStart,
+          polar(teeHostStart, deg, teeHostLength),
+          teeThickHost,
+          hostJ
+        ),
+        if (inward)
+          (tip, at, teeThickStem, stemJ)
+        else
+          (at, tip, teeThickStem, stemJ),
+      ],
+      mirrored: mirrored,
+      scale: scale,
+      rotations: [hostRotation]);
 }
 
 /// An X: the host (200 thick, 4200 long) along [deg] from [teeHostStart];

@@ -210,8 +210,10 @@ void main() {
       'WF3 a T cuts only the face the stem butts, by the range where the '
       'stem\'s two drawn face lines cross that face line; the other face '
       'is whole; every host justification, a stem on either side, drawn '
-      'from or towards the host, at 30° and −112.5°', () {
-    var n = 0;
+      'from or towards the host, at 30° and −112.5°, the host\'s group '
+      'turned 0.3, 1.0 and 1.7 rad (S-3: the side is decided in the host\'s '
+      'local frame, which mapping the stem by toWorld would get wrong)', () {
+    var n = 0, disagree = 0;
     for (final deg in attachAngles) {
       for (final hostJ in Justification.values) {
         for (final (stemTurn, butted) in const [
@@ -219,47 +221,73 @@ void main() {
           (-110.0, FaceSide.right),
         ]) {
           for (final inward in const [false, true]) {
-            final why = '$deg° ${hostJ.name} stem $stemTurn'
-                '${inward ? ' inward' : ''}';
-            final sc = teeScene(deg, stemTurn,
-                hostJ: hostJ, stemJ: Justification.left, inward: inward);
-            final host = worldWallOf(sc.doc, sc.walls[0]);
-            final stem = worldWallOf(sc.doc, sc.walls[1]);
-            final runs = faceRunsOf(sc.doc, sc.walls[0]);
-            final (hl, hr) = offsetsBy(hostJ, teeThickHost);
-            final (sl, sr) = stem.offsets;
-            final d = host.d;
-            for (final side in FaceSide.values) {
-              final off = side == FaceSide.left ? hl : hr;
-              final p0 = face(host, off).$1;
-              final mine = onSide(runs, side);
-              final rw = '$why ${side.name}';
-              for (final r in mine) {
-                expectRunFrame(r, rw);
+            for (final hostRotation in const <double?>[null, 1.0, 1.7]) {
+              final why = '$deg° ${hostJ.name} stem $stemTurn'
+                  '${inward ? ' inward' : ''}'
+                  ' host group ${hostRotation ?? 0.3} rad';
+              final sc = teeScene(deg, stemTurn,
+                  hostJ: hostJ,
+                  stemJ: Justification.left,
+                  inward: inward,
+                  hostRotation: hostRotation);
+              final host = worldWallOf(sc.doc, sc.walls[0]);
+              final stem = worldWallOf(sc.doc, sc.walls[1]);
+              final gx = host.toWorld.transformDirection(Vector2(1, 0));
+              expect(
+                  math.atan2(gx.y, gx.x), closeTo(hostRotation ?? 0.3, 1e-12),
+                  reason: '$why: the host group\'s rotation');
+              // The premise: the local side test names the butted face;
+              // the stem's direction mapped by toWorld instead of toLocal
+              // (turned by twice the group's rotation) disagrees for a
+              // host group turned far enough.
+              final frame = hostFrameInDocument(sc.doc, sc.walls[0])!;
+              final into = End(stem, inward ? 1 : 0).a;
+              final localLeft =
+                  host.toWorld.invert().transformDirection(into).dot(frame.n) >
+                      0;
+              expect(localLeft, butted == FaceSide.left, reason: why);
+              final byToWorld =
+                  host.toWorld.transformDirection(into).dot(frame.n) > 0;
+              if (byToWorld != localLeft) disagree++;
+              final runs = faceRunsOf(sc.doc, sc.walls[0]);
+              final (hl, hr) = offsetsBy(hostJ, teeThickHost);
+              final (sl, sr) = stem.offsets;
+              final d = host.d;
+              for (final side in FaceSide.values) {
+                final off = side == FaceSide.left ? hl : hr;
+                final p0 = face(host, off).$1;
+                final mine = onSide(runs, side);
+                final rw = '$why ${side.name}';
+                for (final r in mine) {
+                  expectRunFrame(r, rw);
+                }
+                if (side != butted) {
+                  expect(mine, hasLength(1), reason: '$rw: whole');
+                  expectEnds(mine.single, p0, face(host, off).$2, rw);
+                  continue;
+                }
+                final u1 = crossU(p0, d, face(stem, sl)),
+                    u2 = crossU(p0, d, face(stem, sr));
+                final lo = math.min(u1, u2), hi = math.max(u1, u2);
+                // The premise: an oblique stem's cut is wider than it.
+                expect(hi - lo, greaterThan(teeThickStem), reason: rw);
+                expect(mine, hasLength(2), reason: '$rw: split');
+                mine.sort(
+                    (x, y) => (x.a - p0).dot(d).compareTo((y.a - p0).dot(d)));
+                expectEnds(mine[0], p0, p0 + d * lo, '$rw before the stem');
+                expectEnds(mine[1], p0 + d * hi, p0 + d * teeHostLength,
+                    '$rw after the stem');
               }
-              if (side != butted) {
-                expect(mine, hasLength(1), reason: '$rw: whole');
-                expectEnds(mine.single, p0, face(host, off).$2, rw);
-                continue;
-              }
-              final u1 = crossU(p0, d, face(stem, sl)),
-                  u2 = crossU(p0, d, face(stem, sr));
-              final lo = math.min(u1, u2), hi = math.max(u1, u2);
-              // The premise: an oblique stem's cut is wider than it.
-              expect(hi - lo, greaterThan(teeThickStem), reason: rw);
-              expect(mine, hasLength(2), reason: '$rw: split');
-              mine.sort(
-                  (x, y) => (x.a - p0).dot(d).compareTo((y.a - p0).dot(d)));
-              expectEnds(mine[0], p0, p0 + d * lo, '$rw before the stem');
-              expectEnds(mine[1], p0 + d * hi, p0 + d * teeHostLength,
-                  '$rw after the stem');
+              n++;
             }
-            n++;
           }
         }
       }
     }
-    expect(n, 24);
+    expect(n, 72);
+    // The premise holds in every case whose host group is turned 1.0 or
+    // 1.7 rad (none at 0.3 rad, the default group of handle 18).
+    expect(disagree, 48);
   });
 
   test(
@@ -501,5 +529,120 @@ void main() {
             reason: why);
       }
     }
+  });
+
+  test(
+      'WF9 two cuts on one face that meet merge into one gap: a narrow '
+      'square stem nested inside the cut of a wide oblique stem; a square '
+      'stem overlapping the start of an oblique X\'s cut on that face, '
+      'though the X comes first in the obstacle order (its band interval '
+      'starts on the other face); at 30° and −112.5°, either face', () {
+    var n = 0;
+    for (final deg in attachAngles) {
+      for (final (sign, butted) in const [
+        (1.0, FaceSide.left),
+        (-1.0, FaceSide.right),
+      ]) {
+        for (final nested in const [true, false]) {
+          final why = '$deg° ${butted.name} '
+              '${nested ? 'nested stems' : 'a stem across an X'}';
+          // The host (200 thick, centre) along deg. Nested: a narrow stem
+          // (60 thick) square to it at 1850, then a wide one (240 thick)
+          // at 35° from 1700, whose cut is 240 / sin 35° ≈ 418 wide about
+          // 1700 + 100·cot 35° ≈ 1843. A stem across an X: the stem (60
+          // thick) square to it at 2110, then an X (160 thick) at 30°
+          // through the host's midpoint 2100, whose cut is 320 wide about
+          // 2100 ± 100·cot 30° ≈ 2100 ± 173 (later on the butted face).
+          final at = polar(teeHostStart, deg, nested ? 1850 : 2110);
+          final SceneWall second;
+          if (nested) {
+            final wideAt = polar(teeHostStart, deg, 1700);
+            second = (
+              wideAt,
+              polar(wideAt, deg + sign * 35, 2000),
+              240,
+              Justification.centre
+            );
+          } else {
+            final mid = polar(teeHostStart, deg, 2100);
+            second = (
+              polar(mid, deg + sign * 30 + 180, 1500),
+              polar(mid, deg + sign * 30, 1500),
+              160,
+              Justification.centre
+            );
+          }
+          final sc = attachScene([
+            (
+              teeHostStart,
+              polar(teeHostStart, deg, teeHostLength),
+              teeThickHost,
+              Justification.centre
+            ),
+            (at, polar(at, deg + sign * 90, 2000), 60, Justification.centre),
+            second,
+          ]);
+          final host = worldWallOf(sc.doc, sc.walls[0]);
+          final d = host.d;
+          // B's cut on the host's face at offset [off], by the oracle.
+          (double, double) cutBy(Handle h, double off) {
+            final p0 = face(host, off).$1;
+            final b = worldWallOf(sc.doc, h);
+            final (bl, br) = b.offsets;
+            final u1 = crossU(p0, d, face(b, bl)),
+                u2 = crossU(p0, d, face(b, br));
+            return (math.min(u1, u2), math.max(u1, u2));
+          }
+
+          final near = sign * teeThickHost / 2;
+          final square = cutBy(sc.walls[1], near);
+          final other = cutBy(sc.walls[2], near);
+          // The premises. Nested: the square stem's cut lies inside the
+          // wide one's. Across an X: the square stem's cut starts first on
+          // the butted face and runs into the X's, while the obstacle
+          // order (by band interval) puts the X first.
+          if (nested) {
+            expect(square.$1 - other.$1, greaterThan(100), reason: why);
+            expect(other.$2 - square.$2, greaterThan(100), reason: why);
+          } else {
+            expect(other.$1 - square.$1, greaterThan(20), reason: why);
+            expect(square.$2 - other.$1, greaterThan(20), reason: why);
+            expect(other.$2 - square.$2, greaterThan(100), reason: why);
+            final obstacles = layoutInDocument(sc.doc, sc.walls[0])!.obstacles;
+            expect(
+                [for (final o in obstacles) o.wall], [sc.walls[2], sc.walls[1]],
+                reason: why);
+          }
+
+          final runs = faceRunsOf(sc.doc, sc.walls[0]);
+          for (final r in runs) {
+            expectRunFrame(r, why);
+          }
+          // On each face, the pieces between its cuts' union, ascending.
+          for (final side in FaceSide.values) {
+            final isNear = side == butted;
+            final off = isNear ? near : -near;
+            final p0 = face(host, off).$1;
+            final cuts = isNear
+                ? [square, other]
+                : [if (!nested) cutBy(sc.walls[2], off)];
+            final lo = cuts.map((c) => c.$1).fold(teeHostLength, math.min);
+            final hi = cuts.map((c) => c.$2).fold(0.0, math.max);
+            final want = cuts.isEmpty
+                ? [(0.0, teeHostLength)]
+                : [(0.0, lo), (hi, teeHostLength)];
+            final mine = onSide(runs, side)
+              ..sort((x, y) => (x.a - p0).dot(d).compareTo((y.a - p0).dot(d)));
+            final rw = '$why ${side.name}';
+            expect(mine, hasLength(want.length), reason: '$rw: $mine');
+            for (final (i, (u0, u1)) in want.indexed) {
+              expectEnds(mine[i], p0 + d * u0, p0 + d * u1, '$rw piece $i');
+            }
+          }
+          n++;
+        }
+      }
+    }
+    expect(n, 8);
   });
 }
