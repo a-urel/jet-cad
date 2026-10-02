@@ -8,6 +8,7 @@
 // along each run's own `a`, `t` and `m` (D3, pinned by
 // `wall_faces_test.dart`), never the code under test.
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:floor_planner/parametric/wall.dart';
 import 'package:floor_planner/parametric/wall_bands.dart';
@@ -408,8 +409,9 @@ void main() {
         'WA8 who is a neighbour: a toilet flush on the face is; on the '
         'other piece of a T (outside [0, L], W-14), back to back on the '
         'opposite face, turned to face the wall, 300 mm into the room, on '
-        'a hidden or a locked layer, scaled, nested in a group, or a plain '
-        'block, it is not', () async {
+        'a hidden or a locked layer, scaled, turned 10° about a back corner '
+        '(one back end off the line), sheared with unit columns, nested in a '
+        'group, or a plain block, it is not', () async {
       for (final deg in attachAngles) {
         final sc = teeScene(deg, 90);
         final doc = withSymbols(sc.doc);
@@ -457,6 +459,68 @@ void main() {
                 .multiply(Transform2.translation(-c.x, -c.y)));
         nestedToilet(doc, standing(r, toiletBox, 400));
         plainBlock(doc, standing(r, toiletBox, 1100));
+        // Turned 10° about one back corner (local back-left, then local
+        // back-right): that corner stays on the face line, the other back
+        // end lifts ~69 mm into the room, the front stays in the room.
+        // Orthonormal, overlapping [0, L]: only "both ends on the line"
+        // refuses it.
+        final front =
+            Vector2((toiletBox.left + toiletBox.right) / 2, toiletBox.front);
+        final flush = standing(r, toiletBox, 700);
+        for (final (x, turn) in [
+          (toiletBox.left, -10.0),
+          (toiletBox.right, 10.0),
+        ]) {
+          final pivot = flush.transformPoint(Vector2(x, toiletBox.back));
+          final g = Transform2.translation(pivot.x, pivot.y)
+              .multiply(Transform2.rotation(turn * math.pi / 180))
+              .multiply(Transform2.translation(-pivot.x, -pivot.y))
+              .multiply(flush);
+          final ends = [
+            for (final e in [toiletBox.left, toiletBox.right])
+              sOf(r, g.transformPoint(Vector2(e, toiletBox.back)))
+          ];
+          final why = '$deg° turned about $x';
+          // Premises by hand: orthonormal (a proper rotation), one back end
+          // on the face line, the other off it, the front in the room.
+          expect((g.a * g.a + g.b * g.b - 1).abs(), lessThan(1e-12));
+          expect((g.c * g.c + g.d * g.d - 1).abs(), lessThan(1e-12));
+          expect((g.a * g.c + g.b * g.d).abs(), lessThan(1e-12));
+          expect(ends.map((s) => s.abs()).reduce(math.min), lessThan(1e-9),
+              reason: '$why: the pivot on the face');
+          expect(ends.reduce(math.max), greaterThan(60),
+              reason: '$why: lifted');
+          expect(sOf(r, g.transformPoint(front)), greaterThan(500),
+              reason: '$why: the front in the room');
+          placeToilet(doc, g);
+        }
+        // Sheared: its columns unit length (the first t, the second −m
+        // turned 20°) but not orthogonal, its back edge flush on the face
+        // line, its front in the room. Only `|ac + bd|` refuses it.
+        final c20 = math.cos(20 * math.pi / 180),
+            s20 = math.sin(20 * math.pi / 180);
+        final ym =
+            Vector2(-r.m.x * c20 + r.m.y * s20, -r.m.x * s20 - r.m.y * c20);
+        final shearQ = at(r, 1200, 0);
+        final shear = Transform2.translation(shearQ.x, shearQ.y)
+            .multiply(Transform2(r.t.x, r.t.y, ym.x, ym.y, 0, 0))
+            .multiply(Transform2.translation(-c.x, -c.y));
+        // Premises by hand: unit columns, not orthogonal (`ac + bd` is
+        // sin 20°), the back edge on the face line, the front in the room.
+        expect((shear.a * shear.c + shear.b * shear.d).abs(), greaterThan(0.3),
+            reason: '$deg° shear');
+        expect(
+            (shear.a * shear.a + shear.b * shear.b - 1).abs(), lessThan(1e-12));
+        expect(
+            (shear.c * shear.c + shear.d * shear.d - 1).abs(), lessThan(1e-12));
+        for (final e in [toiletBox.left, toiletBox.right]) {
+          expect(sOf(r, shear.transformPoint(Vector2(e, toiletBox.back))).abs(),
+              lessThan(1e-9),
+              reason: '$deg° shear: back end $e on the face');
+        }
+        expect(sOf(r, shear.transformPoint(front)), greaterThan(500),
+            reason: '$deg° shear: the front in the room');
+        placeToilet(doc, shear);
         await pumpEventQueue();
 
         final faces = WallFaces(bands);
@@ -747,6 +811,67 @@ void main() {
             reason: '$why: in either order');
       }
     }
+  });
+
+  test(
+      'WA17 the edge-snap tie (D4 step 4): two neighbours whose snaps shift '
+      'u by exactly −16 and +16: the smaller resulting u wins, in either '
+      'order', () {
+    for (final deg in attachAngles) {
+      for (final grp in groups.take(2)) {
+        final sc = freeWallScene(deg, Justification.left, mirrored: grp.$1);
+        final runs = faceRunsOf(sc.doc, sc.walls.single);
+        for (final r in runs) {
+          final p = at(r, 1500.25, 20);
+          // The u the code computes: `(p − a)·t` in the same arithmetic,
+          // bitwise.
+          final u0 = uOf(r, p);
+          final half = toiletBox.width / 2;
+          // Every value below lies in [1024, 2048), one binade with u0, so
+          // each sum and difference is exact.
+          final hi = u0 - 16 - half, lo = u0 + 16 + half;
+          final why = '$deg° ${groupName(grp)} ${r.side.name}';
+          expect((hi + half) - u0, -16, reason: '$why: the left snap');
+          expect((lo - half) - u0, 16, reason: '$why: the right snap');
+          // Premise: the run's ends are beyond the edge capture.
+          expect(u0 - half, greaterThan(edge), reason: why);
+          expect(r.length - half - u0, greaterThan(edge), reason: why);
+          final left = (lo: hi - 400, hi: hi, instance: Handle(9001));
+          final right = (lo: lo, hi: lo + 400, instance: Handle(9002));
+          for (final order in [
+            [left, right],
+            [right, left],
+          ]) {
+            for (final mirrored in const [false, true]) {
+              final att = attachToWall([r], toiletBox, p, cap,
+                  mirrored: mirrored,
+                  neighbours: [order],
+                  edgeCaptureWorld: edge);
+              expectFlush(
+                  att,
+                  r,
+                  toiletBox,
+                  u0 - 16,
+                  mirrored,
+                  '$why ${order.first == left ? 'left first' : 'right first'}'
+                  '${mirrored ? ' mirrored' : ''}');
+            }
+          }
+        }
+      }
+    }
+  });
+
+  test(
+      'WA18 orthonormal (W-8): a rotation and a mirror are; a scale and a '
+      'shear with unit-length columns are not', () {
+    final c = math.cos(20 * math.pi / 180), s = math.sin(20 * math.pi / 180);
+    expect(isOrthonormal(Transform2(c, s, -s, c, 1e5, -7e4)), isTrue);
+    expect(isOrthonormal(Transform2(-c, -s, -s, c, 1e5, -7e4)), isTrue);
+    expect(isOrthonormal(Transform2(1, 0, s, c, 1e5, -7e4)), isFalse);
+    expect(isOrthonormal(Transform2(c, s, 0, 1, 0, 0)), isFalse);
+    expect(isOrthonormal(Transform2(1.5 * c, 1.5 * s, -s, c, 0, 0)), isFalse);
+    expect(isOrthonormal(Transform2(c, s, -1.5 * s, 1.5 * c, 0, 0)), isFalse);
   });
 }
 

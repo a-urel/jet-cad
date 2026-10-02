@@ -290,24 +290,34 @@ WallAttachment? attachToWall(
   var u = bestU;
   var shift = 0.0;
   var snapped = false;
-  void consider(double to) {
-    final d = to - u;
-    if (d.abs() > edgeCaptureWorld) return;
-    if (!snapped ||
-        d.abs() < shift.abs() ||
-        (d.abs() == shift.abs() && d < shift)) {
+  // Each target is where the centre goes when that side meets it; `d` is
+  // the shift to it. Plain locals and a static test, no closure: a closure
+  // over `u` and `shift` would allocate its context and box each double it
+  // writes (D4: the query allocates O(1)).
+  var d = half - u;
+  if (_snapsBefore(d, shift, snapped, edgeCaptureWorld)) {
+    shift = d;
+    snapped = true;
+  }
+  d = (length - half) - u;
+  if (_snapsBefore(d, shift, snapped, edgeCaptureWorld)) {
+    shift = d;
+    snapped = true;
+  }
+  final ns = neighbours[best];
+  for (var k = 0; k < ns.length; k++) {
+    final n = ns[k];
+    if (exclude != null && n.instance == exclude) continue;
+    d = (n.hi + half) - u;
+    if (_snapsBefore(d, shift, snapped, edgeCaptureWorld)) {
       shift = d;
       snapped = true;
     }
-  }
-
-  // Each target is where the centre goes when that side meets it.
-  consider(half);
-  consider(length - half);
-  for (final n in neighbours[best]) {
-    if (exclude != null && n.instance == exclude) continue;
-    consider(n.hi + half);
-    consider(n.lo - half);
+    d = (n.lo - half) - u;
+    if (_snapsBefore(d, shift, snapped, edgeCaptureWorld)) {
+      shift = d;
+      snapped = true;
+    }
   }
   if (snapped) u += shift;
   if (width < length) {
@@ -331,6 +341,17 @@ WallAttachment? attachToWall(
     q: q,
     run: run,
   );
+}
+
+/// Whether the edge snap shifting `u` by [d] is within [capture] and beats
+/// the snap so far ([shift], none when not [snapped]), by D4 step 4: the
+/// smaller `|shift|`, a tie to the smaller resulting `u` (the smaller
+/// shift).
+bool _snapsBefore(double d, double shift, bool snapped, double capture) {
+  if (d.abs() > capture) return false;
+  return !snapped ||
+      d.abs() < shift.abs() ||
+      (d.abs() == shift.abs() && d < shift);
 }
 
 /// Whether run [r] (`|s|` [absS], distance [gap] from `u` to `[0, L]`)
