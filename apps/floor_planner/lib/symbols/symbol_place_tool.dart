@@ -5,7 +5,7 @@
 //
 // Plan 09b Task 6 (pointer, snap, ghost) and Task 7 (keys, F-12; the
 // permission check before `placeSymbol` allocates a handle, Ruling 05-3,
-// F-16).
+// F-16). Plan 09c-1 Task 8 (spec 09c D12): the ghost follows a camera change.
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -47,6 +47,11 @@ const double kGhostCrossPixels = 6.0;
 ///   drops the press, looks up the new ghost path and notifies. The turns
 ///   and the mirror are kept (Ruling R-B6-2).
 /// - Keys ([onKey]): R, Shift+R and M turn and mirror the next placement.
+/// - Spec 09c D12: while [ghostVisible] it listens to the camera, and a
+///   camera change (a wheel zoom, a pan) re-resolves the ghost from the last
+///   pointer's **screen** point, as `PlacementTool` does (F-8). The listener
+///   goes when the ghost hides, on [cancel], on a disarm and on [dispose]; a
+///   re-arm while the ghost is shown listens again.
 class SymbolPlaceTool extends Tool {
   SymbolPlaceTool(this.armed) {
     armed.addListener(_onArmed);
@@ -74,9 +79,19 @@ class SymbolPlaceTool extends Tool {
   int _quarterTurns = 0;
   bool _mirrored = false;
 
-  /// The ghost's placement transform, computed on pointer, key and arm
-  /// events ([_syncPlacement]), never in a paint (spec 09c D5, W-15).
+  /// The ghost's placement transform, computed on pointer, key, arm and
+  /// camera events ([_syncPlacement]), never in a paint (spec 09c D5, W-15).
   Transform2? _placement;
+
+  /// Spec 09c D12: the last pointer event's screen point and context, kept
+  /// so a camera change re-resolves the ghost under the resting pointer. The
+  /// context is a plain reference: the camera listener is [_listening].
+  ui.Offset _lastScreen = ui.Offset.zero;
+  ToolContext? _context;
+
+  /// The context whose camera this tool listens to; non-null exactly while
+  /// [ghostVisible] (after a pointer event brought a context).
+  ToolContext? _listening;
 
   /// Spec D6 Commit: every capability a placement may need. The first
   /// placement of a symbol copies its definition (structure, geometry) and
@@ -134,6 +149,14 @@ class SymbolPlaceTool extends Tool {
 
   void _onArmed() {
     _syncPath();
+    final wasListening = _listening != null;
+    _syncCamera();
+    final ctx = _listening;
+    // Re-armed with the ghost still shown: the camera may have moved while
+    // nothing listened, so the ghost goes under the pointer again.
+    if (ctx != null && !wasListening) {
+      _resolve(ctx, _worldUnderPointer(ctx));
+    }
     _syncPlacement();
     _pressed = false;
     _pressPointer = -1;
@@ -172,15 +195,48 @@ class SymbolPlaceTool extends Tool {
     );
   }
 
+  /// The tool's one recompute path: every pointer event and every camera
+  /// change resolves the raw point and then the placement through here.
+  void _update(ToolContext ctx, Vector2 raw) {
+    _resolve(ctx, raw);
+    _syncPlacement();
+  }
+
+  /// A pointer event's screen point and context, for [_onCamera].
+  void _track(ToolPointerEvent e, ToolContext ctx) {
+    _lastScreen = e.screen;
+    _context = ctx;
+  }
+
+  Vector2 _worldUnderPointer(ToolContext ctx) =>
+      ctx.camera.value.screenToWorld(Vector2(_lastScreen.dx, _lastScreen.dy));
+
+  /// Spec 09c D12: listens to the camera exactly while [ghostVisible].
+  void _syncCamera() {
+    final want = ghostVisible ? _context : null;
+    if (identical(want, _listening)) return;
+    _listening?.camera.removeListener(_onCamera);
+    _listening = want;
+    want?.camera.addListener(_onCamera);
+  }
+
+  void _onCamera() {
+    final ctx = _listening;
+    if (ctx == null) return;
+    _update(ctx, _worldUnderPointer(ctx));
+    notifyListeners();
+  }
+
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
     if (armed.value == null) return;
     if (e.buttons & kPrimaryButton == 0) return;
     _pressed = true;
     _pressPointer = e.pointer;
-    _resolve(ctx, e.world);
-    _syncPlacement();
+    _track(e, ctx);
+    _update(ctx, e.world);
     _ghostVisible = true;
+    _syncCamera();
     notifyListeners();
   }
 
@@ -190,9 +246,10 @@ class SymbolPlaceTool extends Tool {
     final pressedMove = e.buttons & kPrimaryButton != 0;
     // A cancelled press's remaining moves (F-6), or another pointer's.
     if (pressedMove && (!_pressed || e.pointer != _pressPointer)) return;
-    _resolve(ctx, e.world);
-    _syncPlacement();
+    _track(e, ctx);
+    _update(ctx, e.world);
     _ghostVisible = true;
+    _syncCamera();
     notifyListeners();
   }
 
@@ -203,9 +260,10 @@ class SymbolPlaceTool extends Tool {
     _pressPointer = -1;
     final entry = armed.value;
     if (entry != null) {
-      _resolve(ctx, e.world);
-      _syncPlacement();
+      _track(e, ctx);
+      _update(ctx, e.world);
       _ghostVisible = true;
+      _syncCamera();
       _place(ctx, entry, _at.point);
     }
     notifyListeners();
@@ -215,6 +273,7 @@ class SymbolPlaceTool extends Tool {
   void onPointerExit(ToolContext ctx) {
     if (!_ghostVisible) return;
     _ghostVisible = false;
+    _syncCamera();
     notifyListeners();
   }
 
@@ -281,6 +340,7 @@ class SymbolPlaceTool extends Tool {
     _pressed = false;
     _pressPointer = -1;
     _ghostVisible = false;
+    _syncCamera();
     notifyListeners();
   }
 
@@ -340,6 +400,9 @@ class SymbolPlaceTool extends Tool {
   @override
   void dispose() {
     armed.removeListener(_onArmed);
+    _listening?.camera.removeListener(_onCamera);
+    _listening = null;
+    _context = null;
     super.dispose();
   }
 }
