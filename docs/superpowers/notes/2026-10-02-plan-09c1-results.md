@@ -37,8 +37,17 @@ the gates and re-fired the mutants in a detached worktree. Task 6 ran in its
 own worktree on `wip/09c1-t6` and Task 9b on `wip/09c1-t9b` while other
 tasks used the plan worktree (C-2); their commits were cherry-picked (C-4).
 **The final whole-branch review** (a fresh reviewer, a detached worktree,
-on the tip after this note) **is still to come**; its verdict, its fixes
-and its sample on the tip are recorded by the commit that applies them.
+on `c1ea23c`): **"Ready"**, no blocking, major or minor finding. It re-ran
+every gate (the gates of record below, matched), read every `lib/` change
+against D2-D6 and D9-D13 as amended and found no cross-task defect,
+checked R-C11a-3 independently (the "pre-09c" plan built at `main`
+`4d6b78f` and at the tip is byte-identical, 9,075 bytes), spot-checked five
+of this note's figures against the reviews (all match), and fired a sample
+of 48 mutants (below). Its one nit, a stale doc comment in
+`symbol_ghost.dart` ("Task 8 will add camera events"), is fixed in the
+commit after `c1ea23c`; its other observation (WE1's corner check measures
+from `faceRunsOf`'s own point; WF2 pins the corner at unit level) needs no
+change. The review is `final-review.md` in the ledger.
 
 | Task | Commits | Review |
 |---|---|---|
@@ -292,7 +301,7 @@ a time, C-1):
 
 The P-8 rule (09a's): this table is compiled from each task's report and
 independent review, both of which fired real runs at the task commit; the
-final whole-branch review re-fires a sample on the tip (to come). Line
+final whole-branch review re-fired a sample on the tip (below). Line
 numbers are at the task's commit. Every run restored its file by `cp`
 (`diff` exit 0; for catalog mutants also `cmp` on the regenerated asset).
 "R" marks a mutant the reviewer added; "(b)" a mutant fired at the b-round.
@@ -468,7 +477,15 @@ are not degenerate", WF3's disagreement count of 48, L6's out-of-order
 premise) have fixture mutants of their own where the review fired them
 (L6: both red), no product mutant.
 
-**The final whole-branch review's sample:** to be recorded by that review.
+**The final whole-branch review's sample** (on `c1ea23c`, 48 mutants
+across Tasks 1-11a, 33 spec-named and 15 of the reviewer's own; each by `cp`
+backup, a single-match replacement, the named test files, `cp` back, `diff`
+exit 0; the catalog mutant also regenerated and restored the asset, `cmp`
+0): **47 red, 1 survivor**, mis-aimed: on the end-to-end file the reviewer
+removed only the neighbour "right side to a neighbour's left end" snap,
+which WE1 never exercises; the same mutant is red at unit level (WA7), and
+the other half of M-09c-h is red in WE1. The table, with red tests and line
+numbers at `c1ea23c`, is section 4 of the ledger's `final-review.md`.
 
 ## Found, not fixed
 
