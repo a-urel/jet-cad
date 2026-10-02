@@ -9,8 +9,7 @@ and executed ([results](../docs/superpowers/notes/2026-09-30-plan-12a-results.md
 **Slice 12b, the layer panel** — create, rename, colour, hide and lock
 layers, a current layer every tool draws on, moving the selection to a
 layer, each a command — is specified in [2026-10-01-layer-panel-design.md](../docs/superpowers/specs/2026-10-01-layer-panel-design.md)
-and executed on `plan-12b/layer-panel` ([results](../docs/superpowers/notes/2026-10-01-plan-12b-results.md)),
-awaiting the human's look and merge.
+and executed ([results](../docs/superpowers/notes/2026-10-01-plan-12b-results.md)); merged at `0bab9e5`, the macOS and web look done by the human's report.
 **Still open for later slices:** the menu bar (reusing 12a's command
 table), the diagnostics surface, `DraftPermissions` in the UI beyond the
 layer controls (Undo/Redo's `enabled` must read permissions), recent files,

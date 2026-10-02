@@ -1,5 +1,54 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-02. **Plan 12b (the layer panel, the second slice
+of sub-project 12) is MERGED into `main` at `0bab9e5`**, `--no-ff`, on the
+human's word ("layer geliştirmelerini merge edebiliriz. testler iyi
+görünüyor"). **The macOS and web look is done, by the human's report before
+the merge** (no findings; the per-item list in the results note stays as
+written). Sub-project 12 continues by slices.
+- **What it delivers** (see
+  [2026-10-01-plan-12b-results.md](docs/superpowers/notes/2026-10-01-plan-12b-results.md)):
+  a collapsible **Layers** section in the right panel (`LayerPanel`,
+  `LayerRow`): current mark, eye, lock, ACI 1–9 swatch, inline rename, +
+  and empty-only delete; a current layer every tool draws on
+  (`drawingLayer`); a **Layer** menu in the Selection section
+  (`LayerPicker`) moving the whole selection in one undo step. Hidden
+  layers do not draw, pick, snap, outline or plot; locked layers draw and
+  do not select. Every change is one command (six layer commands, user and
+  `.restore` forms); parametric objects carry `ObjectLayer`, stamped on
+  their children by the regeneration. The header gains `currentLayer`;
+  **schema 7** (older builds refuse the files; the bundled furniture
+  library regenerated).
+- **Spec and plan:** [2026-10-01-layer-panel-design.md](docs/superpowers/specs/2026-10-01-layer-panel-design.md)
+  (rev 3, approved 2026-10-01, amended at execution) and
+  [2026-10-01-layer-panel.md](docs/superpowers/plans/2026-10-01-layer-panel.md).
+- **Gates (Linux container):** engine 1,226 + 2 standing; render 1,187 +
+  1 skip + 7 standing (no golden PNG changed); app 993; web `✓ Built`;
+  dev_harness_2d analyze clean. The two allocation invariant tests
+  untouched and green.
+- **Reviews:** every task 1–10 Approved by an independent reviewer (fixes
+  landed as 2b, 3b, 5b, 6b, 8b, 9b, 10b; real defects: the index's
+  reconcile skip on a handle shared with an entity, a stale row callback
+  reverting a rename); the final whole-branch review: "Ready with fixes"
+  (a loaded invalid name blocked hide/lock), applied in 11b; its sample of
+  32 mutants on the tip all red.
+- **Owed, unless the human already did it on macOS:** the two engine
+  fingerprint tests (`generate_document_test.dart:66, :68, :251, :253`)
+  still hold the pre-schema-7 macOS values; no re-baseline commit reached
+  the branch. The two-run procedure is in the results note (R-12b-1).
+- **Open question for the human (kept as built):** the Wall tool still
+  snaps and joins to a wall on a hidden layer; keep, or filter the join
+  too?
+- **Found, not fixed** (in the note): R-12b-3 (a dangling `currentLayer`
+  does not raise the handle seed), the painter's unfiltered definition
+  walk, the ATTRIB's style, `ObjectLayer` on a nested group, the picker's
+  menu without swatches, `isParametricObject` as a hard-coded list, and
+  smaller items.
+- **Next, on the human's word:** the next 12 slice, DXF export, or the
+  found items and owed looks (06, 08, 10).
+
+*Earlier, 2026-10-01 (the plan 13 merge):*
+
 **Last updated:** 2026-10-01. **Plan 13 (export and print, sub-project 13,
 one plan) is MERGED into `main` at `fea0354`**, `--no-ff`, on the human's
 word ("bakışı yaptım, sorun yok. merge et"). **The macOS and web look is
