@@ -99,7 +99,8 @@ const double teeThickHost = 200, teeThickStem = 120;
 /// (default [teeFoot]) along `deg + stemTurn` (so on the host's left for
 /// `0 < stemTurn < 180`), drawn towards the host (its end `k = 1` on it)
 /// when [inward]. The host's group is turned [hostRotation] radians when
-/// given (by default its handle, 18, turns it 0.3 rad).
+/// given (by default its handle, 18, turns it 0.3 rad). The stem is
+/// [stemThickness] thick (default [teeThickStem]).
 AttachScene teeScene(double deg, double stemTurn,
     {Justification hostJ = Justification.centre,
     Justification stemJ = Justification.centre,
@@ -107,7 +108,8 @@ AttachScene teeScene(double deg, double stemTurn,
     double foot = teeFoot,
     bool mirrored = false,
     double scale = 1,
-    double? hostRotation}) {
+    double? hostRotation,
+    double stemThickness = teeThickStem}) {
   final at = polar(teeHostStart, deg, foot);
   final tip = polar(at, deg + stemTurn, teeStemLength);
   return attachScene(
@@ -119,9 +121,9 @@ AttachScene teeScene(double deg, double stemTurn,
           hostJ
         ),
         if (inward)
-          (tip, at, teeThickStem, stemJ)
+          (tip, at, stemThickness, stemJ)
         else
-          (at, tip, teeThickStem, stemJ),
+          (at, tip, stemThickness, stemJ),
       ],
       mirrored: mirrored,
       scale: scale,
