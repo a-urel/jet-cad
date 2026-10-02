@@ -551,6 +551,52 @@ void main() {
     });
   });
 
+  group('D11 the inverse, at its edges', () {
+    test(
+        'a snapshot of unknown payloads alone is not empty: its undo needs '
+        'components', () {
+      final doc = DraftDocument.empty();
+      final h = doc.handleSeed.next();
+      doc.commands.execute(
+          AddDefinitionCommand(definitionAt(h, baseX: -4e4, baseY: 6e3)));
+      doc.components.attachUnknown(h, futurePayload());
+      doc.commands.execute(RemoveDefinitionCommand(h));
+      expect(doc.components.unknownOf(h), isEmpty);
+      doc.commands.permissions = kNoComponents;
+      expect(
+          () => doc.commands.undo(),
+          throwsA(isA<PermissionDeniedError>().having(
+              (e) => e.capability, 'capability', Capability.components)));
+      expect(doc.tree.definition(h), isNull);
+      doc.commands.permissions = DraftPermissions.all;
+      doc.commands.undo();
+      expect(doc.components.unknownOf(h), [futurePayload()]);
+    });
+
+    test(
+        'an add whose snapshot cannot be restored throws and adds nothing '
+        '(all-or-nothing)', () {
+      final source = ComponentRegistry()
+        ..register<Tally>(Tally.id, Tally.fromJson);
+      const h = Handle(0x51F3);
+      source.attach(h, const Tally(7, 'north'));
+      final snapshot = source.snapshotOf(h);
+
+      // This document never registered Tally.
+      final doc = DraftDocument.empty();
+      final components = componentBytes(doc);
+      final depth = doc.commands.undoDepth;
+      expect(
+          () => doc.commands.execute(AddDefinitionCommand(
+              definitionAt(h, baseX: 1e5, baseY: -7e4),
+              components: snapshot)),
+          throwsA(isA<StateError>()));
+      expect(doc.tree.definition(h), isNull);
+      expect(componentBytes(doc), components);
+      expect(doc.commands.undoDepth, depth);
+    });
+  });
+
   group('D11 ComponentRegistry.snapshotOf and restore', () {
     ComponentRegistry registry() => ComponentRegistry()
       ..registerBuiltIns()
