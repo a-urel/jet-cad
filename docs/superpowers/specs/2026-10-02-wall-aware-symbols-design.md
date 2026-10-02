@@ -1,7 +1,7 @@
 # Wall-aware symbols and the Symbol section (09c) — design
 
-**Date:** 2026-10-02. **Status:** design, **revision 4**, ready for the
-human's approval. Revision 1
+**Date:** 2026-10-02. **Status:** design, **revision 4** (`751755f`).
+**Approved by the human on 2026-10-02** ("yaz"). Revision 1
 (`24feacb`) was reviewed independently: "Ready with amendments", 2
 blocking, 6 major, 7 minor, 1 nit (W-1 to W-17,
 [the review](../notes/2026-10-02-wall-aware-symbols-spec-review-r1.md)),
