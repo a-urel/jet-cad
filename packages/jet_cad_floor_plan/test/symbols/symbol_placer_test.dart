@@ -531,10 +531,13 @@ void main() {
 
     test('P13 a component whose definition is gone is not reused', () {
       final doc = target();
+      // Since spec 09c D11 a removed definition takes its component, so the
+      // orphan is written after the removal: the kind a file saved before
+      // 09c may still carry (D11 leaves those alone).
       doc.commands.execute(foreign(905, 'x'));
+      doc.commands.execute(RemoveDefinitionCommand(const Handle(905)));
       doc.commands.execute(SetComponentCommand<SymbolComponent>(
           const Handle(905), sofaSymbol()));
-      doc.commands.execute(RemoveDefinitionCommand(const Handle(905)));
       expect(doc.components.withComponent<SymbolComponent>().length, 1,
           reason: 'the orphan component is still there');
       doc.commands.execute(placeSymbol(doc, sofa(), at: at));
