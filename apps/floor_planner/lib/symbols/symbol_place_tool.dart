@@ -51,7 +51,8 @@ const double kGhostCrossPixels = 6.0;
 ///   camera change (a wheel zoom, a pan) re-resolves the ghost from the last
 ///   pointer's **screen** point, as `PlacementTool` does (F-8). The listener
 ///   goes when the ghost hides, on [cancel], on a disarm and on [dispose]; a
-///   re-arm while the ghost is shown listens again.
+///   re-arm while the ghost is shown listens again and re-resolves the ghost
+///   under the pointer.
 class SymbolPlaceTool extends Tool {
   SymbolPlaceTool(this.armed) {
     armed.addListener(_onArmed);
@@ -149,15 +150,18 @@ class SymbolPlaceTool extends Tool {
 
   void _onArmed() {
     _syncPath();
-    final wasListening = _listening != null;
     _syncCamera();
     final ctx = _listening;
-    // Re-armed with the ghost still shown: the camera may have moved while
-    // nothing listened, so the ghost goes under the pointer again.
-    if (ctx != null && !wasListening) {
-      _resolve(ctx, _worldUnderPointer(ctx));
+    // Re-armed with the ghost still shown (from a disarm or from another
+    // entry): the ghost goes under the pointer again through the one
+    // recompute path. The camera may have moved while nothing listened, and
+    // the snap state or the document may have changed since the last
+    // pointer event (Ruling R-C8b-1).
+    if (ctx != null) {
+      _update(ctx, _worldUnderPointer(ctx));
+    } else {
+      _syncPlacement();
     }
-    _syncPlacement();
     _pressed = false;
     _pressPointer = -1;
     notifyListeners();
@@ -195,8 +199,9 @@ class SymbolPlaceTool extends Tool {
     );
   }
 
-  /// The tool's one recompute path: every pointer event and every camera
-  /// change resolves the raw point and then the placement through here.
+  /// The tool's one recompute path: every pointer event, every camera
+  /// change and a re-arm while the ghost is shown resolve the raw point and
+  /// then the placement through here.
   void _update(ToolContext ctx, Vector2 raw) {
     _resolve(ctx, raw);
     _syncPlacement();
