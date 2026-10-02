@@ -25,6 +25,14 @@ Uint8List assetBytes() =>
 
 SymbolLibrary assetLibrary() => SymbolLibrary.decode(assetBytes());
 
+/// The asset as it shipped before 09c (commit 9414208, byte-equal to `main`
+/// 4d6b78f): the 27 version-1 symbols a plan saved before 09c holds. A test
+/// fixture, not an asset: it is not declared in the pubspec.
+const pre09cLibraryPath = 'test/fixtures/furniture_pre_09c.jetlib';
+
+SymbolLibrary pre09cLibrary() =>
+    SymbolLibrary.decode(File(pre09cLibraryPath).readAsBytesSync());
+
 void main() {
   group('the asset', () {
     test('the committed bytes equal the built library', () {
@@ -425,6 +433,60 @@ void main() {
       expect(lib.entries.length - newNames.length, 27);
       expect(
           lib.entries.where((e) => newNames.containsKey(e.key)), hasLength(14));
+    });
+  });
+
+  group('the 27 symbols shipped before 09c (spec 09c D2, D10)', () {
+    // A definition is reused by key and version, so a version-1 symbol's
+    // geometry may never change: a plan saved before 09c would otherwise get
+    // a second copy on its next placement. 09c only appends tags.
+    test('the fixture decodes to the 27 pre-09c symbols, none tagged by 09c',
+        () {
+      final old = pre09cLibrary().entries;
+      expect(old, hasLength(27));
+      for (final o in old) {
+        expect(o.tags, isNot(contains('against-wall')), reason: o.key);
+        expect(o.tags.where((t) => t.startsWith('family:')), isEmpty,
+            reason: o.key);
+      }
+    });
+
+    test('each keeps its name, category, version, base point and leaves', () {
+      final now = {for (final e in assetLibrary().entries) e.key: e};
+      for (final o in pre09cLibrary().entries) {
+        final n = now[o.key];
+        expect(n, isNotNull, reason: o.key);
+        expect(n!.name, o.name, reason: o.key);
+        expect(n.category, o.category, reason: o.key);
+        expect(n.version, o.version, reason: o.key);
+        expect(n.definition.basePoint.x, o.definition.basePoint.x,
+            reason: o.key);
+        expect(n.definition.basePoint.y, o.definition.basePoint.y,
+            reason: o.key);
+        expect(n.leaves.length, o.leaves.length, reason: o.key);
+        for (var i = 0; i < o.leaves.length; i++) {
+          final (record: or, payload: op) = o.leaves[i];
+          final (record: nr, payload: np) = n.leaves[i];
+          final at = '${o.key} leaf $i';
+          expect(nr.kind, or.kind, reason: at);
+          // Every record field but the three a library rebuild may renumber.
+          final aligned = nr.copyWith(
+              handle: or.handle, owner: or.owner, geomIndex: or.geomIndex);
+          expect(aligned, or,
+              reason: '$at: ${aligned.toJson()} != ${or.toJson()}');
+          expect(np.coords, orderedEquals(op.coords), reason: at);
+          expect(np.scalars, orderedEquals(op.scalars), reason: at);
+        }
+      }
+    });
+
+    test('its tags are the old tags with new ones appended only', () {
+      final now = {for (final e in assetLibrary().entries) e.key: e};
+      for (final o in pre09cLibrary().entries) {
+        final tags = now[o.key]!.tags;
+        expect(tags.length, greaterThanOrEqualTo(o.tags.length), reason: o.key);
+        expect(tags.take(o.tags.length), orderedEquals(o.tags), reason: o.key);
+      }
     });
   });
 
