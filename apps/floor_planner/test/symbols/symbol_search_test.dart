@@ -106,10 +106,16 @@ void main() {
     });
 
     test('a tag alone finds a symbol', () {
-      expect(hitsOnly(lib.entries, 'couch', 'tag'), ['sofa.three@1']);
-      expect(ids(searchSymbols(lib.entries, 'couch')), ['sofa.three@1']);
-      expect(hitsOnly(lib.entries, 'closet', 'tag'), ['bed.wardrobe@1']);
-      expect(ids(searchSymbols(lib.entries, 'closet')), ['bed.wardrobe@1']);
+      const sofas = ['sofa.two@1', 'sofa.three@1'];
+      const wardrobes = [
+        'bed.wardrobe.1200@1',
+        'bed.wardrobe@1',
+        'bed.wardrobe.2400@1',
+      ];
+      expect(hitsOnly(lib.entries, 'couch', 'tag'), sofas);
+      expect(ids(searchSymbols(lib.entries, 'couch')), sofas);
+      expect(hitsOnly(lib.entries, 'closet', 'tag'), wardrobes);
+      expect(ids(searchSymbols(lib.entries, 'closet')), wardrobes);
     });
 
     test('a term inside a tag finds a symbol', () {
@@ -124,6 +130,7 @@ void main() {
     test('the category alone finds a symbol', () {
       // "Living Room": also proves the category is compared lower-cased.
       const living = [
+        'sofa.two@1',
         'sofa.three@1',
         'armchair@1',
         'table.coffee@1',
@@ -193,7 +200,8 @@ void main() {
       // "living" hits a category only; "couch" a tag only.
       hitsOnly(lib.entries, 'living', 'category');
       hitsOnly(lib.entries, 'couch', 'tag');
-      expect(ids(searchSymbols(lib.entries, 'couch living')), ['sofa.three@1']);
+      expect(ids(searchSymbols(lib.entries, 'couch living')),
+          ['sofa.two@1', 'sofa.three@1']);
       // A pair whose terms each hit, but never the same symbol, finds none.
       expect(ids(searchSymbols(lib.entries, 'couch closet')), isEmpty);
       expect(searchSymbols(lib.entries, 'couch closet'), isEmpty);
@@ -207,7 +215,8 @@ void main() {
 
   test('upper case in the query is ignored', () {
     expect(ids(searchSymbols(lib.entries, 'THREE')), ['sofa.three@1']);
-    expect(ids(searchSymbols(lib.entries, 'CoUcH')), ['sofa.three@1']);
+    expect(ids(searchSymbols(lib.entries, 'CoUcH')),
+        ['sofa.two@1', 'sofa.three@1']);
     expect(ids(searchSymbols(lib.entries, 'LIVING')),
         ids(searchSymbols(lib.entries, 'living')));
     expect(ids(searchSymbols(lib.entries, 'Dining CHAIR')), ['dining.chair@1']);
@@ -223,7 +232,7 @@ void main() {
       }
     }
     expect(lib.categories, hasLength(6));
-    expect(lib.entries, hasLength(27));
+    expect(lib.entries, hasLength(41));
   });
 
   test('order is preserved and empty groups are hidden', () {
@@ -250,7 +259,7 @@ void main() {
       ],
       ['bed.nightstand@1'],
       ['table.coffee@1'],
-      ['office.desk@1'],
+      ['office.desk.1200@1', 'office.desk@1', 'office.desk.1600@1'],
     ]);
   });
 

@@ -168,6 +168,124 @@ FurnitureSymbol _diningSet(String key, String name, double tw, double th,
   );
 }
 
+// The size families (spec 09c D9): each member is its family's drawing at
+// another width, the depth, the front (y = 0) and the back the same, the
+// base point on the box's centre x. Tags: the plain ones, then
+// `against-wall`, then `family:<id>` (spec 09c D2, the loader's R03d).
+
+/// A double bed [w] x 2000: outline, two pillows 240 deep with 100 mm
+/// margins and gap, the fold line at 1300. Base point: the centre.
+FurnitureSymbol _doubleBed(String key, String name, double w) {
+  final pillow = (w - 300) / 2;
+  return FurnitureSymbol(
+    key: key,
+    name: name,
+    category: bedRoom,
+    tags: const [
+      'bed',
+      'double',
+      'sleeping',
+      'against-wall',
+      'family:bed-double'
+    ],
+    baseX: w / 2,
+    baseY: 1000,
+    shapes: [
+      _rect(0, 0, w, 2000),
+      _rect(100, 1680, pillow, 240),
+      _rect(200 + pillow, 1680, pillow, 240),
+      LineShape(0, 1300, w, 1300),
+    ],
+  );
+}
+
+/// A single bed [w] x 2000: outline, one pillow 240 deep with 120 mm
+/// margins, the fold line at 1300. Base point: the centre.
+FurnitureSymbol _singleBed(String key, String name, double w) =>
+    FurnitureSymbol(
+      key: key,
+      name: name,
+      category: bedRoom,
+      tags: const [
+        'bed',
+        'single',
+        'sleeping',
+        'against-wall',
+        'family:bed-single'
+      ],
+      baseX: w / 2,
+      baseY: 1000,
+      shapes: [
+        _rect(0, 0, w, 2000),
+        _rect(120, 1680, w - 240, 240),
+        LineShape(0, 1300, w, 1300),
+      ],
+    );
+
+/// A wardrobe [w] x 600 of 600 mm doors: outline, the door line at y = 40,
+/// a line between each pair of doors, the handles either side of the first.
+/// Base point: the front centre.
+FurnitureSymbol _wardrobe(String key, String name, double w) => FurnitureSymbol(
+      key: key,
+      name: name,
+      category: bedRoom,
+      tags: const [
+        'wardrobe',
+        'storage',
+        'closet',
+        'against-wall',
+        'family:wardrobe'
+      ],
+      baseX: w / 2,
+      baseY: 0,
+      shapes: [
+        _rect(0, 0, w, 600),
+        LineShape(0, 40, w, 40),
+        for (var x = 600.0; x < w; x += 600) LineShape(x, 40, x, 600),
+        const LineShape(560, 40, 560, 160),
+        const LineShape(640, 40, 640, 160),
+      ],
+    );
+
+/// A kitchen base unit [w] x 600: outline, the front line at y = 40, the
+/// knob at the front centre. Base point: the front centre.
+FurnitureSymbol _baseUnit(String key, String name, double w) => FurnitureSymbol(
+      key: key,
+      name: name,
+      category: kitchen,
+      tags: const [
+        'base unit',
+        'cabinet',
+        'cupboard',
+        'against-wall',
+        'family:kitchen-base'
+      ],
+      baseX: w / 2,
+      baseY: 0,
+      shapes: [
+        _rect(0, 0, w, 600),
+        LineShape(0, 40, w, 40),
+        CircleShape(w / 2, 20, 10),
+      ],
+    );
+
+/// A desk [w] x 700: outline, a 400 mm drawer block at the right with two
+/// drawer lines. Base point: the front centre.
+FurnitureSymbol _desk(String key, String name, double w) => FurnitureSymbol(
+      key: key,
+      name: name,
+      category: office,
+      tags: const ['desk', 'office', 'table', 'against-wall', 'family:desk'],
+      baseX: w / 2,
+      baseY: 0,
+      shapes: [
+        _rect(0, 0, w, 700),
+        LineShape(w - 400, 0, w - 400, 700),
+        LineShape(w - 400, 230, w, 230),
+        LineShape(w - 400, 460, w, 460),
+      ],
+    );
+
 /// The catalog, in the order the library stores it: definition handles and
 /// leaf handles ascend in this order.
 final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
@@ -252,24 +370,15 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
   ),
 
   // Kitchen
-  FurnitureSymbol(
-    key: 'kitchen.base.600',
-    name: 'Base unit 600',
-    category: kitchen,
-    tags: const ['base unit', 'cabinet', 'cupboard'],
-    baseX: 300,
-    baseY: 0,
-    shapes: [
-      _rect(0, 0, 600, 600),
-      const LineShape(0, 40, 600, 40),
-      const CircleShape(300, 20, 10),
-    ],
-  ),
+  _baseUnit('kitchen.base.300', 'Base unit 300', 300),
+  _baseUnit('kitchen.base.400', 'Base unit 400', 400),
+  _baseUnit('kitchen.base.600', 'Base unit 600', 600),
+  _baseUnit('kitchen.base.800', 'Base unit 800', 800),
   FurnitureSymbol(
     key: 'kitchen.sink',
     name: 'Sink unit',
     category: kitchen,
-    tags: const ['sink', 'basin', 'cabinet'],
+    tags: const ['sink', 'basin', 'cabinet', 'against-wall'],
     baseX: 600,
     baseY: 0,
     shapes: [
@@ -287,7 +396,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'kitchen.hob',
     name: 'Hob',
     category: kitchen,
-    tags: ['hob', 'cooker', 'stove'],
+    tags: ['hob', 'cooker', 'stove', 'against-wall'],
     baseX: 300,
     baseY: 0,
     shapes: [
@@ -306,7 +415,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'kitchen.fridge',
     name: 'Fridge',
     category: kitchen,
-    tags: const ['fridge', 'refrigerator', 'appliance'],
+    tags: const ['fridge', 'refrigerator', 'appliance', 'against-wall'],
     baseX: 300,
     baseY: 0,
     shapes: [
@@ -314,6 +423,32 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
       const LineShape(0, 40, 600, 40),
       const LineShape(60, 40, 60, 160),
       const LineShape(540, 40, 540, 160),
+    ],
+  ),
+  FurnitureSymbol(
+    key: 'kitchen.dishwasher',
+    name: 'Dishwasher',
+    category: kitchen,
+    tags: const ['dishwasher', 'dishes', 'appliance', 'against-wall'],
+    baseX: 300,
+    baseY: 0,
+    shapes: [
+      _rect(0, 0, 600, 600),
+      const LineShape(0, 40, 600, 40),
+      const LineShape(200, 20, 400, 20),
+    ],
+  ),
+  FurnitureSymbol(
+    key: 'kitchen.washer',
+    name: 'Washing machine',
+    category: kitchen,
+    tags: const ['washer', 'laundry', 'appliance', 'against-wall'],
+    baseX: 300,
+    baseY: 0,
+    shapes: [
+      _rect(0, 0, 600, 600),
+      const LineShape(0, 40, 600, 40),
+      const CircleShape(300, 330, 220),
     ],
   ),
   FurnitureSymbol(
@@ -332,38 +467,17 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
   ),
 
   // Bed Room
-  FurnitureSymbol(
-    key: 'bed.double',
-    name: 'Double bed',
-    category: bedRoom,
-    tags: const ['bed', 'double', 'sleeping'],
-    baseX: 800,
-    baseY: 1000,
-    shapes: [
-      _rect(0, 0, 1600, 2000),
-      _rect(100, 1680, 650, 240),
-      _rect(850, 1680, 650, 240),
-      const LineShape(0, 1300, 1600, 1300),
-    ],
-  ),
-  FurnitureSymbol(
-    key: 'bed.single',
-    name: 'Single bed',
-    category: bedRoom,
-    tags: const ['bed', 'single', 'sleeping'],
-    baseX: 450,
-    baseY: 1000,
-    shapes: [
-      _rect(0, 0, 900, 2000),
-      _rect(120, 1680, 660, 240),
-      const LineShape(0, 1300, 900, 1300),
-    ],
-  ),
+  _doubleBed('bed.double.1400', 'Double bed 1400', 1400),
+  _doubleBed('bed.double', 'Double bed', 1600),
+  _doubleBed('bed.double.1800', 'Double bed 1800', 1800),
+  _singleBed('bed.single.800', 'Single bed 800', 800),
+  _singleBed('bed.single', 'Single bed', 900),
+  _singleBed('bed.single.1000', 'Single bed 1000', 1000),
   FurnitureSymbol(
     key: 'bed.nightstand',
     name: 'Nightstand',
     category: bedRoom,
-    tags: const ['nightstand', 'bedside', 'table'],
+    tags: const ['nightstand', 'bedside', 'table', 'against-wall'],
     baseX: 225,
     baseY: 0,
     shapes: [
@@ -372,29 +486,31 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
       const CircleShape(225, 60, 12),
     ],
   ),
-  FurnitureSymbol(
-    key: 'bed.wardrobe',
-    name: 'Wardrobe',
-    category: bedRoom,
-    tags: const ['wardrobe', 'storage', 'closet'],
-    baseX: 900,
-    baseY: 0,
-    shapes: [
-      _rect(0, 0, 1800, 600),
-      const LineShape(0, 40, 1800, 40),
-      const LineShape(600, 40, 600, 600),
-      const LineShape(1200, 40, 1200, 600),
-      const LineShape(560, 40, 560, 160),
-      const LineShape(640, 40, 640, 160),
-    ],
-  ),
+  _wardrobe('bed.wardrobe.1200', 'Wardrobe 1200', 1200),
+  _wardrobe('bed.wardrobe', 'Wardrobe', 1800),
+  _wardrobe('bed.wardrobe.2400', 'Wardrobe 2400', 2400),
 
   // Living Room
+  FurnitureSymbol(
+    key: 'sofa.two',
+    name: 'Two-seat sofa',
+    category: livingRoom,
+    tags: const ['sofa', 'seating', 'couch', 'against-wall', 'family:sofa'],
+    baseX: 750,
+    baseY: 0,
+    shapes: [
+      _rect(0, 0, 1500, 900),
+      const LineShape(0, 700, 1500, 700),
+      const LineShape(200, 0, 200, 700),
+      const LineShape(1300, 0, 1300, 700),
+      const LineShape(750, 0, 750, 700),
+    ],
+  ),
   FurnitureSymbol(
     key: 'sofa.three',
     name: 'Three-seat sofa',
     category: livingRoom,
-    tags: const ['sofa', 'seating', 'couch'],
+    tags: const ['sofa', 'seating', 'couch', 'against-wall', 'family:sofa'],
     baseX: 1000,
     baseY: 0,
     shapes: [
@@ -433,7 +549,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'tv.unit',
     name: 'TV unit',
     category: livingRoom,
-    tags: const ['tv', 'media', 'unit', 'storage'],
+    tags: const ['tv', 'media', 'unit', 'storage', 'against-wall'],
     baseX: 800,
     baseY: 0,
     shapes: [
@@ -449,7 +565,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'bath.toilet',
     name: 'Toilet',
     category: bathroom,
-    tags: ['toilet', 'wc', 'sanitary'],
+    tags: ['toilet', 'wc', 'sanitary', 'against-wall'],
     baseX: 200,
     baseY: 0,
     shapes: [
@@ -466,7 +582,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'bath.washbasin',
     name: 'Washbasin',
     category: bathroom,
-    tags: ['washbasin', 'sink', 'sanitary'],
+    tags: ['washbasin', 'sink', 'sanitary', 'against-wall'],
     baseX: 300,
     baseY: 0,
     shapes: [
@@ -480,7 +596,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'bath.tub',
     name: 'Bathtub',
     category: bathroom,
-    tags: const ['bathtub', 'bath', 'sanitary'],
+    tags: const ['bathtub', 'bath', 'sanitary', 'against-wall'],
     baseX: 850,
     baseY: 375,
     shapes: [
@@ -494,7 +610,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'bath.shower',
     name: 'Shower tray',
     category: bathroom,
-    tags: const ['shower', 'tray', 'sanitary'],
+    tags: const ['shower', 'tray', 'sanitary', 'against-wall'],
     baseX: 450,
     baseY: 450,
     shapes: [
@@ -505,20 +621,9 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
   ),
 
   // Office
-  FurnitureSymbol(
-    key: 'office.desk',
-    name: 'Desk',
-    category: office,
-    tags: const ['desk', 'office', 'table'],
-    baseX: 700,
-    baseY: 0,
-    shapes: [
-      _rect(0, 0, 1400, 700),
-      const LineShape(1000, 0, 1000, 700),
-      const LineShape(1000, 230, 1400, 230),
-      const LineShape(1000, 460, 1400, 460),
-    ],
-  ),
+  _desk('office.desk.1200', 'Desk 1200', 1200),
+  _desk('office.desk', 'Desk', 1400),
+  _desk('office.desk.1600', 'Desk 1600', 1600),
   const FurnitureSymbol(
     key: 'office.chair',
     name: 'Office chair',
@@ -536,7 +641,7 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     key: 'office.bookshelf',
     name: 'Bookshelf',
     category: office,
-    tags: const ['bookshelf', 'shelf', 'storage'],
+    tags: const ['bookshelf', 'shelf', 'storage', 'against-wall'],
     baseX: 450,
     baseY: 0,
     shapes: [
