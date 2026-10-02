@@ -829,3 +829,106 @@ amendments". Applied:
 - **S-14** — an ATTRIB key moves its instance.
 - **S-15** — `tables.changes`'s reason; `didUpdateWidget`.
 - **S-16** — `ObjectLayer` is not `internal`.
+
+## Amended at execution (Plan 12b)
+
+Where execution made this spec precise or departed from it, each with the
+ruling or review that decided it (the plan's ledger,
+`ledgers/2026-10-01-plan-12b/progress.md`, archived by a later commit;
+results: [2026-10-01-plan-12b-results.md](../notes/2026-10-01-plan-12b-results.md)).
+This section rewrites nothing above it.
+
+- **Risks, P-7: the fingerprints were not re-baselined (R-12b-1, Task 1).**
+  `generate_document_test.dart`'s two fingerprint tests are the engine's two
+  standing Linux failures; their constants are macOS values (Ruling 07-7),
+  which a Linux container cannot compute. The constants stay, with a
+  comment; the re-baseline is owed on macOS (the results note's look list
+  has the step). Until then both tests fail on macOS too.
+- **D3, schema 7: the committed furniture library moves with it (R-12b-2,
+  Task 1).** `apps/floor_planner/assets/library/furniture.jetlib` is codec
+  output pinned byte for byte; it was regenerated (schema 7 and the
+  header's `currentLayer`, nothing else).
+- **D1, decision 7: refuse only a *hide* of the effective current layer
+  (R-12b-4, Task 2).** The user form refuses `SetLayerCommand` when it
+  turns `visible` from true to false on `drawingLayer`; a recolour or lock
+  of an already-hidden effective current layer 0 (S-6's file state) is
+  allowed, as D9's enabled lock and swatch require.
+- **D1: integrity failures are `StateError` in both forms (Task 2).** A
+  missing entity or node throws `StateError`, as every command in
+  `commands.dart` does; `ArgumentError` is kept for the user rules (a
+  missing *target layer* included). `AddLayerCommand`'s user form also
+  refuses a handle naming a node, definition or entity.
+- **D6, P-4: the ATTRIB rule lives in the shared leaf path (Task 3).**
+  `FilterEvaluator.acceptsEntityOnLayer(slot, filter, context)` applies
+  "own layer if non-zero, else the owning instance's if non-zero, else the
+  context"; `acceptsEntity` is it in the root context. So an ATTRIB of a
+  nested instance follows its owner too.
+- **D6: the reconcile skip names a handle that is purely a layer (Task 3
+  review finding 1, `540f9cf`).** It skips a touched handle only when it
+  names a layer record and no entity (live or last known), node or
+  definition; a malformed file where a layer shares an entity's handle
+  otherwise left the index stale.
+- **D6, Invariants: the allocation probe uses budgets (R-12b-5).** It
+  asserts `query_allocation_test.dart`'s per-call budgets, not literal zero
+  (`_descend` already allocates per level; `_Uint32List` cannot be
+  watched).
+- **D6: the oracle filters only at the root (R-12b-7, Task 6 review,
+  `a4d85f0`).** `reference_walk` skips a hidden root leaf, a root ATTRIB by
+  its instance's effective layer and a hidden root instance, and nothing
+  below the root, exactly as the painter draws; a test pins painter ==
+  oracle in the residual state. The outline and picking do filter below
+  the root (the outline's root instance key is gated by its own layer).
+- **D8: a plain group counts by `objectLayer` (R-12b-8, Task 6).** The
+  render package cannot tell a parametric group from a plain one, so every
+  group key reads `objectLayer` (absent: layer 0). A layer-0 ATTRIB key uses
+  its instance's layer (S-2); a fill key uses its boundary's.
+- **D2, D7: the creation compound's `ObjectLayer` is its last child
+  (Task 8).** One `ParametricEdit`, one regeneration.
+- **D6, S-11: the overlap rule for the opening tool's host (R-12b-9,
+  Task 8).** A wall that may not host (its `objectLayer` hidden or locked)
+  is passed over in the band scan, so the next band in handle order hosts;
+  the rule lives in `WallBands.hostAt(…, accept:)`. The Wall tool's band
+  join stays unfiltered (decision 8) — an open question for the human's
+  look. The tool's scan memo also keys on `tables.mutationRevision`.
+- **D9: `LayerPanel(document, {foreground})` (Task 9).** ACI 7's swatch is
+  drawn in the paper's foreground, which the panel cannot see; `main`
+  passes the resolver's.
+- **D9: a blur with a valid name commits it** (one `SetLayerCommand`), as
+  the panel's number fields commit on blur; the spec ruled only the
+  invalid case (Task 9).
+- **D9: the current mark is disabled on the layer that is already both
+  stored and effective current** (a tap would be a no-op undo step); with a
+  dangling or hidden stored current layer, layer 0's mark stays enabled
+  (Task 9).
+- **D9: each row control reads the live record at dispatch (Task 9 review
+  finding 1, `8eef675`),** so a rename committed on blur by the same
+  pointer sequence is not reverted by a stale copy.
+- **D11: the disabled delete's tooltip reads "Layers cannot be changed in
+  this document"** (Task 10 review info 6, `c3ab7ca`), not "Read-only":
+  under `runtime` the picker still moves things.
+- **D12: the picker shows by key and moves by record (Task 10).** The label
+  is per key (an ATTRIB its instance's layer, a fill its boundary's, an
+  object its `objectLayer`); the no-op skip is per record on the stored
+  value with exact `==` (an absent `ObjectLayer` is layer 0; a dangling one
+  is not, so moving it to layer 0 rewrites it). A file-split region shows
+  its boundary's layer, and choosing that layer repairs it.
+- **D12: `isParametricObject` is the app's list of its six types** (the
+  engine has no "any registered type" query, and the engine was frozen);
+  the catalog and the predicate name each other (`c3ab7ca`).
+- **D12: a refused move is caught (Task 10 review info 5, `c3ab7ca`):**
+  `_choose` catches `ArgumentError` and `StateError` like the Selection
+  section's other commits; the dispatcher has rolled it back.
+- **Named mutants, M-12e: built in the product (Task 7).** The layers
+  `TableSection` constructed without `onMutated` (`tables.dart:562`), not
+  a test-side copy of the edit. The `add`-only bypass is equivalent for the
+  canvas test (remove-then-add still bumps once) and is killed by the
+  engine's `tables_revision_test.dart`.
+- **Testing, the end-to-end order (Task 11a).** "Make it current, draw,
+  hide it" cannot be done literally: the current layer cannot be hidden
+  (decision 7). The test makes layer 0 current before the hide and asserts
+  the disabled eye as a premise.
+- **Known limitations recorded at execution** (none changes a decision):
+  R-12b-3 (a dangling stored current layer does not raise the handle seed);
+  an ATTRIB on its own non-zero layer (picker vs prune); `ObjectLayer` on a
+  nested group inert and left behind; the index ignores a definition's base
+  point (pre-existing). See the results note.
