@@ -86,11 +86,13 @@ CompoundCommand placeSymbol(
   Handle? definition;
   for (final h in doc.components.withComponent<SymbolComponent>()) {
     final c = doc.components.get<SymbolComponent>(h);
-    // A component can outlive its definition (purge and definition removal
-    // never clear one), so the definition must still exist. Its seating must
-    // agree with the entry's too (spec 14 S2, review F-5): a hand-edited or
-    // foreign plan's copy without seats would make every new placement of a
-    // table unservable, so such a copy is not reused; one is made beside it.
+    // A component can outlive its definition in a file saved before 09c
+    // (removing a definition now takes its components, spec D11, but leaves
+    // such orphans alone, and purge never clears a component), so the
+    // definition must still exist. Its seating must agree with the entry's
+    // too (spec 14 S2, review F-5): a hand-edited or foreign plan's copy
+    // without seats would make every new placement of a table unservable,
+    // so such a copy is not reused; one is made beside it.
     if (c != null &&
         c.key == entry.key &&
         c.version == entry.version &&
