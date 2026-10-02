@@ -82,9 +82,11 @@ Transform2 placementTransform({
 ///
 /// Every handle is allocated from `doc.handleSeed` here, once (spec F-8), so
 /// a redo reuses them. A definition already in [doc] with the entry's key and
-/// version is reused; otherwise the definition is copied with fresh handles
-/// for it and for every leaf, the leaves in the library's ascending order so
-/// draw order is stable.
+/// version is reused when it is leaf-equal to the entry ([isLeafEqual], spec
+/// 09c D10), the first such in ascending handle; otherwise the definition is
+/// copied with fresh handles for it and for every leaf, the leaves in the
+/// library's ascending order so draw order is stable, under the first free
+/// name of `key@version`, `key@version#2`, `#3`, ...
 ///
 /// A servable entry becomes a numbered table (spec 14a T13): when
 /// [numbered], its label, with the plan's next number, is added after the
@@ -117,7 +119,8 @@ CompoundCommand placeSymbol(
         c.key == entry.key &&
         c.version == entry.version &&
         doc.tree.definition(h) != null &&
-        doc.components.get<SeatingComponent>(h)?.seats == entry.seats) {
+        doc.components.get<SeatingComponent>(h)?.seats == entry.seats &&
+        isLeafEqual(doc, h, entry)) {
       definition = h;
       break;
     }
@@ -206,4 +209,50 @@ CompoundCommand placeSymbol(
   }
 
   return CompoundCommand(commands, label: 'Place ${entry.name}');
+}
+
+/// Whether the definition [definition] in [doc] is **leaf-equal** to [entry]
+/// (spec 09c D10, W-11): what a placement checks before it reuses a
+/// definition found by key and version.
+///
+/// Leaf-equal means: [definition] names a definition; its base point is the
+/// entry's; it has no child node; it owns as many live leaves as the entry
+/// has; and, pairing its leaves ascending by handle with the entry's (which
+/// [SymbolEntry] holds ascending by handle), every [EntityRecord] field but
+/// `handle`, `owner` and `geomIndex` (the placement rewrites the first two,
+/// `AddEntityCommand` the third) and every payload coordinate and scalar
+/// are equal. Every comparison is exact `==`: these are stored values, not
+/// geometric decisions. `==` equates `-0.0` and `0.0`, which D10 accepts.
+///
+/// Pure: reads [doc], writes nothing. O(entities) per call, never on a
+/// frame path (a placement is built once per click).
+bool isLeafEqual(DraftDocument doc, Handle definition, SymbolEntry entry) {
+  final def = doc.tree.definition(definition);
+  if (def == null) return false;
+  final base = entry.definition.basePoint;
+  if (def.basePoint.x != base.x || def.basePoint.y != base.y) return false;
+  if (doc.tree.childNodesOf(def.children).isNotEmpty) return false;
+
+  final entities = doc.entities;
+  final slots = [
+    for (final slot in entities.liveSlots)
+      if (entities.ownerAt(slot) == definition) slot,
+  ]..sort((a, b) =>
+      entities.handleAt(a).value.compareTo(entities.handleAt(b).value));
+  if (slots.length != entry.leaves.length) return false;
+
+  for (var i = 0; i < slots.length; i++) {
+    final want = entry.leaves[i];
+    final got = entities.read(slots[i]);
+    // Every field but the three a placement rewrites, through the record's
+    // own `==`, so a field added to `EntityRecord` is compared here too.
+    final comparable = got.copyWith(
+      handle: want.record.handle,
+      owner: want.record.owner,
+      geomIndex: want.record.geomIndex,
+    );
+    if (comparable != want.record) return false;
+    if (doc.geometry.read(got.geomIndex) != want.payload) return false;
+  }
+  return true;
 }
