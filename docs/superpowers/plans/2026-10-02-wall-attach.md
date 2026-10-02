@@ -134,8 +134,9 @@ Plus `CI=true flutter build web --release` in the app from Task 3 on, and
 `(cd apps/dev_harness_2d && CI=true flutter analyze)` after Task 1.
 **Branch point** (`main` `4d6b78f`, measured on 2026-10-02 in this
 container): engine 1,226 + 2 standing
-(`test/testing/generate_document_test.dart`, as STATUS records); render and
-app: RENDER_APP_PENDING. A task that touches only one package may state
+(`test/testing/generate_document_test.dart`, as STATUS records); render 1,187 + 1 skip + 7
+standing (`test/golden/text_ladder_golden_test.dart`, the canvas text
+ladders); app 993, all passing. A task that touches only one package may state
 the others unchanged rather than re-run them (say so in the report).
 
 ## File structure
