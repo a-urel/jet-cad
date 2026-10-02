@@ -577,12 +577,16 @@ void main() {
         'an add whose snapshot cannot be restored throws and adds nothing '
         '(all-or-nothing)', () {
       final source = ComponentRegistry()
+        ..registerBuiltIns()
         ..register<Tally>(Tally.id, Tally.fromJson);
       const h = Handle(0x51F3);
       source.attach(h, const Tally(7, 'north'));
+      source.attach(h, const ObjectLayer(kLayer));
       final snapshot = source.snapshotOf(h);
 
-      // This document never registered Tally.
+      // This document never registered Tally, but it does register
+      // ObjectLayer, which sorts first: a restore that wrote each component
+      // as it validated would leave the layer behind before throwing.
       final doc = DraftDocument.empty();
       final components = componentBytes(doc);
       final depth = doc.commands.undoDepth;
@@ -598,9 +602,12 @@ void main() {
   });
 
   group('D11 ComponentRegistry.snapshotOf and restore', () {
+    // Tally (`test.tally`) is registered before the built-ins
+    // (`jet_cad.object_layer`), so registration order is not type-id order
+    // and the snapshot has to sort.
     ComponentRegistry registry() => ComponentRegistry()
-      ..registerBuiltIns()
-      ..register<Tally>(Tally.id, Tally.fromJson);
+      ..register<Tally>(Tally.id, Tally.fromJson)
+      ..registerBuiltIns();
 
     test(
         'registered components by type id, unknown payloads oldest first; '

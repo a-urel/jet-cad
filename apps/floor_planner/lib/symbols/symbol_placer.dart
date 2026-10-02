@@ -75,8 +75,10 @@ CompoundCommand placeSymbol(
   Handle? definition;
   for (final h in doc.components.withComponent<SymbolComponent>()) {
     final c = doc.components.get<SymbolComponent>(h);
-    // A component can outlive its definition (purge and definition removal
-    // never clear one), so the definition must still exist.
+    // A component can outlive its definition in a file saved before 09c
+    // (removing a definition now takes its components, spec D11, but leaves
+    // such orphans alone, and purge never clears a component), so the
+    // definition must still exist.
     if (c != null &&
         c.key == entry.key &&
         c.version == entry.version &&
