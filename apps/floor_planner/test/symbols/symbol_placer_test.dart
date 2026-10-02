@@ -1004,6 +1004,18 @@ void main() {
           GeometryPayload(coords: coords, scalars: scalars)));
     }
 
+    /// [e] with its definition's base point moved by [by], leaves unchanged.
+    SymbolEntry movedBase(SymbolEntry e, Vector2 by) => SymbolEntry(
+          key: e.key,
+          name: e.name,
+          category: e.category,
+          tags: e.tags,
+          version: e.version,
+          definition:
+              e.definition.copyWith(basePoint: e.definition.basePoint + by),
+          leaves: e.leaves,
+        );
+
     // Leaf indices in the styled sofa, ascending handle.
     const line = 0, polyline = 1, arc = 2, circle = 3, text = 4, attrib = 5;
 
@@ -1187,20 +1199,15 @@ void main() {
               children: const [])));
         }
       ),
+      // Each axis on its own: a check that read only one of them would let
+      // the other through.
       (
-        'a moved base point',
-        (doc, e) => place(
-            doc,
-            SymbolEntry(
-              key: e.key,
-              name: e.name,
-              category: e.category,
-              tags: e.tags,
-              version: e.version,
-              definition: e.definition.copyWith(
-                  basePoint: e.definition.basePoint + Vector2(0, 1e-9)),
-              leaves: e.leaves,
-            ))
+        'a base point moved in y',
+        (doc, e) => place(doc, movedBase(e, Vector2(0, 1e-9)))
+      ),
+      (
+        'a base point moved in x',
+        (doc, e) => place(doc, movedBase(e, Vector2(1e-9, 0)))
       ),
     ];
 
@@ -1299,6 +1306,80 @@ void main() {
       place(doc, e);
       place(doc, e);
       expect(doc.validate(), isEmpty);
+    });
+
+    test(
+        'L6 a definition whose leaves sit out of handle order in the slots '
+        'is reused (spec D10: pairwise, ascending handle on both sides)', () {
+      final doc = target();
+      final e = styledSofa();
+      // Two loose lines take slots 0 and 1 and are removed in ascending slot
+      // order. The free list is last-in first-out, so the copy's first leaf
+      // (lowest handle) lands in slot 1 and its second in slot 0.
+      final loose = [doc.handleSeed.next(), doc.handleSeed.next()];
+      for (final h in loose) {
+        doc.commands.execute(AddEntityCommand(
+            record: leafRecord(h.value, doc.rootHandle, EntityKind.line),
+            payload:
+                linePayload(Vector2(-512.5, 64.25), Vector2(96.75, -8.5))));
+      }
+      expect([for (final h in loose) doc.entities.slotOf(h)], [0, 1]);
+      for (final h in loose) {
+        doc.commands.execute(RemoveEntityCommand(h));
+      }
+
+      place(doc, e);
+      final def = found(doc, e).single.handle;
+      // The premise: in slot order the leaves' handles are not ascending.
+      final bySlot = [
+        for (final slot in doc.entities.liveSlots)
+          if (doc.entities.ownerAt(slot) == def)
+            doc.entities.handleAt(slot).value,
+      ];
+      final byHandle = [
+        for (final l in leavesOf(doc, def)) l.record.handle.value
+      ];
+      expect(bySlot.length, e.leaves.length);
+      expect(bySlot, isNot(byHandle));
+      expect(doc.entities.slotOf(Handle(byHandle[line])), 1);
+      expect(doc.entities.slotOf(Handle(byHandle[polyline])), 0);
+
+      expect(isLeafEqual(doc, def, e), isTrue);
+      final live = doc.entities.liveCount;
+      doc.commands.execute(placeSymbol(doc, e,
+          at: Vector2(-4000.5, 8000.25), quarterTurns: 1, mirrored: true));
+      expect(found(doc, e).single.handle, def);
+      expect(doc.tree.definitions.length, 1);
+      expect(doc.entities.liveCount, live);
+      expect(instances(doc).map((i) => i.definition), [def, def]);
+    });
+
+    test(
+        'L7 of two leaf-equal definitions with the key and version, the '
+        'lower handle is reused', () {
+      final doc = target();
+      final e = styledSofa();
+      place(doc, e);
+      final first = found(doc, e).single.handle;
+      // Edit the first so the next placement copies (#2), then edit it back
+      // by a fresh command (an undo would take the copy with it).
+      final label = leafAt(doc, first, text).handle;
+      doc.commands.execute(SetEntityTextCommand(label, 'Sofa', ''));
+      place(doc, e);
+      final second = found(doc, e).last.handle;
+      doc.commands.execute(SetEntityTextCommand(label, 'SOFA', ''));
+
+      expect(found(doc, e).map((d) => d.handle), [first, second]);
+      expect(first.value, lessThan(second.value));
+      expect(isLeafEqual(doc, first, e), isTrue);
+      expect(isLeafEqual(doc, second, e), isTrue);
+      final live = doc.entities.liveCount;
+
+      doc.commands.execute(placeSymbol(doc, e,
+          at: Vector2(-4000.5, 8000.25), quarterTurns: 3, mirrored: true));
+      expect(instances(doc).last.definition, first);
+      expect(doc.tree.definitions.length, 2);
+      expect(doc.entities.liveCount, live);
     });
   });
 }
