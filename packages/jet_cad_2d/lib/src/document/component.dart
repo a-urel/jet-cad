@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 import '../core/handle.dart';
 import 'object_layer.dart';
 import 'origin_component.dart';
@@ -48,6 +50,42 @@ class ComponentStore<T extends Component> {
   }
 
   void clear() => _byHandle.clear();
+}
+
+/// Every component one handle carries, taken by [ComponentRegistry.snapshotOf]
+/// and put back by [ComponentRegistry.restore] (spec 09c D11).
+///
+/// Immutable: both lists are unmodifiable copies taken when the snapshot is,
+/// so a later attach, detach or `attachUnknown` on the registry does not
+/// change it. The components are the registry's own values (immutable by the
+/// [Component] contract); the unknown payloads are the same references
+/// [ComponentRegistry.unknownOf] hands out, under the same rule: never
+/// mutated in place.
+@immutable
+class ComponentSnapshot {
+  /// The registered components, as `(typeId, value)` pairs ascending by type
+  /// id.
+  final List<(String, Component)> components;
+
+  /// The unknown-component payloads, in the registry's own order (oldest
+  /// first, as [ComponentRegistry.unknownOf] lists them), each still carrying
+  /// its `typeId`. Not re-sorted by type id: [ComponentRegistry.restore]
+  /// appends them in this order, so `unknownOf` reads back exactly as it did.
+  final List<Map<String, Object?>> unknown;
+
+  ComponentSnapshot._(
+      List<(String, Component)> components, List<Map<String, Object?>> unknown)
+      : components = List.unmodifiable(components),
+        unknown = List.unmodifiable(unknown);
+
+  /// A snapshot of a handle that carries nothing.
+  static final ComponentSnapshot empty =
+      ComponentSnapshot._(const [], const []);
+
+  /// True when the handle carried no component, registered or unknown.
+  bool get isEmpty => components.isEmpty && unknown.isEmpty;
+
+  bool get isNotEmpty => !isEmpty;
 }
 
 /// All component stores for one document, plus the type-id mapping.
@@ -111,6 +149,60 @@ class ComponentRegistry {
 
   Iterable<Handle> withComponent<T extends Component>() =>
       _stores[T]?.handles ?? const <Handle>[];
+
+  /// Every component on [handle]: each registered one (ascending by type id)
+  /// and each unknown payload (oldest first), as an immutable value (spec
+  /// 09c D11). Reads only.
+  ComponentSnapshot snapshotOf(Handle handle) {
+    final registered = <(String, Component)>[];
+    for (final entry in _stores.entries) {
+      final component = entry.value[handle];
+      if (component != null) {
+        registered.add((_typeIdOf[entry.key]!, component));
+      }
+    }
+    final unknown = _unknown[handle] ?? const <Map<String, Object?>>[];
+    if (registered.isEmpty && unknown.isEmpty) return ComponentSnapshot.empty;
+    registered.sort((a, b) => a.$1.compareTo(b.$1));
+    return ComponentSnapshot._(registered, unknown);
+  }
+
+  /// Detaches every component on [handle], registered and unknown. Other
+  /// handles are untouched.
+  void detachAll(Handle handle) {
+    for (final store in _stores.values) {
+      store.remove(handle);
+    }
+    _unknown.remove(handle);
+  }
+
+  /// Re-attaches each component of [snapshot] to [handle], exactly: each
+  /// registered value into its type's store (replacing one of that type
+  /// already there, as [attach] does), each unknown payload appended in the
+  /// snapshot's order (as [attachUnknown] does). Meant for a handle that
+  /// carries nothing, which is how `RemoveDefinitionCommand`'s inverse uses
+  /// it; nothing outside the snapshot is added, so a type registered after
+  /// the snapshot was taken gets no component.
+  ///
+  /// All-or-nothing: a registered type id this registry no longer maps to a
+  /// store throws [StateError] before anything is written.
+  void restore(Handle handle, ComponentSnapshot snapshot) {
+    final stores = <ComponentStore<Component>>[];
+    for (final (typeId, _) in snapshot.components) {
+      final store = _stores[_typeOf[typeId]];
+      if (store == null) {
+        throw StateError('cannot restore $typeId on ${handle.toHex()}: '
+            'the type is not registered');
+      }
+      stores.add(store);
+    }
+    for (var i = 0; i < stores.length; i++) {
+      stores[i].set(handle, snapshot.components[i].$2);
+    }
+    for (final payload in snapshot.unknown) {
+      attachUnknown(handle, payload);
+    }
+  }
 
   /// Records a component whose `typeId` this build does not know. The payload
   /// is stored exactly as read and written back unchanged.
