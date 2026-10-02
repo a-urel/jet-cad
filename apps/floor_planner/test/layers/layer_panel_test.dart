@@ -868,4 +868,56 @@ void main() {
         .dy;
     expect(layersTop, lessThan(pageTop));
   });
+
+  testWidgets(
+      'a loaded layer whose stored name fails D4: its eye hides it, one '
+      'command (final review finding 1)', (tester) async {
+    final fx = layerDoc();
+    final zero = rec(fx.doc, ReservedHandles.layerZero);
+    final h = fx.doc.handleSeed.next();
+    // A direct table write: the user form would refuse the colon.
+    fx.doc.tables.layers.add(LayerRecord(
+        handle: h,
+        name: 'Walls:Ext',
+        color: const IndexedColor(4),
+        linetype: zero.linetype,
+        lineweight: zero.lineweight,
+        transparency: zero.transparency));
+    final doc = fx.doc;
+    await pumpPanel(tester, doc);
+    expect(enabled(tester, 'layer-eye-${hx(h)}'), isTrue);
+    final depth = doc.commands.undoDepth;
+    await tester.tap(byKey('layer-eye-${hx(h)}'));
+    await settle(tester);
+    expect(tester.takeException(), isNull);
+    expect(rec(doc, h).visible, isFalse);
+    expect(rec(doc, h).name, 'Walls:Ext');
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(shown(tester, h).visible, isFalse);
+  });
+
+  testWidgets(
+      'a command the document refuses is caught: nothing changes and the '
+      'press raises nothing (final review finding 1)', (tester) async {
+    final fx = layerDoc();
+    final doc = fx.doc;
+    await pumpPanel(tester, doc);
+    expect(enabled(tester, 'layer-eye-${hx(fx.a)}'), isTrue,
+        reason: 'premise: A is not current, so its eye is enabled');
+    // A direct header write the panel does not listen to: A becomes the
+    // effective current layer behind the built row, whose eye stays enabled
+    // until the next rebuild. The press dispatches a hide of the current
+    // layer, which the user form refuses (decision 7).
+    doc.header.currentLayer = fx.a;
+    final before = DraftDocumentCodec.encodeToString(doc);
+    final depth = doc.commands.undoDepth;
+    final record = rec(doc, fx.a);
+    await tester.tap(byKey('layer-eye-${hx(fx.a)}'));
+    await settle(tester);
+    expect(tester.takeException(), isNull, reason: 'the refusal is caught');
+    expect(DraftDocumentCodec.encodeToString(doc), before);
+    expect(doc.commands.undoDepth, depth);
+    expect(rec(doc, fx.a), record,
+        reason: recordReason(rec(doc, fx.a), record));
+  });
 }

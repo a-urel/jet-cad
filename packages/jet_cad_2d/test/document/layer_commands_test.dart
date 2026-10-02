@@ -363,6 +363,51 @@ void main() {
       expect(f.layer(f.a), old);
     });
 
+    test(
+        'a loaded layer whose stored name fails D4 can be hidden, locked and '
+        'recoloured; a rename to another invalid name is still refused '
+        '(final review finding 1)', () {
+      final f = _Fixture();
+      final colon = f.record(f.doc.handleSeed.next(), 'Walls:Ext', 4);
+      final space = f.record(f.doc.handleSeed.next(), ' Walls', 6);
+      // Direct table writes: no user form would let these names in.
+      f.doc.tables.layers
+        ..add(colon)
+        ..add(space);
+      final loaded = reload(f.doc);
+      String bytes() => DraftDocumentCodec.encodeToString(loaded);
+      for (final bad in [colon, space]) {
+        final edits = <(LayerRecord, String)>[
+          (bad.copyWith(visible: false), 'Hide layer'),
+          (bad.copyWith(locked: true), 'Lock layer'),
+          (bad.copyWith(color: const IndexedColor(2)), 'Change layer colour'),
+        ];
+        for (final (record, label) in edits) {
+          final before = bytes();
+          final depth = loaded.commands.undoDepth;
+          final command = SetLayerCommand(record);
+          loaded.commands.execute(command);
+          expect(loaded.tables.layers[bad.handle], record);
+          expect(command.label, label);
+          expect(loaded.commands.undoDepth, depth + 1, reason: 'one step');
+          loaded.commands.undo();
+          expect(loaded.tables.layers[bad.handle], bad);
+          expect(bytes(), before, reason: 'the inverse restores exactly');
+        }
+        final before = bytes();
+        final depth = loaded.commands.undoDepth;
+        for (final name in ['Walls|Ext', 'Walls ', '']) {
+          expect(
+              () => loaded.commands
+                  .execute(SetLayerCommand(bad.copyWith(name: name))),
+              throwsArgumentError);
+        }
+        expect(bytes(), before, reason: 'a refused rename mutates nothing');
+        expect(loaded.commands.undoDepth, depth);
+        expect(loaded.tables.layers[bad.handle], bad);
+      }
+    });
+
     test('layer 0 cannot be renamed, but can be recoloured', () {
       final f = _Fixture();
       final zero = f.layer(ReservedHandles.layerZero);

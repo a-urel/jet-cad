@@ -240,9 +240,10 @@ class RemoveLayerCommand extends DraftCommand {
 /// puts the old record back exactly.
 ///
 /// Every check runs **before** the table's remove, so the remove-then-add
-/// cannot lose the record: the user form checks the target exists, the name
-/// ([layerNameError], the record itself excluded, so a case-only rename is
-/// valid), that layer 0 keeps its name, and that the effective current layer
+/// cannot lose the record: the user form checks the target exists, a new
+/// name ([layerNameError], the record itself excluded, so a case-only rename
+/// is valid; an unchanged stored name is never checked), that layer 0 keeps
+/// its name, and that the effective current layer
 /// ([drawingLayer]) is not hidden (decision 7); the restore form checks the
 /// target exists and that no *other* layer holds the new name under
 /// `toLowerCase()` — the one thing `TableSection.add` would refuse after the
@@ -287,9 +288,13 @@ class SetLayerCommand extends DraftCommand {
       }
     } else {
       old = _requireLayerForUser(target, handle);
-      final reason = layerNameError(target, record.name, self: handle);
-      if (reason != null) {
-        throw ArgumentError.value(record.name, 'name', reason);
+      // A stored name is never checked, only a rename: a layer loaded with
+      // a name that fails D4 can still be hidden, locked or recoloured.
+      if (record.name != old.name) {
+        final reason = layerNameError(target, record.name, self: handle);
+        if (reason != null) {
+          throw ArgumentError.value(record.name, 'name', reason);
+        }
       }
       if (handle == ReservedHandles.layerZero && record.name != old.name) {
         throw ArgumentError.value(

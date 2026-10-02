@@ -141,7 +141,20 @@ class LayerPanelState extends State<LayerPanel> {
 
   bool get _allowed => _doc.commands.permissions.allows(Capability.structure);
 
-  void _execute(DraftCommand command) => _doc.commands.execute(command);
+  /// Executes [command]. A refusal is caught as the Selection section's
+  /// commits and `LayerPicker` catch one: the dispatcher has rolled it back,
+  /// so nothing changed, and no gesture surfaces an exception (a control
+  /// enabled from a state the panel has not rebuilt for yet, final review
+  /// finding 1).
+  void _execute(DraftCommand command) {
+    try {
+      _doc.commands.execute(command);
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
 
   /// One [SetLayerCommand] built from layer [h]'s record as the document
   /// holds it now, not as the last build saw it: another command may have
