@@ -4,6 +4,7 @@ import '../store/entity_store.dart';
 import 'commands.dart';
 import 'draft_document.dart';
 import 'node.dart';
+import 'object_layer.dart';
 import 'tree.dart';
 
 /// The codes [DocumentValidation.validate] can emit.
@@ -25,6 +26,14 @@ abstract final class ValidationCodes {
   static const String fillBoundaryNotClosed = 'fill.boundary_not_closed';
   static const String fillBoundaryForeignOwner = 'fill.boundary_foreign_owner';
   static const String fillDrawOrderInverted = 'fill.draw_order_inverted';
+
+  /// A **warning** (spec 12b D3): the stored current layer names no layer, or
+  /// a hidden one. New drawing goes to layer 0 meanwhile (`drawingLayer`).
+  static const String currentLayerUnusable = 'header.current_layer_unusable';
+
+  /// A **warning** (spec 12b D3): an `ObjectLayer`, on any handle, live or
+  /// dead, names no layer. The object regenerates on layer 0 meanwhile.
+  static const String objectLayerMissing = 'component.object_layer_missing';
 }
 
 extension DocumentValidation on DraftDocument {
@@ -45,6 +54,14 @@ extension DocumentValidation on DraftDocument {
     Diagnostic error(String code, String message, List<Handle> handles) =>
         Diagnostic(
           severity: DiagnosticSeverity.error,
+          code: code,
+          message: message,
+          handles: handles,
+        );
+
+    Diagnostic warning(String code, String message, List<Handle> handles) =>
+        Diagnostic(
+          severity: DiagnosticSeverity.warning,
           code: code,
           message: message,
           handles: handles,
@@ -288,6 +305,35 @@ extension DocumentValidation on DraftDocument {
             'fill ${fill.toHex()} has a higher handle than its boundary '
             '${boundary.toHex()}, so it draws over its own outline',
             [fill, boundary]));
+      }
+    }
+
+    // 8. Layer references (spec 12b D3). Warnings: a stored value that no
+    //    longer resolves is kept as it is, and the engine falls back to
+    //    layer 0 for it.
+    final current = header.currentLayer;
+    final currentRecord = tables.layers[current];
+    if (currentRecord == null) {
+      out.add(warning(
+          ValidationCodes.currentLayerUnusable,
+          'The current layer ${current.toHex()} names no layer; new drawing '
+          'goes to layer 0.',
+          [current]));
+    } else if (!currentRecord.visible) {
+      out.add(warning(
+          ValidationCodes.currentLayerUnusable,
+          'The current layer ${currentRecord.name} is hidden; new drawing '
+          'goes to layer 0.',
+          [current]));
+    }
+    for (final handle in components.withComponent<ObjectLayer>()) {
+      final layer = components.get<ObjectLayer>(handle)!.layer;
+      if (!tables.layers.contains(layer)) {
+        out.add(warning(
+            ValidationCodes.objectLayerMissing,
+            'The object ${handle.toHex()} names layer ${layer.toHex()}, which '
+            'is not in this document; it is drawn on layer 0.',
+            [handle, layer]));
       }
     }
 

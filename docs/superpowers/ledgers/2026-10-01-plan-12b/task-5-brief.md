@@ -1,0 +1,11 @@
+# Task 5 brief — the stamp and the detach (spec D2)
+Read common.md in this directory first and follow it. HEAD 4a735fb. Scratch prefix: /tmp/claude-0/-home-user-jet-cad/436a473c-2fd9-5dea-b1ee-ba84afc1ba81/scratchpad/l5/.
+Do plan Task 5 exactly:
+- `_recordOf` takes the object's layer (objectLayer(target, group)); every added record (plain, region fill and boundary, TEXT) uses it.
+- `_plan`: after the payload rewrite, a matched child whose stored layer != the object's (exact ==) gets SetEntityLayerCommand.restore in the plan; a matched region, one per differing record (fill and boundary). The `Generated` class comment records the one-column amendment of 06 D11 / 10 D13.
+- 06 D8's cleanup and 10 D15's dissolve also plan SetComponentCommand<ObjectLayer>(h, null) when the object carries one (spec D2, R-4).
+- test/parametric/object_layer_test.dart with the engine's parametric test catalog: move then edit keeps the layer on matched children; added and matched regions (both records); a TEXT child; a neighbour edit; undo and redo; no ObjectLayer => layer 0; a missing layer => layer 0 and the warning; an edit leaving layers alone: no SetEntityLayerCommand in the top undo entry's ParametricReplay.replay and capability == components (spec S-10); detach on delete and on dissolve: components.get<ObjectLayer>(h) == null and validate() has no component.object_layer_missing after the layer is deleted; undo restores the component (spec S-1).
+- The existing parametric suite green, unedited beyond Task 4.
+Read first: lib/src/parametric/{parametric_system,regeneration}.dart whole (especially _recordOf ~:437, _plan ~:510-600, the dissolve ~:518-533, the cleanup ~:943, _refused, ParametricEdit/ParametricReplay); the engine's existing parametric tests (test/parametric/) for the test catalog and helpers; Task 2's layer_commands.dart (SetEntityLayerCommand.restore, objectLayer).
+Think about: whether a stamp command inside the plan changes ParametricEdit's capability (D1: SetEntityLayerCommand.capability is geometry, so a real layer move's edit reports geometry — that is intended); that the `!=` guard keeps a normal edit at components (M-LP-6).
+Mutants: M-LP-3, M-LP-4 (boundary; fill — separately), M-LP-6, M-LP-11. Gates: all packages.

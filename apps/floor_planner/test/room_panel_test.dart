@@ -165,8 +165,11 @@ void main() {
     expect(find.byKey(const Key('wall-section')), findsOneWidget);
     await select(tester, view, [r.sep]);
     expect(section, findsNothing, reason: 'a separator');
-    expect(find.byKey(const Key('selection-panel')), findsNothing,
+    // Spec 12b D12: a separator has no type section; the panel shows only
+    // the layer picker.
+    expect(find.byKey(const Key('wall-section')), findsNothing,
         reason: 'a separator has no section');
+    expect(find.byKey(const Key('layer-picker')), findsOneWidget);
     await select(tester, view, []);
     expect(section, findsNothing);
   });
@@ -510,7 +513,8 @@ void main() {
     for (var i = 0; i < 4; i++) {
       final h = doc.handleSeed.next();
       doc.commands.execute(AddEntityCommand(
-          record: draftRecord(h, doc.rootHandle, EntityKind.line),
+          record: draftRecord(h, doc.rootHandle, EntityKind.line,
+              layer: ReservedHandles.layerZero),
           payload: linePayload(place.at(-2000.25 + 300 * i, -3000.5),
               place.at(-1500.75, -2700.25))));
       lines.add(h);

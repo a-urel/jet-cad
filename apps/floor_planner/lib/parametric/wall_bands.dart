@@ -48,8 +48,10 @@ final class WallBands {
 
   /// The index of the lowest-handle wall whose band contains `(px, py)`, or
   /// -1. In a band: between the wall's two faces (by its justification) and
-  /// within the centreline's length, both within `wallJoin.linear`.
-  int _indexAt(DraftDocument doc, double px, double py) {
+  /// within the centreline's length, both within `wallJoin.linear`. With
+  /// [accept], a wall it refuses is passed over, as if it had no band.
+  int _indexAt(DraftDocument doc, double px, double py,
+      [bool Function(DraftDocument, Handle)? accept]) {
     _refresh(doc);
     final tol = wallJoin.linear;
     final c = _cache;
@@ -66,15 +68,20 @@ final class WallBands {
           along > c[o + 6] + tol) {
         continue;
       }
+      if (accept != null && !accept(doc, _handles[i])) continue;
       return i;
     }
     return -1;
   }
 
   /// The wall whose band contains the world point `(x, y)`, the lowest
-  /// handle when several do (spec 08 D14), or null.
-  Handle? hostAt(DraftDocument doc, double x, double y) {
-    final i = _indexAt(doc, x, y);
+  /// handle when several do (spec 08 D14), or null. With [accept], only a
+  /// wall it accepts is a candidate (the Opening tools pass their layer
+  /// rule, spec 12b S-11); it is called only for a wall whose band contains
+  /// the point.
+  Handle? hostAt(DraftDocument doc, double x, double y,
+      {bool Function(DraftDocument, Handle)? accept}) {
+    final i = _indexAt(doc, x, y, accept);
     return i < 0 ? null : _handles[i];
   }
 

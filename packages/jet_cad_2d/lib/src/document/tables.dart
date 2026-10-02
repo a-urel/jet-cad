@@ -171,6 +171,29 @@ class LayerRecord implements TableRecord {
         'locked': locked,
       };
 
+  /// A copy with the given fields replaced; every other field is this
+  /// record's, exactly.
+  LayerRecord copyWith({
+    Handle? handle,
+    String? name,
+    DraftColor? color,
+    Handle? linetype,
+    int? lineweight,
+    int? transparency,
+    bool? visible,
+    bool? locked,
+  }) =>
+      LayerRecord(
+        handle: handle ?? this.handle,
+        name: name ?? this.name,
+        color: color ?? this.color,
+        linetype: linetype ?? this.linetype,
+        lineweight: lineweight ?? this.lineweight,
+        transparency: transparency ?? this.transparency,
+        visible: visible ?? this.visible,
+        locked: locked ?? this.locked,
+      );
+
   static LayerRecord fromJson(Map<String, Object?> json) => LayerRecord(
         handle: Handle.fromJson(json['handle']),
         name: json['name']! as String,

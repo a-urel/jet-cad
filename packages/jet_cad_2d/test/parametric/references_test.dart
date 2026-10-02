@@ -109,7 +109,8 @@ void main() {
         transform: parked,
         children: const [])));
     final line = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)));
+        linePayload(Vector2(7200.5, 2100.25), Vector2(7300.75, 2210.5)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(line);
     final leaf = line.record.handle;
     final bad = [for (var i = 0; i < 4; i++) doc.handleSeed.next()];

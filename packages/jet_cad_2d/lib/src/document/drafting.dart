@@ -19,18 +19,21 @@ const DraftColor kDraftFillColor = TrueColor(0xE6E1D8);
 /// Spec 05 D9: a placed text is 2.5 mm tall on paper.
 const double kDraftTextPaperMm = 2.5;
 
-/// Spec 05 D2: a root-level entity on layer 0, ByLayer everything. A text
+/// Spec 05 D2: a root-level entity on [layer] (spec 12b D7: required, so no
+/// caller silently keeps layer 0), ByLayer everything. A text
 /// takes the Standard style, left and baseline, with **no** override bits,
 /// so its width factor and oblique angle come from the style. [color]
 /// defaults to ByLayer; a parametric client may give its children a
 /// concrete one (spec 07 D3).
 EntityRecord draftRecord(Handle handle, Handle owner, EntityKind kind,
-        {String text = '', DraftColor color = const ByLayerColor()}) =>
+        {required Handle layer,
+        String text = '',
+        DraftColor color = const ByLayerColor()}) =>
     EntityRecord(
       handle: handle,
       owner: owner,
       kind: kind,
-      layer: ReservedHandles.layerZero,
+      layer: layer,
       linetype: ReservedHandles.byLayerLinetype,
       linetypeScale: 1.0,
       geomIndex: 0,
@@ -48,10 +51,10 @@ EntityRecord draftRecord(Handle handle, Handle owner, EntityKind kind,
 /// re-executes this same object, so the handle is stable. Not executed.
 AddEntityCommand addDrafted(
         DraftDocument doc, EntityKind kind, GeometryPayload payload,
-        {String text = ''}) =>
+        {required Handle layer, String text = ''}) =>
     AddEntityCommand(
-      record:
-          draftRecord(doc.handleSeed.next(), doc.rootHandle, kind, text: text),
+      record: draftRecord(doc.handleSeed.next(), doc.rootHandle, kind,
+          layer: layer, text: text),
       payload: payload,
     );
 
@@ -67,6 +70,7 @@ AddRegionCommand? addDraftedRegion(
   DraftDocument doc,
   EntityKind boundaryKind,
   GeometryPayload boundaryPayload, {
+  required Handle layer,
   DraftColor fillColor = kDraftFillColor,
   DraftColor boundaryColor = const ByLayerColor(),
   int boundaryLineweight = kLineweightDefault,
@@ -79,7 +83,7 @@ AddRegionCommand? addDraftedRegion(
     owner: doc.rootHandle,
     boundaryKind: boundaryKind,
     boundaryPayload: boundaryPayload,
-    layer: ReservedHandles.layerZero,
+    layer: layer,
     fillColor: fillColor,
     boundaryColor: boundaryColor,
     boundaryLineweight: boundaryLineweight,

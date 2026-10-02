@@ -50,8 +50,10 @@ typedef _Placement = ({OpeningParams params, Cut? cut});
 /// - **The host** is the wall whose band contains the **raw** pointer, the
 ///   lowest handle when several do: [WallBands.hostAt], shared with the Wall
 ///   tool. The scan is not gated on object snap (Ruling 08-11): finding the
-///   host is not a snap. No wall under the pointer: no preview, and a click
-///   does nothing.
+///   host is not a snap. **Only a wall the user can see and select hosts**
+///   (spec 12b S-11, [isUsableHost]): its object layer must be visible and
+///   unlocked; another wall is passed over, as if it had no band. No wall
+///   under the pointer: no preview, and a click does nothing.
 /// - **The position** is `u` of the **resolved** point (the snap chain's)
 ///   projected onto the host's centreline in its local space, unless an
 ///   **edge snap** wins (D15, [selfSnap]): with object snap on, an edge of
@@ -120,6 +122,7 @@ class OpeningTool extends PlacementTool {
   // same raw point on one move, and the scan runs once.
   DraftDocument? _scanDocument;
   int _scanGeneration = -1;
+  int _scanTables = -1;
   double _scanX = double.nan, _scanY = double.nan;
   Handle? _scanHost;
 
@@ -251,6 +254,8 @@ class OpeningTool extends PlacementTool {
               transform: Transform2.identity(),
               children: const [])),
           SetComponentCommand<OpeningParams>(h, placed.params),
+          // Spec 12b D2: a new object takes the current layer.
+          SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
         ], label: 'Add $name');
       }, needs: const {
         Capability.structure,
@@ -266,18 +271,22 @@ class OpeningTool extends PlacementTool {
     }
   }
 
-  /// The wall whose band contains [raw] ([WallBands.hostAt]), scanned once
-  /// per raw point and band generation.
+  /// The wall whose band contains [raw] ([WallBands.hostAt]) and that
+  /// [isUsableHost] accepts, scanned once per raw point, band generation and
+  /// table revision (a layer hidden or locked since the last scan is seen
+  /// at once, not only when the change stream delivers).
   Handle? _hostAt(DraftDocument doc, Vector2 raw) {
     if (identical(doc, _scanDocument) &&
         _bands.generation == _scanGeneration &&
+        doc.tables.mutationRevision == _scanTables &&
         raw.x == _scanX &&
         raw.y == _scanY) {
       return _scanHost;
     }
-    final host = _bands.hostAt(doc, raw.x, raw.y);
+    final host = _bands.hostAt(doc, raw.x, raw.y, accept: isUsableHost);
     _scanDocument = doc;
     _scanGeneration = _bands.generation;
+    _scanTables = doc.tables.mutationRevision;
     _scanX = raw.x;
     _scanY = raw.y;
     return _scanHost = host;
@@ -427,4 +436,15 @@ class OpeningTool extends PlacementTool {
     }
     canvas.drawPath(band, bandPaint);
   }
+}
+
+/// Whether wall [wall] of [doc] may host a new opening (spec 12b S-11): its
+/// object layer (`objectLayer`) is visible and unlocked. A tool acting on
+/// the wall under the pointer is selection-like, so a door is never placed
+/// on a wall the user cannot see or select. A missing record counts as
+/// visible and unlocked, as `FilterEvaluator` counts it. (Decision 8 is
+/// untouched: a hidden wall's existing openings still cut it.)
+bool isUsableHost(DraftDocument doc, Handle wall) {
+  final record = doc.tables.layers[objectLayer(doc, wall)];
+  return (record?.visible ?? true) && !(record?.locked ?? false);
 }

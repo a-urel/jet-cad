@@ -304,6 +304,8 @@ class DimensionTool extends PlacementTool {
               children: const [])),
           SetComponentCommand<DimensionParams>(
               h, DimensionParams(a, b, kind, offset)),
+          // Spec 12b D2: a new object takes the current layer.
+          SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
         ], label: 'Add dimension');
       }, needs: const {
         Capability.structure,

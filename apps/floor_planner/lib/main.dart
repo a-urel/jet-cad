@@ -13,6 +13,7 @@ import 'document_toolbar.dart';
 import 'exit_guard.dart';
 import 'export/export_font.dart';
 import 'export/page_printer.dart';
+import 'layers/layer_panel.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
@@ -962,6 +963,10 @@ class _PlannerShellState extends State<PlannerShell> {
                               wallSettings: _wallSettings,
                               openingTools: _openingTools,
                               openingSettings: _openingSettings),
+                          // Spec 12b D9: the Layers section, placed only.
+                          LayerPanel(
+                              document: _document,
+                              foreground: _resolver.foreground),
                           Expanded(
                             child: PagePanel(
                                 key: _pagePanel,

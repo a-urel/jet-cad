@@ -211,7 +211,8 @@ void main() {
     // A misplaced Tag on a plain line whose handle is above every object's:
     // it still comes first.
     final line = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
+        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(line);
     final misplaced = line.record.handle;
     expect(misplaced.value, greaterThan(h3.value));
@@ -243,7 +244,8 @@ void main() {
     _probeDoc = doc;
     doc.commands.execute(create(doc, hA, parked, const Tag(1)));
     final plainLine = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(19001.5, 11002.25), Vector2(19044.5, 11090)));
+        linePayload(Vector2(19001.5, 11002.25), Vector2(19044.5, 11090)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(plainLine);
     _probeTarget = plainLine.record.handle;
     final before = enc(doc);
@@ -272,7 +274,8 @@ void main() {
     final system = ParametricSystem(doc, catalog)..install();
     _probeDoc = doc;
     final plainLine = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(19001.5, 11002.25), Vector2(19044.5, 11090)));
+        linePayload(Vector2(19001.5, 11002.25), Vector2(19044.5, 11090)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(plainLine);
     _probeTarget = plainLine.record.handle;
     doc.commands.execute(create(doc, hA, parked, const Tag(1)));

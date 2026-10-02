@@ -1,4 +1,6 @@
+import '../core/handle.dart';
 import '../geometry/aabb2.dart';
+import 'style.dart';
 
 /// Drawing units, mirroring DXF `$INSUNITS` for the values this engine cares
 /// about.
@@ -15,6 +17,16 @@ class DocumentHeader {
   /// is a display setting rather than document content — no geometry moves —
   /// so it is not on the undo stack.
   double globalLinetypeScale = 1.0;
+
+  /// The layer new drawing goes to, as **stored** (spec 12b D3).
+  ///
+  /// A stored value: it round-trips exactly, whether or not it names an
+  /// existing, visible layer. Every decision that says "current" reads the
+  /// *effective* current layer, `drawingLayer(target)`, which falls back to
+  /// layer 0 when this one is dangling or hidden. Changed only through
+  /// `SetCurrentLayerCommand`, so it is on the undo stack and marks the
+  /// document dirty.
+  Handle currentLayer = ReservedHandles.layerZero;
 
   /// Extents exactly as they were read from an imported file, preserved so
   /// `$EXTMIN`/`$EXTMAX` survive a round-trip.
@@ -43,6 +55,7 @@ class DocumentHeader {
         'units': units.name,
         'scale': scale,
         'globalLinetypeScale': globalLinetypeScale,
+        'currentLayer': currentLayer.toJson(),
         'importedExtents': _persistable(importedExtents)?.toJson(),
         'customVariables': {
           for (final key in customVariables.keys.toList()..sort())
@@ -59,7 +72,12 @@ class DocumentHeader {
       ..units = DrawingUnits.values.byName(json['units']! as String)
       ..scale = (json['scale']! as num).toDouble()
       ..globalLinetypeScale =
-          (json['globalLinetypeScale'] as num?)?.toDouble() ?? 1.0;
+          (json['globalLinetypeScale'] as num?)?.toDouble() ?? 1.0
+      // Absent in every file written before schema 7: layer 0, which is
+      // where every one of those files drew.
+      ..currentLayer = json.containsKey('currentLayer')
+          ? Handle.fromJson(json['currentLayer'])
+          : ReservedHandles.layerZero;
     final extents = json['importedExtents'];
     if (extents != null) {
       header.importedExtents = _persistable(Aabb2.fromJson(extents));

@@ -293,7 +293,9 @@ class _Pen {
   /// boundary, the boundary keeping today's colour and weight.
   void _region(EntityKind kind, GeometryPayload payload) =>
       doc.commands.execute(addDraftedRegion(doc, kind, payload,
-          boundaryColor: _furnitureColor, boundaryLineweight: 25)!);
+          boundaryColor: _furnitureColor,
+          boundaryLineweight: 25,
+          layer: ReservedHandles.layerZero)!);
 
   void rectRegion(double ax, double ay, double bx, double by) => _region(
       EntityKind.polyline, rectanglePayload(Vector2(ax, ay), Vector2(bx, by)));

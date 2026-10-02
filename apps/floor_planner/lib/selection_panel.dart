@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'layers/layer_picker.dart';
 import 'panel_focus.dart';
 import 'panel_number.dart';
 import 'parametric/box.dart';
@@ -33,6 +34,9 @@ import 'parametric/wall_tool.dart';
 ///   Vertical), the axes line of a turned linear dimension (D11, R-18) and
 ///   its two end lines (R-28). No tool mode: the Dimension tool has no
 ///   settings.
+/// - **Layer** (12b D12): for any non-empty selection while no tool's
+///   settings show, a [LayerPicker] after the sections above (alone when
+///   none shows).
 ///
 /// Each commit to an object is one `SetComponentCommand`, which the
 /// parametric system turns into one undo step with its regeneration. 12
@@ -775,13 +779,18 @@ class _SelectionPanelState extends State<SelectionPanel> {
   Widget build(BuildContext context) {
     final box = _box, wall = _wall, opening = _opening, room = _room;
     final dimension = _dimension;
-    if (box == null &&
-        wall == null &&
-        opening == null &&
-        room == null &&
-        dimension == null) {
-      return const SizedBox.shrink();
-    }
+    // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
+    // whenever no tool-settings section does, including a selection that
+    // has no type section (a line, a text, a symbol, several things).
+    final picker = widget.selection.keys.isNotEmpty &&
+        !_toolMode &&
+        _openingToolMode == null;
+    final sections = box != null ||
+        wall != null ||
+        opening != null ||
+        room != null ||
+        dimension != null;
+    if (!sections && !picker) return const SizedBox.shrink();
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
     final wallEditable = _editable(_Kind.thickness);
@@ -890,6 +899,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
                   room != null)
                 const SizedBox(height: 12),
               ..._dimensionSection(dimension, title),
+            ],
+            if (picker) ...[
+              if (sections) const SizedBox(height: 12),
+              LayerPicker(
+                  document: widget.document, selection: widget.selection),
             ],
           ],
         ),

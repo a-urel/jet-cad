@@ -441,15 +441,18 @@ List<Handle> _closure(
 /// D12, D13); `draftRecord`'s defaults stand for everything a [Generated]
 /// does not set. [boundary] marks a region's boundary record, which takes
 /// [Generated.boundaryFlags] instead of the fill's [Generated.flags].
+/// [layer] is the object's (`objectLayer`, spec 12b D2): every added
+/// record, a region's fill and boundary both, is on it.
 EntityRecord _recordOf(
-        Handle handle, Handle owner, EntityKind kind, Generated g,
+        Handle handle, Handle owner, EntityKind kind, Generated g, Handle layer,
         {bool boundary = false}) =>
-    draftRecord(handle, owner, kind, color: g.color, text: g.text).copyWith(
-        transparency: g.transparency,
-        flags: boundary ? g.boundaryFlags : g.flags,
-        linetype: g.linetype,
-        lineweight: g.lineweight,
-        textAttrs: g.textAttrs);
+    draftRecord(handle, owner, kind, color: g.color, text: g.text, layer: layer)
+        .copyWith(
+            transparency: g.transparency,
+            flags: boundary ? g.boundaryFlags : g.flags,
+            linetype: g.linetype,
+            lineweight: g.lineweight,
+            textAttrs: g.textAttrs);
 
 bool _samePayload(GeometryPayload a, GeometryPayload b) {
   if (a.coords.length != b.coords.length ||
@@ -464,6 +467,27 @@ bool _samePayload(GeometryPayload a, GeometryPayload b) {
   }
   return true;
 }
+
+/// Spec 12b D2's stamp on one **matched** child [c]: a
+/// `SetEntityLayerCommand.restore` onto [layer] when [c]'s stored layer
+/// differs (exact `==`, a stored value), nothing otherwise. The guard is
+/// load-bearing (R-15): without it every regeneration plans a command and
+/// every `ParametricEdit` reports `geometry`.
+void _stampLayer(
+    CommandTarget t, List<DraftCommand> out, Handle c, Handle layer) {
+  if (t.entities.layerAt(t.entities.slotOf(c)!) != layer) {
+    out.add(SetEntityLayerCommand.restore(c, layer));
+  }
+}
+
+/// [h]'s `ObjectLayer` detach (spec 12b D2, R-4), when [h] carries one:
+/// planned beside the registered component's detach by 06 D8's cleanup and
+/// 10 D15's dissolve, so no dead handle keeps a layer alive and undo
+/// replays it.
+Iterable<DraftCommand> _detachLayer(CommandTarget t, Handle h) => [
+      if (t.components.get<ObjectLayer>(h) != null)
+        SetComponentCommand<ObjectLayer>(h, null),
+    ];
 
 /// The boundary a fill child names: its payload's one scalar (spec 07 D8).
 Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
@@ -509,13 +533,16 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 /// the fill; the boundary is never matched as a plain POLYLINE.
 ///
 /// A matched child's payload is rewritten when it differs; a matched
-/// TEXT's string too (spec 10 D12). Every added record comes from
-/// [_recordOf].
+/// TEXT's string too (spec 10 D12); then its layer, when it differs from
+/// the object's ([_stampLayer], spec 12b D2), a matched region's fill and
+/// boundary each. Every added record comes from [_recordOf], on the
+/// object's layer.
 ///
 /// Each object is first asked whether it dissolves (spec 10 D15), with the
 /// same [view], before its `generate`. A dissolving object is not
 /// generated: its plan is [_subtreeRemoval] (the select tool's order), then
-/// the detach of its own component. The detach is planned here because
+/// the detach of its own component and of its `ObjectLayer`, when it
+/// carries one (spec 12b D2). The detach is planned here because
 /// nothing else would plan it: 06 D8's cleanup detaches only `lost`
 /// objects, and `lost` is computed from the after-survey, where a
 /// dissolving object is still live. For the same reason it is never
@@ -530,9 +557,11 @@ List<DraftCommand> _plan(
     if (registration.dissolves(view, h)) {
       out
         ..addAll(_subtreeRemoval(t, s, h))
-        ..add(registration.detach(h));
+        ..add(registration.detach(h))
+        ..addAll(_detachLayer(t, h));
       continue;
     }
+    final layer = objectLayer(t, h);
     final generated = registration.generate(view, h);
     final children = s.children[h] ?? const <Handle>[];
     final boundaries = <Handle>{
@@ -561,12 +590,15 @@ List<DraftCommand> _plan(
             t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
           out.add(SetEntityGeometryCommand(boundary, g.payload));
         }
+        _stampLayer(t, out, fills[i], layer);
+        _stampLayer(t, out, boundary, layer);
       } else {
         // Fill first: `AddRegionCommand` requires the lower handle on it.
         out.add(AddRegionCommand(
-            fill: _recordOf(Handle.checked(++reserved), h, EntityKind.fill, g),
+            fill: _recordOf(
+                Handle.checked(++reserved), h, EntityKind.fill, g, layer),
             boundary: _recordOf(
-                Handle.checked(++reserved), h, EntityKind.polyline, g,
+                Handle.checked(++reserved), h, EntityKind.polyline, g, layer,
                 boundary: true),
             boundaryPayload: g.payload));
       }
@@ -590,9 +622,10 @@ List<DraftCommand> _plan(
         if (g.kind == EntityKind.text && t.entities.textAt(slot) != g.text) {
           out.add(SetEntityTextCommand(existing[i], g.text, ''));
         }
+        _stampLayer(t, out, existing[i], layer);
       } else {
         out.add(AddEntityCommand(
-            record: _recordOf(Handle.checked(++reserved), h, g.kind, g),
+            record: _recordOf(Handle.checked(++reserved), h, g.kind, g, layer),
             payload: g.payload));
       }
     }
@@ -940,7 +973,14 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       for (final h in before.objects.keys)
         if (!after.objects.containsKey(h) && t.tree[h] == null) h,
     ];
-    cleanup = [for (final h in lost) before.objects[h]!.detach(h)];
+    // Spec 12b D2 (R-4): the `ObjectLayer` goes with the registered
+    // component, so a dead handle keeps no layer alive.
+    cleanup = [
+      for (final h in lost) ...[
+        before.objects[h]!.detach(h),
+        ..._detachLayer(t, h),
+      ],
+    ];
     final seeds = <Handle>{
       for (final h in r.touched) ...[
         // Ruling 06-4: a handle that was an object seeds too.

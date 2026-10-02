@@ -26,6 +26,8 @@ class FakeTarget implements CommandTarget {
   );
   @override
   final FillIndex fills = FillIndex();
+  @override
+  final DocumentHeader header = DocumentHeader();
 
   int invalidations = 0;
   @override

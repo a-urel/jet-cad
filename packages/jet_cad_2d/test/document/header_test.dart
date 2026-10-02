@@ -31,6 +31,8 @@ void main() {
       'units',
       'scale',
       'globalLinetypeScale',
+      // Plan 12b Task 1: schema 7's key, after globalLinetypeScale.
+      'currentLayer',
       'importedExtents',
       'customVariables'
     ]);

@@ -229,7 +229,8 @@ void main() {
     expect(rig.tool.debugPreview, hasLength(1), reason: 'the face, no hole');
     final hovered = doc.handleSeed.current;
     doc.commands.execute(addDrafted(doc, EntityKind.line,
-        linePayload(plan.at(-3000, -3000), plan.at(-2000, -3000.5))));
+        linePayload(plan.at(-3000, -3000), plan.at(-2000, -3000.5)),
+        layer: ReservedHandles.layerZero));
     final raised = doc.handleSeed.current;
     expect(raised.value, greaterThan(hovered.value),
         reason: 'premise: the edit raised the handle seed');

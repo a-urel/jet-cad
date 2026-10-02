@@ -19,7 +19,16 @@
 /// of the v5->v6 migration. The bump exists for the **reader**: without it a
 /// v5 build would load a v6 file, silently drop four fields, and render a
 /// different drawing. With it, that build refuses the file and says why.
-const int kSchemaVersion = 6;
+///
+/// 7: `DocumentHeader.toJson` gained `currentLayer` (the layer new drawing
+/// goes to); `fromJson` defaults it to layer 0 when absent. The same version
+/// carries the `jet_cad.object_layer` component, a parametric object's layer
+/// (spec 12b D2), whose absence also means layer 0. Defaulting both is the
+/// whole of the v6->v7 migration. The bump exists for the reader, as 6's
+/// did: without it a v6 build would load a v7 file, drop the current layer
+/// and every object's layer, and draw every object on layer 0. With it, that
+/// build refuses the file and says why.
+const int kSchemaVersion = 7;
 
 class SchemaVersionError implements Exception {
   final Object? found;

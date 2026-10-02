@@ -76,8 +76,9 @@ void main() {
     expect(a.hashCode == b.hashCode, isFalse);
   });
 
-  test('the schema this build writes is 6', () {
-    expect(kSchemaVersion, 6);
+  test('the schema this build writes is 7', () {
+    // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
+    expect(kSchemaVersion, 7);
   });
 
   group('a v5 document resolves bit-identically under a v6 build', () {
@@ -152,6 +153,8 @@ void main() {
         map.remove('linetype');
         map.remove('linetypeScale');
       }
+      // Plan 12b Task 1: and the v7 header key, which no v5 writer wrote.
+      (json['header']! as Map<String, Object?>).remove('currentLayer');
       json['schemaVersion'] = 5;
       return json;
     }
@@ -188,7 +191,8 @@ void main() {
       // is refused by version rather than by a FormatException deep inside a
       // field parse.
       expect(() => DraftDocumentCodec.decode(v5Document()), returnsNormally);
-      final future = v5Document()..['schemaVersion'] = 7;
+      // Plan 12b Task 1: the future version follows the build's.
+      final future = v5Document()..['schemaVersion'] = kSchemaVersion + 1;
       expect(() => DraftDocumentCodec.decode(future),
           throwsA(isA<SchemaVersionError>()));
     });

@@ -56,6 +56,12 @@ void main() {
     //
     // Re-baselined in Plan 3f.1 Task 1: InstanceNode.toJson gained four style
     // keys and kSchemaVersion moved from 5 to 6.
+    //
+    // Plan 12b Task 1: DocumentHeader.toJson gained `currentLayer` and
+    // kSchemaVersion moved from 6 to 7, which shifts both values. They are
+    // macOS values (Ruling 07-7: the hash covers trig-dependent output) and
+    // were NOT re-baselined: Task 1 ran in a Linux container, which cannot
+    // compute them. Re-baseline owed on macOS.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
         1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
@@ -237,6 +243,10 @@ void main() {
     // Re-baselined in Plan 3f.1 Task 1 in step with the sibling test above:
     // InstanceNode.toJson gained four style keys and kSchemaVersion moved
     // from 5 to 6.
+    //
+    // Plan 12b Task 1: not re-baselined, in step with the sibling test above
+    // (header key `currentLayer`, kSchemaVersion 6 to 7; macOS values, owed
+    // on macOS).
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
         1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),

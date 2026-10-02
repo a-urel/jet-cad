@@ -26,7 +26,8 @@ class _Tagged extends DraftCommand {
 }
 
 AddEntityCommand line(DraftDocument doc) => addDrafted(doc, EntityKind.line,
-    linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)));
+    linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
+    layer: ReservedHandles.layerZero);
 
 void main() {
   test('X1 execute runs the expanded command and reports it', () async {

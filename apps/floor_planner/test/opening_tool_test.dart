@@ -417,7 +417,8 @@ void main() {
     // inside that end.
     for (final (from, to) in [(706.0, 1606.0), (-6.0, -906.0)]) {
       doc.commands.execute(addDrafted(doc, EntityKind.line,
-          linePayload(oracleAt(f, from, 80), oracleAt(f, to, 80))));
+          linePayload(oracleAt(f, from, 80), oracleAt(f, to, 80)),
+          layer: ReservedHandles.layerZero));
     }
     doc.commands.clearHistory();
     final p = doc.components.get<WallParams>(a)!;
@@ -899,8 +900,8 @@ void main() {
     final f = oracleFrameOf(doc, a);
     final tip = oracleAt(f, 1900, 70);
     final far = oracleAt(f, 1900, 900);
-    doc.commands
-        .execute(addDrafted(doc, EntityKind.line, linePayload(tip, far)));
+    doc.commands.execute(addDrafted(doc, EntityKind.line, linePayload(tip, far),
+        layer: ReservedHandles.layerZero));
     doc.commands.clearHistory();
     final rig = directRig(doc, OpeningKind.door, scale: 0.5);
     Offset marker() {

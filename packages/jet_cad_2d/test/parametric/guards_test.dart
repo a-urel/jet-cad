@@ -162,7 +162,8 @@ void main() {
     pair(doc);
     final depth = doc.commands.undoDepth;
     final add = AddEntityCommand(
-        record: draftRecord(doc.handleSeed.next(), hA, EntityKind.line),
+        record: draftRecord(doc.handleSeed.next(), hA, EntityKind.line,
+            layer: ReservedHandles.layerZero),
         payload: linePayload(Vector2(1, 2), Vector2(3, 4)));
     expect(() => doc.commands.execute(add),
         throwsA(isA<GeneratedGeometryError>()));
@@ -289,7 +290,8 @@ void main() {
     _probeDoc = doc;
     doc.commands.execute(create(doc, hA, parked, const ReentrantProbe(1)));
     final plainLine = addDrafted(
-        doc, EntityKind.line, linePayload(Vector2(1, 2), Vector2(3, 4)));
+        doc, EntityKind.line, linePayload(Vector2(1, 2), Vector2(3, 4)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(plainLine);
     _probeTarget = plainLine.record.handle;
     final before = enc(doc);
@@ -315,7 +317,8 @@ void main() {
     _probeDoc = doc;
     doc.commands.execute(create(doc, hA, atA, const ReentrantProbe(1)));
     final plainLine = addDrafted(doc, EntityKind.line,
-        linePayload(Vector2(7001.5, 3002.25), Vector2(7044.5, 3090)));
+        linePayload(Vector2(7001.5, 3002.25), Vector2(7044.5, 3090)),
+        layer: ReservedHandles.layerZero);
     doc.commands.execute(plainLine);
     _probeTarget = plainLine.record.handle;
     final before = enc(doc);

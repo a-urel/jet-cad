@@ -139,7 +139,8 @@ DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
 
 /// A root LINE, owned by no object.
 DraftCommand rootLine(DraftDocument doc) => AddEntityCommand(
-    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line),
+    record: draftRecord(doc.handleSeed.next(), doc.rootHandle, EntityKind.line,
+        layer: ReservedHandles.layerZero),
     payload:
         linePayload(Vector2(-4000.25, 9000.5), Vector2(-3500.75, 9300.25)));
 

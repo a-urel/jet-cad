@@ -10,6 +10,7 @@ import '../document/doc_change.dart';
 import '../document/draft_document.dart';
 import '../document/extents.dart';
 import '../document/node.dart';
+import '../document/style.dart';
 import '../document/text_geometry.dart';
 import '../geometry/aabb2.dart';
 import '../geometry/band_predicates.dart';
@@ -236,7 +237,20 @@ class SpatialIndex {
   void _beginQuery() {
     if (_inQuery) throw const QueryReentrancyError('a nested query');
     _inQuery = true;
+    // Spec 12b D6: a layer's `visible` or `locked` may have changed since the
+    // filter cached its answers — through a layer command, its undo or redo,
+    // or a direct table write alike, since every one of them bumps the
+    // tables' revision. One int compare per query, not per entity.
+    final revision = document.tables.mutationRevision;
+    if (revision != _tablesRevision) {
+      _tablesRevision = revision;
+      _filters.invalidate();
+    }
   }
+
+  /// The `DocumentTables.mutationRevision` [_filters]' cached answers were
+  /// built against; see [_beginQuery]. Recorded by [rebuildAll] too.
+  int _tablesRevision = -1;
 
   /// Lowers the reentrancy flag. Always called from a `finally`, never a
   /// trailing statement: a visitor that throws — or an exception the walk
@@ -451,14 +465,16 @@ class SpatialIndex {
       // Depth 0 of the cycle guard's path is the root container itself; every
       // descent below starts at depth 1. Written once, outside the loop: the
       // value does not change between instances.
-      _ensurePathCapacity(0);
+      _ensurePathCapacity(1);
       _containerPath[0] = root.container.value;
+      _effectiveLayer[0] = ReservedHandles.layerZero.value;
       for (var i = 0; i < level.length; i++) {
         final node = Handle(level[i]);
         final resolved = document.tree[node];
         if (resolved is! InstanceNode) continue;
         final child = _byContainer[resolved.definition];
         if (child == null) continue;
+        _effectiveLayer[1] = _effectiveBelow(resolved, 0);
         final verdict = _bandDescend(
             child, root.transformOfInstance(node), mode, world, filter, 1);
         if (verdict == _BandVerdict.pass) _instanceScratch.add(node.value);
@@ -566,9 +582,10 @@ class SpatialIndex {
     var anyLeaf = false;
     var allPass = true;
     var anyPass = false;
+    final context = Handle(_effectiveLayer[depth]);
     index.searchLeaves(localQuery, (slot) {
       if (mode == BandMode.crossing && anyPass) return;
-      if (!_filters.acceptsEntity(slot, filter)) return;
+      if (!_filters.acceptsEntityOnLayer(slot, filter, context)) return;
       if (document.entities.kindAt(slot) == EntityKind.fill) return;
       anyLeaf = true;
       if (_leafPasses(index, toWorld, slot, mode, world)) {
@@ -584,7 +601,9 @@ class SpatialIndex {
 
     final level = _scratchForDepth(depth)..reset();
     index.searchInstances(localQuery, (node) {
-      if (_filters.acceptsNode(node, filter)) level.add(node.value);
+      if (_filters.acceptsNodeOnLayer(node, filter, context)) {
+        level.add(node.value);
+      }
     });
     var childPass = false;
     for (var i = 0; i < level.length; i++) {
@@ -602,6 +621,8 @@ class SpatialIndex {
         }
       }
       if (cyclic) continue;
+      _ensurePathCapacity(depth + 1);
+      _effectiveLayer[depth + 1] = _effectiveBelow(resolved, depth);
       final verdict = _bandDescend(
           child,
           toWorld.multiply(index.transformOfInstance(node)),
@@ -666,6 +687,15 @@ class SpatialIndex {
   /// scratch scan instead of a `Set<Handle>` allocated per pick.
   Uint32List _containerPath = Uint32List(16);
 
+  /// The effective layer of the context the container at each depth of the
+  /// current descent is placed through (spec 12b D6, plan P-4): layer 0 at
+  /// the root; below an instance, that instance's own layer, or — when it is
+  /// layer 0 — the effective layer of the depth it sits at. The resolver's
+  /// substitution rule (`style_resolver.dart`, `contextFor`), carried down
+  /// the walk in a preallocated array beside [_containerPath], so a pick or
+  /// a snap through instances allocates nothing for it.
+  Uint32List _effectiveLayer = Uint32List(16);
+
   void _ensurePathCapacity(int depth) {
     if (depth < _instancePath.length) return;
     var capacity = _instancePath.length;
@@ -674,9 +704,18 @@ class SpatialIndex {
     }
     final growIn = Uint32List(capacity)..setAll(0, _instancePath);
     final growContainer = Uint32List(capacity)..setAll(0, _containerPath);
+    final growLayer = Uint32List(capacity)..setAll(0, _effectiveLayer);
     _instancePath = growIn;
     _containerPath = growContainer;
+    _effectiveLayer = growLayer;
   }
+
+  /// The effective layer one depth below [depth], through [instance]: its
+  /// own layer, or [depth]'s when that is layer 0.
+  int _effectiveBelow(InstanceNode instance, int depth) =>
+      instance.layer == ReservedHandles.layerZero
+          ? _effectiveLayer[depth]
+          : instance.layer.value;
 
   /// One reusable instance-collection buffer per recursion depth, so a pick
   /// through nested instances allocates nothing once the deepest level any
@@ -762,6 +801,7 @@ class SpatialIndex {
       _bestEntity = 0;
       _bestRoot = 0;
       final broad = radius + _broadPhaseMargin().pick;
+      _effectiveLayer[0] = ReservedHandles.layerZero.value;
       _descend(root, Transform2.identity(), world, radius, broad, broad, filter,
           0, out, SnapMask.none, null);
       return _bestKind != null;
@@ -861,8 +901,12 @@ class SpatialIndex {
         ? localQuery
         : _localQueryBox(toLocal, world, instanceRadius);
 
+    // Spec 12b D6: every leaf and nested instance here is tested against
+    // the effective layer of the context this container is placed through.
+    final context = Handle(_effectiveLayer[depth]);
+
     void visitLeaf(int slot) {
-      if (!_filters.acceptsEntity(slot, filter)) return;
+      if (!_filters.acceptsEntityOnLayer(slot, filter, context)) return;
       _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
       if (pickOut != null) {
         _considerLeaf(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world, radius,
@@ -878,7 +922,7 @@ class SpatialIndex {
     // longer has to reach an arc's centre from the arc's own sliver of a
     // bound.
     void visitSnapCentre(int slot) {
-      if (!_filters.acceptsEntity(slot, filter)) return;
+      if (!_filters.acceptsEntityOnLayer(slot, filter, context)) return;
       _composeLeafTransform(toWorld, index.transformOfLeaf(slot));
       _considerSnapCentre(slot, _lta, _ltb, _ltc, _ltd, _lte, _ltf, world,
           radius, depth, snapOut!);
@@ -906,7 +950,9 @@ class SpatialIndex {
 
     final level = _scratchForDepth(depth)..reset();
     index.searchInstances(instanceQuery, (node) {
-      if (_filters.acceptsNode(node, filter)) level.add(node.value);
+      if (_filters.acceptsNodeOnLayer(node, filter, context)) {
+        level.add(node.value);
+      }
     });
 
     for (var i = 0; i < level.length; i++) {
@@ -935,6 +981,8 @@ class SpatialIndex {
       if (cyclic) continue;
 
       _instancePath[depth] = node.value;
+      _ensurePathCapacity(depth + 1);
+      _effectiveLayer[depth + 1] = _effectiveBelow(resolved, depth);
       // The instance's transform is already composed to this container's
       // space by ContainerIndex.build, since any groups between them were
       // flattened; toWorld then lifts it the rest of the way. The argument
@@ -1494,6 +1542,7 @@ class SpatialIndex {
       // actually produce a centre candidate -- see [_centreDescentMargin].
       final instanceRadius =
           mask.has(SnapKind.center) ? broad + _centreDescentMargin() : broad;
+      _effectiveLayer[0] = ReservedHandles.layerZero.value;
       _descend(root, Transform2.identity(), world, radius, broad,
           instanceRadius, filter, 0, null, mask, out);
       if (mask.has(SnapKind.intersection)) {
@@ -2443,13 +2492,13 @@ class SpatialIndex {
     for (final slot in document.entities.liveSlots) {
       _lastKnownSlot[document.entities.handleAt(slot)] = slot;
     }
-    // A rebuild also follows a layer edit or a load, either of which may
-    // change what a cached visibility answer means for a handle that is
-    // reused. No shipped command can flip a layer's or node's visibility
-    // today — see [FilterEvaluator]'s own doc comment — so this has no
-    // observable effect yet; it is the conservative default for when one
-    // does.
+    // A rebuild also follows a load, which may change what a cached
+    // visibility answer means for a handle that is reused. A layer edit no
+    // longer rebuilds (see [_reconcile]); [_beginQuery]'s revision check
+    // drops the cache for it instead, and the revision is recorded here so a
+    // rebuild's own invalidation is not repeated by the next query.
     _filters.invalidate();
+    _tablesRevision = document.tables.mutationRevision;
     _rebuildPlacements();
     // Every container here was just derived from the document, so this is a
     // no-op unless `DraftDocument.definitionBounds` and the union
@@ -2715,6 +2764,23 @@ class SpatialIndex {
     final fullRebuildsBefore = _fullRebuilds;
     var structural = false;
     for (final handle in ordered) {
+      // Spec 12b D6 (R-1): a layer record. A hide, show, lock, rename or
+      // recolour moves no box; what it changes, the filter's cached answers,
+      // [_beginQuery]'s revision check drops. Without this skip the handle
+      // resolves to no entity or node and `_reconcileEntity` rebuilds
+      // everything. A handle no longer in the table — a removed layer, or a
+      // dangling current layer — still falls through to that one rebuild
+      // (S-4). Only a handle that is *purely* a layer is skipped: handles
+      // are unique by convention, not by check (no command and no loader
+      // refuses a table handle that an entity or node also carries), and an
+      // entity edit must never be mistaken for a layer edit.
+      if (document.tables.layers[handle] != null &&
+          !document.entities.containsHandle(handle) &&
+          _lastKnownSlot[handle] == null &&
+          document.tree[handle] == null &&
+          document.tree.definition(handle) == null) {
+        continue;
+      }
       if (document.tree.definition(handle) != null) {
         structural = true;
         continue;

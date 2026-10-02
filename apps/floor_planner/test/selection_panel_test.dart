@@ -158,7 +158,8 @@ void main() {
     await tester.pump();
     expect(width, findsNothing);
     final line = addDrafted(view.document, EntityKind.line,
-        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)));
+        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)),
+        layer: ReservedHandles.layerZero);
     view.document.commands.execute(line);
     view.selection.replace([SelectionKey.root(line.record.handle)]);
     await tester.pump();
@@ -293,7 +294,8 @@ void main() {
     // panel's document-change listener too, and must not touch the field
     // either.
     final line = addDrafted(view.document, EntityKind.line,
-        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)));
+        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)),
+        layer: ReservedHandles.layerZero);
     view.document.commands.execute(line);
     await tester.pump();
     expect(tester.widget<TextField>(width).controller!.text, '150');

@@ -371,7 +371,8 @@ void main() {
           EntityKind.polyline,
           polylinePayload(
               [Vector2(-500, -500), Vector2(-100, -500), Vector2(-100, -200)],
-              closed: true));
+              closed: true),
+          layer: ReservedHandles.layerZero);
       doc.commands.execute(drafted);
       final [aFill0, _, aFill1, _, _, _] = kids(doc, hA);
       expect(kindOf(doc, aFill1), EntityKind.fill);

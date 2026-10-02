@@ -305,11 +305,25 @@ class OutlineCache extends ChangeNotifier {
     final node = document.tree[key.target];
     switch (node) {
       case InstanceNode():
-        _addInstance(
-            out, node, document.tree.accumulatedTransform(key.target), null);
+        // A root instance is placed through the root, whose layer is
+        // layer 0: its effective layer is its own (spec 12b D6). The painter
+        // draws none of it when that layer is hidden, so neither does the
+        // outline — a key can be held across a direct table write, which
+        // emits no DocChange and so prunes no selection.
+        if (!(_filters ??= FilterEvaluator(document))
+            .acceptsNode(key.target, const QueryFilter.rendering())) {
+          break;
+        }
+        _addInstance(out, node, document.tree.accumulatedTransform(key.target),
+            null, _onLayer(node.layer, ReservedHandles.layerZero));
       case GroupNode():
-        _addContainer(out, key.target, node.children,
-            document.tree.accumulatedTransform(key.target), null);
+        _addContainer(
+            out,
+            key.target,
+            node.children,
+            document.tree.accumulatedTransform(key.target),
+            null,
+            ReservedHandles.layerZero);
       case null:
         final slot = document.entities.slotOf(key.target);
         if (slot == null) break;
@@ -319,43 +333,66 @@ class OutlineCache extends ChangeNotifier {
             slot,
             owner == document.rootHandle
                 ? Transform2.identity()
-                : document.tree.accumulatedTransform(owner));
+                : document.tree.accumulatedTransform(owner),
+            ReservedHandles.layerZero);
     }
     return out;
   }
 
+  /// [own], or [context] when [own] is layer 0: the style resolver's
+  /// substitution (spec 12b D6, plan P-4).
+  static Handle _onLayer(Handle own, Handle context) =>
+      own == ReservedHandles.layerZero ? context : own;
+
   /// An instance's contents: its definition's leaves and child nodes, each
   /// carried through [toWorld] (which already includes the instance's own
-  /// transform).
+  /// transform). [effective] is the instance's effective layer, the context
+  /// its contents are tested in (spec 12b D6).
   void _addInstance(List<_Outline> out, InstanceNode node, Transform2 toWorld,
-      Set<Handle>? visiting) {
+      Set<Handle>? visiting, Handle effective) {
     final definition = document.tree.definition(node.definition);
     if (definition == null) return;
     final open = visiting ?? <Handle>{};
     // A definition that reaches itself is rejected by `addNode`, but an
     // imported document can carry one; an outline is not the place to throw.
     if (!open.add(node.definition)) return;
-    _addContainer(out, node.definition, definition.children, toWorld, open);
+    _addContainer(
+        out, node.definition, definition.children, toWorld, open, effective);
     open.remove(node.definition);
   }
 
   /// Every leaf owned by [container], then its child groups and instances.
   ///
-  /// [toWorld] maps [container]'s own space to world.
-  void _addContainer(List<_Outline> out, Handle container,
-      List<Handle> children, Transform2 toWorld, Set<Handle>? visiting) {
+  /// [toWorld] maps [container]'s own space to world. [context] is the
+  /// effective layer [container] is placed through (spec 12b D6): a leaf or
+  /// a nested instance on layer 0 is tested against it, and a nested
+  /// instance's contents against its own effective layer — recursively, as
+  /// the index's walk does. A group has no layer and passes it on.
+  void _addContainer(
+      List<_Outline> out,
+      Handle container,
+      List<Handle> children,
+      Transform2 toWorld,
+      Set<Handle>? visiting,
+      Handle context) {
     final byOwner = _byOwner ??= document.leavesByOwner();
     for (final slot in byOwner[container] ?? const <int>[]) {
-      _addLeaf(out, slot, toWorld);
+      _addLeaf(out, slot, toWorld, context);
     }
     for (final child in document.tree.childNodesOf(children)) {
       final node = document.tree[child];
       switch (node) {
         case GroupNode():
           _addContainer(out, child, node.children,
-              toWorld.multiply(node.transform), visiting);
+              toWorld.multiply(node.transform), visiting, context);
         case InstanceNode():
-          _addInstance(out, node, toWorld.multiply(node.transform), visiting);
+          final filters = _filters ??= FilterEvaluator(document);
+          if (!filters.acceptsNodeOnLayer(
+              child, const QueryFilter.rendering(), context)) {
+            break;
+          }
+          _addInstance(out, node, toWorld.multiply(node.transform), visiting,
+              _onLayer(node.layer, context));
         case null:
           break;
       }
@@ -370,15 +407,25 @@ class OutlineCache extends ChangeNotifier {
   /// the evaluator is built once per walk and dropped with it.
   FilterEvaluator? _filters;
 
-  void _addLeaf(List<_Outline> out, int slot, Transform2 t) {
+  /// [context] is the effective layer of what [slot] is placed through
+  /// (spec 12b D6): layer 0 at the root and in a group, the instance's
+  /// effective layer inside a definition.
+  void _addLeaf(List<_Outline> out, int slot, Transform2 t, Handle context) {
     // Spec D9, amended at execution: the outline is a statement about what is
     // drawn, so it skips exactly what the canvas skips — `rendering()`, which
-    // drops a hidden leaf and keeps a locked one.
+    // drops a hidden leaf and keeps a locked one. One residual (spec 12b D6):
+    // inside a definition the outline follows picking, which filters by the
+    // effective layer, while the painter's definition walk does not filter,
+    // so a definition leaf or nested instance on a hidden layer is drawn but
+    // not outlined.
     final filters = _filters ??= FilterEvaluator(document);
-    if (!filters.acceptsEntity(slot, const QueryFilter.rendering())) return;
+    if (!filters.acceptsEntityOnLayer(
+        slot, const QueryFilter.rendering(), context)) {
+      return;
+    }
     final kind = document.entities.kindAt(slot);
     if (kind == EntityKind.fill) {
-      _addFill(out, slot, t, filters);
+      _addFill(out, slot, t, filters, context);
       return;
     }
     _addGeometry(out, slot, kind, t);
@@ -404,14 +451,17 @@ class OutlineCache extends ChangeNotifier {
   ///   The painter still draws such a fill, with the boundary's local points
   ///   under the fill's own placement; the outline does not follow it there,
   ///   because the boundary's own leaf, if drawn, sits under its owner's.
-  void _addFill(
-      List<_Outline> out, int slot, Transform2 t, FilterEvaluator filters) {
+  void _addFill(List<_Outline> out, int slot, Transform2 t,
+      FilterEvaluator filters, Handle context) {
     final entities = document.entities;
     final boundary = entities.slotOf(
         boundaryHandleOf(document.geometry.peek(entities.geomIndexAt(slot))));
     if (boundary == null) return;
     if (entities.ownerAt(boundary) != entities.ownerAt(slot)) return;
-    if (filters.acceptsEntity(boundary, const QueryFilter.rendering())) return;
+    if (filters.acceptsEntityOnLayer(
+        boundary, const QueryFilter.rendering(), context)) {
+      return;
+    }
     _addGeometry(out, boundary, entities.kindAt(boundary), t);
   }
 

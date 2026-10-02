@@ -34,6 +34,8 @@ class BoxTool extends RectangleTool {
             children: const [])),
         SetComponentCommand<BoxParams>(
             h, BoxParams((point.x - c1.x).abs(), (point.y - c1.y).abs())),
+        // Spec 12b D2: a new object takes the current layer.
+        SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
       ], label: 'Add box');
     }, needs: const {
       Capability.structure,

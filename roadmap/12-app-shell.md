@@ -6,12 +6,16 @@ Save As on macOS and web, the runtime swap, dirty against a save point,
 the close prompts, the toolbar and shortcuts, Undo/Redo buttons, Redo —
 is specified in [2026-09-30-document-lifecycle-design.md](../docs/superpowers/specs/2026-09-30-document-lifecycle-design.md)
 and executed ([results](../docs/superpowers/notes/2026-09-30-plan-12a-results.md)); merged at `6a9aebb`, the macOS and web look done by the human's report.
+**Slice 12b, the layer panel** — create, rename, colour, hide and lock
+layers, a current layer every tool draws on, moving the selection to a
+layer, each a command — is specified in [2026-10-01-layer-panel-design.md](../docs/superpowers/specs/2026-10-01-layer-panel-design.md)
+and executed on `plan-12b/layer-panel` ([results](../docs/superpowers/notes/2026-10-01-plan-12b-results.md)),
+awaiting the human's look and merge.
 **Still open for later slices:** the menu bar (reusing 12a's command
-table), the layer panel (table edits must go through commands or mark the
-document dirty — 12a's D3), the diagnostics surface, `DraftPermissions` in
-the UI (Undo/Redo's `enabled` must read permissions), recent files,
-autosave and crash recovery, a dimension style table and a dimensions
-layer, the property panel's remaining questions, the language-version
+table), the diagnostics surface, `DraftPermissions` in the UI beyond the
+layer controls (Undo/Redo's `enabled` must read permissions), recent files,
+autosave and crash recovery, a dimension style table, the property panel's
+remaining questions, the language-version
 bump of the app's pubspec. The sections below are the original input;
 where they say "does not exist", 12a and the earlier sub-projects have
 since built part of it.
@@ -95,7 +99,8 @@ the things it wraps gets written twice.
 - **A dimension style table** (11 decision 6: 11 ships fixed paper
   constants, D7).
 - **A layer for dimensions** (roadmap 11's fixed-layer question, deferred
-  by 11: dimensions are on layer 0).
+  by 11: dimensions are on layer 0). **Closed by 12b's decision 9:**
+  dimensions, like every tool, draw on the current layer.
 
 ## Exit criteria sketch
 
