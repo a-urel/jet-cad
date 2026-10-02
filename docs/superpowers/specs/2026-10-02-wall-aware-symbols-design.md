@@ -1,6 +1,8 @@
 # Wall-aware symbols and the Symbol section (09c) — design
 
-**Date:** 2026-10-02. **Status:** design, **revision 4** (`751755f`).
+**Date:** 2026-10-02. **Status:** design, **revision 4** (`751755f`);
+**09c-1 executed** on `plan-09c/wall-attach` (not merged; amended at
+execution, the closing section); 09c-2 unwritten.
 **Approved by the human on 2026-10-02** ("yaz"). Revision 1
 (`24feacb`) was reviewed independently: "Ready with amendments", 2
 blocking, 6 major, 7 minor, 1 nit (W-1 to W-17,
@@ -950,3 +952,91 @@ is applied; no decision of the human's was reopened.
   Mirror under runtime added.
 - **T-7:** "allocates O(1), nothing per run"; `transformDirection`; the
   `drawnCapsOf` remark qualified ("within rounding").
+
+## Amended at execution (Plan 09c-1)
+
+Where execution made this spec precise or departed from it, each with the
+ruling or review that decided it (the plan's ledger,
+`ledgers/2026-10-02-plan-09c1/progress.md`, archived by a later commit;
+results: [2026-10-02-plan-09c1-results.md](../notes/2026-10-02-plan-09c1-results.md)).
+This section rewrites nothing above it.
+
+- **D13, the owner (`f424f9b`, R-C10-1).** The **document host** owns the
+  search field's `TextEditingController` (created in its `initState`,
+  disposed with it) and hands it to each shell
+  (`PlannerShell.symbolSearch`), which hands it to `SymbolPanel`; a shell
+  without a host owns one of its own. Reason: the host keys the shell by its
+  document (12a D2), so a shell-owned controller would die with every
+  document change, which D13 says the text survives. `SymbolPanel` moves its
+  listener when handed a different controller (R-C10-2).
+- **D6 and D8, the marker (`2a1f8c2`, C-5, R-C7-1).** `drawSnapMarker` draws
+  **nothing** for `SnapKind.nearest` (`snap_marker.dart:56-60`, "Not in
+  kDragSnapMask"), so "the `SnapKind.nearest` glyph" (S-10) does not exist.
+  While attached, the placement tool draws an app-side **hourglass**
+  (`drawNearestMarker` in `symbol_place_tool.dart`, AutoCAD's nearest glyph,
+  `kSnapMarkerPixels` wide, the marker paint) at `q`. D8 (09c-2) inherits
+  the question: move it into the render layer's `nearest` case, or reuse it.
+  On the human's look list.
+- **D6, keys (`2a1f8c2`, R-C7-2, R-C7-4).** `R` and `M` re-ask the faces
+  with the stored query (the raw point, the object-snap flag and the scale
+  of the last recompute); they do not re-snap. A refused placement does not
+  invalidate the bands. M-09c-ap is red at the tool level only (R-C7-3).
+- **D11 (`a5a6b35`, `9414208`, R-C1-1, R-C1-3, R-C1-4).** A snapshot's
+  registered components are in type-id order; its **unknown payloads keep
+  the registry's oldest-first order** (sorting them would make `restore`
+  reorder `unknownOf`). The registry gains a public `detachAll(Handle)`; the
+  inverse is the public `AddDefinitionCommand(definition, components:
+  snapshot)`, which restores after its guards and before `addDefinition`,
+  all-or-nothing. **Undoing a plain `AddDefinitionCommand` now needs
+  `components`** (its inverse is the static-capability remove, W-1); only a
+  `DraftPermissions(structure: true, components: false)` is affected, and no
+  preset or app code builds one. P13's orphan is now written after the
+  removal (R-C1-2).
+- **D2 (`31d098d`, `a6ef0bc`, R-C2-1, R-C2-2, R-C3-1, R-C3-3).** The box
+  functions return `SymbolBox?` (null: nothing draws, or no definition;
+  "does not attach"); point, text, attrib and fill leaves are skipped.
+  `againstWallTag` and `familyTagPrefix` are constants in
+  `symbol_library.dart`, and the tool reads the tag through them. New family
+  members copy their family's plain tags (e.g. `couch` on `sofa.two`), so a
+  search lists the whole family. Family members sit together in the
+  catalog, ascending by width (R-C3-2). A repeated `family:` tag counts
+  twice: R03d refuses it (3b).
+- **D9 (`7dbfc88`).** `test/fixtures/furniture_pre_09c.jetlib` is `main`
+  `4d6b78f`'s asset byte for byte; a catalog test pins each of the 27 old
+  symbols' name, category, version, base point and every leaf against it,
+  and that their tags only grew by appending. Task 11a's "plan saved before
+  09c" uses its entries (R-C11a-3).
+- **D3 (`e73621f`, R-C4-1..4).** The face code is `faceRunsOf(doc, wall,
+  {accept})` (the document adapter) and the pure `faceRunsAmong(host,
+  walls)`; runs come left face first, then right, ascending along `d`, with a
+  `FaceSide {left, right}` (the frame's local sides). A named wall's T or X
+  role is recomputed with `strictlyInside`, as `obstaclesOf` decides it; B's
+  frame is taken among the host and the others, sorted by handle.
+  `wall_attach.dart` also imports `wall_bands.dart`, `symbol_placer.dart`
+  (`show placementTransform`) and `vector_math` (R-C6-4); Flutter-free.
+- **D4 (`7b26eb7`, `b3284f1`, R-C6-1..6).** Step 1's `|s|` and distance keys
+  **tie within `wallJoin.linear`** (R-C6-2): the two pieces of one face line
+  give `|s|` equal only within rounding far from the origin; the edge snap
+  compares exactly. The neighbours are a list **per run, parallel to the
+  runs**, each entry carrying its instance handle, and `attachToWall` takes
+  `Handle? exclude` (R-C6-1). The overlap with `[0, L]` is **closed**; "front
+  on the room side" is the transformed front-centre's `(f − a)·m > 0`; the
+  picking rule is the engine's `FilterEvaluator.acceptsNode(…,
+  QueryFilter.picking())` (R-C6-5). `-0.0` is cleaned only in
+  `placementTransform` (R-C6-3). `WallFaces` exposes `runsOf`,
+  `neighboursOf`, `boxOf`, `attach` and a `builds` counter (R-C6-6).
+- **D5 (`bb39637`, R-C5-1..3).** `placeSymbol` keeps `at` **required** when
+  `transform` is given, and ignores it. An equal ghost update keeps the
+  earlier `Transform2` object. `rotation` is used as given, with no
+  unit-length check.
+- **D10 (`a073fb5`, `90f0d97`, R-C9-1, R-C9-2).** A record is compared by
+  **`EntityRecord.==` after normalising `handle`, `owner` and `geomIndex`**
+  to the entry's (its `==` covers all 15 fields, so a field added later is
+  compared automatically); the payload by `GeometryPayload.==`. The entry's
+  leaves are paired in list order, relying on `SymbolEntry`'s documented
+  ascending order, which its constructor does not enforce (09c-2's D7 must
+  sort or assert it).
+- **D12 (`7150bd1`, `bdff57d`, R-C8-1, R-C8b-1).** A disarm removes the
+  camera listener but keeps the ghost shown; a re-arm with a listened camera
+  re-resolves through the one recompute path (snap, grid and attachment),
+  also from one entry to another.
