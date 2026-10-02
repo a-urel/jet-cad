@@ -38,6 +38,7 @@ import 'symbols/symbol_library.dart';
 import 'symbols/symbol_library_loader.dart';
 import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
+import 'symbols/wall_attach.dart';
 import 'tool_palette.dart';
 
 void main() {
@@ -359,7 +360,15 @@ class _PlannerShellState extends State<PlannerShell> {
   // Spec 09b D8: the symbol placement tool and its armed symbol. Outside
   // [_entries] (no letter: a gallery cell arms it), so disposed on its own.
   final ValueNotifier<SymbolEntry?> _armed = ValueNotifier<SymbolEntry?>(null);
-  late final SymbolPlaceTool _symbolTool = SymbolPlaceTool(_armed);
+  // Spec 09c D3, D6 (W-5): the wall faces a tagged symbol attaches to, over
+  // the band cache the Wall and Opening tools share, with the openings'
+  // host rule (a hidden or locked wall hosts nothing). It reads the
+  // document each query hands it (this shell's, the host keys the shell by
+  // its document) and holds no subscription of its own: [_bands] is
+  // disposed below.
+  late final WallFaces _faces = WallFaces(_bands, accept: isUsableHost);
+  late final SymbolPlaceTool _symbolTool =
+      SymbolPlaceTool(_armed, faces: _faces);
 
   /// The Symbols tab's search field (spec 09b D7, F-4): a panel field, so
   /// [_settlePendingInput] hands it back.

@@ -6,6 +6,8 @@
 // Plan 09b Task 6 (pointer, snap, ghost) and Task 7 (keys, F-12; the
 // permission check before `placeSymbol` allocates a handle, Ruling 05-3,
 // F-16). Plan 09c-1 Task 8 (spec 09c D12): the ghost follows a camera change.
+// Plan 09c-1 Task 7 (spec 09c D6): a symbol tagged `against-wall` attaches
+// to a wall face near the raw pointer.
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -25,12 +27,19 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'symbol_box.dart';
 import 'symbol_ghost.dart';
 import 'symbol_library.dart';
 import 'symbol_placer.dart';
+import 'wall_attach.dart';
 
 /// The half-size of the ghost's base-point cross, in screen pixels.
 const double kGhostCrossPixels = 6.0;
+
+/// Spec 09c D4, D6: how near a wall face, in screen pixels, the raw pointer
+/// attaches a tagged symbol. Larger than the snap aperture: in placement
+/// the pointer is often the symbol's centre, far from its back.
+const double kWallAttachPixels = 16.0;
 
 /// Spec 09b D6: places the [armed] symbol on release.
 ///
@@ -53,14 +62,27 @@ const double kGhostCrossPixels = 6.0;
 ///   goes when the ghost hides, on [cancel], on a disarm and on [dispose]; a
 ///   re-arm while the ghost is shown listens again and re-resolves the ghost
 ///   under the pointer.
+/// - Spec 09c D6: given the shell's [faces], an armed entry tagged
+///   [againstWallTag] attaches, while object snap is on, to the wall face
+///   [WallFaces.attach] finds for the **raw** pointer (capture
+///   `kWallAttachPixels / scale`, edge snaps `kSnapAperturePixels /
+///   scale`): the ghost and the release use the attached transform and the
+///   marker is the nearest glyph at the face point `q`. While attached, `M`
+///   mirrors in place and `R` / `Shift+R` change the turn count only (it
+///   applies off the face). After its own commit the tool invalidates the
+///   bands, so the next placement sees the one just made as a neighbour.
+///   Without [faces], nothing attaches: 09b's behaviour.
 class SymbolPlaceTool extends Tool {
-  SymbolPlaceTool(this.armed) {
+  SymbolPlaceTool(this.armed, {this.faces}) {
     armed.addListener(_onArmed);
     _syncPath();
   }
 
   /// The armed symbol; owned by the shell (spec D8), read here.
   final ValueNotifier<SymbolEntry?> armed;
+
+  /// The shell's wall faces (spec 09c D3, D6), or null: no attachment.
+  final WallFaces? faces;
 
   final DragPoint _at = DragPoint();
   final SnapResult _scratch = SnapResult();
@@ -83,6 +105,19 @@ class SymbolPlaceTool extends Tool {
   /// The ghost's placement transform, computed on pointer, key, arm and
   /// camera events ([_syncPlacement]), never in a paint (spec 09c D5, W-15).
   Transform2? _placement;
+
+  /// Spec 09c D6: the wall attachment of the last recompute, or null (free
+  /// placement). Computed by [_syncAttachment], never in a paint.
+  WallAttachment? _attached;
+
+  /// The inputs of the last attachment query, kept so a key (`M`) can ask
+  /// again for the same pointer with the new mirror: the raw world point,
+  /// whether object snap was on, the camera scale. [_hasRaw] is false until
+  /// the first recompute with a context.
+  final Vector2 _raw = Vector2.zero();
+  bool _rawObjectSnap = true;
+  double _rawScale = 1;
+  bool _hasRaw = false;
 
   /// Spec 09c D12: the last pointer event's screen point and context, kept
   /// so a camera change re-resolves the ghost under the resting pointer. The
@@ -121,7 +156,8 @@ class SymbolPlaceTool extends Tool {
   bool get ghostVisible => _ghostVisible && armed.value != null;
 
   /// The resolved (snapped) point the ghost's base point sits on, and a
-  /// release would place at. Read only; reused.
+  /// release would place at, while it places freely (attached, spec 09c
+  /// D6, [ghostAttachment] places it instead). Read only; reused.
   Vector2 get ghostAt => _at.point;
 
   /// The ghost's cached local path, or null while idle.
@@ -136,6 +172,11 @@ class SymbolPlaceTool extends Tool {
   /// The ghost's reused matrix.
   @visibleForTesting
   GhostMatrix get ghostMatrix => _matrix;
+
+  /// Spec 09c D6: the wall attachment the ghost (and a release) uses, or
+  /// null while it places freely.
+  @visibleForTesting
+  WallAttachment? get ghostAttachment => _attached;
 
   /// The rotation, in counter-clockwise quarter turns, of the next placement.
   int get quarterTurns => _quarterTurns;
@@ -160,6 +201,9 @@ class SymbolPlaceTool extends Tool {
     if (ctx != null) {
       _update(ctx, _worldUnderPointer(ctx));
     } else {
+      // Hidden or idle: the previous entry's attachment is not this one's;
+      // the next pointer event asks again.
+      _attached = null;
       _syncPlacement();
     }
     _pressed = false;
@@ -167,18 +211,42 @@ class SymbolPlaceTool extends Tool {
     notifyListeners();
   }
 
-  /// The ghost's placement from the armed entry's base point, the resolved
-  /// point, the turns and the mirror: called on every event that changes
+  /// The ghost's placement: the wall attachment's transform when attached
+  /// (spec 09c D6), else from the armed entry's base point, the resolved
+  /// point, the turns and the mirror. Called on every event that changes
   /// one of them, so a paint only passes the stored value on.
   void _syncPlacement() {
     final entry = armed.value;
+    final attached = _attached;
     _placement = entry == null
         ? null
-        : placementTransform(
-            at: _at.point,
-            basePoint: entry.definition.basePoint,
-            quarterTurns: _quarterTurns,
-            mirrored: _mirrored);
+        : attached != null
+            ? attached.transform
+            : placementTransform(
+                at: _at.point,
+                basePoint: entry.definition.basePoint,
+                quarterTurns: _quarterTurns,
+                mirrored: _mirrored);
+  }
+
+  /// Spec 09c D6: [_attached] for the last query's raw point, object snap
+  /// and scale ([_raw], [_rawObjectSnap], [_rawScale]) and the current
+  /// entry and mirror. Null without [faces], before any query, for an
+  /// entry not tagged [againstWallTag] or with no box (Ruling R-C2-2), with
+  /// object snap off, or when no face takes the point.
+  void _syncAttachment(ToolContext ctx) {
+    _attached = null;
+    final faces = this.faces;
+    final entry = armed.value;
+    if (faces == null || entry == null || !_hasRaw || !_rawObjectSnap) {
+      return;
+    }
+    if (!entry.tags.contains(againstWallTag)) return;
+    final box = boxOfEntry(entry);
+    if (box == null) return;
+    _attached = faces.attach(
+        ctx.document, box, _raw, kWallAttachPixels / _rawScale,
+        mirrored: _mirrored, edgeCaptureWorld: kSnapAperturePixels / _rawScale);
   }
 
   /// F-5: object snap at `kSnapAperturePixels / scale`, else the grid, else
@@ -200,10 +268,16 @@ class SymbolPlaceTool extends Tool {
   }
 
   /// The tool's one recompute path: every pointer event, every camera
-  /// change and a re-arm while the ghost is shown resolve the raw point and
-  /// then the placement through here.
+  /// change and a re-arm while the ghost is shown resolve the raw point,
+  /// then the wall attachment (spec 09c D6), then the placement through
+  /// here.
   void _update(ToolContext ctx, Vector2 raw) {
     _resolve(ctx, raw);
+    _raw.setFrom(raw);
+    _rawObjectSnap = ctx.snap?.objectSnap ?? true;
+    _rawScale = ctx.camera.value.scale;
+    _hasRaw = true;
+    _syncAttachment(ctx);
     _syncPlacement();
   }
 
@@ -269,7 +343,7 @@ class SymbolPlaceTool extends Tool {
       _update(ctx, e.world);
       _ghostVisible = true;
       _syncCamera();
-      _place(ctx, entry, _at.point);
+      _place(ctx, entry);
     }
     notifyListeners();
   }
@@ -312,6 +386,10 @@ class SymbolPlaceTool extends Tool {
         } else {
           _mirrored = !_mirrored;
         }
+        // Spec 09c D6, decision 5: the same pointer asks the faces again
+        // with the new mirror (an attached `M` mirrors in place); the
+        // attached transform ignores the turns, which apply off the face.
+        _syncAttachment(ctx);
         _syncPlacement();
         notifyListeners();
       }
@@ -354,25 +432,37 @@ class SymbolPlaceTool extends Tool {
   /// `placeSymbol` allocates a handle (Ruling 05-3): a refused placement
   /// allocates nothing and throws nothing (F-16: the dispatcher alone would
   /// throw after the allocation).
-  void _place(ToolContext ctx, SymbolEntry entry, Vector2 at) {
+  ///
+  /// Spec 09c D6: an attached placement commits the attached transform
+  /// verbatim; then the bands are invalidated (W-5), so the next placement's
+  /// faces see this one as a neighbour before the change stream delivers.
+  void _place(ToolContext ctx, SymbolEntry entry) {
     if (!needs.every(ctx.document.commands.permissions.allows)) return;
     ctx.execute(placeSymbol(ctx.document, entry,
-        at: at, quarterTurns: _quarterTurns, mirrored: _mirrored));
+        at: _at.point,
+        quarterTurns: _quarterTurns,
+        mirrored: _mirrored,
+        transform: _attached?.transform));
+    faces?.bands.invalidate();
   }
 
   /// The snap marker, in screen space (`placement_tool.dart`'s pattern).
+  /// Attached (spec 09c D6), the nearest glyph at the face point `q`.
   @override
   void paintOverlay(
       ui.Canvas canvas, ViewportTransform camera, ui.Size viewport) {
     if (!ghostVisible) return;
     final m = camera.worldToScreenMatrix;
-    final p = _at.point;
-    drawSnapMarker(
-        canvas,
-        ui.Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f),
-        _at.objectKind,
-        grid: _at.grid,
-        paint: _markerPaint);
+    final attached = _attached;
+    final p = attached?.q ?? _at.point;
+    final at =
+        ui.Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f);
+    if (attached != null) {
+      drawNearestMarker(canvas, at, _markerPaint);
+      return;
+    }
+    drawSnapMarker(canvas, at, _at.objectKind,
+        grid: _at.grid, paint: _markerPaint);
   }
 
   /// Spec D6: the cached local path under `translate(−origin) ∘ P`, then a
@@ -410,4 +500,19 @@ class SymbolPlaceTool extends Tool {
     _context = null;
     super.dispose();
   }
+}
+
+/// The nearest snap glyph (`SnapKind.nearest`: an hourglass, its top and
+/// bottom edges [kSnapMarkerPixels] wide, joined by the two diagonals)
+/// centred on [at], in screen space. The render layer's `drawSnapMarker`
+/// draws nothing for `nearest` (no drag produces it), and 09c-1 does not
+/// touch the render layer, so the attached marker (spec 09c D6) draws it
+/// here. Four lines; no path.
+void drawNearestMarker(ui.Canvas canvas, ui.Offset at, ui.Paint paint) {
+  const h = kSnapMarkerPixels / 2;
+  final x = at.dx, y = at.dy;
+  canvas.drawLine(ui.Offset(x - h, y - h), ui.Offset(x + h, y - h), paint);
+  canvas.drawLine(ui.Offset(x + h, y - h), ui.Offset(x - h, y + h), paint);
+  canvas.drawLine(ui.Offset(x - h, y + h), ui.Offset(x + h, y + h), paint);
+  canvas.drawLine(ui.Offset(x + h, y + h), ui.Offset(x - h, y - h), paint);
 }

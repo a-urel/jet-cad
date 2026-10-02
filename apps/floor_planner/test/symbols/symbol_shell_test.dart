@@ -7,12 +7,22 @@
 // `tester.runAsync`). The camera is rotated, at 0.1 px/mm, centred far from
 // the origin; the placed symbol's base point is off its origin (checked);
 // the placement is turned AND mirrored.
+//
+// Spec 09c D6 (plan 09c-1 Task 7): the shell's wall faces. The walls are
+// added straight through the document's commands (no Wall or Opening tool
+// ever runs, W-5), each in its own rotated group near (1e5, −7e4) at 30°
+// (`wall_attach_fixture.dart`, plan P-2); the expected placements are
+// `attachToWall` over the wall's own runs from the raw pointer the layer
+// computes.
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/parametric/opening_tool.dart' show isUsableHost;
+import 'package:floor_planner/parametric/wall.dart' show Justification;
 import 'package:floor_planner/parametric/wall_tool.dart';
+import 'package:floor_planner/symbols/symbol_box.dart';
 import 'package:floor_planner/symbols/symbol_library.dart';
 import 'package:floor_planner/symbols/symbol_library_loader.dart';
 import 'package:floor_planner/symbols/symbol_library_state.dart';
@@ -20,6 +30,7 @@ import 'package:floor_planner/symbols/symbol_panel.dart';
 import 'package:floor_planner/symbols/symbol_place_tool.dart';
 import 'package:floor_planner/symbols/symbol_placer.dart';
 import 'package:floor_planner/symbols/symbol_search.dart';
+import 'package:floor_planner/symbols/wall_attach.dart';
 import 'package:floor_planner/tool_palette.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -31,6 +42,8 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/document_rig.dart';
 import '../support/fake_document_files.dart';
+import '../support/wall_attach_fixture.dart' show attachGroup, farAt;
+import '../support/wall_fixture.dart' show addWall, polar;
 
 final Uint8List assetBytes =
     File('assets/library/furniture.jetlib').readAsBytesSync();
@@ -182,6 +195,41 @@ List<InstanceNode> instancesOf(DraftDocument doc) =>
     doc.tree.nodes.whereType<InstanceNode>().toList();
 
 List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+
+/// The raw world point the layer computes for a pointer at world [p] (the
+/// screen round trip), as the tool receives it.
+Vector2 rawAt(WidgetTester tester, Vector2 p) {
+  final local =
+      globalOf(tester, p) - tester.getTopLeft(find.byType(InteractionLayer));
+  return viewOf(tester).camera.value.screenToWorld(Vector2(local.dx, local.dy));
+}
+
+/// The loaded library's entry [key].
+SymbolEntry entryOf(WidgetTester tester, String key) =>
+    (panelOf(tester).loader.state as SymbolLibraryReady)
+        .library
+        .entries
+        .singleWhere((e) => e.key == key);
+
+/// Spec 09c D6's shell fixture: a wall at 30°, 3600 long and 150 thick,
+/// justified left, added through the document's commands in its own rotated
+/// group near (1e5, −7e4) (no tool runs), the camera aimed at it. Returns
+/// the wall and its left face's run.
+Future<(Handle, FaceRun)> addAttachWall(WidgetTester tester) async {
+  final doc = sessionOf(tester).document;
+  final s = farAt(1234.5, 678.25);
+  final h = doc.handleSeed.next();
+  doc.commands.execute(addWall(
+      doc, h, s, polar(s, 30, 3600), 150, Justification.left,
+      at: attachGroup(h.value)));
+  await aimCamera(tester, polar(s, 30, 1800));
+  final run = faceRunsOf(doc, h).singleWhere((r) => r.side == FaceSide.left);
+  return (h, run);
+}
+
+/// The point `a + t·u + m·s` of run [r].
+Vector2 onRun(FaceRun r, double u, double s) =>
+    Vector2(r.a.x + r.t.x * u + r.m.x * s, r.a.y + r.t.y * u + r.m.y * s);
 
 Future<void> releaseGesture(TestGesture g) async {
   await g.up();
@@ -577,6 +625,117 @@ void main() {
       expect(isDisposed(own), isFalse, reason: 'premise: alive while used');
       await tester.pumpWidget(const SizedBox());
       expect(isDisposed(own), isTrue, reason: 'disposed by the shell');
+    });
+  });
+
+  group('the wall attachment (spec 09c D6)', () {
+    testWidgets(
+        'SS16 a fresh shell where no Wall or Opening tool ran: a base unit '
+        'attaches to a 30° face, a second placed after it snaps to its '
+        'side; one undo step each (W-5)', (tester) async {
+      await pumpSymbolsApp(tester);
+      final (wall, run) = await addAttachWall(tester);
+      final doc = sessionOf(tester).document;
+      await tapKey(tester, tabSymbols);
+      final unit = entryOf(tester, 'kitchen.base.600');
+      await armBySymbolsTab(tester, unit);
+      final tool = toolsOf(tester).active as SymbolPlaceTool;
+      final box = boxOfEntry(unit)!;
+      final scale = viewOf(tester).camera.value.scale;
+      expect(scale, closeTo(0.1, 1e-12), reason: 'capture 160 mm, edge 100');
+      final depth = doc.commands.undoDepth;
+
+      Future<void> click(Vector2 p) async {
+        final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse, buttons: kPrimaryButton);
+        await mouse.down(globalOf(tester, p));
+        await tester.pump();
+        await releaseGesture(mouse);
+        await tester.pump();
+      }
+
+      final p1 = onRun(run, 1000, 120);
+      await click(p1);
+      final want1 = attachToWall([run], box, rawAt(tester, p1), 16 / scale,
+          mirrored: false,
+          neighbours: const [[]],
+          edgeCaptureWorld: 10 / scale)!;
+      final first = instancesOf(doc).single;
+      expect(partsOf(first.transform), partsOf(want1.transform));
+      expect(doc.commands.undoDepth, depth + 1);
+
+      // 60 mm (inside the 100 mm edge capture) right of the first's side.
+      final p2 = onRun(run, 1000 + 600 + 60, 90);
+      await click(p2);
+      final second = instancesOf(doc).last;
+      expect(instancesOf(doc), hasLength(2));
+      final q2 = second.transform.transformPoint(box.backCentre);
+      expect((q2 - run.a).dot(run.t), closeTo(1600, 1e-6),
+          reason: 'its left side on the first\'s right side');
+      expect((q2 - run.a).dot(run.m), closeTo(0, 1e-6), reason: 'on the face');
+      expect(tool.ghostAttachment, isNotNull);
+      expect(
+          partsOf(second.transform), partsOf(tool.ghostAttachment!.transform));
+      expect(doc.commands.undoDepth, depth + 2);
+
+      await undoKey(tester);
+      expect(instancesOf(doc).single.handle, first.handle,
+          reason: 'one undo step took the second only');
+      await undoKey(tester);
+      expect(instancesOf(doc), isEmpty);
+      expect(wallsOf(doc), [wall]);
+    });
+
+    testWidgets(
+        'SS17 a wall on a hidden or a locked layer hosts nothing: the shell '
+        'hands its faces the openings\' host rule (M-09c-e)', (tester) async {
+      await pumpSymbolsApp(tester);
+      final (wall, run) = await addAttachWall(tester);
+      final doc = sessionOf(tester).document;
+      final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+      Handle layer(String name, {bool visible = true, bool locked = false}) {
+        final h = doc.handleSeed.next();
+        doc.commands.execute(AddLayerCommand(LayerRecord(
+          handle: h,
+          name: name,
+          color: const IndexedColor(3),
+          linetype: zero.linetype,
+          lineweight: zero.lineweight,
+          transparency: zero.transparency,
+          visible: visible,
+          locked: locked,
+        )));
+        return h;
+      }
+
+      final hidden = layer('Hidden', visible: false);
+      final locked = layer('Locked', locked: true);
+      final open = layer('Open');
+      await tapKey(tester, tabSymbols);
+      final toilet = entryOf(tester, 'bath.toilet');
+      // The gallery builds its cells lazily: filter to bring this one in.
+      await tester.enterText(searchField, 'toilet');
+      await tester.pump();
+      await armBySymbolsTab(tester, toilet);
+      final tool = toolsOf(tester).active as SymbolPlaceTool;
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: globalOf(tester, onRun(run, 900, 80)));
+      addTearDown(mouse.removePointer);
+      for (final (i, (on, hosts)) in [
+        (hidden, false),
+        (locked, false),
+        (open, true),
+      ].indexed) {
+        doc.commands
+            .execute(SetComponentCommand<ObjectLayer>(wall, ObjectLayer(on)));
+        await tester.pump();
+        final why = doc.tables.layers[on]!.name;
+        expect(isUsableHost(doc, wall), hosts, reason: 'premise: $why');
+        await mouse.moveTo(globalOf(tester, onRun(run, 1100 + 250.0 * i, 80)));
+        await tester.pump();
+        expect(tool.ghostVisible, isTrue, reason: why);
+        expect(tool.ghostAttachment != null, hosts, reason: why);
+      }
     });
   });
 }
