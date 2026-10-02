@@ -1,0 +1,13 @@
+You are the IMPLEMENTER of Task 4b (review fixes for Task 4) of plan 09c-1 in the jet-cad repository, working in /home/user/jet-cad/.worktrees/plan-09c1 (branch plan-09c/wall-attach). Other implementers work concurrently in the same worktree: Task 3b (test/symbols/furniture_library_test.dart, test/symbols/symbol_library_test.dart, a new test fixture, maybe the catalog/asset temporarily during mutants) and Task 10 (lib/main.dart, lib/symbols/symbol_panel.dart, test/symbols/{symbol_panel,symbol_shell}_test.dart). Do not touch their files; stage only your own by explicit path. If a full-suite run fails in their in-progress files (or because a mutant of theirs is momentarily applied), re-run your own test files and say so.
+
+Read: CLAUDE.md; the plan (Global constraints, Gates, Task 4); spec D3; .superpowers/sdd/plan-09c1/task-4-report.md and task-4-review.md (and the reviewer's differential tests in /tmp/claude-0/-home-user-jet-cad/05cf1abe-1171-54e2-83cf-ffde1eb9cfc8/scratchpad/review4/ for inspiration).
+
+Apply the review's two findings (test-only unless a real defect appears):
+1. (major) In test/symbols/wall_faces_test.dart (WF3) and/or test/support/wall_attach_fixture.dart: add T cases whose HOST group is rotated by about 1 rad (not the 0.3 rad from handle 18), so the side test's local-vs-world choice matters for unmirrored groups. Assert the premise that the local and world side tests disagree in at least one case of the set. Fire the review's mutant: lib/symbols/wall_attach.dart:~130, side test via `toWorld` instead of `toLocal` — must go red. Also re-fire M-09c-as (must stay red).
+2. (minor) Add one face with two cuts where one cut is nested in, or overlaps, the other (e.g. two T stems on the same face close together, or a T and an X), asserting the resulting pieces exactly. Fire: `_pieces` (~:187-192) `if (b > from) from = b;` -> `from = b;`, and dropping the sort of cuts — both must go red.
+
+Rules: `export PATH=/root/flutter/bin:$PATH`; `CI=true` on every command. Never `git checkout --` a .dart file; mutants by cp backup / cp back / diff exit 0. Never stage analysis_options.yaml. Never synthesize output. Gates: the app (test, analyze, format). Commit: `test(app): pin the face side test and nested cuts` with trailers:
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017Jpc94HDwBboPTaZBjjAFr
+Do not push. Write .superpowers/sdd/plan-09c1/task-4b-report.md (SHA, changes, gate counts, mutants with real output) and return it.
+Scratch: /tmp/claude-0/-home-user-jet-cad/05cf1abe-1171-54e2-83cf-ffde1eb9cfc8/scratchpad/task4b/
