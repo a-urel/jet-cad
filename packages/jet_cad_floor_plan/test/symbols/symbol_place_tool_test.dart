@@ -1,6 +1,7 @@
 // Spec 09b D6, F-5, F-6, F-12, F-14, F-16, plan 09b Tasks 6 and 7: the
 // placement tool's pointer, snap, ghost, keys and permission check, driven
-// directly with `ToolPointerEvent`s and `KeyEvent`s.
+// directly with `ToolPointerEvent`s and `KeyEvent`s; spec 09c D12 (plan 09c-1
+// Task 8): the ghost follows a camera change (a wheel zoom, a pan).
 //
 // Fixtures (plan P-3): real entries of the committed asset (every base point
 // is off the origin); a document from `prepareDocument`; a camera at 0.05
@@ -95,7 +96,7 @@ final class Rig {
     index = SpatialIndex(document);
     final linear = Transform2.scale(scale, -scale);
     final mid = linear.transformPoint(Vector2(76000, -41000));
-    camera = CameraController(ViewportTransform(
+    camera = CountingCamera(ViewportTransform(
         worldToScreenMatrix:
             Transform2.translation(400 - mid.x, 300 - mid.y).multiply(linear)));
     selection = SelectionController(document);
@@ -124,7 +125,7 @@ final class Rig {
 
   late final DraftDocument document;
   late final SpatialIndex index;
-  late final CameraController camera;
+  late final CountingCamera camera;
   late final SelectionController selection;
   late final PageNotifier pages;
   late final SnapSettings? snap;
@@ -174,6 +175,26 @@ final class Rig {
 /// The armed notifier, counting its listeners.
 final class CountingNotifier extends ValueNotifier<SymbolEntry?> {
   CountingNotifier(super.value);
+
+  int listeners = 0;
+
+  @override
+  void addListener(ui.VoidCallback listener) {
+    listeners++;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(ui.VoidCallback listener) {
+    listeners--;
+    super.removeListener(listener);
+  }
+}
+
+/// The camera, counting its listeners (spec 09c D12: the tool listens while
+/// the ghost is shown, and only then).
+final class CountingCamera extends CameraController {
+  CountingCamera(super.initial);
 
   int listeners = 0;
 
@@ -974,5 +995,195 @@ void main() {
     expect(rig.instances, isEmpty);
     await g.up();
     expect(rig.instances, hasLength(1));
+  });
+
+  group('the camera (spec 09c D12)', () {
+    /// A zoom focus far from every pointer the tests rest at, so the world
+    /// point under the pointer moves.
+    const focus = ui.Offset(90, 520);
+
+    Vector2 under(Rig rig, ui.Offset s) =>
+        rig.camera.value.screenToWorld(Vector2(s.dx, s.dy));
+
+    /// A zoom by [factor] about [focus] moves the ghost to the resolved world
+    /// point now under the resting pointer [s], and repaints once.
+    void expectFollows(Rig rig, ui.Offset s, double factor, String reason) {
+      final before = rig.tool.ghostAt.clone();
+      rig.notifications.clear();
+      rig.camera.zoomAt(focus, factor);
+      final w = under(rig, s);
+      expect(w.distanceTo(e0),
+          greaterThan(kSnapAperturePixels / rig.camera.value.scale),
+          reason: '$reason: E is outside the aperture');
+      expect(gridOf(w) == before, isFalse,
+          reason: '$reason: the zoom moves the point under the pointer');
+      expectAt(rig.tool.ghostAt, gridOf(w), reason);
+      expect(rig.notifications, [rig.tool.isMidShape],
+          reason: '$reason: one repaint');
+    }
+
+    /// A camera change does nothing: the ghost's point and placement stay,
+    /// nothing is notified, nothing throws.
+    void expectInert(Rig rig, String reason) {
+      final at = rig.tool.ghostAt.clone();
+      final placement = rig.tool.ghostPlacement;
+      rig.notifications.clear();
+      expect(() => rig.camera.zoomAt(focus, 1.7), returnsNormally,
+          reason: reason);
+      expect(() => rig.camera.panBy(const ui.Offset(-37.5, 61.25)),
+          returnsNormally,
+          reason: reason);
+      expectAt(rig.tool.ghostAt, at, reason);
+      expect(rig.tool.ghostPlacement, same(placement), reason: reason);
+      expect(rig.notifications, isEmpty, reason: '$reason: no repaint');
+    }
+
+    test(
+        'a zoom about another point moves the ghost and its placement to the '
+        'world point now under the pointer; a pan too', () {
+      final rig = Rig();
+      rig.key(kR);
+      rig.key(kM);
+      rig.hover(pA);
+      final s = rig.at(pA).screen;
+      expectAt(rig.tool.ghostAt, gridOf(pA), 'the hover');
+      rig.notifications.clear();
+      rig.camera.zoomAt(focus, 1.7);
+      expect(rig.camera.value.scale, closeTo(scale * 1.7, 1e-12));
+      final w = under(rig, s);
+      expect(w.distanceTo(pA), greaterThan(1000),
+          reason: 'the zoom is not about the pointer');
+      expect(w.distanceTo(e0),
+          greaterThan(kSnapAperturePixels / rig.camera.value.scale),
+          reason: 'E is outside the aperture');
+      expectAt(rig.tool.ghostAt, gridOf(w), 'the zoom');
+      expect(rig.notifications, [false], reason: 'one repaint');
+      final want = placementTransform(
+          at: gridOf(w),
+          basePoint: chair.definition.basePoint,
+          quarterTurns: 1,
+          mirrored: true);
+      final t = rig.tool.ghostPlacement!;
+      expect([
+        t.a,
+        t.b,
+        t.c,
+        t.d,
+        t.e,
+        t.f
+      ], [
+        want.a,
+        want.b,
+        want.c,
+        want.d,
+        want.e,
+        want.f
+      ], reason: 'the placement follows, turned and mirrored');
+
+      rig.notifications.clear();
+      rig.camera.panBy(const ui.Offset(-37.5, 61.25));
+      expectAt(rig.tool.ghostAt, gridOf(under(rig, s)), 'the pan');
+      expect(rig.notifications, [false]);
+      // Mid-press, the ghost follows as well; the release places where the
+      // up lands.
+      rig.down(pB);
+      expectFollows(rig, rig.at(pB).screen, 0.6, 'mid-press');
+      final p = under(rig, rig.at(pB).screen);
+      rig.up(p);
+      expectAt(rig.placedAt(rig.instances.single), gridOf(p), 'placed');
+    });
+
+    test(
+        'one camera listener while the ghost is shown, however many events; '
+        'none before the first pointer event', () {
+      final rig = Rig();
+      expect(rig.camera.listeners, 0, reason: 'armed, no pointer yet');
+      rig.hover(pA);
+      rig.hover(pB);
+      rig.down(pB);
+      rig.drag(pMid);
+      rig.up(pC);
+      rig.hover(pA);
+      expect(rig.camera.listeners, 1);
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 1, reason: 're-armed while shown');
+      rig.hover(pB);
+      expect(rig.camera.listeners, 1);
+    });
+
+    test(
+        'after the ghost hides (pointer exit) a camera change does nothing; '
+        'a hover listens again', () {
+      final rig = Rig();
+      rig.hover(pA);
+      rig.tool.onPointerExit(rig.ctx);
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'hidden');
+      // A re-arm while hidden does not listen: the ghost stays hidden.
+      rig.armed.value = null;
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 0, reason: 're-armed while hidden');
+      expectInert(rig, 're-armed while hidden');
+      rig.hover(pB);
+      expect(rig.camera.listeners, 1);
+      expectFollows(rig, rig.at(pB).screen, 0.75, 'shown again');
+    });
+
+    test(
+        'after cancel (a hover, or a press and Esc) a camera change does '
+        'nothing', () {
+      final rig = Rig();
+      rig.hover(pA);
+      rig.tool.cancel(rig.ctx);
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'cancelled hover');
+      rig.down(pB);
+      expect(rig.camera.listeners, 1);
+      expect(rig.key(kEsc), KeyEventResult.handled);
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'Esc mid-press');
+    });
+
+    test(
+        'after a disarm a camera change does nothing; a re-arm listens again '
+        'and puts the ghost under the pointer for the camera now', () {
+      final rig = Rig();
+      rig.hover(pA);
+      final s = rig.at(pA).screen;
+      rig.armed.value = null;
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'disarmed');
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 1);
+      final w = under(rig, s);
+      expect(gridOf(w) == gridOf(pA), isFalse,
+          reason: 'the camera moved while disarmed');
+      expectAt(rig.tool.ghostAt, gridOf(w), 're-armed');
+      final t = rig.tool.ghostPlacement!;
+      final want = placementTransform(
+          at: gridOf(w),
+          basePoint: toilet.definition.basePoint,
+          quarterTurns: 0,
+          mirrored: false);
+      expect([t.e, t.f], [want.e, want.f], reason: 'the placement follows');
+      expectFollows(rig, s, 0.75, 'after the re-arm');
+    });
+
+    test(
+        'dispose with a live camera removes the listener; a camera change '
+        'after it does nothing and does not throw', () {
+      final rig = Rig();
+      rig.hover(pA);
+      expect(rig.camera.listeners, 1);
+      final at = rig.tool.ghostAt.clone();
+      rig.tool.dispose();
+      rig.disposed = true;
+      expect(rig.camera.listeners, 0);
+      // The camera reports (and swallows) a listener's error, so "does not
+      // throw" alone cannot see a listener left behind; the count and the
+      // ghost's point can.
+      expect(() => rig.camera.zoomAt(focus, 1.7), returnsNormally);
+      expectAt(rig.tool.ghostAt, at, 'nothing re-resolves after dispose');
+    });
   });
 }
