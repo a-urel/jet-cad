@@ -12,8 +12,11 @@
 // sit in rotated groups at the corpus far origin; the line, the region and
 // the symbol are away from the origin; the symbol is turned.
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:floor_planner/layers/layer_picker.dart';
+import 'package:floor_planner/parametric/box.dart';
+import 'package:floor_planner/parametric/separator.dart';
 import 'package:floor_planner/selection_panel.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -393,5 +396,163 @@ void main() {
     expect(byKey('wall-section'), findsOneWidget,
         reason: 'premise: the Wall tool\'s settings show');
     expect(byKey('layer-picker'), findsNothing);
+  });
+
+  testWidgets(
+      'every registered parametric type (box, wall, opening, separator, '
+      'room, dimension) alone: the picker is enabled and shows the object\'s '
+      'layer (Task 10 review finding 1, R-own-5)', (tester) async {
+    final l = layerFixture();
+    final doc = l.doc;
+    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+    final d = doc.handleSeed.next();
+    doc.commands.execute(AddLayerCommand(LayerRecord(
+        handle: d,
+        name: 'D',
+        color: const IndexedColor(2),
+        linetype: zero.linetype,
+        lineweight: zero.lineweight,
+        transparency: zero.transparency)));
+    final box = addObjectOn(doc, const BoxParams(1200.5, 800.25), d,
+        at: Transform2.translation(-6400.5, 9100.25)
+            .multiply(Transform2.rotation(0.7)));
+    final separator = addObjectOn(
+        doc,
+        const SeparatorParams(150.5, -320.25, 1650.75, 410.5),
+        ReservedHandles.layerZero,
+        at: Transform2.translation(-9800.25, -7300.5)
+            .multiply(Transform2.rotation(-0.3)));
+    doc.commands.clearHistory();
+    final cases = <(String, Handle, String)>[
+      ('box', box, 'D'),
+      ('wall', l.walls[0], 'A'),
+      ('opening', l.openings[0], 'B'),
+      ('separator', separator, '0'),
+      ('room', l.room!, 'A'),
+      ('dimension', l.dimension!, 'B'),
+    ];
+    final selection = await pumpPanel(tester, doc);
+    for (final (type, h, name) in cases) {
+      expect(isParametricObject(doc, h), isTrue, reason: type);
+      await select(tester, selection, [h]);
+      expect(pickerEnabled(tester), isTrue, reason: type);
+      expect(pickerTooltip(tester), isNot(kLayerPickerPlainGroup),
+          reason: type);
+      expect(valueOf(tester), name, reason: type);
+    }
+    // And one of them moves: the separator, from layer 0 to D.
+    await select(tester, selection, [separator]);
+    await choose(tester, d);
+    expect(doc.commands.undoDepth, 1);
+    expect(objectLayerOf(doc, separator), d);
+    expect(childLayers(doc, separator), isNotEmpty, reason: 'premise');
+    expect(childLayers(doc, separator).toSet(), {d});
+  });
+
+  testWidgets(
+      'the picker needs components, not transform: custom permission sets '
+      'that differ only there (Task 10 review finding 2, R-own-2)',
+      (tester) async {
+    const noComponents = DraftPermissions(
+        transform: true, components: false, geometry: true, structure: true);
+    const onlyComponents = DraftPermissions(
+        transform: false, components: true, geometry: false, structure: false);
+
+    var p = PickerDoc();
+    var doc = p.doc;
+    doc.commands.permissions = noComponents;
+    var selection = await pumpPanel(tester, doc);
+    await select(tester, selection, [p.line, p.wall]);
+    expect(pickerEnabled(tester), isFalse);
+    expect(pickerTooltip(tester), kLayerPickerReadOnly);
+
+    p = PickerDoc();
+    doc = p.doc;
+    doc.commands.permissions = onlyComponents;
+    selection = await pumpPanel(tester, doc);
+    await select(tester, selection, [p.line, p.wall]);
+    expect(pickerEnabled(tester), isTrue);
+    await choose(tester, p.d);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 1);
+    expect(layerOf(doc, p.line), p.d);
+    expect(objectLayerOf(doc, p.wall), p.d);
+    expect(childLayers(doc, p.wall).toSet(), {p.d});
+  });
+
+  testWidgets(
+      'the no-op rule compares the stored ObjectLayer: a dangling one moved '
+      'to layer 0 is rewritten; an absent one moved to layer 0 is a no-op '
+      '(Task 10 review finding 3, R-own-3)', (tester) async {
+    final p = PickerDoc();
+    final doc = p.doc;
+    final zero = ReservedHandles.layerZero;
+    // A layer handle that names no layer (a file can hold one).
+    final gone = doc.handleSeed.next();
+    expect(doc.tables.layers[gone], isNull, reason: 'premise');
+    final dangling = p.wall, absent = p.l.walls[1];
+    doc.commands
+        .execute(SetComponentCommand<ObjectLayer>(dangling, ObjectLayer(gone)));
+    doc.commands.execute(SetComponentCommand<ObjectLayer>(absent, null));
+    doc.commands.clearHistory();
+    expect(objectLayer(doc, dangling), zero, reason: 'premise: shown on 0');
+    expect(objectLayerOf(doc, dangling), gone, reason: 'premise: stored');
+    expect(objectLayerOf(doc, absent), isNull, reason: 'premise');
+    expect(childLayers(doc, dangling).toSet(), {zero}, reason: 'premise');
+    expect(childLayers(doc, absent).toSet(), {zero}, reason: 'premise');
+
+    final repair = layerMoveCommand(doc, [SelectionKey.root(dangling)], zero);
+    expect(repair, isA<SetComponentCommand<ObjectLayer>>());
+    expect(layerMoveCommand(doc, [SelectionKey.root(absent)], zero), isNull);
+
+    final selection = await pumpPanel(tester, doc);
+    await select(tester, selection, [absent]);
+    expect(valueOf(tester), '0');
+    await choose(tester, zero);
+    expect(doc.commands.undoDepth, 0, reason: 'absent is already layer 0');
+    expect(objectLayerOf(doc, absent), isNull);
+
+    await select(tester, selection, [dangling]);
+    expect(valueOf(tester), '0');
+    await choose(tester, zero);
+    expect(doc.commands.undoDepth, 1, reason: 'the stored value is repaired');
+    expect(objectLayerOf(doc, dangling), zero);
+  });
+
+  testWidgets(
+      'a move the document refuses (a regeneration that throws on a broken '
+      'file) is caught: nothing changed, nothing raised (Task 10 review '
+      'info 5)', (tester) async {
+    final l = layerFixture(dimension: false);
+    final doc = l.doc;
+    final room = l.room!;
+    // Break the room as only a file can: behind the parametric system's
+    // back, the room gains a second fill naming a drafted region's boundary
+    // at the root, not one of the room's children, so the room's next
+    // regeneration throws (`_ownBoundaryOf`'s StateError, on the surplus).
+    final stranger = addRegionOn(l, l.a, 7300.5, 2100.25, 350).boundary;
+    l.system.dispose();
+    doc.commands.execute(AddEntityCommand(
+        record: draftRecord(doc.handleSeed.next(), room, EntityKind.fill,
+            layer: l.a, color: const IndexedColor(4)),
+        payload: GeometryPayload(
+            coords: Float64List(0),
+            scalars: Float64List.fromList([stranger.value.toDouble()]))));
+    l.system.install();
+    doc.commands.clearHistory();
+    expect(
+        () => doc.commands
+            .execute(SetComponentCommand<ObjectLayer>(room, ObjectLayer(l.c))),
+        throwsA(isA<StateError>()),
+        reason: 'premise: the move is refused');
+    final bytes = DraftDocumentCodec.encodeToString(doc);
+
+    final selection = await pumpPanel(tester, doc);
+    await select(tester, selection, [room]);
+    expect(pickerEnabled(tester), isTrue);
+    await choose(tester, ReservedHandles.layerZero);
+    expect(tester.takeException(), isNull);
+    expect(doc.commands.undoDepth, 0);
+    expect(DraftDocumentCodec.encodeToString(doc), bytes);
   });
 }

@@ -86,6 +86,18 @@ String hx(Handle h) => h.toHex();
 
 LayerRecord rec(DraftDocument doc, Handle h) => doc.tables.layers[h]!;
 
+/// Every field of [r], for a failing full-record `expect` (`LayerRecord`
+/// has no `toString`, and the engine is frozen; Task 10 review info 7).
+String fieldsOf(LayerRecord r) => '{handle ${r.handle.toHex()}, name '
+    '"${r.name}", ${r.color}, linetype ${r.linetype.toHex()}, lineweight '
+    '${r.lineweight}, transparency ${r.transparency}, visible ${r.visible}, '
+    'locked ${r.locked}}';
+
+/// The `reason:` of a full-record `expect`: the record [actual] against
+/// [want], field by field.
+String recordReason(LayerRecord actual, LayerRecord want) =>
+    'record ${fieldsOf(actual)}, wanted ${fieldsOf(want)}';
+
 /// The record the panel handed row [h]: what the list shows.
 LayerRecord shown(WidgetTester tester, Handle h) =>
     tester.widget<LayerRow>(find.byKey(ValueKey<Handle>(h))).record;
@@ -226,27 +238,32 @@ void main() {
         beforeB = rec(doc, b),
         beforeC = rec(doc, fx.c);
     await step('hide A', () => tester.tap(byKey('layer-eye-${hx(a)}')), (done) {
-      expect(rec(doc, a), done ? beforeA.copyWith(visible: false) : beforeA);
+      final want = done ? beforeA.copyWith(visible: false) : beforeA;
+      expect(rec(doc, a), want, reason: recordReason(rec(doc, a), want));
       expect(shown(tester, a), rec(doc, a));
     });
     await step('show C', () => tester.tap(byKey('layer-eye-${hx(fx.c)}')),
         (done) {
-      expect(rec(doc, fx.c), done ? beforeC.copyWith(visible: true) : beforeC);
+      final want = done ? beforeC.copyWith(visible: true) : beforeC;
+      expect(rec(doc, fx.c), want, reason: recordReason(rec(doc, fx.c), want));
       expect(shown(tester, fx.c), rec(doc, fx.c));
     });
     await step('lock A', () => tester.tap(byKey('layer-lock-${hx(a)}')),
         (done) {
-      expect(rec(doc, a), done ? beforeA.copyWith(locked: true) : beforeA);
+      final want = done ? beforeA.copyWith(locked: true) : beforeA;
+      expect(rec(doc, a), want, reason: recordReason(rec(doc, a), want));
       expect(shown(tester, a), rec(doc, a));
     });
     await step('unlock B', () => tester.tap(byKey('layer-lock-${hx(b)}')),
         (done) {
-      expect(rec(doc, b), done ? beforeB.copyWith(locked: false) : beforeB);
+      final want = done ? beforeB.copyWith(locked: false) : beforeB;
+      expect(rec(doc, b), want, reason: recordReason(rec(doc, b), want));
       expect(shown(tester, b), rec(doc, b));
     });
     await step('recolour B to cyan', () => chooseColour(tester, b, 4), (done) {
       final want = IndexedColor(done ? 4 : 5);
-      expect(rec(doc, b), beforeB.copyWith(color: want));
+      expect(rec(doc, b), beforeB.copyWith(color: want),
+          reason: recordReason(rec(doc, b), beforeB.copyWith(color: want)));
       expect(shown(tester, b), rec(doc, b));
       expect(swatchOf(tester, b), Color(0xFF000000 | aciToRgb(want.aci)));
     });
@@ -478,7 +495,8 @@ void main() {
       await tester.enterText(fieldOf(fx.b), 'Kitchen');
       await pressEnter(tester);
       expect(doc.commands.undoDepth, 1);
-      expect(rec(doc, fx.b), before.copyWith(name: 'Kitchen'));
+      final want = before.copyWith(name: 'Kitchen');
+      expect(rec(doc, fx.b), want, reason: recordReason(rec(doc, fx.b), want));
     });
 
     testWidgets(
@@ -497,7 +515,8 @@ void main() {
       await tester.tap(byKey('layer-lock-${hx(fx.a)}'));
       await settle(tester);
       expect(doc.commands.undoDepth, 2);
-      expect(rec(doc, fx.a), before.copyWith(name: 'Hall', locked: true));
+      final want = before.copyWith(name: 'Hall', locked: true);
+      expect(rec(doc, fx.a), want, reason: recordReason(rec(doc, fx.a), want));
     });
 
     testWidgets(
@@ -722,7 +741,10 @@ void main() {
       expect(
           tester.widget<PopupMenuButton<int>>(byKey('layer-colour-$a')).enabled,
           isFalse);
-      expect(tooltipOf(tester, 'layers-delete'), 'Read-only document');
+      // Neutral wording: under runtime the picker still moves things
+      // (Task 10 review info 6).
+      expect(tooltipOf(tester, 'layers-delete'),
+          'Layers cannot be changed in this document');
       // Tap them all anyway.
       await tester.tap(byKey('layer-row-$c'), warnIfMissed: false);
       await tester.pump(const Duration(milliseconds: 400));

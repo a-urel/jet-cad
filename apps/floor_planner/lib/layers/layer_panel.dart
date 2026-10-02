@@ -10,6 +10,12 @@ import 'layer_row.dart';
 /// six"), so the page panel below keeps its room.
 const int kLayerListVisibleRows = 6;
 
+/// The disabled delete button's tooltip when the permissions forbid
+/// `Capability.structure` (spec 12b D11). Neutral, not "read-only": under
+/// the `runtime` preset the Selection section's layer picker still moves
+/// things (Task 10 review info 6).
+const String kLayersLocked = 'Layers cannot be changed in this document';
+
 /// [layers] in the panel's order (spec 12b D10): layer 0 first, then the
 /// others by name under `toLowerCase()`, ties by handle. Independent of
 /// creation order, so stable across undo, save and load.
@@ -198,7 +204,7 @@ class LayerPanelState extends State<LayerPanel> {
     final current = drawingLayer(_doc);
     final rows = layersInPanelOrder(layers.records);
     final title = Theme.of(context).textTheme.titleSmall;
-    final blocked = allowed ? _deleteBlocked(_selected) : 'Read-only document';
+    final blocked = allowed ? _deleteBlocked(_selected) : kLayersLocked;
     return Material(
       key: const Key('layers-panel'),
       color: Colors.transparent,

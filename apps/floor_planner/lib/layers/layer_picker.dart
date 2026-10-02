@@ -26,6 +26,10 @@ const String kLayerPickerPlainGroup =
 /// Whether [h] is a live parametric object of one of the floor planner's
 /// registered types (`parametricCatalog`), by the engine's own rule
 /// ([isLiveObject]): a root-level group carrying a registered component.
+///
+/// **This list must name every type `parametricCatalog` registers**: the
+/// engine has no "any registered type" query yet. A type left out is
+/// treated as a plain group, so the picker is disabled for it.
 bool isParametricObject(DraftDocument doc, Handle h) =>
     isLiveObject<BoxParams>(doc, h) ||
     isLiveObject<WallParams>(doc, h) ||
@@ -179,7 +183,17 @@ class LayerPicker extends StatelessWidget {
     if (keys.isEmpty || layerPickerBlocked(document, keys) != null) return;
     if (document.tables.layers[layer] == null) return;
     final command = layerMoveCommand(document, keys, layer);
-    if (command != null) document.commands.execute(command);
+    if (command == null) return;
+    // A refused edit (a regeneration that throws on a broken file) is
+    // caught as the Selection section's other commits catch one: the
+    // dispatcher has rolled it back, so nothing changed.
+    try {
+      document.commands.execute(command);
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
   }
 
   @override

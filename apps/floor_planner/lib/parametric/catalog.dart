@@ -17,6 +17,10 @@ import 'wall.dart';
 /// separators contribute places, and rooms read them (10 D16). A dimension
 /// is nobody's neighbour either (11 D3): it relates to the walls it measures
 /// by reference.
+///
+/// A type registered here must also be listed in `isParametricObject`
+/// (`layers/layer_picker.dart`), or the Layer picker treats its objects as
+/// plain groups and refuses to move them (spec 12b D12).
 final ParametricCatalog parametricCatalog = ParametricCatalog()
   ..register<BoxParams>(
       BoxParams.componentTypeId, BoxParams.fromJson, const BoxType())
