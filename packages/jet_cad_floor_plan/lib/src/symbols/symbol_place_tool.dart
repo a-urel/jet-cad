@@ -74,6 +74,10 @@ class SymbolPlaceTool extends Tool {
   int _quarterTurns = 0;
   bool _mirrored = false;
 
+  /// The ghost's placement transform, computed on pointer, key and arm
+  /// events ([_syncPlacement]), never in a paint (spec 09c D5, W-15).
+  Transform2? _placement;
+
   /// Spec D6 Commit: every capability a placement may need. The first
   /// placement of a symbol copies its definition (structure, geometry) and
   /// its `SymbolComponent` (components).
@@ -113,6 +117,15 @@ class SymbolPlaceTool extends Tool {
   @visibleForTesting
   ui.Path? get ghostPath => _path;
 
+  /// The ghost's placement transform as last computed on an event, or null
+  /// while idle or before the first pointer event.
+  @visibleForTesting
+  Transform2? get ghostPlacement => _placement;
+
+  /// The ghost's reused matrix.
+  @visibleForTesting
+  GhostMatrix get ghostMatrix => _matrix;
+
   /// The rotation, in counter-clockwise quarter turns, of the next placement.
   int get quarterTurns => _quarterTurns;
 
@@ -126,9 +139,24 @@ class SymbolPlaceTool extends Tool {
 
   void _onArmed() {
     _syncPath();
+    _syncPlacement();
     _pressed = false;
     _pressPointer = -1;
     notifyListeners();
+  }
+
+  /// The ghost's placement from the armed entry's base point, the resolved
+  /// point, the turns and the mirror: called on every event that changes
+  /// one of them, so a paint only passes the stored value on.
+  void _syncPlacement() {
+    final entry = armed.value;
+    _placement = entry == null
+        ? null
+        : placementTransform(
+            at: _at.point,
+            basePoint: entry.definition.basePoint,
+            quarterTurns: _quarterTurns,
+            mirrored: _mirrored);
   }
 
   /// F-5: object snap at `kSnapAperturePixels / scale`, else the grid, else
@@ -156,6 +184,7 @@ class SymbolPlaceTool extends Tool {
     _pressed = true;
     _pressPointer = e.pointer;
     _resolve(ctx, e.world);
+    _syncPlacement();
     _ghostVisible = true;
     notifyListeners();
   }
@@ -167,6 +196,7 @@ class SymbolPlaceTool extends Tool {
     // A cancelled press's remaining moves (F-6), or another pointer's.
     if (pressedMove && (!_pressed || e.pointer != _pressPointer)) return;
     _resolve(ctx, e.world);
+    _syncPlacement();
     _ghostVisible = true;
     notifyListeners();
   }
@@ -179,6 +209,7 @@ class SymbolPlaceTool extends Tool {
     final entry = armed.value;
     if (entry != null) {
       _resolve(ctx, e.world);
+      _syncPlacement();
       _ghostVisible = true;
       _place(ctx, entry, _at.point);
     }
@@ -222,6 +253,7 @@ class SymbolPlaceTool extends Tool {
         } else {
           _mirrored = !_mirrored;
         }
+        _syncPlacement();
         notifyListeners();
       }
       return KeyEventResult.handled;
@@ -285,18 +317,18 @@ class SymbolPlaceTool extends Tool {
 
   /// Spec D6: the cached local path under `translate(−origin) ∘ P`, then a
   /// cross at the local base point. Allocates no path, transform, matrix or
-  /// paint: `P` is recomputed only when the placement changes.
+  /// paint: `P` is the transform stored on the last event (09c D5, W-15),
+  /// and the matrix rewrites its linear part only when `P` changed.
   @override
   void paintWorldOverlay(ui.Canvas canvas, Vector2 origin, double scale) {
     final entry = armed.value;
     final path = _path;
-    if (!_ghostVisible || entry == null || path == null) return;
+    final placement = _placement;
+    if (!_ghostVisible || entry == null || path == null || placement == null) {
+      return;
+    }
     final base = entry.definition.basePoint;
-    _matrix.update(
-        at: _at.point,
-        basePoint: base,
-        quarterTurns: _quarterTurns,
-        mirrored: _mirrored);
+    _matrix.update(placement: placement);
     final Float64List m = _matrix.forOrigin(origin);
     _ghostPaint.strokeWidth = kPreviewStrokePixels / scale;
     final k = kGhostCrossPixels / scale;

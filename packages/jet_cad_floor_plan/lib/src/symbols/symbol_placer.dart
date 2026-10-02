@@ -33,30 +33,49 @@ final class InstanceStyle {
   });
 }
 
-/// `translation(at) · rotation(quarterTurns · 90°) · scale(mirrored ? -1 : 1,
-/// 1) · translation(-basePoint)`: the definition's base point lands on [at]
-/// (spec F-2), and a mirror flips the **local** x axis whatever the turns.
+/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
+/// translation(-basePoint)`: the definition's base point lands on [at]
+/// (spec F-2), and a mirror flips the **local** x axis whatever the
+/// rotation.
 ///
-/// Quarter turns use exact cosine and sine (0 and ±1, never `6e-17`), taken
-/// modulo 4 (negative allowed), and no stored component is `-0.0`, so a
-/// placement stores clean numbers in a file's bytes.
+/// The rotation is given one of two ways, never both (an [ArgumentError],
+/// in release builds too):
+/// - [quarterTurns] counter-clockwise, taken modulo 4 (negative allowed),
+///   with exact cosine and sine from a table (0 and ±1, never `6e-17`);
+/// - [rotation], a unit vector `(cos, sin)` used exactly as given (spec 09c
+///   D5: a wall face's `t`).
+///
+/// Neither is no turn. The quarter-turn form is the [rotation] form at its
+/// table entry, so the two give the same bytes. No stored component is
+/// `-0.0` in either form, so a placement stores clean numbers in a file.
 Transform2 placementTransform({
   required Vector2 at,
   required Vector2 basePoint,
-  int quarterTurns = 0,
+  int? quarterTurns,
+  (double, double)? rotation,
   bool mirrored = false,
 }) {
-  final q = ((quarterTurns % 4) + 4) % 4;
-  const cos = [1.0, 0.0, -1.0, 0.0];
-  const sin = [0.0, 1.0, 0.0, -1.0];
+  if (quarterTurns != null && rotation != null) {
+    throw ArgumentError(
+        'placementTransform takes quarterTurns or rotation, not both');
+  }
+  final (cos, sin) = rotation ?? _quarterTurn(quarterTurns ?? 0);
   final m = Transform2.translation(at.x, at.y)
-      .multiply(Transform2(cos[q], sin[q], -sin[q], cos[q], 0, 0))
+      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
       .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
       .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
   double clean(double v) => v == 0 ? 0.0 : v;
   return Transform2(
       clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
 }
+
+/// The exact `(cos, sin)` of [quarterTurns] counter-clockwise quarter turns.
+(double, double) _quarterTurn(int quarterTurns) => const [
+      (1.0, 0.0),
+      (0.0, 1.0),
+      (-1.0, 0.0),
+      (0.0, -1.0)
+    ][((quarterTurns % 4) + 4) % 4];
 
 /// The command that places [entry] in [doc] at [at]. Labelled
 /// `Place <name>`; it does **not** execute.
@@ -78,6 +97,7 @@ CompoundCommand placeSymbol(
   required Vector2 at,
   int quarterTurns = 0,
   bool mirrored = false,
+  Transform2? transform,
   InstanceStyle style = const InstanceStyle(),
   bool numbered = true,
 }) {
@@ -145,12 +165,13 @@ CompoundCommand placeSymbol(
   }
 
   final instance = doc.handleSeed.next();
-  final transform = placementTransform(
-    at: at,
-    basePoint: entry.definition.basePoint,
-    quarterTurns: quarterTurns,
-    mirrored: mirrored,
-  );
+  final placement = transform ??
+      placementTransform(
+        at: at,
+        basePoint: entry.definition.basePoint,
+        quarterTurns: quarterTurns,
+        mirrored: mirrored,
+      );
   commands.add(AddNodeCommand(InstanceNode(
     handle: instance,
     parent: doc.rootHandle,
@@ -158,7 +179,7 @@ CompoundCommand placeSymbol(
     // Spec 12b D7: the instance takes the current layer; the definition's
     // leaves stay on layer 0 (the library's rule) and follow it.
     layer: drawingLayer(doc),
-    transform: transform,
+    transform: placement,
     color: style.color,
     lineweight: style.lineweight,
     transparency: style.transparency,
@@ -179,7 +200,7 @@ CompoundCommand placeSymbol(
         height: first == null
             ? kTableLabelMaxHeight
             : tableLabelHeight(first.record.kind, first.payload),
-        placement: transform,
+        placement: placement,
       ),
     ));
   }

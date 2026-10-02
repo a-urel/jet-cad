@@ -5,8 +5,9 @@
 //
 // `dart:ui` only, no widget: the placement tool (plan Task 6) owns the
 // painting. Nothing here allocates per paint: the path is built once per
-// entry, and the placement transform is computed only when the placement
-// changes; a paint writes two doubles of a reused `Float64List(16)`.
+// entry, the placement transform is computed by the tool on events (spec 09c
+// D5), and its linear part is written only when it changes; a paint writes
+// two doubles of a reused `Float64List(16)`.
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -15,7 +16,6 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'symbol_library.dart';
-import 'symbol_placer.dart';
 
 final Expando<ui.Path> _ghostPaths = Expando<ui.Path>('ghostPath');
 
@@ -97,61 +97,44 @@ void _writeTranslation(Float64List m, Transform2 p, Vector2 origin) {
   m[13] = p.f - origin.y;
 }
 
-/// The ghost's reused matrix (spec D6): the placement transform `P =
-/// placementTransform(at, basePoint, turns, mirrored)` is computed, and its
-/// linear part written, only when one of those four changes ([update]); a
-/// paint ([forOrigin]) writes only the translation less the rebase origin.
+/// The ghost's reused matrix (spec 09b D6, 09c D5): the placement transform
+/// `P` is handed in by the tool, which computes it on pointer, key and
+/// camera events; its linear part is written only when one of its six
+/// doubles differs from the last ([update]); a paint ([forOrigin]) writes
+/// only the translation less the rebase origin.
 final class GhostMatrix {
   /// The column-major storage handed to `canvas.transform`, reused for the
   /// holder's life.
   final Float64List storage = identityGhostMatrix();
 
   Transform2? _p;
-  double _atX = 0, _atY = 0, _baseX = 0, _baseY = 0;
-  int _turns = 0;
-  bool _mirrored = false;
   int _computations = 0;
 
-  /// How many times `P` was computed: a test's count (spec D6).
+  /// How many times a new `P` was taken: a test's count (spec D6).
   @visibleForTesting
   int get computations => _computations;
 
   /// The current placement transform, or null before the first [update].
   Transform2? get placement => _p;
 
-  /// Sets the placement; recomputes `P` only when [at], [basePoint],
-  /// [quarterTurns] or [mirrored] differ from the last call (stored values,
-  /// compared exactly). [at] and [basePoint] are read, not kept.
-  void update({
-    required Vector2 at,
-    required Vector2 basePoint,
-    int quarterTurns = 0,
-    bool mirrored = false,
-  }) {
-    if (_p != null &&
-        at.x == _atX &&
-        at.y == _atY &&
-        basePoint.x == _baseX &&
-        basePoint.y == _baseY &&
-        quarterTurns == _turns &&
-        mirrored == _mirrored) {
+  /// Sets the placement; takes [placement] and rewrites the linear part only
+  /// when one of its six doubles differs from the last call's (stored
+  /// values, compared exactly with `==`, so `-0.0` equals `0.0`). An equal
+  /// placement keeps the earlier object.
+  void update({required Transform2 placement}) {
+    final p = _p;
+    if (p != null &&
+        placement.a == p.a &&
+        placement.b == p.b &&
+        placement.c == p.c &&
+        placement.d == p.d &&
+        placement.e == p.e &&
+        placement.f == p.f) {
       return;
     }
-    _atX = at.x;
-    _atY = at.y;
-    _baseX = basePoint.x;
-    _baseY = basePoint.y;
-    _turns = quarterTurns;
-    _mirrored = mirrored;
-    final p = placementTransform(
-      at: at,
-      basePoint: basePoint,
-      quarterTurns: quarterTurns,
-      mirrored: mirrored,
-    );
-    _p = p;
+    _p = placement;
     _computations++;
-    _writeLinear(storage, p);
+    _writeLinear(storage, placement);
   }
 
   /// [storage] with its translation set for [origin] (`world − origin`, the

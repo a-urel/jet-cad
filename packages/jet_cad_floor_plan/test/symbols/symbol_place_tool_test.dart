@@ -590,6 +590,70 @@ void main() {
       expect(y, closeTo(gridOf(pC).y - origin.y, 1e-9));
     });
 
+    test(
+        'the placement is computed on events, never in a paint (spec D5, '
+        'W-15): hover, R, M and a re-arm each set it; repeated paints pass '
+        'the stored transform and compute nothing', () {
+      final rig = Rig();
+      Transform2 want(SymbolEntry e, Vector2 p, int turns, bool mirrored) =>
+          placementTransform(
+              at: gridOf(p),
+              basePoint: e.definition.basePoint,
+              quarterTurns: turns,
+              mirrored: mirrored);
+      void paints(int n) {
+        for (var i = 0; i < n; i++) {
+          rig.tool.paintWorldOverlay(RecordingCanvas(), origin, scale);
+        }
+      }
+
+      final matrix = rig.tool.ghostMatrix;
+      rig.hover(pB);
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 0, false).toJson(),
+          reason: 'set by the hover, before any paint');
+      expect(matrix.computations, 0, reason: 'no paint yet');
+      paints(3);
+      expect(matrix.computations, 1);
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue,
+          reason: 'the paint passed the stored transform');
+
+      rig.key(kR);
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 1, false).toJson(),
+          reason: 'R with no pointer move');
+      paints(2);
+      expect(matrix.computations, 2);
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
+
+      rig.key(kM);
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 1, true).toJson(),
+          reason: 'M with no pointer move');
+      paints(2);
+      expect(matrix.computations, 3);
+      final m = rig.tool.ghostMatrix.storage;
+      // q=1 mirrored: local +x to −y, local +y to −x.
+      expect([m[0], m[1], m[4], m[5]], [0.0, -1.0, -1.0, 0.0]);
+
+      rig.armed.value = toilet;
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(toilet, pB, 1, true).toJson(),
+          reason: 're-armed: the new base point');
+      paints(2);
+      expect(matrix.computations, 4);
+      final tb = toilet.definition.basePoint;
+      final (x, y) = apply(rig.tool.ghostMatrix.forOrigin(origin), tb.x, tb.y);
+      expect(x, closeTo(gridOf(pB).x - origin.x, 1e-9));
+      expect(y, closeTo(gridOf(pB).y - origin.y, 1e-9));
+
+      rig.hover(pC);
+      expect(rig.tool.ghostPlacement!.toJson(),
+          want(toilet, pC, 1, true).toJson());
+      paints(1);
+      expect(matrix.computations, 5);
+    });
+
     test('hides on pointer exit and on cancel', () {
       final rig = Rig();
       rig.hover(pA);

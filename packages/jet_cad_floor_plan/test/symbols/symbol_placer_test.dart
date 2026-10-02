@@ -5,6 +5,7 @@
 // a foreign definition has the symbol's own name, and an older version lives
 // beside a newer one.
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_component.dart';
@@ -106,6 +107,19 @@ Vector2 expectedWorld(
 }
 
 final Vector2 at = Vector2(3333.5, -2222.25);
+
+/// Far from the origin, as the wall fixtures are (plan P-2).
+final Vector2 far = Vector2(100000.25, -70000.75);
+
+/// A 30° and a −112.5° rotation vector: (name, cos, sin).
+final List<(String, double, double)> rotations = [
+  ('30°', math.sqrt(3) / 2, 0.5),
+  (
+    '−112.5°',
+    math.cos(-112.5 * math.pi / 180),
+    math.sin(-112.5 * math.pi / 180)
+  ),
+];
 const Tolerance tol = Tolerance.standard;
 
 void main() {
@@ -192,6 +206,123 @@ void main() {
       final d = t.transformDirection(Vector2(1, 0));
       expect(d.x, 0.0);
       expect(d.y, -1.0);
+    });
+
+    // Plan 09c-1 Task 5 (spec D5): the rotation as a unit vector. The
+    // fixtures: a 30° and a −112.5° vector (no 0 or ±1 in either), `far` and
+    // the sofa's base point off the origin and off each other.
+
+    test(
+        'P20 a rotation vector gives translate(at) · R · S · '
+        'translate(−base), written out by hand, mirrored or not', () {
+      final e = sofa();
+      final base = e.definition.basePoint;
+      final line =
+          e.leaves.firstWhere((l) => l.record.handle.value == sofaLine);
+      for (final (name, cos, sin) in rotations) {
+        for (final mirrored in [false, true]) {
+          final why = '$name mirrored=$mirrored';
+          final s = mirrored ? -1.0 : 1.0;
+          final t = placementTransform(
+              at: far,
+              basePoint: base,
+              rotation: (cos, sin),
+              mirrored: mirrored);
+          // The local x is mirrored first, then turned: (s·cos, s·sin);
+          // the local y turns alone: (−sin, cos). Exact doubles.
+          expect(
+              t.toJson(),
+              [
+                s * cos,
+                s * sin,
+                -sin,
+                cos,
+                far.x - (s * cos * base.x - sin * base.y),
+                far.y - (s * sin * base.x + cos * base.y),
+              ],
+              reason: why);
+          expect(tol.eqPoint(t.transformPoint(base), far), isTrue,
+              reason: '$why base point');
+          for (final p in [line.payload.pointAt(0), line.payload.pointAt(1)]) {
+            final u = (p.x - base.x) * s, v = p.y - base.y;
+            final want =
+                Vector2(far.x + cos * u - sin * v, far.y + sin * u + cos * v);
+            expect(tol.eqPoint(t.transformPoint(p), want), isTrue,
+                reason: '$why $p -> ${t.transformPoint(p)}, want $want');
+          }
+          expect(t.determinant, closeTo(s, 1e-12), reason: why);
+        }
+      }
+    });
+
+    test(
+        'P21 quarterTurns and rotation together are refused (an '
+        'ArgumentError, not only an assert)', () {
+      for (final q in [0, 1]) {
+        expect(
+            () => placementTransform(
+                at: far,
+                basePoint: Vector2(900, 400),
+                quarterTurns: q,
+                rotation: (rotations.first.$2, rotations.first.$3)),
+            throwsArgumentError,
+            reason: 'quarterTurns: $q');
+      }
+      // Neither: no turn.
+      expect(
+          placementTransform(at: far, basePoint: Vector2(900, 400)).toJson(),
+          placementTransform(
+              at: far,
+              basePoint: Vector2(900, 400),
+              rotation: (1.0, 0.0)).toJson());
+    });
+
+    test(
+        'P22 the quarter-turn form is the rotation form at the exact table: '
+        'the same bytes for every turn, mirrored or not', () {
+      const table = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+      final base = Vector2(900, 400);
+      for (final mirrored in [false, true]) {
+        for (var q = -2; q < 6; q++) {
+          expect(
+              placementTransform(
+                      at: far,
+                      basePoint: base,
+                      quarterTurns: q,
+                      mirrored: mirrored)
+                  .toJson(),
+              placementTransform(
+                      at: far,
+                      basePoint: base,
+                      rotation: table[((q % 4) + 4) % 4],
+                      mirrored: mirrored)
+                  .toJson(),
+              reason: 'q=$q mirrored=$mirrored');
+        }
+      }
+    });
+
+    test(
+        'P23 an axis-aligned rotation vector (cos or sin −0.0, as a face '
+        'normal gives it) stores no −0.0, mirrored or not (M-09c-n: the '
+        'named axis-aligned exception)', () {
+      final base = Vector2(900, 400);
+      for (final r in [
+        (-0.0, 1.0),
+        (0.0, 1.0),
+        (-0.0, -1.0),
+        (1.0, -0.0),
+        (-1.0, -0.0),
+      ]) {
+        for (final mirrored in [false, true]) {
+          final t = placementTransform(
+              at: far, basePoint: base, rotation: r, mirrored: mirrored);
+          for (final v in t.toJson()) {
+            expect(v == 0 && v.isNegative, isFalse,
+                reason: '$r mirrored=$mirrored has -0.0: ${t.toJson()}');
+          }
+        }
+      }
     });
   });
 
@@ -655,6 +786,40 @@ void main() {
       expect(doc.entities.liveCount, 0);
       expect(instances(doc), isEmpty);
       expect(doc.components.withComponent<SymbolComponent>(), isEmpty);
+    });
+
+    test(
+        'P24 a given transform is stored verbatim: its six doubles, through '
+        'execute, undo, redo and save/load; at, the turns and the mirror '
+        'are not used', () {
+      final doc = target();
+      final e = sofa();
+      final (_, cos, sin) = rotations.first;
+      final given = placementTransform(
+          at: far,
+          basePoint: Vector2(37.5, -912.25),
+          rotation: (cos, sin)).multiply(Transform2.scale(-1, 1));
+      final bytes = given.toJson();
+      // Not what at, the turns or the mirror passed alongside would give.
+      expect(
+          placementTransform(
+                  at: at,
+                  basePoint: e.definition.basePoint,
+                  quarterTurns: 1,
+                  mirrored: true)
+              .toJson(),
+          isNot(bytes));
+      final cmd = placeSymbol(doc, e,
+          at: at, quarterTurns: 1, mirrored: true, transform: given);
+      doc.commands.execute(cmd);
+      expect(instances(doc).single.transform.toJson(), bytes);
+      doc.commands.undo();
+      expect(instances(doc), isEmpty);
+      doc.commands.redo();
+      expect(instances(doc).single.transform.toJson(), bytes);
+      expect(instances(reload(doc)).single.transform.toJson(), bytes);
+      expect(doc.tree.definitions.single.basePoint, e.definition.basePoint);
+      expect(doc.validate(), isEmpty);
     });
 
     test('P18 a read-only document refuses too', () {
