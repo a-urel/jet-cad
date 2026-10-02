@@ -1,4 +1,5 @@
 import 'dart:async' show StreamSubscription, unawaited;
+import 'dart:collection' show UnmodifiableListView;
 import 'dart:typed_data' show Float64List;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -26,6 +27,7 @@ final class WallBands {
   static const int _stride = 10;
   Float64List _cache = Float64List(_stride * 16);
   final List<Handle> _handles = <Handle>[];
+  late final List<Handle> _liveView = UnmodifiableListView(_handles);
   int _walls = 0;
   bool _stale = true;
   int _generation = 0;
@@ -44,6 +46,20 @@ final class WallBands {
   void invalidate() {
     _stale = true;
     _generation++;
+  }
+
+  /// The live, non-degenerate walls of [doc], ascending by handle (spec
+  /// 09c D3, D6): what the wall faces are built from. Runs the refresh, so
+  /// the first call starts the document subscription and a caller that
+  /// never asked [hostAt] or [joinInto] still sees current walls; a change
+  /// moves [generation] as before.
+  ///
+  /// An unmodifiable **view** of the cache's own handle list, not a copy:
+  /// no allocation per call, and it reads the walls of the latest refresh.
+  /// Call again (which refreshes) before trusting it after a change.
+  List<Handle> liveWalls(DraftDocument doc) {
+    _refresh(doc);
+    return _liveView;
   }
 
   /// The index of the lowest-handle wall whose band contains `(px, py)`, or
