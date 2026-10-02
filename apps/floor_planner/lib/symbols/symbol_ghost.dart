@@ -98,8 +98,8 @@ void _writeTranslation(Float64List m, Transform2 p, Vector2 origin) {
 }
 
 /// The ghost's reused matrix (spec 09b D6, 09c D5): the placement transform
-/// `P` is handed in by the tool, which computes it on pointer and key
-/// events (Task 8 will add camera events); its linear part is written only
+/// `P` is handed in by the tool, which computes it on pointer, key, camera
+/// and re-arm events (spec 09c D12); its linear part is written only
 /// when one of its six doubles differs from the last ([update]); a paint
 /// ([forOrigin]) writes only the translation less the rebase origin.
 final class GhostMatrix {
