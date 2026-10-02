@@ -1152,6 +1152,7 @@ void main() {
       final s = rig.at(pA).screen;
       rig.armed.value = null;
       expect(rig.camera.listeners, 0);
+      expect(rig.tool.ghostPlacement, isNull, reason: 'idle: no placement');
       expectInert(rig, 'disarmed');
       rig.armed.value = toilet;
       expect(rig.camera.listeners, 1);
@@ -1167,6 +1168,63 @@ void main() {
           mirrored: false);
       expect([t.e, t.f], [want.e, want.f], reason: 'the placement follows');
       expectFollows(rig, s, 0.75, 'after the re-arm');
+    });
+
+    test(
+        'a release with no move before it: a zoom puts the ghost under the '
+        'release point, not the press', () {
+      final rig = Rig();
+      final sB = rig.at(pB).screen;
+      rig.down(pB);
+      rig.up(pC);
+      final s = rig.at(pC).screen;
+      expectAt(rig.placedAt(rig.instances.single), gridOf(pC), 'placed');
+      expectFollows(rig, s, 1.7, 'under the release point');
+      expect(gridOf(under(rig, sB)) == rig.tool.ghostAt, isFalse,
+          reason: 'not under the press point');
+    });
+
+    test(
+        'a re-arm from one entry to another while the ghost is shown '
+        're-resolves it under the pointer: a snap change since the last '
+        'event shows', () {
+      final rig = Rig(objectSnap: true);
+      // 75 mm from E: 3.75 px, inside the 200 mm aperture.
+      final near = e0 + Vector2(60, -45);
+      rig.key(kR);
+      rig.hover(near);
+      expectAt(rig.tool.ghostAt, e0, 'the hover snaps to E');
+      // The fixture: the tool does not listen to F3, so only the re-arm can
+      // move the ghost off E.
+      rig.snap!.toggleObjectSnap();
+      expectAt(rig.tool.ghostAt, e0, 'F3 alone moves nothing');
+      rig.notifications.clear();
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 1, reason: 'still listening');
+      expectAt(rig.tool.ghostAt, gridOf(near), 're-armed: object snap off');
+      expect(gridOf(near) == e0, isFalse);
+      final want = placementTransform(
+          at: gridOf(near),
+          basePoint: toilet.definition.basePoint,
+          quarterTurns: 1,
+          mirrored: false);
+      final t = rig.tool.ghostPlacement!;
+      expect([
+        t.a,
+        t.b,
+        t.c,
+        t.d,
+        t.e,
+        t.f
+      ], [
+        want.a,
+        want.b,
+        want.c,
+        want.d,
+        want.e,
+        want.f
+      ], reason: 'the placement follows the re-resolved point');
+      expect(rig.notifications, [false], reason: 'one repaint');
     });
 
     test(
