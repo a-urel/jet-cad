@@ -230,6 +230,18 @@ void main() {
         '"family:bed-side"',
         '"family:table-low"',
       ]);
+      // The same family tag twice is two family tags, not one: "at most one
+      // per symbol" counts tags, so a set of distinct families is not enough.
+      symbolComponentJson(j, nightstandDef.value)['tags'] = [
+        'nightstand',
+        'family:x',
+        'against-wall',
+        'family:x',
+      ];
+      expectRejected(bytesOfJson(j), [
+        'nightstand.single@2',
+        '2 family tags ("family:x", "family:x")',
+      ]);
     });
 
     test(
