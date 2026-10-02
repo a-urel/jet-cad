@@ -220,6 +220,7 @@ class PlannerShell extends StatefulWidget {
     this.initialCamera,
     this.symbols,
     this.thumbnails,
+    this.symbolSearch,
   });
 
   final DraftDocument? document;
@@ -256,6 +257,11 @@ class PlannerShell extends StatefulWidget {
   /// host; not owned here. Read only with [symbols]: a shell given a loader
   /// and no cache makes a cache of its own and disposes it.
   final SymbolThumbnails? thumbnails;
+
+  /// The Symbols tab's search text (spec 09c D13), passed by the host, which
+  /// keeps it across document swaps; not disposed here. A shell given none
+  /// makes one of its own and disposes it. Read once, in `initState`.
+  final TextEditingController? symbolSearch;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -359,6 +365,13 @@ class _PlannerShellState extends State<PlannerShell> {
   /// [_settlePendingInput] hands it back.
   final PanelFieldFocusNode _symbolSearch =
       PanelFieldFocusNode(debugLabel: 'symbol-search');
+
+  /// The Symbols tab's search text (spec 09c D13): the shell's, not the
+  /// panel's, which the Tools tab removes, so the text survives a tab
+  /// switch. The host's when it passed one (a document swap keeps it);
+  /// otherwise [_ownSymbolQuery]. Both set in [initState].
+  late final TextEditingController _symbolQuery;
+  TextEditingController? _ownSymbolQuery;
 
   /// A cache of the shell's own when it was given a loader and no cache.
   SymbolThumbnails? _ownThumbnails;
@@ -692,6 +705,8 @@ class _PlannerShellState extends State<PlannerShell> {
     // same settings for the shell's whole life.
     _ownsSnap = widget.snap == null;
     _snap = widget.snap ?? SnapSettings();
+    _symbolQuery =
+        widget.symbolSearch ?? (_ownSymbolQuery = TextEditingController());
     _busy = widget.busy;
     // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
     // arrives built. The sample (startupPlan) builds its walls, openings,
@@ -726,6 +741,9 @@ class _PlannerShellState extends State<PlannerShell> {
     _symbolTool.dispose();
     _armed.dispose();
     _symbolSearch.dispose();
+    // After the tabs' panel has gone with the tree; the host's is the
+    // host's.
+    _ownSymbolQuery?.dispose();
     _ownThumbnails?.dispose();
     _fill.dispose();
     _wallSettings.dispose();
@@ -815,6 +833,7 @@ class _PlannerShellState extends State<PlannerShell> {
                 armed: _armed,
                 permissions: _document.commands.permissions,
                 searchFocus: _symbolSearch,
+                query: _symbolQuery,
                 onSelect: _armSymbol,
               ),
           },

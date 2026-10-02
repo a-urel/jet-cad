@@ -19,6 +19,7 @@ import 'package:floor_planner/symbols/symbol_library_state.dart';
 import 'package:floor_planner/symbols/symbol_panel.dart';
 import 'package:floor_planner/symbols/symbol_place_tool.dart';
 import 'package:floor_planner/symbols/symbol_placer.dart';
+import 'package:floor_planner/symbols/symbol_search.dart';
 import 'package:floor_planner/tool_palette.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -67,6 +68,25 @@ SymbolPanel panelOf(WidgetTester tester) =>
 
 SymbolGallery galleryOf(WidgetTester tester) =>
     tester.widget<SymbolGallery>(find.byType(SymbolGallery));
+
+final Finder searchField = find.byKey(const Key('symbol-search'));
+
+/// The gallery's cell ids, in order.
+List<String> galleryIdsOf(WidgetTester tester) => [
+      for (final c in galleryOf(tester).categories)
+        for (final s in c.symbols) s.id,
+    ];
+
+/// The ids "bed" matches in the loaded library, by the search itself.
+List<String> bedIdsOf(WidgetTester tester) {
+  final library = (panelOf(tester).loader.state as SymbolLibraryReady).library;
+  return [
+    for (final g in searchSymbols(library.entries, 'bed'))
+      for (final e in g.symbols) symbolIdOf(e),
+  ];
+}
+
+void _noop() {}
 
 /// The loaded library's first entry: the first cell of the first category.
 SymbolEntry firstEntry(WidgetTester tester) =>
@@ -386,6 +406,127 @@ void main() {
     expect(instancesOf(sessionOf(tester).document), hasLength(1),
         reason: 'premise: placed');
     expect(save(), isNotNull);
+  });
+
+  group('the search text (spec 09c D13)', () {
+    testWidgets(
+        'SS12 "bed" typed, Tools and back: the field reads "bed" and the '
+        'gallery is filtered (M-09c-t, M-09c-t5)', (tester) async {
+      await pumpSymbolsApp(tester);
+      await tapKey(tester, tabSymbols);
+      final all = galleryIdsOf(tester);
+      await tester.enterText(searchField, 'bed');
+      await tester.pump();
+      final beds = galleryIdsOf(tester);
+      expect(beds, bedIdsOf(tester), reason: 'premise: filtered');
+      expect(beds.length, lessThan(all.length), reason: 'premise');
+
+      await tapKey(tester, tabTools);
+      expect(find.byType(SymbolPanel), findsNothing,
+          reason: 'the panel is removed on the Tools tab');
+      // A second build of the shell while the panel is away.
+      await press(tester, LogicalKeyboardKey.keyW);
+      await tapKey(tester, tabSymbols);
+      expect(tester.widget<TextField>(searchField).controller!.text, 'bed');
+      expect(galleryIdsOf(tester), beds);
+      expect(
+          [for (final c in galleryOf(tester).categories) c.name], ['Bed Room']);
+      expect(find.byKey(const Key('symbol-search-clear')), findsOneWidget);
+    });
+
+    testWidgets(
+        'SS13 a document replacement keeps it: New, then Open sample, and '
+        'the new shell\'s Symbols tab reads "bed" (M-09c-t6, M-09c-t7)',
+        (tester) async {
+      await pumpSymbolsApp(tester);
+      await tapKey(tester, tabSymbols);
+      await tester.enterText(searchField, 'bed');
+      await tester.pump();
+      final given = panelOf(tester).query;
+      final firstShell = tester.state(find.byType(PlannerShell));
+
+      for (final replace in [
+        () => hostOf(tester).newFlow(),
+        () => hostOf(tester).openSampleFlow(),
+      ]) {
+        final before = sessionOf(tester).document;
+        await replace();
+        await tester.pump();
+        expect(sessionOf(tester).document, isNot(same(before)),
+            reason: 'premise: replaced');
+        expect(before.commands.isDisposed, isTrue, reason: 'premise');
+        expect(tester.state(find.byType(PlannerShell)), isNot(same(firstShell)),
+            reason: 'premise: a new shell');
+        expect(find.byType(SymbolPanel), findsNothing,
+            reason: 'a new shell opens on Tools');
+
+        await tapKey(tester, tabSymbols);
+        expect(panelOf(tester).query, same(given));
+        expect(tester.widget<TextField>(searchField).controller!.text, 'bed');
+        expect(galleryIdsOf(tester), bedIdsOf(tester));
+      }
+    });
+
+    testWidgets(
+        'SS14 the panel gone, the controller stays usable; it is the host\'s '
+        'and goes with the app, and a new app starts empty (M-09c-t2, '
+        'M-09c-t8)', (tester) async {
+      await pumpSymbolsApp(tester);
+      await tapKey(tester, tabSymbols);
+      await tester.enterText(searchField, 'bed');
+      await tester.pump();
+      final given = panelOf(tester).query;
+      expect(
+          tester.widget<PlannerShell>(find.byType(PlannerShell)).symbolSearch,
+          same(given),
+          reason: 'the host hands its own to the shell');
+
+      await tapKey(tester, tabTools);
+      expect(find.byType(SymbolPanel), findsNothing, reason: 'premise');
+      // Not disposed with the panel: it still takes text and listeners.
+      given.text = 'sofa';
+      given.addListener(_noop);
+      given.removeListener(_noop);
+      await tapKey(tester, tabSymbols);
+      expect(tester.widget<TextField>(searchField).controller!.text, 'sofa');
+      expect(galleryIdsOf(tester),
+          allOf(isNotEmpty, everyElement(startsWith('sofa.'))));
+
+      await tester.pumpWidget(const SizedBox());
+      expect(() => given.addListener(_noop), throwsFlutterError,
+          reason: 'disposed with the host');
+
+      await pumpSymbolsApp(tester);
+      await tapKey(tester, tabSymbols);
+      expect(panelOf(tester).query, isNot(same(given)));
+      expect(tester.widget<TextField>(searchField).controller!.text, isEmpty);
+    });
+
+    testWidgets(
+        'SS15 a bare shell given a loader keeps its own across a tab switch '
+        'and disposes it (M-09c-t9)', (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final loader = SymbolLibraryLoader(read: () async => assetBytes);
+      addTearDown(loader.dispose);
+      await loader.load();
+      await tester.pumpWidget(MaterialApp(home: PlannerShell(symbols: loader)));
+      await tester.pump();
+      await tapKey(tester, tabSymbols);
+      await tester.enterText(searchField, 'bed');
+      await tester.pump();
+      final own = panelOf(tester).query;
+
+      await tapKey(tester, tabTools);
+      await tapKey(tester, tabSymbols);
+      expect(panelOf(tester).query, same(own));
+      expect(own.text, 'bed');
+      expect(galleryIdsOf(tester), bedIdsOf(tester));
+
+      await tester.pumpWidget(const SizedBox());
+      expect(() => own.addListener(_noop), throwsFlutterError,
+          reason: 'disposed by the shell that made it');
+    });
   });
 
   group('the thumbnail cache (plan R-B3-1)', () {

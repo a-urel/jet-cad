@@ -176,7 +176,7 @@ class DocumentSession extends ChangeNotifier {
 /// D2, D8, D9, D13): `PlannerShell(key: ObjectKey(document), …)`, so a
 /// replaced document gets a fresh shell and the old one's `dispose`
 /// releases everything it held. Owns the object-snap setting, which
-/// survives a swap (D2).
+/// survives a swap (D2), and the Symbols tab's search text (spec 09c D13).
 ///
 /// The flows are public for the tests; the command table (spec 12a D6)
 /// reaches them through [DocumentHostState.fileCommands].
@@ -235,6 +235,11 @@ enum SaveChoice { save, discard, cancel }
 class DocumentHostState extends State<DocumentHost> {
   /// Object snap (F3): the host's, so it survives a swap (spec 12a D2).
   final SnapSettings snap = SnapSettings();
+
+  /// The Symbols tab's search text (spec 09c D13): the host's, handed to
+  /// every shell, so it survives a tab switch and a document swap; a new
+  /// app starts empty. Made in [initState], disposed with the host.
+  late final TextEditingController _symbolSearch;
 
   VoidCallback? _settle;
 
@@ -603,6 +608,7 @@ class DocumentHostState extends State<DocumentHost> {
   @override
   void initState() {
     super.initState();
+    _symbolSearch = TextEditingController();
     _exitListener = AppLifecycleListener(onExitRequested: _onExitRequested);
     _exitGuard = widget.exitGuard ?? createExitGuard();
     _armExitGuard();
@@ -616,6 +622,7 @@ class DocumentHostState extends State<DocumentHost> {
     _exitListener.dispose();
     _notBusy.dispose();
     snap.dispose();
+    _symbolSearch.dispose();
     super.dispose();
   }
 
@@ -633,6 +640,7 @@ class DocumentHostState extends State<DocumentHost> {
           onSettle: _registerSettle,
           symbols: widget.symbols,
           thumbnails: widget.thumbnails,
+          symbolSearch: _symbolSearch,
         ),
       );
 }
