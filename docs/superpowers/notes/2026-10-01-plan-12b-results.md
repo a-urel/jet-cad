@@ -35,10 +35,12 @@ layer, and the drawing tools' current layer. The app gains `LayerPanel`,
 `LayerRow`, `LayerPicker`, the tools' and the placer's current layer, the
 dimension attach gate and the opening tool's host rule.
 
-Every task had a fresh implementer and an independent reviewer who re-ran
-the gates and re-fired mutants. **The final whole-branch review is owed**
-(plan Task 11, after this note); its verdict and its sample of re-fired
-mutants on the tip are to be added here by that review's follow-up.
+Every task had a fresh implementer. Tasks 1–10 each had an independent
+reviewer who re-ran the gates and re-fired mutants; **10b (`c3ab7ca`) and
+11a (`1f2788a`, `35af9b9`) had no per-task review: their only review is the
+final whole-branch review** (plan Task 11, at `35af9b9`), whose verdict was
+**Ready with fixes** — see "The final whole-branch review" below; 11b
+(`064965c` and this commit) carries its fixes.
 
 | Task | Commits | Review |
 |---|---|---|
@@ -46,13 +48,61 @@ mutants on the tip are to be added here by that review's follow-up.
 | 2 The layer commands and `ObjectLayer` (D1, D2, D3, D4, D5) | `ab7a225`; `582f78b` (2b, test-only) | Approved with notes (no product defect; R-12b-4 confirmed; three surviving own mutants were test gaps -> 2b) |
 | 3 The index sees layer changes (D6 engine half, P-4) | `f5998db`, `af87621`; `540f9cf` (3b) | Approved with notes (R-12b-5, R-12b-6 confirmed; the reconcile skip missed an entity sharing a layer's handle in a malformed file -> 3b guard; two test gaps -> 3b) |
 | 4 The `layer` parameter (D7, P-8) | `4a735fb` | Approved with notes (mechanical: 56 inserts in 33 files, checked by script by both; M3b-4 pinnable by cost only) |
-| 5 The stamp and the detach (D2) | `04a14b3`; `5b1c912` (5b) | Approved with notes (rollback injected and verified; R4 survived (fill and boundary on different layers) -> 5b OL3b, plus the cascade-loss detach test). **Engine frozen after `5b1c912`** (a comment fix was its only lib change) |
+| 5 The stamp and the detach (D2) | `04a14b3`; `5b1c912` (5b) | Approved with notes (rollback injected and verified; R4 survived (fill and boundary on different layers) -> 5b OL3b, plus the cascade-loss detach test). **Engine frozen after `5b1c912`** (a comment fix was its only lib change), until 11b's one-condition fix (final review Finding 1) |
 | 6 Render: selection, outline, oracle (D6, D8) | `0473696`, `3a3286b`; `a4d85f0` (6b) | Approved with notes (R-12b-7: the oracle must match the painter below the root -> 6b; R-12b-8 recorded; root instance key not gated, V3, V4 -> 6b) |
 | 7 Render: the drawing tools and the frame (D6, D7) | `4c7eca3` | Approved with notes (no defect; M-12e in the engine's `TableSection` wiring accepted). **Render `lib/` unchanged after `4c7eca3`** |
 | 8 App: tools and hosts (D2, D6, D7) | `27db262`; `1afcfdd` (8b, test-only) | Approved with notes (R-12b-9 confirmed; R2, R3 test gaps -> 8b; the Wall tool joins a hidden wall: an open question for the human) |
 | 9 App: `LayerPanel` (D9, D10, D11) | `7e83eae`; `8eef675` (9b) | Approved with notes (a stale captured record could revert a same-frame rename -> 9b reads the live record; O1–O3 test gaps -> 9b) |
-| 10 App: `LayerPicker` (D12) | `5ef5673`; `c3ab7ca` (10b) | Approved with notes (no defect; R-own-2, -3, -5 test gaps -> 10b; `_choose` catch and a neutral delete tooltip -> 10b) |
-| 11a End to end, the sweep, this note | `1f2788a` (test-only); this commit (docs) | The final whole-branch review: owed |
+| 10 App: `LayerPicker` (D12) | `5ef5673`; `c3ab7ca` (10b) | Approved with notes (no defect; R-own-2, -3, -5 test gaps -> 10b; `_choose` catch and a neutral delete tooltip -> 10b). 10b itself: reviewed only by the final review |
+| 11a End to end, the sweep, this note | `1f2788a` (test-only); `35af9b9` (docs) | Reviewed only by the final whole-branch review: Ready with fixes |
+| 11b The final review's fixes | `064965c` (engine + app); this commit (docs) | The fixes of the final review's Findings 1–3 (below); no further review |
+
+## The final whole-branch review
+
+Independent, on the whole branch (`git diff 7330c7b 35af9b9`), at the tip
+`35af9b9`: every gate re-run green (the standing failures only), the
+non-negotiables and the human decisions 1–11 checked. **Verdict: Ready with
+fixes.** Its findings and how each was resolved:
+
+1. **Minor defect, file-only state: a layer whose stored name fails D4
+   could not be hidden, shown, locked or recoloured.** `SetLayerCommand`'s
+   user form ran `layerNameError` even when the name was unchanged, so every
+   eye, lock or swatch press on a layer loaded as `Walls:Ext` or ` Walls`
+   threw `ArgumentError` out of the button (the panel had no catch) and
+   dispatched nothing. **Fixed in 11b (`064965c`):** the user form checks
+   the name only on a rename (`record.name != old.name`); the layer-0 and
+   decision-7 checks are unchanged. Engine test: such layers, reloaded
+   through the codec, are hidden, locked and recoloured (one undo step
+   each, undo restores the bytes), and a rename to another invalid name is
+   still refused with the bytes unchanged; app test: the panel's eye hides a
+   `Walls:Ext` layer. Also `LayerPanel._execute` now catches `ArgumentError`
+   and `StateError` as `LayerPicker._choose` and the Selection section do;
+   app test: a refused press (A made current by a direct header write the
+   panel does not observe, its eye still enabled) leaves the document's
+   bytes and undo depth unchanged and raises nothing. Mutants M11b-1,
+   M11b-1b, M11b-2 below. Recorded in the spec's amendments.
+2. **Nit (docs): the macOS fingerprint step was not executable as
+   written** (each test stops at its first failing `expect`, so one run
+   reports only one actual). **Fixed in 11b:** the look list's step is two
+   runs.
+3. **Nit (docs): this note's bookkeeping** ("every task had an independent
+   reviewer"; the review's verdict and sample owed). **Fixed in 11b:** the
+   sentence above, the task table, this section and the sample below.
+4. **Info: decision 8 has no direct app-level regression test** (a hidden
+   or locked wall still cut by its opening, still bounding its room,
+   regenerated by a neighbour's edit); only the Wall tool's join (8b) and
+   the engine's neighbour case (OL5) pin it. Structurally safe: no generator
+   or parametric path reads `visible`, `locked` or `QueryFilter`. No fix
+   needed; not done.
+
+**Its sample: 32 mutants re-fired on the tip `35af9b9`, 32 red** (cp
+backup, one edit, the named test file, cp back, `diff` 0 each time):
+M-LP-1, M-LP-2, M-LP-3, M-LP-4 (boundary), M-LP-4 (fill), M-LP-6,
+M-LP-7a, M-LP-9, M-LP-10 (`ObjectLayer`), M-LP-11, M-LP-12, M-LP-13,
+M-LP-14 (band, pick, snap, outline — four), M-LP-15, M-LP-16 (line, wall,
+symbol — three), M-LP-17, M-LP-19, M-LP-20, M-LP-21, M-LP-22, M-LP-23,
+M-LP-25, M-LP-26, M-12a, M-12e, M10b-catch (10b) and the end-to-end
+M-LP-1 (11a).
 
 ## What the execution found that the spec did not
 
@@ -147,26 +197,27 @@ spec's "Amended at execution (Plan 12b)" lists every deviation.
 ## Gates of record (Linux container, `CI=true`)
 
 Branch point `7330c7b`: engine 1,121 + 2 standing; render 1,154 + 1 skip +
-7 standing; app 934. At `1f2788a` (this commit changes only docs):
+7 standing; app 934. At `064965c` (11b's fix; this commit changes only
+docs):
 
-- **engine** `00:18 +1225 -2: Some tests failed.` — the 2 standing, by
+- **engine** `00:18 +1226 -2: Some tests failed.` — the 2 standing, by
   name: `test/testing/generate_document_test.dart: the default document is
   the one Plan 2 measured, byte for byte` and `…: both text fractions
-  default to zero and change nothing`. 1,225 = 1,121 + 17 (Task 1) + 46 (2)
-  + 3 (2b) + 17 (3) + 7 (3b) + 12 (5) + 2 (5b). `dart analyze` `No issues
-  found!`; `Formatted 168 files (0 changed)`.
+  default to zero and change nothing`. 1,226 = 1,121 + 17 (Task 1) + 46 (2)
+  + 3 (2b) + 17 (3) + 7 (3b) + 12 (5) + 2 (5b) + 1 (11b). `dart analyze`
+  `No issues found!`; `Formatted 168 files (0 changed)`.
 - **render** `01:00 +1187 ~1 -7: Some tests failed.` — the 7 standing Linux
   golden failures (text ladder rungs 1–5, text lod ladder rungs 1–2,
   `RenderBackend.canvas`); the skip is the `rig`-tagged test. 1,187 = 1,154
   + 21 (Task 6) + 4 (6b) + 8 (7). `flutter analyze` `No issues found!`;
   `Formatted 208 files (0 changed)`. `flutter test --tags golden`:
   `00:33 +28 -7: Some tests failed.`, the same 7 and no other.
-- **app** `03:40 +991: All tests passed!` — 991 = 934 + 17 (Task 8) + 2
-  (8b) + 21 (9) + 3 (9b) + 9 (10) + 4 (10b) + 1 (11a). `flutter analyze`
+- **app** `03:33 +993: All tests passed!` — 993 = 934 + 17 (Task 8) + 2
+  (8b) + 21 (9) + 3 (9b) + 9 (10) + 4 (10b) + 1 (11a) + 2 (11b). `flutter analyze`
   `No issues found!`; `Formatted 175 files (0 changed)`.
 - **dev_harness_2d** `flutter analyze`: `No issues found!`.
 - **web** `CI=true flutter build web --release`: `Compiling lib/main.dart
-  for the Web... 54.6s`, `✓ Built build/web`.
+  for the Web... 52.7s`, `✓ Built build/web`.
 - **The two allocation invariant tests** are unedited (`git diff 7330c7b --
   packages/jet_cad_2d/test/invariants/query_allocation_test.dart
   packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`
@@ -253,6 +304,9 @@ Notable own mutants, all red unless marked:
 | R-own-5, R-own-2, R-own-3 (Task 10 review) | Separator and Room dropped from `isParametricObject`; `components` -> `transform`; the no-op on `objectLayer` instead of the stored value | all **survived**; red by 10b | 10b |
 | M10b-catch, M10b-tip | `_choose` no longer catches `StateError`; the delete tooltip back to "Read-only document" | the refused-move test; the read-only test | 10b |
 | E2E-picker | `_choose` never executes | the end-to-end test (one undo step) | 11a |
+| M11b-1 | `SetLayerCommand`'s name check unconditional again (`if (true)`, the defect of final review Finding 1) | `layer_commands_test` the loaded-invalid-name test (`Invalid argument (name): A layer name cannot contain :.: "Walls:Ext"`); `layer_panel_test` its eye test (`Expected: false Actual: <true>`) | 11b |
+| M11b-1b | no name check at all (`if (false)`) | the new test's refused renames, M-LP-8's two tests (`Expected: throws <Instance of 'ArgumentError'>`) | 11b |
+| M11b-2 | `LayerPanel._execute` no longer catches `ArgumentError` | the refused-press test (`Expected: null Actual: ArgumentError:<Invalid argument (record): The current layer cannot be hidden.…`) | 11b |
 
 ## Found, not fixed (known limitations)
 
@@ -290,6 +344,11 @@ Notable own mutants, all red unless marked:
 - **M3b-4** (the reconcile skip's definition conjunct) is pinned by nothing
   but cost; removing a definition at a layer's handle is skipped even with
   the guard (Task 4 review note 2). Malformed files only.
+- **`LayerPanel._execute`'s `on StateError` arm is pinned by nothing**
+  (11b): no panel action reaches a `StateError` from a sound document; it
+  is kept for parity with `LayerPicker._choose` and the Selection section.
+- **Decision 8 has no direct app-level regression test** (final review
+  Finding 4); structurally safe, see that section.
 - `SetLayerCommand` fires `tables.changes` twice with the record briefly
   missing (remove, then add); every listener reads on the next frame or the
   DocChange (Task 2 review info 4, checked again in Task 9's review).
@@ -321,11 +380,12 @@ done for the human.** macOS and web (Chrome, Firefox).
 
 - **Owed on macOS first: the two engine fingerprint tests (R-12b-1).** In
   `packages/jet_cad_2d`, run `dart test
-  test/testing/generate_document_test.dart`; both tests fail with the same
-  two actual values (`generateDocument(2000, …)` and `(20000, …)`). Replace
-  the constants at `test/testing/generate_document_test.dart:66` and `:68`
-  (the first test) and `:251` and `:253` (the second) with the reported
-  actuals, re-run (both green), and commit.
+  test/testing/generate_document_test.dart`. Each test stops at its first
+  failing `expect`, so this run reports one actual, the
+  `generateDocument(2000, …)` value, the same in both tests: put it at
+  `test/testing/generate_document_test.dart:66` and `:251`. Re-run: both
+  now report the `generateDocument(20000, …)` value: put it at `:68` and
+  `:253`. Re-run (both green), and commit.
 - The Layers section at 280 px: layout with long names (ellipsis), the
   header collapsing and opening, the list scrolling past six rows.
 - **32 px rows, below the 48 px touch target** (Task 9): are the eye, lock,

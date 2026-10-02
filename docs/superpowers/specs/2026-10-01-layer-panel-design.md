@@ -853,6 +853,12 @@ This section rewrites nothing above it.
   turns `visible` from true to false on `drawingLayer`; a recolour or lock
   of an already-hidden effective current layer 0 (S-6's file state) is
   allowed, as D9's enabled lock and swatch require.
+- **D1, D4: `SetLayerCommand`'s user form checks the name only on a rename
+  (final review Finding 1, 11b `064965c`).** A stored name is never checked
+  (`layerNameError`'s own rule), so a layer loaded with a name that fails
+  D4 can still be hidden, shown, locked and recoloured; a rename to an
+  invalid name is still refused. `LayerPanel` also catches a refused
+  command (`ArgumentError`, `StateError`), as the picker does.
 - **D1: integrity failures are `StateError` in both forms (Task 2).** A
   missing entity or node throws `StateError`, as every command in
   `commands.dart` does; `ArgumentError` is kept for the user rules (a
