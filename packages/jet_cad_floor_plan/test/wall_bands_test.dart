@@ -55,4 +55,42 @@ void main() {
       expect(out.storage.toList(), end.storage.toList(), reason: what);
     }
   });
+
+  test(
+      'WB2 (09c D3, D6) liveWalls in a fresh WallBands sees the live walls, '
+      'ascending, and a wall added after the first call once the change is '
+      'delivered; it returns an unmodifiable view, not a copy; the '
+      'generation moves on the change', () async {
+    final doc = wallDoc();
+    // Reserved up front, so the wall added last has the middle handle.
+    final h1 = doc.handleSeed.next(), h3 = doc.handleSeed.next();
+    final h2 = doc.handleSeed.next(), hd = doc.handleSeed.next();
+    doc.commands.execute(addWall(
+        doc, h1, plan(-1200, 300), plan(1800, 300), 200, Justification.left));
+    doc.commands.execute(addWall(doc, h2, plan(-1200, 1300), plan(1800, 1700),
+        120, Justification.right));
+    // A degenerate wall (zero thickness) has no band, so it is not listed.
+    doc.commands.execute(addWallLocal(doc, hd,
+        WallParams(10, 20, 3000, 40, 0, Justification.centre), groupAt(7)));
+    expect(doc.components.get<WallParams>(hd), isNotNull);
+    final bands = WallBands();
+    addTearDown(bands.dispose);
+
+    // Fresh: the first call refreshes (no hostAt or joinInto ran before).
+    final live = bands.liveWalls(doc);
+    expect(live, [h1, h2]);
+    expect(() => live.add(h3), throwsUnsupportedError);
+    final g0 = bands.generation;
+
+    // A wall added after construction, with a handle between the two:
+    // the subscription the first call started marks the cache stale.
+    doc.commands.execute(addWall(doc, h3, plan(-900, -800), plan(2100, -400),
+        150, Justification.centre));
+    await pumpEventQueue();
+    expect(bands.generation, greaterThan(g0));
+    final again = bands.liveWalls(doc);
+    expect(again, [h1, h3, h2]);
+    // A view of the cache's own list: the first result reads the same.
+    expect(live, [h1, h3, h2]);
+  });
 }
