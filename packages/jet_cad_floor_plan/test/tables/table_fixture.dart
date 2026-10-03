@@ -94,3 +94,20 @@ const FurnitureSymbol oneChairTable = FurnitureSymbol(
         closed: true),
   ],
 );
+
+/// A servable symbol whose top is an asymmetric trapezoid (14c R-2): a
+/// mirror about the base point changes where the top is, so a pick or a
+/// fill that drops the mirror is seen.
+const FurnitureSymbol trapezoidTable = FurnitureSymbol(
+  key: 'test.trapezoid',
+  name: 'Test trapezoid',
+  category: 'Tests',
+  tags: ['table', 'test'],
+  seats: 2,
+  baseX: 900,
+  baseY: 650,
+  shapes: [
+    PolylineShape([(200, 300), (1600, 300), (1300, 1000), (500, 900)],
+        closed: true),
+  ],
+);

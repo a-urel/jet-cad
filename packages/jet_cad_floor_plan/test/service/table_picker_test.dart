@@ -139,4 +139,24 @@ void main() {
     expect(picker.pick(inside), isNull);
     expect(picker.pick(inside + Vector2(5000, 0))?.table.instance, t.handle);
   });
+
+  test(
+      'TP7 an asymmetric top, mirrored, turned, 40 m off the origin: inside '
+      'and outside near its edges (R-2, M-14c2-11)', () {
+    final doc = plan();
+    final t = placeTurned(doc, trapezoidTable, Vector2(40000, -27000));
+    final picker = TablePicker(doc);
+    // Inside, near the short slanted edges.
+    for (final (x, y) in [(1250, 950), (560, 880), (260, 330), (1560, 320)]) {
+      expect(
+          picker.pick(worldOf(t, x.toDouble(), y.toDouble()))?.table.instance,
+          t.handle,
+          reason: 'inside at ($x, $y)');
+    }
+    // Outside, just beyond them: where a mirrored-away top would be.
+    for (final (x, y) in [(1400, 950), (420, 900), (1650, 400), (150, 350)]) {
+      expect(picker.pick(worldOf(t, x.toDouble(), y.toDouble())), isNull,
+          reason: 'outside at ($x, $y)');
+    }
+  });
 }

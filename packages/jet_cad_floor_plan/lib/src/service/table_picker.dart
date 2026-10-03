@@ -117,8 +117,10 @@ final class PickCandidate {
   final bool locked;
 }
 
-/// The tables of one plan, ready to pick (S1). Rebuilt when the plan's
-/// state id or its tables' revision moves, never per pointer event.
+/// The tables of one plan, ready to pick (S1). The candidates are rebuilt
+/// when the plan's state id or its tables' revision moves, never per
+/// pointer event; the tops are kept per definition for the picker's life
+/// (R-8: under `runtime` a definition cannot change).
 class TablePicker {
   TablePicker(this.document);
 
@@ -128,6 +130,7 @@ class TablePicker {
   static const Tolerance tolerance = Tolerance(linear: 1e-6, angular: 1e-9);
 
   List<PickCandidate> _candidates = const [];
+  final Map<Handle, TableTop?> _tops = {};
   int? _state;
   int? _tablesRevision;
 
@@ -144,7 +147,6 @@ class TablePicker {
   }
 
   List<PickCandidate> _build() {
-    final tops = <Handle, TableTop?>{};
     final out = <PickCandidate>[];
     for (final t in TableSurvey.of(document).tables) {
       final node = document.tree[t.instance];
@@ -153,7 +155,7 @@ class TablePicker {
       if (layer != null && !layer.visible) continue;
       final det = node.transform.determinant;
       if (det == 0 || !det.isFinite) continue;
-      final top = tops.putIfAbsent(
+      final top = _tops.putIfAbsent(
           t.definition, () => tableTopOf(document, t.definition));
       if (top == null) continue;
       out.add(PickCandidate(
