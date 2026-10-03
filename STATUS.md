@@ -38,14 +38,26 @@ mode** built in; what is missing for that comes first.
   90° in place. Gates: render 1,196 + 1 skip + 7 standing, planner 892,
   restaurant 91, app 192, web built and smoke-tested; the engine
   untouched.
+- **Done on the branch (14b-2, host API and the two modes):** see
+  [2026-10-03-plan-14b2-results.md](docs/superpowers/notes/2026-10-03-plan-14b2-results.md);
+  spec [2026-10-03-host-api-and-modes-design.md](docs/superpowers/specs/2026-10-03-host-api-and-modes-design.md)
+  rev 2 (written and run while the human travelled, on their word not to
+  be asked unless needed; amendments A-1 to A-3 owed a look). A host
+  embeds the planner through `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`:
+  `FloorPlanController` holds the designed plan and, in the selection
+  mode, a service copy under `runtime` (service edits and their Undo
+  never reach the design); `FloorPlanView` shows the editor or the canvas
+  alone, Export and Print in both. `apps/restaurant_demo` (every runner)
+  shows two dining areas with a Design / Service toggle. Gates: planner
+  923, app 192, demo 5, both web builds; engine and render untouched.
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this
   session); the repo's floor is unchanged (3.44.0).
-- **Owed:** the human's macOS and web look at the palette, the font and
-  the table numbers; the merge, on the human's word; the earlier owed
-  items below stand.
-- **Next:** 14b-2's spec (the host API `FloorPlanController` /
-  `FloorPlanView`, the built-in design / selection modes, the undo
-  barrier, `apps/restaurant_demo`); the touch spike (14t); 14c.
+- **Owed:** the human's macOS and web look at the palette, the font, the
+  table numbers and the demo; a look at 14b-2's amendments (the service
+  copy as the barrier, the callbacks moved to 14c, Export of the copy);
+  the merge, on the human's word; the earlier owed items below stand.
+- **Next:** 14c's spec (selection-mode behaviour: table pick by tap,
+  status colours, moves); the touch spike (14t).
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
