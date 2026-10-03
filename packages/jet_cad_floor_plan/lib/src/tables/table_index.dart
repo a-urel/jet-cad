@@ -27,7 +27,8 @@ final class TableInfo {
   /// there are several (T2), null when the table is unnumbered.
   final Handle? label;
 
-  /// The label's text, trimmed; null when unnumbered.
+  /// The label's text, trimmed; null when unnumbered (no label, or an
+  /// empty one).
   final String? number;
 
   /// The definition's [SeatingComponent] (T3).
@@ -86,7 +87,11 @@ final class TableSurvey {
         instance: node.handle,
         definition: node.definition,
         label: own?.first.$1,
-        number: own?.first.$2.trim(),
+        // An empty label is no number (demo review F-7).
+        number: switch (own?.first.$2.trim()) {
+          null || '' => null,
+          final n => n,
+        },
         seats: seating.seats,
         symbolKey: doc.components.get<SymbolComponent>(node.definition)?.key,
       ));
@@ -128,7 +133,7 @@ final class TableSurvey {
       ));
     }
     for (final t in tables) {
-      if (t.label == null) {
+      if (t.number == null) {
         out.add(Diagnostic(
           severity: DiagnosticSeverity.warning,
           code: TableDiagnosticCodes.unnumbered,

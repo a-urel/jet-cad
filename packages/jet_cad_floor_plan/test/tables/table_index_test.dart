@@ -209,4 +209,17 @@ void main() {
         payload: command.payload));
     expect(tablesOf(doc).single.number, isNull);
   });
+
+  test('TI6 an empty label is no number: the table is unnumbered', () {
+    final doc = plan();
+    final a = place(doc, entryOf(tableSymbol()), Vector2(-2100, 900),
+        quarterTurns: 3);
+    final b = place(doc, entryOf(stoolSymbol), Vector2(1900, -400));
+    label(doc, a, '  ');
+    label(doc, b, '');
+    final survey = TableSurvey.of(doc);
+    expect([for (final t in survey.tables) t.number], [null, null]);
+    expect([for (final d in survey.diagnostics()) d.code],
+        ['table.unnumbered', 'table.unnumbered']);
+  });
 }

@@ -180,6 +180,12 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
   final ValueNotifier<Set<String>> _selectedTables =
       ValueNotifier(const <String>{});
+  final ValueNotifier<int> _revision = ValueNotifier(0);
+
+  /// Moves whenever the active plan changes: an edit, an undo or a redo
+  /// of it, a mode switch, [load], [newPlan], [resetLayout] (demo review
+  /// F-1). A host re-reads [tables] and [numberingWarnings] on it.
+  ValueListenable<int> get revision => _revision;
 
   /// The mode (H3). Changed by [setMode].
   ValueListenable<FloorPlanMode> get mode => _mode;
@@ -314,6 +320,7 @@ class FloorPlanController extends ChangeNotifier {
     _fitOnStart = true;
     _placeNominally();
     _refreshFlags();
+    _revision.value++;
     notifyListeners();
   }
 
@@ -338,6 +345,7 @@ class FloorPlanController extends ChangeNotifier {
     _mode.value = next;
     _select(numbers);
     _refreshFlags();
+    _revision.value++;
     notifyListeners();
   }
 
@@ -353,6 +361,7 @@ class FloorPlanController extends ChangeNotifier {
     _service = _attach(_copyOf(_design));
     _select(numbers);
     _refreshFlags();
+    _revision.value++;
     notifyListeners();
   }
 
@@ -475,6 +484,7 @@ class FloorPlanController extends ChangeNotifier {
     plan.changes = plan.document.commands.changes.listen((_) {
       if (_disposed) return;
       _refreshFlags();
+      if (identical(plan, _active)) _revision.value++;
     });
     void onSelection() {
       if (!_disposed && identical(plan, _active)) _refreshSelected();
@@ -526,6 +536,7 @@ class FloorPlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _selectedTables.dispose();
+    _revision.dispose();
     super.dispose();
   }
 }

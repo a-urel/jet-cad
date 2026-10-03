@@ -12,6 +12,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart' show FloorPlanMode;
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show ViewportTransform;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 import 'package:restaurant_demo/main.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -154,5 +156,161 @@ void main() {
     await tester.pump();
     expect(byKey('service-bar'), findsOneWidget);
     expect(tablesText(tester), '1 (4), 2 (6)');
+  });
+
+  /// Renames table [from] to [to] in [demo]'s current area.
+  void rename(DemoHomeState demo, String from, String to) {
+    final doc = demo.area.controller.activeDocument;
+    final label = TableSurvey.of(doc).withNumber(from).single.label!;
+    doc.commands.execute(SetEntityTextCommand(label, to, kTableLabelTag));
+  }
+
+  /// A service move of table [n] in [demo]'s current area.
+  void serviceMove(DemoHomeState demo, String n) {
+    final doc = demo.area.controller.activeDocument;
+    final node = doc.tree[TableSurvey.of(doc).withNumber(n).single.instance]!
+        as InstanceNode;
+    doc.commands.execute(CompoundCommand([
+      TransformNodeCommand(node.handle,
+          Transform2.translation(400, -300).multiply(node.transform))
+    ], label: 'Move'));
+  }
+
+  testWidgets(
+      'D6 the tables follow every edit, not only the first (review F-1); '
+      'Save is disabled while clean', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    expect(tester.widget<FilledButton>(byKey('save')).onPressed, isNull);
+    rename(demo, '2', '12');
+    await tester.pump();
+    await tester.pump();
+    expect(tablesText(tester), '1 (4), 12 (6)');
+    rename(demo, '12', '13');
+    await tester.pump();
+    await tester.pump();
+    expect(tablesText(tester), '1 (4), 13 (6)');
+    expect(tester.widget<FilledButton>(byKey('save')).onPressed, isNotNull);
+    expect(demo.log, contains('Salon: edited'));
+  });
+
+  testWidgets('D7 every numbering warning has its line', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final doc = demo.area.controller.activeDocument;
+    final round = SymbolLibrary.decode(Uint8List.fromList(utf8.encode(
+            DraftDocumentCodec.encodeToString(
+                buildSymbolLibrary(restaurantCatalog)))))
+        .entries
+        .firstWhere((e) => e.key == 'restaurant.bar.stool');
+    doc.commands.execute(
+        placeSymbol(doc, round, at: Vector2(500, -2500), numbered: false));
+    rename(demo, '2', '1');
+    await tester.pump();
+    await tester.pump();
+    expect(tester.widget<Text>(byKey('numbering-warning-0')).data,
+        'Number 1 is used by 2 tables');
+    expect(tester.widget<Text>(byKey('numbering-warning-1')).data,
+        contains('has no number'));
+  });
+
+  testWidgets('D8 an export is logged with its name and size', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    await tester.tap(byKey('toolbar-export'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(byKey('export-format-png'));
+    await tester.pump();
+    await tester.tap(byKey('export-dpi-96'));
+    await tester.pump();
+    await tester.tap(byKey('export-ok'));
+    await tester.pump();
+    bool exported() =>
+        demo.log.isNotEmpty && demo.log.first.contains('exported');
+    for (var i = 0; i < 400 && !exported(); i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+    expect(demo.log.first, startsWith('Salon: exported salon.png, '));
+    expect(demo.log.first, endsWith(' bytes'));
+  });
+
+  testWidgets(
+      'D9 Reset layout shows in the service only and undoes its moves; Fit '
+      'refits', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    expect(byKey('reset-layout'), findsNothing);
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    expect(byKey('reset-layout'), findsOneWidget);
+    serviceMove(demo, '1');
+    expect(c.serviceEdited, isTrue);
+    await tester.tap(byKey('reset-layout'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.serviceEdited, isFalse);
+
+    await tester.tap(byKey('fit'));
+    await tester.pump();
+    await tester.pump();
+    final fitted = c.camera.value.worldToScreenMatrix.a;
+    c.camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310, 2400));
+    await tester.tap(byKey('fit'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.camera.value.worldToScreenMatrix.a, fitted);
+  });
+
+  testWidgets(
+      'D10 Revert with nothing stored empties the area; Teras asks before '
+      'discarding its own service edits', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Teras': salonPlan()});
+    await tester.tap(byKey('area-1'));
+    await tester.pump();
+    await tester.pump();
+    final teras = demo.area.controller;
+    expect(demo.area.name, 'Teras');
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    serviceMove(demo, '2');
+    await tester.tap(byKey('mode-design'));
+    await tester.pump();
+    expect(byKey('discard-dialog'), findsOneWidget);
+    await tester.tap(byKey('discard-ok'));
+    await tester.pump();
+    await tester.pump();
+    expect(teras.mode.value, FloorPlanMode.design);
+    expect(demo.areas.first.controller.mode.value, FloorPlanMode.design);
+
+    await tester.tap(byKey('area-0'));
+    await tester.pump();
+    await tester.pump();
+    expect(demo.area.stored, isNull);
+    // Something in Salon first, so a Revert that does nothing shows.
+    demo.area.controller.load(salonPlan());
+    await tester.pump();
+    await tester.pump();
+    expect(tablesText(tester), '1 (4), 2 (6)');
+    await tester.tap(byKey('revert'));
+    await tester.pump();
+    await tester.pump();
+    expect(tablesText(tester), 'none');
+  });
+
+  testWidgets('D11 two numbers, padded, by Enter: both selected, logged sorted',
+      (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    // Table 1 renamed 9: the tables' order (9, 2) is not the sorted one.
+    rename(demo, '1', '9');
+    await tester.pump();
+    await tester.pump();
+    await tester.enterText(byKey('select-number'), ' 9,2 ');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(demo.area.controller.selectedTables.value, {'2', '9'});
+    expect(demo.log.first, 'Salon: selected {2, 9}');
   });
 }

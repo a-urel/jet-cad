@@ -15,8 +15,14 @@ Future<void> main() async {
     // Native platforms: the documents' family from the package's bytes.
     // The web reads the family the pubspec declares (14b-1 V-11a).
     await ensureFloorPlanFonts();
-  } catch (_) {
-    // The text then measures in the platform's font; nothing else fails.
+  } catch (error, stack) {
+    // The text then measures in the platform's font; reported, as the
+    // planner app does, and the demo still starts.
+    FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'restaurant_demo',
+        context: ErrorDescription('registering the plan font')));
   }
   registerFontLicences();
   runApp(const RestaurantDemo());
@@ -81,7 +87,8 @@ class DemoHomeState extends State<DemoHome> {
   @override
   void initState() {
     super.initState();
-    _symbols.load();
+    // The shared library is loaded by the first view that shows it; a host
+    // need not call `load()` (14b-2 review F-3).
     for (final a in areas) {
       final c = a.controller;
       c.mode.addListener(() => _log('${a.name}: mode ${c.mode.value.name}'));
@@ -89,7 +96,10 @@ class DemoHomeState extends State<DemoHome> {
           '${a.name}: selected {${(c.selectedTables.value.toList()..sort()).join(', ')}}'));
       c.dirty.addListener(
           () => _log('${a.name}: ${c.dirty.value ? 'edited' : 'saved'}'));
-      c.addListener(() => setState(() {}));
+      // The tables and warnings follow every change of the active plan.
+      c.revision.addListener(() {
+        if (mounted) setState(() {});
+      });
     }
   }
 
@@ -135,7 +145,7 @@ class DemoHomeState extends State<DemoHome> {
           ],
         ),
       );
-      if (discard != true) return;
+      if (discard != true || !mounted) return;
     }
     c.setMode(next);
   }
@@ -265,9 +275,9 @@ class DemoHomeState extends State<DemoHome> {
                             for (final t in c.tables)
                               '${t.number ?? '—'} (${t.seats})'
                           ].join(', ')),
-                for (final w in c.numberingWarnings)
+                for (final (i, w) in c.numberingWarnings.indexed)
                   Text(w,
-                      key: const Key('numbering-warning'),
+                      key: Key('numbering-warning-$i'),
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.error)),
                 const SizedBox(height: 16),

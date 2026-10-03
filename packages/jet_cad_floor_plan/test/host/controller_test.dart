@@ -349,4 +349,35 @@ void main() {
     expect(c.selectedTables.value, {'2'});
     await tester.pump();
   });
+
+  testWidgets(
+      'C14 revision moves on every change of the active plan, and only of '
+      'it (demo review F-1)', (tester) async {
+    final c = controller(tester, planJson());
+    var r = c.revision.value;
+    int moved() {
+      final d = c.revision.value - r;
+      r = c.revision.value;
+      return d;
+    }
+
+    drawLine(c);
+    await tester.pump();
+    expect(moved(), 1);
+    c.undo();
+    await tester.pump();
+    expect(moved(), 1);
+    c.setMode(FloorPlanMode.selection);
+    expect(moved(), 1);
+    move(c, '1', 300, 0);
+    await tester.pump();
+    expect(moved(), 1);
+    c.resetLayout();
+    expect(moved(), 1);
+    c.load(planJson());
+    expect(moved(), 1);
+    c.select({'1'});
+    await tester.pump();
+    expect(moved(), 0, reason: 'a selection is not a change of the plan');
+  });
 }

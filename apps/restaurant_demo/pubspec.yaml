@@ -29,6 +29,8 @@ dev_dependencies:
   # The tests build seeded plans with the editor's own placement.
   jet_cad_2d:
     path: ../../packages/jet_cad_2d
+  jet_cad_2d_flutter:
+    path: ../../packages/jet_cad_2d_flutter
   vector_math: ^2.2.0
 
 flutter:
