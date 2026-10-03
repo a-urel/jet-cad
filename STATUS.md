@@ -1,5 +1,39 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-03. **A new sub-project, 14 — restaurant
+embedding, is in flight on `claude/exciting-pasteur-9m22jv` (not merged).**
+The human, 2026-10-03: the floor planner's first use is inside a Flutter
+restaurant (POS) application, with a **design mode** and a **selection
+mode** built in; what is missing for that comes first.
+- **Spec:** [2026-10-03-restaurant-embedding-design.md](docs/superpowers/specs/2026-10-03-restaurant-embedding-design.md),
+  an umbrella spec, revision 3, approved 2026-10-03. Six slices:
+  **14b-1** extraction → **14s** restaurant symbols → **14a** table
+  identity → **14b-2** host API, the two modes, the undo barrier,
+  `apps/restaurant_demo` → **14c** selection mode, with a touch spike
+  (**14t**) early. 14b-1 and 14s are specified in full there; every other
+  slice needs its own full spec first. The human's rulings: a Flutter host;
+  single and multiple selection (long press), status colours, moving tables
+  for the service only; the number set in design mode and printed; Export
+  and Print in both modes; every platform; bar stools can be "tables"; the
+  symbols a separate package, as complete as possible.
+- **Done on the branch (14b-1 + 14s):** see
+  [2026-10-03-plan-14b1-14s-results.md](docs/superpowers/notes/2026-10-03-plan-14b1-14s-results.md).
+  `packages/jet_cad_floor_plan` holds the planner (the app is its frame);
+  `packages/jet_cad_restaurant_symbols` ships 69 symbols (25 servable,
+  carrying `SeatingComponent`); the app shows furniture and restaurant
+  symbols together. Gates: planner 832, restaurant 91, app 192, web built;
+  engine 1,226 + 2 standing and render 1,187 + 1 skip + 7 standing,
+  untouched. Two independent reviews: 14b-1 "Needs fixes", 14s "Approved
+  with fixes"; both sets of fixes applied (`2120a74`, `7dce65c`).
+- **Toolchain:** the container ran Flutter 3.47.6 (installed this
+  session); the repo's floor is unchanged (3.44.0).
+- **Owed:** the human's macOS and web look at the palette and the font;
+  the merge, on the human's word; the earlier owed items below stand.
+- **Next, on the human's word:** 14a's spec (table numbers, the ATTRIB
+  label, its delete cascade and upright stamp).
+
+*Earlier, 2026-10-02 (the plan 12b merge):*
+
 **Last updated:** 2026-10-02. **Plan 12b (the layer panel, the second slice
 of sub-project 12) is MERGED into `main` at `0bab9e5`**, `--no-ff`, on the
 human's word ("layer geliştirmelerini merge edebiliriz. testler iyi
