@@ -16,6 +16,10 @@ import 'parametric/opening_tool.dart';
 import 'parametric/room.dart';
 import 'parametric/wall.dart';
 import 'parametric/wall_tool.dart';
+import 'tables/table_index.dart';
+import 'tables/table_label.dart';
+import 'tables/table_numbers.dart';
+import 'tables/table_rotate.dart';
 
 /// Spec 06 D13, 07 D11, 08 D16 and 10 D21: the right panel's parametric
 /// sections.
@@ -34,6 +38,10 @@ import 'parametric/wall_tool.dart';
 ///   Vertical), the axes line of a turned linear dimension (D11, R-18) and
 ///   its two end lines (R-28). No tool mode: the Dimension tool has no
 ///   settings.
+/// - **Table** (14a T14, T16): one selected table's number, a text field
+///   (refused when invalid or used by another table, with an error line),
+///   its seats, read-only, a duplicate-number warning, and two buttons that
+///   turn it 90° about its centre.
 /// - **Layer** (12b D12): for any non-empty selection while no tool's
 ///   settings show, a [LayerPicker] after the sections above (alone when
 ///   none shows).
@@ -89,7 +97,7 @@ class SelectionPanel extends StatefulWidget {
 
 /// Which quantity a field edits: a number, or -- [name], the text kind (10
 /// D21) -- a room's name.
-enum _Kind { width, height, thickness, openingWidth, position, name }
+enum _Kind { width, height, thickness, openingWidth, position, name, number }
 
 /// One field's state.
 ///
@@ -111,7 +119,7 @@ final class _Field {
   Handle? loadedTarget;
   Object? loadedValue;
 
-  bool get isText => kind == _Kind.name;
+  bool get isText => kind == _Kind.name || kind == _Kind.number;
 
   void dispose() {
     text.dispose();
@@ -142,6 +150,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   final _Field _openingWidth = _Field(_Kind.openingWidth);
   final _Field _position = _Field(_Kind.position);
   final _Field _name = _Field(_Kind.name);
+  final _Field _number = _Field(_Kind.number);
   late final List<_Field> _fields = [
     _width,
     _height,
@@ -149,6 +158,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     _openingWidth,
     _position,
     _name,
+    _number,
   ];
   late final StreamSubscription<DocChange> _changes;
 
@@ -164,6 +174,17 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// wall edit or a page change rewrites the value's string in place.
   Handle? _valueDim;
   String? _valueText;
+
+  /// The tables, read once per document change (14a T14, review R-7): the
+  /// selection's hover notifications rebuild the panel and must not rescan
+  /// the document.
+  TableSurvey? _survey;
+  TableSurvey get _tables => _survey ??= TableSurvey.of(widget.document);
+
+  /// The Number field's last refusal and the table it was for (14a T14):
+  /// shown under the field until its next edit or a selection change.
+  String? _numberError;
+  Handle? _numberErrorFor;
 
   /// Whether the Wall tool was active at the last check: the tool
   /// controller forwards every hover of the active tool, and only a switch
@@ -181,6 +202,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     _changes = widget.document.commands.changes.listen((_) {
       _areaRoom = null;
       _valueDim = null;
+      _survey = null;
       _sync();
     });
     widget.tools?.addListener(_onTools);
@@ -257,6 +279,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
             const OpeningType().editCapability,
           _Kind.width || _Kind.height => const BoxType().editCapability,
           _Kind.name => const RoomType().editCapability,
+          // The label's text, or a new label (14a T14).
+          _Kind.number => Capability.geometry,
         });
   }
 
@@ -266,6 +290,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// numeric kind the number it parses to, when [_valid].
   Object? _parse(_Field f, Handle target) {
     final t = f.text.text.trim();
+    if (f.kind == _Kind.number) return _parseNumber(target, t);
     if (f.isText) return t.isEmpty ? null : t;
     final value = double.tryParse(t);
     return value != null && _valid(f.kind, target, value) ? value : null;
@@ -295,8 +320,35 @@ class _SelectionPanelState extends State<SelectionPanel> {
         final l = (host.end - host.start).length;
         return value.isFinite && value >= 0 && value <= l;
       case _Kind.name:
-        throw StateError('the name is text: _parse reads it');
+      case _Kind.number:
+        throw StateError('a text kind: _parse reads it');
     }
+  }
+
+  /// [t] (trimmed) as [table]'s number, or null with [_numberError] set:
+  /// invalid (14a T4), or used by another live table (T6, exact `==`).
+  /// The table's own number is accepted, unchanged.
+  String? _parseNumber(Handle table, String t) {
+    final error = tableNumberError(t);
+    final clash = error == null &&
+        _tables.withNumber(t).any((other) => other.instance != table);
+    // The error line is not cleared here: Enter's focus-loss commit
+    // re-reads the reverted text, which must not end it (T14).
+    if (error == null && !clash) return t;
+    _numberError = error ?? 'Number $t is already used';
+    _numberErrorFor = table;
+    return null;
+  }
+
+  /// The one selected key when it is a table (14a T1), or null.
+  TableInfo? get _table {
+    final keys = widget.selection.keys;
+    if (keys.length != 1 || keys.single.chain.isNotEmpty) return null;
+    final h = keys.single.target;
+    for (final t in _tables.tables) {
+      if (t.instance == h) return t;
+    }
+    return null;
   }
 
   /// [h] is a live [T], by the engine's object rule (`live_objects.dart`):
@@ -345,6 +397,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
         _Kind.position =>
           _openingToolMode == null ? _selected<OpeningParams>() : null,
         _Kind.name => _room,
+        _Kind.number => _table?.instance,
       };
 
   /// [kind]'s value at [target] -- a `double`, or the name's `String` --
@@ -374,6 +427,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
       case _Kind.name:
         if (!_isObject<RoomParams>(target)) return null;
         return widget.document.components.get<RoomParams>(target)!.name;
+      case _Kind.number:
+        for (final t in _tables.tables) {
+          if (t.instance == target) return t.number ?? '';
+        }
+        return null;
     }
   }
 
@@ -383,6 +441,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// the name label in place (10 D12, D21).
   void _write(_Kind kind, Handle target, Object value) {
     final doc = widget.document;
+    if (kind == _Kind.number) {
+      _writeNumber(target, value as String);
+      return;
+    }
     if (kind == _Kind.name) {
       final p = doc.components.get<RoomParams>(target)!;
       final next = p.copyWith(name: value as String);
@@ -424,8 +486,55 @@ class _SelectionPanelState extends State<SelectionPanel> {
         if (next == p) return;
         doc.commands.execute(SetComponentCommand<OpeningParams>(target, next));
       case _Kind.name:
-        throw StateError('unreachable: the name is written above');
+      case _Kind.number:
+        throw StateError('unreachable: a text kind is written above');
     }
+  }
+
+  /// One command (14a T14): the label's text when [table] has a label,
+  /// else a new label; nothing when the number is unchanged.
+  void _writeNumber(Handle table, String number) {
+    final doc = widget.document;
+    final info = _tables.tables.firstWhere((t) => t.instance == table);
+    if (info.number == number) return;
+    final label = info.label;
+    if (label != null) {
+      doc.commands.execute(SetEntityTextCommand(label, number, kTableLabelTag));
+      return;
+    }
+    final node = doc.tree[table]! as InstanceNode;
+    doc.commands.execute(addTableLabelCommand(doc,
+        instance: table,
+        definition: node.definition,
+        placement: node.transform,
+        number: number));
+  }
+
+  /// 14a T16: turns the one selected table by [quarterTurns] × 90° about
+  /// its centre, one step. A refused edit is caught: nothing changed.
+  void _rotateTable(int quarterTurns) {
+    final table = _table;
+    if (table == null || !_rotatable) return;
+    final command =
+        rotateTableCommand(widget.document, table.instance, quarterTurns);
+    if (command == null) return;
+    try {
+      widget.document.commands.execute(command);
+    } on PermissionDeniedError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// The rotate buttons need `transform`, and show in the design mode
+  /// only (Q-4). Until 14b-2 names the modes, the design mode is the one
+  /// whose permissions allow `geometry` (the selection mode's `runtime`
+  /// does not).
+  bool get _rotatable {
+    final permissions = widget.document.commands.permissions;
+    return permissions.allows(Capability.transform) &&
+        permissions.allows(Capability.geometry);
   }
 
   /// Whether [target] is a tool's settings rather than an object.
@@ -670,6 +779,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// A selection, document, tool or settings change: reload and rebuild.
   void _sync() {
+    // A selection change ends the Number field's error line (14a T14).
+    if (_numberError != null && _numberErrorFor != _table?.instance) {
+      _numberError = null;
+    }
     _load();
     if (mounted) setState(() {});
   }
@@ -753,6 +866,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
         // The same for an opening tool's width (08 D16): a width typed
         // with D active and no Enter places the next door at that width.
         onChanged: (t) {
+          if (f.kind == _Kind.number && _numberError != null) {
+            setState(() => _numberError = null);
+          }
           final target = f.pinned;
           if (target == null || !_isToolTarget(target)) return;
           final v = double.tryParse(t.trim());
@@ -775,10 +891,64 @@ class _SelectionPanelState extends State<SelectionPanel> {
         onTapOutside: (_) => f.focus.handBack(),
       );
 
+  /// The Table section (14a T14, T16).
+  List<Widget> _tableSection(TableInfo table, TextStyle? title) {
+    final error = _numberErrorFor == table.instance ? _numberError : null;
+    final shared =
+        table.number == null ? 0 : _tables.withNumber(table.number!).length;
+    final theme = Theme.of(context);
+    return [
+      Text('Table', key: const Key('table-section'), style: title),
+      _field('table-number', 'Number', _number, _editable(_Kind.number)),
+      if (error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(error,
+              key: const Key('table-number-error'),
+              style: TextStyle(color: theme.colorScheme.error)),
+        ),
+      if (shared > 1)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('Number ${table.number} is used by $shared tables',
+              key: const Key('table-number-duplicate'),
+              style: TextStyle(color: theme.colorScheme.error)),
+        ),
+      InputDecorator(
+        decoration:
+            const InputDecoration(labelText: 'Seats', border: InputBorder.none),
+        child: Text('${table.seats}', key: const Key('table-seats')),
+      ),
+      if (_rotatable)
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('table-rotate-left'),
+                onPressed: () => _rotateTable(1),
+                icon: const Icon(Icons.rotate_left),
+                label: const Text('Rotate 90° left'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('table-rotate-right'),
+                onPressed: () => _rotateTable(-1),
+                icon: const Icon(Icons.rotate_right),
+                label: const Text('Rotate 90° right'),
+              ),
+            ),
+          ],
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final box = _box, wall = _wall, opening = _opening, room = _room;
     final dimension = _dimension;
+    final table = _toolMode || _openingToolMode != null ? null : _table;
     // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
     // whenever no tool-settings section does, including a selection that
     // has no type section (a line, a text, a symbol, several things).
@@ -789,7 +959,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         wall != null ||
         opening != null ||
         room != null ||
-        dimension != null;
+        dimension != null ||
+        table != null;
     if (!sections && !picker) return const SizedBox.shrink();
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
@@ -899,6 +1070,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
                   room != null)
                 const SizedBox(height: 12),
               ..._dimensionSection(dimension, title),
+            ],
+            if (table != null) ...[
+              if (box != null ||
+                  wall != null ||
+                  opening != null ||
+                  room != null ||
+                  dimension != null)
+                const SizedBox(height: 12),
+              ..._tableSection(table, title),
             ],
             if (picker) ...[
               if (sections) const SizedBox(height: 12),
