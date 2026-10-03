@@ -181,11 +181,27 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<Set<String>> _selectedTables =
       ValueNotifier(const <String>{});
   final ValueNotifier<int> _revision = ValueNotifier(0);
+  final ValueNotifier<Map<String, TableStatus>> _statuses =
+      ValueNotifier(const <String, TableStatus>{});
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
   /// of it, a mode switch, [load], [newPlan], [resetLayout] (demo review
   /// F-1). A host re-reads [tables] and [numberingWarnings] on it.
   ValueListenable<int> get revision => _revision;
+
+  /// The tables' statuses by number (spec 14c S6), as [setTableStatus]
+  /// last set them. Kept for the controller's life, across mode switches,
+  /// [resetLayout] and [load]; drawn in the selection mode only, on every
+  /// live, visible table carrying the number.
+  ValueListenable<Map<String, TableStatus>> get tableStatuses => _statuses;
+
+  /// Replaces every status at once (S6): numbers trimmed. Not document
+  /// state -- no command, no undo, no [dirty], no [revision]; never saved,
+  /// exported or printed (D13).
+  void setTableStatus(Map<String, TableStatus> statuses) {
+    _statuses.value = Map.unmodifiable(
+        {for (final e in statuses.entries) e.key.trim(): e.value});
+  }
 
   /// The mode (H3). Changed by [setMode].
   ValueListenable<FloorPlanMode> get mode => _mode;
@@ -537,6 +553,7 @@ class FloorPlanController extends ChangeNotifier {
     _canRedo.dispose();
     _selectedTables.dispose();
     _revision.dispose();
+    _statuses.dispose();
     super.dispose();
   }
 }

@@ -5,6 +5,8 @@
 // `geometry` or `structure` (umbrella D11). 14c's table tool picks,
 // selects and moves tables.
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -14,6 +16,7 @@ import '../parametric/catalog.dart';
 import '../planner_view.dart';
 import '../service/table_picker.dart';
 import '../service/table_select_tool.dart';
+import '../service/table_status_painter.dart';
 import '../shell_commands.dart';
 import '../tables/table_label_system.dart';
 import 'floor_plan_controller.dart';
@@ -73,6 +76,17 @@ class _ServiceViewState extends State<ServiceView> {
 
   late DocumentStyleResolver _resolver = _resolverFor(_page.value);
 
+  // Spec 14c S7: the status layer repaints on the camera, the statuses and
+  // every change of this copy (a move, an undo, a redo; R-4).
+  final _Bump _changed = _Bump();
+  StreamSubscription<DocChange>? _changes;
+  late final TableStatusPainter _statusPainter = TableStatusPainter(
+    document: _document,
+    camera: _c.camera,
+    statuses: _c.tableStatuses,
+    repaint: Listenable.merge([_c.camera, _c.tableStatuses, _changed]),
+  );
+
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
       () => widget.flows.ready.value && _page.value != null);
@@ -93,11 +107,14 @@ class _ServiceViewState extends State<ServiceView> {
     _parametric;
     _tableLabels;
     _page.addListener(_onPage);
+    _changes = _document.changes.listen((_) => _changed.bump());
   }
 
   @override
   void dispose() {
     _page.removeListener(_onPage);
+    _changes?.cancel();
+    _changed.dispose();
     _pageReady.dispose();
     _tools.dispose();
     _tool.dispose();
@@ -165,6 +182,13 @@ class _ServiceViewState extends State<ServiceView> {
                   fitRequests: _c.fitRequests,
                   fitOnStart: _fitOnStart,
                   onFitted: _c.fitted,
+                  underlay: RepaintBoundary(
+                    child: CustomPaint(
+                      key: const Key('table-status-layer'),
+                      painter: _statusPainter,
+                      size: Size.infinite,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -185,4 +209,9 @@ class _ServiceViewState extends State<ServiceView> {
           onPressed: on ? onPressed : null,
         ),
       );
+}
+
+/// A notifier whose every [bump] is one notification.
+final class _Bump extends ChangeNotifier {
+  void bump() => notifyListeners();
 }

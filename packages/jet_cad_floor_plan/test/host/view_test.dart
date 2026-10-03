@@ -512,4 +512,16 @@ void main() {
     expect(c.serviceEdited, isFalse, reason: 'the new copy saw no move');
     expect(layouts, 1);
   });
+
+  testWidgets('V16 the status layer is drawn in the selection mode only',
+      (tester) async {
+    final c = await pumpView(tester);
+    c.setTableStatus({'1': TableStatus(color: const Color(0xFF43A047))});
+    await tester.pump();
+    expect(byKey('table-status-layer'), findsNothing);
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    expect(byKey('table-status-layer'), findsOneWidget);
+  });
 }

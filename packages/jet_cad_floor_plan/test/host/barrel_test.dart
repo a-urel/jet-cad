@@ -31,6 +31,7 @@ void main() {
       'FloorPlanMode',
       'FloorPlanTable',
       'FloorPlanExport',
+      'TableStatus',
       'ensureFloorPlanFonts',
       'registerFontLicences',
       'SymbolLibraryLoader',
@@ -63,5 +64,6 @@ void main() {
     expect(ensureFloorPlanFonts, isA<Function>());
     expect(registerFontLicences, isA<Function>());
     expect(furnitureSymbolSource, isA<SymbolLibrarySource>());
+    c.setTableStatus({'1': TableStatus(color: const Color(0xFF00AA00))});
   });
 }

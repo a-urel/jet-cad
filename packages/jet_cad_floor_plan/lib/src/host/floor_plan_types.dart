@@ -1,6 +1,7 @@
 // The host API's value types (spec 14b-2 H3, H6).
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Color, StringCharacters;
 
 /// The two built-in modes (umbrella decision 2, spec 14b-2 H1).
 enum FloorPlanMode {
@@ -57,4 +58,32 @@ final class FloorPlanExport {
 
   /// `application/pdf` or `image/png`.
   final String mimeType;
+}
+
+/// A table's status as the host colours it in the selection mode (spec 14c
+/// S5): a fill under the drafting, and an optional short caption. Not
+/// document state: never saved, exported, printed or undone.
+@immutable
+final class TableStatus {
+  /// [caption] is cut to [maxCaption] characters (grapheme clusters, R-12).
+  TableStatus({required this.color, String? caption})
+      : caption = caption?.characters.take(maxCaption).toString();
+
+  /// The longest caption, in characters.
+  static const int maxCaption = 12;
+
+  /// The fill, drawn as given: a translucent colour lets the paper show.
+  final Color color;
+
+  final String? caption;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TableStatus && other.color == color && other.caption == caption;
+
+  @override
+  int get hashCode => Object.hash(color, caption);
+
+  @override
+  String toString() => 'TableStatus($color, $caption)';
 }

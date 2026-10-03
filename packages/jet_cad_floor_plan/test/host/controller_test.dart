@@ -5,6 +5,7 @@
 // hand-edited file).
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' show Color;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -379,5 +380,28 @@ void main() {
     c.select({'1'});
     await tester.pump();
     expect(moved(), 0, reason: 'a selection is not a change of the plan');
+  });
+
+  testWidgets(
+      'C15 statuses are not plan state: no revision, dirty, history or json '
+      'change; numbers trimmed; kept across a switch and a load (M-14d)',
+      (tester) async {
+    final c = controller(tester, planJson());
+    final json = c.designJson();
+    final revision = c.revision.value;
+    var heard = 0;
+    c.tableStatuses.addListener(() => heard++);
+    c.setTableStatus({' 1 ': TableStatus(color: const Color(0xFFE53935))});
+    await tester.pump();
+    expect(heard, 1);
+    expect(c.tableStatuses.value.keys, ['1']);
+    expect(c.revision.value, revision);
+    expect(c.dirty.value, isFalse);
+    expect(c.canUndo.value, isFalse);
+    expect(c.designJson(), json);
+    c.setMode(FloorPlanMode.selection);
+    c.load(planJson());
+    expect(c.tableStatuses.value.keys, ['1']);
+    await tester.pump();
   });
 }

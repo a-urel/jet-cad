@@ -30,6 +30,7 @@ class PlannerView extends StatefulWidget {
     this.fitRequests,
     this.fitOnStart = true,
     this.onFitted,
+    this.underlay,
   });
 
   final DraftDocument document;
@@ -67,6 +68,10 @@ class PlannerView extends StatefulWidget {
 
   /// Called after each fit this view performs (review F-2).
   final VoidCallback? onFitted;
+
+  /// Painted between the page chrome and the drafting (spec 14c S7): the
+  /// selection mode's status fills, under the lines.
+  final Widget? underlay;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -202,6 +207,8 @@ class _PlannerViewState extends State<PlannerView> {
                             ),
                           ),
                         ),
+                        if (widget.underlay case final under?)
+                          Positioned.fill(child: under),
                         DraftCanvas(
                           document: widget.document,
                           index: widget.index,
