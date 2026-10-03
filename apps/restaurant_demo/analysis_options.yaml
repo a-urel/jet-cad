@@ -1,0 +1,13 @@
+# The demo's lints: the app's (apps/floor_planner), without the generated
+# platform folders.
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - linux/**
+    - macos/**
+    - web/**
+    - windows/**

@@ -1,0 +1,42 @@
+name: restaurant_demo
+description: >-
+  The restaurant embedding's demo host (spec 14b-2 H10): two dining areas,
+  each a FloorPlanController over an in-memory plan, a Design / Service
+  toggle, selection by table number and a log of the API's state. An
+  example and an integration surface, not a product.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+
+environment:
+  # The language version stays at the workspace's (see apps/floor_planner's
+  # pubspec): from 3.7 on the formatter switches to the tall style.
+  sdk: ^3.5.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_floor_plan:
+    path: ../../packages/jet_cad_floor_plan
+  jet_cad_restaurant_symbols:
+    path: ../../packages/jet_cad_restaurant_symbols
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # The tests build seeded plans with the editor's own placement.
+  jet_cad_2d:
+    path: ../../packages/jet_cad_2d
+  vector_math: ^2.2.0
+
+flutter:
+  uses-material-design: true
+  # The bare family documents name, from the planner package's bytes (spec
+  # 14b-1 V-11a): on the web the engine would fetch Google's Roboto
+  # otherwise.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf

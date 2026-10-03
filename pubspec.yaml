@@ -11,3 +11,4 @@ workspace:
   - packages/jet_cad_floor_plan
   - packages/jet_cad_restaurant_symbols
   - apps/floor_planner
+  - apps/restaurant_demo
