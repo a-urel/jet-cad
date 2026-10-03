@@ -108,8 +108,10 @@ final List<FurnitureSymbol> kitchenCatalog = [
       1600,
       [
         const CircleShape(800, 850, 650),
-        const LineShape(550, 0, 550, 200),
-        const LineShape(1050, 0, 1050, 200),
+        // The mouth's sides meet the dome: at x = 800 ± 250 the circle's
+        // lowest point is 850 - 600 = 250 (review F-10).
+        const LineShape(550, 0, 550, 250),
+        const LineShape(1050, 0, 1050, 250),
       ]),
   _piece(
       'restaurant.kitchen.dishwasher',
@@ -158,19 +160,35 @@ final List<FurnitureSymbol> kitchenCatalog = [
         const LineShape(0, 60, 700, 60),
         const LineShape(0, 60, 700, 800),
       ]),
-  // A 2400 x 2000 cold room: its walls (a 100 inset) and an 800 door
-  // opening out of the front wall, its leaf and its swing.
-  _piece(
-      'restaurant.kitchen.walkin',
-      'Walk-in cooler',
-      const ['walk-in', 'cooler', 'cold room'],
-      2400,
-      2000,
-      [
-        inset(0, 0, 2400, 2000, 100),
-        const LineShape(200, 0, 200, -800),
-        const ArcShape(200, 0, 800, -math.pi / 2, math.pi / 2),
-      ]),
+  // A 2400 x 2000 cold room: its 100-thick walls as one closed outline with
+  // an 800 opening in the front wall (x 200 to 1000), the door leaf swung
+  // open out of it, and its swing (review F-7).
+  const FurnitureSymbol(
+    key: 'restaurant.kitchen.walkin',
+    name: 'Walk-in cooler',
+    category: commercialKitchen,
+    tags: ['walk-in', 'cooler', 'cold room'],
+    baseX: 1200,
+    baseY: 1000,
+    shapes: [
+      PolylineShape([
+        (1000, 0),
+        (2400, 0),
+        (2400, 2000),
+        (0, 2000),
+        (0, 0),
+        (200, 0),
+        (200, 100),
+        (100, 100),
+        (100, 1900),
+        (2300, 1900),
+        (2300, 100),
+        (1000, 100),
+      ], closed: true),
+      LineShape(200, 0, 200, -800),
+      ArcShape(200, 0, 800, -math.pi / 2, math.pi / 2),
+    ],
+  ),
   _piece(
       'restaurant.kitchen.shelving',
       'Shelving',

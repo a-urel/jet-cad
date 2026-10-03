@@ -160,17 +160,30 @@ void main() {
     });
 
     test(
-        'SE10 a plan holding an unservable version-1 copy gets a servable '
-        'version-2 copy beside it (M-14s-2)', () {
+        'SE10 a plan holding an unservable version-1 dining table gets a '
+        'servable version-2 copy beside it (M-14s-2)', () {
+      // The real square table, re-issued at version 1 without seats: what a
+      // plan saved before spec 14 holds.
+      final square = SymbolLibrary.decode(bytesOf(buildFurnitureLibrary()))
+          .entries
+          .firstWhere((e) => e.key == 'dining.table.square.four');
+      final v1 = SymbolEntry(
+        key: square.key,
+        name: square.name,
+        category: square.category,
+        tags: square.tags,
+        version: 1,
+        definition: square.definition,
+        leaves: square.leaves,
+      );
       final doc = plan();
-      final old = libraryOf([table(version: 1, seats: null)]).entries.single;
-      doc.commands.execute(placeSymbol(doc, old, at: Vector2(900, 900)));
+      doc.commands.execute(placeSymbol(doc, v1, at: Vector2(900, 900)));
       final oldDef = definitionOfOnlyInstance(doc);
       expect(doc.components.get<SeatingComponent>(oldDef), isNull,
           reason: 'premise: the old copy is not servable');
 
-      final next = libraryOf([table(version: 2, seats: 3)]).entries.single;
-      doc.commands.execute(placeSymbol(doc, next, at: Vector2(3000, 900)));
+      doc.commands.execute(placeSymbol(doc, square,
+          at: Vector2(3000, -900), quarterTurns: 1, mirrored: true));
       final defs = {
         for (final i in doc.tree.nodes.whereType<InstanceNode>()) i.definition
       };
@@ -178,8 +191,36 @@ void main() {
       final newDef = defs.firstWhere((d) => d != oldDef);
       expect(doc.components.get<SymbolComponent>(newDef)!.version, 2);
       expect(doc.components.get<SeatingComponent>(newDef),
-          SeatingComponent(seats: 3));
+          SeatingComponent(seats: 4));
       expect(doc.components.get<SeatingComponent>(oldDef), isNull);
+    });
+
+    test(
+        'SE10b a copy of the same key and version without seats (a '
+        'hand-edited plan) is not reused: a servable one is made beside it '
+        '(review F-5)', () {
+      final entry = libraryOf([table(seats: 3)]).entries.single;
+      final doc = plan();
+      doc.commands.execute(placeSymbol(doc, entry, at: Vector2(-700, 450)));
+      final first = definitionOfOnlyInstance(doc);
+      // The hand edit: the plan's copy loses its seats.
+      doc.commands.execute(SetComponentCommand<SeatingComponent>(first, null));
+      expect(doc.components.get<SeatingComponent>(first), isNull);
+
+      doc.commands.execute(placeSymbol(doc, entry, at: Vector2(2100, 450)));
+      final defs = {
+        for (final i in doc.tree.nodes.whereType<InstanceNode>()) i.definition
+      };
+      expect(defs, hasLength(2));
+      final second = defs.firstWhere((d) => d != first);
+      expect(doc.components.get<SeatingComponent>(second),
+          SeatingComponent(seats: 3));
+
+      // A copy that agrees is reused, as before.
+      doc.commands.execute(placeSymbol(doc, entry, at: Vector2(4100, 450)));
+      expect({
+        for (final i in doc.tree.nodes.whereType<InstanceNode>()) i.definition
+      }, defs);
     });
 
     test(

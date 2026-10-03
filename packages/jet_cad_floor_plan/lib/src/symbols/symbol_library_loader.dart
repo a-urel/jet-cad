@@ -106,6 +106,8 @@ class SymbolLibraryLoader extends ChangeNotifier {
     try {
       final parts = <(String, SymbolLibrary)>[];
       for (final source in sources) {
+        // A loader disposed part-way reads no further (review F-8).
+        if (_disposed) return;
         parts.add((source.name, SymbolLibrary.decode(await source.read())));
       }
       next = SymbolLibraryReady(SymbolLibrary.merge(parts));

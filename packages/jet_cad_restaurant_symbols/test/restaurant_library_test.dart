@@ -91,7 +91,7 @@ const List<(String, String, int?, int)> expected = [
   ('restaurant.kitchen.sink.hand', 'Commercial Kitchen', null, 2),
   ('restaurant.kitchen.fridge.reachin', 'Commercial Kitchen', null, 1),
   ('restaurant.kitchen.freezer', 'Commercial Kitchen', null, 1),
-  ('restaurant.kitchen.walkin', 'Commercial Kitchen', null, 2),
+  ('restaurant.kitchen.walkin', 'Commercial Kitchen', null, 1),
   ('restaurant.kitchen.shelving', 'Commercial Kitchen', null, 1),
   ('restaurant.kitchen.ice.machine', 'Commercial Kitchen', null, 2),
   ('restaurant.kitchen.bin', 'Commercial Kitchen', null, 0),
@@ -248,6 +248,96 @@ bool overlap(Leaf a, Leaf b) {
     }
   }
   return true;
+}
+
+/// The served top of each servable symbol, written out by hand from spec 14
+/// V-6 (review F-1, F-3): `(width, depth)` of a rectangle, or `(d, d)` with
+/// [roundTops] for a circle of diameter d.
+const Map<String, (double, double)> topSizes = {
+  'restaurant.table.square.two': (700, 700),
+  'restaurant.table.square.four': (800, 800),
+  'restaurant.table.rect.four': (1200, 750),
+  'restaurant.table.rect.six': (1800, 800),
+  'restaurant.table.rect.eight': (2400, 900),
+  'restaurant.table.rect.ten': (3000, 900),
+  'restaurant.table.rect.twelve': (3600, 1000),
+  'restaurant.table.round.two': (600, 600),
+  'restaurant.table.round.four': (900, 900),
+  'restaurant.table.round.six': (1200, 1200),
+  'restaurant.table.round.eight': (1500, 1500),
+  'restaurant.table.round.ten': (1800, 1800),
+  'restaurant.booth.two': (700, 700),
+  'restaurant.booth.four': (1200, 700),
+  'restaurant.booth.six': (1800, 750),
+  'restaurant.booth.corner': (1200, 800),
+  'restaurant.booth.round': (1200, 1200),
+  'restaurant.banquette.two': (700, 700),
+  'restaurant.banquette.four': (1400, 700),
+  'restaurant.lounge.four': (1000, 600),
+  'restaurant.lounge.two': (600, 600),
+  'restaurant.bar.stool': (380, 380),
+  'restaurant.bar.table.high.two': (600, 600),
+  'restaurant.bar.table.high.four': (700, 700),
+  'restaurant.bar.table.ledge': (2000, 400),
+};
+
+/// The servable symbols whose top is a circle. Written out by hand.
+const Set<String> roundTops = {
+  'restaurant.table.round.two',
+  'restaurant.table.round.four',
+  'restaurant.table.round.six',
+  'restaurant.table.round.eight',
+  'restaurant.table.round.ten',
+  'restaurant.booth.round',
+  'restaurant.lounge.two',
+  'restaurant.bar.stool',
+  'restaurant.bar.table.high.two',
+  'restaurant.bar.table.high.four',
+};
+
+/// The shoelace area of a closed ring.
+double ringArea(List<Vector2> pts) {
+  var a = 0.0;
+  for (var i = 0; i < pts.length; i++) {
+    final p = pts[i], q = pts[(i + 1) % pts.length];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return a.abs() / 2;
+}
+
+/// [ring] clipped to the axis-aligned box (Sutherland-Hodgman).
+List<Vector2> clipToBox(
+    List<Vector2> ring, double minX, double minY, double maxX, double maxY) {
+  var out = ring;
+  for (final (inside, cut)
+      in <(bool Function(Vector2), Vector2 Function(Vector2, Vector2))>[
+    ((p) => p.x >= minX, (a, b) => a + (b - a) * ((minX - a.x) / (b.x - a.x))),
+    ((p) => p.x <= maxX, (a, b) => a + (b - a) * ((maxX - a.x) / (b.x - a.x))),
+    ((p) => p.y >= minY, (a, b) => a + (b - a) * ((minY - a.y) / (b.y - a.y))),
+    ((p) => p.y <= maxY, (a, b) => a + (b - a) * ((maxY - a.y) / (b.y - a.y))),
+  ]) {
+    final input = out;
+    out = [];
+    for (var i = 0; i < input.length; i++) {
+      final cur = input[i], prev = input[(i + input.length - 1) % input.length];
+      if (inside(cur)) {
+        if (!inside(prev)) out.add(cut(prev, cur));
+        out.add(cur);
+      } else if (inside(prev)) {
+        out.add(cut(prev, cur));
+      }
+    }
+    if (out.isEmpty) break;
+  }
+  return out;
+}
+
+/// A closed polyline's ring, without a repeated first point.
+List<Vector2> ringOf(GeometryPayload p) {
+  final pts = pointsOf(p);
+  return pts.length > 1 && pts.first == pts.last
+      ? pts.sublist(0, pts.length - 1)
+      : pts;
 }
 
 /// A bundle that serves fixed bytes under the keys it holds, and nothing
@@ -497,6 +587,156 @@ void main() {
         expect(size.x, inInclusiveRange(100, 5000), reason: key);
         expect(size.y, inInclusiveRange(100, 5000), reason: key);
       }
+    });
+  });
+
+  group('review fixes (F-1 to F-4, F-7)', () {
+    test('RL17 each servable top has its V-6 size and shape (F-1, F-3)', () {
+      final servable = assetLibrary().entries.where((e) => e.seats != null);
+      expect(servable.map((e) => e.key).toSet(), topSizes.keys.toSet());
+      for (final e in servable) {
+        final top = e.leaves.first;
+        final (w, d) = topSizes[e.key]!;
+        if (roundTops.contains(e.key)) {
+          expect(top.record.kind, EntityKind.circle, reason: e.key);
+          expect(top.payload.scalars[0] * 2, w, reason: e.key);
+        } else {
+          expect(top.record.kind, EntityKind.polyline, reason: e.key);
+          final ring = ringOf(top.payload);
+          expect(ring, hasLength(4), reason: e.key);
+          final xs = ring.map((p) => p.x), ys = ring.map((p) => p.y);
+          expect(xs.reduce(math.max) - xs.reduce(math.min), w, reason: e.key);
+          expect(ys.reduce(math.max) - ys.reduce(math.min), d, reason: e.key);
+        }
+      }
+    });
+
+    test('RL18 the first seat around a round top sits straight below it (F-4)',
+        () {
+      for (final key in const [
+        'restaurant.table.round.two',
+        'restaurant.table.round.four',
+        'restaurant.table.round.six',
+        'restaurant.table.round.eight',
+        'restaurant.table.round.ten',
+        'restaurant.bar.table.high.two',
+        'restaurant.bar.table.high.four',
+      ]) {
+        final e = entryOf(key);
+        final c = e.leaves.first.payload.pointAt(0);
+        final seat =
+            e.leaves.skip(1).firstWhere((l) => isChair(l) || isStool(l));
+        final Vector2 sc;
+        if (isStool(seat)) {
+          sc = seat.payload.pointAt(0);
+        } else {
+          sc = ringOf(seat.payload).fold(Vector2.zero(), (a, p) => a + p) / 4.0;
+        }
+        expect(sc.x, closeTo(c.x, 1e-6), reason: key);
+        expect(sc.y, lessThan(c.y), reason: key);
+      }
+    });
+
+    test('RL19 the round booth\'s bench runs 100 under its top (F-2)', () {
+      final e = entryOf('restaurant.booth.round');
+      final top = e.leaves.first.payload;
+      final r = top.scalars[0];
+      final arcs = [
+        for (final l in e.leaves)
+          if (l.record.kind == EntityKind.arc) l.payload,
+      ];
+      // Written out by hand: the inner edge, the outer edge, the back.
+      expect([for (final a in arcs) a.scalars[0]], [r - 100, r + 500, r + 350]);
+      for (final a in arcs) {
+        expect(a.pointAt(0), top.pointAt(0), reason: 'concentric with the top');
+        expect(a.scalars[2], closeTo(math.pi, 1e-12), reason: 'a half ring');
+      }
+    });
+
+    test(
+        'RL20 the corner booth\'s L bench overlaps its top by 100 on each leg '
+        '(F-2)', () {
+      final e = entryOf('restaurant.booth.corner');
+      final top = ringOf(e.leaves.first.payload);
+      final xs = top.map((p) => p.x), ys = top.map((p) => p.y);
+      final bench = ringOf(e.leaves[2].payload);
+      expect(bench, hasLength(6), reason: 'premise: the L');
+      final shared = ringArea(clipToBox(bench, xs.reduce(math.min),
+          ys.reduce(math.min), xs.reduce(math.max), ys.reduce(math.max)));
+      // 100 deep along the 800 side, 100 deep along the 1200 side, their
+      // 100 x 100 corner counted once.
+      expect(shared, closeTo(100 * 800 + 100 * 1200 - 100 * 100, 1e-6));
+    });
+
+    test('RL21 a lounge set\'s seats stay clear of its low table (F-2)', () {
+      for (final key in const [
+        'restaurant.lounge.four',
+        'restaurant.lounge.two'
+      ]) {
+        final e = entryOf(key);
+        final top = e.leaves.first;
+        final seats = e.leaves
+            .skip(1)
+            .where((l) => l.record.kind == EntityKind.polyline)
+            .where((l) => ringArea(ringOf(l.payload)) > 400000)
+            .toList();
+        // Written out: lounge.four's sofa and armchair, lounge.two's two
+        // armchairs (its table's inset is a circle).
+        expect(seats, hasLength(key == 'restaurant.lounge.four' ? 3 : 2),
+            reason: key);
+        for (final s in seats) {
+          if (e.key == 'restaurant.lounge.four' &&
+              ringArea(ringOf(s.payload)) < 600000) {
+            continue; // the table's inset
+          }
+          expect(penetration(top, s), 0, reason: key);
+        }
+      }
+    });
+
+    test('RL22 the walk-in\'s door opens out of a gap in its wall (F-7)', () {
+      final e = entryOf('restaurant.kitchen.walkin');
+      final wall = ringOf(e.leaves.first.payload);
+      // The front wall (y = 0) is open from x 200 to 1000: no wall edge on
+      // y = 0 crosses that span.
+      for (var i = 0; i < wall.length; i++) {
+        final a = wall[i], b = wall[(i + 1) % wall.length];
+        if (a.y == 0 && b.y == 0) {
+          final lo = math.min(a.x, b.x), hi = math.max(a.x, b.x);
+          expect(hi <= 200 || lo >= 1000, isTrue, reason: 'edge $a-$b');
+        }
+      }
+      // 100-thick walls: the wall's area is the outline less the room.
+      expect(ringArea(wall), 2400 * 2000 - 2200 * 1800 - 800 * 100);
+      final leaf = e.leaves[1].payload, swing = e.leaves[2].payload;
+      expect((leaf.pointAt(0), leaf.pointAt(1)),
+          (Vector2(200, 0), Vector2(200, -800)));
+      // The swing: from the open leaf's end (200, -800) to the closed
+      // door's end (1000, 0), outside the room.
+      expect(swing.pointAt(0), Vector2(200, 0));
+      expect(swing.scalars[0], 800);
+      expect(swing.scalars[1], closeTo(-math.pi / 2, 1e-12));
+      expect(swing.scalars[2], closeTo(math.pi / 2, 1e-12));
+    });
+
+    test('RL23 the dessert display\'s glass bulges 200 in front of it (F-7)',
+        () {
+      final e = entryOf('restaurant.dessert.display');
+      final arc =
+          e.leaves.firstWhere((l) => l.record.kind == EntityKind.arc).payload;
+      final c = arc.pointAt(0);
+      final r = arc.scalars[0];
+      Vector2 at(double a) =>
+          Vector2(c.x + r * math.cos(a), c.y + r * math.sin(a));
+      final start = at(arc.scalars[1]),
+          end = at(arc.scalars[1] + arc.scalars[2]);
+      final mid = at(arc.scalars[1] + arc.scalars[2] / 2);
+      expect(start.x, closeTo(0, 1e-9));
+      expect(start.y, closeTo(0, 1e-9));
+      expect(end.x, closeTo(1200, 1e-9));
+      expect(end.y, closeTo(0, 1e-9));
+      expect(mid.x, closeTo(600, 1e-9));
+      expect(mid.y, closeTo(-200, 1e-9));
     });
   });
 
