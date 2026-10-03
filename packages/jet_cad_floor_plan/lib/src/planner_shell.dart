@@ -35,6 +35,7 @@ import 'symbols/symbol_library.dart';
 import 'symbols/symbol_library_loader.dart';
 import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
+import 'tables/table_label_system.dart';
 import 'tool_palette.dart';
 
 /// Registers the shell's synchronous settle with its host (spec 12a D2,
@@ -173,6 +174,10 @@ class _PlannerShellState extends State<PlannerShell> {
 
   // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
   late final ParametricSystem _parametric;
+
+  // Spec 14a T12: stacked on the parametric system's expander, installed
+  // after it and disposed before it (last in, first out).
+  late final TableLabelSystem _tableLabels;
 
   // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
@@ -559,6 +564,7 @@ class _PlannerShellState extends State<PlannerShell> {
     // one installs over a finished document and trusts its geometry (06
     // D10).
     _parametric = installParametric(_document);
+    _tableLabels = TableLabelSystem(_document)..install();
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
     _history = _document.commands.changes.listen((_) {
@@ -601,6 +607,7 @@ class _PlannerShellState extends State<PlannerShell> {
       ..removeListener(_onPage)
       ..dispose();
     _camera.dispose();
+    _tableLabels.dispose();
     _parametric.dispose();
     _index.dispose();
     _releaseSettle?.call();
