@@ -9,6 +9,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
@@ -334,25 +335,43 @@ void main() {
     await tester.tap(byKey('status-bill'));
     await tester.pump();
     expect(c.tableStatuses.value['2']!.caption, 'Bill');
+    expect(c.tableStatuses.value['1'], DemoHomeState.kStatuses['Eating'],
+        reason: 'only the selection changes (review T4-1)');
     c.select({'1'});
     await tester.tap(byKey('status-free'));
     await tester.pump();
     expect(c.tableStatuses.value.keys, ['2']);
   });
 
-  testWidgets('D13 random statuses are seeded (14c R-13)', (tester) async {
+  testWidgets(
+      'D13 random statuses are seeded and replace the previous ones '
+      '(14c R-13, review T4-2)', (tester) async {
+    final names = DemoHomeState.kStatuses.keys.toList();
+    // The first seed that draws Free for some table, so a merge into the
+    // previous statuses would show.
+    var seed = 0;
+    while (() {
+      final r = math.Random(seed);
+      return [r.nextInt(names.length), r.nextInt(names.length)]
+          .every((i) => names[i] != 'Free');
+    }()) {
+      seed++;
+    }
     final demo = await pumpDemo(tester,
-        plans: {'Salon': salonPlan()}, random: math.Random(7));
+        plans: {'Salon': salonPlan()}, random: math.Random(seed));
+    final c = demo.area.controller;
+    final stale = TableStatus(color: const Color(0xFF123456), caption: 'Old');
+    c.setTableStatus({for (final t in c.tables) t.number!: stale});
     await tester.tap(byKey('status-random'));
     await tester.pump();
-    final names = DemoHomeState.kStatuses.keys.toList();
-    final expected = math.Random(7);
+    final expected = math.Random(seed);
     final want = <String, TableStatus>{};
-    for (final n in ['1', '2']) {
+    for (final t in c.tables) {
       final s = DemoHomeState.kStatuses[names[expected.nextInt(names.length)]];
-      if (s != null) want[n] = s;
+      if (s != null) want[t.number!] = s;
     }
-    expect(demo.area.controller.tableStatuses.value, want);
+    expect(want.length, lessThan(c.tables.length), reason: 'a Free drawn');
+    expect(c.tableStatuses.value, want);
     expect(demo.log.first, 'Salon: random statuses for ${want.length} tables');
   });
 
@@ -384,7 +403,26 @@ void main() {
     await g.moveBy(const Offset(40, 0));
     await g.up();
     await tester.pump();
-    expect(demo.log, contains('Salon: layout changed'));
+    expect(demo.log.where((l) => l == 'Salon: layout changed'), hasLength(1),
+        reason: 'once per drag (review T4-3)');
+    expect(demo.log, isNot(contains('Salon: tapped 1')),
+        reason: 'a drag is no tap');
     expect(c.serviceEdited, isTrue);
+  });
+
+  testWidgets(
+      'D15 the demo opens on its sample plans: both assets load, every table '
+      'numbered once (review T4-5)', (tester) async {
+    // What main() loads, from the app's own bundle.
+    final plans = (await tester.runAsync(() => loadSamplePlans(rootBundle)))!;
+    expect(plans.keys, ['Salon', 'Teras']);
+    final demo = await pumpDemo(tester, plans: plans);
+    final salon = demo.areas[0].controller, teras = demo.areas[1].controller;
+    expect([for (final t in salon.tables) t.number],
+        [for (var i = 1; i <= 11; i++) '$i']);
+    expect([for (final t in teras.tables) t.number],
+        [for (var i = 1; i <= 6; i++) '$i']);
+    expect(salon.numberingWarnings, isEmpty);
+    expect(teras.numberingWarnings, isEmpty);
   });
 }
