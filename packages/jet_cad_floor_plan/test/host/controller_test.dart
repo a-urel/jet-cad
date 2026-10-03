@@ -8,7 +8,6 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
