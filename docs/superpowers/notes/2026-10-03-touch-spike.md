@@ -43,9 +43,13 @@ owed to the human.
 - **TS-8.** The tools' first-down behaviour: `SelectTool`,
   `TableSelectTool` and `SymbolPlaceTool` only classify a press on down
   and act on the up or after their slop, and their `cancel` drops the
-  press with no command. **`PlacementTool` (every drawing tool) places a
-  point on down** and reports `phase: idle` throughout; its `cancel`
-  drops the whole pending shape.
+  press with no command. **`PlacementTool` (every drawing tool) acts on
+  down** and reports `phase: idle` throughout: it places a point, and the
+  down that completes a shape **executes its command** (`RoomTool` and
+  `OpeningTool` commit on a single down; the last down of a line,
+  rectangle, circle or arc commits; the text tool opens an entry). Its
+  `cancel` drops the whole pending shape (corrected after the spec
+  review, R-1).
 - **TS-9. Mouse-sized targets.** The pick radius is 6 px
   (`kPickRadiusPixels`), the grip hit radius 7 px (`kGripHitPixels`), the
   select tool's band slop 4 px (`kBandSlopPixels`); a fingertip's tap

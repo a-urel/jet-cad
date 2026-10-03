@@ -1,7 +1,8 @@
 # Touch (14t) — design
 
-**Date:** 2026-10-03. **Status:** design, **revision 1**, for independent
-review before its plan. **Sub-project:** 14 (restaurant embedding), slice
+**Date:** 2026-10-03. **Status:** design, **revision 2**: revision 1
+(`9611727`) reviewed independently, "Ready with fixes" (R-1 to R-13);
+[Revision 2](#revision-2) is binding where it differs. **Sub-project:** 14 (restaurant embedding), slice
 **14t**.
 **Umbrella:** [2026-10-03-restaurant-embedding-design.md](2026-10-03-restaurant-embedding-design.md)
 (revision 3, approved): D17, decision 9, F-11 and R-7 are this spec's
@@ -252,3 +253,131 @@ pointer ids, under fake time.
 - **The render package changes** behind four tools' backs; the
   "unchanged for precise pointers" invariant is pinned by the existing
   suites passing unedited.
+
+## Revision 2
+
+The independent review of revision 1 ("Ready with fixes") prototyped T3
+and T4 and ran the suites against them. Its findings, and what this
+revision decides:
+
+- **R-1 → T3a, the touch press mode (critical).** Revision 1 let a
+  finger held past 100 ms reach any tool, and a drawing tool's down
+  **executes**: `RoomTool` and `OpeningTool` commit on a single down
+  (`room_tool.dart:174-215`, `opening_tool.dart:236-250`), the last down of
+  a line, rectangle, circle or arc commits the shape, `TextTool` opens an
+  entry; the "Backspace or Undo" escape does not exist (no drawing tool
+  handles Backspace, Undo is disabled mid-shape, `planner_shell.dart:429-438`).
+  F-5 and TS-8 are corrected accordingly. **Decision:** `Tool` gains
+  **`touchPress`**, a `TouchPress` with two values, default **`lift`**:
+  - **`press`** — the hold-back of T3 as written (up, slop, timeout).
+    Opted into by the tools whose down executes nothing and whose `cancel`
+    executes nothing: `SelectTool`, `TableSelectTool`, `SymbolPlaceTool`.
+  - **`lift`** — every other tool, every `PlacementTool` included. A held
+    finger is **never routed on a timeout**. Its moves past the slop are
+    routed as **hovers** (`onPointerMove` with `buttons: 0`, the finger's
+    position), so a drawing tool shows its snap marker and rubber band
+    while the finger aims; its **up is routed as a down then an up at the
+    up's position** (the point goes where the finger lifts). A second
+    finger drops the held finger: the tool saw at most hovers.
+  So **no tool executes a command because of a pinch**, in either mode.
+  New mutant **M-14t-17**: `RoomTool`, a finger held 150 ms and moved,
+  then joined by a second finger: `undoDepth` stays 0 and no room exists.
+- **R-2 → the invariant on existing tests.** `flutter_test`'s `tap`,
+  `tapAt`, `press`, `longPress`, `createGesture` and `startGesture`
+  default to **`PointerDeviceKind.touch`** (new fact **F-8**): every
+  existing canvas tap now runs through the hold-back. The invariant
+  becomes: existing tests pass unedited **except** those whose taps are
+  mouse clicks by intent and depend on a mouse-sized target; each such
+  test gains `kind: PointerDeviceKind.mouse`, listed by name in the plan
+  and in the results note. The review's prototype found seven, six of
+  which pass again under R-3's two-stage pick.
+- **R-3 → T4a, a two-stage touch pick.** `pickInto` returns the
+  **topmost** entity within the radius (`spatial_index.dart:775`), not the
+  nearest; a 48 px circle would pick a later-drawn neighbour over the line
+  under the finger. **Decision:** `pickRadiusWorld` stays the precise
+  radius (6 px) for every kind; `ToolPointerEvent` gains
+  **`reachRadiusWorld`** — `kTouchPickRadiusPixels` (24 px) over the scale
+  for a touch event, equal to `pickRadiusWorld` otherwise. `SelectTool`
+  picks at `pickRadiusWorld`, and only on a miss at `reachRadiusWorld`.
+  New mutant **M-14t-18**: a touch tap exactly on an earlier-drawn line,
+  a later-drawn line 15 px away, picks the line under the finger.
+- **R-4 → T4b, grips by distance on touch.** The rotation grip sits
+  `kRotationGripOffset` = 24 px above the box's top centre and is tested
+  first (`select_tool.dart:135-136`), so a 24 px reach would turn every
+  press on a top-centre grip into a rotation. **Decision:** for a touch
+  press the rotation grip and the grips compete **by screen distance**,
+  each within 24 px; the nearest wins and a tie goes to the grip.
+  `GripCache` gains the distance queries it needs (its `hitTest` and
+  `hitsRotationGrip` keep their precise behaviour by default). New mutant
+  **M-14t-19**: a touch press on a horizontal line's centre grip moves
+  the grip, it does not rotate.
+- **R-5, R-6, R-7 → the tests.** M-14t-7 also asserts that after the
+  second finger the tool is `idle`, its preview null, and a tap after the
+  pinch selects (the "no cancel" mutant leaves the tool stuck).
+  M-14t-8 lifts one finger of a pinch, puts a new finger down and taps:
+  the tool sees nothing, and the camera pairs the remaining finger with
+  the new one. M-14t-12 holds the finger past `kTouchHoldBack` before it
+  jitters. M-14t-6 lifts at least 10 px from the down (press mode: the
+  down at the down's position; lift mode: at the up's). M-14t-2 uses
+  `closeTo`; M-14t-3 a tolerance; M-14t-5 and -6 pump 200 ms after the
+  gesture so a leaked timer shows.
+- **R-8 → further mutants.** **M-14t-20** cancel on every multi start
+  whatever the phase (two polyline points placed, a pinch: the shape is
+  still pending); **-21** the `kPinchMinSpan` guard removed (fingers 2 px
+  apart moving to 20 px do not zoom); **-22** the multi flag never reset
+  (a tap after a pinch reaches the tool); **-23** the timer not cancelled
+  on the up (tap, pump 200 ms: exactly one down); **-24** a held finger's
+  cancel routed to the tool; **-25** a stylus taken as touch (a stylus
+  press is routed at once; a stylus and a finger do not pinch).
+- **R-9 → T3's open cases, closed.**
+  (a) A held finger **claims `_activePointer`**: no precise pointer is
+  routed while a finger is held or a session runs.
+  (b) `deactivate` clears the **whole** session (held finger, live
+  touches, multi flag, timer). A held finger is dropped when `tools`
+  changes (`didUpdateWidget`) and when the active tool changes.
+  (c) Focus is requested when a finger is **routed**, never at a physical
+  down, so a pinch does not move focus. On the web a pinch's first finger
+  outside an open text entry ends it through its tap-outside region —
+  accepted, recorded.
+  (d) A routed held down's `world` and radii come from the camera **at
+  routing time**, at the down's screen position.
+  (e) The hold-back's slop is **strictly greater than `kTouchSlop`**,
+  Euclidean from the down — `TableSelectTool`'s own test (`<=` returns).
+  (f) **`held` is dropped.** `TableSelectTool` starts its timer for
+  `kLongPressTimeout − kTouchHoldBack` on a touch press: in press mode a
+  touch down that can become a long press is always routed by the
+  timeout.
+- **R-10 → no stale markers.** When a touch session ends, and when it
+  becomes multi, the layer calls the tool's **`onPointerExit`** (touch has
+  no hover): the drawing tools' snap marker and `SymbolPlaceTool`'s ghost
+  are hidden. `RulerFrame`'s pointer marker follows **precise pointers
+  only**; a touch event clears it.
+- **R-11 → the selection mode's reach; `fitToView`.** `TablePicker.pick`
+  takes the reach: on a miss by containment, a **touch** tap picks the
+  table whose top is **nearest within `reachRadiusWorld`** (distance to
+  the top's boundary, in world units through the instance's transform;
+  the higher handle on a tie). A mouse keeps containment only. New mutant
+  **M-14t-26**: a touch tap 15 px outside a small table selects it, a
+  mouse click there does not; a touch tap between two tables picks the
+  nearer. **`fitToView` framing the live tables** (D17's last clause):
+  **withdrawn** as an umbrella amendment (A-1): 14b-2 fits the page, which
+  holds every table of a plan drawn on its sheet; listed for the human's
+  look.
+- **R-12 → T2's details.** The product of the ratios is
+  `S_end / S_start` only while both spans exceed the minimum and the
+  camera is not clamped. A pan of zero and a ratio of exactly 1 are
+  skipped (Ruling 01-4). Each event may notify the camera twice (a pan,
+  then a zoom); accepted.
+- **R-13:** confirmed — the new `ToolPointerEvent` fields are optional,
+  every `GripCache` call site keeps its default, only `PlacementTool`
+  and its subclasses report `idle` on a down.
+- **Facts amended.** F-3 cites `interaction_layer.dart:152-158`; the
+  inner `Listener` (the layer) is dispatched before the outer (the
+  camera) (`proxy_box.dart:186-188`, `gestures/binding.dart:506`): on a
+  second finger the layer cancels the tool before the camera takes the
+  pair's baseline. T2 and T3 keep their own lists of live touches; they
+  agree because both cover the same box.
+- **Files, added:** `jet_cad_2d_flutter/lib/src/ruler_frame.dart`;
+  `jet_cad_floor_plan/lib/src/service/table_picker.dart`; the tests that
+  gain `kind: mouse`.
+
