@@ -66,6 +66,8 @@ final class TableSurvey {
     final tables = <TableInfo>[];
     final nested = <Handle>[];
     final extra = <Handle, List<Handle>>{};
+    // `tree.nodes` is ascending by handle (its contract), so both lists
+    // are too.
     for (final node in doc.tree.nodes) {
       if (node is! InstanceNode) continue;
       if (doc.tree.definition(node.definition) == null) continue;
@@ -89,8 +91,6 @@ final class TableSurvey {
         symbolKey: doc.components.get<SymbolComponent>(node.definition)?.key,
       ));
     }
-    tables.sort((a, b) => a.instance.value.compareTo(b.instance.value));
-    nested.sort((a, b) => a.value.compareTo(b.value));
     return TableSurvey._(List.unmodifiable(tables), List.unmodifiable(nested),
         Map.unmodifiable(extra));
   }

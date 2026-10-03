@@ -129,28 +129,53 @@ void main() {
           reason: 'the width factor is read only with bit 8');
     });
 
-    test('TL6 the command anchors at the base point, sized by the first leaf',
-        () {
+    test(
+        'TL6 the command anchors at the base point, sized by the first leaf '
+        '(review F-1)', () {
       final doc = plan();
       final entry = entryOf(stoolSymbol);
       doc.commands.execute(placeSymbol(doc, entry,
-          at: Vector2(-3100, 2200), quarterTurns: 1, mirrored: true));
+          at: Vector2(-3100, 2200),
+          quarterTurns: 1,
+          mirrored: true,
+          numbered: false));
       final instance = doc.tree.nodes.whereType<InstanceNode>().single;
-      doc.commands.execute(addTableLabelCommand(doc,
+      final command = addTableLabelCommand(doc,
           instance: instance.handle,
           definition: instance.definition,
           placement: instance.transform,
-          number: '7'));
-      final slot = doc.entities.liveSlots
-          .firstWhere((s) => doc.entities.kindAt(s) == EntityKind.attrib);
+          number: '7');
+      doc.commands.execute(command);
+      final slot = doc.entities.slotOf(command.record.handle)!;
+      expect(doc.entities.textAt(slot), '7');
+      expect(doc.entities.ownerAt(slot), instance.handle);
       final payload = doc.geometry.read(doc.entities.geomIndexAt(slot));
       expect(payload.coords, [400, 300]);
       // L = R(90°) · diag(−1, 1) = [[0, −1], [−1, 0]]; the stamp
       // R(90°) · diag(−1, 1) is the same matrix, and L · L = I.
       expect(payload.scalars, [152, math.pi / 2, -1.0]);
-      expect(
-          doc.entities.handleAt(slot).value, greaterThan(instance.handle.value),
+      expect(command.record.handle.value, greaterThan(instance.handle.value),
           reason: 'drawn above its table');
+    });
+
+    test('TL7 firstLeafOf is the lowest handle, whatever the slot order', () {
+      final doc = plan();
+      final early = doc.handleSeed.next();
+      final owner = doc.handleSeed.next();
+      doc.tree.addDefinition(Definition(
+          handle: owner,
+          name: 'D',
+          basePoint: Vector2(10, 20),
+          children: const []));
+      AddEntityCommand line(Handle h, double y) => AddEntityCommand(
+          record: tableLabelRecord(handle: h, instance: owner, number: 'x')
+              .copyWith(kind: EntityKind.line),
+          payload: GeometryPayload(
+              coords: Float64List.fromList([0, y, 100, y]),
+              scalars: Float64List(0)));
+      doc.commands.execute(line(doc.handleSeed.next(), 5));
+      doc.commands.execute(line(early, 9));
+      expect(firstLeafOf(doc, owner)!.payload.coords, [0, 9, 100, 9]);
     });
   });
 }

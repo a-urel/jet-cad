@@ -55,6 +55,8 @@ void main() {
         '12345678',
         ' 4 ',
         'ÇİĞ',
+        ' 12345678 ',
+        'a\u00A0b',
       ]) {
         expect(tableNumberError(n), isNull, reason: n);
       }
@@ -67,6 +69,11 @@ void main() {
       expect(tableNumberError('a\nb'), isNotNull);
       expect(tableNumberError('a\tb'), isNotNull);
       expect(tableNumberError('a\u0085b'), isNotNull);
+      // The edges (review F-7): DEL and the top of C1; nine UTF-16 code
+      // units though eight characters (a surrogate pair).
+      expect(tableNumberError('\u007F'), isNotNull);
+      expect(tableNumberError('a\u009Fb'), isNotNull);
+      expect(tableNumberError('1234567😀'), '1 to 8 characters');
     });
   });
 }

@@ -51,21 +51,25 @@ ToolPointerEvent ev(CameraController camera, Offset screen,
       pickRadiusWorld: kPickRadiusPixels / camera.value.scale,
     );
 
-/// A square table definition, one instance of it at [kTablePlacement] and an
-/// ATTRIB `"12"` the instance owns at the square's centre, on [layer].
+/// A square table definition, one instance of it at [kTablePlacement] on a
+/// layer of its own (not layer 0), [parent] or the root holding it, and an
+/// ATTRIB `"12"` the instance owns at the square's centre, on layer 0, as
+/// the app makes one (spec 14a T8).
 final class _Table {
-  _Table(this.doc, {Handle? layer}) {
+  _Table(this.doc, {Handle? parent}) {
+    tables = addLayer(doc, 'Tables');
     definition = addDefinition(doc, 'Table');
     addEntity(doc, definition, EntityKind.polyline,
         [0, 0, 1000, 0, 1000, 1000, 0, 1000, 0, 0], []);
-    instance = addInstance(doc, definition, kTablePlacement);
+    instance = addInstance(doc, definition, kTablePlacement,
+        parent: parent, layer: tables);
     label = doc.handleSeed.next();
     doc.commands.execute(AddEntityCommand(
       record: EntityRecord(
         handle: label,
         owner: instance,
         kind: EntityKind.attrib,
-        layer: layer ?? ReservedHandles.layerZero,
+        layer: ReservedHandles.layerZero,
         linetype: ReservedHandles.byBlockLinetype,
         linetypeScale: 1.0,
         geomIndex: 0,
@@ -87,13 +91,38 @@ final class _Table {
   }
 
   final DraftDocument doc;
+  late final Handle tables;
   late final Handle definition;
   late final Handle instance;
   late final Handle label;
 
-  /// The label's anchor in world space.
+  /// The label's anchor in world space (under the root; a [parent] group
+  /// adds its own transform).
   Vector2 get labelWorld => kTablePlacement.transformPoint(Vector2(500, 500));
 }
+
+/// Records every command [doc]'s dispatcher executes, in order, without
+/// changing it (the slot is free in these tests).
+List<DraftCommand> _record(DraftDocument doc) {
+  final out = <DraftCommand>[];
+  doc.commands.expander = (c) {
+    out.add(c);
+    return c;
+  };
+  addTearDown(() => doc.commands.expander = null);
+  return out;
+}
+
+/// The handles [c]'s leaf commands remove, in order: `E` for an entity,
+/// `N` for a node.
+List<String> _removals(DraftCommand c) => switch (c) {
+      CompoundCommand(:final children) => [
+          for (final child in children) ..._removals(child)
+        ],
+      RemoveEntityCommand(:final handle) => ['E${handle.value}'],
+      RemoveNodeCommand(:final handle) => ['N${handle.value}'],
+      _ => const [],
+    };
 
 DraftDocument _doc() => DraftDocument.empty(measurer: MetricModelMeasurer());
 
@@ -121,15 +150,17 @@ void main() {
 
   test('IA2 a number inside a group resolves to the group, as before', () {
     final doc = _doc();
-    final group =
-        addGroup(doc, doc.rootHandle, Transform2.translation(-700, 300));
-    final def = addDefinition(doc, 'Table');
-    addEntity(doc, def, EntityKind.polyline,
-        [0, 0, 1000, 0, 1000, 1000, 0, 1000, 0, 0], []);
-    final instance = addInstance(doc, def, kTablePlacement, parent: group);
-    final ancestors = doc.tree.ancestorsOf(instance);
-    expect(rootLevelNodeOf(doc, instance, ancestors), group);
-    expect(topmostGroupOf(doc, instance, ancestors), group);
+    final shift = Transform2.translation(-700, 300);
+    final group = addGroup(doc, doc.rootHandle, shift);
+    final t = _Table(doc, parent: group);
+    final index = SpatialIndex(doc);
+    addTearDown(index.dispose);
+
+    final hit = HitPath();
+    final world = shift.transformPoint(t.labelWorld);
+    expect(index.pickInto(world, 5, const QueryFilter.picking(), hit), isTrue);
+    expect(hit.entity, t.label, reason: 'premise: only the number is there');
+    expect(resolveHit(hit, doc), SelectionKey.root(group));
   });
 
   test('IA3 a drag that starts on the number moves the table (F-14)', () {
@@ -185,8 +216,13 @@ void main() {
         () {
       selection.replace([SelectionKey.root(t.instance)]);
       final depth = doc.commands.undoDepth;
+      final executed = _record(doc);
 
       SelectTool().onKey(_deleteDown, ctx);
+
+      expect(_removals(executed.single),
+          ['E${t.label.value}', 'N${t.instance.value}'],
+          reason: 'the number before its table (T9)');
 
       expect(doc.tree[t.instance], isNull);
       expect(doc.entities.slotOf(t.label), isNull);
@@ -214,9 +250,14 @@ void main() {
           doc, inner, EntityKind.line, [100, 100, 300, 100], [],
           layer: ReservedHandles.layerZero);
       selection.replace([SelectionKey.root(group)]);
+      final executed = _record(doc);
 
       SelectTool().onKey(_deleteDown, ctx);
 
+      final order = _removals(executed.single);
+      expect(order.indexOf('E${innerLabel.value}'),
+          lessThan(order.indexOf('N${inner.value}')),
+          reason: 'the number before its table (T9)');
       expect(doc.tree[group], isNull);
       expect(doc.tree[inner], isNull);
       expect(doc.entities.slotOf(innerLabel), isNull);
@@ -259,6 +300,50 @@ void main() {
       expect(doc.tree[bench], isNull);
       expect(doc.entities.slotOf(early), isNull);
       expect(doc.commands.undoDepth, depth + 1);
+      expect(doc.validate(), isEmpty);
+    });
+
+    test(
+        'IA8 a table whose number needs a capability the permissions lack '
+        'stays whole and selected; another key still goes', () {
+      final def = addDefinition(doc, 'Planter');
+      addEntity(doc, def, EntityKind.circle, [250, 250], [250]);
+      final planter = addInstance(doc, def, Transform2.translation(-3000, 1800),
+          layer: t.tables);
+      doc.commands.permissions = const DraftPermissions(
+          transform: true, components: true, geometry: false, structure: true);
+      selection
+          .replace([SelectionKey.root(t.instance), SelectionKey.root(planter)]);
+
+      SelectTool().onKey(_deleteDown, ctx);
+
+      expect(doc.tree[planter], isNull);
+      expect(doc.tree[t.instance], isNotNull);
+      expect(doc.entities.slotOf(t.label), isNotNull);
+      expect(selection.keys, {SelectionKey.root(t.instance)});
+      expect(doc.validate(), isEmpty);
+    });
+
+    test(
+        'IA9 a group and an instance inside it, the instance\'s handle the '
+        'lower, delete in one step', () {
+      final early = doc.handleSeed.next();
+      final group =
+          addGroup(doc, doc.rootHandle, Transform2.translation(2500, -700));
+      final inner = addInstance(doc, t.definition, kTablePlacement,
+          parent: group, handle: early);
+      final innerLabel = addEntity(
+          doc, inner, EntityKind.line, [200, 200, 400, 200], [],
+          layer: ReservedHandles.layerZero);
+      selection.replace([SelectionKey.root(group), SelectionKey.root(inner)]);
+      final depth = doc.commands.undoDepth;
+
+      SelectTool().onKey(_deleteDown, ctx);
+
+      expect(doc.commands.undoDepth, depth + 1);
+      expect(doc.tree[group], isNull);
+      expect(doc.tree[inner], isNull);
+      expect(doc.entities.slotOf(innerLabel), isNull);
       expect(doc.validate(), isEmpty);
     });
   });
