@@ -11,9 +11,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:floor_planner/export/export_flow.dart';
-import 'package:floor_planner/export/page_printer.dart';
-import 'package:floor_planner/parametric/live_objects.dart';
-import 'package:floor_planner/parametric/separator.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show LogicalKeyboardKey, MethodCall, MethodChannel;
@@ -23,8 +21,6 @@ import 'package:jet_cad_2d_flutter/export_testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
-
-import 'package:floor_planner/shell_commands.dart';
 
 import '../support/document_rig.dart';
 import '../support/export_flat.dart';

@@ -13,11 +13,8 @@ import 'dart:typed_data';
 
 import 'package:floor_planner/document_files.dart';
 import 'package:floor_planner/document_host.dart';
-import 'package:floor_planner/export/export_dialog.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:floor_planner/export/export_flow.dart';
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/live_objects.dart';
-import 'package:floor_planner/parametric/separator.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

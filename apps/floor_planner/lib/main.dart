@@ -6,12 +6,13 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'document_files.dart';
 import 'document_host.dart';
 import 'exit_guard.dart';
-import 'export/export_font.dart';
-import 'export/page_printer.dart';
-import 'shell_commands.dart';
-import 'symbols/symbol_library_loader.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 
-void main() {
+Future<void> main() async {
+  // The planner's font is registered from the package's bytes before the
+  // first document is measured (spec 14 V-11).
+  WidgetsFlutterBinding.ensureInitialized();
+  await ensureFloorPlanFonts();
   registerFontLicences();
   runApp(const FloorPlannerApp());
 }

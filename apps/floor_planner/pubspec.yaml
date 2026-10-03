@@ -25,6 +25,8 @@ dependencies:
     path: ../../packages/jet_cad_2d
   jet_cad_2d_flutter:
     path: ../../packages/jet_cad_2d_flutter
+  jet_cad_floor_plan:
+    path: ../../packages/jet_cad_floor_plan
   meta: ^1.18.0
   # The app names PdfPageFormat (the print flow's page size, spec 13 D9);
   # the same bound as jet_cad_2d_flutter's.
@@ -40,10 +42,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/library/furniture.jetlib
-    - assets/fonts/Roboto_LICENSE.txt
-  fonts:
-    - family: Roboto
-      fonts:
-        - asset: assets/fonts/Roboto-Regular.ttf

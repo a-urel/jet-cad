@@ -9,11 +9,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:floor_planner/export/export_flow.dart';
-import 'package:floor_planner/export/export_font.dart';
-import 'package:floor_planner/export/page_printer.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:floor_planner/main.dart';
-import 'package:floor_planner/new_document.dart';
-import 'package:floor_planner/parametric/catalog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

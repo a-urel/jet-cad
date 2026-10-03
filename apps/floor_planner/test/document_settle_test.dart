@@ -8,10 +8,7 @@
 // the canvas, where the file chords work.
 import 'dart:convert';
 
-import 'package:floor_planner/panel_focus.dart';
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/panel_number.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;

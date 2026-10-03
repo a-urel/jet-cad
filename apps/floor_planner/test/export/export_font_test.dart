@@ -4,7 +4,7 @@
 import 'dart:io';
 
 import 'package:floor_planner/document_host.dart';
-import 'package:floor_planner/export/export_font.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:floor_planner/main.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -41,14 +41,18 @@ class _MapBundle extends CachingAssetBundle {
 void main() {
   group('T-12 the files', () {
     test('EF1 the app font equals the vendored one byte for byte', () {
-      final app = File('assets/fonts/Roboto-Regular.ttf').readAsBytesSync();
+      final app = File(
+              '../../packages/jet_cad_floor_plan/assets/fonts/Roboto-Regular.ttf')
+          .readAsBytesSync();
       final vendored = vendoredFont();
       expect(vendored.length, 171676, reason: 'premise: spec F-11');
       expect(app, orderedEquals(vendored));
     });
 
     test('EF2 the licence equals the vendored one byte for byte', () {
-      final app = File('assets/fonts/Roboto_LICENSE.txt').readAsBytesSync();
+      final app = File(
+              '../../packages/jet_cad_floor_plan/assets/fonts/Roboto_LICENSE.txt')
+          .readAsBytesSync();
       final vendored =
           File('$vendoredDir/Roboto_LICENSE.txt').readAsBytesSync();
       expect(app, isNotEmpty);
@@ -61,7 +65,9 @@ void main() {
         'dependency: the digest is checked by sha256sum in the task report '
         'and the bytes equal the vendored file, whose README records the '
         'same digest)', () {
-      final readme = File('assets/fonts/README.md').readAsStringSync();
+      final readme =
+          File('../../packages/jet_cad_floor_plan/assets/fonts/README.md')
+              .readAsStringSync();
       expect(readme, contains(recordedSha256));
       expect(readme, contains('Apache 2.0'));
       expect(readme, contains('Copied unmodified, 2026-10-01, plan 13 Task 7'));
@@ -170,7 +176,7 @@ void main() {
     // finding 1; mutant H).
     test('EF11 main() registers the font licence before runApp', () {
       final source = File('lib/main.dart').readAsStringSync();
-      final start = source.indexOf('void main() {');
+      final start = source.indexOf('main() async {');
       expect(start, isNonNegative, reason: 'premise: main() is found');
       final end = source.indexOf('\n}', start);
       expect(end, greaterThan(start), reason: 'premise: its body ends');

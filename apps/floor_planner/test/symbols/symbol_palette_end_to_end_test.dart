@@ -15,11 +15,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:floor_planner/main.dart';
-import 'package:floor_planner/symbols/symbol_component.dart';
-import 'package:floor_planner/symbols/symbol_library_loader.dart';
-import 'package:floor_planner/symbols/symbol_library_state.dart';
-import 'package:floor_planner/symbols/symbol_place_tool.dart';
-import 'package:floor_planner/symbols/symbol_placer.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide Tolerance;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -32,7 +28,8 @@ import '../support/document_rig.dart';
 import '../support/fake_document_files.dart';
 
 final Uint8List assetBytes =
-    File('assets/library/furniture.jetlib').readAsBytesSync();
+    File('../../packages/jet_cad_floor_plan/assets/library/furniture.jetlib')
+        .readAsBytesSync();
 
 /// Far from the origin and from the page.
 final Vector2 far = Vector2(41234.5, 27345.25);

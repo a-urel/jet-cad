@@ -11,7 +11,7 @@
 // Not degenerate: the camera is rotated and centred far from the origin,
 // nothing is drawn at the origin, the new layer is ACI 3 (not 7), and the
 // saved current layer is not layer 0.
-import 'package:floor_planner/layers/layer_row.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderCustomPaint;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;

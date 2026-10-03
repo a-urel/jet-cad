@@ -4,10 +4,7 @@
 // opened one; a swap leaves nothing of the old document live, and New or
 // Open sample from a titled document forgets its file.
 import 'package:floor_planner/document_host.dart';
-import 'package:floor_planner/new_document.dart';
-import 'package:floor_planner/page_panel.dart';
-import 'package:floor_planner/parametric/separator.dart';
-import 'package:floor_planner/startup_plan.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

@@ -2,8 +2,7 @@ import 'dart:convert';
 
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/main.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/planner_view.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

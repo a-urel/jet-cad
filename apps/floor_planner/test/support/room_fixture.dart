@@ -7,13 +7,7 @@
 import 'dart:convert' show jsonDecode;
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/opening.dart';
-import 'package:floor_planner/parametric/room.dart';
-import 'package:floor_planner/parametric/room_inputs.dart';
-import 'package:floor_planner/parametric/room_trace.dart';
-import 'package:floor_planner/parametric/separator.dart';
-import 'package:floor_planner/parametric/wall.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter_test/flutter_test.dart' show expect;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;

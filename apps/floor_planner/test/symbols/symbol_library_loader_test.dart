@@ -7,10 +7,7 @@ import 'dart:typed_data';
 
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/main.dart';
-import 'package:floor_planner/planner_shell.dart';
-import 'package:floor_planner/symbols/symbol_library.dart';
-import 'package:floor_planner/symbols/symbol_library_loader.dart';
-import 'package:floor_planner/symbols/symbol_library_state.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -19,7 +16,8 @@ import '../support/fake_document_files.dart';
 import '../support/symbol_fixtures.dart';
 
 final Uint8List assetBytes =
-    File('assets/library/furniture.jetlib').readAsBytesSync();
+    File('../../packages/jet_cad_floor_plan/assets/library/furniture.jetlib')
+        .readAsBytesSync();
 
 /// The keys of the real asset, decoded independently of the loader.
 final List<String> assetKeys = [

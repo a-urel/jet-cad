@@ -17,16 +17,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'document_files.dart';
 import 'exit_guard.dart';
-import 'export/export_dialog.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'export/export_flow.dart';
-import 'export/export_font.dart';
-import 'export/page_printer.dart';
-import 'planner_shell.dart';
-import 'new_document.dart';
-import 'parametric/catalog.dart';
-import 'shell_commands.dart';
-import 'startup_plan.dart';
-import 'symbols/symbol_library_loader.dart';
 
 /// The name of a document that has no file yet (spec 12a D4).
 const String kUntitledName = 'Untitled';
