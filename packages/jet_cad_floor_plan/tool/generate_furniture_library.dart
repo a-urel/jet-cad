@@ -1,6 +1,6 @@
 // Writes `assets/library/furniture.jetlib` from the catalog (spec 09 D2).
 //
-// Run from the app directory, under plain Dart (no Flutter):
+// Run from the package directory, under plain Dart (no Flutter):
 //   dart run tool/generate_furniture_library.dart
 import 'dart:convert';
 import 'dart:io';

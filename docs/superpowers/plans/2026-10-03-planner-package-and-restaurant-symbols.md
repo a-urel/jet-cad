@@ -9,7 +9,11 @@ repo's floor is 3.44.0; nothing here needs more).
 
 ## Global constraints
 
-- `CLAUDE.md` non-negotiables. No `analysis_options.yaml` is committed.
+- `CLAUDE.md` non-negotiables. No `analysis_options.yaml` that
+  `flutter pub get` rewrote is committed. **Amended at execution (review of
+  14b-1, F-5):** a new package's initial `analysis_options.yaml` (the app's,
+  `flutter_lints`, without the platform excludes) is committed once, so its
+  `flutter analyze` runs the same lints; `pub get` does not rewrite it.
 - The engine (`packages/jet_cad_2d`) and render (`packages/jet_cad_2d_flutter`)
   packages are **not edited** by this plan; the two allocation invariant
   tests stay untouched and green.
@@ -62,9 +66,27 @@ Create `packages/jet_cad_floor_plan`; `git mv` every non-frame lib file
 tests, `package:jet_cad_floor_plan/editor.dart` in the app); move tests per
 V-9 with their support files; move `tool/generate_furniture_library.dart`.
 `editor.dart` exports exactly what the app's remaining files use.
+**Amended at execution (review F-7):** `editor.dart` exports every `src/`
+file. It is the app's internal surface, not a host's; a future clash
+breaks its analysis at once, and 14b-2 narrows the host barrel instead.
+**The support files copied to both sides (V-9, review F-6):** six —
+`dimension_fixture.dart`, `fake_page_printer.dart`, `layer_fixture.dart`,
+`room_fixture.dart`, `symbol_fixtures.dart`, `wall_fixture.dart` —
+identical but for imports.
 **Done:** both gates green; app + package test counts sum to the baseline.
 
 ### Task 3 — assets and the font
+
+**Amended at execution (review F-1 to F-4):** the font file lives in the
+package's `lib/fonts/` (asset key
+`packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf`, which every
+host has), so that `apps/floor_planner` can also declare the bare family
+`Roboto` from it (`packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf`):
+on the web the engine fetches Google's Roboto when the manifest has no
+family of that name. `main()` reports a failed registration and starts
+anyway; EF11 pins the order binding, font, app; EF12 pins the declaration;
+the font tests reset the registration and the before/after measurement has
+its own file.
 
 Move `furniture.jetlib`, `Roboto-Regular.ttf`, `Roboto_LICENSE.txt` to the
 package; asset keys `packages/jet_cad_floor_plan/...` at every read

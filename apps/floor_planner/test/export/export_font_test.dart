@@ -41,9 +41,9 @@ class _MapBundle extends CachingAssetBundle {
 void main() {
   group('T-12 the files', () {
     test('EF1 the app font equals the vendored one byte for byte', () {
-      final app = File(
-              '../../packages/jet_cad_floor_plan/assets/fonts/Roboto-Regular.ttf')
-          .readAsBytesSync();
+      final app =
+          File('../../packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf')
+              .readAsBytesSync();
       final vendored = vendoredFont();
       expect(vendored.length, 171676, reason: 'premise: spec F-11');
       expect(app, orderedEquals(vendored));
@@ -190,6 +190,35 @@ void main() {
       expect(register, isNonNegative, reason: 'the licence is registered');
       expect(run, isNonNegative, reason: 'premise: main() runs the app');
       expect(register, lessThan(run), reason: 'before the app runs');
+      // Spec 14 V-11 (review F-2): the binding, then the planner's font,
+      // awaited, then the app.
+      final binding =
+          body.indexOf('WidgetsFlutterBinding.ensureInitialized();');
+      final font = body.indexOf('await ensureFloorPlanFonts();');
+      expect(binding, isNonNegative, reason: 'the binding is initialised');
+      expect(font, isNonNegative, reason: 'the font is registered, awaited');
+      expect(binding, lessThan(font));
+      expect(font, lessThan(run), reason: 'before the app runs');
+    });
+
+    test(
+        'EF12 the pubspec declares the bare family Roboto from the planner '
+        'package\'s font (spec 14 V-11, review F-1: on the web the engine '
+        'fetches another Roboto when the manifest has none)', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(
+          RegExp(
+                  r'^\s*fonts:\s*\n\s*-\s*family:\s*Roboto\s*\n\s*fonts:\s*\n'
+                  r'\s*-\s*asset:\s*packages/jet_cad_floor_plan/fonts/'
+                  r'Roboto-Regular\.ttf\s*$',
+                  multiLine: true)
+              .hasMatch(pubspec),
+          isTrue);
+      // The path resolves under the package's lib/.
+      expect(
+          File('../../packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf')
+              .readAsBytesSync(),
+          orderedEquals(vendoredFont()));
     });
   });
 }

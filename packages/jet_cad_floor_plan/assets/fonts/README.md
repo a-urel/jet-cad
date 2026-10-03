@@ -1,7 +1,10 @@
-# The app's font
+# The planner's font
 
-`Roboto-Regular.ttf` is the family `Roboto` the app declares in
-`pubspec.yaml`, which is what `DraftDocument`'s Standard text style asks for.
+`Roboto-Regular.ttf` (in `lib/fonts/`, so a host can declare the bare family
+from it: `packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf`, as
+`apps/floor_planner` does) is the family `Roboto` that `DraftDocument`'s
+Standard text style asks for; `ensureFloorPlanFonts` registers it too (spec
+14 V-11).
 The screen draws text in it, and the PDF export embeds the same bytes, so the
 screen, the text golden and the PDF use one font (spec 13 D7).
 
@@ -13,5 +16,5 @@ screen, the text golden and the PDF use one font (spec 13 D7).
   `LicenseRegistry` under `Roboto` at start-up)
 - Copied unmodified, 2026-10-01, plan 13 Task 7
 
-`test/export/export_font_test.dart` asserts that both files equal the
-vendored ones byte for byte.
+`apps/floor_planner/test/export/export_font_test.dart` asserts that both
+files equal the vendored ones byte for byte.

@@ -5,10 +5,14 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 
-/// The bundled font's asset key (declared under `assets:` in the package's
-/// `pubspec.yaml`; registered as family `Roboto` by `ensureFloorPlanFonts`).
+/// The bundled font's asset key: the package's `lib/fonts/` file, declared
+/// under `assets:` in its `pubspec.yaml`, so every host has it. It lives
+/// under `lib/` so a host can also declare the bare family `Roboto` from it
+/// (`packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf`), as
+/// `apps/floor_planner` does (spec 14 V-11, review F-1); either way
+/// `ensureFloorPlanFonts` registers `Roboto` from these bytes.
 const String kExportFontAsset =
-    'packages/jet_cad_floor_plan/assets/fonts/Roboto-Regular.ttf';
+    'packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf';
 
 /// The font's licence text (declared under `assets:` in the package's
 /// `pubspec.yaml`).

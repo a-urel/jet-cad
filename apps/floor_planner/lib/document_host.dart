@@ -14,10 +14,10 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 
 import 'document_files.dart';
 import 'exit_guard.dart';
-import 'package:jet_cad_floor_plan/editor.dart';
 import 'export/export_flow.dart';
 
 /// The name of a document that has no file yet (spec 12a D4).

@@ -2,8 +2,8 @@
 // `FloorPlannerApp` above the document host, so a document swap -- which
 // rebuilds the shell -- never reads the asset again.
 //
-// With `export/export_font.dart`, the only file of the app that touches
-// `rootBundle`.
+// With `export/export_font.dart` and `fonts.dart`, the only files of the
+// package that touch `rootBundle`.
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 

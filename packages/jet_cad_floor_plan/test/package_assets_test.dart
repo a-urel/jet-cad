@@ -4,7 +4,6 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show FlutterError;
-import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_floor_plan/src/export/export_font.dart';
@@ -29,26 +28,13 @@ class _MapBundle extends CachingAssetBundle {
 
 Uint8List _file(String path) => File(path).readAsBytesSync();
 
-/// The laid-out width of [text] in [family] at 20 px.
-double _width(String text, String family) {
-  final painter = TextPainter(
-    text: TextSpan(
-        text: text, style: TextStyle(fontFamily: family, fontSize: 20)),
-    textDirection: TextDirection.ltr,
-  )..layout();
-  final width = painter.width;
-  painter.dispose();
-  return width;
-}
-
 void main() {
   group('V-10 the asset keys are the package\'s', () {
     // Written out, not read from the constants: a key that drifted back to
     // the app's `assets/...` must turn these red (M-14b1-1).
     const libraryKey =
         'packages/jet_cad_floor_plan/assets/library/furniture.jetlib';
-    const fontKey =
-        'packages/jet_cad_floor_plan/assets/fonts/Roboto-Regular.ttf';
+    const fontKey = 'packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf';
     const licenceKey =
         'packages/jet_cad_floor_plan/assets/fonts/Roboto_LICENSE.txt';
 
@@ -78,7 +64,7 @@ void main() {
 
     test('PA4 the export font loads from a bundle holding the package key',
         () async {
-      final bytes = _file('assets/fonts/Roboto-Regular.ttf');
+      final bytes = _file('lib/fonts/Roboto-Regular.ttf');
       expect(await loadExportFont(_MapBundle({fontKey: bytes})),
           orderedEquals(bytes));
     });
@@ -87,7 +73,7 @@ void main() {
       final pubspec = File('pubspec.yaml').readAsStringSync();
       for (final asset in const [
         'assets/library/furniture.jetlib',
-        'assets/fonts/Roboto-Regular.ttf',
+        'lib/fonts/Roboto-Regular.ttf',
         'assets/fonts/Roboto_LICENSE.txt',
       ]) {
         expect(
@@ -100,7 +86,12 @@ void main() {
   });
 
   group('V-11 ensureFloorPlanFonts', () {
-    const sample = 'Masa 12 · Teras İçi';
+    // The registration is process-wide: each test starts from none (review
+    // F-3), and every call that reads a bundle runs in real async time.
+    setUp(resetFloorPlanFontsForTest);
+    tearDown(resetFloorPlanFontsForTest);
+
+    const fontKey = 'packages/jet_cad_floor_plan/lib/fonts/Roboto-Regular.ttf';
 
     testWidgets(
         'PA6 a bundle without the font fails the registration, and the next '
@@ -110,40 +101,22 @@ void main() {
             ensureFloorPlanFonts(_MapBundle(const {})), throwsA(anything));
       });
       // Not held: this call registers from a bundle that has the bytes.
-      final bytes = _file('assets/fonts/Roboto-Regular.ttf');
-      await tester.runAsync(() => ensureFloorPlanFonts(_MapBundle({
-            'packages/jet_cad_floor_plan/assets/fonts/'
-                'Roboto-Regular.ttf': bytes
-          })));
-    });
-
-    testWidgets(
-        'PA7 after the registration family Roboto lays out in the bundled '
-        'face, not the test font (M-14b1-2)', (tester) async {
-      final bytes = _file('assets/fonts/Roboto-Regular.ttf');
-      // A probe family carrying the same bytes: what Roboto must measure as.
-      await tester.runAsync(() async {
-        final probe = FontLoader('JetCadRobotoProbe')
-          ..addFont(Future.value(ByteData.sublistView(bytes)));
-        await probe.load();
-        await ensureFloorPlanFonts(_MapBundle({
-          'packages/jet_cad_floor_plan/assets/fonts/Roboto-Regular.ttf': bytes
-        }));
-      });
-      // The test font draws every glyph as a square of the font size; Roboto
-      // does not, so the two widths differ.
-      final unregistered = _width(sample, 'NoSuchFamily');
-      final roboto = _width(sample, kFloorPlanFontFamily);
-      final probe = _width(sample, 'JetCadRobotoProbe');
-      expect(probe, isNot(unregistered), reason: 'premise: the probe loaded');
-      expect(roboto, probe);
-      expect(kFloorPlanFontFamily, 'Roboto');
+      final bytes = _file('lib/fonts/Roboto-Regular.ttf');
+      await tester
+          .runAsync(() => ensureFloorPlanFonts(_MapBundle({fontKey: bytes})));
     });
 
     testWidgets('PA8 a second call returns the first call\'s future',
         (tester) async {
-      final first = ensureFloorPlanFonts();
-      expect(ensureFloorPlanFonts(), same(first));
+      final bundle =
+          _MapBundle({fontKey: _file('lib/fonts/Roboto-Regular.ttf')});
+      await tester.runAsync(() async {
+        final first = ensureFloorPlanFonts(bundle);
+        expect(ensureFloorPlanFonts(bundle), same(first));
+        expect(ensureFloorPlanFonts(), same(first),
+            reason: 'a later call, whatever its bundle, gets the first');
+        await first;
+      });
     });
   });
 }

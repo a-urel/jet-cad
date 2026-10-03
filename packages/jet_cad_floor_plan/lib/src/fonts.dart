@@ -5,6 +5,7 @@
 // family itself, from its own bytes, before the first document is measured:
 // the screen then lays text out in the same face the PDF embeds, on every
 // platform, whatever the host's default font.
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/services.dart' show AssetBundle, FontLoader, rootBundle;
 
 import 'export/export_font.dart';
@@ -13,6 +14,13 @@ import 'export/export_font.dart';
 const String kFloorPlanFontFamily = 'Roboto';
 
 Future<void>? _registered;
+
+/// Forgets the registration, so the next [ensureFloorPlanFonts] registers
+/// again: a test seam (the registration is process-wide, and a test must
+/// not inherit another's pending future). The engine keeps any face already
+/// loaded.
+@visibleForTesting
+void resetFloorPlanFontsForTest() => _registered = null;
 
 /// Registers family [kFloorPlanFontFamily] from the package's bundled Roboto
 /// (read from [bundle], [rootBundle] when null). Once per process: every

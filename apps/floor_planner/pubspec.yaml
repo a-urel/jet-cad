@@ -29,11 +29,9 @@ dependencies:
     path: ../../packages/jet_cad_floor_plan
   jet_cad_restaurant_symbols:
     path: ../../packages/jet_cad_restaurant_symbols
-  meta: ^1.18.0
   # The app names PdfPageFormat (the print flow's page size, spec 13 D9);
   # the same bound as jet_cad_2d_flutter's.
   pdf: ^3.13.1
-  printing: ^5.15.1
   vector_math: ^2.2.0
   web: ^1.1.0
 
@@ -44,3 +42,12 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Spec 14 V-11 (review F-1): the app declares the bare family the
+  # documents name, from the planner package's bytes (a package font path
+  # is resolved under the package's lib/), so no platform -- the web's
+  # engine fetches Google's Roboto when the manifest has none -- draws text
+  # in another face.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf

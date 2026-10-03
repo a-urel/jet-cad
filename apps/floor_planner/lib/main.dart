@@ -23,9 +23,19 @@ const int kAppThumbnailCapacity = 128;
 
 Future<void> main() async {
   // The planner's font is registered from the package's bytes before the
-  // first document is measured (spec 14 V-11).
+  // first document is measured (spec 14 V-11). The pubspec declares the
+  // family too; a failed registration is reported, not fatal: the app still
+  // starts (review F-4).
   WidgetsFlutterBinding.ensureInitialized();
-  await ensureFloorPlanFonts();
+  try {
+    await ensureFloorPlanFonts();
+  } catch (error, stack) {
+    FlutterError.reportError(FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'floor_planner',
+        context: ErrorDescription('while registering the planner font')));
+  }
   registerFontLicences();
   runApp(const FloorPlannerApp());
 }

@@ -696,6 +696,16 @@ items below amend it and are binding where they differ.
   the measured width of a string in family `'Roboto'` differs before and
   after it under the test font, and equals the width measured in the
   declared package family.
+- **V-11a. Amended at execution (review of 14b-1, F-1, F-8).** On the
+  web the engine fetches Google's Roboto whenever the app's font manifest
+  has no family `Roboto`, so registering a second face at run time cannot
+  be relied on there. The font file therefore lives in the package's
+  `lib/fonts/`, and **a host declares the bare family** in its pubspec
+  (`fonts: - family: Roboto  fonts: - asset:
+  packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf`), as
+  `apps/floor_planner` does; `ensureFloorPlanFonts` stays for a host that
+  does not (native platforms). `ensureFloorPlanFonts` is exported by
+  `editor.dart` now and by the host barrel when 14b-2 writes it.
 - **V-12. Behaviour-neutral.** No public behaviour of the app changes; no
   golden PNG changes; the engine and render packages are untouched; the
   two allocation invariant tests are untouched and green. The gate gains

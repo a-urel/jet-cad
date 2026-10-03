@@ -7,10 +7,10 @@ import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 
 import '../document_files.dart';
-import 'package:jet_cad_floor_plan/editor.dart';
 
 /// The page [document]'s root carries, or null when it has none (spec 13
 /// D8: the flow then returns without effect). Read from the document, never
