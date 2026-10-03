@@ -8,7 +8,7 @@
 // parameters and its group's transform, over the oracle's own cut.
 import 'dart:math' as math;
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/wall.dart';

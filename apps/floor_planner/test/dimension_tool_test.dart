@@ -18,7 +18,7 @@
 // unturned (the plan's Ruling 11-9).
 import 'dart:math' as math;
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/dimension_attach.dart';
 import 'package:floor_planner/parametric/dimension_tool.dart';

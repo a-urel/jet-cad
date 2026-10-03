@@ -6,7 +6,7 @@
 // call `opening_geometry.dart`.
 import 'dart:typed_data';
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/object_grips.dart';

@@ -6,7 +6,7 @@
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/wall.dart';

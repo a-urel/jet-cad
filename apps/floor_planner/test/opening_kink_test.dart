@@ -12,7 +12,7 @@
 // plan is turned 23 degrees, and the camera of the shell tests is rotated.
 import 'dart:math' as math;
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/opening.dart';
 import 'package:floor_planner/parametric/opening_geometry.dart';

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/page_panel.dart';
 import 'package:floor_planner/panel_number.dart';
 import 'package:floor_planner/parametric/box.dart';

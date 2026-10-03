@@ -1,4 +1,4 @@
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/box.dart';
 import 'package:floor_planner/planner_view.dart';
 import 'package:flutter/material.dart';

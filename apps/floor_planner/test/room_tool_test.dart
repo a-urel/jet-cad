@@ -11,7 +11,7 @@
 // label string is at least 0.0005 m² from a rounding tie. Seeds are
 // fractional, and the fixtures run at the origin and at the corpus far
 // origin with every wall and separator in its own rotated group.
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/live_objects.dart';

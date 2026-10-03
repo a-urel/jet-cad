@@ -16,7 +16,7 @@
 // arithmetic, each label at least 0.0005 m² from a rounding tie.
 import 'dart:math' as math;
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/object_grips.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';

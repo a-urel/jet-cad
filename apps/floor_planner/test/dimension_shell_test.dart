@@ -22,7 +22,7 @@
 // assertion.
 import 'dart:math' as math;
 
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/catalog.dart';
 import 'package:floor_planner/parametric/dimension.dart';
 import 'package:floor_planner/parametric/wall.dart';

@@ -10,7 +10,7 @@
 // label string is at least 0.0005 m² from a rounding tie. Points are
 // fractional; the relational cases run at the origin and at the corpus far
 // origin with every wall in its own rotated group.
-import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/room.dart';
 import 'package:floor_planner/parametric/live_objects.dart';
 import 'package:floor_planner/parametric/room_inputs.dart';

@@ -12,6 +12,7 @@ import 'dart:typed_data';
 
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/main.dart';
+import 'package:floor_planner/planner_shell.dart';
 import 'package:floor_planner/parametric/wall_tool.dart';
 import 'package:floor_planner/symbols/symbol_library.dart';
 import 'package:floor_planner/symbols/symbol_library_loader.dart';

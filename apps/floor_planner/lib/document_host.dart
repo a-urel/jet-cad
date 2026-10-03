@@ -21,7 +21,7 @@ import 'export/export_dialog.dart';
 import 'export/export_flow.dart';
 import 'export/export_font.dart';
 import 'export/page_printer.dart';
-import 'main.dart';
+import 'planner_shell.dart';
 import 'new_document.dart';
 import 'parametric/catalog.dart';
 import 'shell_commands.dart';
