@@ -5,6 +5,8 @@
 // a plan kept in memory; a Design / Service toggle that asks before it
 // discards service edits; selection by table number; and a log of the
 // API's state. An example and an integration surface, not a product.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
@@ -31,15 +33,18 @@ Future<void> main() async {
 /// The demo. [plans] seeds the areas' stored plans by name (tests); an area
 /// without one starts empty.
 class RestaurantDemo extends StatelessWidget {
-  const RestaurantDemo({super.key, this.plans = const {}});
+  const RestaurantDemo({super.key, this.plans = const {}, this.random});
 
   final Map<String, String> plans;
+
+  /// The source of "Random statuses" (tests seed it, 14c R-13).
+  final math.Random? random;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'Restaurant demo',
         theme: ThemeData(colorSchemeSeed: Colors.teal),
-        home: DemoHome(plans: plans),
+        home: DemoHome(plans: plans, random: random),
       );
 }
 
@@ -53,9 +58,10 @@ final class Area {
 }
 
 class DemoHome extends StatefulWidget {
-  const DemoHome({super.key, required this.plans});
+  const DemoHome({super.key, required this.plans, this.random});
 
   final Map<String, String> plans;
+  final math.Random? random;
 
   @override
   State<DemoHome> createState() => DemoHomeState();
@@ -77,6 +83,7 @@ class DemoHomeState extends State<DemoHome> {
           widget.plans[name]),
   ];
   int _area = 0;
+  late final math.Random _random = widget.random ?? math.Random();
   final TextEditingController _number = TextEditingController();
 
   /// The newest line first.
@@ -166,6 +173,44 @@ class DemoHomeState extends State<DemoHome> {
     _log('${area.name}: reloaded');
   }
 
+  /// The statuses a POS would set (14c S10): by the selected tables.
+  static final Map<String, TableStatus?> kStatuses = {
+    'Free': null,
+    'Ordered': TableStatus(color: const Color(0x99FFB300)),
+    'Eating': TableStatus(color: const Color(0x9943A047)),
+    'Bill': TableStatus(color: const Color(0x99E53935), caption: 'Bill'),
+  };
+
+  void _setStatus(String name) {
+    final c = area.controller;
+    final next = Map<String, TableStatus>.of(c.tableStatuses.value);
+    final status = kStatuses[name];
+    for (final n in c.selectedTables.value) {
+      if (status == null) {
+        next.remove(n);
+      } else {
+        next[n] = status;
+      }
+    }
+    c.setTableStatus(next);
+    _log('${area.name}: $name for '
+        '{${(c.selectedTables.value.toList()..sort()).join(', ')}}');
+  }
+
+  void _randomStatuses() {
+    final c = area.controller;
+    final names = kStatuses.keys.toList();
+    final next = <String, TableStatus>{};
+    for (final t in c.tables) {
+      final n = t.number;
+      if (n == null) continue;
+      final status = kStatuses[names[_random.nextInt(names.length)]];
+      if (status != null) next[n] = status;
+    }
+    c.setTableStatus(next);
+    _log('${area.name}: random statuses for ${next.length} tables');
+  }
+
   void _select() {
     final numbers = {for (final n in _number.text.split(',')) n.trim()}
       ..remove('');
@@ -221,6 +266,8 @@ class DemoHomeState extends State<DemoHome> {
               exportName: area.name.toLowerCase(),
               onExport: (e) => _log('${area.name}: exported ${e.fileName}, '
                   '${e.bytes.length} bytes'),
+              onTableTap: (n) => _log('${area.name}: tapped $n'),
+              onLayoutChanged: () => _log('${area.name}: layout changed'),
             ),
           ),
           SizedBox(
@@ -265,6 +312,20 @@ class DemoHomeState extends State<DemoHome> {
                     key: const Key('select'),
                     onPressed: _select,
                     child: const Text('Select')),
+                const SizedBox(height: 16),
+                Text('Status of the selected tables', style: title),
+                const SizedBox(height: 4),
+                Wrap(spacing: 6, runSpacing: 6, children: [
+                  for (final name in kStatuses.keys)
+                    OutlinedButton(
+                        key: Key('status-${name.toLowerCase()}'),
+                        onPressed: () => _setStatus(name),
+                        child: Text(name)),
+                  OutlinedButton(
+                      key: const Key('status-random'),
+                      onPressed: _randomStatuses,
+                      child: const Text('Random statuses')),
+                ]),
                 const SizedBox(height: 16),
                 Text('Tables', style: title),
                 Text(

@@ -5,15 +5,17 @@
 // cannot (a service move comes with 14c).
 // ignore_for_file: invalid_use_of_internal_member
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
-import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart' show FloorPlanMode;
+import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
+    show FloorPlanMode, TableStatus;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show ViewportTransform;
+    show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 import 'package:restaurant_demo/main.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -37,10 +39,10 @@ String salonPlan() {
 Finder byKey(String k) => find.byKey(Key(k));
 
 Future<DemoHomeState> pumpDemo(WidgetTester tester,
-    {Map<String, String> plans = const {}}) async {
+    {Map<String, String> plans = const {}, math.Random? random}) async {
   await tester.binding.setSurfaceSize(const Size(1600, 1000));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester.pumpWidget(RestaurantDemo(plans: plans));
+  await tester.pumpWidget(RestaurantDemo(plans: plans, random: random));
   await tester.pump();
   await tester.pump();
   return tester.state<DemoHomeState>(find.byType(DemoHome));
@@ -312,5 +314,77 @@ void main() {
     await tester.pump();
     expect(demo.area.controller.selectedTables.value, {'2', '9'});
     expect(demo.log.first, 'Salon: selected {2, 9}');
+  });
+
+  testWidgets(
+      'D12 status buttons set the selected tables\' statuses; Free clears '
+      'them (14c S10)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    c.select({'1', '2'});
+    await tester.pump();
+    await tester.tap(byKey('status-eating'));
+    await tester.pump();
+    expect(c.tableStatuses.value, {
+      '1': DemoHomeState.kStatuses['Eating'],
+      '2': DemoHomeState.kStatuses['Eating'],
+    });
+    expect(demo.log.first, 'Salon: Eating for {1, 2}');
+    c.select({'2'});
+    await tester.tap(byKey('status-bill'));
+    await tester.pump();
+    expect(c.tableStatuses.value['2']!.caption, 'Bill');
+    c.select({'1'});
+    await tester.tap(byKey('status-free'));
+    await tester.pump();
+    expect(c.tableStatuses.value.keys, ['2']);
+  });
+
+  testWidgets('D13 random statuses are seeded (14c R-13)', (tester) async {
+    final demo = await pumpDemo(tester,
+        plans: {'Salon': salonPlan()}, random: math.Random(7));
+    await tester.tap(byKey('status-random'));
+    await tester.pump();
+    final names = DemoHomeState.kStatuses.keys.toList();
+    final expected = math.Random(7);
+    final want = <String, TableStatus>{};
+    for (final n in ['1', '2']) {
+      final s = DemoHomeState.kStatuses[names[expected.nextInt(names.length)]];
+      if (s != null) want[n] = s;
+    }
+    expect(demo.area.controller.tableStatuses.value, want);
+    expect(demo.log.first, 'Salon: random statuses for ${want.length} tables');
+  });
+
+  testWidgets('D14 in the service, a tap and a drag are logged by number',
+      (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    Offset onScreen(String n) {
+      final d = c.activeDocument;
+      final node = d.tree[TableSurvey.of(d).withNumber(n).single.instance]!
+          as InstanceNode;
+      final def = d.tree.definition(node.definition)!;
+      final w = node.transform.transformPoint(def.basePoint);
+      final s = c.camera.value.worldToScreen(w);
+      return tester.getTopLeft(find.byType(InteractionLayer)) +
+          Offset(s.x, s.y);
+    }
+
+    await tester.tapAt(onScreen('2'));
+    await tester.pump();
+    // The newest line first: the selection, then the tap that made it.
+    expect(demo.log.first, 'Salon: tapped 2');
+    expect(demo.log[1], 'Salon: selected {2}');
+    final g = await tester.startGesture(onScreen('1'));
+    await g.moveBy(const Offset(40, 0));
+    await g.moveBy(const Offset(40, 0));
+    await g.up();
+    await tester.pump();
+    expect(demo.log, contains('Salon: layout changed'));
+    expect(c.serviceEdited, isTrue);
   });
 }
