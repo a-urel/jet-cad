@@ -414,3 +414,19 @@ expected number and count is written out by hand.
 - **Q-4.** Rotating after placement (T16): in the **design** mode only
   (proposed; the umbrella's decision 10), or also in the **selection**
   mode during service?
+
+## The human's rulings (2026-10-03)
+
+*"1) bu sürümde olmayabilir. 2) önerin uygun ama manuel değiştirilebilmeli.
+3) uygun. 4) sadece tasarım modunda. bu branch'te devam edebiliriz."*
+
+- **Q-1 closed:** no per-table seat count in v1 (T3 stands).
+- **Q-2 closed:** each plan numbers from 1 by itself, and **every number
+  can be changed by hand** (T14's Number field); because the next number
+  is `max + 1` over the live numeric numbers (T5), a plan whose first
+  table is renamed `101` continues `102`, `103`, … — a starting number
+  needs no setting of its own.
+- **Q-3 closed:** the size rule and the 8-character limit stand (T4, T8).
+- **Q-4 closed:** rotating a placed table is a **design-mode** action only
+  (T16); the selection mode does not rotate (umbrella decision 10).
+- The work continues on `claude/exciting-pasteur-9m22jv`.
