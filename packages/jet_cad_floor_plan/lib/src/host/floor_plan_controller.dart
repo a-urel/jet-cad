@@ -206,6 +206,11 @@ class FloorPlanController extends ChangeNotifier {
     };
   }
 
+  /// Settles the active view's pending input (H11): for the view's own
+  /// flows (Export, Print) before they read the plan.
+  @internal
+  void settle() => _settle?.call();
+
   _Plan get _active => _service ?? _design;
 
   /// Whether the service copy has edits (H1): the demo asks before
@@ -281,6 +286,8 @@ class FloorPlanController extends ChangeNotifier {
   void setMode(FloorPlanMode next) {
     if (next == _mode.value) return;
     _settle?.call();
+    // The settle may have renumbered a selected table: read it now (V4).
+    _refreshSelected();
     final numbers = _selectedTables.value;
     if (next == FloorPlanMode.selection) {
       _service = _attach(_copyOf(_design));
@@ -300,6 +307,7 @@ class FloorPlanController extends ChangeNotifier {
     final service = _service;
     if (service == null) return;
     _settle?.call();
+    _refreshSelected();
     final numbers = _selectedTables.value;
     _drop(service);
     _service = _attach(_copyOf(_design));
