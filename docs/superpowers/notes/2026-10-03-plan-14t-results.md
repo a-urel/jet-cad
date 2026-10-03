@@ -24,10 +24,10 @@ before.
 |---|---|---|
 | Spike, spec rev 1, rev 2 | `9611727`, `ccebdff` | rev 1: Ready with fixes (R-1..R-13; R-1 critical: a drawing tool's down executes), applied in rev 2 |
 | Plan | `c6bb290` | — |
-| 1 Touch sessions in the layer | `da3c8a9` | review in progress at this commit |
+| 1 Touch sessions in the layer | `da3c8a9` | **Approved with fixes** (shared review of 1–4; F-1 a finger's exit cancelled a mouse band) |
 | 2 The pinch | `f91f2ce` | idem |
 | 3 Finger-sized targets | `7cd9a70` | idem |
-| 4 The selection mode, the drawing tools | `4a338c9` | idem |
+| 4 The selection mode, the drawing tools | `4a338c9` | idem → `7ae3c3b` (F-1..F-7) |
 
 One implementer (this session); the spec's reviewer prototyped T3 and T4
 and ran the suites against them; the code reviewer re-ran the gates in its
@@ -38,13 +38,13 @@ own worktree and fired its own mutants.
 | Package | Result |
 |---|---|
 | engine `packages/jet_cad_2d` | **untouched** |
-| render `packages/jet_cad_2d_flutter` | **1,225 passed** + 1 skip + 7 standing (text ladder rungs 1–5, text LOD ladder rungs 1–2, as before); analyze, format clean |
-| planner `packages/jet_cad_floor_plan` | **967 passed**; analyze, format clean |
+| render `packages/jet_cad_2d_flutter` | **1,229 passed** + 1 skip + 7 standing (text ladder rungs 1–5, text LOD ladder rungs 1–2, as before); analyze, format clean |
+| planner `packages/jet_cad_floor_plan` | **969 passed**; analyze, format clean |
 | app `apps/floor_planner` | **192 passed**; analyze, format clean |
 | demo `apps/restaurant_demo` | **17 passed**; analyze, format clean |
 | web builds | `apps/floor_planner` and `apps/restaurant_demo`: `✓ Built build/web` |
 
-**Touch smoke (Chromium, CDP touch events, tr-TR), at `4a338c9`:** in the
+**Touch smoke (Chromium, CDP touch events, tr-TR), at `4a338c9` and again at `7ae3c3b`:** in the
 demo's service mode a touch tap on table 3 logged "tapped 3"; a one-finger
 drag of table 6 moved it and logged one layout change; a drag of table 7
 joined by a second finger zoomed the view by the fingers' span ratio
@@ -74,6 +74,13 @@ finger, the rotation grip at the mouse radius on touch, the table reach
 taking the later-drawn, the reach ignored, the polygon distance to one
 edge.
 
+The code review's 47 mutants: 38 red; its six test gaps (the press-mode
+opt-ins of `SelectTool` and `SymbolPlaceTool`, the grip distance's
+rotation terms, the reach's instance scale, a mouse given a 6 px table
+reach, the long press through the view) are red after `7ae3c3b`, with the
+three fixes' own mutants (an exit while a mouse holds the layer, a mouse
+routed during a session, a lift off the canvas routed).
+
 **Survive, recorded:** **M-14t-8** (the multi flag reset at a lift):
 equivalent — after a lift the remaining finger is neither held nor routed,
 and a new finger finds another finger down and makes the session multi
@@ -100,6 +107,15 @@ is pinned at the layer (TL8).
   boundary in definition units times the instance's `sqrt(|det|)`: exact
   for the placements (turns and mirrors), approximate for a table scaled by
   hand unevenly.
+
+- **Review fixes beyond the spec:** a touch session sends no exit while a
+  mouse holds the layer (F-1: the exit cancelled a live mouse band); no
+  precise pointer is routed while any touch session runs (F-2, R-9a's
+  second half); a lift-mode finger lifted off the canvas places nothing
+  (F-7).
+- **`kTouchHoldBack` is not pinned by the planner suite** on its own: the
+  long press is timed from contact whatever its value (the tool subtracts
+  it); the render suite pins the value (TL3).
 
 ## Found, not fixed
 

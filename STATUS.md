@@ -63,16 +63,33 @@ mode** built in; what is missing for that comes first.
   The render package gained one `mounted` guard (`RulerFrame`). Gates:
   render 1,197 + 1 skip + 7 standing,
   planner 961, app 192, demo 17, both web builds; the engine untouched.
+- **Done on the branch (14t, touch):** see
+  [2026-10-03-plan-14t-results.md](docs/superpowers/notes/2026-10-03-plan-14t-results.md);
+  spike [2026-10-03-touch-spike.md](docs/superpowers/notes/2026-10-03-touch-spike.md),
+  spec [2026-10-03-touch-design.md](docs/superpowers/specs/2026-10-03-touch-design.md)
+  rev 2. Two fingers pinch about their midpoint and pan; a finger is held
+  back 100 ms (a select-like tool) or until it lifts (a drawing tool, which
+  sees the slide as a hover and places where the finger lifts), so a pinch
+  never taps, drags, draws or commits; two fingers keep every tool out
+  until all lift; a second finger cancels a table drag; a finger reaches
+  24 px after a 6 px pick misses, and its grips, slop and table picks are
+  finger-sized. The render package changed (the layer, the camera
+  detector, the select tool, the grip cache, the ruler). Gates: render
+  1,229 + 1 skip + 7 standing, planner 969, app 192, demo 17, both web
+  builds, a Chromium touch smoke; the engine untouched. **No device was
+  measured.**
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this
   session); the repo's floor is unchanged (3.44.0).
 - **Owed:** the human's macOS and web look at the palette, the font, the
   table numbers and the demo (now with the service mode's taps, drags and
-  colours); a look at the amendments of 14b-2 (the service copy as the
-  barrier, Export of the copy) and of 14c (the render guard, the caption
-  below the number, statuses set on the selected tables); the merge, on
+  colours, and touch on a tablet: pinch, the hold-back, finger targets); a look at the amendments of 14b-2 (the service copy as the
+  barrier, Export of the copy), of 14c (the render guard, the caption
+  below the number, statuses set on the selected tables) and of 14t (the
+  press and lift modes, `fitToView` framing withdrawn); the merge, on
   the human's word; the earlier owed items below stand.
-- **Next:** the touch spike (14t: pinch, two fingers, the long press on a
-  real device), with its own spec.
+- **Next:** the restaurant embedding's six slices are done on the branch.
+  What remains is the human's: the look (now on a touch device too), the
+  amendments of 14b-2, 14c and 14t, and the merge into `main`.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
