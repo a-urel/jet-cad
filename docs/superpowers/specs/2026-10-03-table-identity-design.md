@@ -335,7 +335,8 @@ mirrored**, on a non-default layer (the degenerate-fixture rule); every
 expected number and count is written out by hand.
 
 - **M-14a-1 (umbrella M-14a):** next number `count + 1` — live tables
-  `"1"` and `"3"` give `"4"`, not `"3"`.
+  `"1"` and `"3"` give `"4"`, not `"3"`. And the Q-2 ruling: the only table renamed
+  `101` at the field, the next placement is `"102"`.
 - **M-14a-2:** a deleted table counted — tables 1–5, delete 5, place: the
   new one is `"5"`; and the deleted number is accepted at the field.
 - **M-14a-3:** non-numeric or long numbers counted — tables `"07"`, `"B9"`,
