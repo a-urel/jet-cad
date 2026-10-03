@@ -50,14 +50,29 @@ mode** built in; what is missing for that comes first.
   alone, Export and Print in both. `apps/restaurant_demo` (every runner)
   shows two dining areas with a Design / Service toggle. Gates: planner
   925, app 192, demo 11, both web builds; engine and render untouched.
+- **Done on the branch (14c, selection-mode behaviour):** see
+  [2026-10-03-plan-14c-results.md](docs/superpowers/notes/2026-10-03-plan-14c-results.md);
+  spec [2026-10-03-selection-mode-design.md](docs/superpowers/specs/2026-10-03-selection-mode-design.md)
+  rev 2. In the selection mode a tap inside a table's top selects it and
+  reports its number (`onTableTap`); Shift, Ctrl or ⌘ toggles; a long
+  press adds or removes; a drag moves the selection in one step on the
+  service copy (`onLayoutChanged`); the floor pans; a locked table is
+  tapped only. `setTableStatus` colours tables by number (a colour and a
+  caption below the number; not document state), under the drafting. The
+  demo opens on two furnished sample areas with status buttons and a log.
+  The render package gained one `mounted` guard (`RulerFrame`). Gates:
+  render 1,197 + 1 skip + 7 standing,
+  planner 961, app 192, demo 16, both web builds; the engine untouched.
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this
   session); the repo's floor is unchanged (3.44.0).
 - **Owed:** the human's macOS and web look at the palette, the font, the
-  table numbers and the demo; a look at 14b-2's amendments (the service
-  copy as the barrier, the callbacks moved to 14c, Export of the copy);
-  the merge, on the human's word; the earlier owed items below stand.
-- **Next:** 14c's spec (selection-mode behaviour: table pick by tap,
-  status colours, moves); the touch spike (14t).
+  table numbers and the demo (now with the service mode's taps, drags and
+  colours); a look at the amendments of 14b-2 (the service copy as the
+  barrier, Export of the copy) and of 14c (the render guard, the caption
+  below the number, statuses set on the selected tables); the merge, on
+  the human's word; the earlier owed items below stand.
+- **Next:** the touch spike (14t: pinch, two fingers, the long press on a
+  real device), with its own spec.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
