@@ -72,6 +72,27 @@ void main() {
   });
 
   testWidgets(
+      'a finger marks nothing and clears a mouse\'s mark (spec 14t R-10)',
+      (tester) async {
+    final (state, _) = await pump(tester);
+    final child = tester.getRect(find.byKey(const Key('child')));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: child.topLeft + const Offset(50, 40));
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(child.topLeft + const Offset(60, 45));
+    await tester.pump();
+    expect(state.pointer.value, const Offset(60, 45));
+    final finger = await tester.startGesture(
+        child.topLeft + const Offset(200, 100),
+        kind: PointerDeviceKind.touch,
+        pointer: 7);
+    await finger.moveTo(child.topLeft + const Offset(230, 120));
+    await tester.pump();
+    expect(state.pointer.value, isNull);
+    await finger.up();
+  });
+
+  testWidgets(
       "the sheet corner's major tick sits at its screen x in the top bar",
       (tester) async {
     // S10: the frame-level check the painter test cannot make.

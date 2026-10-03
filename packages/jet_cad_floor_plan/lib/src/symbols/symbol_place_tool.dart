@@ -89,6 +89,11 @@ class SymbolPlaceTool extends Tool {
   @override
   ToolPhase get phase => _pressed ? ToolPhase.pressed : ToolPhase.idle;
 
+  /// A down only classifies a press and `cancel` executes nothing, so a
+  /// finger reaches this tool after the hold-back (spec 14t R-1).
+  @override
+  TouchPress get touchPress => TouchPress.press;
+
   /// Spec D6, 12a F-2: true while a press is down.
   @override
   bool get isMidShape => _pressed;

@@ -48,6 +48,11 @@ class TableSelectTool extends Tool {
   @override
   String get name => 'Tables';
 
+  /// A down only classifies a press and `cancel` executes nothing, so a
+  /// finger reaches this tool after the hold-back (spec 14t R-1).
+  @override
+  TouchPress get touchPress => TouchPress.press;
+
   @override
   ToolPhase get phase => switch (_gesture) {
         _Gesture.none => ToolPhase.idle,

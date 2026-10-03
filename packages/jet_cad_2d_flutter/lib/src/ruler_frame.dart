@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind, PointerEvent;
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
@@ -36,6 +37,10 @@ class RulerFrameState extends State<RulerFrame> {
   void _point(Offset? at) {
     if (mounted) pointer.value = at;
   }
+
+  /// The marked position: a precise pointer's, none for a finger.
+  static Offset? _cursorAt(PointerEvent e) =>
+      e.kind == PointerDeviceKind.touch ? null : e.localPosition;
 
   @override
   void dispose() {
@@ -107,8 +112,10 @@ class RulerFrameState extends State<RulerFrame> {
                     onExit: (_) => _point(null),
                     child: Listener(
                       behavior: HitTestBehavior.translucent,
-                      onPointerHover: (e) => _point(e.localPosition),
-                      onPointerMove: (e) => _point(e.localPosition),
+                      // A finger is not a cursor (spec 14t R-10): it marks
+                      // nothing and clears the mark.
+                      onPointerHover: (e) => _point(_cursorAt(e)),
+                      onPointerMove: (e) => _point(_cursorAt(e)),
                       onPointerCancel: (_) => _point(null),
                       child: widget.child,
                     ),

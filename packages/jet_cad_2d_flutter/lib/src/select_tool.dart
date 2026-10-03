@@ -42,6 +42,11 @@ class SelectTool extends Tool {
   @override
   ToolPhase get phase => _phase;
 
+  /// A down only classifies a press and `cancel` executes nothing, so a
+  /// finger reaches this tool after the hold-back (spec 14t R-1).
+  @override
+  TouchPress get touchPress => TouchPress.press;
+
   final HitPath _hit = HitPath();
   Offset _start = Offset.zero;
   final Vector2 _pressWorld = Vector2.zero();
