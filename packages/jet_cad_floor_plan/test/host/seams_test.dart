@@ -23,8 +23,8 @@ void main() {
     final doc = startupPlan(measurer);
     final selection = SelectionController(doc);
     addTearDown(selection.dispose);
-    await tester.pumpWidget(MaterialApp(
-        home: PlannerShell(document: doc, selection: selection)));
+    await tester.pumpWidget(
+        MaterialApp(home: PlannerShell(document: doc, selection: selection)));
     await tester.pump();
     final view = tester.widget<PlannerView>(find.byType(PlannerView));
     expect(view.selection, same(selection));

@@ -28,6 +28,7 @@ class PlannerView extends StatefulWidget {
     this.grips,
     this.textTool,
     this.fitRequests,
+    this.fitOnStart = true,
   });
 
   final DraftDocument document;
@@ -58,6 +59,11 @@ class PlannerView extends StatefulWidget {
   /// drawing area's last size (spec 14b-2 H8, `fitToView`).
   final Listenable? fitRequests;
 
+  /// Whether the camera is fitted after the first frame (Ruling 01-2).
+  /// False when the host hands over a camera it already placed: a mode
+  /// switch keeps the pan and zoom (spec 14b-2 R-13).
+  final bool fitOnStart;
+
   @override
   State<PlannerView> createState() => _PlannerViewState();
 }
@@ -66,7 +72,7 @@ class _PlannerViewState extends State<PlannerView> {
   /// Ruling 01-2: the camera is fitted once, to the size the drawing area
   /// really got; since Plan 04 the fit lands at the end of the first frame
   /// (Ruling 04-16).
-  bool _fitted = false;
+  late bool _fitted = !widget.fitOnStart;
 
   // The two caches are in the merge because they are the members that hear
   // a `DocChange`: an edit under a selected instance rebuilds the outline

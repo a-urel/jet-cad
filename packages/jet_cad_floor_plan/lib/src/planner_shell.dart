@@ -82,6 +82,8 @@ class PlannerShell extends StatefulWidget {
     this.thumbnails,
     this.selection,
     this.fitRequests,
+    this.camera,
+    this.fitOnStart = true,
   });
 
   final DraftDocument? document;
@@ -127,6 +129,13 @@ class PlannerShell extends StatefulWidget {
   /// view.
   final Listenable? fitRequests;
 
+  /// The host's camera (spec 14b-2 R-13): used and never disposed here,
+  /// so a mode switch keeps the view; [initialCamera] is then not read.
+  final CameraController? camera;
+
+  /// Forwarded to the view: false when [camera] is already placed.
+  final bool fitOnStart;
+
   @override
   State<PlannerShell> createState() => _PlannerShellState();
 }
@@ -167,11 +176,12 @@ class _PlannerShellState extends State<PlannerShell> {
         _resolver = DocumentStyleResolver(_document, foreground: foreground));
   }
 
-  late final CameraController _camera = CameraController(
-    widget.initialCamera ?? _nominalFit(),
-    minScale: kMinScale,
-    maxScale: kMaxScale,
-  );
+  late final CameraController _camera = widget.camera ??
+      CameraController(
+        widget.initialCamera ?? _nominalFit(),
+        minScale: kMinScale,
+        maxScale: kMaxScale,
+      );
   final GesturePolicy _policy = GesturePolicy.forPlatform();
 
   /// The host's when it passed one (spec 12a D2: object snap survives a
@@ -617,7 +627,7 @@ class _PlannerShellState extends State<PlannerShell> {
     _page
       ..removeListener(_onPage)
       ..dispose();
-    _camera.dispose();
+    if (widget.camera == null) _camera.dispose();
     _tableLabels.dispose();
     _parametric.dispose();
     // Last in, first out (spec 14a T12): both released, the slot is empty.
@@ -823,6 +833,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         grips: _grips,
                         textTool: _text,
                         fitRequests: widget.fitRequests,
+                        fitOnStart: widget.fitOnStart,
                       ),
                     ),
                   ),
