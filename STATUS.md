@@ -35,7 +35,7 @@ mode** built in; what is missing for that comes first.
   paper (a stacked table system re-stamps it inside the edit that turns
   it); a click on the number selects the table, Delete removes both; the
   Selection panel's Table section edits the number and turns the table
-  90° in place. Gates: render 1,196 + 1 skip + 7 standing, planner 890,
+  90° in place. Gates: render 1,196 + 1 skip + 7 standing, planner 892,
   restaurant 91, app 192, web built and smoke-tested; the engine
   untouched.
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this

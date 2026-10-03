@@ -23,7 +23,7 @@ the table; a turned or mirrored table's number reads upright.
 | 1 Render: the pick mapping, the delete cascade | `955e6f8` | **Approved with fixes** (shared review of 1–3) |
 | 2–3 The table model; placement numbers a table | `b4b586a` | idem → `355e12f` (F-1..F-8, all in tests) |
 | 4 The table system | `fc0dbe3` | **Approved with fixes** (shared review of 4–5) |
-| 5 The Table section, the rotate buttons | `c951bf7` | idem → `FIXSHA` (F-1 an unchanged commit showed an error line; F-2..F-10 tests and small fixes) |
+| 5 The Table section, the rotate buttons | `c951bf7` | idem → `c3b8278` (F-1 an unchanged commit showed an error line; F-2..F-10 tests and small fixes) |
 
 One implementer (this session) for every task; the reviews were
 independent agents that re-ran the gates in their own worktrees and fired
