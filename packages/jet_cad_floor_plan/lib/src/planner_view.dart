@@ -29,6 +29,7 @@ class PlannerView extends StatefulWidget {
     this.textTool,
     this.fitRequests,
     this.fitOnStart = true,
+    this.onFitted,
   });
 
   final DraftDocument document;
@@ -63,6 +64,9 @@ class PlannerView extends StatefulWidget {
   /// False when the host hands over a camera it already placed: a mode
   /// switch keeps the pan and zoom (spec 14b-2 R-13).
   final bool fitOnStart;
+
+  /// Called after each fit this view performs (review F-2).
+  final VoidCallback? onFitted;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -112,7 +116,11 @@ class _PlannerViewState extends State<PlannerView> {
 
   void _onFitRequest() {
     final size = _size;
-    if (size == null) return;
+    if (size == null) {
+      // Not laid out yet: the first layout fits (review F-2).
+      _fitted = false;
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
     WidgetsBinding.instance.ensureVisualUpdate();
   }
@@ -125,6 +133,7 @@ class _PlannerViewState extends State<PlannerView> {
     widget.camera.value = page != null
         ? fitToPage(page, size)
         : ViewportTransform.fit(widget.document.extents, size);
+    widget.onFitted?.call();
   }
 
   late final Listenable _chromeRepaint =

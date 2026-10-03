@@ -12,30 +12,35 @@ import '../export/page_printer.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_types.dart';
 
-/// The two flows of one [FloorPlanView].
+/// What the flows read from the view at call time (review F-1): a host
+/// rebuild with a new `onExport` closure must not rebuild the flows.
+typedef PageFlowSettings = ({
+  void Function(FloorPlanExport export)? onExport,
+  PagePrinter printer,
+  String exportName,
+});
+
+/// The two flows of one [FloorPlanView]: one per view state, for its
+/// controller.
 class PageFlows {
-  PageFlows({
-    required this.controller,
-    required this.onExport,
-    required this.printer,
-    required this.exportName,
-  });
+  PageFlows({required this.controller, required this.settings});
 
   final FloorPlanController controller;
-  final void Function(FloorPlanExport export)? onExport;
-  final PagePrinter printer;
-  final String exportName;
+
+  /// The view's current settings, read at each call.
+  final PageFlowSettings Function() settings;
 
   final ValueNotifier<bool> _ready = ValueNotifier(true);
+  bool _disposed = false;
 
   /// False while a flow runs: a second press does nothing.
   ValueListenable<bool> get ready => _ready;
 
   /// Export is offered only with an `onExport` (H6).
-  bool get canExport => onExport != null;
+  bool get canExport => settings().onExport != null;
 
   Future<void> export(BuildContext context) => _run(context, () async {
-        final sink = onExport;
+        final sink = settings().onExport;
         if (sink == null) return;
         final document = controller.activeDocument;
         final page = exportPageOf(document);
@@ -46,11 +51,13 @@ class PageFlows {
         if (!identical(document, controller.activeDocument)) return;
         final bytes = await exportBytes(document, page, choice,
             fontBytes: () => controller.exportFont.bytes);
-        if (!identical(document, controller.activeDocument)) return;
+        if (_disposed || !identical(document, controller.activeDocument)) {
+          return;
+        }
         final pdf = choice.format == ExportFormat.pdf;
         sink(FloorPlanExport(
           bytes: bytes,
-          fileName: '$exportName.${pdf ? 'pdf' : 'png'}',
+          fileName: '${settings().exportName}.${pdf ? 'pdf' : 'png'}',
           mimeType: pdf ? 'application/pdf' : 'image/png',
         ));
       });
@@ -62,20 +69,27 @@ class PageFlows {
         final font = await controller.exportFont.bytes;
         if (!identical(document, controller.activeDocument)) return;
         final bytes = await exportPdfBytes(document, page, fontBytes: font);
-        if (!identical(document, controller.activeDocument)) return;
-        await printer.print(bytes, exportName, printPageFormat(page));
+        if (_disposed || !identical(document, controller.activeDocument)) {
+          return;
+        }
+        final s = settings();
+        await s.printer.print(bytes, s.exportName, printPageFormat(page));
       });
 
   Future<void> _run(BuildContext context, Future<void> Function() flow) async {
-    if (!_ready.value) return;
+    if (_disposed || !_ready.value) return;
     _ready.value = false;
     try {
       controller.settle();
       await flow();
     } finally {
-      _ready.value = true;
+      // The view may have gone while the flow awaited (review F-1).
+      if (!_disposed) _ready.value = true;
     }
   }
 
-  void dispose() => _ready.dispose();
+  void dispose() {
+    _disposed = true;
+    _ready.dispose();
+  }
 }

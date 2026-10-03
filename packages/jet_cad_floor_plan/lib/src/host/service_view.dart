@@ -95,6 +95,10 @@ class _ServiceViewState extends State<ServiceView> {
 
   late DocumentStyleResolver _resolver = _resolverFor(_page.value);
 
+  /// Export and Print need a page, as the shell's do (R-5, review F-4).
+  late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
+      () => widget.flows.ready.value && _page.value != null);
+
   DocumentStyleResolver _resolverFor(PageComponent? page) =>
       DocumentStyleResolver(_document,
           foreground: foregroundFor(page?.background ?? 0xFFFFFFFF));
@@ -116,6 +120,7 @@ class _ServiceViewState extends State<ServiceView> {
   @override
   void dispose() {
     _page.removeListener(_onPage);
+    _pageReady.dispose();
     _tools.dispose();
     _idle.dispose();
     _outlines.dispose();
@@ -159,10 +164,10 @@ class _ServiceViewState extends State<ServiceView> {
                         'service-export',
                         'Export…',
                         Icons.ios_share_outlined,
-                        flows.ready,
+                        _pageReady,
                         () => flows.export(context)),
                   _button('service-print', 'Print…', Icons.print_outlined,
-                      flows.ready, () => flows.print(context)),
+                      _pageReady, () => flows.print(context)),
                 ],
               ),
             ),
@@ -181,6 +186,7 @@ class _ServiceViewState extends State<ServiceView> {
                   outlines: _outlines,
                   fitRequests: _c.fitRequests,
                   fitOnStart: _fitOnStart,
+                  onFitted: _c.fitted,
                 ),
               ),
             ),

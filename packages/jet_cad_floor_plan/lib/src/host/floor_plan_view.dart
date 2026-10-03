@@ -38,28 +38,29 @@ class FloorPlanView extends StatefulWidget {
 }
 
 class _FloorPlanViewState extends State<FloorPlanView> {
-  late PageFlows _flows = _flowsFor(widget);
+  late PageFlows _flows = _flowsFor(widget.controller);
 
   /// The fit-on-start answer, taken once per plan shown (R-13).
   DraftDocument? _fitFor;
   bool _fit = true;
 
-  PageFlows _flowsFor(FloorPlanView w) => PageFlows(
-        controller: w.controller,
-        onExport: w.onExport,
-        printer: w.printer ?? const PrintingPagePrinter(),
-        exportName: w.exportName,
+  /// One per controller: the settings are read from the current widget
+  /// at each call (review F-1).
+  PageFlows _flowsFor(FloorPlanController c) => PageFlows(
+        controller: c,
+        settings: () => (
+          onExport: widget.onExport,
+          printer: widget.printer ?? const PrintingPagePrinter(),
+          exportName: widget.exportName,
+        ),
       );
 
   @override
   void didUpdateWidget(FloorPlanView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller != widget.controller ||
-        oldWidget.onExport != widget.onExport ||
-        oldWidget.printer != widget.printer ||
-        oldWidget.exportName != widget.exportName) {
+    if (oldWidget.controller != widget.controller) {
       _flows.dispose();
-      _flows = _flowsFor(widget);
+      _flows = _flowsFor(widget.controller);
     }
   }
 
@@ -77,7 +78,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     return _fit;
   }
 
-  List<ShellCommand> _commands(BuildContext context) => [
+  List<ShellCommand> _commands() => [
         if (_flows.canExport)
           ShellCommand(
               id: 'export',
@@ -116,7 +117,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             camera: c.camera,
             fitOnStart: _fitOnStartFor(document),
             fitRequests: c.fitRequests,
-            fileCommands: _commands(context),
+            fileCommands: _commands(),
+            onFitted: c.fitted,
             onSettle: c.registerSettle,
             symbols: c.symbols,
             thumbnails: c.thumbnails,

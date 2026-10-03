@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:flutter/widgets.dart' show Size;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
@@ -70,16 +71,15 @@ final class _Requests extends ChangeNotifier {
 /// Notifies when the active plan changes (a mode switch, [load],
 /// [newPlan], [resetLayout]).
 class FloorPlanController extends ChangeNotifier {
-  FloorPlanController({
+  /// A controller over [json], or over an empty plan. Throws a
+  /// [FormatException] when [json] is not a plan, as [load] does, before
+  /// it builds anything it would have to dispose (review F-5).
+  factory FloorPlanController({
     List<SymbolLibrarySource> symbolSources = const [furnitureSymbolSource],
     SymbolLibraryLoader? symbols,
     SymbolThumbnails? thumbnails,
     String? json,
-  })  : _ownsSymbols = symbols == null,
-        symbols = symbols ?? SymbolLibraryLoader(sources: symbolSources),
-        _ownsThumbnails = thumbnails == null,
-        thumbnails = thumbnails ??
-            SymbolThumbnails(maxEntries: kFloorPlanThumbnailCapacity) {
+  }) {
     final measurer = FlutterTextMeasurer();
     final DraftDocument document;
     if (json == null) {
@@ -87,14 +87,43 @@ class FloorPlanController extends ChangeNotifier {
     } else {
       try {
         document = _decode(json, measurer, DraftPermissions.all);
-      } catch (_) {
+      } catch (e) {
         measurer.clear();
-        rethrow;
+        throw FormatException('Not a floor plan: $e');
       }
     }
-    _design = _attach(_Plan(document, measurer));
-    _savedState = document.commands.stateId;
+    return FloorPlanController._(_Plan(document, measurer),
+        symbolSources: symbolSources, symbols: symbols, thumbnails: thumbnails);
+  }
+
+  FloorPlanController._(
+    _Plan design, {
+    required List<SymbolLibrarySource> symbolSources,
+    SymbolLibraryLoader? symbols,
+    SymbolThumbnails? thumbnails,
+  })  : _ownsSymbols = symbols == null,
+        symbols = symbols ?? SymbolLibraryLoader(sources: symbolSources),
+        _ownsThumbnails = thumbnails == null,
+        thumbnails = thumbnails ??
+            SymbolThumbnails(maxEntries: kFloorPlanThumbnailCapacity) {
+    _design = _attach(design);
+    _savedState = design.document.commands.stateId;
+    _placeNominally();
     _refreshFlags();
+  }
+
+  /// The shell's nominal fit (1440 x 900), so the first frame of a new
+  /// plan's view is drawn near the right place before the real fit
+  /// (review F-6). Set here, never during a build.
+  void _placeNominally() {
+    final d = _design.document;
+    const size = Size(1440, 900);
+    final page = d.components.isRegistered<PageComponent>()
+        ? d.components.get<PageComponent>(d.rootHandle)
+        : null;
+    camera.value = page != null
+        ? fitToPage(page, size)
+        : ViewportTransform.fit(d.extents, size);
   }
 
   /// The symbol library the design mode's palette shows (H3, R-11): the
@@ -137,6 +166,10 @@ class FloorPlanController extends ChangeNotifier {
 
   final _Requests _fits = _Requests();
   bool _fitOnStart = true;
+
+  /// A [fitToView] no mounted view has performed yet (review F-2): the
+  /// next view fits on its first frame.
+  bool _fitPending = false;
   VoidCallback? _settle;
   bool _disposed = false;
 
@@ -181,16 +214,22 @@ class FloorPlanController extends ChangeNotifier {
   /// construction, [load], [newPlan]; not after a mode switch (R-13).
   @internal
   bool takeFitOnStart() {
-    final fit = _fitOnStart;
+    final fit = _fitOnStart || _fitPending;
     _fitOnStart = false;
     return fit;
   }
+
+  /// A view performed a fit: a pending [fitToView] is done (review F-2).
+  @internal
+  void fitted() => _fitPending = false;
 
   /// Starts loading the symbol library, once, when the design view first
   /// mounts (R-11): the binding exists then.
   @internal
   void startSymbols() {
-    if (_symbolsStarted || !_ownsSymbols) return;
+    // A shared loader too (review F-3): `load` is once-only, and the host
+    // that shares one need not call it.
+    if (_symbolsStarted) return;
     _symbolsStarted = true;
     unawaited(symbols.load());
   }
@@ -273,6 +312,7 @@ class FloorPlanController extends ChangeNotifier {
       _service = null;
     }
     _fitOnStart = true;
+    _placeNominally();
     _refreshFlags();
     notifyListeners();
   }
@@ -423,7 +463,10 @@ class FloorPlanController extends ChangeNotifier {
   }
 
   /// The active view frames the plan as on its first frame (H3, F-7).
-  void fitToView() => _fits.bump();
+  void fitToView() {
+    _fitPending = true;
+    _fits.bump();
+  }
 
   // ---------------------------------------------------------------------
   // Bookkeeping.

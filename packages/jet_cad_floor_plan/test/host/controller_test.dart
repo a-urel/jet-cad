@@ -10,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
@@ -288,6 +289,64 @@ void main() {
     expect(c.dirty.value, isFalse);
     c.load(planJson());
     expect(c.tables, hasLength(3));
+    await tester.pump();
+  });
+
+  testWidgets(
+      'C12 a load forgets the last designJson\'s state (review m31); a '
+      'bad json at construction is a FormatException (review F-5)',
+      (tester) async {
+    final c = controller(tester, planJson());
+    drawLine(c);
+    drawLine(c);
+    drawLine(c);
+    c.designJson(); // state 3 of the old plan
+    c.load(planJson());
+    drawLine(c);
+    c.markSaved(); // the new plan's current state
+    await tester.pump();
+    expect(c.dirty.value, isFalse);
+    expect(() => FloorPlanController(json: '{"entities": 7}'),
+        throwsFormatException);
+  });
+
+  testWidgets(
+      'C13 selectedTables holds numbered tables only: an unnumbered table '
+      'and a planter selected by hand are not in it (review m40); a hidden '
+      'table is not selectable (review m11b)', (tester) async {
+    final c = controller(tester, planJson());
+    final doc = c.activeDocument;
+    doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
+        at: Vector2(-4000, -3000), numbered: false));
+    final survey = TableSurvey.of(doc);
+    final bare = survey.tables.firstWhere((t) => t.number == null).instance;
+    final planter = doc.tree.nodes
+        .whereType<InstanceNode>()
+        .firstWhere((n) => !survey.tables.any((t) => t.instance == n.handle))
+        .handle;
+    c.activeSelection.replace([
+      SelectionKey.root(bare),
+      SelectionKey.root(planter),
+      SelectionKey.root(survey.withNumber('3').single.instance),
+    ]);
+    await tester.pump();
+    expect(c.selectedTables.value, {'3'});
+
+    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+    final hidden = doc.handleSeed.next();
+    doc.commands.execute(AddLayerCommand(LayerRecord(
+        handle: hidden,
+        name: 'Hidden',
+        color: const IndexedColor(2),
+        linetype: zero.linetype,
+        lineweight: zero.lineweight,
+        transparency: zero.transparency,
+        visible: false,
+        locked: false)));
+    doc.commands
+        .execute(SetInstanceLayerCommand(tableNode(doc, '1').handle, hidden));
+    c.select({'1', '2'});
+    expect(c.selectedTables.value, {'2'});
     await tester.pump();
   });
 }

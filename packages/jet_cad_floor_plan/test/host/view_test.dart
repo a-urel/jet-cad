@@ -3,6 +3,7 @@
 // canvas over the service copy, the settle before a switch, the drop rule,
 // and Export of what is on screen in both modes. Tables are placed on the
 // page, off its centre, turned and mirrored.
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -13,7 +14,12 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
+import 'package:jet_cad_floor_plan/src/host/page_flows.dart';
+import 'package:jet_cad_floor_plan/src/export/page_printer.dart';
 import 'package:jet_cad_floor_plan/src/new_document.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_library_loader.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:jet_cad_floor_plan/src/planner_shell.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
@@ -40,14 +46,37 @@ String pagePlan() {
 
 Finder byKey(String k) => find.byKey(Key(k));
 
+/// A printer that records its calls and finishes each when told.
+class FakePrinter implements PagePrinter {
+  final List<String> names = [];
+  final List<Completer<void>> pending = [];
+
+  @override
+  Future<void> print(Uint8List pdf, String name, PdfPageFormat format) {
+    names.add(name);
+    final done = Completer<void>();
+    pending.add(done);
+    return done.future;
+  }
+}
+
 Future<FloorPlanController> pumpView(WidgetTester tester,
-    {void Function(FloorPlanExport)? onExport}) async {
-  final c = FloorPlanController(json: pagePlan());
+    {void Function(FloorPlanExport)? onExport,
+    PagePrinter? printer,
+    String exportName = 'plan',
+    String? json,
+    SymbolLibraryLoader? symbols}) async {
+  final c = FloorPlanController(json: json ?? pagePlan(), symbols: symbols);
   addTearDown(c.dispose);
   await tester.binding.setSurfaceSize(const Size(1440, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: FloorPlanView(controller: c, onExport: onExport))));
+      home: Scaffold(
+          body: FloorPlanView(
+              controller: c,
+              onExport: onExport,
+              printer: printer,
+              exportName: exportName))));
   await tester.pump();
   await tester.pump();
   return c;
@@ -127,11 +156,13 @@ void main() {
   });
 
   testWidgets(
-      'V3 a switch, a reset and a load with the view mounted dispose the '
-      'old plans after the frame (M-14b2-12)', (tester) async {
+      'V3 a switch, a reset and a load with the view mounted: nothing '
+      'throws, the old plans are disposed after the frame (M-14b2-12 '
+      'survives: recorded)', (tester) async {
     final c = await pumpView(tester);
     c.setMode(FloorPlanMode.selection);
     await tester.pump();
+    final copy = c.activeDocument;
     move(c, '1', 500, 0);
     c.resetLayout();
     await tester.pump();
@@ -139,11 +170,17 @@ void main() {
     c.setMode(FloorPlanMode.design);
     await tester.pump();
     await tester.pump();
+    final oldDesign = c.activeDocument;
     c.load(pagePlan());
     await tester.pump();
     await tester.pump();
     expect(tester.takeException(), isNull);
     expect(c.tables, hasLength(2));
+    // The copy's systems were disposed last in, first out (review m33),
+    // and the dropped plans are disposed (review m36).
+    expect(copy.commands.expander, isNull);
+    expect(copy.commands.isDisposed, isTrue);
+    expect(oldDesign.commands.isDisposed, isTrue);
   });
 
   testWidgets(
@@ -262,5 +299,161 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
     await tester.pump();
     expect(c.canUndo.value, isTrue);
+  });
+
+  /// Lets the flows' real async work (the font, the PDF) run.
+  Future<void> letRun(WidgetTester tester, bool Function() done) async {
+    for (var i = 0; i < 400 && !done(); i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+    }
+  }
+
+  testWidgets(
+      'V9 Print in the selection mode prints the copy under the export name; '
+      'a second press while it runs does nothing (review m21b, m39)',
+      (tester) async {
+    final printer = FakePrinter();
+    final c = await pumpView(tester, printer: printer, exportName: 'teras');
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    move(c, '1', 400, 400);
+    await tester.tap(byKey('service-print'));
+    await tester.pump();
+    await letRun(tester, () => printer.names.isNotEmpty);
+    expect(printer.names, ['teras']);
+    await tester.tap(byKey('service-print'));
+    await tester.pump();
+    await letRun(tester, () => printer.names.length > 1);
+    expect(printer.names, ['teras'], reason: 'busy: the press is ignored');
+    // The chord is not a disabled button: the flows' own guard (m21b).
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
+    await tester.pump();
+    await letRun(tester, () => printer.names.length > 1);
+    expect(printer.names, ['teras'], reason: 'busy: the chord is ignored');
+    printer.pending.single.complete();
+    await tester.pump();
+    await tester.tap(byKey('service-print'));
+    await tester.pump();
+    await letRun(tester, () => printer.names.length > 1);
+    expect(printer.names, ['teras', 'teras']);
+    printer.pending.last.complete();
+    await tester.pump();
+  });
+
+  testWidgets(
+      'V10 a host rebuild, or the view removed, while Print runs throws '
+      'nothing (review F-1)', (tester) async {
+    final printer = FakePrinter();
+    final c = await pumpView(tester, printer: printer);
+    await tester.tap(byKey('toolbar-print'));
+    await tester.pump();
+    await letRun(tester, () => printer.names.isNotEmpty);
+    // A rebuild with a new closure, as a host's build makes one.
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: FloorPlanView(
+                controller: c, printer: printer, onExport: (_) {}))));
+    printer.pending.single.complete();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(byKey('toolbar-print'), findsOneWidget);
+
+    await tester.tap(byKey('toolbar-print'));
+    await tester.pump();
+    await letRun(tester, () => printer.names.length > 1);
+    await tester.pumpWidget(const SizedBox());
+    printer.pending.last.complete();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'V11 a plan swapped while a flow awaits: nothing is printed or '
+      'exported (review m21, m21c)', (tester) async {
+    final printer = FakePrinter();
+    final got = <FloorPlanExport>[];
+    final c = await pumpView(tester, printer: printer, onExport: got.add);
+    // The flow runs synchronously up to its first await; the plan is
+    // swapped right after, as a host could.
+    final flows = PageFlows(
+        controller: c,
+        settings: () =>
+            (onExport: got.add, printer: printer, exportName: 'plan'));
+    addTearDown(flows.dispose);
+    final printing = flows.print(tester.element(find.byType(FloorPlanView)));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await letRun(tester, () => printer.names.isNotEmpty);
+    await tester.runAsync(() => printing);
+    expect(printer.names, isEmpty);
+
+    await tester.tap(byKey('service-export'));
+    await tester.pump();
+    await tester.pump();
+    expect(byKey('export-dialog'), findsOneWidget);
+    c.resetLayout();
+    await tester.tap(byKey('export-format-png'));
+    await tester.pump();
+    await tester.tap(byKey('export-ok'));
+    await tester.pump();
+    await letRun(tester, () => got.isNotEmpty);
+    expect(got, isEmpty);
+  });
+
+  testWidgets(
+      'V12 fitToView right after a switch, and a load, fit the new view '
+      '(review F-2, m28)', (tester) async {
+    final c = await pumpView(tester);
+    await tester.pump();
+    final odd = ViewportTransform(
+        worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310, 2400));
+    c.camera.value = odd;
+    c.setMode(FloorPlanMode.selection);
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    // The selection mode's canvas is wider than the editor's: its fit.
+    final fitted = c.camera.value.worldToScreenMatrix.a;
+    expect(fitted, isNot(0.07));
+    c.camera.value = odd;
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    expect(c.camera.value.worldToScreenMatrix.a, fitted,
+        reason: 'the same view fits the same');
+
+    c.camera.value = odd;
+    c.load(pagePlan());
+    await tester.pump();
+    await tester.pump();
+    expect(c.camera.value.worldToScreenMatrix.a, fitted);
+  });
+
+  testWidgets(
+      'V13 a plan without a page: Export and Print are disabled in the '
+      'service bar (review F-4)', (tester) async {
+    final doc = plan();
+    final c = await pumpView(tester,
+        onExport: (_) {}, json: DraftDocumentCodec.encodeToString(doc));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    for (final k in ['service-print', 'service-export']) {
+      expect(tester.widget<IconButton>(byKey(k)).onPressed, isNull, reason: k);
+    }
+  });
+
+  testWidgets('V14 a shared symbol loader is loaded by the view (review F-3)',
+      (tester) async {
+    final loader = SymbolLibraryLoader();
+    addTearDown(loader.dispose);
+    await pumpView(tester, symbols: loader);
+    await letRun(tester, () => loader.state is SymbolLibraryReady);
+    expect(loader.state, isA<SymbolLibraryReady>());
   });
 }
