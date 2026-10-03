@@ -8,6 +8,9 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../tables/table_index.dart';
+import '../tables/table_label.dart';
+import '../tables/table_numbers.dart';
 import 'seating_component.dart';
 import 'symbol_component.dart';
 import 'symbol_library.dart';
@@ -63,6 +66,12 @@ Transform2 placementTransform({
 /// version is reused; otherwise the definition is copied with fresh handles
 /// for it and for every leaf, the leaves in the library's ascending order so
 /// draw order is stable.
+///
+/// A servable entry becomes a numbered table (spec 14a T13): when
+/// [numbered], its label, with the plan's next number, is added after the
+/// instance and stamped upright for the placement. The palette's thumbnails
+/// pass `numbered: false` (F-15). The number is fixed here, with the
+/// handles, so a redo replays the same one.
 CompoundCommand placeSymbol(
   DraftDocument doc,
   SymbolEntry entry, {
@@ -70,6 +79,7 @@ CompoundCommand placeSymbol(
   int quarterTurns = 0,
   bool mirrored = false,
   InstanceStyle style = const InstanceStyle(),
+  bool numbered = true,
 }) {
   final commands = <DraftCommand>[];
 
@@ -132,25 +142,45 @@ CompoundCommand placeSymbol(
     definition = copy;
   }
 
+  final instance = doc.handleSeed.next();
+  final transform = placementTransform(
+    at: at,
+    basePoint: entry.definition.basePoint,
+    quarterTurns: quarterTurns,
+    mirrored: mirrored,
+  );
   commands.add(AddNodeCommand(InstanceNode(
-    handle: doc.handleSeed.next(),
+    handle: instance,
     parent: doc.rootHandle,
     definition: definition,
     // Spec 12b D7: the instance takes the current layer; the definition's
     // leaves stay on layer 0 (the library's rule) and follow it.
     layer: drawingLayer(doc),
-    transform: placementTransform(
-      at: at,
-      basePoint: entry.definition.basePoint,
-      quarterTurns: quarterTurns,
-      mirrored: mirrored,
-    ),
+    transform: transform,
     color: style.color,
     lineweight: style.lineweight,
     transparency: style.transparency,
     linetype: style.linetype,
     linetypeScale: style.linetypeScale,
   )));
+
+  if (numbered && entry.seats != null) {
+    final first = entry.leaves.isEmpty ? null : entry.leaves.first;
+    commands.add(AddEntityCommand(
+      record: tableLabelRecord(
+        handle: doc.handleSeed.next(),
+        instance: instance,
+        number: nextTableNumber(TableSurvey.of(doc).numbers),
+      ),
+      payload: tableLabelPayload(
+        anchor: entry.definition.basePoint,
+        height: first == null
+            ? kTableLabelMaxHeight
+            : tableLabelHeight(first.record.kind, first.payload),
+        placement: transform,
+      ),
+    ));
+  }
 
   return CompoundCommand(commands, label: 'Place ${entry.name}');
 }

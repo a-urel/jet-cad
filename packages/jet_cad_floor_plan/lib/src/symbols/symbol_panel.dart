@@ -40,7 +40,9 @@ String symbolIdOf(SymbolEntry entry) => '${entry.key}@${entry.version}';
 DraftDocument symbolThumbnailDocument(
     SymbolEntry entry, TextMeasurer measurer) {
   final doc = prepareDocument(measurer);
-  doc.commands.execute(placeSymbol(doc, entry, at: entry.definition.basePoint));
+  // Spec 14a T13 (F-15): a thumbnail shows the symbol, not a table number.
+  doc.commands.execute(
+      placeSymbol(doc, entry, at: entry.definition.basePoint, numbered: false));
   return doc;
 }
 

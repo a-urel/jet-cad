@@ -62,5 +62,8 @@ export 'src/symbols/symbol_panel.dart';
 export 'src/symbols/symbol_place_tool.dart';
 export 'src/symbols/symbol_placer.dart';
 export 'src/symbols/symbol_search.dart';
+export 'src/tables/table_index.dart';
+export 'src/tables/table_label.dart';
+export 'src/tables/table_numbers.dart';
 export 'src/text_entry_overlay.dart';
 export 'src/tool_palette.dart';
