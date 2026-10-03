@@ -11,6 +11,7 @@ import 'package:jet_cad_floor_plan/src/parametric/box.dart';
 import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
+import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_label_system.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
@@ -86,15 +87,26 @@ final Vector2 pivot = Vector2(-1750, 3300);
 void main() {
   test(
       'LS1 a 37° turn of a mirrored table stamps its number upright in the '
-      'same step; undo and redo carry both (M-14a-8, M-14a-10)', () {
+      'same step; undo and redo carry both (M-14a-8, M-14a-10)', () async {
     final doc = rig();
     final node = placeTable(doc, Vector2(2400, -1300), mirrored: true);
     final before = labelPayload(doc, node.handle);
     expectUpright(doc, node.handle);
     final depth = doc.commands.undoDepth;
+    final label = tablesOf(doc).single.label!;
+    final applied = <CommandApplied>[];
+    final sub = doc.changes.listen((c) {
+      if (c is CommandApplied) applied.add(c);
+    });
+    addTearDown(sub.cancel);
 
     doc.commands.execute(rotate(node, kDeg37, pivot));
+    await pumpEventQueue();
 
+    expect(applied.single.capability, Capability.geometry,
+        reason: 'a label was written (F-2\'s rule, review F-8)');
+    expect(applied.single.touched, containsAll([node.handle, label]));
+    expect(applied.single.label, 'Rotate');
     expect(doc.commands.undoDepth, depth + 1, reason: 'one step, not two');
     expectUpright(doc, node.handle);
     final after = labelPayload(doc, node.handle);
@@ -206,6 +218,56 @@ void main() {
         placeSymbol(doc, entryOf(planterSymbol), at: Vector2(600, -600)));
     expect(seen.single, isNot(isA<TableLabelEdit>()));
     doc.commands.expander = inner;
+  });
+
+  test(
+      'LS6b the number is the lowest-handle label, and that one is stamped; '
+      'a servable instance in a group is not stamped (review F-8)', () {
+    final doc = rig();
+    final early = doc.handleSeed.next();
+    final node = placeTable(doc, Vector2(2400, -1300), mirrored: true);
+    final placed = tablesOf(doc).single.label!;
+    final extra = addTableLabelCommand(doc,
+        instance: node.handle,
+        definition: node.definition,
+        placement: node.transform,
+        number: '8');
+    doc.commands.execute(AddEntityCommand(
+        record: extra.record.copyWith(handle: early), payload: extra.payload));
+    expect(tablesOf(doc).single.label, early);
+    GeometryPayload read(Handle h) =>
+        doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(h)!));
+    final placedBefore = read(placed);
+
+    doc.commands.execute(rotate(node, kDeg37, pivot));
+    expectUpright(doc, node.handle);
+    expect(read(placed), placedBefore, reason: 'only the number is stamped');
+
+    // A servable instance under a group, with a TABLE label of its own.
+    final group = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(GroupNode(
+        handle: group,
+        parent: doc.rootHandle,
+        transform: Transform2.translation(-4000, 300),
+        children: const [])));
+    final nested = doc.handleSeed.next();
+    doc.commands.execute(AddNodeCommand(InstanceNode(
+        handle: nested,
+        parent: group,
+        transform: placementAt(100, 200, 0),
+        definition: node.definition,
+        layer: ReservedHandles.layerZero)));
+    final nestedLabel = addTableLabelCommand(doc,
+        instance: nested,
+        definition: node.definition,
+        placement: placementAt(100, 200, 0),
+        number: '9');
+    doc.commands.execute(nestedLabel);
+    final before = read(nestedLabel.record.handle);
+    doc.commands.execute(TransformNodeCommand(
+        nested, placementAt(100, 200, kDeg37, mirrored: true)));
+    expect(read(nestedLabel.record.handle), before,
+        reason: 'not a table in v1 (T1)');
   });
 
   group('the drawn label (render check, F-16)', () {

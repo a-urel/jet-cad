@@ -76,3 +76,21 @@ Transform2 placementAt(double x, double y, double theta,
         .multiply(Transform2.rotation(theta))
         .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
         .multiply(Transform2.translation(-baseX, -baseY));
+
+/// [tableSymbol]'s top with one chair, below it: the symbol's box centre,
+/// (900, 525), is not its base point, (900, 700) (review F-3).
+const FurnitureSymbol oneChairTable = FurnitureSymbol(
+  key: 'test.table.one',
+  name: 'Test table, one chair',
+  category: 'Tests',
+  tags: ['table', 'test'],
+  seats: 1,
+  baseX: 900,
+  baseY: 700,
+  shapes: [
+    PolylineShape([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
+        closed: true),
+    PolylineShape([(675, -50), (1125, -50), (1125, 400), (675, 400)],
+        closed: true),
+  ],
+);

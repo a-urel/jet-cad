@@ -22,8 +22,8 @@ the table; a turned or mirrored table's number reads upright.
 | Plan | `3892024` | — |
 | 1 Render: the pick mapping, the delete cascade | `955e6f8` | **Approved with fixes** (shared review of 1–3) |
 | 2–3 The table model; placement numbers a table | `b4b586a` | idem → `355e12f` (F-1..F-8, all in tests) |
-| 4 The table system | `fc0dbe3` | REVIEW-4-5 |
-| 5 The Table section, the rotate buttons | `c951bf7` | idem |
+| 4 The table system | `fc0dbe3` | **Approved with fixes** (shared review of 4–5) |
+| 5 The Table section, the rotate buttons | `c951bf7` | idem → `FIXSHA` (F-1 an unchanged commit showed an error line; F-2..F-10 tests and small fixes) |
 
 One implementer (this session) for every task; the reviews were
 independent agents that re-ran the gates in their own worktrees and fired
@@ -37,7 +37,7 @@ Tasks 2–3.
 |---|---|
 | engine `packages/jet_cad_2d` | untouched by this plan (1,226 + 2 standing, as recorded) |
 | render `packages/jet_cad_2d_flutter` | **1,196 passed**, 1 skipped, **7 failed** — exactly the standing seven (`text_ladder` rungs 1–5, `text_lod_ladder` rungs 1–2, canvas goldens); analyze, format clean |
-| planner `packages/jet_cad_floor_plan` | **890 passed**; analyze, format clean |
+| planner `packages/jet_cad_floor_plan` | **892 passed**; analyze, format clean |
 | restaurant `packages/jet_cad_restaurant_symbols` | **91 passed**; analyze, format clean |
 | app `apps/floor_planner` | **192 passed**; analyze, format clean |
 | app web build | `✓ Built build/web` |
@@ -63,7 +63,11 @@ eight-digit fallback), -19 (cascade not de-duplicated), -20 (the inverse
 with the stamp's authority). Own, all red: the error line cleared by the
 focus-loss re-parse; the rotate buttons in runtime; a foreign slot
 released (after moving the assert behind the release); the review's
-survivors R3, R5, R8, R10, P5–P7, P21, P34, P36, P39, P41, P42.
+survivors R3, R5, R8, R10, P5–P7, P21, P34, P36, P39, P41, P42 (Tasks
+1–3) and A3, A9, A12, A13, B1, B2, B4, B5, B11, B17, B21 (Tasks 4–5).
+**Survive, recorded:** A1 (the table system's rollback: no stamp can be
+made to throw), B15 (the section in a tool mode: needs the whole shell),
+F-9's fix (clearing the survey right after a write; no visible effect).
 **Equivalent, removed:** P28/P33 (the survey's two sorts) — `tree.nodes`
 is ascending by contract, so the sorts were dead and are gone.
 
@@ -75,7 +79,12 @@ is ascending by contract, so the sorts were dead and are gone.
   table system's tear-off, and nothing tells the table system. The debug
   assert catches the case it can see (the slot taken by someone else, which
   is never released); the shell's order is fixed in code and pinned by
-  `document_host_test`'s empty-slot checks.
+  `document_host_test`'s empty-slot checks (DH5 goes red when the order
+  is swapped) and, since the review, a debug assert in
+  `PlannerShell.dispose` that the slot is empty after both disposes.
+- **The Number field needs `geometry` only** (T14), not `components` too
+  as the other fields do; the duplicate line is drawn in the theme's
+  tertiary colour (a warning), the refusal in its error colour.
 - **"Design mode only" for the rotate buttons (Q-4)** is, until 14b-2
   names the modes, "the permissions allow `geometry`": the selection
   mode's `runtime` does not.

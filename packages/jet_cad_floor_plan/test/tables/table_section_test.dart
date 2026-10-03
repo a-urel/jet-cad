@@ -92,7 +92,7 @@ void main() {
   testWidgets('TS1 one table shows its number and seats; a planter does not',
       (tester) async {
     final doc = rig();
-    final a = placeOne(doc, tableSymbol(seats: 2), Vector2(-2400, 1300),
+    final a = placeOne(doc, tableSymbol(seats: 4), Vector2(-2400, 1300),
         quarterTurns: 1, mirrored: true);
     final planter = placeOne(doc, planterSymbol, Vector2(900, -700));
     final s = await pumpPanel(tester, doc);
@@ -101,7 +101,8 @@ void main() {
     await select(tester, s, a);
     expect(section, findsOneWidget);
     expect(fieldText(tester), '1');
-    expect(tester.widget<Text>(seats).data, '2');
+    expect(tester.widget<Text>(seats).data, '4');
+    expect(duplicate, findsNothing, reason: 'a unique number');
     expect(left, findsOneWidget);
     expect(right, findsOneWidget);
 
@@ -150,7 +151,7 @@ void main() {
       'field reverts and says why, until the next edit', (tester) async {
     final doc = rig();
     final a = placeOne(doc, tableSymbol(), Vector2(-2400, 1300));
-    placeOne(doc, tableSymbol(), Vector2(2400, 1300), mirrored: true);
+    final b = placeOne(doc, tableSymbol(), Vector2(2400, 1300), mirrored: true);
     final s = await pumpPanel(tester, doc);
     await select(tester, s, a);
     final depth = doc.commands.undoDepth;
@@ -168,6 +169,36 @@ void main() {
     expect(fieldText(tester), '1');
     expect(tester.widget<Text>(error).data, '1 to 8 characters');
     expect(numbers(doc), ['1', '2']);
+
+    // A selection change ends it (review F-5).
+    await select(tester, s, b);
+    await select(tester, s, a);
+    expect(error, findsNothing);
+  });
+
+  testWidgets(
+      'TS3b unchanged is nothing: an unnumbered table\'s empty field, a '
+      'duplicate from a file (review F-1)', (tester) async {
+    final doc = rig();
+    doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
+        at: Vector2(1700, -2900), numbered: false));
+    final bare = doc.tree.nodes.whereType<InstanceNode>().single.handle;
+    placeOne(doc, tableSymbol(), Vector2(-2400, 1300));
+    final b = placeOne(doc, tableSymbol(), Vector2(2400, 1300));
+    doc.commands.execute(
+        SetEntityTextCommand(tablesOf(doc).last.label!, '1', kTableLabelTag));
+    final s = await pumpPanel(tester, doc);
+    final depth = doc.commands.undoDepth;
+
+    await select(tester, s, bare);
+    await enterAndSubmit(tester, '');
+    expect(error, findsNothing);
+    expect(tablesOf(doc).first.label, isNull, reason: 'no empty label');
+
+    await select(tester, s, b);
+    await enterAndSubmit(tester, '1');
+    expect(error, findsNothing);
+    expect(doc.commands.undoDepth, depth);
   });
 
   testWidgets(
@@ -227,15 +258,21 @@ void main() {
   });
 
   testWidgets(
-      'TS7 the rotate buttons turn the table in place about its centre, one '
-      'step each, the number upright (M-14a-15)', (tester) async {
+      'TS7 the rotate buttons turn the table in place about its base point '
+      '(not its box centre), one Rotate step each, the number upright '
+      '(M-14a-15)', (tester) async {
     final doc = rig();
-    final a = placeOne(doc, tableSymbol(), Vector2(-2300, 1700),
+    final a = placeOne(doc, oneChairTable, Vector2(-2300, 1700),
         quarterTurns: 1, mirrored: true);
     final start = (doc.tree[a]! as InstanceNode).transform;
     final s = await pumpPanel(tester, doc);
     await select(tester, s, a);
     final depth = doc.commands.undoDepth;
+    final labels = <String>[];
+    final sub = doc.changes.listen((c) {
+      if (c is CommandApplied) labels.add(c.label);
+    });
+    addTearDown(sub.cancel);
 
     await tester.tap(right);
     await tester.pump();
@@ -247,6 +284,8 @@ void main() {
     // Right is clockwise: R(−90°) takes the local x axis's image (a, b) to
     // (b, −a), exactly.
     expect([once.a, once.b], [start.b, -start.a]);
+    expect(parts(once).any((v) => v == 0 && v.isNegative), isFalse,
+        reason: 'no −0.0 is stored');
     final st = tableLabelStamp(once);
     final payload = doc.geometry.read(doc.entities
         .geomIndexAt(doc.entities.slotOf(tablesOf(doc).single.label!)!));
@@ -258,8 +297,15 @@ void main() {
     }
     expect(parts((doc.tree[a]! as InstanceNode).transform), parts(start),
         reason: 'four quarter turns: exactly where it began');
+
+    // Left is counter-clockwise: (a, b) to (−b, a).
     await tester.tap(left);
     await tester.pump();
+    final leftOnce = (doc.tree[a]! as InstanceNode).transform;
+    expect([leftOnce.a, leftOnce.b], [-start.b, start.a]);
+    expect(leftOnce.transformPoint(Vector2(900, 700)), Vector2(-2300, 1700));
+    await tester.pump();
+    expect(labels, List.filled(5, 'Rotate'));
     doc.commands.undo();
     expect(parts((doc.tree[a]! as InstanceNode).transform), parts(start));
   });

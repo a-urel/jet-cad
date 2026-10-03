@@ -271,6 +271,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// `editCapability` (final review m4).
   bool _editable(_Kind kind) {
     final permissions = widget.document.commands.permissions;
+    // A table's number is entity text, not a component (14a T14).
+    if (kind == _Kind.number) return permissions.allows(Capability.geometry);
     return permissions.allows(Capability.components) &&
         permissions.allows(switch (kind) {
           _Kind.thickness => const WallType().editCapability,
@@ -279,8 +281,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
             const OpeningType().editCapability,
           _Kind.width || _Kind.height => const BoxType().editCapability,
           _Kind.name => const RoomType().editCapability,
-          // The label's text, or a new label (14a T14).
-          _Kind.number => Capability.geometry,
+          _Kind.number => throw StateError('answered above'),
         });
   }
 
@@ -329,6 +330,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// invalid (14a T4), or used by another live table (T6, exact `==`).
   /// The table's own number is accepted, unchanged.
   String? _parseNumber(Handle table, String t) {
+    // Unchanged -- an unnumbered table's empty field, or a duplicate a file
+    // brought -- is nothing, never an error (T14, review F-1).
+    final current = _read(_Kind.number, table);
+    if (t == current) return t;
     final error = tableNumberError(t);
     final clash = error == null &&
         _tables.withNumber(t).any((other) => other.instance != table);
@@ -496,18 +501,21 @@ class _SelectionPanelState extends State<SelectionPanel> {
   void _writeNumber(Handle table, String number) {
     final doc = widget.document;
     final info = _tables.tables.firstWhere((t) => t.instance == table);
-    if (info.number == number) return;
+    if ((info.number ?? '') == number) return;
     final label = info.label;
     if (label != null) {
       doc.commands.execute(SetEntityTextCommand(label, number, kTableLabelTag));
-      return;
+    } else {
+      final node = doc.tree[table]! as InstanceNode;
+      doc.commands.execute(addTableLabelCommand(doc,
+          instance: table,
+          definition: node.definition,
+          placement: node.transform,
+          number: number));
     }
-    final node = doc.tree[table]! as InstanceNode;
-    doc.commands.execute(addTableLabelCommand(doc,
-        instance: table,
-        definition: node.definition,
-        placement: node.transform,
-        number: number));
+    // The change event that clears the cache arrives later; `_show` reads
+    // the survey now (review F-9).
+    _survey = null;
   }
 
   /// 14a T16: turns the one selected table by [quarterTurns] × 90° about
@@ -912,7 +920,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
           padding: const EdgeInsets.only(top: 4),
           child: Text('Number ${table.number} is used by $shared tables',
               key: const Key('table-number-duplicate'),
-              style: TextStyle(color: theme.colorScheme.error)),
+              // A warning (T6), not a refusal.
+              style: TextStyle(color: theme.colorScheme.tertiary)),
         ),
       InputDecorator(
         decoration:

@@ -609,6 +609,9 @@ class _PlannerShellState extends State<PlannerShell> {
     _camera.dispose();
     _tableLabels.dispose();
     _parametric.dispose();
+    // Last in, first out (spec 14a T12): both released, the slot is empty.
+    assert(_document.commands.expander == null,
+        'the expander slot was not released: dispose order');
     _index.dispose();
     _releaseSettle?.call();
     _ownMeasurer?.clear();
