@@ -8,6 +8,8 @@ import 'dart:typed_data';
 import 'package:floor_planner/document_host.dart';
 import 'package:floor_planner/main.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart'
+    show restaurantCatalog;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -205,6 +207,47 @@ void main() {
     expect(keysOf(loader.state), assetKeys);
   });
 
+  testWidgets(
+      'SL9b the app reads the furniture, then the restaurant library (spec '
+      '14 V-5)', (tester) async {
+    expect(kAppSymbolSources.map((s) => s.name).toList(),
+        ['furniture', 'restaurant']);
+    final loader = SymbolLibraryLoader(sources: kAppSymbolSources);
+    addTearDown(loader.dispose);
+    await tester.runAsync(loader.load);
+    final lib = (loader.state as SymbolLibraryReady).library;
+    // Written out by hand: 27 furniture symbols, then 69 restaurant ones,
+    // the restaurant categories after the furniture ones.
+    expect(lib.entries, hasLength(27 + 69));
+    expect(lib.categories, [
+      'Dining Room',
+      'Kitchen',
+      'Bed Room',
+      'Living Room',
+      'Bathroom',
+      'Office',
+      'Restaurant Tables',
+      'Booths and Lounge',
+      'Bar',
+      'Service',
+      'Commercial Kitchen',
+      'Outdoor and Decor',
+    ]);
+    expect(lib.entries.where((e) => e.seats != null), hasLength(5 + 25));
+    expect(kAppThumbnailCapacity, greaterThanOrEqualTo(lib.entries.length));
+  });
+
+  testWidgets('SL9c the app makes its own loader over both libraries',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(FloorPlannerApp(files: FakeDocumentFiles()));
+    await tester.pump();
+    final shell = tester.widget<PlannerShell>(find.byType(PlannerShell));
+    expect(shell.symbols!.sources, kAppSymbolSources);
+    expect(shell.thumbnails!.maxEntries, kAppThumbnailCapacity);
+  });
+
   group('the wiring (spec 09b D2, R-4)', () {
     /// A loader over the real bytes that counts its reads.
     ({SymbolLibraryLoader loader, int Function() reads}) counted() {
@@ -260,10 +303,14 @@ void main() {
       expect(own, isNotNull);
       expect(tester.widget<DocumentHost>(find.byType(DocumentHost)).symbols,
           same(own));
-      // The production path: the app's own loader reads the declared asset
-      // through rootBundle and reaches ready (m-T2-1).
+      // The production path: the app's own loader reads the declared assets
+      // through rootBundle and reaches ready (m-T2-1): since spec 14 V-5 the
+      // furniture library, then the restaurant one.
       expect(own!.state, isA<SymbolLibraryReady>());
-      expect(keysOf(own.state), assetKeys);
+      expect(keysOf(own.state), [
+        ...assetKeys,
+        for (final s in restaurantCatalog) '${s.key}@${s.version}'
+      ]);
 
       await tester.pumpWidget(const SizedBox());
       expect(() => own.addListener(() {}), throwsFlutterError,

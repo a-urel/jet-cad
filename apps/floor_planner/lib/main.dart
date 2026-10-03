@@ -2,11 +2,24 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
 import 'document_files.dart';
 import 'document_host.dart';
 import 'exit_guard.dart';
-import 'package:jet_cad_floor_plan/editor.dart';
+
+/// The app's symbol libraries, in palette order (spec 14 V-5): the
+/// planner's furniture, then the restaurant symbols.
+const List<SymbolLibrarySource> kAppSymbolSources = [
+  furnitureSymbolSource,
+  restaurantSymbolSource,
+];
+
+/// The thumbnail cache's size (spec 14 14s risks): every symbol of both
+/// libraries (27 + 69) fits at one size and pixel ratio, with room to
+/// spare, so scrolling the palette never repaints a thumbnail it showed.
+const int kAppThumbnailCapacity = 128;
 
 Future<void> main() async {
   // The planner's font is registered from the package's bytes before the
@@ -76,14 +89,14 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   /// The loader this app made itself, disposed with it; null when the
   /// caller gave one.
   SymbolLibraryLoader? _ownSymbols;
-  late final SymbolLibraryLoader _symbols =
-      widget.symbols ?? (_ownSymbols = SymbolLibraryLoader());
+  late final SymbolLibraryLoader _symbols = widget.symbols ??
+      (_ownSymbols = SymbolLibraryLoader(sources: kAppSymbolSources));
 
   /// The thumbnail cache this app made itself, disposed with it; null when
   /// the caller gave one.
   SymbolThumbnails? _ownThumbnails;
-  late final SymbolThumbnails _thumbnails =
-      widget.thumbnails ?? (_ownThumbnails = SymbolThumbnails());
+  late final SymbolThumbnails _thumbnails = widget.thumbnails ??
+      (_ownThumbnails = SymbolThumbnails(maxEntries: kAppThumbnailCapacity));
 
   /// The export font (spec 13 D7): above the host, so a document swap never
   /// reads the asset again. Nothing is read until an export asks.
