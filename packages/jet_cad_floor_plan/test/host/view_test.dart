@@ -6,6 +6,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
@@ -511,6 +512,59 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(c.serviceEdited, isFalse, reason: 'the new copy saw no move');
     expect(layouts, 1);
+  });
+
+  testWidgets(
+      'V18 by touch: a second finger joining a table drag cancels it and '
+      'pinches; nothing moves; a tap after it selects (14t T6, M-14t-7)',
+      (tester) async {
+    final taps = <String>[];
+    var layouts = 0;
+    final c = FloorPlanController(json: pagePlan());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: FloorPlanView(
+                controller: c,
+                onTableTap: taps.add,
+                onLayoutChanged: () => layouts++))));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    final scale = c.camera.value.scale;
+    final at2 = tableOnScreen(tester, c, '2');
+    final a = await tester.startGesture(at2,
+        pointer: 31, kind: PointerDeviceKind.touch);
+    await tester.pump(const Duration(milliseconds: 150));
+    await a.moveTo(at2 + const Offset(40, 0));
+    await a.moveTo(at2 + const Offset(70, 15));
+    final b = await tester.startGesture(at2 + const Offset(200, 120),
+        pointer: 32, kind: PointerDeviceKind.touch);
+    for (var i = 1; i <= 3; i++) {
+      await a.moveTo(at2 + Offset(70.0 - 20 * i, 15.0 - 10 * i));
+      await b.moveTo(at2 + Offset(200.0 + 25 * i, 120.0 + 15 * i));
+    }
+    await a.up();
+    await b.up();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(c.activeDocument.commands.undoDepth, 0, reason: 'no Move');
+    expect(layouts, 0);
+    expect(c.serviceEdited, isFalse);
+    expect(c.camera.value.scale, greaterThan(scale * 1.2), reason: 'zoomed');
+    expect(c.selectedTables.value, {'2'},
+        reason: 'the drag selected it at the slop; the selection stands');
+
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    final t = await tester.startGesture(tableOnScreen(tester, c, '1'),
+        pointer: 33, kind: PointerDeviceKind.touch);
+    await t.up();
+    await tester.pump();
+    expect(c.selectedTables.value, {'1'}, reason: 'the tool is not stuck');
+    expect(taps, ['1']);
   });
 
   testWidgets('V16 the status layer is drawn in the selection mode only',

@@ -5,7 +5,8 @@
 // off the origin, turned and mirrored, on a service copy (runtime).
 import 'dart:convert';
 
-import 'package:flutter/gestures.dart' show kPrimaryButton;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kLongPressTimeout, kPrimaryButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -116,7 +117,8 @@ final class Rig {
           {int buttons = kPrimaryButton,
           bool shift = false,
           bool control = false,
-          bool meta = false}) =>
+          bool meta = false,
+          bool touch = false}) =>
       ToolPointerEvent(
         screen: screen,
         world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
@@ -127,6 +129,8 @@ final class Rig {
         meta: meta,
         alt: false,
         pickRadiusWorld: 6 / camera.value.scale,
+        kind: touch ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
+        reachRadiusWorld: touch ? 24 / camera.value.scale : null,
       );
 
   void down(Offset s,
@@ -424,5 +428,45 @@ void main() {
     expect(after.sublist(0, 4), before.sublist(0, 4));
     expect(after[4], closeTo(before[4], 1e-6), reason: 'the undone -500 x');
     expect(after[5], closeTo(before[5] + 300, 1e-6), reason: 'the +300 y');
+  });
+
+  testWidgets(
+      'ST16 a finger 15 px outside a table selects it; a mouse there does '
+      'not (spec 14t R-11, M-14t-26)', (tester) async {
+    final r = rig(tester);
+    // 150 mm below the trapezoid's bottom edge (y 300): 15 px.
+    final p = r.at('2', 900, 150);
+    r.tap(p);
+    expect(r.selection.isEmpty, isTrue);
+    expect(r.taps, isEmpty);
+    r.tool.onPointerDown(r.ev(p, touch: true), r.ctx);
+    r.tool.onPointerUp(r.ev(p, touch: true, buttons: 0), r.ctx);
+    expect(r.selection.keys, {r.key('2')});
+    expect(r.taps, ['2']);
+    // 300 mm: past a finger's reach.
+    final far = r.at('2', 900, 0);
+    r.tool.onPointerDown(r.ev(far, touch: true), r.ctx);
+    r.tool.onPointerUp(r.ev(far, touch: true, buttons: 0), r.ctx);
+    expect(r.selection.isEmpty, isTrue);
+  });
+
+  testWidgets(
+      'ST17 a finger\'s long press toggles kTouchHoldBack sooner than a '
+      'mouse\'s: 500 ms from contact (T5, M-14t-15)', (tester) async {
+    final r = rig(tester);
+    final p = r.at('2', 900, 400);
+    final early = kLongPressTimeout - kTouchHoldBack;
+    r.tool.onPointerDown(r.ev(p, touch: true), r.ctx);
+    await tester.pump(early - const Duration(milliseconds: 1));
+    expect(r.selection.isEmpty, isTrue);
+    await tester.pump(const Duration(milliseconds: 2));
+    expect(r.selection.keys, {r.key('2')});
+    r.tool.onPointerUp(r.ev(p, touch: true, buttons: 0), r.ctx);
+    r.down(p);
+    await tester.pump(early + const Duration(milliseconds: 1));
+    expect(r.selection.keys, {r.key('2')}, reason: 'a mouse waits 500 ms');
+    await tester.pump(kTouchHoldBack);
+    expect(r.selection.isEmpty, isTrue);
+    r.up(p);
   });
 }

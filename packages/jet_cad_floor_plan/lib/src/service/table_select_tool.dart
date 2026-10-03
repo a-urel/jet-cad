@@ -72,13 +72,19 @@ class TableSelectTool extends Tool {
     _pressScreen = e.screen;
     _lastScreen = e.screen;
     _pressWorld.setFrom(e.world);
-    _hit = picker.pick(e.world);
+    // A finger that misses every top reaches the nearest within 24 px
+    // (spec 14t R-11); a mouse picks by containment only.
+    _hit = picker.pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
     _toggle = e.shift || e.control || e.meta;
     _gesture = _Gesture.pressed;
     _dx = _dy = 0;
     final hit = _hit;
     if (hit != null && !hit.locked) {
-      _timer = Timer(kLongPressTimeout, () => _longPress(ctx));
+      // A finger's down arrives kTouchHoldBack after it touched, so the
+      // long press still falls 500 ms from contact (spec 14t T5, R-9f).
+      _timer = Timer(
+          e.isTouch ? kLongPressTimeout - kTouchHoldBack : kLongPressTimeout,
+          () => _longPress(ctx));
     }
     notifyListeners();
   }

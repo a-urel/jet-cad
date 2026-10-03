@@ -187,4 +187,39 @@ void main() {
     expect(top.xy, [300, 300, 1500, 300, 1500, 1100, 300, 1100],
         reason: 'the closing vertex dropped');
   });
+
+  test(
+      'TP9 a reach picks the nearest top on a miss, not the later-drawn; '
+      'nothing beyond it (spec 14t R-11, M-14t-26)', () {
+    final doc = plan();
+    // A (mirrored) and B face each other across a 100 mm gap: A's top
+    // spans world x 29,400..30,600, B's 30,700..31,900. Then the pair is
+    // turned 37 degrees about the gap, rigidly: distances are kept.
+    doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
+        at: Vector2(30000, -12000), mirrored: true));
+    doc.commands.execute(
+        placeSymbol(doc, entryOf(tableSymbol()), at: Vector2(31300, -12000)));
+    final pivot = Vector2(30650, -12000);
+    final turn = Transform2.translation(pivot.x, pivot.y)
+        .multiply(Transform2.rotation(kDeg37))
+        .multiply(Transform2.translation(-pivot.x, -pivot.y));
+    final nodes = doc.tree.nodes.whereType<InstanceNode>().toList()
+      ..sort((x, y) => x.handle.value.compareTo(y.handle.value));
+    for (final n in nodes) {
+      doc.commands
+          .execute(TransformNodeCommand(n.handle, turn.multiply(n.transform)));
+    }
+    final a = nodes[0].handle, b = nodes[1].handle;
+    Vector2 world(double x) => turn.transformPoint(Vector2(x, -12000));
+    final picker = TablePicker(doc);
+    expect(picker.pick(world(30640)), isNull, reason: 'in the gap: a miss');
+    expect(picker.pick(world(30640), reach: 240)?.table.instance, a,
+        reason: '40 mm from A, 60 from B: A, though B is drawn later');
+    expect(picker.pick(world(30665), reach: 240)?.table.instance, b,
+        reason: '65 mm from A, 35 from B');
+    expect(picker.pick(world(29100), reach: 240), isNull,
+        reason: '300 mm from A');
+    expect(picker.pick(world(29200), reach: 240)?.table.instance, a,
+        reason: '200 mm from A: within the reach');
+  });
 }

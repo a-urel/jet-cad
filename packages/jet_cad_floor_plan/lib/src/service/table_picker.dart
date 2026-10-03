@@ -18,6 +18,9 @@ sealed class TableTop {
   /// Whether ([x], [y]) is inside, a point within [tolerance] of the
   /// boundary counting as inside (S1).
   bool contains(double x, double y, Tolerance tolerance);
+
+  /// The distance from ([x], [y]) to the top's boundary.
+  double boundaryDistance(double x, double y);
 }
 
 /// A closed polyline's vertices, `x0, y0, x1, y1, ...`.
@@ -45,6 +48,19 @@ final class PolygonTop extends TableTop {
     return inside;
   }
 
+  @override
+  double boundaryDistance(double x, double y) {
+    final n = xy.length ~/ 2;
+    var best = double.infinity;
+    for (var i = 0, j = n - 1; i < n; j = i++) {
+      best = math.min(
+          best,
+          _segmentDistance(
+              x, y, xy[2 * i], xy[2 * i + 1], xy[2 * j], xy[2 * j + 1]));
+    }
+    return best;
+  }
+
   static double _segmentDistance(
       double px, double py, double ax, double ay, double bx, double by) {
     final dx = bx - ax, dy = by - ay;
@@ -66,6 +82,12 @@ final class CircleTop extends TableTop {
   bool contains(double x, double y, Tolerance tolerance) {
     final dx = x - cx, dy = y - cy;
     return math.sqrt(dx * dx + dy * dy) <= r + tolerance.linear;
+  }
+
+  @override
+  double boundaryDistance(double x, double y) {
+    final dx = x - cx, dy = y - cy;
+    return (math.sqrt(dx * dx + dy * dy) - r).abs();
   }
 }
 
@@ -98,7 +120,8 @@ final class PickCandidate {
       {required this.table,
       required this.inverse,
       required this.top,
-      required this.locked});
+      required this.locked,
+      required this.scale});
 
   final TableInfo table;
 
@@ -108,6 +131,9 @@ final class PickCandidate {
 
   /// On a locked layer: picked, not moved (S9).
   final bool locked;
+
+  /// The instance's linear scale, `sqrt(|det|)`: definition units to world.
+  final double scale;
 }
 
 /// The tables of one plan, ready to pick (S1). The candidates are rebuilt
@@ -155,20 +181,37 @@ class TablePicker {
           table: t,
           inverse: node.transform.invert(),
           top: top,
-          locked: layer?.locked ?? false));
+          locked: layer?.locked ?? false,
+          scale: math.sqrt(det.abs())));
     }
     return out;
   }
 
   /// The table whose top holds [world], the highest handle among several
-  /// (draw order), or null.
-  PickCandidate? pick(Vector2 world) {
+  /// (draw order), or null. On a miss, with a [reach] (a finger's, spec
+  /// 14t R-11), the table whose top's boundary is nearest within [reach]
+  /// world units, the higher handle on a tie.
+  PickCandidate? pick(Vector2 world, {double reach = 0}) {
     final list = candidates;
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
       final local = c.inverse.transformPoint(world);
       if (c.top.contains(local.x, local.y, tolerance)) return c;
     }
-    return null;
+    if (reach <= 0) return null;
+    PickCandidate? best;
+    var bestDistance = reach;
+    for (var i = list.length - 1; i >= 0; i--) {
+      final c = list[i];
+      final local = c.inverse.transformPoint(world);
+      // Local units to world: the instance's scale (placements turn and
+      // mirror, so it is 1 unless a table was scaled by hand).
+      final d = c.top.boundaryDistance(local.x, local.y) * c.scale;
+      if (d < bestDistance || (best == null && d <= bestDistance)) {
+        best = c;
+        bestDistance = d;
+      }
+    }
+    return best;
   }
 }
