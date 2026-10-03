@@ -221,5 +221,21 @@ void main() {
         reason: '300 mm from A');
     expect(picker.pick(world(29200), reach: 240)?.table.instance, a,
         reason: '200 mm from A: within the reach');
+
+    // A table scaled by 2 by hand, far off: its local units are 2 mm.
+    final c = placeTurned(doc, tableSymbol(), Vector2(45000, -20000));
+    final at = Vector2(45000, -20000);
+    doc.commands.execute(TransformNodeCommand(
+        c.handle,
+        Transform2.translation(at.x, at.y)
+            .multiply(Transform2.scale(2, 2))
+            .multiply(Transform2.translation(-at.x, -at.y))
+            .multiply(c.transform)));
+    final scaled = doc.tree[c.handle]! as InstanceNode;
+    Vector2 off(double x) => scaled.transform.transformPoint(Vector2(x, 700));
+    expect(picker.pick(off(1600), reach: 240)?.table.instance, c.handle,
+        reason: '100 local, 200 mm in the world');
+    expect(picker.pick(off(1650), reach: 240), isNull,
+        reason: '150 local, 300 mm in the world (review F-5)');
   });
 }

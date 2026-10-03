@@ -31,7 +31,14 @@ import 'package:flutter/services.dart'
         MouseCursor,
         PhysicalKeyboardKey,
         SystemMouseCursors;
-import 'package:flutter/widgets.dart' show KeyEventResult;
+import 'package:flutter/widgets.dart'
+    show
+        Align,
+        Alignment,
+        Directionality,
+        KeyEventResult,
+        SizedBox,
+        TextDirection;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -821,5 +828,33 @@ void main() {
         expect(rig.document.commands.undoDepth, 1);
       });
     }
+  });
+
+  testWidgets(
+      'SP-T1 a finger held on the canvas presses after the hold-back, and '
+      'places on its lift (press mode, spec 14t R-1, review F-3)',
+      (tester) async {
+    final rig = Rig();
+    final tools = ToolController(initial: rig.tool, context: rig.ctx);
+    addTearDown(tools.dispose);
+    addTearDown(() => tester.pumpWidget(const SizedBox.shrink()));
+    await tester.pumpWidget(Directionality(
+        textDirection: TextDirection.ltr,
+        child: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+                width: 800,
+                height: 600,
+                child: InteractionLayer(
+                    tools: tools, child: const SizedBox.expand())))));
+    final s = rig.camera.value.worldToScreen(pA);
+    final g = await tester.startGesture(ui.Offset(s.x, s.y),
+        pointer: 41, kind: ui.PointerDeviceKind.touch);
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(rig.tool.isMidShape, isTrue, reason: 'pressed, not yet placed');
+    expect(rig.tool.ghostVisible, isTrue);
+    expect(rig.instances, isEmpty);
+    await g.up();
+    expect(rig.instances, hasLength(1));
   });
 }

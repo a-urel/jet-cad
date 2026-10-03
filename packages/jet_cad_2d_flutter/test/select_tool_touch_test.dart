@@ -130,27 +130,39 @@ void main() {
   });
 
   group('grips by distance on touch (R-4)', () {
-    // A circle alone, selected: its top quadrant grip is the box's top
-    // centre, and the rotation grip 24 px above it. An unrotated camera, so
-    // "above" is screen up.
+    // A circle alone, selected, under the fixture's rotated camera (0.35
+    // rad, scale 1.1, y up, off the origin). The rotation grip is found from
+    // the cache's own distance query (three samples locate a point from its
+    // distances); the grips are the cache's, through the camera.
     late GripRig rig;
-    late Handle circle;
-    late Offset top, right;
+    late Offset rotation, centre;
+    late List<Offset> grips;
 
     setUp(() {
       final doc = DraftDocument.empty();
-      circle =
-          addEntity(doc, doc.rootHandle, EntityKind.circle, [7300, 3250], [25]);
-      rig = GripRig(doc, camera: gripCamera(rotation: 0));
-      rig.selection.replace([SelectionKey.root(circle)]);
-      final m = rig.camera.value;
+      addEntity(doc, doc.rootHandle, EntityKind.circle, [7300, 3250], [10]);
+      rig = GripRig(doc);
+      rig.selection.replace([
+        SelectionKey.root(doc.entities.handleAt(doc.entities.liveSlots.first))
+      ]);
+      final cam = rig.camera.value;
       Offset s(double x, double y) {
-        final p = m.worldToScreen(Vector2(x, y));
+        final p = cam.worldToScreen(Vector2(x, y));
         return Offset(p.x, p.y);
       }
 
-      top = s(7300, 3275);
-      right = s(7325, 3250);
+      centre = s(7300, 3250);
+      grips = [for (final g in rig.grips.grips) s(g.grip.x, g.grip.y)];
+      final m = cam.worldToScreenMatrix;
+      double d2(Offset p) {
+        final d = rig.grips.rotationGripDistance(p, m);
+        return d * d;
+      }
+
+      const p0 = Offset(100, 100);
+      final d0 = d2(p0);
+      rotation = Offset(p0.dx - (d2(p0 + const Offset(1, 0)) - d0 - 1) / 2,
+          p0.dy - (d2(p0 + const Offset(0, 1)) - d0 - 1) / 2);
     });
     tearDown(() => rig.dispose());
 
@@ -164,22 +176,37 @@ void main() {
     }
 
     test(
-        'TT4 a finger on the top quadrant grip reshapes; it does not rotate '
-        '(M-14t-19)', () {
+        'TT4 a finger nearer a grip than the rotation grip reshapes; nearer '
+        'the rotation grip it rotates (M-14t-19, review F-4)', () {
       final m = rig.camera.value.worldToScreenMatrix;
-      expect(rig.grips.rotationGripDistance(top, m),
+      expect(rig.grips.rotationGripDistance(rotation, m), closeTo(0, 1e-6),
+          reason: 'premise: the rotation grip located');
+      // The grip nearest the rotation grip, a quadrant.
+      final g = grips.reduce(
+          (a, b) => (a - rotation).distance <= (b - rotation).distance ? a : b);
+      final gap = (rotation - g).distance;
+      expect(gap, lessThan(kTouchGripHitPixels + 8),
+          reason: 'premise: the two compete for a finger');
+      final towards = (rotation - g) / gap;
+      final nearGrip = g + towards * 8;
+      expect((nearGrip - rotation).distance,
           lessThanOrEqualTo(kTouchGripHitPixels),
-          reason: 'premise: the rotation grip is within a finger\'s reach');
-      expect(pressAndDrag(top, touch: true), DragKind.reshape);
-      expect(pressAndDrag(top + const Offset(0, -14), touch: true),
-          DragKind.rotate,
-          reason: '10 px from the rotation grip, 14 from the quadrant');
+          reason: 'premise: the rotation grip is within reach too');
+      expect(pressAndDrag(nearGrip, touch: true), DragKind.reshape);
+      final nearRotation = rotation - towards * 6;
+      expect(pressAndDrag(nearRotation, touch: true), DragKind.rotate);
     });
 
     test(
         'TT5 a finger 20 px from a grip takes it; a mouse there does not '
         '(M-14t-13)', () {
-      final at = right + const Offset(20, 0);
+      // The grip farthest from the rotation grip, pressed 20 px outward.
+      final g = grips.reduce(
+          (a, b) => (a - rotation).distance >= (b - rotation).distance ? a : b);
+      final out = (g - centre) / (g - centre).distance;
+      final at = g + out * 20;
+      expect((at - rotation).distance, greaterThan(kTouchGripHitPixels),
+          reason: 'premise: away from the rotation grip');
       expect(pressAndDrag(at, touch: true), DragKind.reshape);
       expect(pressAndDrag(at, touch: false), isNot(DragKind.reshape));
     });

@@ -12,6 +12,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'support/selection_fixture.dart';
+
 /// Records every call the layer makes, with the event's essentials.
 class RecordingTool extends Tool {
   RecordingTool(this.touchPress, {this.pressPhase = ToolPhase.pressed});
@@ -399,6 +401,85 @@ void main() {
     await tester.pump(kPast);
     await a.up();
     await mouse.up();
-    expect(r.tool.routed, ['down 9 200,200 b1', 'up 9 200,200 b0']);
+    expect(r.tool.log, ['down 9 200,200 b1', 'up 9 200,200 b0'],
+        reason: 'no exit either while the mouse holds the layer (F-1)');
+  });
+
+  /// A line from world (990, 500) to (1010, 500) at local y 120, x 130..170
+  /// under a scale 2 camera translated off the origin.
+  Future<(InteractionRig, Handle)> selectRig(WidgetTester tester) async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final doc = DraftDocument.empty(measurer: measurer);
+    final line = addEntity(
+        doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+    final rig = await pumpInteraction(tester,
+        document: doc, camera: cameraAt(2.0, const Offset(-1850, 1120)));
+    return (rig, line);
+  }
+
+  Offset local(WidgetTester tester, Offset p) =>
+      tester.getTopLeft(find.byType(InteractionLayer)) + p;
+
+  testWidgets(
+      'TL16 a finger tapped during a mouse band leaves the band alone '
+      '(review F-1)', (tester) async {
+    final (rig, line) = await selectRig(tester);
+    final mouse = await tester.createGesture(
+        kind: PointerDeviceKind.mouse, pointer: 9, buttons: kPrimaryButton);
+    await mouse.down(local(tester, const Offset(100, 90)));
+    await mouse.moveTo(local(tester, const Offset(150, 120)));
+    final f = await tester.startGesture(local(tester, const Offset(300, 250)),
+        pointer: 1, kind: PointerDeviceKind.touch);
+    await f.up();
+    await mouse.moveTo(local(tester, const Offset(200, 150)));
+    await mouse.up();
+    await tester.pump();
+    expect(rig.selection.keys, {SelectionKey.root(line)});
+  });
+
+  testWidgets(
+      'TL17 no mouse is routed while a pinch runs: down, promotion, hover '
+      '(R-9a, review F-2)', (tester) async {
+    final r = await pumpLayer(tester, TouchPress.press);
+    final a = await finger(tester, 1, const Offset(100, 100));
+    final b = await finger(tester, 2, const Offset(300, 200));
+    final mouse =
+        await tester.createGesture(kind: PointerDeviceKind.mouse, pointer: 9);
+    await mouse.addPointer(location: at(tester, const Offset(50, 50)));
+    await mouse.moveTo(at(tester, const Offset(60, 60)));
+    await mouse.down(at(tester, const Offset(60, 60)));
+    await mouse.moveTo(at(tester, const Offset(80, 70)));
+    await mouse.up();
+    await a.up();
+    await b.up();
+    expect(r.tool.routed, isEmpty);
+    await mouse.removePointer();
+  });
+
+  testWidgets(
+      'TL18 a lift-mode finger lifted off the canvas places nothing '
+      '(review F-7)', (tester) async {
+    final r = await pumpLayer(tester, TouchPress.lift);
+    final g = await finger(tester, 1, const Offset(380, 100));
+    await g.moveTo(at(tester, const Offset(430, 100)));
+    await g.up();
+    expect(r.tool.routed.where((l) => !l.startsWith('move')), isEmpty);
+    final h = await finger(tester, 2, const Offset(380, 100));
+    await h.up();
+    expect(r.tool.routed.last, 'up 2 380,100 b0', reason: 'inside: a tap');
+  });
+
+  testWidgets(
+      'TL19 one finger on empty floor drags a band with the select tool '
+      '(T6, review F-3)', (tester) async {
+    final (rig, line) = await selectRig(tester);
+    final f = await tester.startGesture(local(tester, const Offset(100, 90)),
+        pointer: 1, kind: PointerDeviceKind.touch);
+    await f.moveTo(local(tester, const Offset(130, 105)));
+    await f.moveTo(local(tester, const Offset(200, 150)));
+    await f.up();
+    await tester.pump();
+    expect(rig.selection.keys, {SelectionKey.root(line)});
   });
 }

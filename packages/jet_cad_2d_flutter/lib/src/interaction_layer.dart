@@ -215,7 +215,9 @@ class _InteractionLayerState extends State<InteractionLayer> {
       // part-way through a press is cancelled.
       if (_tool.phase != ToolPhase.idle) _tool.cancel(_ctx);
     }
-    _tool.onPointerExit(_ctx);
+    // Not while a precise pointer holds the layer: an exit would cancel
+    // its drag (review F-1).
+    if (_activePointer == -1) _tool.onPointerExit(_ctx);
   }
 
   /// The held finger is routed as a down at its own position (press mode).
@@ -277,6 +279,17 @@ class _InteractionLayerState extends State<InteractionLayer> {
         _holdTimer = null;
         _held = null;
         _aiming = false;
+        final size = context.size;
+        if (!press &&
+            size != null &&
+            !(Offset.zero & size).contains(e.localPosition)) {
+          // A lift-mode finger lifted off the canvas places nothing there
+          // (review F-7): the press is withdrawn.
+          _activePointer = -1;
+          _lastButtons = 0;
+          if (_touches.isEmpty) _endSession();
+          return;
+        }
         _focus.requestFocus();
         // A tap: press mode at the down's position, lift mode at the lift's.
         _tool.onPointerDown(
@@ -315,7 +328,9 @@ class _InteractionLayerState extends State<InteractionLayer> {
   void _endSession() {
     _multi = false;
     _dropHeld();
-    _tool.onPointerExit(_ctx);
+    // Not while a precise pointer holds the layer: an exit would cancel
+    // its drag (review F-1).
+    if (_activePointer == -1) _tool.onPointerExit(_ctx);
   }
 
   /// The whole session forgotten (R-9b): the layer leaves the tree.
@@ -329,7 +344,12 @@ class _InteractionLayerState extends State<InteractionLayer> {
 
   void _onDown(PointerDownEvent e) {
     if (_isTouch(e)) return _touchDown(e);
-    if (_cameraOwned(e.buttons) || _activePointer != -1) return;
+    // No precise pointer while a touch session runs (R-9a).
+    if (_cameraOwned(e.buttons) ||
+        _activePointer != -1 ||
+        _touches.isNotEmpty) {
+      return;
+    }
     if (e.buttons & kPrimaryButton == 0) return;
     _focus.requestFocus();
     _activePointer = e.pointer;
@@ -352,7 +372,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
       }
       return;
     }
-    if (_activePointer == -1 && hasPrimary) {
+    if (_activePointer == -1 && hasPrimary && _touches.isEmpty) {
       // Treated as a down in every respect, focus included.
       _focus.requestFocus();
       _activePointer = e.pointer;
@@ -379,7 +399,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
 
   void _onHover(PointerHoverEvent e) {
     // A finger has no hover; the web sends one after every lift (TS-3).
-    if (_isTouch(e) || _activePointer != -1) return;
+    if (_isTouch(e) || _activePointer != -1 || _touches.isNotEmpty) return;
     _tool.onPointerMove(_wrap(e), _ctx);
   }
 

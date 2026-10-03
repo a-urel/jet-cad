@@ -439,6 +439,8 @@ void main() {
     r.tap(p);
     expect(r.selection.isEmpty, isTrue);
     expect(r.taps, isEmpty);
+    r.tap(r.at('2', 900, 260)); // 40 mm, 4 px: a mouse has no reach
+    expect(r.selection.isEmpty, isTrue, reason: 'review F-5');
     r.tool.onPointerDown(r.ev(p, touch: true), r.ctx);
     r.tool.onPointerUp(r.ev(p, touch: true, buttons: 0), r.ctx);
     expect(r.selection.keys, {r.key('2')});

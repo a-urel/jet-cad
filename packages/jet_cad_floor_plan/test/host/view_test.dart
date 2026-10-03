@@ -567,6 +567,29 @@ void main() {
     expect(taps, ['1']);
   });
 
+  testWidgets(
+      'V19 by touch through the view: a long press toggles 500 ms from '
+      'contact (14t T5, review F-6)', (tester) async {
+    final c = FloorPlanController(json: pagePlan());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: FloorPlanView(controller: c))));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    final g = await tester.startGesture(tableOnScreen(tester, c, '2'),
+        pointer: 34, kind: PointerDeviceKind.touch);
+    await tester.pump(const Duration(milliseconds: 499));
+    expect(c.selectedTables.value, isEmpty);
+    await tester.pump(const Duration(milliseconds: 2));
+    expect(c.selectedTables.value, {'2'});
+    await g.up();
+    await tester.pump();
+    expect(c.selectedTables.value, {'2'}, reason: 'spent: no tap after');
+  });
+
   testWidgets('V16 the status layer is drawn in the selection mode only',
       (tester) async {
     final c = await pumpView(tester);
