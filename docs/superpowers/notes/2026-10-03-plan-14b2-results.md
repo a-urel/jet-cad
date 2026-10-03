@@ -25,7 +25,7 @@ Design / Service toggle, on every platform's runner.
 | 1 The seams, the export helpers | `d0fd6ef` | **Needs fixes** (shared review of 1–4) |
 | 2 The controller | `9fa5513`, `e4fc4a4` | idem |
 | 3–4 The views, the barrel | `8f94fc7` | idem → `bb81e6a` (F-1..F-7) |
-| 5 The demo | `07f42c1` | DEMO-REVIEW |
+| 5 The demo | `07f42c1` | **Needs fixes** (F-1 the side panel went stale: the API had no change signal; tests) → `7dc38fa` |
 
 One implementer (this session); independent reviewers re-ran the gates in
 their own worktrees and fired their own mutants.
@@ -35,9 +35,9 @@ their own worktrees and fired their own mutants.
 | Package | Result |
 |---|---|
 | engine, render | **untouched** by this plan (`git diff 8e86bdb..HEAD` empty for both) |
-| planner `packages/jet_cad_floor_plan` | **923 passed**; analyze, format clean |
+| planner `packages/jet_cad_floor_plan` | **925 passed**; analyze, format clean |
 | app `apps/floor_planner` | **192 passed**; analyze, format clean |
-| demo `apps/restaurant_demo` | **5 passed**; analyze, format clean |
+| demo `apps/restaurant_demo` | **11 passed**; analyze, format clean |
 | web builds | `apps/floor_planner` and `apps/restaurant_demo`: `✓ Built build/web` |
 | `apps/dev_harness_2d` | analyze clean |
 
@@ -67,6 +67,10 @@ observable failure in the current tree; the post-frame drop is kept as
 defensive. **m21, m21c** (one of the two identity guards in a flow
 removed): equivalent, the other guard catches it. **m27** (the
 numbering-warnings filter): equivalent under the current diagnostics.
+**M8 (demo)** (the number field not trimmed): equivalent, the controller
+trims. **M9, M11, M23 (demo)** (the view's key, a removed listener,
+controllers not disposed): harmless or unmeasured, as the demo review
+recorded.
 
 ## Amended at execution
 
@@ -83,6 +87,12 @@ numbering-warnings filter): equivalent under the current diagnostics.
   changed beyond imports, against the plan's constraint, by this type
   change only.
 - **The controller is a factory** that decodes first (review F-5).
+- **`revision`** (a `ValueListenable<int>`) is added to the controller:
+  it moves on every change of the active plan, so a host re-reads
+  `tables` and `numberingWarnings` (demo review F-1; the API had no such
+  signal before 14c's callbacks).
+- **An empty label is no number** (`TableSurvey`, demo review F-7): the
+  table is unnumbered, not "Number  is used by 2 tables".
 
 ## Found, not fixed
 

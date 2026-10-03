@@ -49,7 +49,7 @@ mode** built in; what is missing for that comes first.
   never reach the design); `FloorPlanView` shows the editor or the canvas
   alone, Export and Print in both. `apps/restaurant_demo` (every runner)
   shows two dining areas with a Design / Service toggle. Gates: planner
-  923, app 192, demo 5, both web builds; engine and render untouched.
+  925, app 192, demo 11, both web builds; engine and render untouched.
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this
   session); the repo's floor is unchanged (3.44.0).
 - **Owed:** the human's macOS and web look at the palette, the font, the
