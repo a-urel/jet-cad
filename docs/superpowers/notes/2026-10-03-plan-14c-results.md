@@ -27,7 +27,7 @@ areas, Salon and Teras, with status buttons, random statuses and a log.
 | 1 The picker | `851a2f3` (early), `b37152f` | **Approved with fixes** (shared review of 1–3) |
 | 2 The tool, the callbacks | `31ec07b`, `65751ce` | idem |
 | 3 The status layer | `f719b6d` | idem → `0ccda2e` (F-1..F-8) |
-| 4 The demo | `e52918f`, `845901b` | review in progress at this commit |
+| 4 The demo | `e52918f`, `845901b` | **Approved with fixes** (with `0ccda2e`'s check; T4-1..T4-6, all Low) → `a9c5e2f` |
 
 One implementer (this session); independent reviewers re-ran the gates in
 their own worktrees and fired their own mutants.
@@ -41,7 +41,7 @@ their own worktrees and fired their own mutants.
 | planner `packages/jet_cad_floor_plan` | **961 passed**; analyze, format clean |
 | restaurant symbols | untouched |
 | app `apps/floor_planner` | **192 passed**; analyze, format clean |
-| demo `apps/restaurant_demo` | **16 passed**; analyze, format clean |
+| demo `apps/restaurant_demo` | **17 passed**; analyze, format clean |
 | web builds | `apps/floor_planner` and `apps/restaurant_demo`: `✓ Built build/web` |
 | `apps/dev_harness_2d` | analyze clean |
 
@@ -75,7 +75,12 @@ old selection), T18 (no zero-translation guard), T20 (Ctrl / ⌘ ignored),
 T21 (the preview reversed), the cancelled timer left armed (F-2), and own:
 the caption at the top's centre or 11 px below the number's anchor (F-5),
 no eviction (F-8), an open first leaf served as a top (F-7), the step
-applied to the transforms at the drag's start (R-6).
+applied to the transforms at the drag's start (R-6). The Task 4 review's,
+red after its fixes: a status button writing every table but Free only the
+selection (T4-1, D12), Random merging into the previous statuses (T4-2,
+D13), the layout change logged twice (T4-3, D14), a wrong sample path in
+`loadSamplePlans` (T4-5, D15); its own 29 further mutants on `0ccda2e`
+and the demo were red.
 
 **Survive, recorded:** **P2** (the even-odd ray towards −x): equivalent,
 either direction gives the same parity. **P12** (the circle's edge without
@@ -109,6 +114,9 @@ gesture) and **T25** (dispose not cancelling the timer, which
 - **The painter's caches are evicted** (review F-8): paints and captions no
   fill holds are dropped at each rebuild, so changing captions ("12 min",
   "13 min") do not grow them.
+- **The demo's samples load through `loadSamplePlans`** (review T4-5),
+  which `main` and D15 share, so a wrong asset path fails a test rather
+  than opening both areas empty.
 - **The allocation measurement lives in `table_status_painter_test.dart`**
   (SP1, structural, and a counter), not in a `status_allocation_test.dart`
   (review F-10).
@@ -128,6 +136,10 @@ gesture) and **T25** (dispose not cancelling the timer, which
 
 ## Found, not fixed
 
+- **The caption's gap assumes a uniform scale** (review T4-4):
+  `sqrt(|det|)` is the label's scale only when the instance scales x and
+  y alike. Placement rotates and mirrors only; a hand-scaled instance's
+  caption may sit too close to or too far from its number.
 - **A second finger:** after a first finger lifts, `InteractionLayer`
   turns a second finger's move into a down (review F-10). Multi-touch is
   the touch spike's (14t).

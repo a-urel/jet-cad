@@ -62,7 +62,7 @@ mode** built in; what is missing for that comes first.
   demo opens on two furnished sample areas with status buttons and a log.
   The render package gained one `mounted` guard (`RulerFrame`). Gates:
   render 1,197 + 1 skip + 7 standing,
-  planner 961, app 192, demo 16, both web builds; the engine untouched.
+  planner 961, app 192, demo 17, both web builds; the engine untouched.
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this
   session); the repo's floor is unchanged (3.44.0).
 - **Owed:** the human's macOS and web look at the palette, the font, the
