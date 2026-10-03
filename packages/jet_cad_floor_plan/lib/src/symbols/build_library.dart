@@ -14,25 +14,31 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../parametric/catalog.dart';
 import 'furniture_catalog.dart';
+import 'seating_component.dart';
 import 'symbol_component.dart';
 
-/// The document holding every symbol of [furnitureCatalog] as a definition
-/// with its leaves. Deterministic: handles ascend in catalog order (a
-/// definition, then its leaves, then the next definition), so two builds
-/// encode to identical bytes.
+/// The furniture library: [buildSymbolLibrary] over [furnitureCatalog].
+DraftDocument buildFurnitureLibrary() => buildSymbolLibrary(furnitureCatalog);
+
+/// The document holding every symbol of [catalog] as a definition with its
+/// leaves (spec 14 V-3: any catalog, the furniture one or a host's).
+/// Deterministic: handles ascend in catalog order (a definition, then its
+/// leaves, then the next definition), so two builds encode to identical
+/// bytes. A servable symbol's definition also carries its
+/// [SeatingComponent] (spec 14 S2), set right after its [SymbolComponent].
 ///
 /// Leaves are BYBLOCK-friendly: layer 0, BYBLOCK linetype, `ByBlockColor`,
 /// lineweight and transparency BYBLOCK, no flag. A BYBLOCK lineweight
 /// resolves from the instance, whose own default is also BYBLOCK, which
 /// resolves from the document default; both values are on the loader's
 /// allow-list.
-DraftDocument buildFurnitureLibrary() {
+DraftDocument buildSymbolLibrary(List<FurnitureSymbol> catalog) {
   final doc = DraftDocument.empty();
   registerAppComponents(doc.components);
   doc.header.units = DrawingUnits.millimeters;
 
   final commands = <DraftCommand>[];
-  for (final s in furnitureCatalog) {
+  for (final s in catalog) {
     final def = doc.handleSeed.next();
     commands
       ..add(AddDefinitionCommand(Definition(
@@ -51,6 +57,11 @@ DraftDocument buildFurnitureLibrary() {
           version: s.version,
         ),
       ));
+    final seats = s.seats;
+    if (seats != null) {
+      commands.add(SetComponentCommand<SeatingComponent>(
+          def, SeatingComponent(seats: seats)));
+    }
     for (final shape in s.shapes) {
       commands.add(AddEntityCommand(
         record: EntityRecord(

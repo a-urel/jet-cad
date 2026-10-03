@@ -91,11 +91,14 @@ void main() {
 
     test('a term inside the name finds a symbol', () {
       // "Square dining table, 2 seats" and its kin: "seats" ends the name.
+      // Since spec 14 S3 the dining tables are version 2, and the round one
+      // is "Round dining table, 4 seats".
       const seats = [
-        'dining.table.square.two@1',
-        'dining.table.square.four@1',
-        'dining.table.rect.four@1',
-        'dining.table.rect.six@1',
+        'dining.table.square.two@2',
+        'dining.table.square.four@2',
+        'dining.table.rect.four@2',
+        'dining.table.rect.six@2',
+        'dining.table.round@2',
       ];
       expect(hitsOnly(lib.entries, 'seats', 'name'), seats);
       for (final id in seats) {
@@ -242,11 +245,11 @@ void main() {
     ]);
     expect(found.map((g) => g.symbols.map(idOf).toList()).toList(), [
       [
-        'dining.table.square.two@1',
-        'dining.table.square.four@1',
-        'dining.table.rect.four@1',
-        'dining.table.rect.six@1',
-        'dining.table.round@1',
+        'dining.table.square.two@2',
+        'dining.table.square.four@2',
+        'dining.table.rect.four@2',
+        'dining.table.rect.six@2',
+        'dining.table.round@2',
       ],
       ['bed.nightstand@1'],
       ['table.coffee@1'],

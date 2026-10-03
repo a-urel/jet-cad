@@ -8,6 +8,7 @@
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'seating_component.dart';
 import 'symbol_component.dart';
 import 'symbol_library.dart';
 
@@ -111,6 +112,12 @@ CompoundCommand placeSymbol(
           version: entry.version,
         ),
       ));
+    // A servable symbol stays servable in the plan (spec 14 S2).
+    final seats = entry.seats;
+    if (seats != null) {
+      commands.add(SetComponentCommand<SeatingComponent>(
+          copy, SeatingComponent(seats: seats)));
+    }
     for (final leaf in entry.leaves) {
       commands.add(AddEntityCommand(
         record:

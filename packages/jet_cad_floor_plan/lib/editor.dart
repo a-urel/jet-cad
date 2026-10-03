@@ -52,6 +52,7 @@ export 'src/shortcut_guard.dart';
 export 'src/startup_plan.dart';
 export 'src/symbols/build_library.dart';
 export 'src/symbols/furniture_catalog.dart';
+export 'src/symbols/seating_component.dart';
 export 'src/symbols/symbol_component.dart';
 export 'src/symbols/symbol_ghost.dart';
 export 'src/symbols/symbol_library.dart';

@@ -90,14 +90,24 @@ void main() {
       }
     });
 
-    test('every entry has a category, two tags, version 1 and leaves', () {
+    // Written out by hand (spec 14 S3): the five dining tables moved to
+    // version 2 when they became servable; every other symbol is at 1.
+    const version2 = {
+      'dining.table.square.two',
+      'dining.table.square.four',
+      'dining.table.rect.four',
+      'dining.table.rect.six',
+      'dining.table.round',
+    };
+
+    test('every entry has a category, two tags, its version and leaves', () {
       for (final e in assetLibrary().entries) {
         expect(e.category, isNotEmpty, reason: e.key);
         expect(e.tags.length, greaterThanOrEqualTo(2), reason: e.key);
         for (final t in e.tags) {
           expect(t, t.toLowerCase(), reason: e.key);
         }
-        expect(e.version, 1, reason: e.key);
+        expect(e.version, version2.contains(e.key) ? 2 : 1, reason: e.key);
         expect(e.leaves, isNotEmpty, reason: e.key);
       }
     });
@@ -120,7 +130,7 @@ void main() {
       'dining.table.square.four': 6,
       'dining.table.rect.four': 6,
       'dining.table.rect.six': 8,
-      'dining.table.round': 0,
+      'dining.table.round': 4,
       'dining.chair': 2,
       'dining.bench': 2,
       'kitchen.base.600': 1,
@@ -201,7 +211,8 @@ void main() {
           expect(isClosedPolyline(first.payload), isTrue, reason: e.key);
         } else {
           expect(first.record.kind, EntityKind.circle, reason: e.key);
-          expect(closedPolylines[e.key], 0, reason: e.key);
+          // Written out by hand: the two symbols whose outline is a circle.
+          expect(e.key, isIn(const ['dining.table.round', 'office.chair']));
         }
       }
     });
@@ -304,6 +315,70 @@ void main() {
             expect(overlap, isFalse, reason: '$key: chairs $i and $j');
           }
         }
+      }
+    });
+  });
+
+  group('seating (spec 14 S1-S3)', () {
+    // Written out by hand: the servable symbols and their seats. Every other
+    // symbol is not servable (M-14s-1).
+    const servable = {
+      'dining.table.square.two': 2,
+      'dining.table.square.four': 4,
+      'dining.table.rect.four': 4,
+      'dining.table.rect.six': 6,
+      'dining.table.round': 4,
+    };
+
+    test('the decoded library carries each servable symbol\'s seats', () {
+      final lib = assetLibrary();
+      for (final e in lib.entries) {
+        expect(e.seats, servable[e.key], reason: e.key);
+      }
+      expect(lib.entries.where((e) => e.seats != null).length, 5);
+    });
+
+    test('the catalog says the same thing the file does', () {
+      for (final s in furnitureCatalog) {
+        expect(s.seats, servable[s.key], reason: s.key);
+      }
+    });
+
+    test('the round table draws its four chairs around its top', () {
+      final e = assetLibrary()
+          .entries
+          .firstWhere((e) => e.key == 'dining.table.round');
+      final top = e.leaves.first;
+      expect(top.record.kind, EntityKind.circle);
+      final c = top.payload.pointAt(0);
+      final r = top.payload.scalars[0];
+      expect(e.definition.basePoint, c, reason: 'the base point is the top');
+      expect((c.x, c.y, r), (900.0, 900.0, 550.0));
+      final chairs = [
+        for (final l in e.leaves)
+          if (l.record.kind == EntityKind.polyline) l.payload,
+      ];
+      expect(chairs, hasLength(4));
+      for (final p in chairs) {
+        // A 450 x 450 seat whose nearest edge is 100 under the top's edge:
+        // its nearest point to the centre is at r - 100.
+        var minD = double.infinity;
+        var minX = double.infinity, maxX = -double.infinity;
+        var minY = double.infinity, maxY = -double.infinity;
+        for (var i = 0; i < p.pointCount; i++) {
+          final q = p.pointAt(i);
+          minX = q.x < minX ? q.x : minX;
+          maxX = q.x > maxX ? q.x : maxX;
+          minY = q.y < minY ? q.y : minY;
+          maxY = q.y > maxY ? q.y : maxY;
+        }
+        expect((maxX - minX, maxY - minY), (450.0, 450.0));
+        // The nearest point of an axis-aligned box to the centre.
+        final nx = c.x.clamp(minX, maxX), ny = c.y.clamp(minY, maxY);
+        minD = (Vector2(nx, ny) - c).length;
+        expect(minD, closeTo(r - 100, 1e-9));
+        expect(minX, greaterThanOrEqualTo(0));
+        expect(minY, greaterThanOrEqualTo(0));
       }
     });
   });

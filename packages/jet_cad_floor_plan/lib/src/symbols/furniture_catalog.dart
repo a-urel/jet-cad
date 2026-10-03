@@ -78,6 +78,11 @@ final class FurnitureSymbol {
   final String category;
   final List<String> tags;
   final int version;
+
+  /// How many people the symbol seats when it is servable (a table, a
+  /// booth, a bar stool: spec 14 S1, S2), or null when it is not. A
+  /// servable symbol draws its served top first (S4).
+  final int? seats;
   final double baseX, baseY;
   final List<FurnitureShape> shapes;
 
@@ -87,6 +92,7 @@ final class FurnitureSymbol {
     required this.category,
     required this.tags,
     this.version = 1,
+    this.seats,
     required this.baseX,
     required this.baseY,
     required this.shapes,
@@ -137,7 +143,8 @@ List<FurnitureShape> _chair(double x, double y, _Side back) => [
 /// ([ox], [oy]); [chairs] are (side, centre along that side) pairs, the
 /// centre measured from the table's lower-left corner along the side. The
 /// base point is the table centre. Leaves: table outline, table inset, then
-/// each chair (outline, back line).
+/// each chair (outline, back line). Servable at version 2 (spec 14 S3): it
+/// seats one per chair.
 FurnitureSymbol _diningSet(String key, String name, double tw, double th,
     double ox, double oy, List<String> tags, List<(_Side, double)> chairs) {
   final shapes = <FurnitureShape>[
@@ -162,6 +169,8 @@ FurnitureSymbol _diningSet(String key, String name, double tw, double th,
     name: name,
     category: dining,
     tags: tags,
+    version: 2,
+    seats: chairs.length,
     baseX: ox + tw / 2,
     baseY: oy + th / 2,
     shapes: shapes,
@@ -219,14 +228,26 @@ final List<FurnitureSymbol> furnitureCatalog = List.unmodifiable([
     (_Side.left, 450),
     (_Side.right, 450),
   ]),
-  const FurnitureSymbol(
+  // A Ø 1100 top with four chairs (spec 14 S3: version 2 draws them, so
+  // its seat count is visible), centred far enough from the origin that
+  // every chair has non-negative coordinates.
+  FurnitureSymbol(
     key: 'dining.table.round',
-    name: 'Round dining table',
+    name: 'Round dining table, 4 seats',
     category: dining,
-    tags: ['table', 'dining', 'round'],
-    baseX: 550,
-    baseY: 550,
-    shapes: [CircleShape(550, 550, 550), CircleShape(550, 550, 500)],
+    tags: const ['table', 'dining', 'round', 'four'],
+    version: 2,
+    seats: 4,
+    baseX: 900,
+    baseY: 900,
+    shapes: [
+      const CircleShape(900, 900, 550),
+      const CircleShape(900, 900, 500),
+      ..._chair(900 - _chairSize / 2, 900 - 550 - _chairReach, _Side.bottom),
+      ..._chair(900 - _chairSize / 2, 900 + 550 - _chairTuck, _Side.top),
+      ..._chair(900 - 550 - _chairReach, 900 - _chairSize / 2, _Side.left),
+      ..._chair(900 + 550 - _chairTuck, 900 - _chairSize / 2, _Side.right),
+    ],
   ),
   FurnitureSymbol(
     key: 'dining.chair',

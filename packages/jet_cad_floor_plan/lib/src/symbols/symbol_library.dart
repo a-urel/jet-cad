@@ -10,6 +10,7 @@ import 'dart:typed_data';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../parametric/catalog.dart';
+import 'seating_component.dart';
 import 'symbol_component.dart';
 
 /// A library the loader refuses. The message names the offending key or
@@ -34,6 +35,10 @@ final class SymbolEntry {
   final String category;
   final List<String> tags;
   final int version;
+
+  /// How many the symbol seats, from its definition's [SeatingComponent]
+  /// (spec 14 S1, S2), or null when it is not servable.
+  final int? seats;
   final Definition definition;
   final List<({EntityRecord record, GeometryPayload payload})> leaves;
 
@@ -43,6 +48,7 @@ final class SymbolEntry {
     required this.category,
     required List<String> tags,
     required this.version,
+    this.seats,
     required this.definition,
     required List<({EntityRecord record, GeometryPayload payload})> leaves,
   })  : tags = List.unmodifiable(tags),
@@ -70,6 +76,29 @@ final class SymbolLibrary {
       for (final e in entries)
         if (seen.add(e.category)) e.category,
     ];
+  }
+
+  /// Several libraries as one (spec 14 V-4): [parts] are (name, library)
+  /// pairs, their entries concatenated in order, so categories keep their
+  /// first appearance across them. A `key@version` present in two parts is
+  /// a [SymbolLibraryError] naming both. One part is returned as it is.
+  static SymbolLibrary merge(List<(String, SymbolLibrary)> parts) {
+    if (parts.length == 1) return parts.single.$2;
+    final from = <String, String>{};
+    final entries = <SymbolEntry>[];
+    for (final (name, library) in parts) {
+      for (final e in library.entries) {
+        final id = '${e.key}@${e.version}';
+        final earlier = from[id];
+        if (earlier != null) {
+          throw SymbolLibraryError(
+              '$id is in both the "$earlier" and the "$name" library');
+        }
+        from[id] = name;
+        entries.add(e);
+      }
+    }
+    return SymbolLibrary._(entries);
   }
 
   /// Decodes [bytes] (UTF-8 of the codec's JSON) and validates the result.
@@ -191,6 +220,16 @@ final class SymbolLibrary {
       owned.add((record: record, payload: payload));
     }
 
+    // Seating (spec 14 S2): only on a symbol's definition. Its value was
+    // checked when it was decoded (`SeatingComponent` refuses below 1, and
+    // the codec's throw is a refusal above).
+    for (final h in doc.components.withComponent<SeatingComponent>()) {
+      if (leavesOf[h] == null) {
+        throw SymbolLibraryError('a seating component on ${h.toHex()}, which '
+            'is not a symbol\'s definition');
+      }
+    }
+
     for (final (definition, component) in drafts) {
       final leaves = leavesOf[definition.handle]!
         ..sort(
@@ -201,6 +240,7 @@ final class SymbolLibrary {
         category: component.category,
         tags: component.tags,
         version: component.version,
+        seats: doc.components.get<SeatingComponent>(definition.handle)?.seats,
         definition: definition,
         leaves: leaves,
       );

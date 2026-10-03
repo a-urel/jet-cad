@@ -22,19 +22,62 @@ Future<Uint8List> readBundledLibrary([AssetBundle? bundle]) async {
   return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
 }
 
-/// Loads the symbol library once and holds its [SymbolLibraryState].
-///
-/// [read] is the test seam: it returns the library's bytes (or throws); the
-/// default reads the bundled asset ([readBundledLibrary]). [load] runs
-/// [read] then [SymbolLibrary.decode]; **any** throw -- a missing asset,
-/// bytes the codec cannot read, a [SymbolLibraryError] -- ends in
-/// [SymbolLibraryFailed]. [retry] runs it again, from a failure only.
-/// Listeners are notified on every change of [state].
-class SymbolLibraryLoader extends ChangeNotifier {
-  SymbolLibraryLoader({Future<Uint8List> Function()? read})
-      : _read = read ?? readBundledLibrary;
+/// One library the loader reads (spec 14 V-4): a [name] its errors use and
+/// a [read]er of its bytes. A host adds its own beside the planner's
+/// [furnitureSymbolSource].
+final class SymbolLibrarySource {
+  const SymbolLibrarySource({required this.name, required this.read});
 
-  final Future<Uint8List> Function() _read;
+  final String name;
+  final Future<Uint8List> Function() read;
+
+  @override
+  String toString() => 'SymbolLibrarySource($name)';
+}
+
+/// The planner's own furniture library, read through [rootBundle].
+const SymbolLibrarySource furnitureSymbolSource =
+    SymbolLibrarySource(name: 'furniture', read: readBundledLibrary);
+
+/// Loads the symbol libraries once and holds their [SymbolLibraryState].
+///
+/// [sources] are read and decoded in order and merged into one library
+/// ([SymbolLibrary.merge]); the default is [furnitureSymbolSource] alone,
+/// so a host that adds nothing sees the furniture palette. [read] is the
+/// older single-source test seam, a source named `library`; give one or the
+/// other. [load] reads every source; **any** throw -- a missing asset,
+/// bytes the codec cannot read, a [SymbolLibraryError], a key and version
+/// in two sources -- ends in [SymbolLibraryFailed]. [retry] reads every
+/// source again, from a failure only. Listeners are notified on every
+/// change of [state].
+class SymbolLibraryLoader extends ChangeNotifier {
+  /// Throws [ArgumentError] when both [read] and [sources] are given, or
+  /// [sources] is empty.
+  SymbolLibraryLoader(
+      {Future<Uint8List> Function()? read, List<SymbolLibrarySource>? sources})
+      : sources = List.unmodifiable(_sourcesOf(read, sources));
+
+  static List<SymbolLibrarySource> _sourcesOf(
+      Future<Uint8List> Function()? read, List<SymbolLibrarySource>? sources) {
+    if (read != null && sources != null) {
+      throw ArgumentError('give read or sources, not both');
+    }
+    if (sources != null) {
+      if (sources.isEmpty) {
+        throw ArgumentError.value(sources, 'sources', 'must not be empty');
+      }
+      return sources;
+    }
+    return [
+      if (read == null)
+        furnitureSymbolSource
+      else
+        SymbolLibrarySource(name: 'library', read: read),
+    ];
+  }
+
+  /// The libraries this loader reads, in palette order.
+  final List<SymbolLibrarySource> sources;
 
   SymbolLibraryState _state = const SymbolLibraryLoading();
   bool _started = false;
@@ -61,7 +104,11 @@ class SymbolLibraryLoader extends ChangeNotifier {
   Future<void> _run() async {
     SymbolLibraryState next;
     try {
-      next = SymbolLibraryReady(SymbolLibrary.decode(await _read()));
+      final parts = <(String, SymbolLibrary)>[];
+      for (final source in sources) {
+        parts.add((source.name, SymbolLibrary.decode(await source.read())));
+      }
+      next = SymbolLibraryReady(SymbolLibrary.merge(parts));
     } catch (e) {
       next = SymbolLibraryFailed(e);
     }
