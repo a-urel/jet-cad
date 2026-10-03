@@ -105,4 +105,35 @@ void main() {
         reason: 'the top bar emits a major tick at the sheet corner: '
             'majors were $majors, corner at $cornerX');
   });
+
+  testWidgets(
+      'a frame replaced mid-drag: the old frame\'s pointer is not written '
+      '(spec 14c, a host replacing the plan while a finger is down)',
+      (tester) async {
+    final page = ValueNotifier<PageComponent?>(standardPage());
+    final camera = standardCamera();
+    Widget frame(Key key) => Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(
+              width: 424,
+              height: 324,
+              child: RulerFrame(
+                key: key,
+                camera: camera,
+                page: page,
+                child: const SizedBox.expand(key: Key('child')),
+              ),
+            ),
+          ),
+        );
+    await tester.pumpWidget(frame(const ValueKey('first')));
+    final g = await tester
+        .startGesture(tester.getCenter(find.byKey(const Key('child'))));
+    await g.moveBy(const Offset(10, 0));
+    await tester.pumpWidget(frame(const ValueKey('second')));
+    await g.moveBy(const Offset(10, 0));
+    await g.cancel();
+    expect(tester.takeException(), isNull);
+  });
 }

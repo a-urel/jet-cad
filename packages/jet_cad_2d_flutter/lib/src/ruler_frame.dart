@@ -33,6 +33,10 @@ class RulerFrameState extends State<RulerFrame> {
       Listenable.merge([widget.camera, widget.page, pointer]);
   late final Listenable _cornerRepaint = widget.page;
 
+  void _point(Offset? at) {
+    if (mounted) pointer.value = at;
+  }
+
   @override
   void dispose() {
     pointer.dispose();
@@ -95,13 +99,17 @@ class RulerFrameState extends State<RulerFrame> {
                   ),
                 ),
                 Expanded(
+                  // A pointer that went down before this frame was replaced
+                  // keeps sending its moves to the old, detached listener
+                  // (spec 14c: a host replaced the plan mid-drag): the
+                  // disposed notifier is not written then.
                   child: MouseRegion(
-                    onExit: (_) => pointer.value = null,
+                    onExit: (_) => _point(null),
                     child: Listener(
                       behavior: HitTestBehavior.translucent,
-                      onPointerHover: (e) => pointer.value = e.localPosition,
-                      onPointerMove: (e) => pointer.value = e.localPosition,
-                      onPointerCancel: (_) => pointer.value = null,
+                      onPointerHover: (e) => _point(e.localPosition),
+                      onPointerMove: (e) => _point(e.localPosition),
+                      onPointerCancel: (_) => _point(null),
                       child: widget.child,
                     ),
                   ),

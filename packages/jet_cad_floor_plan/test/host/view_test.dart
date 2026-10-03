@@ -11,6 +11,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+    show InteractionLayer;
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
@@ -455,5 +456,61 @@ void main() {
     await pumpView(tester, symbols: loader);
     await letRun(tester, () => loader.state is SymbolLibraryReady);
     expect(loader.state, isA<SymbolLibraryReady>());
+  });
+
+  /// Table [n]'s top centre on the screen, in the test's coordinates.
+  Offset tableOnScreen(WidgetTester tester, FloorPlanController c, String n) {
+    final d = c.activeDocument;
+    final node = d.tree[TableSurvey.of(d).withNumber(n).single.instance]!
+        as InstanceNode;
+    final w = node.transform.transformPoint(Vector2(900, 700));
+    final s = c.camera.value.worldToScreen(w);
+    return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
+  }
+
+  testWidgets(
+      'V15 through the widgets: a tap reports the number and selects; a '
+      'drag moves and reports once; a reset mid-drag executes nothing '
+      '(14c S8, R-5)', (tester) async {
+    final taps = <String>[];
+    var layouts = 0;
+    final c = FloorPlanController(json: pagePlan());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: FloorPlanView(
+                controller: c,
+                onTableTap: taps.add,
+                onLayoutChanged: () => layouts++))));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tapAt(tableOnScreen(tester, c, '2'));
+    await tester.pump();
+    expect(taps, ['2']);
+    expect(c.selectedTables.value, {'2'});
+
+    final g = await tester.startGesture(tableOnScreen(tester, c, '2'));
+    await g.moveBy(const Offset(30, 0));
+    await g.moveBy(const Offset(30, 10));
+    await g.up();
+    await tester.pump();
+    expect(layouts, 1);
+    expect(c.serviceEdited, isTrue);
+    expect(c.activeDocument.commands.undoDepth, 1);
+
+    final g2 = await tester.startGesture(tableOnScreen(tester, c, '2'));
+    await g2.moveBy(const Offset(40, 0));
+    c.resetLayout();
+    await tester.pump();
+    await g2.moveBy(const Offset(40, 0));
+    await g2.up();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(c.serviceEdited, isFalse, reason: 'the new copy saw no move');
+    expect(layouts, 1);
   });
 }

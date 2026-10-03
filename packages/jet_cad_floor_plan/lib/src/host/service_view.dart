@@ -2,7 +2,8 @@
 // controller's service copy, under `runtime` permissions -- rulers, page
 // chrome, the drafting and the selection outlines -- with Undo, Redo,
 // Export and Print. No palette, no panels, no grips, and nothing that needs
-// `geometry` or `structure` (umbrella D11). 14c adds the table tool.
+// `geometry` or `structure` (umbrella D11). 14c's table tool picks,
+// selects and moves tables.
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
@@ -11,42 +12,12 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
+import '../service/table_picker.dart';
+import '../service/table_select_tool.dart';
 import '../shell_commands.dart';
 import '../tables/table_label_system.dart';
 import 'floor_plan_controller.dart';
 import 'page_flows.dart';
-
-/// A tool that does nothing (H7): the selection mode's pointer acts on the
-/// camera only, until 14c's `TableSelectTool`.
-class IdleTool extends Tool {
-  @override
-  String get name => 'Idle';
-
-  @override
-  ToolPhase get phase => ToolPhase.idle;
-
-  @override
-  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
-
-  @override
-  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
-
-  @override
-  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
-
-  @override
-  void onPointerExit(ToolContext ctx) {}
-
-  @override
-  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
-      KeyEventResult.ignored;
-
-  @override
-  void cancel(ToolContext ctx) {}
-
-  @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
-}
 
 /// The canvas over [controller]'s service copy (H7). Built per copy: the
 /// view is keyed by it, so a [FloorPlanController.resetLayout] or a load
@@ -56,13 +27,17 @@ class ServiceView extends StatefulWidget {
       {super.key,
       required this.controller,
       required this.flows,
-      required this.fitOnStart});
+      required this.fitOnStart,
+      required this.callbacks});
 
   final FloorPlanController controller;
   final PageFlows flows;
 
   /// Whether the camera fits after the first frame (R-13).
   final bool fitOnStart;
+
+  /// The host's callbacks, read at each call (14c R-5).
+  final ServiceCallbacks Function() callbacks;
 
   @override
   State<ServiceView> createState() => _ServiceViewState();
@@ -76,9 +51,12 @@ class _ServiceViewState extends State<ServiceView> {
   late final SpatialIndex _index = SpatialIndex(_document);
   late final PageNotifier _page = PageNotifier(_document);
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
-  final IdleTool _idle = IdleTool();
+  // Spec 14c S3: the table tool, over this copy's tables.
+  late final TablePicker _picker = TablePicker(_document);
+  late final TableSelectTool _tool =
+      TableSelectTool(picker: _picker, callbacks: widget.callbacks);
   late final ToolController _tools = ToolController(
-      initial: _idle,
+      initial: _tool,
       context: ToolContext(
           document: _document,
           index: _index,
@@ -122,7 +100,7 @@ class _ServiceViewState extends State<ServiceView> {
     _page.removeListener(_onPage);
     _pageReady.dispose();
     _tools.dispose();
-    _idle.dispose();
+    _tool.dispose();
     _outlines.dispose();
     _tableLabels.dispose();
     _parametric.dispose();

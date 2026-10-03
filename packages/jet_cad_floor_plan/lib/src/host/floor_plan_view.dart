@@ -26,12 +26,21 @@ class FloorPlanView extends StatefulWidget {
     this.onExport,
     this.printer,
     this.exportName = 'plan',
+    this.onTableTap,
+    this.onLayoutChanged,
   });
 
   final FloorPlanController controller;
   final void Function(FloorPlanExport export)? onExport;
   final PagePrinter? printer;
   final String exportName;
+
+  /// A table was tapped in the selection mode (14c S8): its number. A
+  /// locked table reports its tap too; an unnumbered one reports none.
+  final void Function(String number)? onTableTap;
+
+  /// Tables were moved in the selection mode, one call per drag (14c S8).
+  final void Function()? onLayoutChanged;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -107,7 +116,11 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                 key: ObjectKey(document),
                 controller: c,
                 flows: _flows,
-                fitOnStart: _fitOnStartFor(document));
+                fitOnStart: _fitOnStartFor(document),
+                callbacks: () => (
+                      onTableTap: widget.onTableTap,
+                      onLayoutChanged: widget.onLayoutChanged,
+                    ));
           }
           c.startSymbols();
           return PlannerShell(
