@@ -1,6 +1,9 @@
 # Host API and the two modes (14b-2) — design
 
-**Date:** 2026-10-03. **Status:** design, **revision 1**. **Sub-project:**
+**Date:** 2026-10-03. **Status:** design, **revision 2**: revision 1
+(`efd013e`) reviewed independently, "Ready with fixes" (R-1 to R-15),
+each applied in [Revision 2](#revision-2), which is binding where it
+differs from the text above it. **Sub-project:**
 14 (restaurant embedding), slice **14b-2**.
 **Umbrella:** [2026-10-03-restaurant-embedding-design.md](2026-10-03-restaurant-embedding-design.md)
 (revision 3, approved): decisions 1, 6, 7, 11, 12 and D8–D12, D19 are
@@ -301,3 +304,111 @@ two tables sharing a number (from a hand-edited JSON), a wall.
   mode or on `load`; a host that wants service moves to outlive a
   restart needs a later `serviceJson()` (not in v1; decision 11 says
   "for the service or until undone").
+
+## Revision 2
+
+Applied from the independent review of revision 1. The review found the
+three amendments sound and the facts accurate (F-6's line is :61; F-8:
+`editor.dart` does not export `src/tables/table_rotate.dart`; F-9: the
+selection also prunes keys on hidden or locked layers,
+`selection.dart:174-196`).
+
+- **R-1 → H11, the settle.** `FloorPlanView` passes the shell the
+  existing `onSettle` registrar (`planner_shell.dart:107, 569`); the
+  controller keeps the registered settle and calls it, synchronously,
+  first in `designJson`, `setMode`, `load`, `newPlan`, `undo`, `redo`,
+  `markSaved`, `resetLayout`, `select` and before Export and Print read
+  the document. `undo`/`redo` re-read `canUndo`/`canRedo` after it, as
+  the shell's own do (`planner_shell.dart:463-476`). Mutant **M-14b2-11**:
+  `setMode` without the settle — a value typed in the Selection panel is
+  in the copy, and `designJson()` before the switch equals the one after
+  the panel unmounts.
+- **R-2 → H12, dropping a document.** One rule for every document the
+  controller lets go (the copy on `setMode(design)`, on `resetLayout`, on
+  `load`/`newPlan`; the old design on `load`/`newPlan`): its
+  subscriptions are cancelled at once; the document, its measurer and its
+  `SelectionController` are disposed in a post-frame callback with
+  `ensureVisualUpdate` (`document_host.dart:118-140`); `dispose()`
+  disposes any still pending at once. Controller tests run under the
+  widgets binding. Mutant **M-14b2-12**: the copy disposed synchronously —
+  `setMode(design)` then a pump throws.
+- **R-3 → M-14b2-7 restated.** A PDF carries a random `/ID`; the export
+  comparison uses **PNG bytes** (deterministic) or the content operators
+  through `export_testing.dart`'s `PdfContent`, on a table off the origin
+  and turned.
+- **R-4 → H1 detailed.** The copy is decoded with a `FlutterTextMeasurer`
+  of its own, `registerAppComponents`, `permissions: runtime` and
+  `diagnostics: []`. The **ServiceView** installs `installParametric` then
+  `TableLabelSystem` on it, and disposes them in reverse (as the shell
+  does, `planner_shell.dart:566-567, 610-614`), so 14c's moves behave as
+  in the design mode; under `runtime` a `TransformNodeCommand` stays
+  `transform` through both wrappers (`table_label_system.dart:69,
+  104-107`).
+- **R-5 → H7, H8 detailed.** `PlannerView` (added to Files) gains an
+  optional `fitRequests` (it keeps its last size and fits post-frame on
+  each notification) and makes `grips` and `textTool` optional (no grips
+  when null: `ToolContext.grips` stays null, `tool.dart:65-67`;
+  `selection_overlay.dart:193-204`). The shell forwards `fitRequests`.
+  The ServiceView's Export/Print take the page condition
+  (`kPageCommandIds`).
+- **R-6 → H13, selection.** `select` selects the live, numbered tables
+  carrying the numbers **that the selection can hold** — visible and on
+  an unlocked layer; others are ignored, documented (14c revisits locked
+  tables for statuses, D14). The selection **survives** a mode switch
+  and `resetLayout` (the same numbers are re-selected in the new
+  document; handles are equal, H2). The controller subscribes to a
+  document after constructing its selection, so pruning runs first
+  (`planner_shell.dart:341-343`).
+- **R-7 → H3 `tables`.** Cached by (document identity,
+  `commands.stateId`), recomputed lazily on read. Mutant **M-14b2-13**: a
+  renumber executed, then `tables` read in the same synchronous block,
+  shows the new number.
+- **R-8 → H3 `markSaved`.** `markSaved()` marks the state captured by the
+  **last `designJson()`** (the app's S-2 rule, `document_host.dart:480-486,
+  515-520`): an edit that lands while the host writes stays dirty.
+  Mutant **M-14b2-14**: `designJson()`, an edit, `markSaved()` — `dirty`
+  stays true.
+- **R-9 → H6 guarded.** Export and Print keep a busy flag of the view's
+  (a second press does nothing), check `mounted` before the dialog, and
+  after every await go on only if the document is still `identical` to
+  the controller's active one. The export font cache and the last
+  `ExportChoice` are the controller's, for its life.
+- **R-10 → H5, H9 detailed.** `FloorPlanView({required controller,
+  onExport, printer, exportName = 'plan'})`. The barrel adds
+  `registerFontLicences`; `PagePrinter.print` names `PdfPageFormat`, so a
+  host implementing its own printer depends on `pdf` (documented). Every
+  barrel export uses `show`; M-14b2-9's test reads the `show` lists as
+  text (no `analyzer` dependency) and a compile test uses each name
+  through the barrel alone.
+- **R-11 → H3 symbols.** The controller takes optional shared `symbols:`
+  (a `SymbolLibraryLoader`) and `thumbnails:` (not owned when passed, as
+  `snap`); otherwise it builds its own with `symbolSources` and a
+  thumbnail capacity of **128** (the app's, `main.dart:22`). The loader's
+  `load()` is called when the design view first mounts (the binding
+  exists then), once. The demo shares one loader and one cache between
+  its two controllers.
+- **R-12 → H10 detailed.** `flutter create --no-pub --org com.jetcad
+  --project-name restaurant_demo
+  --platforms=android,ios,macos,windows,linux,web`; the pubspec set to
+  `resolution: workspace`, `sdk: ^3.5.0`, `flutter: ">=3.44.0"`, path
+  dependencies on both packages; added to the root `workspace:` list
+  (Changed); the generated counter app and its test deleted; macOS
+  `com.apple.security.print` in both entitlements (as the app's); its
+  initial `analysis_options.yaml` committed once (14b-1's rule); the demo
+  joins the gate.
+- **R-13 → H14, the camera; the demo's diagnostics.** The controller keeps
+  the active view's last camera (`ViewportTransform`) and hands it to the
+  next view as `initialCamera`, so a mode switch or `resetLayout` keeps
+  pan and zoom; `fitToView` and `load` reset it. The demo shows
+  `TableSurvey`-style numbering diagnostics through a controller getter,
+  `List<String> numberingWarnings` (duplicate and unnumbered tables, as
+  text), umbrella D5.
+- **R-14 → M-14b2-8's fixtures.** Valid JSON with a broken structure (a
+  `TypeError` inside the decoder) and an unsupported `schemaVersion`
+  (`SchemaVersionError`) are both rethrown as `FormatException`; the
+  state before is the selection mode with a non-empty selection and a
+  moved copy, and all three survive.
+- **R-15 → M-14b2-3's fixture.** The loaded plan is the same JSON with
+  one table moved (same handles, same numbers): `selectedTables` is empty
+  after `load`, and the copy's moved table has the new plan's transform.
+
