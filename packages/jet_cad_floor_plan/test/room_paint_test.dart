@@ -178,7 +178,9 @@ final class Shot {
   }
 
   Future<void> tap(Vector2 p) async {
-    await tester.tapAt(globalOf(p));
+    // A mouse click: the probes sit 60 mm or more from anything, inside a
+    // fingertip's reach (spec 14t R-2).
+    await tester.tapAt(globalOf(p), kind: PointerDeviceKind.mouse);
     await tester.pump();
   }
 

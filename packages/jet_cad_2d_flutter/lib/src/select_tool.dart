@@ -9,11 +9,13 @@ import 'package:flutter/services.dart'
         LogicalKeyboardKey,
         MouseCursor,
         SystemMouseCursors;
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'grip_cache.dart' show GripCache, GripRef, movableKey;
+import 'grip_cache.dart'
+    show GripCache, GripRef, kTouchGripHitPixels, movableKey;
 import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
@@ -52,6 +54,9 @@ class SelectTool extends Tool {
   final Vector2 _pressWorld = Vector2.zero();
   bool _pressShift = false;
   PressClass _class = PressClass.empty;
+
+  /// The press's slop: a fingertip's is [kTouchSlop] (spec 14t T4).
+  double _slop = kBandSlopPixels;
   SelectionKey? _downKey;
   GripRef? _pressRef;
 
@@ -109,9 +114,15 @@ class SelectTool extends Tool {
         : null;
   }
 
+  /// The topmost pick within the precise radius; for a finger that
+  /// misses, within its reach (spec 14t R-3): a wide first pick would
+  /// return a later-drawn neighbour over the line under the finger.
   SelectionKey? _pick(ToolPointerEvent e, ToolContext ctx) {
     if (!ctx.index.pickInto(
-        e.world, e.pickRadiusWorld, const QueryFilter.picking(), _hit)) {
+            e.world, e.pickRadiusWorld, const QueryFilter.picking(), _hit) &&
+        (e.reachRadiusWorld <= e.pickRadiusWorld ||
+            !ctx.index.pickInto(e.world, e.reachRadiusWorld,
+                const QueryFilter.picking(), _hit))) {
       return null;
     }
     return resolveHit(_hit, ctx.document);
@@ -125,6 +136,7 @@ class SelectTool extends Tool {
     _start = e.screen;
     _pressWorld.setFrom(e.world);
     _pressShift = e.shift;
+    _slop = e.isTouch ? kTouchSlop : kBandSlopPixels;
     _class = _classify(e, ctx);
     notifyListeners();
   }
@@ -137,8 +149,24 @@ class SelectTool extends Tool {
     final grips = ctx.grips;
     if (grips != null) {
       final m = ctx.camera.value.worldToScreenMatrix;
-      if (grips.hitsRotationGrip(e.screen, m)) return PressClass.rotationGrip;
-      final i = grips.hitTest(e.screen, m);
+      final int i;
+      if (e.isTouch) {
+        // A finger's reach would put the rotation grip, 24 px above the
+        // box, over the top-centre grip: the nearer wins, a tie the grip
+        // (spec 14t T4b).
+        i = grips.hitTest(e.screen, m, radius: kTouchGripHitPixels);
+        final rotation = grips.rotationGripDistance(e.screen, m);
+        final grip =
+            i >= 0 ? grips.gripDistance(i, e.screen, m) : double.infinity;
+        if (rotation <= kTouchGripHitPixels && rotation < grip) {
+          return PressClass.rotationGrip;
+        }
+      } else {
+        if (grips.hitsRotationGrip(e.screen, m)) {
+          return PressClass.rotationGrip;
+        }
+        i = grips.hitTest(e.screen, m);
+      }
       if (i >= 0) {
         _pressRef = grips.grips[i];
         return PressClass.grip;
@@ -162,7 +190,7 @@ class SelectTool extends Tool {
         _hoverAt(e, ctx);
       case ToolPhase.pressed:
         if (e.pointer != _pointer || _clickOnly) return;
-        if ((e.screen - _start).distance < kBandSlopPixels) return;
+        if ((e.screen - _start).distance < _slop) return;
         _beginDrag(e, ctx);
       case ToolPhase.dragging:
         if (e.pointer != _pointer) return;
