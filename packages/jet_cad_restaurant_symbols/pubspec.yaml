@@ -1,0 +1,31 @@
+name: jet_cad_restaurant_symbols
+description: >-
+  The restaurant symbol library for the floor planner (spec 14, slice 14s):
+  tables, booths, bar, service, commercial kitchen, outdoor and decor
+  symbols, the servable ones carrying their seats. A host adds
+  restaurantSymbolSource to the planner's symbol sources.
+publish_to: none
+version: 0.0.1
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_2d:
+    path: ../jet_cad_2d
+  jet_cad_floor_plan:
+    path: ../jet_cad_floor_plan
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  vector_math: ^2.2.0
+
+flutter:
+  assets:
+    - assets/restaurant.jetlib
