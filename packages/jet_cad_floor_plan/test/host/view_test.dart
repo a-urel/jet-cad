@@ -524,4 +524,35 @@ void main() {
     await tester.pump();
     expect(byKey('table-status-layer'), findsOneWidget);
   });
+
+  testWidgets(
+      'V17 the status layer repaints on a status change, a move, an undo '
+      'and the camera (R-4, review F-3)', (tester) async {
+    final c = await pumpView(tester);
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    final painter =
+        tester.widget<CustomPaint>(byKey('table-status-layer')).painter!;
+    var repaints = 0;
+    void count() => repaints++;
+    painter.addListener(count);
+    addTearDown(() => painter.removeListener(count));
+
+    c.setTableStatus({'1': TableStatus(color: const Color(0xFF43A047))});
+    expect(repaints, 1, reason: 'a status change');
+    move(c, '1', 700, -300);
+    await tester.pump();
+    await tester.pump();
+    expect(repaints, 2, reason: 'a move');
+    c.activeDocument.commands.undo();
+    await tester.pump();
+    await tester.pump();
+    expect(repaints, 3, reason: 'its undo');
+    final before = repaints;
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    expect(repaints, greaterThan(before), reason: 'the camera');
+  });
 }

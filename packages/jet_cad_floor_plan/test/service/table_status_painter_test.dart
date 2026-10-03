@@ -14,6 +14,8 @@ import 'package:jet_cad_floor_plan/src/service/table_status_painter.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
+import 'package:jet_cad_floor_plan/symbols.dart'
+    show FurnitureSymbol, PolylineShape;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_fixture.dart';
@@ -22,13 +24,16 @@ import '../tables/table_fixture.dart';
 class SpyCanvas implements ui.Canvas {
   final List<Object> seen = [];
   final List<ui.Path> paths = [];
+  final List<ui.Paint> paints = [];
+  final List<ui.Offset> translations = [];
+  final List<ui.Paragraph> paragraphs = [];
 
   @override
   void save() {}
   @override
   void restore() {}
   @override
-  void translate(double dx, double dy) {}
+  void translate(double dx, double dy) => translations.add(ui.Offset(dx, dy));
   @override
   void transform(Float64List matrix4) => seen.add(matrix4);
   @override
@@ -37,12 +42,14 @@ class SpyCanvas implements ui.Canvas {
       ..add(path)
       ..add(paint);
     paths.add(path);
+    paints.add(paint);
   }
 
   @override
   void drawParagraph(ui.Paragraph paragraph, ui.Offset offset) {
     expect(offset, ui.Offset.zero, reason: 'no Offset per frame (R-3)');
     seen.add(paragraph);
+    paragraphs.add(paragraph);
   }
 
   @override
@@ -259,5 +266,112 @@ void main() {
       ui.Rect.fromLTRB(200, 300, 1600, 1000),
       ui.Rect.fromLTRB(300, 300, 1500, 1100),
     ]);
+  });
+
+  test(
+      'SP7 a new status map is drawn at once, the plan unchanged (R-4, '
+      'review F-3)', () {
+    final doc = rowOfTables(2);
+    final statuses = ValueNotifier<Map<String, TableStatus>>(
+        {'1': TableStatus(color: const Color(0xFFAA0000))});
+    final painter = painterFor(doc, cameraOn(doc), statuses);
+    SpyCanvas frame() {
+      final spy = SpyCanvas();
+      painter.paint(spy, const ui.Size(800, 600));
+      return spy;
+    }
+
+    expect(frame().paints.single.color.toARGB32(), 0xFFAA0000);
+    statuses.value = {
+      '1': TableStatus(color: const Color(0xFF0000AA)),
+      '2': TableStatus(color: const Color(0xFF00AA00)),
+    };
+    expect([for (final p in frame().paints) p.color.toARGB32()],
+        [0xFF0000AA, 0xFF00AA00]);
+    statuses.value = const {};
+    expect(frame().paths, isEmpty);
+  });
+
+  // A trapezoid whose base point, where the number sits, is off its top's
+  // centre (900, 650).
+  const offCentre = FurnitureSymbol(
+    key: 'test.trapezoid.off',
+    name: 'Off-centre trapezoid',
+    category: 'Tests',
+    tags: ['table', 'test'],
+    seats: 2,
+    baseX: 1200,
+    baseY: 500,
+    shapes: [
+      PolylineShape([(200, 300), (1600, 300), (1300, 1000), (500, 900)],
+          closed: true),
+    ],
+  );
+
+  test(
+      'SP8 the caption sits centred below the number, clear of it at any '
+      'zoom; a table smaller than its caption has none (S7, review F-4, '
+      'F-5)', () {
+    final doc = plan();
+    final at = Vector2(40000, -27000);
+    doc.commands
+        .execute(placeSymbol(doc, entryOf(offCentre), at: at, mirrored: true));
+    final node = doc.tree.nodes.whereType<InstanceNode>().single;
+    final turn = Transform2.translation(at.x, at.y)
+        .multiply(Transform2.rotation(kDeg37))
+        .multiply(Transform2.translation(-at.x, -at.y));
+    doc.commands.execute(
+        TransformNodeCommand(node.handle, turn.multiply(node.transform)));
+    // The base point lands on `at`; the camera puts it at (400, 300).
+    final camera = ValueNotifier(ViewportTransform(
+        worldToScreenMatrix:
+            Transform2(0.1, 0, 0, -0.1, 400 - 4000, 300 - 2700)));
+    final statuses = ValueNotifier<Map<String, TableStatus>>({
+      '1': TableStatus(color: const Color(0xFFAA0000), caption: 'Bill'),
+    });
+    final painter = painterFor(doc, camera, statuses);
+    SpyCanvas frame() {
+      final spy = SpyCanvas();
+      painter.paint(spy, const ui.Size(800, 600));
+      return spy;
+    }
+
+    // The label's height: min(200, 0.4 x 700) = 200, so 100 below the
+    // anchor, plus a 2 px gap, or 11 px when that is less.
+    for (final (scale, below) in [(0.1, 12.0), (0.5, 52.0), (0.07, 11.0)]) {
+      camera.value = ViewportTransform(
+          worldToScreenMatrix: Transform2(
+              scale, 0, 0, -scale, 400 - scale * at.x, 300 + scale * at.y));
+      final spy = frame();
+      final p = spy.paragraphs.single;
+      expect(spy.translations.single.dx, closeTo(400 - p.width / 2, 1e-6),
+          reason: 'x at $scale');
+      expect(spy.translations.single.dy, closeTo(300 + below, 1e-6),
+          reason: 'y at $scale');
+    }
+    camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2(
+            0.001, 0, 0, -0.001, 400 - 0.001 * at.x, 300 + 0.001 * at.y));
+    final tiny = frame();
+    expect(tiny.paths, hasLength(1), reason: 'the fill stays');
+    expect(tiny.paragraphs, isEmpty, reason: 'the caption does not');
+  });
+
+  test('SP9 captions and paints no table holds are dropped (review F-8)', () {
+    final doc = rowOfTables(2);
+    final statuses = ValueNotifier<Map<String, TableStatus>>({});
+    final painter = painterFor(doc, cameraOn(doc), statuses);
+    for (var minute = 0; minute < 30; minute++) {
+      statuses.value = {
+        '1': TableStatus(
+            color: Color(0xFF000000 | minute), caption: '$minute min'),
+        '2': TableStatus(color: const Color(0xFF00AA00), caption: 'Bill'),
+      };
+      painter.paint(SpyCanvas(), const ui.Size(800, 600));
+    }
+    expect(painter.debugCached, 4, reason: 'two paints, two captions');
+    statuses.value = const {};
+    painter.paint(SpyCanvas(), const ui.Size(800, 600));
+    expect(painter.debugCached, 0);
   });
 }

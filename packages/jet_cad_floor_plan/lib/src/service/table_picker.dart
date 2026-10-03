@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_index.dart';
+import '../tables/table_label.dart' show firstLeafOf;
 
 /// A table's top in definition space (14s S4): its first leaf.
 sealed class TableTop {
@@ -69,31 +70,23 @@ final class CircleTop extends TableTop {
 }
 
 /// The top of [definition] in [doc]: its lowest-handle leaf, when that is
-/// a closed polyline or a circle; null otherwise (such a table cannot be
-/// picked).
+/// a closed polyline (its last vertex repeating its first, by exact `==`)
+/// or a circle; null otherwise (such a table is never picked nor filled,
+/// R-8).
 TableTop? tableTopOf(DraftDocument doc, Handle definition) {
-  final e = doc.entities;
-  int? best;
-  for (final slot in e.liveSlots) {
-    if (e.ownerAt(slot) != definition) continue;
-    if (best == null || e.handleAt(slot).value < e.handleAt(best).value) {
-      best = slot;
-    }
-  }
-  if (best == null) return null;
-  final payload = doc.geometry.read(e.geomIndexAt(best));
-  switch (e.kindAt(best)) {
+  final leaf = firstLeafOf(doc, definition);
+  if (leaf == null) return null;
+  final payload = leaf.payload;
+  switch (leaf.kind) {
     case EntityKind.circle:
       return CircleTop(
           payload.coords[0], payload.coords[1], payload.scalars[0]);
     case EntityKind.polyline:
-      var xy = payload.coords;
-      final n = xy.length;
-      // A closing vertex repeating the first is dropped.
-      if (n >= 4 && xy[0] == xy[n - 2] && xy[1] == xy[n - 1]) {
-        xy = Float64List.sublistView(xy, 0, n - 2);
-      }
-      return PolygonTop(Float64List.fromList(xy));
+      if (!isClosedPolyline(payload)) return null;
+      // The closing vertex repeating the first is dropped.
+      final xy = payload.coords;
+      return PolygonTop(
+          Float64List.fromList(Float64List.sublistView(xy, 0, xy.length - 2)));
     default:
       return null;
   }

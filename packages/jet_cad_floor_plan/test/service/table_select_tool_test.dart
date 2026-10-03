@@ -113,26 +113,32 @@ final class Rig {
   }
 
   ToolPointerEvent ev(Offset screen,
-          {int buttons = kPrimaryButton, bool shift = false}) =>
+          {int buttons = kPrimaryButton,
+          bool shift = false,
+          bool control = false,
+          bool meta = false}) =>
       ToolPointerEvent(
         screen: screen,
         world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
         pointer: 1,
         buttons: buttons,
         shift: shift,
-        control: false,
-        meta: false,
+        control: control,
+        meta: meta,
         alt: false,
         pickRadiusWorld: 6 / camera.value.scale,
       );
 
-  void down(Offset s, {bool shift = false}) =>
-      tool.onPointerDown(ev(s, shift: shift), ctx);
+  void down(Offset s,
+          {bool shift = false, bool control = false, bool meta = false}) =>
+      tool.onPointerDown(
+          ev(s, shift: shift, control: control, meta: meta), ctx);
   void move(Offset s) => tool.onPointerMove(ev(s), ctx);
   void up(Offset s) => tool.onPointerUp(ev(s, buttons: 0), ctx);
 
-  void tap(Offset s, {bool shift = false}) {
-    down(s, shift: shift);
+  void tap(Offset s,
+      {bool shift = false, bool control = false, bool meta = false}) {
+    down(s, shift: shift, control: control, meta: meta);
     up(s);
   }
 }
@@ -187,7 +193,9 @@ void main() {
     r.down(start);
     r.move(start + const Offset(30, 0));
     r.move(start + const Offset(60, -20));
-    expect(r.tool.selectionPreviewTransform, isNotNull);
+    // 60 px right, 20 px up: +600, +200 in world (review F-6).
+    expect(parts(r.tool.selectionPreviewTransform!),
+        [1, 0, 0, 1, closeTo(600, 1e-6), closeTo(200, 1e-6)]);
     r.move(start + const Offset(85, -35));
     r.up(start + const Offset(85, -35));
     expect(r.doc.commands.undoDepth, 1, reason: 'one step per drag');
@@ -208,6 +216,7 @@ void main() {
       (tester) async {
     final r = rig(tester);
     r.tap(r.at('1', 900, 700));
+    final before1 = parts(r.node('1').transform);
     final before = parts(r.node('2').transform);
     final start = r.at('2', 900, 400);
     r.down(start);
@@ -215,7 +224,8 @@ void main() {
     r.up(start + const Offset(-40, 40));
     expect(r.selection.keys, {r.key('2')});
     expect(parts(r.node('2').transform)[4], closeTo(before[4] - 400, 1e-6));
-    expect(parts(r.node('1').transform)[4], isNot(before[4]));
+    expect(parts(r.node('1').transform), before1,
+        reason: 'the previous selection stays where it was (review F-1)');
   });
 
   testWidgets(
@@ -332,5 +342,87 @@ void main() {
     r.tap(r.at('2', 1400, 950));
     expect(r.selection.isEmpty, isTrue, reason: 'outside the trapezoid');
     expect(jsonEncode(r.taps), '["2"]');
+  });
+
+  testWidgets(
+      'ST11 a cancelled press leaves no timer behind: a later press is not '
+      'toggled early (R-5, review F-2)', (tester) async {
+    final r = rig(tester);
+    r.down(r.at('1', 900, 700));
+    await tester.pump(const Duration(milliseconds: 300));
+    r.tool.cancel(r.ctx);
+    final b = r.at('2', 900, 400);
+    r.down(b);
+    await tester.pump(const Duration(milliseconds: 250));
+    expect(r.selection.keys, isEmpty, reason: 'the old timer did not fire');
+    r.up(b);
+    expect(r.selection.keys, {r.key('2')}, reason: 'a tap');
+    expect(r.taps, ['2']);
+  });
+
+  testWidgets(
+      'ST12 within the touch slop a press stays a tap; past it, a drag '
+      '(R-7, review F-6)', (tester) async {
+    final r = rig(tester);
+    final p = r.at('2', 900, 400);
+    r.down(p);
+    r.move(p + const Offset(12, 0));
+    r.up(p + const Offset(12, 0));
+    expect(r.taps, ['2'], reason: '12 px is within kTouchSlop');
+    expect(r.doc.commands.undoDepth, 0);
+    r.down(p);
+    r.move(p + const Offset(19, 0));
+    r.up(p + const Offset(19, 0));
+    expect(r.taps, ['2'], reason: '19 px is past it: no tap');
+    expect(r.doc.commands.undoDepth, 1);
+  });
+
+  testWidgets(
+      'ST13 a drag back to its start executes nothing and reports no layout '
+      'change (review F-6)', (tester) async {
+    final r = rig(tester);
+    final p = r.at('2', 900, 400);
+    r.down(p);
+    r.move(p + const Offset(60, 30));
+    r.move(p);
+    r.up(p);
+    expect(r.doc.commands.undoDepth, 0);
+    expect(r.layouts, 0);
+    expect(r.taps, isEmpty, reason: 'a drag, not a tap');
+  });
+
+  testWidgets('ST14 Ctrl and Cmd toggle as Shift does (S3, review F-6)',
+      (tester) async {
+    final r = rig(tester);
+    r.tap(r.at('1', 900, 700));
+    r.tap(r.at('2', 900, 400), control: true);
+    expect(r.selection.keys, {r.key('1'), r.key('2')});
+    r.tap(r.at('1', 900, 700), meta: true);
+    expect(r.selection.keys, {r.key('2')});
+    r.tap(const Offset(40, 40), meta: true);
+    expect(r.selection.keys, {r.key('2')}, reason: 'the floor keeps it');
+    r.tap(const Offset(40, 40), control: true);
+    expect(r.selection.keys, {r.key('2')});
+  });
+
+  testWidgets(
+      'ST15 an undo mid-drag: the step applies to each transform as it is at '
+      'release (R-6, review F-6)', (tester) async {
+    final r = rig(tester);
+    final before = parts(r.node('2').transform);
+    final p = r.at('2', 900, 400);
+    r.down(p);
+    r.move(p + const Offset(-50, 0));
+    r.up(p + const Offset(-50, 0));
+    expect(r.doc.commands.undoDepth, 1);
+    final q = r.at('2', 900, 400);
+    r.down(q);
+    r.move(q + const Offset(0, -30));
+    r.doc.commands.undo(); // the first move, while the second drags
+    r.up(q + const Offset(0, -30));
+    final after = parts(r.node('2').transform);
+    expect(after.sublist(0, 4), before.sublist(0, 4));
+    expect(after[4], closeTo(before[4], 1e-6), reason: 'the undone -500 x');
+    expect(after[5], closeTo(before[5] + 300, 1e-6), reason: 'the +300 y');
   });
 }

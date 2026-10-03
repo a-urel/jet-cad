@@ -16,20 +16,28 @@ import 'table_picker.dart';
 /// One statused table, prebuilt at status-change or plan-change rate (R-3):
 /// the frame reads it and creates nothing.
 final class _Fill {
-  _Fill(this.instance, this.path, this.paint, this.caption, this.cx, this.cy,
-      this.size);
+  _Fill(this.instance, this.path, this.paint, this.caption, this.lx, this.ly,
+      this.half, this.size);
 
   final Handle instance;
   final Path path;
   final Paint paint;
   final ui.Paragraph? caption;
 
-  /// The top's centre and its smaller side, in definition space.
-  final double cx, cy, size;
+  /// The number label's anchor and half its height, in definition space:
+  /// the caption goes below the number (S7, review F-5).
+  final double lx, ly, half;
+
+  /// The top's smaller side, in definition space.
+  final double size;
 }
 
 /// The caption's height in logical pixels (S7).
 const double kStatusCaptionSize = 11;
+
+/// The gap between the number label's bottom and the caption, in logical
+/// pixels.
+const double kStatusCaptionGap = 2;
 
 /// Paints the statuses of [document]'s tables through [camera] (S7).
 ///
@@ -65,6 +73,10 @@ class TableStatusPainter extends CustomPainter {
   @visibleForTesting
   int debugAllocations = 0;
 
+  /// How many paints and captions the caches hold (review F-8).
+  @visibleForTesting
+  int get debugCached => _paints.length + _captions.length;
+
   void _rebuild() {
     final map = statuses.value;
     final fills = <_Fill>[];
@@ -87,6 +99,7 @@ class TableStatusPainter extends CustomPainter {
               ..color = status.color;
           });
           final caption = status.caption;
+          final label = _labelOf(t.label);
           fills.add(_Fill(
             t.instance,
             path,
@@ -95,8 +108,9 @@ class TableStatusPainter extends CustomPainter {
                 ? null
                 : _captions
                     .putIfAbsent((caption, colour), () => _paragraph(caption)),
-            bounds.center.dx,
-            bounds.center.dy,
+            label?.x ?? bounds.center.dx,
+            label?.y ?? bounds.center.dy,
+            label?.half ?? 0,
             math.min(bounds.width, bounds.height),
           ));
         }
@@ -105,6 +119,28 @@ class TableStatusPainter extends CustomPainter {
       fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
     }
     _fills = fills;
+    // Paints and captions no fill holds are dropped (review F-8): a host
+    // whose captions change ("12 min", "13 min") does not grow the caches.
+    final paints = {for (final f in fills) f.paint};
+    final captions = {for (final f in fills) f.caption};
+    _paints.removeWhere((_, p) => !paints.contains(p));
+    _captions.removeWhere((_, p) => !captions.contains(p));
+  }
+
+  /// The anchor and half height of the number label [label], in the
+  /// instance's space; null when there is none.
+  ({double x, double y, double half})? _labelOf(Handle? label) {
+    if (label == null) return null;
+    final e = document.entities;
+    final slot = e.slotOf(label);
+    if (slot == null) return null;
+    final payload = document.geometry.read(e.geomIndexAt(slot));
+    if (payload.coords.length < 2 || payload.scalars.isEmpty) return null;
+    return (
+      x: payload.coords[0],
+      y: payload.coords[1],
+      half: payload.scalars[0] / 2,
+    );
   }
 
   /// The table's top as a local path, or null when it has none (R-8).
@@ -182,11 +218,15 @@ class TableStatusPainter extends CustomPainter {
       // Skipped when the table is smaller on screen than its caption.
       final scale = math.sqrt((a * d - b * c).abs());
       if (f.size * scale < caption.maxIntrinsicWidth) continue;
-      final sx = a * f.cx + c * f.cy + e;
-      final sy = b * f.cx + d * f.cy + g;
+      final sx = a * f.lx + c * f.ly + e;
+      final sy = b * f.lx + d * f.ly + g;
+      // Below the number: its half height on screen and a gap, at least
+      // one caption height from the anchor.
+      final below =
+          math.max(kStatusCaptionSize, f.half * scale + kStatusCaptionGap);
       canvas
         ..save()
-        ..translate(sx - caption.width / 2, sy + kStatusCaptionSize)
+        ..translate(sx - caption.width / 2, sy + below)
         ..drawParagraph(caption, Offset.zero)
         ..restore();
     }

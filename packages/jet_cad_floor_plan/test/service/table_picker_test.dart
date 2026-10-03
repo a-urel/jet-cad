@@ -9,7 +9,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
-import 'package:jet_cad_floor_plan/symbols.dart' show FurnitureSymbol;
+import 'package:jet_cad_floor_plan/symbols.dart'
+    show FurnitureSymbol, PolylineShape;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_fixture.dart';
@@ -158,5 +159,32 @@ void main() {
       expect(picker.pick(worldOf(t, x.toDouble(), y.toDouble())), isNull,
           reason: 'outside at ($x, $y)');
     }
+  });
+
+  test('TP8 an open first leaf is no top: never picked (R-8, review F-7)', () {
+    const open = FurnitureSymbol(
+      key: 'test.table.open',
+      name: 'Open table',
+      category: 'Tests',
+      tags: ['table', 'test'],
+      seats: 2,
+      baseX: 900,
+      baseY: 700,
+      shapes: [
+        PolylineShape([(300, 300), (1500, 300), (1500, 1100), (300, 1100)]),
+        PolylineShape([(675, -50), (1125, -50), (1125, 400), (675, 400)],
+            closed: true),
+      ],
+    );
+    final doc = plan();
+    final t = placeTurned(doc, open, Vector2(-4000, 2500));
+    final closed = placeTurned(doc, tableSymbol(), Vector2(4000, 2500));
+    final picker = TablePicker(doc);
+    expect(tableTopOf(doc, t.definition), isNull);
+    expect(picker.pick(worldOf(t, 900, 700)), isNull);
+    expect(picker.candidates.map((c) => c.table.instance), [closed.handle]);
+    final top = tableTopOf(doc, closed.definition)! as PolygonTop;
+    expect(top.xy, [300, 300, 1500, 300, 1500, 1100, 300, 1100],
+        reason: 'the closing vertex dropped');
   });
 }
