@@ -25,12 +25,27 @@ mode** built in; what is missing for that comes first.
   engine 1,226 + 2 standing and render 1,187 + 1 skip + 7 standing,
   untouched. Two independent reviews: 14b-1 "Needs fixes", 14s "Approved
   with fixes"; both sets of fixes applied (`2120a74`, `7dce65c`).
+- **Done on the branch (14a, table identity):** see
+  [2026-10-03-plan-14a-results.md](docs/superpowers/notes/2026-10-03-plan-14a-results.md);
+  spec [2026-10-03-table-identity-design.md](docs/superpowers/specs/2026-10-03-table-identity-design.md)
+  rev 2 (the human's rulings: seats per symbol, numbers per plan and
+  editable by hand, the label size rule, turning in the design mode only).
+  A servable placement is a numbered table: its number is the `TABLE`
+  ATTRIB its instance owns, upright at the top's centre on screen and
+  paper (a stacked table system re-stamps it inside the edit that turns
+  it); a click on the number selects the table, Delete removes both; the
+  Selection panel's Table section edits the number and turns the table
+  90° in place. Gates: render 1,196 + 1 skip + 7 standing, planner 890,
+  restaurant 91, app 192, web built and smoke-tested; the engine
+  untouched.
 - **Toolchain:** the container ran Flutter 3.47.6 (installed this
   session); the repo's floor is unchanged (3.44.0).
-- **Owed:** the human's macOS and web look at the palette and the font;
-  the merge, on the human's word; the earlier owed items below stand.
-- **Next, on the human's word:** 14a's spec (table numbers, the ATTRIB
-  label, its delete cascade and upright stamp).
+- **Owed:** the human's macOS and web look at the palette, the font and
+  the table numbers; the merge, on the human's word; the earlier owed
+  items below stand.
+- **Next:** 14b-2's spec (the host API `FloorPlanController` /
+  `FloorPlanView`, the built-in design / selection modes, the undo
+  barrier, `apps/restaurant_demo`); the touch spike (14t); 14c.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
