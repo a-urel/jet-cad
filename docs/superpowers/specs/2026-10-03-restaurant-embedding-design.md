@@ -1,19 +1,22 @@
 # Restaurant embedding (14) — umbrella design
 
-**Date:** 2026-10-03. **Status:** design, **revision 2**, **not approved**.
-Revision 1 (`c413ba6`) was reviewed independently: "Not ready", 10 major,
-6 minor (R-1 to R-16), each applied below; see [Revision 2](#revision-2).
-The human answered rev 1's open questions the same day; see
-[Decisions](#decisions-the-human-made-on-2026-10-03).
+**Date:** 2026-10-03. **Status:** design, **revision 3**, **approved by the
+human on 2026-10-03** ("evet", for revision 2), with the rulings recorded
+in [Revision 3](#revision-3): the symbols are a **separate package**,
+`jet_cad_restaurant_symbols`; the design / selection split is **built into
+the planner package**; **every platform**; the symbol list **as complete
+as possible**. Revision 1 (`c413ba6`) was reviewed independently: "Not
+ready", 10 major, 6 minor (R-1 to R-16), each applied in
+[Revision 2](#revision-2).
 **Sub-project:** new, `14` — the first consumer of the floor planner: a
 restaurant (point-of-sale) application written in Flutter that embeds the
 planner in two modes, **design** and **selection**.
 **This is an umbrella spec (R-14).** It fixes the decisions, the slices and
-their order. **Slice 14s (restaurant symbols) is specified in full here**
-and may be planned from this document once approved. Every other slice
-gets its own full spec (Facts at a sha, Files, Invariants, Testing,
-Risks, the layer-panel spec's rigor) before its plan.
-**Size:** L overall; five slices (below).
+their order. **Slices 14b-1 (extraction) and 14s (restaurant symbols) are
+specified in full here** and are planned from this document. Every other
+slice gets its own full spec (Facts at a sha, Files, Invariants, Testing,
+Risks) before its plan.
+**Size:** L overall; six slices (below).
 **Branch:** `claude/exciting-pasteur-9m22jv`, cut from `main` at `4d6b78f`.
 **Depends on:** 09 (symbols), 12a (the session, the save point), 12b
 (layers, `DraftPermissions` presets).
@@ -130,6 +133,10 @@ only as an application.
 
 ## Slices and order (R-15)
 
+**Revision 3 changes the order to 14b-1 → 14s → 14a → 14b-2 → 14c (14t
+spiked early)**: the symbols package depends on the planner package
+([Revision 3](#revision-3), V-1). The table below is revision 2's.
+
 | Slice | What | Package touched | Spec |
 |---|---|---|---|
 | **14s** | Restaurant symbols and seating metadata | app (catalog, library asset) | **here, full** |
@@ -147,6 +154,10 @@ largest unknown (R-7) and lives in the render package.
 ---
 
 ## Slice 14s — restaurant symbols (full)
+
+**Amended by [Revision 3](#revision-3)** (V-2 to V-6): the restaurant
+symbols live in their own package, the planner loads several libraries,
+and S5's list is replaced by V-6's.
 
 ### What it delivers
 
@@ -280,6 +291,8 @@ the catalog (the existing test's rule).
 ## The other slices — the decisions, for their own specs
 
 ### 14b-1 — Extraction (behaviour-neutral)
+
+**Specified in full in [Revision 3](#revision-3), V-7 to V-12.**
 
 - **D7.** A new package `packages/jet_cad_floor_plan` (name proposed;
   **Q11**) holds `apps/floor_planner/lib/` except the application frame
@@ -486,3 +499,209 @@ answers of 2026-10-03:
 - R-16: M-14h to M-14l.
 - Citations corrected: `command.dart:58-59`, `node.dart:163`.
 - The human's answers became decisions 4–12; rev 1's Q1–Q10 are closed.
+
+## Revision 3
+
+The human's rulings on revision 2, 2026-10-03: *"1) evet. 2)
+jet_cad_restaurant_symbols nasıl olur? Semboller ayrı paket olabilir. Ama
+design ve seçim modu ayrımı built-in olmalı. 3) tüm platformlar. 4) mümkün
+olduğunca kapsamlı bir sembol listesi olsun."* Revision 2 is approved; the
+items below amend it and are binding where they differ.
+
+### Order and packages
+
+- **V-1. Three packages, one direction of dependency:**
+  `jet_cad_restaurant_symbols` → `jet_cad_floor_plan` → `jet_cad_2d_flutter`
+  → `jet_cad_2d`. The planner package (name kept, Q11 closed) carries the
+  design / selection split **built in** (14b-2); it knows nothing about
+  restaurants' symbols. The symbols package depends on the planner for the
+  symbol types (V-3). Because of that, **14b-1 runs first**, then 14s:
+  **14b-1 → 14s → 14a → 14b-2 → 14c**, the touch spike (14t) early.
+- **V-1a. Every platform (Q12 closed):** Android, iOS, macOS, Windows,
+  Linux, web. 14b-1 adds no runner to `apps/floor_planner` (its macOS and
+  web runners stay); `apps/restaurant_demo` (14b-2) gets every runner. The
+  packages may use no `dart:io` or `dart:js_interop` outside a conditional
+  import (the app's platform files stay in the app).
+
+### Slice 14s, amended
+
+- **V-2. `packages/jet_cad_restaurant_symbols`**: depends on `jet_cad_2d`
+  and `jet_cad_floor_plan` only (no Flutter import outside the one file
+  that reads its asset). It holds the restaurant catalog (one Dart file per
+  category), a generator `tool/generate_restaurant_library.dart`, the
+  committed asset `assets/restaurant.jetlib`, and exports
+  `restaurantSymbolSource` (V-4) and `restaurantCatalog`.
+- **V-3. The symbol authoring types become the planner package's public
+  API**, in `package:jet_cad_floor_plan/symbols.dart`: `FurnitureShape`
+  and its four shapes, `FurnitureSymbol` (with `seats`, S2),
+  `buildSymbolLibrary(List<FurnitureSymbol>)` (today's
+  `buildFurnitureLibrary` generalised; the furniture library is
+  `buildSymbolLibrary(furnitureCatalog)`), `SymbolComponent`,
+  `SeatingComponent`, `SymbolLibrary`, `SymbolEntry`. The geometry helpers
+  a restaurant catalog needs (a chair at an angle around a round top, a
+  bench with a back) live in the symbols package, not the planner.
+- **V-4. Several libraries.** `SymbolLibraryLoader` takes a list of
+  `SymbolLibrarySource`s (a name and a `Future<Uint8List> Function()`
+  reader; the planner ships `furnitureSymbolSource`). `load()` reads and
+  decodes each, then merges their entries in source order into one
+  `SymbolLibrary`; **any** source failing fails the load (Retry reloads
+  all), and a `key@version` present in two sources is a
+  `SymbolLibraryError` naming both sources. Categories keep
+  first-appearance order across sources. The default (no sources given) is
+  the furniture library alone: a host that adds nothing sees today's
+  palette.
+- **V-5. `apps/floor_planner` loads both** (furniture, then restaurant), so
+  the standalone app shows the restaurant symbols.
+- **V-5a.** The library format is unchanged, so `SymbolLibrary.decode`'s
+  rules (09 D5) hold per source; a restaurant library is decoded with the
+  same component registration as the furniture one.
+- **V-6. The list (replaces S5).** Every size in millimetres; chairs
+  450 × 450 tucked 100 mm (the dining sets' rule), around a round top at
+  equal angles starting at the bottom; stools Ø 380. Every base point at
+  the served top's centre, off the origin. **Servable** symbols carry a
+  `SeatingComponent` with the count shown; their first leaf is the served
+  top's outline (S4). Category names in the palette are the headings.
+
+  **Restaurant Tables** (all servable):
+
+  | Key | Seats | Geometry |
+  |---|---|---|
+  | `restaurant.table.square.two` | 2 | 700 × 700, chairs on two opposite sides |
+  | `restaurant.table.square.four` | 4 | 800 × 800, a chair per side |
+  | `restaurant.table.rect.four` | 4 | 1200 × 750, two chairs per long side |
+  | `restaurant.table.rect.six` | 6 | 1800 × 800, two per long side, one per end |
+  | `restaurant.table.rect.eight` | 8 | 2400 × 900, three per long side, one per end |
+  | `restaurant.table.rect.ten` | 10 | 3000 × 900, four per long side, one per end |
+  | `restaurant.table.rect.twelve` | 12 | 3600 × 1000, five per long side, one per end |
+  | `restaurant.table.round.two` | 2 | Ø 600 |
+  | `restaurant.table.round.four` | 4 | Ø 900 |
+  | `restaurant.table.round.six` | 6 | Ø 1200 |
+  | `restaurant.table.round.eight` | 8 | Ø 1500 |
+  | `restaurant.table.round.ten` | 10 | Ø 1800 |
+
+  **Booths and Lounge** (all servable):
+
+  | Key | Seats | Geometry |
+  |---|---|---|
+  | `restaurant.booth.two` | 2 | 700 × 700 top between two 600-deep benches with a 150 back |
+  | `restaurant.booth.four` | 4 | 1200 × 700 top, benches 1200 long |
+  | `restaurant.booth.six` | 6 | 1800 × 750 top, benches 1800 long |
+  | `restaurant.booth.corner` | 5 | 1200 × 800 top, an L bench on two sides, one chair |
+  | `restaurant.booth.round` | 6 | Ø 1200 top in a half-ring bench (arcs) |
+  | `restaurant.banquette.two` | 2 | 700 × 700 top, a wall bench behind, one chair in front |
+  | `restaurant.banquette.four` | 4 | 1400 × 700 top, a wall bench behind, two chairs in front |
+  | `restaurant.lounge.four` | 4 | a 1000 × 600 low table, a three-seat sofa and an armchair |
+  | `restaurant.lounge.two` | 2 | a Ø 600 low table between two armchairs |
+
+  **Bar**:
+
+  | Key | Seats | Geometry |
+  |---|---|---|
+  | `restaurant.bar.stool` | 1 | Ø 380 seat, Ø 300 footrest ring |
+  | `restaurant.bar.table.high.two` | 2 | Ø 600 top, two stools |
+  | `restaurant.bar.table.high.four` | 4 | Ø 700 top, four stools |
+  | `restaurant.bar.table.ledge` | 4 | 2000 × 400 ledge, four stools on one side |
+  | `restaurant.bar.counter` | — | 3000 × 600, a 250 inner work line |
+  | `restaurant.bar.counter.corner` | — | L, legs 2400 and 1800, 600 deep |
+  | `restaurant.bar.counter.u` | — | U, 4000 wide, legs 2400, 600 deep |
+  | `restaurant.bar.back` | — | back bar, 3000 × 450, shelf lines |
+  | `restaurant.bar.taps` | — | beer tap tower, 600 × 300, five tap circles |
+
+  **Service** (none servable):
+
+  `restaurant.cashier` (1400 × 700, a register), `restaurant.host.stand`
+  (600 × 450), `restaurant.pos.terminal` (400 × 400),
+  `restaurant.service.station` (1200 × 600, two drawer lines),
+  `restaurant.buffet` (2400 × 800, four tray outlines),
+  `restaurant.salad.bar` (1800 × 900, a sneeze-guard line, six wells),
+  `restaurant.dessert.display` (1200 × 700, curved glass front),
+  `restaurant.drinks.fridge` (700 × 700), `restaurant.coffee.station`
+  (1500 × 650, a machine and a grinder), `restaurant.service.cart`
+  (900 × 500), `restaurant.tray.stand` (550 × 400),
+  `restaurant.highchair` (500 × 550, a tray line),
+  `restaurant.waiting.bench` (1500 × 450), `restaurant.coat.rack` (Ø 500).
+
+  **Commercial Kitchen** (none servable):
+
+  `restaurant.kitchen.pass` (2000 × 600, heat-lamp lines),
+  `restaurant.kitchen.prep.table` (1800 × 700),
+  `restaurant.kitchen.range.four` (900 × 900, four burners),
+  `restaurant.kitchen.range.six` (1200 × 900, six burners),
+  `restaurant.kitchen.fryer` (400 × 800, two baskets),
+  `restaurant.kitchen.griddle` (900 × 800),
+  `restaurant.kitchen.oven.convection` (900 × 900),
+  `restaurant.kitchen.oven.pizza` (1600 × 1600, a domed chamber),
+  `restaurant.kitchen.dishwasher` (700 × 750),
+  `restaurant.kitchen.sink.three` (1800 × 700, three bowls),
+  `restaurant.kitchen.sink.hand` (450 × 400),
+  `restaurant.kitchen.fridge.reachin` (700 × 800),
+  `restaurant.kitchen.freezer` (700 × 800),
+  `restaurant.kitchen.walkin` (2400 × 2000, a door swing),
+  `restaurant.kitchen.shelving` (1200 × 500, three shelf lines),
+  `restaurant.kitchen.ice.machine` (600 × 700),
+  `restaurant.kitchen.bin` (Ø 500).
+
+  **Outdoor and Decor** (none servable):
+
+  `restaurant.parasol` (Ø 2700, eight spokes), `restaurant.heater`
+  (Ø 500), `restaurant.planter.round` (Ø 600, an inner Ø 450),
+  `restaurant.planter.long` (1200 × 400), `restaurant.partition`
+  (1500 × 100), `restaurant.stage` (3000 × 2000, a front edge line),
+  `restaurant.dj.booth` (1500 × 700), `restaurant.piano` (a grand piano,
+  1500 × 1600, a curved side).
+
+  That is 12 + 9 + 9 + 14 + 17 + 8 = **69** symbols, 25 servable. S3
+  stands: the five existing dining tables become servable at version 2
+  (the round one gains four chairs).
+- **V-6a. Tests, written out by hand** (the furniture test's rule): the key
+  list in order, the category of each key, the seats of each servable key,
+  the closed-polyline count of each key; and by rule over every entry:
+  base point off the origin and at the first leaf's centre for servable
+  keys, every polyline closed, every chair and stool outside the served
+  top (beyond the chair tuck), every coordinate under
+  `SymbolLibrary.maxCoordinate`, the committed asset equal to the built
+  bytes. M-14s-1 to M-14s-6 apply to the package.
+
+### Slice 14b-1, in full
+
+- **V-7. What moves.** Every file of `apps/floor_planner/lib/` moves to
+  `packages/jet_cad_floor_plan/lib/src/` with its relative layout, except
+  the application frame, which stays in the app: `main.dart`'s
+  `main()` and `FloorPlannerApp`, `document_host.dart`,
+  `document_files*.dart`, `exit_guard*.dart` and `export/export_flow.dart`
+  (it writes through `DocumentFiles`). `PlannerShell` and
+  `ShellSettleRegistrar` move out of `main.dart` first, into
+  `planner_shell.dart`, in the app, as their own commit (F-12), so the
+  move is two mechanical steps.
+- **V-8. Two libraries.** `package:jet_cad_floor_plan/editor.dart` exports
+  what `apps/floor_planner` uses (the shell, the document helpers, the
+  symbol loader, export font and printer); `symbols.dart` is V-3's. The
+  main barrel, `jet_cad_floor_plan.dart`, is empty until 14b-2 writes the
+  host API. The app imports only these; tests inside the package import
+  `src/` directly.
+- **V-9. Tests move with their code.** A test that pumps
+  `FloorPlannerApp` or `DocumentHost`, or uses `fake_document_files`,
+  `fake_exit_guard`, stays in the app; every other test moves, with the
+  support files it uses (a support file used on both sides is copied, and
+  the copies named in the plan). Test counts before and after are
+  recorded; **their sum must equal today's 993**.
+- **V-10. Assets.** `furniture.jetlib`, the Roboto font and its licence
+  move to the package; the loader reads `packages/jet_cad_floor_plan/...`
+  through a bundle it is given (`rootBundle` by default). The generator
+  tool moves with the catalog.
+- **V-11. The font (R-9, F-13).** `ensureFloorPlanFonts()` (exported by
+  both libraries) registers family `'Roboto'` with a `FontLoader` over the
+  package's bytes, once per process; `main()` awaits it before `runApp`.
+  Documents keep naming `'Roboto'`. A widget test proves the registration:
+  the measured width of a string in family `'Roboto'` differs before and
+  after it under the test font, and equals the width measured in the
+  declared package family.
+- **V-12. Behaviour-neutral.** No public behaviour of the app changes; no
+  golden PNG changes; the engine and render packages are untouched; the
+  two allocation invariant tests are untouched and green. The gate gains
+  the new package (`flutter test`, `flutter analyze`, `dart format`).
+- **Named mutants for 14b-1.** **M-14b1-1:** the loader reads
+  `assets/library/furniture.jetlib` (the app's old key) — the package's
+  loader test with an asset bundle holding only the package key goes red.
+  **M-14b1-2:** `ensureFloorPlanFonts()` a no-op — V-11's test goes red.
+  **M-14b1-3:** drop a moved test file — the count check (V-9) goes red.
