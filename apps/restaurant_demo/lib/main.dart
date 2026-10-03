@@ -8,6 +8,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
@@ -27,7 +28,17 @@ Future<void> main() async {
         context: ErrorDescription('registering the plan font')));
   }
   registerFontLicences();
-  runApp(const RestaurantDemo());
+  // The sample plans, so the demo opens on two furnished areas.
+  final plans = <String, String>{};
+  for (final name in const ['Salon', 'Teras']) {
+    try {
+      plans[name] = await rootBundle
+          .loadString('assets/plans/${name.toLowerCase()}.json');
+    } catch (_) {
+      // An area without its sample starts empty.
+    }
+  }
+  runApp(RestaurantDemo(plans: plans));
 }
 
 /// The demo. [plans] seeds the areas' stored plans by name (tests); an area

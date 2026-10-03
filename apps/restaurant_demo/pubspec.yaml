@@ -35,6 +35,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # The sample plans the demo opens with (test/sample_plans_test.dart builds
+  # and checks them).
+  assets:
+    - assets/plans/salon.json
+    - assets/plans/teras.json
   # The bare family documents name, from the planner package's bytes (spec
   # 14b-1 V-11a): on the web the engine would fetch Google's Roboto
   # otherwise.
