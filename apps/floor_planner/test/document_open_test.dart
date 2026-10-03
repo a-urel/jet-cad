@@ -177,9 +177,9 @@ void main() {
     await clickAt(tester, c + Vector2(3500, 300));
     final view = viewOf(tester);
     expect(view.selection.keys, [SelectionKey.root(free)], reason: 'premise');
-    expect(view.grips.rotatable, isTrue, reason: 'premise');
-    final grip = rotationGripOf(view.grips.box!,
-            view.camera.value.worldToScreenMatrix, view.grips.frame)
+    expect(view.grips!.rotatable, isTrue, reason: 'premise');
+    final grip = rotationGripOf(view.grips!.box!,
+            view.camera.value.worldToScreenMatrix, view.grips!.frame)
         .centre;
     final origin = tester.getTopLeft(find.byType(InteractionLayer));
     await dragGlobal(
@@ -290,7 +290,7 @@ void main() {
     view.selection.replace([SelectionKey.root(walls.first)]);
     await tester.pump();
     expect([
-      for (final r in view.grips.grips)
+      for (final r in view.grips!.grips)
         if (r.object && r.key == SelectionKey.root(walls.first)) r.grip
     ], hasLength(2), reason: 'a live wall\'s two end grips');
   });

@@ -155,7 +155,7 @@ Vector2 gridOf(DraftDocument doc, Vector2 p) => snapToGrid(
 
 /// The shown object grips of [h].
 List<Grip> objectGripsOf(PlannerView view, Handle h) => [
-      for (final r in view.grips.grips)
+      for (final r in view.grips!.grips)
         if (r.object && r.key == k(h)) r.grip,
     ];
 
@@ -375,9 +375,9 @@ void main() {
     final g3 = objectGripsOf(view, s.door).single;
     final m = view.camera.value.worldToScreenMatrix;
     final at = view.camera.value.worldToScreen(Vector2(g3.x, g3.y));
-    expect(view.grips.hitTest(Offset(at.x, at.y), m), isNot(-1));
+    expect(view.grips!.hitTest(Offset(at.x, at.y), m), isNot(-1));
     doc.commands.permissions = DraftPermissions.runtime;
-    expect(view.grips.hitTest(Offset(at.x, at.y), m), -1);
+    expect(view.grips!.hitTest(Offset(at.x, at.y), m), -1);
   });
 
   testWidgets(
@@ -412,8 +412,8 @@ void main() {
     final leaf = oracleAt(f, 1730 + 450, f.ro - 450);
     await tapWorld(tester, view, leaf);
     expect(view.selection.keys, [k(door)]);
-    expect(view.grips.box, isNotNull);
-    expect(view.grips.rotatable, isFalse, reason: 'no rotation grip');
+    expect(view.grips!.box, isNotNull);
+    expect(view.grips!.rotatable, isFalse, reason: 'no rotation grip');
     await dragWorld(tester, view, leaf, leaf + (plan(700, 300) - plan(0, 0)));
     await tester.pump();
     expect(doc.commands.undoDepth, 0, reason: 'nothing in the history');
@@ -424,7 +424,7 @@ void main() {
     final body = oracleAt(f, 800, -100);
     await tapWorld(tester, view, body, shift: true);
     expect(view.selection.keys.toSet(), {k(door), k(a)});
-    expect(view.grips.rotatable, isTrue);
+    expect(view.grips!.rotatable, isTrue);
     final t0 = doc.tree.accumulatedTransform(a);
     final lines = {
       for (final o in [door, win]) o: worldLines(doc, o)
@@ -591,11 +591,11 @@ void main() {
     final view = await pumpShell(tester, doc, plan(2500, 0));
     view.selection.replace([k(fill), k(door)]);
     await tester.pump();
-    expect(view.grips.box, isNotNull, reason: 'the door has an outline');
-    expect(view.grips.rotatable, isFalse, reason: 'a fill and a door');
+    expect(view.grips!.box, isNotNull, reason: 'the door has an outline');
+    expect(view.grips!.rotatable, isFalse, reason: 'a fill and a door');
     view.selection.replace([k(fill), k(a)]);
     await tester.pump();
-    expect(view.grips.rotatable, isTrue,
+    expect(view.grips!.rotatable, isTrue,
         reason: 'the control: a fill and a wall');
   });
 

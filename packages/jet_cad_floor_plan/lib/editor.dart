@@ -5,6 +5,7 @@
 library;
 
 export 'src/document_toolbar.dart';
+export 'src/export/export_bytes.dart';
 export 'src/export/export_dialog.dart';
 export 'src/export/export_font.dart';
 export 'src/export/page_printer.dart';
@@ -66,5 +67,6 @@ export 'src/tables/table_index.dart';
 export 'src/tables/table_label.dart';
 export 'src/tables/table_label_system.dart';
 export 'src/tables/table_numbers.dart';
+export 'src/tables/table_rotate.dart';
 export 'src/text_entry_overlay.dart';
 export 'src/tool_palette.dart';

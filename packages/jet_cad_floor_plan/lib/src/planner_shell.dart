@@ -80,6 +80,8 @@ class PlannerShell extends StatefulWidget {
     this.initialCamera,
     this.symbols,
     this.thumbnails,
+    this.selection,
+    this.fitRequests,
   });
 
   final DraftDocument? document;
@@ -116,6 +118,14 @@ class PlannerShell extends StatefulWidget {
   /// host; not owned here. Read only with [symbols]: a shell given a loader
   /// and no cache makes a cache of its own and disposes it.
   final SymbolThumbnails? thumbnails;
+
+  /// The host's selection over [document] (spec 14b-2 H4, H8): used and
+  /// never disposed here, as [snap]; without one the shell owns its own.
+  final SelectionController? selection;
+
+  /// Each notification refits the camera (spec 14b-2 H8), forwarded to the
+  /// view.
+  final Listenable? fitRequests;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -341,7 +351,8 @@ class _PlannerShellState extends State<PlannerShell> {
   // Constructed before the tool controller and its context: the selection
   // controller's listener on `document.changes` must prune dead keys before
   // anything downstream (the outline cache, in PlannerView) walks them.
-  late final SelectionController _selection = SelectionController(_document);
+  late final SelectionController _selection =
+      widget.selection ?? SelectionController(_document);
 
   // Spec 03 D6, moved from PlannerView. The order is load-bearing.
   // - The outline cache is built after the selection controller, so the
@@ -601,7 +612,7 @@ class _PlannerShellState extends State<PlannerShell> {
     _roomInputs.dispose();
     _grips.dispose();
     _outlines.dispose();
-    _selection.dispose();
+    if (widget.selection == null) _selection.dispose();
     if (_ownsSnap) _snap.dispose();
     _page
       ..removeListener(_onPage)
@@ -811,6 +822,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         outlines: _outlines,
                         grips: _grips,
                         textTool: _text,
+                        fitRequests: widget.fitRequests,
                       ),
                     ),
                   ),

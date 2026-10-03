@@ -25,8 +25,9 @@ class PlannerView extends StatefulWidget {
     required this.selection,
     required this.tools,
     required this.outlines,
-    required this.grips,
-    required this.textTool,
+    this.grips,
+    this.textTool,
+    this.fitRequests,
   });
 
   final DraftDocument document;
@@ -45,12 +46,17 @@ class PlannerView extends StatefulWidget {
   /// Owned by the shell since 03 (spec D6).
   final OutlineCache outlines;
 
-  /// The selection's grips. A member of the overlay's repaint merge.
-  final GripCache grips;
+  /// The selection's grips. A member of the overlay's repaint merge; null
+  /// where no grips show (the selection mode, spec 14b-2 H7).
+  final GripCache? grips;
 
   /// The shell's text tool, whose inline field sits over the canvas
-  /// (spec 05 D9).
-  final TextTool textTool;
+  /// (spec 05 D9); null where there is none (the selection mode).
+  final TextTool? textTool;
+
+  /// Each notification refits the camera as the first frame did, at the
+  /// drawing area's last size (spec 14b-2 H8, `fitToView`).
+  final Listenable? fitRequests;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -71,8 +77,50 @@ class _PlannerViewState extends State<PlannerView> {
     widget.tools,
     widget.camera,
     widget.outlines,
-    widget.grips,
+    if (widget.grips != null) widget.grips,
   ]);
+
+  /// The drawing area's size at the last layout, for a fit request.
+  Size? _size;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.fitRequests?.addListener(_onFitRequest);
+  }
+
+  @override
+  void didUpdateWidget(PlannerView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.fitRequests != widget.fitRequests) {
+      oldWidget.fitRequests?.removeListener(_onFitRequest);
+      widget.fitRequests?.addListener(_onFitRequest);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.fitRequests?.removeListener(_onFitRequest);
+    super.dispose();
+  }
+
+  void _onFitRequest() {
+    final size = _size;
+    if (size == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  /// Spec D4/D11: the page when there is one, at the drawing area's size --
+  /// inside the frame, so the bars are excluded.
+  void _fit(Size size) {
+    if (!mounted) return;
+    final page = widget.page.value;
+    widget.camera.value = page != null
+        ? fitToPage(page, size)
+        : ViewportTransform.fit(widget.document.extents, size);
+  }
+
   late final Listenable _chromeRepaint =
       Listenable.merge([widget.camera, widget.page]);
 
@@ -82,6 +130,10 @@ class _PlannerViewState extends State<PlannerView> {
         page: widget.page,
         child: LayoutBuilder(
           builder: (context, constraints) {
+            if (constraints.biggest.width > 0 &&
+                constraints.biggest.height > 0) {
+              _size = constraints.biggest;
+            }
             if (!_fitted &&
                 constraints.biggest.width > 0 &&
                 constraints.biggest.height > 0) {
@@ -94,15 +146,7 @@ class _PlannerViewState extends State<PlannerView> {
               // nominal fit, the second at the real size. The latch is set
               // synchronously, so the fit still happens exactly once
               // (Ruling 01-2).
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted) return;
-                final page = widget.page.value;
-                // Spec D4/D11: the page when there is one, at the drawing
-                // area's size — inside the frame, so the bars are excluded.
-                widget.camera.value = page != null
-                    ? fitToPage(page, size)
-                    : ViewportTransform.fit(widget.document.extents, size);
-              });
+              WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
             }
             // Spec 05 D9: the field sits outside the InteractionLayer, so a
             // click on it is not a canvas click.
@@ -117,11 +161,14 @@ class _PlannerViewState extends State<PlannerView> {
             return Flow(
               delegate: const _FieldAboveCanvas(),
               children: [
-                TextEntryOverlay(
-                  tool: widget.textTool,
-                  tools: widget.tools,
-                  camera: widget.camera,
-                ),
+                if (widget.textTool case final text?)
+                  TextEntryOverlay(
+                    tool: text,
+                    tools: widget.tools,
+                    camera: widget.camera,
+                  )
+                else
+                  const SizedBox.shrink(),
                 CameraGestureDetector(
                   camera: widget.camera,
                   policy: widget.policy,

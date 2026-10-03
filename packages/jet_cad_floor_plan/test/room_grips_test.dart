@@ -205,7 +205,7 @@ String osnap(WidgetTester tester) =>
 
 /// The shown object grips of [h].
 List<Grip> objectGripsOf(PlannerView view, Handle h) => [
-      for (final r in view.grips.grips)
+      for (final r in view.grips!.grips)
         if (r.object && r.key == k(h)) r.grip,
     ];
 
@@ -411,10 +411,10 @@ void main() {
     final g = objectGripsOf(view, f.kitchen).single;
     final m = view.camera.value.worldToScreenMatrix;
     final s = view.camera.value.worldToScreen(at(g));
-    expect(view.grips.hitTest(Offset(s.x, s.y), m), isNot(-1),
+    expect(view.grips!.hitTest(Offset(s.x, s.y), m), isNot(-1),
         reason: 'the control: hit under full permissions');
     doc.commands.permissions = DraftPermissions.runtime;
-    expect(view.grips.hitTest(Offset(s.x, s.y), m), -1);
+    expect(view.grips!.hitTest(Offset(s.x, s.y), m), -1);
     final before = enc(doc);
     await dragWorld(tester, view, at(g), f.plan.at(1900.37, 2600.81));
     expect(enc(doc), before, reason: 'nothing moved');
@@ -433,8 +433,8 @@ void main() {
       final name = anchorOf(doc, f.kitchen) + Vector2(0, 0.7 * 125);
       await tapWorld(tester, view, name);
       expect(view.selection.keys, [k(f.kitchen)]);
-      expect(view.grips.box, isNotNull);
-      expect(view.grips.rotatable, isFalse, reason: 'no rotation grip');
+      expect(view.grips!.box, isNotNull);
+      expect(view.grips!.rotatable, isFalse, reason: 'no rotation grip');
       final before = enc(doc);
       await dragWorld(
           tester, view, name, name + (f.plan.at(700, 300) - f.plan.at(0, 0)));
@@ -448,7 +448,7 @@ void main() {
       await toggleF3(tester);
       view.selection.replace([k(f.kitchen), k(f.b), k(f.part)]);
       await tester.pump();
-      expect(view.grips.rotatable, isTrue, reason: 'the partition');
+      expect(view.grips!.rotatable, isTrue, reason: 'the partition');
       final t0 = doc.tree.accumulatedTransform(f.part);
       final rooms = {
         f.kitchen: (roomOf(doc, f.kitchen), doc.tree[f.kitchen]),
@@ -587,7 +587,7 @@ void main() {
       final view = await pumpShell(tester, f, f.plan.at(6000, 3000));
       view.selection.replace([k(f.sep)]);
       await tester.pump();
-      expect(view.grips.rotatable, isTrue, reason: 'a separator is movable');
+      expect(view.grips!.rotatable, isTrue, reason: 'a separator is movable');
       final stored = sepOf(doc, f.sep);
       final toWorld = doc.tree.accumulatedTransform(f.sep);
       final p = f.plan.at(5800.37, 3960.21);

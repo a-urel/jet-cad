@@ -142,7 +142,7 @@ Future<void> dragWorld(
 }
 
 List<Grip> objectGripsOf(PlannerView view, Handle h) => [
-      for (final r in view.grips.grips)
+      for (final r in view.grips!.grips)
         if (r.object && r.key == SelectionKey.root(h)) r.grip,
     ];
 

@@ -127,7 +127,7 @@ Vector2 endOf(DraftDocument doc, Handle h, int k) =>
 
 /// The shown grips of wall [h], as (index, x, y).
 List<(int, double, double)> gripsOf(PlannerView view, Handle h) => [
-      for (final r in view.grips.grips)
+      for (final r in view.grips!.grips)
         if (r.key == SelectionKey.root(h)) (r.grip.index, r.grip.x, r.grip.y),
     ];
 
@@ -282,7 +282,7 @@ void main() {
     final w = worldWallOf(doc, wb);
     expect(gripsOf(view, wb), [(0, w.s.x, w.s.y), (1, w.e.x, w.e.y)],
         reason: 'bitwise where WorldWall puts them');
-    expect(view.grips.grips.every((r) => r.object), isTrue);
+    expect(view.grips!.grips.every((r) => r.object), isTrue);
     final local = doc.components.get<WallParams>(wb)!;
     expect((local.start - w.s).length, greaterThan(1000),
         reason: 'the group is not at the identity');

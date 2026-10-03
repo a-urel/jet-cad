@@ -366,9 +366,9 @@ void main() {
       final view = await pumpShell(tester, doc, 'rotation-grip');
       await tapWorld(tester, view, Vector2(14000, 9150));
       expect(view.selection.keys, [SelectionKey.root(hall)]);
-      expect(view.grips.rotatable, isTrue,
+      expect(view.grips!.rotatable, isTrue,
           reason: 'D11: a dimension alone rotates like a box');
-      expect(view.grips.pivot, isNotNull);
+      expect(view.grips!.pivot, isNotNull);
     }
 
     // ---- 5. The walls and their dimensions dragged together: every value
