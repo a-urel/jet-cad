@@ -1,6 +1,8 @@
 # Selection-mode behaviour (14c) — design
 
-**Date:** 2026-10-03. **Status:** design, **revision 1**. **Sub-project:**
+**Date:** 2026-10-03. **Status:** design, **revision 2**: revision 1
+(`b911cda`) reviewed independently, "Ready with fixes" (R-1 to R-14);
+[Revision 2](#revision-2) is binding where it differs. **Sub-project:**
 14 (restaurant embedding), slice **14c**.
 **Umbrella:** [2026-10-03-restaurant-embedding-design.md](2026-10-03-restaurant-embedding-design.md)
 (revision 3, approved): decisions 2, 8, 9, 10, 11 and D13–D16, D18,
@@ -242,3 +244,85 @@ and a hidden layer.
   accepted, and the M-14g fixture sits 40 m off the origin.
 - **The preview moves outlines only**: during a drag the drafting and the
   status fill stay until release (as the design mode's move does).
+
+## Revision 2
+
+Applied from the independent review of revision 1. Facts confirmed, with
+citations: the top comes from the lowest-handle leaf
+(`tables/table_label.dart:157`, `firstLeafOf`); a closed polyline repeats
+its first point (`drafting.dart:104-116`); `PlannerView`'s Stack is at
+`planner_view.dart:192-226`.
+
+- **R-1 → S9 replaced (A-1).** The selection prunes keys on locked or
+  hidden layers at every document change (`selection.dart:168-196`), and
+  the controller already refuses to select them (14b-2 R-6); keeping a
+  locked table selected would need a render change. So a **locked** table
+  is **picked** (a tap fires `onTableTap` with its number) and
+  **statused**, but **never selected, toggled or moved**; a drag that
+  starts on one does nothing (no move, no pan). **M-14l** becomes:
+  dragging a locked table changes no transform and no selection; a long
+  press does not toggle it.
+- **R-2 → the asymmetric fixture.** Every catalog top is symmetric about
+  its base point, so a mirror cannot be seen on it. M-14h, M-14g and the
+  allocation corpus use a **hand-made servable definition with an
+  asymmetric top** (an off-centre trapezoid, a `SeatingComponent`), turned
+  37°, mirrored, 40 m off the origin; inside and outside points are
+  computed in the test with the forward transform, near the edges. New
+  mutant **M-14c2-11**: the inverse ignores the mirror.
+- **R-3 → S7's measurement.** The paint loop is an **indexed loop over a
+  list prebuilt** when the statuses or the plan's state change (instance,
+  path, colour, paragraph, the top's local centre): no map iteration, no
+  closure, no `Offset` per frame — captions are drawn with
+  `canvas.translate(x, y)` and `drawParagraph(p, Offset.zero)`, inside the
+  save/restore. The invariant is measured **structurally**: a recording
+  canvas asserts that, after warm-up, every frame passes the **identical**
+  `Path`, `Paint` and `Paragraph` objects and the identical matrix buffer;
+  the counter stays as a second check.
+- **R-4 → S6, S7 detailed.** The painter repaints on the camera, on the
+  statuses and on **every document change** of the plan it shows (a
+  move, an undo, a redo), through a listener it disposes. Statuses are a
+  `ValueListenable<Map<String, TableStatus>> tableStatuses` of the
+  controller (`Map.unmodifiable`, keys trimmed); `setTableStatus` does not
+  notify the controller and does not move `revision` (M-14d). The
+  controller resolves numbers to instances in an `@internal` view keyed by
+  (document, state id, statuses).
+- **R-5 → the wiring.** `FloorPlanView` passes `ServiceView` a settings
+  reader, as `PageFlows` reads its own: the tool reads `onTableTap` and
+  `onLayoutChanged` at call time. The picker and the tool live per
+  `ServiceView` (one per copy); `ServiceView` disposes the tool. The tool
+  uses a `dart:async` `Timer`, cancelled in `cancel` and `dispose`;
+  `InteractionLayer._release` cancels the tool on deactivate
+  (`interaction_layer.dart:200-218`), so a `resetLayout`, a `load` or a
+  switch mid-gesture drops the drag and the timer (tested).
+- **R-6 → S3's gaps.** After a long press the gesture is **spent**: moves
+  and the up do nothing; a long press fires **no** `onTableTap`. A
+  Shift/Ctrl tap on empty floor keeps the selection. An up after a pan
+  changes no selection. Hover moves (no button) are ignored. At release
+  the delta is applied to each table's transform **as it is then**, and a
+  table no longer live is skipped (an Undo can land mid-drag). The long
+  press is Flutter's `kLongPressTimeout`.
+- **R-7 → one slop, the touch one.** The selection mode is mostly used by
+  finger; `ToolPointerEvent` carries no pointer kind (`tool.dart:17-38`),
+  so the slop is Flutter's **`kTouchSlop` (18 px)** for every pointer;
+  14t may split it by kind.
+- **R-8 → the picker.** Candidates with a singular transform are skipped
+  (`invert` throws); a definition whose first leaf is neither a closed
+  polyline nor a circle is never picked and never filled. Tops are cached
+  **per definition** for the picker's life (under `runtime` definitions
+  cannot change); inverses per state id.
+- **R-9 → M-14c's fixture.** The wall has a **higher** handle than the
+  table and the tap lies within 6 px of the wall line, inside the top.
+- **R-10 → M-14g.** Rendered through a `PictureRecorder` with the painter
+  alone (no caption, no label), read back under `runAsync`
+  (`room_paint_test.dart:140` is the precedent).
+- **R-11 → amendments.** (A-2) `tables` gains no hidden flag in v1: a host
+  that needs it reads its layers itself — recorded, not built.
+  `onSelectionChanged` is `selectedTables` (14b-2). (A-3) `fitToView`
+  still fits the page (14b-2), not the visible tables' extents (D17, 14t).
+- **R-12.** A caption is cut to 12 **characters** (grapheme clusters).
+- **R-13.** The demo's "Random statuses" takes a seeded `Random`.
+- **R-14.** The matrix is composed in doubles (camera · instance) before
+  it reaches the canvas; no world-coordinate translate: precise as the
+  drafting's rebase for tops with ordinary local coordinates. The risk is
+  restated accordingly.
+
