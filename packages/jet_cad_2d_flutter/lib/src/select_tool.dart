@@ -636,8 +636,16 @@ class SelectTool extends Tool {
         names = Set.of(named);
         list = _groupCascade(doc, node, byOwner, names);
       } else if (node is InstanceNode) {
-        names = {key.target};
-        list = [RemoveNodeCommand(key.target)];
+        // Spec 14a T9: the entities the instance owns (a table's number)
+        // go first, in the same compound, so none is left without its
+        // owner.
+        byOwner ??= doc.leavesByOwner();
+        names = Set.of(named);
+        list = [
+          ..._ownedLeaves(doc, key.target, byOwner, names),
+          RemoveNodeCommand(key.target),
+        ];
+        names.add(key.target);
       } else if (doc.entities.slotOf(key.target) != null) {
         names = {key.target, ...doc.fills.fillsOf(key.target)};
         list = [RemoveEntityCommand(key.target)];
@@ -665,8 +673,33 @@ class SelectTool extends Tool {
   /// including the fills that go with a boundary — is added to it.
   List<DraftCommand> _groupCascade(DraftDocument doc, GroupNode group,
       Map<Handle, List<int>> byOwner, Set<Handle> named) {
+    final out = _ownedLeaves(doc, group.handle, byOwner, named);
+    for (final child in doc.tree.childNodesOf(group.children)) {
+      final n = doc.tree[child];
+      if (n is GroupNode) {
+        out.addAll(_groupCascade(doc, n, byOwner, named));
+      } else if (n is InstanceNode) {
+        if (named.add(child)) {
+          // Spec 14a T9: an instance's own entities before the instance.
+          out
+            ..addAll(_ownedLeaves(doc, child, byOwner, named))
+            ..add(RemoveNodeCommand(child));
+        }
+      }
+    }
+    if (named.add(group.handle)) out.add(RemoveNodeCommand(group.handle));
+    return out;
+  }
+
+  /// A `RemoveEntityCommand` per leaf [owner] owns, ascending by handle (the
+  /// order `leavesByOwner` keeps), except a fill whose boundary is also
+  /// here, which the boundary's command takes. Handles already in [named]
+  /// are skipped, and every handle the returned commands will remove —
+  /// including the fills that go with a boundary — is added to it.
+  List<DraftCommand> _ownedLeaves(DraftDocument doc, Handle owner,
+      Map<Handle, List<int>> byOwner, Set<Handle> named) {
     final out = <DraftCommand>[];
-    final leaves = byOwner[group.handle] ?? const <int>[];
+    final leaves = byOwner[owner] ?? const <int>[];
     final boundaries = <Handle>{};
     for (final slot in leaves) {
       if (doc.entities.kindAt(slot) != EntityKind.fill) {
@@ -681,15 +714,6 @@ class SelectTool extends Tool {
       named.addAll(doc.fills.fillsOf(h));
       out.add(RemoveEntityCommand(h));
     }
-    for (final child in doc.tree.childNodesOf(group.children)) {
-      final n = doc.tree[child];
-      if (n is GroupNode) {
-        out.addAll(_groupCascade(doc, n, byOwner, named));
-      } else if (n is InstanceNode) {
-        if (named.add(child)) out.add(RemoveNodeCommand(child));
-      }
-    }
-    if (named.add(group.handle)) out.add(RemoveNodeCommand(group.handle));
     return out;
   }
 
