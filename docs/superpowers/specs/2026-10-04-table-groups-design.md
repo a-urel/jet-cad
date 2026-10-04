@@ -1,7 +1,9 @@
 # Table groups (merging and splitting tables) — design
 
-**Date:** 2026-10-04. **Status:** design, **revision 1**, awaiting an
-independent review. **Sub-project:** a follow-on to 14 (restaurant
+**Date:** 2026-10-04. **Status:** design, **revision 2**. Revision 1
+(`50d1504`) was reviewed independently: "Ready with fixes", R-1 to R-18,
+four of them blocking. All are applied **in place**; the
+[Revision log](#revision-log) maps each to its change. **Sub-project:** a follow-on to 14 (restaurant
 embedding); unnumbered until the human gives it a number.
 **Approval:** the human chose this as the next POS need ("Masa birleştirme
 / ayırma", 2026-10-04) and approved every decision below in the
@@ -22,8 +24,9 @@ The human then said "Tamam, spec'i yaz".
 **Branch:** `claude/dreamy-gates-2kgh4o`, restarted from `main` at
 `4490cd9`. The facts below hold there.
 **Size:** M. **Packages touched:** `jet_cad_floor_plan` (the controller,
-the host types, `FloorPlanView`, `ServiceView`, the table select tool, a new
-group painter) and `apps/restaurant_demo`. The engine and the render
+the host types, `FloorPlanView`, `ServiceView`, `PlannerView`'s new
+`overlay` slot, the table select tool, a new group painter) and
+`apps/restaurant_demo`. The engine and the render
 package are untouched.
 
 ## What it delivers
@@ -89,6 +92,9 @@ the design mode, exactly as statuses are today.
 - **F-5. `SelectionController.toggle` flips each key on its own**
   (`jet_cad_2d_flutter/lib/src/selection.dart:131-142`). A group that is
   half selected would come out half selected the other way.
+  - `replace` (`:122-129`) does no filtering. Keys on hidden or locked
+    layers are pruned only at the next document change (`:168-196`), so
+    any expansion must filter before it calls `replace`.
 - **F-6. The service copy** allows `transform` and `components` only
   (`DraftPermissions.runtime`). It is thrown away on `setMode(design)`,
   `resetLayout` and `load` (controller `:357-359`, `:376-377`, `:327`).
@@ -102,6 +108,19 @@ the design mode, exactly as statuses are today.
     (controller `:181`, `:219`).
   - `select(Set<String>)` replaces the selection with every live, visible,
     unlocked table carrying one of the numbers (`:456-476`).
+- **F-10. The picker.**
+  - Its candidates carry each table's `box`, the definition's bounding
+    box covering "its chairs, the space between them". The box is cached
+    per definition (`service/table_picker.dart:2-4`, `:117-119`,
+    `:177-180`), defined for every candidate, and skipped for a singular
+    transform.
+  - A candidate's `top` may be null when the first leaf is not a top
+    (`:94-95`).
+  - Candidates are rebuilt on `stateId` and the table revision only
+    (`:154-163`).
+- **F-11. Draw order in `PlannerView`.** The `underlay` is painted
+  **below** `DraftCanvas` (`planner_view.dart:244-252`), so anything in it
+  is overdrawn by the drafting.
 - **F-9. The architecture rule.** "Runtime state (occupied, reserved) is
   not in the document at all; it is supplied to the view layer"
   (`2026-07-27-jet-cad-2d-architecture-design.md:382-384`).
@@ -133,6 +152,10 @@ the controller gains these members.
   and **`ValueListenable<Map<String, TableStatus>> get groupStatuses`**,
   keyed by trimmed group id. They are kept apart from `tableStatuses`;
   neither map's keys are interpreted in the other.
+- **`ValueListenable<String?> get selectedGroup`.** The id of the group
+  the selection is **exactly**, by the rule of G5's Split, else null. It
+  drives Split, and lets a host route a status to a group without
+  re-deriving layer rules it cannot see (14c A-2).
 - **`FloorPlanView`** gains three optional callbacks, passed through
   `ServiceCallbacks` like today's two (F-7):
   - `onGroupTap(String groupId, String number)`;
@@ -149,11 +172,18 @@ the controller gains these members.
 
 - **Overlapping membership.** `setTableGroups` throws `ArgumentError`,
   naming the number and both group ids, when a number appears in two
-  groups after trimming. Nothing is assigned on a throw.
-- **Unusable entries.**
-  - An empty or blank group id, or an empty `members`, throws
-    `ArgumentError`.
-  - A blank member is dropped when `TableGroup` trims its members.
+  groups after trimming (`'5'` and `' 5 '` overlap).
+- **Unusable entries.** `setTableGroups` throws `ArgumentError` for:
+  - an empty or blank group id;
+  - two ids that collide after trimming (`'G1'` and `' G1 '`). Unlike
+    `setTableStatus`, the last entry does not silently win;
+  - a group whose `members` are empty **after trimming**. `TableGroup`
+    drops blank members.
+- **No partial effect.** Validation runs before any assignment. On a
+  throw nothing is assigned and **no listener is notified**.
+- **Labels.** `label` is trimmed. A blank or empty label means none.
+- **Orphan group statuses.** A group status whose id has no group is kept
+  and draws nothing. It applies again if a group with that id comes back.
 - **Unknown numbers are kept, not dropped.** A member number with no live
   table is stored; it draws nothing and selects nothing until a table with
   that number exists. This is the same "addressed by number, resolved at
@@ -161,9 +191,14 @@ the controller gains these members.
 - **Duplicate numbers.** A member number carried by several tables (a file
   duplicate, F-1) makes all of them members, as `withNumber` returns them
   all.
-- **Which tables count.** The group's **visible members** are the visible
-  live tables its member numbers resolve to. "Visible" means on a visible
-  layer, the same rule the picker and status painter use.
+- **Which tables count.**
+  - The group's **visible members** are the live tables its member
+    numbers resolve to that lie on a visible layer. This is the same rule
+    the picker and status painter use.
+  - Its **selectable members** are the visible members that are also
+    unlocked (14c R-1).
+  - A member on a hidden layer counts for neither. A **locked** visible
+    member counts as visible, not selectable.
 - **A group with fewer than two visible members** draws no frame (G3).
   - Its status still fills the one visible member.
   - Tap and drag on that member behave as for a group of one: the group
@@ -171,25 +206,56 @@ the controller gains these members.
 
 ### G3 — The look (selection mode only)
 
-A new `TableGroupPainter` (`service/table_group_painter.dart`) draws, under
-the status fills. It is mounted with the status painter as `PlannerView`'s
-underlay, in one `Stack`, with groups below and statuses above.
+A new `TableGroupPainter` (`service/table_group_painter.dart`) draws in
+two layers:
+- the **frames**, in `PlannerView`'s `underlay`, in one `Stack` under the
+  status fills (frames below, statuses above, the status layer keeping its
+  key `table-status-layer`; the group layer keyed `table-group-layer`);
+- the **label chips**, in a new optional **`overlay`** slot of
+  `PlannerView`, painted **above** `DraftCanvas` and below the selection
+  overlay. That way the chairs' lines do not paint over the chip (F-11).
+  `PlannerView` lives in `jet_cad_floor_plan`, so neither the render
+  package nor the engine is touched.
 
 - **The frame.** Each group with two or more visible members gets one
   closed, rounded outline around them.
-  - The outline is the convex hull of the members' **top** corners in
-    world space (each member's first leaf's local box, transformed),
-    offset outwards by `kGroupFrameMarginMm = 150` world millimetres,
-    with rounded corners.
-  - It is stroked `kGroupFrameStrokePixels = 2` screen pixels wide in
-    `paper.selection`, the paper set (dark theme D3), so it reads on
-    every paper.
-  - The fill under it is `paper.selection` at alpha `0x18`.
+  - **Geometry.** The outline is the convex hull of the four corners of
+    each visible member's **`definitionBounds` box** (the picker's `box`,
+    F-10), transformed to world space. That box includes the chairs and
+    is defined for every table, circles and tables without a top
+    included.
+  - **Offset.** The hull is offset outwards by `kGroupFrameMarginMm = 150`
+    world millimetres with **round joins of radius equal to the margin**.
+    Members with a singular transform or an empty box are skipped, as the
+    picker skips them.
+  - **No fill.** A table that is not a member can lie inside the hull
+    (Risks), and a tint would make it read as grouped.
+  - **Colour.** It is stroked `kGroupFrameStrokePixels = 2` screen pixels
+    wide in **`paper.gripMove`**, from the paper set (dark theme D3). That
+    is purple, distinct from `paper.selection` (the selected outline).
+    Grips never show in the selection mode, so it means only "group"
+    there. It has at least 5:1 on every swatch (light `0xFF7A3FD1`, dark
+    `0xFFC4A0FF`).
+  - **Draw order.** Frames are drawn in ascending order of each group's
+    lowest member handle (the draw-order non-negotiable).
   - **Rebuild.** The frame is rebuilt only when the groups map, the
-    document's `stateId`, the table revision or the paper changes, so the
-    per-frame cost is one transform and one prebuilt path per group (14c
-    S7).
-- **The status.**
+    document's `stateId`, the table revision or the paper changes.
+- **The per-frame recipe** (14c S7, R-3: no allocation, no `Offset` per
+  frame):
+  - one reused `Paint` per painter, its `strokeWidth` set in place to
+    `kGroupFrameStrokePixels / scale` each frame;
+  - prebuilt world-space `Path`s drawn under one reused camera matrix;
+  - each chip's `RRect` and `Paragraph` built at rebuild time in
+    chip-local coordinates, its world anchor computed at rebuild time,
+    then drawn after `canvas.translate` to the anchor's screen point.
+- **The status.** The status painter changes how it resolves:
+  - **Iteration.** It iterates the survey's visible tables, not the
+    status map, and resolves each table's **effective status**: its
+    group's status if the group has one, else its own table status. The
+    early return on an empty table-status map goes.
+  - **Rebuild key.** The identities of `tableGroups` and `groupStatuses`
+    join the rebuild key, `ServiceView`'s repaint merge and
+    `shouldRepaint`.
   - **Fill.** A group status fills every visible member's top, like a
     table status.
   - **Overrides.** It **overrides** each member's own `tableStatuses`
@@ -197,32 +263,51 @@ underlay, in one `Stack`, with groups below and statuses above.
     status. A member's own status shows again when the group has none or
     the member leaves the group.
   - **Caption.** The group's caption is drawn **once**, under the **lead**
-    member's number label. The lead is the visible member whose number
-    sorts lowest: numeric order when every member number is all digits,
-    else plain string order.
+    member's number label.
+  - **Lead order.** The lead is the visible member **that has a top**
+    whose number sorts lowest:
+    - numeric order when every such member's number is all digits,
+      compared as (length after stripping leading zeros, then string),
+      never `int.parse`;
+    - else plain string order;
+    - ties, as duplicate numbers give, go to the lowest handle, so the
+      caption is drawn exactly once.
   - **Ink.** The caption ink follows dark theme D6c: the lead's composite
     of status over paper.
 - **The label.** One label per group: `label` if given, else the visible
-  members' numbers joined by `+` in lead order (e.g. `5+6+7`).
-  - It is drawn in screen space at the frame's top edge, centred on the
-    frame's top-most point.
-  - It uses the status caption's text size, on a chip filled
-    `paper.selection` with `kStatusCaptionOnDark`/`OnLight` ink by the
+  members' **distinct** numbers joined by `+` in lead order (e.g. `5+6+7`,
+  never `5+5+6`).
+  - **Placement.** It is drawn in screen space, centred on the frame's
+    **top-most point**: the frame bounds' centre x at its maximum world y,
+    computed at rebuild time.
+  - **Style.** It uses the status caption's text size, on a chip filled
+    `paper.gripMove` with `kStatusCaptionOnDark`/`OnLight` ink by the
     same `foregroundFor` rule.
-  - It is skipped when the frame is narrower on screen than the chip.
-  - The chip's paragraph is built at rebuild time and cached by `(text,
-    ink)`, never per frame.
+  - **Layout.** The paragraph is laid out at the label's intrinsic width,
+    on one line with no wrap, so a 24-character label never breaks.
+  - **Hiding.** It is skipped when the frame is narrower on screen than
+    the chip.
+  - **Cache.** The paragraph is built at rebuild time and cached by
+    `(text, ink)`, never per frame.
+- **During a drag** the frames, fills and chips stay where they are and
+  jump on release, as status fills do today. Only the outlines follow the
+  drag preview.
 - **Not plotted.** Groups are never exported or printed (statuses are
   not; host spec A-3).
 - **Design mode.** Nothing about groups is drawn in the design mode.
 
 ### G4 — Selecting, tapping and moving
 
-The select tool gains a group lookup:
-- a number-to-group-id map built from `tableGroups` and the survey at the
-  same rate as the picker's candidates;
-- `groupOf(table)` gives the group id and its selectable member keys
-  (visible, unlocked, live).
+The select tool takes `ValueListenable<Map<String, TableGroup>> groups` and
+gains a group lookup:
+- **Where it lives.** The lookup sits in the Flutter-free
+  `service/table_groups.dart`.
+- **What it holds.** A number-to-group-id map, plus per group its
+  selectable member keys and whether it has a locked visible member. The
+  member keys come from the picker's candidates that are not `locked`.
+- **When it rebuilds.** On the picker's key (`stateId`, table revision)
+  **and** the identity of the groups map, so a `setTableGroups` alone
+  refreshes it.
 
 **A tap on a member**
 - **Plain tap:** replaces the selection with **all** the group's
@@ -235,25 +320,38 @@ The select tool gains a group lookup:
   and selects nothing (R-1).
 
 **A long press on a member** adds or removes the whole group by the same
-rule as a modifier tap. It reports nothing, as today.
+rule as a modifier tap, through one `replace` (never `toggle`). It reports
+nothing, as today.
 
-**A drag on a member**
+**A drag** (on any selected table, member or not)
 - **Starting:** an unselected member's group replaces the selection, as
   a single table does today.
-- **What moves:** every root-level selected key, which now includes the
-  whole group. The existing one-compound `Move` and `onLayoutChanged`
-  stay as they are.
-- **Locked members:** if the group has a **locked** member, the drag is
-  spent and nothing moves.
-  - This is checked when the drag would start, the same moment a locked
+- **What moves:** at drag start, `_moving` is the root-level selected
+  keys **expanded to the selectable members of every group that has a
+  member among them**. So a half-selected group (one selected before the
+  groups changed) moves whole. The existing one-compound `Move` and
+  `onLayoutChanged` stay as they are.
+- **Locked members:** if any group so involved has a **locked visible**
+  member, the drag is spent and nothing moves.
+  - This holds whether the drag started on that group's member or on
+    another selected table.
+  - It is checked when the drag would start, the same moment a locked
     single table spends it today.
+  - A spent drag leaves the selection as it was before the press, so it
+    does not replace it.
+  - A locked member on a **hidden** layer does not count; the picker
+    cannot see it.
   - Groups are logical, so moving part of one would silently break the
     arrangement the staff see.
 
-**`FloorPlanController.select(numbers)`** expands each number to its whole
-group (every selectable member) before replacing the selection.
-`selectedTables` keeps reporting numbers, now including every selected
-member.
+**Selecting by number.** The expansion happens inside the controller's
+`_select`, which `select`, `setMode` and `resetLayout` all use, **in the
+selection mode only**. Groups do not exist in the design mode (G3).
+- Each number expands to its group's member numbers.
+- The result then goes through the existing visible, unlocked, live
+  filter, so a locked or hidden member is never selected.
+- `selectedTables` keeps reporting numbers, now including every selected
+  member.
 
 Tables in no group behave exactly as today.
 
@@ -262,16 +360,26 @@ Tables in no group behave exactly as today.
 `ServiceView`'s service bar gains two buttons after Redo, separated by a
 gap:
 - **Merge** (`service-merge`, icon `Icons.merge_type`).
-  - **Enabled** when the selection holds tables carrying **two or more
-    distinct numbers**.
-  - **On press:** `onMergeRequested(numbers)`, the selected tables'
-    numbers.
-  - **A selection that already includes a group** sends all of its
-    numbers. The host decides whether that means "grow the group".
+  - **Units.** A **unit** is a group, or a selected number in no group.
+  - **Enabled** when the selected numbers span **two or more units**. So
+    exactly one whole group is disabled, and two tables sharing one
+    duplicate number are disabled.
+  - **On press:** `onMergeRequested(selectedTables.value)`, exactly the
+    selected numbers. The host decides what a selection spanning a group
+    means, e.g. "grow the group".
 - **Split** (`service-split`, icon `Icons.call_split`).
-  - **Enabled** when the selected tables' numbers are **exactly one
-    group's** visible members (no more, no less).
-  - **On press:** `onSplitRequested(groupId)`.
+  - **Enabled** when `selectedGroup` is non-null, i.e. when:
+    - the set of selected numbers equals the numbers of exactly one
+      group's **selectable** members;
+    - that set is not empty;
+    - no unnumbered table is selected.
+
+    A group with a locked visible member therefore qualifies, since its
+    locked member is never selected (14c R-1). A group with one visible
+    member qualifies too.
+  - **On press:** `onSplitRequested(selectedGroup.value!)`.
+- **Freshness.** Both flags follow the selection **and** `tableGroups`:
+  a `setTableGroups` with the selection unchanged updates them.
 
 Both buttons are **hidden** when the host passed no callback for them.
 They are disabled, not hidden, when the selection does not qualify. Unnumbered tables
@@ -280,17 +388,18 @@ cannot be merged (they have no number to report) and do not count towards
 
 ### G6 — The demo (`apps/restaurant_demo`)
 
-- **Merge.** `onMergeRequested` accepts any request. It drops the numbers
-  from any group they are in and makes a new group `G<n>`, the next
-  integer.
-  - It sets the groups and logs `Merged {numbers} as G<n>`.
-  - When the selection already held one whole group plus more tables, it
-    grows that group under its id instead.
+- **Merge.** `onMergeRequested(numbers)` accepts any request.
+  - **Grow.** If the numbers include all the selectable members of
+    exactly one existing group, it grows that group under its id with the
+    other numbers.
+  - **New group.** Otherwise it drops the numbers from any group they are
+    in and makes a new group `G<n>`, where n is the largest existing
+    numeric suffix plus one.
+  - **After.** It sets the groups and logs `Merged {numbers} as G<n>`.
 - **Split.** `onSplitRequested` removes the group and its group status,
   and logs `Split G<n>`.
-- **Status.** The status buttons apply to a selected **group** through
-  `setGroupStatus` when the selection is exactly one group, and to tables
-  otherwise.
+- **Status.** The status buttons apply to a group through `setGroupStatus`
+  when `selectedGroup` is non-null, and to the selected tables otherwise.
 - **Display.** The tables list shows the groups, and `onGroupTap` is
   logged.
 
@@ -324,14 +433,16 @@ cannot be merged (they have no number to report) and do not count towards
   - `packages/jet_cad_floor_plan/lib/src/service/table_group_painter.dart`
     (the frame, the label, the group lookup shared with the tool);
   - `packages/jet_cad_floor_plan/lib/src/service/table_groups.dart`
-    (`resolveGroups`: the validated number-to-group map, the lead order).
+    (Flutter-free: validation, the number-to-group lookup, selectable
+    members, the lead order, the Merge/Split rules).
 - **Changed, `jet_cad_floor_plan`:**
   - `host/floor_plan_types.dart` (`TableGroup`);
   - `host/floor_plan_controller.dart` (`setTableGroups`, `tableGroups`,
     `setGroupStatus`, `groupStatuses`, `select` expansion, disposal);
   - `host/floor_plan_view.dart` (three callbacks);
-  - `host/service_view.dart` (the bar buttons, the underlay `Stack`,
-    `ServiceCallbacks`);
+  - `host/service_view.dart` (the bar buttons, the underlay `Stack`, the
+    overlay, `ServiceCallbacks`, the repaint merge);
+  - `planner_view.dart` (the optional `overlay` slot above `DraftCanvas`);
   - `service/table_select_tool.dart` (G4);
   - `service/table_status_painter.dart` (group status override and the
     single caption);
@@ -346,9 +457,12 @@ cannot be merged (they have no number to report) and do not count towards
    S7). The group painter and the status painter build at rebuild rate
    only, measured by their `debugAllocations`.
 2. **No group, no change** (G7). The existing selection-mode, status and
-   demo suites pass unedited, except tests that construct
-   `ServiceCallbacks` or `TableStatusPainter` and gain a parameter
-   mechanically.
+   demo suites pass unedited, except for mechanical changes:
+   - tests that construct `ServiceCallbacks`, `TableStatusPainter` or
+     `TableSelectTool` (`table_select_tool_test.dart:65`) gain a
+     parameter;
+   - the barrel test (`test/host/barrel_test.dart:28-43`, B1) gains
+     `TableGroup`.
 3. **Groups never reach the document.** `designJson()` and the service
    copy are byte-identical with and without groups.
 4. **The planner only asks.** No group changes without a
@@ -367,8 +481,8 @@ cannot be merged (they have no number to report) and do not count towards
   seed (the dark theme palette fixture), in both themes.
 
 **Named mutants.**
-- **M-TG-1** — Overlap accepted. `setTableGroups` with `5` in two groups
-  must throw, and the old map must be kept.
+- **M-TG-1** — Overlap accepted. `setTableGroups` with `5` and `' 5 '` in
+  two groups must throw. The old map is kept and no listener is notified.
 - **M-TG-2** — Untrimmed keys. `' G1 '` and `' 5 '` resolve as `G1` and
   `5`.
 - **M-TG-3** — Unknown numbers dropped. A group naming `99` before table
@@ -376,27 +490,49 @@ cannot be merged (they have no number to report) and do not count towards
   the design and the mode is switched back.
 - **M-TG-4** — Plain tap selects one member only. A tap on `12` selects
   `3, 7, 12`.
-- **M-TG-5** — Modifier tap via `toggle`. With the group half selected (by
-  `controller.select` of a member and one unrelated table), a modifier tap
-  on an unselected member selects all three members and keeps the
-  unrelated one.
-- **M-TG-6** — `onGroupTap` missing or with the wrong number. A tap on `7`
-  reports `onTableTap('7')`, then `onGroupTap('G7', '7')`.
+- **M-TG-5** — Modifier tap via `toggle`.
+  - **Fixture:** `controller.select({'3', '20'})` **before**
+    `setTableGroups` makes `G7 = {12, 3, 7}`. The group is then half
+    selected.
+  - **Expected:** a modifier tap on `7` gives `{3, 7, 12, 20}`. The
+    toggle mutant gives `{7, 12, 20}`.
+- **M-TG-5b** — Long press via `toggle`. The same fixture and expectation,
+  with a long press on `7`.
+- **M-TG-6** — `onGroupTap` missing or with the wrong number.
+  - A tap on `7` reports `onTableTap('7')`, then `onGroupTap('G7', '7')`.
+  - A tap on a **locked** member reports both and selects nothing.
 - **M-TG-7** — Drag moves only the hit table. A drag on `3` moves all
   three members by the same delta in one `Move` compound.
 - **M-TG-8** — Locked member moved. A drag on an unlocked member of a
   group with a locked member moves nothing.
+- **M-TG-8b** — Locked group moved through another table. With such a
+  group selected and a non-member added by a modifier, a drag on the
+  non-member moves nothing.
+- **M-TG-8c** — Half-selected group moved in part. With M-TG-5's fixture,
+  a drag on `3` moves `3`, `7`, `12` and `20`.
 - **M-TG-9** — `select` not expanded. `controller.select({'3'})` selects
   the whole group.
+- **M-TG-9b** — Expansion unfiltered. With a member on a locked layer and
+  one on a hidden layer, `selectedTables` after `select({'3'})` reports
+  neither.
 - **M-TG-10** — Group status not overriding. A member with its own
   `Ordered` and a group `Bill` fills `Bill`. Clearing the group status
   shows `Ordered` again.
+  - The pixels are read after `setGroupStatus` with **no camera or
+    document change**, so a missing repaint listener is killed.
 - **M-TG-11** — Caption repeated. The group caption appears under the
   lead only. The lead of `{12, 3, 7}` is `3` (numeric order, not string
   order).
-- **M-TG-12** — Frame missing or covering the wrong members. The frame's
-  path contains every member's top corners plus the margin, and excludes
-  a non-member table between them.
+- **M-TG-11b** — Caption under every duplicate. With the lead's number
+  duplicated by a file, the caption is drawn once, under the lower handle.
+- **M-TG-12** — Frame missing or covering the wrong members.
+  - **Fixture:** members have an asymmetric, mirrored definition
+    (selection spec R-2).
+  - **Expected:**
+    - the frame's path contains every member's `definitionBounds`
+      corners, each pushed outwards by the margin;
+    - it excludes a non-member table placed **beside** the members,
+      outside the hull plus margin.
 - **M-TG-13** — Frame for a single visible member. A group whose second
   member is on a hidden layer draws no frame and still fills the visible
   member.
@@ -404,21 +540,35 @@ cannot be merged (they have no number to report) and do not count towards
   label it reads the label, cut to 24 characters.
 - **M-TG-15** — Per-frame allocation. Ten steady frames leave both
   painters' `debugAllocations` unchanged. A groups change rebuilds once.
-- **M-TG-16** — Merge enabled wrongly. Merge is disabled for one table and
-  for two unnumbered tables, and enabled for two numbered ones. It
-  reports the numbers.
-- **M-TG-17** — Split enabled wrongly. Split is disabled when the
-  selection is a group plus one table, or part of a group, and enabled
-  for exactly one group's visible members. It reports the id.
+- **M-TG-16** — Merge enabled wrongly.
+  - **Disabled** for one table, for two unnumbered tables, for two tables
+    sharing one duplicate number, and for exactly one whole group.
+  - **Enabled** for two numbered tables. It reports exactly
+    `selectedTables`.
+- **M-TG-17** — Split enabled wrongly.
+  - **Disabled** for a group plus one table, for part of a group, and for
+    a group plus an unnumbered table.
+  - **Enabled** for exactly one group's selectable members, including a
+    group whose third member is on a locked layer.
+  - It reports the id.
+- **M-TG-17b** — Flags stale. With the selection unchanged, a
+  `setTableGroups` that groups the selected tables flips Merge off and
+  Split on.
+- **M-TG-17c** — Lookup stale in the tool. Tap, then `setTableGroups`,
+  then tap again: the new grouping applies.
 - **M-TG-18** — Buttons shown without callbacks. With no merge or split
   callback, the buttons are absent.
 - **M-TG-19** — Groups leak into the document. `designJson()` with and
-  without groups is byte-identical.
-- **M-TG-20** — Groups lost on a mode switch or `resetLayout`. They are
-  still drawn after design→selection and after `resetLayout`.
+  without groups is byte-identical. This is an **invariant check**, not
+  a counted kill: nothing realistic writes groups into the document.
+- **M-TG-20** — Groups lost on a mode switch, `resetLayout` or `load`.
+  They are still drawn after design→selection, after `resetLayout`, and
+  after `load` of the same plan.
 - **M-TG-21** — Frame colour from the theme instead of the paper. On
-  Blueprint under the light theme the frame stroke is `paper.selection`
-  of the dark set.
+  Blueprint under the light theme the frame stroke is `0xFFC4A0FF` (the
+  dark set's `gripMove`), not the light `0xFF7A3FD1`.
+- **M-TG-22** — Chip under the drafting. The chip's pixels over a chair
+  line show the chip, so it is in the overlay, not the underlay.
 
 ## Exit gate
 
@@ -427,7 +577,8 @@ cannot be merged (they have no number to report) and do not count towards
    once.
 2. `flutter build web --release` for `apps/restaurant_demo` and
    `apps/floor_planner`.
-3. M-TG-1..21 are each killed, recorded in a results note.
+3. M-TG-1..22 (with their b/c variants) are each killed, except the
+   invariant check M-TG-19, recorded in a results note.
 4. A Chromium smoke of the demo: merge two tables, give the group a
    status, drag the group, split it. Screenshots are evidence for the
    human.
@@ -437,14 +588,46 @@ cannot be merged (they have no number to report) and do not count towards
 ## Risks
 
 - **A hull across empty floor.** Members far apart give a frame that
-  spans the floor between them. This is accepted for a logical link (the
-  human's choice); the label and the shared fill carry the meaning.
+  spans the floor between them. It may enclose tables that are not
+  members.
+  - This is accepted for a logical link (the human's choice).
+  - The frame has no fill, so an enclosed non-member is not tinted. The
+    label and the shared status fill carry the meaning.
 - **Lead order.** Numbers are free text (T4). "Numeric when all digits,
   else string" is a rule the host may not expect for mixed numbers like
   `5A`. It only decides where the caption sits.
+- **The frame colour.** Purple `gripMove` was chosen so an unselected
+  group does not read as selected. Grips never show in the selection mode
+  (14c S3), so the colour has no other meaning there.
 - **Two status maps.** A host could set a table status and a group status
   for the same member and expect both. The override (G3) is documented
   on `setGroupStatus`.
 - **Touch.** The long press and the drag now act on a group. 14t's
   hold-back and finger targets are unchanged, but the look on a tablet is
   owed.
+
+## Revision log
+
+Revision 2 applies the independent review of revision 1 (`50d1504`),
+"Ready with fixes":
+
+| Finding | Severity | Change |
+|---|---|---|
+| R-1 | blocking | M-TG-12's non-member placed beside, outside the hull; the frame fill dropped; Risks |
+| R-2 | blocking | M-TG-5's half-selected fixture: `select` before `setTableGroups` |
+| R-3 | blocking | Split on **selectable** members; locked-member group qualifies; unnumbered blocks |
+| R-4 | blocking | Drag expands to every involved group; spent on any locked visible member; M-TG-8b/8c |
+| R-5 | should-fix | Hull from `definitionBounds` corners; round joins; picker's skips; F-10 |
+| R-6 | should-fix | Chip in a new `PlannerView.overlay` slot above `DraftCanvas`; F-11; M-TG-22 |
+| R-7 | should-fix | Per-frame recipe; top-most point; intrinsic one-line layout; draw order |
+| R-8 | should-fix | Status painter iterates tables; rebuild key, merge, `shouldRepaint`; lead rule; M-TG-11b |
+| R-9 | should-fix | Tool takes `groups`, keys on its identity; lookup in `table_groups.dart`; M-TG-17c |
+| R-10 | should-fix | Merge on two or more units; payload `selectedTables`; demo grow rule |
+| R-11 | should-fix | `selectedGroup` listenable drives Split and the demo |
+| R-12 | should-fix | G2 trims before checks, id collisions throw, no notification on throw, orphan statuses |
+| R-13 | should-fix | Expansion in `_select`, selection mode only, filtered; M-TG-9b |
+| R-14 | should-fix | M-TG-5b, locked tap, M-TG-17b, M-TG-9b; M-TG-19 as invariant; M-TG-20 adds `load` |
+| R-15 | nit | Barrel test and `TableSelectTool` in invariant 2's list; layer keys |
+| R-16 | nit | Frame and chip in `gripMove` (purple), not `selection`; Risks |
+| R-17 | nit | Frames jump on release during a drag (G3) |
+| R-18 | nit | Distinct numbers in the joined label; `label` trimmed |
