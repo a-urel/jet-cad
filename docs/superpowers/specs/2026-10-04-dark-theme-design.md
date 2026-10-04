@@ -686,19 +686,25 @@ by that task's independent review; the ledger is
   no symbol loader, and existing tests change only mechanically, so the
   live-switch assertions on the symbol cells and the page swatch borders
   live in `widget_theme_test.dart`, not in M-DT-9's test.
-- **R-C6-3 — D9a's patterns take `Color.from(` and `CupertinoColors.`**
-  (after the plan; a review of `4f324f9`). R-4 asked for `Color.from*`, but
-  `\bColor\.from(ARGB|RGBO)\(` misses Flutter's component constructor
-  `Color.from(alpha: ..., red: ...)`, and `\bColors\.` finds no word
-  boundary inside `CupertinoColors.`. The patterns are now
-  `\bColor\.from(ARGB|RGBO)?\(` and `\b(Cupertino)?Colors\.(?!transparent\b)`;
-  neither spelling occurs in the scanned roots, so the allow-list is
-  unchanged. The scan's own mutant test adds both.
 - **Not amendments.** R-C1-1 (the old colour constants kept as literals
   for Tasks 1-2, pinned to `.light` by a transitional test) changed only
   the plan's interim step: Task 3 (`31b5a43`) removed the constants and
   that test, as D5 says. R-C5-2 (`fillColor:` equivalent under Material 3
   defaults) leaves D6b as written.
+
+## Amendment, 2026-10-04: the scan's spellings
+
+After the plan, on a review of `4f324f9`; not a task ruling, so not under
+"Amended at execution". Binding over D9a's patterns where they differ:
+
+- **S-1.** R-4 asked the scan for `Color.from*`, but
+  `\bColor\.from(ARGB|RGBO)\(` misses Flutter's component constructor
+  `Color.from(alpha: ..., red: ...)`, and `\bColors\.` finds no word
+  boundary inside `CupertinoColors.`. The patterns are now
+  `\bColor\.from(ARGB|RGBO)?\(` and
+  `\b(Cupertino)?Colors\.(?!transparent\b)`. Neither spelling occurs in
+  the scanned roots, so the allow-list is unchanged. The scan's own mutant
+  test adds both.
 
 ## Revision log
 
