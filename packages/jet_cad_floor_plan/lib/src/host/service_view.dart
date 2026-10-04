@@ -14,6 +14,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
+import '../service/table_group_painter.dart';
 import '../service/table_picker.dart';
 import '../service/table_select_tool.dart';
 import '../service/table_status_painter.dart';
@@ -98,16 +99,46 @@ class _ServiceViewState extends State<ServiceView> {
   // Spec 14c S7: the status layer repaints on the camera, the statuses and
   // every change of this copy (a move, an undo, a redo; R-4), and (dark
   // theme D6c, F-16) on the paper, which a theme switch with no page
-  // changes with no document change.
+  // changes with no document change. Table-groups spec G3: and on the
+  // groups and their statuses.
   final _Bump _changed = _Bump();
   StreamSubscription<DocChange>? _changes;
   late final TableStatusPainter _statusPainter = TableStatusPainter(
     document: _document,
     camera: _c.camera,
     statuses: _c.tableStatuses,
+    tableGroups: _c.tableGroups,
+    groupStatuses: _c.groupStatuses,
     paper: _paper,
-    repaint: Listenable.merge([_c.camera, _c.tableStatuses, _changed, _paper]),
+    repaint: Listenable.merge([
+      _c.camera,
+      _c.tableStatuses,
+      _c.tableGroups,
+      _c.groupStatuses,
+      _changed,
+      _paper
+    ]),
   );
+
+  // Table-groups spec G3: the group frames (under the status fills) and
+  // label chips (above the drafting) repaint on the camera, the groups,
+  // every change of this copy and the paper.
+  late final Listenable _groupRepaint =
+      Listenable.merge([_c.camera, _c.tableGroups, _changed, _paper]);
+  late final TableGroupPainter _framePainter =
+      _groupPainter(TableGroupLayer.frames);
+  late final TableGroupPainter _chipPainter =
+      _groupPainter(TableGroupLayer.chips);
+
+  TableGroupPainter _groupPainter(TableGroupLayer layer) => TableGroupPainter(
+        layer: layer,
+        document: _document,
+        picker: _picker,
+        camera: _c.camera,
+        groups: _c.tableGroups,
+        paper: _paper,
+        repaint: _groupRepaint,
+      );
 
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
@@ -234,10 +265,31 @@ class _ServiceViewState extends State<ServiceView> {
                   // The service shows the plan, not the drafting aids.
                   rulers: false,
                   grid: false,
-                  underlay: RepaintBoundary(
+                  // Table-groups spec G3: the frames under the status fills.
+                  underlay: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      RepaintBoundary(
+                        child: CustomPaint(
+                          key: const Key('table-group-layer'),
+                          painter: _framePainter,
+                          size: Size.infinite,
+                        ),
+                      ),
+                      RepaintBoundary(
+                        child: CustomPaint(
+                          key: const Key('table-status-layer'),
+                          painter: _statusPainter,
+                          size: Size.infinite,
+                        ),
+                      ),
+                    ],
+                  ),
+                  // The label chips above the drafting (G3, F-11).
+                  overlay: RepaintBoundary(
                     child: CustomPaint(
-                      key: const Key('table-status-layer'),
-                      painter: _statusPainter,
+                      key: const Key('table-group-chips'),
+                      painter: _chipPainter,
                       size: Size.infinite,
                     ),
                   ),
