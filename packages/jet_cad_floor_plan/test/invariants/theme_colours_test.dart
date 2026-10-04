@@ -1,8 +1,9 @@
 // Dark theme spec D9a, R-4, R-19 (plan Task 6, M-DT-14): no literal colour
 // in a widget. A widget takes its colours from `Theme.of(context)`; the
 // literals that remain are data, or not a screen colour, and each is named
-// here by (file, exact literal), so a second literal in the same file goes
-// red. An allow-list entry that no longer matches anything goes red too: a
+// here by (file, exact literal), so a second, different literal in the same
+// file goes red; the same literal again does not (`layer_row.dart` has two).
+// An allow-list entry that no longer matches anything goes red too: a
 // stale entry would silently allow the next literal of that spelling.
 //
 // The scan reads the source text of every `.dart` file under the four
@@ -20,12 +21,15 @@ const List<String> kRoots = [
   '../../apps/restaurant_demo/lib',
 ];
 
-/// The three patterns (R-4). The word boundary keeps `TrueColor(0x...)`,
-/// document data, out of the first; `Colors.transparent` is no colour.
+/// The three patterns (R-4, amended R-C6-3). The word boundary keeps
+/// `TrueColor(0x...)`, document data, out of the first; the second takes
+/// every `Color.from*`, `Color.from(alpha: ...)` too; the third takes
+/// `CupertinoColors` as well, which its word boundary alone would miss.
+/// `Colors.transparent` is no colour.
 final List<RegExp> kPatterns = [
   RegExp(r'\bColor\(0[xX]'),
-  RegExp(r'\bColor\.from(ARGB|RGBO)\('),
-  RegExp(r'\bColors\.(?!transparent\b)'),
+  RegExp(r'\bColor\.from(ARGB|RGBO)?\('),
+  RegExp(r'\b(Cupertino)?Colors\.(?!transparent\b)'),
 ];
 
 /// Allowed as a whole file (paths relative to `packages/jet_cad_floor_plan`,
@@ -189,6 +193,14 @@ void main() {
         hasLength(1));
     expect(withPanel('final c = Color.fromRGBO(1, 2, 3, 1);').offenders,
         hasLength(1));
+    expect(
+        withPanel('final c = Color.from(alpha: 1, red: 0, green: 0, blue: 0);')
+            .offenders,
+        hasLength(1),
+        reason: 'Color.from, the component constructor (R-C6-3)');
+    expect(withPanel('final c = CupertinoColors.systemBlue;').offenders,
+        hasLength(1),
+        reason: 'CupertinoColors (R-C6-3)');
     expect(withPanel('final c = Colors.blue;').offenders, hasLength(1));
     expect(withPanel('final c = Colors.tealAccent;').offenders, hasLength(1));
     expect(withPanel('final c = Colors.transparent;').offenders, isEmpty);
