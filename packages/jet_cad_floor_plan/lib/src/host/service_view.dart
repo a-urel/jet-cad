@@ -56,8 +56,9 @@ class _ServiceViewState extends State<ServiceView> {
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   // Spec 14c S3: the table tool, over this copy's tables.
   late final TablePicker _picker = TablePicker(_document);
-  late final TableSelectTool _tool =
-      TableSelectTool(picker: _picker, callbacks: widget.callbacks);
+  // Table-groups spec G4: a member acts with its group.
+  late final TableSelectTool _tool = TableSelectTool(
+      picker: _picker, groups: _c.tableGroups, callbacks: widget.callbacks);
   late final ToolController _tools = ToolController(
       initial: _tool,
       context: ToolContext(

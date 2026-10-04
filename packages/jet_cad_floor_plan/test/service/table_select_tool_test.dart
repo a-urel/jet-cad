@@ -5,6 +5,7 @@
 // off the origin, turned and mirrored, on a service copy (runtime).
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/gestures.dart'
     show PointerDeviceKind, kLongPressTimeout, kPrimaryButton;
 import 'package:flutter/services.dart';
@@ -64,9 +65,13 @@ final class Rig {
     var layouts = 0;
     final tool = TableSelectTool(
         picker: TablePicker(doc),
+        groups: ValueNotifier(const {}),
         callbacks: () => (
               onTableTap: taps.add,
               onLayoutChanged: () => layouts++,
+              onGroupTap: null,
+              onMergeRequested: null,
+              onSplitRequested: null,
             ));
     final rig = Rig._(
         doc,
