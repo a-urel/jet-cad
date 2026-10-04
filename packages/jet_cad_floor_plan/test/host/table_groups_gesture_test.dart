@@ -441,4 +441,70 @@ void main() {
           worldDelta(const Offset(66, 18)), handle.toHex());
     }
   });
+
+  testWidgets(
+      'TG-G12 groups cleared: a drag on a former member selects and moves it '
+      'alone (review 2 finding 1, the drag start\'s stale-map guard)',
+      (tester) async {
+    final h = await mount(tester);
+    h.c.setTableGroups({
+      'G7': group({'12', '3', '7'})
+    });
+    await mouseTap(tester, onTable(tester, h, '12'));
+    expect(h.selected, h.keys({'3', '7', '12'}), reason: 'premise');
+    await mouseTap(tester, onTable(tester, h, '20'));
+    h.c.setTableGroups(const {});
+    await tester.pump();
+    final before = {
+      for (final n in ['12', '3', '7']) n: parts(h.node(n).transform)
+    };
+    await mouseDrag(tester, onTable(tester, h, '3'), const Offset(54, -24));
+    expect(h.selected, h.keys({'3'}));
+    expectMoved(before['3']!, h.node('3').transform,
+        worldDelta(const Offset(54, -24)), '3');
+    expect(parts(h.node('12').transform), before['12']);
+    expect(parts(h.node('7').transform), before['7']);
+  });
+
+  testWidgets(
+      'TG-G13 groups cleared: a long press and a Shift tap toggle one table '
+      '(review 2 finding 1, the long press\'s stale-map guard)',
+      (tester) async {
+    final h = await mount(tester);
+    h.c.setTableGroups({
+      'G7': group({'12', '3', '7'})
+    });
+    await mouseTap(tester, onTable(tester, h, '20'));
+    h.c.setTableGroups(const {});
+    await tester.pump();
+    final p = await tester.startGesture(onTable(tester, h, '7'),
+        kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 501));
+    await p.up();
+    await tester.pump();
+    expect(h.selected, h.keys({'7', '20'}));
+    await mouseTap(tester, onTable(tester, h, '12'),
+        modifier: LogicalKeyboardKey.shiftLeft);
+    expect(h.selected, h.keys({'7', '12', '20'}));
+    expect(h.heard, ['table 20', 'table 12']);
+  });
+
+  testWidgets(
+      'TG-G14 a locked member on a hidden layer does not spend the drag '
+      '(spec G4: the picker cannot see it)', (tester) async {
+    final h = await mount(tester);
+    h.c.setTableGroups({
+      'G2': group({'5', '8'})
+    });
+    final layers = h.doc.tables.layers;
+    final locked = layers.byName('Locked')!;
+    layers
+      ..remove(locked.handle)
+      ..add(locked.copyWith(visible: false));
+    final before = parts(h.node('5').transform);
+    await mouseDrag(tester, onTable(tester, h, '5'), const Offset(60, 30));
+    expect(h.selected, h.keys({'5'}));
+    expectMoved(
+        before, h.node('5').transform, worldDelta(const Offset(60, 30)), '5');
+  });
 }
