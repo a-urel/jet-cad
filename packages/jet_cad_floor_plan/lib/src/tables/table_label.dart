@@ -153,12 +153,18 @@ AddEntityCommand addTableLabelCommand(
 }
 
 /// The lowest-handle leaf [owner] owns, or null. O(entities): at command
-/// or document-change rate, never per frame.
+/// or document-change rate, never per frame. With [leavesByOwner]
+/// ([DraftDocument.leavesByOwner], shared by a caller asking for many
+/// owners in one pass), only [owner]'s own leaves are visited.
 ({EntityKind kind, GeometryPayload payload})? firstLeafOf(
-    DraftDocument doc, Handle owner) {
+    DraftDocument doc, Handle owner,
+    [Map<Handle, List<int>>? leavesByOwner]) {
   final entities = doc.entities;
   int? best;
-  for (final slot in entities.liveSlots) {
+  final slots = leavesByOwner == null
+      ? entities.liveSlots
+      : leavesByOwner[owner] ?? const <int>[];
+  for (final slot in slots) {
     if (entities.ownerAt(slot) != owner) continue;
     if (best == null ||
         entities.handleAt(slot).value < entities.handleAt(best).value) {

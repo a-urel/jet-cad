@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_index.dart';
@@ -74,9 +75,10 @@ final class CircleTop extends TableTop {
 /// The top of [definition] in [doc]: its lowest-handle leaf, when that is
 /// a closed polyline (its last vertex repeating its first, by exact `==`)
 /// or a circle; null otherwise (such a table is not filled, R-8, and is
-/// picked by its box alone).
-TableTop? tableTopOf(DraftDocument doc, Handle definition) {
-  final leaf = firstLeafOf(doc, definition);
+/// picked by its box alone). [leavesByOwner] as for [firstLeafOf].
+TableTop? tableTopOf(DraftDocument doc, Handle definition,
+    [Map<Handle, List<int>>? leavesByOwner]) {
+  final leaf = firstLeafOf(doc, definition, leavesByOwner);
   if (leaf == null) return null;
   final payload = leaf.payload;
   switch (leaf.kind) {
@@ -128,9 +130,16 @@ final class PickCandidate {
 /// pointer event; the tops and boxes are kept per definition for the
 /// picker's life (R-8: under `runtime` a definition cannot change).
 class TablePicker {
-  TablePicker(this.document);
+  TablePicker(this.document,
+      {@visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner})
+      : _leavesByOwner = leavesByOwner ?? document.leavesByOwner;
 
   final DraftDocument document;
+
+  /// [DraftDocument.leavesByOwner], the one entity-store scan of a build;
+  /// a test hands in its own to count the scans and to see that every
+  /// definition reads the map it returns.
+  final Map<Handle, List<int>> Function() _leavesByOwner;
 
   /// The boundary tolerance (S1): a point on a top's edge is inside.
   static const Tolerance tolerance = Tolerance(linear: 1e-6, angular: 1e-9);
@@ -155,6 +164,9 @@ class TablePicker {
 
   List<PickCandidate> _build() {
     final out = <PickCandidate>[];
+    // One entity-store scan per build, shared by every definition not yet
+    // cached, never one per definition (`DraftDocument.definitionBounds`).
+    Map<Handle, List<int>>? leaves;
     for (final t in TableSurvey.of(document).tables) {
       final node = document.tree[t.instance];
       if (node is! InstanceNode) continue;
@@ -163,13 +175,17 @@ class TablePicker {
       final det = node.transform.determinant;
       if (det == 0 || !det.isFinite) continue;
       final box = _boxes.putIfAbsent(
-          t.definition, () => document.definitionBounds(t.definition));
+          t.definition,
+          () => document.definitionBounds(
+              t.definition, leaves ??= _leavesByOwner()));
       if (box.isEmpty) continue;
       out.add(PickCandidate(
           table: t,
           inverse: node.transform.invert(),
           top: _tops.putIfAbsent(
-              t.definition, () => tableTopOf(document, t.definition)),
+              t.definition,
+              () => tableTopOf(
+                  document, t.definition, leaves ??= _leavesByOwner())),
           box: box,
           locked: layer?.locked ?? false,
           scale: math.sqrt(det.abs())));
