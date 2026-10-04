@@ -303,6 +303,45 @@ void main() {
     expect(tablesText(tester), 'none');
   });
 
+  testWidgets(
+      'Dark theme (spec D9, review 6 finding 1): under a dark platform the '
+      'demo is dark and its own UI paints without an exception: the areas, '
+      'the service with statuses, the discard dialog, back to design',
+      (tester) async {
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    final demo = await pumpDemo(tester,
+        plans: {'Teras': salonPlan()}, random: math.Random(7));
+    void dark(String step) {
+      expect(tester.takeException(), isNull, reason: step);
+      expect(Theme.of(tester.element(find.byType(DemoHome))).brightness,
+          Brightness.dark,
+          reason: step);
+    }
+
+    dark('start');
+    await tester.tap(byKey('area-1'));
+    await tester.pump();
+    await tester.pump();
+    dark('Teras');
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(byKey('status-random'));
+    await tester.pump();
+    dark('service with statuses');
+    serviceMove(demo, '2');
+    await tester.tap(byKey('mode-design'));
+    await tester.pump();
+    expect(byKey('discard-dialog'), findsOneWidget);
+    dark('discard dialog');
+    await tester.tap(byKey('discard-ok'));
+    await tester.pump();
+    await tester.pump();
+    expect(demo.area.controller.mode.value, FloorPlanMode.design);
+    dark('back to design');
+  });
+
   testWidgets('D11 two numbers, padded, by Enter: both selected, logged sorted',
       (tester) async {
     final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
