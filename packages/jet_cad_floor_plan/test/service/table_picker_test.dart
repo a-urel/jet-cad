@@ -294,6 +294,51 @@ void main() {
     expect(picker.pick(worldOf(a, 900, 100))?.table.instance, a.handle);
   });
 
+  test(
+      'TP12 a build scans the entity store once, however many definitions, '
+      'and not at all once they are cached; every definition reads that '
+      'scan', () {
+    final doc = plan();
+    final a = placeTurned(
+        doc, tableSymbol(key: 'test.table.a'), Vector2(41000, -27500));
+    final b = placeTurned(
+        doc, tableSymbol(key: 'test.table.b'), Vector2(-38000, 26000));
+    expect(a.definition, isNot(b.definition), reason: 'premise');
+    // The scan the picker sees is doctored: A keeps its top alone, B loses
+    // its top. A picker that scans again, behind the map, sees neither.
+    List<int> byHandle(List<int> slots) =>
+        [...slots]..sort((x, y) => doc.entities
+            .handleAt(x)
+            .value
+            .compareTo(doc.entities.handleAt(y).value));
+    var scans = 0;
+    Map<Handle, List<int>> doctored() {
+      scans++;
+      final map = doc.leavesByOwner();
+      map[a.definition] = [byHandle(map[a.definition]!).first];
+      map[b.definition] = byHandle(map[b.definition]!).sublist(1);
+      return map;
+    }
+
+    final picker = TablePicker(doc, leavesByOwner: doctored);
+    expect(
+        picker.candidates.map((c) => c.table.instance), [a.handle, b.handle]);
+    expect(scans, 1, reason: 'one scan for two definitions');
+    expect(picker.pick(worldOf(a, 900, 100)), isNull,
+        reason: 'A\'s box is its top alone: the chair is outside');
+    expect(picker.pick(worldOf(a, 900, 700))?.table.instance, a.handle);
+    expect((picker.candidates[1].top! as PolygonTop).xy,
+        [675, -50, 1125, -50, 1125, 400, 675, 400],
+        reason: 'B\'s top is its lowest remaining leaf, the near chair');
+    expect(picker.pick(worldOf(b, 400, 700)), isNull,
+        reason: 'B\'s box is its chairs\' alone: the top\'s left is out');
+
+    doc.commands.execute(TransformNodeCommand(
+        a.handle, Transform2.translation(5, 0).multiply(a.transform)));
+    expect(picker.candidates, hasLength(2), reason: 'premise: rebuilt');
+    expect(scans, 1, reason: 'both definitions cached: no scan');
+  });
+
   test('TP8 an open first leaf is no top: picked by its box (R-8, F-7)', () {
     const open = FurnitureSymbol(
       key: 'test.table.open',

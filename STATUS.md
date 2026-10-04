@@ -159,8 +159,12 @@ mode** built in; what is missing for that comes first.
   one entity-store scan per definition. Tests: the painter's rebuild test,
   TP11; the mutants (`shouldRepaint` always false, always true; the shared
   map's lowest slot taken for the lowest handle; a leaf dropped) are red.
-  Gates: engine 1,241 + 2 standing, render 1,241 + 1 skip + 7 standing,
-  planner 1,168, app 201, demo 17.
+  On Copilot's review of the PR (TP11 stays green with no map shared),
+  `TablePicker` takes a test-only `leavesByOwner` source and TP12 hands it
+  a counting, doctored one; the mutants (the bounds or the top without
+  the map, a scan per definition, a scan per build, the source ignored)
+  are red. Gates: engine 1,241 + 2 standing, render 1,241 + 1 skip + 7
+  standing, planner 1,169, app 201, demo 17.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
   then the roadmap.
 

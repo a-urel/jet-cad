@@ -8,6 +8,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_index.dart';
@@ -129,9 +130,16 @@ final class PickCandidate {
 /// pointer event; the tops and boxes are kept per definition for the
 /// picker's life (R-8: under `runtime` a definition cannot change).
 class TablePicker {
-  TablePicker(this.document);
+  TablePicker(this.document,
+      {@visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner})
+      : _leavesByOwner = leavesByOwner ?? document.leavesByOwner;
 
   final DraftDocument document;
+
+  /// [DraftDocument.leavesByOwner], the one entity-store scan of a build;
+  /// a test hands in its own to count the scans and to see that every
+  /// definition reads the map it returns.
+  final Map<Handle, List<int>> Function() _leavesByOwner;
 
   /// The boundary tolerance (S1): a point on a top's edge is inside.
   static const Tolerance tolerance = Tolerance(linear: 1e-6, angular: 1e-9);
@@ -169,7 +177,7 @@ class TablePicker {
       final box = _boxes.putIfAbsent(
           t.definition,
           () => document.definitionBounds(
-              t.definition, leaves ??= document.leavesByOwner()));
+              t.definition, leaves ??= _leavesByOwner()));
       if (box.isEmpty) continue;
       out.add(PickCandidate(
           table: t,
@@ -177,7 +185,7 @@ class TablePicker {
           top: _tops.putIfAbsent(
               t.definition,
               () => tableTopOf(
-                  document, t.definition, leaves ??= document.leavesByOwner())),
+                  document, t.definition, leaves ??= _leavesByOwner())),
           box: box,
           locked: layer?.locked ?? false,
           scale: math.sqrt(det.abs())));
