@@ -64,6 +64,7 @@ export 'src/symbols/symbol_panel.dart';
 export 'src/symbols/symbol_place_tool.dart';
 export 'src/symbols/symbol_placer.dart';
 export 'src/symbols/symbol_search.dart';
+export 'src/symbols/symbol_section.dart';
 export 'src/symbols/wall_attach.dart';
 export 'src/tables/table_index.dart';
 export 'src/tables/table_label.dart';

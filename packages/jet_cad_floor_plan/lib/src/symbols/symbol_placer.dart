@@ -77,34 +77,18 @@ Transform2 placementTransform({
       (0.0, -1.0)
     ][((quarterTurns % 4) + 4) % 4];
 
-/// The command that places [entry] in [doc] at [at]. Labelled
-/// `Place <name>`; it does **not** execute.
-///
-/// Every handle is allocated from `doc.handleSeed` here, once (spec F-8), so
-/// a redo reuses them. A definition already in [doc] with the entry's key and
-/// version is reused when it is leaf-equal to the entry ([isLeafEqual], spec
-/// 09c D10), the first such in ascending handle; otherwise the definition is
-/// copied with fresh handles for it and for every leaf, the leaves in the
-/// library's ascending order so draw order is stable, under the first free
-/// name of `key@version`, `key@version#2`, `#3`, ...
-///
-/// A servable entry becomes a numbered table (spec 14a T13): when
-/// [numbered], its label, with the plan's next number, is added after the
-/// instance and stamped upright for the placement. The palette's thumbnails
-/// pass `numbered: false` (F-15). The number is fixed here, with the
-/// handles, so a redo replays the same one.
-CompoundCommand placeSymbol(
-  DraftDocument doc,
-  SymbolEntry entry, {
-  required Vector2 at,
-  int quarterTurns = 0,
-  bool mirrored = false,
-  Transform2? transform,
-  InstanceStyle style = const InstanceStyle(),
-  bool numbered = true,
-}) {
+/// The definition a placement of [entry] in [doc] uses, and the commands
+/// that make it when it is a copy (none when one is reused): the one
+/// reuse-or-copy path, shared by [placeSymbol] and a size change (spec 09c
+/// D7, V-7). A definition is reused when it carries the entry's key and
+/// version, still exists, agrees on seating (spec 14 S2) and is leaf-equal
+/// to the entry; otherwise the definition is copied with fresh handles,
+/// allocated here. The entry's leaves are ascending by handle (R5-7).
+({Handle definition, List<DraftCommand> commands}) definitionForEntry(
+    DraftDocument doc, SymbolEntry entry) {
+  assert(_ascending(entry.leaves),
+      'the entry\'s leaves must be ascending by handle (spec 09c R5-7)');
   final commands = <DraftCommand>[];
-
   Handle? definition;
   for (final h in doc.components.withComponent<SymbolComponent>()) {
     final c = doc.components.get<SymbolComponent>(h);
@@ -166,6 +150,47 @@ CompoundCommand placeSymbol(
     }
     definition = copy;
   }
+  return (definition: definition, commands: commands);
+}
+
+bool _ascending(List<({EntityRecord record, GeometryPayload payload})> leaves) {
+  for (var i = 1; i < leaves.length; i++) {
+    if (leaves[i - 1].record.handle.value >= leaves[i].record.handle.value) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// The command that places [entry] in [doc] at [at]. Labelled
+/// `Place <name>`; it does **not** execute.
+///
+/// Every handle is allocated from `doc.handleSeed` here, once (spec F-8), so
+/// a redo reuses them. A definition already in [doc] with the entry's key and
+/// version is reused when it is leaf-equal to the entry ([isLeafEqual], spec
+/// 09c D10), the first such in ascending handle; otherwise the definition is
+/// copied with fresh handles for it and for every leaf, the leaves in the
+/// library's ascending order so draw order is stable, under the first free
+/// name of `key@version`, `key@version#2`, `#3`, ...
+///
+/// A servable entry becomes a numbered table (spec 14a T13): when
+/// [numbered], its label, with the plan's next number, is added after the
+/// instance and stamped upright for the placement. The palette's thumbnails
+/// pass `numbered: false` (F-15). The number is fixed here, with the
+/// handles, so a redo replays the same one.
+CompoundCommand placeSymbol(
+  DraftDocument doc,
+  SymbolEntry entry, {
+  required Vector2 at,
+  int quarterTurns = 0,
+  bool mirrored = false,
+  Transform2? transform,
+  InstanceStyle style = const InstanceStyle(),
+  bool numbered = true,
+}) {
+  final made = definitionForEntry(doc, entry);
+  final commands = <DraftCommand>[...made.commands];
+  final definition = made.definition;
 
   final instance = doc.handleSeed.next();
   final placement = transform ??

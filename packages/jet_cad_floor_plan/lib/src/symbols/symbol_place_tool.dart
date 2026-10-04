@@ -463,7 +463,8 @@ class SymbolPlaceTool extends Tool {
     final at =
         ui.Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f);
     if (attached != null) {
-      drawNearestMarker(canvas, at, _markerPaint);
+      drawSnapMarker(canvas, at, SnapKind.nearest,
+          grid: false, paint: _markerPaint);
       return;
     }
     drawSnapMarker(canvas, at, _at.objectKind,
@@ -505,19 +506,4 @@ class SymbolPlaceTool extends Tool {
     _context = null;
     super.dispose();
   }
-}
-
-/// The nearest snap glyph (`SnapKind.nearest`: an hourglass, its top and
-/// bottom edges [kSnapMarkerPixels] wide, joined by the two diagonals)
-/// centred on [at], in screen space. The render layer's `drawSnapMarker`
-/// draws nothing for `nearest` (no drag produces it), and 09c-1 does not
-/// touch the render layer, so the attached marker (spec 09c D6) draws it
-/// here. Four lines; no path.
-void drawNearestMarker(ui.Canvas canvas, ui.Offset at, ui.Paint paint) {
-  const h = kSnapMarkerPixels / 2;
-  final x = at.dx, y = at.dy;
-  canvas.drawLine(ui.Offset(x - h, y - h), ui.Offset(x + h, y - h), paint);
-  canvas.drawLine(ui.Offset(x + h, y - h), ui.Offset(x - h, y + h), paint);
-  canvas.drawLine(ui.Offset(x - h, y + h), ui.Offset(x + h, y + h), paint);
-  canvas.drawLine(ui.Offset(x + h, y + h), ui.Offset(x - h, y - h), paint);
 }

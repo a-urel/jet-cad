@@ -887,7 +887,8 @@ class _PlannerShellState extends State<PlannerShell> {
                               wallTool: _wall,
                               wallSettings: _wallSettings,
                               openingTools: _openingTools,
-                              openingSettings: _openingSettings),
+                              openingSettings: _openingSettings,
+                              symbols: widget.symbols),
                           // Spec 12b D9: the Layers section, placed only.
                           LayerPanel(
                               document: _document,
