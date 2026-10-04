@@ -37,6 +37,21 @@ const List<(double, double)> turned = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 final Vector2 at = Vector2(73250.5, -41810.25);
 final Vector2 origin = Vector2(70000, -40000);
 
+/// Far from the origin (plan P-2) and from [at] and [origin].
+final Vector2 far = Vector2(100000.25, -70000.75);
+
+/// A 30° rotation vector.
+final (double, double) r30 = (math.sqrt(3) / 2, 0.5);
+
+/// The next double above [v] (one ulp).
+double nextUp(double v) {
+  final d = ByteData(8)..setFloat64(0, v);
+  if (v == 0) return double.minPositive;
+  final bits = d.getInt64(0);
+  d.setInt64(0, v > 0 ? bits + 1 : bits - 1);
+  return d.getFloat64(0);
+}
+
 /// [m] (column-major 4×4) applied to the point (x, y).
 (double, double) apply(Float64List m, double x, double y) =>
     (m[0] * x + m[4] * y + m[12], m[1] * x + m[5] * y + m[13]);
@@ -100,7 +115,11 @@ void main() {
             final why = '$key q=$q mirrored=$mirrored';
             final g = GhostMatrix()
               ..update(
-                  at: at, basePoint: b, quarterTurns: q, mirrored: mirrored);
+                  placement: placementTransform(
+                      at: at,
+                      basePoint: b,
+                      quarterTurns: q,
+                      mirrored: mirrored));
             final m = g.forOrigin(origin);
             expectPoint(apply(m, b.x, b.y), (at.x - origin.x, at.y - origin.y),
                 1e-9, '$why base point');
@@ -147,17 +166,20 @@ void main() {
     test('P is computed only when the placement changes, not the origin', () {
       final b = entry('bath.toilet').definition.basePoint;
       final g = GhostMatrix()
-        ..update(at: at, basePoint: b, quarterTurns: 1, mirrored: true);
+        ..update(
+            placement: placementTransform(
+                at: at, basePoint: b, quarterTurns: 1, mirrored: true));
       expect(g.computations, 1);
       final linear = [g.storage[0], g.storage[1], g.storage[4], g.storage[5]];
 
       // Three paints at three origins: the translation follows each, P stays.
       for (final o in [origin, Vector2(-5000, 92000), Vector2(70001, -40000)]) {
         g.update(
-            at: at.clone(),
-            basePoint: b.clone(),
-            quarterTurns: 1,
-            mirrored: true);
+            placement: placementTransform(
+                at: at.clone(),
+                basePoint: b.clone(),
+                quarterTurns: 1,
+                mirrored: true));
         final m = g.forOrigin(o);
         expect((m[12], m[13]), (g.placement!.e - o.x, g.placement!.f - o.y));
         expect([m[0], m[1], m[4], m[5]], linear);
@@ -166,29 +188,33 @@ void main() {
       expect(identical(g.forOrigin(origin), g.storage), isTrue);
 
       g.update(
-          at: at + Vector2(10, 0),
-          basePoint: b,
-          quarterTurns: 1,
-          mirrored: true);
+          placement: placementTransform(
+              at: at + Vector2(10, 0),
+              basePoint: b,
+              quarterTurns: 1,
+              mirrored: true));
       expect(g.computations, 2, reason: 'at changed');
       g.update(
-          at: at + Vector2(10, 0),
-          basePoint: b,
-          quarterTurns: 2,
-          mirrored: true);
+          placement: placementTransform(
+              at: at + Vector2(10, 0),
+              basePoint: b,
+              quarterTurns: 2,
+              mirrored: true));
       expect(g.computations, 3, reason: 'turns changed');
       g.update(
-          at: at + Vector2(10, 0),
-          basePoint: b,
-          quarterTurns: 2,
-          mirrored: false);
+          placement: placementTransform(
+              at: at + Vector2(10, 0),
+              basePoint: b,
+              quarterTurns: 2,
+              mirrored: false));
       expect(g.computations, 4, reason: 'mirror changed');
       final other = entry('office.chair').definition.basePoint;
       g.update(
-          at: at + Vector2(10, 0),
-          basePoint: other,
-          quarterTurns: 2,
-          mirrored: false);
+          placement: placementTransform(
+              at: at + Vector2(10, 0),
+              basePoint: other,
+              quarterTurns: 2,
+              mirrored: false));
       expect(g.computations, 5, reason: 'base point changed');
       expectPoint(apply(g.forOrigin(origin), other.x, other.y),
           (at.x + 10 - origin.x, at.y - origin.y), 1e-9, 'new base point');
@@ -199,18 +225,126 @@ void main() {
         'recomputes P once', () {
       final b = entry('office.chair').definition.basePoint;
       final g = GhostMatrix()
-        ..update(at: at, basePoint: b, quarterTurns: 3, mirrored: true);
+        ..update(
+            placement: placementTransform(
+                at: at, basePoint: b, quarterTurns: 3, mirrored: true));
       expect(g.computations, 1);
       final onlyX = Vector2(b.x + 125, b.y);
-      g.update(at: at, basePoint: onlyX, quarterTurns: 3, mirrored: true);
+      g.update(
+          placement: placementTransform(
+              at: at, basePoint: onlyX, quarterTurns: 3, mirrored: true));
       expect(g.computations, 2, reason: 'base point x changed');
       expectPoint(apply(g.forOrigin(origin), onlyX.x, onlyX.y),
           (at.x - origin.x, at.y - origin.y), 1e-9, 'x-moved base point');
       final onlyY = Vector2(onlyX.x, onlyX.y - 75);
-      g.update(at: at, basePoint: onlyY, quarterTurns: 3, mirrored: true);
+      g.update(
+          placement: placementTransform(
+              at: at, basePoint: onlyY, quarterTurns: 3, mirrored: true));
       expect(g.computations, 3, reason: 'base point y changed');
       expectPoint(apply(g.forOrigin(origin), onlyY.x, onlyY.y),
           (at.x - origin.x, at.y - origin.y), 1e-9, 'y-moved base point');
+    });
+
+    // Plan 09c-1 Task 5 (spec D5): the matrix keyed on the placement's six
+    // doubles. A 30° placement (no 0 or ±1 in its linear part), mirrored
+    // and not, far from the origin and from the rebase origin.
+
+    test(
+        'a 30° placement far from the origin: the storage holds its linear '
+        'part and its translation less the origin, and every leaf of the '
+        'toilet lands where the transform puts it', () {
+      final e = entry('bath.toilet');
+      final b = e.definition.basePoint;
+      for (final mirrored in [false, true]) {
+        final p = placementTransform(
+            at: far, basePoint: b, rotation: r30, mirrored: mirrored);
+        final g = GhostMatrix()..update(placement: p);
+        expect(identical(g.placement, p), isTrue);
+        final m = g.forOrigin(origin);
+        expect([
+          m[0],
+          m[1],
+          m[4],
+          m[5],
+          m[12],
+          m[13]
+        ], [
+          p.a,
+          p.b,
+          p.c,
+          p.d,
+          p.e - origin.x,
+          p.f - origin.y
+        ], reason: 'mirrored=$mirrored');
+        // Independently: mirror the local x, turn by 30°, base point to far.
+        final s = mirrored ? -1.0 : 1.0;
+        final (cos, sin) = r30;
+        for (final (x, y) in leafPoints(e)) {
+          final u = (x - b.x) * s, v = y - b.y;
+          expectPoint(
+              apply(m, x, y),
+              (
+                far.x + cos * u - sin * v - origin.x,
+                far.y + sin * u + cos * v - origin.y
+              ),
+              1e-9,
+              'mirrored=$mirrored ($x, $y)');
+        }
+      }
+    });
+
+    test(
+        'equal placements recompute once; a change of one ulp in any one of '
+        'the six doubles recomputes once, and the storage follows', () {
+      final b = entry('bath.toilet').definition.basePoint;
+      for (final mirrored in [false, true]) {
+        final p = placementTransform(
+            at: far, basePoint: b, rotation: r30, mirrored: mirrored);
+        final g = GhostMatrix()..update(placement: p);
+        expect(g.computations, 1);
+        // Equal doubles in another object: nothing recomputed, nothing kept.
+        for (var k = 0; k < 3; k++) {
+          g.update(placement: Transform2.fromJson(p.toJson()));
+        }
+        expect(g.computations, 1, reason: 'mirrored=$mirrored equal');
+        expect(identical(g.placement, p), isTrue);
+        var expected = 1;
+        for (var i = 0; i < 6; i++) {
+          final v = p.toJson();
+          v[i] = nextUp(v[i]);
+          final q = Transform2.fromJson(v);
+          g.update(placement: q);
+          expect(g.computations, ++expected,
+              reason: 'mirrored=$mirrored component $i changed');
+          expect(identical(g.placement, q), isTrue);
+          final m = g.forOrigin(origin);
+          expect([
+            m[0],
+            m[1],
+            m[4],
+            m[5],
+            m[12],
+            m[13]
+          ], [
+            q.a,
+            q.b,
+            q.c,
+            q.d,
+            q.e - origin.x,
+            q.f - origin.y
+          ], reason: 'mirrored=$mirrored component $i storage');
+          g.update(placement: p);
+          expect(g.computations, ++expected,
+              reason: 'mirrored=$mirrored component $i back');
+        }
+      }
+    });
+
+    test('-0.0 and 0.0 compare equal: no recompute (stated, not a mutant)', () {
+      final g = GhostMatrix()
+        ..update(placement: const Transform2(0.0, 1.0, -1.0, 0.0, 5, 7));
+      g.update(placement: const Transform2(-0.0, 1.0, -1.0, -0.0, 5, 7));
+      expect(g.computations, 1);
     });
   });
 
@@ -320,7 +454,9 @@ void main() {
       for (var q = 0; q < 4; q++) {
         for (final mirrored in [false, true]) {
           final g = GhostMatrix()
-            ..update(at: at, basePoint: b, quarterTurns: q, mirrored: mirrored);
+            ..update(
+                placement: placementTransform(
+                    at: at, basePoint: b, quarterTurns: q, mirrored: mirrored));
           final world = ghostPathFor(e).transform(g.forOrigin(origin));
           final metric = world.computeMetrics().toList()[i];
           final why = 'q=$q mirrored=$mirrored';

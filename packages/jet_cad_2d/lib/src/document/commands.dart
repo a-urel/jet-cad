@@ -408,13 +408,27 @@ class RemoveNodeCommand extends DraftCommand {
 /// `touched` names the definition handle, which is what makes the spatial
 /// index rebuild its containers (a touched handle that resolves to a
 /// definition is structural).
+///
+/// [components] is what [RemoveDefinitionCommand]'s inverse puts back on the
+/// handle with the definition (spec 09c D11): restored exactly, after the
+/// refusals above and before the definition is added, so a restore that
+/// throws leaves nothing changed. It is empty for an ordinary add.
+/// [capabilities] is `{structure}`, plus `components` when [components] is
+/// not empty; [capability] stays `structure` either way.
 class AddDefinitionCommand extends DraftCommand {
   final Definition definition;
+  final ComponentSnapshot components;
 
-  AddDefinitionCommand(this.definition);
+  AddDefinitionCommand(this.definition, {ComponentSnapshot? components})
+      : components = components ?? ComponentSnapshot.empty;
 
   @override
   Capability get capability => Capability.structure;
+
+  @override
+  Set<Capability> get capabilities => components.isEmpty
+      ? const {Capability.structure}
+      : const {Capability.structure, Capability.components};
 
   @override
   String get label => 'Add definition';
@@ -434,6 +448,7 @@ class AddDefinitionCommand extends DraftCommand {
           'a definition added by command lists no nodes; '
               '${handle.toHex()} names ${definition.children.length}');
     }
+    target.components.restore(handle, components);
     target.tree.addDefinition(definition);
     target.handleSeed.raiseTo(handle);
     target.invalidateDerived();
@@ -444,13 +459,22 @@ class AddDefinitionCommand extends DraftCommand {
   }
 }
 
-/// Removes one [Definition] from the tree.
+/// Removes one [Definition] from the tree, and every component on its handle
+/// with it (spec 09c D11).
 ///
 /// Refused, before any mutation, while anything still names it: an
 /// [InstanceNode] of it, a node parented to it, or an entity owned by it.
 /// Removal is the last step of a compound that has already removed those, so
-/// nothing is left dangling. The inverse carries the definition value read
-/// before removal.
+/// nothing is left dangling — and no component stays behind on a handle that
+/// names nothing. The inverse carries the definition value read before
+/// removal and the [ComponentSnapshot] of the handle, and puts both back.
+///
+/// **[capabilities] are static** (spec 09c W-1): the dispatcher checks them
+/// before [apply], when what the handle carries is not yet known, so the
+/// command always declares `{structure, components}`, even for a handle that
+/// carries nothing. [capability], what `SpatialIndex` reads, stays
+/// `structure`. The inverse is built after the snapshot is taken and declares
+/// `components` only when the snapshot is not empty.
 class RemoveDefinitionCommand extends DraftCommand {
   final Handle handle;
 
@@ -458,6 +482,10 @@ class RemoveDefinitionCommand extends DraftCommand {
 
   @override
   Capability get capability => Capability.structure;
+
+  @override
+  Set<Capability> get capabilities =>
+      const {Capability.structure, Capability.components};
 
   @override
   String get label => 'Remove definition';
@@ -482,10 +510,12 @@ class RemoveDefinitionCommand extends DraftCommand {
             '${entities.handleAt(slot).toHex()}');
       }
     }
+    final components = target.components.snapshotOf(handle);
+    target.components.detachAll(handle);
     target.tree.removeDefinition(handle);
     target.invalidateDerived();
     return CommandResult(
-      inverse: AddDefinitionCommand(definition),
+      inverse: AddDefinitionCommand(definition, components: components),
       touched: {handle},
     );
   }

@@ -35,6 +35,7 @@ import 'symbols/symbol_library.dart';
 import 'symbols/symbol_library_loader.dart';
 import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
+import 'symbols/wall_attach.dart';
 import 'tables/table_label_system.dart';
 import 'tool_palette.dart';
 
@@ -80,6 +81,7 @@ class PlannerShell extends StatefulWidget {
     this.initialCamera,
     this.symbols,
     this.thumbnails,
+    this.symbolSearch,
     this.selection,
     this.fitRequests,
     this.camera,
@@ -121,6 +123,11 @@ class PlannerShell extends StatefulWidget {
   /// host; not owned here. Read only with [symbols]: a shell given a loader
   /// and no cache makes a cache of its own and disposes it.
   final SymbolThumbnails? thumbnails;
+
+  /// The Symbols tab's search text (spec 09c D13), passed by the host, which
+  /// keeps it across document swaps; not disposed here. A shell given none
+  /// makes one of its own and disposes it. Read once, in `initState`.
+  final TextEditingController? symbolSearch;
 
   /// The host's selection over [document] (spec 14b-2 H4, H8): used and
   /// never disposed here, as [snap]; without one the shell owns its own.
@@ -241,12 +248,27 @@ class _PlannerShellState extends State<PlannerShell> {
   // Spec 09b D8: the symbol placement tool and its armed symbol. Outside
   // [_entries] (no letter: a gallery cell arms it), so disposed on its own.
   final ValueNotifier<SymbolEntry?> _armed = ValueNotifier<SymbolEntry?>(null);
-  late final SymbolPlaceTool _symbolTool = SymbolPlaceTool(_armed);
+  // Spec 09c D3, D6 (W-5): the wall faces a tagged symbol attaches to, over
+  // the band cache the Wall and Opening tools share, with the openings'
+  // host rule (a hidden or locked wall hosts nothing). It reads the
+  // document each query hands it (this shell's, the host keys the shell by
+  // its document) and holds no subscription of its own: [_bands] is
+  // disposed below.
+  late final WallFaces _faces = WallFaces(_bands, accept: isUsableHost);
+  late final SymbolPlaceTool _symbolTool =
+      SymbolPlaceTool(_armed, faces: _faces);
 
   /// The Symbols tab's search field (spec 09b D7, F-4): a panel field, so
   /// [_settlePendingInput] hands it back.
   final PanelFieldFocusNode _symbolSearch =
       PanelFieldFocusNode(debugLabel: 'symbol-search');
+
+  /// The Symbols tab's search text (spec 09c D13): the shell's, not the
+  /// panel's, which the Tools tab removes, so the text survives a tab
+  /// switch. The host's when it passed one (a document swap keeps it);
+  /// otherwise [_ownSymbolQuery]. Both set in [initState].
+  late final TextEditingController _symbolQuery;
+  TextEditingController? _ownSymbolQuery;
 
   /// A cache of the shell's own when it was given a loader and no cache.
   SymbolThumbnails? _ownThumbnails;
@@ -581,6 +603,8 @@ class _PlannerShellState extends State<PlannerShell> {
     // same settings for the shell's whole life.
     _ownsSnap = widget.snap == null;
     _snap = widget.snap ?? SnapSettings();
+    _symbolQuery =
+        widget.symbolSearch ?? (_ownSymbolQuery = TextEditingController());
     _busy = widget.busy;
     // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
     // arrives built. The sample (startupPlan) builds its walls, openings,
@@ -616,6 +640,9 @@ class _PlannerShellState extends State<PlannerShell> {
     _symbolTool.dispose();
     _armed.dispose();
     _symbolSearch.dispose();
+    // After the tabs' panel has gone with the tree; the host's is the
+    // host's.
+    _ownSymbolQuery?.dispose();
     _ownThumbnails?.dispose();
     _fill.dispose();
     _wallSettings.dispose();
@@ -709,6 +736,7 @@ class _PlannerShellState extends State<PlannerShell> {
                 armed: _armed,
                 permissions: _document.commands.permissions,
                 searchFocus: _symbolSearch,
+                query: _symbolQuery,
                 onSelect: _armSymbol,
               ),
           },

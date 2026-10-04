@@ -216,9 +216,10 @@ void main() {
     addTearDown(loader.dispose);
     await tester.runAsync(loader.load);
     final lib = (loader.state as SymbolLibraryReady).library;
-    // Written out by hand: 27 furniture symbols, then 69 restaurant ones,
-    // the restaurant categories after the furniture ones.
-    expect(lib.entries, hasLength(27 + 69));
+    // Written out by hand: 41 furniture symbols (27, and 14 from spec 09c),
+    // then 69 restaurant ones, the restaurant categories after the
+    // furniture ones.
+    expect(lib.entries, hasLength(41 + 69));
     expect(lib.categories, [
       'Dining Room',
       'Kitchen',

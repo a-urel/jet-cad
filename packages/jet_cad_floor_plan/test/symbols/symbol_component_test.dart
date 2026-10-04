@@ -255,21 +255,32 @@ void main() {
     });
 
     test(
-        'SC12 purge does not clean a component on a handle that no longer '
-        'names anything (what a removed definition leaves behind)', () {
+        'SC12 a removed definition takes its component with it (spec 09c '
+        'D11): undo brings it back byte for byte, and purge finds no '
+        'orphan', () {
       final r = withSymbol(measurer);
+      final before = DraftDocumentCodec.encodeToString(r.doc);
       r.doc.commands.execute(CompoundCommand([
         RemoveEntityCommand(r.leafA),
         RemoveEntityCommand(r.leafB),
         RemoveDefinitionCommand(r.def),
       ], label: 'Remove symbol'));
-      // The component stays where the compound's own step left it: the
-      // placer's undo removes it through SetComponentCommand, not through
-      // RemoveDefinitionCommand.
+      // No component stays on a handle that names nothing.
       expect(r.doc.tree.definition(r.def), isNull);
+      expect(r.doc.components.get<SymbolComponent>(r.def), isNull);
+      expect(r.doc.components.withComponent<SymbolComponent>(), isEmpty);
+      expect(r.doc.components.toJson(),
+          isNot(contains(SymbolComponent.componentTypeId)));
+
+      r.doc.commands.undo();
+      expect(DraftDocumentCodec.encodeToString(r.doc), before);
       expect(r.doc.components.get<SymbolComponent>(r.def), sofa());
+
+      r.doc.commands.redo();
+      expect(r.doc.components.get<SymbolComponent>(r.def), isNull);
       r.doc.purge();
-      expect(r.doc.components.get<SymbolComponent>(r.def), sofa());
+      expect(r.doc.components.withComponent<SymbolComponent>(), isEmpty);
+      expect(r.doc.validate(), isEmpty);
     });
   });
 }

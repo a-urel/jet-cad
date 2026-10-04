@@ -3,7 +3,8 @@
 //
 // The shell (Task 9) owns everything passed in: the loader and the thumbnail
 // cache (both the app's, R-4), the tool controller, the placement tool, the
-// armed symbol and the search field's focus node. A cell tap only reports
+// armed symbol, the search field's focus node and, since 09c (D13), its
+// text controller. A cell tap only reports
 // the entry ([SymbolPanel.onSelect]); arming and activating are the shell's.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -70,6 +71,11 @@ DraftDocument symbolThumbnailDocument(
 ///
 /// **Enabled** only when [permissions] allow every capability of
 /// [kSymbolPlacementNeeds].
+///
+/// **The search text** is [query]'s (spec 09c D13): the caller's, which
+/// outlives the panel -- the shell removes the panel on its Tools tab -- so
+/// the text survives a tab switch. The panel listens to it while mounted and
+/// never disposes it.
 class SymbolPanel extends StatefulWidget {
   const SymbolPanel({
     super.key,
@@ -80,6 +86,7 @@ class SymbolPanel extends StatefulWidget {
     required this.armed,
     required this.permissions,
     required this.searchFocus,
+    required this.query,
     required this.onSelect,
     this.measurer = const InsertionPointMeasurer(),
   });
@@ -91,6 +98,10 @@ class SymbolPanel extends StatefulWidget {
   final ValueNotifier<SymbolEntry?> armed;
   final DraftPermissions permissions;
   final PanelFieldFocusNode searchFocus;
+
+  /// The search field's text (spec 09c D13): the caller's, never disposed
+  /// here.
+  final TextEditingController query;
 
   /// A cell tap, with its entry. The shell arms the tool and activates it.
   final void Function(SymbolEntry entry) onSelect;
@@ -104,7 +115,7 @@ class SymbolPanel extends StatefulWidget {
 }
 
 class _SymbolPanelState extends State<SymbolPanel> {
-  final TextEditingController _query = TextEditingController();
+  TextEditingController get _query => widget.query;
 
   /// One [GallerySymbol] per entry of the loaded library, by identity, so a
   /// rebuild hands the gallery the same values.
@@ -125,9 +136,17 @@ class _SymbolPanelState extends State<SymbolPanel> {
   void _onQuery() => setState(() {});
 
   @override
+  void didUpdateWidget(SymbolPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.query, widget.query)) return;
+    oldWidget.query.removeListener(_onQuery);
+    widget.query.addListener(_onQuery);
+  }
+
+  @override
   void dispose() {
+    // The caller's: only the panel's own listener goes (D13).
     _query.removeListener(_onQuery);
-    _query.dispose();
     super.dispose();
   }
 

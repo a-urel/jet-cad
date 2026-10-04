@@ -1,6 +1,7 @@
 // Spec 09b D6, F-5, F-6, F-12, F-14, F-16, plan 09b Tasks 6 and 7: the
 // placement tool's pointer, snap, ghost, keys and permission check, driven
-// directly with `ToolPointerEvent`s and `KeyEvent`s.
+// directly with `ToolPointerEvent`s and `KeyEvent`s; spec 09c D12 (plan 09c-1
+// Task 8): the ghost follows a camera change (a wheel zoom, a pan).
 //
 // Fixtures (plan P-3): real entries of the committed asset (every base point
 // is off the origin); a document from `prepareDocument`; a camera at 0.05
@@ -8,6 +9,16 @@
 // 10 / 0.05 = 200 mm, not 10 mm; a page whose grid (25 mm, origin off every
 // round number) moves every raw point; one line whose start E is the object
 // snap target. The ghost is painted with a rebase origin far from zero.
+//
+// Spec 09c D6 (plan 09c-1 Task 7): the wall attachment. A rig with walls
+// adds them through the parametric system, each in its own rotated group
+// near (1e5, −7e4) (`wall_attach_fixture.dart`, plan P-2), at 30° and
+// −112.5°, non-centre justified; the pointer rests on either face; the
+// symbol is the toilet (its back the cistern, its base point off its back
+// edge) and the kitchen base units, mirrored and not, turned and not. The
+// expected transforms are `attachToWall`'s over the rig's own runs (pinned
+// by `wall_attach_test.dart`) and checked against hand arithmetic along the
+// run (`q = a + u·t`, the rotation `t`).
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -18,6 +29,14 @@ import 'package:jet_cad_floor_plan/src/symbols/symbol_ghost.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_library.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_place_tool.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
+import 'package:jet_cad_floor_plan/src/parametric/catalog.dart'
+    show installParametric;
+import 'package:jet_cad_floor_plan/src/parametric/opening_tool.dart'
+    show isUsableHost;
+import 'package:jet_cad_floor_plan/src/parametric/wall.dart' show Justification;
+import 'package:jet_cad_floor_plan/src/parametric/wall_bands.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_box.dart';
+import 'package:jet_cad_floor_plan/src/symbols/wall_attach.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/gestures.dart' show kPrimaryButton, kSecondaryButton;
 import 'package:flutter/services.dart'
@@ -43,6 +62,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../support/wall_attach_fixture.dart' show SceneWall, attachGroup, farAt;
+import '../support/wall_fixture.dart' show addWall, polar;
 
 final SymbolLibrary library = SymbolLibrary.decode(
     File('assets/library/furniture.jetlib').readAsBytesSync());
@@ -80,8 +102,27 @@ final class Rig {
   /// [objectSnap] non-null: a `SnapSettings` with it in the context (null:
   /// none, object snap on). [step] null: the page has no fixed grid step,
   /// so the drag uses the zoom-adaptive one.
-  Rig({bool page = true, bool? objectSnap, double? step = gridStep}) {
+  ///
+  /// [walls] non-null (spec 09c D6): the parametric system is installed,
+  /// each wall is added in its own [attachGroup] (handles ascending, in
+  /// order, in [wallHandles]), and, with [faces], the tool gets a
+  /// [WallFaces] over its own [WallBands] and the shell's host rule
+  /// ([isUsableHost]).
+  Rig(
+      {bool page = true,
+      bool? objectSnap,
+      double? step = gridStep,
+      List<SceneWall>? walls,
+      bool faces = true}) {
     document = prepareDocument(const InsertionPointMeasurer());
+    final ParametricSystem? parametric =
+        walls == null ? null : installParametric(document);
+    for (final (s, e, t, j) in walls ?? const <SceneWall>[]) {
+      final h = document.handleSeed.next();
+      document.commands
+          .execute(addWall(document, h, s, e, t, j, at: attachGroup(h.value)));
+      wallHandles.add(h);
+    }
     if (page) {
       document.commands.execute(SetComponentCommand<PageComponent>(
           document.rootHandle,
@@ -95,7 +136,7 @@ final class Rig {
     index = SpatialIndex(document);
     final linear = Transform2.scale(scale, -scale);
     final mid = linear.transformPoint(Vector2(76000, -41000));
-    camera = CameraController(ViewportTransform(
+    camera = CountingCamera(ViewportTransform(
         worldToScreenMatrix:
             Transform2.translation(400 - mid.x, 300 - mid.y).multiply(linear)));
     selection = SelectionController(document);
@@ -109,10 +150,15 @@ final class Rig {
         page: pages,
         snap: snap);
     armed = CountingNotifier(chair);
-    tool = SymbolPlaceTool(armed);
+    final bands = walls != null && faces ? WallBands() : null;
+    this.bands = bands;
+    wallFaces = bands == null ? null : WallFaces(bands, accept: isUsableHost);
+    tool = SymbolPlaceTool(armed, faces: wallFaces);
     tool.addListener(() => notifications.add(tool.isMidShape));
     addTearDown(() {
       if (!disposed) tool.dispose();
+      bands?.dispose();
+      parametric?.dispose();
       armed.dispose();
       pages.dispose();
       snap?.dispose();
@@ -124,13 +170,16 @@ final class Rig {
 
   late final DraftDocument document;
   late final SpatialIndex index;
-  late final CameraController camera;
+  late final CountingCamera camera;
   late final SelectionController selection;
   late final PageNotifier pages;
   late final SnapSettings? snap;
   late final ToolContext ctx;
   late final CountingNotifier armed;
   late final SymbolPlaceTool tool;
+  late final WallBands? bands;
+  late final WallFaces? wallFaces;
+  final List<Handle> wallHandles = [];
   bool disposed = false;
 
   /// `isMidShape` at each notification.
@@ -174,6 +223,26 @@ final class Rig {
 /// The armed notifier, counting its listeners.
 final class CountingNotifier extends ValueNotifier<SymbolEntry?> {
   CountingNotifier(super.value);
+
+  int listeners = 0;
+
+  @override
+  void addListener(ui.VoidCallback listener) {
+    listeners++;
+    super.addListener(listener);
+  }
+
+  @override
+  void removeListener(ui.VoidCallback listener) {
+    listeners--;
+    super.removeListener(listener);
+  }
+}
+
+/// The camera, counting its listeners (spec 09c D12: the tool listens while
+/// the ghost is shown, and only then).
+final class CountingCamera extends CameraController {
+  CountingCamera(super.initial);
 
   int listeners = 0;
 
@@ -295,6 +364,73 @@ extension on Rig {
 
 /// [t]'s linear part.
 List<double> linear(Transform2 t) => [t.a, t.b, t.c, t.d];
+
+// ---------------------------------------------------------------------------
+// Spec 09c D6: the wall attachment's fixtures.
+
+final SymbolEntry island = entry('kitchen.island');
+final SymbolEntry base600 = entry('kitchen.base.600');
+
+/// The rig's attach capture and edge capture: 16 / 0.05 = 320 mm and
+/// 10 / 0.05 = 200 mm.
+const double captureWorld = kWallAttachPixels / scale;
+const double edgeWorld = kSnapAperturePixels / scale;
+
+/// A free wall at [deg], 3600 long and 150 thick, justified [j], from
+/// `farAt(1234.5, 678.25)`.
+SceneWall attachWall(double deg, Justification j) {
+  final s = farAt(1234.5, 678.25);
+  return (s, polar(s, deg, 3600), 150, j);
+}
+
+/// P-2's two angles, each with a non-centre justification and the face the
+/// pointer rests on.
+const List<(double, Justification, FaceSide)> attachCases = [
+  (30, Justification.left, FaceSide.left),
+  (-112.5, Justification.right, FaceSide.right),
+];
+
+/// The point `a + t·u + m·s` of run [r].
+Vector2 onRun(FaceRun r, double u, double s) =>
+    Vector2(r.a.x + r.t.x * u + r.m.x * s, r.a.y + r.t.y * u + r.m.y * s);
+
+List<double> partsOf(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
+
+/// The box's four corners under [t].
+List<Vector2> footprint(SymbolBox b, Transform2 t) => [
+      for (final (x, y) in [
+        (b.left, b.front),
+        (b.right, b.front),
+        (b.right, b.back),
+        (b.left, b.back),
+      ])
+        t.transformPoint(Vector2(x, y)),
+    ];
+
+extension on Rig {
+  /// The rig's one wall's run on [side].
+  FaceRun runOn(FaceSide side) =>
+      wallFaces!.runsOf(document).singleWhere((r) => r.side == side);
+
+  /// [attachToWall] over the rig's runs with no neighbours, for [e] at the
+  /// raw point [p] and the camera scale [k].
+  WallAttachment? attachOf(SymbolEntry e, Vector2 p,
+      {bool mirrored = false, double k = scale}) {
+    final runs = wallFaces!.runsOf(document);
+    return attachToWall(runs, boxOfEntry(e)!, p, kWallAttachPixels / k,
+        mirrored: mirrored,
+        neighbours: [for (final _ in runs) const <FaceNeighbour>[]],
+        edgeCaptureWorld: kSnapAperturePixels / k);
+  }
+
+  /// The free placement of [e] at the tool's resolved point.
+  Transform2 freeOf(SymbolEntry e, {int turns = 0, bool mirrored = false}) =>
+      placementTransform(
+          at: tool.ghostAt,
+          basePoint: e.definition.basePoint,
+          quarterTurns: turns,
+          mirrored: mirrored);
+}
 
 void main() {
   // The tool reads HardwareKeyboard.instance (F-12, `_hasModifier`), which
@@ -590,6 +726,124 @@ void main() {
       expect(y, closeTo(gridOf(pC).y - origin.y, 1e-9));
     });
 
+    test(
+        'the placement is computed on events, never in a paint (spec D5, '
+        'W-15): hover, R, M and a re-arm each set it; repeated paints pass '
+        'the stored transform and compute nothing', () {
+      final rig = Rig();
+      Transform2 want(SymbolEntry e, Vector2 p, int turns, bool mirrored) =>
+          placementTransform(
+              at: gridOf(p),
+              basePoint: e.definition.basePoint,
+              quarterTurns: turns,
+              mirrored: mirrored);
+      void paints(int n) {
+        for (var i = 0; i < n; i++) {
+          rig.tool.paintWorldOverlay(RecordingCanvas(), origin, scale);
+        }
+      }
+
+      final matrix = rig.tool.ghostMatrix;
+      rig.hover(pB);
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 0, false).toJson(),
+          reason: 'set by the hover, before any paint');
+      expect(matrix.computations, 0, reason: 'no paint yet');
+      paints(3);
+      expect(matrix.computations, 1);
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue,
+          reason: 'the paint passed the stored transform');
+
+      rig.key(kR);
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 1, false).toJson(),
+          reason: 'R with no pointer move');
+      paints(2);
+      expect(matrix.computations, 2);
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
+
+      rig.key(kM);
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(chair, pB, 1, true).toJson(),
+          reason: 'M with no pointer move');
+      paints(2);
+      expect(matrix.computations, 3);
+      final m = rig.tool.ghostMatrix.storage;
+      // q=1 mirrored: local +x to −y, local +y to −x.
+      expect([m[0], m[1], m[4], m[5]], [0.0, -1.0, -1.0, 0.0]);
+
+      rig.armed.value = toilet;
+      expect(
+          rig.tool.ghostPlacement!.toJson(), want(toilet, pB, 1, true).toJson(),
+          reason: 're-armed: the new base point');
+      paints(2);
+      expect(matrix.computations, 4);
+      final tb = toilet.definition.basePoint;
+      final (x, y) = apply(rig.tool.ghostMatrix.forOrigin(origin), tb.x, tb.y);
+      expect(x, closeTo(gridOf(pB).x - origin.x, 1e-9));
+      expect(y, closeTo(gridOf(pB).y - origin.y, 1e-9));
+
+      rig.hover(pC);
+      expect(rig.tool.ghostPlacement!.toJson(),
+          want(toilet, pC, 1, true).toJson());
+      paints(1);
+      expect(matrix.computations, 5);
+    });
+
+    test(
+        'touch: the press and the release each set the placement (spec D5, '
+        'F-6): with no hover the ghost is drawn at the press, and after a '
+        'release away from the drag it sits at the release point', () {
+      final rig = Rig();
+      Transform2 want(Vector2 p) => placementTransform(
+          at: gridOf(p),
+          basePoint: chair.definition.basePoint,
+          quarterTurns: 3,
+          mirrored: true);
+      List<double> bytes(Transform2? t) =>
+          t == null ? const [] : [t.a, t.b, t.c, t.d, t.e, t.f];
+      void paintOnce() =>
+          rig.tool.paintWorldOverlay(RecordingCanvas(), origin, scale);
+      final matrix = rig.tool.ghostMatrix;
+      final b = chair.definition.basePoint;
+
+      // Turned clockwise and mirrored, armed idle, before any pointer event.
+      rig.key(kR, held: [kShift]);
+      rig.key(kM);
+      expect(rig.tool.ghostVisible, isFalse, reason: 'no hover, no ghost');
+
+      rig.down(pA, pointer: 21);
+      expect(bytes(rig.tool.ghostPlacement), bytes(want(pA)),
+          reason: 'set by the press, with no hover');
+      paintOnce();
+      expect(matrix.computations, 1, reason: 'one paint computes once');
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
+      var (x, y) = apply(matrix.storage, b.x, b.y);
+      expect(x, closeTo(gridOf(pA).x - origin.x, 1e-9));
+      expect(y, closeTo(gridOf(pA).y - origin.y, 1e-9));
+      // q=3 mirrored: local +x to +y, local +y to +x.
+      expect([matrix.storage[0], matrix.storage[1]], [0.0, 1.0]);
+      expect([matrix.storage[4], matrix.storage[5]], [1.0, 0.0]);
+
+      rig.drag(pMid, pointer: 21);
+      expect(bytes(rig.tool.ghostPlacement), bytes(want(pMid)));
+      paintOnce();
+      expect(matrix.computations, 2);
+
+      // The up arrives at a point no move reported.
+      rig.up(pB, pointer: 21);
+      expect(bytes(rig.tool.ghostPlacement), bytes(want(pB)),
+          reason: 'set by the release, not left at the drag');
+      expect(bytes(rig.instances.single.transform), bytes(want(pB)),
+          reason: 'the ghost sits where the instance landed');
+      paintOnce();
+      expect(matrix.computations, 3);
+      expect(identical(matrix.placement, rig.tool.ghostPlacement), isTrue);
+      (x, y) = apply(matrix.storage, b.x, b.y);
+      expect(x, closeTo(gridOf(pB).x - origin.x, 1e-9));
+      expect(y, closeTo(gridOf(pB).y - origin.y, 1e-9));
+    });
+
     test('hides on pointer exit and on cancel', () {
       final rig = Rig();
       rig.hover(pA);
@@ -856,5 +1110,622 @@ void main() {
     expect(rig.instances, isEmpty);
     await g.up();
     expect(rig.instances, hasLength(1));
+  });
+
+  group('the camera (spec 09c D12)', () {
+    /// A zoom focus far from every pointer the tests rest at, so the world
+    /// point under the pointer moves.
+    const focus = ui.Offset(90, 520);
+
+    Vector2 under(Rig rig, ui.Offset s) =>
+        rig.camera.value.screenToWorld(Vector2(s.dx, s.dy));
+
+    /// A zoom by [factor] about [focus] moves the ghost to the resolved world
+    /// point now under the resting pointer [s], and repaints once.
+    void expectFollows(Rig rig, ui.Offset s, double factor, String reason) {
+      final before = rig.tool.ghostAt.clone();
+      rig.notifications.clear();
+      rig.camera.zoomAt(focus, factor);
+      final w = under(rig, s);
+      expect(w.distanceTo(e0),
+          greaterThan(kSnapAperturePixels / rig.camera.value.scale),
+          reason: '$reason: E is outside the aperture');
+      expect(gridOf(w) == before, isFalse,
+          reason: '$reason: the zoom moves the point under the pointer');
+      expectAt(rig.tool.ghostAt, gridOf(w), reason);
+      expect(rig.notifications, [rig.tool.isMidShape],
+          reason: '$reason: one repaint');
+    }
+
+    /// A camera change does nothing: the ghost's point and placement stay,
+    /// nothing is notified, nothing throws.
+    void expectInert(Rig rig, String reason) {
+      final at = rig.tool.ghostAt.clone();
+      final placement = rig.tool.ghostPlacement;
+      rig.notifications.clear();
+      expect(() => rig.camera.zoomAt(focus, 1.7), returnsNormally,
+          reason: reason);
+      expect(() => rig.camera.panBy(const ui.Offset(-37.5, 61.25)),
+          returnsNormally,
+          reason: reason);
+      expectAt(rig.tool.ghostAt, at, reason);
+      expect(rig.tool.ghostPlacement, same(placement), reason: reason);
+      expect(rig.notifications, isEmpty, reason: '$reason: no repaint');
+    }
+
+    test(
+        'a zoom about another point moves the ghost and its placement to the '
+        'world point now under the pointer; a pan too', () {
+      final rig = Rig();
+      rig.key(kR);
+      rig.key(kM);
+      rig.hover(pA);
+      final s = rig.at(pA).screen;
+      expectAt(rig.tool.ghostAt, gridOf(pA), 'the hover');
+      rig.notifications.clear();
+      rig.camera.zoomAt(focus, 1.7);
+      expect(rig.camera.value.scale, closeTo(scale * 1.7, 1e-12));
+      final w = under(rig, s);
+      expect(w.distanceTo(pA), greaterThan(1000),
+          reason: 'the zoom is not about the pointer');
+      expect(w.distanceTo(e0),
+          greaterThan(kSnapAperturePixels / rig.camera.value.scale),
+          reason: 'E is outside the aperture');
+      expectAt(rig.tool.ghostAt, gridOf(w), 'the zoom');
+      expect(rig.notifications, [false], reason: 'one repaint');
+      final want = placementTransform(
+          at: gridOf(w),
+          basePoint: chair.definition.basePoint,
+          quarterTurns: 1,
+          mirrored: true);
+      final t = rig.tool.ghostPlacement!;
+      expect([
+        t.a,
+        t.b,
+        t.c,
+        t.d,
+        t.e,
+        t.f
+      ], [
+        want.a,
+        want.b,
+        want.c,
+        want.d,
+        want.e,
+        want.f
+      ], reason: 'the placement follows, turned and mirrored');
+
+      rig.notifications.clear();
+      rig.camera.panBy(const ui.Offset(-37.5, 61.25));
+      expectAt(rig.tool.ghostAt, gridOf(under(rig, s)), 'the pan');
+      expect(rig.notifications, [false]);
+      // Mid-press, the ghost follows as well; the release places where the
+      // up lands.
+      rig.down(pB);
+      expectFollows(rig, rig.at(pB).screen, 0.6, 'mid-press');
+      final p = under(rig, rig.at(pB).screen);
+      rig.up(p);
+      expectAt(rig.placedAt(rig.instances.single), gridOf(p), 'placed');
+    });
+
+    test(
+        'one camera listener while the ghost is shown, however many events; '
+        'none before the first pointer event', () {
+      final rig = Rig();
+      expect(rig.camera.listeners, 0, reason: 'armed, no pointer yet');
+      rig.hover(pA);
+      rig.hover(pB);
+      rig.down(pB);
+      rig.drag(pMid);
+      rig.up(pC);
+      rig.hover(pA);
+      expect(rig.camera.listeners, 1);
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 1, reason: 're-armed while shown');
+      rig.hover(pB);
+      expect(rig.camera.listeners, 1);
+    });
+
+    test(
+        'after the ghost hides (pointer exit) a camera change does nothing; '
+        'a hover listens again', () {
+      final rig = Rig();
+      rig.hover(pA);
+      rig.tool.onPointerExit(rig.ctx);
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'hidden');
+      // A re-arm while hidden does not listen: the ghost stays hidden.
+      rig.armed.value = null;
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 0, reason: 're-armed while hidden');
+      expectInert(rig, 're-armed while hidden');
+      rig.hover(pB);
+      expect(rig.camera.listeners, 1);
+      expectFollows(rig, rig.at(pB).screen, 0.75, 'shown again');
+    });
+
+    test(
+        'after cancel (a hover, or a press and Esc) a camera change does '
+        'nothing', () {
+      final rig = Rig();
+      rig.hover(pA);
+      rig.tool.cancel(rig.ctx);
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'cancelled hover');
+      rig.down(pB);
+      expect(rig.camera.listeners, 1);
+      expect(rig.key(kEsc), KeyEventResult.handled);
+      expect(rig.camera.listeners, 0);
+      expectInert(rig, 'Esc mid-press');
+    });
+
+    test(
+        'after a disarm a camera change does nothing; a re-arm listens again '
+        'and puts the ghost under the pointer for the camera now', () {
+      final rig = Rig();
+      rig.hover(pA);
+      final s = rig.at(pA).screen;
+      rig.armed.value = null;
+      expect(rig.camera.listeners, 0);
+      expect(rig.tool.ghostPlacement, isNull, reason: 'idle: no placement');
+      expectInert(rig, 'disarmed');
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 1);
+      final w = under(rig, s);
+      expect(gridOf(w) == gridOf(pA), isFalse,
+          reason: 'the camera moved while disarmed');
+      expectAt(rig.tool.ghostAt, gridOf(w), 're-armed');
+      final t = rig.tool.ghostPlacement!;
+      final want = placementTransform(
+          at: gridOf(w),
+          basePoint: toilet.definition.basePoint,
+          quarterTurns: 0,
+          mirrored: false);
+      expect([t.e, t.f], [want.e, want.f], reason: 'the placement follows');
+      expectFollows(rig, s, 0.75, 'after the re-arm');
+    });
+
+    test(
+        'a release with no move before it: a zoom puts the ghost under the '
+        'release point, not the press', () {
+      final rig = Rig();
+      final sB = rig.at(pB).screen;
+      rig.down(pB);
+      rig.up(pC);
+      final s = rig.at(pC).screen;
+      expectAt(rig.placedAt(rig.instances.single), gridOf(pC), 'placed');
+      expectFollows(rig, s, 1.7, 'under the release point');
+      expect(gridOf(under(rig, sB)) == rig.tool.ghostAt, isFalse,
+          reason: 'not under the press point');
+    });
+
+    test(
+        'a re-arm from one entry to another while the ghost is shown '
+        're-resolves it under the pointer: a snap change since the last '
+        'event shows', () {
+      final rig = Rig(objectSnap: true);
+      // 75 mm from E: 3.75 px, inside the 200 mm aperture.
+      final near = e0 + Vector2(60, -45);
+      rig.key(kR);
+      rig.hover(near);
+      expectAt(rig.tool.ghostAt, e0, 'the hover snaps to E');
+      // The fixture: the tool does not listen to F3, so only the re-arm can
+      // move the ghost off E.
+      rig.snap!.toggleObjectSnap();
+      expectAt(rig.tool.ghostAt, e0, 'F3 alone moves nothing');
+      rig.notifications.clear();
+      rig.armed.value = toilet;
+      expect(rig.camera.listeners, 1, reason: 'still listening');
+      expectAt(rig.tool.ghostAt, gridOf(near), 're-armed: object snap off');
+      expect(gridOf(near) == e0, isFalse);
+      final want = placementTransform(
+          at: gridOf(near),
+          basePoint: toilet.definition.basePoint,
+          quarterTurns: 1,
+          mirrored: false);
+      final t = rig.tool.ghostPlacement!;
+      expect([
+        t.a,
+        t.b,
+        t.c,
+        t.d,
+        t.e,
+        t.f
+      ], [
+        want.a,
+        want.b,
+        want.c,
+        want.d,
+        want.e,
+        want.f
+      ], reason: 'the placement follows the re-resolved point');
+      expect(rig.notifications, [false], reason: 'one repaint');
+    });
+
+    test(
+        'dispose with a live camera removes the listener; a camera change '
+        'after it does nothing and does not throw', () {
+      final rig = Rig();
+      rig.hover(pA);
+      expect(rig.camera.listeners, 1);
+      final at = rig.tool.ghostAt.clone();
+      rig.tool.dispose();
+      rig.disposed = true;
+      expect(rig.camera.listeners, 0);
+      // The camera reports (and swallows) a listener's error, so "does not
+      // throw" alone cannot see a listener left behind; the count and the
+      // ghost's point can.
+      expect(() => rig.camera.zoomAt(focus, 1.7), returnsNormally);
+      expectAt(rig.tool.ghostAt, at, 'nothing re-resolves after dispose');
+    });
+  });
+
+  group('the wall attachment (spec 09c D6)', () {
+    /// A point 0.37 along [r] and 160 mm (half the capture) into the room.
+    Vector2 nearFace(FaceRun r) => onRun(r, r.length * 0.37, 160);
+
+    test('the fixtures are not degenerate', () {
+      expect(toilet.tags, contains(againstWallTag));
+      expect(base600.tags, contains(againstWallTag));
+      expect(island.tags, isNot(contains(againstWallTag)));
+      final b = boxOfEntry(toilet)!;
+      expect(toilet.definition.basePoint == b.backCentre, isFalse,
+          reason: 'the toilet\'s base point is not its back-centre');
+      for (final (deg, j, side) in attachCases) {
+        final rig = Rig(walls: [attachWall(deg, j)]);
+        final r = rig.runOn(side);
+        expect(r.t.x.abs(), greaterThan(0.1),
+            reason: '$deg°: not axis-aligned');
+        expect(r.t.y.abs(), greaterThan(0.1),
+            reason: '$deg°: not axis-aligned');
+        expect(r.a.length, greaterThan(1e5), reason: 'far from the origin');
+        expect(rig.camera.value.scale, isNot(1));
+      }
+    });
+
+    test(
+        'a tagged symbol attaches on hover and on release: the ghost and the '
+        'instance take attachToWall\'s transform byte for byte (30° and '
+        '−112.5°, either face, mirrored and not, turned)', () {
+      for (final (deg, j, side) in attachCases) {
+        for (final mirrored in [false, true]) {
+          final why = '$deg° ${side.name}${mirrored ? ' mirrored' : ''}';
+          final rig = Rig(walls: [attachWall(deg, j)]);
+          rig.armed.value = toilet;
+          rig.key(kR);
+          if (mirrored) rig.key(kM);
+          final run = rig.runOn(side);
+          final u = run.length * 0.37;
+          final p = onRun(run, u, 160);
+          final want = rig.attachOf(toilet, p, mirrored: mirrored)!;
+          // Hand arithmetic: the back-centre on the face at the pointer's
+          // `u`, turned to `t`, mirrored about the box's centre.
+          expect(identical(want.run, run), isTrue, reason: why);
+          expect(want.q.distanceTo(onRun(run, u, 0)), lessThan(1e-6),
+              reason: why);
+          expect(
+              partsOf(want.transform),
+              partsOf(placementTransform(
+                  at: want.q,
+                  basePoint: boxOfEntry(toilet)!.backCentre,
+                  rotation: (run.t.x, run.t.y),
+                  mirrored: mirrored)),
+              reason: why);
+
+          rig.hover(p);
+          expect(rig.tool.ghostAttachment, isNotNull, reason: why);
+          expect(partsOf(rig.tool.ghostPlacement!), partsOf(want.transform),
+              reason: '$why: the ghost');
+          expect(partsOf(rig.tool.ghostPlacement!),
+              isNot(partsOf(rig.freeOf(toilet, turns: 1, mirrored: mirrored))),
+              reason: '$why: not the free placement');
+          // Pressed away from the wall, released on it.
+          rig.down(pA);
+          expect(rig.tool.ghostAttachment, isNull, reason: '$why: free');
+          rig.up(p);
+          expect(
+              partsOf(rig.instances.single.transform), partsOf(want.transform),
+              reason: '$why: the instance');
+          expect(rig.document.commands.undoDepth, 1, reason: why);
+        }
+      }
+    });
+
+    test(
+        'the capture is kWallAttachPixels (16 px), not the snap aperture: '
+        '300 mm off the face attaches at 0.05 px/mm, 330 mm does not', () {
+      expect(kWallAttachPixels, 16.0);
+      final rig = Rig(walls: [attachWall(30, Justification.left)]);
+      rig.armed.value = toilet;
+      final run = rig.runOn(FaceSide.left);
+      rig.hover(onRun(run, 1500, 300));
+      expect(rig.tool.ghostAttachment, isNotNull, reason: '300 < 320 mm');
+      expect(300, greaterThan(edgeWorld), reason: 'premise: past 10 px');
+      rig.hover(onRun(run, 1500, 330));
+      expect(rig.tool.ghostAttachment, isNull, reason: '330 > 320 mm');
+    });
+
+    test(
+        'an untagged symbol (the island) does not attach: the ghost and the '
+        'instance are free (M-09c-a)', () {
+      final rig = Rig(walls: [attachWall(30, Justification.left)]);
+      rig.armed.value = island;
+      rig.key(kR);
+      final p = nearFace(rig.runOn(FaceSide.left));
+      expect(rig.attachOf(island, p), isNotNull,
+          reason: 'premise: a face would take its box');
+      rig.hover(p);
+      expect(rig.tool.ghostAttachment, isNull);
+      final free = rig.freeOf(island, turns: 1);
+      expect(partsOf(rig.tool.ghostPlacement!), partsOf(free));
+      rig.down(p);
+      rig.up(p);
+      expect(partsOf(rig.instances.single.transform), partsOf(free));
+    });
+
+    test(
+        'with object snap off (F3) nothing attaches; on, it does '
+        '(M-09c-l)', () {
+      for (final on in [false, true]) {
+        final rig =
+            Rig(objectSnap: on, walls: [attachWall(30, Justification.left)]);
+        rig.armed.value = toilet;
+        final p = nearFace(rig.runOn(FaceSide.left));
+        final want = rig.attachOf(toilet, p)!;
+        rig.hover(p);
+        rig.down(p);
+        rig.up(p);
+        final t = rig.instances.single.transform;
+        if (on) {
+          expect(rig.tool.ghostAttachment, isNotNull);
+          expect(partsOf(t), partsOf(want.transform));
+        } else {
+          expect(rig.tool.ghostAttachment, isNull);
+          expect(
+              partsOf(rig.tool.ghostPlacement!), partsOf(rig.freeOf(toilet)));
+          expect(partsOf(t), partsOf(rig.freeOf(toilet)));
+        }
+      }
+    });
+
+    test('a tool given no wall faces never attaches (09b\'s behaviour)', () {
+      final rig =
+          Rig(walls: [attachWall(30, Justification.left)], faces: false);
+      expect(rig.tool.faces, isNull);
+      rig.armed.value = toilet;
+      final runs = faceRunsOf(rig.document, rig.wallHandles.single);
+      final p = nearFace(runs.singleWhere((r) => r.side == FaceSide.left));
+      rig.hover(p);
+      expect(rig.tool.ghostAttachment, isNull);
+      expect(partsOf(rig.tool.ghostPlacement!), partsOf(rig.freeOf(toilet)));
+    });
+
+    test(
+        'M while attached mirrors in place: the footprint stays, the '
+        'transform is the mirrored attachment (M-09c-j)', () {
+      for (final (deg, j, side) in attachCases) {
+        final rig = Rig(walls: [attachWall(deg, j)]);
+        rig.armed.value = toilet;
+        final p = nearFace(rig.runOn(side));
+        rig.hover(p);
+        final p0 = rig.tool.ghostPlacement!;
+        expect(partsOf(p0), partsOf(rig.attachOf(toilet, p)!.transform));
+        rig.notifications.clear();
+        rig.key(kM);
+        expect(rig.notifications, [false], reason: '$deg°: one repaint');
+        final p1 = rig.tool.ghostPlacement!;
+        final want = rig.attachOf(toilet, p, mirrored: true)!;
+        expect(partsOf(p1), partsOf(want.transform), reason: '$deg°');
+        expect(p0.a * p0.d - p0.b * p0.c, greaterThan(0));
+        expect(p1.a * p1.d - p1.b * p1.c, lessThan(0),
+            reason: '$deg°: mirrored');
+        // The same four corners, the mirror swapping left and right.
+        final box = boxOfEntry(toilet)!;
+        final f0 = footprint(box, p0), f1 = footprint(box, p1);
+        for (final (i, k) in [(0, 1), (1, 0), (2, 3), (3, 2)]) {
+          expect(f1[i].distanceTo(f0[k]), lessThan(1e-6),
+              reason: '$deg°: corner $i in place');
+        }
+        rig.down(p);
+        rig.up(p);
+        expect(partsOf(rig.instances.single.transform), partsOf(want.transform),
+            reason: '$deg°: placed mirrored');
+        rig.key(kM);
+        expect(partsOf(rig.tool.ghostPlacement!), partsOf(p0),
+            reason: '$deg°: M again');
+      }
+    });
+
+    test(
+        'R and Shift+R while attached change the turn count only: the ghost '
+        'does not turn; off the face the count applies (M-09c-k)', () {
+      final rig = Rig(walls: [attachWall(-112.5, Justification.right)]);
+      rig.armed.value = toilet;
+      final p = nearFace(rig.runOn(FaceSide.right));
+      rig.hover(p);
+      final p0 = partsOf(rig.tool.ghostPlacement!);
+      rig.key(kR);
+      expect(rig.tool.quarterTurns, 1);
+      expect(partsOf(rig.tool.ghostPlacement!), p0, reason: 'R');
+      rig.key(kR);
+      rig.key(kR);
+      rig.key(kR, held: [kShift]);
+      expect(rig.tool.quarterTurns, 2);
+      expect(partsOf(rig.tool.ghostPlacement!), p0, reason: 'R, R, Shift+R');
+      rig.down(p);
+      rig.up(p);
+      expect(partsOf(rig.instances.single.transform), p0,
+          reason: 'placed unturned');
+      // Off the face: the two quarter turns apply.
+      rig.hover(pA);
+      expect(rig.tool.ghostAttachment, isNull);
+      expect(partsOf(rig.tool.ghostPlacement!),
+          partsOf(rig.freeOf(toilet, turns: 2)));
+      expectAt(rig.tool.ghostAt, gridOf(pA), 'free at the grid');
+    });
+
+    test(
+        'the marker is the nearest glyph at the face point q, not at the '
+        'raw or the resolved point', () {
+      final rig = Rig(walls: [attachWall(30, Justification.left)]);
+      rig.armed.value = toilet;
+      final p = nearFace(rig.runOn(FaceSide.left));
+      rig.hover(p);
+      final q = rig.tool.ghostAttachment!.q;
+      final canvas = RecordingCanvas();
+      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
+      expect(canvas.named('drawRect'), isEmpty);
+      final lines = canvas.named('drawLine').toList();
+      expect(lines, hasLength(4), reason: 'the hourglass');
+      final ends = [
+        for (final l in lines) ...[
+          l.positionalArguments[0] as ui.Offset,
+          l.positionalArguments[1] as ui.Offset
+        ]
+      ];
+      final cx = ends.map((o) => o.dx).reduce((a, b) => a + b) / 8;
+      final cy = ends.map((o) => o.dy).reduce((a, b) => a + b) / 8;
+      final sq = rig.camera.value.worldToScreen(q);
+      expect(cx, closeTo(sq.x, 1e-9));
+      expect(cy, closeTo(sq.y, 1e-9));
+      // The glyph: top and bottom edges, then the two diagonals.
+      const h = kSnapMarkerPixels / 2;
+      for (final (o, dx, dy) in [
+        (ends[0], -h, -h),
+        (ends[1], h, -h),
+        (ends[3], -h, h),
+        (ends[4], -h, h),
+        (ends[5], h, h),
+        (ends[7], -h, -h),
+      ]) {
+        expect(o.dx, closeTo(sq.x + dx, 1e-9));
+        expect(o.dy, closeTo(sq.y + dy, 1e-9));
+      }
+      for (final w in [p, rig.tool.ghostAt]) {
+        final sw = rig.camera.value.worldToScreen(w);
+        expect(sw.distanceTo(sq), greaterThan(5),
+            reason: 'q is not the raw or the resolved point');
+      }
+    });
+
+    test(
+        'a camera zoom that brings the face within capture attaches the '
+        'resting ghost (M-09c-ak)', () {
+      final rig = Rig(walls: [attachWall(30, Justification.left)]);
+      rig.armed.value = toilet;
+      final run = rig.runOn(FaceSide.left);
+      // 400 mm off the face: outside 320 mm, inside 640 mm.
+      final p = onRun(run, run.length * 0.37, 400);
+      rig.hover(p);
+      expect(rig.tool.ghostAttachment, isNull, reason: 'premise: too far');
+      final s = rig.at(p).screen;
+      rig.notifications.clear();
+      rig.camera.zoomAt(s, 0.5);
+      final k = rig.camera.value.scale;
+      expect(k, closeTo(scale / 2, 1e-15));
+      final w = rig.camera.value.screenToWorld(Vector2(s.dx, s.dy));
+      final want = rig.attachOf(toilet, w, k: k)!;
+      expect(rig.tool.ghostAttachment, isNotNull);
+      expect(partsOf(rig.tool.ghostPlacement!), partsOf(want.transform));
+      expect(rig.notifications, [false]);
+      // And back out: free again.
+      rig.camera.zoomAt(s, 2);
+      expect(rig.tool.ghostAttachment, isNull);
+    });
+
+    test(
+        'a re-arm between a tagged and an untagged entry while the ghost '
+        'rests near a face switches the attachment on and off', () {
+      final rig = Rig(walls: [attachWall(-112.5, Justification.right)]);
+      rig.armed.value = island;
+      final p = nearFace(rig.runOn(FaceSide.right));
+      rig.hover(p);
+      expect(rig.tool.ghostAttachment, isNull, reason: 'the island: free');
+      final s = rig.at(p).screen;
+      final w = rig.camera.value.screenToWorld(Vector2(s.dx, s.dy));
+      rig.armed.value = toilet;
+      expect(rig.tool.ghostAttachment, isNotNull, reason: 'the toilet');
+      expect(partsOf(rig.tool.ghostPlacement!),
+          partsOf(rig.attachOf(toilet, w)!.transform));
+      rig.armed.value = island;
+      expect(rig.tool.ghostAttachment, isNull, reason: 'the island again');
+      expect(partsOf(rig.tool.ghostPlacement!), partsOf(rig.freeOf(island)));
+      // Hidden (no context to re-resolve with), a re-arm still drops the
+      // tagged entry's attachment: the stored placement is the new entry's.
+      rig.armed.value = toilet;
+      expect(rig.tool.ghostAttachment, isNotNull);
+      rig.tool.onPointerExit(rig.ctx);
+      rig.armed.value = island;
+      expect(rig.tool.ghostAttachment, isNull, reason: 'hidden re-arm');
+      expect(partsOf(rig.tool.ghostPlacement!), partsOf(rig.freeOf(island)),
+          reason: 'hidden re-arm');
+    });
+
+    test(
+        'W-5: a unit placed right after another along the face snaps to it '
+        'before the change stream delivers; one undo step each (M-09c-ap)', () {
+      final rig = Rig(walls: [attachWall(30, Justification.left)]);
+      rig.armed.value = base600;
+      final run = rig.runOn(FaceSide.left);
+      final bands = rig.bands!;
+      final p1 = onRun(run, 1000, 200);
+      rig.hover(p1);
+      rig.down(p1);
+      rig.up(p1);
+      final first = rig.tool.ghostAttachment!;
+      expect((first.q - run.a).dot(run.t), closeTo(1000, 1e-6));
+      // Synchronously (no await: the document's change stream has not
+      // delivered), a second unit 120 mm (inside the 200 mm edge capture)
+      // to the right of the first's right side, mirrored and turned.
+      rig.key(kM);
+      rig.key(kR);
+      final gen = bands.generation;
+      // 250 mm: outside the edge capture (10 px), inside the attach capture
+      // (16 px): attached, not snapped.
+      rig.hover(onRun(run, 1000 + 600 + 250, 150));
+      expect(
+          (rig.tool.ghostAttachment!.q - run.a).dot(run.t), closeTo(1850, 1e-6),
+          reason: 'beyond the edge capture: not snapped');
+      final p2 = onRun(run, 1000 + 600 + 120, 150);
+      rig.hover(p2);
+      final second = rig.tool.ghostAttachment!;
+      expect(bands.generation, gen, reason: 'no change delivered meanwhile');
+      expect((second.q - run.a).dot(run.t), closeTo(1600, 1e-6),
+          reason: 'its left side on the first\'s right side');
+      rig.down(p2);
+      rig.up(p2);
+      expect(rig.instances, hasLength(2));
+      expect(partsOf(rig.instances.last.transform), partsOf(second.transform));
+      expect(rig.document.commands.undoDepth, 2);
+      rig.document.commands.undo();
+      expect(partsOf(rig.instances.single.transform), partsOf(first.transform),
+          reason: 'one undo step took the second only');
+      rig.document.commands.undo();
+      expect(rig.instances, isEmpty);
+    });
+
+    test(
+        'an attached placement refused by the permissions allocates nothing; '
+        'lifted, it places the attached transform', () {
+      final rig = Rig(walls: [attachWall(30, Justification.left)]);
+      rig.armed.value = toilet;
+      final p = nearFace(rig.runOn(FaceSide.left));
+      rig.document.commands.permissions = const DraftPermissions(
+          transform: true, components: true, geometry: true, structure: false);
+      final seed = rig.document.handleSeed.current;
+      final gen = rig.bands!.generation;
+      rig.hover(p);
+      rig.down(p);
+      rig.up(p);
+      expect(rig.tool.ghostAttachment, isNotNull, reason: 'premise');
+      expect(rig.document.handleSeed.current, seed);
+      expect(rig.instances, isEmpty);
+      expect(rig.bands!.generation, gen, reason: 'nothing to see');
+      rig.document.commands.permissions = DraftPermissions.all;
+      rig.down(p);
+      rig.up(p);
+      expect(partsOf(rig.instances.single.transform),
+          partsOf(rig.attachOf(toilet, p)!.transform));
+    });
   });
 }

@@ -39,10 +39,16 @@ final List<String> allIds = [
 /// The "Bed Room" category: the only one `bed` matches (its name; and
 /// nothing outside it carries `bed` in a name, tag or category).
 const List<String> bedIds = [
+  'bed.double.1400@1',
   'bed.double@1',
+  'bed.double.1800@1',
+  'bed.single.800@1',
   'bed.single@1',
+  'bed.single.1000@1',
   'bed.nightstand@1',
+  'bed.wardrobe.1200@1',
   'bed.wardrobe@1',
+  'bed.wardrobe.2400@1',
 ];
 
 /// A tool that does nothing: the controller's other tool.
@@ -98,6 +104,10 @@ class Host {
   final FocusNode canvas = FocusNode(debugLabel: 'canvas');
   final PanelFieldFocusNode searchFocus =
       PanelFieldFocusNode(debugLabel: 'symbol-search');
+
+  /// The search field's controller (spec 09c D13): the host's, as the
+  /// shell's is; the panel neither makes nor disposes one.
+  final TextEditingController query = TextEditingController();
   final ValueNotifier<SymbolEntry?> armed = ValueNotifier<SymbolEntry?>(null);
   final IdleTool idle = IdleTool();
   late final DraftDocument document;
@@ -118,7 +128,8 @@ class Host {
       .entries
       .singleWhere((e) => e.key == key);
 
-  Widget build(DraftPermissions permissions) => MaterialApp(
+  Widget build(DraftPermissions permissions, {TextEditingController? query}) =>
+      MaterialApp(
         home: Scaffold(
           body: CallbackShortcuts(
             bindings: <ShortcutActivator, VoidCallback>{
@@ -142,6 +153,7 @@ class Host {
                   armed: armed,
                   permissions: permissions,
                   searchFocus: searchFocus,
+                  query: query ?? this.query,
                   onSelect: selected.add,
                 ),
               ),
@@ -161,9 +173,10 @@ class Host {
   /// Loads the library, pumps the panel and lets the canvas take focus.
   Future<void> pump(
       {DraftPermissions permissions = DraftPermissions.all,
-      bool load = true}) async {
+      bool load = true,
+      TextEditingController? query}) async {
     if (load) await loader.load();
-    await tester.pumpWidget(build(permissions));
+    await tester.pumpWidget(build(permissions, query: query));
     await tester.pump();
   }
 
@@ -176,6 +189,7 @@ class Host {
     camera.dispose();
     index.dispose();
     searchFocus.dispose();
+    query.dispose();
     canvas.dispose();
     thumbnails.dispose();
     loader.dispose();
@@ -208,6 +222,8 @@ Future<void> focusField(WidgetTester tester, Host h) async {
   expect(h.searchFocus.hasFocus, isTrue, reason: 'premise: field focused');
   expect(h.canvas.hasFocus, isFalse, reason: 'premise: canvas not focused');
 }
+
+void _noop() {}
 
 void main() {
   test('the fixture is not degenerate: every base point is off the origin', () {
@@ -315,6 +331,93 @@ void main() {
       expect(find.byKey(const Key('symbol-search-empty')), findsNothing);
       expect(galleryIds(tester), allIds);
       expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+    });
+  });
+
+  group('the search controller is the caller\'s (spec 09c D13)', () {
+    testWidgets(
+        'the field edits the given controller, and its text filters the '
+        'gallery both ways (M-09c-t)', (tester) async {
+      final h = Host(tester);
+      await h.pump();
+      await tester.enterText(field, 'bed');
+      await tester.pump();
+      expect(h.query.text, 'bed', reason: 'the field writes the given one');
+      expect(galleryIds(tester), bedIds);
+
+      // Written from outside, as the shell's survives the panel: the
+      // panel listens to it.
+      h.query.text = 'sofa three';
+      await tester.pump();
+      expect(galleryIds(tester), ['sofa.three@1']);
+      expect(tester.widget<TextField>(field).controller, same(h.query));
+    });
+
+    testWidgets(
+        'a panel built over a controller that already reads "bed" opens '
+        'filtered, the clear button showing (M-09c-t)', (tester) async {
+      final h = Host(tester);
+      h.query.text = 'bed';
+      await h.pump();
+      expect(galleryIds(tester), bedIds);
+      expect(
+          [for (final c in gallery(tester).categories) c.name], ['Bed Room']);
+      expect(find.byKey(const Key('symbol-search-clear')), findsOneWidget);
+      expect(tester.widget<TextField>(field).controller!.text, 'bed');
+    });
+
+    testWidgets(
+        'the panel gone, the controller stays usable: not disposed, and the '
+        'panel\'s listener removed (M-09c-t2, M-09c-t3)', (tester) async {
+      final h = Host(tester);
+      await h.pump();
+      await tester.enterText(field, 'bed');
+      await tester.pump();
+
+      await tester.pumpWidget(const SizedBox());
+      expect(find.byType(SymbolPanel), findsNothing, reason: 'premise');
+      // A disposed controller asserts on any use; a listener left on it
+      // would call setState on the disposed panel. Neither throws.
+      h.query.text = 'sofa';
+      h.query.addListener(_noop);
+      h.query.removeListener(_noop);
+      expect(h.query.text, 'sofa');
+
+      // A new panel over it reads its text.
+      await h.pump();
+      expect(tester.widget<TextField>(field).controller!.text, 'sofa');
+      expect(galleryIds(tester), isNot(allIds));
+      expect(galleryIds(tester),
+          allOf(isNotEmpty, everyElement(startsWith('sofa.'))));
+    });
+
+    testWidgets(
+        'a different controller handed in: the panel follows it and leaves '
+        'the old one (M-09c-t4)', (tester) async {
+      final h = Host(tester);
+      final other = TextEditingController(text: 'bed');
+      addTearDown(other.dispose);
+      await h.pump();
+      expect(galleryIds(tester), allIds, reason: 'premise: empty text');
+
+      await h.pump(query: other);
+      expect(galleryIds(tester), bedIds);
+      expect(tester.widget<TextField>(field).controller, same(other));
+
+      // The old one no longer drives the panel...
+      h.query.text = 'bed zebra';
+      await tester.pump();
+      expect(galleryIds(tester), bedIds);
+      // ...the new one does.
+      other.text = 'sofa three';
+      await tester.pump();
+      expect(galleryIds(tester), ['sofa.three@1']);
+
+      // And the panel gone, the old one has no listener of the panel's
+      // that would call setState on a disposed state.
+      await tester.pumpWidget(const SizedBox());
+      h.query.text = 'x';
+      other.text = 'y';
     });
   });
 

@@ -33,24 +33,35 @@ final class InstanceStyle {
   });
 }
 
-/// `translation(at) · rotation(quarterTurns · 90°) · scale(mirrored ? -1 : 1,
-/// 1) · translation(-basePoint)`: the definition's base point lands on [at]
-/// (spec F-2), and a mirror flips the **local** x axis whatever the turns.
+/// `translation(at) · rotation · scale(mirrored ? -1 : 1, 1) ·
+/// translation(-basePoint)`: the definition's base point lands on [at]
+/// (spec F-2), and a mirror flips the **local** x axis whatever the
+/// rotation.
 ///
-/// Quarter turns use exact cosine and sine (0 and ±1, never `6e-17`), taken
-/// modulo 4 (negative allowed), and no stored component is `-0.0`, so a
-/// placement stores clean numbers in a file's bytes.
+/// The rotation is given one of two ways, never both (an [ArgumentError],
+/// in release builds too):
+/// - [quarterTurns] counter-clockwise, taken modulo 4 (negative allowed),
+///   with exact cosine and sine from a table (0 and ±1, never `6e-17`);
+/// - [rotation], a unit vector `(cos, sin)` used exactly as given (spec 09c
+///   D5: a wall face's `t`).
+///
+/// Neither is no turn. The quarter-turn form is the [rotation] form at its
+/// table entry, so the two give the same bytes. No stored component is
+/// `-0.0` in either form, so a placement stores clean numbers in a file.
 Transform2 placementTransform({
   required Vector2 at,
   required Vector2 basePoint,
-  int quarterTurns = 0,
+  int? quarterTurns,
+  (double, double)? rotation,
   bool mirrored = false,
 }) {
-  final q = ((quarterTurns % 4) + 4) % 4;
-  const cos = [1.0, 0.0, -1.0, 0.0];
-  const sin = [0.0, 1.0, 0.0, -1.0];
+  if (quarterTurns != null && rotation != null) {
+    throw ArgumentError(
+        'placementTransform takes quarterTurns or rotation, not both');
+  }
+  final (cos, sin) = rotation ?? _quarterTurn(quarterTurns ?? 0);
   final m = Transform2.translation(at.x, at.y)
-      .multiply(Transform2(cos[q], sin[q], -sin[q], cos[q], 0, 0))
+      .multiply(Transform2(cos, sin, -sin, cos, 0, 0))
       .multiply(Transform2.scale(mirrored ? -1 : 1, 1))
       .multiply(Transform2.translation(-basePoint.x, -basePoint.y));
   double clean(double v) => v == 0 ? 0.0 : v;
@@ -58,14 +69,24 @@ Transform2 placementTransform({
       clean(m.a), clean(m.b), clean(m.c), clean(m.d), clean(m.e), clean(m.f));
 }
 
+/// The exact `(cos, sin)` of [quarterTurns] counter-clockwise quarter turns.
+(double, double) _quarterTurn(int quarterTurns) => const [
+      (1.0, 0.0),
+      (0.0, 1.0),
+      (-1.0, 0.0),
+      (0.0, -1.0)
+    ][((quarterTurns % 4) + 4) % 4];
+
 /// The command that places [entry] in [doc] at [at]. Labelled
 /// `Place <name>`; it does **not** execute.
 ///
 /// Every handle is allocated from `doc.handleSeed` here, once (spec F-8), so
 /// a redo reuses them. A definition already in [doc] with the entry's key and
-/// version is reused; otherwise the definition is copied with fresh handles
-/// for it and for every leaf, the leaves in the library's ascending order so
-/// draw order is stable.
+/// version is reused when it is leaf-equal to the entry ([isLeafEqual], spec
+/// 09c D10), the first such in ascending handle; otherwise the definition is
+/// copied with fresh handles for it and for every leaf, the leaves in the
+/// library's ascending order so draw order is stable, under the first free
+/// name of `key@version`, `key@version#2`, `#3`, ...
 ///
 /// A servable entry becomes a numbered table (spec 14a T13): when
 /// [numbered], its label, with the plan's next number, is added after the
@@ -78,6 +99,7 @@ CompoundCommand placeSymbol(
   required Vector2 at,
   int quarterTurns = 0,
   bool mirrored = false,
+  Transform2? transform,
   InstanceStyle style = const InstanceStyle(),
   bool numbered = true,
 }) {
@@ -86,16 +108,19 @@ CompoundCommand placeSymbol(
   Handle? definition;
   for (final h in doc.components.withComponent<SymbolComponent>()) {
     final c = doc.components.get<SymbolComponent>(h);
-    // A component can outlive its definition (purge and definition removal
-    // never clear one), so the definition must still exist. Its seating must
-    // agree with the entry's too (spec 14 S2, review F-5): a hand-edited or
-    // foreign plan's copy without seats would make every new placement of a
-    // table unservable, so such a copy is not reused; one is made beside it.
+    // A component can outlive its definition in a file saved before 09c
+    // (removing a definition now takes its components, spec D11, but leaves
+    // such orphans alone, and purge never clears a component), so the
+    // definition must still exist. Its seating must agree with the entry's
+    // too (spec 14 S2, review F-5): a hand-edited or foreign plan's copy
+    // without seats would make every new placement of a table unservable,
+    // so such a copy is not reused; one is made beside it.
     if (c != null &&
         c.key == entry.key &&
         c.version == entry.version &&
         doc.tree.definition(h) != null &&
-        doc.components.get<SeatingComponent>(h)?.seats == entry.seats) {
+        doc.components.get<SeatingComponent>(h)?.seats == entry.seats &&
+        isLeafEqual(doc, h, entry)) {
       definition = h;
       break;
     }
@@ -143,12 +168,13 @@ CompoundCommand placeSymbol(
   }
 
   final instance = doc.handleSeed.next();
-  final transform = placementTransform(
-    at: at,
-    basePoint: entry.definition.basePoint,
-    quarterTurns: quarterTurns,
-    mirrored: mirrored,
-  );
+  final placement = transform ??
+      placementTransform(
+        at: at,
+        basePoint: entry.definition.basePoint,
+        quarterTurns: quarterTurns,
+        mirrored: mirrored,
+      );
   commands.add(AddNodeCommand(InstanceNode(
     handle: instance,
     parent: doc.rootHandle,
@@ -156,7 +182,7 @@ CompoundCommand placeSymbol(
     // Spec 12b D7: the instance takes the current layer; the definition's
     // leaves stay on layer 0 (the library's rule) and follow it.
     layer: drawingLayer(doc),
-    transform: transform,
+    transform: placement,
     color: style.color,
     lineweight: style.lineweight,
     transparency: style.transparency,
@@ -177,10 +203,56 @@ CompoundCommand placeSymbol(
         height: first == null
             ? kTableLabelMaxHeight
             : tableLabelHeight(first.record.kind, first.payload),
-        placement: transform,
+        placement: placement,
       ),
     ));
   }
 
   return CompoundCommand(commands, label: 'Place ${entry.name}');
+}
+
+/// Whether the definition [definition] in [doc] is **leaf-equal** to [entry]
+/// (spec 09c D10, W-11): what a placement checks before it reuses a
+/// definition found by key and version.
+///
+/// Leaf-equal means: [definition] names a definition; its base point is the
+/// entry's; it has no child node; it owns as many live leaves as the entry
+/// has; and, pairing its leaves ascending by handle with the entry's (which
+/// [SymbolEntry] holds ascending by handle), every [EntityRecord] field but
+/// `handle`, `owner` and `geomIndex` (the placement rewrites the first two,
+/// `AddEntityCommand` the third) and every payload coordinate and scalar
+/// are equal. Every comparison is exact `==`: these are stored values, not
+/// geometric decisions. `==` equates `-0.0` and `0.0`, which D10 accepts.
+///
+/// Pure: reads [doc], writes nothing. O(entities) per call, never on a
+/// frame path (a placement is built once per click).
+bool isLeafEqual(DraftDocument doc, Handle definition, SymbolEntry entry) {
+  final def = doc.tree.definition(definition);
+  if (def == null) return false;
+  final base = entry.definition.basePoint;
+  if (def.basePoint.x != base.x || def.basePoint.y != base.y) return false;
+  if (doc.tree.childNodesOf(def.children).isNotEmpty) return false;
+
+  final entities = doc.entities;
+  final slots = [
+    for (final slot in entities.liveSlots)
+      if (entities.ownerAt(slot) == definition) slot,
+  ]..sort((a, b) =>
+      entities.handleAt(a).value.compareTo(entities.handleAt(b).value));
+  if (slots.length != entry.leaves.length) return false;
+
+  for (var i = 0; i < slots.length; i++) {
+    final want = entry.leaves[i];
+    final got = entities.read(slots[i]);
+    // Every field but the three a placement rewrites, through the record's
+    // own `==`, so a field added to `EntityRecord` is compared here too.
+    final comparable = got.copyWith(
+      handle: want.record.handle,
+      owner: want.record.owner,
+      geomIndex: want.record.geomIndex,
+    );
+    if (comparable != want.record) return false;
+    if (doc.geometry.read(got.geomIndex) != want.payload) return false;
+  }
+  return true;
 }

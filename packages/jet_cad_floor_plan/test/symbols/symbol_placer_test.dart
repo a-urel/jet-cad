@@ -5,6 +5,8 @@
 // a foreign definition has the symbol's own name, and an older version lives
 // beside a newer one.
 import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_component.dart';
@@ -105,7 +107,76 @@ Vector2 expectedWorld(
   return Vector2(at.x + rx, at.y + ry);
 }
 
+/// The styled sofa's text and attribute leaves (spec 09c D10 tests), after
+/// the library's four, so the leaves stay ascending by handle.
+const int sofaText = 4214, sofaAttrib = 4215;
+
+/// The sofa with every leaf restyled away from the library's defaults, each
+/// leaf differently, plus a text and an attribute leaf carrying every text
+/// field: the fixture for leaf-equal reuse (spec 09c D10). The text sits at
+/// local x = 0.0 with rotation 0.0, for the `-0.0` case.
+SymbolEntry styledSofa() {
+  final e = sofa();
+  const styles = [
+    (IndexedColor(1), 50, 77, EntityFlags.unpickable, 1.5),
+    (TrueColor(0x8844cc), 25, 12, EntityFlags.unpickable, 2.25),
+    (TrueColor(0x3a7bd5), 18, 200, EntityFlags.invisible, 0.625),
+    (IndexedColor(30), 35, 90, EntityFlags.unpickable, 0.75),
+    (IndexedColor(5), 13, 45, EntityFlags.unpickable, 3.0),
+    (TrueColor(0x101010), 9, 3, EntityFlags.invisible, 0.5),
+  ];
+  final def = e.definition.handle;
+  final leaves = <Leaf>[
+    ...e.leaves,
+    (
+      record: leafRecord(sofaText, def, EntityKind.text)
+          .copyWith(text: 'SOFA', textAttrs: 0x12),
+      payload: textPayload(Vector2(0.0, 655.5), 120),
+    ),
+    (
+      record: leafRecord(sofaAttrib, def, EntityKind.attrib)
+          .copyWith(text: 'ACME', tag: 'MAKER', textAttrs: 0x21),
+      payload: textPayload(Vector2(1500.25, 120.5), 80),
+    ),
+  ];
+  return SymbolEntry(
+    key: e.key,
+    name: e.name,
+    category: e.category,
+    tags: e.tags,
+    version: e.version,
+    definition: e.definition,
+    leaves: [
+      for (var i = 0; i < leaves.length; i++)
+        (
+          record: leaves[i].record.copyWith(
+                linetype: ReservedHandles.continuousLinetype,
+                color: styles[i].$1,
+                lineweight: styles[i].$2,
+                transparency: styles[i].$3,
+                flags: styles[i].$4,
+                linetypeScale: styles[i].$5,
+              ),
+          payload: leaves[i].payload,
+        ),
+    ],
+  );
+}
+
 final Vector2 at = Vector2(3333.5, -2222.25);
+
+/// Far from the origin, as the wall fixtures are (plan P-2).
+final Vector2 far = Vector2(100000.25, -70000.75);
+
+/// A 30° and a −112.5° rotation vector: (name, cos, sin).
+final List<(String, double, double)> rotations = [
+  ('30°', math.sqrt(3) / 2, 0.5),
+  (
+    '−112.5°',
+    math.cos(-112.5 * math.pi / 180),
+    math.sin(-112.5 * math.pi / 180)
+  ),
+];
 const Tolerance tol = Tolerance.standard;
 
 void main() {
@@ -192,6 +263,123 @@ void main() {
       final d = t.transformDirection(Vector2(1, 0));
       expect(d.x, 0.0);
       expect(d.y, -1.0);
+    });
+
+    // Plan 09c-1 Task 5 (spec D5): the rotation as a unit vector. The
+    // fixtures: a 30° and a −112.5° vector (no 0 or ±1 in either), `far` and
+    // the sofa's base point off the origin and off each other.
+
+    test(
+        'P20 a rotation vector gives translate(at) · R · S · '
+        'translate(−base), written out by hand, mirrored or not', () {
+      final e = sofa();
+      final base = e.definition.basePoint;
+      final line =
+          e.leaves.firstWhere((l) => l.record.handle.value == sofaLine);
+      for (final (name, cos, sin) in rotations) {
+        for (final mirrored in [false, true]) {
+          final why = '$name mirrored=$mirrored';
+          final s = mirrored ? -1.0 : 1.0;
+          final t = placementTransform(
+              at: far,
+              basePoint: base,
+              rotation: (cos, sin),
+              mirrored: mirrored);
+          // The local x is mirrored first, then turned: (s·cos, s·sin);
+          // the local y turns alone: (−sin, cos). Exact doubles.
+          expect(
+              t.toJson(),
+              [
+                s * cos,
+                s * sin,
+                -sin,
+                cos,
+                far.x - (s * cos * base.x - sin * base.y),
+                far.y - (s * sin * base.x + cos * base.y),
+              ],
+              reason: why);
+          expect(tol.eqPoint(t.transformPoint(base), far), isTrue,
+              reason: '$why base point');
+          for (final p in [line.payload.pointAt(0), line.payload.pointAt(1)]) {
+            final u = (p.x - base.x) * s, v = p.y - base.y;
+            final want =
+                Vector2(far.x + cos * u - sin * v, far.y + sin * u + cos * v);
+            expect(tol.eqPoint(t.transformPoint(p), want), isTrue,
+                reason: '$why $p -> ${t.transformPoint(p)}, want $want');
+          }
+          expect(t.determinant, closeTo(s, 1e-12), reason: why);
+        }
+      }
+    });
+
+    test(
+        'P21 quarterTurns and rotation together are refused (an '
+        'ArgumentError, not only an assert)', () {
+      for (final q in [0, 1]) {
+        expect(
+            () => placementTransform(
+                at: far,
+                basePoint: Vector2(900, 400),
+                quarterTurns: q,
+                rotation: (rotations.first.$2, rotations.first.$3)),
+            throwsArgumentError,
+            reason: 'quarterTurns: $q');
+      }
+      // Neither: no turn.
+      expect(
+          placementTransform(at: far, basePoint: Vector2(900, 400)).toJson(),
+          placementTransform(
+              at: far,
+              basePoint: Vector2(900, 400),
+              rotation: (1.0, 0.0)).toJson());
+    });
+
+    test(
+        'P22 the quarter-turn form is the rotation form at the exact table: '
+        'the same bytes for every turn, mirrored or not', () {
+      const table = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+      final base = Vector2(900, 400);
+      for (final mirrored in [false, true]) {
+        for (var q = -2; q < 6; q++) {
+          expect(
+              placementTransform(
+                      at: far,
+                      basePoint: base,
+                      quarterTurns: q,
+                      mirrored: mirrored)
+                  .toJson(),
+              placementTransform(
+                      at: far,
+                      basePoint: base,
+                      rotation: table[((q % 4) + 4) % 4],
+                      mirrored: mirrored)
+                  .toJson(),
+              reason: 'q=$q mirrored=$mirrored');
+        }
+      }
+    });
+
+    test(
+        'P23 an axis-aligned rotation vector (cos or sin −0.0, as a face '
+        'normal gives it) stores no −0.0, mirrored or not (M-09c-n: the '
+        'named axis-aligned exception)', () {
+      final base = Vector2(900, 400);
+      for (final r in [
+        (-0.0, 1.0),
+        (0.0, 1.0),
+        (-0.0, -1.0),
+        (1.0, -0.0),
+        (-1.0, -0.0),
+      ]) {
+        for (final mirrored in [false, true]) {
+          final t = placementTransform(
+              at: far, basePoint: base, rotation: r, mirrored: mirrored);
+          for (final v in t.toJson()) {
+            expect(v == 0 && v.isNegative, isFalse,
+                reason: '$r mirrored=$mirrored has -0.0: ${t.toJson()}');
+          }
+        }
+      }
     });
   });
 
@@ -531,10 +719,13 @@ void main() {
 
     test('P13 a component whose definition is gone is not reused', () {
       final doc = target();
+      // Since spec 09c D11 a removed definition takes its component, so the
+      // orphan is written after the removal: the kind a file saved before
+      // 09c may still carry (D11 leaves those alone).
       doc.commands.execute(foreign(905, 'x'));
+      doc.commands.execute(RemoveDefinitionCommand(const Handle(905)));
       doc.commands.execute(SetComponentCommand<SymbolComponent>(
           const Handle(905), sofaSymbol()));
-      doc.commands.execute(RemoveDefinitionCommand(const Handle(905)));
       expect(doc.components.withComponent<SymbolComponent>().length, 1,
           reason: 'the orphan component is still there');
       doc.commands.execute(placeSymbol(doc, sofa(), at: at));
@@ -654,6 +845,40 @@ void main() {
       expect(doc.components.withComponent<SymbolComponent>(), isEmpty);
     });
 
+    test(
+        'P24 a given transform is stored verbatim: its six doubles, through '
+        'execute, undo, redo and save/load; at, the turns and the mirror '
+        'are not used', () {
+      final doc = target();
+      final e = sofa();
+      final (_, cos, sin) = rotations.first;
+      final given = placementTransform(
+          at: far,
+          basePoint: Vector2(37.5, -912.25),
+          rotation: (cos, sin)).multiply(Transform2.scale(-1, 1));
+      final bytes = given.toJson();
+      // Not what at, the turns or the mirror passed alongside would give.
+      expect(
+          placementTransform(
+                  at: at,
+                  basePoint: e.definition.basePoint,
+                  quarterTurns: 1,
+                  mirrored: true)
+              .toJson(),
+          isNot(bytes));
+      final cmd = placeSymbol(doc, e,
+          at: at, quarterTurns: 1, mirrored: true, transform: given);
+      doc.commands.execute(cmd);
+      expect(instances(doc).single.transform.toJson(), bytes);
+      doc.commands.undo();
+      expect(instances(doc), isEmpty);
+      doc.commands.redo();
+      expect(instances(doc).single.transform.toJson(), bytes);
+      expect(instances(reload(doc)).single.transform.toJson(), bytes);
+      expect(doc.tree.definitions.single.basePoint, e.definition.basePoint);
+      expect(doc.validate(), isEmpty);
+    });
+
     test('P18 a read-only document refuses too', () {
       final doc = target(permissions: DraftPermissions.readOnly);
       expect(() => doc.commands.execute(placeSymbol(doc, sofa(), at: at)),
@@ -664,7 +889,10 @@ void main() {
 
   group('the library entry is read-only to a placement', () {
     /// Every field of every leaf record and payload, and the entry's own
-    /// fields, as text: a record has no `==`, a payload compares by identity.
+    /// fields, as text: a copy of the values taken before the placements.
+    /// Records and payloads have value `==`, but the entry's own objects
+    /// compared with themselves afterwards would hide an in-place change to
+    /// a shared buffer.
     List<String> snapshot(SymbolEntry e) => [
           '${e.key}|${e.name}|${e.category}|${e.tags}|${e.version}',
           '${e.definition.handle.value}|${e.definition.name}|'
@@ -722,6 +950,439 @@ void main() {
                 placedLeaves[i].payload.coords, entry.leaves[i].payload.coords),
             isFalse);
       }
+    });
+  });
+
+  // Spec 09c D10 (W-11): a definition found by key and version is reused
+  // only when leaf-equal to the entry. The entry is the sofa restyled: every
+  // leaf carries a style that is not a default, distinct per leaf, and a text
+  // and an attribute leaf carry every text field. The placements are rotated
+  // (30°) and mirrored, far from the origin; the base point is off the
+  // origin. Each edit is the smallest one exact `==` can see.
+  group('leaf-equal reuse', () {
+    final turn = rotations.first;
+    Transform2 placed(SymbolEntry e) => placementTransform(
+        at: far,
+        basePoint: e.definition.basePoint,
+        rotation: (turn.$2, turn.$3),
+        mirrored: true);
+
+    void place(DraftDocument doc, SymbolEntry e) => doc.commands
+        .execute(placeSymbol(doc, e, at: far, transform: placed(e)));
+
+    /// Every definition carrying [e]'s key and version, ascending by handle.
+    List<Definition> found(DraftDocument doc, SymbolEntry e) => [
+          for (final h in doc.components.withComponent<SymbolComponent>())
+            if (doc.tree.definition(h) case final d?
+                when doc.components.get<SymbolComponent>(h)!.key == e.key &&
+                    doc.components.get<SymbolComponent>(h)!.version ==
+                        e.version)
+              d,
+        ];
+
+    /// The leaf of [def] with the entry's leaf index [i] (ascending handle).
+    EntityRecord leafAt(DraftDocument doc, Handle def, int i) =>
+        leavesOf(doc, def)[i].record;
+
+    /// Replaces the [i]th leaf of [def] by one with the same handle and
+    /// [edit]'s record: the only way to change a record's style field.
+    void restyle(DraftDocument doc, Handle def, int i,
+        EntityRecord Function(EntityRecord r) edit) {
+      final leaf = leavesOf(doc, def)[i];
+      doc.commands.execute(CompoundCommand([
+        RemoveEntityCommand(leaf.record.handle),
+        AddEntityCommand(record: edit(leaf.record), payload: leaf.payload),
+      ], label: 'Restyle'));
+    }
+
+    /// Rewrites one number of the [i]th leaf's payload.
+    void reshape(DraftDocument doc, Handle def, int i,
+        {int? coord, int? scalar, required double Function(double) to}) {
+      final leaf = leavesOf(doc, def)[i];
+      final coords = Float64List.fromList(leaf.payload.coords);
+      final scalars = Float64List.fromList(leaf.payload.scalars);
+      if (coord != null) coords[coord] = to(coords[coord]);
+      if (scalar != null) scalars[scalar] = to(scalars[scalar]);
+      doc.commands.execute(SetEntityGeometryCommand(leaf.record.handle,
+          GeometryPayload(coords: coords, scalars: scalars)));
+    }
+
+    /// [e] with its definition's base point moved by [by], leaves unchanged.
+    SymbolEntry movedBase(SymbolEntry e, Vector2 by) => SymbolEntry(
+          key: e.key,
+          name: e.name,
+          category: e.category,
+          tags: e.tags,
+          version: e.version,
+          definition:
+              e.definition.copyWith(basePoint: e.definition.basePoint + by),
+          leaves: e.leaves,
+        );
+
+    // Leaf indices in the styled sofa, ascending handle.
+    const line = 0, polyline = 1, arc = 2, circle = 3, text = 4, attrib = 5;
+
+    /// What leaves a definition `sofa.three@3` in the document that is not
+    /// leaf-equal to [styledSofa]: (name, setup).
+    final edits = <(String, void Function(DraftDocument, SymbolEntry))>[
+      (
+        'a leaf coordinate',
+        (doc, e) {
+          place(doc, e);
+          reshape(doc, found(doc, e).single.handle, polyline,
+              coord: 3, to: (v) => v + 1e-9);
+        }
+      ),
+      (
+        'a payload scalar (an arc\'s sweep)',
+        (doc, e) {
+          place(doc, e);
+          reshape(doc, found(doc, e).single.handle, arc,
+              scalar: 2, to: (v) => v + 1e-9);
+        }
+      ),
+      (
+        'a text scalar (the height)',
+        (doc, e) {
+          place(doc, e);
+          reshape(doc, found(doc, e).single.handle, text,
+              scalar: 0, to: (v) => v * 2);
+        }
+      ),
+      (
+        'the kind',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, line,
+              (r) => r.copyWith(kind: EntityKind.polyline));
+        }
+      ),
+      (
+        'the layer',
+        (doc, e) {
+          place(doc, e);
+          final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+          final layer = doc.handleSeed.next();
+          doc.commands.execute(AddLayerCommand(LayerRecord(
+              handle: layer,
+              name: 'Furniture',
+              color: const IndexedColor(4),
+              linetype: zero.linetype,
+              lineweight: zero.lineweight,
+              transparency: zero.transparency)));
+          final def = found(doc, e).single.handle;
+          doc.commands.execute(
+              SetEntityLayerCommand(leafAt(doc, def, circle).handle, layer));
+        }
+      ),
+      (
+        'the linetype',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, polyline,
+              (r) => r.copyWith(linetype: ReservedHandles.byLayerLinetype));
+        }
+      ),
+      (
+        'the colour',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, arc,
+              (r) => r.copyWith(color: const TrueColor(0x3a7bd4)));
+        }
+      ),
+      (
+        'the lineweight',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, circle,
+              (r) => r.copyWith(lineweight: 30));
+        }
+      ),
+      (
+        'the transparency',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, line,
+              (r) => r.copyWith(transparency: 78));
+        }
+      ),
+      (
+        'the flags',
+        (doc, e) {
+          place(doc, e);
+          restyle(
+              doc,
+              found(doc, e).single.handle,
+              polyline,
+              (r) => r.copyWith(
+                  flags: EntityFlags.unpickable | EntityFlags.invisible));
+        }
+      ),
+      (
+        'the linetype scale',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, arc,
+              (r) => r.copyWith(linetypeScale: 0.625 + 1 / (1 << 20)));
+        }
+      ),
+      (
+        'the text',
+        (doc, e) {
+          place(doc, e);
+          final h = leafAt(doc, found(doc, e).single.handle, text).handle;
+          doc.commands.execute(SetEntityTextCommand(h, 'Sofa', ''));
+        }
+      ),
+      (
+        'the tag',
+        (doc, e) {
+          place(doc, e);
+          final h = leafAt(doc, found(doc, e).single.handle, attrib).handle;
+          doc.commands.execute(SetEntityTextCommand(h, 'ACME', 'BRAND'));
+        }
+      ),
+      (
+        'the text style',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, text,
+              (r) => r.copyWith(textStyle: ReservedHandles.layerZero));
+        }
+      ),
+      (
+        'the text attributes',
+        (doc, e) {
+          place(doc, e);
+          restyle(doc, found(doc, e).single.handle, attrib,
+              (r) => r.copyWith(textAttrs: 0x22));
+        }
+      ),
+      (
+        'an extra leaf',
+        (doc, e) {
+          place(doc, e);
+          final def = found(doc, e).single.handle;
+          doc.commands.execute(AddEntityCommand(
+            record:
+                leafAt(doc, def, line).copyWith(handle: doc.handleSeed.next()),
+            payload: linePayload(Vector2(130, 350), Vector2(1670, 350)),
+          ));
+        }
+      ),
+      (
+        'a missing leaf',
+        (doc, e) {
+          place(doc, e);
+          final def = found(doc, e).single.handle;
+          doc.commands
+              .execute(RemoveEntityCommand(leafAt(doc, def, circle).handle));
+        }
+      ),
+      (
+        // The last leaf: the pairs that remain all match, so only the count
+        // can tell.
+        'a missing last leaf',
+        (doc, e) {
+          place(doc, e);
+          final def = found(doc, e).single.handle;
+          doc.commands
+              .execute(RemoveEntityCommand(leafAt(doc, def, attrib).handle));
+        }
+      ),
+      (
+        'a child node',
+        (doc, e) {
+          place(doc, e);
+          doc.commands.execute(AddNodeCommand(GroupNode(
+              handle: doc.handleSeed.next(),
+              parent: found(doc, e).single.handle,
+              transform: const Transform2(0, 1, -1, 0, 250.5, -75.25),
+              children: const [])));
+        }
+      ),
+      // Each axis on its own: a check that read only one of them would let
+      // the other through.
+      (
+        'a base point moved in y',
+        (doc, e) => place(doc, movedBase(e, Vector2(0, 1e-9)))
+      ),
+      (
+        'a base point moved in x',
+        (doc, e) => place(doc, movedBase(e, Vector2(1e-9, 0)))
+      ),
+    ];
+
+    for (final (name, setup) in edits) {
+      test(
+          'L1 $name: the found definition is passed over and the entry is '
+          'copied as #2; the next placement reuses the copy', () {
+        final doc = target();
+        final e = styledSofa();
+        setup(doc, e);
+        final edited = found(doc, e).single;
+        expect(edited.name, 'sofa.three@3');
+        expect(isLeafEqual(doc, edited.handle, e), isFalse);
+        final live = doc.entities.liveCount;
+
+        place(doc, e);
+        final defs = found(doc, e);
+        expect(defs.map((d) => d.name), ['sofa.three@3', 'sofa.three@3#2']);
+        final copy = defs.last;
+        expect(defs.first.handle, edited.handle);
+        expect(instances(doc).last.definition, copy.handle);
+        expect(doc.entities.liveCount, live + e.leaves.length);
+        expect(isLeafEqual(doc, copy.handle, e), isTrue);
+
+        // The search goes on past the edited one to the copy.
+        doc.commands.execute(placeSymbol(doc, e,
+            at: Vector2(-4000.5, 8000.25), quarterTurns: 3, mirrored: true));
+        expect(
+            found(doc, e).map((d) => d.handle), [edited.handle, copy.handle]);
+        expect(doc.tree.definitions.length, 2);
+        expect(instances(doc).last.definition, copy.handle);
+        expect(doc.entities.liveCount, live + e.leaves.length);
+      });
+    }
+
+    test('L2 an unedited definition is reused: one definition, no new leaf',
+        () {
+      final doc = target();
+      final e = styledSofa();
+      place(doc, e);
+      final def = found(doc, e).single;
+      expect(isLeafEqual(doc, def.handle, e), isTrue);
+      final live = doc.entities.liveCount;
+      doc.commands.execute(placeSymbol(doc, e,
+          at: Vector2(-4000.5, 8000.25), quarterTurns: 1, mirrored: true));
+      expect(found(doc, e).single.handle, def.handle);
+      expect(doc.tree.definitions.length, 1);
+      expect(doc.entities.liveCount, live);
+      expect(instances(doc).map((i) => i.definition), [def.handle, def.handle]);
+      expect(doc.validate(), isEmpty);
+    });
+
+    test(
+        'L3 -0.0 and 0.0 count as equal (stated, spec D10: `==` equates '
+        'them); a definition whose leaf holds -0.0 is reused', () {
+      final doc = target();
+      final e = styledSofa();
+      expect(e.leaves[text].payload.coords[0], 0.0);
+      expect(e.leaves[text].payload.scalars[1], 0.0);
+      place(doc, e);
+      final def = found(doc, e).single.handle;
+      reshape(doc, def, text, coord: 0, to: (v) => -0.0);
+      reshape(doc, def, text, scalar: 1, to: (v) => -0.0);
+      final stored = leavesOf(doc, def)[text].payload;
+      expect(stored.coords[0].isNegative, isTrue);
+      expect(stored.scalars[1].isNegative, isTrue);
+      expect(isLeafEqual(doc, def, e), isTrue);
+      place(doc, e);
+      expect(found(doc, e).single.handle, def);
+      expect(doc.tree.definitions.length, 1);
+    });
+
+    test('L4 isLeafEqual is false for a handle that names no definition', () {
+      final doc = target();
+      final e = styledSofa();
+      place(doc, e);
+      final inst = instances(doc).single.handle;
+      expect(isLeafEqual(doc, inst, e), isFalse);
+      expect(isLeafEqual(doc, const Handle(0xBEEF), e), isFalse);
+    });
+
+    test('L5 the styled fixture is valid and its leaves are not defaults', () {
+      final doc = target();
+      final e = styledSofa();
+      expect(e.leaves.length, 6);
+      expect([for (final l in e.leaves) l.record.handle.value],
+          [sofaLine, sofaPolyline, sofaArc, sofaCircle, sofaText, sofaAttrib]);
+      for (final l in e.leaves) {
+        expect(l.record.color, isNot(const ByBlockColor()));
+        expect(l.record.lineweight, isNot(kByBlock));
+        expect(l.record.transparency, isNot(kByBlock));
+        expect(l.record.flags, isNot(0));
+        expect(l.record.linetypeScale, isNot(1.0));
+      }
+      expect(e.definition.basePoint, isNot(Vector2.zero()));
+      place(doc, e);
+      place(doc, e);
+      expect(doc.validate(), isEmpty);
+    });
+
+    test(
+        'L6 a definition whose leaves sit out of handle order in the slots '
+        'is reused (spec D10: pairwise, ascending handle on both sides)', () {
+      final doc = target();
+      final e = styledSofa();
+      // Two loose lines take slots 0 and 1 and are removed in ascending slot
+      // order. The free list is last-in first-out, so the copy's first leaf
+      // (lowest handle) lands in slot 1 and its second in slot 0.
+      final loose = [doc.handleSeed.next(), doc.handleSeed.next()];
+      for (final h in loose) {
+        doc.commands.execute(AddEntityCommand(
+            record: leafRecord(h.value, doc.rootHandle, EntityKind.line),
+            payload:
+                linePayload(Vector2(-512.5, 64.25), Vector2(96.75, -8.5))));
+      }
+      expect([for (final h in loose) doc.entities.slotOf(h)], [0, 1]);
+      for (final h in loose) {
+        doc.commands.execute(RemoveEntityCommand(h));
+      }
+
+      place(doc, e);
+      final def = found(doc, e).single.handle;
+      // The premise: in slot order the leaves' handles are not ascending.
+      final bySlot = [
+        for (final slot in doc.entities.liveSlots)
+          if (doc.entities.ownerAt(slot) == def)
+            doc.entities.handleAt(slot).value,
+      ];
+      final byHandle = [
+        for (final l in leavesOf(doc, def)) l.record.handle.value
+      ];
+      expect(bySlot.length, e.leaves.length);
+      expect(bySlot, isNot(byHandle));
+      expect(doc.entities.slotOf(Handle(byHandle[line])), 1);
+      expect(doc.entities.slotOf(Handle(byHandle[polyline])), 0);
+
+      expect(isLeafEqual(doc, def, e), isTrue);
+      final live = doc.entities.liveCount;
+      doc.commands.execute(placeSymbol(doc, e,
+          at: Vector2(-4000.5, 8000.25), quarterTurns: 1, mirrored: true));
+      expect(found(doc, e).single.handle, def);
+      expect(doc.tree.definitions.length, 1);
+      expect(doc.entities.liveCount, live);
+      expect(instances(doc).map((i) => i.definition), [def, def]);
+    });
+
+    test(
+        'L7 of two leaf-equal definitions with the key and version, the '
+        'lower handle is reused', () {
+      final doc = target();
+      final e = styledSofa();
+      place(doc, e);
+      final first = found(doc, e).single.handle;
+      // Edit the first so the next placement copies (#2), then edit it back
+      // by a fresh command (an undo would take the copy with it).
+      final label = leafAt(doc, first, text).handle;
+      doc.commands.execute(SetEntityTextCommand(label, 'Sofa', ''));
+      place(doc, e);
+      final second = found(doc, e).last.handle;
+      doc.commands.execute(SetEntityTextCommand(label, 'SOFA', ''));
+
+      expect(found(doc, e).map((d) => d.handle), [first, second]);
+      expect(first.value, lessThan(second.value));
+      expect(isLeafEqual(doc, first, e), isTrue);
+      expect(isLeafEqual(doc, second, e), isTrue);
+      final live = doc.entities.liveCount;
+
+      doc.commands.execute(placeSymbol(doc, e,
+          at: Vector2(-4000.5, 8000.25), quarterTurns: 3, mirrored: true));
+      expect(instances(doc).last.definition, first);
+      expect(doc.tree.definitions.length, 2);
+      expect(doc.entities.liveCount, live);
     });
   });
 }

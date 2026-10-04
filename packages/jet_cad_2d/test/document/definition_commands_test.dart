@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -59,6 +60,89 @@ bool picks(SpatialIndex index, double x, double y, Handle expectedLeaf) {
 
 bool picksAnything(SpatialIndex index, double x, double y) =>
     index.pickInto(Vector2(x, y), 1.0, const QueryFilter.all(), HitPath());
+
+/// A component type the test defines, with two fields neither of which is a
+/// default.
+class Tally implements Component {
+  static const String id = 'test.tally';
+  final int count;
+  final String label;
+  const Tally(this.count, this.label);
+
+  @override
+  String get typeId => id;
+
+  @override
+  Map<String, Object?> toJson() => {'count': count, 'label': label};
+
+  static Tally fromJson(Map<String, Object?> json) =>
+      Tally(json['count']! as int, json['label']! as String);
+
+  @override
+  bool operator ==(Object other) =>
+      other is Tally && other.count == count && other.label == label;
+
+  @override
+  int get hashCode => Object.hash(count, label);
+}
+
+/// A second test type, registered only by the test that needs a type the
+/// snapshot never saw.
+class Late implements Component {
+  const Late();
+  @override
+  String get typeId => 'test.late';
+  @override
+  Map<String, Object?> toJson() => const {};
+  @override
+  bool operator ==(Object other) => other is Late;
+  @override
+  int get hashCode => 0;
+}
+
+/// Not a default layer: layer 0 is what an absent [ObjectLayer] reads as.
+const Handle kLayer = Handle(0x2A1);
+
+Map<String, Object?> futurePayload() => {
+      'typeId': 'zz.future',
+      'k': [1, 2.5],
+      'note': 'kept verbatim',
+    };
+
+Map<String, Object?> pastPayload() => {
+      'typeId': 'aa.past',
+      'v': -3,
+    };
+
+/// A document with [Tally] registered and two definitions far from the
+/// origin, each carrying two registered components of different types
+/// ([Tally], [ObjectLayer] on a non-zero layer) and one unknown payload. The
+/// second one, [other], is the neighbour a removal must not touch. History
+/// cleared.
+({DraftDocument doc, Handle def, Handle other}) withComponents() {
+  final doc = DraftDocument.empty();
+  doc.components.register<Tally>(Tally.id, Tally.fromJson);
+  final def = doc.handleSeed.next();
+  final other = doc.handleSeed.next();
+  doc.commands.execute(CompoundCommand([
+    AddDefinitionCommand(definitionAt(def, baseX: 1e5 + 40, baseY: -7e4)),
+    AddDefinitionCommand(definitionAt(other, baseX: -310, baseY: 925)),
+    SetComponentCommand<Tally>(def, const Tally(7, 'north')),
+    SetComponentCommand<ObjectLayer>(def, const ObjectLayer(kLayer)),
+    SetComponentCommand<Tally>(other, const Tally(3, 'south')),
+    SetComponentCommand<ObjectLayer>(other, const ObjectLayer(kLayer)),
+  ], label: 'Fixture'));
+  doc.components.attachUnknown(def, futurePayload());
+  doc.components.attachUnknown(other, pastPayload());
+  doc.commands.clearHistory();
+  return (doc: doc, def: def, other: other);
+}
+
+String componentBytes(DraftDocument doc) => jsonEncode(doc.components.toJson());
+
+/// Allows everything a definition's removal needs except components.
+const DraftPermissions kNoComponents = DraftPermissions(
+    transform: true, components: false, geometry: true, structure: true);
 
 void main() {
   group('AddDefinitionCommand', () {
@@ -326,6 +410,281 @@ void main() {
       doc.commands.redo();
       expect(doc.extents.maxX, closeTo(970, 1e-6));
       expect(doc.extents.maxY, closeTo(560, 1e-6));
+    });
+  });
+  group('D11 RemoveDefinitionCommand takes the handle\'s components', () {
+    test('remove takes them all, undo restores the bytes, redo takes them', () {
+      final f = withComponents();
+      final doc = f.doc;
+      final components = componentBytes(doc);
+      final document = DraftDocumentCodec.encodeToString(doc);
+
+      doc.commands.execute(RemoveDefinitionCommand(f.def));
+      expect(doc.tree.definition(f.def), isNull);
+      expect(doc.components.get<Tally>(f.def), isNull);
+      expect(doc.components.get<ObjectLayer>(f.def), isNull);
+      expect(doc.components.unknownOf(f.def), isEmpty);
+      expect(componentBytes(doc), isNot(components));
+      // The neighbour keeps everything it carries.
+      expect(doc.components.get<Tally>(f.other), const Tally(3, 'south'));
+      expect(
+          doc.components.get<ObjectLayer>(f.other), const ObjectLayer(kLayer));
+      expect(doc.components.unknownOf(f.other), [pastPayload()]);
+      expect(doc.components.withComponent<Tally>(), [f.other]);
+
+      doc.commands.undo();
+      expect(componentBytes(doc), components);
+      expect(DraftDocumentCodec.encodeToString(doc), document);
+      expect(doc.components.get<Tally>(f.def), const Tally(7, 'north'));
+      expect(doc.components.unknownOf(f.def), [futurePayload()]);
+      expect(doc.tree.definition(f.def)!.basePoint, Vector2(1e5 + 40, -7e4));
+
+      doc.commands.redo();
+      expect(doc.tree.definition(f.def), isNull);
+      expect(doc.components.get<Tally>(f.def), isNull);
+      expect(doc.components.get<ObjectLayer>(f.def), isNull);
+      expect(doc.components.unknownOf(f.def), isEmpty);
+      expect(componentBytes(doc), isNot(components));
+
+      doc.commands.undo();
+      expect(componentBytes(doc), components);
+    });
+
+    test('a refused removal takes nothing', () {
+      final f = withComponents();
+      final l = f.doc.handleSeed.next();
+      f.doc.commands.execute(leaf(l, f.def, [20, 30, 60, 30]));
+      final components = componentBytes(f.doc);
+      expect(() => f.doc.commands.execute(RemoveDefinitionCommand(f.def)),
+          throwsA(isA<StateError>()));
+      expect(componentBytes(f.doc), components);
+    });
+
+    test(
+        'the forward capabilities are {structure, components} even with '
+        'nothing attached; the summary stays structure', () {
+      final doc = DraftDocument.empty();
+      final h = doc.handleSeed.next();
+      doc.commands.execute(AddDefinitionCommand(definitionAt(h)));
+      final cmd = RemoveDefinitionCommand(h);
+      expect(cmd.capabilities, {Capability.structure, Capability.components});
+      expect(cmd.capability, Capability.structure);
+      // An ordinary add needs structure alone.
+      expect(
+          AddDefinitionCommand(definitionAt(doc.handleSeed.next()))
+              .capabilities,
+          {Capability.structure});
+
+      final changes = <DocChange>[];
+      doc.commands.onAfterMutate = changes.add;
+      doc.commands.execute(cmd);
+      expect(
+          (changes.single as CommandApplied).capability, Capability.structure);
+    });
+
+    test(
+        'without components the forward command is refused before anything '
+        'changes, carrying components or not', () {
+      final f = withComponents();
+      final doc = f.doc;
+      final bare = doc.handleSeed.next();
+      doc.commands.execute(
+          AddDefinitionCommand(definitionAt(bare, baseX: 5e4, baseY: -2e3)));
+      final document = DraftDocumentCodec.encodeToString(doc);
+      final depth = doc.commands.undoDepth;
+      final state = doc.commands.stateId;
+      doc.commands.permissions = kNoComponents;
+
+      for (final h in [f.def, bare]) {
+        expect(
+            () => doc.commands.execute(RemoveDefinitionCommand(h)),
+            throwsA(isA<PermissionDeniedError>().having(
+                (e) => e.capability, 'capability', Capability.components)),
+            reason: h.toHex());
+      }
+      expect(DraftDocumentCodec.encodeToString(doc), document);
+      expect(doc.commands.undoDepth, depth);
+      expect(doc.commands.stateId, state);
+    });
+
+    test(
+        'the inverse of an empty snapshot runs without components; the '
+        'inverse of a non-empty one is refused, and kept', () {
+      final f = withComponents();
+      final doc = f.doc;
+      final bare = doc.handleSeed.next();
+      doc.commands.execute(
+          AddDefinitionCommand(definitionAt(bare, baseX: 5e4, baseY: -2e3)));
+      final components = componentBytes(doc);
+
+      // Empty snapshot: removed with everything allowed, undone without
+      // components.
+      doc.commands.execute(RemoveDefinitionCommand(bare));
+      doc.commands.permissions = kNoComponents;
+      final changes = <DocChange>[];
+      doc.commands.onAfterMutate = changes.add;
+      doc.commands.undo();
+      expect(doc.tree.definition(bare)!.basePoint, Vector2(5e4, -2e3));
+      expect(
+          (changes.single as CommandUndone).capability, Capability.structure);
+
+      // Non-empty snapshot: the undo is refused and the entry stays.
+      doc.commands.permissions = DraftPermissions.all;
+      doc.commands.execute(RemoveDefinitionCommand(f.def));
+      final removed = DraftDocumentCodec.encodeToString(doc);
+      final depth = doc.commands.undoDepth;
+      final state = doc.commands.stateId;
+      doc.commands.permissions = kNoComponents;
+      expect(
+          () => doc.commands.undo(),
+          throwsA(isA<PermissionDeniedError>().having(
+              (e) => e.capability, 'capability', Capability.components)));
+      expect(DraftDocumentCodec.encodeToString(doc), removed);
+      expect(doc.tree.definition(f.def), isNull);
+      expect(doc.commands.undoDepth, depth);
+      expect(doc.commands.stateId, state);
+
+      // Granted again, the same entry undoes to the same bytes.
+      doc.commands.permissions = DraftPermissions.all;
+      doc.commands.undo();
+      expect(componentBytes(doc), components);
+    });
+  });
+
+  group('D11 the inverse, at its edges', () {
+    test(
+        'a snapshot of unknown payloads alone is not empty: its undo needs '
+        'components', () {
+      final doc = DraftDocument.empty();
+      final h = doc.handleSeed.next();
+      doc.commands.execute(
+          AddDefinitionCommand(definitionAt(h, baseX: -4e4, baseY: 6e3)));
+      doc.components.attachUnknown(h, futurePayload());
+      doc.commands.execute(RemoveDefinitionCommand(h));
+      expect(doc.components.unknownOf(h), isEmpty);
+      doc.commands.permissions = kNoComponents;
+      expect(
+          () => doc.commands.undo(),
+          throwsA(isA<PermissionDeniedError>().having(
+              (e) => e.capability, 'capability', Capability.components)));
+      expect(doc.tree.definition(h), isNull);
+      doc.commands.permissions = DraftPermissions.all;
+      doc.commands.undo();
+      expect(doc.components.unknownOf(h), [futurePayload()]);
+    });
+
+    test(
+        'an add whose snapshot cannot be restored throws and adds nothing '
+        '(all-or-nothing)', () {
+      final source = ComponentRegistry()
+        ..registerBuiltIns()
+        ..register<Tally>(Tally.id, Tally.fromJson);
+      const h = Handle(0x51F3);
+      source.attach(h, const Tally(7, 'north'));
+      source.attach(h, const ObjectLayer(kLayer));
+      final snapshot = source.snapshotOf(h);
+
+      // This document never registered Tally, but it does register
+      // ObjectLayer, which sorts first: a restore that wrote each component
+      // as it validated would leave the layer behind before throwing.
+      final doc = DraftDocument.empty();
+      final components = componentBytes(doc);
+      final depth = doc.commands.undoDepth;
+      expect(
+          () => doc.commands.execute(AddDefinitionCommand(
+              definitionAt(h, baseX: 1e5, baseY: -7e4),
+              components: snapshot)),
+          throwsA(isA<StateError>()));
+      expect(doc.tree.definition(h), isNull);
+      expect(componentBytes(doc), components);
+      expect(doc.commands.undoDepth, depth);
+    });
+  });
+
+  group('D11 ComponentRegistry.snapshotOf and restore', () {
+    // Tally (`test.tally`) is registered before the built-ins
+    // (`jet_cad.object_layer`), so registration order is not type-id order
+    // and the snapshot has to sort.
+    ComponentRegistry registry() => ComponentRegistry()
+      ..register<Tally>(Tally.id, Tally.fromJson)
+      ..registerBuiltIns();
+
+    test(
+        'registered components by type id, unknown payloads oldest first; '
+        'restore puts each back exactly', () {
+      final r = registry();
+      const h = Handle(0x51F3);
+      const n = Handle(0x51F4);
+      // Unknown payloads attached out of type-id order.
+      r.attachUnknown(h, futurePayload());
+      r.attachUnknown(h, pastPayload());
+      r.attach(h, const Tally(7, 'north'));
+      r.attach(h, const ObjectLayer(kLayer));
+      r.attach(n, const Tally(2, 'east'));
+      final bytes = jsonEncode(r.toJson());
+
+      final s = r.snapshotOf(h);
+      expect(s.isEmpty, isFalse);
+      expect(s.components, [
+        (ObjectLayer.componentTypeId, const ObjectLayer(kLayer)),
+        (Tally.id, const Tally(7, 'north')),
+      ]);
+      expect(s.unknown, [futurePayload(), pastPayload()]);
+
+      r.detachAll(h);
+      expect(r.snapshotOf(h).isEmpty, isTrue);
+      expect(r.unknownOf(h), isEmpty);
+      expect(r.get<Tally>(n), const Tally(2, 'east'));
+
+      r.restore(h, s);
+      expect(jsonEncode(r.toJson()), bytes);
+      expect(r.unknownOf(h), [futurePayload(), pastPayload()]);
+      expect(r.get<Tally>(h), const Tally(7, 'north'));
+      expect(r.get<ObjectLayer>(h), const ObjectLayer(kLayer));
+    });
+
+    test('a snapshot does not follow later changes and cannot be edited', () {
+      final r = registry();
+      const h = Handle(0x51F3);
+      r.attach(h, const Tally(7, 'north'));
+      r.attachUnknown(h, futurePayload());
+      final s = r.snapshotOf(h);
+      r.attach(h, const ObjectLayer(kLayer));
+      r.attachUnknown(h, pastPayload());
+      r.detach<Tally>(h);
+      expect(s.components, [(Tally.id, const Tally(7, 'north'))]);
+      expect(s.unknown, [futurePayload()]);
+      expect(() => s.components.clear(), throwsUnsupportedError);
+      expect(() => s.unknown.clear(), throwsUnsupportedError);
+    });
+
+    test(
+        'a handle carrying nothing gives an empty value; restoring it adds '
+        'nothing', () {
+      final r = registry();
+      const h = Handle(0x51F3);
+      r.attach(const Handle(0x51F4), const Tally(2, 'east'));
+      final s = r.snapshotOf(h);
+      expect(s.isEmpty, isTrue);
+      expect(s.components, isEmpty);
+      expect(s.unknown, isEmpty);
+      final bytes = jsonEncode(r.toJson());
+      r.restore(h, s);
+      expect(jsonEncode(r.toJson()), bytes);
+    });
+
+    test('a type registered after the snapshot is not invented', () {
+      final r = registry();
+      const h = Handle(0x51F3);
+      r.attach(h, const Tally(7, 'north'));
+      final s = r.snapshotOf(h);
+      r.detachAll(h);
+      r.register<Late>('test.late', (_) => const Late());
+      r.attach(const Handle(0x51F4), const Late());
+      r.restore(h, s);
+      expect(r.get<Late>(h), isNull);
+      expect(r.withComponent<Late>(), [const Handle(0x51F4)]);
+      expect(r.get<Tally>(h), const Tally(7, 'north'));
     });
   });
 }
