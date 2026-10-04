@@ -182,6 +182,9 @@ class _ServiceViewState extends State<ServiceView> {
                   fitRequests: _c.fitRequests,
                   fitOnStart: _fitOnStart,
                   onFitted: _c.fitted,
+                  // The service shows the plan, not the drafting aids.
+                  rulers: false,
+                  grid: false,
                   underlay: RepaintBoundary(
                     child: CustomPaint(
                       key: const Key('table-status-layer'),

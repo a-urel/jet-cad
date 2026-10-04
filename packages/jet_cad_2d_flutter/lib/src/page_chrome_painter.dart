@@ -20,12 +20,18 @@ class PageChromePainter extends CustomPainter {
   PageChromePainter({
     required this.camera,
     required this.page,
+    this.grid = true,
     super.repaint,
     this.onPaintForTest,
   });
 
   final CameraController camera;
   final ValueListenable<PageComponent?> page;
+
+  /// False: no grid, whatever the page's `gridVisible` says (a host's
+  /// view that shows the plan, not the drafting aids). The sheet and the
+  /// page breaks are drawn as before.
+  final bool grid;
   final void Function()? onPaintForTest;
 
   /// Test-only, reset per paint.
@@ -80,7 +86,9 @@ class PageChromePainter extends CustomPainter {
     _sheetFill.color = Color(p.background);
     canvas.drawRect(sheetScreen, _sheetFill);
     canvas.drawRect(sheetScreen, _sheetEdge);
-    if (p.gridVisible) _paintGrid(canvas, size, cam, p, sheet, sheetScreen);
+    if (grid && p.gridVisible) {
+      _paintGrid(canvas, size, cam, p, sheet, sheetScreen);
+    }
     if (p.pageBreaks) _paintBreaks(canvas, size, cam, p, sheet);
   }
 

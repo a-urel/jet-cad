@@ -127,6 +127,18 @@ mode** built in; what is missing for that comes first.
   restaurant symbols 94, app 201, demo 17, `dev_harness_2d` analyze, both
   web builds, a Chromium smoke of the section and the move. Its macOS and
   web look is OWED.
+- **The selection mode draws no rulers and no grid** (the human,
+  2026-10-04: "servis modunda cetvel ve grid çizilmesin"): `PlannerView`
+  gains `rulers` and `grid` (both on by default), `PageChromePainter`
+  gains `grid`; `ServiceView` turns both off. The sheet and the page
+  breaks stay; the design mode is unchanged. Tests V18 (planner) and the
+  painter's grid test (render), each killing its mutants. Gates: render
+  1,240 + 1 skip + 7 standing, planner 1,165, restaurant symbols 94, app
+  201, demo 17, the demo's web build. **Found, not changed:** a mode
+  switch keeps the camera's numbers (14b-2 R-13, test V7), so the plan
+  already moves on screen by the design editor's left panel (240 px) and
+  now also by the rulers (24 px); keeping it in place is a change to R-13
+  for the human to rule on.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
   then the roadmap.
 

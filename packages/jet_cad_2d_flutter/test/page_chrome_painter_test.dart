@@ -231,6 +231,28 @@ void main() {
     expect(index.rebuildCount, rebuilds);
   });
 
+  test(
+      'grid: false draws no grid line on a page whose grid is visible; the '
+      'sheet and the page breaks stay', () {
+    final page = standardPage().copyWith(gridVisible: true, pageBreaks: true);
+    final n = ValueNotifier<PageComponent?>(page);
+    final cam = standardCamera();
+    final shown = PageChromePainter(camera: cam, page: n);
+    final hidden = PageChromePainter(camera: cam, page: n, grid: false);
+    final a = SpyCanvas(), b = SpyCanvas();
+    shown.paint(a, kChromeSize);
+    hidden.paint(b, kChromeSize);
+    expect(
+        shown.debugLastMajorCount + shown.debugLastMinorCount, greaterThan(0),
+        reason: 'premise: the page shows a grid');
+    expect(hidden.debugLastMajorCount + hidden.debugLastMinorCount, 0);
+    expect(shown.debugLastBreakCount, greaterThan(0), reason: 'premise');
+    expect(hidden.debugLastBreakCount, shown.debugLastBreakCount,
+        reason: 'the page breaks stay');
+    expect(b.named('drawRect').length, a.named('drawRect').length,
+        reason: 'the sheet stays');
+  });
+
   test('null page and zero size paint nothing', () {
     final (painter, n, _) = rig();
     n.value = null;

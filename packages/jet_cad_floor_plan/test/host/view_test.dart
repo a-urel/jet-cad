@@ -632,4 +632,40 @@ void main() {
     await tester.pump();
     expect(repaints, greaterThan(before), reason: 'the camera');
   });
+
+  testWidgets(
+      'V18 the selection mode draws no rulers and no grid; the sheet stays; '
+      'the design mode keeps both', (tester) async {
+    final c = await pumpView(tester);
+    PageChromePainter chrome() => tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((w) => w.painter)
+        .whereType<PageChromePainter>()
+        .single;
+    expect(
+        c.activeDocument.components
+            .get<PageComponent>(c.activeDocument.rootHandle)!
+            .gridVisible,
+        isTrue,
+        reason: 'premise: the page shows its grid');
+    expect(find.byType(RulerFrame), findsOneWidget);
+    expect(chrome().grid, isTrue);
+    final designArea = tester.getRect(find.byType(InteractionLayer));
+
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(RulerFrame), findsNothing);
+    expect(chrome().grid, isFalse);
+    expect(chrome().page.value, isNotNull, reason: 'the sheet is drawn');
+    final serviceArea = tester.getRect(find.byType(InteractionLayer));
+    expect(serviceArea.width, greaterThan(designArea.width),
+        reason: 'the rulers\' room goes to the plan');
+
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(RulerFrame), findsOneWidget);
+    expect(chrome().grid, isTrue);
+  });
 }

@@ -7,7 +7,8 @@ import 'text_entry_overlay.dart';
 /// The rulers around the drawing area: a [RulerFrame] whose child is a
 /// [CameraGestureDetector] over the page chrome, the [DraftCanvas] and the
 /// selection overlay, with -- since 05 -- the text tool's inline field
-/// painted above it.
+/// painted above it. Without [rulers] (the selection mode) the drawing area
+/// stands alone.
 ///
 /// Tiles off, `backend` unset (spec D6): a floor plan is 500-5,000
 /// entities, and the resident backend cannot run on web, which this product
@@ -31,6 +32,8 @@ class PlannerView extends StatefulWidget {
     this.fitOnStart = true,
     this.onFitted,
     this.underlay,
+    this.rulers = true,
+    this.grid = true,
   });
 
   final DraftDocument document;
@@ -72,6 +75,13 @@ class PlannerView extends StatefulWidget {
   /// Painted between the page chrome and the drafting (spec 14c S7): the
   /// selection mode's status fills, under the lines.
   final Widget? underlay;
+
+  /// The rulers around the drawing area; false in the selection mode,
+  /// which shows the plan, not the drafting aids.
+  final bool rulers;
+
+  /// The page's grid; false in the selection mode. The sheet stays.
+  final bool grid;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -145,99 +155,102 @@ class _PlannerViewState extends State<PlannerView> {
       Listenable.merge([widget.camera, widget.page]);
 
   @override
-  Widget build(BuildContext context) => RulerFrame(
-        camera: widget.camera,
-        page: widget.page,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.biggest.width > 0 &&
-                constraints.biggest.height > 0) {
-              _size = constraints.biggest;
-            }
-            if (!_fitted &&
-                constraints.biggest.width > 0 &&
-                constraints.biggest.height > 0) {
-              _fitted = true;
-              final size = constraints.biggest;
-              // Assigning `camera.value` during layout would notify the
-              // zoom text's builder mid-build, which Flutter forbids
-              // (Ruling 04-16). Posting it defers the notification to the
-              // end of this frame: the first frame paints at the shell's
-              // nominal fit, the second at the real size. The latch is set
-              // synchronously, so the fit still happens exactly once
-              // (Ruling 01-2).
-              WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
-            }
-            // Spec 05 D9: the field sits outside the InteractionLayer, so a
-            // click on it is not a canvas click.
-            //
-            // A `Flow`, not a `Stack`: the field paints and hit-tests above
-            // the canvas (`_FieldAboveCanvas`), yet it is the first child,
-            // so it leaves the tree first. The layer's `deactivate` cancels
-            // the active tool; with a text pending, that notifies the
-            // field's builders and its `EditableText`, which must already be
-            // inactive, or Flutter asserts "markNeedsBuild() called during
-            // build".
-            return Flow(
-              delegate: const _FieldAboveCanvas(),
-              children: [
-                if (widget.textTool case final text?)
-                  TextEntryOverlay(
-                    tool: text,
-                    tools: widget.tools,
-                    camera: widget.camera,
-                  )
-                else
-                  const SizedBox.shrink(),
-                CameraGestureDetector(
+  Widget build(BuildContext context) {
+    final area = _drawingArea();
+    return widget.rulers
+        ? RulerFrame(camera: widget.camera, page: widget.page, child: area)
+        : area;
+  }
+
+  Widget _drawingArea() => LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.biggest.width > 0 && constraints.biggest.height > 0) {
+            _size = constraints.biggest;
+          }
+          if (!_fitted &&
+              constraints.biggest.width > 0 &&
+              constraints.biggest.height > 0) {
+            _fitted = true;
+            final size = constraints.biggest;
+            // Assigning `camera.value` during layout would notify the
+            // zoom text's builder mid-build, which Flutter forbids
+            // (Ruling 04-16). Posting it defers the notification to the
+            // end of this frame: the first frame paints at the shell's
+            // nominal fit, the second at the real size. The latch is set
+            // synchronously, so the fit still happens exactly once
+            // (Ruling 01-2).
+            WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
+          }
+          // Spec 05 D9: the field sits outside the InteractionLayer, so a
+          // click on it is not a canvas click.
+          //
+          // A `Flow`, not a `Stack`: the field paints and hit-tests above
+          // the canvas (`_FieldAboveCanvas`), yet it is the first child,
+          // so it leaves the tree first. The layer's `deactivate` cancels
+          // the active tool; with a text pending, that notifies the
+          // field's builders and its `EditableText`, which must already be
+          // inactive, or Flutter asserts "markNeedsBuild() called during
+          // build".
+          return Flow(
+            delegate: const _FieldAboveCanvas(),
+            children: [
+              if (widget.textTool case final text?)
+                TextEntryOverlay(
+                  tool: text,
+                  tools: widget.tools,
                   camera: widget.camera,
-                  policy: widget.policy,
-                  child: InteractionLayer(
-                    tools: widget.tools,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: RepaintBoundary(
-                            child: CustomPaint(
-                              painter: PageChromePainter(
-                                camera: widget.camera,
-                                page: widget.page,
-                                repaint: _chromeRepaint,
-                              ),
+                )
+              else
+                const SizedBox.shrink(),
+              CameraGestureDetector(
+                camera: widget.camera,
+                policy: widget.policy,
+                child: InteractionLayer(
+                  tools: widget.tools,
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            painter: PageChromePainter(
+                              camera: widget.camera,
+                              page: widget.page,
+                              grid: widget.grid,
+                              repaint: _chromeRepaint,
                             ),
                           ),
                         ),
-                        if (widget.underlay case final under?)
-                          Positioned.fill(child: under),
-                        DraftCanvas(
-                          document: widget.document,
-                          index: widget.index,
-                          camera: widget.camera,
-                          resolver: widget.resolver,
-                          tiles: false,
-                        ), // already inside its own RepaintBoundary
-                        Positioned.fill(
-                          child: RepaintBoundary(
-                            child: CustomPaint(
-                              painter: SelectionOverlayPainter(
-                                selection: widget.selection,
-                                tools: widget.tools,
-                                camera: widget.camera,
-                                outlines: widget.outlines,
-                                repaint: _repaint,
-                              ),
-                              size: Size.infinite,
+                      ),
+                      if (widget.underlay case final under?)
+                        Positioned.fill(child: under),
+                      DraftCanvas(
+                        document: widget.document,
+                        index: widget.index,
+                        camera: widget.camera,
+                        resolver: widget.resolver,
+                        tiles: false,
+                      ), // already inside its own RepaintBoundary
+                      Positioned.fill(
+                        child: RepaintBoundary(
+                          child: CustomPaint(
+                            painter: SelectionOverlayPainter(
+                              selection: widget.selection,
+                              tools: widget.tools,
+                              camera: widget.camera,
+                              outlines: widget.outlines,
+                              repaint: _repaint,
                             ),
+                            size: Size.infinite,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
-            );
-          },
-        ),
+              ),
+            ],
+          );
+        },
       );
 }
 
