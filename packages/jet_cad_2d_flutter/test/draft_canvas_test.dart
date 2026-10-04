@@ -116,6 +116,38 @@ void main() {
     expect(painter.shouldRepaint(painter), isFalse);
   });
 
+  testWidgets(
+      'a new resolver repaints with no document change and no camera move; '
+      'a rebuild with the same one does not (dark theme Task 4)',
+      (tester) async {
+    // A host replaces the resolver when ACI 7's foreground flips; with no
+    // page the theme flips it, which is not a `DocChange` (dark theme spec
+    // D4). The re-attached painter must reach the screen on that frame.
+    var paints = 0;
+    void counted() => paints++;
+    final black = DocumentStyleResolver(doc, foreground: 0x000000);
+    final white = DocumentStyleResolver(doc, foreground: 0xFFFFFF);
+    Widget canvas(StyleResolver resolver) => wrap(DraftCanvas(
+        document: doc,
+        index: index,
+        camera: camera,
+        resolver: resolver,
+        onPaintForTest: counted));
+
+    await tester.pumpWidget(canvas(black));
+    final first = paints;
+    expect(first, greaterThan(0));
+
+    await tester.pumpWidget(canvas(black));
+    expect(paints, first, reason: 'the same resolver: no repaint');
+
+    await tester.pumpWidget(canvas(white));
+    final state = tester.state<DraftCanvasState>(find.byType(DraftCanvas));
+    expect(identical(state.painter.resolver, white), isTrue);
+    expect(paints, first + 1,
+        reason: 'a new resolver repaints on its own frame');
+  });
+
   testWidgets('disposing stops listening', (tester) async {
     final measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);

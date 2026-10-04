@@ -74,7 +74,18 @@ class _ServiceViewState extends State<ServiceView> {
   late final TableLabelSystem _tableLabels = TableLabelSystem(_document)
     ..install();
 
-  late DocumentStyleResolver _resolver = _resolverFor(_page.value);
+  /// ACI 7's foreground follows the paper, as in the shell (fix/post-07,
+  /// dark theme spec D4): re-derived in [_onPage] and
+  /// [didChangeDependencies], replaced only when the foreground flips.
+  /// Assigned in the first [didChangeDependencies]: without a page it reads
+  /// the theme, which `initState` cannot.
+  late DocumentStyleResolver _resolver;
+  bool _hasResolver = false;
+
+  /// The theme's surface, ARGB: the paper with no page (D4). Set in
+  /// [didChangeDependencies], the only place this state reads the theme for
+  /// the paper.
+  late int _surfaceArgb;
 
   // Spec 14c S7: the status layer repaints on the camera, the statuses and
   // every change of this copy (a move, an undo, a redo; R-4).
@@ -91,14 +102,29 @@ class _ServiceViewState extends State<ServiceView> {
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
       () => widget.flows.ready.value && _page.value != null);
 
-  DocumentStyleResolver _resolverFor(PageComponent? page) =>
-      DocumentStyleResolver(_document,
-          foreground: foregroundFor(page?.background ?? 0xFFFFFFFF));
+  /// The paper (D4): the page's background, or with no page the theme's
+  /// surface, which the drafting then lies on. It feeds both ACI 7's
+  /// foreground and [PaperPalette.forPaper].
+  int _paperArgb() => _page.value?.background ?? _surfaceArgb;
 
+  /// A flip rebuilds, which also hands the view the new paper palette: it
+  /// switches at exactly the paper where the foreground does.
   void _onPage() {
-    final next = foregroundFor(_page.value?.background ?? 0xFFFFFFFF);
+    final next = foregroundFor(_paperArgb());
     if (next == _resolver.foreground) return;
-    setState(() => _resolver = _resolverFor(_page.value));
+    setState(
+        () => _resolver = DocumentStyleResolver(_document, foreground: next));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _surfaceArgb = Theme.of(context).colorScheme.surface.toARGB32();
+    // A `build` follows: only a flip builds a new resolver.
+    final next = foregroundFor(_paperArgb());
+    if (_hasResolver && next == _resolver.foreground) return;
+    _hasResolver = true;
+    _resolver = DocumentStyleResolver(_document, foreground: next);
   }
 
   @override
@@ -128,7 +154,8 @@ class _ServiceViewState extends State<ServiceView> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final flows = widget.flows;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
@@ -179,6 +206,10 @@ class _ServiceViewState extends State<ServiceView> {
                   selection: _selection,
                   tools: _tools,
                   outlines: _outlines,
+                  // Dark theme spec D5: the chrome (here the sheet edge)
+                  // follows the theme, the overlays the paper.
+                  chrome: ChromePalette.of(theme.brightness),
+                  paper: PaperPalette.forPaper(_paperArgb()),
                   fitRequests: _c.fitRequests,
                   fitOnStart: _fitOnStart,
                   onFitted: _c.fitted,

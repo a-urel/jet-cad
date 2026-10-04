@@ -605,8 +605,17 @@ class _DraftCustomPainter extends CustomPainter {
     batching.flush();
   }
 
-  /// False, except for the two resident-path facts a rebuild can carry that
-  /// [repaint] itself has no way to see.
+  /// False, except for a new [painter] and the two resident-path facts a
+  /// rebuild can carry that [repaint] itself has no way to see.
+  ///
+  /// **A new [painter]** exists only after [DraftCanvasState.didUpdateWidget]
+  /// re-attached for a prop change -- a new resolver, `drawText`, the text
+  /// threshold -- each of which changes the drawing. Nothing in [repaint]
+  /// fires for one: a resolver replaced because the host's theme flipped
+  /// ACI 7's foreground (dark theme spec D4, no page) carries no
+  /// `DocChange` and no camera move, so the canvas would keep the old ink
+  /// until something unrelated repainted it. A rebuild that changed nothing
+  /// keeps the same painter and still answers false.
   ///
   /// `shouldRepaint` is asked on every rebuild, and a rebuild happens for
   /// reasons — a parent laying out, a theme change — that have nothing to do
@@ -634,7 +643,8 @@ class _DraftCustomPainter extends CustomPainter {
   /// the way a never-updated dpr or a freshly re-attached rebuilder is.
   @override
   bool shouldRepaint(_DraftCustomPainter old) {
-    return old.resident != resident ||
+    return old.painter != painter ||
+        old.resident != resident ||
         (resident != null && old.devicePixelRatio != devicePixelRatio);
   }
 }
