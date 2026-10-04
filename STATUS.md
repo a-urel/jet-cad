@@ -1,5 +1,24 @@
 # jet-cad — project status
 
+**2026-10-04 — dark theme: spec APPROVED, plan WRITTEN, not started**
+(branch `claude/dreamy-gates-2kgh4o`, off `main` at `5ba6fb2`).
+- **Spec:** [2026-10-04-dark-theme-design.md](docs/superpowers/specs/2026-10-04-dark-theme-design.md),
+  revision 2.
+  - Revision 1 (`aceed65`) was reviewed independently: "Ready with fixes",
+    R-1..R-20, all applied.
+  - The human approved revision 2 ("Onaylıyorum").
+- **What it delivers:**
+  - the host app's theme decides light or dark;
+  - panels, the symbol list and the canvas chrome follow the theme;
+  - the paper keeps the document's colour;
+  - everything drawn on the paper (grid, breaks, selection, grips,
+    previews, snap) follows the paper;
+  - export is unchanged.
+- **Plan:** [2026-10-04-dark-theme.md](docs/superpowers/plans/2026-10-04-dark-theme.md),
+  seven tasks.
+- **Next:** execute Task 1, on the human's word. The cloud container this
+  was written in has no Flutter SDK.
+
 **Last updated:** 2026-10-04 (09c-2 MERGED into `main` at `43dd020`; see below). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and

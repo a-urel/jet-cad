@@ -5,8 +5,10 @@
 six of them blocking. All twenty are applied **in place**; the
 [Revision log](#revision-log) maps each finding to its change. **Sub-project:** not on the roadmap; unnumbered until
 the human gives it a number.
-**Approval:** the human approved the decisions below in the brainstorm on
-2026-10-04: the scope ("Arayüz + kanvas çerçevesi"), the host's theme
+**Approval:** revision 2 **approved** by the human ("Onaylıyorum",
+2026-10-04), including R-5's two deliberate light-theme changes (D6a,
+D6b). Before that, the human approved the decisions below in the
+brainstorm on 2026-10-04: the scope ("Arayüz + kanvas çerçevesi"), the host's theme
 decides, overlays follow the paper, two palette values carried explicitly,
 and D9 (the planner's widgets, the symbol list named) added on the human's
 request. "Tamam, spec'i yaz" approved D1–D9 as drafted in the brainstorm.
