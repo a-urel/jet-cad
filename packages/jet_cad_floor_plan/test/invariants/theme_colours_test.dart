@@ -21,7 +21,7 @@ const List<String> kRoots = [
   '../../apps/restaurant_demo/lib',
 ];
 
-/// The three patterns (R-4, amended R-C6-3). The word boundary keeps
+/// The three patterns (R-4; the spec's amendment S-1). The word boundary keeps
 /// `TrueColor(0x...)`, document data, out of the first; the second takes
 /// every `Color.from*`, `Color.from(alpha: ...)` too; the third takes
 /// `CupertinoColors` as well, which its word boundary alone would miss.
@@ -197,10 +197,10 @@ void main() {
         withPanel('final c = Color.from(alpha: 1, red: 0, green: 0, blue: 0);')
             .offenders,
         hasLength(1),
-        reason: 'Color.from, the component constructor (R-C6-3)');
+        reason: 'Color.from, the component constructor (S-1)');
     expect(withPanel('final c = CupertinoColors.systemBlue;').offenders,
         hasLength(1),
-        reason: 'CupertinoColors (R-C6-3)');
+        reason: 'CupertinoColors (S-1)');
     expect(withPanel('final c = Colors.blue;').offenders, hasLength(1));
     expect(withPanel('final c = Colors.tealAccent;').offenders, hasLength(1));
     expect(withPanel('final c = Colors.transparent;').offenders, isEmpty);
