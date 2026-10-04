@@ -91,13 +91,23 @@ mode** built in; what is missing for that comes first.
   below the number, statuses set on the selected tables) and of 14t (the
   press and lift modes, `fitToView` framing withdrawn); the earlier owed
   items below stand.
-- **Unmerged work on the remote:** `plan-09c/wall-attach` (29 commits:
-  spec 09c, plan 09c-1, wall-aware symbol placement, its results and
-  ledger, 2026-10-02) is in neither `main` nor 14; its spec branch
-  `spec-09c/wall-aware-symbols` is contained in it. Kept for the human to
-  decide: merge, rebase onto `main`, or drop.
-- **Next:** the human's look (on a touch device too) and the 09c
-  decision; then the roadmap.
+- **Plan 09c-1 (wall-aware symbol placement) is MERGED into `main` at
+  `cf463d8`**, on the human's word ("rebase 09c onto main and merge it",
+  2026-10-04): its 29 commits rebased onto the 14 merge, and `a0eaeec`
+  carries what the rebase needed (the unit tests moved into the planner
+  package, the shell wiring in `planner_shell.dart`, `placeSymbol`
+  reusing a definition only when its seating agrees and it is
+  leaf-equal, the furniture asset regenerated, the five dining tables
+  14s redrew at version 2 exempt from the pre-09c pin). Results:
+  [2026-10-02-plan-09c1-results.md](docs/superpowers/notes/2026-10-02-plan-09c1-results.md).
+  Gates after the rebase: engine 1,237 + 2 standing, render 1,229 + 1
+  skip + 7 standing, planner 1,138, restaurant symbols 91, app 200, demo
+  17, both web builds. The rebased commits between the branch point and
+  `a0eaeec` do not each build on their own (they name the app's old
+  paths); `a0eaeec` is the first green one. Its macOS and web look is
+  OWED. 09c-2 is unwritten.
+- **Next:** the human's looks (14 on a touch device too, 09c-1); then
+  09c-2 or the roadmap.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
