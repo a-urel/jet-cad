@@ -65,6 +65,12 @@ class RecordingThumbnails extends SymbolThumbnails {
 
   final List<Future<ui.Image>> requests = [];
 
+  /// Every request's key and foreground, in order (dark theme D9b).
+  final List<(Object, int)> asked = [];
+
+  /// The foreground of the latest request for [key].
+  int lastForeground(Object key) => asked.lastWhere((r) => r.$1 == key).$2;
+
   @override
   Future<ui.Image> imageFor({
     required Object key,
@@ -80,6 +86,7 @@ class RecordingThumbnails extends SymbolThumbnails {
         devicePixelRatio: devicePixelRatio,
         foreground: foreground);
     requests.add(f);
+    asked.add((key, foreground));
     return f;
   }
 
@@ -103,6 +110,7 @@ class Harness {
     String? selectedId,
     bool enabled = true,
     int foreground = 0x000000,
+    int? selectedForeground,
     bool showGallery = true,
   }) =>
       MaterialApp(
@@ -118,6 +126,7 @@ class Harness {
                       onSelect: selected.add,
                       thumbnails: thumbnails,
                       foreground: foreground,
+                      selectedForeground: selectedForeground ?? foreground,
                       cellColor: kCell,
                     )
                   : const SizedBox(),
@@ -138,6 +147,7 @@ class Harness {
     String? selectedId,
     bool enabled = true,
     int foreground = 0x000000,
+    int? selectedForeground,
     bool showGallery = true,
   }) async {
     await tester.pumpWidget(build(
@@ -145,6 +155,7 @@ class Harness {
         selectedId: selectedId,
         enabled: enabled,
         foreground: foreground,
+        selectedForeground: selectedForeground,
         showGallery: showGallery));
   }
 
@@ -316,6 +327,39 @@ void main() {
       expect(isSelected(tester, id), isFalse, reason: id);
     }
     semantics.dispose();
+  });
+
+  testWidgets(
+      'the selected cell asks for its thumbnail in selectedForeground, the '
+      'others in foreground; a selection move re-asks for both cells '
+      '(dark theme D9b)', (tester) async {
+    // MUTATION: the selected cell passes `foreground` -> its request carries
+    // 0x336699; MUTATION: every cell passes `selectedForeground`.
+    final h = Harness(tester);
+    addTearDown(h.dispose);
+    const ink = 0x336699, selectedInk = 0xF0E0D0;
+    await h.pump(
+        selectedId: 'chair@2',
+        foreground: ink,
+        selectedForeground: selectedInk);
+    await h.settleImages();
+    expect(h.thumbnails.lastForeground('chair@2'), selectedInk);
+    for (final id in ['chair@1', 'sofa@1', 'table@1']) {
+      expect(h.thumbnails.lastForeground(id), ink, reason: id);
+    }
+    final before = h.thumbnails.asked.length;
+    await h.pump(
+        selectedId: 'table@1',
+        foreground: ink,
+        selectedForeground: selectedInk);
+    await h.settleImages();
+    expect(h.thumbnails.asked.sublist(before),
+        unorderedEquals([('chair@2', ink), ('table@1', selectedInk)]),
+        reason: 'only the two cells whose ink changed ask again');
+    expect(shownImage(tester, 'table@1'), isNotNull);
+    await h.pump(foreground: ink, selectedForeground: selectedInk);
+    await h.settleImages();
+    expect(h.thumbnails.lastForeground('table@1'), ink);
   });
 
   testWidgets('a cell and a header never take focus', (tester) async {
