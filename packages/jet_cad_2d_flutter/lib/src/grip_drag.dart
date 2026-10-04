@@ -189,6 +189,31 @@ final class GripDrag {
   /// per-frame read allocates nothing.
   Transform2? get transform => _transform;
 
+  /// The exact transform a resolver gave the single captured node (spec
+  /// 09c D8), or null for the plain move. [moveTo] clears it.
+  Transform2? _exact;
+
+  /// The node handle when this move captured exactly one node and nothing
+  /// else (spec 09c D8); null otherwise.
+  Handle? get singleNode => kind == DragKind.move &&
+          _captures.length == 1 &&
+          _captures.single is _NodeCapture
+      ? _captures.single.handle
+      : null;
+
+  /// A move whose single node takes [exact] instead of `delta · transform`
+  /// (spec 09c D8): the preview's delta is `exact · transform⁻¹`, and the
+  /// guide runs to [marker]. Only for a [singleNode] move.
+  void moveToTransform(Vector2 marker, Transform2 exact) {
+    if (singleNode == null) {
+      throw StateError('moveToTransform on a drag of more than one node');
+    }
+    final node = (_captures.single as _NodeCapture).node;
+    target.setFrom(marker);
+    _exact = exact;
+    _transform = exact.multiply(node.transform.invert());
+  }
+
   /// A reshape's payload at the current target; null when degenerate.
   GeometryPayload? get previewPayload => _preview;
 
@@ -224,6 +249,7 @@ final class GripDrag {
   /// A move or a reshape follows [world].
   void moveTo(Vector2 world) {
     target.setFrom(world);
+    _exact = null;
     switch (kind) {
       case DragKind.move:
         _transform =
@@ -293,13 +319,28 @@ final class GripDrag {
       case DragKind.rotate:
         final t = _transform;
         if (t == null) return null;
-        if (kind == DragKind.move &&
+        final exact = _exact;
+        if (exact != null) {
+          // Spec 09c D8: verbatim, and a no-op only when it changes nothing
+          // (an attached drag released at its press point still turns).
+          final c = _captures.single as _NodeCapture;
+          final n = c.node.transform;
+          if (exact.a == n.a &&
+              exact.b == n.b &&
+              exact.c == n.c &&
+              exact.d == n.d &&
+              exact.e == n.e &&
+              exact.f == n.f) {
+            return null;
+          }
+          members.add(TransformNodeCommand(c.handle, exact));
+        } else if (kind == DragKind.move &&
             target.x - base.x == 0 &&
             target.y - base.y == 0) {
           return null;
         }
         if (kind == DragKind.rotate && _theta == 0) return null;
-        for (final c in _captures) {
+        for (final c in exact == null ? _captures : const <_Capture>[]) {
           switch (c) {
             case _LeafCapture(:final handle, :final entityKind, :final payload):
               members.add(SetEntityGeometryCommand(

@@ -53,9 +53,16 @@ void drawSnapMarker(Canvas canvas, Offset at, SnapKind? kind,
     case SnapKind.intersection:
       canvas.drawLine(at.translate(-h, -h), at.translate(h, h), paint);
       canvas.drawLine(at.translate(-h, h), at.translate(h, -h), paint);
+    case SnapKind.nearest:
+      // A point on an object (spec 09c D8, R5-5): an hourglass, its top and
+      // bottom edges [kSnapMarkerPixels] wide, joined by the diagonals. A
+      // drag never produces it; a wall attachment marks its face point so.
+      canvas.drawLine(at.translate(-h, -h), at.translate(h, -h), paint);
+      canvas.drawLine(at.translate(h, -h), at.translate(-h, h), paint);
+      canvas.drawLine(at.translate(-h, h), at.translate(h, h), paint);
+      canvas.drawLine(at.translate(h, h), at.translate(-h, -h), paint);
     case SnapKind.perpendicular:
     case SnapKind.tangent:
-    case SnapKind.nearest:
       // Not in kDragSnapMask: a drag never produces them.
       return;
   }
