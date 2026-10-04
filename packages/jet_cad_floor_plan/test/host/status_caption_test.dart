@@ -188,4 +188,34 @@ void main() {
     await tester.pump();
     expectLightCaption(await shoot(tester), box, 'dark theme, Blueprint');
   });
+
+  testWidgets(
+      'D6c: a page change that does not flip ACI 7 can still flip the '
+      'caption: White to Ivory under a translucent mid-tone status '
+      '(review 5 finding 1; _onPage updates the paper before its early '
+      'return)', (tester) async {
+    // Premise: Ivory keeps ACI 7 black, so _onPage's early return is taken;
+    // the status over each paper sits either side of the WCAG switch.
+    const smoke = Color(0x991E1E1E);
+    expect(foregroundFor(0xFAF6EC), foregroundFor(0xFFFFFF));
+    expect(foregroundFor(over(smoke, 0xFFFFFF)), 0x000000);
+    expect(foregroundFor(over(smoke, 0xFAF6EC)), 0xFFFFFF);
+
+    final c = statusController(white);
+    await pumpService(tester, c, ThemeMode.light);
+    c.setTableStatus({'1': TableStatus(color: smoke, caption: 'Bill')});
+    await tester.pump();
+    final box = captionBox(tester);
+    expectDarkCaption(await shoot(tester), box, 'smoke on White');
+
+    final doc = c.activeDocument;
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle,
+        doc.components
+            .get<PageComponent>(doc.rootHandle)!
+            .copyWith(background: 0xFFFAF6EC)));
+    await tester.pump();
+    await tester.pump();
+    expectLightCaption(await shoot(tester), box, 'smoke on Ivory');
+  });
 }
