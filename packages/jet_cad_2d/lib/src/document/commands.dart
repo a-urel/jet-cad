@@ -317,6 +317,45 @@ class TransformNodeCommand extends DraftCommand {
   }
 }
 
+/// Points instance [handle] at another definition (spec 09c D7: a symbol's
+/// size change). Refuses a missing node, a node that is not an instance and
+/// a missing definition; a definition that would make a cycle is refused by
+/// the tree (`replaceNode`'s guard). The previous definition stays in the
+/// document; the inverse points the instance back at it.
+class SetInstanceDefinitionCommand extends DraftCommand {
+  final Handle handle;
+  final Handle definition;
+
+  SetInstanceDefinitionCommand(this.handle, this.definition);
+
+  @override
+  Capability get capability => Capability.structure;
+
+  @override
+  String get label => 'Change size';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final node = target.tree[handle];
+    if (node == null) {
+      throw StateError('no node with handle ${handle.toHex()}');
+    }
+    if (node is! InstanceNode) {
+      throw StateError('${handle.toHex()} is not an instance');
+    }
+    if (target.tree.definition(definition) == null) {
+      throw StateError('no definition with handle ${definition.toHex()}');
+    }
+    final previous = node.definition;
+    target.tree.replaceNode(node.copyWith(definition: definition));
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: SetInstanceDefinitionCommand(handle, previous),
+      touched: {handle},
+    );
+  }
+}
+
 /// Inserts a node into the scene tree.
 ///
 /// **Insert, never overwrite.** [DocumentTree.addNode] deliberately supports
