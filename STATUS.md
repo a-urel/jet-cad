@@ -1,8 +1,12 @@
 # jet-cad — project status
 
-**2026-10-04 — dark theme: plan EXECUTED, NOT MERGED** (branch
-`claude/dreamy-gates-2kgh4o`, off `main` at `5ba6fb2`; Tasks 1–6 at
-`23314be`..`36902c0`, Task 7's docs on top). Results:
+**2026-10-04 — dark theme: plan EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#2](https://github.com/a-urel/jet-cad/pull/2), a merge
+commit, on the human's word ("main'e merge et", 2026-10-04), before the
+look below was given (branch `claude/dreamy-gates-2kgh4o`, off `main` at
+`5ba6fb2`; Tasks 1–6 at `23314be`..`36902c0`, Task 7's docs on top; the
+ledger archive, `docs/superpowers/ledgers/2026-10-04-dark-theme/`, is the
+branch's last commit). Copilot's PR review: no findings. Results:
 [2026-10-04-dark-theme-results.md](docs/superpowers/notes/2026-10-04-dark-theme-results.md);
 spec [2026-10-04-dark-theme-design.md](docs/superpowers/specs/2026-10-04-dark-theme-design.md)
 rev 2 (approved "Onaylıyorum"), with "Amended at execution" (R-C4-1,
@@ -36,7 +40,7 @@ R-C4-2, R-C5-1, R-C2-1, R-C6-2); plan
   gate 5: four papers per theme, the symbol list, the layer panel, the
   service view with statuses, a live OS theme switch), never simulated.
   The macOS build was not run here (Linux container).
-- **Next:** the human's look, then the merge decision.
+- **Next:** the human's look (owed, above). After that, the human's choice of the next sub-project.
 
 **Last updated:** 2026-10-04 (09c-2 MERGED into `main` at `43dd020`; see below). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
