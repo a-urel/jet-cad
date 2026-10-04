@@ -284,6 +284,27 @@ void main() {
     });
 
     test(
+        'a move: the guide (paintOverlay) is 0xFFC857 on Blueprint; the '
+        'light set on White', () {
+      // A move draws no reshape preview, so `paintWorldOverlay` returns
+      // early: the guide's colour must be set where the guide is drawn.
+      final rig = blueprintGripRig();
+      final mid = screenOf(rig.camera, 7070, 3040); // the line's move grip
+      pressAndMove(rig, mid, mid + const Offset(30, -20));
+      expect(rig.tool.dragKind, DragKind.move, reason: 'premise');
+      final paper = paperOf(rig.document);
+      for (final (p, preview) in [
+        (paper, 0xFFFFC857),
+        (PaperPalette.light, 0xFFE8A11E),
+      ]) {
+        final spy = SpyCanvas();
+        frameOf(rig, spy, p);
+        expect(argbOf(guideOf(spy, mid)), preview, reason: 'the guide');
+        expectOnlySet(spy, p, 'move');
+      }
+    });
+
+    test(
         'a stretch: the reshape preview (paintWorldOverlay) is 0xFFC857 on '
         'Blueprint; the light set on White', () {
       final rig = blueprintGripRig();

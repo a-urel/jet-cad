@@ -1605,8 +1605,8 @@ void main() {
   // as without one) under the far, turned placement; the set is
   // `forPaper(page.background)`; White is the control, on the same tool.
   test(
-      'M-DT-8: the attach ring is 0xFFC857 on Blueprint, the light set on '
-      'White', () {
+      'M-DT-8: the attach ring is 0xFFC857 and the snap marker 0x5FD68F on '
+      'Blueprint, the light set on White', () {
     final plan = buildPlan(c2Walls, place: corpusGroups);
     final doc = plan.doc;
     PageComponent.register(doc.components);
@@ -1620,9 +1620,9 @@ void main() {
         reason: 'premise: onto the corner');
     final paper = PaperPalette.forPaper(rig.ctx.page!.value!.background);
     Paint? ringPaint;
-    for (final (p, ring) in [
-      (paper, 0xFFFFC857),
-      (PaperPalette.forPaper(0xFFFFFFFF), 0xFFE8A11E),
+    for (final (p, ring, snap) in [
+      (paper, 0xFFFFC857, 0xFF5FD68F),
+      (PaperPalette.forPaper(0xFFFFFFFF), 0xFFE8A11E, 0xFF2E9E5B),
     ]) {
       final spy = CircleSpy();
       rig.tool
@@ -1633,13 +1633,21 @@ void main() {
       ringPaint ??= spy.circles.single.paint;
       expect(identical(spy.circles.single.paint, ringPaint), isTrue,
           reason: 'a field, recoloured, not a Paint per frame');
+      // The endpoint square, drawn by `PlacementTool.paintOverlay` through
+      // the override's `super` call: it must forward the set it was handed.
+      expect(spy.rects, [snap], reason: 'the snap marker');
     }
   });
 }
 
-/// Every circle drawn, with its Paint's colour read at call time.
+/// Every circle drawn, and every rect's colour, each Paint's colour read at
+/// call time.
 class CircleSpy implements Canvas {
   final List<({double radius, int argb, Paint paint})> circles = [];
+  final List<int> rects = [];
+
+  @override
+  void drawRect(Rect rect, Paint paint) => rects.add(paint.color.toARGB32());
 
   @override
   void drawCircle(Offset c, double radius, Paint paint) {
