@@ -499,9 +499,12 @@ void main() {
       expect(frame(painter).paths, hasLength(1),
           reason: 'GB only: GH and GA have one visible member each');
 
+      // Interleaved handle ranges (review 3): GA = {12, 20} spans handles
+      // 0..3 and GB = {7, 3} sits inside it, so only the *lowest* member
+      // puts GA first; the highest would put GB first.
       groups.value = {
-        'GB': tg({'7', '20'}),
-        'GA': tg({'12', '3'}),
+        'GB': tg({'7', '3'}),
+        'GA': tg({'12', '20'}),
       };
       final spy = frame(painter);
       expect(spy.paths, hasLength(2));
