@@ -60,6 +60,7 @@ export 'src/symbols/symbol_ghost.dart';
 export 'src/symbols/symbol_library.dart';
 export 'src/symbols/symbol_library_loader.dart';
 export 'src/symbols/symbol_library_state.dart';
+export 'src/symbols/symbol_move.dart';
 export 'src/symbols/symbol_panel.dart';
 export 'src/symbols/symbol_place_tool.dart';
 export 'src/symbols/symbol_placer.dart';
