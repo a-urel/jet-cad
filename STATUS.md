@@ -44,7 +44,7 @@ R-C4-2, R-C5-1, R-C2-1, R-C6-2); plan
   The macOS build was not run here (Linux container).
 - **Next:** the human's look (owed, above). After that, the human's choice of the next sub-project.
 
-**Last updated:** 2026-10-04 (the review fixes MERGED into `main` at `d94d72d`; see below). **Sub-project 14 — restaurant embedding (all
+**Last updated:** 2026-10-04 (the dark theme MERGED into `main` at `4490cd9`; see above). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
