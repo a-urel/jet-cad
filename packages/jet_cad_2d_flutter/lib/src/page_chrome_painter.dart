@@ -226,10 +226,11 @@ class PageChromePainter extends CustomPainter {
     }
   }
 
-  /// True exactly when a palette changed (dark theme spec D5): a theme or a
-  /// paper flip must repaint without waiting for the camera. Every other
-  /// reason to repaint is in the `repaint` listenable the caller merged.
+  /// The camera and the page arrive through `repaint`; [grid] and the
+  /// palettes arrive only with a rebuild. A palette change (dark theme spec
+  /// D5) is a theme or a paper flip, which must repaint without waiting for
+  /// the camera.
   @override
   bool shouldRepaint(PageChromePainter old) =>
-      old.chrome != chrome || old.paper != paper;
+      grid != old.grid || old.chrome != chrome || old.paper != paper;
 }

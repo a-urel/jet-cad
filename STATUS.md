@@ -5,8 +5,10 @@
 commit, on the human's word ("main'e merge et", 2026-10-04), before the
 look below was given (branch `claude/dreamy-gates-2kgh4o`, off `main` at
 `5ba6fb2`; Tasks 1–6 at `23314be`..`36902c0`, Task 7's docs on top; the
-ledger archive, `docs/superpowers/ledgers/2026-10-04-dark-theme/`, is the
-branch's last commit). Copilot's PR review: no findings. Results:
+ledger archive, `docs/superpowers/ledgers/2026-10-04-dark-theme/`, at
+`de2b75e`; then `main` merged in for PR #1, the one conflict being
+`PageChromePainter.shouldRepaint`, resolved to keep both terms: the grid
+switch and the palettes). Copilot's PR review: no findings. Results:
 [2026-10-04-dark-theme-results.md](docs/superpowers/notes/2026-10-04-dark-theme-results.md);
 spec [2026-10-04-dark-theme-design.md](docs/superpowers/specs/2026-10-04-dark-theme-design.md)
 rev 2 (approved "Onaylıyorum"), with "Amended at execution" (R-C4-1,
@@ -192,6 +194,21 @@ mode** built in; what is missing for that comes first.
   (no top pass, no box pass, the lowest handle among boxes, the world
   bounds, an unscaled reach) are red. Gates: planner 1,167, demo 17;
   engine and render untouched.
+- **Review fixes for the two commits above** (a codex review of each):
+  `PageChromePainter.shouldRepaint` answers `grid != old.grid`, so a
+  rebuild that only flips `grid` repaints (no mode switch does that yet:
+  each mode mounts its own painter); `TablePicker` builds
+  `leavesByOwner()` once per candidate build and hands it to
+  `definitionBounds` and `tableTopOf` (`firstLeafOf` takes it too), not
+  one entity-store scan per definition. Tests: the painter's rebuild test,
+  TP11; the mutants (`shouldRepaint` always false, always true; the shared
+  map's lowest slot taken for the lowest handle; a leaf dropped) are red.
+  On Copilot's review of the PR (TP11 stays green with no map shared),
+  `TablePicker` takes a test-only `leavesByOwner` source and TP12 hands it
+  a counting, doctored one; the mutants (the bounds or the top without
+  the map, a scan per definition, a scan per build, the source ignored)
+  are red. Gates: engine 1,241 + 2 standing, render 1,241 + 1 skip + 7
+  standing, planner 1,169, app 201, demo 17.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
   then the roadmap.
 
