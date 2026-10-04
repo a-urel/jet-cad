@@ -168,7 +168,8 @@ class RoomTool extends PlacementTool {
   /// kind's marker, wherever drawn, would claim a snap that does not
   /// happen.
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {}
 
   @override
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {

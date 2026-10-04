@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show SystemMouseCursors;
 import 'package:flutter/widgets.dart' show Offset, Path;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
 import 'package:jet_cad_2d_flutter/src/grip_drag.dart';
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
@@ -257,7 +258,8 @@ void main() {
     // The preview: one path, the provider's moved line, rebased.
     final origin = Vector2(7000, 3000);
     final spy = SpyCanvas();
-    rig.tool.paintWorldOverlay(spy, origin, rig.camera.value.scale);
+    rig.tool.paintWorldOverlay(
+        spy, origin, rig.camera.value.scale, PaperPalette.light);
     final path = spy.named('drawPath').single.args[0]! as Path;
     final world = worldOf(rig, to);
     final m = doc.tree.accumulatedTransform(f.group);

@@ -17,6 +17,7 @@ import 'package:flutter/widgets.dart'
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/draft_canvas.dart';
 import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
 import 'package:jet_cad_2d_flutter/src/interaction_layer.dart';
@@ -255,6 +256,7 @@ Future<void> pumpGripLayer(WidgetTester tester, GripRig rig) async {
                     tools: rig.tools,
                     camera: rig.camera,
                     outlines: rig.outlines,
+                    paper: PaperPalette.light,
                     repaint: Listenable.merge([
                       rig.selection,
                       rig.tools,

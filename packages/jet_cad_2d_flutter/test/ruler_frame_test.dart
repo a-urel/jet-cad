@@ -23,6 +23,7 @@ void main() {
             key: key,
             camera: camera ?? standardCamera(),
             page: page,
+            chrome: ChromePalette.light,
             child: Listener(
               behavior: HitTestBehavior.opaque,
               onPointerHover: (_) => childHovers++,
@@ -143,6 +144,7 @@ void main() {
                 key: key,
                 camera: camera,
                 page: page,
+                chrome: ChromePalette.light,
                 child: const SizedBox.expand(key: Key('child')),
               ),
             ),

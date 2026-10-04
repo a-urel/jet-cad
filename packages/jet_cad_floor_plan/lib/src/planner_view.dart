@@ -26,6 +26,8 @@ class PlannerView extends StatefulWidget {
     required this.selection,
     required this.tools,
     required this.outlines,
+    required this.chrome,
+    required this.paper,
     this.grips,
     this.textTool,
     this.fitRequests,
@@ -51,6 +53,17 @@ class PlannerView extends StatefulWidget {
 
   /// Owned by the shell since 03 (spec D6).
   final OutlineCache outlines;
+
+  /// The rulers' and the sheet edge's colours, from the host's theme (dark
+  /// theme spec D2, D5): the shell and the service view compute it in
+  /// `build`, so a theme switch hands a new one down.
+  final ChromePalette chrome;
+
+  /// The colours of everything drawn on the paper -- the grid, the page
+  /// breaks, the selection and the tools' overlays -- picked by the paper
+  /// (dark theme spec D3, D4): the page's background, or the theme's
+  /// surface with no page.
+  final PaperPalette paper;
 
   /// The selection's grips. A member of the overlay's repaint merge; null
   /// where no grips show (the selection mode, spec 14b-2 H7).
@@ -158,7 +171,12 @@ class _PlannerViewState extends State<PlannerView> {
   Widget build(BuildContext context) {
     final area = _drawingArea();
     return widget.rulers
-        ? RulerFrame(camera: widget.camera, page: widget.page, child: area)
+        ? RulerFrame(
+            camera: widget.camera,
+            page: widget.page,
+            chrome: widget.chrome,
+            child: area,
+          )
         : area;
   }
 
@@ -216,6 +234,8 @@ class _PlannerViewState extends State<PlannerView> {
                               camera: widget.camera,
                               page: widget.page,
                               grid: widget.grid,
+                              chrome: widget.chrome,
+                              paper: widget.paper,
                               repaint: _chromeRepaint,
                             ),
                           ),
@@ -238,6 +258,7 @@ class _PlannerViewState extends State<PlannerView> {
                               tools: widget.tools,
                               camera: widget.camera,
                               outlines: widget.outlines,
+                              paper: widget.paper,
                               repaint: _repaint,
                             ),
                             size: Size.infinite,

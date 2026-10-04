@@ -7,6 +7,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'camera_controller.dart';
+import 'canvas_palette.dart';
 import 'grip_cache.dart';
 import 'page_notifier.dart';
 import 'selection.dart';
@@ -112,7 +113,12 @@ abstract class Tool extends ChangeNotifier {
   void onPointerExit(ToolContext ctx);
   KeyEventResult onKey(KeyEvent event, ToolContext ctx);
   void cancel(ToolContext ctx);
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport);
+
+  /// Paints in screen space, after [paintWorldOverlay]. Every colour comes
+  /// from [paper], the overlay's own set for the paper under it (dark theme
+  /// spec D5); none is kept in a field initialiser.
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper);
 
   /// How a finger's press reaches this tool (spec 14t R-1). [TouchPress.lift]
   /// unless the tool's down and its `cancel` execute nothing.
@@ -134,7 +140,9 @@ abstract class Tool extends ChangeNotifier {
   /// Paints under the overlay's rebased world matrix, `worldToScreen ∘
   /// translate(origin)`, so coordinates handed to [canvas] must be `world −
   /// origin` (Ruling 03-3). [scale] is the camera's, for stroke widths.
-  void paintWorldOverlay(Canvas canvas, Vector2 origin, double scale) {}
+  /// Colours come from [paper], as in [paintOverlay].
+  void paintWorldOverlay(
+      Canvas canvas, Vector2 origin, double scale, PaperPalette paper) {}
 }
 
 /// Holds the active [Tool] and forwards its notifications, so a widget can

@@ -15,6 +15,7 @@ import 'package:flutter/widgets.dart'
         Widget;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
 import 'package:jet_cad_2d_flutter/src/interaction_layer.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
@@ -53,7 +54,8 @@ class _CursorTool extends Tool {
   @override
   void cancel(ToolContext ctx) {}
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {}
 }
 
 /// A [ToolController] whose active tool is a fresh [_CursorTool], over a

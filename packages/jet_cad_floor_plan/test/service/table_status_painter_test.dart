@@ -87,15 +87,21 @@ ValueNotifier<ViewportTransform> cameraOn(DraftDocument doc) {
           Transform2(0.1, 0, 0, -0.1, 400 - 0.1 * c.x, 300 + 0.1 * c.y)));
 }
 
+/// The painter over [doc]; its paper is [paper], White when not given (dark
+/// theme spec D6c: the tests before it paint on White).
 TableStatusPainter painterFor(
-        DraftDocument doc,
-        ValueNotifier<ViewportTransform> camera,
-        ValueNotifier<Map<String, TableStatus>> statuses) =>
-    TableStatusPainter(
-        document: doc,
-        camera: camera,
-        statuses: statuses,
-        repaint: Listenable.merge([camera, statuses]));
+    DraftDocument doc,
+    ValueNotifier<ViewportTransform> camera,
+    ValueNotifier<Map<String, TableStatus>> statuses,
+    {ValueNotifier<int>? paper}) {
+  final p = paper ?? ValueNotifier<int>(0xFFFFFFFF);
+  return TableStatusPainter(
+      document: doc,
+      camera: camera,
+      statuses: statuses,
+      paper: p,
+      repaint: Listenable.merge([camera, statuses, p]));
+}
 
 void main() {
   test(
@@ -373,5 +379,138 @@ void main() {
     statuses.value = const {};
     painter.paint(SpyCanvas(), const ui.Size(800, 600));
     expect(painter.debugCached, 0);
+  });
+
+  // Dark theme spec D6c: a caption's ink follows what it sits on, the
+  // status colour composited over the paper.
+  const white = 0xFFFFFFFF, blueprint = 0xFF1F3A5F;
+  const ordered = Color(0x99FFB300), eating = Color(0x9943A047);
+  const bill = Color(0x99E53935);
+
+  test(
+      'SP10 over composites a translucent status colour onto the paper\'s '
+      'RGB: straight alpha, rounded per channel, the paper\'s alpha unread '
+      '(D6c)', () {
+    // 0x99 / 255 = 0.6: blue is 0.6 x 0x35 + 0.4 x 0xFF = 133.8, rounded to
+    // 134 (0x86), not cut to 133.
+    expect(over(bill, white), 0xEF8886);
+    expect(over(bill, blueprint), 0x963946);
+    expect(over(ordered, blueprint), 0xA58326);
+    expect(over(eating, white), 0x8EC691);
+    expect(over(const Color(0xFF123456), blueprint), 0x123456,
+        reason: 'opaque: the colour');
+    expect(over(const Color(0x00123456), blueprint), 0x1F3A5F,
+        reason: 'transparent: the paper');
+    expect(over(bill, 0x001F3A5F), 0x963946, reason: 'the paper is opaque');
+  });
+
+  test(
+      'SP11 the caption colour: the demo\'s statuses on White keep today\'s '
+      '0xFF202020; on Blueprint the paper decides, where the status colour '
+      'alone would not (D6c, R-5)', () {
+    expect(kStatusCaptionOnLight, const Color(0xFF202020));
+    expect(kStatusCaptionOnDark, const Color(0xFFFFFFFF));
+    for (final c in const [ordered, eating, bill]) {
+      expect(statusCaptionInk(c, white), kStatusCaptionOnLight,
+          reason: '$c on White');
+    }
+    expect(statusCaptionInk(bill, blueprint), kStatusCaptionOnDark);
+    expect(statusCaptionInk(eating, blueprint), kStatusCaptionOnDark);
+    // Amber over navy is still light: black ink.
+    expect(statusCaptionInk(ordered, blueprint), kStatusCaptionOnLight);
+    // Bill's RGB alone takes black ink: the white on Blueprint is the
+    // paper's doing.
+    expect(foregroundFor(0xE53935), 0x000000);
+    // An opaque dark status takes white ink on White too.
+    expect(
+        statusCaptionInk(const Color(0xFF1B3A1B), white), kStatusCaptionOnDark);
+  });
+
+  testWidgets(
+      'SP12 M-DT-13: on one painter, Bill on White has dark glyphs; the paper '
+      'flips to Blueprint: light glyphs and exactly one new paragraph; ten '
+      'steady frames build nothing (D6c, R-11)', (tester) async {
+    final doc = plan();
+    final at = Vector2(40000, -27000);
+    doc.commands
+        .execute(placeSymbol(doc, entryOf(offCentre), at: at, mirrored: true));
+    final node = doc.tree.nodes.whereType<InstanceNode>().single;
+    final turn = Transform2.translation(at.x, at.y)
+        .multiply(Transform2.rotation(kDeg37))
+        .multiply(Transform2.translation(-at.x, -at.y));
+    doc.commands.execute(
+        TransformNodeCommand(node.handle, turn.multiply(node.transform)));
+    // The base point at (400, 300), 0.2 px per mm.
+    final camera = ValueNotifier(ViewportTransform(
+        worldToScreenMatrix:
+            Transform2(0.2, 0, 0, -0.2, 400 - 0.2 * at.x, 300 + 0.2 * at.y)));
+    final paper = ValueNotifier<int>(white);
+    final statuses = ValueNotifier<Map<String, TableStatus>>(
+        {'1': TableStatus(color: bill, caption: 'Bill')});
+    final painter = painterFor(doc, camera, statuses, paper: paper);
+    const w = 800, h = 600;
+    const size = ui.Size(800, 600);
+    SpyCanvas frame() {
+      final spy = SpyCanvas();
+      painter.paint(spy, size);
+      return spy;
+    }
+
+    // The caption's box: its translation and its paragraph's size.
+    final first = frame();
+    final p = first.paragraphs.single;
+    final t = first.translations.single;
+    final box = ui.Rect.fromLTWH(t.dx, t.dy, p.width, p.height);
+
+    // The paper, then the painter, read back; the box's darkest and
+    // brightest pixels.
+    Future<(int, int)> glyphs() async {
+      final bytes = (await tester.runAsync(() async {
+        final recorder = ui.PictureRecorder();
+        final canvas = ui.Canvas(recorder)
+          ..drawColor(Color(paper.value), ui.BlendMode.src);
+        painter.paint(canvas, size);
+        final image = await recorder.endRecording().toImage(w, h);
+        final data = await image.toByteData();
+        image.dispose();
+        return data!;
+      }))!;
+      var darkest = 0xFFFFFF, brightest = 0, dMax = 256, bMin = -1;
+      for (var y = box.top.floor(); y < box.bottom.ceil(); y++) {
+        for (var x = box.left.floor(); x < box.right.ceil(); x++) {
+          final i = (y * w + x) * 4;
+          final r = bytes.getUint8(i),
+              g = bytes.getUint8(i + 1),
+              b = bytes.getUint8(i + 2);
+          final hi = [r, g, b].reduce((a, b) => a > b ? a : b);
+          final lo = [r, g, b].reduce((a, b) => a < b ? a : b);
+          final rgb = (r << 16) | (g << 8) | b;
+          if (hi < dMax) (dMax, darkest) = (hi, rgb);
+          if (lo > bMin) (bMin, brightest) = (lo, rgb);
+        }
+      }
+      return (darkest, brightest);
+    }
+
+    String hex(int v) => '0x${v.toRadixString(16).padLeft(6, '0')}';
+    final (onWhite, _) = await glyphs();
+    expect(hex(onWhite), hex(0x202020), reason: 'Bill on White: dark glyphs');
+    final made = painter.debugAllocations;
+
+    paper.value = blueprint;
+    final (_, onBlueprint) = await glyphs();
+    expect(hex(onBlueprint), hex(0xFFFFFF),
+        reason: 'Bill on Blueprint: light glyphs');
+    expect(painter.debugAllocations, made + 1,
+        reason: 'the flip builds one paragraph');
+    final flipped = frame().paragraphs.single;
+    expect(identical(flipped, p), isFalse);
+    for (var i = 0; i < 10; i++) {
+      expect(identical(frame().paragraphs.single, flipped), isTrue,
+          reason: 'steady frame $i');
+    }
+    expect(painter.debugAllocations, made + 1,
+        reason: 'ten steady frames build nothing');
+    expect(painter.debugCached, 2, reason: 'one paint, one caption');
   });
 }

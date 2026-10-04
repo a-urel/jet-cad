@@ -906,7 +906,8 @@ void main() {
     final rig = directRig(doc, OpeningKind.door, scale: 0.5);
     Offset marker() {
       final spy = MarkerSpy();
-      rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(800, 600));
+      rig.tool.paintOverlay(
+          spy, rig.ctx.camera.value, const Size(800, 600), PaperPalette.light);
       final r = spy.rects.single;
       return r.center;
     }

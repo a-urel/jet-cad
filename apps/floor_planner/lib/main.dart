@@ -21,6 +21,9 @@ const List<SymbolLibrarySource> kAppSymbolSources = [
 /// spare, so scrolling the palette never repaints a thumbnail it showed.
 const int kAppThumbnailCapacity = 128;
 
+/// The app's theme seed, for the light and the dark theme alike.
+const Color _seed = Color(0xFF2266CC);
+
 Future<void> main() async {
   // The planner's font is registered from the package's bytes before the
   // first document is measured (spec 14 V-11). The pubspec declares the
@@ -147,7 +150,12 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
           onGenerateTitle: (_) =>
               documentTitle(_session.name, dirty: _session.dirty.value),
           debugShowCheckedModeBanner: false,
-          theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
+          // Dark theme spec D1: the planner follows the host's theme, and
+          // the OS picks light or dark.
+          theme: ThemeData(colorSchemeSeed: _seed),
+          darkTheme:
+              ThemeData(colorSchemeSeed: _seed, brightness: Brightness.dark),
+          themeMode: ThemeMode.system,
           // Spec 12a D6 (T-3, U-3, R-10): the file chords once more above
           // the Navigator, consume-only. A dialog or a dropdown's route is
           // outside the shell's focus chain, and on web a key nobody

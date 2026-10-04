@@ -12,6 +12,7 @@ import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
 import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
 import 'package:jet_cad_2d_flutter/src/interaction_layer.dart'
@@ -281,7 +282,8 @@ void main() {
     r.tool.onPointerDown(r.ev(r.body()), r.ctx);
     r.tool.onPointerMove(r.ev(r.body() + const ui.Offset(30, 0)), r.ctx);
     final spy = LineSpy();
-    r.tool.paintOverlay(spy, r.camera.value, const ui.Size(800, 600));
+    r.tool.paintOverlay(
+        spy, r.camera.value, const ui.Size(800, 600), PaperPalette.light);
     final m = r.camera.value.worldToScreen(kMarker);
     const h = kSnapMarkerPixels / 2;
     expect(

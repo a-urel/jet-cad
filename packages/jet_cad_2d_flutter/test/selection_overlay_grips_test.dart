@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart'
     show rebaseOriginFor;
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
 import 'package:jet_cad_2d_flutter/src/grip_drag.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
@@ -27,6 +28,7 @@ SelectionOverlayPainter overlayOf(GripRig rig) => SelectionOverlayPainter(
       tools: rig.tools,
       camera: rig.camera,
       outlines: rig.outlines,
+      paper: PaperPalette.light,
       repaint: Listenable.merge(
           [rig.selection, rig.tools, rig.camera, rig.outlines, rig.grips]),
     );
@@ -79,9 +81,8 @@ void main() {
         expect(got.dy, closeTo(expected.y, 1e-6), reason: 'flipY $flipY');
       }
       expect(
-          spy
-              .named('drawPath')
-              .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32()),
+          spy.named('drawPath').where((c) =>
+              c.color?.toARGB32() == PaperPalette.light.preview.toARGB32()),
           hasLength(1));
     }
   });
@@ -125,11 +126,11 @@ void main() {
     expect(raw[0].args[0], PointMode.points);
     expect((raw[0].args[1] as Float32List).length, 2 * 299,
         reason: 'the stretch and radius grips');
-    expect(raw[0].color?.toARGB32(), kGripColor.toARGB32());
+    expect(raw[0].color?.toARGB32(), PaperPalette.light.grip.toARGB32());
     expect(raw[0].strokeWidth, kGripPixels);
     expect((raw[0].args[2] as Paint).strokeCap, StrokeCap.square);
     expect((raw[1].args[1] as Float32List).length, 2, reason: 'one centre');
-    expect(raw[1].color?.toARGB32(), kGripMoveColor.toARGB32());
+    expect(raw[1].color?.toARGB32(), PaperPalette.light.gripMove.toARGB32());
 
     for (final flipY in const [true, false]) {
       final (hot, rig) = frame(5, hot: 2, flipY: flipY);
@@ -138,7 +139,8 @@ void main() {
           if (c.name == 'drawRawPoints') c,
       ];
       expect(hotCalls, hasLength(3));
-      expect(hotCalls[2].color?.toARGB32(), kGripHotColor.toARGB32());
+      expect(
+          hotCalls[2].color?.toARGB32(), PaperPalette.light.gripHot.toARGB32());
       final pts = hotCalls[2].args[1] as Float32List;
       final third = screenOf(rig.camera, 7001, 3000); // polyline vertex 2
       expect(pts[0], closeTo(third.dx, 1e-3), reason: 'flipY $flipY');
@@ -286,7 +288,7 @@ void main() {
       // guide line in the same colour is not.
       final arms = [
         for (final c in spy.named('drawLine'))
-          if (c.color?.toARGB32() == kPreviewColor.toARGB32() &&
+          if (c.color?.toARGB32() == PaperPalette.light.preview.toARGB32() &&
               (((c.args[1] as Offset) - (c.args[0] as Offset)).distance - 12)
                       .abs() <
                   1e-6)
@@ -320,7 +322,7 @@ void main() {
     final names = [for (final c in spy.calls) c.name];
     final at = spy.calls.indexWhere((c) =>
         c.name == 'drawPath' &&
-        c.color?.toARGB32() == kPreviewColor.toARGB32());
+        c.color?.toARGB32() == PaperPalette.light.preview.toARGB32());
     expect(at, greaterThan(names.indexOf('transform')));
     expect(at, lessThan(names.indexOf('restore')),
         reason: 'drawn under the rebased world matrix');
@@ -361,7 +363,8 @@ void main() {
     final origin = rebaseOriginFor(rig.camera.value.visibleWorld(kView));
     final drawn = spy
         .named('drawPath')
-        .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32())
+        .where(
+            (c) => c.color?.toARGB32() == PaperPalette.light.preview.toARGB32())
         .toList();
     expect(drawn, hasLength(1));
     final path = drawn.single.args[0] as Path;
@@ -408,7 +411,8 @@ void main() {
     expect(origin.x, isNot(0.0));
     final drawn = spy
         .named('drawPath')
-        .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32())
+        .where(
+            (c) => c.color?.toARGB32() == PaperPalette.light.preview.toARGB32())
         .toList();
     expect(drawn, hasLength(1));
     // A full oval's bounds are tight: its conic control points lie on the
@@ -438,16 +442,15 @@ void main() {
       overlayOf(rig).paint(spy, kView);
       final markers = [
         for (final c in spy.named('drawRect'))
-          if (c.color?.toARGB32() == kSnapMarkerColor.toARGB32()) c,
+          if (c.color?.toARGB32() == PaperPalette.light.snap.toARGB32()) c,
       ];
       expect(markers, hasLength(1), reason: 'an endpoint won: a square');
       final r = markers.single.args[0] as Rect;
       expect(r.center.dx, closeTo(endpoint.dx, 1e-6), reason: 'flipY $flipY');
       expect(r.center.dy, closeTo(endpoint.dy, 1e-6), reason: 'flipY $flipY');
       expect(r.width, kSnapMarkerPixels);
-      final guide = spy
-          .named('drawLine')
-          .where((c) => c.color?.toARGB32() == kPreviewColor.toARGB32());
+      final guide = spy.named('drawLine').where(
+          (c) => c.color?.toARGB32() == PaperPalette.light.preview.toARGB32());
       expect(guide, hasLength(1));
       expect((guide.single.args[0] as Offset).dx, closeTo(vertex.dx, 1e-6),
           reason: 'flipY $flipY');

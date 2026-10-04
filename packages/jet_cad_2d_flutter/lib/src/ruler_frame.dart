@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import 'camera_controller.dart';
+import 'canvas_palette.dart';
 import 'chrome_style.dart';
 import 'ruler_painter.dart';
 
@@ -16,11 +17,16 @@ class RulerFrame extends StatefulWidget {
     super.key,
     required this.camera,
     required this.page,
+    required this.chrome,
     required this.child,
   });
 
   final CameraController camera;
   final ValueListenable<PageComponent?> page;
+
+  /// The bars' and the corner's colours, handed to their painters (dark
+  /// theme spec D5).
+  final ChromePalette chrome;
   final Widget child;
 
   @override
@@ -63,7 +69,9 @@ class RulerFrameState extends State<RulerFrame> {
                     child: CustomPaint(
                       key: const Key('ruler-corner'),
                       painter: RulerCornerPainter(
-                          page: widget.page, repaint: _cornerRepaint),
+                          page: widget.page,
+                          chrome: widget.chrome,
+                          repaint: _cornerRepaint),
                     ),
                   ),
                 ),
@@ -76,6 +84,7 @@ class RulerFrameState extends State<RulerFrame> {
                         camera: widget.camera,
                         page: widget.page,
                         pointer: pointer,
+                        chrome: widget.chrome,
                         repaint: _repaint,
                       ),
                     ),
@@ -98,6 +107,7 @@ class RulerFrameState extends State<RulerFrame> {
                         camera: widget.camera,
                         page: widget.page,
                         pointer: pointer,
+                        chrome: widget.chrome,
                         repaint: _repaint,
                       ),
                     ),

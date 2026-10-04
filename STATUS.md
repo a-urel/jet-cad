@@ -1,5 +1,49 @@
 # jet-cad — project status
 
+**2026-10-04 — dark theme: plan EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#2](https://github.com/a-urel/jet-cad/pull/2), a merge
+commit, on the human's word ("main'e merge et", 2026-10-04), before the
+look below was given (branch `claude/dreamy-gates-2kgh4o`, off `main` at
+`5ba6fb2`; Tasks 1–6 at `23314be`..`36902c0`, Task 7's docs on top; the
+ledger archive, `docs/superpowers/ledgers/2026-10-04-dark-theme/`, at
+`de2b75e`; then `main` merged in for PR #1, the one conflict being
+`PageChromePainter.shouldRepaint`, resolved to keep both terms: the grid
+switch and the palettes). Copilot's PR review: no findings. Results:
+[2026-10-04-dark-theme-results.md](docs/superpowers/notes/2026-10-04-dark-theme-results.md);
+spec [2026-10-04-dark-theme-design.md](docs/superpowers/specs/2026-10-04-dark-theme-design.md)
+rev 2 (approved "Onaylıyorum"), with "Amended at execution" (R-C4-1,
+R-C4-2, R-C5-1, R-C2-1, R-C6-2); plan
+[2026-10-04-dark-theme.md](docs/superpowers/plans/2026-10-04-dark-theme.md).
+- **What landed:**
+  - `ChromePalette` and `PaperPalette` (`canvas_palette.dart`): the host's
+    theme decides the panels and the canvas chrome; the paper keeps the
+    document's colour, and the grid, breaks, selection, grips, previews
+    and snap follow the paper (`forPaper`, ACI 7's switch).
+  - The painters and both tool paint methods take their palettes;
+    `PlannerShell` / `ServiceView` derive them from the theme and the page
+    (`scheme.surface` with no page); both apps add `darkTheme` and
+    `ThemeMode.system`.
+  - Canvas UI: the swatch border and the filled text entry (the two
+    deliberate light-theme changes), the status caption's ink from the
+    status over the paper; the selected symbol cell's own ink, a
+    literal-colour source scan, a live theme switch.
+  - Light theme on light paper is pixel-identical; export, walls, the
+    file format and the engine unchanged.
+- **Reviews:** six task reviews: Tasks 1, 2 and 4 Approved; 3, 5 and 6
+  "Needs fixes" (minor, test-only), fixed in 3b, 5b and 6b. M-DT-1..20
+  all killed.
+- **Gates** (Flutter 3.47.6, Linux): render +1303 ~1 −7 (standing),
+  planner +1211, restaurant symbols +94, app +201, demo +18, dev harness
+  +82; analyze and format clean throughout; engine untouched (+1241 −2
+  standing). `flutter build web --release` ✓ for both apps; a Chromium
+  smoke under a dark colour scheme, screenshots in
+  `docs/superpowers/notes/2026-10-04-dark-theme/`.
+- **Owed:** the human's look on macOS and web, both themes (spec exit
+  gate 5: four papers per theme, the symbol list, the layer panel, the
+  service view with statuses, a live OS theme switch), never simulated.
+  The macOS build was not run here (Linux container).
+- **Next:** the human's look (owed, above). After that, the human's choice of the next sub-project.
+
 **Last updated:** 2026-10-04 (09c-2 MERGED into `main` at `43dd020`; see below). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and

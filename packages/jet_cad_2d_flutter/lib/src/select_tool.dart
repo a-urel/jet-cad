@@ -16,6 +16,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'grip_cache.dart'
     show GripCache, GripRef, kTouchGripHitPixels, movableKey;
+import 'canvas_palette.dart';
 import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
@@ -95,17 +96,15 @@ class SelectTool extends Tool {
   final DragPoint _dragPoint = DragPoint();
   final SnapResult _snapScratch = SnapResult();
   MouseCursor _cursor = MouseCursor.defer;
+  // Coloured from the overlay's paper set where they are drawn (dark theme
+  // spec D5): the guide and the preview `preview`, the marker `snap`.
   final Paint _guidePaint = Paint()
-    ..color = kPreviewColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.0;
   final Paint _markerPaint = Paint()
-    ..color = kSnapMarkerColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = kSnapMarkerStrokePixels;
-  final Paint _previewPaint = Paint()
-    ..color = kPreviewColor
-    ..style = PaintingStyle.stroke;
+  final Paint _previewPaint = Paint()..style = PaintingStyle.stroke;
 
   /// What the press landed on; null while idle.
   PressClass? get pressClass => _phase == ToolPhase.idle ? null : _class;
@@ -786,16 +785,19 @@ class SelectTool extends Tool {
   }
 
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {
     final drag = _drag;
     if (drag != null && _phase == ToolPhase.dragging) {
+      _guidePaint.color = paper.preview;
+      _markerPaint.color = paper.snap;
       _paintGuide(canvas, camera.worldToScreenMatrix, drag);
       return;
     }
     final rect = bandScreen;
     if (rect == null) return;
     final crossing = _bandMode == BandMode.crossing;
-    final color = crossing ? kCrossingBandColor : kWindowBandColor;
+    final color = crossing ? paper.crossingBand : paper.windowBand;
     canvas.drawRect(rect, Paint()..color = color.withAlpha(kBandFillAlpha));
     final stroke = Paint()
       ..color = color
@@ -867,9 +869,11 @@ class SelectTool extends Tool {
   /// document and the selection size. An object reshape's preview is its
   /// provider's pieces, in the same one path (07 D11).
   @override
-  void paintWorldOverlay(Canvas canvas, Vector2 origin, double scale) {
+  void paintWorldOverlay(
+      Canvas canvas, Vector2 origin, double scale, PaperPalette paper) {
     final drag = _drag;
     if (drag == null || drag.kind != DragKind.reshape) return;
+    _previewPaint.color = paper.preview;
     final pieces = drag.objectPreview;
     if (pieces != null) {
       if (pieces.isEmpty) return;
