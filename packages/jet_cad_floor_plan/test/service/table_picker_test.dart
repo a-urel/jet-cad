@@ -238,6 +238,62 @@ void main() {
         reason: 'B\'s top');
   });
 
+  test(
+      'TP11 one leaf map shared by a build: a definition whose lowest-handle '
+      'leaf is not in its lowest slot keeps its top; its box holds every '
+      'leaf', () {
+    final doc = plan();
+    EntityRecord line(Handle h, Handle owner) => EntityRecord(
+          handle: h,
+          owner: owner,
+          kind: EntityKind.line,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.byLayerLinetype,
+          linetypeScale: 1.0,
+          geomIndex: 0,
+          color: const ByLayerColor(),
+          lineweight: kByLayer,
+          transparency: kByLayer,
+          flags: 0,
+        );
+    GeometryPayload segment(double x0, double y0, double x1, double y1) =>
+        GeometryPayload(
+            coords: Float64List.fromList([x0, y0, x1, y1]),
+            scalars: Float64List(0));
+    // A stray line takes slot 0; removed once the tables are placed, it
+    // leaves that slot to the next leaf, whose handle is the highest.
+    final stray = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+        record: line(stray, doc.rootHandle), payload: segment(0, 0, 10, 10)));
+    final a = placeTurned(doc, tableSymbol(), Vector2(41000, -27500));
+    final b = placeTurned(doc, trapezoidTable, Vector2(-38000, 26000));
+    doc.commands.execute(RemoveEntityCommand(stray));
+    // B's definition gains an open leaf right of its top, past its box.
+    final added = doc.handleSeed.next();
+    doc.commands.execute(AddEntityCommand(
+        record: line(added, b.definition),
+        payload: segment(1600, 300, 2400, 300)));
+    final leaves = doc.leavesByOwner()[b.definition]!;
+    expect(doc.entities.handleAt(leaves.first), added,
+        reason: 'premise: the added leaf is in the definition\'s lowest slot');
+
+    final picker = TablePicker(doc);
+    expect(
+        picker.candidates.map((c) => c.table.instance), [a.handle, b.handle]);
+    final top = picker.candidates[1].top! as PolygonTop;
+    expect(top.xy, [200, 300, 1600, 300, 1300, 1000, 500, 900],
+        reason: 'the lowest handle, not the lowest slot');
+    for (final d in [a.definition, b.definition]) {
+      expect((tableTopOf(doc, d, doc.leavesByOwner())! as PolygonTop).xy,
+          (tableTopOf(doc, d)! as PolygonTop).xy,
+          reason: 'the shared map and the scan agree');
+    }
+    expect(picker.pick(worldOf(b, 2350, 310))?.table.instance, b.handle,
+        reason: 'inside the box only through the added leaf');
+    expect(picker.pick(worldOf(b, 2450, 310)), isNull);
+    expect(picker.pick(worldOf(a, 900, 100))?.table.instance, a.handle);
+  });
+
   test('TP8 an open first leaf is no top: picked by its box (R-8, F-7)', () {
     const open = FurnitureSymbol(
       key: 'test.table.open',

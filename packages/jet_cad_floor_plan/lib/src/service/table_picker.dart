@@ -74,9 +74,10 @@ final class CircleTop extends TableTop {
 /// The top of [definition] in [doc]: its lowest-handle leaf, when that is
 /// a closed polyline (its last vertex repeating its first, by exact `==`)
 /// or a circle; null otherwise (such a table is not filled, R-8, and is
-/// picked by its box alone).
-TableTop? tableTopOf(DraftDocument doc, Handle definition) {
-  final leaf = firstLeafOf(doc, definition);
+/// picked by its box alone). [leavesByOwner] as for [firstLeafOf].
+TableTop? tableTopOf(DraftDocument doc, Handle definition,
+    [Map<Handle, List<int>>? leavesByOwner]) {
+  final leaf = firstLeafOf(doc, definition, leavesByOwner);
   if (leaf == null) return null;
   final payload = leaf.payload;
   switch (leaf.kind) {
@@ -155,6 +156,9 @@ class TablePicker {
 
   List<PickCandidate> _build() {
     final out = <PickCandidate>[];
+    // One entity-store scan per build, shared by every definition not yet
+    // cached, never one per definition (`DraftDocument.definitionBounds`).
+    Map<Handle, List<int>>? leaves;
     for (final t in TableSurvey.of(document).tables) {
       final node = document.tree[t.instance];
       if (node is! InstanceNode) continue;
@@ -163,13 +167,17 @@ class TablePicker {
       final det = node.transform.determinant;
       if (det == 0 || !det.isFinite) continue;
       final box = _boxes.putIfAbsent(
-          t.definition, () => document.definitionBounds(t.definition));
+          t.definition,
+          () => document.definitionBounds(
+              t.definition, leaves ??= document.leavesByOwner()));
       if (box.isEmpty) continue;
       out.add(PickCandidate(
           table: t,
           inverse: node.transform.invert(),
           top: _tops.putIfAbsent(
-              t.definition, () => tableTopOf(document, t.definition)),
+              t.definition,
+              () => tableTopOf(
+                  document, t.definition, leaves ??= document.leavesByOwner())),
           box: box,
           locked: layer?.locked ?? false,
           scale: math.sqrt(det.abs())));

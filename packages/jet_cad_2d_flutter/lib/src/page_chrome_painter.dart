@@ -216,6 +216,8 @@ class PageChromePainter extends CustomPainter {
     }
   }
 
+  /// The camera and the page arrive through `repaint`; [grid] arrives
+  /// only with a rebuild.
   @override
-  bool shouldRepaint(PageChromePainter old) => false;
+  bool shouldRepaint(PageChromePainter old) => grid != old.grid;
 }

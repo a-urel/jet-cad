@@ -150,6 +150,17 @@ mode** built in; what is missing for that comes first.
   (no top pass, no box pass, the lowest handle among boxes, the world
   bounds, an unscaled reach) are red. Gates: planner 1,167, demo 17;
   engine and render untouched.
+- **Review fixes for the two commits above** (a codex review of each):
+  `PageChromePainter.shouldRepaint` answers `grid != old.grid`, so a
+  rebuild that only flips `grid` repaints (no mode switch does that yet:
+  each mode mounts its own painter); `TablePicker` builds
+  `leavesByOwner()` once per candidate build and hands it to
+  `definitionBounds` and `tableTopOf` (`firstLeafOf` takes it too), not
+  one entity-store scan per definition. Tests: the painter's rebuild test,
+  TP11; the mutants (`shouldRepaint` always false, always true; the shared
+  map's lowest slot taken for the lowest handle; a leaf dropped) are red.
+  Gates: engine 1,241 + 2 standing, render 1,241 + 1 skip + 7 standing,
+  planner 1,168, app 201, demo 17.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
   then the roadmap.
 
