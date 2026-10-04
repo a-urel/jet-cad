@@ -1,254 +1,43 @@
 {
-    // Only the live 2D line is launchable from here. The OCCT 3D line
-    // (`apps/dev_harness`, `packages/jet_cad`) is dormant -- see STATUS.md --
-    // and its configurations were what F5 kept opening.
+    // The two applications, on macOS and on the web (Chrome). The 2D
+    // harness's measurement runs (`apps/dev_harness_2d`) are no longer
+    // listed here; `git log -- .vscode/launch.json` keeps them.
+    //
+    // VS Code remembers the selected configuration by name: if F5 opens the
+    // wrong one, pick it once from the Run and Debug dropdown.
     "version": "0.2.0",
     "configurations": [
         {
-            // First in the list, so F5 lands here.
-            //
-            // Ordering alone is not enough: VS Code remembers the selected
-            // configuration by name, and a remembered name wins over list
-            // order. Every configuration here was renamed once for exactly
-            // that reason -- a remembered name that no longer exists is
-            // discarded, and the first entry becomes the default again. If
-            // F5 ever opens the wrong one, pick it once from the Run and
-            // Debug dropdown; the choice sticks from then on.
-            //
-            // The naked-eye corpus: ~60 entities, built to make a tile seam
-            // visible. `ENTITIES` is not passed -- it does not reach this
-            // corpus, and passing it would suggest otherwise.
-            "name": "2d: seam check -- tiles ON",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=TILES=on",
-                "--dart-define=CORPUS=simple"
-            ]
-        },
-        {
-            // The control the seam check is read against: same drawing, same
-            // camera, no tile cache. A line that differs between the two is
-            // the cache's doing.
-            "name": "2d: seam check -- tiles off (control)",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=CORPUS=simple"
-            ]
-        },
-        {
-            // The measurement corpus: 50,000 entities, what every number in
-            // `docs/superpowers/notes/` was taken against.
-            //
-            // TILES defaults to `off` in `main.dart`, so without the define
-            // below the tile cache never runs and the frame path under test
-            // is not the one being exercised.
-            "name": "2d: measure 50k -- tiles ON, profile",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=TILES=on",
-                "--dart-define=ENTITIES=50000"
-            ]
-        },
-        {
-            // The control: same app, same document, tile cache off. What a
-            // seam looks like here is what it looked like before the cache.
-            "name": "2d: measure 50k -- tiles off, profile",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=ENTITIES=50000"
-            ]
-        },
-        {
-            // **The fills eyeball run.** Plan D's five window checks -- a
-            // fill is filled, the higher-handle stroke stays visible OVER
-            // it, a filled circle meets its own outline at every zoom, a
-            // hairline-layer fill does not fade, a translucent fill shows
-            // what is under it -- and Plan B's four and Plan C's five, which
-            // one run discharges together. See STATUS.md's "Resume here".
-            //
-            // `SPIKE_FILL_SCALE=20` is what makes them checkable at all: at
-            // the corpus's own room size a fill lands on screen at 0.7 to
-            // 2.7 logical pixels. **Do not read timings off this run** --
-            // the drawing is not the measured one. Use the configuration
-            // below for that.
-            "name": "2d: GPU spike -- fills ON, eyeball scale",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=RUN_GPU_SPIKE=true",
-                "--dart-define=ENTITIES=10000",
-                "--dart-define=SPIKE_DEFS=20",
-                "--dart-define=SPIKE_INSTANCES=150",
-                "--dart-define=SPIKE_FRAMES=30",
-                "--dart-define=SPIKE_REPEATS=3",
-                "--dart-define=SPIKE_FILLS=true",
-                "--dart-define=SPIKE_FILL_SCALE=20"
-            ]
-        },
-        {
-            // The same run at the corpus's own room size -- no
-            // `SPIKE_FILL_SCALE`, so the drawing is the one every number in
-            // `docs/superpowers/notes/2026-09-01-plan-d-results.md` was
-            // taken against. This is the configuration whose GSPIKE lines
-            // are worth recording; the one above is for the eye only.
-            "name": "2d: GPU spike -- fills ON, measurement scale",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=RUN_GPU_SPIKE=true",
-                "--dart-define=ENTITIES=10000",
-                "--dart-define=SPIKE_DEFS=20",
-                "--dart-define=SPIKE_INSTANCES=150",
-                "--dart-define=SPIKE_FRAMES=30",
-                "--dart-define=SPIKE_REPEATS=3",
-                "--dart-define=SPIKE_FILLS=true"
-            ]
-        },
-        {
-            // **Criterion 11's pair, arm one.** `SPIKE_TEXT=true` puts labels
-            // in the corpus -- `kPatchedLabelCount` of them deliberately
-            // patched -- and `DRAW_TEXT` (unset here, so its own default of
-            // `true`) means arm C draws them. Read this configuration and the
-            // one below as a DIFFERENCE, not as two numbers on their own:
-            // neither run's timings mean anything by itself, only the gap
-            // between this run's and the control's isolates the cost of
-            // drawing text.
-            "name": "2d: GPU spike -- text ON (criterion 11, DRAW_TEXT=true)",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=RUN_GPU_SPIKE=true",
-                "--dart-define=ENTITIES=10000",
-                "--dart-define=SPIKE_DEFS=20",
-                "--dart-define=SPIKE_INSTANCES=150",
-                "--dart-define=SPIKE_FRAMES=30",
-                "--dart-define=SPIKE_REPEATS=3",
-                "--dart-define=SPIKE_FILLS=true",
-                "--dart-define=SPIKE_TEXT=true"
-            ]
-        },
-        {
-            // **Criterion 11's pair, arm two -- the control.** The same
-            // corpus (`SPIKE_TEXT=true`, so the labels and their patches are
-            // still there to composite around) but `DRAW_TEXT=false`: the
-            // painter suppresses every text op, so arm C draws nothing text
-            // touches. Read only as a difference against the configuration
-            // above -- see its comment for why.
-            "name": "2d: GPU spike -- text ON, DRAW_TEXT=false (criterion 11 control)",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=RUN_GPU_SPIKE=true",
-                "--dart-define=ENTITIES=10000",
-                "--dart-define=SPIKE_DEFS=20",
-                "--dart-define=SPIKE_INSTANCES=150",
-                "--dart-define=SPIKE_FRAMES=30",
-                "--dart-define=SPIKE_REPEATS=3",
-                "--dart-define=SPIKE_FILLS=true",
-                "--dart-define=SPIKE_TEXT=true",
-                "--dart-define=DRAW_TEXT=false"
-            ]
-        },
-        {
-            // Plan F: four arms (D is DraftCanvas on residentGpu), the ten
-            // trigger rebuilds per repeat, the band-exit phase and the
-            // allocation probe. The same corpus as the criterion-11 run.
-            "name": "2d: GPU spike -- Plan F (arm D, triggers, band exit, probe)",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=RUN_GPU_SPIKE=true",
-                "--dart-define=ENTITIES=10000",
-                "--dart-define=SPIKE_DEFS=20",
-                "--dart-define=SPIKE_INSTANCES=150",
-                "--dart-define=SPIKE_FRAMES=30",
-                "--dart-define=SPIKE_REPEATS=3",
-                "--dart-define=SPIKE_FILLS=true",
-                "--dart-define=SPIKE_TEXT=true"
-            ]
-        },
-        {
-            // The main view on the resident backend, for the eye: pan and
-            // zoom by hand, watch the rebuild land past 2x, pan far off the
-            // fitted view and look for an empty edge.
-            "name": "2d: main view -- BACKEND=residentGpu",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "flutterMode": "profile",
-            "toolArgs": [
-                "--dart-define=BACKEND=residentGpu",
-                "--dart-define=ENTITIES=10000"
-            ]
-        },
-        {
-            // Debug mode: hot reload and breakpoints, at the cost of numbers
-            // that mean nothing -- `refuseDebugMode()` in the rig refuses to
-            // record from a debug build, and the same caution applies to
-            // anything you judge by eye here.
-            "name": "2d: measure 50k -- tiles ON, debug",
-            "cwd": "apps/dev_harness_2d",
-            "program": "lib/main.dart",
-            "request": "launch",
-            "type": "dart",
-            "deviceId": "macos",
-            "toolArgs": [
-                "--dart-define=TILES=on",
-                "--dart-define=ENTITIES=50000"
-            ]
-        },
-        {
-            // The product application, sub-project 01. Not an instrument:
-            // nothing here is measured, and F5 should keep landing on the
-            // harness entries above it.
             "name": "floor_planner: macOS",
             "cwd": "apps/floor_planner",
             "program": "lib/main.dart",
             "request": "launch",
             "type": "dart",
             "deviceId": "macos"
+        },
+        {
+            "name": "floor_planner: web",
+            "cwd": "apps/floor_planner",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "chrome"
+        },
+        {
+            "name": "restaurant_demo: macOS",
+            "cwd": "apps/restaurant_demo",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "macos"
+        },
+        {
+            "name": "restaurant_demo: web",
+            "cwd": "apps/restaurant_demo",
+            "program": "lib/main.dart",
+            "request": "launch",
+            "type": "dart",
+            "deviceId": "chrome"
         }
     ]
 }
