@@ -3,7 +3,8 @@
 //
 // Two dining areas (umbrella decision 12), each a FloorPlanController over
 // a plan kept in memory; a Design / Service toggle that asks before it
-// discards service edits; selection by table number; and a log of the
+// discards service edits; selection by table number; table groups merged
+// and split from the service bar (table-groups spec G6); and a log of the
 // API's state. An example and an integration surface, not a product.
 import 'dart:math' as math;
 
@@ -127,10 +128,13 @@ class DemoHomeState extends State<DemoHome> {
           '${a.name}: selected {${(c.selectedTables.value.toList()..sort()).join(', ')}}'));
       c.dirty.addListener(
           () => _log('${a.name}: ${c.dirty.value ? 'edited' : 'saved'}'));
-      // The tables and warnings follow every change of the active plan.
-      c.revision.addListener(() {
-        if (mounted) setState(() {});
-      });
+      // The tables and warnings follow every change of the active plan;
+      // the groups line follows the groups and their statuses.
+      for (final l in [c.revision, c.tableGroups, c.groupStatuses]) {
+        l.addListener(() {
+          if (mounted) setState(() {});
+        });
+      }
     }
   }
 
@@ -207,8 +211,22 @@ class DemoHomeState extends State<DemoHome> {
 
   void _setStatus(String name) {
     final c = area.controller;
-    final next = Map<String, TableStatus>.of(c.tableStatuses.value);
     final status = kStatuses[name];
+    // A selected group gets a group status (G6), which overrides its
+    // members' own; Free clears it.
+    final group = c.selectedGroup.value;
+    if (group != null) {
+      final next = Map<String, TableStatus>.of(c.groupStatuses.value);
+      if (status == null) {
+        next.remove(group);
+      } else {
+        next[group] = status;
+      }
+      c.setGroupStatus(next);
+      _log('${area.name}: $name for $group');
+      return;
+    }
+    final next = Map<String, TableStatus>.of(c.tableStatuses.value);
     for (final n in c.selectedTables.value) {
       if (status == null) {
         next.remove(n);
@@ -235,6 +253,127 @@ class DemoHomeState extends State<DemoHome> {
     _log('${area.name}: random statuses for ${next.length} tables');
   }
 
+  /// Orders numbers and group ids as people read them: a shared prefix,
+  /// then the digits by value (`G2` before `G10`, `3` before `12`).
+  static int byNumber(String a, String b) {
+    final x = _tail.firstMatch(a), y = _tail.firstMatch(b);
+    if (x != null && y != null && x[1] == y[1]) {
+      final order = BigInt.parse(x[2]!).compareTo(BigInt.parse(y[2]!));
+      if (order != 0) return order;
+    }
+    return a.compareTo(b);
+  }
+
+  static final RegExp _tail = RegExp(r'^(\D*)(\d+)$');
+  static final RegExp _groupId = RegExp(r'^G(\d+)$');
+
+  static String _sorted(Iterable<String> numbers) =>
+      (numbers.toList()..sort(byNumber)).join(', ');
+
+  /// `G<n>`, n the largest numeric suffix among [ids] plus one; `G1` when
+  /// none has one (G6).
+  static String nextGroupId(Iterable<String> ids) {
+    var max = BigInt.zero;
+    for (final id in ids) {
+      final m = _groupId.firstMatch(id);
+      if (m == null) continue;
+      final n = BigInt.parse(m[1]!);
+      if (n > max) max = n;
+    }
+    return 'G${max + BigInt.one}';
+  }
+
+  /// G6's merge rule for the requested [numbers] over [groups]: the groups
+  /// to set and the id merged into.
+  ///
+  /// **Grow:** when exactly one group has a member among [numbers], that
+  /// group grows by the other numbers under its id and label. A host cannot
+  /// see which members are selectable (locked or hidden layers), but a
+  /// selection always holds every selectable member of a group it touches,
+  /// so "touches exactly one group" stands for "includes all the selectable
+  /// members of exactly one group" (ruling R-C5-1).
+  ///
+  /// **New group:** otherwise [numbers] leave every group they are in (a
+  /// group left empty goes) and form [nextGroupId] of the groups before the
+  /// merge.
+  static ({Map<String, TableGroup> groups, String id}) mergeGroups(
+      Map<String, TableGroup> groups, Set<String> numbers) {
+    final touched = [
+      for (final e in groups.entries)
+        if (e.value.members.any(numbers.contains)) e.key
+    ];
+    if (touched.length == 1) {
+      final id = touched.single;
+      final grown = groups[id]!;
+      return (
+        groups: {
+          ...groups,
+          id: TableGroup(
+              members: {...grown.members, ...numbers}, label: grown.label),
+        },
+        id: id,
+      );
+    }
+    final id = nextGroupId(groups.keys);
+    final next = <String, TableGroup>{};
+    for (final e in groups.entries) {
+      final rest = e.value.members.difference(numbers);
+      if (rest.length == e.value.members.length) {
+        next[e.key] = e.value;
+      } else if (rest.isNotEmpty) {
+        next[e.key] = TableGroup(members: rest, label: e.value.label);
+      }
+    }
+    next[id] = TableGroup(members: numbers);
+    return (groups: next, id: id);
+  }
+
+  /// The service bar's Merge (G6): any request is accepted. A group the
+  /// merge empties takes its group status with it (ruling R-C5-2).
+  void _merge(Area a, Set<String> numbers) {
+    final c = a.controller;
+    final before = c.tableGroups.value;
+    final merged = mergeGroups(before, numbers);
+    c.setTableGroups(merged.groups);
+    final gone = {
+      for (final id in before.keys)
+        if (!merged.groups.containsKey(id)) id
+    };
+    if (gone.any(c.groupStatuses.value.containsKey)) {
+      c.setGroupStatus({...c.groupStatuses.value}
+        ..removeWhere((id, _) => gone.contains(id)));
+    }
+    _log('${a.name}: Merged {${_sorted(numbers)}} as ${merged.id}');
+  }
+
+  /// The service bar's Split (G6): the group goes, and its status with it.
+  void _split(Area a, String id) {
+    final c = a.controller;
+    c.setTableGroups({...c.tableGroups.value}..remove(id));
+    c.setGroupStatus({...c.groupStatuses.value}..remove(id));
+    _log('${a.name}: Split $id');
+  }
+
+  /// The name [kStatuses] gives [status], or `status` for another one.
+  static String _statusName(TableStatus status) => kStatuses.entries
+      .firstWhere((e) => e.value == status,
+          orElse: () => const MapEntry('status', null))
+      .key;
+
+  /// The groups line: `G1: 3+7+12 (Bill)`, by id.
+  String _groupsText(FloorPlanController c) {
+    final groups = c.tableGroups.value;
+    if (groups.isEmpty) return 'none';
+    final statuses = c.groupStatuses.value;
+    return [
+      for (final id in groups.keys.toList()..sort(byNumber))
+        [
+          '$id: ${(groups[id]!.members.toList()..sort(byNumber)).join('+')}',
+          if (statuses[id] case final s?) ' (${_statusName(s)})',
+        ].join()
+    ].join(', ');
+  }
+
   void _select() {
     final numbers = {for (final n in _number.text.split(',')) n.trim()}
       ..remove('');
@@ -243,7 +382,8 @@ class DemoHomeState extends State<DemoHome> {
 
   @override
   Widget build(BuildContext context) {
-    final c = area.controller;
+    final a = area;
+    final c = a.controller;
     final title = Theme.of(context).textTheme.titleSmall;
     return Scaffold(
       appBar: AppBar(
@@ -292,6 +432,9 @@ class DemoHomeState extends State<DemoHome> {
                   '${e.bytes.length} bytes'),
               onTableTap: (n) => _log('${area.name}: tapped $n'),
               onLayoutChanged: () => _log('${area.name}: layout changed'),
+              onGroupTap: (id, n) => _log('${a.name}: group $id tapped at $n'),
+              onMergeRequested: (numbers) => _merge(a, numbers),
+              onSplitRequested: (id) => _split(a, id),
             ),
           ),
           SizedBox(
@@ -337,7 +480,7 @@ class DemoHomeState extends State<DemoHome> {
                     onPressed: _select,
                     child: const Text('Select')),
                 const SizedBox(height: 16),
-                Text('Status of the selected tables', style: title),
+                Text('Status of the selected tables or group', style: title),
                 const SizedBox(height: 4),
                 Wrap(spacing: 6, runSpacing: 6, children: [
                   for (final name in kStatuses.keys)
@@ -360,6 +503,9 @@ class DemoHomeState extends State<DemoHome> {
                             for (final t in c.tables)
                               '${t.number ?? '—'} (${t.seats})'
                           ].join(', ')),
+                const SizedBox(height: 8),
+                Text('Groups', style: title),
+                Text(key: const Key('groups'), _groupsText(c)),
                 for (final (i, w) in c.numberingWarnings.indexed)
                   Text(w,
                       key: Key('numbering-warning-$i'),

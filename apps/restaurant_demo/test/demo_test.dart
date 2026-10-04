@@ -8,13 +8,14 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show LogicalKeyboardKey, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
-    show FloorPlanMode, TableStatus;
+    show FloorPlanMode, TableGroup, TableStatus;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
@@ -463,5 +464,329 @@ void main() {
         [for (var i = 1; i <= 6; i++) '$i']);
     expect(salon.numberingWarnings, isEmpty);
     expect(teras.numberingWarnings, isEmpty);
+  });
+
+  // Table-groups spec G6: Merge (grow or a new `G<n>`), Split, the status
+  // buttons by `selectedGroup`, the groups line and `onGroupTap`.
+
+  /// The numbers of [groupPlan]'s numbered tables in handle order: not
+  /// sorted. 8 sits on a visible locked layer, 9 on a hidden one.
+  const groupNumbers = ['12', '3', '7', '20', '5', '11', '8', '9'];
+
+  /// A Salon plan of eight tables numbered [groupNumbers], each off the
+  /// origin, turned, mirrored or both, of four kinds.
+  String groupPlan() {
+    final doc = newDocument(MetricModelMeasurer());
+    final entries = SymbolLibrary.decode(Uint8List.fromList(utf8.encode(
+            DraftDocumentCodec.encodeToString(
+                buildSymbolLibrary(restaurantCatalog)))))
+        .entries;
+    SymbolEntry entry(String key) => entries.firstWhere((e) => e.key == key);
+    final placements = [
+      ('restaurant.table.rect.four', Vector2(-3800, 2400), 1, false),
+      ('restaurant.table.round.six', Vector2(1600, 2900), 0, true),
+      ('restaurant.table.square.four', Vector2(4700, -700), 3, true),
+      ('restaurant.table.rect.six', Vector2(-2200, -2600), 2, true),
+      ('restaurant.table.round.four', Vector2(2100, -3100), 1, false),
+      ('restaurant.table.square.two', Vector2(-5600, -300), 3, false),
+      ('restaurant.table.round.two', Vector2(5900, 3300), 0, true),
+      ('restaurant.table.rect.four', Vector2(-600, 300), 1, true),
+    ];
+    for (final (key, at, turns, mirrored) in placements) {
+      doc.commands.execute(placeSymbol(doc, entry(key),
+          at: at, quarterTurns: turns, mirrored: mirrored));
+    }
+    final tables = TableSurvey.of(doc).tables.toList();
+    for (var i = 0; i < groupNumbers.length; i++) {
+      doc.commands.execute(SetEntityTextCommand(
+          tables[i].label!, groupNumbers[i], kTableLabelTag));
+    }
+    final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+    Handle layer(String name, {required bool visible, required bool locked}) {
+      final h = doc.handleSeed.next();
+      doc.commands.execute(AddLayerCommand(LayerRecord(
+          handle: h,
+          name: name,
+          color: const IndexedColor(5),
+          linetype: zero.linetype,
+          lineweight: zero.lineweight,
+          transparency: zero.transparency,
+          visible: visible,
+          locked: locked)));
+      return h;
+    }
+
+    doc.commands.execute(SetInstanceLayerCommand(
+        tables[6].instance, layer('Locked', visible: true, locked: true)));
+    doc.commands.execute(SetInstanceLayerCommand(
+        tables[7].instance, layer('Hidden', visible: false, locked: false)));
+    return DraftDocumentCodec.encodeToString(doc);
+  }
+
+  /// [groupPlan] in Salon, in the service.
+  Future<DemoHomeState> pumpGroups(WidgetTester tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': groupPlan()});
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    return demo;
+  }
+
+  /// The instance of the table numbered [n] in [demo]'s current area.
+  InstanceNode instanceOf(DemoHomeState demo, String n) {
+    final d = demo.area.controller.activeDocument;
+    return d.tree[TableSurvey.of(d).withNumber(n).single.instance]!
+        as InstanceNode;
+  }
+
+  /// The centre of table [n] on the screen: a restaurant table's base point
+  /// is its centre.
+  Offset centreOf(WidgetTester tester, DemoHomeState demo, String n) {
+    final c = demo.area.controller;
+    final node = instanceOf(demo, n);
+    final def = c.activeDocument.tree.definition(node.definition)!;
+    final s = c.camera.value
+        .worldToScreen(node.transform.transformPoint(def.basePoint));
+    return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
+  }
+
+  Future<void> tapTable(WidgetTester tester, DemoHomeState demo, String n,
+      {bool add = false}) async {
+    if (add) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.tapAt(centreOf(tester, demo, n),
+        kind: PointerDeviceKind.mouse);
+    if (add) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+  }
+
+  Future<void> selectByField(WidgetTester tester, String text) async {
+    await tester.enterText(byKey('select-number'), text);
+    await tester.tap(byKey('select'));
+    await tester.pump();
+  }
+
+  Future<void> press(WidgetTester tester, String key) async {
+    await tester.tap(byKey(key));
+    await tester.pump();
+    await tester.pump();
+  }
+
+  String groupsText(WidgetTester tester) =>
+      tester.widget<Text>(byKey('groups')).data!;
+
+  Map<String, Set<String>> membersOf(DemoHomeState demo) => {
+        for (final e in demo.area.controller.tableGroups.value.entries)
+          e.key: e.value.members
+      };
+
+  testWidgets(
+      'D16 G6: Merge makes G1, Merge again grows it; a tap on a member is '
+      'logged as the group\'s; Bill goes to the group; a drag moves the '
+      'group; Split drops the group and its status', (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    expect(groupsText(tester), 'none');
+
+    // Two tables by Shift taps, out of order.
+    await tapTable(tester, demo, '12');
+    await tapTable(tester, demo, '3', add: true);
+    expect(c.selectedTables.value, {'12', '3'});
+    await press(tester, 'service-merge');
+    expect(membersOf(demo), {
+      'G1': {'3', '12'}
+    });
+    expect(demo.log.first, 'Salon: Merged {3, 12} as G1');
+    expect(groupsText(tester), 'G1: 3+12');
+    expect(c.selectedGroup.value, 'G1');
+
+    // G1 plus a third table by the number field: 3 selects all of G1.
+    await selectByField(tester, '3, 7');
+    expect(c.selectedTables.value, {'3', '7', '12'});
+    await press(tester, 'service-merge');
+    expect(
+        membersOf(demo),
+        {
+          'G1': {'3', '7', '12'}
+        },
+        reason: 'grown under its id, no new group');
+    expect(demo.log.first, 'Salon: Merged {3, 7, 12} as G1');
+    expect(groupsText(tester), 'G1: 3+7+12');
+
+    // A tap on a table in no group reports no group.
+    await tapTable(tester, demo, '20');
+    expect(demo.log.first, 'Salon: tapped 20');
+    expect(c.selectedGroup.value, isNull);
+    // Per table while no group is selected.
+    await press(tester, 'status-eating');
+    expect(c.tableStatuses.value, {'20': DemoHomeState.kStatuses['Eating']});
+    expect(c.groupStatuses.value, isEmpty);
+
+    // A tap on a member selects the group and is logged as the group's.
+    await tapTable(tester, demo, '7');
+    expect(demo.log.take(3).toList(), [
+      'Salon: group G1 tapped at 7',
+      'Salon: tapped 7',
+      'Salon: selected {12, 3, 7}',
+    ]);
+    expect(c.selectedGroup.value, 'G1');
+    await press(tester, 'status-bill');
+    expect(c.groupStatuses.value, {'G1': DemoHomeState.kStatuses['Bill']});
+    expect(c.tableStatuses.value, {'20': DemoHomeState.kStatuses['Eating']},
+        reason: 'the members\' own statuses are left alone');
+    expect(demo.log.first, 'Salon: Bill for G1');
+    expect(groupsText(tester), 'G1: 3+7+12 (Bill)');
+
+    // A drag on a member moves every member by the same step, nothing else.
+    final before = {
+      for (final n in groupNumbers.take(5)) n: instanceOf(demo, n).transform
+    };
+    await tapTable(tester, demo, '20');
+    final g = await tester.startGesture(centreOf(tester, demo, '3'),
+        kind: PointerDeviceKind.mouse);
+    await g.moveBy(const Offset(40, 0));
+    await g.moveBy(const Offset(30, 25));
+    await g.up();
+    await tester.pump();
+    expect(demo.log.where((l) => l == 'Salon: layout changed'), hasLength(1));
+    final after = {
+      for (final n in before.keys) n: instanceOf(demo, n).transform
+    };
+    final step =
+        Vector2(after['3']!.e - before['3']!.e, after['3']!.f - before['3']!.f);
+    expect(step.length, greaterThan(100), reason: 'the drag moved 3');
+    for (final n in ['12', '7']) {
+      expect(after[n]!.e - before[n]!.e, moreOrLessEquals(step.x), reason: n);
+      expect(after[n]!.f - before[n]!.f, moreOrLessEquals(step.y), reason: n);
+      expect((
+        after[n]!.a,
+        after[n]!.b,
+        after[n]!.c,
+        after[n]!.d
+      ), (
+        before[n]!.a,
+        before[n]!.b,
+        before[n]!.c,
+        before[n]!.d
+      ), reason: 'only moved');
+    }
+    for (final n in ['20', '5']) {
+      expect(after[n], before[n], reason: '$n is in no group');
+    }
+
+    // Split: the group and its status go; table 20's own status stays.
+    expect(c.selectedGroup.value, 'G1', reason: 'the drag selected G1');
+    await press(tester, 'service-split');
+    expect(c.tableGroups.value, isEmpty);
+    expect(c.groupStatuses.value, isEmpty);
+    expect(c.tableStatuses.value, {'20': DemoHomeState.kStatuses['Eating']});
+    expect(demo.log.first, 'Salon: Split G1');
+    expect(groupsText(tester), 'none');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'D17 G6: a new group is G<largest suffix + 1> after a split; a merge '
+      'spanning two groups makes a new one, and the groups it empties go '
+      'with their statuses', (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    for (final pair in ['12, 3', '7, 20', '5, 11']) {
+      await selectByField(tester, pair);
+      await press(tester, 'service-merge');
+    }
+    expect(membersOf(demo), {
+      'G1': {'12', '3'},
+      'G2': {'7', '20'},
+      'G3': {'5', '11'},
+    });
+    await selectByField(tester, '7');
+    expect(c.selectedGroup.value, 'G2');
+    await press(tester, 'service-split');
+    expect(c.tableGroups.value.keys, unorderedEquals(['G1', 'G3']));
+
+    await selectByField(tester, '20, 7');
+    await press(tester, 'service-merge');
+    expect(
+        membersOf(demo),
+        {
+          'G1': {'12', '3'},
+          'G3': {'5', '11'},
+          'G4': {'7', '20'},
+        },
+        reason: 'G4, not a second G3');
+    expect(demo.log.first, 'Salon: Merged {7, 20} as G4');
+
+    await selectByField(tester, '3');
+    await press(tester, 'status-ordered');
+    await selectByField(tester, '11');
+    await press(tester, 'status-bill');
+    expect(c.groupStatuses.value.keys, unorderedEquals(['G1', 'G3']));
+    expect(groupsText(tester), 'G1: 3+12 (Ordered), G3: 5+11 (Bill), G4: 7+20');
+
+    // G1 and G3 together touch two groups: a new group, not a grown one.
+    await selectByField(tester, '11, 3');
+    expect(c.selectedTables.value, {'12', '3', '5', '11'});
+    await press(tester, 'service-merge');
+    expect(membersOf(demo), {
+      'G4': {'7', '20'},
+      'G5': {'12', '3', '5', '11'},
+    });
+    expect(demo.log.first, 'Salon: Merged {3, 5, 11, 12} as G5');
+    expect(c.groupStatuses.value, isEmpty,
+        reason: 'G1 and G3 are gone, so are their statuses (R-C5-2)');
+    expect(groupsText(tester), 'G4: 7+20, G5: 3+5+11+12');
+
+    // The id comes from the groups before the merge: G6, not a reused G1.
+    await selectByField(tester, '20, 5');
+    await press(tester, 'service-merge');
+    expect(membersOf(demo), {
+      'G6': {'7', '20', '12', '3', '5', '11'},
+    });
+    expect(demo.log.first, 'Salon: Merged {3, 5, 7, 11, 12, 20} as G6');
+  });
+
+  testWidgets(
+      'D18 G6: a POS-restored group with a locked and a hidden member grows '
+      '(neither is ever selected) and keeps its label', (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    c.setTableGroups({
+      'G7': TableGroup(members: {'12', '3', '8', '9'}, label: 'Window'),
+    });
+    await tester.pump();
+    await tapTable(tester, demo, '3');
+    expect(c.selectedTables.value, {'12', '3'},
+        reason: '8 is locked, 9 hidden');
+    expect(c.selectedGroup.value, 'G7');
+    await tapTable(tester, demo, '20', add: true);
+    expect(c.selectedTables.value, {'12', '3', '20'});
+    await press(tester, 'service-merge');
+    expect(c.tableGroups.value, {
+      'G7': TableGroup(members: {'12', '3', '8', '9', '20'}, label: 'Window')
+    });
+    expect(demo.log.first, 'Salon: Merged {3, 12, 20} as G7');
+    expect(groupsText(tester), 'G7: 3+8+9+12+20');
+  });
+
+  testWidgets(
+      'D19 G6 under a dark platform: merge, a group status, split paint '
+      'without an exception', (tester) async {
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    expect(Theme.of(tester.element(find.byType(DemoHome))).brightness,
+        Brightness.dark);
+    await selectByField(tester, '20, 5, 7');
+    await press(tester, 'service-merge');
+    expect(c.tableGroups.value.keys, ['G1']);
+    expect(tester.takeException(), isNull, reason: 'merged');
+    await press(tester, 'status-eating');
+    expect(c.groupStatuses.value.keys, ['G1']);
+    expect(tester.takeException(), isNull, reason: 'group status');
+    await press(tester, 'service-split');
+    expect(c.tableGroups.value, isEmpty);
+    expect(c.groupStatuses.value, isEmpty);
+    expect(tester.takeException(), isNull, reason: 'split');
   });
 }
