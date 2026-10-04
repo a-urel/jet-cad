@@ -5,7 +5,8 @@
 four of them blocking. All are applied **in place**; the
 [Revision log](#revision-log) maps each to its change. **Sub-project:** a follow-on to 14 (restaurant
 embedding); unnumbered until the human gives it a number.
-**Approval:** the human chose this as the next POS need ("Masa birleştirme
+**Approval:** revision 2 **approved** by the human ("Onaylıyorum, planı
+yaz", 2026-10-04). Before that, the human chose this as the next POS need ("Masa birleştirme
 / ayırma", 2026-10-04) and approved every decision below in the
 brainstorm:
 - the merge is the POS's runtime state, outside the document;

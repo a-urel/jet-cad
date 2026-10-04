@@ -1,5 +1,23 @@
 # jet-cad — project status
 
+**2026-10-04 — table groups (merging and splitting tables): spec
+APPROVED, plan WRITTEN, not started** (branch `claude/dreamy-gates-2kgh4o`,
+restarted from `main` at `4490cd9`). The human chose it as the next POS
+need ("Masa birleştirme / ayırma").
+- **Spec:** [2026-10-04-table-groups-design.md](docs/superpowers/specs/2026-10-04-table-groups-design.md)
+  rev 2. Revision 1 (`50d1504`) was reviewed independently, "Ready with
+  fixes", R-1..R-18 applied. The human approved revision 2.
+- **What it delivers:** POS-owned runtime groups (`setTableGroups`, keyed
+  by a POS group id; the document is untouched).
+  - **Look:** a purple frame, one label chip, and a group status that
+    overrides the members' own.
+  - **Behaviour:** a tap selects the whole group and reports
+    `onGroupTap`; a drag moves the whole group.
+  - **Toolbar:** Merge and Split buttons that only ask the host.
+- **Plan:** [2026-10-04-table-groups.md](docs/superpowers/plans/2026-10-04-table-groups.md),
+  six tasks.
+- **Next:** execute Task 1, on the human's word.
+
 **2026-10-04 — dark theme: plan EXECUTED and MERGED into `main`** through
 [a-urel/jet-cad#2](https://github.com/a-urel/jet-cad/pull/2), a merge
 commit, on the human's word ("main'e merge et", 2026-10-04), before the
