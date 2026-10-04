@@ -1,4 +1,4 @@
-import 'dart:ui' show Canvas, Offset, Size;
+import 'dart:ui' show Canvas, Offset, PointerDeviceKind, Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show KeyEvent, MouseCursor;
@@ -26,14 +26,43 @@ final class ToolPointerEvent {
     required this.meta,
     required this.alt,
     required this.pickRadiusWorld,
-  });
+    this.kind = PointerDeviceKind.mouse,
+    double? reachRadiusWorld,
+  }) : _reach = reachRadiusWorld;
 
   final Offset screen;
   final Vector2 world;
   final int pointer;
   final int buttons;
   final bool shift, control, meta, alt;
+
+  /// The precise pick radius (6 px on screen) for every kind of pointer.
   final double pickRadiusWorld;
+
+  /// What sent the event (spec 14t T1): a touch is a fingertip.
+  final PointerDeviceKind kind;
+
+  final double? _reach;
+
+  /// How far a miss at [pickRadiusWorld] may reach (spec 14t R-3): 24 px
+  /// on screen for a touch, [pickRadiusWorld] otherwise.
+  double get reachRadiusWorld => _reach ?? pickRadiusWorld;
+
+  /// Whether a fingertip sent this event (spec 14t T1).
+  bool get isTouch => kind == PointerDeviceKind.touch;
+}
+
+/// How `InteractionLayer` hands a tool a finger's press (spec 14t R-1).
+enum TouchPress {
+  /// The down is routed once the finger lifts, leaves the slop, or has
+  /// been held for `kTouchHoldBack`: for a tool whose down executes
+  /// nothing and whose `cancel` executes nothing.
+  press,
+
+  /// The down is routed only when the finger lifts, at the lift's
+  /// position; past the slop the finger's moves are hovers. For a tool
+  /// whose down acts (every drawing tool): a pinch never reaches it.
+  lift,
 }
 
 /// Everything a [Tool] needs to act: the document to mutate, the index to
@@ -84,6 +113,10 @@ abstract class Tool extends ChangeNotifier {
   KeyEventResult onKey(KeyEvent event, ToolContext ctx);
   void cancel(ToolContext ctx);
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport);
+
+  /// How a finger's press reaches this tool (spec 14t R-1). [TouchPress.lift]
+  /// unless the tool's down and its `cancel` execute nothing.
+  TouchPress get touchPress => TouchPress.lift;
 
   /// True while the tool is part-way through a shape; the shell disables
   /// its commands (spec 12a D6). False by default. A tool that changes it

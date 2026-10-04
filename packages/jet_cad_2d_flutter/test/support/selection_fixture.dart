@@ -40,8 +40,8 @@ final Transform2 kPlacement = Transform2.translation(300, -200)
 /// leaf on a hidden or locked layer.
 Handle addEntity(DraftDocument doc, Handle owner, EntityKind kind,
     List<double> coords, List<double> scalars,
-    {Handle? layer}) {
-  final handle = doc.handleSeed.next();
+    {Handle? layer, Handle? handle}) {
+  handle ??= doc.handleSeed.next();
   doc.commands.execute(AddEntityCommand(
     record: EntityRecord(
       handle: handle,
@@ -94,15 +94,15 @@ Handle addDefinition(DraftDocument doc, String name) {
 }
 
 Handle addInstance(DraftDocument doc, Handle def, Transform2 transform,
-    {Handle? parent}) {
-  final handle = doc.handleSeed.next();
+    {Handle? parent, Handle? layer, Handle? handle}) {
+  handle ??= doc.handleSeed.next();
   doc.commands.execute(AddNodeCommand(
     InstanceNode(
       handle: handle,
       parent: parent ?? doc.rootHandle,
       transform: transform,
       definition: def,
-      layer: ReservedHandles.layerZero,
+      layer: layer ?? ReservedHandles.layerZero,
     ),
   ));
   return handle;

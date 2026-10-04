@@ -2,9 +2,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/parametric/wall_geometry.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 

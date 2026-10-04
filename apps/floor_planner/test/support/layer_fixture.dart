@@ -9,13 +9,7 @@
 // colour, and the hidden layer is not layer 0.
 import 'dart:typed_data';
 
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/dimension.dart';
-import 'package:floor_planner/parametric/opening.dart';
-import 'package:floor_planner/parametric/room.dart';
-import 'package:floor_planner/parametric/separator.dart'
-    show ensureDashedLinetype;
-import 'package:floor_planner/parametric/wall.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/painting.dart' show Offset;
 import 'package:flutter_test/flutter_test.dart' show addTearDown;

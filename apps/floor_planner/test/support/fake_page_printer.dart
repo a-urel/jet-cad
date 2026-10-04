@@ -5,7 +5,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:floor_planner/export/page_printer.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 
 class PrintCall {

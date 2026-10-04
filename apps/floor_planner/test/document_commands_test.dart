@@ -8,13 +8,7 @@
 import 'dart:convert';
 
 import 'package:floor_planner/main.dart';
-import 'package:floor_planner/panel_focus.dart';
-import 'package:floor_planner/parametric/live_objects.dart';
-import 'package:floor_planner/parametric/opening.dart';
-import 'package:floor_planner/parametric/room.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/parametric/wall_tool.dart';
-import 'package:floor_planner/startup_plan.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';

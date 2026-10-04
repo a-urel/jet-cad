@@ -8,4 +8,7 @@ workspace:
   - packages/jet_cad_2d_flutter
   - apps/dev_harness
   - apps/dev_harness_2d
+  - packages/jet_cad_floor_plan
+  - packages/jet_cad_restaurant_symbols
   - apps/floor_planner
+  - apps/restaurant_demo

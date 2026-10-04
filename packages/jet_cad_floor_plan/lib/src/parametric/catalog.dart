@@ -1,0 +1,60 @@
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+
+import '../symbols/seating_component.dart';
+import '../symbols/symbol_component.dart';
+import 'box.dart';
+import 'dimension.dart';
+import 'opening.dart';
+import 'room.dart';
+import 'separator.dart';
+import 'wall.dart';
+
+/// The floor planner's parametric types (spec 07 D1, 08 D1, 10 D1, 11 D1):
+/// the Box, the Wall, the Opening, the room Separator, the Room and the
+/// Dimension. A box and a wall may be neighbours; each type's `generate`
+/// ignores the other's parameters. An opening is nobody's neighbour: it
+/// relates to its host wall by reference (08 D2). A separator and a room are
+/// nobody's neighbours either (their reach is empty, 10 D2, D3): walls and
+/// separators contribute places, and rooms read them (10 D16). A dimension
+/// is nobody's neighbour either (11 D3): it relates to the walls it measures
+/// by reference.
+///
+/// A type registered here must also be listed in `isParametricObject`
+/// (`layers/layer_picker.dart`), or the Layer picker treats its objects as
+/// plain groups and refuses to move them (spec 12b D12).
+final ParametricCatalog parametricCatalog = ParametricCatalog()
+  ..register<BoxParams>(
+      BoxParams.componentTypeId, BoxParams.fromJson, const BoxType())
+  ..register<WallParams>(
+      WallParams.componentTypeId, WallParams.fromJson, const WallType())
+  ..register<OpeningParams>(OpeningParams.componentTypeId,
+      OpeningParams.fromJson, const OpeningType())
+  ..register<SeparatorParams>(SeparatorParams.componentTypeId,
+      SeparatorParams.fromJson, const SeparatorType())
+  ..register<RoomParams>(
+      RoomParams.componentTypeId, RoomParams.fromJson, const RoomType())
+  ..register<DimensionParams>(DimensionParams.componentTypeId,
+      DimensionParams.fromJson, const DimensionType());
+
+/// Registers every component type the app's documents carry (spec 12a D8,
+/// S-1): [PageComponent], the parametric catalog's types, then
+/// [SymbolComponent] (spec 09 D1; not a parametric type), and the
+/// [SeatingComponent] (spec 14 S1; not a parametric type either). The one
+/// registration New, the sample and Open use — pass it as
+/// `DraftDocumentCodec.decode(…, registerComponents: registerAppComponents)`.
+/// Without the page's registration a file's page loads as preserve-unknown;
+/// without the catalog's, its walls, openings, rooms and dimensions do.
+///
+/// **Call it once per registry**: `PageComponent.register` replaces the
+/// page's store unconditionally, so a second call wipes a live page. (The
+/// catalog's registrations skip a type already registered.)
+void registerAppComponents(ComponentRegistry r) {
+  PageComponent.register(r);
+  parametricCatalog.registerComponents(r);
+  SymbolComponent.register(r);
+  SeatingComponent.register(r);
+}
+
+/// Builds and installs the document's parametric system.
+ParametricSystem installParametric(DraftDocument doc) =>
+    ParametricSystem(doc, parametricCatalog)..install();

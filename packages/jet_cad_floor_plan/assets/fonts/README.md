@@ -1,0 +1,20 @@
+# The planner's font
+
+`Roboto-Regular.ttf` (in `lib/fonts/`, so a host can declare the bare family
+from it: `packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf`, as
+`apps/floor_planner` does) is the family `Roboto` that `DraftDocument`'s
+Standard text style asks for; `ensureFloorPlanFonts` registers it too (spec
+14 V-11).
+The screen draws text in it, and the PDF export embeds the same bytes, so the
+screen, the text golden and the PDF use one font (spec 13 D7).
+
+- Source: `packages/jet_cad_2d_flutter/test/golden/fonts/Roboto-Regular.ttf`,
+  which came from Flutter 3.27.3's
+  `bin/cache/artifacts/material_fonts/Roboto-Regular.ttf`
+- SHA-256: `79e851404657dac2106b3d22ad256d47824a9a5765458edb72c9102a45816d95`
+- Licence: Apache 2.0, `Roboto_LICENSE.txt` beside it (registered with
+  `LicenseRegistry` under `Roboto` at start-up)
+- Copied unmodified, 2026-10-01, plan 13 Task 7
+
+`apps/floor_planner/test/export/export_font_test.dart` asserts that both
+files equal the vendored ones byte for byte.

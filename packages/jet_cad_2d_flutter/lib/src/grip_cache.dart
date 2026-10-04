@@ -18,6 +18,9 @@ const int kMaxGrips = 400;
 /// it (spec D2).
 const double kGripHitPixels = 7.0;
 
+/// A fingertip's reach to a grip or the rotation grip (spec 14t T4b).
+const double kTouchGripHitPixels = 24.0;
+
 /// Grips for a selected **root-level group** that an application object
 /// type owns — a parametric object, whose own leaves are generated and
 /// carry none (spec 07 D11). `GripCache` consults it; `GripDrag` builds a
@@ -273,12 +276,14 @@ class GripCache extends ChangeNotifier {
   bool get leafGripsLive =>
       document.commands.permissions.allows(Capability.geometry);
 
-  /// The grip under [screen] within [kGripHitPixels], or -1.
+  /// The grip under [screen] within [radius] screen pixels
+  /// ([kGripHitPixels] by default), or -1.
   ///
   /// The nearest wins, then the greater handle (coincident grips of two
   /// objects: the later-drawn one moves), then the lower ordinal. Nothing
   /// hits while leaf grips are not live.
-  int hitTest(Offset screen, Transform2 worldToScreen) {
+  int hitTest(Offset screen, Transform2 worldToScreen,
+      {double radius = kGripHitPixels}) {
     if (!leafGripsLive) return -1;
     final m = worldToScreen;
     var best = -1;
@@ -291,7 +296,7 @@ class GripCache extends ChangeNotifier {
       final dx = m.a * g.x + m.c * g.y + m.e - screen.dx;
       final dy = m.b * g.x + m.d * g.y + m.f - screen.dy;
       final d = math.sqrt(dx * dx + dy * dy);
-      if (d > kGripHitPixels) continue;
+      if (d > radius) continue;
       final h = ref.key.target.value;
       final better = best < 0 ||
           d < bestDistance ||
@@ -309,12 +314,24 @@ class GripCache extends ChangeNotifier {
 
   /// Whether [screen] is within [kGripHitPixels] of the rotation grip;
   /// never while it is not [rotatable].
-  bool hitsRotationGrip(Offset screen, Transform2 worldToScreen) {
-    if (!rotatable) return false;
+  bool hitsRotationGrip(Offset screen, Transform2 worldToScreen) =>
+      rotationGripDistance(screen, worldToScreen) <= kGripHitPixels;
+
+  /// The screen distance from [screen] to the rotation grip's centre;
+  /// infinite while it is not [rotatable] (spec 14t T4b).
+  double rotationGripDistance(Offset screen, Transform2 worldToScreen) {
+    if (!rotatable) return double.infinity;
     final b = _box!;
-    return (rotationGripOf(b, worldToScreen, _frame).centre - screen)
-            .distance <=
-        kGripHitPixels;
+    return (rotationGripOf(b, worldToScreen, _frame).centre - screen).distance;
+  }
+
+  /// The screen distance from [screen] to grip [index]'s centre.
+  double gripDistance(int index, Offset screen, Transform2 worldToScreen) {
+    final g = _grips[index].grip;
+    final m = worldToScreen;
+    final dx = m.a * g.x + m.c * g.y + m.e - screen.dx;
+    final dy = m.b * g.x + m.d * g.y + m.f - screen.dy;
+    return math.sqrt(dx * dx + dy * dy);
   }
 
   /// A hover change notifies the selection controller with the same keys.

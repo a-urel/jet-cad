@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart'
     show
+        PointerDeviceKind,
         PointerExitEvent,
         PointerHoverEvent,
         kMiddleMouseButton,
-        kPrimaryButton;
+        kPressTimeout,
+        kPrimaryButton,
+        kTouchSlop;
 import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -18,6 +23,14 @@ import 'tool.dart';
 /// because this is the one place that performs the conversion; the tool and
 /// its tests import it back.
 const double kPickRadiusPixels = 6.0;
+
+/// How far a fingertip's miss may reach, in screen pixels (spec 14t R-3): a
+/// 48 px target.
+const double kTouchPickRadiusPixels = 24.0;
+
+/// How long a finger is held back before a [TouchPress.press] tool sees its
+/// down (spec 14t T3): long enough for a pinch's second finger to land.
+const Duration kTouchHoldBack = kPressTimeout;
 
 /// Turns Flutter's pointer and key events into calls on the active [Tool].
 ///
@@ -44,6 +57,18 @@ const double kPickRadiusPixels = 6.0;
 /// press behind it, and `MouseRegion.onExit` reaches the tool only while no
 /// pointer is active — a captured pointer's drag is allowed to leave the box
 /// and come back, and ends on its own up.
+///
+/// **Touch** (spec 14t T3) runs in sessions, from a finger down while no
+/// finger is down until none is. The first finger is **held back**: a
+/// [TouchPress.press] tool sees its down when it lifts, leaves the slop or
+/// has been held for [kTouchHoldBack]; a [TouchPress.lift] tool sees it
+/// only when it lifts, at the lift's position, and its moves past the slop
+/// as hovers. A second finger makes the session **multi**: a held finger is
+/// dropped unseen, a routed one is released (its tool cancelled unless
+/// idle), and no touch reaches a tool until every finger lifts — the
+/// pinch is `CameraGestureDetector`'s. A finger's move never becomes a
+/// down, a touch hover is never routed, and the tool hears
+/// [Tool.onPointerExit] when a session goes multi or ends.
 class InteractionLayer extends StatefulWidget {
   const InteractionLayer({
     super.key,
@@ -87,12 +112,31 @@ class _InteractionLayerState extends State<InteractionLayer> {
   bool _leaving = false;
 
   void _onTools() {
+    // A finger held for the outgoing tool is not the new tool's (R-9b).
+    if (!identical(_tool, _lastTool)) {
+      _lastTool = _tool;
+      _dropHeld();
+    }
     if (!_leaving) _cursor.value = _tool.cursor;
   }
+
+  /// The tool [_onTools] last saw active.
+  late Tool _lastTool;
+
+  /// The touch session (spec 14t T3): the live fingers, whether a second
+  /// finger has been down, and the first finger while it is held back.
+  final Set<int> _touches = {};
+  bool _multi = false;
+  PointerDownEvent? _held;
+  Timer? _holdTimer;
+
+  /// A [TouchPress.lift] finger past the slop: its moves are hovers.
+  bool _aiming = false;
 
   @override
   void initState() {
     super.initState();
+    _lastTool = _tool;
     widget.tools.addListener(_onTools);
   }
 
@@ -100,6 +144,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   void didUpdateWidget(InteractionLayer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (identical(oldWidget.tools, widget.tools)) return;
+    _dropHeld();
     oldWidget.tools.removeListener(_onTools);
     widget.tools.addListener(_onTools);
     _onTools();
@@ -107,27 +152,204 @@ class _InteractionLayerState extends State<InteractionLayer> {
 
   /// Resolves one pointer sample into both spaces and snapshots the modifier
   /// state, so a tool never inverts the camera or reads the keyboard itself.
-  ToolPointerEvent _wrap(PointerEvent e) {
+  ToolPointerEvent _wrap(PointerEvent e) =>
+      _event(e.localPosition, e.pointer, e.buttons, e.kind);
+
+  /// One sample at [local], through the camera as it is now (R-9d).
+  ToolPointerEvent _event(
+      Offset local, int pointer, int buttons, PointerDeviceKind kind) {
     final cam = _ctx.camera.value;
-    final local = e.localPosition;
     final keyboard = HardwareKeyboard.instance;
+    final touch = kind == PointerDeviceKind.touch;
     return ToolPointerEvent(
       screen: local,
       world: cam.screenToWorld(Vector2(local.dx, local.dy)),
-      pointer: e.pointer,
-      buttons: e.buttons,
+      pointer: pointer,
+      buttons: buttons,
       shift: keyboard.isShiftPressed,
       control: keyboard.isControlPressed,
       meta: keyboard.isMetaPressed,
       alt: keyboard.isAltPressed,
       pickRadiusWorld: kPickRadiusPixels / cam.scale,
+      kind: kind,
+      reachRadiusWorld: touch ? kTouchPickRadiusPixels / cam.scale : null,
     );
+  }
+
+  static bool _isTouch(PointerEvent e) => e.kind == PointerDeviceKind.touch;
+
+  // ---- Touch (spec 14t T3) ------------------------------------------------
+
+  void _touchDown(PointerDownEvent e) {
+    final first = _touches.isEmpty;
+    _touches.add(e.pointer);
+    if (_multi) return;
+    if (first) {
+      if (_activePointer != -1) {
+        // A precise pointer holds the layer: this session reaches no tool.
+        _multi = true;
+        return;
+      }
+      // The held finger claims the layer (R-9a).
+      _held = e;
+      _aiming = false;
+      _activePointer = e.pointer;
+      _lastButtons = e.buttons;
+      if (_tool.touchPress == TouchPress.press) {
+        _holdTimer = Timer(kTouchHoldBack, _routeHeld);
+      }
+      return;
+    }
+    _goMulti();
+  }
+
+  /// A second finger: the gesture is the camera's until every finger lifts.
+  void _goMulti() {
+    _multi = true;
+    if (_held != null) {
+      _dropHeld();
+    } else if (_activePointer != -1 && _touches.contains(_activePointer)) {
+      _activePointer = -1;
+      _lastButtons = 0;
+      // A drawing tool's pending shape survives a pinch (R-8): only a tool
+      // part-way through a press is cancelled.
+      if (_tool.phase != ToolPhase.idle) _tool.cancel(_ctx);
+    }
+    // Not while a precise pointer holds the layer: an exit would cancel
+    // its drag (review F-1).
+    if (_activePointer == -1) _tool.onPointerExit(_ctx);
+  }
+
+  /// The held finger is routed as a down at its own position (press mode).
+  void _routeHeld() {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+    final held = _held;
+    if (held == null) return;
+    _held = null;
+    _focus.requestFocus();
+    _tool.onPointerDown(_wrap(held), _ctx);
+  }
+
+  /// The held finger, never routed, is forgotten; the layer is free.
+  void _dropHeld() {
+    _holdTimer?.cancel();
+    _holdTimer = null;
+    if (_held == null) return;
+    _held = null;
+    _aiming = false;
+    _activePointer = -1;
+    _lastButtons = 0;
+  }
+
+  void _touchMove(PointerMoveEvent e) {
+    if (_multi) return;
+    final held = _held;
+    if (held != null) {
+      if (e.pointer != held.pointer) return;
+      if (!_aiming &&
+          (e.localPosition - held.localPosition).distance <= kTouchSlop) {
+        return;
+      }
+      if (_tool.touchPress == TouchPress.press) {
+        _routeHeld();
+        _lastButtons = e.buttons;
+        _tool.onPointerMove(_wrap(e), _ctx);
+      } else {
+        // Aiming: a hover the tool can show, never a press.
+        _aiming = true;
+        _tool.onPointerMove(
+            _event(e.localPosition, e.pointer, 0, e.kind), _ctx);
+      }
+      return;
+    }
+    // No promotion for a finger (TS-6): only the routed one moves.
+    if (e.pointer != _activePointer) return;
+    _lastButtons = e.buttons;
+    _tool.onPointerMove(_wrap(e), _ctx);
+  }
+
+  void _touchUp(PointerUpEvent e) {
+    _touches.remove(e.pointer);
+    if (!_multi) {
+      final held = _held;
+      if (held != null && e.pointer == held.pointer) {
+        final press = _tool.touchPress == TouchPress.press;
+        _holdTimer?.cancel();
+        _holdTimer = null;
+        _held = null;
+        _aiming = false;
+        final size = context.size;
+        if (!press &&
+            size != null &&
+            !(Offset.zero & size).contains(e.localPosition)) {
+          // A lift-mode finger lifted off the canvas places nothing there
+          // (review F-7): the press is withdrawn.
+          _activePointer = -1;
+          _lastButtons = 0;
+          if (_touches.isEmpty) _endSession();
+          return;
+        }
+        _focus.requestFocus();
+        // A tap: press mode at the down's position, lift mode at the lift's.
+        _tool.onPointerDown(
+            press
+                ? _wrap(held)
+                : _event(e.localPosition, e.pointer, held.buttons, e.kind),
+            _ctx);
+        _activePointer = -1;
+        _lastButtons = 0;
+        _tool.onPointerUp(_wrap(e), _ctx);
+      } else if (e.pointer == _activePointer) {
+        _activePointer = -1;
+        _lastButtons = 0;
+        _tool.onPointerUp(_wrap(e), _ctx);
+      }
+    }
+    if (_touches.isEmpty) _endSession();
+  }
+
+  void _touchCancel(PointerCancelEvent e) {
+    _touches.remove(e.pointer);
+    if (!_multi) {
+      if (_held?.pointer == e.pointer) {
+        _dropHeld();
+      } else if (e.pointer == _activePointer) {
+        _activePointer = -1;
+        _lastButtons = 0;
+        _tool.cancel(_ctx);
+      }
+    }
+    if (_touches.isEmpty) _endSession();
+  }
+
+  /// The last finger lifted: touch has no hover, so the tool hears an exit
+  /// (R-10).
+  void _endSession() {
+    _multi = false;
+    _dropHeld();
+    // Not while a precise pointer holds the layer: an exit would cancel
+    // its drag (review F-1).
+    if (_activePointer == -1) _tool.onPointerExit(_ctx);
+  }
+
+  /// The whole session forgotten (R-9b): the layer leaves the tree.
+  void _clearTouches() {
+    _dropHeld();
+    _touches.clear();
+    _multi = false;
   }
 
   bool _cameraOwned(int buttons) => buttons & kMiddleMouseButton != 0;
 
   void _onDown(PointerDownEvent e) {
-    if (_cameraOwned(e.buttons) || _activePointer != -1) return;
+    if (_isTouch(e)) return _touchDown(e);
+    // No precise pointer while a touch session runs (R-9a).
+    if (_cameraOwned(e.buttons) ||
+        _activePointer != -1 ||
+        _touches.isNotEmpty) {
+      return;
+    }
     if (e.buttons & kPrimaryButton == 0) return;
     _focus.requestFocus();
     _activePointer = e.pointer;
@@ -136,6 +358,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onMove(PointerMoveEvent e) {
+    if (_isTouch(e)) return _touchMove(e);
     if (_cameraOwned(e.buttons)) return;
     final hadPrimary = _lastButtons & kPrimaryButton != 0;
     final hasPrimary = e.buttons & kPrimaryButton != 0;
@@ -149,7 +372,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
       }
       return;
     }
-    if (_activePointer == -1 && hasPrimary) {
+    if (_activePointer == -1 && hasPrimary && _touches.isEmpty) {
       // Treated as a down in every respect, focus included.
       _focus.requestFocus();
       _activePointer = e.pointer;
@@ -159,6 +382,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onUp(PointerUpEvent e) {
+    if (_isTouch(e)) return _touchUp(e);
     if (e.pointer != _activePointer) return;
     _activePointer = -1;
     _lastButtons = 0;
@@ -166,6 +390,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onCancel(PointerCancelEvent e) {
+    if (_isTouch(e)) return _touchCancel(e);
     if (e.pointer != _activePointer) return;
     _activePointer = -1;
     _lastButtons = 0;
@@ -173,7 +398,8 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onHover(PointerHoverEvent e) {
-    if (_activePointer != -1) return;
+    // A finger has no hover; the web sends one after every lift (TS-3).
+    if (_isTouch(e) || _activePointer != -1 || _touches.isNotEmpty) return;
     _tool.onPointerMove(_wrap(e), _ctx);
   }
 
@@ -195,6 +421,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   /// the case where the layer leaves the tree without being disposed.
   void _release() {
     _leaving = true;
+    _clearTouches();
     _ctx.selection.setHover(null);
     _tool.cancel(_ctx);
   }

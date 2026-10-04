@@ -1,0 +1,1173 @@
+{
+ "schemaVersion": 7,
+ "header": {
+  "units": "millimeters",
+  "scale": 1.0,
+  "globalLinetypeScale": 1.0,
+  "currentLayer": 1,
+  "importedExtents": null,
+  "customVariables": {}
+ },
+ "tables": {
+  "layers": [
+   {
+    "handle": 1,
+    "name": "0",
+    "color": 7,
+    "linetype": 4,
+    "lineweight": -3,
+    "transparency": 0,
+    "visible": true,
+    "locked": false
+   }
+  ],
+  "linetypes": [
+   {
+    "handle": 2,
+    "name": "ByLayer",
+    "description": "",
+    "pattern": {
+     "dashes": [],
+     "totalLength": 0.0
+    }
+   },
+   {
+    "handle": 3,
+    "name": "ByBlock",
+    "description": "",
+    "pattern": {
+     "dashes": [],
+     "totalLength": 0.0
+    }
+   },
+   {
+    "handle": 4,
+    "name": "Continuous",
+    "description": "Solid line",
+    "pattern": {
+     "dashes": [],
+     "totalLength": 0.0
+    }
+   },
+   {
+    "handle": 6,
+    "name": "DASHED",
+    "description": "Dashed __ __ __",
+    "pattern": {
+     "dashes": [
+      200.0,
+      -100.0
+     ],
+     "totalLength": 300.0
+    }
+   }
+  ],
+  "textStyles": [
+   {
+    "handle": 5,
+    "name": "Standard",
+    "fontFamily": "Roboto",
+    "widthFactor": 1.0,
+    "obliqueAngle": 0.0,
+    "fixedHeight": 0.0,
+    "isShx": false,
+    "shxFileName": ""
+   }
+  ],
+  "patterns": [],
+  "dimStyles": [],
+  "appIds": []
+ },
+ "definitions": [
+  {
+   "handle": 18,
+   "name": "restaurant.table.round.four@1",
+   "basePoint": [
+    1025.0,
+    1025.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 37,
+   "name": "restaurant.bar.table.high.two@1",
+   "basePoint": [
+    640.0,
+    640.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 48,
+   "name": "restaurant.planter.round@1",
+   "basePoint": [
+    300.0,
+    300.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 53,
+   "name": "restaurant.planter.long@1",
+   "basePoint": [
+    600.0,
+    200.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  }
+ ],
+ "root": 17,
+ "nodes": [
+  {
+   "type": "group",
+   "handle": 17,
+   "parent": 0,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "visible": true,
+   "children": [
+    29,
+    31,
+    33,
+    35,
+    44,
+    46,
+    51,
+    52,
+    56
+   ],
+   "exportAsDxfGroup": false
+  },
+  {
+   "type": "instance",
+   "handle": 29,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -5450.0,
+    725.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 31,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -2450.0,
+    725.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 33,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -5450.0,
+    -2475.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 35,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -2450.0,
+    -2475.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 44,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    1435.0,
+    1110.0
+   ],
+   "visible": true,
+   "definition": 37,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 46,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    1435.0,
+    -2090.0
+   ],
+   "visible": true,
+   "definition": 37,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 51,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -6725.0,
+    3950.0
+   ],
+   "visible": true,
+   "definition": 48,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 52,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    5775.0,
+    3950.0
+   ],
+   "visible": true,
+   "definition": 48,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 56,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -725.0,
+    -4450.0
+   ],
+   "visible": true,
+   "definition": 53,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  }
+ ],
+ "entities": [
+  {
+   "record": {
+    "handle": 19,
+    "owner": 18,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1025.0,
+     1025.0
+    ],
+    "scalars": [
+     450.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 20,
+    "owner": 18,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1025.0,
+     1025.0
+    ],
+    "scalars": [
+     400.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 21,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1250.0,
+     225.0,
+     1250.0,
+     675.0,
+     800.0,
+     675.0,
+     800.0,
+     225.0,
+     1250.0,
+     225.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 22,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1250.0,
+     285.0,
+     800.0,
+     285.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 23,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1825.0,
+     1250.0,
+     1375.0,
+     1250.0,
+     1375.0,
+     800.0,
+     1825.0,
+     800.0,
+     1825.0,
+     1250.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 24,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1765.0,
+     1250.0,
+     1765.0,
+     800.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 25,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     800.0,
+     1825.0,
+     800.0,
+     1375.0,
+     1250.0,
+     1375.0,
+     1250.0,
+     1825.0,
+     800.0,
+     1825.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 26,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     800.0,
+     1765.0,
+     1250.0,
+     1765.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 27,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     225.0,
+     800.0,
+     675.0,
+     800.0,
+     675.0,
+     1250.0,
+     225.0,
+     1250.0,
+     225.0,
+     800.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 28,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     285.0,
+     800.0,
+     285.0,
+     1250.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 30,
+    "owner": 29,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "1",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     1025.0,
+     1025.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 32,
+    "owner": 31,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "2",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     1025.0,
+     1025.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 34,
+    "owner": 33,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "3",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     1025.0,
+     1025.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 36,
+    "owner": 35,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "4",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     1025.0,
+     1025.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 38,
+    "owner": 37,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     640.0
+    ],
+    "scalars": [
+     300.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 39,
+    "owner": 37,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     640.0
+    ],
+    "scalars": [
+     260.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 40,
+    "owner": 37,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     190.0
+    ],
+    "scalars": [
+     190.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 41,
+    "owner": 37,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     190.0
+    ],
+    "scalars": [
+     150.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 42,
+    "owner": 37,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     1090.0
+    ],
+    "scalars": [
+     190.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 43,
+    "owner": 37,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     1090.0
+    ],
+    "scalars": [
+     150.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 45,
+    "owner": 44,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "5",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     640.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 47,
+    "owner": 46,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "6",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     640.0,
+     640.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 49,
+    "owner": 48,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     300.0,
+     300.0
+    ],
+    "scalars": [
+     300.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 50,
+    "owner": 48,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     300.0,
+     300.0
+    ],
+    "scalars": [
+     225.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 54,
+    "owner": 53,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     0.0,
+     1200.0,
+     0.0,
+     1200.0,
+     400.0,
+     0.0,
+     400.0,
+     0.0,
+     0.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 55,
+    "owner": 53,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     50.0,
+     50.0,
+     1150.0,
+     50.0,
+     1150.0,
+     350.0,
+     50.0,
+     350.0,
+     50.0,
+     50.0
+    ],
+    "scalars": []
+   }
+  }
+ ],
+ "components": {
+  "jetcad.page": {
+   "17": {
+    "background": 4294967295,
+    "displayUnit": "meters",
+    "gridStepMm": null,
+    "gridVisible": true,
+    "heightMm": 297.0,
+    "orientation": "landscape",
+    "originX": -7425.0,
+    "originY": -5250.0,
+    "pageBreaks": false,
+    "scaleDenominator": 50.0,
+    "snapToGrid": true,
+    "widthMm": 210.0
+   }
+  },
+  "jetcad.seating": {
+   "18": {
+    "seats": 4
+   },
+   "37": {
+    "seats": 2
+   }
+  },
+  "jetcad.symbol": {
+   "18": {
+    "category": "Restaurant Tables",
+    "key": "restaurant.table.round.four",
+    "name": "Round table, 4 seats",
+    "tags": [
+     "table",
+     "round",
+     "four"
+    ],
+    "version": 1
+   },
+   "37": {
+    "category": "Bar",
+    "key": "restaurant.bar.table.high.two",
+    "name": "High table, 2 stools",
+    "tags": [
+     "table",
+     "high",
+     "bar",
+     "two"
+    ],
+    "version": 1
+   },
+   "48": {
+    "category": "Outdoor and Decor",
+    "key": "restaurant.planter.round",
+    "name": "Round planter",
+    "tags": [
+     "planter",
+     "plant",
+     "pot",
+     "round"
+    ],
+    "version": 1
+   },
+   "53": {
+    "category": "Outdoor and Decor",
+    "key": "restaurant.planter.long",
+    "name": "Long planter",
+    "tags": [
+     "planter",
+     "plant",
+     "trough"
+    ],
+    "version": 1
+   }
+  }
+ },
+ "rawData": {},
+ "handleSeed": 56
+}

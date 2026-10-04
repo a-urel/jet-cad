@@ -7,8 +7,7 @@
 // exactly while the document is dirty, across a swap.
 import 'dart:ui' show AppExitResponse;
 
-import 'package:floor_planner/panel_focus.dart';
-import 'package:floor_planner/parametric/wall.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

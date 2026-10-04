@@ -1,0 +1,1102 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+
+import 'layers/layer_picker.dart';
+import 'panel_focus.dart';
+import 'panel_number.dart';
+import 'parametric/box.dart';
+import 'parametric/dimension.dart';
+import 'parametric/live_objects.dart';
+import 'parametric/opening.dart';
+import 'parametric/opening_tool.dart';
+import 'parametric/room.dart';
+import 'parametric/wall.dart';
+import 'parametric/wall_tool.dart';
+import 'tables/table_index.dart';
+import 'tables/table_label.dart';
+import 'tables/table_numbers.dart';
+import 'tables/table_rotate.dart';
+
+/// Spec 06 D13, 07 D11, 08 D16 and 10 D21: the right panel's parametric
+/// sections.
+///
+/// - **Box:** one selected box's width and height.
+/// - **Wall:** one selected wall's thickness and justification, or -- while
+///   the Wall tool is active -- the tool's [WallSettings] for the next wall.
+/// - **Opening:** one selected opening's width and position, and a door's
+///   Flip hinge and Flip swing; or -- while the Door, Window or Gap tool is
+///   active, even with an opening selected -- that tool's [OpeningSettings]
+///   (its width only) for the next opening.
+/// - **Room:** one selected room's name, a free-text field, and its area,
+///   read-only: the area label's stored string (10 R-25).
+/// - **Dimension** (11 D14): one selected dimension's value, read-only (its
+///   TEXT child's stored string), its kind (Aligned | Horizontal |
+///   Vertical), the axes line of a turned linear dimension (D11, R-18) and
+///   its two end lines (R-28). No tool mode: the Dimension tool has no
+///   settings.
+/// - **Table** (14a T14, T16): one selected table's number, a text field
+///   (refused when invalid or used by another table, with an error line),
+///   its seats, read-only, a duplicate-number warning, and two buttons that
+///   turn it 90° about its centre.
+/// - **Layer** (12b D12): for any non-empty selection while no tool's
+///   settings show, a [LayerPicker] after the sections above (alone when
+///   none shows).
+///
+/// Each commit to an object is one `SetComponentCommand`, which the
+/// parametric system turns into one undo step with its regeneration. 12
+/// builds the real inspector.
+///
+/// Every field -- the numeric ones and the Name field, the one text field
+/// (10 D21, R-23) -- follows 06 D13's amendment (F1/F2): it owns a
+/// `FocusNode` and commits on its own focus loss, whatever took the focus;
+/// Enter commits too; an invalid value (an empty name, 10 R-24) reverts the
+/// field instead; a reload never writes into a focused field.
+///
+/// **The commit target is pinned at focus gain (07 D11).** A field records
+/// its section's target when it gains focus, and its commit goes to that
+/// target -- if it is still a live object of the same type; otherwise the
+/// typed text is discarded. A selection change while a field has focus
+/// therefore never redirects the typed value onto another object.
+class SelectionPanel extends StatefulWidget {
+  const SelectionPanel(
+      {super.key,
+      required this.document,
+      required this.selection,
+      this.tools,
+      this.wallTool,
+      this.wallSettings,
+      this.openingTools,
+      this.openingSettings});
+
+  final DraftDocument document;
+  final SelectionController selection;
+
+  /// The shell's tool controller and its Wall tool: while [wallTool] is
+  /// active, the Wall section edits [wallSettings]. All three or none.
+  final ToolController? tools;
+  final Tool? wallTool;
+
+  /// Owned by the shell and shared with the Wall tool, which reads it at
+  /// each commit (07 D11).
+  final ValueNotifier<WallSettings>? wallSettings;
+
+  /// The shell's Door, Window and Gap tools, and their settings (spec 08
+  /// D16, Ruling 08-17): while the tool of a kind is active, the Opening
+  /// section edits that kind's settings, which the tool reads at each hover
+  /// and click. Both, with [tools], or neither.
+  final Map<OpeningKind, Tool>? openingTools;
+  final Map<OpeningKind, ValueNotifier<OpeningSettings>>? openingSettings;
+
+  @override
+  State<SelectionPanel> createState() => _SelectionPanelState();
+}
+
+/// Which quantity a field edits: a number, or -- [name], the text kind (10
+/// D21) -- a room's name.
+enum _Kind { width, height, thickness, openingWidth, position, name, number }
+
+/// One field's state.
+///
+/// A target is a `Handle`: a box, a wall, an opening or a room,
+/// [_toolSettings] for the Wall tool's settings, or [_openingToolSettings]
+/// for an opening tool's. [pinned] is the target recorded at focus gain (07
+/// D11); [loadedTarget] and [loadedValue] are what the field last showed, so
+/// a reload can tell a real model change from a notification that carries
+/// none (06 D13's F1: hover and unrelated edits both notify). A value is a
+/// `double` for a numeric kind and a `String` for the text kind, compared
+/// with `==` either way.
+final class _Field {
+  _Field(this.kind);
+
+  final _Kind kind;
+  final TextEditingController text = TextEditingController();
+  final PanelFieldFocusNode focus = PanelFieldFocusNode();
+  Handle? pinned;
+  Handle? loadedTarget;
+  Object? loadedValue;
+
+  bool get isText => kind == _Kind.name || kind == _Kind.number;
+
+  void dispose() {
+    text.dispose();
+    focus.dispose();
+  }
+}
+
+/// The Wall section's target while the Wall tool is active: its settings.
+/// Handle 0 is never an object's handle.
+const Handle _toolSettings = Handle.none;
+
+/// The Opening section's target while the tool of [kind] is active: its
+/// settings (Ruling 08-17). A negative value is never an object's handle,
+/// and each kind has its own, so a field pinned to the Door tool's settings
+/// never writes the Window tool's.
+Handle _openingToolSettings(OpeningKind kind) => Handle(-1 - kind.index);
+
+/// The kind whose tool settings [h] is ([_openingToolSettings]), or null.
+OpeningKind? _openingToolKind(Handle h) =>
+    h.value < 0 && h.value >= -OpeningKind.values.length
+        ? OpeningKind.values[-1 - h.value]
+        : null;
+
+class _SelectionPanelState extends State<SelectionPanel> {
+  final _Field _width = _Field(_Kind.width);
+  final _Field _height = _Field(_Kind.height);
+  final _Field _thickness = _Field(_Kind.thickness);
+  final _Field _openingWidth = _Field(_Kind.openingWidth);
+  final _Field _position = _Field(_Kind.position);
+  final _Field _name = _Field(_Kind.name);
+  final _Field _number = _Field(_Kind.number);
+  late final List<_Field> _fields = [
+    _width,
+    _height,
+    _thickness,
+    _openingWidth,
+    _position,
+    _name,
+    _number,
+  ];
+  late final StreamSubscription<DocChange> _changes;
+
+  /// The Area line's memo (10 R-25): the room [_areaText] was read for, or
+  /// null. Every document change clears it -- a page change rewrites the
+  /// area label's string in place (D12) -- and nothing else does, so the
+  /// selection's hover notifications never rescan the document.
+  Handle? _areaRoom;
+  String? _areaText;
+
+  /// The Value line's memo (11 D14), as the Area line's: the dimension
+  /// [_valueText] was read for, or null. Every document change clears it: a
+  /// wall edit or a page change rewrites the value's string in place.
+  Handle? _valueDim;
+  String? _valueText;
+
+  /// The tables, read once per document change (14a T14, review R-7): the
+  /// selection's hover notifications rebuild the panel and must not rescan
+  /// the document.
+  TableSurvey? _survey;
+  TableSurvey get _tables => _survey ??= TableSurvey.of(widget.document);
+
+  /// The Number field's last refusal and the table it was for (14a T14):
+  /// shown under the field until its next edit or a selection change.
+  String? _numberError;
+  Handle? _numberErrorFor;
+
+  /// Whether the Wall tool was active at the last check: the tool
+  /// controller forwards every hover of the active tool, and only a switch
+  /// in or out of the Wall tool concerns the panel.
+  bool _toolMode = false;
+
+  /// The kind of the opening tool that was active at the last check, or
+  /// null: likewise, only a switch in or out of one concerns the panel.
+  OpeningKind? _openingToolMode;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selection.addListener(_sync);
+    _changes = widget.document.commands.changes.listen((_) {
+      _areaRoom = null;
+      _valueDim = null;
+      _survey = null;
+      _sync();
+    });
+    widget.tools?.addListener(_onTools);
+    widget.wallSettings?.addListener(_sync);
+    for (final s in _openingSettingsList) {
+      s.addListener(_sync);
+    }
+    for (final f in _fields) {
+      f.focus.addListener(() => _onFocusChange(f));
+    }
+    _toolMode = _wallToolActive;
+    _openingToolMode = _activeOpeningTool;
+    _load();
+  }
+
+  @override
+  void dispose() {
+    widget.selection.removeListener(_sync);
+    _changes.cancel();
+    widget.tools?.removeListener(_onTools);
+    widget.wallSettings?.removeListener(_sync);
+    for (final s in _openingSettingsList) {
+      s.removeListener(_sync);
+    }
+    for (final f in _fields) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  List<ValueNotifier<OpeningSettings>> get _openingSettingsList =>
+      widget.openingSettings?.values.toList() ?? const [];
+
+  bool get _wallToolActive {
+    final tools = widget.tools, wall = widget.wallTool;
+    return tools != null &&
+        wall != null &&
+        widget.wallSettings != null &&
+        identical(tools.active, wall);
+  }
+
+  /// The kind of the active opening tool, when it has settings here.
+  OpeningKind? get _activeOpeningTool {
+    final tools = widget.tools, openings = widget.openingTools;
+    if (tools == null || openings == null) return null;
+    for (final MapEntry(:key, :value) in openings.entries) {
+      if (identical(tools.active, value) &&
+          widget.openingSettings?[key] != null) {
+        return key;
+      }
+    }
+    return null;
+  }
+
+  void _onTools() {
+    final mode = _wallToolActive, opening = _activeOpeningTool;
+    if (mode == _toolMode && opening == _openingToolMode) return;
+    _toolMode = mode;
+    _openingToolMode = opening;
+    _sync();
+  }
+
+  /// Under runtime permissions every section is read-only (06 D13, 07
+  /// D11, 08 D16, 10 D21): a commit is a `SetComponentCommand`, which needs
+  /// `Capability.components`, and its regeneration needs the type's
+  /// `editCapability` (final review m4).
+  bool _editable(_Kind kind) {
+    final permissions = widget.document.commands.permissions;
+    // A table's number is entity text, not a component (14a T14).
+    if (kind == _Kind.number) return permissions.allows(Capability.geometry);
+    return permissions.allows(Capability.components) &&
+        permissions.allows(switch (kind) {
+          _Kind.thickness => const WallType().editCapability,
+          _Kind.openingWidth ||
+          _Kind.position =>
+            const OpeningType().editCapability,
+          _Kind.width || _Kind.height => const BoxType().editCapability,
+          _Kind.name => const RoomType().editCapability,
+          _Kind.number => throw StateError('answered above'),
+        });
+  }
+
+  /// [f]'s text as the value to commit at [target], or null when the field
+  /// reverts instead: for the text kind the text trimmed, unless that leaves
+  /// it empty (10 R-24: a nameless room could not be told apart); for a
+  /// numeric kind the number it parses to, when [_valid].
+  Object? _parse(_Field f, Handle target) {
+    final t = f.text.text.trim();
+    if (f.kind == _Kind.number) return _parseNumber(target, t);
+    if (f.isText) return t.isEmpty ? null : t;
+    final value = double.tryParse(t);
+    return value != null && _valid(f.kind, target, value) ? value : null;
+  }
+
+  /// Whether [value] may be committed as [kind] at [target], which [_read]
+  /// just found live: a thickness is `isWallThickness` (final review m1), a
+  /// box side is finite and > 0, an opening's width is `isOpeningWidth` for
+  /// its kind (spec 08 D6: a gap's must exceed `4 × wallJoin.linear`), and
+  /// its position is finite and within `[0, L]`, `L` its host's centreline
+  /// length (none when the host is not a wall).
+  bool _valid(_Kind kind, Handle target, double value) {
+    switch (kind) {
+      case _Kind.thickness:
+        return isWallThickness(value);
+      case _Kind.width:
+      case _Kind.height:
+        return value.isFinite && value > 0;
+      case _Kind.openingWidth:
+        final k = _openingToolKind(target) ??
+            widget.document.components.get<OpeningParams>(target)!.kind;
+        return isOpeningWidth(k, value);
+      case _Kind.position:
+        final o = widget.document.components.get<OpeningParams>(target)!;
+        if (!_isObject<WallParams>(o.host)) return false;
+        final host = widget.document.components.get<WallParams>(o.host)!;
+        final l = (host.end - host.start).length;
+        return value.isFinite && value >= 0 && value <= l;
+      case _Kind.name:
+      case _Kind.number:
+        throw StateError('a text kind: _parse reads it');
+    }
+  }
+
+  /// [t] (trimmed) as [table]'s number, or null with [_numberError] set:
+  /// invalid (14a T4), or used by another live table (T6, exact `==`).
+  /// The table's own number is accepted, unchanged.
+  String? _parseNumber(Handle table, String t) {
+    // Unchanged -- an unnumbered table's empty field, or a duplicate a file
+    // brought -- is nothing, never an error (T14, review F-1).
+    final current = _read(_Kind.number, table);
+    if (t == current) return t;
+    final error = tableNumberError(t);
+    final clash = error == null &&
+        _tables.withNumber(t).any((other) => other.instance != table);
+    // The error line is not cleared here: Enter's focus-loss commit
+    // re-reads the reverted text, which must not end it (T14).
+    if (error == null && !clash) return t;
+    _numberError = error ?? 'Number $t is already used';
+    _numberErrorFor = table;
+    return null;
+  }
+
+  /// The one selected key when it is a table (14a T1), or null.
+  TableInfo? get _table {
+    final keys = widget.selection.keys;
+    if (keys.length != 1 || keys.single.chain.isNotEmpty) return null;
+    final h = keys.single.target;
+    for (final t in _tables.tables) {
+      if (t.instance == h) return t;
+    }
+    return null;
+  }
+
+  /// [h] is a live [T], by the engine's object rule (`live_objects.dart`):
+  /// a file's group carrying a [T] and a later-registered type is not one.
+  bool _isObject<T extends Component>(Handle h) =>
+      isLiveObject<T>(widget.document, h);
+
+  /// The one selected key when it is a live [T] ([_isObject]), or null.
+  Handle? _selected<T extends Component>() {
+    final keys = widget.selection.keys;
+    if (keys.length != 1) return null;
+    final key = keys.single;
+    if (key.chain.isNotEmpty) return null;
+    return _isObject<T>(key.target) ? key.target : null;
+  }
+
+  /// The Box section's box, or null when it is hidden.
+  Handle? get _box => _selected<BoxParams>();
+
+  /// The Wall section's target, or null when it is hidden: the tool's
+  /// settings while the Wall tool is active (a drawing tool clears the
+  /// selection when it activates), else the one selected wall.
+  Handle? get _wall => _toolMode ? _toolSettings : _selected<WallParams>();
+
+  /// The Opening section's target, or null when it is hidden: the active
+  /// opening tool's settings (spec 08 D16: even with an opening selected),
+  /// else the one selected opening.
+  Handle? get _opening => switch (_openingToolMode) {
+        final k? => _openingToolSettings(k),
+        null => _selected<OpeningParams>(),
+      };
+
+  /// The Room section's room, or null when it is hidden (10 D21).
+  Handle? get _room => _selected<RoomParams>();
+
+  /// The Dimension section's dimension, or null when it is hidden (11 D14:
+  /// exactly one selected key, 10 D21's rule).
+  Handle? get _dimension => _selected<DimensionParams>();
+
+  /// The target [kind]'s section shows now, or null. The position has none
+  /// in tool mode: the tools place at the click.
+  Handle? _targetOf(_Kind kind) => switch (kind) {
+        _Kind.width || _Kind.height => _box,
+        _Kind.thickness => _wall,
+        _Kind.openingWidth => _opening,
+        _Kind.position =>
+          _openingToolMode == null ? _selected<OpeningParams>() : null,
+        _Kind.name => _room,
+        _Kind.number => _table?.instance,
+      };
+
+  /// [kind]'s value at [target] -- a `double`, or the name's `String` --
+  /// or null when [target] is no longer a live object of the field's type.
+  Object? _read(_Kind kind, Handle target) {
+    switch (kind) {
+      case _Kind.width:
+      case _Kind.height:
+        if (!_isObject<BoxParams>(target)) return null;
+        final p = widget.document.components.get<BoxParams>(target)!;
+        return kind == _Kind.width ? p.width : p.height;
+      case _Kind.thickness:
+        if (target == _toolSettings) {
+          return widget.wallSettings?.value.thickness;
+        }
+        if (!_isObject<WallParams>(target)) return null;
+        return widget.document.components.get<WallParams>(target)!.thickness;
+      case _Kind.openingWidth:
+      case _Kind.position:
+        if (_openingToolKind(target) case final k?) {
+          final settings = widget.openingSettings?[k];
+          return kind == _Kind.openingWidth ? settings?.value.width : null;
+        }
+        if (!_isObject<OpeningParams>(target)) return null;
+        final o = widget.document.components.get<OpeningParams>(target)!;
+        return kind == _Kind.openingWidth ? o.width : o.position;
+      case _Kind.name:
+        if (!_isObject<RoomParams>(target)) return null;
+        return widget.document.components.get<RoomParams>(target)!.name;
+      case _Kind.number:
+        for (final t in _tables.tables) {
+          if (t.instance == target) return t.number ?? '';
+        }
+        return null;
+    }
+  }
+
+  /// Stores [value] as [kind] at [target], which [_read] just found live:
+  /// one command for an object, nothing when the value is unchanged. A name
+  /// is one `SetComponentCommand<RoomParams>`, whose regeneration rewrites
+  /// the name label in place (10 D12, D21).
+  void _write(_Kind kind, Handle target, Object value) {
+    final doc = widget.document;
+    if (kind == _Kind.number) {
+      _writeNumber(target, value as String);
+      return;
+    }
+    if (kind == _Kind.name) {
+      final p = doc.components.get<RoomParams>(target)!;
+      final next = p.copyWith(name: value as String);
+      if (next == p) return;
+      doc.commands.execute(SetComponentCommand<RoomParams>(target, next));
+      return;
+    }
+    value as double;
+    switch (kind) {
+      case _Kind.width:
+      case _Kind.height:
+        final p = doc.components.get<BoxParams>(target)!;
+        final next = kind == _Kind.width
+            ? p.copyWith(width: value)
+            : p.copyWith(height: value);
+        if (next == p) return;
+        doc.commands.execute(SetComponentCommand<BoxParams>(target, next));
+      case _Kind.thickness:
+        if (target == _toolSettings) {
+          final s = widget.wallSettings!;
+          s.value = s.value.copyWith(thickness: value);
+          return;
+        }
+        final p = doc.components.get<WallParams>(target)!;
+        final next = p.copyWith(thickness: value);
+        if (next == p) return;
+        doc.commands.execute(SetComponentCommand<WallParams>(target, next));
+      case _Kind.openingWidth:
+      case _Kind.position:
+        if (_openingToolKind(target) case final k?) {
+          final s = widget.openingSettings![k]!;
+          s.value = s.value.copyWith(width: value);
+          return;
+        }
+        final p = doc.components.get<OpeningParams>(target)!;
+        final next = kind == _Kind.openingWidth
+            ? p.copyWith(width: value)
+            : p.copyWith(position: value);
+        if (next == p) return;
+        doc.commands.execute(SetComponentCommand<OpeningParams>(target, next));
+      case _Kind.name:
+      case _Kind.number:
+        throw StateError('unreachable: a text kind is written above');
+    }
+  }
+
+  /// One command (14a T14): the label's text when [table] has a label,
+  /// else a new label; nothing when the number is unchanged.
+  void _writeNumber(Handle table, String number) {
+    final doc = widget.document;
+    final info = _tables.tables.firstWhere((t) => t.instance == table);
+    if ((info.number ?? '') == number) return;
+    final label = info.label;
+    if (label != null) {
+      doc.commands.execute(SetEntityTextCommand(label, number, kTableLabelTag));
+    } else {
+      final node = doc.tree[table]! as InstanceNode;
+      doc.commands.execute(addTableLabelCommand(doc,
+          instance: table,
+          definition: node.definition,
+          placement: node.transform,
+          number: number));
+    }
+    // The change event that clears the cache arrives later; `_show` reads
+    // the survey now (review F-9).
+    _survey = null;
+  }
+
+  /// 14a T16: turns the one selected table by [quarterTurns] × 90° about
+  /// its centre, one step. A refused edit is caught: nothing changed.
+  void _rotateTable(int quarterTurns) {
+    final table = _table;
+    if (table == null || !_rotatable) return;
+    final command =
+        rotateTableCommand(widget.document, table.instance, quarterTurns);
+    if (command == null) return;
+    try {
+      widget.document.commands.execute(command);
+    } on PermissionDeniedError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// The rotate buttons need `transform`, and show in the design mode
+  /// only (Q-4). Until 14b-2 names the modes, the design mode is the one
+  /// whose permissions allow `geometry` (the selection mode's `runtime`
+  /// does not).
+  bool get _rotatable {
+    final permissions = widget.document.commands.permissions;
+    return permissions.allows(Capability.transform) &&
+        permissions.allows(Capability.geometry);
+  }
+
+  /// Whether [target] is a tool's settings rather than an object.
+  static bool _isToolTarget(Handle? target) =>
+      target == _toolSettings ||
+      (target != null && _openingToolKind(target) != null);
+
+  static String _titleOf(OpeningKind k) => switch (k) {
+        OpeningKind.door => 'Door',
+        OpeningKind.window => 'Window',
+        OpeningKind.gap => 'Gap',
+      };
+
+  /// Records the target on focus gain; commits on focus loss (06 D13's F2,
+  /// 07 D11). `??=`: a focused node that notifies again keeps its pin.
+  void _onFocusChange(_Field f) {
+    if (f.focus.hasFocus) {
+      f.pinned ??= _targetOf(f.kind);
+      return;
+    }
+    _commit(f);
+  }
+
+  /// Commits [f]'s text to its pinned target (07 D11, 10 D21), then shows
+  /// the current target's value in it.
+  ///
+  /// The text is discarded when the pinned target is no longer a live
+  /// object of the field's type, and reverted when it is not a valid value
+  /// ([_parse]), the edit is not allowed, or the document refuses the edit
+  /// (an `ArgumentError` or `StateError` from `execute` -- a loaded file
+  /// the regeneration cannot honour, say -- or, spec 08 D5, a
+  /// `DanglingReferenceError` for a loaded opening whose host is gone;
+  /// the edit was rolled back, and must not escape a focus listener or
+  /// `onSubmitted`; final review m1).
+  /// Enter commits here and then, once focus has moved, focus loss commits
+  /// again: the field is re-pinned to what it now shows, so that second
+  /// commit is a no-op.
+  ///
+  /// A live pinned target's typed text is also dropped if its section
+  /// hides while the field keeps focus: the field unmounts, and its commit
+  /// finds it no longer shows. The UI never reaches this -- a click on the
+  /// canvas, the only way to change the selection by hand, unfocuses the
+  /// field first.
+  void _commit(_Field f) {
+    final target = f.pinned;
+    if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
+      final value = _parse(f, target);
+      if (value != null) {
+        try {
+          _write(f.kind, target, value);
+        } on ArgumentError {
+          // Refused: nothing changed; the field reverts below.
+        } on StateError {
+          // Refused: nothing changed; the field reverts below.
+        } on DanglingReferenceError {
+          // Refused (spec 08 D5): nothing changed; the field reverts below.
+        }
+      }
+    }
+    _show(f);
+    f.pinned = f.focus.hasFocus ? _targetOf(f.kind) : null;
+    if (mounted) setState(() {});
+  }
+
+  /// Writes the current target's value into [f], unconditionally: the
+  /// field is being left, so its own text has to go.
+  void _show(_Field f) {
+    final target = _targetOf(f.kind);
+    final value = target == null ? null : _read(f.kind, target);
+    f.loadedTarget = value == null ? null : target;
+    f.loadedValue = value;
+    if (value == null) return;
+    final t = value is String ? value : panelNumberText(value as double);
+    if (f.text.text != t) f.text.text = t;
+  }
+
+  /// The Area line of [room] (10 D21, R-25): its area label's stored
+  /// string, exactly as drawn, or null when it has none (a file's room with
+  /// no children). The labels are the room's TEXT children, the name then
+  /// the area in handle order (D9, D18), so the area is the second.
+  /// Recomputing the area here would trace on every rebuild; this reads
+  /// the document once per room shown and per document change
+  /// ([_areaRoom]).
+  String? _areaOf(Handle room) {
+    if (room == _areaRoom) return _areaText;
+    final entities = widget.document.entities;
+    final labels = <(Handle, int)>[
+      for (final slot in entities.liveSlots)
+        if (entities.ownerAt(slot) == room &&
+            entities.kindAt(slot) == EntityKind.text)
+          (entities.handleAt(slot), slot),
+    ]..sort((a, b) => a.$1.value.compareTo(b.$1.value));
+    _areaRoom = room;
+    return _areaText = labels.length < 2 ? null : entities.textAt(labels[1].$2);
+  }
+
+  /// The Value line of dimension [dim] (11 D14): its TEXT child's stored
+  /// string, exactly as drawn, or null when it has none -- a broken
+  /// dimension generates no child (D7, D15), so its value is never
+  /// formatted here. Read once per dimension shown and per document change
+  /// ([_valueDim]), as [_areaOf].
+  String? _valueOf(Handle dim) {
+    if (dim == _valueDim) return _valueText;
+    final entities = widget.document.entities;
+    String? text;
+    for (final slot in entities.liveSlots) {
+      if (entities.ownerAt(slot) == dim &&
+          entities.kindAt(slot) == EntityKind.text) {
+        text = entities.textAt(slot);
+        break;
+      }
+    }
+    _valueDim = dim;
+    return _valueText = text;
+  }
+
+  /// Whether the Dimension section edits (11 D14, 07 WS8): a kind switch is
+  /// a `SetComponentCommand`, which needs `components`, and its
+  /// regeneration the type's `editCapability`, `geometry`.
+  bool get _dimensionEditable {
+    final permissions = widget.document.commands.permissions;
+    return permissions.allows(Capability.components) &&
+        permissions.allows(const DimensionType().editCapability);
+  }
+
+  /// 11 D14, R-27: dimension [target]'s kind to [kind], one
+  /// `SetComponentCommand` with only the kind changed -- the ends and the
+  /// offset are kept, and no end is re-decided (D10). A click on the kind
+  /// it has issues nothing. [target] is the dimension the section showed
+  /// when it was clicked: nothing is issued when it is no longer a live
+  /// dimension (its group removed before the panel rebuilt), so no
+  /// component lands on a dead handle. An edit the document refuses is
+  /// caught, as the justification toggle's: nothing changed, so the switch
+  /// keeps showing the model's kind.
+  void _setKind(Handle target, DimKind kind) {
+    if (!_dimensionEditable || !_isObject<DimensionParams>(target)) return;
+    final p = widget.document.components.get<DimensionParams>(target)!;
+    final next = p.copyWith(kind: kind);
+    if (next == p) return;
+    try {
+      widget.document.commands
+          .execute(SetComponentCommand<DimensionParams>(target, next));
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// The axes line of dimension [p] in group [dim] (11 D11, R-18), or null:
+  /// for a linear kind whose group's world rotation, `atan2(M.b, M.a)` in
+  /// degrees, is at least 0.05° either way -- the number, not its printed
+  /// string, which is `-0.0` at −0.04° (S-8). The angle shown is rounded to
+  /// tenths first and then normalised to (−180°, 180°], so −179.96° reads
+  /// `180.0°`, as 179.96° does, never `-180.0°`.
+  String? _axesOf(Handle dim, DimensionParams p) {
+    if (p.kind == DimKind.aligned) return null;
+    final m = widget.document.tree.accumulatedTransform(dim);
+    final angle = math.atan2(m.b, m.a) * 180 / math.pi;
+    if (angle.abs() < 0.05) return null;
+    var shown = double.parse(angle.toStringAsFixed(1));
+    if (shown <= -180) shown += 360;
+    return 'Axes turned ${shown.toStringAsFixed(1)}°';
+  }
+
+  /// An end line (11 D14, R-28): for an attached end, `Wall`, its wall's
+  /// handle in hex, `start` or `end` for its `k`, and `left face`,
+  /// `centreline` or `right face` for its side (`Wall 1A, end, left face`);
+  /// `Fixed` for a fixed end.
+  static String _endLine(DimEnd end) => switch (end) {
+        FixedEnd() => 'Fixed',
+        AttachedEnd(:final wall, :final k, :final side) =>
+          'Wall ${wall.toHex()}, ${k == 0 ? 'start' : 'end'}, '
+              '${switch (side) {
+            WallSide.left => 'left face',
+            WallSide.centre => 'centreline',
+            WallSide.right => 'right face',
+          }}',
+      };
+
+  /// The Dimension section's widgets for dimension [dim] (11 D14).
+  List<Widget> _dimensionSection(Handle dim, TextStyle? title) {
+    final p = widget.document.components.get<DimensionParams>(dim)!;
+    final editable = _dimensionEditable;
+    final axes = _axesOf(dim, p);
+    Widget line(String key, String label, String text) => InputDecorator(
+          decoration:
+              InputDecoration(labelText: label, border: InputBorder.none),
+          child: Text(text, key: Key(key)),
+        );
+    return [
+      Text('Dimension', key: const Key('dimension-section'), style: title),
+      // Read-only (decision 13): the value as drawn.
+      line('dimension-value', 'Value', _valueOf(dim) ?? '—'),
+      const SizedBox(height: 8),
+      SegmentedButton<DimKind>(
+        key: const Key('dimension-kind'),
+        showSelectedIcon: false,
+        segments: const [
+          ButtonSegment(
+              value: DimKind.aligned,
+              label: Text('Aligned', key: Key('dimension-aligned'))),
+          ButtonSegment(
+              value: DimKind.horizontal,
+              label: Text('Horizontal', key: Key('dimension-horizontal'))),
+          ButtonSegment(
+              value: DimKind.vertical,
+              label: Text('Vertical', key: Key('dimension-vertical'))),
+        ],
+        selected: {p.kind},
+        onSelectionChanged: editable ? (s) => _setKind(dim, s.single) : null,
+      ),
+      if (axes != null) ...[
+        const SizedBox(height: 8),
+        Text(axes, key: const Key('dimension-axes')),
+      ],
+      line('dimension-end-1', 'End 1', _endLine(p.a)),
+      line('dimension-end-2', 'End 2', _endLine(p.b)),
+    ];
+  }
+
+  /// Copies the model into the fields; no rebuild.
+  ///
+  /// A field reloads only when its target, or the target's value, changed
+  /// since its last load (06 D13's F1), and never while it has focus: the
+  /// user may be mid-edit, and a reload must never overwrite what they
+  /// typed before they commit it.
+  void _load() {
+    for (final f in _fields) {
+      final target = _targetOf(f.kind);
+      final value = target == null ? null : _read(f.kind, target);
+      if (value == null) {
+        f.loadedTarget = null;
+        f.loadedValue = null;
+        continue;
+      }
+      if (f.focus.hasFocus) continue;
+      if (target == f.loadedTarget && value == f.loadedValue) continue;
+      _show(f);
+    }
+  }
+
+  /// A selection, document, tool or settings change: reload and rebuild.
+  void _sync() {
+    // A selection change ends the Number field's error line (14a T14).
+    if (_numberError != null && _numberErrorFor != _table?.instance) {
+      _numberError = null;
+    }
+    _load();
+    if (mounted) setState(() {});
+  }
+
+  /// One step for a wall, the settings for the tool (07 D11). The toggle
+  /// is a click, not a text entry: it acts on the target shown now. An
+  /// edit the document refuses is caught as `_commit` catches one (final
+  /// review): nothing changed, so the toggle keeps showing the model.
+  void _setJustification(Justification j) {
+    final target = _wall;
+    if (target == null || !_editable(_Kind.thickness)) return;
+    if (target == _toolSettings) {
+      final s = widget.wallSettings!;
+      s.value = s.value.copyWith(justification: j);
+      return;
+    }
+    final p = widget.document.components.get<WallParams>(target)!;
+    final next = p.copyWith(justification: j);
+    if (next == p) return;
+    try {
+      widget.document.commands
+          .execute(SetComponentCommand<WallParams>(target, next));
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// Spec 08 D16: Flip hinge or Flip swing, one step for the one selected
+  /// door. Like the justification toggle, a click that acts on the target
+  /// shown now, and a refused edit is caught: nothing changed.
+  void _flip({required bool hinge}) {
+    final target = _openingToolMode == null ? _selected<OpeningParams>() : null;
+    if (target == null || !_editable(_Kind.openingWidth)) return;
+    final p = widget.document.components.get<OpeningParams>(target)!;
+    if (p.kind != OpeningKind.door) return;
+    final next = hinge
+        ? p.copyWith(
+            hinge: p.hinge == HingeEnd.start ? HingeEnd.end : HingeEnd.start)
+        : p.copyWith(
+            swing:
+                p.swing == SwingSide.left ? SwingSide.right : SwingSide.left);
+    try {
+      widget.document.commands
+          .execute(SetComponentCommand<OpeningParams>(target, next));
+    } on ArgumentError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    } on DanglingReferenceError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// Whether [v] is a valid keystroke for the tool settings [target]:
+  /// written at once in tool mode (07 D11, 08 D16).
+  bool _validSetting(_Kind kind, Handle target, double v) =>
+      switch (_openingToolKind(target)) {
+        final k? => kind == _Kind.openingWidth && isOpeningWidth(k, v),
+        null => kind == _Kind.thickness && isWallThickness(v),
+      };
+
+  Widget _field(String key, String label, _Field f, bool editable) => TextField(
+        key: Key(key),
+        controller: f.text,
+        focusNode: f.focus,
+        readOnly: !editable,
+        decoration: InputDecoration(
+            labelText: label, suffixText: f.isText ? null : 'mm'),
+        keyboardType: f.isText
+            ? TextInputType.text
+            : const TextInputType.numberWithOptions(decimal: true),
+        // While the Wall tool is active every valid keystroke reaches its
+        // settings at once (07 D11, review round 1): a canvas click
+        // accepts its point before the field's focus-loss commit runs, so
+        // a value typed without Enter would otherwise miss that click's
+        // wall. Erasing back leaves the last valid prefix in the settings
+        // until the field commits.
+        //
+        // The same for an opening tool's width (08 D16): a width typed
+        // with D active and no Enter places the next door at that width.
+        onChanged: (t) {
+          if (f.kind == _Kind.number && _numberError != null) {
+            setState(() => _numberError = null);
+          }
+          final target = f.pinned;
+          if (target == null || !_isToolTarget(target)) return;
+          final v = double.tryParse(t.trim());
+          if (v != null && _validSetting(f.kind, target, v)) {
+            _write(f.kind, target, v);
+          }
+        },
+        onSubmitted: (_) => _commit(f),
+        // Enter hands focus back to what had it before the panel fields --
+        // the canvas -- so the shell's letters and Escape work again at
+        // once; past any other panel field still in the focus history
+        // (fix/post-07 F3; `PanelFieldFocusNode.handBack`). `onSubmitted`
+        // still runs after it.
+        onEditingComplete: f.focus.handBack,
+        // Only unfocuses (spec 06 D13's amendment for F2): the commit
+        // itself happens in `_onFocusChange`, which fires for this too, so
+        // every way of losing focus -- Enter, moving to another field, or a
+        // tap outside -- commits. Like Enter, it hands focus back to the
+        // canvas, and leaves a canvas click's own focus request alone.
+        onTapOutside: (_) => f.focus.handBack(),
+      );
+
+  /// The Table section (14a T14, T16).
+  List<Widget> _tableSection(TableInfo table, TextStyle? title) {
+    final error = _numberErrorFor == table.instance ? _numberError : null;
+    final shared =
+        table.number == null ? 0 : _tables.withNumber(table.number!).length;
+    final theme = Theme.of(context);
+    return [
+      Text('Table', key: const Key('table-section'), style: title),
+      _field('table-number', 'Number', _number, _editable(_Kind.number)),
+      if (error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(error,
+              key: const Key('table-number-error'),
+              style: TextStyle(color: theme.colorScheme.error)),
+        ),
+      if (shared > 1)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text('Number ${table.number} is used by $shared tables',
+              key: const Key('table-number-duplicate'),
+              // A warning (T6), not a refusal.
+              style: TextStyle(color: theme.colorScheme.tertiary)),
+        ),
+      InputDecorator(
+        decoration:
+            const InputDecoration(labelText: 'Seats', border: InputBorder.none),
+        child: Text('${table.seats}', key: const Key('table-seats')),
+      ),
+      if (_rotatable)
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('table-rotate-left'),
+                onPressed: () => _rotateTable(1),
+                icon: const Icon(Icons.rotate_left),
+                label: const Text('Rotate 90° left'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('table-rotate-right'),
+                onPressed: () => _rotateTable(-1),
+                icon: const Icon(Icons.rotate_right),
+                label: const Text('Rotate 90° right'),
+              ),
+            ),
+          ],
+        ),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final box = _box, wall = _wall, opening = _opening, room = _room;
+    final dimension = _dimension;
+    final table = _toolMode || _openingToolMode != null ? null : _table;
+    // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
+    // whenever no tool-settings section does, including a selection that
+    // has no type section (a line, a text, a symbol, several things).
+    final picker = widget.selection.keys.isNotEmpty &&
+        !_toolMode &&
+        _openingToolMode == null;
+    final sections = box != null ||
+        wall != null ||
+        opening != null ||
+        room != null ||
+        dimension != null ||
+        table != null;
+    if (!sections && !picker) return const SizedBox.shrink();
+    final title = Theme.of(context).textTheme.titleSmall;
+    final boxEditable = _editable(_Kind.width);
+    final wallEditable = _editable(_Kind.thickness);
+    final openingEditable = _editable(_Kind.openingWidth);
+    final roomEditable = _editable(_Kind.name);
+    final OpeningParams? openingParams = opening == null
+        ? null
+        : widget.document.components.get<OpeningParams>(opening);
+    final openingKind = switch (opening) {
+      null => null,
+      final h => _openingToolKind(h) ?? openingParams!.kind,
+    };
+    final Justification? justification = switch (wall) {
+      null => null,
+      _toolSettings => widget.wallSettings!.value.justification,
+      final h => widget.document.components.get<WallParams>(h)!.justification,
+    };
+    return Material(
+      key: const Key('selection-panel'),
+      color: Colors.transparent,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (box != null) ...[
+              Text('Box', style: title),
+              _field('box-width', 'Width', _width, boxEditable),
+              _field('box-height', 'Height', _height, boxEditable),
+            ],
+            if (wall != null) ...[
+              Text('Wall', key: const Key('wall-section'), style: title),
+              _field('wall-thickness', 'Thickness', _thickness, wallEditable),
+              const SizedBox(height: 8),
+              SegmentedButton<Justification>(
+                key: const Key('wall-justification'),
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                      value: Justification.left,
+                      label: Text('Left', key: Key('wall-left'))),
+                  ButtonSegment(
+                      value: Justification.centre,
+                      label: Text('Centre', key: Key('wall-centre'))),
+                  ButtonSegment(
+                      value: Justification.right,
+                      label: Text('Right', key: Key('wall-right'))),
+                ],
+                selected: {justification!},
+                onSelectionChanged:
+                    wallEditable ? (s) => _setJustification(s.single) : null,
+              ),
+            ],
+            if (opening != null) ...[
+              if (box != null || wall != null) const SizedBox(height: 12),
+              Text(_titleOf(openingKind!),
+                  key: const Key('opening-section'), style: title),
+              _field('opening-width', 'Width', _openingWidth, openingEditable),
+              // The position, from the host's start to the centre, is the
+              // stored one; a tool places at the click, so it has none.
+              if (openingParams != null)
+                _field(
+                    'opening-position', 'Position', _position, openingEditable),
+              if (openingParams?.kind == OpeningKind.door) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        key: const Key('opening-flip-hinge'),
+                        onPressed:
+                            openingEditable ? () => _flip(hinge: true) : null,
+                        child: const Text('Flip hinge'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton(
+                        key: const Key('opening-flip-swing'),
+                        onPressed:
+                            openingEditable ? () => _flip(hinge: false) : null,
+                        child: const Text('Flip swing'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+            if (room != null) ...[
+              if (box != null || wall != null || opening != null)
+                const SizedBox(height: 12),
+              Text('Room', key: const Key('room-section'), style: title),
+              _field('room-name', 'Name', _name, roomEditable),
+              // Read-only (10 R-25): the area label's string as drawn.
+              InputDecorator(
+                decoration: const InputDecoration(
+                    labelText: 'Area', border: InputBorder.none),
+                child: Text(_areaOf(room) ?? '—', key: const Key('room-area')),
+              ),
+            ],
+            if (dimension != null) ...[
+              if (box != null ||
+                  wall != null ||
+                  opening != null ||
+                  room != null)
+                const SizedBox(height: 12),
+              ..._dimensionSection(dimension, title),
+            ],
+            if (table != null) ...[
+              if (box != null ||
+                  wall != null ||
+                  opening != null ||
+                  room != null ||
+                  dimension != null)
+                const SizedBox(height: 12),
+              ..._tableSection(table, title),
+            ],
+            if (picker) ...[
+              if (sections) const SizedBox(height: 12),
+              LayerPicker(
+                  document: widget.document, selection: widget.selection),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}

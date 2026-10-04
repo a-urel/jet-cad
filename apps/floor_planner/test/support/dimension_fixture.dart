@@ -15,14 +15,7 @@
 // `drift_test.dart`, the oracle widened to every child (spec 11 D5).
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/dimension.dart';
-import 'package:floor_planner/parametric/opening.dart';
-import 'package:floor_planner/parametric/opening_geometry.dart'
-    show wallsInDocument;
-import 'package:floor_planner/parametric/separator.dart'
-    show ensureDashedLinetype;
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/parametric/wall_geometry.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 

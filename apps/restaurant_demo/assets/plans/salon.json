@@ -1,0 +1,1963 @@
+{
+ "schemaVersion": 7,
+ "header": {
+  "units": "millimeters",
+  "scale": 1.0,
+  "globalLinetypeScale": 1.0,
+  "currentLayer": 1,
+  "importedExtents": null,
+  "customVariables": {}
+ },
+ "tables": {
+  "layers": [
+   {
+    "handle": 1,
+    "name": "0",
+    "color": 7,
+    "linetype": 4,
+    "lineweight": -3,
+    "transparency": 0,
+    "visible": true,
+    "locked": false
+   }
+  ],
+  "linetypes": [
+   {
+    "handle": 2,
+    "name": "ByLayer",
+    "description": "",
+    "pattern": {
+     "dashes": [],
+     "totalLength": 0.0
+    }
+   },
+   {
+    "handle": 3,
+    "name": "ByBlock",
+    "description": "",
+    "pattern": {
+     "dashes": [],
+     "totalLength": 0.0
+    }
+   },
+   {
+    "handle": 4,
+    "name": "Continuous",
+    "description": "Solid line",
+    "pattern": {
+     "dashes": [],
+     "totalLength": 0.0
+    }
+   },
+   {
+    "handle": 6,
+    "name": "DASHED",
+    "description": "Dashed __ __ __",
+    "pattern": {
+     "dashes": [
+      200.0,
+      -100.0
+     ],
+     "totalLength": 300.0
+    }
+   }
+  ],
+  "textStyles": [
+   {
+    "handle": 5,
+    "name": "Standard",
+    "fontFamily": "Roboto",
+    "widthFactor": 1.0,
+    "obliqueAngle": 0.0,
+    "fixedHeight": 0.0,
+    "isShx": false,
+    "shxFileName": ""
+   }
+  ],
+  "patterns": [],
+  "dimStyles": [],
+  "appIds": []
+ },
+ "definitions": [
+  {
+   "handle": 18,
+   "name": "restaurant.table.rect.four@1",
+   "basePoint": [
+    600.0,
+    725.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 35,
+   "name": "restaurant.table.round.six@1",
+   "basePoint": [
+    1175.0,
+    1175.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 54,
+   "name": "restaurant.booth.four@1",
+   "basePoint": [
+    600.0,
+    850.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 65,
+   "name": "restaurant.bar.stool@1",
+   "basePoint": [
+    190.0,
+    190.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 76,
+   "name": "restaurant.bar.counter@1",
+   "basePoint": [
+    1500.0,
+    300.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  },
+  {
+   "handle": 80,
+   "name": "restaurant.host.stand@1",
+   "basePoint": [
+    300.0,
+    225.0
+   ],
+   "children": [],
+   "isXref": false,
+   "xrefPath": ""
+  }
+ ],
+ "root": 17,
+ "nodes": [
+  {
+   "type": "group",
+   "handle": 17,
+   "parent": 0,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "visible": true,
+   "children": [
+    29,
+    31,
+    33,
+    50,
+    52,
+    61,
+    63,
+    68,
+    70,
+    72,
+    74,
+    79,
+    83
+   ],
+   "exportAsDxfGroup": false
+  },
+  {
+   "type": "instance",
+   "handle": 29,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -5525.0,
+    1625.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 31,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -3025.0,
+    1625.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 33,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -525.0,
+    1625.0
+   ],
+   "visible": true,
+   "definition": 18,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 50,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -5900.0,
+    -2125.0
+   ],
+   "visible": true,
+   "definition": 35,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 52,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -2900.0,
+    -2125.0
+   ],
+   "visible": true,
+   "definition": 35,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 61,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    2975.0,
+    2200.0
+   ],
+   "visible": true,
+   "definition": 54,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 63,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    2975.0,
+    -500.0
+   ],
+   "visible": true,
+   "definition": 54,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 68,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    85.0,
+    -2790.0
+   ],
+   "visible": true,
+   "definition": 65,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 70,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    885.0,
+    -2790.0
+   ],
+   "visible": true,
+   "definition": 65,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 72,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    1685.0,
+    -2790.0
+   ],
+   "visible": true,
+   "definition": 65,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 74,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    2485.0,
+    -2790.0
+   ],
+   "visible": true,
+   "definition": 65,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 79,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    -25.0,
+    -3750.0
+   ],
+   "visible": true,
+   "definition": 76,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  },
+  {
+   "type": "instance",
+   "handle": 83,
+   "parent": 17,
+   "transform": [
+    1.0,
+    0.0,
+    0.0,
+    1.0,
+    5875.0,
+    -4175.0
+   ],
+   "visible": true,
+   "definition": 80,
+   "layer": 1,
+   "color": -2,
+   "lineweight": -2,
+   "transparency": -2,
+   "linetype": 3,
+   "linetypeScale": 1.0
+  }
+ ],
+ "entities": [
+  {
+   "record": {
+    "handle": 19,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     350.0,
+     1200.0,
+     350.0,
+     1200.0,
+     1100.0,
+     0.0,
+     1100.0,
+     0.0,
+     350.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 20,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     50.0,
+     400.0,
+     1150.0,
+     400.0,
+     1150.0,
+     1050.0,
+     50.0,
+     1050.0,
+     50.0,
+     400.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 21,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     525.0,
+     0.0,
+     525.0,
+     450.0,
+     75.0,
+     450.0,
+     75.0,
+     0.0,
+     525.0,
+     0.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 22,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     525.0,
+     60.0,
+     75.0,
+     60.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 23,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     75.0,
+     1450.0,
+     75.0,
+     1000.0,
+     525.0,
+     1000.0,
+     525.0,
+     1450.0,
+     75.0,
+     1450.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 24,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     75.0,
+     1390.0,
+     525.0,
+     1390.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 25,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1125.0,
+     0.0,
+     1125.0,
+     450.0,
+     675.0,
+     450.0,
+     675.0,
+     0.0,
+     1125.0,
+     0.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 26,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1125.0,
+     60.0,
+     675.0,
+     60.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 27,
+    "owner": 18,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     675.0,
+     1450.0,
+     675.0,
+     1000.0,
+     1125.0,
+     1000.0,
+     1125.0,
+     1450.0,
+     675.0,
+     1450.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 28,
+    "owner": 18,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     675.0,
+     1390.0,
+     1125.0,
+     1390.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 30,
+    "owner": 29,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "1",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     600.0,
+     725.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 32,
+    "owner": 31,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "2",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     600.0,
+     725.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 34,
+    "owner": 33,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "3",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     600.0,
+     725.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 36,
+    "owner": 35,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1175.0,
+     1175.0
+    ],
+    "scalars": [
+     600.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 37,
+    "owner": 35,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1175.0,
+     1175.0
+    ],
+    "scalars": [
+     550.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 38,
+    "owner": 35,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1400.0,
+     225.0,
+     1400.0,
+     675.0,
+     950.0,
+     675.0,
+     950.0,
+     225.0,
+     1400.0,
+     225.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 39,
+    "owner": 35,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1400.0,
+     285.0,
+     950.0,
+     285.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 40,
+    "owner": 35,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     2110.224134,
+     894.855716,
+     1720.512702,
+     1119.855716,
+     1495.512702,
+     730.144284,
+     1885.224134,
+     505.144284,
+     2110.224134,
+     894.855716
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 41,
+    "owner": 35,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     2058.26261,
+     924.855716,
+     1833.26261,
+     535.144284
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 42,
+    "owner": 35,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1885.224134,
+     1844.855716,
+     1495.512702,
+     1619.855716,
+     1720.512702,
+     1230.144284,
+     2110.224134,
+     1455.144284,
+     1885.224134,
+     1844.855716
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 43,
+    "owner": 35,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     1833.26261,
+     1814.855716,
+     2058.26261,
+     1425.144284
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 44,
+    "owner": 35,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     950.0,
+     2125.0,
+     950.0,
+     1675.0,
+     1400.0,
+     1675.0,
+     1400.0,
+     2125.0,
+     950.0,
+     2125.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 45,
+    "owner": 35,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     950.0,
+     2065.0,
+     1400.0,
+     2065.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 46,
+    "owner": 35,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     239.775866,
+     1455.144284,
+     629.487298,
+     1230.144284,
+     854.487298,
+     1619.855716,
+     464.775866,
+     1844.855716,
+     239.775866,
+     1455.144284
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 47,
+    "owner": 35,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     291.73739,
+     1425.144284,
+     516.73739,
+     1814.855716
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 48,
+    "owner": 35,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     464.775866,
+     505.144284,
+     854.487298,
+     730.144284,
+     629.487298,
+     1119.855716,
+     239.775866,
+     894.855716,
+     464.775866,
+     505.144284
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 49,
+    "owner": 35,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     516.73739,
+     535.144284,
+     291.73739,
+     924.855716
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 51,
+    "owner": 50,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "4",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     1175.0,
+     1175.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 53,
+    "owner": 52,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "5",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     1175.0,
+     1175.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 55,
+    "owner": 54,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     500.0,
+     1200.0,
+     500.0,
+     1200.0,
+     1200.0,
+     0.0,
+     1200.0,
+     0.0,
+     500.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 56,
+    "owner": 54,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     50.0,
+     550.0,
+     1150.0,
+     550.0,
+     1150.0,
+     1150.0,
+     50.0,
+     1150.0,
+     50.0,
+     550.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 57,
+    "owner": 54,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     0.0,
+     1200.0,
+     0.0,
+     1200.0,
+     600.0,
+     0.0,
+     600.0,
+     0.0,
+     0.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 58,
+    "owner": 54,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     150.0,
+     1200.0,
+     150.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 59,
+    "owner": 54,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     1100.0,
+     1200.0,
+     1100.0,
+     1200.0,
+     1700.0,
+     0.0,
+     1700.0,
+     0.0,
+     1100.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 60,
+    "owner": 54,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     1550.0,
+     1200.0,
+     1550.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 62,
+    "owner": 61,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "6",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     600.0,
+     850.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 64,
+    "owner": 63,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "7",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     600.0,
+     850.0
+    ],
+    "scalars": [
+     200.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 66,
+    "owner": 65,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     190.0,
+     190.0
+    ],
+    "scalars": [
+     190.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 67,
+    "owner": 65,
+    "kind": "circle",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     190.0,
+     190.0
+    ],
+    "scalars": [
+     150.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 69,
+    "owner": 68,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "8",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     190.0,
+     190.0
+    ],
+    "scalars": [
+     152.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 71,
+    "owner": 70,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "9",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     190.0,
+     190.0
+    ],
+    "scalars": [
+     152.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 73,
+    "owner": 72,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "10",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     190.0,
+     190.0
+    ],
+    "scalars": [
+     152.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 75,
+    "owner": 74,
+    "kind": "attrib",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "11",
+    "tag": "TABLE",
+    "textStyle": 5,
+    "textAttrs": 289
+   },
+   "geometry": {
+    "coords": [
+     190.0,
+     190.0
+    ],
+    "scalars": [
+     152.0,
+     0.0,
+     1.0
+    ]
+   }
+  },
+  {
+   "record": {
+    "handle": 77,
+    "owner": 76,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     0.0,
+     3000.0,
+     0.0,
+     3000.0,
+     600.0,
+     0.0,
+     600.0,
+     0.0,
+     0.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 78,
+    "owner": 76,
+    "kind": "line",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     350.0,
+     3000.0,
+     350.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 81,
+    "owner": 80,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     0.0,
+     0.0,
+     600.0,
+     0.0,
+     600.0,
+     450.0,
+     0.0,
+     450.0,
+     0.0,
+     0.0
+    ],
+    "scalars": []
+   }
+  },
+  {
+   "record": {
+    "handle": 82,
+    "owner": 80,
+    "kind": "polyline",
+    "layer": 1,
+    "linetype": 3,
+    "linetypeScale": 1.0,
+    "color": -2,
+    "lineweight": -2,
+    "transparency": -2,
+    "flags": 0,
+    "text": "",
+    "tag": "",
+    "textStyle": 5,
+    "textAttrs": 0
+   },
+   "geometry": {
+    "coords": [
+     40.0,
+     40.0,
+     560.0,
+     40.0,
+     560.0,
+     410.0,
+     40.0,
+     410.0,
+     40.0,
+     40.0
+    ],
+    "scalars": []
+   }
+  }
+ ],
+ "components": {
+  "jetcad.page": {
+   "17": {
+    "background": 4294967295,
+    "displayUnit": "meters",
+    "gridStepMm": null,
+    "gridVisible": true,
+    "heightMm": 297.0,
+    "orientation": "landscape",
+    "originX": -7425.0,
+    "originY": -5250.0,
+    "pageBreaks": false,
+    "scaleDenominator": 50.0,
+    "snapToGrid": true,
+    "widthMm": 210.0
+   }
+  },
+  "jetcad.seating": {
+   "18": {
+    "seats": 4
+   },
+   "35": {
+    "seats": 6
+   },
+   "54": {
+    "seats": 4
+   },
+   "65": {
+    "seats": 1
+   }
+  },
+  "jetcad.symbol": {
+   "18": {
+    "category": "Restaurant Tables",
+    "key": "restaurant.table.rect.four",
+    "name": "Rectangular table, 4 seats",
+    "tags": [
+     "table",
+     "rectangular",
+     "four"
+    ],
+    "version": 1
+   },
+   "35": {
+    "category": "Restaurant Tables",
+    "key": "restaurant.table.round.six",
+    "name": "Round table, 6 seats",
+    "tags": [
+     "table",
+     "round",
+     "six"
+    ],
+    "version": 1
+   },
+   "54": {
+    "category": "Booths and Lounge",
+    "key": "restaurant.booth.four",
+    "name": "Booth, 4 seats",
+    "tags": [
+     "booth",
+     "table",
+     "four"
+    ],
+    "version": 1
+   },
+   "65": {
+    "category": "Bar",
+    "key": "restaurant.bar.stool",
+    "name": "Bar stool",
+    "tags": [
+     "stool",
+     "bar",
+     "seat"
+    ],
+    "version": 1
+   },
+   "76": {
+    "category": "Bar",
+    "key": "restaurant.bar.counter",
+    "name": "Bar counter",
+    "tags": [
+     "counter",
+     "bar"
+    ],
+    "version": 1
+   },
+   "80": {
+    "category": "Service",
+    "key": "restaurant.host.stand",
+    "name": "Host stand",
+    "tags": [
+     "host",
+     "stand",
+     "reception"
+    ],
+    "version": 1
+   }
+  }
+ },
+ "rawData": {},
+ "handleSeed": 83
+}

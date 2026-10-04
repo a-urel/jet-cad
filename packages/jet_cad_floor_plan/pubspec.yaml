@@ -1,0 +1,39 @@
+name: jet_cad_floor_plan
+description: >-
+  The floor planner as a package (spec 14, slice 14b-1): the shell, the
+  tools, the parametric objects, the symbol library and the panels that
+  apps/floor_planner builds its application frame from, and that a host
+  application embeds. The design / selection split is built in (14b-2).
+publish_to: none
+version: 0.0.1
+resolution: workspace
+
+environment:
+  # The same bounds as apps/floor_planner's (spec 13 R-4, plan 13 P-7): the
+  # sdk bound sets the language version, which keeps the moved code's
+  # formatting; printing and pdf set the Flutter floor.
+  sdk: ^3.5.0
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_2d:
+    path: ../jet_cad_2d
+  jet_cad_2d_flutter:
+    path: ../jet_cad_2d_flutter
+  meta: ^1.18.0
+  pdf: ^3.13.1
+  printing: ^5.15.1
+  vector_math: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  assets:
+    - assets/library/furniture.jetlib
+    - lib/fonts/Roboto-Regular.ttf
+    - assets/fonts/Roboto_LICENSE.txt

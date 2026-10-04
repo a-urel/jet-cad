@@ -4,7 +4,7 @@
 // downloads under its name without asking (web); the web's name prompt;
 // a Save As whose panel throws shows the error and changes nothing.
 import 'package:floor_planner/document_host.dart';
-import 'package:floor_planner/startup_plan.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';

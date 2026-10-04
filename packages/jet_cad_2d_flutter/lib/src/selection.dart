@@ -46,6 +46,11 @@ final class SelectionKey {
 
 /// Spec D2: the root-level object under a hit, or null for a miss or a
 /// truncated chain. Never throws at hover rate.
+///
+/// A leaf owned by an [InstanceNode] (an ATTRIB: a table's number, spec 14a
+/// T11) resolves to the root-level node above it, the topmost group when
+/// there is one, else the instance: a click on the number selects the
+/// table, and the number is never selected, dragged or deleted alone.
 SelectionKey? resolveHit(HitPath hit, DraftDocument document) {
   if (hit.entity.isNone || hit.truncated) return null;
   if (hit.chainLength > 0) return SelectionKey.root(Handle(hit.chain[0]));
@@ -59,8 +64,25 @@ SelectionKey? resolveHit(HitPath hit, DraftDocument document) {
   } on NodeCycleError {
     return SelectionKey.root(hit.entity);
   }
-  return SelectionKey.root(
-      topmostGroupOf(document, owner, ancestors) ?? hit.entity);
+  final group = topmostGroupOf(document, owner, ancestors);
+  if (group != null) return SelectionKey.root(group);
+  if (document.tree[owner] is InstanceNode) {
+    return SelectionKey.root(rootLevelNodeOf(document, owner, ancestors));
+  }
+  return SelectionKey.root(hit.entity);
+}
+
+/// The last handle in `[owner, ...ancestors]` before the root: the
+/// root-level node [owner] sits under, or [owner] itself when it is one.
+/// [ancestors] is `tree.ancestorsOf(owner)`, nearest first.
+Handle rootLevelNodeOf(
+    DraftDocument document, Handle owner, List<Handle> ancestors) {
+  var top = owner;
+  for (final h in ancestors) {
+    if (h == document.rootHandle) break;
+    top = h;
+  }
+  return top;
 }
 
 /// The last group in `[owner, ...ancestors]` before the root, or null when

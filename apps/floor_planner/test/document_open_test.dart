@@ -7,13 +7,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/dimension.dart';
-import 'package:floor_planner/parametric/live_objects.dart';
-import 'package:floor_planner/parametric/opening.dart';
-import 'package:floor_planner/parametric/room.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/startup_plan.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -183,9 +177,9 @@ void main() {
     await clickAt(tester, c + Vector2(3500, 300));
     final view = viewOf(tester);
     expect(view.selection.keys, [SelectionKey.root(free)], reason: 'premise');
-    expect(view.grips.rotatable, isTrue, reason: 'premise');
-    final grip = rotationGripOf(view.grips.box!,
-            view.camera.value.worldToScreenMatrix, view.grips.frame)
+    expect(view.grips!.rotatable, isTrue, reason: 'premise');
+    final grip = rotationGripOf(view.grips!.box!,
+            view.camera.value.worldToScreenMatrix, view.grips!.frame)
         .centre;
     final origin = tester.getTopLeft(find.byType(InteractionLayer));
     await dragGlobal(
@@ -296,7 +290,7 @@ void main() {
     view.selection.replace([SelectionKey.root(walls.first)]);
     await tester.pump();
     expect([
-      for (final r in view.grips.grips)
+      for (final r in view.grips!.grips)
         if (r.object && r.key == SelectionKey.root(walls.first)) r.grip
     ], hasLength(2), reason: 'a live wall\'s two end grips');
   });

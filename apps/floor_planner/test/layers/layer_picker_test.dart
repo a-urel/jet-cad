@@ -14,10 +14,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:floor_planner/layers/layer_picker.dart';
-import 'package:floor_planner/parametric/box.dart';
-import 'package:floor_planner/parametric/separator.dart';
-import 'package:floor_planner/selection_panel.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';

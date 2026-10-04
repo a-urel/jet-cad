@@ -1,5 +1,98 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-03. **A new sub-project, 14 — restaurant
+embedding, is in flight on `claude/exciting-pasteur-9m22jv` (not merged).**
+The human, 2026-10-03: the floor planner's first use is inside a Flutter
+restaurant (POS) application, with a **design mode** and a **selection
+mode** built in; what is missing for that comes first.
+- **Spec:** [2026-10-03-restaurant-embedding-design.md](docs/superpowers/specs/2026-10-03-restaurant-embedding-design.md),
+  an umbrella spec, revision 3, approved 2026-10-03. Six slices:
+  **14b-1** extraction → **14s** restaurant symbols → **14a** table
+  identity → **14b-2** host API, the two modes, the undo barrier,
+  `apps/restaurant_demo` → **14c** selection mode, with a touch spike
+  (**14t**) early. 14b-1 and 14s are specified in full there; every other
+  slice needs its own full spec first. The human's rulings: a Flutter host;
+  single and multiple selection (long press), status colours, moving tables
+  for the service only; the number set in design mode and printed; Export
+  and Print in both modes; every platform; bar stools can be "tables"; the
+  symbols a separate package, as complete as possible.
+- **Done on the branch (14b-1 + 14s):** see
+  [2026-10-03-plan-14b1-14s-results.md](docs/superpowers/notes/2026-10-03-plan-14b1-14s-results.md).
+  `packages/jet_cad_floor_plan` holds the planner (the app is its frame);
+  `packages/jet_cad_restaurant_symbols` ships 69 symbols (25 servable,
+  carrying `SeatingComponent`); the app shows furniture and restaurant
+  symbols together. Gates: planner 832, restaurant 91, app 192, web built;
+  engine 1,226 + 2 standing and render 1,187 + 1 skip + 7 standing,
+  untouched. Two independent reviews: 14b-1 "Needs fixes", 14s "Approved
+  with fixes"; both sets of fixes applied (`2120a74`, `7dce65c`).
+- **Done on the branch (14a, table identity):** see
+  [2026-10-03-plan-14a-results.md](docs/superpowers/notes/2026-10-03-plan-14a-results.md);
+  spec [2026-10-03-table-identity-design.md](docs/superpowers/specs/2026-10-03-table-identity-design.md)
+  rev 2 (the human's rulings: seats per symbol, numbers per plan and
+  editable by hand, the label size rule, turning in the design mode only).
+  A servable placement is a numbered table: its number is the `TABLE`
+  ATTRIB its instance owns, upright at the top's centre on screen and
+  paper (a stacked table system re-stamps it inside the edit that turns
+  it); a click on the number selects the table, Delete removes both; the
+  Selection panel's Table section edits the number and turns the table
+  90° in place. Gates: render 1,196 + 1 skip + 7 standing, planner 892,
+  restaurant 91, app 192, web built and smoke-tested; the engine
+  untouched.
+- **Done on the branch (14b-2, host API and the two modes):** see
+  [2026-10-03-plan-14b2-results.md](docs/superpowers/notes/2026-10-03-plan-14b2-results.md);
+  spec [2026-10-03-host-api-and-modes-design.md](docs/superpowers/specs/2026-10-03-host-api-and-modes-design.md)
+  rev 2 (written and run while the human travelled, on their word not to
+  be asked unless needed; amendments A-1 to A-3 owed a look). A host
+  embeds the planner through `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`:
+  `FloorPlanController` holds the designed plan and, in the selection
+  mode, a service copy under `runtime` (service edits and their Undo
+  never reach the design); `FloorPlanView` shows the editor or the canvas
+  alone, Export and Print in both. `apps/restaurant_demo` (every runner)
+  shows two dining areas with a Design / Service toggle. Gates: planner
+  925, app 192, demo 11, both web builds; engine and render untouched.
+- **Done on the branch (14c, selection-mode behaviour):** see
+  [2026-10-03-plan-14c-results.md](docs/superpowers/notes/2026-10-03-plan-14c-results.md);
+  spec [2026-10-03-selection-mode-design.md](docs/superpowers/specs/2026-10-03-selection-mode-design.md)
+  rev 2. In the selection mode a tap inside a table's top selects it and
+  reports its number (`onTableTap`); Shift, Ctrl or ⌘ toggles; a long
+  press adds or removes; a drag moves the selection in one step on the
+  service copy (`onLayoutChanged`); the floor pans; a locked table is
+  tapped only. `setTableStatus` colours tables by number (a colour and a
+  caption below the number; not document state), under the drafting. The
+  demo opens on two furnished sample areas with status buttons and a log.
+  The render package gained one `mounted` guard (`RulerFrame`). Gates:
+  render 1,197 + 1 skip + 7 standing,
+  planner 961, app 192, demo 17, both web builds; the engine untouched.
+- **Done on the branch (14t, touch):** see
+  [2026-10-03-plan-14t-results.md](docs/superpowers/notes/2026-10-03-plan-14t-results.md);
+  spike [2026-10-03-touch-spike.md](docs/superpowers/notes/2026-10-03-touch-spike.md),
+  spec [2026-10-03-touch-design.md](docs/superpowers/specs/2026-10-03-touch-design.md)
+  rev 2. Two fingers pinch about their midpoint and pan; a finger is held
+  back 100 ms (a select-like tool) or until it lifts (a drawing tool, which
+  sees the slide as a hover and places where the finger lifts), so a pinch
+  never taps, drags, draws or commits; two fingers keep every tool out
+  until all lift; a second finger cancels a table drag; a finger reaches
+  24 px after a 6 px pick misses, and its grips, slop and table picks are
+  finger-sized. The render package changed (the layer, the camera
+  detector, the select tool, the grip cache, the ruler). Gates: render
+  1,229 + 1 skip + 7 standing, planner 969, app 192, demo 17, both web
+  builds, a Chromium touch smoke; the engine untouched. **No device was
+  measured.**
+- **Toolchain:** the container ran Flutter 3.47.6 (installed this
+  session); the repo's floor is unchanged (3.44.0).
+- **Owed:** the human's macOS and web look at the palette, the font, the
+  table numbers and the demo (now with the service mode's taps, drags and
+  colours, and touch on a tablet: pinch, the hold-back, finger targets); a look at the amendments of 14b-2 (the service copy as the
+  barrier, Export of the copy), of 14c (the render guard, the caption
+  below the number, statuses set on the selected tables) and of 14t (the
+  press and lift modes, `fitToView` framing withdrawn); the merge, on
+  the human's word; the earlier owed items below stand.
+- **Next:** the restaurant embedding's six slices are done on the branch.
+  What remains is the human's: the look (now on a touch device too), the
+  amendments of 14b-2, 14c and 14t, and the merge into `main`.
+
+*Earlier, 2026-10-02 (the plan 12b merge):*
+
 **Last updated:** 2026-10-02. **Plan 12b (the layer panel, the second slice
 of sub-project 12) is MERGED into `main` at `0bab9e5`**, `--no-ff`, on the
 human's word ("layer geliştirmelerini merge edebiliriz. testler iyi

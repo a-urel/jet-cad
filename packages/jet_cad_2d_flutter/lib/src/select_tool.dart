@@ -9,11 +9,13 @@ import 'package:flutter/services.dart'
         LogicalKeyboardKey,
         MouseCursor,
         SystemMouseCursors;
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import 'grip_cache.dart' show GripCache, GripRef, movableKey;
+import 'grip_cache.dart'
+    show GripCache, GripRef, kTouchGripHitPixels, movableKey;
 import 'grip_drag.dart';
 import 'selection.dart';
 import 'selection_style.dart';
@@ -42,11 +44,19 @@ class SelectTool extends Tool {
   @override
   ToolPhase get phase => _phase;
 
+  /// A down only classifies a press and `cancel` executes nothing, so a
+  /// finger reaches this tool after the hold-back (spec 14t R-1).
+  @override
+  TouchPress get touchPress => TouchPress.press;
+
   final HitPath _hit = HitPath();
   Offset _start = Offset.zero;
   final Vector2 _pressWorld = Vector2.zero();
   bool _pressShift = false;
   PressClass _class = PressClass.empty;
+
+  /// The press's slop: a fingertip's is [kTouchSlop] (spec 14t T4).
+  double _slop = kBandSlopPixels;
   SelectionKey? _downKey;
   GripRef? _pressRef;
 
@@ -104,9 +114,15 @@ class SelectTool extends Tool {
         : null;
   }
 
+  /// The topmost pick within the precise radius; for a finger that
+  /// misses, within its reach (spec 14t R-3): a wide first pick would
+  /// return a later-drawn neighbour over the line under the finger.
   SelectionKey? _pick(ToolPointerEvent e, ToolContext ctx) {
     if (!ctx.index.pickInto(
-        e.world, e.pickRadiusWorld, const QueryFilter.picking(), _hit)) {
+            e.world, e.pickRadiusWorld, const QueryFilter.picking(), _hit) &&
+        (e.reachRadiusWorld <= e.pickRadiusWorld ||
+            !ctx.index.pickInto(e.world, e.reachRadiusWorld,
+                const QueryFilter.picking(), _hit))) {
       return null;
     }
     return resolveHit(_hit, ctx.document);
@@ -120,6 +136,7 @@ class SelectTool extends Tool {
     _start = e.screen;
     _pressWorld.setFrom(e.world);
     _pressShift = e.shift;
+    _slop = e.isTouch ? kTouchSlop : kBandSlopPixels;
     _class = _classify(e, ctx);
     notifyListeners();
   }
@@ -132,8 +149,24 @@ class SelectTool extends Tool {
     final grips = ctx.grips;
     if (grips != null) {
       final m = ctx.camera.value.worldToScreenMatrix;
-      if (grips.hitsRotationGrip(e.screen, m)) return PressClass.rotationGrip;
-      final i = grips.hitTest(e.screen, m);
+      final int i;
+      if (e.isTouch) {
+        // A finger's reach would put the rotation grip, 24 px above the
+        // box, over the top-centre grip: the nearer wins, a tie the grip
+        // (spec 14t T4b).
+        i = grips.hitTest(e.screen, m, radius: kTouchGripHitPixels);
+        final rotation = grips.rotationGripDistance(e.screen, m);
+        final grip =
+            i >= 0 ? grips.gripDistance(i, e.screen, m) : double.infinity;
+        if (rotation <= kTouchGripHitPixels && rotation < grip) {
+          return PressClass.rotationGrip;
+        }
+      } else {
+        if (grips.hitsRotationGrip(e.screen, m)) {
+          return PressClass.rotationGrip;
+        }
+        i = grips.hitTest(e.screen, m);
+      }
       if (i >= 0) {
         _pressRef = grips.grips[i];
         return PressClass.grip;
@@ -157,7 +190,7 @@ class SelectTool extends Tool {
         _hoverAt(e, ctx);
       case ToolPhase.pressed:
         if (e.pointer != _pointer || _clickOnly) return;
-        if ((e.screen - _start).distance < kBandSlopPixels) return;
+        if ((e.screen - _start).distance < _slop) return;
         _beginDrag(e, ctx);
       case ToolPhase.dragging:
         if (e.pointer != _pointer) return;
@@ -636,8 +669,16 @@ class SelectTool extends Tool {
         names = Set.of(named);
         list = _groupCascade(doc, node, byOwner, names);
       } else if (node is InstanceNode) {
-        names = {key.target};
-        list = [RemoveNodeCommand(key.target)];
+        // Spec 14a T9: the entities the instance owns (a table's number)
+        // go first, in the same compound, so none is left without its
+        // owner.
+        byOwner ??= doc.leavesByOwner();
+        names = Set.of(named);
+        list = [
+          ..._ownedLeaves(doc, key.target, byOwner, names),
+          RemoveNodeCommand(key.target),
+        ];
+        names.add(key.target);
       } else if (doc.entities.slotOf(key.target) != null) {
         names = {key.target, ...doc.fills.fillsOf(key.target)};
         list = [RemoveEntityCommand(key.target)];
@@ -665,8 +706,33 @@ class SelectTool extends Tool {
   /// including the fills that go with a boundary — is added to it.
   List<DraftCommand> _groupCascade(DraftDocument doc, GroupNode group,
       Map<Handle, List<int>> byOwner, Set<Handle> named) {
+    final out = _ownedLeaves(doc, group.handle, byOwner, named);
+    for (final child in doc.tree.childNodesOf(group.children)) {
+      final n = doc.tree[child];
+      if (n is GroupNode) {
+        out.addAll(_groupCascade(doc, n, byOwner, named));
+      } else if (n is InstanceNode) {
+        if (named.add(child)) {
+          // Spec 14a T9: an instance's own entities before the instance.
+          out
+            ..addAll(_ownedLeaves(doc, child, byOwner, named))
+            ..add(RemoveNodeCommand(child));
+        }
+      }
+    }
+    if (named.add(group.handle)) out.add(RemoveNodeCommand(group.handle));
+    return out;
+  }
+
+  /// A `RemoveEntityCommand` per leaf [owner] owns, ascending by handle (the
+  /// order `leavesByOwner` keeps), except a fill whose boundary is also
+  /// here, which the boundary's command takes. Handles already in [named]
+  /// are skipped, and every handle the returned commands will remove —
+  /// including the fills that go with a boundary — is added to it.
+  List<DraftCommand> _ownedLeaves(DraftDocument doc, Handle owner,
+      Map<Handle, List<int>> byOwner, Set<Handle> named) {
     final out = <DraftCommand>[];
-    final leaves = byOwner[group.handle] ?? const <int>[];
+    final leaves = byOwner[owner] ?? const <int>[];
     final boundaries = <Handle>{};
     for (final slot in leaves) {
       if (doc.entities.kindAt(slot) != EntityKind.fill) {
@@ -681,15 +747,6 @@ class SelectTool extends Tool {
       named.addAll(doc.fills.fillsOf(h));
       out.add(RemoveEntityCommand(h));
     }
-    for (final child in doc.tree.childNodesOf(group.children)) {
-      final n = doc.tree[child];
-      if (n is GroupNode) {
-        out.addAll(_groupCascade(doc, n, byOwner, named));
-      } else if (n is InstanceNode) {
-        if (named.add(child)) out.add(RemoveNodeCommand(child));
-      }
-    }
-    if (named.add(group.handle)) out.add(RemoveNodeCommand(group.handle));
     return out;
   }
 

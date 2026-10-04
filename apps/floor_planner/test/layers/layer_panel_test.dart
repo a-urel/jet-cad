@@ -12,12 +12,7 @@
 import 'dart:convert';
 
 import 'package:floor_planner/document_host.dart';
-import 'package:floor_planner/layers/layer_panel.dart';
-import 'package:floor_planner/layers/layer_row.dart';
-import 'package:floor_planner/page_panel.dart';
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/shell_commands.dart';
-import 'package:floor_planner/shortcut_guard.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

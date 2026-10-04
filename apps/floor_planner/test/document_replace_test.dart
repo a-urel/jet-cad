@@ -4,9 +4,7 @@
 // the Save step inside the flow's busy span: a cancelled or failed save
 // keeps everything, and a save that succeeded while an edit landed asks
 // again (T-8). While the nested save is held, nothing else runs.
-import 'package:floor_planner/panel_focus.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/startup_plan.dart';
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';

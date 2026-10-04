@@ -72,6 +72,27 @@ void main() {
   });
 
   testWidgets(
+      'a finger marks nothing and clears a mouse\'s mark (spec 14t R-10)',
+      (tester) async {
+    final (state, _) = await pump(tester);
+    final child = tester.getRect(find.byKey(const Key('child')));
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: child.topLeft + const Offset(50, 40));
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(child.topLeft + const Offset(60, 45));
+    await tester.pump();
+    expect(state.pointer.value, const Offset(60, 45));
+    final finger = await tester.startGesture(
+        child.topLeft + const Offset(200, 100),
+        kind: PointerDeviceKind.touch,
+        pointer: 7);
+    await finger.moveTo(child.topLeft + const Offset(230, 120));
+    await tester.pump();
+    expect(state.pointer.value, isNull);
+    await finger.up();
+  });
+
+  testWidgets(
       "the sheet corner's major tick sits at its screen x in the top bar",
       (tester) async {
     // S10: the frame-level check the painter test cannot make.
@@ -104,5 +125,36 @@ void main() {
     expect(majors.any((x) => (x - cornerX).abs() < 1e-6), isTrue,
         reason: 'the top bar emits a major tick at the sheet corner: '
             'majors were $majors, corner at $cornerX');
+  });
+
+  testWidgets(
+      'a frame replaced mid-drag: the old frame\'s pointer is not written '
+      '(spec 14c, a host replacing the plan while a finger is down)',
+      (tester) async {
+    final page = ValueNotifier<PageComponent?>(standardPage());
+    final camera = standardCamera();
+    Widget frame(Key key) => Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(
+              width: 424,
+              height: 324,
+              child: RulerFrame(
+                key: key,
+                camera: camera,
+                page: page,
+                child: const SizedBox.expand(key: Key('child')),
+              ),
+            ),
+          ),
+        );
+    await tester.pumpWidget(frame(const ValueKey('first')));
+    final g = await tester
+        .startGesture(tester.getCenter(find.byKey(const Key('child'))));
+    await g.moveBy(const Offset(10, 0));
+    await tester.pumpWidget(frame(const ValueKey('second')));
+    await g.moveBy(const Offset(10, 0));
+    await g.cancel();
+    expect(tester.takeException(), isNull);
   });
 }
