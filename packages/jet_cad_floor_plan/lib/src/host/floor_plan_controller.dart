@@ -14,6 +14,7 @@ import '../export/export_dialog.dart';
 import '../export/export_font.dart';
 import '../new_document.dart';
 import '../parametric/catalog.dart';
+import '../service/table_groups.dart';
 import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
 import '../tables/table_index.dart';
@@ -183,6 +184,11 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<int> _revision = ValueNotifier(0);
   final ValueNotifier<Map<String, TableStatus>> _statuses =
       ValueNotifier(const <String, TableStatus>{});
+  final ValueNotifier<Map<String, TableGroup>> _groups =
+      ValueNotifier(const <String, TableGroup>{});
+  final ValueNotifier<Map<String, TableStatus>> _groupStatuses =
+      ValueNotifier(const <String, TableStatus>{});
+  final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
   /// of it, a mode switch, [load], [newPlan], [resetLayout] (demo review
@@ -202,6 +208,48 @@ class FloorPlanController extends ChangeNotifier {
     _statuses.value = Map.unmodifiable(
         {for (final e in statuses.entries) e.key.trim(): e.value});
   }
+
+  /// The table groups by trimmed group id (table-groups spec G1), as
+  /// [setTableGroups] last set them. Kept for the controller's life, across
+  /// mode switches, [resetLayout] and [load], like [tableStatuses]; they act
+  /// in the selection mode only.
+  ValueListenable<Map<String, TableGroup>> get tableGroups => _groups;
+
+  /// Replaces every group at once (G1): ids trimmed. Not document state --
+  /// no command, no undo, no [dirty], no [revision]; never saved, exported
+  /// or printed. The planner never changes a group itself.
+  ///
+  /// Throws an [ArgumentError] (G2) for a blank id, two ids the same after
+  /// trimming, a group with no member after trimming, or a number in two
+  /// groups; then nothing is assigned and no listener is notified. A member
+  /// number with no live table is kept.
+  void setTableGroups(Map<String, TableGroup> groups) {
+    final valid = validateTableGroups(groups);
+    _groups.value = valid;
+    _refreshSelectedGroup();
+  }
+
+  /// The groups' statuses by trimmed group id (G1), as [setGroupStatus]
+  /// last set them; kept like [tableStatuses].
+  ValueListenable<Map<String, TableStatus>> get groupStatuses => _groupStatuses;
+
+  /// Replaces every group status at once (G1): ids trimmed. A group's
+  /// status fills every visible member and **overrides** each member's own
+  /// [tableStatuses] entry while it is set (G3). A status whose id has no
+  /// group is kept, draws nothing, and applies again when a group with that
+  /// id comes back (G2). Not document state, as [setTableStatus].
+  void setGroupStatus(Map<String, TableStatus> statuses) {
+    _groupStatuses.value = Map.unmodifiable(
+        {for (final e in statuses.entries) e.key.trim(): e.value});
+  }
+
+  /// The id of the group the selection is exactly (G1, G5's Split rule):
+  /// the selected numbers are the numbers of that group's selectable
+  /// members (visible, unlocked), none is missing or extra, and no
+  /// unnumbered table is selected. Null otherwise, and always in the design
+  /// mode, where groups do not act (G4). Follows the selection, the groups
+  /// and the active plan.
+  ValueListenable<String?> get selectedGroup => _selectedGroup;
 
   /// The mode (H3). Changed by [setMode].
   ValueListenable<FloorPlanMode> get mode => _mode;
@@ -452,7 +500,9 @@ class FloorPlanController extends ChangeNotifier {
   /// Selects every live table carrying one of [numbers] that the selection
   /// can hold -- visible, on an unlocked layer -- replacing the selection
   /// (H3, H13). A number used twice selects both; an unknown one is
-  /// ignored.
+  /// ignored. In the selection mode a number in a group stands for every
+  /// member of it (table-groups spec G4), filtered by the same rule, so a
+  /// hidden or locked member is never selected.
   void select(Set<String> numbers) {
     _settle?.call();
     _select(numbers);
@@ -462,7 +512,7 @@ class FloorPlanController extends ChangeNotifier {
     final plan = _active;
     final layers = plan.document.tables.layers;
     final keys = <SelectionKey>[];
-    for (final n in numbers) {
+    for (final n in _expandGroups(numbers)) {
       for (final t in _tables.withNumber(n)) {
         final node = plan.document.tree[t.instance];
         if (node is! InstanceNode) continue;
@@ -475,6 +525,56 @@ class FloorPlanController extends ChangeNotifier {
     _refreshSelected();
   }
 
+  /// [numbers], each number of a group replaced by all its members (G4):
+  /// in the selection mode only, where groups act.
+  Set<String> _expandGroups(Set<String> numbers) {
+    final groups = _groups.value;
+    if (_mode.value != FloorPlanMode.selection || groups.isEmpty) {
+      return numbers;
+    }
+    final lookup = _groupLookup;
+    return {
+      for (final n in numbers)
+        ...switch (lookup.groupOf(n)) {
+          null => [n],
+          final id => groups[id]!.members,
+        }
+    };
+  }
+
+  TableGroupLookup? _lookup;
+  TableSurvey? _lookupSurvey;
+  Map<String, TableGroup>? _lookupGroups;
+  int? _lookupLayers;
+
+  /// The groups resolved against the active plan's tables, rebuilt when the
+  /// survey, the groups or the layers moved.
+  TableGroupLookup get _groupLookup {
+    final survey = _tables;
+    final groups = _groups.value;
+    final document = _active.document;
+    final layersRevision = document.tables.mutationRevision;
+    if (_lookup == null ||
+        !identical(_lookupSurvey, survey) ||
+        !identical(_lookupGroups, groups) ||
+        _lookupLayers != layersRevision) {
+      final layers = document.tables.layers;
+      _lookup = TableGroupLookup(groups, [
+        for (final t in survey.tables)
+          if (document.tree[t.instance] case final InstanceNode node)
+            GroupTable(
+                handle: t.instance,
+                number: t.number,
+                visible: layers[node.layer]?.visible ?? true,
+                locked: layers[node.layer]?.locked ?? false),
+      ]);
+      _lookupSurvey = survey;
+      _lookupGroups = groups;
+      _lookupLayers = layersRevision;
+    }
+    return _lookup!;
+  }
+
   void _refreshSelected() {
     final keys = _active.selection.keys;
     final numbers = <String>{
@@ -485,6 +585,20 @@ class FloorPlanController extends ChangeNotifier {
     if (!setEquals(numbers, _selectedTables.value)) {
       _selectedTables.value = Set.unmodifiable(numbers);
     }
+    _refreshSelectedGroup();
+  }
+
+  /// [selectedGroup] by G5's Split rule, over the active plan.
+  void _refreshSelectedGroup() {
+    String? id;
+    if (_mode.value == FloorPlanMode.selection && _groups.value.isNotEmpty) {
+      final keys = _active.selection.keys;
+      final unnumbered = _tables.tables.any((t) =>
+          t.number == null && keys.contains(SelectionKey.root(t.instance)));
+      id = _groupLookup.splitGroup(_selectedTables.value,
+          unnumberedSelected: unnumbered);
+    }
+    _selectedGroup.value = id;
   }
 
   /// The active view frames the plan as on its first frame (H3, F-7).
@@ -554,6 +668,9 @@ class FloorPlanController extends ChangeNotifier {
     _selectedTables.dispose();
     _revision.dispose();
     _statuses.dispose();
+    _groups.dispose();
+    _groupStatuses.dispose();
+    _selectedGroup.dispose();
     super.dispose();
   }
 }

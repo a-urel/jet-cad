@@ -12,6 +12,7 @@ export 'src/fonts.dart' show ensureFloorPlanFonts;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
     show FloorPlanExport, FloorPlanMode, FloorPlanTable, TableStatus;
+export 'src/host/floor_plan_types.dart' show TableGroup;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
 export 'src/symbols/symbol_library_loader.dart'
     show SymbolLibraryLoader, SymbolLibrarySource, furnitureSymbolSource;
