@@ -57,7 +57,15 @@ List<double> oracleMajorXs(
     {PageComponent? page, CameraController? camera}) {
   final n = ValueNotifier<PageComponent?>(page ?? standardPage());
   final cam = camera ?? standardCamera();
-  return (PageChromePainter(camera: cam, page: n), n, cam);
+  return (
+    PageChromePainter(
+        camera: cam,
+        page: n,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light),
+    n,
+    cam
+  );
 }
 
 /// Vertical lines' x from a recorded `drawRawPoints` list: every pair
@@ -217,7 +225,11 @@ void main() {
     addTearDown(index.dispose);
     final n = PageNotifier(doc);
     addTearDown(n.dispose);
-    final painter = PageChromePainter(camera: standardCamera(), page: n);
+    final painter = PageChromePainter(
+        camera: standardCamera(),
+        page: n,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light);
     final entities = doc.entities.liveCount;
     final rebuilds = index.rebuildCount;
     for (final flag in [true, false, true]) {
@@ -237,8 +249,17 @@ void main() {
     final page = standardPage().copyWith(gridVisible: true, pageBreaks: true);
     final n = ValueNotifier<PageComponent?>(page);
     final cam = standardCamera();
-    final shown = PageChromePainter(camera: cam, page: n);
-    final hidden = PageChromePainter(camera: cam, page: n, grid: false);
+    final shown = PageChromePainter(
+        camera: cam,
+        page: n,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light);
+    final hidden = PageChromePainter(
+        camera: cam,
+        page: n,
+        grid: false,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light);
     final a = SpyCanvas(), b = SpyCanvas();
     shown.paint(a, kChromeSize);
     hidden.paint(b, kChromeSize);

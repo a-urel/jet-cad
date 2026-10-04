@@ -3,6 +3,7 @@ import 'dart:ui' show Size;
 import 'package:flutter/widgets.dart' show Listenable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/draw/polyline_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection_overlay.dart';
 import 'package:jet_cad_2d_flutter/src/selection_style.dart';
@@ -34,6 +35,7 @@ List<RecordedCall> frame(int extraEntities) {
     tools: rig.tools,
     camera: rig.camera,
     outlines: rig.outlines,
+    paper: PaperPalette.light,
     repaint: Listenable.merge([rig.selection, rig.tools, rig.camera]),
   );
   final spy = SpyCanvas();

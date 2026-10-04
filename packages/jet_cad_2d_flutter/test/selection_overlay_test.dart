@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart' show kDefaultOriginX;
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/draft_canvas.dart';
 import 'package:jet_cad_2d_flutter/src/flutter_text_measurer.dart';
 import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
@@ -57,6 +58,7 @@ final class Rig {
         tools: tools,
         camera: camera,
         outlines: outlines,
+        paper: PaperPalette.light,
         repaint: Listenable.merge([selection, tools, camera, outlines]),
         onPaintForTest: onPaintForTest,
       );
@@ -673,6 +675,7 @@ void main() {
         tools: tools,
         camera: camera,
         outlines: outlines,
+        paper: PaperPalette.light,
       ).paint(spy, view);
       final origin = rebaseOriginFor(camera.value.visibleWorld(view));
       bool preview(RecordedCall c) =>

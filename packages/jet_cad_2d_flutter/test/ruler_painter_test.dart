@@ -21,6 +21,7 @@ void main() {
         camera: camera ?? standardCamera(),
         page: ValueNotifier<PageComponent?>(standardPage()),
         pointer: ValueNotifier<Offset?>(pointer),
+        chrome: ChromePalette.light,
       );
 
   test('major ticks sit at worldToScreen of the lattice, labelled in metres',
@@ -121,7 +122,7 @@ void main() {
   test('the corner shows the unit symbol', () {
     final n = ValueNotifier<PageComponent?>(
         standardPage().copyWith(displayUnit: DisplayUnit.feetInches));
-    final painter = RulerCornerPainter(page: n);
+    final painter = RulerCornerPainter(page: n, chrome: ChromePalette.light);
     expect(painter.debugLastSymbol(), isNull);
     painter.paint(SpyCanvas(), const Size(kRulerThickness, kRulerThickness));
     expect(painter.debugLastSymbol(), 'ft');

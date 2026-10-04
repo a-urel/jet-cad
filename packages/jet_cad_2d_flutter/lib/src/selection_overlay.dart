@@ -7,6 +7,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show GripRole, Transform2;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'camera_controller.dart';
+import 'canvas_palette.dart';
 import 'grip_cache.dart';
 import 'outline_cache.dart';
 import 'selection.dart';
@@ -48,6 +49,7 @@ class SelectionOverlayPainter extends CustomPainter {
     required this.tools,
     required this.camera,
     required this.outlines,
+    required this.paper,
     super.repaint,
     this.onPaintForTest,
   });
@@ -56,6 +58,10 @@ class SelectionOverlayPainter extends CustomPainter {
   final ToolController tools;
   final CameraController camera;
   final OutlineCache outlines;
+
+  /// The outlines', the preview's and the grips' colours: drawn on the
+  /// paper, so they follow it (dark theme spec D3, D5).
+  final PaperPalette paper;
 
   /// Counts frames in a widget test — the seam criterion 6 is measured on.
   final void Function()? onPaintForTest;
@@ -73,36 +79,28 @@ class SelectionOverlayPainter extends CustomPainter {
     ..[10] = 1.0
     ..[15] = 1.0;
 
-  final Paint _selected = Paint()
-    ..color = kSelectionColor
-    ..style = PaintingStyle.stroke;
+  // Every colour is assigned from [paper] in `paint` (dark theme spec D5):
+  // the Paints stay fields, distinct objects, re-coloured in place.
+  final Paint _selected = Paint()..style = PaintingStyle.stroke;
 
-  final Paint _hover = Paint()
-    ..color = kHoverColor
-    ..style = PaintingStyle.stroke;
+  final Paint _hover = Paint()..style = PaintingStyle.stroke;
 
   // New in 03.
-  final Paint _previewPaint = Paint()
-    ..color = kPreviewColor
-    ..style = PaintingStyle.stroke;
+  final Paint _previewPaint = Paint()..style = PaintingStyle.stroke;
 
   final Paint _gripPaint = Paint()
-    ..color = kGripColor
     ..strokeCap = StrokeCap.square
     ..strokeWidth = kGripPixels;
 
   final Paint _gripMovePaint = Paint()
-    ..color = kGripMoveColor
     ..strokeCap = StrokeCap.square
     ..strokeWidth = kGripPixels;
 
   final Paint _gripHotPaint = Paint()
-    ..color = kGripHotColor
     ..strokeCap = StrokeCap.square
     ..strokeWidth = kGripPixels;
 
   final Paint _stem = Paint()
-    ..color = kGripColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.0;
 
@@ -124,6 +122,13 @@ class SelectionOverlayPainter extends CustomPainter {
     // undoing the rebase the cache exists for, and re-doing the rebuild on
     // the next real frame.
     if (size.isEmpty) return;
+    _selected.color = paper.selection;
+    _hover.color = paper.hover;
+    _previewPaint.color = paper.preview;
+    _gripPaint.color = paper.grip;
+    _gripMovePaint.color = paper.gripMove;
+    _gripHotPaint.color = paper.gripHot;
+    _stem.color = paper.grip;
     final cam = camera.value;
     final origin = rebaseOriginFor(cam.visibleWorld(size));
     final m = cam.worldToScreenMatrix;
@@ -313,9 +318,13 @@ class SelectionOverlayPainter extends CustomPainter {
     canvas.drawLine(Offset(x, y - half), Offset(x, y + half), paint);
   }
 
-  /// Always false: every reason to repaint is in the `repaint` listenable the
-  /// caller merged. Answering true would repaint on every ancestor rebuild,
-  /// which is exactly the cost the boundary split exists to avoid.
+  /// True exactly when the paper's palette changed (dark theme spec D5): the
+  /// repaint merge does not include the page, so a paper flip reaches this
+  /// painter only here. Every other reason to repaint is in the `repaint`
+  /// listenable the caller merged; answering true for anything else would
+  /// repaint on every ancestor rebuild, which is exactly the cost the
+  /// boundary split exists to avoid.
   @override
-  bool shouldRepaint(covariant SelectionOverlayPainter oldDelegate) => false;
+  bool shouldRepaint(covariant SelectionOverlayPainter oldDelegate) =>
+      oldDelegate.paper != paper;
 }

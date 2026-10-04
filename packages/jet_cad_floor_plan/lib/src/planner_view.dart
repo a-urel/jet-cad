@@ -158,7 +158,13 @@ class _PlannerViewState extends State<PlannerView> {
   Widget build(BuildContext context) {
     final area = _drawingArea();
     return widget.rulers
-        ? RulerFrame(camera: widget.camera, page: widget.page, child: area)
+        ? RulerFrame(
+            camera: widget.camera,
+            page: widget.page,
+            // Task 4: the palettes come from the theme and the paper.
+            chrome: ChromePalette.light,
+            child: area,
+          )
         : area;
   }
 
@@ -216,6 +222,10 @@ class _PlannerViewState extends State<PlannerView> {
                               camera: widget.camera,
                               page: widget.page,
                               grid: widget.grid,
+                              // Task 4: the palettes come from the theme and
+                              // the paper.
+                              chrome: ChromePalette.light,
+                              paper: PaperPalette.light,
                               repaint: _chromeRepaint,
                             ),
                           ),
@@ -238,6 +248,8 @@ class _PlannerViewState extends State<PlannerView> {
                               tools: widget.tools,
                               camera: widget.camera,
                               outlines: widget.outlines,
+                              // Task 4: the palette comes from the paper.
+                              paper: PaperPalette.light,
                               repaint: _repaint,
                             ),
                             size: Size.infinite,
