@@ -1,8 +1,10 @@
 # Wall-aware symbols and the Symbol section (09c) — design
 
-**Date:** 2026-10-02. **Status:** design, **revision 4** (`751755f`);
-**09c-1 executed** on `plan-09c/wall-attach` (not merged; amended at
-execution, the closing section); 09c-2 unwritten.
+**Date:** 2026-10-02. **Status:** design, **revision 5** (2026-10-04):
+revision 4 (`751755f`) plus [Revision 5](#revision-5), which reconciles
+09c-2 with the restaurant embedding (14) merged before it; **09c-1 is
+MERGED** into `main` at `cf463d8` (rebased onto 14; amended at execution,
+the closing section); 09c-2 is planned from revision 5.
 **Approved by the human on 2026-10-02** ("yaz"). Revision 1
 (`24feacb`) was reviewed independently: "Ready with amendments", 2
 blocking, 6 major, 7 minor, 1 nit (W-1 to W-17,
@@ -1040,3 +1042,91 @@ This section rewrites nothing above it.
   camera listener but keeps the ghost shown; a re-arm with a listened camera
   re-resolves through the one recompute path (snap, grid and attachment),
   also from one entry to another.
+
+## Revision 5
+
+**2026-10-04, before 09c-2's plan.** Sub-project 14 (the restaurant
+embedding) merged at `95d6e0e` and 09c-1, rebased onto it, at `cf463d8`.
+The human: "Devam et, 09c-2'yi başlat" (go on, start 09c-2). Revisions
+1–4 stand; this revision records what 14 changed under D7 and D8 and
+decides each point. Facts verified at `f2c4875`.
+
+### Facts after 14
+
+- **G-1. Paths.** The planner is `packages/jet_cad_floor_plan`:
+  `apps/floor_planner/lib/{main,selection_panel}.dart` and
+  `lib/symbols/*` are now `lib/src/{planner_shell,selection_panel}.dart`
+  and `lib/src/symbols/*`; the shell builds its `SelectTool`, its
+  `WallFaces` and its symbol loader in `planner_shell.dart`. Unit tests
+  live in the package; the app keeps the end-to-end tests that drive the
+  document host (`apps/floor_planner/test/symbols/`), and reaches the
+  planner through `package:jet_cad_floor_plan/editor.dart`.
+- **G-2. A table is a symbol.** A servable entry (14s) places a numbered
+  table (14a): its instance owns a `TABLE` ATTRIB anchored at the
+  **definition's base point** and stamped upright by the table system on
+  every command that changes the instance's transform (the dispatcher's
+  expander, 14a T10). The Selection panel shows a **Table section**
+  (number, seats, *Rotate 90° left/right*) for one selected table
+  (`selection_panel.dart:902-950`). **No servable entry carries a
+  `family:` tag** (furniture or restaurant), and **no restaurant symbol is
+  tagged `against-wall`**.
+- **G-3. The Select tool** is a press-mode tool for a finger (14t: a
+  finger reaches it after the hold-back); its move path is otherwise
+  unchanged: `_beginDrag` (`select_tool.dart:242`), `_retarget` (`:380`),
+  `_onCamera` (`:407`), the up's `_follow` (`:444`), `_paintGuide`'s
+  `drawSnapMarker` (`:823`); `GripDrag.moveTo` (`grip_drag.dart:225`) and
+  `command` (`:269`).
+- **G-4. The marker.** `drawSnapMarker` draws nothing for
+  `SnapKind.nearest` (`snap_marker.dart:56-60`), and no caller produces
+  that kind (no drag mask holds it); the attached ghost's hourglass is the
+  planner's `drawNearestMarker` (`symbol_place_tool.dart:516`).
+- **G-5. The panel has no library.** `SelectionPanel` takes the document,
+  the selection and the tools (`planner_shell.dart:883`); the shell holds
+  the loader (`SymbolLibraryLoader`, a `ValueListenable` of its state).
+- **G-6. Where runtime permissions apply.** The host's selection mode
+  shows the canvas alone (14b-2): the panel never shows over a service
+  copy. The planner app's own runtime mode is unchanged (F-11).
+
+### Amendments
+
+- **R5-1 (G-1) Files.** D7's section is
+  `lib/src/symbols/symbol_section.dart`, D8's resolver
+  `lib/src/symbols/symbol_move.dart`, both in the planner package, both
+  exported by `editor.dart`; the wiring is in `planner_shell.dart`;
+  `SetInstanceDefinitionCommand` is in the engine as written. The
+  end-to-end test of 09c-2 is an app test, beside 09c-1's.
+- **R5-2 (G-2) A table shows the Symbol section too**, above its Table
+  section: name, size, **Rotation** and **Mirror** commit one
+  `TransformNodeCommand` each, and the table system re-stamps the number
+  in the same step, so the number stays upright (a test: Rotation 37°,
+  then Mirror, the label upright after each, one undo each restores
+  both). The Table section's 90° buttons stay (the human's 14a ruling).
+- **R5-3 (G-2) No size change for a table.** The **Size menu is hidden
+  for a servable symbol**: its number is anchored at its definition's
+  base point, which a size change would replace. Today this only guards
+  (no servable entry has a family); a catalog test pins "no servable
+  entry carries a `family:` tag" in both libraries, so a future family
+  of tables fails a test before it reaches the menu. New mutant
+  **M-09c-bf**: the Size menu shown for a servable symbol with a family
+  (a test fixture's).
+- **R5-4 (G-5) The library reaches the panel.** `SelectionPanel` gains
+  an optional `symbols` (`ValueListenable<SymbolLibraryState>`, the
+  shell's loader); the Size menu is hidden when it is null or not ready,
+  as D7 says.
+- **R5-5 (G-4) The marker moves to the render layer.** D8 names the
+  `nearest` glyph: `drawSnapMarker`'s `nearest` case draws the hourglass
+  (the planner's four lines, moved), and the placement tool calls it.
+  Since nothing produces `nearest` today, no other marker changes (the
+  marker tests pass unedited).
+- **R5-6 (G-3) Touch.** The wall-aware move applies to a finger's drag
+  as to a mouse's: no separate rule (the tool sees a finger's down after
+  the hold-back, then the same moves).
+- **R5-7 (09c-1's debt) The entry's order.** The size change copies a
+  definition through the placer, which keeps `SymbolEntry.leaves` in the
+  decoder's ascending order; the copy asserts it (a test builds an entry
+  out of order and expects the assertion).
+- **R5-8 Exit gate.** The gates are 14's: engine, render, planner,
+  restaurant symbols, app, demo (tests, analyze, format), both web
+  builds; the look list of 09c-2 stands, plus a table's Symbol section
+  (Rotation 37°, Mirror: the number upright).
+
