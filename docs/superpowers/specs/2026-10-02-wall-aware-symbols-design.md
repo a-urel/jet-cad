@@ -1065,7 +1065,7 @@ decides each point. Facts verified at `f2c4875`.
   table (14a): its instance owns a `TABLE` ATTRIB anchored at the
   **definition's base point** and stamped upright by the table system on
   every command that changes the instance's transform (the dispatcher's
-  expander, 14a T10). The Selection panel shows a **Table section**
+  expander, 14a T12). The Selection panel shows a **Table section**
   (number, seats, *Rotate 90° left/right*) for one selected table
   (`selection_panel.dart:902-950`). **No servable entry carries a
   `family:` tag** (furniture or restaurant), and **no restaurant symbol is
@@ -1081,11 +1081,14 @@ decides each point. Facts verified at `f2c4875`.
   that kind (no drag mask holds it); the attached ghost's hourglass is the
   planner's `drawNearestMarker` (`symbol_place_tool.dart:516`).
 - **G-5. The panel has no library.** `SelectionPanel` takes the document,
-  the selection and the tools (`planner_shell.dart:883`); the shell holds
-  the loader (`SymbolLibraryLoader`, a `ValueListenable` of its state).
+  the selection and the tools (`planner_shell.dart:883`); the shell is
+  **handed** the loader (`PlannerShell.symbols`, nullable, not owned,
+  `:117-120`), a `ChangeNotifier` with a `state` getter
+  (`symbol_library_loader.dart:59`).
 - **G-6. Where runtime permissions apply.** The host's selection mode
   shows the canvas alone (14b-2): the panel never shows over a service
-  copy. The planner app's own runtime mode is unchanged (F-11).
+  copy. The planner app has no runtime mode of its own: `runtime` reaches
+  the panel only in tests (F-11).
 
 ### Amendments
 
@@ -1129,4 +1132,62 @@ decides each point. Facts verified at `f2c4875`.
   restaurant symbols, app, demo (tests, analyze, format), both web
   builds; the look list of 09c-2 stands, plus a table's Symbol section
   (Rotation 37°, Mirror: the number upright).
+
+### Spot check of revision 5 (2026-10-04)
+
+A fresh reviewer spot-checked revision 5 against the code: "Ready with
+amendments", 0 blocking, 3 major, 4 minor, 2 nits (V-1..V-9). Each is
+applied here and binds where it differs from R5-1..R5-8.
+
+- **V-1 (major) A table turns in the design mode only.** The human ruled
+  (14a Q-4) that turning a placed table is a design-mode action; the
+  panel encodes it as "`transform` and `geometry` allowed" (`_rotatable`,
+  `selection_panel.dart:540-546`). For a **servable** instance the Symbol
+  section's Rotation and Mirror follow `_rotatable`; W-12 and M-09c-be
+  stand for every other symbol. New mutant **M-09c-bg**: a table's
+  Rotation editable under `runtime`.
+- **V-2 (major) The marker test changes.** R5-5's "unedited" is
+  withdrawn: `snap_marker_test.dart` now pins `nearest` as the four
+  hourglass lines (`perpendicular` and `tangent` stay empty); the
+  planner's marker test moves with the glyph. Mutant: `nearest` draws
+  nothing again.
+- **V-3 (minor) The panel takes the loader.**
+  `SelectionPanel({SymbolLibraryLoader? symbols})`, passed
+  `widget.symbols` by the shell; the panel listens (added, removed, and
+  moved in `didUpdateWidget`). A test: the Size menu appears when the
+  loader turns ready while the symbol is selected.
+- **V-4 (major) Servable, both ways.** *Servable* is a `SeatingComponent`
+  on the instance's definition (as `TableSurvey` reads it). The Size menu
+  is hidden for a servable instance **and** leaves servable members out
+  of a family's list, so a bed never becomes an unnumbered table. A host
+  library (`SymbolLibrarySource` is public) is covered by the rule, not
+  only by the catalog test. New mutant **M-09c-bi**: a servable member
+  listed in a non-servable symbol's menu.
+- **V-5 (minor) Which entry, which family.** An instance's entry is the
+  exact `key@version` of its definition's `SymbolComponent`, else the
+  key's highest version. A family is every merged entry carrying the tag,
+  from any source, one per key (its highest version), sorted by `W` then
+  `D`. The members are memoised per (library, family): the panel rebuilds
+  on every hover.
+- **V-6 (minor) The Mirror pivot is tested.** New mutant **M-09c-bh**:
+  Mirror pivots on the base point, or on the origin. R5-2's table test
+  runs on `restaurant.booth.corner`, whose base point is off its box's
+  centre `x` (`booths.dart:84-108`): the footprint does not move, the
+  number stays on the top and upright. The claims "the base point is on
+  the box's centre `x`" (D4, D8) are scoped to the `against-wall` symbols
+  of both libraries, and the catalog test runs over that set.
+- **V-7 (minor) One reuse-or-copy path.** The placer's inline
+  reuse-or-copy (`symbol_placer.dart:107-160`, with 14's seating check)
+  is factored into one function that the size change calls too; it
+  asserts the entry's leaves ascending by handle (R5-7) on both the reuse
+  and the copy side.
+- **V-8 (nit)** G-2 cites 14a T12 (corrected above). D7's
+  `command.dart:56-57` is now `:56-59`. The new files are exported by
+  `editor.dart`, **not** by the host barrel (`barrel_test.dart` B1 pins
+  its list). The gate keeps `dev_harness_2d` analyze.
+- **V-9 (nit) Touch, stated.** A finger's attached drag cancelled by a
+  second finger commits nothing and drops `T'` with the drag (the layer
+  cancels the tool, 14t T3); the resolver executes nothing. A finger's
+  reach pick needs no rule: the anchor is the plain-moved back-centre,
+  not the press point.
 
