@@ -1,7 +1,11 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-03. **A new sub-project, 14 — restaurant
-embedding, is in flight on `claude/exciting-pasteur-9m22jv` (not merged).**
+**Last updated:** 2026-10-04. **Sub-project 14 — restaurant embedding (all
+six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
+word ("merge into main and clean up branches", 2026-10-04). The looks and
+the amendments listed under **Owed** were not given before the merge;
+they stand. The per-task reviews live in each slice's results note (no
+`.superpowers/sdd` ledger was kept for 14).
 The human, 2026-10-03: the floor planner's first use is inside a Flutter
 restaurant (POS) application, with a **design mode** and a **selection
 mode** built in; what is missing for that comes first.
@@ -16,7 +20,7 @@ mode** built in; what is missing for that comes first.
   for the service only; the number set in design mode and printed; Export
   and Print in both modes; every platform; bar stools can be "tables"; the
   symbols a separate package, as complete as possible.
-- **Done on the branch (14b-1 + 14s):** see
+- **Done (14b-1 + 14s):** see
   [2026-10-03-plan-14b1-14s-results.md](docs/superpowers/notes/2026-10-03-plan-14b1-14s-results.md).
   `packages/jet_cad_floor_plan` holds the planner (the app is its frame);
   `packages/jet_cad_restaurant_symbols` ships 69 symbols (25 servable,
@@ -25,7 +29,7 @@ mode** built in; what is missing for that comes first.
   engine 1,226 + 2 standing and render 1,187 + 1 skip + 7 standing,
   untouched. Two independent reviews: 14b-1 "Needs fixes", 14s "Approved
   with fixes"; both sets of fixes applied (`2120a74`, `7dce65c`).
-- **Done on the branch (14a, table identity):** see
+- **Done (14a, table identity):** see
   [2026-10-03-plan-14a-results.md](docs/superpowers/notes/2026-10-03-plan-14a-results.md);
   spec [2026-10-03-table-identity-design.md](docs/superpowers/specs/2026-10-03-table-identity-design.md)
   rev 2 (the human's rulings: seats per symbol, numbers per plan and
@@ -38,7 +42,7 @@ mode** built in; what is missing for that comes first.
   90° in place. Gates: render 1,196 + 1 skip + 7 standing, planner 892,
   restaurant 91, app 192, web built and smoke-tested; the engine
   untouched.
-- **Done on the branch (14b-2, host API and the two modes):** see
+- **Done (14b-2, host API and the two modes):** see
   [2026-10-03-plan-14b2-results.md](docs/superpowers/notes/2026-10-03-plan-14b2-results.md);
   spec [2026-10-03-host-api-and-modes-design.md](docs/superpowers/specs/2026-10-03-host-api-and-modes-design.md)
   rev 2 (written and run while the human travelled, on their word not to
@@ -50,7 +54,7 @@ mode** built in; what is missing for that comes first.
   alone, Export and Print in both. `apps/restaurant_demo` (every runner)
   shows two dining areas with a Design / Service toggle. Gates: planner
   925, app 192, demo 11, both web builds; engine and render untouched.
-- **Done on the branch (14c, selection-mode behaviour):** see
+- **Done (14c, selection-mode behaviour):** see
   [2026-10-03-plan-14c-results.md](docs/superpowers/notes/2026-10-03-plan-14c-results.md);
   spec [2026-10-03-selection-mode-design.md](docs/superpowers/specs/2026-10-03-selection-mode-design.md)
   rev 2. In the selection mode a tap inside a table's top selects it and
@@ -63,7 +67,7 @@ mode** built in; what is missing for that comes first.
   The render package gained one `mounted` guard (`RulerFrame`). Gates:
   render 1,197 + 1 skip + 7 standing,
   planner 961, app 192, demo 17, both web builds; the engine untouched.
-- **Done on the branch (14t, touch):** see
+- **Done (14t, touch):** see
   [2026-10-03-plan-14t-results.md](docs/superpowers/notes/2026-10-03-plan-14t-results.md);
   spike [2026-10-03-touch-spike.md](docs/superpowers/notes/2026-10-03-touch-spike.md),
   spec [2026-10-03-touch-design.md](docs/superpowers/specs/2026-10-03-touch-design.md)
@@ -85,11 +89,15 @@ mode** built in; what is missing for that comes first.
   colours, and touch on a tablet: pinch, the hold-back, finger targets); a look at the amendments of 14b-2 (the service copy as the
   barrier, Export of the copy), of 14c (the render guard, the caption
   below the number, statuses set on the selected tables) and of 14t (the
-  press and lift modes, `fitToView` framing withdrawn); the merge, on
-  the human's word; the earlier owed items below stand.
-- **Next:** the restaurant embedding's six slices are done on the branch.
-  What remains is the human's: the look (now on a touch device too), the
-  amendments of 14b-2, 14c and 14t, and the merge into `main`.
+  press and lift modes, `fitToView` framing withdrawn); the earlier owed
+  items below stand.
+- **Unmerged work on the remote:** `plan-09c/wall-attach` (29 commits:
+  spec 09c, plan 09c-1, wall-aware symbol placement, its results and
+  ledger, 2026-10-02) is in neither `main` nor 14; its spec branch
+  `spec-09c/wall-aware-symbols` is contained in it. Kept for the human to
+  decide: merge, rebase onto `main`, or drop.
+- **Next:** the human's look (on a touch device too) and the 09c
+  decision; then the roadmap.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
