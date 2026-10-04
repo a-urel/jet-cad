@@ -673,8 +673,16 @@ void main() {
       expect(after[n], before[n], reason: '$n is in no group');
     }
 
-    // Split: the group and its status go; table 20's own status stays.
+    // Free on the selected group clears its status only (review 5).
     expect(c.selectedGroup.value, 'G1', reason: 'the drag selected G1');
+    await press(tester, 'status-free');
+    expect(c.groupStatuses.value, isEmpty);
+    expect(c.tableStatuses.value, {'20': DemoHomeState.kStatuses['Eating']});
+    expect(demo.log.first, 'Salon: Free for G1');
+    await press(tester, 'status-bill');
+    expect(c.groupStatuses.value, {'G1': DemoHomeState.kStatuses['Bill']});
+
+    // Split: the group and its status go; table 20's own status stays.
     await press(tester, 'service-split');
     expect(c.tableGroups.value, isEmpty);
     expect(c.groupStatuses.value, isEmpty);
@@ -766,6 +774,28 @@ void main() {
     });
     expect(demo.log.first, 'Salon: Merged {3, 12, 20} as G7');
     expect(groupsText(tester), 'G7: 3+8+9+12+20');
+  });
+
+  testWidgets(
+      'D20 G6, R-C5-4: a new-group merge leaves what remains of a POS group '
+      'under its id and label, and drops a group it empties (review 5)',
+      (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    c.setTableGroups({
+      'G7': TableGroup(members: {'12', '3', '8', '9'}, label: 'Window'),
+      'G1': TableGroup(members: {'5', '11'}),
+    });
+    await tester.pump();
+    await tapTable(tester, demo, '3');
+    await tapTable(tester, demo, '5', add: true);
+    expect(c.selectedTables.value, {'12', '3', '5', '11'},
+        reason: 'premise: 8 locked, 9 hidden, both groups whole');
+    await press(tester, 'service-merge');
+    expect(c.tableGroups.value, {
+      'G7': TableGroup(members: {'8', '9'}, label: 'Window'),
+      'G8': TableGroup(members: {'12', '3', '5', '11'}),
+    });
   });
 
   testWidgets(
