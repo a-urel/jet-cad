@@ -165,7 +165,7 @@ class SelectionOverlayPainter extends CustomPainter {
     }
     // New in 03: the reshape preview, in rebased world, under this same
     // matrix (spec D7, Ruling 03-3).
-    tool.paintWorldOverlay(canvas, origin, scale);
+    tool.paintWorldOverlay(canvas, origin, scale, paper);
     canvas.restore();
 
     // New in 03: the move/rotate preview (spec D7).
@@ -207,7 +207,7 @@ class SelectionOverlayPainter extends CustomPainter {
       }
     }
     if (grips != null) _paintGrips(canvas, grips, m, preview);
-    tool.paintOverlay(canvas, cam, size);
+    tool.paintOverlay(canvas, cam, size, paper);
     canvas.restore();
   }
 

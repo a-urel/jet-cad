@@ -538,8 +538,9 @@ void main() {
       expect(rig.tool.ghostVisible, isFalse);
       expect(rig.tool.cursor, MouseCursor.defer);
       final canvas = RecordingCanvas();
-      rig.tool.paintWorldOverlay(canvas, origin, scale);
-      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
+      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
+      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
+          PaperPalette.light);
       expect(canvas.calls, isEmpty);
     });
 
@@ -657,7 +658,8 @@ void main() {
       final rig = Rig();
       rig.hover(e0 + Vector2(60, -45));
       final canvas = RecordingCanvas();
-      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
+      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
+          PaperPalette.light);
       final rect =
           canvas.named('drawRect').single.positionalArguments[0] as ui.Rect;
       final s = rig.camera.value.worldToScreen(e0);
@@ -673,7 +675,7 @@ void main() {
       final rig = Rig();
       rig.hover(pB);
       final canvas = RecordingCanvas();
-      rig.tool.paintWorldOverlay(canvas, origin, scale);
+      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
       expect(canvas.calls.map((c) => c.memberName), [
         #save,
         #transform,
@@ -693,7 +695,7 @@ void main() {
       expect(draw[0], same(ghostPathFor(chair)));
       final paint = draw[1] as ui.Paint;
       expect(paint.strokeWidth, closeTo(kPreviewStrokePixels / scale, 1e-12));
-      expect(paint.color.toARGB32(), kPreviewColor.toARGB32());
+      expect(paint.color.toARGB32(), PaperPalette.light.preview.toARGB32());
       expect(paint.style, ui.PaintingStyle.stroke);
       const k = kGhostCrossPixels / scale;
       final lines = canvas.named('drawLine').toList();
@@ -708,10 +710,10 @@ void main() {
       final rig = Rig();
       rig.hover(pA);
       final first = RecordingCanvas();
-      rig.tool.paintWorldOverlay(first, origin, scale);
+      rig.tool.paintWorldOverlay(first, origin, scale, PaperPalette.light);
       rig.hover(pC);
       final second = RecordingCanvas();
-      rig.tool.paintWorldOverlay(second, origin, scale);
+      rig.tool.paintWorldOverlay(second, origin, scale, PaperPalette.light);
       Object? arg(RecordingCanvas c, String name, int i) =>
           c.named(name).single.positionalArguments[i];
       expect(arg(second, 'drawPath', 0), same(arg(first, 'drawPath', 0)));
@@ -739,7 +741,8 @@ void main() {
               mirrored: mirrored);
       void paints(int n) {
         for (var i = 0; i < n; i++) {
-          rig.tool.paintWorldOverlay(RecordingCanvas(), origin, scale);
+          rig.tool.paintWorldOverlay(
+              RecordingCanvas(), origin, scale, PaperPalette.light);
         }
       }
 
@@ -802,8 +805,8 @@ void main() {
           mirrored: true);
       List<double> bytes(Transform2? t) =>
           t == null ? const [] : [t.a, t.b, t.c, t.d, t.e, t.f];
-      void paintOnce() =>
-          rig.tool.paintWorldOverlay(RecordingCanvas(), origin, scale);
+      void paintOnce() => rig.tool.paintWorldOverlay(
+          RecordingCanvas(), origin, scale, PaperPalette.light);
       final matrix = rig.tool.ghostMatrix;
       final b = chair.definition.basePoint;
 
@@ -853,16 +856,18 @@ void main() {
       expect(rig.tool.ghostVisible, isFalse);
       expect(rig.notifications, hasLength(1), reason: 'the overlay repaints');
       var canvas = RecordingCanvas();
-      rig.tool.paintWorldOverlay(canvas, origin, scale);
-      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
+      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
+      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
+          PaperPalette.light);
       expect(canvas.calls, isEmpty);
 
       rig.hover(pB);
       rig.tool.cancel(rig.ctx);
       expect(rig.tool.ghostVisible, isFalse);
       canvas = RecordingCanvas();
-      rig.tool.paintWorldOverlay(canvas, origin, scale);
-      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
+      rig.tool.paintWorldOverlay(canvas, origin, scale, PaperPalette.light);
+      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
+          PaperPalette.light);
       expect(canvas.calls, isEmpty);
     });
   });
@@ -1573,7 +1578,8 @@ void main() {
       rig.hover(p);
       final q = rig.tool.ghostAttachment!.q;
       final canvas = RecordingCanvas();
-      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600));
+      rig.tool.paintOverlay(canvas, rig.camera.value, const ui.Size(800, 600),
+          PaperPalette.light);
       expect(canvas.named('drawRect'), isEmpty);
       final lines = canvas.named('drawLine').toList();
       expect(lines, hasLength(4), reason: 'the hourglass');
@@ -1726,6 +1732,73 @@ void main() {
       rig.up(p);
       expect(partsOf(rig.instances.single.transform),
           partsOf(rig.attachOf(toilet, p)!.transform));
+    });
+  });
+
+  // Dark theme spec D5 "Tools", Task 3 (M-DT-8): the ghost and the snap
+  // marker take the overlay's paper set, handed to each paint method. The
+  // page is Blueprint and the set is `forPaper(page.background)`, as the
+  // planner picks it; White is the control, on the same tool right after.
+  group('the paper set (dark theme M-DT-8)', () {
+    /// The document's page colour, as the planner reads it.
+    int paperArgb(Rig rig) => rig.document.components
+        .get<PageComponent>(rig.document.rootHandle)!
+        .background;
+
+    Rig blueprintRig() {
+      final rig = Rig();
+      rig.document.commands.execute(SetComponentCommand<PageComponent>(
+          rig.document.rootHandle,
+          rig.pages.value!.copyWith(background: 0xFF1F3A5F)));
+      expect(paperArgb(rig), 0xFF1F3A5F, reason: 'premise');
+      // 75 mm from E: the ghost snaps there and the marker shows.
+      rig.hover(e0 + Vector2(60, -45));
+      expect(rig.tool.ghostVisible, isTrue, reason: 'premise');
+      return rig;
+    }
+
+    test(
+        'on Blueprint the ghost (paintWorldOverlay) is 0xFFC857 and the '
+        'marker (paintOverlay) 0x5FD68F; on White the light set', () {
+      final rig = blueprintRig();
+      final paper = PaperPalette.forPaper(paperArgb(rig));
+      for (final (p, ghost, snap) in [
+        (paper, 0xFFFFC857, 0xFF5FD68F),
+        (PaperPalette.forPaper(0xFFFFFFFF), 0xFFE8A11E, 0xFF2E9E5B),
+      ]) {
+        final world = RecordingCanvas();
+        rig.tool.paintWorldOverlay(world, origin, scale, p);
+        // The Paint is the tool's own and is recoloured per frame: read it
+        // now.
+        final drawn = [
+          for (final c in world.calls)
+            if (c.memberName == #drawPath || c.memberName == #drawLine)
+              (c.positionalArguments.last as ui.Paint).color.toARGB32(),
+        ];
+        expect(drawn, [ghost, ghost, ghost],
+            reason: 'the outline and the base-point cross');
+        final screen = RecordingCanvas();
+        rig.tool
+            .paintOverlay(screen, rig.camera.value, const ui.Size(800, 600), p);
+        final marker = screen.named('drawRect').single;
+        expect(
+            (marker.positionalArguments[1] as ui.Paint).color.toARGB32(), snap,
+            reason: 'the endpoint square');
+      }
+    });
+
+    test('its marker Paint is a field: the same object on the next frame', () {
+      final rig = blueprintRig();
+      ui.Paint markerPaint(PaperPalette p) {
+        final c = RecordingCanvas();
+        rig.tool.paintOverlay(c, rig.camera.value, const ui.Size(800, 600), p);
+        return c.named('drawRect').single.positionalArguments[1] as ui.Paint;
+      }
+
+      expect(
+          identical(
+              markerPaint(PaperPalette.dark), markerPaint(PaperPalette.light)),
+          isTrue);
     });
   });
 }

@@ -6,7 +6,6 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/draw/polyline_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection_overlay.dart';
-import 'package:jet_cad_2d_flutter/src/selection_style.dart';
 
 import '../support/draw_fixture.dart';
 import '../support/grip_fixture.dart' show screenOf;
@@ -50,7 +49,7 @@ void main() {
     final calls = frame(0);
     final preview = [
       for (final c in calls)
-        if (c.color?.toARGB32() == kPreviewColor.toARGB32()) c,
+        if (c.color?.toARGB32() == PaperPalette.light.preview.toARGB32()) c,
     ];
     expect(preview.where((c) => c.name == 'drawPath'), hasLength(1));
     expect(preview.where((c) => c.name == 'drawLine'), isEmpty);

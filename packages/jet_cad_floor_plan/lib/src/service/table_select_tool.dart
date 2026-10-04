@@ -229,7 +229,8 @@ class TableSelectTool extends Tool {
   }
 
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {}
 
   @override
   void dispose() {

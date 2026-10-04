@@ -313,7 +313,8 @@ void main() {
     expect(drawn, hasLength(1));
     expect(
         drawn.single.strokeWidth, closeTo(kSelectionStrokePixels / 4.0, 1e-12));
-    expect(drawn.single.color?.toARGB32(), kSelectionColor.toARGB32());
+    expect(drawn.single.color?.toARGB32(),
+        PaperPalette.light.selection.toARGB32());
   });
 
   test('the two Paints are reused across frames', () {
@@ -365,15 +366,15 @@ void main() {
     painter.paint(same, kViewport);
     expect(same.named('drawPath'), hasLength(1));
     expect(same.named('drawPath').single.color?.toARGB32(),
-        kSelectionColor.toARGB32());
+        PaperPalette.light.selection.toARGB32());
 
     r.selection.setHover(SelectionKey.root(other));
     final differing = SpyCanvas();
     painter.paint(differing, kViewport);
     final calls = differing.named('drawPath').toList();
     expect(calls, hasLength(2));
-    expect(calls[0].color?.toARGB32(), kSelectionColor.toARGB32());
-    expect(calls[1].color?.toARGB32(), kHoverColor.toARGB32());
+    expect(calls[0].color?.toARGB32(), PaperPalette.light.selection.toARGB32());
+    expect(calls[1].color?.toARGB32(), PaperPalette.light.hover.toARGB32());
     expect(calls[1].strokeWidth, closeTo(kHoverStrokePixels / 2.0, 1e-12));
   });
 
@@ -679,7 +680,7 @@ void main() {
       ).paint(spy, view);
       final origin = rebaseOriginFor(camera.value.visibleWorld(view));
       bool preview(RecordedCall c) =>
-          c.color?.toARGB32() == kPreviewColor.toARGB32();
+          c.color?.toARGB32() == PaperPalette.light.preview.toARGB32();
       // The select tool's own guide line shares the colour at 1 px; a
       // point's preview cross is stroked at the preview width.
       bool cross(RecordedCall c) =>

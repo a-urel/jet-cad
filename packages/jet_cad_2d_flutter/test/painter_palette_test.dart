@@ -257,6 +257,40 @@ void main() {
     });
 
     test(
+        'C-1: the page breaks follow the paper, not the chrome: White in the '
+        'dark chrome, Blueprint in the light', () async {
+      // Crossed: here the chrome's brightness and the paper's set disagree,
+      // so a break coloured by the chrome (or the theme) shows.
+      const s = 0.05;
+      for (final (chrome, paperArgb, want) in const [
+        (ChromePalette.dark, kWhite, 0xFF3366CC),
+        (ChromePalette.light, kBlueprint, 0xFF8AB4F8),
+      ]) {
+        final camera = CameraController(ViewportTransform(
+            worldToScreenMatrix:
+                const Transform2(s, 0, 0, -s, 300.5 - s * 7350, 439)));
+        final page = standardPage().copyWith(
+            background: paperArgb, pageBreaks: true, gridVisible: false);
+        final painter = chromePainter(page,
+            chrome: chrome,
+            paper: PaperPalette.forPaper(paperArgb),
+            camera: camera);
+        final spy = SpyCanvas();
+        painter.paint(spy, kChromeSize);
+        final breaks = spy.named('drawPath').toList();
+        expect(breaks, hasLength(1), reason: 'premise: the breaks are drawn');
+        expect(argbOf(breaks.single), want,
+            reason: 'paper 0x${paperArgb.toRadixString(16)}');
+        // The same pixel as M-DT-5's: column 300, inside the second dash.
+        final shot =
+            await rasterise((c) => painter.paint(c, kChromeSize), kChromeSize);
+        final c = pixelAt(shot, 300, 13);
+        expect(c, nearRgb(want),
+            reason: 'paper 0x${paperArgb.toRadixString(16)}: got $c');
+      }
+    });
+
+    test(
         'M-DT-7: the sheet edge\'s Paint.color is the chrome\'s, whatever '
         'the paper', () {
       for (final (chrome, paperArgb, edge) in const [
@@ -364,7 +398,7 @@ void main() {
       final label = painter.debugLastLabel;
       expect(label, isNotNull, reason: 'premise: a label was laid out');
       expect(label!.style?.color?.toARGB32(), 0xFFC8C8C8,
-          reason: 'the label TextSpan, not kRulerInk');
+          reason: 'the label TextSpan, not the light ink');
       expect(label.style?.fontSize, kRulerLabelSize);
     });
 

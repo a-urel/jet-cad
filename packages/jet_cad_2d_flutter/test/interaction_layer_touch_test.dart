@@ -64,7 +64,8 @@ class RecordingTool extends Tool {
   }
 
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {}
 
   /// The log without exits, for the routing alone.
   List<String> get routed => log.where((l) => l != 'exit').toList();

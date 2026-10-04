@@ -98,16 +98,16 @@ void main() {
     // already does for the same reason.
     final marker = canvas
         .named('drawLine')
-        .where((c) => c.color?.toARGB32() == kRulerPointer.toARGB32())
+        .where((c) =>
+            c.color?.toARGB32() == ChromePalette.light.rulerPointer.toARGB32())
         .toList();
     expect(marker, hasLength(1));
     expect((marker.single.args[0] as Offset).dx, 123.4);
     final none = SpyCanvas();
     make(RulerAxis.horizontal).paint(none, barH);
     expect(
-        none
-            .named('drawLine')
-            .where((c) => c.color?.toARGB32() == kRulerPointer.toARGB32()),
+        none.named('drawLine').where((c) =>
+            c.color?.toARGB32() == ChromePalette.light.rulerPointer.toARGB32()),
         isEmpty);
   });
 

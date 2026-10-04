@@ -186,7 +186,7 @@ class RingSpy implements Canvas {
   @override
   void drawCircle(Offset c, double radius, Paint paint) {
     // Paint keeps its colour as floats: compare the 32-bit value.
-    if (paint.color.toARGB32() == kPreviewColor.toARGB32()) {
+    if (paint.color.toARGB32() == PaperPalette.light.preview.toARGB32()) {
       rings.add((c, radius));
     }
   }
@@ -201,7 +201,8 @@ class RingSpy implements Canvas {
 /// The rings [rig]'s tool paints now, through `paintOverlay`.
 List<(Offset, double)> ringsOf(Rig rig) {
   final spy = RingSpy();
-  rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(1440, 900));
+  rig.tool.paintOverlay(
+      spy, rig.ctx.camera.value, const Size(1440, 900), PaperPalette.light);
   return spy.rings;
 }
 
@@ -1084,8 +1085,10 @@ void main() {
       final builds = rig.tool.debugPreviewBuilds;
       final spy = RingSpy();
       for (var i = 0; i < 10; i++) {
-        rig.tool.paintWorldOverlay(spy, Vector2.zero(), 0.3);
-        rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(1440, 900));
+        rig.tool
+            .paintWorldOverlay(spy, Vector2.zero(), 0.3, PaperPalette.light);
+        rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(1440, 900),
+            PaperPalette.light);
       }
       expect(spy.paths, 10, reason: 'the preview is painted each frame');
       expect(rig.tool.debugPreviewBuilds, builds, reason: 'built on no frame');
@@ -1212,7 +1215,8 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(rig.tool.notice.value, '6633', reason: 'the new unit');
         final spy = RingSpy();
-        rig.tool.paintWorldOverlay(spy, Vector2.zero(), 0.3);
+        rig.tool
+            .paintWorldOverlay(spy, Vector2.zero(), 0.3, PaperPalette.light);
         expect(spy.paths, 0, reason: 'nothing painted off the canvas');
       }
 
@@ -1595,4 +1599,53 @@ void main() {
         'per move (D12; '
         'printed, not asserted)');
   });
+
+  // Dark theme spec D5 "Tools", Task 3 (M-DT-8): the attach ring takes the
+  // overlay's paper set. A Blueprint page (no grid snap, so the hover lands
+  // as without one) under the far, turned placement; the set is
+  // `forPaper(page.background)`; White is the control, on the same tool.
+  test(
+      'M-DT-8: the attach ring is 0xFFC857 on Blueprint, the light set on '
+      'White', () {
+    final plan = buildPlan(c2Walls, place: corpusGroups);
+    final doc = plan.doc;
+    PageComponent.register(doc.components);
+    doc.commands.execute(SetComponentCommand<PageComponent>(doc.rootHandle,
+        PageComponent(background: 0xFF1F3A5F, snapToGrid: false)));
+    final rig = dimRig(doc);
+    // A.1/right and B.0/right meet at the outer corner (4100, -100).
+    hoverTo(rig, plan.at(4103, -104));
+    expect((rig.tool.hoverPoint - plan.at(4100, -100)).length,
+        lessThan(dimAttach.linear),
+        reason: 'premise: onto the corner');
+    final paper = PaperPalette.forPaper(rig.ctx.page!.value!.background);
+    Paint? ringPaint;
+    for (final (p, ring) in [
+      (paper, 0xFFFFC857),
+      (PaperPalette.forPaper(0xFFFFFFFF), 0xFFE8A11E),
+    ]) {
+      final spy = CircleSpy();
+      rig.tool
+          .paintOverlay(spy, rig.ctx.camera.value, const Size(1440, 900), p);
+      expect(spy.circles, hasLength(1), reason: 'premise: the corner rings');
+      expect(spy.circles.single.radius, kAttachRingPixels, reason: 'premise');
+      expect(spy.circles.single.argb, ring);
+      ringPaint ??= spy.circles.single.paint;
+      expect(identical(spy.circles.single.paint, ringPaint), isTrue,
+          reason: 'a field, recoloured, not a Paint per frame');
+    }
+  });
+}
+
+/// Every circle drawn, with its Paint's colour read at call time.
+class CircleSpy implements Canvas {
+  final List<({double radius, int argb, Paint paint})> circles = [];
+
+  @override
+  void drawCircle(Offset c, double radius, Paint paint) {
+    circles.add((radius: radius, argb: paint.color.toARGB32(), paint: paint));
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }

@@ -4,8 +4,8 @@ import 'package:flutter/services.dart'
     show LogicalKeyboardKey, PhysicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/draw/line_tool.dart';
-import 'package:jet_cad_2d_flutter/src/selection_style.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/draw_fixture.dart';
@@ -117,10 +117,12 @@ void main() {
     hoverAt(rig, screenOf(rig.camera, 7090, 3060));
     final origin = Vector2(7000, 3000);
     final spy = SpyCanvas();
-    rig.tool.paintWorldOverlay(spy, origin, rig.camera.value.scale);
+    rig.tool.paintWorldOverlay(
+        spy, origin, rig.camera.value.scale, PaperPalette.light);
     final paths = spy.named('drawPath').toList();
     expect(paths, hasLength(1));
-    expect(paths.single.color?.toARGB32(), kPreviewColor.toARGB32());
+    expect(
+        paths.single.color?.toARGB32(), PaperPalette.light.preview.toARGB32());
     final bounds = (paths.single.args[0] as Path).getBounds();
     final a = rig.tool.points.single, h = rig.tool.hoverPoint;
     final want = Rect.fromPoints(Offset(a.x - origin.x, a.y - origin.y),

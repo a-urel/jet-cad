@@ -107,31 +107,6 @@ void main() {
         'snap': const Color(0xFF2E9E5B),
       });
     });
-
-    // Transitional (plan Task 1): the old constants stay until Task 3
-    // removes them, and until then they must not drift from `.light`.
-    test('the old chrome and selection constants equal the .light fields', () {
-      expect(chromeFields(ChromePalette.light), {
-        'rulerBackground': kRulerBackground,
-        'rulerInk': kRulerInk,
-        'rulerPointer': kRulerPointer,
-        'sheetEdge': kSheetEdgeColor,
-      });
-      expect(paperFields(PaperPalette.light), {
-        'minorGrid': kMinorGridColor,
-        'majorGrid': kMajorGridColor,
-        'pageBreak': kPageBreakColor,
-        'selection': kSelectionColor,
-        'hover': kHoverColor,
-        'windowBand': kWindowBandColor,
-        'crossingBand': kCrossingBandColor,
-        'grip': kGripColor,
-        'gripMove': kGripMoveColor,
-        'gripHot': kGripHotColor,
-        'preview': kPreviewColor,
-        'snap': kSnapMarkerColor,
-      });
-    });
   });
 
   group('the dark palettes equal the D2 / D3 literals', () {

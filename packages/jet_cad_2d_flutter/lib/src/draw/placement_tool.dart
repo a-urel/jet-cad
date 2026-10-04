@@ -16,6 +16,7 @@ import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../canvas_palette.dart';
 import '../selection_style.dart';
 import '../snap_marker.dart';
 import '../tool.dart';
@@ -44,16 +45,15 @@ abstract class PlacementTool extends Tool {
   /// 05-4).
   bool acceptingSelf = false;
 
-  /// Spec 05 D12: reset each frame, never reallocated.
+  /// Spec 05 D12: reset each frame, never reallocated. [bandPaint]'s colour
+  /// and width are set by [paintWorldOverlay] before it calls
+  /// [paintRubberBand] (dark theme spec D5).
   final Path band = Path();
-  final Paint bandPaint = Paint()
-    ..color = kPreviewColor
-    ..style = PaintingStyle.stroke;
+  final Paint bandPaint = Paint()..style = PaintingStyle.stroke;
 
   final DragPoint _hover = DragPoint();
   final SnapResult _scratch = SnapResult();
   final Paint _markerPaint = Paint()
-    ..color = kSnapMarkerColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = kSnapMarkerStrokePixels;
   bool _hoverVisible = false;
@@ -279,8 +279,10 @@ abstract class PlacementTool extends Tool {
   }
 
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {
     if (!_hoverVisible) return;
+    _markerPaint.color = paper.snap;
     final m = camera.worldToScreenMatrix;
     final p = markerPoint;
     drawSnapMarker(
@@ -292,7 +294,9 @@ abstract class PlacementTool extends Tool {
   }
 
   @override
-  void paintWorldOverlay(Canvas canvas, Vector2 origin, double scale) {
+  void paintWorldOverlay(
+      Canvas canvas, Vector2 origin, double scale, PaperPalette paper) {
+    bandPaint.color = paper.preview;
     bandPaint.strokeWidth = kPreviewStrokePixels / scale;
     paintRubberBand(canvas, origin, scale);
   }
