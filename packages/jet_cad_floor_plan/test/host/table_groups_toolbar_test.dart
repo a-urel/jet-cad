@@ -422,4 +422,36 @@ void main() {
     await press(tester, 'service-split');
     expect(h.heard, ['split G7']);
   });
+
+  testWidgets(
+      'TB6 the flags are released: a resetLayout\'s new bar listens, leaving '
+      'the selection mode leaves none listening (review 4 finding 2)',
+      (tester) async {
+    final h = await mount(tester);
+    // Only the bar's two flags listen to selectedGroup.
+    final sg = h.c.selectedGroup as ValueNotifier<String?>;
+    // ignore: invalid_use_of_protected_member
+    expect(sg.hasListeners, isTrue, reason: 'premise');
+    final before = h.c.activeDocument;
+    h.c.resetLayout();
+    await tester.pump();
+    await tester.pump();
+    expect(identical(before, h.c.activeDocument), isFalse, reason: 'premise');
+    // ignore: invalid_use_of_protected_member
+    expect(sg.hasListeners, isTrue, reason: 'the new view listens');
+    h.c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    await tester.pump();
+    // ignore: invalid_use_of_protected_member
+    expect(sg.hasListeners, isFalse, reason: 'no view left listening');
+  });
+
+  testWidgets(
+      'TB7 no merge or split callback: Print sits 8 px after Redo, as before '
+      '(R-C4-1, review 4 finding 1)', (tester) async {
+    await mount(tester, merge: false, split: false);
+    final gap = tester.getTopLeft(byKey('service-print')).dx -
+        tester.getTopRight(byKey('service-redo')).dx;
+    expect(gap, 8);
+  });
 }
