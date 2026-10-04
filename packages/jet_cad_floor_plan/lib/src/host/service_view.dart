@@ -87,15 +87,25 @@ class _ServiceViewState extends State<ServiceView> {
   /// the paper.
   late int _surfaceArgb;
 
+  /// The paper under the status captions, ARGB (dark theme spec D6c): set
+  /// to [_paperArgb] in [didChangeDependencies] and [_onPage]. Created with
+  /// the state, so it exists before the status painter, a `late final`
+  /// built at the first `build`, reads it; its first value is replaced in
+  /// the first [didChangeDependencies], which runs before that `build`.
+  final ValueNotifier<int> _paper = ValueNotifier<int>(0xFFFFFFFF);
+
   // Spec 14c S7: the status layer repaints on the camera, the statuses and
-  // every change of this copy (a move, an undo, a redo; R-4).
+  // every change of this copy (a move, an undo, a redo; R-4), and (dark
+  // theme D6c, F-16) on the paper, which a theme switch with no page
+  // changes with no document change.
   final _Bump _changed = _Bump();
   StreamSubscription<DocChange>? _changes;
   late final TableStatusPainter _statusPainter = TableStatusPainter(
     document: _document,
     camera: _c.camera,
     statuses: _c.tableStatuses,
-    repaint: Listenable.merge([_c.camera, _c.tableStatuses, _changed]),
+    paper: _paper,
+    repaint: Listenable.merge([_c.camera, _c.tableStatuses, _changed, _paper]),
   );
 
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
@@ -109,7 +119,12 @@ class _ServiceViewState extends State<ServiceView> {
 
   /// A flip rebuilds, which also hands the view the new paper palette: it
   /// switches at exactly the paper where the foreground does.
+  ///
+  /// The status captions' paper is set on every page change, flip or not:
+  /// a status colour over the paper can flip where the paper alone does
+  /// not (D6c).
   void _onPage() {
+    _paper.value = _paperArgb();
     final next = foregroundFor(_paperArgb());
     if (next == _resolver.foreground) return;
     setState(
@@ -120,6 +135,7 @@ class _ServiceViewState extends State<ServiceView> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     _surfaceArgb = Theme.of(context).colorScheme.surface.toARGB32();
+    _paper.value = _paperArgb();
     // A `build` follows: only a flip builds a new resolver.
     final next = foregroundFor(_paperArgb());
     if (_hasResolver && next == _resolver.foreground) return;
@@ -141,6 +157,7 @@ class _ServiceViewState extends State<ServiceView> {
     _page.removeListener(_onPage);
     _changes?.cancel();
     _changed.dispose();
+    _paper.dispose();
     _pageReady.dispose();
     _tools.dispose();
     _tool.dispose();

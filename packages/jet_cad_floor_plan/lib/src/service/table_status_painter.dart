@@ -39,6 +39,33 @@ const double kStatusCaptionSize = 11;
 /// pixels.
 const double kStatusCaptionGap = 2;
 
+/// [colour] composited onto [paper]'s RGB (dark theme spec D6c), as
+/// `0xRRGGBB`: straight alpha, per channel `round(a * s + (1 - a) * p)`
+/// with `a` the colour's alpha over 255. The paper's own alpha is ignored:
+/// the paper is opaque.
+int over(Color colour, int paper) {
+  final argb = colour.toARGB32();
+  final a = ((argb >> 24) & 0xFF) / 255;
+  var rgb = 0;
+  for (final shift in const [16, 8, 0]) {
+    final s = (argb >> shift) & 0xFF;
+    final p = (paper >> shift) & 0xFF;
+    rgb |= (a * s + (1 - a) * p).round() << shift;
+  }
+  return rgb;
+}
+
+/// The caption colour for a status [colour] on [paper] (D6c): the ink
+/// [foregroundFor] picks for the colour over the paper, mapped to
+/// [kStatusCaptionOnLight] (black ink, today's caption) or
+/// [kStatusCaptionOnDark] (white ink). `foregroundFor` returns `0xRRGGBB`,
+/// so this mapping is the only conversion: `Color(foregroundFor(...))`
+/// would be fully transparent.
+Color statusCaptionInk(Color colour, int paper) =>
+    foregroundFor(over(colour, paper)) == 0xFFFFFF
+        ? kStatusCaptionOnDark
+        : kStatusCaptionOnLight;
+
 /// Paints the statuses of [document]'s tables through [camera] (S7).
 ///
 /// The fills are rebuilt when the statuses or the plan's state move; each
@@ -46,11 +73,17 @@ const double kStatusCaptionGap = 2;
 /// and [ui.Paragraph] objects and one reused matrix buffer to the canvas
 /// (the allocation bar, measured structurally by its test). The matrix is
 /// `camera . instance`, composed in doubles before it reaches the canvas.
+///
+/// A caption's ink follows what it sits on (dark theme spec D6c): the
+/// status colour over [paper], through [statusCaptionInk]. The host puts
+/// [paper] in [repaint] too (F-16), so a paper change repaints, and the
+/// rebuild then builds each flipped caption once.
 class TableStatusPainter extends CustomPainter {
   TableStatusPainter({
     required this.document,
     required this.camera,
     required this.statuses,
+    required this.paper,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
@@ -58,14 +91,22 @@ class TableStatusPainter extends CustomPainter {
   final ValueListenable<ViewportTransform> camera;
   final ValueListenable<Map<String, TableStatus>> statuses;
 
+  /// The paper under the statuses, ARGB: the page's background, or the
+  /// theme's surface with no page (D4, D6c).
+  final ValueListenable<int> paper;
+
   List<_Fill> _fills = const [];
   int? _state;
   int? _tablesRevision;
   Map<String, TableStatus>? _builtFor;
+  int? _paperBuilt;
 
   final Map<Handle, Path?> _paths = {};
   final Map<int, Paint> _paints = {};
-  final Map<(String, int), ui.Paragraph> _captions = {};
+
+  /// Keyed by (caption, status colour, ink): a paper flip that flips the
+  /// ink builds the new paragraph once; steady frames build none (D6c).
+  final Map<(String, int, Color), ui.Paragraph> _captions = {};
   final Float64List _matrix = Float64List(16);
 
   /// Every `Path`, `Paint`, `Paragraph` and matrix this painter created: a
@@ -79,6 +120,7 @@ class TableStatusPainter extends CustomPainter {
 
   void _rebuild() {
     final map = statuses.value;
+    final paperArgb = paper.value;
     final fills = <_Fill>[];
     if (map.isNotEmpty) {
       final survey = TableSurvey.of(document);
@@ -106,8 +148,8 @@ class TableStatusPainter extends CustomPainter {
             paint,
             caption == null || caption.isEmpty
                 ? null
-                : _captions
-                    .putIfAbsent((caption, colour), () => _paragraph(caption)),
+                : _captionOf(
+                    caption, colour, statusCaptionInk(status.color, paperArgb)),
             label?.x ?? bounds.center.dx,
             label?.y ?? bounds.center.dy,
             label?.half ?? 0,
@@ -161,12 +203,14 @@ class TableStatusPainter extends CustomPainter {
     }
   }
 
-  ui.Paragraph _paragraph(String text) {
+  ui.Paragraph _captionOf(String caption, int colour, Color ink) => _captions
+      .putIfAbsent((caption, colour, ink), () => _paragraph(caption, ink));
+
+  ui.Paragraph _paragraph(String text, Color ink) {
     debugAllocations++;
     final b = ui.ParagraphBuilder(ui.ParagraphStyle(
         fontSize: kStatusCaptionSize, textAlign: TextAlign.center))
-      ..pushStyle(ui.TextStyle(
-          color: const Color(0xFF202020), fontSize: kStatusCaptionSize))
+      ..pushStyle(ui.TextStyle(color: ink, fontSize: kStatusCaptionSize))
       ..addText(text);
     return b.build()..layout(const ui.ParagraphConstraints(width: 120));
   }
@@ -176,13 +220,16 @@ class TableStatusPainter extends CustomPainter {
     final state = document.commands.stateId;
     final revision = document.tables.mutationRevision;
     final map = statuses.value;
+    final paperArgb = paper.value;
     if (_state != state ||
         _tablesRevision != revision ||
-        !identical(_builtFor, map)) {
+        !identical(_builtFor, map) ||
+        _paperBuilt != paperArgb) {
       _rebuild();
       _state = state;
       _tablesRevision = revision;
       _builtFor = map;
+      _paperBuilt = paperArgb;
     }
     final fills = _fills;
     if (fills.isEmpty) return;
@@ -235,5 +282,6 @@ class TableStatusPainter extends CustomPainter {
   @override
   bool shouldRepaint(TableStatusPainter oldDelegate) =>
       !identical(oldDelegate.document, document) ||
-      !identical(oldDelegate.statuses, statuses);
+      !identical(oldDelegate.statuses, statuses) ||
+      !identical(oldDelegate.paper, paper);
 }
