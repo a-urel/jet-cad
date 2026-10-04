@@ -3,7 +3,7 @@
 // and the end-to-end test (Task 11).
 import 'dart:io';
 
-import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_library.dart';
 
 /// The asset as it shipped before 09c (commit 9414208, byte-equal to `main`
 /// 4d6b78f): the 27 version-1 symbols a plan saved before 09c holds. A test

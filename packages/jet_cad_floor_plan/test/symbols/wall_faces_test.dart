@@ -6,10 +6,10 @@
 // Cramer oracle, never the code under test.
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/opening_geometry.dart';
-import 'package:floor_planner/parametric/wall.dart';
-import 'package:floor_planner/parametric/wall_geometry.dart';
-import 'package:floor_planner/symbols/wall_attach.dart';
+import 'package:jet_cad_floor_plan/src/parametric/opening_geometry.dart';
+import 'package:jet_cad_floor_plan/src/parametric/wall.dart';
+import 'package:jet_cad_floor_plan/src/parametric/wall_geometry.dart';
+import 'package:jet_cad_floor_plan/src/symbols/wall_attach.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;

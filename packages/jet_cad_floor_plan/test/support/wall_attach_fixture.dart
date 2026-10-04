@@ -8,7 +8,7 @@
 // runs must lie on). Walls are drawn by world end points, taken back to
 // their group's local space (`wall_fixture.dart`'s `addWall`), so a joint
 // drawn at one world point meets within rounding, not bitwise.
-import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_floor_plan/src/parametric/wall.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 

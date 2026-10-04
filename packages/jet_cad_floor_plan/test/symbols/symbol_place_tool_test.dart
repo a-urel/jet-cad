@@ -29,8 +29,10 @@ import 'package:jet_cad_floor_plan/src/symbols/symbol_ghost.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_library.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_place_tool.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
-import 'package:jet_cad_floor_plan/src/parametric/catalog.dart' show installParametric;
-import 'package:jet_cad_floor_plan/src/parametric/opening_tool.dart' show isUsableHost;
+import 'package:jet_cad_floor_plan/src/parametric/catalog.dart'
+    show installParametric;
+import 'package:jet_cad_floor_plan/src/parametric/opening_tool.dart'
+    show isUsableHost;
 import 'package:jet_cad_floor_plan/src/parametric/wall.dart' show Justification;
 import 'package:jet_cad_floor_plan/src/parametric/wall_bands.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_box.dart';

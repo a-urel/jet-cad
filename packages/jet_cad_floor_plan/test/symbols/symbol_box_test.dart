@@ -7,11 +7,11 @@
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/symbols/symbol_box.dart';
-import 'package:floor_planner/symbols/symbol_component.dart';
-import 'package:floor_planner/symbols/symbol_library.dart';
-import 'package:floor_planner/symbols/symbol_placer.dart';
+import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_box.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_component.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_library.dart';
+import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -67,15 +67,16 @@ Handle definitionOf(DraftDocument doc, String key) {
 
 /// Every catalog symbol's box, derived by hand from `furniture_catalog.dart`
 /// (left, right, front, back). The dining sets' boxes are set by their
-/// chairs (350 mm beyond the table edge); the toilet's front only by its
-/// bowl's axis extreme; the round table's and the office chair's only by
-/// circles.
+/// chairs (350 mm beyond the table edge), the round table's too since 14s
+/// (its Ø 1100 top centred at 900, 900: 900 − 550 − 350 = 0 and
+/// 900 + 550 + 350 = 1800); the toilet's front only by its bowl's axis
+/// extreme; the office chair's only by circles.
 const Map<String, (double, double, double, double)> catalogBoxes = {
   'dining.table.square.two': (0, 800, 0, 1500),
   'dining.table.square.four': (0, 1600, 0, 1600),
   'dining.table.rect.four': (0, 1400, 0, 1500),
   'dining.table.rect.six': (0, 2500, 0, 1600),
-  'dining.table.round': (0, 1100, 0, 1100),
+  'dining.table.round': (0, 1800, 0, 1800),
   'dining.chair': (0, 450, 0, 450),
   'dining.bench': (0, 1200, 0, 350),
   'kitchen.base.300': (0, 300, 0, 600),

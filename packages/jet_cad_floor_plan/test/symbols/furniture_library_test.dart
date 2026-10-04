@@ -445,9 +445,32 @@ void main() {
       }
     });
 
+    // The five dining tables were redrawn with their chairs and made
+    // servable by plan 14s, at version 2: by the rule above, a plan saved
+    // with a version-1 table keeps its copy, and a new placement makes a
+    // version-2 one beside it.
+    const redrawnBy14s = {
+      'dining.table.square.two',
+      'dining.table.square.four',
+      'dining.table.rect.four',
+      'dining.table.rect.six',
+      'dining.table.round',
+    };
+
+    test('the dining tables 14s redrew moved to version 2', () {
+      final now = {for (final e in assetLibrary().entries) e.key: e};
+      final old = {for (final e in pre09cLibrary().entries) e.key: e};
+      for (final key in redrawnBy14s) {
+        expect(old[key]!.version, 1, reason: key);
+        expect(now[key]!.version, 2, reason: key);
+        expect(now[key]!.category, old[key]!.category, reason: key);
+      }
+    });
+
     test('each keeps its name, category, version, base point and leaves', () {
       final now = {for (final e in assetLibrary().entries) e.key: e};
       for (final o in pre09cLibrary().entries) {
+        if (redrawnBy14s.contains(o.key)) continue;
         final n = now[o.key];
         expect(n, isNotNull, reason: o.key);
         expect(n!.name, o.name, reason: o.key);

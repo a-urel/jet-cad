@@ -16,21 +16,8 @@
 // drawn vertices, not against `SymbolBox`.
 import 'dart:io';
 import 'dart:typed_data';
-
-import 'package:floor_planner/new_document.dart';
-import 'package:floor_planner/parametric/catalog.dart';
-import 'package:floor_planner/parametric/opening_tool.dart' show isUsableHost;
-import 'package:floor_planner/parametric/wall.dart' show Justification;
+import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:floor_planner/main.dart';
-import 'package:floor_planner/symbols/symbol_box.dart';
-import 'package:floor_planner/symbols/symbol_component.dart';
-import 'package:floor_planner/symbols/symbol_library.dart';
-import 'package:floor_planner/symbols/symbol_library_loader.dart';
-import 'package:floor_planner/symbols/symbol_library_state.dart';
-import 'package:floor_planner/symbols/symbol_panel.dart' show symbolIdOf;
-import 'package:floor_planner/symbols/symbol_place_tool.dart';
-import 'package:floor_planner/symbols/symbol_placer.dart';
-import 'package:floor_planner/symbols/wall_attach.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart' hide Tolerance;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -46,7 +33,8 @@ import '../support/wall_attach_fixture.dart' show attachGroup, farAt;
 import '../support/wall_fixture.dart' show addWall, polar;
 
 final Uint8List assetBytes =
-    File('assets/library/furniture.jetlib').readAsBytesSync();
+    File('../../packages/jet_cad_floor_plan/assets/library/furniture.jetlib')
+        .readAsBytesSync();
 
 /// The app over [files] with a loader over the real asset.
 Future<SymbolLibrary> pumpSymbolsApp(
