@@ -639,6 +639,59 @@ kept as a smoke test; the named mutants above carry the weight.
   they stay consistent with each other, but either may be low-contrast.
   This is accepted; Material 3 surfaces are far from mid-grey.
 
+## Amended at execution
+
+Recorded at the plan's exit (Task 7). Each was a proposed ruling, accepted
+by that task's independent review; the ledger is
+`.superpowers/sdd/2026-10-04-dark-theme/progress.md`.
+
+- **R-C4-1 — `DraftCanvas` repaints on a new painter** (`37a1797`).
+  `_DraftCustomPainter.shouldRepaint` in
+  `jet_cad_2d_flutter/lib/src/draft_canvas.dart` (not in "Files") also
+  answers `old.painter != painter`.
+  - D4's theme flip with no page replaces the resolver, and `DraftCanvas`
+    re-attaches a new `DraftPainter`, but no `DocChange` and no camera
+    move follow. Without this line the old ink stayed on screen.
+  - `painter` is assigned only in `_attach()` (`initState`, or
+    `didUpdateWidget` on a real prop change). An ordinary rebuild keeps
+    the painter and still answers false; frame accounting is unedited.
+  - Pinned by `draft_canvas_test.dart` (a new resolver repaints; the same
+    one does not) and by the shell's and `ServiceView`'s no-page theme
+    switches.
+- **R-C4-2 — M-DT-9's paper-flip premise is wrong** (`37a1797`).
+  "`SelectionOverlayPainter`'s repaint merge excludes the page, so only
+  `shouldRepaint` can repaint it" does not hold with a line selected:
+  `OutlineCache._onChange` (`outline_cache.dart:248-259`) notifies on any
+  `DocChange` while the selection is non-empty, and a page change is a
+  command.
+  - So the White to Blueprint test cannot kill the overlay's
+    `shouldRepaint => false`. That mutant is killed by the **no-page theme
+    switch** (shell and `ServiceView`), where no `DocChange` happens and
+    the paper set flips with the surface.
+  - The paper-flip test stays: it pins the selection colour after a real
+    page change and kills `_onPage` without `setState`.
+- **R-C5-1 — D7's "captions unchanged" is scoped** (`6e3fa02`). In the
+  light theme a status caption is pixel-identical to today **when the
+  status composited over the paper takes black ink**; the demo's three
+  statuses do on White, Ivory and Grey. A status whose composite
+  takes white ink (an opaque dark host colour) now gets
+  `kStatusCaptionOnDark` in the light theme too: D6c's formula, where
+  today's `0xFF202020` on such a fill is unreadable.
+- **R-C2-1 — ruler label test seam** (`2a439e0`). `RulerPainter` and
+  `RulerCornerPainter` gain `@visibleForTesting TextSpan? get debugLastLabel`,
+  the "painter's `TextPainter`" route of M-DT-6. A `SpyCanvas` sees only
+  an opaque `Paragraph`. It follows the existing `debugLastTicks` /
+  `debugLastSymbol` seams.
+- **R-C6-2 — M-DT-17 is its own test** (`4f324f9`). The M-DT-9 shell has
+  no symbol loader, and existing tests change only mechanically, so the
+  live-switch assertions on the symbol cells and the page swatch borders
+  live in `widget_theme_test.dart`, not in M-DT-9's test.
+- **Not amendments.** R-C1-1 (the old colour constants kept as literals
+  for Tasks 1-2, pinned to `.light` by a transitional test) changed only
+  the plan's interim step: Task 3 (`31b5a43`) removed the constants and
+  that test, as D5 says. R-C5-2 (`fillColor:` equivalent under Material 3
+  defaults) leaves D6b as written.
+
 ## Revision log
 
 Revision 2 applies the independent review of revision 1 (`aceed65`),
