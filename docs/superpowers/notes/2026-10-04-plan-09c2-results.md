@@ -8,7 +8,8 @@ amendment. **Plan:**
 [2026-10-04-symbol-section.md](../plans/2026-10-04-symbol-section.md).
 **Approval:** revision 4 by the human ("yaz", 2026-10-02); revision 5 and
 this plan on the human's "Devam et, 09c-2'yi başlat" (2026-10-04), while
-travelling, on their word not to be asked unless needed. **Not merged.**
+travelling, on their word not to be asked unless needed. **Merged into
+`main` at `43dd020`** on the human's word ("merge 09c-2 into main").
 
 With one symbol selected, the Selection panel shows a **Symbol** section
 above the Table section: its name, its size `W × D`, a **Rotation** field
@@ -173,4 +174,3 @@ kills it (the joint review's finding).
   press Mirror, pick another size from the menu; undo each. Select a
   table: Rotation 37, then Mirror: the number stays upright; in Service
   the two rows are read-only and there is no Size menu.
-- **Merge:** on the human's word.

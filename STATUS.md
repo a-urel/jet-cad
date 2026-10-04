@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-04 (09c-2 executed, not merged; see below). **Sub-project 14 — restaurant embedding (all
+**Last updated:** 2026-10-04 (09c-2 MERGED into `main` at `43dd020`; see below). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
@@ -106,10 +106,11 @@ mode** built in; what is missing for that comes first.
   `a0eaeec` do not each build on their own (they name the app's old
   paths); `a0eaeec` is the first green one. Its macOS and web look is
   OWED.
-- **Plan 09c-2 (the Symbol section and the wall-aware move) is executed**
-  on `claude/exciting-pasteur-9m22jv` (restarted from `main` at
-  `f2c4875`), on the human's "Devam et, 09c-2'yi başlat" (2026-10-04);
-  **not merged**. Spec 09c revision 5 with its spot check (V-1..V-9),
+- **Plan 09c-2 (the Symbol section and the wall-aware move) is MERGED
+  into `main` at `43dd020`**, `--no-ff`, on the human's word ("merge
+  09c-2 into main", 2026-10-04); executed on
+  `claude/exciting-pasteur-9m22jv` (restarted from `main` at `f2c4875`)
+  on the human's "Devam et, 09c-2'yi başlat". **Slice 09c is complete.** Spec 09c revision 5 with its spot check (V-1..V-9),
   plan [2026-10-04-symbol-section.md](docs/superpowers/plans/2026-10-04-symbol-section.md),
   results [2026-10-04-plan-09c2-results.md](docs/superpowers/notes/2026-10-04-plan-09c2-results.md).
   One selected symbol shows a Symbol section (name, size, Rotation,
@@ -127,7 +128,7 @@ mode** built in; what is missing for that comes first.
   web builds, a Chromium smoke of the section and the move. Its macOS and
   web look is OWED.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
-  the 09c-2 merge on the human's word; then the roadmap.
+  then the roadmap.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 
