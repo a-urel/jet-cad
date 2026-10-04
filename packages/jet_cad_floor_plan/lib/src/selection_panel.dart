@@ -302,12 +302,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// D11, 08 D16, 10 D21): a commit is a `SetComponentCommand`, which needs
   /// `Capability.components`, and its regeneration needs the type's
   /// `editCapability` (final review m4).
-  bool _editable(_Kind kind) {
+  bool _editable(_Kind kind, [Handle? target]) {
     final permissions = widget.document.commands.permissions;
     // A table's number is entity text, not a component (14a T14).
     if (kind == _Kind.number) return permissions.allows(Capability.geometry);
     // A symbol's rotation is its transform (09c D7, W-12; V-1 for a table).
-    if (kind == _Kind.rotation) return _turnable;
+    if (kind == _Kind.rotation) return _turnableAt(target ?? _symbol);
     return permissions.allows(Capability.components) &&
         permissions.allows(switch (kind) {
           _Kind.thickness => const WallType().editCapability,
@@ -407,8 +407,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// `TransformNodeCommand` needs `transform`, which runtime allows; a
   /// table turns in the design mode only, as its Table section's buttons
   /// (V-1, 14a Q-4).
-  bool get _turnable {
-    final symbol = _symbol;
+  bool get _turnable => _turnableAt(_symbol);
+
+  /// [_turnable] for [symbol]: the field's pinned target at a commit, which
+  /// the selection may no longer be (V-1 holds for the table it turns).
+  bool _turnableAt(Handle? symbol) {
     if (symbol != null && isServableInstance(widget.document, symbol)) {
       return _rotatable;
     }
@@ -517,7 +520,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         // Shown to a millionth of a degree: 30° is not 29.999999999999996.
         final deg = rotationDegreesOf(
             (widget.document.tree[target]! as InstanceNode).transform);
-        final shown = (deg * 1e6).roundToDouble() / 1e6;
+        final shown = (deg * kRotationStepsPerDegree).roundToDouble() /
+            kRotationStepsPerDegree;
         return shown >= 360 ? 0.0 : shown;
     }
   }
@@ -712,7 +716,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// field first.
   void _commit(_Field f) {
     final target = f.pinned;
-    if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
+    if (target != null &&
+        _read(f.kind, target) != null &&
+        _editable(f.kind, target)) {
       final value = _parse(f, target);
       if (value != null) {
         try {
@@ -992,7 +998,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
                     : 'mm'),
         keyboardType: f.isText
             ? TextInputType.text
-            : const TextInputType.numberWithOptions(decimal: true),
+            // A rotation may be negative (−90): a phone's keyboard needs the
+            // minus key.
+            : TextInputType.numberWithOptions(
+                decimal: true, signed: f.kind == _Kind.rotation),
         // While the Wall tool is active every valid keystroke reaches its
         // settings at once (07 D11, review round 1): a canvas click
         // accepts its point before the field's focus-loss commit runs, so

@@ -299,6 +299,47 @@ void main() {
       expect(() => definitionForEntry(rig(), shuffled),
           throwsA(isA<AssertionError>()));
     });
+    test(
+        'SS10 the Rotate step turns about the insertion point, not the box\'s '
+        'centre nor the origin: a corner seat whose base point is off its '
+        'centre x (M-09c-y)', () {
+      final doc = rig();
+      final h = place(doc, 'test.corner', far, mirrored: false);
+      final base = doc.tree
+          .definition((doc.tree[h]! as InstanceNode).definition)!
+          .basePoint;
+      final box =
+          boxOfDefinition(doc, (doc.tree[h]! as InstanceNode).definition)!;
+      expect(base.x, isNot((box.left + box.right) / 2), reason: 'premise');
+      final p = transformOf(doc, h).transformPoint(base);
+      doc.commands.execute(rotateSymbolCommand(doc, h, 37)!);
+      expect(rotationDegreesOf(transformOf(doc, h)), closeTo(37, 1e-9));
+      expectNear(transformOf(doc, h).transformPoint(base), p,
+          'the insertion point stays');
+    });
+
+    test(
+        'SS11 re-picking the instance\'s own size is nothing, even when its '
+        'definition was edited and would be copied afresh', () {
+      final doc = rig();
+      final h = place(doc, 'test.bed.1600', far);
+      expect(changeSizeCommand(doc, h, entry('test.bed.1600')), isNull);
+      // Edit one leaf of the definition: no longer leaf-equal to the entry.
+      final def = (doc.tree[h]! as InstanceNode).definition;
+      final e = doc.entities;
+      final leaf = [
+        for (final slot in e.liveSlots)
+          if (e.ownerAt(slot) == def) e.handleAt(slot)
+      ].last;
+      final payload = doc.geometry.read(e.geomIndexAt(e.slotOf(leaf)!));
+      final coords = Float64List.fromList(payload.coords)..[0] += 10;
+      doc.commands.execute(SetEntityGeometryCommand(
+          leaf, GeometryPayload(coords: coords, scalars: payload.scalars)));
+      expect(
+          definitionForEntry(doc, entry('test.bed.1600')).commands, isNotEmpty,
+          reason: 'premise: the entry would be copied');
+      expect(changeSizeCommand(doc, h, entry('test.bed.1600')), isNull);
+    });
   });
 
   group('the panel', () {
@@ -375,6 +416,9 @@ void main() {
       await select(tester, s, [table]);
       expect(byKey('symbol-section'), findsOneWidget);
       expect(byKey('table-section'), findsOneWidget);
+      expect(tester.getTopLeft(byKey('symbol-section')).dy,
+          lessThan(tester.getTopLeft(byKey('table-section')).dy),
+          reason: 'the Symbol section above the Table section (R5-2)');
     });
 
     testWidgets(
@@ -454,12 +498,20 @@ void main() {
     });
 
     testWidgets(
-        'SW5 a table has no Size menu even with a family (R5-3, M-09c-bf)',
-        (tester) async {
+        'SW5 a table has no Size menu, its family all tables or all beds '
+        '(R5-3, M-09c-bf)', (tester) async {
       final doc = rig();
       final table = place(doc, 'test.table.a', far);
       final s = await pumpPanel(tester, doc, symbols: await loader(tester));
       await select(tester, s, [table]);
+      expect(byKey('symbol-section'), findsOneWidget);
+      expect(byKey('symbol-size-menu'), findsNothing);
+      // A servable member of the beds' family: its family lists three beds,
+      // but a table never changes size.
+      final bedTable = place(doc, 'test.bed.table', far + Vector2(4000, 0));
+      expect(familyMembers(library, entry('test.bed.table')), hasLength(3),
+          reason: 'premise: the family offers beds');
+      await select(tester, s, [bedTable]);
       expect(byKey('symbol-section'), findsOneWidget);
       expect(byKey('symbol-size-menu'), findsNothing);
     });
@@ -484,8 +536,14 @@ void main() {
       }
 
       final depth = doc.commands.undoDepth;
+      final base = doc.tree
+          .definition((doc.tree[corner]! as InstanceNode).definition)!
+          .basePoint;
+      final insertion = transformOf(doc, corner).transformPoint(base);
       await typeRotation(tester, '37');
       expect(rotationDegreesOf(transformOf(doc, corner)), closeTo(37, 1e-9));
+      expectNear(transformOf(doc, corner).transformPoint(base), insertion,
+          'turned about the insertion point (M-09c-y)');
       expectUpright('after the rotation');
       final before = footprint(doc, corner);
       await tester.tap(byKey('symbol-mirror'));
@@ -498,6 +556,71 @@ void main() {
       doc.commands.undo();
       expect(rotationDegreesOf(transformOf(doc, corner)), closeTo(30, 1e-9));
       expectUpright('after two');
+    });
+
+    testWidgets(
+        'SW7 a new loader is listened to: the Size menu appears when it turns '
+        'ready (V-3, didUpdateWidget)', (tester) async {
+      final doc = rig();
+      final bed = place(doc, 'test.bed.1600', far);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final first = await loader(tester, load: false);
+      final second = await loader(tester, load: false);
+      Future<void> pumpWith(SymbolLibraryLoader l) =>
+          tester.pumpWidget(MaterialApp(
+            home: Scaffold(
+              body: SingleChildScrollView(
+                child: SelectionPanel(
+                    document: doc, selection: selection, symbols: l),
+              ),
+            ),
+          ));
+      await pumpWith(first);
+      await select(tester, selection, [bed]);
+      await pumpWith(second);
+      expect(byKey('symbol-size-menu'), findsNothing, reason: 'not ready');
+      await tester.runAsync(second.load);
+      await tester.pump();
+      expect(byKey('symbol-size-menu'), findsOneWidget);
+    });
+
+    testWidgets('SW8 the Rotation field offers a minus key (−90 on a phone)',
+        (tester) async {
+      final doc = rig();
+      final bed = place(doc, 'test.bed.1600', far);
+      final s = await pumpPanel(tester, doc);
+      await select(tester, s, [bed]);
+      expect(tester.widget<TextField>(byKey('symbol-rotation')).keyboardType,
+          const TextInputType.numberWithOptions(decimal: true, signed: true));
+    });
+
+    testWidgets(
+        'SW9 a rotation typed for a bed under runtime commits to the bed '
+        'when the selection moves to a table before the edit ends: the '
+        'pinned target decides (V-1)', (tester) async {
+      final doc = rig();
+      final bed = place(doc, 'test.bed.1600', far);
+      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
+      final s = await pumpPanel(tester, doc);
+      doc.commands.permissions = DraftPermissions.runtime;
+      await select(tester, s, [bed]);
+      expect(editable(tester), isTrue, reason: 'premise: a bed turns');
+      final tableBefore = transformOf(doc, table);
+      await tester.pump(kDoubleTapTimeout * 2);
+      await tester.tap(byKey('symbol-rotation'));
+      await tester.pump();
+      await tester.enterText(byKey('symbol-rotation'), '45');
+      await select(tester, s, [table]);
+      // The table's field is read-only: the input connection closes, and
+      // the edit ends by losing focus, which commits (06 D13).
+      expect(editable(tester), isFalse, reason: 'premise: a table does not');
+      tester.binding.focusManager.primaryFocus!.unfocus();
+      await tester.pump();
+      await tester.pump();
+      expect(rotationDegreesOf(transformOf(doc, bed)), closeTo(45, 1e-9),
+          reason: 'the bed, which the field was pinned to');
+      expect(transformOf(doc, table), tableBefore, reason: 'not the table');
     });
   });
 }

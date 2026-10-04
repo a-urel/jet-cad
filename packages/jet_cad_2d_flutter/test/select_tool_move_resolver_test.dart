@@ -12,6 +12,8 @@ import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart';
+import 'package:jet_cad_2d_flutter/src/grip_cache.dart';
+import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
 import 'package:jet_cad_2d_flutter/src/interaction_layer.dart'
     show kPickRadiusPixels;
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
@@ -194,6 +196,18 @@ void main() {
     final sameDepth = same.doc.commands.undoDepth;
     same.drag([same.body() + const ui.Offset(30, 0)]);
     expect(same.doc.commands.undoDepth, sameDepth, reason: 'nothing changes');
+
+    // The same linear part, another translation: a change, committed.
+    final slid = Transform2(
+        kPlace.a, kPlace.b, kPlace.c, kPlace.d, kPlace.e + 7.25, kPlace.f);
+    final along = rig(
+        resolver: RecordingResolver(
+            (_) => (transform: slid, marker: kMarker.clone())));
+    final alongDepth = along.doc.commands.undoDepth;
+    along.drag([along.body() + const ui.Offset(30, 0)]);
+    expect(along.doc.commands.undoDepth, alongDepth + 1,
+        reason: 'the translation alone is a change');
+    expect(parts(along.transform), parts(slid));
   });
 
   test(
@@ -279,6 +293,78 @@ void main() {
     r.tool.cancel(r.ctx);
   });
 
+  test(
+      'MR9 a centre-grip drag of the one selected node never asks: D8 is a '
+      'body drag (M-09c-ao\'s grip half)', () {
+    // A root group whose provider gives it one centre grip: the only way a
+    // single selected node has a move grip (an instance has none).
+    final doc = DraftDocument.empty();
+    final group = addGroup(doc, doc.rootHandle, kPlace);
+    addEntity(doc, group, EntityKind.line, [0, 0, 100, 0], []);
+    final centre = kPlace.transformPoint(Vector2(50, 0));
+    final index = SpatialIndex(doc);
+    final selection = SelectionController(doc);
+    final camera = cameraAt(0.5, const ui.Offset(-2200, -1300));
+    final outlines = OutlineCache(doc, selection);
+    final grips = GripCache(doc, selection, outlines,
+        objects: _CentreGrip(group, centre));
+    final resolver =
+        RecordingResolver((_) => (transform: kExact, marker: kMarker.clone()));
+    final tool = SelectTool(moveResolver: resolver);
+    addTearDown(() {
+      tool.dispose();
+      grips.dispose();
+      outlines.dispose();
+      selection.dispose();
+      index.dispose();
+      camera.dispose();
+    });
+    final ctx = ToolContext(
+        document: doc,
+        index: index,
+        camera: camera,
+        selection: selection,
+        grips: grips);
+    selection.replace([SelectionKey.root(group)]);
+    expect([for (final g in grips.grips) g.grip.role], [GripRole.move],
+        reason: 'premise: the centre grip');
+    ui.Offset screen(Vector2 w) {
+      final s = camera.value.worldToScreen(w);
+      return ui.Offset(s.x, s.y);
+    }
+
+    ToolPointerEvent ev(ui.Offset s, {int buttons = kPrimaryButton}) =>
+        ToolPointerEvent(
+          screen: s,
+          world: camera.value.screenToWorld(Vector2(s.dx, s.dy)),
+          pointer: 1,
+          buttons: buttons,
+          shift: false,
+          control: false,
+          meta: false,
+          alt: false,
+          pickRadiusWorld: kPickRadiusPixels / camera.value.scale,
+        );
+    void drag(ui.Offset from) {
+      final end = from + const ui.Offset(30, -10);
+      tool.onPointerDown(ev(from), ctx);
+      tool.onPointerMove(ev(from + const ui.Offset(15, -5)), ctx);
+      tool.onPointerMove(ev(end), ctx);
+      tool.onPointerUp(ev(end, buttons: 0), ctx);
+    }
+
+    Transform2 t() => (doc.tree[group]! as GroupNode).transform;
+    drag(screen(centre));
+    expect(resolver.calls, isEmpty, reason: 'a grip drag');
+    expect(t().a, kPlace.a, reason: 'the plain move, not turned');
+    expect(t().e, isNot(kPlace.e), reason: 'premise: it moved');
+
+    // The same context's body drag asks: the grips do not block D8. The
+    // provider's grip stays where it was, so the press is far from it.
+    drag(screen(t().transformPoint(Vector2(95, 0))));
+    expect(resolver.calls, isNotEmpty, reason: 'a body drag');
+  });
+
   test('MR8 drawSnapMarker draws nearest as an hourglass of four lines', () {
     final spy = LineSpy();
     drawSnapMarker(spy, const ui.Offset(100, 50), SnapKind.nearest,
@@ -322,4 +408,28 @@ class LineSpy implements ui.Canvas {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+/// One centre grip, at [at], for [group]; no reshape.
+final class _CentreGrip implements ObjectGripProvider {
+  _CentreGrip(this.group, this.at);
+
+  final Handle group;
+  final Vector2 at;
+
+  @override
+  List<Grip> gripsOf(DraftDocument d, Handle g) =>
+      g == group ? [Grip(GripRole.move, 0, at.x, at.y)] : const [];
+
+  @override
+  DraftCommand? drag(DraftDocument d, Handle g, Grip grip, Vector2 world) =>
+      null;
+
+  @override
+  List<(EntityKind, GeometryPayload)> preview(
+          DraftDocument d, Handle g, Grip grip, Vector2 world) =>
+      const [];
+
+  @override
+  bool movable(DraftDocument d, Handle g) => true;
 }

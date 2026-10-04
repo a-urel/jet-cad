@@ -12,6 +12,7 @@ import 'symbol_box.dart';
 import 'symbol_component.dart';
 import 'symbol_library.dart';
 import 'symbol_placer.dart';
+import 'wall_attach.dart' show isOrthonormal;
 
 /// [handle] is a root-level instance whose definition carries a
 /// [SymbolComponent] (D7's rule, F-11's for a symbol).
@@ -88,6 +89,12 @@ List<SymbolEntry> familyMembers(SymbolLibrary library, SymbolEntry entry) {
   }();
 }
 
+/// The Rotation field's display steps per degree: it shows a rotation
+/// rounded to a millionth of a degree, and a typed value within one step
+/// of the current rotation is the shown value committed again, not a
+/// turn. A property of the field's text, not a geometric tolerance.
+const double kRotationStepsPerDegree = 1e6;
+
 /// The Rotation row's value (D7): `atan2(−c, d)` in degrees, in `[0, 360)`
 /// -- the local `y` column's angle, so a mirror does not add 180°.
 double rotationDegreesOf(Transform2 t) {
@@ -120,11 +127,7 @@ Transform2 rotatedTo(Transform2 t, Vector2 basePoint, double degrees) {
   final cs = math.cos(delta), sn = math.sin(delta);
   var a = cs * t.a - sn * t.b, b = sn * t.a + cs * t.b;
   var c = cs * t.c - sn * t.d, d = sn * t.c + cs * t.d;
-  const eps = 1e-9;
-  final orthonormal = ((a * a + b * b) - 1).abs() <= eps &&
-      ((c * c + d * d) - 1).abs() <= eps &&
-      (a * c + b * d).abs() <= eps;
-  if (orthonormal && target % 90 == 0) {
+  if (target % 90 == 0 && isOrthonormal(Transform2(a, b, c, d, 0, 0))) {
     final (qc, qs) = _quarter(target ~/ 90);
     if (t.a * t.d - t.b * t.c < 0) {
       // R(θ')·scale(−1, 1).
@@ -160,11 +163,12 @@ CompoundCommand? rotateSymbolCommand(
   if (node is! InstanceNode || !degrees.isFinite) return null;
   final def = doc.tree.definition(node.definition);
   if (def == null) return null;
-  // Already there, within a millionth of a degree (a geometric decision):
-  // the field's shown value committed again is nothing.
+  // Already there, within the field's display step: the shown value
+  // committed again is nothing.
   var diff = (degrees - rotationDegreesOf(node.transform)) % 360;
   if (diff < 0) diff += 360;
-  if (diff < 1e-6 || diff > 360 - 1e-6) return null;
+  final steps = diff * kRotationStepsPerDegree;
+  if (steps < 1 || steps > 360 * kRotationStepsPerDegree - 1) return null;
   final next = rotatedTo(node.transform, def.basePoint, degrees);
   if (_same(next, node.transform)) return null;
   return CompoundCommand([TransformNodeCommand(instance, next)],
@@ -186,11 +190,16 @@ CompoundCommand? mirrorSymbolCommand(DraftDocument doc, Handle instance) {
 /// definition (reused or copied, [definitionForEntry]), its linear part
 /// kept and its translation chosen so the new box's back-left corner
 /// `(left', back')` lands where the old `(left, back)` was. Null when the
-/// instance already draws that definition, or a box is missing.
+/// instance already draws [entry]'s key (re-picking the checked size is
+/// not a size change: it would copy a fresh definition over an older
+/// version or an edited one), or a box is missing.
 CompoundCommand? changeSizeCommand(
     DraftDocument doc, Handle instance, SymbolEntry entry) {
   final node = doc.tree[instance];
   if (node is! InstanceNode) return null;
+  if (doc.components.get<SymbolComponent>(node.definition)?.key == entry.key) {
+    return null;
+  }
   final oldBox = boxOfDefinition(doc, node.definition);
   final newBox = boxOfEntry(entry);
   if (oldBox == null || newBox == null) return null;
