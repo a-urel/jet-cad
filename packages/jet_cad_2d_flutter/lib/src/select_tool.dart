@@ -27,6 +27,17 @@ import 'viewport_transform.dart';
 /// (M-02f); past it, a press becomes the drag its class names (spec 03 D2).
 const double kBandSlopPixels = 4.0;
 
+/// Spec 09c D8: what a body drag of exactly one root-level node asks, on
+/// every retarget, for the transform the node should take instead of the
+/// plain move's. An application seam: the render layer knows no walls.
+abstract interface class MoveResolver {
+  /// For a body drag of exactly one root-level node, the transform the
+  /// node should take instead of `delta · node.transform`, and the point
+  /// to mark, or null to keep the plain move.
+  ({Transform2 transform, Vector2 marker})? resolveMove(
+      ToolContext ctx, Handle node, Transform2 delta);
+}
+
 /// What a press landed on (spec 03 D2). The first class that hits wins.
 enum PressClass { rotationGrip, grip, selectedBody, unselectedBody, empty }
 
@@ -36,7 +47,16 @@ enum PressClass { rotationGrip, grip, selectedBody, unselectedBody, empty }
 /// - move, rotate and reshape drags with object and grid snap;
 /// - one command on release (spec 03 D2, D4, D5).
 class SelectTool extends Tool {
-  SelectTool();
+  SelectTool({this.moveResolver});
+
+  /// Spec 09c D8: asked during a single-node body drag; null: today's move.
+  final MoveResolver? moveResolver;
+
+  /// The drag began from a body with exactly one key selected (09c D8).
+  bool _resolvable = false;
+
+  /// The resolver answered at the last retarget: the marker is `nearest`.
+  bool _attached = false;
 
   @override
   String get name => 'Select';
@@ -240,6 +260,7 @@ class SelectTool extends Tool {
   /// Spec D2, past the slop. A drag whose capability is refused never
   /// starts; the press stays a click (Ruling 03-6).
   void _beginDrag(ToolPointerEvent e, ToolContext ctx) {
+    _resolvable = false;
     switch (_class) {
       case PressClass.empty:
         _phase = ToolPhase.dragging;
@@ -255,6 +276,7 @@ class SelectTool extends Tool {
           _clickOnly = true;
           return;
         }
+        _resolvable = ctx.selection.keys.length == 1;
         _moveBase(ctx, drag!);
         _enter(drag, e, ctx);
       case PressClass.unselectedBody:
@@ -273,6 +295,7 @@ class SelectTool extends Tool {
         _pressShift
             ? ctx.selection.toggle([key])
             : ctx.selection.replace([key]);
+        _resolvable = next.length == 1;
         _moveBase(ctx, drag!);
         _enter(drag, e, ctx);
       case PressClass.grip:
@@ -386,6 +409,16 @@ class SelectTool extends Tool {
     }
     _resolve(ctx, world, shift ? drag.base : null);
     drag.moveTo(_dragPoint.point);
+    // Spec 09c D8: after the plain move, on every path that retargets; with
+    // Shift down the plain, ortho move applies.
+    _attached = false;
+    final resolver = moveResolver;
+    final node = drag.singleNode;
+    if (resolver == null || !_resolvable || shift || node == null) return;
+    final r = resolver.resolveMove(ctx, node, drag.transform!);
+    if (r == null) return;
+    drag.moveToTransform(r.marker, r.transform);
+    _attached = true;
   }
 
   void _resolve(ToolContext ctx, Vector2 raw, Vector2? orthoBase) {
@@ -562,6 +595,8 @@ class SelectTool extends Tool {
     _clickOnly = false;
     _bandMode = null;
     _dragKind = null;
+    _resolvable = false;
+    _attached = false;
   }
 
   /// The single way out of a move, rotate or reshape (Ruling 03-7).
@@ -820,8 +855,11 @@ class SelectTool extends Tool {
         Offset(m.a * to.x + m.c * to.y + m.e, m.b * to.x + m.d * to.y + m.f);
     canvas.drawLine(a, b, _guidePaint);
     if (drag.kind == DragKind.rotate) return;
-    drawSnapMarker(canvas, b, _dragPoint.objectKind,
-        grid: _dragPoint.grid, paint: _markerPaint);
+    // Spec 09c D8: an attached move marks its face point as a point on an
+    // object.
+    drawSnapMarker(
+        canvas, b, _attached ? SnapKind.nearest : _dragPoint.objectKind,
+        grid: !_attached && _dragPoint.grid, paint: _markerPaint);
   }
 
   /// Spec D7: the reshape preview, drawn by the overlay under its rebased

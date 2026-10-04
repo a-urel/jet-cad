@@ -35,6 +35,8 @@ import 'symbols/symbol_library.dart';
 import 'symbols/symbol_library_loader.dart';
 import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
+import 'symbols/symbol_library_state.dart';
+import 'symbols/symbol_move.dart';
 import 'symbols/wall_attach.dart';
 import 'tables/table_label_system.dart';
 import 'tool_palette.dart';
@@ -212,7 +214,15 @@ class _PlannerShellState extends State<PlannerShell> {
 
   // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
-  final SelectTool _select = SelectTool();
+  // Spec 09c D8: one tagged symbol dragged near a wall face attaches, over
+  // the faces the symbol tool shares; the library is read at each drag.
+  late final SelectTool _select = SelectTool(
+      moveResolver: SymbolMoveResolver(
+          faces: _faces,
+          library: () => switch (widget.symbols?.state) {
+                SymbolLibraryReady(:final library) => library,
+                _ => null,
+              }));
   final LineTool _line = LineTool();
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
@@ -887,7 +897,8 @@ class _PlannerShellState extends State<PlannerShell> {
                               wallTool: _wall,
                               wallSettings: _wallSettings,
                               openingTools: _openingTools,
-                              openingSettings: _openingSettings),
+                              openingSettings: _openingSettings,
+                              symbols: widget.symbols),
                           // Spec 12b D9: the Layers section, placed only.
                           LayerPanel(
                               document: _document,

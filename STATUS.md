@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-04. **Sub-project 14 — restaurant embedding (all
+**Last updated:** 2026-10-04 (09c-2 executed, not merged; see below). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
@@ -105,9 +105,29 @@ mode** built in; what is missing for that comes first.
   17, both web builds. The rebased commits between the branch point and
   `a0eaeec` do not each build on their own (they name the app's old
   paths); `a0eaeec` is the first green one. Its macOS and web look is
-  OWED. 09c-2 is unwritten.
-- **Next:** the human's looks (14 on a touch device too, 09c-1); then
-  09c-2 or the roadmap.
+  OWED.
+- **Plan 09c-2 (the Symbol section and the wall-aware move) is executed**
+  on `claude/exciting-pasteur-9m22jv` (restarted from `main` at
+  `f2c4875`), on the human's "Devam et, 09c-2'yi başlat" (2026-10-04);
+  **not merged**. Spec 09c revision 5 with its spot check (V-1..V-9),
+  plan [2026-10-04-symbol-section.md](docs/superpowers/plans/2026-10-04-symbol-section.md),
+  results [2026-10-04-plan-09c2-results.md](docs/superpowers/notes/2026-10-04-plan-09c2-results.md).
+  One selected symbol shows a Symbol section (name, size, Rotation,
+  Mirror, a Size menu for a family that is not a table); a table shows it
+  too, turning in the design mode only, its number upright; an
+  against-wall symbol dragged alone by its body attaches to a wall face
+  (the hourglass marks it), Shift or F3 off moving it freely. The engine
+  gains `SetInstanceDefinitionCommand`; the render layer the
+  `MoveResolver` seam and the `nearest` glyph. The tasks were done by the
+  controller, without a per-task implementer and reviewer; one joint
+  independent review of Tasks 1–4 (no blocking finding, three surviving
+  mutants and seven nits, all fixed in `266e609`). Gates: engine 1,241 +
+  2 standing, render 1,239 + 1 skip + 7 standing, planner 1,164,
+  restaurant symbols 94, app 201, demo 17, `dev_harness_2d` analyze, both
+  web builds, a Chromium smoke of the section and the move. Its macOS and
+  web look is OWED.
+- **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
+  the 09c-2 merge on the human's word; then the roadmap.
 
 *Earlier, 2026-10-02 (the plan 12b merge):*
 

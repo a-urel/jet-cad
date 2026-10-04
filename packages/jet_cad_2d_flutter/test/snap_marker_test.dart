@@ -58,13 +58,22 @@ void main() {
         6.0);
 
     expect(draw(null), isEmpty, reason: 'nothing when the raw point won');
-    for (final kind in [
-      SnapKind.perpendicular,
-      SnapKind.tangent,
-      SnapKind.nearest,
-    ]) {
+    for (final kind in [SnapKind.perpendicular, SnapKind.tangent]) {
       expect(draw(kind), isEmpty,
           reason: '${kind.name} is not in kDragSnapMask');
     }
+
+    // Spec 09c D8, R5-5: a wall attachment marks its face point with the
+    // nearest glyph, an hourglass.
+    final n = draw(SnapKind.nearest);
+    expect(names(n), ['drawLine', 'drawLine', 'drawLine', 'drawLine']);
+    expect([
+      for (final c in n) (c.args[0], c.args[1])
+    ], [
+      (at + const Offset(-5, -5), at + const Offset(5, -5)),
+      (at + const Offset(5, -5), at + const Offset(-5, 5)),
+      (at + const Offset(-5, 5), at + const Offset(5, 5)),
+      (at + const Offset(5, 5), at + const Offset(-5, -5)),
+    ]);
   });
 }

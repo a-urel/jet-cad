@@ -16,6 +16,12 @@ import 'parametric/opening_tool.dart';
 import 'parametric/room.dart';
 import 'parametric/wall.dart';
 import 'parametric/wall_tool.dart';
+import 'symbols/symbol_box.dart';
+import 'symbols/symbol_component.dart';
+import 'symbols/symbol_library.dart';
+import 'symbols/symbol_library_loader.dart';
+import 'symbols/symbol_library_state.dart';
+import 'symbols/symbol_section.dart';
 import 'tables/table_index.dart';
 import 'tables/table_label.dart';
 import 'tables/table_numbers.dart';
@@ -70,7 +76,8 @@ class SelectionPanel extends StatefulWidget {
       this.wallTool,
       this.wallSettings,
       this.openingTools,
-      this.openingSettings});
+      this.openingSettings,
+      this.symbols});
 
   final DraftDocument document;
   final SelectionController selection;
@@ -91,13 +98,26 @@ class SelectionPanel extends StatefulWidget {
   final Map<OpeningKind, Tool>? openingTools;
   final Map<OpeningKind, ValueNotifier<OpeningSettings>>? openingSettings;
 
+  /// The shell's symbol library (spec 09c D7, V-3), for the Symbol
+  /// section's Size menu; hidden while it is null or not ready.
+  final SymbolLibraryLoader? symbols;
+
   @override
   State<SelectionPanel> createState() => _SelectionPanelState();
 }
 
 /// Which quantity a field edits: a number, or -- [name], the text kind (10
 /// D21) -- a room's name.
-enum _Kind { width, height, thickness, openingWidth, position, name, number }
+enum _Kind {
+  width,
+  height,
+  thickness,
+  openingWidth,
+  position,
+  name,
+  number,
+  rotation
+}
 
 /// One field's state.
 ///
@@ -151,6 +171,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   final _Field _position = _Field(_Kind.position);
   final _Field _name = _Field(_Kind.name);
   final _Field _number = _Field(_Kind.number);
+  final _Field _rotation = _Field(_Kind.rotation);
   late final List<_Field> _fields = [
     _width,
     _height,
@@ -159,6 +180,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     _position,
     _name,
     _number,
+    _rotation,
   ];
   late final StreamSubscription<DocChange> _changes;
 
@@ -206,6 +228,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
       _sync();
     });
     widget.tools?.addListener(_onTools);
+    widget.symbols?.addListener(_sync);
     widget.wallSettings?.addListener(_sync);
     for (final s in _openingSettingsList) {
       s.addListener(_sync);
@@ -223,6 +246,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     widget.selection.removeListener(_sync);
     _changes.cancel();
     widget.tools?.removeListener(_onTools);
+    widget.symbols?.removeListener(_sync);
     widget.wallSettings?.removeListener(_sync);
     for (final s in _openingSettingsList) {
       s.removeListener(_sync);
@@ -231,6 +255,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
       f.dispose();
     }
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(SelectionPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.symbols, widget.symbols)) {
+      oldWidget.symbols?.removeListener(_sync);
+      widget.symbols?.addListener(_sync);
+    }
   }
 
   List<ValueNotifier<OpeningSettings>> get _openingSettingsList =>
@@ -269,10 +302,12 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// D11, 08 D16, 10 D21): a commit is a `SetComponentCommand`, which needs
   /// `Capability.components`, and its regeneration needs the type's
   /// `editCapability` (final review m4).
-  bool _editable(_Kind kind) {
+  bool _editable(_Kind kind, [Handle? target]) {
     final permissions = widget.document.commands.permissions;
     // A table's number is entity text, not a component (14a T14).
     if (kind == _Kind.number) return permissions.allows(Capability.geometry);
+    // A symbol's rotation is its transform (09c D7, W-12; V-1 for a table).
+    if (kind == _Kind.rotation) return _turnableAt(target ?? _symbol);
     return permissions.allows(Capability.components) &&
         permissions.allows(switch (kind) {
           _Kind.thickness => const WallType().editCapability,
@@ -281,7 +316,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
             const OpeningType().editCapability,
           _Kind.width || _Kind.height => const BoxType().editCapability,
           _Kind.name => const RoomType().editCapability,
-          _Kind.number => throw StateError('answered above'),
+          _Kind.number || _Kind.rotation => throw StateError('answered above'),
         });
   }
 
@@ -310,6 +345,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
       case _Kind.width:
       case _Kind.height:
         return value.isFinite && value > 0;
+      case _Kind.rotation:
+        // Any finite number, taken modulo 360 (D7).
+        return value.isFinite;
       case _Kind.openingWidth:
         final k = _openingToolKind(target) ??
             widget.document.components.get<OpeningParams>(target)!.kind;
@@ -355,6 +393,45 @@ class _SelectionPanelState extends State<SelectionPanel> {
     }
     return null;
   }
+
+  /// The one selected key when it is a root-level symbol instance (09c D7),
+  /// or null.
+  Handle? get _symbol {
+    final keys = widget.selection.keys;
+    if (keys.length != 1 || keys.single.chain.isNotEmpty) return null;
+    final h = keys.single.target;
+    return isSymbolInstance(widget.document, h) ? h : null;
+  }
+
+  /// Whether the Symbol section's Rotation and Mirror edit (D7, W-12): a
+  /// `TransformNodeCommand` needs `transform`, which runtime allows; a
+  /// table turns in the design mode only, as its Table section's buttons
+  /// (V-1, 14a Q-4).
+  bool get _turnable => _turnableAt(_symbol);
+
+  /// [_turnable] for [symbol]: the field's pinned target at a commit, which
+  /// the selection may no longer be (V-1 holds for the table it turns).
+  bool _turnableAt(Handle? symbol) {
+    if (symbol != null && isServableInstance(widget.document, symbol)) {
+      return _rotatable;
+    }
+    return widget.document.commands.permissions.allows(Capability.transform);
+  }
+
+  /// Whether the Size menu edits (D7): a copy needs the worst case.
+  bool get _resizable {
+    final p = widget.document.commands.permissions;
+    return p.allows(Capability.structure) &&
+        p.allows(Capability.geometry) &&
+        p.allows(Capability.components) &&
+        p.allows(Capability.transform);
+  }
+
+  /// The shell's library when it is ready (V-3), or null.
+  SymbolLibrary? get _library => switch (widget.symbols?.state) {
+        SymbolLibraryReady(:final library) => library,
+        _ => null,
+      };
 
   /// [h] is a live [T], by the engine's object rule (`live_objects.dart`):
   /// a file's group carrying a [T] and a later-registered type is not one.
@@ -403,6 +480,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
           _openingToolMode == null ? _selected<OpeningParams>() : null,
         _Kind.name => _room,
         _Kind.number => _table?.instance,
+        _Kind.rotation => _symbol,
       };
 
   /// [kind]'s value at [target] -- a `double`, or the name's `String` --
@@ -437,6 +515,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
           if (t.instance == target) return t.number ?? '';
         }
         return null;
+      case _Kind.rotation:
+        if (!isSymbolInstance(widget.document, target)) return null;
+        // Shown to a millionth of a degree: 30° is not 29.999999999999996.
+        final deg = rotationDegreesOf(
+            (widget.document.tree[target]! as InstanceNode).transform);
+        final shown = (deg * kRotationStepsPerDegree).roundToDouble() /
+            kRotationStepsPerDegree;
+        return shown >= 360 ? 0.0 : shown;
     }
   }
 
@@ -448,6 +534,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final doc = widget.document;
     if (kind == _Kind.number) {
       _writeNumber(target, value as String);
+      return;
+    }
+    if (kind == _Kind.rotation) {
+      final command = rotateSymbolCommand(doc, target, value as double);
+      if (command != null) doc.commands.execute(command);
       return;
     }
     if (kind == _Kind.name) {
@@ -492,7 +583,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         doc.commands.execute(SetComponentCommand<OpeningParams>(target, next));
       case _Kind.name:
       case _Kind.number:
-        throw StateError('unreachable: a text kind is written above');
+      case _Kind.rotation:
+        throw StateError('unreachable: written above');
     }
   }
 
@@ -525,6 +617,42 @@ class _SelectionPanelState extends State<SelectionPanel> {
     if (table == null || !_rotatable) return;
     final command =
         rotateTableCommand(widget.document, table.instance, quarterTurns);
+    if (command == null) return;
+    try {
+      widget.document.commands.execute(command);
+    } on PermissionDeniedError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// D7's Mirror: one step about the box's centre `x`. A refused edit is
+  /// caught: nothing changed.
+  void _mirrorSymbol() {
+    final symbol = _symbol;
+    if (symbol == null || !_turnable) return;
+    final command = mirrorSymbolCommand(widget.document, symbol);
+    if (command == null) return;
+    try {
+      widget.document.commands.execute(command);
+    } on PermissionDeniedError {
+      // Refused: nothing changed.
+    } on StateError {
+      // Refused: nothing changed.
+    }
+  }
+
+  /// D7's size change to [entry]: one `Change size` step. A refused edit is
+  /// caught: nothing changed.
+  void _changeSize(SymbolEntry entry) {
+    final symbol = _symbol;
+    if (symbol == null ||
+        !_resizable ||
+        isServableInstance(widget.document, symbol)) {
+      return;
+    }
+    final command = changeSizeCommand(widget.document, symbol, entry);
     if (command == null) return;
     try {
       widget.document.commands.execute(command);
@@ -588,7 +716,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// field first.
   void _commit(_Field f) {
     final target = f.pinned;
-    if (target != null && _read(f.kind, target) != null && _editable(f.kind)) {
+    if (target != null &&
+        _read(f.kind, target) != null &&
+        _editable(f.kind, target)) {
       final value = _parse(f, target);
       if (value != null) {
         try {
@@ -860,10 +990,18 @@ class _SelectionPanelState extends State<SelectionPanel> {
         focusNode: f.focus,
         readOnly: !editable,
         decoration: InputDecoration(
-            labelText: label, suffixText: f.isText ? null : 'mm'),
+            labelText: label,
+            suffixText: f.isText
+                ? null
+                : f.kind == _Kind.rotation
+                    ? '°'
+                    : 'mm'),
         keyboardType: f.isText
             ? TextInputType.text
-            : const TextInputType.numberWithOptions(decimal: true),
+            // A rotation may be negative (−90): a phone's keyboard needs the
+            // minus key.
+            : TextInputType.numberWithOptions(
+                decimal: true, signed: f.kind == _Kind.rotation),
         // While the Wall tool is active every valid keystroke reaches its
         // settings at once (07 D11, review round 1): a canvas click
         // accepts its point before the field's focus-loss commit runs, so
@@ -898,6 +1036,65 @@ class _SelectionPanelState extends State<SelectionPanel> {
         // canvas, and leaves a canvas click's own focus request alone.
         onTapOutside: (_) => f.focus.handBack(),
       );
+
+  /// The Symbol section (09c D7): name, size, Rotation, Mirror, and the
+  /// Size menu when the symbol has a family and is not a table (V-4).
+  List<Widget> _symbolSection(Handle instance, TextStyle? title) {
+    final doc = widget.document;
+    final node = doc.tree[instance]! as InstanceNode;
+    final component = doc.components.get<SymbolComponent>(node.definition)!;
+    final box = boxOfDefinition(doc, node.definition);
+    final library = _library;
+    final entry =
+        library == null ? null : entryOfInstance(library, doc, instance);
+    final members =
+        library == null || entry == null || isServableInstance(doc, instance)
+            ? const <SymbolEntry>[]
+            : familyMembers(library, entry);
+    String size(SymbolBox b) =>
+        '${panelNumberText(b.width)} × ${panelNumberText(b.depth)}';
+    final turnable = _turnable;
+    return [
+      Text('Symbol', key: const Key('symbol-section'), style: title),
+      InputDecorator(
+        decoration:
+            const InputDecoration(labelText: 'Name', border: InputBorder.none),
+        child: Text(component.name, key: const Key('symbol-name')),
+      ),
+      InputDecorator(
+        decoration:
+            const InputDecoration(labelText: 'Size', border: InputBorder.none),
+        child:
+            Text(box == null ? '—' : size(box), key: const Key('symbol-size')),
+      ),
+      _field('symbol-rotation', 'Rotation', _rotation, turnable),
+      const SizedBox(height: 8),
+      OutlinedButton.icon(
+        key: const Key('symbol-mirror'),
+        onPressed: turnable ? _mirrorSymbol : null,
+        icon: const Icon(Icons.flip),
+        label: const Text('Mirror'),
+      ),
+      if (members.isNotEmpty) ...[
+        const SizedBox(height: 8),
+        DropdownButton<SymbolEntry>(
+          key: const Key('symbol-size-menu'),
+          isExpanded: true,
+          value: members.where((m) => m.key == component.key).firstOrNull,
+          items: [
+            for (final m in members)
+              DropdownMenuItem(
+                value: m,
+                child: Text(size(boxOfEntry(m)!),
+                    key: Key('symbol-size-${m.key}')),
+              ),
+          ],
+          onChanged:
+              _resizable ? (m) => m == null ? null : _changeSize(m) : null,
+        ),
+      ],
+    ];
+  }
 
   /// The Table section (14a T14, T16).
   List<Widget> _tableSection(TableInfo table, TextStyle? title) {
@@ -958,6 +1155,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final box = _box, wall = _wall, opening = _opening, room = _room;
     final dimension = _dimension;
     final table = _toolMode || _openingToolMode != null ? null : _table;
+    final symbol = _toolMode || _openingToolMode != null ? null : _symbol;
     // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
     // whenever no tool-settings section does, including a selection that
     // has no type section (a line, a text, a symbol, several things).
@@ -969,7 +1167,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         opening != null ||
         room != null ||
         dimension != null ||
-        table != null;
+        table != null ||
+        symbol != null;
     if (!sections && !picker) return const SizedBox.shrink();
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
@@ -1080,12 +1279,22 @@ class _SelectionPanelState extends State<SelectionPanel> {
                 const SizedBox(height: 12),
               ..._dimensionSection(dimension, title),
             ],
-            if (table != null) ...[
+            if (symbol != null) ...[
               if (box != null ||
                   wall != null ||
                   opening != null ||
                   room != null ||
                   dimension != null)
+                const SizedBox(height: 12),
+              ..._symbolSection(symbol, title),
+            ],
+            if (table != null) ...[
+              if (box != null ||
+                  wall != null ||
+                  opening != null ||
+                  room != null ||
+                  dimension != null ||
+                  symbol != null)
                 const SizedBox(height: 12),
               ..._tableSection(table, title),
             ],
