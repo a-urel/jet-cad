@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-04 (09c-2 MERGED into `main` at `43dd020`; see below). **Sub-project 14 — restaurant embedding (all
+**Last updated:** 2026-10-04 (the review fixes MERGED into `main` at `d94d72d`; see below). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
@@ -150,7 +150,9 @@ mode** built in; what is missing for that comes first.
   (no top pass, no box pass, the lowest handle among boxes, the world
   bounds, an unscaled reach) are red. Gates: planner 1,167, demo 17;
   engine and render untouched.
-- **Review fixes for the two commits above** (a codex review of each):
+- **Review fixes for the two commits above are MERGED into `main` at
+  `d94d72d`** (PR 1, a merge commit, on the human's word "merge it",
+  2026-10-04; found by a codex review of each commit):
   `PageChromePainter.shouldRepaint` answers `grid != old.grid`, so a
   rebuild that only flips `grid` repaints (no mode switch does that yet:
   each mode mounts its own painter); `TablePicker` builds
