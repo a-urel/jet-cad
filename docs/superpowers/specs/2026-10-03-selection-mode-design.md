@@ -326,3 +326,25 @@ its first point (`drafting.dart:104-116`); `PlannerView`'s Stack is at
   drafting's rebase for tops with ordinary local coordinates. The risk is
   restated accordingly.
 
+
+## Amendment, 2026-10-04: the box picks
+
+The human, 2026-10-04: "Servis modundayken semboller bounding-box
+tıklanınca seçilebilsin. Çizgiye tıklamak gerekmemeli." Binding over S1,
+R-8 and the reach of 14t R-11 where they differ:
+
+- **B-1.** A point inside a table's **top** picks it, the highest handle
+  among several (S1, unchanged). Failing every top, a point inside a
+  table symbol's **bounding box** picks it, the highest handle among
+  several: its chairs and the space between them count, no line has to be
+  hit. A top therefore beats a neighbour's box.
+- **B-2.** The box is the definition's bounds (`definitionBounds`) in
+  definition space, tested through the inverse instance transform: it
+  turns and mirrors with the table; its world bounds are never used.
+  Cached per definition for the picker's life, as the tops are.
+- **B-3.** A table whose first leaf is no top is picked by its box; it is
+  still never filled (R-8). A definition with an empty box is never
+  picked.
+- **B-4.** A finger's reach (14t R-11) measures to the nearest **box**.
+- Walls, labels and anything that is not a table are still never picked
+  (M-14c); hidden tables and grouped servable instances as before (S2).

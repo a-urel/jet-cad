@@ -1,7 +1,9 @@
 // Spec 14c S1, S2, S9: a point inside a table's top picks it, through the
-// table's inverse transform; a chair, a wall, a hidden table do not; the
-// highest handle wins; a locked table is picked and flagged. Tables are off
-// the origin, turned 37 degrees and mirrored.
+// table's inverse transform; failing a top, a point inside the symbol's
+// bounding box does (a chair, the space between the chairs: the human,
+// 2026-10-04); a wall, a hidden table do not; a top beats a neighbour's
+// box; the highest handle wins; a locked table is picked and flagged.
+// Tables are off the origin, turned 37 degrees and mirrored.
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -55,15 +57,20 @@ void main() {
   // tableSymbol's top is 300..1500 x 300..1100; its chairs reach y -50 and
   // y 1450, tucked 100 under the top.
   test(
-      'TP1 inside the top of a turned, mirrored table off the origin; not '
-      'on a chair; not at the untransformed spot (M-14h, M-14c2-1)', () {
+      'TP1 inside the top of a turned, mirrored table off the origin; on a '
+      'chair and off every line inside its box; not at the untransformed '
+      'spot (M-14h, M-14c2-1)', () {
     final doc = plan();
     final t = placeTurned(doc, tableSymbol(), Vector2(41000, -27500));
     final picker = TablePicker(doc);
     expect(picker.pick(worldOf(t, 1450, 1050))?.table.instance, t.handle);
     expect(picker.pick(worldOf(t, 320, 320))?.table.instance, t.handle);
-    expect(picker.pick(worldOf(t, 900, 100)), isNull,
-        reason: 'a chair, outside the top');
+    expect(picker.pick(worldOf(t, 900, 100))?.table.instance, t.handle,
+        reason: 'a chair, outside the top, inside the box');
+    expect(picker.pick(worldOf(t, 400, 1300))?.table.instance, t.handle,
+        reason: 'beside the far chair: no shape, inside the box');
+    expect(picker.pick(worldOf(t, 400, 1500)), isNull,
+        reason: 'beyond the far chair: outside the box');
     expect(picker.pick(worldOf(t, 1600, 700)), isNull);
     expect(picker.pick(worldOf(t, 1500, 700))?.table.instance, t.handle,
         reason: 'on the right edge, within the tolerance');
@@ -110,6 +117,9 @@ void main() {
     expect(picker.pick(worldOf(s, 400, 300 + 190))?.table.instance, s.handle,
         reason: 'on the edge, within the tolerance');
     expect(picker.pick(worldOf(s, 400 + 195, 300)), isNull);
+    expect(
+        picker.pick(worldOf(s, 400 + 170, 300 - 170))?.table.instance, s.handle,
+        reason: 'off the seat, in the box\'s corner');
   });
 
   test(
@@ -143,7 +153,7 @@ void main() {
 
   test(
       'TP7 an asymmetric top, mirrored, turned, 40 m off the origin: inside '
-      'and outside near its edges (R-2, M-14c2-11)', () {
+      'near its edges (R-2, M-14c2-11)', () {
     final doc = plan();
     final t = placeTurned(doc, trapezoidTable, Vector2(40000, -27000));
     final picker = TablePicker(doc);
@@ -154,14 +164,81 @@ void main() {
           t.handle,
           reason: 'inside at ($x, $y)');
     }
-    // Outside, just beyond them: where a mirrored-away top would be.
-    for (final (x, y) in [(1400, 950), (420, 900), (1650, 400), (150, 350)]) {
+    // Outside the box, just beyond its edges.
+    for (final (x, y) in [(900, 1050), (150, 650), (1650, 650), (900, 250)]) {
       expect(picker.pick(worldOf(t, x.toDouble(), y.toDouble())), isNull,
           reason: 'outside at ($x, $y)');
     }
   });
 
-  test('TP8 an open first leaf is no top: never picked (R-8, review F-7)', () {
+  test(
+      'TP7b a box asymmetric about the base point, mirrored and turned: '
+      'the box turns with the table; its world bounds do not pick', () {
+    // One chair, right of the top: the box spans x 300..1850, so a
+    // mirror about x 900 puts the chair at x -50..400.
+    const sideChair = FurnitureSymbol(
+      key: 'test.table.side',
+      name: 'Side chair table',
+      category: 'Tests',
+      tags: ['table', 'test'],
+      seats: 1,
+      baseX: 900,
+      baseY: 700,
+      shapes: [
+        PolylineShape([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
+            closed: true),
+        PolylineShape([(1400, 475), (1850, 475), (1850, 925), (1400, 925)],
+            closed: true),
+      ],
+    );
+    final doc = plan();
+    final t = placeTurned(doc, sideChair, Vector2(-38000, 26000));
+    final picker = TablePicker(doc);
+    expect(picker.pick(worldOf(t, 1800, 400))?.table.instance, t.handle,
+        reason: 'below the chair, inside the box');
+    expect(picker.pick(worldOf(t, 0, 700)), isNull,
+        reason: 'where the chair would be without the mirror');
+    expect(picker.pick(worldOf(t, 1900, 700)), isNull);
+    // The box's world bounds, turned 37 degrees, hold their corners; the
+    // box itself does not.
+    final world = Aabb2.raw(300, 300, 1850, 1100).transformedBy(t.transform);
+    final corner = Vector2(world.minX + 20, world.minY + 20);
+    expect(picker.pick(corner), isNull, reason: 'a world-bounds corner');
+  });
+
+  test(
+      'TP10 a top beats a neighbour\'s box; between two boxes, off both '
+      'tops, the higher handle wins', () {
+    final doc = plan();
+    // A's top spans world y -12,400..-11,600, its box -12,750..-11,250;
+    // B's box reaches down to y -11,650 (its lower chair), its top to
+    // -11,300. The pair is then turned 37 degrees about A.
+    doc.commands.execute(
+        placeSymbol(doc, entryOf(tableSymbol()), at: Vector2(30000, -12000)));
+    doc.commands.execute(
+        placeSymbol(doc, entryOf(tableSymbol()), at: Vector2(30000, -10900)));
+    final pivot = Vector2(30000, -12000);
+    final turn = Transform2.translation(pivot.x, pivot.y)
+        .multiply(Transform2.rotation(kDeg37))
+        .multiply(Transform2.translation(-pivot.x, -pivot.y));
+    final nodes = doc.tree.nodes.whereType<InstanceNode>().toList()
+      ..sort((x, y) => x.handle.value.compareTo(y.handle.value));
+    for (final n in nodes) {
+      doc.commands
+          .execute(TransformNodeCommand(n.handle, turn.multiply(n.transform)));
+    }
+    final a = nodes[0].handle, b = nodes[1].handle;
+    Vector2 world(double x, double y) => turn.transformPoint(Vector2(x, y));
+    final picker = TablePicker(doc);
+    expect(picker.pick(world(29500, -11620))?.table.instance, a,
+        reason: 'A\'s top, B\'s box: A, though B is drawn later');
+    expect(picker.pick(world(29500, -11500))?.table.instance, b,
+        reason: 'both boxes, neither top: B, drawn later');
+    expect(picker.pick(world(29500, -11200))?.table.instance, b,
+        reason: 'B\'s top');
+  });
+
+  test('TP8 an open first leaf is no top: picked by its box (R-8, F-7)', () {
     const open = FurnitureSymbol(
       key: 'test.table.open',
       name: 'Open table',
@@ -181,15 +258,18 @@ void main() {
     final closed = placeTurned(doc, tableSymbol(), Vector2(4000, 2500));
     final picker = TablePicker(doc);
     expect(tableTopOf(doc, t.definition), isNull);
-    expect(picker.pick(worldOf(t, 900, 700)), isNull);
-    expect(picker.candidates.map((c) => c.table.instance), [closed.handle]);
+    expect(picker.pick(worldOf(t, 900, 700))?.table.instance, t.handle);
+    expect(picker.pick(worldOf(t, 900, 1200)), isNull);
+    expect(picker.candidates.map((c) => c.table.instance),
+        [t.handle, closed.handle]);
+    expect(picker.candidates.first.top, isNull);
     final top = tableTopOf(doc, closed.definition)! as PolygonTop;
     expect(top.xy, [300, 300, 1500, 300, 1500, 1100, 300, 1100],
         reason: 'the closing vertex dropped');
   });
 
   test(
-      'TP9 a reach picks the nearest top on a miss, not the later-drawn; '
+      'TP9 a reach picks the nearest box on a miss, not the later-drawn; '
       'nothing beyond it (spec 14t R-11, M-14t-26)', () {
     final doc = plan();
     // A (mirrored) and B face each other across a 100 mm gap: A's top

@@ -338,14 +338,18 @@ void main() {
     expect(r.selection.isEmpty, isTrue);
   });
 
-  testWidgets('ST10 the asymmetric, mirrored top: picked where it is',
-      (tester) async {
+  testWidgets(
+      'ST10 the asymmetric, mirrored top: picked where it is, and off it '
+      'inside its box', (tester) async {
     final r = rig(tester);
     r.tap(r.at('2', 1250, 950));
     expect(r.selection.keys, {r.key('2')});
-    r.tap(r.at('2', 1400, 950));
-    expect(r.selection.isEmpty, isTrue, reason: 'outside the trapezoid');
-    expect(jsonEncode(r.taps), '["2"]');
+    r.tap(r.at('2', 1700, 700));
+    expect(r.selection.isEmpty, isTrue, reason: 'outside the box');
+    r.tap(r.at('2', 1500, 950));
+    expect(r.selection.keys, {r.key('2')},
+        reason: 'outside the trapezoid, inside its box: no line hit');
+    expect(jsonEncode(r.taps), '["2","2"]');
   });
 
   testWidgets(

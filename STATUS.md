@@ -139,6 +139,17 @@ mode** built in; what is missing for that comes first.
   already moves on screen by the design editor's left panel (240 px) and
   now also by the rulers (24 px); keeping it in place is a change to R-13
   for the human to rule on.
+- **The selection mode picks a table by its symbol's bounding box**
+  (the human, 2026-10-04: "semboller bounding-box tıklanınca seçilebilsin,
+  çizgiye tıklamak gerekmemeli"; spec 14c, amendment B-1..B-4):
+  `TablePicker` tries the tops first (a top beats a neighbour's chairs),
+  then each table's definition box in definition space (it turns and
+  mirrors with the table), the highest handle winning; a finger's reach
+  measures to the box; a table with no closed top is picked by its box,
+  still unfilled. Tests TP1, TP4, TP7, TP7b, TP8, TP10, ST10; the mutants
+  (no top pass, no box pass, the lowest handle among boxes, the world
+  bounds, an unscaled reach) are red. Gates: planner 1,167, demo 17;
+  engine and render untouched.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
   then the roadmap.
 

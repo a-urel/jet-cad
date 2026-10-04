@@ -1,5 +1,7 @@
 // Picking a table in the selection mode (spec 14c S1, S2): a point inside a
-// table's top selects it, whatever else is drawn there.
+// table's top selects it, whatever else is drawn there; failing that, a
+// point inside the table symbol's bounding box (its chairs, the space
+// between them) does (the human, 2026-10-04: no line has to be hit).
 //
 // No Flutter import: this file is Dart over `package:jet_cad_2d` only.
 import 'dart:math' as math;
@@ -18,9 +20,6 @@ sealed class TableTop {
   /// Whether ([x], [y]) is inside, a point within [tolerance] of the
   /// boundary counting as inside (S1).
   bool contains(double x, double y, Tolerance tolerance);
-
-  /// The distance from ([x], [y]) to the top's boundary.
-  double boundaryDistance(double x, double y);
 }
 
 /// A closed polyline's vertices, `x0, y0, x1, y1, ...`.
@@ -48,19 +47,6 @@ final class PolygonTop extends TableTop {
     return inside;
   }
 
-  @override
-  double boundaryDistance(double x, double y) {
-    final n = xy.length ~/ 2;
-    var best = double.infinity;
-    for (var i = 0, j = n - 1; i < n; j = i++) {
-      best = math.min(
-          best,
-          _segmentDistance(
-              x, y, xy[2 * i], xy[2 * i + 1], xy[2 * j], xy[2 * j + 1]));
-    }
-    return best;
-  }
-
   static double _segmentDistance(
       double px, double py, double ax, double ay, double bx, double by) {
     final dx = bx - ax, dy = by - ay;
@@ -83,18 +69,12 @@ final class CircleTop extends TableTop {
     final dx = x - cx, dy = y - cy;
     return math.sqrt(dx * dx + dy * dy) <= r + tolerance.linear;
   }
-
-  @override
-  double boundaryDistance(double x, double y) {
-    final dx = x - cx, dy = y - cy;
-    return (math.sqrt(dx * dx + dy * dy) - r).abs();
-  }
 }
 
 /// The top of [definition] in [doc]: its lowest-handle leaf, when that is
 /// a closed polyline (its last vertex repeating its first, by exact `==`)
-/// or a circle; null otherwise (such a table is never picked nor filled,
-/// R-8).
+/// or a circle; null otherwise (such a table is not filled, R-8, and is
+/// picked by its box alone).
 TableTop? tableTopOf(DraftDocument doc, Handle definition) {
   final leaf = firstLeafOf(doc, definition);
   if (leaf == null) return null;
@@ -120,6 +100,7 @@ final class PickCandidate {
       {required this.table,
       required this.inverse,
       required this.top,
+      required this.box,
       required this.locked,
       required this.scale});
 
@@ -127,7 +108,13 @@ final class PickCandidate {
 
   /// World to definition space.
   final Transform2 inverse;
-  final TableTop top;
+
+  /// Null when the first leaf is no top (R-8).
+  final TableTop? top;
+
+  /// The symbol's bounding box in definition space: it turns and mirrors
+  /// with the table.
+  final Aabb2 box;
 
   /// On a locked layer: picked, not moved (S9).
   final bool locked;
@@ -138,8 +125,8 @@ final class PickCandidate {
 
 /// The tables of one plan, ready to pick (S1). The candidates are rebuilt
 /// when the plan's state id or its tables' revision moves, never per
-/// pointer event; the tops are kept per definition for the picker's life
-/// (R-8: under `runtime` a definition cannot change).
+/// pointer event; the tops and boxes are kept per definition for the
+/// picker's life (R-8: under `runtime` a definition cannot change).
 class TablePicker {
   TablePicker(this.document);
 
@@ -150,6 +137,7 @@ class TablePicker {
 
   List<PickCandidate> _candidates = const [];
   final Map<Handle, TableTop?> _tops = {};
+  final Map<Handle, Aabb2> _boxes = {};
   int? _state;
   int? _tablesRevision;
 
@@ -174,13 +162,15 @@ class TablePicker {
       if (layer != null && !layer.visible) continue;
       final det = node.transform.determinant;
       if (det == 0 || !det.isFinite) continue;
-      final top = _tops.putIfAbsent(
-          t.definition, () => tableTopOf(document, t.definition));
-      if (top == null) continue;
+      final box = _boxes.putIfAbsent(
+          t.definition, () => document.definitionBounds(t.definition));
+      if (box.isEmpty) continue;
       out.add(PickCandidate(
           table: t,
           inverse: node.transform.invert(),
-          top: top,
+          top: _tops.putIfAbsent(
+              t.definition, () => tableTopOf(document, t.definition)),
+          box: box,
           locked: layer?.locked ?? false,
           scale: math.sqrt(det.abs())));
     }
@@ -188,15 +178,22 @@ class TablePicker {
   }
 
   /// The table whose top holds [world], the highest handle among several
-  /// (draw order), or null. On a miss, with a [reach] (a finger's, spec
-  /// 14t R-11), the table whose top's boundary is nearest within [reach]
-  /// world units, the higher handle on a tie.
+  /// (draw order); else the table whose box holds it, the highest handle
+  /// among several (a top is never lost under a neighbour's chairs); else
+  /// null. On a miss, with a [reach] (a finger's, spec 14t R-11), the
+  /// table whose box is nearest within [reach] world units, the higher
+  /// handle on a tie.
   PickCandidate? pick(Vector2 world, {double reach = 0}) {
     final list = candidates;
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
       final local = c.inverse.transformPoint(world);
-      if (c.top.contains(local.x, local.y, tolerance)) return c;
+      if (c.top?.contains(local.x, local.y, tolerance) ?? false) return c;
+    }
+    for (var i = list.length - 1; i >= 0; i--) {
+      final c = list[i];
+      final local = c.inverse.transformPoint(world);
+      if (_boxDistance(c.box, local.x, local.y) <= tolerance.linear) return c;
     }
     if (reach <= 0) return null;
     PickCandidate? best;
@@ -206,12 +203,19 @@ class TablePicker {
       final local = c.inverse.transformPoint(world);
       // Local units to world: the instance's scale (placements turn and
       // mirror, so it is 1 unless a table was scaled by hand).
-      final d = c.top.boundaryDistance(local.x, local.y) * c.scale;
+      final d = _boxDistance(c.box, local.x, local.y) * c.scale;
       if (d < bestDistance || (best == null && d <= bestDistance)) {
         best = c;
         bestDistance = d;
       }
     }
     return best;
+  }
+
+  /// The distance from ([x], [y]) to [box]; zero inside it.
+  static double _boxDistance(Aabb2 box, double x, double y) {
+    final dx = math.max(math.max(box.minX - x, x - box.maxX), 0.0);
+    final dy = math.max(math.max(box.minY - y, y - box.maxY), 0.0);
+    return math.sqrt(dx * dx + dy * dy);
   }
 }
