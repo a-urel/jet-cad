@@ -607,6 +607,102 @@ cannot be merged (they have no number to report) and do not count towards
   hold-back and finger targets are unchanged, but the look on a tablet is
   owed.
 
+## Amended at execution
+
+Recorded at the plan's exit (Task 6). Each was a proposed ruling, accepted
+by that task's independent review; the ledger is
+`.superpowers/sdd/2026-10-04-table-groups/progress.md`. Where a bullet and
+the text above disagree, the bullet holds.
+
+- **R-C5-1 — the demo's grow rule** (`eecc823`, pinned by D18; M1 and
+  M8 red). G6's "the numbers include all the selectable members
+  of exactly one existing group" is implemented as **"exactly one
+  existing group has a member among the numbers"**.
+  - A host cannot see which members are selectable (F-1 below). Applying
+    the literal rule over the plan's numbers is lock-blind: a group with a
+    locked or hidden member could never grow.
+  - The two rules differ only for a **half-selected** group. No
+    selection-mode UI path makes one: a tap, a modifier tap, a long
+    press, `select`, `setMode` and `resetLayout` all expand to whole
+    groups, and the demo's own `setTableGroups` calls keep the selection
+    whole. The one way in is a host calling `setTableGroups` under a live
+    selection (M-TG-5's fixture); the touched group then grows whole.
+  - This is the reading G4 already takes: a half-selected group moves
+    whole on a drag.
+- **F-1 — API finding, not fixed.** The host API cannot answer "which
+  members of group X are selectable": `FloorPlanTable` carries no lock or
+  visibility flag, and no call exposes `TableGroupLookup.selectableMembers`.
+  A `selectableMembers(groupId)` on the controller, or `locked` / `visible`
+  on `FloorPlanTable`, would close it and allow G6's literal rule. One
+  consequence: a group left holding only locked or hidden members (a
+  new-group merge's remainder, R-C5-4) cannot be split or merged from the
+  demo's UI; only the POS can clear it.
+- **R-C5-2 — a merge that empties a group removes its group status**
+  (`eecc823`, M7 red in D17). G6 says so only for Split. Without it a stale
+  status reattaches when a later merge reuses the id.
+- **R-C5-4 — a new-group merge's remainder keeps its id and label**, even
+  with one member (`eecc823`, pinned by D20 at `9c09121`).
+- **R-C3-2 — the group painters take the paper ARGB notifier**
+  (`b464204`). `ServiceView` passes `_paper` (the notifier the status
+  painter reads, D6c) and each painter calls `PaperPalette.forPaper`
+  itself, not a built `PaperPalette`. The painters are built once
+  (`late final`), so a palette passed by value would go stale on a paper
+  change; the notifier is also in their repaint merge. M-TG-21b kills the
+  theme surface passed as the paper.
+- **R-C3-5 — round joins are exact `Path.arcTo` arcs** (`b464204`), not a
+  fixed segment count. The chip's anchor and the chip-hiding width come
+  from the hull grown by the margin, the exact bounds of a round offset,
+  not from `Path.getBounds` (whose arcs' control points reach further).
+- **R-C3-1 — frames, the two-member count and the label use the picker's
+  candidates** (`b464204`): visible tables, minus singular transforms and
+  empty boxes. One number on two tables (a file duplicate) is two visible
+  members and gets a frame.
+- **R-C3-3 — the status painter skips its survey only when both status
+  maps are empty** (`b464204`). G3's "the early return on an empty
+  table-status map goes" holds; the both-empty skip saves a survey per
+  document change when nothing can fill (M-TG-10d keeps it honest).
+- **R-C3-6 — chip padding 5 × 2 px, radius 4 px** (`b464204`;
+  `kGroupChipPaddingX/Y`, `kGroupChipRadius`). G3 fixed only the text size
+  and the colours.
+- **`debugRebuilds` on `TableStatusPainter`** (`b464204`), a test seam
+  beside `debugAllocations`. Without it M-TG-15b (the status painter
+  rebuilt every frame) survived: the painter caches every object, so a
+  per-frame rebuild allocated nothing countable.
+- **R-C2-1 — a half-selected group's drag grows the moved set, not the
+  selection** (`c5eb454`). G4's `_moving` expansion is applied to
+  `_moving` only; after the drag the group is still half selected.
+  Moved-but-unselected members show no preview outline during the drag
+  and jump on release (G3's "only the outlines follow" covers selected
+  tables only).
+- **R-C2-4 — the tool's members come from the picker's candidates**
+  (`c5eb454`). A member with a singular transform or an empty box is
+  neither tapped into the selection nor moved, while `controller.select`
+  (from the survey) still selects it by number: the divergence the picker
+  already has for such tables.
+- **R-C1-2 — `selectedGroup` is always null in the design mode**
+  (`638048b`). G1 defines it by G5's Split rule; G4 says groups do not
+  exist in the design mode. Killed by M-TG-17-design (TG-C9).
+- **R-C1-3 — numeric lead ties** (`638048b`). G3's "(length after
+  stripping leading zeros, then string)" compares the **stripped** string,
+  then the original string, then the handle: `'07'` and `'7'` order
+  totally, and only true duplicates fall to the lowest handle.
+- **R-C1-1 — `service/table_groups.dart` has no Flutter import of its
+  own** (`638048b`), but depends on Flutter through `TableGroup`, which G1
+  places in `host/floor_plan_types.dart`. G4's "Flutter-free" reads that
+  way.
+- **Notification order** (`f98532f`, documented on `selectedGroup`).
+  `selectedGroup` updates **after** `selectedTables` / `tableGroups`
+  notify, so a listener to only one of those reads the old
+  `selectedGroup` for that callback. G5's "both flags follow the selection
+  and `tableGroups`" is met by listening to all three (Task 4's flags).
+- **R-C4-1 — Merge and Split sit between two 8 px gaps** (`5261b9c`,
+  pinned by TB6 at `cda29b7`). The second gap, before Export / Print, is
+  built only when at least one of the two buttons is shown, so a host
+  without the callbacks gets today's bar to the pixel (G7).
+- **R-C4-2 — Split's press null-guards** `selectedGroup.value` instead of
+  G5's `!` (`5261b9c`). Same behaviour; the button is disabled whenever it
+  is null.
+
 ## Revision log
 
 Revision 2 applies the independent review of revision 1 (`50d1504`),
