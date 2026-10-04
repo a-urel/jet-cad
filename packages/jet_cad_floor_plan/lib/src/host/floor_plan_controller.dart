@@ -249,6 +249,10 @@ class FloorPlanController extends ChangeNotifier {
   /// unnumbered table is selected. Null otherwise, and always in the design
   /// mode, where groups do not act (G4). Follows the selection, the groups
   /// and the active plan.
+  ///
+  /// It updates after [selectedTables] and [tableGroups] have notified, so
+  /// a listener that reads it alongside them listens to it too (e.g. a
+  /// `Listenable.merge` of all three).
   ValueListenable<String?> get selectedGroup => _selectedGroup;
 
   /// The mode (H3). Changed by [setMode].

@@ -202,6 +202,15 @@ void main() {
       expect(mergeQualifies({'5', '30'}, const {}), isTrue);
       expect(mergeQualifies({'12', '3', '7', '5'}, groups), isTrue);
       expect(mergeQualifies({'3', '20'}, groups), isTrue);
+      // A group id equal to an ungrouped number (a POS naming groups "1",
+      // "2"): group 1 and table 1 are still two units (review 1).
+      expect(
+          mergeQualifies(
+              {'3', '7', '1'},
+              validateTableGroups({
+                '1': g({'3', '7'})
+              })),
+          isTrue);
     });
   });
 
