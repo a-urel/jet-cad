@@ -46,6 +46,9 @@ Future<Map<String, String>> loadSamplePlans(AssetBundle bundle) async {
   return plans;
 }
 
+/// The demo's theme seed, for the light and the dark theme alike.
+const Color _seed = Colors.teal;
+
 /// The demo. [plans] seeds the areas' stored plans by name (tests); an area
 /// without one starts empty.
 class RestaurantDemo extends StatelessWidget {
@@ -59,7 +62,12 @@ class RestaurantDemo extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'Restaurant demo',
-        theme: ThemeData(colorSchemeSeed: Colors.teal),
+        // Dark theme spec D1: the planner follows the host's theme, and the
+        // OS picks light or dark.
+        theme: ThemeData(colorSchemeSeed: _seed),
+        darkTheme:
+            ThemeData(colorSchemeSeed: _seed, brightness: Brightness.dark),
+        themeMode: ThemeMode.system,
         home: DemoHome(plans: plans, random: random),
       );
 }

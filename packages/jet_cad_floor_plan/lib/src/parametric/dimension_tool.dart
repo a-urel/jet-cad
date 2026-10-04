@@ -114,8 +114,9 @@ class DimensionTool extends PlacementTool {
 
   // The rings: at the placed points and at the hover point.
   bool _ring0 = false, _ring1 = false, _ringHover = false;
+  // Coloured `preview` from the overlay's paper set in [paintOverlay] (dark
+  // theme spec D5).
   final Paint _ringPaint = Paint()
-    ..color = kPreviewColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = kPreviewStrokePixels;
 
@@ -529,8 +530,10 @@ class DimensionTool extends PlacementTool {
   /// The snap marker, then a ring at each attaching placed or hovered point
   /// (decided on the pointer move; nothing is searched here).
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {
-    super.paintOverlay(canvas, camera, viewport);
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {
+    super.paintOverlay(canvas, camera, viewport, paper);
+    _ringPaint.color = paper.preview;
     final m = camera.worldToScreenMatrix;
     void ring(Vector2 p) => canvas.drawCircle(
         Offset(m.a * p.x + m.c * p.y + m.e, m.b * p.x + m.d * p.y + m.f),

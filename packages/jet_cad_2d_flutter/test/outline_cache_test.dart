@@ -17,6 +17,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart' show kDefaultOriginX;
 import 'package:jet_cad_2d_flutter/src/camera_controller.dart'
     show CameraController, rebaseOriginFor;
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/outline_cache.dart';
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
@@ -678,6 +679,7 @@ void main() {
               tools: tools,
               camera: camera,
               outlines: cache,
+              paper: PaperPalette.light,
               repaint: Listenable.merge([selection, tools, camera, cache]),
               onPaintForTest: () => paints++,
             ),

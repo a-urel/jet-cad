@@ -164,29 +164,60 @@ class _PlannerShellState extends State<PlannerShell> {
 
   /// ACI 7's foreground follows the paper (fix/post-07): the app drafts
   /// ByLayer on layer 0, which is ACI 7, so drafting is black on a light
-  /// paper and white on a dark one ([foregroundFor]). [_onPage] keeps it in
-  /// step with the page by every route that changes it. Replaced only when
-  /// the chosen foreground changes: `DraftCanvas` rebuilds its painter
-  /// whenever the resolver it is handed is a different object, so White to
-  /// Ivory, or a scale edit, must not build a new one.
-  late DocumentStyleResolver _resolver =
-      DocumentStyleResolver(_document, foreground: _foregroundOn(_page.value));
+  /// paper and white on a dark one ([foregroundFor] of [_paperArgb]). It is
+  /// re-derived wherever the paper can change: [_onPage] for the page, by
+  /// every route that changes it, and [didChangeDependencies] for the
+  /// theme's surface, the paper of a document without a page (dark theme
+  /// spec D4). Replaced only when the chosen foreground changes:
+  /// `DraftCanvas` rebuilds its painter whenever the resolver it is handed
+  /// is a different object, so White to Ivory, a scale edit or a theme
+  /// switch under a page must not build a new one.
+  ///
+  /// Assigned in the first [didChangeDependencies], which runs after
+  /// `initState` and before the first `build`: without a page it reads the
+  /// theme, which `initState` cannot.
+  late DocumentStyleResolver _resolver;
+  bool _hasResolver = false;
 
+  /// The theme's surface, ARGB: the paper when the document has no page
+  /// (dark theme spec D4). Set in [didChangeDependencies], the only place
+  /// this state reads the theme for the paper.
+  late int _surfaceArgb;
+
+  /// The paper the drafting and the overlays lie on (dark theme spec D4).
   /// A document without a page has no sheet to draw on: the chrome paints
-  /// none, and the drafting lies on the shell's light surface, so it is
-  /// read as white paper.
-  static int _foregroundOn(PageComponent? page) =>
-      foregroundFor(page?.background ?? 0xFFFFFFFF);
+  /// none, and the drafting lies on the surround, which is the theme's
+  /// `scheme.surface` (light in a light theme, dark in a dark one), so the
+  /// surface is the paper. One function feeds both ACI 7's foreground and
+  /// [PaperPalette.forPaper], so the ink and the overlays switch together.
+  int _paperArgb() => _page.value?.background ?? _surfaceArgb;
 
   /// The page notifier re-reads the page on a command that touches the
   /// root, its undo and redo, a load and a purge, and notifies only when
   /// the page is a different value; a swatch, an undo of one and a loaded
   /// document all arrive here.
+  ///
+  /// The rebuild on a flip also hands [PlannerView] the new paper palette:
+  /// [PaperPalette.forPaper] keys on the same [foregroundFor], so a page
+  /// change that keeps the foreground (White to Ivory) keeps the palette,
+  /// and one that flips it (White to Blueprint) flips both.
   void _onPage() {
-    final foreground = _foregroundOn(_page.value);
+    final foreground = foregroundFor(_paperArgb());
     if (foreground == _resolver.foreground) return;
     setState(() =>
         _resolver = DocumentStyleResolver(_document, foreground: foreground));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _surfaceArgb = Theme.of(context).colorScheme.surface.toARGB32();
+    // A `build` follows, so no setState: with no page a theme switch can
+    // flip the foreground, and only a flip builds a new resolver.
+    final foreground = foregroundFor(_paperArgb());
+    if (_hasResolver && foreground == _resolver.foreground) return;
+    _hasResolver = true;
+    _resolver = DocumentStyleResolver(_document, foreground: foreground);
   }
 
   late final CameraController _camera = widget.camera ??
@@ -757,7 +788,8 @@ class _PlannerShellState extends State<PlannerShell> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     return Scaffold(
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
@@ -872,6 +904,10 @@ class _PlannerShellState extends State<PlannerShell> {
                         selection: _selection,
                         tools: _tools,
                         outlines: _outlines,
+                        // Dark theme spec D5: the chrome follows the theme,
+                        // the overlays the paper, both computed here.
+                        chrome: ChromePalette.of(theme.brightness),
+                        paper: PaperPalette.forPaper(_paperArgb()),
                         grips: _grips,
                         textTool: _text,
                         fitRequests: widget.fitRequests,

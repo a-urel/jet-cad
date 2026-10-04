@@ -5,6 +5,7 @@ import 'package:flutter/services.dart'
 import 'package:flutter/widgets.dart' show KeyEventResult, Offset;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/draw/line_tool.dart';
 import 'package:jet_cad_2d_flutter/src/select_tool.dart';
 import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
@@ -77,7 +78,8 @@ void main() {
         final at = screenOf(rig.camera, kAnchorX, kAnchorY);
         hoverAt(rig, at + const Offset(2, 2));
         final spy = SpyCanvas();
-        rig.tool.paintOverlay(spy, rig.camera.value, const Size(800, 600));
+        rig.tool.paintOverlay(
+            spy, rig.camera.value, const Size(800, 600), PaperPalette.light);
         final squares = spy.named('drawRect').toList();
         expect(squares, hasLength(1), reason: 'an endpoint: a square');
         final r = squares.single.args[0] as Rect;
@@ -85,7 +87,8 @@ void main() {
         expect(r.center.dy, closeTo(at.dy, 1e-6));
         hoverAt(rig, screenOf(rig.camera, 7050, 3050));
         final none = SpyCanvas();
-        rig.tool.paintOverlay(none, rig.camera.value, const Size(800, 600));
+        rig.tool.paintOverlay(
+            none, rig.camera.value, const Size(800, 600), PaperPalette.light);
         expect(none.calls, isEmpty, reason: 'grid off, nothing hit');
       });
     });
@@ -244,12 +247,14 @@ void main() {
     rig.tools.activate(rig.tool);
 
     final stale = SpyCanvas();
-    rig.tool.paintOverlay(stale, rig.camera.value, const Size(800, 600));
+    rig.tool.paintOverlay(
+        stale, rig.camera.value, const Size(800, 600), PaperPalette.light);
     expect(stale.calls, isEmpty, reason: 'the old marker must not repaint');
 
     hoverAt(rig, at + const Offset(2, 2));
     final fresh = SpyCanvas();
-    rig.tool.paintOverlay(fresh, rig.camera.value, const Size(800, 600));
+    rig.tool.paintOverlay(
+        fresh, rig.camera.value, const Size(800, 600), PaperPalette.light);
     expect(fresh.named('drawRect'), hasLength(1));
   });
 
@@ -268,7 +273,8 @@ void main() {
       expect(tool.hoverPoint.x, kAnchorX, reason: 'the chain snapped');
       expect(tool.hoverPoint.y, kAnchorY);
       final spy = SpyCanvas();
-      tool.paintOverlay(spy, rig.camera.value, const Size(800, 600));
+      tool.paintOverlay(
+          spy, rig.camera.value, const Size(800, 600), PaperPalette.light);
       final r = spy.named('drawRect').single.args[0] as Rect;
       final want = screenOf(rig.camera, kAnchorX + dx, kAnchorY + dy);
       expect(r.center.dx, closeTo(want.dx, 1e-6), reason: '$tool');

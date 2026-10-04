@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'camera_controller.dart';
+import 'canvas_palette.dart';
 import 'chrome_style.dart';
 import 'viewport_transform.dart';
 
@@ -20,6 +21,8 @@ class PageChromePainter extends CustomPainter {
   PageChromePainter({
     required this.camera,
     required this.page,
+    required this.chrome,
+    required this.paper,
     this.grid = true,
     super.repaint,
     this.onPaintForTest,
@@ -27,6 +30,13 @@ class PageChromePainter extends CustomPainter {
 
   final CameraController camera;
   final ValueListenable<PageComponent?> page;
+
+  /// The sheet's edge: chrome, so it follows the theme (dark theme spec D2).
+  final ChromePalette chrome;
+
+  /// The grid and the page breaks: drawn on the paper, so they follow it
+  /// (dark theme spec D3).
+  final PaperPalette paper;
 
   /// False: no grid, whatever the page's `gridVisible` says (a host's
   /// view that shows the plan, not the drafting aids). The sheet and the
@@ -52,19 +62,15 @@ class PageChromePainter extends CustomPainter {
   /// (the test double does) would then see the wrong grid.
   Float32List _buffer = Float32List(0);
 
+  // The colours are assigned from the palettes in `paint` (dark theme spec
+  // D5): a `Color` field read allocates nothing, so the Paints stay fields.
   final Paint _sheetFill = Paint();
   final Paint _sheetEdge = Paint()
-    ..color = kSheetEdgeColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.0;
-  final Paint _minor = Paint()
-    ..color = kMinorGridColor
-    ..strokeWidth = 1.0;
-  final Paint _major = Paint()
-    ..color = kMajorGridColor
-    ..strokeWidth = 1.0;
+  final Paint _minor = Paint()..strokeWidth = 1.0;
+  final Paint _major = Paint()..strokeWidth = 1.0;
   final Paint _breaks = Paint()
-    ..color = kPageBreakColor
     ..style = PaintingStyle.stroke
     ..strokeWidth = 1.0;
 
@@ -84,6 +90,10 @@ class PageChromePainter extends CustomPainter {
         Rect.fromLTRB(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y);
 
     _sheetFill.color = Color(p.background);
+    _sheetEdge.color = chrome.sheetEdge;
+    _minor.color = paper.minorGrid;
+    _major.color = paper.majorGrid;
+    _breaks.color = paper.pageBreak;
     canvas.drawRect(sheetScreen, _sheetFill);
     canvas.drawRect(sheetScreen, _sheetEdge);
     if (grid && p.gridVisible) {
@@ -216,8 +226,11 @@ class PageChromePainter extends CustomPainter {
     }
   }
 
-  /// The camera and the page arrive through `repaint`; [grid] arrives
-  /// only with a rebuild.
+  /// The camera and the page arrive through `repaint`; [grid] and the
+  /// palettes arrive only with a rebuild. A palette change (dark theme spec
+  /// D5) is a theme or a paper flip, which must repaint without waiting for
+  /// the camera.
   @override
-  bool shouldRepaint(PageChromePainter old) => grid != old.grid;
+  bool shouldRepaint(PageChromePainter old) =>
+      grid != old.grid || old.chrome != chrome || old.paper != paper;
 }
