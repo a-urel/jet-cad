@@ -3,7 +3,8 @@
 // chrome, the drafting and the selection outlines -- with Undo, Redo,
 // Export and Print. No palette, no panels, no grips, and nothing that needs
 // `geometry` or `structure` (umbrella D11). 14c's table tool picks,
-// selects and moves tables.
+// selects and moves tables. Table-groups spec G5: Merge and Split, when the
+// host asks for them.
 
 import 'dart:async';
 
@@ -15,6 +16,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
 import '../service/table_group_painter.dart';
+import '../service/table_groups.dart' show mergeQualifies;
 import '../service/table_picker.dart';
 import '../service/table_select_tool.dart';
 import '../service/table_status_painter.dart';
@@ -144,6 +146,25 @@ class _ServiceViewState extends State<ServiceView> {
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
       () => widget.flows.ready.value && _page.value != null);
 
+  /// Table-groups spec G5: Merge and Split follow the selection **and** the
+  /// groups. `selectedGroup` updates after `selectedTables` and
+  /// `tableGroups` have notified, so both flags listen to all three: one
+  /// that missed `selectedGroup` would compute before it moved and stay
+  /// stale.
+  late final List<Listenable> _groupSources = [
+    _c.selectedTables,
+    _c.tableGroups,
+    _c.selectedGroup
+  ];
+
+  /// Merge: the selected numbers span two or more units (G5).
+  late final DerivedFlag _canMerge = DerivedFlag(_groupSources,
+      () => mergeQualifies(_c.selectedTables.value, _c.tableGroups.value));
+
+  /// Split: the selection is exactly one group (G5, `selectedGroup`).
+  late final DerivedFlag _canSplit =
+      DerivedFlag(_groupSources, () => _c.selectedGroup.value != null);
+
   /// The paper (D4): the page's background, or with no page the theme's
   /// surface, which the drafting then lies on. It feeds both ACI 7's
   /// foreground and [PaperPalette.forPaper].
@@ -180,6 +201,9 @@ class _ServiceViewState extends State<ServiceView> {
     super.initState();
     _parametric;
     _tableLabels;
+    // Built now, so dispose never builds one over a controller in teardown.
+    _canMerge;
+    _canSplit;
     _page.addListener(_onPage);
     _changes = _document.changes.listen((_) => _changed.bump());
   }
@@ -191,6 +215,8 @@ class _ServiceViewState extends State<ServiceView> {
     _changed.dispose();
     _paper.dispose();
     _pageReady.dispose();
+    _canMerge.dispose();
+    _canSplit.dispose();
     _tools.dispose();
     _tool.dispose();
     _outlines.dispose();
@@ -206,6 +232,10 @@ class _ServiceViewState extends State<ServiceView> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final flows = widget.flows;
+    // Read here, so a host that rebuilds `FloorPlanView` with a callback
+    // added or dropped shows or hides its button (G5); a press reads them
+    // again (14c R-5).
+    final callbacks = widget.callbacks();
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         for (final chord in kUndoChords) chord: _c.undo,
@@ -230,6 +260,18 @@ class _ServiceViewState extends State<ServiceView> {
                   _button(
                       'service-redo', 'Redo', Icons.redo, _c.canRedo, _c.redo),
                   const SizedBox(width: 8),
+                  // Table-groups spec G5: each shown only when the host
+                  // passed its callback; disabled when the selection does
+                  // not qualify.
+                  if (callbacks.onMergeRequested != null)
+                    _button('service-merge', 'Merge', Icons.merge_type,
+                        _canMerge, _merge),
+                  if (callbacks.onSplitRequested != null)
+                    _button('service-split', 'Split', Icons.call_split,
+                        _canSplit, _split),
+                  if (callbacks.onMergeRequested != null ||
+                      callbacks.onSplitRequested != null)
+                    const SizedBox(width: 8),
                   if (flows.canExport)
                     _button(
                         'service-export',
@@ -300,6 +342,16 @@ class _ServiceViewState extends State<ServiceView> {
         ),
       ),
     );
+  }
+
+  /// Exactly the selected numbers: the host decides what a selection
+  /// spanning a group means (G5).
+  void _merge() =>
+      widget.callbacks().onMergeRequested?.call(_c.selectedTables.value);
+
+  void _split() {
+    final id = _c.selectedGroup.value;
+    if (id != null) widget.callbacks().onSplitRequested?.call(id);
   }
 
   Widget _button(String key, String tooltip, IconData icon,
