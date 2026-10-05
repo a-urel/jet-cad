@@ -615,9 +615,13 @@ by that task's independent review; the ledger is
 the text above disagree, the bullet holds.
 
 - **R-C5-1 — the demo's grow rule** (`eecc823`, pinned by D18; M1 and
-  M8 red). G6's "the numbers include all the selectable members
-  of exactly one existing group" is implemented as **"exactly one
-  existing group has a member among the numbers"**.
+  M8 red). **Retired** by the table groups fixes
+  ([2026-10-05-table-groups-fixes-design.md](2026-10-05-table-groups-fixes-design.md),
+  X2): with `FloorPlanController.selectableMembers` (X1) the demo applies
+  G6's literal rule, and this bullet stands as history only. G6's "the
+  numbers include all the selectable members of exactly one existing
+  group" was implemented as **"exactly one existing group has a member
+  among the numbers"**.
   - A host cannot see which members are selectable (F-1 below). Applying
     the literal rule over the plan's numbers is lock-blind: a group with a
     locked or hidden member could never grow.
@@ -629,8 +633,12 @@ the text above disagree, the bullet holds.
     selection (M-TG-5's fixture); the touched group then grows whole.
   - This is the reading G4 already takes: a half-selected group moves
     whole on a drag.
-- **F-1 — API finding, not fixed.** The host API cannot answer "which
-  members of group X are selectable": `FloorPlanTable` carries no lock or
+- **F-1 — API finding, closed** by the table groups fixes
+  ([2026-10-05-table-groups-fixes-design.md](2026-10-05-table-groups-fixes-design.md),
+  X1): `FloorPlanController.selectableMembers(groupId)` gives a group's
+  selectable members' numbers, and `FloorPlanTable` stays flagless (A-2).
+  The text below is the finding as it stood. The host API cannot answer
+  "which members of group X are selectable": `FloorPlanTable` carries no lock or
   visibility flag, and no call exposes `TableGroupLookup.selectableMembers`.
   A `selectableMembers(groupId)` on the controller, or `locked` / `visible`
   on `FloorPlanTable`, would close it and allow G6's literal rule. One

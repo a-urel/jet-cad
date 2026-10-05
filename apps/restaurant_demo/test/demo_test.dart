@@ -15,7 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
-    show FloorPlanMode, TableGroup, TableStatus;
+    show FloorPlanMode, FloorPlanView, TableGroup, TableStatus;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
@@ -806,6 +806,110 @@ void main() {
       'G7': TableGroup(members: {'8', '9'}, label: 'Window'),
       'G8': TableGroup(members: {'12', '3', '5', '11'}),
     });
+  });
+
+  // Table-groups fixes spec X2: the grow rule is G6's literal one, over
+  // `FloorPlanController.selectableMembers` (R-C5-1 retired).
+
+  testWidgets(
+      'D21 X2, M-TGF-4: groups set under a live selection that holds part of '
+      'a group make a new group, not a grown one', (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    await selectByField(tester, '3, 20');
+    c.setTableGroups({
+      'G7': TableGroup(members: {'12', '3', '7'}),
+    });
+    await tester.pump();
+    expect(c.selectedTables.value, {'3', '20'},
+        reason: 'premise: half of G7 selected');
+    await press(tester, 'service-merge');
+    expect(c.tableGroups.value, {
+      'G7': TableGroup(members: {'12', '7'}),
+      'G8': TableGroup(members: {'3', '20'}),
+    });
+    expect(demo.log.first, 'Salon: Merged {3, 20} as G8');
+  });
+
+  testWidgets('D22 X2, M-TGF-6: a group with no selectable member never grows',
+      (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    c.setTableGroups({
+      'G9': TableGroup(members: {'8', '9'}, label: 'Back'),
+    });
+    await tester.pump();
+    await selectByField(tester, '20, 5');
+    expect(c.selectedTables.value, {'5', '20'});
+    expect(c.selectableMembers('G9'), isEmpty,
+        reason: 'premise: 8 locked, 9 hidden');
+    await press(tester, 'service-merge');
+    expect(c.tableGroups.value, {
+      'G9': TableGroup(members: {'8', '9'}, label: 'Back'),
+      'G10': TableGroup(members: {'20', '5'}),
+    });
+    expect(demo.log.first, 'Salon: Merged {5, 20} as G10');
+  });
+
+  testWidgets(
+      'D23 X2, M-TGF-7: a grow takes a number from another group, which '
+      'keeps its id, label and group status', (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    c.setTableGroups({
+      'G7': TableGroup(members: {'12', '3'}),
+    });
+    await tester.pump();
+    await selectByField(tester, '3, 5');
+    expect(c.selectedTables.value, {'12', '3', '5'});
+    final bill = DemoHomeState.kStatuses['Bill']!;
+    c.setTableGroups({
+      'G7': TableGroup(members: {'12', '3'}),
+      'G1': TableGroup(members: {'5', '11'}, label: 'Bar'),
+    });
+    c.setGroupStatus({'G1': bill});
+    await tester.pump();
+    expect(c.selectedTables.value, {'12', '3', '5'},
+        reason: 'premise: part of G1 selected');
+    await press(tester, 'service-merge');
+    expect(tester.takeException(), isNull);
+    expect(c.tableGroups.value, {
+      'G7': TableGroup(members: {'12', '3', '5'}),
+      'G1': TableGroup(members: {'11'}, label: 'Bar'),
+    });
+    expect(c.groupStatuses.value, {'G1': bill});
+    expect(demo.log.first, 'Salon: Merged {3, 5, 12} as G7');
+    expect(groupsText(tester), 'G1: 11 (Bill), G7: 3+5+12');
+  });
+
+  testWidgets(
+      'D24 X2 edge cases from a host: a request of exactly one group\'s '
+      'selectable members is a logged no-op grow; an empty request changes '
+      'nothing', (tester) async {
+    final demo = await pumpGroups(tester);
+    final c = demo.area.controller;
+    final groups = {
+      'G7': TableGroup(members: {'12', '3', '8', '9'}, label: 'Window'),
+      'G2': TableGroup(members: {'20', '5'}),
+    };
+    c.setTableGroups(groups);
+    c.setGroupStatus({'G7': DemoHomeState.kStatuses['Eating']!});
+    await tester.pump();
+    final merge = tester
+        .widget<FloorPlanView>(find.byType(FloorPlanView))
+        .onMergeRequested!;
+    merge({'3', '12'});
+    await tester.pump();
+    expect(c.tableGroups.value, groups);
+    expect(c.groupStatuses.value, {'G7': DemoHomeState.kStatuses['Eating']});
+    expect(demo.log.first, 'Salon: Merged {3, 12} as G7');
+
+    final log = [...demo.log];
+    merge(const {});
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(c.tableGroups.value, groups);
+    expect(demo.log, log, reason: 'nothing logged');
   });
 
   testWidgets(
