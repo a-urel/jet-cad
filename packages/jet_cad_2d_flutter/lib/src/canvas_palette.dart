@@ -63,6 +63,10 @@ class ChromePalette {
       Object.hash(rulerBackground, rulerInk, rulerPointer, sheetEdge);
 }
 
+/// The sheet a dark theme shows in place of a light document paper, ARGB
+/// (dark canvas decision note K1): a neutral dark, as in AutoCAD.
+const int kDarkCanvasPaper = 0xFF1E1F22;
+
 /// The colours of everything drawn **on** the paper: the grid, the page
 /// breaks and the interaction overlays (dark theme spec D3). They follow the
 /// paper, not the theme, so they stay legible on any paper in either theme.

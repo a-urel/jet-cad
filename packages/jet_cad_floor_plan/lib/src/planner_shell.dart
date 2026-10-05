@@ -164,60 +164,86 @@ class _PlannerShellState extends State<PlannerShell> {
 
   /// ACI 7's foreground follows the paper (fix/post-07): the app drafts
   /// ByLayer on layer 0, which is ACI 7, so drafting is black on a light
-  /// paper and white on a dark one ([foregroundFor] of [_paperArgb]). It is
-  /// re-derived wherever the paper can change: [_onPage] for the page, by
-  /// every route that changes it, and [didChangeDependencies] for the
-  /// theme's surface, the paper of a document without a page (dark theme
-  /// spec D4). Replaced only when the chosen foreground changes:
+  /// paper and white on a dark one ([foregroundFor] of [_paperArgb]). On a
+  /// dark canvas (a dark theme over a light page, dark canvas decision note
+  /// K1–K3) it is a [DarkCanvasStyleResolver], which re-tones every colour
+  /// for the dark sheet. It is re-derived wherever the paper can change:
+  /// [_onPage] for the page, by every route that changes it, and
+  /// [didChangeDependencies] for the theme (its surface, the paper of a
+  /// document without a page, dark theme spec D4, and its brightness).
+  /// Replaced only when its key ([_foreground], [_darkCanvas]) changes:
   /// `DraftCanvas` rebuilds its painter whenever the resolver it is handed
   /// is a different object, so White to Ivory, a scale edit or a theme
-  /// switch under a page must not build a new one.
+  /// switch that keeps the key must not build a new one.
   ///
   /// Assigned in the first [didChangeDependencies], which runs after
   /// `initState` and before the first `build`: without a page it reads the
   /// theme, which `initState` cannot.
-  late DocumentStyleResolver _resolver;
-  bool _hasResolver = false;
+  late StyleResolver _resolver;
+
+  /// [_resolver]'s key: ACI 7's ink on the display paper, and whether the
+  /// canvas re-tones. -1 until the first [didChangeDependencies].
+  int _foreground = -1;
+  bool _darkCanvas = false;
 
   /// The theme's surface, ARGB: the paper when the document has no page
   /// (dark theme spec D4). Set in [didChangeDependencies], the only place
   /// this state reads the theme for the paper.
   late int _surfaceArgb;
 
-  /// The paper the drafting and the overlays lie on (dark theme spec D4).
-  /// A document without a page has no sheet to draw on: the chrome paints
-  /// none, and the drafting lies on the surround, which is the theme's
-  /// `scheme.surface` (light in a light theme, dark in a dark one), so the
-  /// surface is the paper. One function feeds both ACI 7's foreground and
-  /// [PaperPalette.forPaper], so the ink and the overlays switch together.
-  int _paperArgb() => _page.value?.background ?? _surfaceArgb;
+  /// The theme's brightness: a dark one shows a light page dark (decision
+  /// note K1). Set in [didChangeDependencies].
+  late Brightness _brightness;
+
+  /// The paper the drafting and the overlays lie on (dark theme spec D4,
+  /// dark canvas K1–K2): [kDarkCanvasPaper] on a dark canvas, else the
+  /// page's background. A document without a page has no sheet to draw on:
+  /// the chrome paints none, and the drafting lies on the surround, which
+  /// is the theme's `scheme.surface`, so the surface is the paper. One
+  /// function feeds ACI 7's foreground, [PaperPalette.forPaper] and the
+  /// sheet's fill, so the ink, the overlays and the sheet switch together.
+  int _paperArgb() => displayPaperFor(
+      page: _page.value?.background,
+      surface: _surfaceArgb,
+      brightness: _brightness);
+
+  /// A new resolver when the key moved, else null; records the new key.
+  StyleResolver? _nextResolver() {
+    final paper = _paperArgb();
+    final foreground = foregroundFor(paper);
+    final dark =
+        darkCanvasFor(page: _page.value?.background, brightness: _brightness);
+    if (foreground == _foreground && dark == _darkCanvas) return null;
+    _foreground = foreground;
+    _darkCanvas = dark;
+    return canvasResolverFor(_document, paper: paper, dark: dark);
+  }
 
   /// The page notifier re-reads the page on a command that touches the
   /// root, its undo and redo, a load and a purge, and notifies only when
   /// the page is a different value; a swatch, an undo of one and a loaded
   /// document all arrive here.
   ///
-  /// The rebuild on a flip also hands [PlannerView] the new paper palette:
-  /// [PaperPalette.forPaper] keys on the same [foregroundFor], so a page
-  /// change that keeps the foreground (White to Ivory) keeps the palette,
-  /// and one that flips it (White to Blueprint) flips both.
+  /// The rebuild on a key change also hands [PlannerView] the new paper
+  /// palette and sheet fill: [PaperPalette.forPaper] keys on the same
+  /// [foregroundFor], so a page change that keeps the key (White to Ivory)
+  /// keeps the palette, and one that changes it (White to Blueprint) flips
+  /// both.
   void _onPage() {
-    final foreground = foregroundFor(_paperArgb());
-    if (foreground == _resolver.foreground) return;
-    setState(() =>
-        _resolver = DocumentStyleResolver(_document, foreground: foreground));
+    final next = _nextResolver();
+    if (next == null) return;
+    setState(() => _resolver = next);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _surfaceArgb = Theme.of(context).colorScheme.surface.toARGB32();
-    // A `build` follows, so no setState: with no page a theme switch can
-    // flip the foreground, and only a flip builds a new resolver.
-    final foreground = foregroundFor(_paperArgb());
-    if (_hasResolver && foreground == _resolver.foreground) return;
-    _hasResolver = true;
-    _resolver = DocumentStyleResolver(_document, foreground: foreground);
+    final theme = Theme.of(context);
+    _surfaceArgb = theme.colorScheme.surface.toARGB32();
+    _brightness = theme.brightness;
+    // A `build` follows, so no setState: a theme switch can change the
+    // key, and only a change builds a new resolver.
+    if (_nextResolver() case final next?) _resolver = next;
   }
 
   late final CameraController _camera = widget.camera ??
@@ -908,6 +934,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         // the overlays the paper, both computed here.
                         chrome: ChromePalette.of(theme.brightness),
                         paper: PaperPalette.forPaper(_paperArgb()),
+                        sheetArgb: _darkCanvas ? _paperArgb() : null,
                         grips: _grips,
                         textTool: _text,
                         fitRequests: widget.fitRequests,
@@ -937,8 +964,7 @@ class _PlannerShellState extends State<PlannerShell> {
                               symbols: widget.symbols),
                           // Spec 12b D9: the Layers section, placed only.
                           LayerPanel(
-                              document: _document,
-                              foreground: _resolver.foreground),
+                              document: _document, foreground: _foreground),
                           Expanded(
                             child: PagePanel(
                                 key: _pagePanel,

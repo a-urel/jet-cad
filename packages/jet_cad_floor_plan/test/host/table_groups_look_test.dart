@@ -324,15 +324,17 @@ void main() {
   });
 
   testWidgets(
-      'TG-V4 M-TG-21: the frame is in the paper\'s gripMove, not the '
+      'TG-V4 M-TG-21: the frame is in the shown paper\'s gripMove, not the '
       'theme\'s: Blueprint under the light theme 0xC4A0FF, White under the '
-      'dark theme 0x7A3FD1', (tester) async {
+      'light theme 0x7A3FD1, and White under the dark theme, shown dark '
+      '(dark canvas K1), 0xC4A0FF', (tester) async {
     // The frame's left-most point: the left-most corner pushed left by the
     // margin.
     final left = kCorners.reduce((a, b) => a.$1 <= b.$1 ? a : b);
     for (final (paper, mode, want, not) in [
       (blueprint, ThemeMode.light, 0xC4A0FF, 0x7A3FD1),
-      (white, ThemeMode.dark, 0x7A3FD1, 0xC4A0FF),
+      (white, ThemeMode.light, 0x7A3FD1, 0xC4A0FF),
+      (white, ThemeMode.dark, 0xC4A0FF, 0x7A3FD1),
     ]) {
       final c = lookController(paper);
       await pumpLook(tester, c, mode);

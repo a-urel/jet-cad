@@ -23,6 +23,7 @@ class PageChromePainter extends CustomPainter {
     required this.page,
     required this.chrome,
     required this.paper,
+    this.sheetArgb,
     this.grid = true,
     super.repaint,
     this.onPaintForTest,
@@ -37,6 +38,11 @@ class PageChromePainter extends CustomPainter {
   /// The grid and the page breaks: drawn on the paper, so they follow it
   /// (dark theme spec D3).
   final PaperPalette paper;
+
+  /// The sheet's fill, ARGB, when the canvas shows a paper other than the
+  /// page's: [kDarkCanvasPaper] on a dark canvas (dark canvas decision note
+  /// K2). Null fills the sheet with the page's own background.
+  final int? sheetArgb;
 
   /// False: no grid, whatever the page's `gridVisible` says (a host's
   /// view that shows the plan, not the drafting aids). The sheet and the
@@ -89,7 +95,7 @@ class PageChromePainter extends CustomPainter {
     final sheetScreen =
         Rect.fromLTRB(topLeft.x, topLeft.y, bottomRight.x, bottomRight.y);
 
-    _sheetFill.color = Color(p.background);
+    _sheetFill.color = Color(sheetArgb ?? p.background);
     _sheetEdge.color = chrome.sheetEdge;
     _minor.color = paper.minorGrid;
     _major.color = paper.majorGrid;
@@ -232,5 +238,8 @@ class PageChromePainter extends CustomPainter {
   /// the camera.
   @override
   bool shouldRepaint(PageChromePainter old) =>
-      grid != old.grid || old.chrome != chrome || old.paper != paper;
+      grid != old.grid ||
+      old.chrome != chrome ||
+      old.paper != paper ||
+      old.sheetArgb != sheetArgb;
 }

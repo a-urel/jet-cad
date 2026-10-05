@@ -28,6 +28,7 @@ class PlannerView extends StatefulWidget {
     required this.outlines,
     required this.chrome,
     required this.paper,
+    this.sheetArgb,
     this.grips,
     this.textTool,
     this.fitRequests,
@@ -65,6 +66,11 @@ class PlannerView extends StatefulWidget {
   /// (dark theme spec D3, D4): the page's background, or the theme's
   /// surface with no page.
   final PaperPalette paper;
+
+  /// The sheet's fill when the canvas shows a paper other than the page's
+  /// ([kDarkCanvasPaper] on a dark canvas, decision note K2); null fills it
+  /// with the page's background.
+  final int? sheetArgb;
 
   /// The selection's grips. A member of the overlay's repaint merge; null
   /// where no grips show (the selection mode, spec 14b-2 H7).
@@ -242,6 +248,7 @@ class _PlannerViewState extends State<PlannerView> {
                               grid: widget.grid,
                               chrome: widget.chrome,
                               paper: widget.paper,
+                              sheetArgb: widget.sheetArgb,
                               repaint: _chromeRepaint,
                             ),
                           ),

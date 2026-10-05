@@ -125,8 +125,10 @@ void main() {
         (click.dx + 200).floor(),
         (click.dy - kTextEntrySize.height / 2).floor()
       );
+      // Dark canvas K1: a dark theme shows White as kDarkCanvasPaper.
+      final shown = mode == ThemeMode.dark ? kDarkCanvasPaper : paper;
       final before = await shoot(tester);
-      expect(hex(before.rgbAt(sample.$1, sample.$2)), hex(paper & 0xFFFFFF),
+      expect(hex(before.rgbAt(sample.$1, sample.$2)), hex(shown & 0xFFFFFF),
           reason: 'premise: the paper shows there before the field opens');
 
       await tester.tap(find.byKey(const Key('tool-text')));

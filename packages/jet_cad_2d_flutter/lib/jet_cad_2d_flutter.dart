@@ -5,6 +5,7 @@ export 'src/camera_controller.dart';
 export 'src/camera_gesture_detector.dart';
 export 'src/canvas_draw_sink.dart';
 export 'src/canvas_palette.dart';
+export 'src/dark_canvas.dart';
 export 'src/chrome_style.dart';
 export 'src/vertices_draw_sink.dart';
 export 'src/draft_canvas.dart';

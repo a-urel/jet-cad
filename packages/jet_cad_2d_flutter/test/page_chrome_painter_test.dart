@@ -90,6 +90,34 @@ void main() {
     expect(canvas.calls.first.name, 'drawRect');
   });
 
+  test(
+      'M-DC-1: sheetArgb fills the sheet in its place, the page keeps its '
+      'background, and shouldRepaint follows it (dark canvas K2)', () {
+    final n = ValueNotifier<PageComponent?>(
+        standardPage().copyWith(background: 0xFFFAF6EC));
+    final cam = standardCamera();
+    PageChromePainter make(int? sheet) => PageChromePainter(
+        camera: cam,
+        page: n,
+        chrome: ChromePalette.dark,
+        paper: PaperPalette.dark,
+        sheetArgb: sheet);
+    final canvas = SpyCanvas();
+    make(kDarkCanvasPaper).paint(canvas, kChromeSize);
+    expect(canvas.calls.first.name, 'drawRect');
+    expect(canvas.named('drawRect').first.color?.toARGB32(), kDarkCanvasPaper);
+    expect(n.value!.background, 0xFFFAF6EC, reason: 'display only');
+
+    final plain = SpyCanvas();
+    make(null).paint(plain, kChromeSize);
+    expect(plain.named('drawRect').first.color?.toARGB32(), 0xFFFAF6EC);
+
+    expect(make(kDarkCanvasPaper).shouldRepaint(make(null)), isTrue);
+    expect(make(null).shouldRepaint(make(kDarkCanvasPaper)), isTrue);
+    expect(
+        make(kDarkCanvasPaper).shouldRepaint(make(kDarkCanvasPaper)), isFalse);
+  });
+
   test('major lines sit where the oracle says, anchored at the sheet corner',
       () {
     // M-04f and M-04c on one camera; the seeded sweep below is the check.

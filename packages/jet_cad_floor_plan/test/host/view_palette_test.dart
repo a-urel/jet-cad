@@ -7,6 +7,11 @@
 // Read back in pixels under the floor planner's seed (support/
 // palette_fixture.dart). `restaurant_demo` mounts one view at a time
 // (F-10), so the two-view harness is this file's own.
+//
+// Dark canvas decision note K1 (2026-10-05): a dark theme shows a light
+// page dark, so under it every view takes the dark set. The two-view test
+// therefore runs under the light theme, where White and Blueprint still
+// take opposite sets.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -69,10 +74,11 @@ void main() {
     testWidgets(
         'M-DT-11 (${viewMode.name} mode): two views side by side in one frame, '
         'White and Blueprint, each with a line selected, show the light and '
-        'the dark selection colour and their own ink', (tester) async {
+        'the dark selection colour and their own ink (light theme)',
+        (tester) async {
       final onWhite = controllerOn(white);
       final onBlueprint = controllerOn(blueprint);
-      await pumpViews(tester, [onWhite, onBlueprint], ThemeMode.dark,
+      await pumpViews(tester, [onWhite, onBlueprint], ThemeMode.light,
           viewMode: viewMode);
       expect(find.byType(PlannerView), findsNWidgets(2));
       expect(find.byType(ServiceView),
@@ -86,11 +92,12 @@ void main() {
       expectDarkInk(left, 'White view');
       expectLightInk(right, 'Blueprint view');
       // One theme, so one chrome for both.
-      expectEdge(left, ChromePalette.dark, 'White view');
-      expectEdge(right, ChromePalette.dark, 'Blueprint view');
-      expectPainters(tester, ChromePalette.dark, PaperPalette.light, 'White',
+      expectEdge(left, ChromePalette.light, 'White view');
+      expectEdge(right, ChromePalette.light, 'Blueprint view');
+      expectPainters(tester, ChromePalette.light, PaperPalette.light, 'White',
           view: 0, withRulers: viewMode == FloorPlanMode.design);
-      expectPainters(tester, ChromePalette.dark, PaperPalette.dark, 'Blueprint',
+      expectPainters(
+          tester, ChromePalette.light, PaperPalette.dark, 'Blueprint',
           view: 1, withRulers: viewMode == FloorPlanMode.design);
     });
   }
@@ -110,14 +117,14 @@ void main() {
       expect(find.byType(ServiceView), findsOneWidget);
       final chrome =
           mode == ThemeMode.dark ? ChromePalette.dark : ChromePalette.light;
-      final set = paper == blueprint ? PaperPalette.dark : PaperPalette.light;
+      // K1: a dark theme shows White dark.
+      final darkPaper = paper == blueprint || mode == ThemeMode.dark;
+      final set = darkPaper ? PaperPalette.dark : PaperPalette.light;
       final seen = look(tester, await shoot(tester));
       expect(seen.rulerBar, isNull, reason: 'no rulers in the selection mode');
       expectSelection(seen, set, name);
       expectEdge(seen, chrome, name);
-      paper == blueprint
-          ? expectLightInk(seen, name)
-          : expectDarkInk(seen, name);
+      darkPaper ? expectLightInk(seen, name) : expectDarkInk(seen, name);
       final view = tester.widget<PlannerView>(find.byType(PlannerView));
       expect(view.chrome, chrome);
       expect(view.paper, set);
@@ -163,7 +170,8 @@ void main() {
 
   testWidgets(
       'ServiceView, a theme switch with no camera move repaints the sheet '
-      'edge in the dark chrome; White to Blueprint repaints the selection',
+      'edge in the dark chrome and, White shown dark (K1), the selection; '
+      'back in the light theme, White to Blueprint repaints the selection',
       (tester) async {
     final v = controllerOn(white);
     await pumpViews(tester, [v], ThemeMode.light,
@@ -177,7 +185,13 @@ void main() {
     expect(identical(v.c.camera.value, camera), isTrue);
     seen = look(tester, await shoot(tester));
     expectEdge(seen, ChromePalette.dark, 'after the switch to dark');
-    expectSelection(seen, PaperPalette.light, 'White stays the light set');
+    expectSelection(seen, PaperPalette.dark, 'White shown dark (K1)');
+    expectLightInk(seen, 'White shown dark (K1)');
+
+    await pumpThemed(tester, views([v.c]), ThemeMode.light);
+    await tester.pump();
+    seen = look(tester, await shoot(tester));
+    expectSelection(seen, PaperPalette.light, 'back to light');
 
     final doc = v.c.activeDocument;
     doc.commands.execute(SetComponentCommand<PageComponent>(
