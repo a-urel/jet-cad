@@ -1,8 +1,10 @@
 # jet-cad — project status
 
 **2026-10-05 — dark canvas (a dark theme shows the drawing dark):
-EXECUTED on `claude/dreamy-gates-2kgh4o`, NOT MERGED.** The branch carries
-it on top of the unmerged table groups fixes below:
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), a merge
+commit, on the human's word ("main'e merge et", 2026-10-05), together
+with the table groups fixes below. Branch history:
 - decision note at `deaadca`;
 - implementation at `118d707`;
 - review fixes at `4543dd6`.
@@ -38,20 +40,20 @@ No SDD ledger.
   `docs/superpowers/notes/2026-10-05-dark-canvas/`.
 - **Human look:** "tamam iyi görünüyor" (2026-10-05), given on the web
   screenshots. macOS and a tablet are still owed.
-- **Next:** the human's merge decision. The PR carries the table groups
-  fixes too. On merge, archive
-  `.superpowers/sdd/2026-10-05-table-groups-fixes/` to
-  `docs/superpowers/ledgers/`.
+- **Owed:** the human's look on macOS and a tablet.
+- **Next:** pick the next sub-project (roadmap).
 
 **2026-10-05 — table groups fixes (F-1, the chip at low zoom): plan
-EXECUTED on `claude/dreamy-gates-2kgh4o`, NOT MERGED** (restarted from
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), with the
+dark canvas (restarted from
 `main` at `3753ca4`; spec `ee553e1`, plan `cfee751`; Tasks 1–2 at
 `d8d06ed`, `7a96dc5`; Task 3's docs on top). Results:
 [2026-10-05-table-groups-fixes-results.md](docs/superpowers/notes/2026-10-05-table-groups-fixes-results.md);
 spec [2026-10-05-table-groups-fixes-design.md](docs/superpowers/specs/2026-10-05-table-groups-fixes-design.md)
 rev 2 (approved "Onaylıyorum, planı yaz"); plan
 [2026-10-05-table-groups-fixes.md](docs/superpowers/plans/2026-10-05-table-groups-fixes.md).
-Ledger (in flight, git-ignored): `.superpowers/sdd/2026-10-05-table-groups-fixes/`.
+Ledger: archived at `docs/superpowers/ledgers/2026-10-05-table-groups-fixes/`.
 - **What landed:**
   - `d8d06ed`: `FloorPlanController.selectableMembers(groupId)`, which
     gives the numbers of a group's visible, unlocked, live members, fresh
@@ -79,7 +81,7 @@ Ledger (in flight, git-ignored): `.superpowers/sdd/2026-10-05-table-groups-fixes
   - the chip is clipped at the canvas top edge.
 - **Owed:** the human's look on macOS, web and a tablet, never
   simulated.
-- **Next:** the human's look, then the human's merge decision.
+- **Next:** the human's look (owed).
 
 **2026-10-05 — table groups (merging and splitting tables): plan
 EXECUTED and MERGED into `main`** through
