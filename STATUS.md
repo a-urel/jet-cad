@@ -1,5 +1,48 @@
 # jet-cad — project status
 
+**2026-10-05 — dark canvas (a dark theme shows the drawing dark):
+EXECUTED on `claude/dreamy-gates-2kgh4o`, NOT MERGED.** The branch carries
+it on top of the unmerged table groups fixes below:
+- decision note at `deaadca`;
+- implementation at `118d707`;
+- review fixes at `4543dd6`.
+
+Results:
+[2026-10-05-dark-canvas-results.md](docs/superpowers/notes/2026-10-05-dark-canvas-results.md);
+decision note
+[2026-10-05-dark-canvas-design.md](docs/superpowers/specs/2026-10-05-dark-canvas-design.md)
+(approved "Onaylıyorum, başla"; amended at execution: the blend constants,
+the RGB cache, white is the paper). The fast process the human chose: a
+short note, one implementation, one review, screenshots before the merge.
+No SDD ledger.
+- **What landed:**
+  - **Sheet.** In a dark theme a light page is shown on `#1E1F22`.
+  - **Colours.** A display-only `DarkCanvasStyleResolver` re-tones every
+    drawing colour to keep its contrast on white: black walls go white,
+    light-grey floors go dark grey, coloured colours only lighten.
+  - **Unchanged:** Blueprint, the light theme, page-less views and every
+    export.
+  - **Superseded tests.** Ten tests asserted D4's "dark theme keeps a white
+    sheet" and now assert K1.
+- **Review:** "Approved with findings", nothing blocking. Findings 1–6 and
+  8 were fixed in `4543dd6`. M-DC-1..10 and R-1..R-8b are all killed.
+- **Gates** (Flutter 3.47.6):
+  - render: +1333 ~1 −7, the standing failures;
+  - planner: +1293;
+  - restaurant symbols +94, app +201, demo +28, dev harness +82;
+  - engine: +1241 −2, the standing failures;
+  - analyze and format clean;
+  - `flutter build web --release` ✓ for both apps.
+
+  The Chromium screenshots are in
+  `docs/superpowers/notes/2026-10-05-dark-canvas/`.
+- **Human look:** "tamam iyi görünüyor" (2026-10-05), given on the web
+  screenshots. macOS and a tablet are still owed.
+- **Next:** the human's merge decision. The PR carries the table groups
+  fixes too. On merge, archive
+  `.superpowers/sdd/2026-10-05-table-groups-fixes/` to
+  `docs/superpowers/ledgers/`.
+
 **2026-10-05 — table groups fixes (F-1, the chip at low zoom): plan
 EXECUTED on `claude/dreamy-gates-2kgh4o`, NOT MERGED** (restarted from
 `main` at `3753ca4`; spec `ee553e1`, plan `cfee751`; Tasks 1–2 at

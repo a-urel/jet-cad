@@ -113,3 +113,24 @@ TrueColors.
 - **Review.** One independent review.
 - **The human's look** at those screenshots comes before the merge.
 - **Results note:** `docs/superpowers/notes/2026-10-05-dark-canvas-results.md`.
+
+## Amended at execution
+
+Approved by the human ("Onaylıyorum, başla", 2026-10-05). The review
+findings (see the results note) changed three details of K3:
+
+- **The blend constants.** The blend `w = clamp(1 − C/0.08)` became a ramp
+  from `kDarkCanvasNeutralChroma = 0.09` (fully neutral: the exact contrast
+  mirror) to `kDarkCanvasColouredChroma = 0.15` (fully coloured: never
+  darkened). Under the old constant, pale tints (chroma 0.03–0.09) were
+  mostly treated as coloured and kept their lightness: `e0ffe0` reached
+  contrast 6.8 on the dark sheet, against 1.07 on white. That went against
+  K3's intent that a subtle fill stays subtle. Every saturated ACI colour
+  (chroma ≥ 0.155) still stays exactly.
+- **The caches.** The resolver keeps a `Map<ResolvedStyle, ResolvedStyle>`
+  so a steady frame returns the kept object and allocates nothing. Under it
+  sits the `Map<int, int>` of computed colours that K3 names, so one RGB is
+  computed once, however many styles carry it.
+- **White.** Pure white shows as the display paper itself, as K3's table
+  promises. The mirror alone gave the neutral `#202020`, a faint seam
+  against the paper.
