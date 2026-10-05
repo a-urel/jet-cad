@@ -16,9 +16,13 @@ The paper keeps the document's colour. Everything drawn on the paper
 takes its colours from the paper (`PaperPalette.forPaper`, the same switch
 as ACI 7's ink): the grid, the page breaks, the selection, hover, bands,
 grips, previews and snap markers. In a light theme on light paper the
-canvas is pixel-identical to `91d88e4`; D6a (swatch border) and D6b
-(filled text entry) are the two deliberate light-theme changes. Export,
-walls, the file format and the engine are unchanged.
+canvas is pixel-identical to `91d88e4`, with one scoped exception: a
+status caption whose status, composited over the paper, takes white ink
+now gets `kStatusCaptionOnDark` (R-C5-1). The demo's three statuses take
+black ink on White, Ivory and Grey, so the demo is unchanged. D6a (swatch
+border) and D6b (filled text entry) are the two deliberate light-theme
+changes. Export, walls, the file format and the engine are unchanged.
+*(Exception added 2026-10-05, after a review of `3f28e41`.)*
 
 ## Commits
 
@@ -77,7 +81,7 @@ worktree and re-fired the named mutants plus their own.
 - **The engine's 2 failures** are the standing pair in `generate_document_test.dart` ("the default document is the one Plan 2 measured, byte for byte"; "both text fractions default to zero and change nothing"). `git diff 91d88e4 -- packages/jet_cad_2d` is empty.
 - **The counts add up.** Render: 33 (T1) + 18 (T2) + 9 (T3, one transitional test deleted, C-1 added) + 1 (3b) + 1 (T4) + 1 (T6). Planner: 3 (T3) + 17 (T4) + 11 (T5) + 1 (5b) + 12 (T6). Demo: 1 (6b).
 - **Untouched.** `git diff 91d88e4` is empty on the two allocation invariants, the goldens and every `analysis_options.yaml`. The Paint-identity block of `selection_overlay_test.dart` is byte-identical at its new offset (+3).
-- Task 7 edits one comment in `jet_cad_2d_flutter/test/support/tile_comparison.dart`. After it, render analyze and format are clean again, and the five tile suites that import the file pass (`+66: All tests passed!`).
+- Task 7 edits one comment in `jet_cad_2d_flutter/test/support/tile_comparison.dart`. After it, render analyze and format are clean again, and the tile suites pass (`+66: All tests passed!`). That record names no files. Eight test files import `tile_comparison.dart`, and two different sets of five add up to 66, so which five ran cannot be recovered. All eight, re-run at `93a3909` with the same files as at `3f28e41`: `+82: All tests passed!` (`gpu/zoom_defect_test.dart` 4, `invariants/tile_budget_test.dart` 10, `tile_cache_test.dart` 30, `tile_fallback_test.dart` 2, `tile_invalidation_test.dart` 13, `tile_regime_test.dart` 14, `tile_settle_test.dart` 4, `tile_slice_differential_test.dart` 5). *(Corrected 2026-10-05, after a review of `3f28e41`.)*
 
 **Web builds** (`CI=true flutter build web --release`, at `36902c0`):
 - `apps/floor_planner`: `Compiling lib/main.dart for the Web... 64.5s` / `✓ Built build/web`
