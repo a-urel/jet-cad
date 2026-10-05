@@ -692,6 +692,20 @@ by that task's independent review; the ledger is
   that test, as D5 says. R-C5-2 (`fillColor:` equivalent under Material 3
   defaults) leaves D6b as written.
 
+## Amendment, 2026-10-04: the scan's spellings
+
+After the plan, on a review of `4f324f9`; not a task ruling, so not under
+"Amended at execution". Binding over D9a's patterns where they differ:
+
+- **S-1.** R-4 asked the scan for `Color.from*`, but
+  `\bColor\.from(ARGB|RGBO)\(` misses Flutter's component constructor
+  `Color.from(alpha: ..., red: ...)`, and `\bColors\.` finds no word
+  boundary inside `CupertinoColors.`. The patterns are now
+  `\bColor\.from(ARGB|RGBO)?\(` and
+  `\b(Cupertino)?Colors\.(?!transparent\b)`. Neither spelling occurs in
+  the scanned roots, so the allow-list is unchanged. The scan's own mutant
+  test adds both.
+
 ## Revision log
 
 Revision 2 applies the independent review of revision 1 (`aceed65`),
