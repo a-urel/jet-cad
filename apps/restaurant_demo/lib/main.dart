@@ -265,7 +265,10 @@ class DemoHomeState extends State<DemoHome> {
   }
 
   static final RegExp _tail = RegExp(r'^(\D*)(\d+)$');
-  static final RegExp _groupId = RegExp(r'^G(\d+)$');
+
+  /// The trailing digits of any group id, whatever its prefix: a POS's own
+  /// `VIP9` counts as 9, so the next id is `G10` (G6).
+  static final RegExp _idSuffix = RegExp(r'(\d+)$');
 
   static String _sorted(Iterable<String> numbers) =>
       (numbers.toList()..sort(byNumber)).join(', ');
@@ -275,7 +278,7 @@ class DemoHomeState extends State<DemoHome> {
   static String nextGroupId(Iterable<String> ids) {
     var max = BigInt.zero;
     for (final id in ids) {
-      final m = _groupId.firstMatch(id);
+      final m = _idSuffix.firstMatch(id.trim());
       if (m == null) continue;
       final n = BigInt.parse(m[1]!);
       if (n > max) max = n;

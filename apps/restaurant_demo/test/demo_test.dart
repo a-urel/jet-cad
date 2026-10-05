@@ -692,6 +692,16 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  test(
+      'D17b G6: the next id counts every id\'s trailing digits, a POS\'s own '
+      'prefix included (Copilot review on #8)', () {
+    expect(DemoHomeState.nextGroupId(const []), 'G1');
+    expect(DemoHomeState.nextGroupId(const ['VIP9', 'G3']), 'G10');
+    expect(DemoHomeState.nextGroupId(const ['Window', 'G2']), 'G3',
+        reason: 'an id with no digits counts for nothing');
+    expect(DemoHomeState.nextGroupId(const ['T007']), 'G8');
+  });
+
   testWidgets(
       'D17 G6: a new group is G<largest suffix + 1> after a split; a merge '
       'spanning two groups makes a new one, and the groups it empties go '
