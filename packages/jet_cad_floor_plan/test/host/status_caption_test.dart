@@ -168,13 +168,23 @@ void main() {
   });
 
   testWidgets(
-      'D6c: ServiceView in the dark theme on White keeps the dark caption '
-      '(the paper decides, not the theme); White to Blueprint repaints it '
-      'light', (tester) async {
+      'D6c, dark canvas K1: the shown paper decides the caption: White in '
+      'the light theme dark; the same White in the dark theme, shown dark, '
+      'light; back in the light theme, White to Blueprint repaints it light',
+      (tester) async {
     final c = statusController(white);
-    await pumpService(tester, c, ThemeMode.dark);
+    await pumpService(tester, c, ThemeMode.light);
     final box = captionBox(tester);
-    expectDarkCaption(await shoot(tester), box, 'dark theme, White');
+    expectDarkCaption(await shoot(tester), box, 'light theme, White');
+
+    await pumpThemed(tester, view(c), ThemeMode.dark);
+    await tester.pump();
+    expectLightCaption(
+        await shoot(tester), box, 'dark theme, White shown dark (K1)');
+
+    await pumpThemed(tester, view(c), ThemeMode.light);
+    await tester.pump();
+    expectDarkCaption(await shoot(tester), box, 'back to light, White');
 
     final doc = c.activeDocument;
     doc.commands.execute(SetComponentCommand<PageComponent>(
@@ -186,7 +196,7 @@ void main() {
     // The page notifier hears the change on the document's change stream,
     // a microtask after the command: a second frame shows it.
     await tester.pump();
-    expectLightCaption(await shoot(tester), box, 'dark theme, Blueprint');
+    expectLightCaption(await shoot(tester), box, 'light theme, Blueprint');
   });
 
   testWidgets(

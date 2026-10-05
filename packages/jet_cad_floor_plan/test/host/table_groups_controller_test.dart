@@ -23,8 +23,15 @@ const List<String> kNumbers = ['12', '3', '7', '20', '5', '8', '9'];
 /// A plan: tables numbered [kNumbers] in handle order, each placed off the
 /// origin, turned or mirrored; table 8 on a visible locked layer, table 9
 /// on a hidden one; an unnumbered table last. [duplicate] renames table 5
-/// to "3"; [hideNine] false leaves table 9 on layer 0.
-String groupsPlanJson({bool duplicate = false, bool hideNine = true}) {
+/// to "3"; [hideNine] false leaves table 9 on layer 0. [eightTwice] renames
+/// table 5 to "8", so 8 is carried by table 5's unlocked table and the
+/// locked one; [lockFive] then puts table 5's table on the locked layer
+/// instead, so the locked carrier of 8 comes first in handle order.
+String groupsPlanJson(
+    {bool duplicate = false,
+    bool hideNine = true,
+    bool eightTwice = false,
+    bool lockFive = false}) {
   final doc = plan();
   final zero = doc.tables.layers[ReservedHandles.layerZero]!;
   Handle layer(String name, {required bool visible, required bool locked}) {
@@ -61,11 +68,16 @@ String groupsPlanJson({bool duplicate = false, bool hideNine = true}) {
       at: Vector2(3600, 5200), quarterTurns: 3, numbered: false));
   final tables = tablesOf(doc);
   for (var i = 0; i < kNumbers.length; i++) {
-    final n = duplicate && kNumbers[i] == '5' ? '3' : kNumbers[i];
+    final n = switch (kNumbers[i]) {
+      '5' when duplicate => '3',
+      '5' when eightTwice => '8',
+      final n => n,
+    };
     doc.commands
         .execute(SetEntityTextCommand(tables[i].label!, n, kTableLabelTag));
   }
-  doc.commands.execute(SetInstanceLayerCommand(tables[5].instance, locked));
+  doc.commands.execute(
+      SetInstanceLayerCommand(tables[lockFive ? 4 : 5].instance, locked));
   if (hideNine) {
     doc.commands.execute(SetInstanceLayerCommand(tables[6].instance, hidden));
   }
@@ -419,6 +431,100 @@ void main() {
     c.select({'5'});
     expect(c.selectedTables.value, {'5', '9'});
     expect(c.selectedGroup.value, 'G9');
+    await tester.pump();
+  });
+
+  // Table-groups fixes spec X1: `selectableMembers`, the host's view of the
+  // rule Merge and Split use.
+
+  testWidgets(
+      'TG-C13 selectableMembers gives the visible, unlocked members\' '
+      'numbers, in both modes; a group of only a locked and a hidden member '
+      'gives none; the set is unmodifiable (M-TGF-1)', (tester) async {
+    final c = controller(groupsPlanJson());
+    c.setTableGroups({
+      'G7': group({'12', '3', '8', '9'}),
+      'G2': group({'20', '5'}),
+    });
+    expect(c.selectableMembers('G7'), {'12', '3'}, reason: 'the design mode');
+    c.setMode(FloorPlanMode.selection);
+    expect(c.selectableMembers('G7'), {'12', '3'},
+        reason: '8 is locked, 9 hidden');
+    expect(c.selectableMembers('G2'), {'20', '5'});
+    expect(() => c.selectableMembers('G2').add('7'), throwsUnsupportedError);
+    c.setTableGroups({
+      'G9': group({'8', '9'})
+    });
+    expect(c.selectableMembers('G9'), isEmpty);
+    await tester.pump();
+  });
+
+  testWidgets(
+      'TG-C14 selectableMembers trims the id; an unknown id gives the empty '
+      'set (M-TGF-2)', (tester) async {
+    final c = controller(groupsPlanJson());
+    c.setMode(FloorPlanMode.selection);
+    c.setTableGroups({
+      'G7': group({'12', '3', '8', '9'})
+    });
+    expect(c.selectableMembers(' G7 '), {'12', '3'});
+    expect(c.selectableMembers('G8'), isEmpty);
+    expect(c.selectableMembers('12'), isEmpty, reason: 'a number is no id');
+    await tester.pump();
+  });
+
+  testWidgets(
+      'TG-C15 a number carried by an unlocked and a locked table is '
+      'selectable, whichever comes first in handle order (M-TGF-3)',
+      (tester) async {
+    for (final lockFive in [false, true]) {
+      final c =
+          controller(groupsPlanJson(eightTwice: true, lockFive: lockFive));
+      c.setMode(FloorPlanMode.selection);
+      c.setTableGroups({
+        'G7': group({'12', '3', '8'})
+      });
+      final eights = TableSurvey.of(c.activeDocument).withNumber('8');
+      expect(eights, hasLength(2), reason: 'premise: 8 twice');
+      expect(c.selectableMembers('G7'), {'12', '3', '8'},
+          reason: 'lockFive: $lockFive');
+    }
+    await tester.pump();
+  });
+
+  testWidgets(
+      'TG-C16 selectableMembers is fresh after setTableGroups with the same '
+      'id, after a design layer was locked and the mode switched, and after '
+      'a layer edit that made no command (M-TGF-10)', (tester) async {
+    final c = controller(groupsPlanJson());
+    c.setTableGroups({
+      'G7': group({'12', '3', '7'})
+    });
+    expect(c.selectableMembers('G7'), {'12', '3', '7'});
+    c.setTableGroups({
+      'G7': group({'20', '12', '5', '8'})
+    });
+    expect(c.selectableMembers('G7'), {'20', '12', '5'},
+        reason: 'the same id, new members');
+
+    // Layer 0, which carries 20, 12 and 5, locked in the design through its
+    // table section: no command.
+    void setZeroLocked(bool locked) {
+      final layers = c.activeDocument.tables.layers;
+      final zero = layers[ReservedHandles.layerZero]!;
+      layers
+        ..remove(zero.handle)
+        ..add(zero.copyWith(locked: locked));
+    }
+
+    setZeroLocked(true);
+    c.setMode(FloorPlanMode.selection);
+    expect(c.selectableMembers('G7'), isEmpty,
+        reason: 'the service copy carries the locked layer');
+
+    setZeroLocked(false);
+    expect(c.selectableMembers('G7'), {'20', '12', '5'},
+        reason: 'only the layers\' revision moved');
     await tester.pump();
   });
 }

@@ -615,9 +615,13 @@ by that task's independent review; the ledger is
 the text above disagree, the bullet holds.
 
 - **R-C5-1 — the demo's grow rule** (`eecc823`, pinned by D18; M1 and
-  M8 red). G6's "the numbers include all the selectable members
-  of exactly one existing group" is implemented as **"exactly one
-  existing group has a member among the numbers"**.
+  M8 red). **Retired** by the table groups fixes
+  ([2026-10-05-table-groups-fixes-design.md](2026-10-05-table-groups-fixes-design.md),
+  X2): with `FloorPlanController.selectableMembers` (X1) the demo applies
+  G6's literal rule, and this bullet stands as history only. G6's "the
+  numbers include all the selectable members of exactly one existing
+  group" was implemented as **"exactly one existing group has a member
+  among the numbers"**.
   - A host cannot see which members are selectable (F-1 below). Applying
     the literal rule over the plan's numbers is lock-blind: a group with a
     locked or hidden member could never grow.
@@ -629,14 +633,30 @@ the text above disagree, the bullet holds.
     selection (M-TG-5's fixture); the touched group then grows whole.
   - This is the reading G4 already takes: a half-selected group moves
     whole on a drag.
-- **F-1 — API finding, not fixed.** The host API cannot answer "which
-  members of group X are selectable": `FloorPlanTable` carries no lock or
+- **F-1 — API finding, closed** by the table groups fixes
+  ([2026-10-05-table-groups-fixes-design.md](2026-10-05-table-groups-fixes-design.md),
+  X1): `FloorPlanController.selectableMembers(groupId)` gives a group's
+  selectable members' numbers, and `FloorPlanTable` stays flagless (A-2).
+  The text below is the finding as it stood. The host API cannot answer
+  "which members of group X are selectable": `FloorPlanTable` carries no lock or
   visibility flag, and no call exposes `TableGroupLookup.selectableMembers`.
   A `selectableMembers(groupId)` on the controller, or `locked` / `visible`
   on `FloorPlanTable`, would close it and allow G6's literal rule. One
   consequence: a group left holding only locked or hidden members (a
   new-group merge's remainder, R-C5-4) cannot be split or merged from the
   demo's UI; only the POS can clear it.
+- **X3 — the chip sits outside the frame**, by the table groups fixes
+  ([2026-10-05-table-groups-fixes-design.md](2026-10-05-table-groups-fixes-design.md),
+  X3). G3's Placement, "centred on the top-most point", is **superseded**:
+  the chip is still centred horizontally on the frame bounds' centre x,
+  but its rounded rectangle's **bottom edge** lies on the frame bounds'
+  top line (maximum y plus the margin) at that x. Per frame it is drawn
+  after `translate(sx - width / 2, sy - (height + kGroupChipPaddingY))`.
+  A chip entirely above the bounds then covers no member of its own group
+  at any zoom (the centred chip covered the chair lines at the default
+  fit). On a slanted frame the chip floats a little above it. The hiding
+  rule and the per-frame recipe are unchanged. TG-L7 and TG-V2 carry the
+  new placement.
 - **R-C5-2 — a merge that empties a group removes its group status**
   (`eecc823`, M7 red in D17). G6 says so only for Split. Without it a stale
   status reattaches when a later merge reuses the id.

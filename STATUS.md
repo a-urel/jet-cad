@@ -1,5 +1,88 @@
 # jet-cad — project status
 
+**2026-10-05 — dark canvas (a dark theme shows the drawing dark):
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), a merge
+commit, on the human's word ("main'e merge et", 2026-10-05), together
+with the table groups fixes below. Branch history:
+- decision note at `deaadca`;
+- implementation at `118d707`;
+- review fixes at `4543dd6`.
+
+Results:
+[2026-10-05-dark-canvas-results.md](docs/superpowers/notes/2026-10-05-dark-canvas-results.md);
+decision note
+[2026-10-05-dark-canvas-design.md](docs/superpowers/specs/2026-10-05-dark-canvas-design.md)
+(approved "Onaylıyorum, başla"; amended at execution: the blend constants,
+the RGB cache, white is the paper). The fast process the human chose: a
+short note, one implementation, one review, screenshots before the merge.
+No SDD ledger.
+- **What landed:**
+  - **Sheet.** In a dark theme a light page is shown on `#1E1F22`.
+  - **Colours.** A display-only `DarkCanvasStyleResolver` re-tones every
+    drawing colour to keep its contrast on white: black walls go white,
+    light-grey floors go dark grey, coloured colours only lighten.
+  - **Unchanged:** Blueprint, the light theme, page-less views and every
+    export.
+  - **Superseded tests.** Ten tests asserted D4's "dark theme keeps a white
+    sheet" and now assert K1.
+- **Review:** "Approved with findings", nothing blocking. Findings 1–6 and
+  8 were fixed in `4543dd6`. M-DC-1..10 and R-1..R-8b are all killed.
+- **Gates** (Flutter 3.47.6):
+  - render: +1333 ~1 −7, the standing failures;
+  - planner: +1293;
+  - restaurant symbols +94, app +201, demo +28, dev harness +82;
+  - engine: +1241 −2, the standing failures;
+  - analyze and format clean;
+  - `flutter build web --release` ✓ for both apps.
+
+  The Chromium screenshots are in
+  `docs/superpowers/notes/2026-10-05-dark-canvas/`.
+- **Human look:** "tamam iyi görünüyor" (2026-10-05), given on the web
+  screenshots. macOS and a tablet are still owed.
+- **Owed:** the human's look on macOS and a tablet.
+- **Next:** pick the next sub-project (roadmap).
+
+**2026-10-05 — table groups fixes (F-1, the chip at low zoom): plan
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), with the
+dark canvas (restarted from
+`main` at `3753ca4`; spec `ee553e1`, plan `cfee751`; Tasks 1–2 at
+`d8d06ed`, `7a96dc5`; Task 3's docs on top). Results:
+[2026-10-05-table-groups-fixes-results.md](docs/superpowers/notes/2026-10-05-table-groups-fixes-results.md);
+spec [2026-10-05-table-groups-fixes-design.md](docs/superpowers/specs/2026-10-05-table-groups-fixes-design.md)
+rev 2 (approved "Onaylıyorum, planı yaz"); plan
+[2026-10-05-table-groups-fixes.md](docs/superpowers/plans/2026-10-05-table-groups-fixes.md).
+Ledger: archived at `docs/superpowers/ledgers/2026-10-05-table-groups-fixes/`.
+- **What landed:**
+  - `d8d06ed`: `FloorPlanController.selectableMembers(groupId)`, which
+    gives the numbers of a group's visible, unlocked, live members, fresh
+    at every call. It closes F-1. The demo grows a group by G6's literal
+    rule: the request includes all of exactly one group's (non-empty)
+    selectable members. R-C5-1 is retired.
+  - `7a96dc5`: the group label chip rests on the frame, outside it (its
+    bottom edge on the frame bounds' top line), so it covers no member
+    at any zoom. Only TG-L7 and TG-V2 changed, as X3 says.
+- **Reviews:** both Approved, with no findings (2 notes each).
+  M-TGF-1..10 are all killed (M-TGF-5 by D18), and M-TG-22 is still
+  killed.
+- **Gates** (Flutter 3.47.6, Linux, at `7a96dc5`): render +1304 ~1 −7
+  (standing, package unchanged since `3753ca4`), planner +1283 (+5 on
+  +1278), restaurant symbols +94, app +201, demo +28 (+4 on +24), dev
+  harness +82; analyze and format are clean.
+  `flutter build web --release` ✓ for the demo. A Chromium smoke at the
+  default fit (light and dark) and zoomed in: the chip is clear of the
+  chairs. Screenshots are in
+  `docs/superpowers/notes/2026-10-05-table-groups-fixes/`.
+- **Debt:**
+  - frames jump on release during a drag;
+  - a hull may enclose non-members;
+  - the chip may float above a slanted frame;
+  - the chip is clipped at the canvas top edge.
+- **Owed:** the human's look on macOS, web and a tablet, never
+  simulated.
+- **Next:** the human's look (owed).
+
 **2026-10-05 — table groups (merging and splitting tables): plan
 EXECUTED and MERGED into `main`** through
 [a-urel/jet-cad#8](https://github.com/a-urel/jet-cad/pull/8), a merge
@@ -44,9 +127,10 @@ Ledger: archived at `docs/superpowers/ledgers/2026-10-04-table-groups/`.
   dark, Blueprint), screenshots in
   `docs/superpowers/notes/2026-10-04-table-groups/`.
 - **Debt:** F-1 (a host cannot ask which members are selectable; a
-  locked/hidden-only remainder group only the POS can clear); at the
-  default fit the chip covers the members' chair lines; frames jump on
-  release during a drag (spec'd).
+  locked/hidden-only remainder group only the POS can clear) (fixed by
+  the table groups fixes, see above); at the default fit the chip covers
+  the members' chair lines (fixed by the table groups fixes, see above);
+  frames jump on release during a drag (spec'd).
 - **Owed:** the human's look on macOS, web and a tablet — never simulated.
 - **Next:** the human's look (owed, above). After that, the human's
   choice of the next sub-project.

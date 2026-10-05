@@ -332,14 +332,17 @@ void main() {
   ]) {
     testWidgets(
         'M-DT-18, ${mode.name} theme on White paper: the layer row\'s '
-        '"Foreground" swatch and the colour menu\'s show the paper\'s black '
-        'ink inside a scheme.outline border (D9c)', (tester) async {
+        '"Foreground" swatch and the colour menu\'s show the canvas\'s ink '
+        '(black in the light theme; white in the dark one, which shows White '
+        'dark, dark canvas K1) inside a scheme.outline border (D9c)',
+        (tester) async {
       windowAt(tester, const Size(1440, 900));
       final p = Planner(tester);
       await p.pump(mode);
       final outline = rgbOf(theme.colorScheme.outline);
-      expect(_maxChannel(outline), greaterThan(60),
-          reason: 'premise: the outline is not the black ink');
+      final ink = mode == ThemeMode.dark ? 0xFFFFFF : 0x000000;
+      expect(channelDistance(outline, ink), greaterThan(60),
+          reason: 'premise: the outline is not the ink');
 
       Future<void> expectSwatch(Finder box, String reason) async {
         final r = tester.getRect(box);
@@ -352,8 +355,8 @@ void main() {
             reason: '$reason: left border');
         expect(hex(shot.rgbAt(right, y)), hex(outline),
             reason: '$reason: right border');
-        expect(hex(shot.rgbAt(r.center.dx.floor(), y)), hex(0x000000),
-            reason: '$reason: the swatch shows the paper\'s ink');
+        expect(hex(shot.rgbAt(r.center.dx.floor(), y)), hex(ink),
+            reason: '$reason: the swatch shows the canvas\'s ink');
       }
 
       // Layer 0 (handle 1) is ACI 7, drawn in the paper's foreground.

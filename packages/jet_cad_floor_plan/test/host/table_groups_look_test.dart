@@ -6,8 +6,10 @@
 //
 // Under the floor planner's seed (support/palette_fixture.dart), at device
 // pixel ratio 1. The members (12, 3, 7, placed in that order) are turned and
-// mirrored; the camera is off the origin at 0.125 px/mm and puts the chip's
-// row on pixel centres.
+// mirrored; the camera is off the origin at 0.125 px/mm and puts the frame
+// bounds' top line (the chip's bottom edge, fixes X3) on a pixel centre.
+// Table 20's chair line lies a whole 8 px above it, on a pixel centre
+// strictly inside the chip's rows.
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -66,6 +68,11 @@ final double kAnchorY =
 /// The drawing area's row the camera puts [kAnchorY] on (its centre).
 const int kAnchorRow = 300;
 
+/// How many whole pixels table 20's chair line lies above [kAnchorRow]:
+/// 64 mm at 0.125 px/mm, so the line falls on a pixel centre strictly
+/// inside the chip, whose bottom edge is the anchor (fixes X3).
+const int kChairRowsUp = 8;
+
 /// The camera: the sheet's left edge at x = 40.5, [kAnchorY] at
 /// y = [kAnchorRow] + 0.5, 0.125 px/mm, y up.
 ViewportTransform lookCamera() => ViewportTransform(
@@ -74,7 +81,8 @@ ViewportTransform lookCamera() => ViewportTransform(
 
 /// A controller over the app's set-up with a 1:20 page of [paper] (grid
 /// off) and the tables: the members 12, 3 and 7; 20, not a member, whose
-/// lower chair's bottom line runs through G7's chip; 9 on a hidden layer.
+/// lower chair's bottom line runs through G7's chip, [kChairRowsUp] pixels
+/// above the anchor; 9 on a hidden layer.
 FloorPlanController lookController(int paper) {
   final m = FlutterTextMeasurer();
   final doc = prepareDocument(m);
@@ -91,7 +99,7 @@ FloorPlanController lookController(int paper) {
   final placements = [
     for (final (n, t) in kMembers) (n, t),
     // The chair's bottom edge is 750 below the base point.
-    ('20', placementAt(kAnchorX, kAnchorY + 750, 0)),
+    ('20', placementAt(kAnchorX, kAnchorY + kChairRowsUp / pxPerMm + 750, 0)),
     ('9', placementAt(12200, 6400, kDeg37)),
   ];
   for (final (_, t) in placements) {
@@ -226,20 +234,39 @@ void main() {
     });
     await tester.pump();
     final spy = groupSpy(tester, 'table-group-chips');
-    final p = spy.paragraphs.single;
     final t = spy.translations.single;
     final layer = find.byKey(const Key('table-group-chips'));
     final o = tester.getTopLeft(layer);
-    // Premises: the chip is centred on the anchor's row, and the chair's
-    // line (x within 225 mm of the anchor) runs through its left padding.
-    expect(t.dy + p.height / 2, closeTo(kAnchorRow + 0.5, 1e-6));
-    final (ax, ay) = pixelOf(tester, Vector2(kAnchorX, kAnchorY));
+    // The chip's rounded rectangle in global pixels.
+    final chip = spy.rrects.single.shift(o + Offset(t.dx, t.dy));
+    // Premises: the chip's bottom edge is the anchor's row centre (X3);
+    // the chair's line (x within 225 mm of the anchor) is kChairRowsUp
+    // rows above it and runs through the chip's left padding, the whole
+    // sampled pixel strictly inside the rounded rectangle.
+    expect(t.dy + spy.rrects.single.bottom, closeTo(kAnchorRow + 0.5, 1e-6));
+    final (ax, ay) =
+        pixelOf(tester, Vector2(kAnchorX, kAnchorY + kChairRowsUp / pxPerMm));
+    expect(ay, o.dy + kAnchorRow - kChairRowsUp, reason: 'the chair row');
     final sx = (o.dx + t.dx - kGroupChipPaddingX / 2).floor();
     expect(ax - sx, lessThan(225 * pxPerMm), reason: 'on the chair line');
+    for (final (dx, dy) in const [
+      (0.0, 0.0),
+      (1.0, 0.0),
+      (0.0, 1.0),
+      (1.0, 1.0)
+    ]) {
+      final corner = Offset(sx + 0.1 + 0.8 * dx, ay + 0.1 + 0.8 * dy);
+      expect(chip.contains(corner), isTrue,
+          reason: 'premise: pixel ($sx, $ay) inside the chip $chip');
+    }
+    expect(chip.top < ay && ay + 1 < chip.bottom, isTrue,
+        reason: 'premise: row $ay strictly inside the chip\'s rows');
     final paper = PaperPalette.forPaper(white);
     final shot = await shoot(tester);
     // Without the chip the chair line is there: the same row a chip
     // width to the left of the chip, still on the line.
+    expect(chip.right < ax - 22 || chip.left > ax - 21, isTrue,
+        reason: 'premise: pixel ${ax - 22} is clear of the chip $chip');
     expect(channelDistance(shot.rgbAt(ax - 22, ay), 0xFFFFFF), greaterThan(100),
         reason: 'premise: the chair line is drawn on row $ay');
     expectRgb(shot.rgbAt(sx, ay), rgbOf(paper.gripMove), 3, 'the chip');
@@ -297,15 +324,17 @@ void main() {
   });
 
   testWidgets(
-      'TG-V4 M-TG-21: the frame is in the paper\'s gripMove, not the '
+      'TG-V4 M-TG-21: the frame is in the shown paper\'s gripMove, not the '
       'theme\'s: Blueprint under the light theme 0xC4A0FF, White under the '
-      'dark theme 0x7A3FD1', (tester) async {
+      'light theme 0x7A3FD1, and White under the dark theme, shown dark '
+      '(dark canvas K1), 0xC4A0FF', (tester) async {
     // The frame's left-most point: the left-most corner pushed left by the
     // margin.
     final left = kCorners.reduce((a, b) => a.$1 <= b.$1 ? a : b);
     for (final (paper, mode, want, not) in [
       (blueprint, ThemeMode.light, 0xC4A0FF, 0x7A3FD1),
-      (white, ThemeMode.dark, 0x7A3FD1, 0xC4A0FF),
+      (white, ThemeMode.light, 0x7A3FD1, 0xC4A0FF),
+      (white, ThemeMode.dark, 0xC4A0FF, 0x7A3FD1),
     ]) {
       final c = lookController(paper);
       await pumpLook(tester, c, mode);

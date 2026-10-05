@@ -255,6 +255,22 @@ class FloorPlanController extends ChangeNotifier {
   /// `Listenable.merge` of all three).
   ValueListenable<String?> get selectedGroup => _selectedGroup;
 
+  /// The numbers of the selectable members of group [groupId] (trimmed) in
+  /// the active plan: its live members on a visible, unlocked layer, by the
+  /// rule Merge and Split use (table-groups fixes spec X1, closing the
+  /// table-groups spec's F-1). A number carried by several tables is in it
+  /// once, when any of them is selectable.
+  ///
+  /// Empty for an unknown id or a group with no selectable member;
+  /// unmodifiable. A pure query, valid in both modes (in the design mode it
+  /// answers for the design plan, where groups do not act), and fresh at
+  /// every call: right after [setTableGroups], a mode switch or a layer
+  /// edit.
+  Set<String> selectableMembers(String groupId) => Set.unmodifiable({
+        for (final t in _groupLookup.selectableMembers(groupId.trim()))
+          t.number!,
+      });
+
   /// The mode (H3). Changed by [setMode].
   ValueListenable<FloorPlanMode> get mode => _mode;
 

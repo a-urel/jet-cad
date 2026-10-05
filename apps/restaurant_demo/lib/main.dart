@@ -287,56 +287,54 @@ class DemoHomeState extends State<DemoHome> {
   }
 
   /// G6's merge rule for the requested [numbers] over [groups]: the groups
-  /// to set and the id merged into.
+  /// to set and the id merged into. [selectable] gives a group's selectable
+  /// members' numbers over the same [groups] (in `_merge`,
+  /// `FloorPlanController.selectableMembers`, table-groups fixes spec X2).
   ///
-  /// **Grow:** when exactly one group has a member among [numbers], that
-  /// group grows by the other numbers under its id and label. A host cannot
-  /// see which members are selectable (locked or hidden layers), but a
-  /// selection always holds every selectable member of a group it touches,
-  /// so "touches exactly one group" stands for "includes all the selectable
-  /// members of exactly one group" (ruling R-C5-1).
+  /// **Grow:** when exactly one group has selectable members and [numbers]
+  /// include all of them, that group grows by the other numbers under its
+  /// id and label. Those numbers leave any other group they were in; a group
+  /// left empty goes. A request of exactly that group's selectable members
+  /// grows it by nothing: the same groups again.
   ///
   /// **New group:** otherwise [numbers] leave every group they are in (a
   /// group left empty goes) and form [nextGroupId] of the groups before the
-  /// merge.
+  /// merge. [numbers] are not empty (a group needs a member).
   static ({Map<String, TableGroup> groups, String id}) mergeGroups(
-      Map<String, TableGroup> groups, Set<String> numbers) {
-    final touched = [
-      for (final e in groups.entries)
-        if (e.value.members.any(numbers.contains)) e.key
+      Map<String, TableGroup> groups,
+      Set<String> numbers,
+      Set<String> Function(String id) selectable) {
+    final whole = [
+      for (final id in groups.keys)
+        if (selectable(id) case final s
+            when s.isNotEmpty && numbers.containsAll(s))
+          id
     ];
-    if (touched.length == 1) {
-      final id = touched.single;
-      final grown = groups[id]!;
-      return (
-        groups: {
-          ...groups,
-          id: TableGroup(
-              members: {...grown.members, ...numbers}, label: grown.label),
-        },
-        id: id,
-      );
-    }
-    final id = nextGroupId(groups.keys);
+    final id = whole.length == 1 ? whole.single : nextGroupId(groups.keys);
     final next = <String, TableGroup>{};
     for (final e in groups.entries) {
       final rest = e.value.members.difference(numbers);
-      if (rest.length == e.value.members.length) {
+      if (e.key == id) {
+        next[id] = TableGroup(
+            members: {...e.value.members, ...numbers}, label: e.value.label);
+      } else if (rest.length == e.value.members.length) {
         next[e.key] = e.value;
       } else if (rest.isNotEmpty) {
         next[e.key] = TableGroup(members: rest, label: e.value.label);
       }
     }
-    next[id] = TableGroup(members: numbers);
+    next.putIfAbsent(id, () => TableGroup(members: numbers));
     return (groups: next, id: id);
   }
 
-  /// The service bar's Merge (G6): any request is accepted. A group the
-  /// merge empties takes its group status with it (ruling R-C5-2).
+  /// The service bar's Merge (G6): any request is accepted, an empty one
+  /// changes nothing. A group the merge empties takes its group status with
+  /// it (ruling R-C5-2).
   void _merge(Area a, Set<String> numbers) {
+    if (numbers.isEmpty) return;
     final c = a.controller;
     final before = c.tableGroups.value;
-    final merged = mergeGroups(before, numbers);
+    final merged = mergeGroups(before, numbers, c.selectableMembers);
     c.setTableGroups(merged.groups);
     final gone = {
       for (final id in before.keys)

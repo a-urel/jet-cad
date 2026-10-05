@@ -79,17 +79,25 @@ class _ServiceViewState extends State<ServiceView> {
     ..install();
 
   /// ACI 7's foreground follows the paper, as in the shell (fix/post-07,
-  /// dark theme spec D4): re-derived in [_onPage] and
-  /// [didChangeDependencies], replaced only when the foreground flips.
-  /// Assigned in the first [didChangeDependencies]: without a page it reads
-  /// the theme, which `initState` cannot.
-  late DocumentStyleResolver _resolver;
-  bool _hasResolver = false;
+  /// dark theme spec D4), and on a dark canvas every colour is re-toned
+  /// (dark canvas decision note K3): re-derived in [_onPage] and
+  /// [didChangeDependencies], replaced only when its key ([_foreground],
+  /// [_darkCanvas]) changes. Assigned in the first [didChangeDependencies]:
+  /// without a page it reads the theme, which `initState` cannot.
+  late StyleResolver _resolver;
+
+  /// [_resolver]'s key; -1 until the first [didChangeDependencies].
+  int _foreground = -1;
+  bool _darkCanvas = false;
 
   /// The theme's surface, ARGB: the paper with no page (D4). Set in
   /// [didChangeDependencies], the only place this state reads the theme for
   /// the paper.
   late int _surfaceArgb;
+
+  /// The theme's brightness (decision note K1). Set in
+  /// [didChangeDependencies].
+  late Brightness _brightness;
 
   /// The paper under the status captions, ARGB (dark theme spec D6c): set
   /// to [_paperArgb] in [didChangeDependencies] and [_onPage]. Created with
@@ -165,35 +173,49 @@ class _ServiceViewState extends State<ServiceView> {
   late final DerivedFlag _canSplit =
       DerivedFlag(_groupSources, () => _c.selectedGroup.value != null);
 
-  /// The paper (D4): the page's background, or with no page the theme's
-  /// surface, which the drafting then lies on. It feeds both ACI 7's
-  /// foreground and [PaperPalette.forPaper].
-  int _paperArgb() => _page.value?.background ?? _surfaceArgb;
+  /// The paper (D4, dark canvas K1–K2): [kDarkCanvasPaper] on a dark
+  /// canvas, else the page's background, or with no page the theme's
+  /// surface, which the drafting then lies on. It feeds ACI 7's foreground,
+  /// [PaperPalette.forPaper], the sheet's fill and the status captions.
+  int _paperArgb() => displayPaperFor(
+      page: _page.value?.background,
+      surface: _surfaceArgb,
+      brightness: _brightness);
 
-  /// A flip rebuilds, which also hands the view the new paper palette: it
-  /// switches at exactly the paper where the foreground does.
+  /// A new resolver when the key moved, else null; records the new key.
+  StyleResolver? _nextResolver() {
+    final paper = _paperArgb();
+    final foreground = foregroundFor(paper);
+    final dark =
+        darkCanvasFor(page: _page.value?.background, brightness: _brightness);
+    if (foreground == _foreground && dark == _darkCanvas) return null;
+    _foreground = foreground;
+    _darkCanvas = dark;
+    return canvasResolverFor(_document, paper: paper, dark: dark);
+  }
+
+  /// A key change rebuilds, which also hands the view the new paper palette
+  /// and sheet fill: they switch at exactly the paper where the key does.
   ///
-  /// The status captions' paper is set on every page change, flip or not:
-  /// a status colour over the paper can flip where the paper alone does
-  /// not (D6c).
+  /// The status captions' paper is set on every page change, a key change
+  /// or not: a status colour over the paper can flip where the paper alone
+  /// does not (D6c).
   void _onPage() {
     _paper.value = _paperArgb();
-    final next = foregroundFor(_paperArgb());
-    if (next == _resolver.foreground) return;
-    setState(
-        () => _resolver = DocumentStyleResolver(_document, foreground: next));
+    final next = _nextResolver();
+    if (next == null) return;
+    setState(() => _resolver = next);
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _surfaceArgb = Theme.of(context).colorScheme.surface.toARGB32();
+    final theme = Theme.of(context);
+    _surfaceArgb = theme.colorScheme.surface.toARGB32();
+    _brightness = theme.brightness;
     _paper.value = _paperArgb();
-    // A `build` follows: only a flip builds a new resolver.
-    final next = foregroundFor(_paperArgb());
-    if (_hasResolver && next == _resolver.foreground) return;
-    _hasResolver = true;
-    _resolver = DocumentStyleResolver(_document, foreground: next);
+    // A `build` follows: only a key change builds a new resolver.
+    if (_nextResolver() case final next?) _resolver = next;
   }
 
   @override
@@ -301,6 +323,7 @@ class _ServiceViewState extends State<ServiceView> {
                   // follows the theme, the overlays the paper.
                   chrome: ChromePalette.of(theme.brightness),
                   paper: PaperPalette.forPaper(_paperArgb()),
+                  sheetArgb: _darkCanvas ? _paperArgb() : null,
                   fitRequests: _c.fitRequests,
                   fitOnStart: _fitOnStart,
                   onFitted: _c.fitted,

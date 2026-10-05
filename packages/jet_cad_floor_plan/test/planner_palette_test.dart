@@ -8,6 +8,11 @@
 // are each asserted on their own, so a palette taken from the wrong source
 // shows up in the crossing that separates the two sources: a dark theme on
 // White paper, and a light theme on Blueprint.
+//
+// Dark canvas decision note K1 (2026-10-05) supersedes D4 for one crossing:
+// a dark theme on White now *shows* the sheet dark, so there the paper set
+// is the dark one and the ink is white. The light theme on Blueprint still
+// separates the paper from the theme.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -83,11 +88,13 @@ void main() {
       final view = await pumpShell(tester, f.doc, f.selected, mode);
       final chrome =
           mode == ThemeMode.dark ? ChromePalette.dark : ChromePalette.light;
-      final set = paper == blueprint ? PaperPalette.dark : PaperPalette.light;
+      // K1: Blueprint is dark paper; a dark theme shows White dark too.
+      final darkPaper = paper == blueprint || mode == ThemeMode.dark;
+      final set = darkPaper ? PaperPalette.dark : PaperPalette.light;
       final seen = look(tester, await shoot(tester));
       expectSelection(seen, set, name);
       expectChrome(seen, chrome, name);
-      if (paper == blueprint) {
+      if (darkPaper) {
         expectLightInk(seen, name);
         expect(inkArgb(tester, f.doc, f.ink), 0xFFFFFFFF);
       } else {
@@ -103,10 +110,10 @@ void main() {
   }
 
   testWidgets(
-      'M-DT-9: a theme switch with no camera move repaints the ruler bar, '
-      'the corner and the sheet edge in the dark chrome and back; the '
-      'paper\'s selection and ink stay, and the canvas keeps its resolver',
-      (tester) async {
+      'M-DT-9, K1: a theme switch over White with no camera move repaints '
+      'the ruler bar, the corner and the sheet edge in the dark chrome and '
+      'back; the sheet turns dark, so the selection and the ink take the '
+      'dark set and the canvas takes a new resolver', (tester) async {
     final m = FlutterTextMeasurer();
     addTearDown(m.clear);
     final f = paletteDoc(m, paper: white);
@@ -122,15 +129,17 @@ void main() {
         reason: 'no camera move: only shouldRepaint can repaint');
     seen = look(tester, await shoot(tester));
     expectChrome(seen, ChromePalette.dark, 'after the switch to dark');
-    expectSelection(seen, PaperPalette.light, 'White stays the light set');
-    expectDarkInk(seen, 'White stays black ink');
-    expect(identical(canvas(tester).painter, painter), isTrue,
-        reason: 'a theme switch under a page keeps the foreground, so the '
-            'resolver, so the painter');
+    expectSelection(seen, PaperPalette.dark, 'White shown dark (K1)');
+    expectLightInk(seen, 'White shown dark: white ink');
+    expect(identical(canvas(tester).painter, painter), isFalse,
+        reason: 'the dark canvas re-tones, so a new resolver, so a new '
+            'painter');
 
     await switchTheme(tester, f.doc, ThemeMode.light);
     seen = look(tester, await shoot(tester));
     expectChrome(seen, ChromePalette.light, 'back to light');
+    expectSelection(seen, PaperPalette.light, 'back to light');
+    expectDarkInk(seen, 'back to light');
   });
 
   testWidgets(

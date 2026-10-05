@@ -169,8 +169,9 @@ final class _Group {
   /// The frame's bounds' width, in world units.
   final double width;
 
-  /// The frame's top-most point (its bounds' centre x at its maximum
-  /// world y): where the chip is centred.
+  /// The frame bounds' top line at their centre x (the bounds' centre x
+  /// at their maximum world y): the chip is centred on it horizontally and
+  /// its bottom edge rests on it (table groups fixes X3).
   final double anchorX, anchorY;
 
   /// The label's text and its paragraph, laid out on one line
@@ -192,8 +193,10 @@ final class _Group {
 /// layer, with a singular transform or an empty box is skipped, as the
 /// picker skips it), offset by [kGroupFrameMarginMm] with round joins,
 /// stroked [kGroupFrameStrokePixels] screen pixels wide in the paper set's
-/// `gripMove`, never filled; and a chip, centred on the frame's top-most
-/// point, filled `gripMove`, with [groupLabel] in the status caption's size
+/// `gripMove`, never filled; and a chip outside the frame, centred on the
+/// frame bounds' centre x with its bottom edge on their top line (table
+/// groups fixes X3: it then covers no member of its own group at any
+/// zoom), filled `gripMove`, with [groupLabel] in the status caption's size
 /// and the ink [foregroundFor] picks on `gripMove`. A chip is skipped when
 /// the frame is narrower on screen than it.
 ///
@@ -415,9 +418,11 @@ class TableGroupPainter extends CustomPainter {
       if (g.width * scale < rrect.width) continue;
       final sx = cam.a * g.anchorX + cam.c * g.anchorY + cam.e;
       final sy = cam.b * g.anchorX + cam.d * g.anchorY + cam.f;
+      // The prebuilt rect spans [-padY, height + padY] in the chip's own
+      // y: its bottom edge lands on the anchor's screen y (fixes X3).
       canvas
         ..save()
-        ..translate(sx - p.width / 2, sy - p.height / 2)
+        ..translate(sx - p.width / 2, sy - (p.height + kGroupChipPaddingY))
         ..drawRRect(rrect, _paint)
         ..drawParagraph(p, Offset.zero)
         ..restore();
