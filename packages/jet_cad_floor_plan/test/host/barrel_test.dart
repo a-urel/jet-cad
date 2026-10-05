@@ -32,6 +32,7 @@ void main() {
       'FloorPlanTable',
       'FloorPlanExport',
       'TableStatus',
+      'TableGroup',
       'ensureFloorPlanFonts',
       'registerFontLicences',
       'SymbolLibraryLoader',

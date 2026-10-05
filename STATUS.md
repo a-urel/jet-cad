@@ -1,5 +1,56 @@
 # jet-cad — project status
 
+**2026-10-05 — table groups (merging and splitting tables): plan
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#8](https://github.com/a-urel/jet-cad/pull/8), a merge
+commit, on the human's word ("main'e merge et", 2026-10-05), before the
+look below was given. Branch history:
+- restarted from `main` at `4490cd9`; spec and plan at `eed5856`;
+- Tasks 1–5 at `638048b`..`9c09121`, Task 6's docs at `0d931d3`;
+- `main` merged in twice (PRs #3–#6 at `8026f1b`, PR #7 at `07136f7`),
+  with no conflict;
+- Copilot's single finding (the demo's next group id ignored non-`G`
+  prefixes) fixed at `8f56773`, with D17b;
+- the ledger archive, `docs/superpowers/ledgers/2026-10-04-table-groups/`,
+  is the branch's last commit. Results:
+[2026-10-04-table-groups-results.md](docs/superpowers/notes/2026-10-04-table-groups-results.md);
+spec [2026-10-04-table-groups-design.md](docs/superpowers/specs/2026-10-04-table-groups-design.md)
+rev 2 (approved "Onaylıyorum, planı yaz"), with "Amended at execution"
+(R-C5-1 and F-1, R-C3-2, R-C3-5, R-C2-1, R-C1-2, R-C1-3, R-C4-1 and
+others); plan [2026-10-04-table-groups.md](docs/superpowers/plans/2026-10-04-table-groups.md).
+Ledger: archived at `docs/superpowers/ledgers/2026-10-04-table-groups/`.
+- **What landed:**
+  - POS-owned runtime groups: `TableGroup`, `setTableGroups` (validated,
+    nothing assigned on a throw), `setGroupStatus`, `selectedGroup`;
+    `onGroupTap`, `onMergeRequested`, `onSplitRequested` on
+    `FloorPlanView`. The document is untouched.
+  - Selection mode: a tap, a long press and a drag act on the whole
+    group; `select` expands to groups; a locked visible member spends the
+    drag.
+  - The look: a purple frame (hull of the members' boxes, 150 mm round
+    offset, `paper.gripMove`), one label chip in a new `PlannerView.overlay`
+    above the drafting, a group status overriding the members' own with
+    one caption under the lead.
+  - Merge and Split on the service bar, shown only with their callbacks;
+    the demo merges (grow or new `G<n>`), splits and sets group statuses.
+- **Reviews:** five task reviews, all Approved with minor test-only
+  findings, each fixed by a "b" commit (1b..5b). M-TG-1..22 all killed
+  (M-TG-19 an invariant check, green).
+- **Gates** (Flutter 3.47.6, Linux, at `9c09121`): render +1304 ~1 −7
+  (standing, package unchanged), planner +1278 (+65), restaurant symbols
+  +94, app +201, demo +23 (+5), dev harness +82; analyze and format clean;
+  engine +1241 −2 (standing, unchanged). `flutter build web --release` ✓
+  for both apps; a Chromium smoke (merge, grow, Bill, drag, split; light,
+  dark, Blueprint), screenshots in
+  `docs/superpowers/notes/2026-10-04-table-groups/`.
+- **Debt:** F-1 (a host cannot ask which members are selectable; a
+  locked/hidden-only remainder group only the POS can clear); at the
+  default fit the chip covers the members' chair lines; frames jump on
+  release during a drag (spec'd).
+- **Owed:** the human's look on macOS, web and a tablet — never simulated.
+- **Next:** the human's look (owed, above). After that, the human's
+  choice of the next sub-project.
+
 **2026-10-04 — dark theme: plan EXECUTED and MERGED into `main`** through
 [a-urel/jet-cad#2](https://github.com/a-urel/jet-cad/pull/2), a merge
 commit, on the human's word ("main'e merge et", 2026-10-04), before the

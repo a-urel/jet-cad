@@ -1,6 +1,8 @@
 // The status layer (spec 14c S6, S7, R-3, R-4, R-14): each statused table's
 // top filled in its status colour, under the drafting, with an optional
-// caption. Not document state.
+// caption. A group's status (table-groups spec G3) fills every visible
+// member over its own status, with one caption, under the lead. Not
+// document state.
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -11,6 +13,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import '../host/floor_plan_types.dart';
 import '../tables/table_index.dart';
+import 'table_groups.dart';
 import 'table_picker.dart';
 
 /// One statused table, prebuilt at status-change or plan-change rate (R-3):
@@ -68,7 +71,14 @@ Color statusCaptionInk(Color colour, int paper) =>
 
 /// Paints the statuses of [document]'s tables through [camera] (S7).
 ///
-/// The fills are rebuilt when the statuses or the plan's state move; each
+/// Each visible table's effective status is its group's (table-groups spec
+/// G3: [groupStatuses], through [tableGroups]) when the group has one, else
+/// its own [statuses] entry. A group status's caption is drawn once, under
+/// the lead: the visible member with a top that [inLeadOrder] puts first
+/// (a file duplicate ties to the lower handle).
+///
+/// The fills are rebuilt when the statuses, the groups or the plan's state
+/// move; each
 /// frame is an indexed loop over them that passes the same [Path], [Paint]
 /// and [ui.Paragraph] objects and one reused matrix buffer to the canvas
 /// (the allocation bar, measured structurally by its test). The matrix is
@@ -83,6 +93,8 @@ class TableStatusPainter extends CustomPainter {
     required this.document,
     required this.camera,
     required this.statuses,
+    required this.tableGroups,
+    required this.groupStatuses,
     required this.paper,
     required Listenable repaint,
   }) : super(repaint: repaint);
@@ -90,6 +102,11 @@ class TableStatusPainter extends CustomPainter {
   final DraftDocument document;
   final ValueListenable<ViewportTransform> camera;
   final ValueListenable<Map<String, TableStatus>> statuses;
+
+  /// The host's groups and their statuses, as `FloorPlanController`'s
+  /// `tableGroups` and `groupStatuses` hold them (ids trimmed).
+  final ValueListenable<Map<String, TableGroup>> tableGroups;
+  final ValueListenable<Map<String, TableStatus>> groupStatuses;
 
   /// The paper under the statuses, ARGB: the page's background, or the
   /// theme's surface with no page (D4, D6c).
@@ -99,6 +116,8 @@ class TableStatusPainter extends CustomPainter {
   int? _state;
   int? _tablesRevision;
   Map<String, TableStatus>? _builtFor;
+  Map<String, TableGroup>? _groupsBuilt;
+  Map<String, TableStatus>? _groupStatusesBuilt;
   int? _paperBuilt;
 
   final Map<Handle, Path?> _paths = {};
@@ -114,48 +133,85 @@ class TableStatusPainter extends CustomPainter {
   @visibleForTesting
   int debugAllocations = 0;
 
+  /// How many times the fills were rebuilt (table-groups spec invariant 1:
+  /// at rebuild rate only).
+  @visibleForTesting
+  int debugRebuilds = 0;
+
   /// How many paints and captions the caches hold (review F-8).
   @visibleForTesting
   int get debugCached => _paints.length + _captions.length;
 
   void _rebuild() {
+    debugRebuilds++;
     final map = statuses.value;
+    final groupMap = groupStatuses.value;
     final paperArgb = paper.value;
     final fills = <_Fill>[];
-    if (map.isNotEmpty) {
+    // With neither map set nothing can fill: no survey.
+    if (map.isNotEmpty || groupMap.isNotEmpty) {
       final survey = TableSurvey.of(document);
-      for (final MapEntry(key: number, value: status) in map.entries) {
-        for (final t in survey.withNumber(number)) {
-          final node = document.tree[t.instance];
-          if (node is! InstanceNode) continue;
-          final layer = document.tables.layers[node.layer];
-          if (layer != null && !layer.visible) continue;
-          final path = _paths.putIfAbsent(t.definition, () => _pathOf(t));
-          if (path == null) continue;
-          final bounds = path.getBounds();
-          final colour = status.color.toARGB32();
-          final paint = _paints.putIfAbsent(colour, () {
-            debugAllocations++;
-            return Paint()
-              ..style = PaintingStyle.fill
-              ..color = status.color;
-          });
-          final caption = status.caption;
-          final label = _labelOf(t.label);
-          fills.add(_Fill(
-            t.instance,
-            path,
-            paint,
-            caption == null || caption.isEmpty
-                ? null
-                : _captionOf(
-                    caption, colour, statusCaptionInk(status.color, paperArgb)),
-            label?.x ?? bounds.center.dx,
-            label?.y ?? bounds.center.dy,
-            label?.half ?? 0,
-            math.min(bounds.width, bounds.height),
-          ));
+      final groupOf = groupMap.isEmpty
+          ? const <String, String>{}
+          : groupIdsByNumber(tableGroups.value);
+      // Each visible table with a top and an effective status, in draw
+      // order (the survey is ascending by handle), and per statused group
+      // its members that may lead.
+      final statused = <(TableInfo, Path, TableStatus, String?)>[];
+      final candidates = <String, List<GroupTable>>{};
+      for (final t in survey.tables) {
+        final number = t.number;
+        if (number == null) continue;
+        final id = groupOf[number];
+        final groupStatus = id == null ? null : groupMap[id];
+        final status = groupStatus ?? map[number];
+        if (status == null) continue;
+        final node = document.tree[t.instance];
+        if (node is! InstanceNode) continue;
+        final layer = document.tables.layers[node.layer];
+        if (layer != null && !layer.visible) continue;
+        final path = _paths.putIfAbsent(t.definition, () => _pathOf(t));
+        if (path == null) continue;
+        statused.add((t, path, status, groupStatus == null ? null : id));
+        if (groupStatus != null) {
+          (candidates[id!] ??= []).add(GroupTable(
+              handle: t.instance,
+              number: number,
+              visible: true,
+              locked: false));
         }
+      }
+      // The lead of each statused group: its caption's one place.
+      final leads = <Handle>{
+        for (final list in candidates.values) inLeadOrder(list).first.handle,
+      };
+      for (final (t, path, status, id) in statused) {
+        final bounds = path.getBounds();
+        final colour = status.color.toARGB32();
+        final paint = _paints.putIfAbsent(colour, () {
+          debugAllocations++;
+          return Paint()
+            ..style = PaintingStyle.fill
+            ..color = status.color;
+        });
+        final caption = status.caption;
+        final captioned = caption != null &&
+            caption.isNotEmpty &&
+            (id == null || leads.contains(t.instance));
+        final label = _labelOf(t.label);
+        fills.add(_Fill(
+          t.instance,
+          path,
+          paint,
+          captioned
+              ? _captionOf(
+                  caption, colour, statusCaptionInk(status.color, paperArgb))
+              : null,
+          label?.x ?? bounds.center.dx,
+          label?.y ?? bounds.center.dy,
+          label?.half ?? 0,
+          math.min(bounds.width, bounds.height),
+        ));
       }
       // Draw order (ascending handle), whatever the map's order.
       fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
@@ -220,15 +276,21 @@ class TableStatusPainter extends CustomPainter {
     final state = document.commands.stateId;
     final revision = document.tables.mutationRevision;
     final map = statuses.value;
+    final groups = tableGroups.value;
+    final groupMap = groupStatuses.value;
     final paperArgb = paper.value;
     if (_state != state ||
         _tablesRevision != revision ||
         !identical(_builtFor, map) ||
+        !identical(_groupsBuilt, groups) ||
+        !identical(_groupStatusesBuilt, groupMap) ||
         _paperBuilt != paperArgb) {
       _rebuild();
       _state = state;
       _tablesRevision = revision;
       _builtFor = map;
+      _groupsBuilt = groups;
+      _groupStatusesBuilt = groupMap;
       _paperBuilt = paperArgb;
     }
     final fills = _fills;
@@ -283,5 +345,7 @@ class TableStatusPainter extends CustomPainter {
   bool shouldRepaint(TableStatusPainter oldDelegate) =>
       !identical(oldDelegate.document, document) ||
       !identical(oldDelegate.statuses, statuses) ||
+      !identical(oldDelegate.tableGroups, tableGroups) ||
+      !identical(oldDelegate.groupStatuses, groupStatuses) ||
       !identical(oldDelegate.paper, paper);
 }

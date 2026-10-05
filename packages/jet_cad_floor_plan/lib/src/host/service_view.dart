@@ -3,7 +3,8 @@
 // chrome, the drafting and the selection outlines -- with Undo, Redo,
 // Export and Print. No palette, no panels, no grips, and nothing that needs
 // `geometry` or `structure` (umbrella D11). 14c's table tool picks,
-// selects and moves tables.
+// selects and moves tables. Table-groups spec G5: Merge and Split, when the
+// host asks for them.
 
 import 'dart:async';
 
@@ -14,6 +15,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
+import '../service/table_group_painter.dart';
+import '../service/table_groups.dart' show mergeQualifies;
 import '../service/table_picker.dart';
 import '../service/table_select_tool.dart';
 import '../service/table_status_painter.dart';
@@ -56,8 +59,9 @@ class _ServiceViewState extends State<ServiceView> {
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   // Spec 14c S3: the table tool, over this copy's tables.
   late final TablePicker _picker = TablePicker(_document);
-  late final TableSelectTool _tool =
-      TableSelectTool(picker: _picker, callbacks: widget.callbacks);
+  // Table-groups spec G4: a member acts with its group.
+  late final TableSelectTool _tool = TableSelectTool(
+      picker: _picker, groups: _c.tableGroups, callbacks: widget.callbacks);
   late final ToolController _tools = ToolController(
       initial: _tool,
       context: ToolContext(
@@ -97,20 +101,69 @@ class _ServiceViewState extends State<ServiceView> {
   // Spec 14c S7: the status layer repaints on the camera, the statuses and
   // every change of this copy (a move, an undo, a redo; R-4), and (dark
   // theme D6c, F-16) on the paper, which a theme switch with no page
-  // changes with no document change.
+  // changes with no document change. Table-groups spec G3: and on the
+  // groups and their statuses.
   final _Bump _changed = _Bump();
   StreamSubscription<DocChange>? _changes;
   late final TableStatusPainter _statusPainter = TableStatusPainter(
     document: _document,
     camera: _c.camera,
     statuses: _c.tableStatuses,
+    tableGroups: _c.tableGroups,
+    groupStatuses: _c.groupStatuses,
     paper: _paper,
-    repaint: Listenable.merge([_c.camera, _c.tableStatuses, _changed, _paper]),
+    repaint: Listenable.merge([
+      _c.camera,
+      _c.tableStatuses,
+      _c.tableGroups,
+      _c.groupStatuses,
+      _changed,
+      _paper
+    ]),
   );
+
+  // Table-groups spec G3: the group frames (under the status fills) and
+  // label chips (above the drafting) repaint on the camera, the groups,
+  // every change of this copy and the paper.
+  late final Listenable _groupRepaint =
+      Listenable.merge([_c.camera, _c.tableGroups, _changed, _paper]);
+  late final TableGroupPainter _framePainter =
+      _groupPainter(TableGroupLayer.frames);
+  late final TableGroupPainter _chipPainter =
+      _groupPainter(TableGroupLayer.chips);
+
+  TableGroupPainter _groupPainter(TableGroupLayer layer) => TableGroupPainter(
+        layer: layer,
+        document: _document,
+        picker: _picker,
+        camera: _c.camera,
+        groups: _c.tableGroups,
+        paper: _paper,
+        repaint: _groupRepaint,
+      );
 
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
       () => widget.flows.ready.value && _page.value != null);
+
+  /// Table-groups spec G5: Merge and Split follow the selection **and** the
+  /// groups. `selectedGroup` updates after `selectedTables` and
+  /// `tableGroups` have notified, so both flags listen to all three: one
+  /// that missed `selectedGroup` would compute before it moved and stay
+  /// stale.
+  late final List<Listenable> _groupSources = [
+    _c.selectedTables,
+    _c.tableGroups,
+    _c.selectedGroup
+  ];
+
+  /// Merge: the selected numbers span two or more units (G5).
+  late final DerivedFlag _canMerge = DerivedFlag(_groupSources,
+      () => mergeQualifies(_c.selectedTables.value, _c.tableGroups.value));
+
+  /// Split: the selection is exactly one group (G5, `selectedGroup`).
+  late final DerivedFlag _canSplit =
+      DerivedFlag(_groupSources, () => _c.selectedGroup.value != null);
 
   /// The paper (D4): the page's background, or with no page the theme's
   /// surface, which the drafting then lies on. It feeds both ACI 7's
@@ -148,6 +201,9 @@ class _ServiceViewState extends State<ServiceView> {
     super.initState();
     _parametric;
     _tableLabels;
+    // Built now, so dispose never builds one over a controller in teardown.
+    _canMerge;
+    _canSplit;
     _page.addListener(_onPage);
     _changes = _document.changes.listen((_) => _changed.bump());
   }
@@ -159,6 +215,8 @@ class _ServiceViewState extends State<ServiceView> {
     _changed.dispose();
     _paper.dispose();
     _pageReady.dispose();
+    _canMerge.dispose();
+    _canSplit.dispose();
     _tools.dispose();
     _tool.dispose();
     _outlines.dispose();
@@ -174,6 +232,10 @@ class _ServiceViewState extends State<ServiceView> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final flows = widget.flows;
+    // Read here, so a host that rebuilds `FloorPlanView` with a callback
+    // added or dropped shows or hides its button (G5); a press reads them
+    // again (14c R-5).
+    final callbacks = widget.callbacks();
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
         for (final chord in kUndoChords) chord: _c.undo,
@@ -198,6 +260,18 @@ class _ServiceViewState extends State<ServiceView> {
                   _button(
                       'service-redo', 'Redo', Icons.redo, _c.canRedo, _c.redo),
                   const SizedBox(width: 8),
+                  // Table-groups spec G5: each shown only when the host
+                  // passed its callback; disabled when the selection does
+                  // not qualify.
+                  if (callbacks.onMergeRequested != null)
+                    _button('service-merge', 'Merge', Icons.merge_type,
+                        _canMerge, _merge),
+                  if (callbacks.onSplitRequested != null)
+                    _button('service-split', 'Split', Icons.call_split,
+                        _canSplit, _split),
+                  if (callbacks.onMergeRequested != null ||
+                      callbacks.onSplitRequested != null)
+                    const SizedBox(width: 8),
                   if (flows.canExport)
                     _button(
                         'service-export',
@@ -233,10 +307,31 @@ class _ServiceViewState extends State<ServiceView> {
                   // The service shows the plan, not the drafting aids.
                   rulers: false,
                   grid: false,
-                  underlay: RepaintBoundary(
+                  // Table-groups spec G3: the frames under the status fills.
+                  underlay: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      RepaintBoundary(
+                        child: CustomPaint(
+                          key: const Key('table-group-layer'),
+                          painter: _framePainter,
+                          size: Size.infinite,
+                        ),
+                      ),
+                      RepaintBoundary(
+                        child: CustomPaint(
+                          key: const Key('table-status-layer'),
+                          painter: _statusPainter,
+                          size: Size.infinite,
+                        ),
+                      ),
+                    ],
+                  ),
+                  // The label chips above the drafting (G3, F-11).
+                  overlay: RepaintBoundary(
                     child: CustomPaint(
-                      key: const Key('table-status-layer'),
-                      painter: _statusPainter,
+                      key: const Key('table-group-chips'),
+                      painter: _chipPainter,
                       size: Size.infinite,
                     ),
                   ),
@@ -247,6 +342,16 @@ class _ServiceViewState extends State<ServiceView> {
         ),
       ),
     );
+  }
+
+  /// Exactly the selected numbers: the host decides what a selection
+  /// spanning a group means (G5).
+  void _merge() =>
+      widget.callbacks().onMergeRequested?.call(_c.selectedTables.value);
+
+  void _split() {
+    final id = _c.selectedGroup.value;
+    if (id != null) widget.callbacks().onSplitRequested?.call(id);
   }
 
   Widget _button(String key, String tooltip, IconData icon,

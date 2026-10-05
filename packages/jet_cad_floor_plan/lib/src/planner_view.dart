@@ -34,6 +34,7 @@ class PlannerView extends StatefulWidget {
     this.fitOnStart = true,
     this.onFitted,
     this.underlay,
+    this.overlay,
     this.rulers = true,
     this.grid = true,
   });
@@ -88,6 +89,11 @@ class PlannerView extends StatefulWidget {
   /// Painted between the page chrome and the drafting (spec 14c S7): the
   /// selection mode's status fills, under the lines.
   final Widget? underlay;
+
+  /// Painted above the drafting and below the selection overlay
+  /// (table-groups spec G3, F-11): the selection mode's group label chips,
+  /// which a chair's lines must not paint over. Null draws nothing there.
+  final Widget? overlay;
 
   /// The rulers around the drawing area; false in the selection mode,
   /// which shows the plan, not the drafting aids.
@@ -250,6 +256,8 @@ class _PlannerViewState extends State<PlannerView> {
                         resolver: widget.resolver,
                         tiles: false,
                       ), // already inside its own RepaintBoundary
+                      if (widget.overlay case final over?)
+                        Positioned.fill(child: over),
                       Positioned.fill(
                         child: RepaintBoundary(
                           child: CustomPaint(

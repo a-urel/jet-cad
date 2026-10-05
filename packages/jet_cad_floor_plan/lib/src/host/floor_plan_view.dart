@@ -28,6 +28,9 @@ class FloorPlanView extends StatefulWidget {
     this.exportName = 'plan',
     this.onTableTap,
     this.onLayoutChanged,
+    this.onGroupTap,
+    this.onMergeRequested,
+    this.onSplitRequested,
   });
 
   final FloorPlanController controller;
@@ -41,6 +44,20 @@ class FloorPlanView extends StatefulWidget {
 
   /// Tables were moved in the selection mode, one call per drag (14c S8).
   final void Function()? onLayoutChanged;
+
+  /// A member of a group was tapped in the selection mode (table-groups
+  /// spec G4): the group's id and the tapped number, after [onTableTap]. A
+  /// locked member reports its tap too.
+  final void Function(String groupId, String number)? onGroupTap;
+
+  /// The service bar's Merge was pressed (G5): the selected numbers. The
+  /// planner only asks; the host decides and calls
+  /// [FloorPlanController.setTableGroups].
+  final void Function(Set<String> numbers)? onMergeRequested;
+
+  /// The service bar's Split was pressed (G5): the selected group's id. The
+  /// planner only asks, as for [onMergeRequested].
+  final void Function(String groupId)? onSplitRequested;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -120,6 +137,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                 callbacks: () => (
                       onTableTap: widget.onTableTap,
                       onLayoutChanged: widget.onLayoutChanged,
+                      onGroupTap: widget.onGroupTap,
+                      onMergeRequested: widget.onMergeRequested,
+                      onSplitRequested: widget.onSplitRequested,
                     ));
           }
           c.startSymbols();

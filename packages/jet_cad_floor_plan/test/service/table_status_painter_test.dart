@@ -99,6 +99,8 @@ TableStatusPainter painterFor(
       document: doc,
       camera: camera,
       statuses: statuses,
+      tableGroups: ValueNotifier(const {}),
+      groupStatuses: ValueNotifier(const {}),
       paper: p,
       repaint: Listenable.merge([camera, statuses, p]));
 }
