@@ -568,9 +568,9 @@ void main() {
     });
 
     test(
-        'TG-L7 the chip is centred on the frame\'s top-most point, filled '
-        'gripMove; it is skipped when the frame is narrower on screen than '
-        'it (G3)', () {
+        'TG-L7 the chip is centred on the frame bounds\' centre x, its '
+        'bottom edge on their top line (fixes X3), filled gripMove; it is '
+        'skipped when the frame is narrower on screen than it (G3)', () {
       final doc = groupedPlan();
       final camera = ValueNotifier(cameraAt(0.06));
       final painter = groupPainter(
@@ -587,13 +587,14 @@ void main() {
       final ys = [for (final c in corners) c.$2];
       final ax = (xs.reduce(math.min) + xs.reduce(math.max)) / 2;
       final ay = ys.reduce(math.max) + kGroupFrameMarginMm;
-      for (final scale in [0.06, 0.11]) {
+      for (final scale in [0.04, 0.06, 0.11]) {
         camera.value = cameraAt(scale);
         final spy = frame(painter);
         final p = spy.paragraphs.single;
         final (sx, sy) = screenOf(camera.value, ax, ay);
         expect(spy.translations.single.dx, closeTo(sx - p.width / 2, 1e-6));
-        expect(spy.translations.single.dy, closeTo(sy - p.height / 2, 1e-6));
+        expect(spy.translations.single.dy,
+            closeTo(sy - (p.height + kGroupChipPaddingY), 1e-6));
         expect(
             spy.rrects.single,
             ui.RRect.fromLTRBR(
@@ -619,6 +620,67 @@ void main() {
       expect(width * 0.004, lessThan(p.width + 2 * kGroupChipPaddingX),
           reason: 'premise');
       expect(frame(painter).paragraphs, isEmpty);
+    });
+
+    test(
+        'TG-L11 M-TGF-8, M-TGF-9: at 0.04 and 0.125 px/mm each chip\'s '
+        'bottom edge lies on its frame bounds\' top line, centred on their '
+        'centre x, above every member\'s box (fixes X3)', () {
+      // Two groups, so the anchors are paired with their own chips: G7
+      // (12 and 7, labelled) and G3 (both tables numbered 3, a file
+      // duplicate, and 20; 9 is hidden and left out). Draw order: G7's
+      // lowest handle (12) before G3's (3).
+      final doc = groupedPlan(duplicate: true);
+      final camera = ValueNotifier(cameraAt(0.04));
+      final painter = groupPainter(
+          TableGroupLayer.chips,
+          doc,
+          camera,
+          ValueNotifier({
+            'G3': tg({'3', '20', '9'}),
+            'G7': tg({'7', '12'}, label: 'Window'),
+          }));
+      // Each group's visible members' box corners, computed here: the
+      // frame bounds' top line is their maximum y plus the margin.
+      final groupsCorners = [
+        for (final g in [
+          ['7', '12'],
+          ['3', '20'],
+        ])
+          [for (final n in g) ...cornersOf(doc, n)]
+      ];
+      for (final scale in [0.04, 0.125]) {
+        camera.value = cameraAt(scale);
+        final spy = frame(painter);
+        expect(spy.rrects, hasLength(2), reason: 'premise: two chips');
+        expect(spy.translations, hasLength(2));
+        for (var i = 0; i < 2; i++) {
+          final corners = groupsCorners[i];
+          final xs = [for (final c in corners) c.$1];
+          final ys = [for (final c in corners) c.$2];
+          final ax = (xs.reduce(math.min) + xs.reduce(math.max)) / 2;
+          final ay = ys.reduce(math.max) + kGroupFrameMarginMm;
+          final (sx, sy) = screenOf(camera.value, ax, ay);
+          final t = spy.translations[i];
+          final r = spy.rrects[i];
+          final bottom = t.dy + r.bottom;
+          final where = 'group $i at $scale px/mm';
+          expect(bottom, lessThanOrEqualTo(sy + 1e-6),
+              reason: '$where: the chip ends on or above the anchor '
+                  '(M-TGF-8)');
+          expect(bottom, closeTo(sy, 1e-6),
+              reason: '$where: the chip rests on the anchor (M-TGF-9)');
+          expect(t.dx + (r.left + r.right) / 2, closeTo(sx, 1e-6),
+              reason: '$where: centred on the bounds\' centre x');
+          for (final (x, y) in corners) {
+            expect(
+                screenOf(camera.value, x, y).$2,
+                greaterThanOrEqualTo(
+                    bottom + kGroupFrameMarginMm * scale - 1e-6),
+                reason: '$where: a member\'s corner below the chip');
+          }
+        }
+      }
     });
 
     testWidgets(

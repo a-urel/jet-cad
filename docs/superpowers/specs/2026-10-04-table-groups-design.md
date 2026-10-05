@@ -645,6 +645,18 @@ the text above disagree, the bullet holds.
   consequence: a group left holding only locked or hidden members (a
   new-group merge's remainder, R-C5-4) cannot be split or merged from the
   demo's UI; only the POS can clear it.
+- **X3 — the chip sits outside the frame**, by the table groups fixes
+  ([2026-10-05-table-groups-fixes-design.md](2026-10-05-table-groups-fixes-design.md),
+  X3). G3's Placement, "centred on the top-most point", is **superseded**:
+  the chip is still centred horizontally on the frame bounds' centre x,
+  but its rounded rectangle's **bottom edge** lies on the frame bounds'
+  top line (maximum y plus the margin) at that x. Per frame it is drawn
+  after `translate(sx - width / 2, sy - (height + kGroupChipPaddingY))`.
+  A chip entirely above the bounds then covers no member of its own group
+  at any zoom (the centred chip covered the chair lines at the default
+  fit). On a slanted frame the chip floats a little above it. The hiding
+  rule and the per-frame recipe are unchanged. TG-L7 and TG-V2 carry the
+  new placement.
 - **R-C5-2 — a merge that empties a group removes its group status**
   (`eecc823`, M7 red in D17). G6 says so only for Split. Without it a stale
   status reattaches when a later merge reuses the id.
