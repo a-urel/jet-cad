@@ -27,8 +27,10 @@ R-C4-2, R-C5-1, R-C2-1, R-C6-2); plan
     deliberate light-theme changes), the status caption's ink from the
     status over the paper; the selected symbol cell's own ink, a
     literal-colour source scan, a live theme switch.
-  - Light theme on light paper is pixel-identical; export, walls, the
-    file format and the engine unchanged.
+  - Light theme on light paper is pixel-identical, but for a status
+    caption that takes white ink over its paper (R-C5-1; the demo's
+    statuses do not); export, walls, the file format and the engine
+    unchanged.
 - **Reviews:** six task reviews: Tasks 1, 2 and 4 Approved; 3, 5 and 6
   "Needs fixes" (minor, test-only), fixed in 3b, 5b and 6b. M-DT-1..20
   all killed.
