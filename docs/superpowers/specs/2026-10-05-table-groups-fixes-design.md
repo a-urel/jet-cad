@@ -1,7 +1,9 @@
 # Table groups fixes (F-1 and the chip at low zoom) — design
 
-**Date:** 2026-10-05. **Status:** design, **revision 1**, awaiting an
-independent review. **Sub-project:** a fix slice of the table groups work
+**Date:** 2026-10-05. **Status:** design, **revision 2**. Revision 1
+(`6a04783`) was reviewed independently: "Ready with fixes", R-1..R-12,
+one of them blocking. All are applied **in place**; see the
+[Revision log](#revision-log). **Sub-project:** a fix slice of the table groups work
 ([2026-10-04-table-groups-design.md](2026-10-04-table-groups-design.md),
 merged in a-urel/jet-cad#8 at `3753ca4`); unnumbered.
 **Approval:** in the brainstorm on 2026-10-05 the human chose this slice
@@ -38,13 +40,13 @@ package are untouched.
   - `TableGroupLookup.selectableMembers(String id) → List<GroupTable>`
     (`service/table_groups.dart:137`) gives a group's visible, unlocked
     members.
-  - `splitGroup` (`:155`) builds on it.
+  - `splitGroup` (`:148`) builds on it.
   - The controller keeps a cached lookup over the active plan's survey,
-    groups and layer revision (`host/floor_plan_controller.dart:556-575`).
+    groups and layer revision (`host/floor_plan_controller.dart:556-580`).
     It uses that lookup for `selectedGroup` (`:602-605`).
 - **F-2. The demo's grow rule is "touches exactly one group".**
-  `DemoHomeState.mergeGroups` checks `touched.length == 1`
-  (`apps/restaurant_demo/lib/main.dart:302-308`). This is ruling R-C5-1:
+  `DemoHomeState.mergeGroups` (`apps/restaurant_demo/lib/main.dart:300-327`)
+  checks `touched.length == 1` (`:305`). This is ruling R-C5-1:
   the host could not see locks or visibility.
 - **F-3. The host cannot see layers.**
   - 14c A-2 (`2026-10-03-selection-mode-design.md:318-319`) gave
@@ -53,13 +55,29 @@ package are untouched.
   - No API exposes layers. F-1 of the table groups spec records the gap.
 - **F-4. The chip is centred on the frame's top-most point.**
   - The anchor is `(centre x, maxY + kGroupFrameMarginMm)`, in world
-    space with y up (`service/table_group_painter.dart:336-340`).
+    space with y up (`service/table_group_painter.dart:339-340`).
   - Per frame it draws after
     `translate(sx - p.width / 2, sy - p.height / 2)` (`:416-422`). So
     half the chip lies inside the frame.
   - At the default fit (about 0.04 px/mm) the 150 mm margin is about
     6 px on screen, less than half the chip's height. The chip then
     covers the members' chair lines (table groups results, "Debt").
+- **F-5b. A unit test pins the old placement.** TG-L7 asserts the chip's
+  translation `dy == sy - p.height / 2`
+  (`test/service/table_group_painter_test.dart:595-596`), over a scale
+  loop at `:591`.
+- **F-6. The query is always fresh.** `_groupLookup` is checked on every
+  call against three keys:
+  - the survey's identity, which changes with the active document or its
+    `stateId` (`:476-486`): a mode switch, `resetLayout`, `load`, undo,
+    redo;
+  - the groups map's identity, new on every `setTableGroups` because
+    `validateTableGroups` returns a fresh map (`:226-230`);
+  - the layer table's `mutationRevision`, which raw layer edits move.
+- **F-7. The camera.** It only pans and zooms with y flipped
+  (`camera_controller.dart:60-101`, `viewport_transform.dart:38-46`:
+  `b = c = 0`, `d < 0`). The largest world y is therefore the smallest
+  screen y.
 - **F-5. The chip test samples the old place.** TG-V2 (M-TG-22,
   `test/host/table_groups_look_test.dart:219`) reads a chip pixel over a
   neighbour's chair line where the centred chip used to be.
@@ -78,6 +96,9 @@ package are untouched.
     set.
   - A number carried by two tables (a file duplicate) appears once.
   - The result is an unmodifiable set.
+- **Fresh.** It is fresh at every call, right after `setTableGroups` and
+  after a mode switch included (F-6), so it is fresher than
+  `selectedGroup`.
 - **Both modes.** It is a pure query, valid in both modes. It reads the
   active plan, which is the design in the design mode, where groups do
   not act (G4) but the rule is still well defined.
@@ -90,7 +111,9 @@ package are untouched.
 ### X2 — The demo uses G6's literal grow rule
 
 `DemoHomeState.mergeGroups(groups, numbers, selectable)`, where
-`selectable(id)` is `controller.selectableMembers`:
+`selectable(id)` is `controller.selectableMembers`. `selectable` answers
+over the same groups as the `groups` argument; in `_merge` that holds,
+because `groups` is `c.tableGroups.value` read just before (R-9):
 - **Grow.** Exactly one group G satisfies both conditions:
   - `selectable(G)` is non-empty;
   - `numbers ⊇ selectable(G)`.
@@ -101,6 +124,19 @@ package are untouched.
 - **New group.** Otherwise the demo makes a new group, as today: the
   numbers leave every group, an emptied group goes with its status, and
   the id is `G<largest trailing digits + 1>`, as fixed at `8f56773`.
+- **Edge cases.**
+  - **Two or more groups fully requested** give a new group. D17's
+    `11, 3` and D20 already pin this.
+  - **A request equal to one group's selectable members and nothing
+    else** cannot come from the toolbar, because `mergeQualifies` is
+    false (`table_groups.dart:169-181`). From a host it is a no-op grow:
+    the groups are re-set with the same content and the merge is logged.
+  - **An empty request** is unreachable from the toolbar. From a host it
+    would make a group with no members, which `setTableGroups` refuses
+    (`:32-34`), so the demo returns without change for it.
+  - **A grow that empties another group** (host-only) drops that group
+    with its status, through `_merge`'s existing `gone` set
+    (`main.dart:340-347`).
 - **R-C5-1 is retired.** The spec's "Amended at execution" records the
   retirement.
 - **No visible change in the UI.** A selection made under the current
@@ -111,17 +147,26 @@ package are untouched.
 
 ### X3 — The chip sits on the frame, outside it
 
+- **Camera assumption.** As F-7: no rotation, y flipped. A host can set
+  `camera.value` to anything; under a rotated camera the "top" is not the
+  screen top, which is accepted (no UI rotates the camera).
 - **Placement.**
-  - The chip is centred horizontally on the frame's top-most point (F-4)
-    as today.
-  - Its rounded rectangle's **bottom edge** lies on the frame's top edge
-    at that point.
+  - The chip is centred horizontally on the frame **bounds'** centre x,
+    as today (F-4).
+  - Its rounded rectangle's **bottom edge** lies on the frame bounds'
+    top line (`maxY + margin`) at that x.
+  - It touches the frame only where the hull's highest vertex sits at
+    the bounds' centre x. On a slanted frame (a diagonal group) the frame
+    is lower there and the chip floats a little above it (Risks). The 2 px
+    stroke is centred on the frame, so where they touch the chip also
+    covers the stroke's outer 1 px.
   - In screen terms, it is drawn after
     `translate(sx - p.width / 2, sy - (p.height + kGroupChipPaddingY))`,
     so the rectangle spans `[sy - p.height - 2·padY, sy]` vertically.
 - **No member is covered.** The frame encloses every member's box plus
-  the margin, so a chip entirely above the frame's top-most point cannot
-  cover a member at any zoom.
+  the margin, so a chip entirely above the frame bounds' top line cannot
+  cover a member of its own group at any zoom. Another group's members
+  higher up can still be covered, as before.
 - **Non-members.** It may cover drafting outside the group, which it
   already could, since the chip is in the overlay above the drafting
   (F-11 of the table groups spec).
@@ -130,17 +175,32 @@ package are untouched.
 - **Per-frame recipe unchanged.** The `RRect` and the paragraph are
   built at rebuild time in chip-local coordinates. Only the translate's
   constant changes, with no allocation (14c S7, R-3).
-- **TG-V2.** It moves its sample to the chip's new place: a neighbour's
-  chair line that now runs under the moved chip. This is a **deliberate
-  expectation change** under X3, not a mechanical one. The test still
-  kills M-TG-22 (chips in the underlay).
+- **Deliberate test changes** under X3. These are not mechanical:
+  - **TG-V2** needs its fixture moved, not only a new sample point.
+    Table 20's chair line sits at the old anchor row, now exactly the
+    chip's bottom edge and so only half covered (`look_test:93-94`). Move
+    table 20 up by a whole number of pixels (8 px = 64 mm at
+    0.125 px/mm), so its line falls on a pixel centre strictly inside the
+    chip's rows. Keep a premise that the row is inside the chip's
+    `RRect`, and update the header comment. The test still kills M-TG-22
+    (chips in the underlay); TG-V3 computes `insideTop(20)` and is
+    unaffected.
+  - **TG-L7**'s expectation becomes `dy == sy - (p.height + kGroupChipPaddingY)`.
+    Its scale loop gains 0.04 px/mm, so it carries M-TGF-8 and M-TGF-9.
+- **Docs to amend.**
+  - The parent spec's G3 Placement still says "centred on the top-most
+    point" (`2026-10-04-table-groups-design.md:281-283`). Its "Amended at
+    execution" gains an X3 bullet.
+  - The painter's class doc (`table_group_painter.dart:195-198`) and the
+    `_Group` anchor doc (`:172-174`) are updated to match.
 
 ### X4 — What does not change
 
 - the group rules, the frames, the statuses and the toolbar;
 - the document;
 - the engine and the render package;
-- every other existing test, which passes unedited.
+- every other existing test, which passes unedited. The exceptions are
+  the two deliberate changes in X3: TG-V2 and TG-L7.
 
 ## Not in scope
 
@@ -159,13 +219,15 @@ package are untouched.
   - `apps/restaurant_demo/lib/main.dart` (the grow rule).
 - **Tests:**
   - `packages/jet_cad_floor_plan/test/host/table_groups_controller_test.dart`
-    (`selectableMembers`);
-  - `test/host/table_groups_look_test.dart` (TG-V2 moved, and a new
-    low-zoom chip test);
+    (`selectableMembers`, a locked-duplicate variant);
+  - `test/host/table_groups_look_test.dart` (TG-V2's fixture moved);
+  - `test/service/table_group_painter_test.dart` (TG-L7's expectation
+    and scale loop);
   - `apps/restaurant_demo/test/demo_test.dart` (the grow rule cases).
 - **Docs:**
   - the table groups spec's "Amended at execution" (R-C5-1 retired, F-1
-    closed);
+    closed, X3's placement);
+  - the painter's doc comments;
   - a results note;
   - STATUS.
 
@@ -186,34 +248,51 @@ and a hidden member; a file duplicate number.
   For `G7 = {12, 3, 8 locked, 9 hidden}` it returns exactly `{12, 3}`.
 - **M-TGF-2** — An untrimmed id. `' G7 '` gives the same set; an unknown
   id gives the empty set.
-- **M-TGF-3** — A duplicate listed twice. A member number carried by two
-  tables (a file duplicate) appears once in the set.
+- **M-TGF-3** — A number decided per number, not per table.
+  - **Fixture:** a variant where table 5 is renamed `8`, so `8` is
+    carried by an unlocked table (5's) and a locked one.
+  - **Expected:** `8` is in the set.
+  - **Kills** a mutant that decides each number by its first table, or by
+    "every table carrying the number is selectable". A `Set` cannot list a
+    number twice, so that is not a mutant.
 - **M-TGF-4** — The demo grows on "touches one group" (R-C5-1).
   - **Fixture:** a host sets `G7 = {12, 3, 7}` while `{3, 20}` is
     selected, then presses Merge.
   - **Expected:** a **new** group `G8 = {3, 20}`, with `G7 = {12, 7}`
     kept.
   - **The R-C5-1 mutant** grows `G7` to `{12, 3, 7, 20}`.
-- **M-TGF-5** — The demo never grows, or grows only when every member
-  (locked ones included) is requested.
-  - **Fixture:** `G7 = {12, 3, 8 locked}`, with the request `{12, 3, 20}`.
-  - **Expected:** `G7` grows to `{12, 3, 8, 20}` under its id and label,
-    since its selectable members `{12, 3}` are all requested.
+- **M-TGF-5** — The demo never grows, grows only when every member
+  (locked ones included) is requested, or drops the label. This is
+  **D18** (`demo_test:767-788`): `G7 = {12, 3, 8, 9}` labelled `Window`
+  grows with `20` and keeps its label. D18 is cited, not duplicated, and
+  re-fired under the new rule.
 - **M-TGF-6** — A group with no selectable member grows vacuously.
   - **Fixture:** `G9 = {8 locked, 9 hidden}`, and the request `{20, 5}`.
   - **Expected:** a new group; `G9` is not grown.
-- **M-TGF-7** — The grow path keeps a number in its old group.
-  - **Fixture:** `G1 = {5, 11}` and `G7 = {12, 3}`, with the request
-    `{12, 3, 5}` (all of G7's selectable members, and part of G1).
-  - **Expected:** `G7` grows to `{12, 3, 5}`, and `G1` becomes `{11}`,
-    keeping its id and label.
-- **M-TGF-8** — Chip still centred, so it covers members. At the default
-  fit (about 0.04 px/mm) and at a close zoom, no chip pixel lies below
-  the frame's top-most screen row, inside the frame. This is read through
-  the recording canvas: the chip's translated rectangle bottom is at most
-  the anchor's screen y.
-- **M-TGF-9** — Chip off the frame. Its bottom edge is within 0.5 px of
-  the anchor's screen y, so it touches the frame and does not float.
+- **M-TGF-7** — The grow path keeps a number in its old group, or loses
+  that group's label or status.
+  - **How the request arrives:** select `12, 3, 5` with only
+    `G7 = {12, 3}` set; then `setTableGroups` adds `G1 = {5, 11}` with
+    label `Bar` and a group status; then press Merge. `mergeQualifies`
+    sees two units (G7, G1), so Merge is enabled.
+  - **Expected:** `G7` grows to `{12, 3, 5}`; `G1` becomes `{11}`,
+    keeping its id, its label `Bar` and its group status.
+  - **Red evidence:** the keep-5 mutant fails through the `ArgumentError`
+    from `validateTableGroups` (`table_groups.dart:35-41`), since 5 would
+    be in two groups.
+- **M-TGF-8** — Chip still centred, so it covers members. Through the
+  recording canvas (the GroupSpy seam: translations and `RRect`s), at
+  cameras of 0.04 and 0.125 px/mm, the chip's translated rectangle bottom
+  is at most the anchor's screen y, within 1e-6.
+- **M-TGF-9** — Chip off the frame. In the same check, its bottom edge
+  equals the anchor's screen y within 1e-6, as TG-L7 compares, so the
+  chip does not float above the bounds' top line.
+- **M-TGF-10** — `selectableMembers` stale.
+  - **Fixture:** call it after `setTableGroups` with the same id and new
+    members, and after `setMode(selection)` when a design layer was locked
+    in between.
+  - **Kills** a memo keyed by the id only, or by the survey only (without
+    the groups or the layer revision).
 - **TG-V2** still kills M-TG-22 at its new sample.
 
 ## Exit gate
@@ -221,7 +300,8 @@ and a hidden member; a file duplicate number.
 1. The planner and demo green lines, `floor_planner`'s tests and
    analyze, and the render package re-run once (unchanged).
 2. `flutter build web --release` for the demo.
-3. M-TGF-1..9 are each killed, recorded in a results note.
+3. M-TGF-1..10 are each killed (M-TGF-5 by D18), recorded in a results
+   note.
 4. A Chromium screenshot of the demo at the default fit with a group:
    the chip clear of the chairs. This is evidence only.
 5. **The human's look:** owed and never simulated.
@@ -231,6 +311,30 @@ and a hidden member; a file duplicate number.
 - **A chip above the frame can leave the visible area.** A group at the
   top of the view puts its chip above the canvas's top edge, where it is
   clipped. This is accepted: panning shows it.
+- **A chip floating on slanted frames.** On a diagonal group the frame
+  at the bounds' centre x is below the bounds' top line, so the chip sits
+  a little above the frame instead of on it. This is accepted: it still
+  covers no member.
 - **`selectableMembers` reads the active plan.** In the design mode it
   answers for the design document. Groups do not act there, so no UI
   depends on it.
+
+## Revision log
+
+Revision 2 applies the independent review of revision 1 (`6a04783`),
+"Ready with fixes":
+
+| Finding | Severity | Change |
+|---|---|---|
+| R-1 | blocking | TG-L7 listed as a deliberate expectation change; its scale loop gains 0.04; F-5b; X4 |
+| R-2 | should-fix | TG-V2's table 20 moved up by 8 px, with a premise |
+| R-3 | should-fix | X3 reworded to the bounds' top line; slanted-frame gap in Risks |
+| R-4 | should-fix | The parent spec's G3 and the painter's docs are amended |
+| R-5 | should-fix | M-TGF-3 uses a locked/unlocked duplicate |
+| R-6 | should-fix | M-TGF-10 (freshness); F-6 |
+| R-7 | should-fix | M-TGF-5 is D18; M-TGF-7 with a label, a status and how the request arrives |
+| R-8 | nit | X2's edge cases |
+| R-9 | nit | `selectable` answers over the same groups as `groups` |
+| R-10 | nit | M-TGF-8/9 at 0.04 and 0.125 px/mm, within 1e-6 |
+| R-11 | nit | X3's camera assumption; "no member of its own group" |
+| R-12 | nit | Citations corrected |
