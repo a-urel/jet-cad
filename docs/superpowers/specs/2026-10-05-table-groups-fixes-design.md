@@ -6,7 +6,8 @@ one of them blocking. All are applied **in place**; see the
 [Revision log](#revision-log). **Sub-project:** a fix slice of the table groups work
 ([2026-10-04-table-groups-design.md](2026-10-04-table-groups-design.md),
 merged in a-urel/jet-cad#8 at `3753ca4`); unnumbered.
-**Approval:** in the brainstorm on 2026-10-05 the human chose this slice
+**Approval:** revision 2 **approved** by the human ("Onaylıyorum, planı
+yaz", 2026-10-05). Before that, in the brainstorm on 2026-10-05 the human chose this slice
 ("Masa gruplarının borcu (fix/)") and its two decisions:
 - `controller.selectableMembers(id)` closes F-1;
 - the label chip moves outside the frame.

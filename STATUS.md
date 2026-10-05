@@ -1,5 +1,20 @@
 # jet-cad — project status
 
+**2026-10-05 — table groups fixes (F-1, the chip at low zoom): spec
+APPROVED, plan WRITTEN, not started** (branch `claude/dreamy-gates-2kgh4o`,
+restarted from `main` at `3753ca4`).
+- **Spec:** [2026-10-05-table-groups-fixes-design.md](docs/superpowers/specs/2026-10-05-table-groups-fixes-design.md)
+  rev 2. Revision 1 (`6a04783`) was reviewed independently, "Ready with
+  fixes", R-1..R-12 applied. The human approved revision 2.
+- **What it delivers:**
+  - `controller.selectableMembers(id)`, which closes F-1;
+  - the demo uses G6's literal grow rule, which retires R-C5-1;
+  - the group label chip sits outside the frame, so it never covers
+    members at low zoom.
+- **Plan:** [2026-10-05-table-groups-fixes.md](docs/superpowers/plans/2026-10-05-table-groups-fixes.md),
+  three tasks.
+- **Next:** execute Task 1, on the human's word.
+
 **2026-10-05 — table groups (merging and splitting tables): plan
 EXECUTED and MERGED into `main`** through
 [a-urel/jet-cad#8](https://github.com/a-urel/jet-cad/pull/8), a merge
