@@ -44,9 +44,15 @@ StyleResolver canvasResolverFor(DraftDocument document,
         : DocumentStyleResolver(document,
             foreground: foregroundFor(paper & 0xFFFFFF));
 
-/// The chroma at and above which a colour only ever gets lighter (K3). Below
-/// it a colour blends towards the exact contrast mirror, which may darken it.
-const double kDarkCanvasNeutralChroma = 0.08;
+/// The OKLab chroma up to which a colour is treated as neutral (K3): it
+/// takes the exact contrast mirror, so it may darken. Pale tints (a pale
+/// zone fill, chroma 0.03–0.09) sit here, so a subtle fill stays subtle.
+const double kDarkCanvasNeutralChroma = 0.09;
+
+/// The OKLab chroma from which a colour is treated as coloured (K3): it is
+/// never darkened. Every saturated ACI colour (1–6, chroma ≥ 0.155) sits
+/// here. Between the two the cases blend linearly.
+const double kDarkCanvasColouredChroma = 0.15;
 
 /// [rgb] (`0xRRGGBB`) as shown on the dark [paperRgb] (K3): the colour whose
 /// WCAG contrast against [paperRgb] equals [rgb]'s contrast against white,
@@ -54,7 +60,10 @@ const double kDarkCanvasNeutralChroma = 0.08;
 /// goes dark grey and black goes white; a coloured one is never darkened,
 /// so yellow stays yellow; between them the two blend by chroma. The result
 /// is brought into sRGB by reducing chroma, never by clipping a channel.
+/// White, whose contrast on white is 1, shows as [paperRgb] itself, so a
+/// white mask is the paper, as it is on white paper.
 int darkCanvasTone(int rgb, int paperRgb) {
+  if (rgb & 0xFFFFFF == 0xFFFFFF) return paperRgb & 0xFFFFFF;
   final lab = _oklab(rgb & 0xFFFFFF);
   final l = lab[0], a = lab[1], b = lab[2];
   final chroma = math.sqrt(a * a + b * b);
@@ -77,7 +86,9 @@ int darkCanvasTone(int rgb, int paperRgb) {
     }
   }
   final mirror = (lo + hi) / 2;
-  final w = (1 - chroma / kDarkCanvasNeutralChroma).clamp(0.0, 1.0);
+  final w = ((kDarkCanvasColouredChroma - chroma) /
+          (kDarkCanvasColouredChroma - kDarkCanvasNeutralChroma))
+      .clamp(0.0, 1.0);
   final shown = w * mirror + (1 - w) * math.max(l, mirror);
   return _inGamut(shown, a, b);
 }
@@ -89,7 +100,9 @@ int darkCanvasTone(int rgb, int paperRgb) {
 ///
 /// **Allocation.** Each distinct inner style is re-toned once and the result
 /// kept: a steady frame finds every style in [_styles] and returns the kept
-/// object, so it allocates nothing beyond what [inner] already does.
+/// object, so it allocates nothing beyond what [inner] already does. The
+/// colour itself is computed once per RGB ([_tones], K3): styles that differ
+/// only in lineweight, linetype or scale share it.
 final class DarkCanvasStyleResolver implements StyleResolver {
   DarkCanvasStyleResolver(this.inner, {required int paper})
       : paper = paper & 0xFFFFFF;
@@ -100,10 +113,15 @@ final class DarkCanvasStyleResolver implements StyleResolver {
   final int paper;
 
   final Map<ResolvedStyle, ResolvedStyle> _styles = {};
+  final Map<int, int> _tones = {};
 
-  /// Test-only: how many styles have been re-toned (cache misses).
+  /// Test-only: how many styles have been re-toned (style cache misses).
   @visibleForTesting
   int debugToneCount = 0;
+
+  /// Test-only: how many colours have been computed (RGB cache misses).
+  @visibleForTesting
+  int debugColourCount = 0;
 
   @override
   StyleContext contextFor(Handle instance, StyleContext inherited) =>
@@ -115,11 +133,16 @@ final class DarkCanvasStyleResolver implements StyleResolver {
     return _styles[style] ??= _retone(style);
   }
 
+  int _tone(int rgb) {
+    debugColourCount++;
+    return darkCanvasTone(rgb, paper);
+  }
+
   ResolvedStyle _retone(ResolvedStyle style) {
     debugToneCount++;
     return ResolvedStyle(
       argb: (style.argb & 0xFF000000) |
-          darkCanvasTone(style.argb & 0xFFFFFF, paper),
+          (_tones[style.argb & 0xFFFFFF] ??= _tone(style.argb & 0xFFFFFF)),
       lineweightHundredths: style.lineweightHundredths,
       linetype: style.linetype,
       linetypeScale: style.linetypeScale,

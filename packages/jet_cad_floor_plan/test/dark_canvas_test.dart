@@ -160,6 +160,40 @@ void main() {
       });
 
       testWidgets(
+          'review finding 8: dark theme, White to Ivory keeps the key, so the '
+          'resolver and the canvas painter stay the same objects',
+          (tester) async {
+        final c = controllerOn(white);
+        await pumpView(tester, c, ThemeMode.dark, viewMode);
+        final resolver =
+            tester.widget<PlannerView>(find.byType(PlannerView)).resolver;
+        final painter =
+            tester.state<DraftCanvasState>(find.byType(DraftCanvas)).painter;
+        final doc = c.activeDocument;
+        doc.commands.execute(SetComponentCommand<PageComponent>(
+            doc.rootHandle,
+            doc.components
+                .get<PageComponent>(doc.rootHandle)!
+                .copyWith(background: 0xFFFAF6EC)));
+        await tester.pump();
+        await tester.pump();
+        expect(
+            identical(
+                tester.widget<PlannerView>(find.byType(PlannerView)).resolver,
+                resolver),
+            isTrue);
+        expect(
+            identical(
+                tester
+                    .state<DraftCanvasState>(find.byType(DraftCanvas))
+                    .painter,
+                painter),
+            isTrue);
+        expect(hex(bareAt(tester, await shoot(tester))),
+            hex(kDarkCanvasPaper & 0xFFFFFF));
+      });
+
+      testWidgets(
           'dark theme, White to Blueprint and back: the sheet and the '
           'resolver follow the page', (tester) async {
         final c = controllerOn(white);

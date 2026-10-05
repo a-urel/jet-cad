@@ -10,13 +10,18 @@
 // Named mutants: M-DC-2 (`darkCanvasFor` on dark papers too), M-DC-5
 // (neutral colours take `max(L, target)`), M-DC-6 (coloured colours take
 // the target exactly), M-DC-7 (the contrast target a constant), M-DC-8 (the
-// resolver's cache skipped).
+// resolver's caches skipped). Review findings 1–3, 5, 6: the pass-through of
+// linetype and scale, `contextFor` on a real instance, gamut mapping by
+// chroma (not clipping), the two blend constants, the RGB cache and the
+// white mask.
 import 'dart:math' as math;
 import 'dart:ui' show Brightness;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+
+import 'dart:typed_data';
 
 import 'support/fixtures.dart';
 
@@ -34,6 +39,20 @@ double _y(int rgb) =>
 double contrast(int a, int b) {
   final ya = _y(a), yb = _y(b);
   return (math.max(ya, yb) + 0.05) / (math.min(ya, yb) + 0.05);
+}
+
+/// OKLab hue, degrees, written out from Ottosson's published matrices.
+double hue(int rgb) {
+  double c(double x) => math.pow(x, 1 / 3).toDouble();
+  final r = _lin((rgb >> 16) & 0xFF),
+      g = _lin((rgb >> 8) & 0xFF),
+      b = _lin(rgb & 0xFF);
+  final l = c(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  final m = c(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  final s = c(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  final a = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+  final bb = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+  return math.atan2(bb, a) * 180 / math.pi;
 }
 
 String hex(int rgb) => '0x${rgb.toRadixString(16).padLeft(6, '0')}';
@@ -115,10 +134,33 @@ void main() {
           }
         });
 
-        test('black goes white; white goes to the paper\'s luminance', () {
+        test('black goes white; white (a mask) is the paper itself', () {
           expect(hex(darkCanvasTone(0x000000, paper)), hex(0xFFFFFF));
-          expect(contrast(darkCanvasTone(0xFFFFFF, paper), paper),
-              closeTo(1.0, 0.05));
+          expect(hex(darkCanvasTone(0xFFFFFF, paper)), hex(paper));
+        });
+
+        test(
+            'pale tints are neutral: they keep their contrast on white, '
+            'so a subtle fill stays subtle (kDarkCanvasNeutralChroma)', () {
+          for (final rgb in [
+            0xE0FFE0, 0xFFF5CC, 0xFFE0E0, 0xCCE5FF, 0xFFCC99, 0x99CC99, //
+          ]) {
+            final shown = darkCanvasTone(rgb, paper);
+            expect(
+                contrast(shown, paper), closeTo(contrast(rgb, 0xFFFFFF), 0.1),
+                reason: '${hex(rgb)} -> ${hex(shown)}');
+          }
+        });
+
+        test(
+            'a lifted colour keeps its OKLab hue to 2 degrees: the gamut '
+            'is met by reducing chroma, not by clipping a channel', () {
+          for (final rgb in [0x0000FF, 0x006400, 0x5C3A1E, 0x800080]) {
+            final shown = darkCanvasTone(rgb, paper);
+            var d = (hue(shown) - hue(rgb)).abs();
+            if (d > 180) d = 360 - d;
+            expect(d, lessThan(2), reason: '${hex(rgb)} -> ${hex(shown)}');
+          }
         });
 
         test(
@@ -182,6 +224,26 @@ void main() {
       addEntity(d, d.rootHandle, const Handle(803), EntityKind.line,
           [10, 20, 30, 40], const [],
           color: const IndexedColor(2));
+      // Black again, but dashed at 2.5 and 0.70 mm: a second style of the
+      // same RGB.
+      d.commands.execute(AddEntityCommand(
+        record: EntityRecord(
+          handle: const Handle(804),
+          owner: d.rootHandle,
+          kind: EntityKind.line,
+          layer: ReservedHandles.layerZero,
+          linetype: ReservedHandles.dashedLinetype,
+          linetypeScale: 2.5,
+          geomIndex: 0,
+          color: const TrueColor(0x000000),
+          lineweight: 70,
+          transparency: 0,
+          flags: 0,
+        ),
+        payload: GeometryPayload(
+            coords: Float64List.fromList(const [10, 20, 30, 40]),
+            scalars: Float64List(0)),
+      ));
       return d;
     }
 
@@ -191,7 +253,7 @@ void main() {
       final d = doc();
       final inner = DocumentStyleResolver(d, foreground: 0x000000);
       final r = DarkCanvasStyleResolver(inner, paper: kDarkCanvasPaper);
-      for (final h in [800, 801, 802, 803]) {
+      for (final h in [800, 801, 802, 803, 804]) {
         final slot = d.entities.slotOf(Handle(h))!;
         final want = inner.styleFor(slot, StyleContext.documentRoot);
         final got = r.styleFor(slot, StyleContext.documentRoot);
@@ -213,6 +275,28 @@ void main() {
       final yellow = r.styleFor(
           d.entities.slotOf(const Handle(803))!, StyleContext.documentRoot);
       expect(yellow.argb, 0xFFFFFF00);
+      final dashed = r.styleFor(
+          d.entities.slotOf(const Handle(804))!, StyleContext.documentRoot);
+      expect(dashed.argb, 0xFFFFFFFF);
+      expect(dashed.linetype, ReservedHandles.dashedLinetype);
+      expect(dashed.linetypeScale, 2.5);
+      expect(dashed.lineweightHundredths, 70);
+    });
+
+    test(
+        'review finding 5: one RGB is computed once, however many styles '
+        'carry it', () {
+      final d = doc();
+      final r = DarkCanvasStyleResolver(
+          DocumentStyleResolver(d, foreground: 0x000000),
+          paper: kDarkCanvasPaper);
+      for (final h in [800, 804, 802]) {
+        r.styleFor(d.entities.slotOf(Handle(h))!, StyleContext.documentRoot);
+      }
+      // 800 (translucent 0.50 mm black), 804 (dashed 0.70 mm black) and 802
+      // (ACI 7 through black): three styles, one colour.
+      expect(r.debugToneCount, 3);
+      expect(r.debugColourCount, 1);
     });
 
     test(
@@ -223,12 +307,13 @@ void main() {
           DocumentStyleResolver(d, foreground: 0x000000),
           paper: kDarkCanvasPaper);
       final slots = [
-        for (final h in [800, 801, 802, 803]) d.entities.slotOf(Handle(h))!
+        for (final h in [800, 801, 802, 803, 804]) d.entities.slotOf(Handle(h))!
       ];
       final first = [
         for (final s in slots) r.styleFor(s, StyleContext.documentRoot)
       ];
-      expect(r.debugToneCount, 4);
+      expect(r.debugToneCount, 5);
+      expect(r.debugColourCount, 3);
       for (var frame = 0; frame < 10; frame++) {
         for (var i = 0; i < slots.length; i++) {
           expect(
@@ -237,15 +322,30 @@ void main() {
               isTrue);
         }
       }
-      expect(r.debugToneCount, 4);
+      expect(r.debugToneCount, 5);
+      expect(r.debugColourCount, 3);
     });
 
-    test('contextFor delegates', () {
+    test(
+        'contextFor delegates, on an instance whose own colour moves the '
+        'context', () {
       final d = doc();
+      addDefinition(d, const Handle(900), 'blk');
+      d.commands.execute(AddNodeCommand(InstanceNode(
+        handle: const Handle(901),
+        parent: d.rootHandle,
+        transform: Transform2.translation(120, -40),
+        definition: const Handle(900),
+        layer: ReservedHandles.layerZero,
+        color: const IndexedColor(3),
+      )));
       final inner = DocumentStyleResolver(d, foreground: 0x000000);
       final r = DarkCanvasStyleResolver(inner, paper: kDarkCanvasPaper);
-      expect(r.contextFor(d.rootHandle, StyleContext.documentRoot),
-          inner.contextFor(d.rootHandle, StyleContext.documentRoot));
+      final want =
+          inner.contextFor(const Handle(901), StyleContext.documentRoot);
+      expect(want, isNot(StyleContext.documentRoot),
+          reason: 'premise: the instance changes the context');
+      expect(r.contextFor(const Handle(901), StyleContext.documentRoot), want);
     });
   });
 }
