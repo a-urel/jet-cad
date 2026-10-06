@@ -1,0 +1,12 @@
+{"protocolVersion":"0.1.1","runnerVersion":"1.31.1","pid":2415,"type":"start","time":0}
+{"suite":{"id":0,"platform":"vm","path":"test/invariants/zz_vm_skip_probe_test.dart"},"type":"suite","time":0}
+{"test":{"id":1,"name":"loading test/invariants/zz_vm_skip_probe_test.dart","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":5}
+{"count":1,"time":23,"type":"allSuites"}
+{"testID":1,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":1079}
+{"group":{"id":2,"suiteID":0,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":2,"line":null,"column":null,"url":null},"type":"group","time":1084}
+{"test":{"id":3,"name":"allocation probe","suiteID":0,"groupIDs":[2],"metadata":{"skip":false,"skipReason":null},"line":6,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/invariants/zz_vm_skip_probe_test.dart"},"type":"testStart","time":1085}
+{"testID":3,"messageType":"skip","message":"the VM allocation profiler could not be started or reached from this process (Service.controlWebServer failed, or its first RPC did not round-trip) -- this environment likely blocks the loopback socket dart:developer opens for it. Run under an environment that allows a local socket; no CLI flag works around this, since the harness starts the service itself at runtime rather than requiring --enable-vm-service.","type":"print","time":1113}
+{"testID":3,"result":"success","skipped":true,"hidden":false,"type":"testDone","time":1117}
+{"test":{"id":4,"name":"a passing neighbour","suiteID":0,"groupIDs":[2],"metadata":{"skip":false,"skipReason":null},"line":9,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/invariants/zz_vm_skip_probe_test.dart"},"type":"testStart","time":1119}
+{"testID":4,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":1125}
+{"success":true,"type":"done","time":1139}

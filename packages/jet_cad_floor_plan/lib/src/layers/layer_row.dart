@@ -6,22 +6,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/strings.dart';
 import '../panel_focus.dart';
 import '../shortcut_guard.dart';
 
-/// The colours a layer may be given (spec 12b decision 6): ACI 1–9, with
-/// their names in the colour menu.
-const List<(int, String)> kLayerColours = [
-  (1, 'Red'),
-  (2, 'Yellow'),
-  (3, 'Green'),
-  (4, 'Cyan'),
-  (5, 'Blue'),
-  (6, 'Magenta'),
-  (7, 'Foreground'),
-  (8, 'Dark grey'),
-  (9, 'Light grey'),
-];
+/// The colours a layer may be given (spec 12b decision 6): ACI 1-9. Their
+/// names are `FloorPlanStrings.colourName`'s, in the UI's language.
+const List<int> kLayerColours = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /// The `0xRRGGBB` a layer of [color] is drawn in, as the style resolver
 /// draws it: ACI 7 (and anything that is not a colour of its own) in the
@@ -113,8 +104,10 @@ class _LayerRowState extends State<LayerRow> {
   final PanelFieldFocusNode _focus =
       PanelFieldFocusNode(debugLabel: 'layer name');
 
-  /// The reason the last Enter was refused, shown under the field.
-  String? _error;
+  /// The name the last Enter refused; its reason is asked of
+  /// [LayerRow.validate] at build, so a language switch re-words it (review
+  /// 14d-1 F-3).
+  String? _refused;
 
   /// Whether the field is open and has not been closed by Enter, Escape or
   /// focus loss: a close hands the focus back, and the focus listener must
@@ -147,7 +140,7 @@ class _LayerRowState extends State<LayerRow> {
 
   void _begin() {
     _open = true;
-    _error = null;
+    _refused = null;
     _text.value = TextEditingValue(
         text: widget.record.name,
         selection: TextSelection(
@@ -171,7 +164,7 @@ class _LayerRowState extends State<LayerRow> {
     final name = _text.text.trim();
     final error = widget.validate(name);
     if (error != null) {
-      setState(() => _error = error);
+      setState(() => _refused = name);
       return;
     }
     _close(commit: name);
@@ -192,6 +185,7 @@ class _LayerRowState extends State<LayerRow> {
 
   @override
   Widget build(BuildContext context) {
+    final strings = FloorPlanStrings.of(context);
     final r = widget.record;
     final enabled = widget.enabled;
     final scheme = Theme.of(context).colorScheme;
@@ -214,27 +208,27 @@ class _LayerRowState extends State<LayerRow> {
                     ? Icons.radio_button_checked
                     : Icons.radio_button_unchecked,
                 tooltip: !r.visible
-                    ? 'A hidden layer cannot be current'
+                    ? strings.hiddenLayerNotCurrent
                     : widget.current
-                        ? 'Current layer'
-                        : 'Make current',
+                        ? strings.currentLayer
+                        : strings.makeCurrent,
                 onPressed: enabled && r.visible ? widget.onMakeCurrent : null,
               ),
               _icon(
                 key: 'layer-eye-$_hex',
                 icon: r.visible ? Icons.visibility : Icons.visibility_off,
                 tooltip: hideBlocked
-                    ? 'The current layer cannot be hidden'
+                    ? strings.currentLayerNotHidden
                     : r.visible
-                        ? 'Hide layer'
-                        : 'Show layer',
+                        ? strings.hideLayer
+                        : strings.showLayer,
                 onPressed:
                     enabled && !hideBlocked ? widget.onToggleVisible : null,
               ),
               _icon(
                 key: 'layer-lock-$_hex',
                 icon: r.locked ? Icons.lock : Icons.lock_open,
-                tooltip: r.locked ? 'Unlock layer' : 'Lock layer',
+                tooltip: r.locked ? strings.unlockLayer : strings.lockLayer,
                 onPressed: enabled ? widget.onToggleLocked : null,
               ),
               // Tight, so the button's own minimum size does not make the
@@ -245,11 +239,11 @@ class _LayerRowState extends State<LayerRow> {
                 child: PopupMenuButton<int>(
                   key: Key('layer-colour-$_hex'),
                   enabled: enabled,
-                  tooltip: 'Layer colour',
+                  tooltip: strings.layerColour,
                   padding: EdgeInsets.zero,
                   onSelected: widget.onColour,
                   itemBuilder: (context) => [
-                    for (final (aci, name) in kLayerColours)
+                    for (final aci in kLayerColours)
                       PopupMenuItem<int>(
                         key: Key('layer-colour-item-$aci'),
                         value: aci,
@@ -259,7 +253,7 @@ class _LayerRowState extends State<LayerRow> {
                               layerSwatchRgb(
                                   IndexedColor(aci), widget.foreground))),
                           const SizedBox(width: 8),
-                          Text(name),
+                          Text(strings.colourName(aci)),
                         ]),
                       ),
                   ],
@@ -339,7 +333,10 @@ class _LayerRowState extends State<LayerRow> {
               border: const OutlineInputBorder(),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              errorText: _error,
+              errorText: switch (_refused) {
+                null => null,
+                final name => widget.validate(name),
+              },
               errorMaxLines: 3,
             ),
           ),

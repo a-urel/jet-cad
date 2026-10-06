@@ -9,10 +9,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryButton, kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../l10n/strings.dart';
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
 import '../service/table_group_painter.dart';
@@ -34,7 +38,8 @@ class ServiceView extends StatefulWidget {
       required this.controller,
       required this.flows,
       required this.fitOnStart,
-      required this.callbacks});
+      required this.callbacks,
+      this.options = _defaultOptions});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -44,6 +49,11 @@ class ServiceView extends StatefulWidget {
 
   /// The host's callbacks, read at each call (14c R-5).
   final ServiceCallbacks Function() callbacks;
+
+  /// The host's service options, read at each press (spec 14d S5-S7).
+  final ServiceOptions Function() options;
+
+  static ServiceOptions _defaultOptions() => kDefaultServiceOptions;
 
   @override
   State<ServiceView> createState() => _ServiceViewState();
@@ -61,7 +71,61 @@ class _ServiceViewState extends State<ServiceView> {
   late final TablePicker _picker = TablePicker(_document);
   // Table-groups spec G4: a member acts with its group.
   late final TableSelectTool _tool = TableSelectTool(
-      picker: _picker, groups: _c.tableGroups, callbacks: widget.callbacks);
+      picker: _picker,
+      groups: _c.tableGroups,
+      callbacks: widget.callbacks,
+      options: widget.options,
+      toGlobal: _toGlobal);
+
+  /// The canvas, whose origin is the interaction layer's (no rulers).
+  final GlobalKey _canvas = GlobalKey();
+
+  Offset _toGlobal(Offset local) {
+    final box = _canvas.currentContext?.findRenderObject();
+    return box is RenderBox && box.attached ? box.localToGlobal(local) : local;
+  }
+
+  // Spec 14d S6: a secondary click on a table. The interaction layer never
+  // sees a press without the primary button (V-1), so the view listens.
+  int? _secondary;
+  Offset _secondaryAt = Offset.zero;
+
+  static bool _isPrecise(PointerDeviceKind kind) =>
+      kind == PointerDeviceKind.mouse ||
+      kind == PointerDeviceKind.stylus ||
+      kind == PointerDeviceKind.invertedStylus;
+
+  void _onSecondaryDown(PointerDownEvent e) {
+    if (!_isPrecise(e.kind) ||
+        e.buttons & kSecondaryButton == 0 ||
+        _tool.phase != ToolPhase.idle) {
+      return;
+    }
+    _secondary = e.pointer;
+    _secondaryAt = e.localPosition;
+  }
+
+  void _onSecondaryUp(PointerUpEvent e) {
+    if (e.pointer != _secondary) return;
+    _secondary = null;
+    if ((e.localPosition - _secondaryAt).distance > kTouchSlop) return;
+    final report = widget.options().onTableContextMenu;
+    // A host without a menu: a right click is nothing, as before 14d; the
+    // selection rule exists for the menu's sake (review F-2).
+    if (report == null) return;
+    final world = _c.camera.value
+        .screenToWorld(Vector2(e.localPosition.dx, e.localPosition.dy));
+    final hit = _picker.pick(world);
+    if (hit == null) return;
+    final number =
+        contextSelect(hit, _selection, group: _tool.groupKeysOf(hit));
+    if (number != null) report(number, e.position);
+  }
+
+  void _onSecondaryCancel(PointerCancelEvent e) {
+    if (e.pointer == _secondary) _secondary = null;
+  }
+
   late final ToolController _tools = ToolController(
       initial: _tool,
       context: ToolContext(
@@ -253,6 +317,7 @@ class _ServiceViewState extends State<ServiceView> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final strings = FloorPlanStrings.of(context);
     final flows = widget.flows;
     // Read here, so a host that rebuilds `FloorPlanView` with a callback
     // added or dropped shows or hides its button (G5); a press reads them
@@ -277,19 +342,19 @@ class _ServiceViewState extends State<ServiceView> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  _button(
-                      'service-undo', 'Undo', Icons.undo, _c.canUndo, _c.undo),
-                  _button(
-                      'service-redo', 'Redo', Icons.redo, _c.canRedo, _c.redo),
+                  _button('service-undo', strings.undo, Icons.undo, _c.canUndo,
+                      _c.undo),
+                  _button('service-redo', strings.redo, Icons.redo, _c.canRedo,
+                      _c.redo),
                   const SizedBox(width: 8),
                   // Table-groups spec G5: each shown only when the host
                   // passed its callback; disabled when the selection does
                   // not qualify.
                   if (callbacks.onMergeRequested != null)
-                    _button('service-merge', 'Merge', Icons.merge_type,
+                    _button('service-merge', strings.merge, Icons.merge_type,
                         _canMerge, _merge),
                   if (callbacks.onSplitRequested != null)
-                    _button('service-split', 'Split', Icons.call_split,
+                    _button('service-split', strings.split, Icons.call_split,
                         _canSplit, _split),
                   if (callbacks.onMergeRequested != null ||
                       callbacks.onSplitRequested != null)
@@ -297,65 +362,75 @@ class _ServiceViewState extends State<ServiceView> {
                   if (flows.canExport)
                     _button(
                         'service-export',
-                        'Export…',
+                        strings.exportEllipsis,
                         Icons.ios_share_outlined,
                         _pageReady,
                         () => flows.export(context)),
-                  _button('service-print', 'Print…', Icons.print_outlined,
-                      _pageReady, () => flows.print(context)),
+                  _button(
+                      'service-print',
+                      strings.printEllipsis,
+                      Icons.print_outlined,
+                      _pageReady,
+                      () => flows.print(context)),
                 ],
               ),
             ),
             Expanded(
               child: ColoredBox(
                 color: scheme.surface,
-                child: PlannerView(
-                  document: _document,
-                  index: _index,
-                  resolver: _resolver,
-                  camera: _c.camera,
-                  page: _page,
-                  policy: _policy,
-                  selection: _selection,
-                  tools: _tools,
-                  outlines: _outlines,
-                  // Dark theme spec D5: the chrome (here the sheet edge)
-                  // follows the theme, the overlays the paper.
-                  chrome: ChromePalette.of(theme.brightness),
-                  paper: PaperPalette.forPaper(_paperArgb()),
-                  sheetArgb: _darkCanvas ? _paperArgb() : null,
-                  fitRequests: _c.fitRequests,
-                  fitOnStart: _fitOnStart,
-                  onFitted: _c.fitted,
-                  // The service shows the plan, not the drafting aids.
-                  rulers: false,
-                  grid: false,
-                  // Table-groups spec G3: the frames under the status fills.
-                  underlay: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      RepaintBoundary(
-                        child: CustomPaint(
-                          key: const Key('table-group-layer'),
-                          painter: _framePainter,
-                          size: Size.infinite,
+                child: Listener(
+                  key: _canvas,
+                  onPointerDown: _onSecondaryDown,
+                  onPointerUp: _onSecondaryUp,
+                  onPointerCancel: _onSecondaryCancel,
+                  child: PlannerView(
+                    document: _document,
+                    index: _index,
+                    resolver: _resolver,
+                    camera: _c.camera,
+                    page: _page,
+                    policy: _policy,
+                    selection: _selection,
+                    tools: _tools,
+                    outlines: _outlines,
+                    // Dark theme spec D5: the chrome (here the sheet edge)
+                    // follows the theme, the overlays the paper.
+                    chrome: ChromePalette.of(theme.brightness),
+                    paper: PaperPalette.forPaper(_paperArgb()),
+                    sheetArgb: _darkCanvas ? _paperArgb() : null,
+                    fitRequests: _c.fitRequests,
+                    fitOnStart: _fitOnStart,
+                    onFitted: _c.fitted,
+                    // The service shows the plan, not the drafting aids.
+                    rulers: false,
+                    grid: false,
+                    // Table-groups spec G3: the frames under the status fills.
+                    underlay: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            key: const Key('table-group-layer'),
+                            painter: _framePainter,
+                            size: Size.infinite,
+                          ),
                         ),
-                      ),
-                      RepaintBoundary(
-                        child: CustomPaint(
-                          key: const Key('table-status-layer'),
-                          painter: _statusPainter,
-                          size: Size.infinite,
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            key: const Key('table-status-layer'),
+                            painter: _statusPainter,
+                            size: Size.infinite,
+                          ),
                         ),
+                      ],
+                    ),
+                    // The label chips above the drafting (G3, F-11).
+                    overlay: RepaintBoundary(
+                      child: CustomPaint(
+                        key: const Key('table-group-chips'),
+                        painter: _chipPainter,
+                        size: Size.infinite,
                       ),
-                    ],
-                  ),
-                  // The label chips above the drafting (G3, F-11).
-                  overlay: RepaintBoundary(
-                    child: CustomPaint(
-                      key: const Key('table-group-chips'),
-                      painter: _chipPainter,
-                      size: Size.infinite,
                     ),
                   ),
                 ),

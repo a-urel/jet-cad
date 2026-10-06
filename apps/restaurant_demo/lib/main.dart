@@ -2,16 +2,22 @@
 // sale application does with the planner, through its public API only.
 //
 // Two dining areas (umbrella decision 12), each a FloorPlanController over
-// a plan kept in memory; a Design / Service toggle that asks before it
-// discards service edits; selection by table number; table groups merged
-// and split from the service bar (table-groups spec G6); and a log of the
-// API's state. An example and an integration surface, not a product.
+// a plan kept in memory, with its service layout kept beside it (spec 14d
+// S4, S9: Design and back shows the moves again; Reset layout drops them);
+// a Design / Service toggle; selection by table number; a table's context
+// menu; the service options; table groups merged and split from the service
+// bar (table-groups spec G6); and a log of the API's state, in English,
+// German or Turkish. An example and an integration surface, not a product.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show AssetBundle, rootBundle;
+import 'package:flutter/services.dart'
+    show AssetBundle, BrowserContextMenu, rootBundle;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
+
+import 'demo_strings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,6 +35,9 @@ Future<void> main() async {
         context: ErrorDescription('registering the plan font')));
   }
   registerFontLicences();
+  // A right click on a table opens the demo's menu, not the browser's
+  // (spec 14d S8): app-global, so the host's to decide.
+  if (kIsWeb) await BrowserContextMenu.disableContextMenu();
   runApp(RestaurantDemo(plans: await loadSamplePlans(rootBundle)));
 }
 
@@ -52,41 +61,75 @@ const Color _seed = Colors.teal;
 
 /// The demo. [plans] seeds the areas' stored plans by name (tests); an area
 /// without one starts empty.
-class RestaurantDemo extends StatelessWidget {
-  const RestaurantDemo({super.key, this.plans = const {}, this.random});
+class RestaurantDemo extends StatefulWidget {
+  const RestaurantDemo(
+      {super.key, this.plans = const {}, this.random, this.locale});
 
   final Map<String, String> plans;
 
   /// The source of "Random statuses" (tests seed it, 14c R-13).
   final math.Random? random;
 
+  /// The language to start in; the system's when null (spec 14d L17).
+  final Locale? locale;
+
+  @override
+  State<RestaurantDemo> createState() => _RestaurantDemoState();
+}
+
+class _RestaurantDemoState extends State<RestaurantDemo> {
+  late Locale? _locale = widget.locale;
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Restaurant demo',
+        onGenerateTitle: (context) => DemoStrings.of(context).title,
         // Dark theme spec D1: the planner follows the host's theme, and the
         // OS picks light or dark.
         theme: ThemeData(colorSchemeSeed: _seed),
         darkTheme:
             ThemeData(colorSchemeSeed: _seed, brightness: Brightness.dark),
         themeMode: ThemeMode.system,
-        home: DemoHome(plans: plans, random: random),
+        // Spec 14d L17: the three languages, switched in the app bar
+        // through `MaterialApp.locale` (V-4), so all three can be looked at
+        // without changing the system's language.
+        locale: _locale,
+        supportedLocales: floorPlanSupportedLocales,
+        localizationsDelegates: floorPlanLocalizationsDelegates,
+        home: DemoHome(
+            plans: widget.plans,
+            random: widget.random,
+            onLocale: (l) => setState(() => _locale = l)),
       );
 }
 
-/// One dining area: its controller and the plan last saved, in memory.
+/// One dining area: its controller, the plan last saved and the service
+/// layout last seen, in memory.
 final class Area {
   Area(this.name, this.controller, this.stored);
 
   final String name;
   final FloorPlanController controller;
   String? stored;
+
+  /// The service layout, kept on `serviceLayoutChanges` (spec 14d S4).
+  String? layout;
+
+  /// Each table's status by its [DemoHomeState.kStatuses] name, so the
+  /// captions are worded again when the language changes (review F-6).
+  final Map<String, String> statusNames = {};
+
+  /// Each group's status by name, as [statusNames] (G6).
+  final Map<String, String> groupStatusNames = {};
 }
 
 class DemoHome extends StatefulWidget {
-  const DemoHome({super.key, required this.plans, this.random});
+  const DemoHome({super.key, required this.plans, this.random, this.onLocale});
 
   final Map<String, String> plans;
   final math.Random? random;
+
+  /// Switches the app's language (spec 14d L17).
+  final void Function(Locale locale)? onLocale;
 
   @override
   State<DemoHome> createState() => DemoHomeState();
@@ -111,6 +154,10 @@ class DemoHomeState extends State<DemoHome> {
   late final math.Random _random = widget.random ?? math.Random();
   final TextEditingController _number = TextEditingController();
 
+  /// The service options (spec 14d S5, S7).
+  bool moves = true;
+  bool longPressMenu = false;
+
   /// The newest line first.
   final List<String> log = [];
 
@@ -123,11 +170,14 @@ class DemoHomeState extends State<DemoHome> {
     // need not call `load()` (14b-2 review F-3).
     for (final a in areas) {
       final c = a.controller;
-      c.mode.addListener(() => _log('${a.name}: mode ${c.mode.value.name}'));
-      c.selectedTables.addListener(() => _log(
-          '${a.name}: selected {${(c.selectedTables.value.toList()..sort()).join(', ')}}'));
-      c.dirty.addListener(
-          () => _log('${a.name}: ${c.dirty.value ? 'edited' : 'saved'}'));
+      c.mode.addListener(() => _log(_words.logMode(
+          a.name,
+          c.mode.value == FloorPlanMode.design
+              ? _words.design
+              : _words.service)));
+      c.selectedTables.addListener(() => _log(_words.logSelected(
+          a.name, (c.selectedTables.value.toList()..sort()).join(', '))));
+      c.dirty.addListener(() => _log(_words.logDirty(a.name, c.dirty.value)));
       // The tables and warnings follow every change of the active plan;
       // the groups line follows the groups and their statuses.
       for (final l in [c.revision, c.tableGroups, c.groupStatuses]) {
@@ -135,6 +185,10 @@ class DemoHomeState extends State<DemoHome> {
           if (mounted) setState(() {});
         });
       }
+      // Kept on every change of the layout, never on a mode switch or a
+      // load, which start from the design (S4).
+      c.serviceLayoutChanges
+          .addListener(() => a.layout = c.serviceLayoutJson());
     }
   }
 
@@ -149,6 +203,24 @@ class DemoHomeState extends State<DemoHome> {
     super.dispose();
   }
 
+  /// The demo's words in the app's language (spec 14d L17).
+  DemoStrings get _words => DemoStrings.of(context);
+
+  /// The language the statuses were last worded in.
+  Type? _wordedIn;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final language = _words.runtimeType;
+    if (_wordedIn != null && _wordedIn != language) {
+      for (final a in areas) {
+        _applyStatuses(a);
+      }
+    }
+    _wordedIn = language;
+  }
+
   void _log(String line) {
     if (!mounted) return;
     setState(() {
@@ -157,38 +229,65 @@ class DemoHomeState extends State<DemoHome> {
     });
   }
 
-  /// The toggle (H10): leaving the service asks first when it has edits.
-  Future<void> _setMode(FloorPlanMode next) async {
-    final c = area.controller;
-    if (next == FloorPlanMode.design && c.serviceEdited) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          key: const Key('discard-dialog'),
-          title: const Text('Discard the service layout?'),
-          content: const Text(
-              'Tables moved during the service go back to the designed plan.'),
-          actions: [
-            TextButton(
-                key: const Key('discard-cancel'),
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel')),
-            FilledButton(
-                key: const Key('discard-ok'),
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Discard')),
-          ],
-        ),
-      );
-      if (discard != true || !mounted) return;
+  /// The toggle (H10). The service layout is kept, not discarded (spec
+  /// 14d S9): entering the service puts it back.
+  void _setMode(FloorPlanMode next) {
+    area.controller.setMode(next);
+    if (next == FloorPlanMode.selection) _restoreLayout(area);
+  }
+
+  /// [a]'s kept layout, put back on its service copy (S4); entries the
+  /// design no longer matches are dropped and logged.
+  void _restoreLayout(Area a) {
+    final layout = a.layout;
+    if (layout == null) return;
+    final r = a.controller.restoreServiceLayout(layout);
+    if (r.applied.isEmpty && r.dropped.isEmpty) return;
+    _log(_words.logRestored(a.name, r.applied.length, r.dropped.length));
+  }
+
+  /// A table's context menu (spec 14d S6): the table is already selected
+  /// alone, or with the selection that held it -- unless it is locked,
+  /// which leaves the selection alone: the menu then acts on the table
+  /// only (review F-1).
+  Future<void> _tableMenu(String number, Offset at) async {
+    final a = area;
+    final selected = a.controller.selectedTables.value;
+    final locked = !selected.contains(number);
+    final tables = locked ? {number} : selected;
+    _log(_words.logMenu(a.name, number));
+    final words = _words;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
+      items: [
+        PopupMenuItem(enabled: false, child: Text(words.tableTitle(number))),
+        PopupMenuItem(
+            key: const Key('menu-select'),
+            value: 'select',
+            enabled: !locked,
+            child: Text(words.selectOnlyThis)),
+        const PopupMenuDivider(),
+        for (final name in kStatuses.keys)
+          PopupMenuItem(
+              key: Key('menu-status-${name.toLowerCase()}'),
+              value: 'status:$name',
+              child: Text(words.statusName(name))),
+      ],
+    );
+    if (choice == null || !mounted || !identical(a, area)) return;
+    if (choice == 'select') {
+      a.controller.select({number});
+    } else if (choice.startsWith('status:')) {
+      // A locked table alone; otherwise the selection, a group's whole.
+      _setStatus(choice.substring('status:'.length), locked ? tables : null);
     }
-    c.setMode(next);
   }
 
   void _save() {
     area.stored = area.controller.designJson();
     area.controller.markSaved();
-    _log('${area.name}: stored ${area.stored!.length} characters');
+    _log(_words.logStored(area.name, area.stored!.length));
   }
 
   void _revert() {
@@ -198,7 +297,11 @@ class DemoHomeState extends State<DemoHome> {
     } else {
       area.controller.load(stored);
     }
-    _log('${area.name}: reloaded');
+    _log(_words.logReloaded(area.name));
+    // A load in the service starts from the design: the layout goes back.
+    if (area.controller.mode.value == FloorPlanMode.selection) {
+      _restoreLayout(area);
+    }
   }
 
   /// The statuses a POS would set (14c S10): by the selected tables.
@@ -209,48 +312,66 @@ class DemoHomeState extends State<DemoHome> {
     'Bill': TableStatus(color: const Color(0x99E53935), caption: 'Bill'),
   };
 
-  void _setStatus(String name) {
-    final c = area.controller;
+  /// [kStatuses]'s status [name], its caption in the app's language.
+  TableStatus? _statusFor(String name) {
     final status = kStatuses[name];
-    // A selected group gets a group status (G6), which overrides its
-    // members' own; Free clears it.
-    final group = c.selectedGroup.value;
+    if (status == null || status.caption == null) return status;
+    return TableStatus(color: status.color, caption: _words.statusName(name));
+  }
+
+  /// Sets status [name] on [tables], the selected ones when null. A
+  /// selected group, when no [tables] are given, gets a group status (G6),
+  /// which overrides its members' own; Free clears it.
+  void _setStatus(String name, [Set<String>? tables]) {
+    final a = area;
+    final group = tables == null ? a.controller.selectedGroup.value : null;
     if (group != null) {
-      final next = Map<String, TableStatus>.of(c.groupStatuses.value);
-      if (status == null) {
-        next.remove(group);
+      if (kStatuses[name] == null) {
+        a.groupStatusNames.remove(group);
       } else {
-        next[group] = status;
+        a.groupStatusNames[group] = name;
       }
-      c.setGroupStatus(next);
-      _log('${area.name}: $name for $group');
+      _applyStatuses(a);
+      _log(_words.logGroupStatus(a.name, _words.statusName(name), group));
       return;
     }
-    final next = Map<String, TableStatus>.of(c.tableStatuses.value);
-    for (final n in c.selectedTables.value) {
-      if (status == null) {
-        next.remove(n);
+    final targets = tables ?? a.controller.selectedTables.value;
+    for (final n in targets) {
+      if (kStatuses[name] == null) {
+        a.statusNames.remove(n);
       } else {
-        next[n] = status;
+        a.statusNames[n] = name;
       }
     }
-    c.setTableStatus(next);
-    _log('${area.name}: $name for '
-        '{${(c.selectedTables.value.toList()..sort()).join(', ')}}');
+    _applyStatuses(a);
+    _log(_words.logStatus(a.name, _words.statusName(name),
+        (targets.toList()..sort()).join(', ')));
+  }
+
+  /// [a]'s table and group statuses, worded in the app's language.
+  void _applyStatuses(Area a) {
+    a.controller.setTableStatus({
+      for (final e in a.statusNames.entries)
+        if (_statusFor(e.value) case final status?) e.key: status,
+    });
+    a.controller.setGroupStatus({
+      for (final e in a.groupStatusNames.entries)
+        if (_statusFor(e.value) case final status?) e.key: status,
+    });
   }
 
   void _randomStatuses() {
-    final c = area.controller;
+    final a = area;
     final names = kStatuses.keys.toList();
-    final next = <String, TableStatus>{};
-    for (final t in c.tables) {
+    a.statusNames.clear();
+    for (final t in a.controller.tables) {
       final n = t.number;
       if (n == null) continue;
-      final status = kStatuses[names[_random.nextInt(names.length)]];
-      if (status != null) next[n] = status;
+      final name = names[_random.nextInt(names.length)];
+      if (kStatuses[name] != null) a.statusNames[n] = name;
     }
-    c.setTableStatus(next);
-    _log('${area.name}: random statuses for ${next.length} tables');
+    _applyStatuses(a);
+    _log(_words.logRandom(a.name, a.controller.tableStatuses.value.length));
   }
 
   /// Orders numbers and group ids as people read them: a shared prefix,
@@ -340,37 +461,40 @@ class DemoHomeState extends State<DemoHome> {
       for (final id in before.keys)
         if (!merged.groups.containsKey(id)) id
     };
-    if (gone.any(c.groupStatuses.value.containsKey)) {
-      c.setGroupStatus({...c.groupStatuses.value}
-        ..removeWhere((id, _) => gone.contains(id)));
+    if (gone.any(a.groupStatusNames.containsKey)) {
+      a.groupStatusNames.removeWhere((id, _) => gone.contains(id));
+      _applyStatuses(a);
     }
-    _log('${a.name}: Merged {${_sorted(numbers)}} as ${merged.id}');
+    _log(_words.logMerged(a.name, _sorted(numbers), merged.id));
   }
 
   /// The service bar's Split (G6): the group goes, and its status with it.
   void _split(Area a, String id) {
     final c = a.controller;
     c.setTableGroups({...c.tableGroups.value}..remove(id));
-    c.setGroupStatus({...c.groupStatuses.value}..remove(id));
-    _log('${a.name}: Split $id');
+    a.groupStatusNames.remove(id);
+    _applyStatuses(a);
+    _log(_words.logSplit(a.name, id));
   }
 
-  /// The name [kStatuses] gives [status], or `status` for another one.
+  /// The name [kStatuses] gives [status], by its colour (a caption is
+  /// worded), or `status` for another one.
   static String _statusName(TableStatus status) => kStatuses.entries
-      .firstWhere((e) => e.value == status,
+      .firstWhere((e) => e.value?.color == status.color,
           orElse: () => const MapEntry('status', null))
       .key;
 
   /// The groups line: `G1: 3+7+12 (Bill)`, by id.
   String _groupsText(FloorPlanController c) {
     final groups = c.tableGroups.value;
-    if (groups.isEmpty) return 'none';
+    if (groups.isEmpty) return _words.none;
     final statuses = c.groupStatuses.value;
     return [
       for (final id in groups.keys.toList()..sort(byNumber))
         [
           '$id: ${(groups[id]!.members.toList()..sort(byNumber)).join('+')}',
-          if (statuses[id] case final s?) ' (${_statusName(s)})',
+          if (statuses[id] case final s?)
+            ' (${_words.statusName(_statusName(s))})',
         ].join()
     ].join(', ');
   }
@@ -385,11 +509,26 @@ class DemoHomeState extends State<DemoHome> {
   Widget build(BuildContext context) {
     final a = area;
     final c = a.controller;
+    final words = _words;
     final title = Theme.of(context).textTheme.titleSmall;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Restaurant demo'),
+        title: Text(words.title),
         actions: [
+          // Spec 14d L17: the app's language.
+          SegmentedButton<String>(
+            key: const Key('language-toggle'),
+            showSelectedIcon: false,
+            segments: [
+              for (final code in const ['en', 'de', 'tr'])
+                ButtonSegment(
+                    value: code,
+                    label: Text(code.toUpperCase(), key: Key('lang-$code'))),
+            ],
+            selected: {FloorPlanStrings.of(context).languageCode},
+            onSelectionChanged: (s) => widget.onLocale?.call(Locale(s.single)),
+          ),
+          const SizedBox(width: 16),
           SegmentedButton<int>(
             key: const Key('area-toggle'),
             showSelectedIcon: false,
@@ -407,13 +546,13 @@ class DemoHomeState extends State<DemoHome> {
             builder: (_, mode, __) => SegmentedButton<FloorPlanMode>(
               key: const Key('mode-toggle'),
               showSelectedIcon: false,
-              segments: const [
+              segments: [
                 ButtonSegment(
                     value: FloorPlanMode.design,
-                    label: Text('Design', key: Key('mode-design'))),
+                    label: Text(words.design, key: const Key('mode-design'))),
                 ButtonSegment(
                     value: FloorPlanMode.selection,
-                    label: Text('Service', key: Key('mode-service'))),
+                    label: Text(words.service, key: const Key('mode-service'))),
               ],
               selected: {mode},
               onSelectionChanged: (s) => _setMode(s.single),
@@ -429,11 +568,16 @@ class DemoHomeState extends State<DemoHome> {
               key: ObjectKey(c),
               controller: c,
               exportName: area.name.toLowerCase(),
-              onExport: (e) => _log('${area.name}: exported ${e.fileName}, '
-                  '${e.bytes.length} bytes'),
-              onTableTap: (n) => _log('${area.name}: tapped $n'),
-              onLayoutChanged: () => _log('${area.name}: layout changed'),
-              onGroupTap: (id, n) => _log('${a.name}: group $id tapped at $n'),
+              onExport: (e) => _log(
+                  _words.logExported(area.name, e.fileName, e.bytes.length)),
+              onTableTap: (n) => _log(_words.logTapped(area.name, n)),
+              onLayoutChanged: () => _log(_words.logLayoutChanged(area.name)),
+              serviceMoves: moves,
+              longPress: longPressMenu
+                  ? FloorPlanLongPress.contextMenu
+                  : FloorPlanLongPress.toggleSelection,
+              onTableContextMenu: _tableMenu,
+              onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
               onMergeRequested: (numbers) => _merge(a, numbers),
               onSplitRequested: (id) => _split(a, id),
             ),
@@ -451,69 +595,83 @@ class DemoHomeState extends State<DemoHome> {
                     builder: (_, dirty, __) => FilledButton(
                         key: const Key('save'),
                         onPressed: dirty ? _save : null,
-                        child: const Text('Save')),
+                        child: Text(words.save)),
                   ),
                   OutlinedButton(
                       key: const Key('revert'),
                       onPressed: _revert,
-                      child: const Text('Revert')),
+                      child: Text(words.revert)),
                   if (c.mode.value == FloorPlanMode.selection)
                     OutlinedButton(
                         key: const Key('reset-layout'),
                         onPressed: c.resetLayout,
-                        child: const Text('Reset layout')),
+                        child: Text(words.resetLayout)),
                   OutlinedButton(
                       key: const Key('fit'),
                       onPressed: c.fitToView,
-                      child: const Text('Fit')),
+                      child: Text(words.fit)),
                 ]),
+                if (c.mode.value == FloorPlanMode.selection) ...[
+                  SwitchListTile(
+                      key: const Key('moves'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(words.moves),
+                      value: moves,
+                      onChanged: (v) => setState(() => moves = v)),
+                  SwitchListTile(
+                      key: const Key('long-press-menu'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(words.longPressMenu),
+                      value: longPressMenu,
+                      onChanged: (v) => setState(() => longPressMenu = v)),
+                ],
                 const SizedBox(height: 16),
                 TextField(
                   key: const Key('select-number'),
                   controller: _number,
-                  decoration: const InputDecoration(
-                      labelText: 'Table numbers (comma separated)'),
+                  decoration:
+                      InputDecoration(labelText: words.tableNumbersField),
                   onSubmitted: (_) => _select(),
                 ),
                 const SizedBox(height: 8),
                 FilledButton.tonal(
                     key: const Key('select'),
                     onPressed: _select,
-                    child: const Text('Select')),
+                    child: Text(words.select)),
                 const SizedBox(height: 16),
-                Text('Status of the selected tables or group', style: title),
+                Text(words.statusOfSelected, style: title),
                 const SizedBox(height: 4),
                 Wrap(spacing: 6, runSpacing: 6, children: [
                   for (final name in kStatuses.keys)
                     OutlinedButton(
                         key: Key('status-${name.toLowerCase()}'),
                         onPressed: () => _setStatus(name),
-                        child: Text(name)),
+                        child: Text(words.statusName(name))),
                   OutlinedButton(
                       key: const Key('status-random'),
                       onPressed: _randomStatuses,
-                      child: const Text('Random statuses')),
+                      child: Text(words.randomStatuses)),
                 ]),
                 const SizedBox(height: 16),
-                Text('Tables', style: title),
+                Text(words.tables, style: title),
                 Text(
                     key: const Key('tables'),
                     c.tables.isEmpty
-                        ? 'none'
+                        ? words.none
                         : [
                             for (final t in c.tables)
                               '${t.number ?? '—'} (${t.seats})'
                           ].join(', ')),
                 const SizedBox(height: 8),
-                Text('Groups', style: title),
+                Text(words.groups, style: title),
                 Text(key: const Key('groups'), _groupsText(c)),
                 for (final (i, w) in c.numberingWarnings.indexed)
-                  Text(w,
+                  Text(FloorPlanStrings.of(context).numberingWarning(w),
                       key: Key('numbering-warning-$i'),
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.error)),
                 const SizedBox(height: 16),
-                Text('Log', style: title),
+                Text(words.log, style: title),
                 for (final (i, line) in log.indexed)
                   Text(line, key: Key('log-$i')),
               ],

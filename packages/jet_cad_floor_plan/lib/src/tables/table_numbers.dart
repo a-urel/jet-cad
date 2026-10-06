@@ -10,21 +10,38 @@ final RegExp _counted = RegExp(r'^[0-9]{1,8}$');
 /// The largest number [nextTableNumber] writes: eight digits (T4, T5).
 const int _kLargestCounted = 99999999;
 
+/// Why a text is not a table number (T4), as a value a UI words (spec 14d
+/// L6).
+enum TableNumberProblem {
+  /// Empty, or longer than [kTableNumberMaxLength] code units, trimmed.
+  length,
+
+  /// A control character, a line break among them.
+  control,
+}
+
 /// Why [raw], trimmed, is not a table number, or null when it is one (T4):
 /// non-empty, at most [kTableNumberMaxLength] code units, no control
 /// character (no line break).
-String? tableNumberError(String raw) {
+TableNumberProblem? tableNumberProblem(String raw) {
   final n = raw.trim();
   if (n.isEmpty || n.length > kTableNumberMaxLength) {
-    return '1 to $kTableNumberMaxLength characters';
+    return TableNumberProblem.length;
   }
   for (final u in n.codeUnits) {
     if (u < 0x20 || (u >= 0x7F && u <= 0x9F)) {
-      return 'No line breaks or control characters';
+      return TableNumberProblem.control;
     }
   }
   return null;
 }
+
+/// [tableNumberProblem] in English, or null.
+String? tableNumberError(String raw) => switch (tableNumberProblem(raw)) {
+      null => null,
+      TableNumberProblem.length => '1 to $kTableNumberMaxLength characters',
+      TableNumberProblem.control => 'No line breaks or control characters',
+    };
 
 /// The value of [number] when it counts for [nextTableNumber]: 1 to 8 ASCII
 /// digits, leading zeros allowed (`"07"` is 7). Null otherwise.

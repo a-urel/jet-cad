@@ -1,5 +1,84 @@
 # jet-cad — project status
 
+**Last updated:** 2026-10-06 (**14d — 14d-2, 14d-1 and 14d-3 — done on `claude/exciting-pasteur-9m22jv`, not merged, not tagged**; 09c-2 MERGED into `main` at `43dd020`; see below).
+- **Slice 14d (POS readiness)** — spec
+  [2026-10-06-pos-readiness-design.md](docs/superpowers/specs/2026-10-06-pos-readiness-design.md),
+  revision 2, **approved by the human** (2026-10-06: *"Q0 evet, diğerleri
+  de önerdiğin gibi, plana geç"*): three built-in languages (en, de, tr;
+  the plan's own text keeps `.` for 0.1.0, no schema change), the service
+  layout and the service options, a release a POS can pin (0.1.0, a host
+  guide, CI on GitHub Actions). Order **14d-2 → 14d-1 → 14d-3**.
+- **14d-2 (the service layout and the service options) is DONE, not
+  merged** (on the human's *"evet, başla"*): plan
+  [2026-10-06-service-layout-and-options.md](docs/superpowers/plans/2026-10-06-service-layout-and-options.md),
+  results [2026-10-06-plan-14d2-results.md](docs/superpowers/notes/2026-10-06-plan-14d2-results.md).
+  `serviceLayoutJson()` / `restoreServiceLayout(json)` (a strict match,
+  the restore as the copy's floor), `serviceEdited` by layout,
+  `serviceLayoutChanges` (never on a mode switch or a load);
+  `FloorPlanView.serviceMoves`, `onTableContextMenu` (a secondary click
+  through the service view's own `Listener`), `longPress`
+  (`FloorPlanLongPress`). The demo keeps each area's layout (no discard
+  question; Reset layout drops it), a table menu, Moves and Long-press
+  switches. Engine and render untouched. Gates: engine 1,241 + 2
+  standing, render 1,240 + 1 skip + 7 standing, planner 1,183,
+  restaurant symbols 94, app 201, demo 20, both web builds, a Chromium
+  smoke. Implemented by the controller without a per-task reviewer; the
+  code has had no independent review yet. **Look owed** (macOS, web, a
+  tablet for the long-press menu).
+- **14d-1 (three languages: en, de, tr) is DONE, not merged** (on the
+  human's *"evet, 14d-1'e başla"*): plan
+  [2026-10-06-three-languages.md](docs/superpowers/plans/2026-10-06-three-languages.md),
+  results [2026-10-06-plan-14d1-results.md](docs/superpowers/notes/2026-10-06-plan-14d1-results.md).
+  `FloorPlanStrings` (one hand-written class per language),
+  `floorPlanSupportedLocales` / `floorPlanLocalizationsDelegates`; the
+  engine and the planner hand out values (`LayerNameProblem`,
+  `TableNumberProblem`, `NumberingWarning` — a breaking host API —,
+  `RoomOccupied`); panel numbers in the language's separator; new rooms
+  and layers named in the language, numbered over all three; 110 symbols
+  and 12 categories in German and Turkish, the document keeping the
+  library's English; a fold for search. The demo has an EN / DE / TR
+  switch, the floor planner follows the system. Guards: a leak test (the
+  planner in Turkish through a recording language) and a determinism test
+  (the same UI edits in English and Turkish encode the same). Gates:
+  engine 1,242 + 2 standing, render 1,240 + 1 skip + 7 standing, planner
+  1,212, restaurant symbols 97, app 203, demo 21, both web builds, a
+  Chromium smoke in German and Turkish. Implemented by the controller
+  without a per-task reviewer; no independent code review yet. **The
+  German and Turkish text is the controller's:** Turkish owed the human's
+  read, German a native speaker's. **Look owed** (macOS, web).
+- **14d-3 (a release a POS can pin) is DONE, not merged, not tagged**
+  (on the human's *"evet, 14d-3'e başla"*): plan
+  [2026-10-06-release.md](docs/superpowers/plans/2026-10-06-release.md),
+  results [2026-10-06-plan-14d3-results.md](docs/superpowers/notes/2026-10-06-plan-14d3-results.md).
+  The four packages at `0.1.0`, a root `CHANGELOG.md`;
+  [docs/host-guide.md](docs/host-guide.md), whose code blocks are
+  checked against `tool/ci/host_probe` (a host outside the workspace,
+  depending on the packages by git); `.github/workflows/ci.yml` runs
+  every gate on pushes to `main` and `claude/**` and on pull requests,
+  comparing failures and skips exactly with `tool/ci/standing_*.txt`,
+  and builds the probe by git at the commit under test. **CI run 1
+  green** (all nine jobs). `tool/ci` is a workspace member with its own
+  tests (19).
+- **14d's independent code review is DONE** (on the human's *"evet,
+  bağımsız kod incelemesi yap"*): three fresh reviewers, one per slice,
+  each *Approved with fixes*, nothing critical. Every finding and its
+  disposition: [2026-10-06-14d-review.md](docs/superpowers/notes/2026-10-06-14d-review.md).
+  Fixed: CI read a test that fails after it completed as passed; the
+  scripts' exit codes untested; the guide's service flow could save a
+  drag over the stored layout; the demo's menu on a locked table acted
+  on the selection; the right panel overflowed at 656 x 700 with a table
+  (4 px English, 24 px German), now one scroll; the leak guard covered a
+  wall only, now every section; stale error words after a language
+  switch; Undo then `setMode` never heard by `serviceLayoutChanges`;
+  English constants removed from `editor.dart` (breaking); six
+  translations. Gates after: planner 1,222, app 203, demo 24, `tool/ci`
+  31; CI runs 3 and 4 green. **Owed the human:** the floor planner's
+  English save-panel file-type labels (localise or waive, 14d-1 F-5).
+  **Next, on the human's word:** the merge of 14d into `main`, then the
+  tag `v0.1.0` on the merge (P3); the looks and the German and Turkish
+  reads owed above.
+  **Sub-project 14 — restaurant embedding (all
+
 **2026-10-05 — dark canvas (a dark theme shows the drawing dark):
 EXECUTED and MERGED into `main`** through
 [a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), a merge

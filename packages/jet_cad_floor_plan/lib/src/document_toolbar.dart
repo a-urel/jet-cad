@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
+import 'l10n/strings.dart';
 import 'shell_commands.dart';
 
 /// The toolbar at the left of the top bar (spec 12a D7): one icon button
@@ -60,7 +62,9 @@ class _CommandButton extends StatelessWidget {
         valueListenable: command.enabled,
         builder: (context, enabled, _) => IconButton(
           key: Key('toolbar-${command.id}'),
-          tooltip: command.tooltip,
+          tooltip: command.tooltipFor(defaultTargetPlatform,
+              control: FloorPlanStrings.of(context).controlKey,
+              shift: FloorPlanStrings.of(context).shiftKey),
           icon: Icon(command.icon),
           iconSize: 20,
           visualDensity: VisualDensity.compact,

@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/strings.dart';
 import '../export/page_printer.dart';
 import '../planner_shell.dart';
 import '../shell_commands.dart';
@@ -28,6 +29,9 @@ class FloorPlanView extends StatefulWidget {
     this.exportName = 'plan',
     this.onTableTap,
     this.onLayoutChanged,
+    this.serviceMoves = true,
+    this.onTableContextMenu,
+    this.longPress = FloorPlanLongPress.toggleSelection,
     this.onGroupTap,
     this.onMergeRequested,
     this.onSplitRequested,
@@ -44,6 +48,25 @@ class FloorPlanView extends StatefulWidget {
 
   /// Tables were moved in the selection mode, one call per drag (14c S8).
   final void Function()? onLayoutChanged;
+
+  /// Whether staff may move tables in the selection mode (spec 14d S5).
+  /// When false, a drag from a table pans as one on the floor does; taps
+  /// and long presses are unchanged. Read at each press.
+  final bool serviceMoves;
+
+  /// A table's context menu was asked for in the selection mode (spec 14d
+  /// S6): a secondary click, or a long press under
+  /// [FloorPlanLongPress.contextMenu]. Its number and the pointer's global
+  /// position. An unselected table is first selected alone, a selected one
+  /// keeps the selection, so the menu acts on `selectedTables`; a locked
+  /// table is reported without a selection change; an unnumbered one is
+  /// not reported. On the web the browser's own menu opens too, unless the
+  /// host calls `BrowserContextMenu.disableContextMenu()` (S8).
+  final void Function(String number, Offset globalPosition)? onTableContextMenu;
+
+  /// What a long press on a table does in the selection mode (spec 14d
+  /// S7).
+  final FloorPlanLongPress longPress;
 
   /// A member of a group was tapped in the selection mode (table-groups
   /// spec G4): the group's id and the tapped number, after [onTableTap]. A
@@ -104,18 +127,18 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     return _fit;
   }
 
-  List<ShellCommand> _commands() => [
+  List<ShellCommand> _commands(FloorPlanStrings strings) => [
         if (_flows.canExport)
           ShellCommand(
               id: 'export',
-              label: 'Export…',
+              label: strings.exportEllipsis,
               icon: Icons.ios_share_outlined,
               shortcuts: kExportChords,
               enabled: _flows.ready,
               run: () => _flows.export(context)),
         ShellCommand(
             id: 'print',
-            label: 'Print…',
+            label: strings.printEllipsis,
             icon: Icons.print_outlined,
             shortcuts: kPrintChords,
             enabled: _flows.ready,
@@ -140,6 +163,11 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                       onGroupTap: widget.onGroupTap,
                       onMergeRequested: widget.onMergeRequested,
                       onSplitRequested: widget.onSplitRequested,
+                    ),
+                options: () => (
+                      serviceMoves: widget.serviceMoves,
+                      longPress: widget.longPress,
+                      onTableContextMenu: widget.onTableContextMenu,
                     ));
           }
           c.startSymbols();
@@ -150,7 +178,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             camera: c.camera,
             fitOnStart: _fitOnStartFor(document),
             fitRequests: c.fitRequests,
-            fileCommands: _commands(),
+            fileCommands: _commands(FloorPlanStrings.of(context)),
             onFitted: c.fitted,
             onSettle: c.registerSettle,
             symbols: c.symbols,

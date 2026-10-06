@@ -1,0 +1,53 @@
+{"protocolVersion":"0.1.1","runnerVersion":"1.31.1","pid":32313,"type":"start","time":0}
+{"suite":{"id":0,"platform":"vm","path":"test/codec/schema_v3_fixture_test.dart"},"type":"suite","time":0}
+{"test":{"id":1,"name":"loading test/codec/schema_v3_fixture_test.dart","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":2}
+{"count":2,"time":18,"type":"allSuites"}
+{"testID":1,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":826}
+{"group":{"id":4,"suiteID":0,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":2,"line":null,"column":null,"url":null},"type":"group","time":831}
+{"test":{"id":5,"name":"a version-3 document loads under the version-4 build","suiteID":0,"groupIDs":[4],"metadata":{"skip":false,"skipReason":null},"line":60,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/codec/schema_v3_fixture_test.dart"},"type":"testStart","time":832}
+{"testID":5,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":889}
+{"test":{"id":8,"name":"a version-3 document survives a round-trip unpadded","suiteID":0,"groupIDs":[4],"metadata":{"skip":false,"skipReason":null},"line":73,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/codec/schema_v3_fixture_test.dart"},"type":"testStart","time":890}
+{"testID":8,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":906}
+{"suite":{"id":1202,"platform":"vm","path":"test/testing/generate_document_test.dart"},"type":"suite","time":23815}
+{"test":{"id":1203,"name":"loading test/testing/generate_document_test.dart","suiteID":1202,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":23815}
+{"testID":1203,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":24089}
+{"group":{"id":1211,"suiteID":1202,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":18,"line":null,"column":null,"url":null},"type":"group","time":24090}
+{"test":{"id":1212,"name":"generateDocument is deterministic across calls","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":21,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24090}
+{"testID":1212,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24349}
+{"test":{"id":1219,"name":"the default document is the one Plan 2 measured, byte for byte","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":39,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24362}
+{"testID":1219,"error":"Expected: <1593811103237081036>\n  Actual: <-565808937189420354>\n","stackTrace":"package:matcher                                expect\ntest/testing/generate_document_test.dart 65:5  main.<fn>\n","isFailure":true,"type":"error","time":24527}
+{"testID":1219,"result":"failure","skipped":false,"hidden":false,"type":"testDone","time":24528}
+{"test":{"id":1223,"name":"defaults reproduce the Plan 2 corpus structurally too","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":71,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24529}
+{"testID":1223,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24553}
+{"test":{"id":1224,"name":"nestingDepth places instances inside definitions","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":90,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24554}
+{"testID":1224,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24576}
+{"test":{"id":1225,"name":"nesting terminates: no definition reaches itself","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":98,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24577}
+{"testID":1225,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24595}
+{"test":{"id":1226,"name":"mirroredFraction produces negative-determinant instances","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":124,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24596}
+{"testID":1226,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24619}
+{"test":{"id":1227,"name":"nonUniformFraction produces anisotropic instances","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":133,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24620}
+{"testID":1227,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24638}
+{"test":{"id":1228,"name":"groupCount puts leaves under group nodes","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":146,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24639}
+{"testID":1228,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24660}
+{"test":{"id":1229,"name":"byBlockFraction and layerCount create more than one resolution path","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":164,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24660}
+{"testID":1229,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24686}
+{"test":{"id":1230,"name":"byBlock entities live where ByBlock means something","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":184,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24687}
+{"testID":1230,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24710}
+{"test":{"id":1231,"name":"dashedFraction is reported and non-zero when asked for","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":197,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24711}
+{"testID":1231,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24743}
+{"test":{"id":1234,"name":"every extension stays deterministic","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":206,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24744}
+{"testID":1234,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24865}
+{"test":{"id":1247,"name":"both text fractions default to zero and change nothing","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":233,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24865}
+{"testID":1247,"error":"Expected: <1593811103237081036>\n  Actual: <-565808937189420354>\n","stackTrace":"package:matcher                                 expect\ntest/testing/generate_document_test.dart 250:5  main.<fn>\n","isFailure":true,"type":"error","time":24909}
+{"testID":1247,"result":"failure","skipped":false,"hidden":false,"type":"testDone","time":24910}
+{"test":{"id":1258,"name":"labelFraction produces repeating strings out of the root budget","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":256,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24911}
+{"testID":1258,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24920}
+{"test":{"id":1261,"name":"labelFraction is not capped by the old floor-text ceiling at a larger corpus","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":284,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24920}
+{"testID":1261,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":24979}
+{"test":{"id":1264,"name":"labelFraction does not change the total leaf count","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":306,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":24980}
+{"testID":1264,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":25002}
+{"test":{"id":1265,"name":"attributedInstanceFraction gives each chosen instance a unique attrib","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":315,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":25003}
+{"testID":1265,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":25011}
+{"test":{"id":1266,"name":"attributedInstanceFraction places attributes in the instance's local space, not world space","suiteID":1202,"groupIDs":[1211],"metadata":{"skip":false,"skipReason":null},"line":340,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/testing/generate_document_test.dart"},"type":"testStart","time":25012}
+{"testID":1266,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":25019}
+{"success":false,"type":"done","time":31692}

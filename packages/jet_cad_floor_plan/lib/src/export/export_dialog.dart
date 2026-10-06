@@ -4,6 +4,8 @@
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show ExportDpi;
 
+import '../l10n/strings.dart';
+
 /// What an export writes (spec 13 D8).
 enum ExportFormat { pdf, png }
 
@@ -60,7 +62,7 @@ class _ExportDialogState extends State<_ExportDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
         key: const Key('export-dialog'),
-        title: const Text('Export'),
+        title: Text(FloorPlanStrings.of(context).exportTitle),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -89,7 +91,7 @@ class _ExportDialogState extends State<_ExportDialog> {
                   for (final d in ExportDpi.values)
                     ButtonSegment(
                         value: d,
-                        label: Text('${d.value} dpi',
+                        label: Text(FloorPlanStrings.of(context).dpi(d.value),
                             key: Key('export-dpi-${d.value}'))),
                 ],
                 selected: {_choice.dpi},
@@ -103,13 +105,13 @@ class _ExportDialogState extends State<_ExportDialog> {
           TextButton(
             key: const Key('export-cancel'),
             onPressed: _cancel,
-            child: const Text('Cancel'),
+            child: Text(FloorPlanStrings.of(context).cancel),
           ),
           FilledButton(
             key: const Key('export-ok'),
             autofocus: true,
             onPressed: () => Navigator.of(context).pop(_choice),
-            child: const Text('Export'),
+            child: Text(FloorPlanStrings.of(context).exportAction),
           ),
         ],
       );

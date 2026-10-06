@@ -29,9 +29,15 @@ final class GallerySymbol {
 /// One collapsible group of the gallery, in the caller's order.
 @immutable
 final class GalleryCategory {
-  const GalleryCategory({required this.name, required this.symbols});
+  const GalleryCategory({required this.name, String? id, required this.symbols})
+      : id = id ?? name;
 
+  /// The header's text.
   final String name;
+
+  /// What keys the header and its collapsed state: [name] unless given, so
+  /// a category shown in another language keeps both (spec 14d L10).
+  final String id;
   final List<GallerySymbol> symbols;
 }
 
@@ -125,14 +131,14 @@ class _SymbolGalleryState extends State<SymbolGallery> {
             for (final category in widget.categories) ...[
               SliverToBoxAdapter(
                 child: _Header(
-                  key: Key('symbol-group-${category.name}'),
+                  key: Key('symbol-group-${category.id}'),
                   name: category.name,
                   count: category.symbols.length,
-                  collapsed: _collapsed.contains(category.name),
-                  onTap: () => _toggle(category.name),
+                  collapsed: _collapsed.contains(category.id),
+                  onTap: () => _toggle(category.id),
                 ),
               ),
-              if (!_collapsed.contains(category.name))
+              if (!_collapsed.contains(category.id))
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                   sliver: SliverGrid(

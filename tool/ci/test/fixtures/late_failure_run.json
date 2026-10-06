@@ -1,0 +1,13 @@
+{"protocolVersion":"0.1.1","runnerVersion":"1.31.1","pid":4801,"type":"start","time":0}
+{"suite":{"id":0,"platform":"vm","path":"test/zz_late_failure_probe_test.dart"},"type":"suite","time":0}
+{"test":{"id":1,"name":"loading test/zz_late_failure_probe_test.dart","suiteID":0,"groupIDs":[],"metadata":{"skip":false,"skipReason":null},"line":null,"column":null,"url":null},"type":"testStart","time":2}
+{"count":1,"time":15,"type":"allSuites"}
+{"testID":1,"result":"success","skipped":false,"hidden":true,"type":"testDone","time":872}
+{"group":{"id":2,"suiteID":0,"parentID":null,"name":"","metadata":{"skip":false,"skipReason":null},"testCount":2,"line":null,"column":null,"url":null},"type":"group","time":879}
+{"test":{"id":3,"name":"fails after it completed","suiteID":0,"groupIDs":[2],"metadata":{"skip":false,"skipReason":null},"line":6,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/zz_late_failure_probe_test.dart"},"type":"testStart","time":880}
+{"testID":3,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":911}
+{"test":{"id":4,"name":"a later neighbour","suiteID":0,"groupIDs":[2],"metadata":{"skip":false,"skipReason":null},"line":10,"column":3,"url":"file:///home/user/jet-cad/packages/jet_cad_2d/test/zz_late_failure_probe_test.dart"},"type":"testStart","time":912}
+{"testID":3,"error":"Bad state: late","stackTrace":"test/zz_late_failure_probe_test.dart 8:15  main.<fn>.<fn>\n","isFailure":false,"type":"error","time":968}
+{"testID":3,"error":"This test failed after it had already completed.\nMake sure to use a matching library which informs the test runner\nof pending async work.","stackTrace":"test/zz_late_failure_probe_test.dart 8:15  main.<fn>.<fn>\n","isFailure":false,"type":"error","time":970}
+{"testID":4,"result":"success","skipped":false,"hidden":false,"type":"testDone","time":1115}
+{"success":false,"type":"done","time":1131}

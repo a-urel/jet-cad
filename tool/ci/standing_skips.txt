@@ -1,0 +1,7 @@
+# Tests that are skipped on every run (spec 14d P5, revision 2), compared
+# exactly as the failures are. A skip for want of the VM service is red
+# even if listed here. Lines: <package> | <suite> | <full test name>.
+#
+# The paint micro-benchmark rig, run by hand: flutter test --tags rig
+# --run-skipped.
+packages/jet_cad_2d_flutter | test/rig/paint_microbench_test.dart | (suite)

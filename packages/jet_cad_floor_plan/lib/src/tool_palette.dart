@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'l10n/strings.dart';
+
 /// One palette row and its shortcut (spec 05 D5).
 final class PaletteEntry {
   const PaletteEntry({
@@ -14,7 +16,9 @@ final class PaletteEntry {
   });
 
   final String keyName;
-  final String label;
+
+  /// The row's words in a language (spec 14d L5): read at build.
+  final String Function(FloorPlanStrings strings) label;
   final String shortcut;
   final LogicalKeyboardKey logicalKey;
   final Tool tool;
@@ -52,31 +56,34 @@ class ToolPalette extends StatelessWidget {
           color: Colors.transparent,
           child: ListenableBuilder(
             listenable: Listenable.merge([tools, fill]),
-            builder: (context, _) => ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              children: [
-                for (final e in entries)
-                  ListTile(
-                    key: Key(e.keyName),
+            builder: (context, _) {
+              final strings = FloorPlanStrings.of(context);
+              return ListView(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                children: [
+                  for (final e in entries)
+                    ListTile(
+                      key: Key(e.keyName),
+                      dense: true,
+                      selected: identical(tools.active, e.tool),
+                      enabled: !e.drawing || geometryAllowed,
+                      title: Text(e.label(strings)),
+                      trailing: Text(e.shortcut),
+                      onTap: () => onSelect(e.tool),
+                    ),
+                  const Divider(),
+                  CheckboxListTile(
+                    key: const Key('tool-fill'),
                     dense: true,
-                    selected: identical(tools.active, e.tool),
-                    enabled: !e.drawing || geometryAllowed,
-                    title: Text(e.label),
-                    trailing: Text(e.shortcut),
-                    onTap: () => onSelect(e.tool),
+                    title: Text(strings.fill),
+                    secondary: const Text('F'),
+                    value: fill.value,
+                    onChanged:
+                        geometryAllowed ? (v) => fill.value = v ?? false : null,
                   ),
-                const Divider(),
-                CheckboxListTile(
-                  key: const Key('tool-fill'),
-                  dense: true,
-                  title: const Text('Fill'),
-                  secondary: const Text('F'),
-                  value: fill.value,
-                  onChanged:
-                      geometryAllowed ? (v) => fill.value = v ?? false : null,
-                ),
-              ],
-            ),
+                ],
+              );
+            },
           ),
         ),
       );

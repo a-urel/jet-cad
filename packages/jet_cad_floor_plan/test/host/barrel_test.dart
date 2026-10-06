@@ -12,7 +12,9 @@ Set<String> barrelNames() {
   final text = File('lib/jet_cad_floor_plan.dart').readAsStringSync();
   final exports = RegExp(r'^export\s[^;]*;', multiLine: true)
       .allMatches(text)
-      .map((m) => m.group(0)!)
+      // One space for any run of whitespace: the formatter wraps a long
+      // `show` list onto its own lines.
+      .map((m) => m.group(0)!.replaceAll(RegExp(r'\s+'), ' '))
       .toList();
   final names = <String>{};
   for (final e in exports) {
@@ -32,12 +34,25 @@ void main() {
       'FloorPlanTable',
       'FloorPlanExport',
       'TableStatus',
+      'ServiceLayoutRestore',
+      'FloorPlanLongPress',
+      'NumberingWarning',
+      'DuplicateNumber',
+      'Unnumbered',
+      'FloorPlanLocalizations',
+      'floorPlanLocalizationsDelegates',
+      'floorPlanSupportedLocales',
+      'FloorPlanStrings',
+      'FloorPlanStringsEn',
+      'FloorPlanStringsDe',
+      'FloorPlanStringsTr',
       'TableGroup',
       'ensureFloorPlanFonts',
       'registerFontLicences',
       'SymbolLibraryLoader',
       'SymbolLibrarySource',
       'furnitureSymbolSource',
+      'SymbolNames',
       'SymbolThumbnails',
       'PagePrinter',
       'PrintingPagePrinter',
@@ -58,7 +73,10 @@ void main() {
     FloorPlanExport? last;
     await tester.pumpWidget(MaterialApp(
         home: FloorPlanView(
-            controller: c, printer: printer, onExport: (e) => last = e)));
+            controller: c,
+            printer: printer,
+            onExport: (e) => last = e,
+            longPress: FloorPlanLongPress.toggleSelection)));
     expect(c.mode.value, FloorPlanMode.design);
     expect(c.tables, const <FloorPlanTable>[]);
     expect(last, isNull);
@@ -66,5 +84,9 @@ void main() {
     expect(registerFontLicences, isA<Function>());
     expect(furnitureSymbolSource, isA<SymbolLibrarySource>());
     c.setTableStatus({'1': TableStatus(color: const Color(0xFF00AA00))});
+    c.setMode(FloorPlanMode.selection);
+    final ServiceLayoutRestore restored =
+        c.restoreServiceLayout(c.serviceLayoutJson()!);
+    expect(restored.applied, isEmpty);
   });
 }

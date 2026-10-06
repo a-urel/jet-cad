@@ -6,3 +6,4 @@ library;
 
 export 'src/symbols/symbol_library_loader.dart'
     show SymbolLibrarySource, furnitureSymbolSource, readBundledLibrary;
+export 'src/symbols/symbol_names.dart' show SymbolNames;

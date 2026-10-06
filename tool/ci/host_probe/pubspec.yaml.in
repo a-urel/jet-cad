@@ -1,0 +1,31 @@
+# The probe's pubspec, written by tool/ci/host_probe.sh with the
+# repository's URL and the commit under test (spec 14d P6). The same
+# dependency lines a host writes (docs/host-guide.md), at a commit SHA.
+name: host_probe
+description: A host outside the workspace (spec 14d P6).
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_floor_plan:
+    git:
+      url: @URL@
+      path: packages/jet_cad_floor_plan
+      ref: @REF@
+  jet_cad_restaurant_symbols:
+    git:
+      url: @URL@
+      path: packages/jet_cad_restaurant_symbols
+      ref: @REF@
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf

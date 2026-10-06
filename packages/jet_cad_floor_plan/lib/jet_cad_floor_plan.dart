@@ -11,11 +11,30 @@ export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/fonts.dart' show ensureFloorPlanFonts;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
-    show FloorPlanExport, FloorPlanMode, FloorPlanTable, TableStatus;
-export 'src/host/floor_plan_types.dart' show TableGroup;
+    show
+        DuplicateNumber,
+        FloorPlanExport,
+        FloorPlanLongPress,
+        FloorPlanMode,
+        FloorPlanTable,
+        ServiceLayoutRestore,
+        NumberingWarning,
+        TableGroup,
+        TableStatus,
+        Unnumbered;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
+export 'src/l10n/localizations.dart'
+    show
+        FloorPlanLocalizations,
+        floorPlanLocalizationsDelegates,
+        floorPlanSupportedLocales;
+export 'src/l10n/strings.dart' show FloorPlanStrings;
+export 'src/l10n/strings_de.dart' show FloorPlanStringsDe;
+export 'src/l10n/strings_en.dart' show FloorPlanStringsEn;
+export 'src/l10n/strings_tr.dart' show FloorPlanStringsTr;
 export 'src/symbols/symbol_library_loader.dart'
     show SymbolLibraryLoader, SymbolLibrarySource, furnitureSymbolSource;
+export 'src/symbols/symbol_names.dart' show SymbolNames;
 // A host with several plans shares one loader and one thumbnail cache
 // between their controllers (R-11).
 export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'

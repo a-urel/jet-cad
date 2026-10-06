@@ -19,6 +19,7 @@ import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
 import '../tables/table_index.dart';
 import 'floor_plan_types.dart';
+import 'service_layout.dart';
 
 /// The thumbnail capacity of a controller's own cache: the app's (spec
 /// 14b-2 R-11), above the 96 symbols of both libraries.
@@ -37,6 +38,11 @@ final class _Plan {
   final SelectionController selection;
   StreamSubscription<DocChange>? changes;
   VoidCallback? onSelection;
+
+  /// The history state last announced on `serviceLayoutChanges`, for a
+  /// service copy: an Undo is announced at once and again by the change
+  /// stream, which is heard once (review 14d-2).
+  int? announced;
 
   /// Cancels what listens to it, at once (R-2).
   void detach() {
@@ -342,9 +348,79 @@ class FloorPlanController extends ChangeNotifier {
 
   _Plan get _active => _service ?? _design;
 
-  /// Whether the service copy has edits (H1): the demo asks before
-  /// discarding them.
-  bool get serviceEdited => (_service?.document.commands.undoDepth ?? 0) > 0;
+  /// Whether the service copy has a layout (spec 14d S3): a table stands
+  /// elsewhere than in the design. Not the undo depth: a restored layout
+  /// has none, and a table dragged back exactly to its place is no edit.
+  /// Surveys the copy's tables at each read: read it on a change, not per
+  /// frame.
+  bool get serviceEdited {
+    final service = _service;
+    return service != null &&
+        serviceLayoutOf(_design.document, service.document).isNotEmpty;
+  }
+
+  /// Fires after every change of the service layout a mode switch or a
+  /// load did not make (spec 14d S4, revision 2): a move, an Undo or a
+  /// Redo in the selection mode, [resetLayout], [restoreServiceLayout];
+  /// for [undo] and [redo], before they return. Never on [setMode], [load]
+  /// or [newPlan], so a host that saves
+  /// [serviceLayoutJson] on it never overwrites its stored layout with the
+  /// empty one a new copy starts with.
+  Listenable get serviceLayoutChanges => _layoutChanges;
+  final _Requests _layoutChanges = _Requests();
+
+  /// The service layout as JSON (spec 14d S1): the tables the selection
+  /// mode moved away from the design, ascending by handle. Null in the
+  /// design mode.
+  String? serviceLayoutJson() {
+    _settle?.call();
+    final service = _service;
+    if (service == null) return null;
+    return encodeServiceLayout(
+        serviceLayoutOf(_design.document, service.document));
+  }
+
+  /// Puts a stored service layout back (spec 14d S2, revision 2): the
+  /// selection mode only (a [StateError] in the design mode). A [json]
+  /// that is not a layout throws a [FormatException] and changes nothing.
+  /// Otherwise the service copy is rebuilt from the design, as
+  /// [resetLayout] does, and every entry whose table is still the same
+  /// table at the same designed place, visible and unlocked, is moved to
+  /// its stored place; the others are dropped. The restored places are
+  /// the copy's floor: Undo does not remove them, [resetLayout] does.
+  ServiceLayoutRestore restoreServiceLayout(String json) {
+    final old = _service;
+    if (old == null) {
+      throw StateError('restoreServiceLayout needs the selection mode');
+    }
+    final entries = decodeServiceLayout(json);
+    _settle?.call();
+    _refreshSelected();
+    final numbers = _selectedTables.value;
+    final match = matchServiceLayout(_design.document, entries);
+    final copy = _copyOf(_design);
+    if (match.applied.isNotEmpty) {
+      // No system is installed for this edit: an entry only translates
+      // (S2), a translation re-stamps no table label (14a T12) and no
+      // parametric object reads a table. The history is cleared before
+      // anything listens, so the restore is no step and fires nothing.
+      final commands = copy.document.commands;
+      commands.execute(CompoundCommand(
+          [for (final e in match.applied) TransformNodeCommand(e.handle, e.to)],
+          label: 'Restore layout'));
+      commands.clearHistory();
+    }
+    _drop(old);
+    _service = _attach(copy);
+    _select(numbers);
+    _refreshFlags();
+    _revision.value++;
+    _layoutChanges.bump();
+    notifyListeners();
+    return ServiceLayoutRestore(
+        applied: [for (final e in match.applied) e.number],
+        dropped: [for (final e in match.dropped) e.number]);
+  }
 
   // ---------------------------------------------------------------------
   // The designed plan.
@@ -446,6 +522,7 @@ class FloorPlanController extends ChangeNotifier {
     _select(numbers);
     _refreshFlags();
     _revision.value++;
+    _layoutChanges.bump();
     notifyListeners();
   }
 
@@ -472,12 +549,27 @@ class FloorPlanController extends ChangeNotifier {
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canUndo) commands.undo();
+    _announceLayout();
   }
 
   void redo() {
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canRedo) commands.redo();
+    _announceLayout();
+  }
+
+  /// Fires [serviceLayoutChanges] if the service copy's history moved since
+  /// it last did. The change stream is asynchronous: without this, a host
+  /// that calls [undo] and then [setMode] in one synchronous step would
+  /// never hear the Undo, and would keep the undone move (review 14d-2).
+  void _announceLayout() {
+    final service = _service;
+    if (service == null) return;
+    final state = service.document.commands.stateId;
+    if (state == service.announced) return;
+    service.announced = state;
+    _layoutChanges.bump();
   }
 
   // ---------------------------------------------------------------------
@@ -508,14 +600,24 @@ class FloorPlanController extends ChangeNotifier {
               number: t.number, seats: t.seats, symbolKey: t.symbolKey)
       ];
 
-  /// The active plan's numbering problems, as text (umbrella D5, R-13):
-  /// numbers used by several tables, and tables with no number.
-  List<String> get numberingWarnings => [
-        for (final d in _tables.diagnostics())
-          if (d.code == TableDiagnosticCodes.duplicateNumber ||
-              d.code == TableDiagnosticCodes.unnumbered)
-            d.message
-      ];
+  /// The active plan's numbering problems (umbrella D5, R-13; spec 14d
+  /// L6): numbers used by several tables, by first appearance, then the
+  /// tables with no number, ascending. Values, not text:
+  /// `FloorPlanStrings.numberingWarning` words one.
+  List<NumberingWarning> get numberingWarnings {
+    final survey = _tables;
+    final byNumber = <String, int>{};
+    for (final t in survey.tables) {
+      if (t.number case final n?) byNumber[n] = (byNumber[n] ?? 0) + 1;
+    }
+    return [
+      for (final MapEntry(key: number, value: count) in byNumber.entries)
+        if (count > 1) DuplicateNumber(number: number, count: count),
+      for (final t in survey.tables)
+        if (t.number == null)
+          Unnumbered(seats: t.seats, symbolKey: t.symbolKey),
+    ];
+  }
 
   /// Selects every live table carrying one of [numbers] that the selection
   /// can hold -- visible, on an unlocked layer -- replacing the selection
@@ -635,7 +737,9 @@ class FloorPlanController extends ChangeNotifier {
       if (_disposed) return;
       _refreshFlags();
       if (identical(plan, _active)) _revision.value++;
+      if (identical(plan, _service)) _announceLayout();
     });
+    plan.announced = plan.document.commands.stateId;
     void onSelection() {
       if (!_disposed && identical(plan, _active)) _refreshSelected();
     }
@@ -681,6 +785,7 @@ class FloorPlanController extends ChangeNotifier {
     if (_ownsThumbnails) thumbnails.dispose();
     camera.dispose();
     _fits.dispose();
+    _layoutChanges.dispose();
     _mode.dispose();
     _dirty.dispose();
     _canUndo.dispose();

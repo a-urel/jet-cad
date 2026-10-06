@@ -265,7 +265,9 @@ void main() {
       });
       await h.pump();
       expect(find.byKey(const Key('symbol-failed')), findsOneWidget);
-      expect(find.textContaining('no asset here'), findsOneWidget);
+      // The words, not the exception (spec 14d V-17): it is logged.
+      expect(find.text('The symbols could not be loaded.'), findsOneWidget);
+      expect(find.textContaining('no asset here'), findsNothing);
       expect(field, findsNothing);
 
       expect(canTakeFocus(tester, 'symbol-retry', find.text('Retry')), isFalse);

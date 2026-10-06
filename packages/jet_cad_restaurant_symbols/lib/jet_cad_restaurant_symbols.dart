@@ -2,4 +2,5 @@
 library;
 
 export 'src/catalog.dart';
+export 'src/names.dart';
 export 'src/source.dart';

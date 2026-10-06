@@ -4,17 +4,14 @@ import 'dart:async' show StreamSubscription;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/strings_en.dart';
+import '../l10n/numbered_names.dart';
+import '../l10n/strings.dart';
 import 'layer_row.dart';
 
 /// How many rows the list shows before it scrolls (spec 12b D9: "about
 /// six"), so the page panel below keeps its room.
 const int kLayerListVisibleRows = 6;
-
-/// The disabled delete button's tooltip when the permissions forbid
-/// `Capability.structure` (spec 12b D11). Neutral, not "read-only": under
-/// the `runtime` preset the Selection section's layer picker still moves
-/// things (Task 10 review info 6).
-const String kLayersLocked = 'Layers cannot be changed in this document';
 
 /// [layers] in the panel's order (spec 12b D10): layer 0 first, then the
 /// others by name under `toLowerCase()`, ties by handle. Independent of
@@ -32,11 +29,22 @@ List<LayerRecord> layersInPanelOrder(Iterable<LayerRecord> layers) {
   return out;
 }
 
-/// The name the panel's + gives a new layer (spec 12b D4): `Layer N`, the
-/// smallest `N ≥ 1` that [layerNameError] accepts in [target].
-String nextLayerName(CommandTarget target) {
+/// The name the panel's + gives a new layer (spec 12b D4, spec 14d L7):
+/// [strings]' `Layer N`, the smallest `N ≥ 1` that no layer's name already
+/// takes in any built-in language (by `toLowerCase()`, the table's own
+/// folding) and that [layerNameError] accepts in [target].
+String nextLayerName(CommandTarget target,
+    [FloorPlanStrings strings = const FloorPlanStringsEn()]) {
+  final used = <int>{
+    for (final r in target.tables.layers.records)
+      if (numberedNameIndex(r.name, (s, n) => s.layerName(n), strings,
+              fold: (s) => s.toLowerCase())
+          case final n?)
+        n,
+  };
   for (var n = 1;; n++) {
-    final name = 'Layer $n';
+    if (used.contains(n)) continue;
+    final name = strings.layerName(n);
     if (layerNameError(target, name) == null) return name;
   }
 }
@@ -173,7 +181,7 @@ class LayerPanelState extends State<LayerPanel> {
     final handle = _doc.handleSeed.next();
     _execute(AddLayerCommand(LayerRecord(
       handle: handle,
-      name: nextLayerName(_doc),
+      name: nextLayerName(_doc, FloorPlanStrings.of(context)),
       color: const IndexedColor(7),
       linetype: zero.linetype,
       lineweight: zero.lineweight,
@@ -193,15 +201,15 @@ class LayerPanelState extends State<LayerPanel> {
   }
 
   /// Why the selected row cannot be deleted, or null when it can.
-  String? _deleteBlocked(Handle? layer) {
-    if (layer == null) return 'Select a layer to delete it';
+  String? _deleteBlocked(Handle? layer, FloorPlanStrings strings) {
+    if (layer == null) return strings.selectLayerToDelete;
     if (layer == ReservedHandles.layerZero) {
-      return 'Layer 0 cannot be deleted';
+      return strings.layerZeroUndeletable;
     }
     if (layer == drawingLayer(_doc)) {
-      return 'The current layer cannot be deleted';
+      return strings.currentLayerUndeletable;
     }
-    if (!layerIsEmpty(_doc, layer)) return 'This layer is in use';
+    if (!layerIsEmpty(_doc, layer)) return strings.layerInUse;
     return null;
   }
 
@@ -217,7 +225,9 @@ class LayerPanelState extends State<LayerPanel> {
     final current = drawingLayer(_doc);
     final rows = layersInPanelOrder(layers.records);
     final title = Theme.of(context).textTheme.titleSmall;
-    final blocked = allowed ? _deleteBlocked(_selected) : kLayersLocked;
+    final strings = FloorPlanStrings.of(context);
+    final blocked =
+        allowed ? _deleteBlocked(_selected, strings) : strings.layersLocked;
     return Material(
       key: const Key('layers-panel'),
       color: Colors.transparent,
@@ -233,7 +243,7 @@ class LayerPanelState extends State<LayerPanel> {
               child: SizedBox(
                 height: 32,
                 child: Row(children: [
-                  Expanded(child: Text('Layers', style: title)),
+                  Expanded(child: Text(strings.layers, style: title)),
                   Icon(_open ? Icons.expand_less : Icons.expand_more, size: 18),
                 ]),
               ),
@@ -279,8 +289,12 @@ class LayerPanelState extends State<LayerPanel> {
                               _selected = r.handle;
                               _editing = r.handle;
                             }),
-                            validate: (name) =>
-                                layerNameError(_doc, name, self: r.handle),
+                            validate: (name) => switch (
+                                layerNameProblem(_doc, name, self: r.handle)) {
+                              null => null,
+                              final p => FloorPlanStrings.of(context)
+                                  .layerNameProblem(p),
+                            },
                             onRename: (name) => _update(
                                 r.handle, (l) => l.copyWith(name: name)),
                             onEndRename: () {
@@ -299,12 +313,12 @@ class LayerPanelState extends State<LayerPanel> {
                   key: const Key('layers-add'),
                   icon: const Icon(Icons.add),
                   iconSize: 18,
-                  tooltip: 'New layer',
+                  tooltip: strings.newLayer,
                   visualDensity: VisualDensity.compact,
                   onPressed: allowed ? _add : null,
                 ),
                 Tooltip(
-                  message: blocked ?? 'Delete layer',
+                  message: blocked ?? strings.deleteLayer,
                   child: IconButton(
                     key: const Key('layers-delete'),
                     icon: const Icon(Icons.delete_outline),

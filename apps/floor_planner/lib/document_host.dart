@@ -15,7 +15,10 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
+    show FloorPlanStrings;
 
+import 'app_strings.dart';
 import 'document_files.dart';
 import 'exit_guard.dart';
 import 'export/export_flow.dart';
@@ -86,10 +89,27 @@ class DocumentSession extends ChangeNotifier {
   /// The file's name, with its extension; null while untitled.
   String? get fileName => _fileName;
 
-  /// The document's name: [kUntitledName], or [fileName] without
+  /// The document's name: [untitledName], or [fileName] without
   /// `.jetplan`.
   String get name =>
-      _fileName == null ? kUntitledName : documentNameOf(_fileName!);
+      _fileName == null ? untitledName : documentNameOf(_fileName!);
+
+  /// What an untitled document is called (spec 14d L16): [kUntitledName]
+  /// until the host sets its language's word.
+  String get untitledName => _untitledName;
+  String _untitledName = kUntitledName;
+
+  /// Sets [untitledName] without notifying (the host sets it during a
+  /// build); true when the shown [name] changed, and the host then calls
+  /// [nameChanged] after the frame.
+  bool setUntitledName(String next) {
+    if (next == _untitledName) return false;
+    _untitledName = next;
+    return _fileName == null;
+  }
+
+  /// Tells the listeners that [name] changed with the language.
+  void nameChanged() => notifyListeners();
 
   /// Where a Save writes, as the files object returned it; opaque here.
   Object? get location => _location;
@@ -270,56 +290,60 @@ class DocumentHostState extends State<DocumentHost> {
   /// Bind them through the shell, which re-wraps each with its own idle
   /// and, for those, its page; a consumer that binds this list directly
   /// would act mid-shape.
-  late final List<ShellCommand> fileCommands = [
-    ShellCommand(
-        id: 'new',
-        label: 'New',
-        icon: Icons.note_add_outlined,
-        shortcuts: kNewChords,
-        enabled: _notBusy,
-        run: newFlow),
-    ShellCommand(
-        id: 'open',
-        label: 'Open…',
-        icon: Icons.folder_open_outlined,
-        shortcuts: kOpenChords,
-        enabled: _notBusy,
-        run: openFlow),
-    ShellCommand(
-        id: 'open-sample',
-        label: 'Open sample',
-        icon: Icons.home_work_outlined,
-        enabled: _notBusy,
-        run: openSampleFlow),
-    ShellCommand(
-        id: 'save',
-        label: 'Save',
-        icon: Icons.save_outlined,
-        shortcuts: kSaveChords,
-        enabled: _notBusy,
-        run: saveStep),
-    ShellCommand(
-        id: 'save-as',
-        label: 'Save As…',
-        icon: Icons.save_as_outlined,
-        shortcuts: kSaveAsChords,
-        enabled: _notBusy,
-        run: saveAsStep),
-    ShellCommand(
-        id: 'export',
-        label: 'Export…',
-        icon: Icons.ios_share_outlined,
-        shortcuts: kExportChords,
-        enabled: _notBusy,
-        run: exportFlow),
-    ShellCommand(
-        id: 'print',
-        label: 'Print…',
-        icon: Icons.print_outlined,
-        shortcuts: kPrintChords,
-        enabled: _notBusy,
-        run: printFlow),
-  ];
+  List<ShellCommand> get fileCommands {
+    final words = AppStrings.of(context);
+    final planner = FloorPlanStrings.of(context);
+    return [
+      ShellCommand(
+          id: 'new',
+          label: words.newDocument,
+          icon: Icons.note_add_outlined,
+          shortcuts: kNewChords,
+          enabled: _notBusy,
+          run: newFlow),
+      ShellCommand(
+          id: 'open',
+          label: words.open,
+          icon: Icons.folder_open_outlined,
+          shortcuts: kOpenChords,
+          enabled: _notBusy,
+          run: openFlow),
+      ShellCommand(
+          id: 'open-sample',
+          label: words.openSample,
+          icon: Icons.home_work_outlined,
+          enabled: _notBusy,
+          run: openSampleFlow),
+      ShellCommand(
+          id: 'save',
+          label: words.save,
+          icon: Icons.save_outlined,
+          shortcuts: kSaveChords,
+          enabled: _notBusy,
+          run: saveStep),
+      ShellCommand(
+          id: 'save-as',
+          label: words.saveAs,
+          icon: Icons.save_as_outlined,
+          shortcuts: kSaveAsChords,
+          enabled: _notBusy,
+          run: saveAsStep),
+      ShellCommand(
+          id: 'export',
+          label: planner.exportEllipsis,
+          icon: Icons.ios_share_outlined,
+          shortcuts: kExportChords,
+          enabled: _notBusy,
+          run: exportFlow),
+      ShellCommand(
+          id: 'print',
+          label: planner.printEllipsis,
+          icon: Icons.print_outlined,
+          shortcuts: kPrintChords,
+          enabled: _notBusy,
+          run: printFlow),
+    ];
+  }
 
   VoidCallback _registerSettle(VoidCallback settle) {
     _settle = settle;
@@ -412,9 +436,11 @@ class DocumentHostState extends State<DocumentHost> {
   /// the current document may go (D10).
   Future<void> openSampleFlow() => _flow(() async {
         _settlePendingInput();
+        // The sample's room names in the language of the moment (L7).
+        final strings = FloorPlanStrings.of(context);
         if (!await _mayDiscard()) return;
         final measurer = FlutterTextMeasurer();
-        _session.replace(startupPlan(measurer), measurer);
+        _session.replace(startupPlan(measurer, strings: strings), measurer);
       });
 
   /// Open (spec 12a D8): once the current document may go -- asked before
@@ -432,7 +458,7 @@ class DocumentHostState extends State<DocumentHost> {
         try {
           file = await widget.files.open();
         } catch (e) {
-          await _showError('Could not open the file', e);
+          await _showError((w) => w.couldNotOpenFile, e);
           return;
         }
         if (file == null) return;
@@ -446,7 +472,8 @@ class DocumentHostState extends State<DocumentHost> {
               diagnostics: <Diagnostic>[]);
         } catch (e) {
           measurer.clear();
-          await _showError('Could not open ${file.name}', e);
+          final name = file.name;
+          await _showError((w) => w.couldNotOpen(name), e);
           return;
         }
         _session.replace(document, measurer,
@@ -497,7 +524,7 @@ class DocumentHostState extends State<DocumentHost> {
     try {
       place = await widget.files.saveLocation('${_session.name}.jetplan');
     } catch (e) {
-      await _showError('Could not save ${_session.name}', e);
+      await _showError((w) => w.couldNotSave(_session.name), e);
       return false;
     }
     if (place == null) return false;
@@ -514,7 +541,7 @@ class DocumentHostState extends State<DocumentHost> {
     try {
       await widget.files.write(location, fileName, encoded.bytes);
     } catch (e) {
-      await _showError('Could not save $fileName', e);
+      await _showError((w) => w.couldNotSave(fileName), e);
       return false;
     }
     // A save point is an id of one dispatcher's (spec 12a D3): it means
@@ -550,7 +577,7 @@ class DocumentHostState extends State<DocumentHost> {
           await widget.files
               .write(place.location, place.name, bytes, kind: kind);
         } catch (e) {
-          await _showError('Export failed', e);
+          await _showError((w) => w.exportFailed, e);
         }
       });
 
@@ -571,26 +598,28 @@ class DocumentHostState extends State<DocumentHost> {
           await widget.printer
               .print(bytes, _session.name, printPageFormat(page));
         } catch (e) {
-          await _showError('Print failed', e);
+          await _showError((w) => w.printFailed, e);
         }
       });
 
   /// The error dialog of a failed Open or Save (spec 12a D8): what failed
   /// and the thrown object's text. The flow waits for it, so it stays busy
   /// while the dialog is up.
-  Future<void> _showError(String title, Object error) async {
+  Future<void> _showError(
+      String Function(AppStrings words) title, Object error) async {
     if (!mounted) return;
+    final words = AppStrings.of(context);
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         key: const Key('document-error'),
-        title: Text(title, key: const Key('document-error-title')),
+        title: Text(title(words), key: const Key('document-error-title')),
         content: Text(error.toString(), key: const Key('document-error-text')),
         actions: [
           TextButton(
             key: const Key('document-error-ok'),
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
+            child: Text(AppStrings.of(context).ok),
           ),
         ],
       ),
@@ -605,6 +634,17 @@ class DocumentHostState extends State<DocumentHost> {
     _exitGuard = widget.exitGuard ?? createExitGuard();
     _armExitGuard();
     _session.dirty.addListener(_armExitGuard);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_session.setUntitledName(AppStrings.of(context).untitled)) {
+      // Not during this build: the app's title listens to the session.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _session.nameChanged();
+      });
+    }
   }
 
   @override
@@ -654,25 +694,25 @@ class _SaveChangesDialog extends StatelessWidget {
       },
       child: AlertDialog(
         key: const Key('replace-dialog'),
-        title:
-            Text('Save the changes to $name?', key: const Key('replace-title')),
-        content: const Text('Your changes are lost if you do not save them.'),
+        title: Text(AppStrings.of(context).saveChangesTo(name),
+            key: const Key('replace-title')),
+        content: Text(AppStrings.of(context).changesLost),
         actions: [
           TextButton(
             key: const Key('replace-discard'),
             onPressed: () => choose(SaveChoice.discard),
-            child: const Text("Don't Save"),
+            child: Text(AppStrings.of(context).dontSave),
           ),
           TextButton(
             key: const Key('replace-cancel'),
             onPressed: () => choose(SaveChoice.cancel),
-            child: const Text('Cancel'),
+            child: Text(FloorPlanStrings.of(context).cancel),
           ),
           FilledButton(
             key: const Key('replace-save'),
             autofocus: true,
             onPressed: () => choose(SaveChoice.save),
-            child: const Text('Save'),
+            child: Text(AppStrings.of(context).save),
           ),
         ],
       ),
@@ -714,24 +754,25 @@ class _NamePromptState extends State<_NamePrompt> {
   @override
   Widget build(BuildContext context) => AlertDialog(
         key: const Key('name-prompt'),
-        title: const Text('Save as'),
+        title: Text(AppStrings.of(context).saveAsTitle),
         content: TextField(
           key: const Key('name-prompt-field'),
           controller: _name,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'File name'),
+          decoration:
+              InputDecoration(labelText: AppStrings.of(context).fileName),
           onSubmitted: (_) => _save(),
         ),
         actions: [
           TextButton(
             key: const Key('name-prompt-cancel'),
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: Text(FloorPlanStrings.of(context).cancel),
           ),
           TextButton(
             key: const Key('name-prompt-save'),
             onPressed: _save,
-            child: const Text('Save'),
+            child: Text(AppStrings.of(context).save),
           ),
         ],
       );

@@ -188,7 +188,7 @@ void main() {
     expect(c.selectedTables.value, {'2'});
     c.select({'99'});
     expect(c.activeSelection.keys, isEmpty);
-    expect(c.numberingWarnings, ['Number 2 is used by 2 tables']);
+    expect(c.numberingWarnings, const [DuplicateNumber(number: '2', count: 2)]);
     await tester.pump();
   });
 
@@ -402,6 +402,142 @@ void main() {
     c.setMode(FloorPlanMode.selection);
     c.load(planJson());
     expect(c.tableStatuses.value.keys, ['1']);
+    await tester.pump();
+  });
+
+  testWidgets(
+      'C16 the service layout: null in the design mode; a restore puts '
+      'the moves back as the copy\'s floor, re-selects by number, and no '
+      'Undo removes it (spec 14d S1-S3, M-14d-m, M-14d-t)', (tester) async {
+    final c = controller(tester, planJson());
+    expect(c.serviceLayoutJson(), isNull);
+    c.setMode(FloorPlanMode.selection);
+    expect(jsonDecode(c.serviceLayoutJson()!)['tables'], isEmpty);
+    move(c, '1', 750.25, -250.5);
+    move(c, '3', -125.125, 400.75);
+    final want1 = parts(tableNode(c.activeDocument, '1').transform);
+    final want3 = parts(tableNode(c.activeDocument, '3').transform);
+    final json = c.serviceLayoutJson()!;
+    await tester.pump();
+
+    c.setMode(FloorPlanMode.design);
+    c.setMode(FloorPlanMode.selection);
+    expect(c.serviceEdited, isFalse, reason: 'premise: a fresh copy');
+    c.select({'2'});
+    final copy = c.activeDocument;
+    final restored = c.restoreServiceLayout(json);
+    expect(restored.applied, ['1', '3']);
+    expect(restored.dropped, isEmpty);
+    expect(identical(c.activeDocument, copy), isFalse, reason: 'a new copy');
+    expect(parts(tableNode(c.activeDocument, '1').transform), want1);
+    expect(parts(tableNode(c.activeDocument, '3').transform), want3);
+    expect(c.selectedTables.value, {'2'});
+    expect(c.serviceEdited, isTrue);
+    expect(c.canUndo.value, isFalse, reason: 'the restore is no step');
+    c.undo();
+    expect(parts(tableNode(c.activeDocument, '1').transform), want1);
+    expect(c.serviceLayoutJson(), json);
+    await tester.pump();
+  });
+
+  testWidgets(
+      'C17 serviceEdited is the layout, not the depth: a table dragged back '
+      'exactly is no edit; a restore, a move and its undo still are '
+      '(spec 14d S3, M-14d-m)', (tester) async {
+    final c = controller(tester, planJson());
+    c.setMode(FloorPlanMode.selection);
+    move(c, '2', 333.5, -71.25);
+    move(c, '2', -333.5, 71.25);
+    expect(c.activeDocument.commands.undoDepth, 2, reason: 'premise');
+    expect(c.serviceEdited, isFalse);
+
+    move(c, '1', 90.5, 12.75);
+    final json = c.serviceLayoutJson()!;
+    c.resetLayout();
+    expect(c.serviceEdited, isFalse);
+    c.restoreServiceLayout(json);
+    move(c, '3', 15.5, 15.5);
+    c.undo();
+    expect(c.activeDocument.commands.undoDepth, 0, reason: 'premise');
+    expect(c.serviceEdited, isTrue);
+    await tester.pump();
+  });
+
+  testWidgets(
+      'C18 serviceLayoutChanges fires on a move, Undo, Redo, resetLayout and '
+      'a restore, never on a mode switch or a load (spec 14d S4, M-14d-r)',
+      (tester) async {
+    final c = controller(tester, planJson());
+    var heard = 0;
+    c.serviceLayoutChanges.addListener(() => heard++);
+    Future<int> after(void Function() act) async {
+      final before = heard;
+      act();
+      await tester.pump();
+      return heard - before;
+    }
+
+    expect(await after(() => move(c, '1', 10.5, 0)), 0,
+        reason: 'a design edit is not the service layout');
+    expect(await after(() => c.setMode(FloorPlanMode.selection)), 0);
+    expect(await after(() => move(c, '1', 20.25, 5)), 1);
+    final json = c.serviceLayoutJson()!;
+    expect(await after(c.undo), 1);
+    expect(await after(c.redo), 1);
+    expect(await after(c.resetLayout), 1);
+    expect(await after(() => c.restoreServiceLayout(json)), 1);
+    expect(await after(() => c.load(planJson())), 0);
+    expect(await after(() => c.setMode(FloorPlanMode.design)), 0);
+  });
+
+  testWidgets(
+      'C20 an Undo followed at once by a switch to the design is heard, '
+      'before the switch: a host saving on it keeps the undone layout '
+      '(review 14d-2)', (tester) async {
+    final c = controller(tester, planJson());
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    final saved = <String?>[];
+    c.serviceLayoutChanges.addListener(() => saved.add(c.serviceLayoutJson()));
+    move(c, '1', 20.25, 5);
+    await tester.pump();
+    expect(saved, hasLength(1), reason: 'premise: the move is heard');
+    expect(saved.last, contains('"tables":[{'), reason: 'premise: a move');
+    c.undo();
+    c.setMode(FloorPlanMode.design);
+    expect(saved, hasLength(2), reason: 'heard before the switch');
+    expect(saved.last, contains('"tables":[]'));
+    await tester.pump();
+    expect(saved, hasLength(2), reason: 'and only once');
+  });
+
+  testWidgets(
+      'C19 a restore in the design mode is a StateError; a text that is not '
+      'a layout changes nothing; a stale entry is dropped (spec 14d S2)',
+      (tester) async {
+    final c = controller(tester, planJson());
+    expect(() => c.restoreServiceLayout('{}'), throwsStateError);
+    c.setMode(FloorPlanMode.selection);
+    move(c, '1', 44.5, 0);
+    move(c, '2', 0, -61.75);
+    final json = c.serviceLayoutJson()!;
+    final copy = c.activeDocument;
+    final revision = c.revision.value;
+    expect(
+        () => c.restoreServiceLayout('{"format":"x"}'), throwsFormatException);
+    expect(identical(c.activeDocument, copy), isTrue);
+    expect(c.revision.value, revision);
+
+    // The design moves table 2 after the layout was stored.
+    c.setMode(FloorPlanMode.design);
+    move(c, '2', 5, 5);
+    final designed2 = parts(tableNode(c.activeDocument, '2').transform);
+    c.setMode(FloorPlanMode.selection);
+    final r = c.restoreServiceLayout(json);
+    expect(r.applied, ['1']);
+    expect(r.dropped, ['2']);
+    expect(parts(tableNode(c.activeDocument, '2').transform), designed2,
+        reason: 'a dropped entry leaves the table at its designed place');
     await tester.pump();
   });
 }

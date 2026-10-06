@@ -216,6 +216,22 @@ void main() {
     });
   });
 
+  test('layerNameProblem names each reason as a value (spec 14d L6)', () {
+    final f = _Fixture();
+    final doc = f.doc;
+    expect(layerNameProblem(doc, ''), isA<LayerNameEmpty>());
+    expect(layerNameProblem(doc, ' Walls'), isA<LayerNameEdgeSpace>());
+    expect((layerNameProblem(doc, 'w' * 256)! as LayerNameTooLong).max, 255);
+    expect(
+        (layerNameProblem(doc, 'Wa;lls')! as LayerNameBadCharacter).character,
+        ';');
+    final dup = layerNameProblem(doc, 'A')! as LayerNameDuplicate;
+    expect(dup.existing, doc.tables.layers[f.a]!.name);
+    expect(layerNameProblem(doc, 'Walls'), isNull);
+    expect(layerNameError(doc, ''), 'A layer name cannot be empty.');
+    expect(layerNameError(doc, 'Wa;lls'), 'A layer name cannot contain ;.');
+  });
+
   group('layerNameError (D4)', () {
     test('accepts a fresh, well-formed name', () {
       final f = _Fixture();

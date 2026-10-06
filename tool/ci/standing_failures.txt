@@ -1,0 +1,16 @@
+# Tests that fail on CI's Linux runner by design (spec 14d P5): each is
+# compared exactly, so a new failure is red, and so is one of these that
+# passes. Lines: <package> | <suite> | <full test name>.
+#
+# The engine's document fingerprints, measured on macOS.
+packages/jet_cad_2d | test/testing/generate_document_test.dart | the default document is the one Plan 2 measured, byte for byte
+packages/jet_cad_2d | test/testing/generate_document_test.dart | both text fractions default to zero and change nothing
+#
+# The render package's text ladders: goldens of macOS text metrics.
+packages/jet_cad_2d_flutter | test/golden/text_ladder_golden_test.dart | text ladder rung 1 (RenderBackend.canvas)
+packages/jet_cad_2d_flutter | test/golden/text_ladder_golden_test.dart | text ladder rung 2 (RenderBackend.canvas)
+packages/jet_cad_2d_flutter | test/golden/text_ladder_golden_test.dart | text ladder rung 3 (RenderBackend.canvas)
+packages/jet_cad_2d_flutter | test/golden/text_ladder_golden_test.dart | text ladder rung 4 (RenderBackend.canvas)
+packages/jet_cad_2d_flutter | test/golden/text_ladder_golden_test.dart | text ladder rung 5 (RenderBackend.canvas)
+packages/jet_cad_2d_flutter | test/golden/text_lod_ladder_golden_test.dart | text lod ladder rung 1 (RenderBackend.canvas)
+packages/jet_cad_2d_flutter | test/golden/text_lod_ladder_golden_test.dart | text lod ladder rung 2 (RenderBackend.canvas)

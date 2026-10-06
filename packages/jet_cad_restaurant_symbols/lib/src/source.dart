@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 import 'package:jet_cad_floor_plan/symbol_sources.dart';
 
+import 'names.dart';
+
 /// The committed library's asset key.
 const String kRestaurantLibraryAsset =
     'packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib';
@@ -19,5 +21,7 @@ Future<Uint8List> readRestaurantLibrary([AssetBundle? bundle]) async {
 /// The restaurant library, for the planner's symbol sources:
 /// `SymbolLibraryLoader(sources: [furnitureSymbolSource,
 /// restaurantSymbolSource])`.
-const SymbolLibrarySource restaurantSymbolSource =
-    SymbolLibrarySource(name: 'restaurant', read: readRestaurantLibrary);
+const SymbolLibrarySource restaurantSymbolSource = SymbolLibrarySource(
+    name: 'restaurant',
+    read: readRestaurantLibrary,
+    names: restaurantSymbolNames);

@@ -11,6 +11,10 @@
 // label string is at least 0.0005 m² from a rounding tie. Seeds are
 // fractional, and the fixtures run at the origin and at the corpus far
 // origin with every wall and separator in its own rotated group.
+import 'package:jet_cad_floor_plan/src/l10n/strings_tr.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings_de.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings_en.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings.dart';
 import 'package:jet_cad_floor_plan/src/planner_shell.dart';
 import 'package:jet_cad_floor_plan/src/parametric/dimension.dart';
 import 'package:jet_cad_floor_plan/src/parametric/room.dart';
@@ -39,13 +43,14 @@ typedef Rig = ({RoomTool tool, ToolContext ctx, RoomInputs inputs});
 /// A Room tool over [doc] with its own [RoomInputs]: a camera at [scale]
 /// pixels per mm (1 gives a 10 mm aperture), object snap on, no page (no
 /// grid).
-Rig roomRig(DraftDocument doc, {double scale = 1}) {
+Rig roomRig(DraftDocument doc,
+    {double scale = 1, FloorPlanStrings strings = const FloorPlanStringsEn()}) {
   final index = SpatialIndex(doc);
   final camera = CameraController(
       ViewportTransform(worldToScreenMatrix: Transform2.scale(scale, scale)));
   final selection = SelectionController(doc);
   final inputs = RoomInputs(doc);
-  final tool = RoomTool(inputs);
+  final tool = RoomTool(inputs, strings: () => strings);
   addTearDown(() {
     tool.dispose();
     inputs.dispose();
@@ -250,7 +255,7 @@ void main() {
     expect(labelStrings(doc, room), ['Room 1', '29.64 m²']);
     expect(driftOf(doc), isEmpty);
     expect(rig.tool.debugPreview, isEmpty, reason: 'the face now holds a room');
-    expect(rig.tool.notice.value, 'Already a room: Room 1');
+    expect(rig.tool.notice.value, const RoomOccupied('Room 1'));
     doc.commands.undo();
     expect(rooms(doc), isEmpty, reason: 'one undo takes it away');
 
@@ -435,7 +440,11 @@ void main() {
       for (final (what, (x, y), notice) in [
         ('in the south wall\'s band', (4000.5, 30.25), null),
         ('outside the box', (-2000.5, 2000.25), null),
-        ('in the occupied face', (6000.75, 1200.5), 'Already a room: Pantry'),
+        (
+          'in the occupied face',
+          (6000.75, 1200.5),
+          const RoomOccupied('Pantry')
+        ),
       ]) {
         final why = '$what, $place';
         final p = plan.at(x, y);
@@ -463,7 +472,7 @@ void main() {
       pressAt(frig, q);
       expect(free.doc.commands.undoDepth, fdepth,
           reason: 'a same-task edit, $place');
-      expect(frig.tool.notice.value, 'Already a room: Study');
+      expect(frig.tool.notice.value, const RoomOccupied('Study'));
     }
   });
 
@@ -491,6 +500,29 @@ void main() {
     final living = addedRoom(doc, before);
     expect(doc.components.get<RoomParams>(living)!.name, 'Room 4');
     expect(driftOf(doc), isEmpty);
+  });
+
+  test(
+      'TT4b a new room is named in the language of the moment, its N counted '
+      'over every built-in language (spec 14d L7, M-14d-k)', () {
+    final plan = samplePlan(corpusGroups);
+    final doc = plan.doc;
+    Vector2 at(String name) {
+      final (x, y) = sampleSeeds[name]!;
+      return plan.at(x, y);
+    }
+
+    addRoom(doc, at('Hall'), 'Room 1');
+    addRoom(doc, at('Bedroom 1'), 'Oda 2');
+    addRoom(doc, at('Kitchen'), 'Raum 4');
+    var before = rooms(doc);
+    pressAt(roomRig(doc, strings: const FloorPlanStringsDe()), at('Bath'));
+    expect(
+        doc.components.get<RoomParams>(addedRoom(doc, before))!.name, 'Raum 3');
+    before = rooms(doc);
+    pressAt(roomRig(doc, strings: const FloorPlanStringsTr()), at('Living'));
+    expect(
+        doc.components.get<RoomParams>(addedRoom(doc, before))!.name, 'Oda 5');
   });
 
   test('TT5 the seed is the raw point with object snap on beside a vertex', () {
@@ -871,11 +903,11 @@ void main() {
       pressAt(rig, kitchen);
       expect(rooms(doc), hasLength(1), reason: 'placed, $place');
       expect(tool.debugTraces, greaterThan(traces), reason: 'traced, $place');
-      expect(tool.notice.value, 'Already a room: Room 1');
+      expect(tool.notice.value, const RoomOccupied('Room 1'));
       expect(tool.debugContourBuilds, builds, reason: 'the click, $place');
       // The change listener re-reads the notice's face.
       await Future<void>.delayed(Duration.zero);
-      expect(tool.notice.value, 'Already a room: Room 1');
+      expect(tool.notice.value, const RoomOccupied('Room 1'));
       expect(tool.debugContourBuilds, builds,
           reason: 'the listener\'s re-read, $place');
       // An undo: the listener re-reads to a free face, and shows it.
@@ -970,7 +1002,7 @@ void main() {
       expect(
           doc.components.get<RoomParams>(room), RoomParams(p.x, p.y, 'Room 1'),
           reason: 'Room 1 is free: no live room holds it, $place');
-      expect(rig.tool.notice.value, 'Already a room: Room 1',
+      expect(rig.tool.notice.value, const RoomOccupied('Room 1'),
           reason: 'control: a live room occupies the face, $place');
     }
   });

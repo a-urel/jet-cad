@@ -14,7 +14,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
-import '../host/floor_plan_types.dart' show TableGroup;
+import '../host/floor_plan_types.dart';
 import 'table_groups.dart';
 import 'table_picker.dart';
 
@@ -29,12 +29,49 @@ typedef ServiceCallbacks = ({
   void Function(String groupId)? onSplitRequested,
 });
 
+/// The view's options for the tool (spec 14d S5-S7), read at each press.
+/// [onTableContextMenu] takes a global position.
+typedef ServiceOptions = ({
+  bool serviceMoves,
+  FloorPlanLongPress longPress,
+  void Function(String number, Offset globalPosition)? onTableContextMenu,
+});
+
+/// Today's behaviour: moves allowed, a long press toggles, no menu.
+const ServiceOptions kDefaultServiceOptions = (
+  serviceMoves: true,
+  longPress: FloorPlanLongPress.toggleSelection,
+  onTableContextMenu: null,
+);
+
+ServiceOptions _defaultOptions() => kDefaultServiceOptions;
+Offset _sameOffset(Offset local) => local;
+
+/// A context gesture's selection (spec 14d S6): an unselected, unlocked
+/// table becomes the selection alone -- or, a member of a group, its
+/// [group]'s selectable members, as a tap selects them (table-groups G4)
+/// -- a selected one keeps the selection, a locked one changes nothing.
+/// Returns the table's number, which the host is told when it is not null
+/// (D18).
+String? contextSelect(PickCandidate hit, SelectionController selection,
+    {Set<SelectionKey>? group}) {
+  if (!hit.locked) {
+    final key = SelectionKey.root(hit.table.instance);
+    if (!selection.keys.contains(key)) selection.replace(group ?? [key]);
+  }
+  return hit.table.number;
+}
+
 enum _Gesture { none, pressed, dragging, panning, spent }
 
 /// The selection mode's tool (S3). One per service view; disposed with it.
 class TableSelectTool extends Tool {
   TableSelectTool(
-      {required this.picker, required this.groups, required this.callbacks});
+      {required this.picker,
+      required this.groups,
+      required this.callbacks,
+      this.options = _defaultOptions,
+      this.toGlobal = _sameOffset});
 
   final TablePicker picker;
 
@@ -43,6 +80,14 @@ class TableSelectTool extends Tool {
   final ValueListenable<Map<String, TableGroup>> groups;
 
   final ServiceCallbacks Function() callbacks;
+
+  /// The view's options (spec 14d S5-S7), read at each press.
+  final ServiceOptions Function() options;
+
+  /// The layer's local point as a global one, for a context menu (S7).
+  final Offset Function(Offset local) toGlobal;
+
+  ServiceOptions _options = kDefaultServiceOptions;
 
   _Gesture _gesture = _Gesture.none;
   int _pointer = -1;
@@ -101,10 +146,14 @@ class TableSelectTool extends Tool {
     // (spec 14t R-11); a mouse picks by containment only.
     _hit = picker.pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
     _toggle = e.shift || e.control || e.meta;
+    _options = options();
     _gesture = _Gesture.pressed;
     _dx = _dy = 0;
     final hit = _hit;
-    if (hit != null && !hit.locked) {
+    // Under a context menu a locked table is reported too (S7, amending
+    // 14c R-1 for this mode only).
+    if (hit != null &&
+        (!hit.locked || _options.longPress == FloorPlanLongPress.contextMenu)) {
       // A finger's down arrives kTouchHoldBack after it touched, so the
       // long press still falls 500 ms from contact (spec 14t T5, R-9f).
       _timer = Timer(
@@ -126,7 +175,8 @@ class TableSelectTool extends Tool {
         _timer?.cancel();
         _timer = null;
         final hit = _hit;
-        if (hit == null) {
+        if (hit == null || !_options.serviceMoves) {
+          // Empty floor pans; so does any table when moves are off (S5).
           _gesture = _Gesture.panning;
         } else if (hit.locked) {
           // A locked table is tapped only (R-1): no move, no pan.
@@ -241,6 +291,14 @@ class TableSelectTool extends Tool {
     if (group != null) callbacks().onGroupTap?.call(group, number);
   }
 
+  /// The selectable members' keys of the group [hit] belongs to, or null:
+  /// what a context gesture selects for a member, as a tap would (G4).
+  Set<SelectionKey>? groupKeysOf(PickCandidate hit) {
+    final lookup = _groupLookup();
+    final group = lookup == null ? null : _groupByHandle[hit.table.instance];
+    return group == null ? null : _memberKeys(lookup!, group);
+  }
+
   /// The group's selectable members' keys, ascending by handle (G4).
   static Set<SelectionKey> _memberKeys(TableGroupLookup lookup, String id) => {
         for (final t in lookup.selectableMembers(id))
@@ -309,20 +367,31 @@ class TableSelectTool extends Tool {
   }
 
   /// A long press (decision 9): the table toggled, a member's group added
-  /// or removed whole as by a modifier tap (G4); the gesture is spent, so
-  /// moves and the up do nothing, and no tap is reported (R-6).
+  /// or removed whole as by a modifier tap (G4) -- or, under
+  /// [FloorPlanLongPress.contextMenu], reported as a context menu at the
+  /// press (spec 14d S7), a member selecting its group as a tap does; the
+  /// gesture is spent, so moves and the up do nothing, and no tap is
+  /// reported (R-6).
   void _longPress(ToolContext ctx) {
     _timer = null;
     final hit = _hit;
-    if (_gesture != _Gesture.pressed || hit == null || hit.locked) return;
-    final key = SelectionKey.root(hit.table.instance);
-    final lookup = _groupLookup();
-    final group = lookup == null ? null : _groupByHandle[hit.table.instance];
-    if (group == null) {
-      ctx.selection.toggle([key]);
+    if (_gesture != _Gesture.pressed || hit == null) return;
+    if (_options.longPress == FloorPlanLongPress.contextMenu) {
+      final number = contextSelect(hit, ctx.selection, group: groupKeysOf(hit));
+      if (number != null) {
+        _options.onTableContextMenu?.call(number, toGlobal(_pressScreen));
+      }
     } else {
-      ctx.selection
-          .replace(_addOrRemoveGroup(lookup!, group, key, ctx.selection.keys));
+      if (hit.locked) return;
+      final key = SelectionKey.root(hit.table.instance);
+      final lookup = _groupLookup();
+      final group = lookup == null ? null : _groupByHandle[hit.table.instance];
+      if (group == null) {
+        ctx.selection.toggle([key]);
+      } else {
+        ctx.selection.replace(
+            _addOrRemoveGroup(lookup!, group, key, ctx.selection.keys));
+      }
     }
     _gesture = _Gesture.spent;
     notifyListeners();

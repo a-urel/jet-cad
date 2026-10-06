@@ -5,7 +5,7 @@ description: >-
   apps/floor_planner builds its application frame from, and that a host
   application embeds. The design / selection split is built in (14b-2).
 publish_to: none
-version: 0.0.1
+version: 0.1.0
 resolution: workspace
 
 environment:
@@ -17,6 +17,10 @@ environment:
 
 dependencies:
   flutter:
+    sdk: flutter
+  # Spec 14d L2: Flutter's Material, Widgets and Cupertino words for de and
+  # tr, listed with the planner's own delegate.
+  flutter_localizations:
     sdk: flutter
   jet_cad_2d:
     path: ../jet_cad_2d

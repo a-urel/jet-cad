@@ -5,9 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'symbols/symbol_names.dart';
+import 'host/floor_plan_types.dart';
+import 'l10n/strings_en.dart';
+import 'l10n/number_text.dart';
+import 'l10n/strings.dart';
 import 'layers/layer_picker.dart';
 import 'panel_focus.dart';
-import 'panel_number.dart';
 import 'parametric/box.dart';
 import 'parametric/dimension.dart';
 import 'parametric/live_objects.dart';
@@ -205,7 +209,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// The Number field's last refusal and the table it was for (14a T14):
   /// shown under the field until its next edit or a selection change.
-  String? _numberError;
+  /// The number field's error, worded at build, so a language switch
+  /// re-words it (review 14d-1 F-3).
+  String Function(FloorPlanStrings)? _numberError;
   Handle? _numberErrorFor;
 
   /// Whether the Wall tool was active at the last check: the tool
@@ -216,6 +222,21 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// The kind of the opening tool that was active at the last check, or
   /// null: likewise, only a switch in or out of one concerns the panel.
   OpeningKind? _openingToolMode;
+
+  /// The panel's words (spec 14d L12): set before the first build and on a
+  /// change of language, when the fields are shown again in it.
+  FloorPlanStrings _strings = const FloorPlanStringsEn();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = FloorPlanStrings.of(context);
+    if (identical(next, _strings)) return;
+    _strings = next;
+    for (final f in _fields) {
+      if (!f.focus.hasFocus && f.loadedTarget != null) _show(f);
+    }
+  }
 
   @override
   void initState() {
@@ -328,7 +349,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final t = f.text.text.trim();
     if (f.kind == _Kind.number) return _parseNumber(target, t);
     if (f.isText) return t.isEmpty ? null : t;
-    final value = double.tryParse(t);
+    final value = parsePanelNumber(t, _strings);
     return value != null && _valid(f.kind, target, value) ? value : null;
   }
 
@@ -372,13 +393,15 @@ class _SelectionPanelState extends State<SelectionPanel> {
     // brought -- is nothing, never an error (T14, review F-1).
     final current = _read(_Kind.number, table);
     if (t == current) return t;
-    final error = tableNumberError(t);
-    final clash = error == null &&
+    final problem = tableNumberProblem(t);
+    final clash = problem == null &&
         _tables.withNumber(t).any((other) => other.instance != table);
     // The error line is not cleared here: Enter's focus-loss commit
     // re-reads the reverted text, which must not end it (T14).
-    if (error == null && !clash) return t;
-    _numberError = error ?? 'Number $t is already used';
+    if (problem == null && !clash) return t;
+    _numberError = problem != null
+        ? (s) => s.tableNumberProblem(problem)
+        : (s) => s.tableNumberUsed(t);
     _numberErrorFor = table;
     return null;
   }
@@ -678,10 +701,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
       target == _toolSettings ||
       (target != null && _openingToolKind(target) != null);
 
-  static String _titleOf(OpeningKind k) => switch (k) {
-        OpeningKind.door => 'Door',
-        OpeningKind.window => 'Window',
-        OpeningKind.gap => 'Gap',
+  String _titleOf(OpeningKind k) => switch (k) {
+        OpeningKind.door => _strings.toolDoor,
+        OpeningKind.window => _strings.toolWindow,
+        OpeningKind.gap => _strings.toolGap,
       };
 
   /// Records the target on focus gain; commits on focus loss (06 D13's F2,
@@ -745,7 +768,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
     f.loadedTarget = value == null ? null : target;
     f.loadedValue = value;
     if (value == null) return;
-    final t = value is String ? value : panelNumberText(value as double);
+    final t =
+        value is String ? value : formatPanelNumber(value as double, _strings);
     if (f.text.text != t) f.text.text = t;
   }
 
@@ -835,22 +859,24 @@ class _SelectionPanelState extends State<SelectionPanel> {
     if (angle.abs() < 0.05) return null;
     var shown = double.parse(angle.toStringAsFixed(1));
     if (shown <= -180) shown += 360;
-    return 'Axes turned ${shown.toStringAsFixed(1)}°';
+    return _strings.axesTurned(
+        shown.toStringAsFixed(1).replaceAll('.', _strings.decimalSeparator));
   }
 
   /// An end line (11 D14, R-28): for an attached end, `Wall`, its wall's
   /// handle in hex, `start` or `end` for its `k`, and `left face`,
   /// `centreline` or `right face` for its side (`Wall 1A, end, left face`);
   /// `Fixed` for a fixed end.
-  static String _endLine(DimEnd end) => switch (end) {
-        FixedEnd() => 'Fixed',
-        AttachedEnd(:final wall, :final k, :final side) =>
-          'Wall ${wall.toHex()}, ${k == 0 ? 'start' : 'end'}, '
-              '${switch (side) {
-            WallSide.left => 'left face',
-            WallSide.centre => 'centreline',
-            WallSide.right => 'right face',
-          }}',
+  String _endLine(DimEnd end) => switch (end) {
+        FixedEnd() => _strings.endFixed,
+        AttachedEnd(:final wall, :final k, :final side) => _strings.endOnWall(
+            wall.toHex(),
+            k == 0,
+            switch (side) {
+              WallSide.left => _strings.leftFace,
+              WallSide.centre => _strings.centreline,
+              WallSide.right => _strings.rightFace,
+            }),
       };
 
   /// The Dimension section's widgets for dimension [dim] (11 D14).
@@ -864,23 +890,27 @@ class _SelectionPanelState extends State<SelectionPanel> {
           child: Text(text, key: Key(key)),
         );
     return [
-      Text('Dimension', key: const Key('dimension-section'), style: title),
+      Text(_strings.toolDimension,
+          key: const Key('dimension-section'), style: title),
       // Read-only (decision 13): the value as drawn.
-      line('dimension-value', 'Value', _valueOf(dim) ?? '—'),
+      line('dimension-value', _strings.value, _valueOf(dim) ?? '—'),
       const SizedBox(height: 8),
       SegmentedButton<DimKind>(
         key: const Key('dimension-kind'),
         showSelectedIcon: false,
-        segments: const [
+        segments: [
           ButtonSegment(
               value: DimKind.aligned,
-              label: Text('Aligned', key: Key('dimension-aligned'))),
+              label:
+                  Text(_strings.aligned, key: const Key('dimension-aligned'))),
           ButtonSegment(
               value: DimKind.horizontal,
-              label: Text('Horizontal', key: Key('dimension-horizontal'))),
+              label: Text(_strings.horizontal,
+                  key: const Key('dimension-horizontal'))),
           ButtonSegment(
               value: DimKind.vertical,
-              label: Text('Vertical', key: Key('dimension-vertical'))),
+              label: Text(_strings.vertical,
+                  key: const Key('dimension-vertical'))),
         ],
         selected: {p.kind},
         onSelectionChanged: editable ? (s) => _setKind(dim, s.single) : null,
@@ -889,8 +919,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
         const SizedBox(height: 8),
         Text(axes, key: const Key('dimension-axes')),
       ],
-      line('dimension-end-1', 'End 1', _endLine(p.a)),
-      line('dimension-end-2', 'End 2', _endLine(p.b)),
+      line('dimension-end-1', _strings.end1, _endLine(p.a)),
+      line('dimension-end-2', _strings.end2, _endLine(p.b)),
     ];
   }
 
@@ -1017,7 +1047,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
           }
           final target = f.pinned;
           if (target == null || !_isToolTarget(target)) return;
-          final v = double.tryParse(t.trim());
+          final v = parsePanelNumber(t, _strings);
           if (v != null && _validSetting(f.kind, target, v)) {
             _write(f.kind, target, v);
           }
@@ -1051,29 +1081,36 @@ class _SelectionPanelState extends State<SelectionPanel> {
         library == null || entry == null || isServableInstance(doc, instance)
             ? const <SymbolEntry>[]
             : familyMembers(library, entry);
-    String size(SymbolBox b) =>
-        '${panelNumberText(b.width)} × ${panelNumberText(b.depth)}';
+    String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
+        '${formatPanelNumber(b.depth, _strings)}';
     final turnable = _turnable;
     return [
-      Text('Symbol', key: const Key('symbol-section'), style: title),
+      Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),
       InputDecorator(
         decoration:
-            const InputDecoration(labelText: 'Name', border: InputBorder.none),
-        child: Text(component.name, key: const Key('symbol-name')),
+            InputDecoration(labelText: _strings.name, border: InputBorder.none),
+        // By key in the panel's language (spec 14d L9); the copy's own
+        // name when no loaded library knows the key.
+        child: Text(
+            SymbolWords(widget.symbols?.names ?? SymbolNames.empty,
+                        _strings.languageCode)
+                    .nameOfKey(component.key) ??
+                component.name,
+            key: const Key('symbol-name')),
       ),
       InputDecorator(
         decoration:
-            const InputDecoration(labelText: 'Size', border: InputBorder.none),
+            InputDecoration(labelText: _strings.size, border: InputBorder.none),
         child:
             Text(box == null ? '—' : size(box), key: const Key('symbol-size')),
       ),
-      _field('symbol-rotation', 'Rotation', _rotation, turnable),
+      _field('symbol-rotation', _strings.rotation, _rotation, turnable),
       const SizedBox(height: 8),
       OutlinedButton.icon(
         key: const Key('symbol-mirror'),
         onPressed: turnable ? _mirrorSymbol : null,
         icon: const Icon(Icons.flip),
-        label: const Text('Mirror'),
+        label: Text(_strings.mirror),
       ),
       if (members.isNotEmpty) ...[
         const SizedBox(height: 8),
@@ -1098,13 +1135,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// The Table section (14a T14, T16).
   List<Widget> _tableSection(TableInfo table, TextStyle? title) {
-    final error = _numberErrorFor == table.instance ? _numberError : null;
+    final error =
+        _numberErrorFor == table.instance ? _numberError?.call(_strings) : null;
     final shared =
         table.number == null ? 0 : _tables.withNumber(table.number!).length;
     final theme = Theme.of(context);
     return [
-      Text('Table', key: const Key('table-section'), style: title),
-      _field('table-number', 'Number', _number, _editable(_Kind.number)),
+      Text(_strings.tableTitle, key: const Key('table-section'), style: title),
+      _field('table-number', _strings.number, _number, _editable(_Kind.number)),
       if (error != null)
         Padding(
           padding: const EdgeInsets.only(top: 4),
@@ -1115,14 +1153,16 @@ class _SelectionPanelState extends State<SelectionPanel> {
       if (shared > 1)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text('Number ${table.number} is used by $shared tables',
+          child: Text(
+              _strings.numberingWarning(
+                  DuplicateNumber(number: table.number!, count: shared)),
               key: const Key('table-number-duplicate'),
               // A warning (T6), not a refusal.
               style: TextStyle(color: theme.colorScheme.tertiary)),
         ),
       InputDecorator(
-        decoration:
-            const InputDecoration(labelText: 'Seats', border: InputBorder.none),
+        decoration: InputDecoration(
+            labelText: _strings.seats, border: InputBorder.none),
         child: Text('${table.seats}', key: const Key('table-seats')),
       ),
       if (_rotatable)
@@ -1133,7 +1173,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
                 key: const Key('table-rotate-left'),
                 onPressed: () => _rotateTable(1),
                 icon: const Icon(Icons.rotate_left),
-                label: const Text('Rotate 90° left'),
+                label: Text(_strings.rotateLeft),
               ),
             ),
             const SizedBox(width: 8),
@@ -1142,7 +1182,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
                 key: const Key('table-rotate-right'),
                 onPressed: () => _rotateTable(-1),
                 icon: const Icon(Icons.rotate_right),
-                label: const Text('Rotate 90° right'),
+                label: Text(_strings.rotateRight),
               ),
             ),
           ],
@@ -1197,27 +1237,32 @@ class _SelectionPanelState extends State<SelectionPanel> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (box != null) ...[
-              Text('Box', style: title),
-              _field('box-width', 'Width', _width, boxEditable),
-              _field('box-height', 'Height', _height, boxEditable),
+              Text(_strings.toolBox, style: title),
+              _field('box-width', _strings.width, _width, boxEditable),
+              _field('box-height', _strings.height, _height, boxEditable),
             ],
             if (wall != null) ...[
-              Text('Wall', key: const Key('wall-section'), style: title),
-              _field('wall-thickness', 'Thickness', _thickness, wallEditable),
+              Text(_strings.toolWall,
+                  key: const Key('wall-section'), style: title),
+              _field('wall-thickness', _strings.thickness, _thickness,
+                  wallEditable),
               const SizedBox(height: 8),
               SegmentedButton<Justification>(
                 key: const Key('wall-justification'),
                 showSelectedIcon: false,
-                segments: const [
+                segments: [
                   ButtonSegment(
                       value: Justification.left,
-                      label: Text('Left', key: Key('wall-left'))),
+                      label: Text(_strings.justifyLeft,
+                          key: const Key('wall-left'))),
                   ButtonSegment(
                       value: Justification.centre,
-                      label: Text('Centre', key: Key('wall-centre'))),
+                      label: Text(_strings.justifyCentre,
+                          key: const Key('wall-centre'))),
                   ButtonSegment(
                       value: Justification.right,
-                      label: Text('Right', key: Key('wall-right'))),
+                      label: Text(_strings.justifyRight,
+                          key: const Key('wall-right'))),
                 ],
                 selected: {justification!},
                 onSelectionChanged:
@@ -1228,12 +1273,13 @@ class _SelectionPanelState extends State<SelectionPanel> {
               if (box != null || wall != null) const SizedBox(height: 12),
               Text(_titleOf(openingKind!),
                   key: const Key('opening-section'), style: title),
-              _field('opening-width', 'Width', _openingWidth, openingEditable),
+              _field('opening-width', _strings.width, _openingWidth,
+                  openingEditable),
               // The position, from the host's start to the centre, is the
               // stored one; a tool places at the click, so it has none.
               if (openingParams != null)
-                _field(
-                    'opening-position', 'Position', _position, openingEditable),
+                _field('opening-position', _strings.position, _position,
+                    openingEditable),
               if (openingParams?.kind == OpeningKind.door) ...[
                 const SizedBox(height: 8),
                 Row(
@@ -1243,7 +1289,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
                         key: const Key('opening-flip-hinge'),
                         onPressed:
                             openingEditable ? () => _flip(hinge: true) : null,
-                        child: const Text('Flip hinge'),
+                        child: Text(_strings.flipHinge),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1252,7 +1298,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
                         key: const Key('opening-flip-swing'),
                         onPressed:
                             openingEditable ? () => _flip(hinge: false) : null,
-                        child: const Text('Flip swing'),
+                        child: Text(_strings.flipSwing),
                       ),
                     ),
                   ],
@@ -1262,12 +1308,13 @@ class _SelectionPanelState extends State<SelectionPanel> {
             if (room != null) ...[
               if (box != null || wall != null || opening != null)
                 const SizedBox(height: 12),
-              Text('Room', key: const Key('room-section'), style: title),
-              _field('room-name', 'Name', _name, roomEditable),
+              Text(_strings.toolRoom,
+                  key: const Key('room-section'), style: title),
+              _field('room-name', _strings.name, _name, roomEditable),
               // Read-only (10 R-25): the area label's string as drawn.
               InputDecorator(
-                decoration: const InputDecoration(
-                    labelText: 'Area', border: InputBorder.none),
+                decoration: InputDecoration(
+                    labelText: _strings.area, border: InputBorder.none),
                 child: Text(_areaOf(room) ?? '—', key: const Key('room-area')),
               ),
             ],
