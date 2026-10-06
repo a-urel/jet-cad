@@ -16,6 +16,8 @@ import 'package:flutter/services.dart'
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
+import 'demo_strings.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
@@ -55,19 +57,39 @@ Future<Map<String, String>> loadSamplePlans(AssetBundle bundle) async {
 
 /// The demo. [plans] seeds the areas' stored plans by name (tests); an area
 /// without one starts empty.
-class RestaurantDemo extends StatelessWidget {
-  const RestaurantDemo({super.key, this.plans = const {}, this.random});
+class RestaurantDemo extends StatefulWidget {
+  const RestaurantDemo(
+      {super.key, this.plans = const {}, this.random, this.locale});
 
   final Map<String, String> plans;
 
   /// The source of "Random statuses" (tests seed it, 14c R-13).
   final math.Random? random;
 
+  /// The language to start in; the system's when null (spec 14d L17).
+  final Locale? locale;
+
+  @override
+  State<RestaurantDemo> createState() => _RestaurantDemoState();
+}
+
+class _RestaurantDemoState extends State<RestaurantDemo> {
+  late Locale? _locale = widget.locale;
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-        title: 'Restaurant demo',
+        onGenerateTitle: (context) => DemoStrings.of(context).title,
         theme: ThemeData(colorSchemeSeed: Colors.teal),
-        home: DemoHome(plans: plans, random: random),
+        // Spec 14d L17: the three languages, switched in the app bar
+        // through `MaterialApp.locale` (V-4), so all three can be looked at
+        // without changing the system's language.
+        locale: _locale,
+        supportedLocales: floorPlanSupportedLocales,
+        localizationsDelegates: floorPlanLocalizationsDelegates,
+        home: DemoHome(
+            plans: widget.plans,
+            random: widget.random,
+            onLocale: (l) => setState(() => _locale = l)),
       );
 }
 
@@ -85,10 +107,13 @@ final class Area {
 }
 
 class DemoHome extends StatefulWidget {
-  const DemoHome({super.key, required this.plans, this.random});
+  const DemoHome({super.key, required this.plans, this.random, this.onLocale});
 
   final Map<String, String> plans;
   final math.Random? random;
+
+  /// Switches the app's language (spec 14d L17).
+  final void Function(Locale locale)? onLocale;
 
   @override
   State<DemoHome> createState() => DemoHomeState();
@@ -129,11 +154,10 @@ class DemoHomeState extends State<DemoHome> {
     // need not call `load()` (14b-2 review F-3).
     for (final a in areas) {
       final c = a.controller;
-      c.mode.addListener(() => _log('${a.name}: mode ${c.mode.value.name}'));
-      c.selectedTables.addListener(() => _log(
-          '${a.name}: selected {${(c.selectedTables.value.toList()..sort()).join(', ')}}'));
-      c.dirty.addListener(
-          () => _log('${a.name}: ${c.dirty.value ? 'edited' : 'saved'}'));
+      c.mode.addListener(() => _log(_words.logMode(a.name, c.mode.value.name)));
+      c.selectedTables.addListener(() => _log(_words.logSelected(
+          a.name, (c.selectedTables.value.toList()..sort()).join(', '))));
+      c.dirty.addListener(() => _log(_words.logDirty(a.name, c.dirty.value)));
       // The tables and warnings follow every change of the active plan.
       c.revision.addListener(() {
         if (mounted) setState(() {});
@@ -155,6 +179,9 @@ class DemoHomeState extends State<DemoHome> {
     _number.dispose();
     super.dispose();
   }
+
+  /// The demo's words in the app's language (spec 14d L17).
+  DemoStrings get _words => DemoStrings.of(context);
 
   void _log(String line) {
     if (!mounted) return;
@@ -178,30 +205,30 @@ class DemoHomeState extends State<DemoHome> {
     if (layout == null) return;
     final r = a.controller.restoreServiceLayout(layout);
     if (r.applied.isEmpty && r.dropped.isEmpty) return;
-    _log('${a.name}: layout restored, ${r.applied.length} moved, '
-        '${r.dropped.length} dropped');
+    _log(_words.logRestored(a.name, r.applied.length, r.dropped.length));
   }
 
   /// A table's context menu (spec 14d S6): the table is already selected
   /// alone, or with the selection that held it.
   Future<void> _tableMenu(String number, Offset at) async {
     final a = area;
-    _log('${a.name}: menu for $number');
+    _log(_words.logMenu(a.name, number));
+    final words = _words;
     final choice = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
       items: [
-        PopupMenuItem(enabled: false, child: Text('Table $number')),
-        const PopupMenuItem(
-            key: Key('menu-select'),
+        PopupMenuItem(enabled: false, child: Text(words.tableTitle(number))),
+        PopupMenuItem(
+            key: const Key('menu-select'),
             value: 'select',
-            child: Text('Select only this')),
+            child: Text(words.selectOnlyThis)),
         const PopupMenuDivider(),
         for (final name in kStatuses.keys)
           PopupMenuItem(
               key: Key('menu-status-${name.toLowerCase()}'),
               value: 'status:$name',
-              child: Text(name)),
+              child: Text(words.statusName(name))),
       ],
     );
     if (choice == null || !mounted || !identical(a, area)) return;
@@ -215,7 +242,7 @@ class DemoHomeState extends State<DemoHome> {
   void _save() {
     area.stored = area.controller.designJson();
     area.controller.markSaved();
-    _log('${area.name}: stored ${area.stored!.length} characters');
+    _log(_words.logStored(area.name, area.stored!.length));
   }
 
   void _revert() {
@@ -225,7 +252,7 @@ class DemoHomeState extends State<DemoHome> {
     } else {
       area.controller.load(stored);
     }
-    _log('${area.name}: reloaded');
+    _log(_words.logReloaded(area.name));
     // A load in the service starts from the design: the layout goes back.
     if (area.controller.mode.value == FloorPlanMode.selection) {
       _restoreLayout(area);
@@ -240,10 +267,17 @@ class DemoHomeState extends State<DemoHome> {
     'Bill': TableStatus(color: const Color(0x99E53935), caption: 'Bill'),
   };
 
+  /// [kStatuses]'s status [name], its caption in the app's language.
+  TableStatus? _statusFor(String name) {
+    final status = kStatuses[name];
+    if (status == null || status.caption == null) return status;
+    return TableStatus(color: status.color, caption: _words.statusName(name));
+  }
+
   void _setStatus(String name) {
     final c = area.controller;
     final next = Map<String, TableStatus>.of(c.tableStatuses.value);
-    final status = kStatuses[name];
+    final status = _statusFor(name);
     for (final n in c.selectedTables.value) {
       if (status == null) {
         next.remove(n);
@@ -252,8 +286,8 @@ class DemoHomeState extends State<DemoHome> {
       }
     }
     c.setTableStatus(next);
-    _log('${area.name}: $name for '
-        '{${(c.selectedTables.value.toList()..sort()).join(', ')}}');
+    _log(_words.logStatus(area.name, _words.statusName(name),
+        (c.selectedTables.value.toList()..sort()).join(', ')));
   }
 
   void _randomStatuses() {
@@ -263,11 +297,11 @@ class DemoHomeState extends State<DemoHome> {
     for (final t in c.tables) {
       final n = t.number;
       if (n == null) continue;
-      final status = kStatuses[names[_random.nextInt(names.length)]];
+      final status = _statusFor(names[_random.nextInt(names.length)]);
       if (status != null) next[n] = status;
     }
     c.setTableStatus(next);
-    _log('${area.name}: random statuses for ${next.length} tables');
+    _log(_words.logRandom(area.name, next.length));
   }
 
   void _select() {
@@ -279,11 +313,26 @@ class DemoHomeState extends State<DemoHome> {
   @override
   Widget build(BuildContext context) {
     final c = area.controller;
+    final words = _words;
     final title = Theme.of(context).textTheme.titleSmall;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Restaurant demo'),
+        title: Text(words.title),
         actions: [
+          // Spec 14d L17: the app's language.
+          SegmentedButton<String>(
+            key: const Key('language-toggle'),
+            showSelectedIcon: false,
+            segments: [
+              for (final code in const ['en', 'de', 'tr'])
+                ButtonSegment(
+                    value: code,
+                    label: Text(code.toUpperCase(), key: Key('lang-$code'))),
+            ],
+            selected: {FloorPlanStrings.of(context).languageCode},
+            onSelectionChanged: (s) => widget.onLocale?.call(Locale(s.single)),
+          ),
+          const SizedBox(width: 16),
           SegmentedButton<int>(
             key: const Key('area-toggle'),
             showSelectedIcon: false,
@@ -301,13 +350,13 @@ class DemoHomeState extends State<DemoHome> {
             builder: (_, mode, __) => SegmentedButton<FloorPlanMode>(
               key: const Key('mode-toggle'),
               showSelectedIcon: false,
-              segments: const [
+              segments: [
                 ButtonSegment(
                     value: FloorPlanMode.design,
-                    label: Text('Design', key: Key('mode-design'))),
+                    label: Text(words.design, key: const Key('mode-design'))),
                 ButtonSegment(
                     value: FloorPlanMode.selection,
-                    label: Text('Service', key: Key('mode-service'))),
+                    label: Text(words.service, key: const Key('mode-service'))),
               ],
               selected: {mode},
               onSelectionChanged: (s) => _setMode(s.single),
@@ -323,10 +372,10 @@ class DemoHomeState extends State<DemoHome> {
               key: ObjectKey(c),
               controller: c,
               exportName: area.name.toLowerCase(),
-              onExport: (e) => _log('${area.name}: exported ${e.fileName}, '
-                  '${e.bytes.length} bytes'),
-              onTableTap: (n) => _log('${area.name}: tapped $n'),
-              onLayoutChanged: () => _log('${area.name}: layout changed'),
+              onExport: (e) => _log(
+                  _words.logExported(area.name, e.fileName, e.bytes.length)),
+              onTableTap: (n) => _log(_words.logTapped(area.name, n)),
+              onLayoutChanged: () => _log(_words.logLayoutChanged(area.name)),
               serviceMoves: moves,
               longPress: longPressMenu
                   ? FloorPlanLongPress.contextMenu
@@ -347,33 +396,33 @@ class DemoHomeState extends State<DemoHome> {
                     builder: (_, dirty, __) => FilledButton(
                         key: const Key('save'),
                         onPressed: dirty ? _save : null,
-                        child: const Text('Save')),
+                        child: Text(words.save)),
                   ),
                   OutlinedButton(
                       key: const Key('revert'),
                       onPressed: _revert,
-                      child: const Text('Revert')),
+                      child: Text(words.revert)),
                   if (c.mode.value == FloorPlanMode.selection)
                     OutlinedButton(
                         key: const Key('reset-layout'),
                         onPressed: c.resetLayout,
-                        child: const Text('Reset layout')),
+                        child: Text(words.resetLayout)),
                   OutlinedButton(
                       key: const Key('fit'),
                       onPressed: c.fitToView,
-                      child: const Text('Fit')),
+                      child: Text(words.fit)),
                 ]),
                 if (c.mode.value == FloorPlanMode.selection) ...[
                   SwitchListTile(
                       key: const Key('moves'),
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Moves'),
+                      title: Text(words.moves),
                       value: moves,
                       onChanged: (v) => setState(() => moves = v)),
                   SwitchListTile(
                       key: const Key('long-press-menu'),
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Long press: menu'),
+                      title: Text(words.longPressMenu),
                       value: longPressMenu,
                       onChanged: (v) => setState(() => longPressMenu = v)),
                 ],
@@ -381,35 +430,35 @@ class DemoHomeState extends State<DemoHome> {
                 TextField(
                   key: const Key('select-number'),
                   controller: _number,
-                  decoration: const InputDecoration(
-                      labelText: 'Table numbers (comma separated)'),
+                  decoration:
+                      InputDecoration(labelText: words.tableNumbersField),
                   onSubmitted: (_) => _select(),
                 ),
                 const SizedBox(height: 8),
                 FilledButton.tonal(
                     key: const Key('select'),
                     onPressed: _select,
-                    child: const Text('Select')),
+                    child: Text(words.select)),
                 const SizedBox(height: 16),
-                Text('Status of the selected tables', style: title),
+                Text(words.statusOfSelected, style: title),
                 const SizedBox(height: 4),
                 Wrap(spacing: 6, runSpacing: 6, children: [
                   for (final name in kStatuses.keys)
                     OutlinedButton(
                         key: Key('status-${name.toLowerCase()}'),
                         onPressed: () => _setStatus(name),
-                        child: Text(name)),
+                        child: Text(words.statusName(name))),
                   OutlinedButton(
                       key: const Key('status-random'),
                       onPressed: _randomStatuses,
-                      child: const Text('Random statuses')),
+                      child: Text(words.randomStatuses)),
                 ]),
                 const SizedBox(height: 16),
-                Text('Tables', style: title),
+                Text(words.tables, style: title),
                 Text(
                     key: const Key('tables'),
                     c.tables.isEmpty
-                        ? 'none'
+                        ? words.none
                         : [
                             for (final t in c.tables)
                               '${t.number ?? '—'} (${t.seats})'
@@ -420,7 +469,7 @@ class DemoHomeState extends State<DemoHome> {
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.error)),
                 const SizedBox(height: 16),
-                Text('Log', style: title),
+                Text(words.log, style: title),
                 for (final (i, line) in log.indexed)
                   Text(line, key: Key('log-$i')),
               ],

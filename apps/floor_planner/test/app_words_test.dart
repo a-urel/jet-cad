@@ -1,0 +1,42 @@
+// Spec 14d L16: the app follows the system's language -- its own file
+// commands, the untitled name, the sample's rooms -- and English for any
+// other.
+import 'package:floor_planner/main.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'support/fake_document_files.dart';
+
+String tooltipOf(WidgetTester tester, String key) =>
+    tester.widget<IconButton>(find.byKey(Key(key))).tooltip!;
+
+Future<void> pumpIn(WidgetTester tester, Locale locale) async {
+  tester.platformDispatcher.localesTestValue = [locale];
+  addTearDown(tester.platformDispatcher.clearLocalesTestValue);
+  await tester.binding.setSurfaceSize(const Size(1440, 900));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(FloorPlannerApp(files: FakeDocumentFiles()));
+  await tester.pump();
+}
+
+void main() {
+  testWidgets('AW1 a Turkish system: the app and the planner speak Turkish',
+      (tester) async {
+    await pumpIn(tester, const Locale('tr', 'TR'));
+    expect(tooltipOf(tester, 'toolbar-new'), 'Yeni (Ctrl+N)');
+    expect(tooltipOf(tester, 'toolbar-open-sample'), 'Örneği aç');
+    expect(tooltipOf(tester, 'toolbar-print'), 'Yazdır… (Ctrl+P)');
+    expect(find.text('Adsız'), findsOneWidget, reason: 'the untitled name');
+    expect(find.text('Duvar'), findsOneWidget);
+  });
+
+  testWidgets('AW2 a German system; a French one is English', (tester) async {
+    await pumpIn(tester, const Locale('de', 'DE'));
+    expect(tooltipOf(tester, 'toolbar-save-as'),
+        'Speichern unter… (Strg+Umschalt+S)');
+    expect(find.text('Unbenannt'), findsOneWidget);
+    await pumpIn(tester, const Locale('fr'));
+    expect(tooltipOf(tester, 'toolbar-new'), 'New (Ctrl+N)');
+    expect(find.text('Untitled'), findsOneWidget);
+  });
+}

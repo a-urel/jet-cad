@@ -519,4 +519,33 @@ void main() {
     expect(c.serviceEdited, isFalse);
     expect(demo.log, isNot(contains('Salon: layout changed')));
   });
+
+  testWidgets(
+      'D19 the language switch: the demo, the planner and a status caption '
+      'speak Turkish, then German (spec 14d L17)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('lang-tr'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Restoran demosu'), findsOneWidget);
+    expect(find.text('Tasarım'), findsOneWidget);
+    expect(find.text('Duvar'), findsOneWidget, reason: 'the planner too');
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    expect(demo.log, contains('Salon: mod selection'));
+    c.select({'2'});
+    await tester.pump();
+    await tester.tap(byKey('status-bill'));
+    await tester.pump();
+    expect(c.tableStatuses.value['2']!.caption, 'Hesap');
+    expect(find.text('Hesap'), findsWidgets, reason: 'the button');
+
+    await tester.tap(byKey('lang-de'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Entwurf'), findsOneWidget);
+    expect(find.text('Anordnung zurücksetzen'), findsOneWidget);
+  });
 }

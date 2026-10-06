@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
+    show floorPlanLocalizationsDelegates, floorPlanSupportedLocales;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
 import 'document_files.dart';
@@ -147,6 +149,10 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
           onGenerateTitle: (_) =>
               documentTitle(_session.name, dirty: _session.dirty.value),
           debugShowCheckedModeBanner: false,
+          // Spec 14d L16: English, German and Turkish, by the system's
+          // language; the planner's delegate with Flutter's three.
+          supportedLocales: floorPlanSupportedLocales,
+          localizationsDelegates: floorPlanLocalizationsDelegates,
           theme: ThemeData(colorSchemeSeed: const Color(0xFF2266CC)),
           // Spec 12a D6 (T-3, U-3, R-10): the file chords once more above
           // the Navigator, consume-only. A dialog or a dropdown's route is
