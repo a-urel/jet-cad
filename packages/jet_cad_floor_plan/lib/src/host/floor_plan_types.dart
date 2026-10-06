@@ -87,3 +87,19 @@ final class TableStatus {
   @override
   String toString() => 'TableStatus($color, $caption)';
 }
+
+/// What [FloorPlanController.restoreServiceLayout] did (spec 14d S2): the
+/// numbers of the entries it applied and of those it dropped, in the
+/// layout's order; an unnumbered table's is null, so a number may repeat
+/// and the lengths are the counts.
+@immutable
+final class ServiceLayoutRestore {
+  const ServiceLayoutRestore({required this.applied, required this.dropped});
+
+  final List<String?> applied;
+  final List<String?> dropped;
+
+  @override
+  String toString() => 'ServiceLayoutRestore(applied: $applied, '
+      'dropped: $dropped)';
+}
