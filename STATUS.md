@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-06 (**14d-2 and 14d-1 done on `claude/exciting-pasteur-9m22jv`, not merged**; 09c-2 MERGED into `main` at `43dd020`; see below).
+**Last updated:** 2026-10-06 (**14d — 14d-2, 14d-1 and 14d-3 — done on `claude/exciting-pasteur-9m22jv`, not merged, not tagged**; 09c-2 MERGED into `main` at `43dd020`; see below).
 - **Slice 14d (POS readiness)** — spec
   [2026-10-06-pos-readiness-design.md](docs/superpowers/specs/2026-10-06-pos-readiness-design.md),
   revision 2, **approved by the human** (2026-10-06: *"Q0 evet, diğerleri
@@ -46,8 +46,22 @@
   without a per-task reviewer; no independent code review yet. **The
   German and Turkish text is the controller's:** Turkish owed the human's
   read, German a native speaker's. **Look owed** (macOS, web).
-  **Next:** 14d-3 (the release: 0.1.0, the host guide, CI), on the
-  human's word, or the merge of 14d-2 and 14d-1. **Sub-project 14 — restaurant embedding (all
+- **14d-3 (a release a POS can pin) is DONE, not merged, not tagged**
+  (on the human's *"evet, 14d-3'e başla"*): plan
+  [2026-10-06-release.md](docs/superpowers/plans/2026-10-06-release.md),
+  results [2026-10-06-plan-14d3-results.md](docs/superpowers/notes/2026-10-06-plan-14d3-results.md).
+  The four packages at `0.1.0`, a root `CHANGELOG.md`;
+  [docs/host-guide.md](docs/host-guide.md), whose code blocks are
+  checked against `tool/ci/host_probe` (a host outside the workspace,
+  depending on the packages by git); `.github/workflows/ci.yml` runs
+  every gate on pushes to `main` and `claude/**` and on pull requests,
+  comparing failures and skips exactly with `tool/ci/standing_*.txt`,
+  and builds the probe by git at the commit under test. **CI run 1
+  green** (all nine jobs). `tool/ci` is a workspace member with its own
+  tests (19). **Next, on the human's word:** the merge of 14d into
+  `main`, then the tag `v0.1.0` on the merge (P3); an independent review
+  of 14d's code; the looks and the German and Turkish reads owed above.
+  **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
