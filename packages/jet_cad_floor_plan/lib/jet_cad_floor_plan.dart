@@ -33,6 +33,7 @@ export 'src/l10n/strings_en.dart' show FloorPlanStringsEn;
 export 'src/l10n/strings_tr.dart' show FloorPlanStringsTr;
 export 'src/symbols/symbol_library_loader.dart'
     show SymbolLibraryLoader, SymbolLibrarySource, furnitureSymbolSource;
+export 'src/symbols/symbol_names.dart' show SymbolNames;
 // A host with several plans shares one loader and one thumbnail cache
 // between their controllers (R-11).
 export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'

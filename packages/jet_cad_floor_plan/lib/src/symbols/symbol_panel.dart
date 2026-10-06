@@ -11,6 +11,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'symbol_names.dart';
 import '../l10n/strings.dart';
 import '../new_document.dart';
 import '../panel_focus.dart';
@@ -155,12 +156,16 @@ class _SymbolPanelState extends State<SymbolPanel> {
 
   void _clear() => _query.clear();
 
+  /// The palette's names (spec 14d L9): the cells are rebuilt when the
+  /// language changes.
+  SymbolWords _words = SymbolWords.english;
+
   GallerySymbol _gallerySymbol(SymbolEntry entry) =>
       _gallerySymbols.putIfAbsent(entry, () {
         final id = symbolIdOf(entry);
         return GallerySymbol(
           id: id,
-          label: entry.name,
+          label: _words.name(entry),
           thumbnailKey: id,
           thumbnailDocument: () =>
               symbolThumbnailDocument(entry, widget.measurer),
@@ -200,9 +205,16 @@ class _SymbolPanelState extends State<SymbolPanel> {
 
   Widget _ready(BuildContext context, SymbolLibrary library) {
     _index(library);
+    final words = SymbolWords(
+        widget.loader.names, FloorPlanStrings.of(context).languageCode);
+    if (words.language != _words.language ||
+        !identical(words.names, _words.names)) {
+      _words = words;
+      _gallerySymbols.clear();
+    }
     final scheme = Theme.of(context).colorScheme;
     final cellColor = scheme.surfaceContainerLowest;
-    final groups = searchSymbols(library.entries, _query.text);
+    final groups = searchSymbols(library.entries, _query.text, words);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -217,7 +229,8 @@ class _SymbolPanelState extends State<SymbolPanel> {
                   categories: [
                     for (final g in groups)
                       GalleryCategory(
-                        name: g.category,
+                        id: g.category,
+                        name: words.category(g.category),
                         symbols: [for (final e in g.symbols) _gallerySymbol(e)],
                       ),
                   ],

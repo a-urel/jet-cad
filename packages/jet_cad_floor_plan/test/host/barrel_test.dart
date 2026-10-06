@@ -51,6 +51,7 @@ void main() {
       'SymbolLibraryLoader',
       'SymbolLibrarySource',
       'furnitureSymbolSource',
+      'SymbolNames',
       'SymbolThumbnails',
       'PagePrinter',
       'PrintingPagePrinter',

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'symbols/symbol_names.dart';
 import 'host/floor_plan_types.dart';
 import 'l10n/strings_en.dart';
 import 'l10n/number_text.dart';
@@ -1086,7 +1087,14 @@ class _SelectionPanelState extends State<SelectionPanel> {
       InputDecorator(
         decoration:
             InputDecoration(labelText: _strings.name, border: InputBorder.none),
-        child: Text(component.name, key: const Key('symbol-name')),
+        // By key in the panel's language (spec 14d L9); the copy's own
+        // name when no loaded library knows the key.
+        child: Text(
+            SymbolWords(widget.symbols?.names ?? SymbolNames.empty,
+                        _strings.languageCode)
+                    .nameOfKey(component.key) ??
+                component.name,
+            key: const Key('symbol-name')),
       ),
       InputDecorator(
         decoration:

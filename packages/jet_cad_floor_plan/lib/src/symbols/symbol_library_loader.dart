@@ -7,6 +7,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show AssetBundle, rootBundle;
 
+import 'symbol_names.dart';
+import 'furniture_names.dart';
 import 'symbol_library.dart';
 import 'symbol_library_state.dart';
 
@@ -26,18 +28,22 @@ Future<Uint8List> readBundledLibrary([AssetBundle? bundle]) async {
 /// a [read]er of its bytes. A host adds its own beside the planner's
 /// [furnitureSymbolSource].
 final class SymbolLibrarySource {
-  const SymbolLibrarySource({required this.name, required this.read});
+  const SymbolLibrarySource(
+      {required this.name, required this.read, this.names = SymbolNames.empty});
 
   final String name;
   final Future<Uint8List> Function() read;
+
+  /// The library's names in other languages (spec 14d L8).
+  final SymbolNames names;
 
   @override
   String toString() => 'SymbolLibrarySource($name)';
 }
 
 /// The planner's own furniture library, read through [rootBundle].
-const SymbolLibrarySource furnitureSymbolSource =
-    SymbolLibrarySource(name: 'furniture', read: readBundledLibrary);
+const SymbolLibrarySource furnitureSymbolSource = SymbolLibrarySource(
+    name: 'furniture', read: readBundledLibrary, names: furnitureSymbolNames);
 
 /// Loads the symbol libraries once and holds their [SymbolLibraryState].
 ///
@@ -78,6 +84,10 @@ class SymbolLibraryLoader extends ChangeNotifier {
 
   /// The libraries this loader reads, in palette order.
   final List<SymbolLibrarySource> sources;
+
+  /// Every source's names in other languages (spec 14d L8), merged.
+  late final SymbolNames names =
+      sources.fold(SymbolNames.empty, (all, s) => all.merge(s.names));
 
   SymbolLibraryState _state = const SymbolLibraryLoading();
   bool _started = false;
