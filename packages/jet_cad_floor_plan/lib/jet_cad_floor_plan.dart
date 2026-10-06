@@ -19,6 +19,15 @@ export 'src/host/floor_plan_types.dart'
         ServiceLayoutRestore,
         TableStatus;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
+export 'src/l10n/localizations.dart'
+    show
+        FloorPlanLocalizations,
+        floorPlanLocalizationsDelegates,
+        floorPlanSupportedLocales;
+export 'src/l10n/strings.dart' show FloorPlanStrings;
+export 'src/l10n/strings_de.dart' show FloorPlanStringsDe;
+export 'src/l10n/strings_en.dart' show FloorPlanStringsEn;
+export 'src/l10n/strings_tr.dart' show FloorPlanStringsTr;
 export 'src/symbols/symbol_library_loader.dart'
     show SymbolLibraryLoader, SymbolLibrarySource, furnitureSymbolSource;
 // A host with several plans shares one loader and one thumbnail cache

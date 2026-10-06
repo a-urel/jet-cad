@@ -18,6 +18,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Spec 14d L2: Flutter's Material, Widgets and Cupertino words for de and
+  # tr, listed with the planner's own delegate.
+  flutter_localizations:
+    sdk: flutter
   jet_cad_2d:
     path: ../jet_cad_2d
   jet_cad_2d_flutter:
