@@ -47,8 +47,8 @@ with the planner. Import only the two barrels:
 `package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
 Anything under `src/` is not API.
 
-The packages need Flutter 3.44 or later and Dart 3.5 or later; the
-release was built and tested with Flutter 3.47.6.
+The packages need Flutter 3.44 or later (the Dart that comes with it);
+the release was built and tested with Flutter 3.47.6.
 
 ## 2. Fonts
 
@@ -70,7 +70,13 @@ Then register it before `runApp`, with its licence:
 ```dart
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ensureFloorPlanFonts();
+  try {
+    await ensureFloorPlanFonts();
+  } catch (error, stack) {
+    // The plans then measure in the platform's font; the POS still starts.
+    FlutterError.reportError(
+        FlutterErrorDetails(exception: error, stack: stack));
+  }
   registerFontLicences();
   if (kIsWeb) await BrowserContextMenu.disableContextMenu();
   runApp(PosApp(store: MemoryStore()));
@@ -79,10 +85,7 @@ Future<void> main() async {
 
 `ensureFloorPlanFonts` registers once per process; a later call returns
 the first one's future, or tries again if it failed. It throws when the
-font asset cannot be read: the demo
-([`apps/restaurant_demo/lib/main.dart`](../apps/restaurant_demo/lib/main.dart))
-catches and reports it, and its plans then measure in the platform's
-font. The `BrowserContextMenu` line is
+font asset cannot be read; catch it, or the app never starts. The `BrowserContextMenu` line is
 [§ 8](#8-callbacks-options-and-the-webs-context-menu).
 
 ## 3. Languages
@@ -111,7 +114,8 @@ delegates in your `MaterialApp`:
   the Export dialog opens on the root navigator and would not see it.
 - Your own words: `FloorPlanStrings.of(context)` gives the planner's
   language, and its `languageCode`.
-- Panel numbers show and read with the language's decimal separator.
+- Panel numbers show and read with the language's decimal separator,
+  per language, not per region: `de_CH` gets German's `,`.
   The plan's own text — dimensions, room areas, the rulers, the PDF and
   PNG — keeps `.` in every language in 0.1.0.
 
@@ -149,7 +153,7 @@ them yourself after the controllers:
 A single floor can skip both: `FloorPlanController(symbolSources: …)`
 makes and owns its own.
 
-The view, with every host option:
+The view, with the host's options:
 
 ```dart
             child: FloorPlanView(
@@ -163,6 +167,9 @@ The view, with every host option:
               longPress: FloorPlanLongPress.toggleSelection,
             ),
 ```
+
+(`onLayoutChanged`, one call per service drag, still exists; for saving,
+`serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it.)
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
 or `FloorPlanMode.selection`, read back from `controller.mode`. The
@@ -183,7 +190,7 @@ like:
 
   Future<void> openDesign() async {
     final json = await store.read('floor-1.design');
-    if (json == null) return;
+    if (json == null || !mounted) return;
     try {
       controller.load(json);
     } on FormatException catch (e) {
@@ -218,11 +225,18 @@ mode switch or a restart, save the **service layout** and put it back:
   }
 
   Future<void> enterService() async {
-    controller.setMode(FloorPlanMode.selection);
-    final json = await store.read('floor-1.layout');
-    if (json == null || controller.mode.value != FloorPlanMode.selection) {
+    // Read before switching: while the read waits, the plan stays in the
+    // design mode, so no move can be saved over the stored layout.
+    final String? json;
+    try {
+      json = await store.read('floor-1.layout');
+    } catch (e) {
+      showProblem('$e');
       return;
     }
+    if (!mounted) return;
+    controller.setMode(FloorPlanMode.selection);
+    if (json == null) return;
     try {
       final result = controller.restoreServiceLayout(json);
       if (result.dropped.isNotEmpty) {
@@ -239,6 +253,10 @@ mode switch or a restart, save the **service layout** and put it back:
   `setMode` or `load`: those start a copy with no moves, and saving then
   would overwrite your stored layout with an empty one.
 - `serviceLayoutJson()` is null in the design mode.
+- **Read the stored layout first, then switch and restore in one
+  synchronous step**, as above. Switching before an `await` leaves the
+  copy live while the store answers: a table dragged meanwhile is saved
+  over your stored layout, then thrown away by the restore.
 - Restore after `setMode(FloorPlanMode.selection)`, and after a `load`
   in the selection mode. `restoreServiceLayout` throws a `StateError` in
   the design mode, and a `FormatException` (changing nothing) on text
@@ -286,16 +304,21 @@ word them in its language:
 ```
 
 ```dart
-  void checkNumbers() {
-    final strings = FloorPlanStrings.of(context);
-    setState(() {
-      problems = [
-        for (final warning in controller.numberingWarnings)
-          strings.numberingWarning(warning),
-      ];
-    });
-  }
+        title: ValueListenableBuilder<int>(
+          valueListenable: controller.revision,
+          builder: (context, _, __) {
+            final strings = FloorPlanStrings.of(context);
+            final problems = [
+              for (final warning in controller.numberingWarnings)
+                strings.numberingWarning(warning),
+            ];
+            return Text(problems.isEmpty ? 'Floor 1' : problems.first);
+          },
+        ),
 ```
+
+Word them where you build, not when they change: a sentence kept in
+state stays in the old language after a language switch.
 
 ## 8. Callbacks, options, and the web's context menu
 
@@ -337,7 +360,10 @@ a desktop.
 ## 10. What a host must never assume
 
 - **Handles.** A table's identity is its number. The plan's internal
-  handles are not API, and nothing in it hands one out.
+  handles are not API.
+- **The service layout's text.** It names tables by internal handles
+  and belongs to the one plan it was saved from: store it as it is,
+  never parse, edit or move it to another plan.
 - **The service copy's undo.** Undo in the selection mode undoes service
   moves only; it never reaches a design edit, and a restored layout is
   not a step.

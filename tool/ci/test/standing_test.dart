@@ -43,6 +43,24 @@ String editDone(String run, String name, String Function(String) edit) {
   return lines.join('\n');
 }
 
+/// [run] as if the test named [name] passed: its end says success and its
+/// error events are gone.
+String passes(String run, String name) {
+  final start = run.split('\n').firstWhere(
+      (l) => l.contains('"type":"testStart"') && l.contains('"name":"$name"'));
+  final id = RegExp(r'"id":(\d+)').firstMatch(start)![1];
+  final edited = editDone(
+      run,
+      name,
+      (l) => l.replaceFirst(
+          RegExp(r'"result":"(failure|error)"'), '"result":"success"'));
+  return edited
+      .split('\n')
+      .where(
+          (l) => !(l.contains('"testID":$id,') && l.contains('"type":"error"')))
+      .join('\n');
+}
+
 void main() {
   group('the engine run (dart test)', () {
     final run = fixture('engine_run.json');
@@ -70,10 +88,8 @@ void main() {
     });
 
     test('ST3 a standing failure that passes is red (the list is stale)', () {
-      final passing = editDone(
-          run,
-          'both text fractions default to zero and change nothing',
-          (l) => l.replaceFirst('"result":"failure"', '"result":"success"'));
+      final passing =
+          passes(run, 'both text fractions default to zero and change nothing');
       final o = compareRun(passing,
           root: engineRoot, failures: engineFailures, skips: const {});
       expect(o.ok, isFalse);
@@ -187,6 +203,53 @@ void main() {
       expect(o.ok, isFalse);
       expect(o.vmSkips, [probe]);
     });
+  });
+
+  group('failures reported apart from a test\'s end (review F-1)', () {
+    final run = fixture('late_failure_run.json');
+    const late = 'test/zz_late_failure_probe_test.dart :: fails after it '
+        'completed';
+
+    test('ST15 a test that fails after it completed is a new failure', () {
+      expect(
+          run,
+          contains('"testID":3,"result":"success","skipped":false,'
+              '"hidden":false,"type":"testDone"'),
+          reason: 'premise: its end said success');
+      final o = compareRun(run,
+          root: engineRoot, failures: const {}, skips: const {});
+      expect(o.ok, isFalse);
+      expect(o.newFailures, [late]);
+    });
+
+    test('ST16 a run that failed with no test failing is red', () {
+      final unattributed = run
+          .split('\n')
+          .where((l) => !l.contains('"type":"error"'))
+          .join('\n');
+      expect(unattributed, contains('{"success":false,"type":"done"'),
+          reason: 'premise: the run said it failed');
+      final o = compareRun(unattributed,
+          root: engineRoot, failures: const {}, skips: const {});
+      expect(o.newFailures, isEmpty, reason: 'premise: nothing attributed');
+      expect(o.unexplained, isTrue);
+      expect(o.ok, isFalse);
+    });
+
+    test('ST17 a failed run whose failures are all standing is explained', () {
+      final o = compareRun(fixture('engine_run.json'),
+          root: engineRoot, failures: engineFailures, skips: const {});
+      expect(o.unexplained, isFalse);
+      expect(o.ok, isTrue);
+    });
+  });
+
+  test('ST18 the VM-service marker is the engine\'s own reason (review F-5)',
+      () {
+    final meter = File(
+            '../../packages/jet_cad_2d/test/invariants/vm_allocation_meter.dart')
+        .readAsStringSync();
+    expect(meter, contains("'$vmServiceSkipMarker"));
   });
 
   group('the standing lists', () {

@@ -31,8 +31,9 @@ export and printing.
   editor) and a **selection** mode (service) on a copy of the plan, which
   service moves never change;
 - tables identified by their numbers; statuses with a colour and a
-  caption; selection by number; tap, long-press and context-menu
-  callbacks; numbering warnings as values;
+  caption; selection by number; tap and context-menu callbacks (a
+  secondary click, or a long press when the host chooses); numbering
+  warnings as values;
 - the service layout saved and restored as JSON; a view that forbids
   moves; touch;
 - English, German and Turkish built in, chosen by the host's locale;

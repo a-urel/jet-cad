@@ -14,9 +14,11 @@ on:
 permissions:
   contents: read
 
+# A newer push to a branch cancels its older run; on main every commit
+# keeps its verdict.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CI: 'true'

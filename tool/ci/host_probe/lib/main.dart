@@ -12,7 +12,13 @@ import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ensureFloorPlanFonts();
+  try {
+    await ensureFloorPlanFonts();
+  } catch (error, stack) {
+    // The plans then measure in the platform's font; the POS still starts.
+    FlutterError.reportError(
+        FlutterErrorDetails(exception: error, stack: stack));
+  }
   registerFontLicences();
   if (kIsWeb) await BrowserContextMenu.disableContextMenu();
   runApp(PosApp(store: MemoryStore()));
@@ -84,13 +90,10 @@ class _FloorScreenState extends State<FloorScreen> {
   /// Whether staff may drag tables during service.
   bool staffMayMoveTables = true;
 
-  List<String> problems = const [];
-
   @override
   void initState() {
     super.initState();
     controller.serviceLayoutChanges.addListener(saveLayout);
-    controller.revision.addListener(checkNumbers);
     controller.selectedTables.addListener(showOrders);
     openDesign();
   }
@@ -111,7 +114,7 @@ class _FloorScreenState extends State<FloorScreen> {
 
   Future<void> openDesign() async {
     final json = await store.read('floor-1.design');
-    if (json == null) return;
+    if (json == null || !mounted) return;
     try {
       controller.load(json);
     } on FormatException catch (e) {
@@ -125,11 +128,18 @@ class _FloorScreenState extends State<FloorScreen> {
   }
 
   Future<void> enterService() async {
-    controller.setMode(FloorPlanMode.selection);
-    final json = await store.read('floor-1.layout');
-    if (json == null || controller.mode.value != FloorPlanMode.selection) {
+    // Read before switching: while the read waits, the plan stays in the
+    // design mode, so no move can be saved over the stored layout.
+    final String? json;
+    try {
+      json = await store.read('floor-1.layout');
+    } catch (e) {
+      showProblem('$e');
       return;
     }
+    if (!mounted) return;
+    controller.setMode(FloorPlanMode.selection);
+    if (json == null) return;
     try {
       final result = controller.restoreServiceLayout(json);
       if (result.dropped.isNotEmpty) {
@@ -152,16 +162,6 @@ class _FloorScreenState extends State<FloorScreen> {
     debugPrint('orders for tables $numbers');
   }
 
-  void checkNumbers() {
-    final strings = FloorPlanStrings.of(context);
-    setState(() {
-      problems = [
-        for (final warning in controller.numberingWarnings)
-          strings.numberingWarning(warning),
-      ];
-    });
-  }
-
   String describe(NumberingWarning warning) => switch (warning) {
         DuplicateNumber(:final number, :final count) =>
           'Table $number is used $count times',
@@ -173,7 +173,7 @@ class _FloorScreenState extends State<FloorScreen> {
         '${export.mimeType}');
   }
 
-  void openOrder(String number) => controller.select({number});
+  void openOrder(String number) => debugPrint('open the order of $number');
 
   Future<void> showTableMenu(String number, Offset position) async {
     final tables = controller.selectedTables.value;
@@ -197,7 +197,17 @@ class _FloorScreenState extends State<FloorScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(problems.isEmpty ? 'Floor 1' : problems.first),
+        title: ValueListenableBuilder<int>(
+          valueListenable: controller.revision,
+          builder: (context, _, __) {
+            final strings = FloorPlanStrings.of(context);
+            final problems = [
+              for (final warning in controller.numberingWarnings)
+                strings.numberingWarning(warning),
+            ];
+            return Text(problems.isEmpty ? 'Floor 1' : problems.first);
+          },
+        ),
         actions: [
           IconButton(
               icon: const Icon(Icons.save), onPressed: () => saveDesign()),
@@ -217,10 +227,13 @@ class _FloorScreenState extends State<FloorScreen> {
       ),
       body: Column(
         children: [
-          for (final table in controller.tables)
-            if (table.number == null) Text('${table.seats} seats, unnumbered'),
-          for (final warning in controller.numberingWarnings)
-            Text(describe(warning)),
+          ValueListenableBuilder<int>(
+            valueListenable: controller.revision,
+            builder: (context, _, __) => Column(children: [
+              for (final warning in controller.numberingWarnings)
+                Text(describe(warning)),
+            ]),
+          ),
           Expanded(
             child: FloorPlanView(
               controller: controller,

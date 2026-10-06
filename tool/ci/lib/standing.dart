@@ -20,6 +20,7 @@ String testId(String suite, String name) => '$suite :: $name';
 final class Outcome {
   const Outcome({
     required this.ended,
+    required this.unexplained,
     required this.tests,
     required this.newFailures,
     required this.fixed,
@@ -30,6 +31,10 @@ final class Outcome {
 
   /// Whether the run reported its end (a `done` event).
   final bool ended;
+
+  /// The run said it failed, yet no test failed (review F-1's backstop):
+  /// a failure this reading does not know how to attribute.
+  final bool unexplained;
 
   /// Tests that finished, the hidden loaders left out.
   final int tests;
@@ -51,6 +56,7 @@ final class Outcome {
 
   bool get ok =>
       ended &&
+      !unexplained &&
       tests > 0 &&
       newFailures.isEmpty &&
       fixed.isEmpty &&
@@ -61,6 +67,7 @@ final class Outcome {
   /// One line per difference, for the CI log.
   List<String> report() => [
         if (!ended) 'the run did not end (no "done" event)',
+        if (unexplained) 'the run failed, but no test did',
         if (tests == 0) 'the run had no test',
         for (final t in newFailures) 'new failure: $t',
         for (final t in fixed) 'standing failure passed or did not run: $t',
@@ -89,6 +96,7 @@ Outcome compareRun(
   final skipped = <String>{};
   final vm = <String>{};
   var ended = false;
+  var succeeded = true;
   var tests = 0;
   for (final line in const LineSplitter().convert(json)) {
     final Object? decoded;
@@ -109,6 +117,12 @@ Outcome compareRun(
         final test = event['test']! as Map<String, Object?>;
         names[test['id']! as int] = testId(
             suites[test['suiteID']! as int] ?? '?', test['name']! as String);
+      case 'error':
+        // A failure reported apart from the test's end: one after it
+        // completed (its `testDone` said success), or an error of a test
+        // that is still running. Either way the test failed.
+        final id = event['testID']! as int;
+        failing.add(names[id] ?? '? :: #$id');
       case 'print':
         if (event['messageType'] == 'skip') {
           skipReasons[event['testID']! as int] = event['message']! as String;
@@ -128,11 +142,13 @@ Outcome compareRun(
         if (!hidden) tests++;
       case 'done':
         ended = true;
+        succeeded = event['success'] != false;
     }
   }
   List<String> sorted(Iterable<String> s) => s.toList()..sort();
   return Outcome(
     ended: ended,
+    unexplained: ended && !succeeded && failing.isEmpty,
     tests: tests,
     newFailures: sorted(failing.difference(failures)),
     fixed: sorted(failures.difference(failing)),
