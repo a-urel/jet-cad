@@ -2,8 +2,12 @@
 
 **Date:** 2026-10-06. **Status:** design, **revision 2**: revision 1
 (`82942ea`) reviewed independently, "Needs revision" (findings V-1 to
-V-21); [Revision 2](#revision-2) is binding where it differs. For the
-human's approval, with its questions Q0–Q4. **Sub-project:** 14
+V-21); [Revision 2](#revision-2) is binding where it differs.
+**Approved by the human at revision 2** (2026-10-06: *"Q0 evet, diğerleri
+de önerdiğin gibi, plana geç"*): **Q0 yes** — the plan's own text keeps
+`.` for 0.1.0, so L13, L14, M-14d-d and M-14d-e are out and no schema
+changes; **Q1** the glossary as proposed; **Q2** moot; **Q3** GitHub
+Actions accepted; **Q4** the order 14d-2 → 14d-1 → 14d-3. **Sub-project:** 14
 (restaurant embedding), slice **14d**, after 14b-1, 14s, 14a, 14b-2,
 14c, 14t (all merged at `95d6e0e`) and 09c (merged at `43dd020`).
 **Umbrella:** [2026-10-03-restaurant-embedding-design.md](2026-10-03-restaurant-embedding-design.md)
