@@ -921,31 +921,35 @@ class _PlannerShellState extends State<PlannerShell> {
                     width: 280,
                     color: scheme.surfaceContainerLow,
                     child: ShellShortcutGuard(
-                      child: Column(
-                        children: [
-                          // Spec 07 D11, 08 D16: while the Wall tool or
-                          // an opening tool is active, the panel edits its
-                          // settings.
-                          SelectionPanel(
-                              document: _document,
-                              selection: _selection,
-                              tools: _tools,
-                              wallTool: _wall,
-                              wallSettings: _wallSettings,
-                              openingTools: _openingTools,
-                              openingSettings: _openingSettings,
-                              symbols: widget.symbols),
-                          // Spec 12b D9: the Layers section, placed only.
-                          LayerPanel(
-                              document: _document,
-                              foreground: _resolver.foreground),
-                          Expanded(
-                            child: PagePanel(
+                      // One scroll for the whole column (review 14d-1 F-2):
+                      // a selection's sections, the layers and the page
+                      // outgrow a short window, longer in German.
+                      child: SingleChildScrollView(
+                        key: const Key('chrome-right-scroll'),
+                        child: Column(
+                          children: [
+                            // Spec 07 D11, 08 D16: while the Wall tool or
+                            // an opening tool is active, the panel edits its
+                            // settings.
+                            SelectionPanel(
+                                document: _document,
+                                selection: _selection,
+                                tools: _tools,
+                                wallTool: _wall,
+                                wallSettings: _wallSettings,
+                                openingTools: _openingTools,
+                                openingSettings: _openingSettings,
+                                symbols: widget.symbols),
+                            // Spec 12b D9: the Layers section, placed only.
+                            LayerPanel(
+                                document: _document,
+                                foreground: _resolver.foreground),
+                            PagePanel(
                                 key: _pagePanel,
                                 document: _document,
                                 page: _page),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

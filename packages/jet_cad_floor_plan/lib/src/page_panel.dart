@@ -139,7 +139,12 @@ class PagePanelState extends State<PagePanel> {
           // ink splashes may be invisible" on every frame.
           return Material(
             color: Colors.transparent,
+            // Laid out whole: the shell's right column scrolls (review
+            // 14d-1 F-2).
             child: ListView(
+              shrinkWrap: true,
+              primary: false,
+              physics: const NeverScrollableScrollPhysics(),
               padding: const EdgeInsets.all(12),
               children: [
                 Text(_strings.pageTitle,
