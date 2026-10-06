@@ -1,5 +1,27 @@
 # jet-cad — project status
 
+**2026-10-06 — 14d MERGED into `main` at `22206f5` (release 0.1.0)**, a
+`--no-ff` merge, on the human's word (*"evet, main'e merge et ve v0.1.0
+tag'ini at"*). `main` had moved 64 commits (PRs 1–9: the dark theme and
+canvas, table groups); it was merged into the branch first (`b1f3e91`,
+eleven conflicts, both sides kept; Merge and Split and the demo's group
+words put through the strings; a context gesture on a group member
+selects its whole group), then fixed (`29820b6`) and checked: planner
+1,352, render 1,333 + 7 standing + 1 skip, engine 1,242 + 2 standing,
+app 203, demo 35, restaurant symbols 97, `tool/ci` 32, the probe built
+by git over the merged commit, CI run 7 green. `main`'s tree is that
+commit's.
+- **The tag `v0.1.0` is made but NOT pushed:** this session's git proxy
+  refuses tag pushes (*unexpected disconnect*, four tries), and the
+  GitHub tools here cannot create a tag. **Owed the human:** push it —
+  `git tag -a v0.1.0 22206f527e32e4677fe706731a751ec9de0d751e -m "jet-cad
+  0.1.0"` and `git push origin v0.1.0`, or a GitHub release with tag
+  `v0.1.0` on that commit. The host guide names the SHA.
+- **Owed, as before:** the looks (macOS, web, a tablet); the German
+  text's native read; the floor planner's English save-panel labels
+  (localise or waive).
+- **Next:** the human's choice; the roadmap's next sub-project.
+
 **Last updated:** 2026-10-06 (**14d — 14d-2, 14d-1 and 14d-3 — done on `claude/exciting-pasteur-9m22jv`, not merged, not tagged**; 09c-2 MERGED into `main` at `43dd020`; see below).
 - **Slice 14d (POS readiness)** — spec
   [2026-10-06-pos-readiness-design.md](docs/superpowers/specs/2026-10-06-pos-readiness-design.md),
