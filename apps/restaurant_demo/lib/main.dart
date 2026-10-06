@@ -2,13 +2,17 @@
 // sale application does with the planner, through its public API only.
 //
 // Two dining areas (umbrella decision 12), each a FloorPlanController over
-// a plan kept in memory; a Design / Service toggle that asks before it
-// discards service edits; selection by table number; and a log of the
-// API's state. An example and an integration surface, not a product.
+// a plan kept in memory, with its service layout kept beside it (spec 14d
+// S4, S9: Design and back shows the moves again; Reset layout drops them);
+// a Design / Service toggle; selection by table number; a table's context
+// menu; the service options; and a log of the API's state. An example and
+// an integration surface, not a product.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show AssetBundle, rootBundle;
+import 'package:flutter/services.dart'
+    show AssetBundle, BrowserContextMenu, rootBundle;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
@@ -28,6 +32,9 @@ Future<void> main() async {
         context: ErrorDescription('registering the plan font')));
   }
   registerFontLicences();
+  // A right click on a table opens the demo's menu, not the browser's
+  // (spec 14d S8): app-global, so the host's to decide.
+  if (kIsWeb) await BrowserContextMenu.disableContextMenu();
   runApp(RestaurantDemo(plans: await loadSamplePlans(rootBundle)));
 }
 
@@ -64,13 +71,17 @@ class RestaurantDemo extends StatelessWidget {
       );
 }
 
-/// One dining area: its controller and the plan last saved, in memory.
+/// One dining area: its controller, the plan last saved and the service
+/// layout last seen, in memory.
 final class Area {
   Area(this.name, this.controller, this.stored);
 
   final String name;
   final FloorPlanController controller;
   String? stored;
+
+  /// The service layout, kept on `serviceLayoutChanges` (spec 14d S4).
+  String? layout;
 }
 
 class DemoHome extends StatefulWidget {
@@ -102,6 +113,10 @@ class DemoHomeState extends State<DemoHome> {
   late final math.Random _random = widget.random ?? math.Random();
   final TextEditingController _number = TextEditingController();
 
+  /// The service options (spec 14d S5, S7).
+  bool moves = true;
+  bool longPressMenu = false;
+
   /// The newest line first.
   final List<String> log = [];
 
@@ -123,6 +138,10 @@ class DemoHomeState extends State<DemoHome> {
       c.revision.addListener(() {
         if (mounted) setState(() {});
       });
+      // Kept on every change of the layout, never on a mode switch or a
+      // load, which start from the design (S4).
+      c.serviceLayoutChanges
+          .addListener(() => a.layout = c.serviceLayoutJson());
     }
   }
 
@@ -145,32 +164,52 @@ class DemoHomeState extends State<DemoHome> {
     });
   }
 
-  /// The toggle (H10): leaving the service asks first when it has edits.
-  Future<void> _setMode(FloorPlanMode next) async {
-    final c = area.controller;
-    if (next == FloorPlanMode.design && c.serviceEdited) {
-      final discard = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          key: const Key('discard-dialog'),
-          title: const Text('Discard the service layout?'),
-          content: const Text(
-              'Tables moved during the service go back to the designed plan.'),
-          actions: [
-            TextButton(
-                key: const Key('discard-cancel'),
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('Cancel')),
-            FilledButton(
-                key: const Key('discard-ok'),
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('Discard')),
-          ],
-        ),
-      );
-      if (discard != true || !mounted) return;
+  /// The toggle (H10). The service layout is kept, not discarded (spec
+  /// 14d S9): entering the service puts it back.
+  void _setMode(FloorPlanMode next) {
+    area.controller.setMode(next);
+    if (next == FloorPlanMode.selection) _restoreLayout(area);
+  }
+
+  /// [a]'s kept layout, put back on its service copy (S4); entries the
+  /// design no longer matches are dropped and logged.
+  void _restoreLayout(Area a) {
+    final layout = a.layout;
+    if (layout == null) return;
+    final r = a.controller.restoreServiceLayout(layout);
+    if (r.applied.isEmpty && r.dropped.isEmpty) return;
+    _log('${a.name}: layout restored, ${r.applied.length} moved, '
+        '${r.dropped.length} dropped');
+  }
+
+  /// A table's context menu (spec 14d S6): the table is already selected
+  /// alone, or with the selection that held it.
+  Future<void> _tableMenu(String number, Offset at) async {
+    final a = area;
+    _log('${a.name}: menu for $number');
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(at.dx, at.dy, at.dx, at.dy),
+      items: [
+        PopupMenuItem(enabled: false, child: Text('Table $number')),
+        const PopupMenuItem(
+            key: Key('menu-select'),
+            value: 'select',
+            child: Text('Select only this')),
+        const PopupMenuDivider(),
+        for (final name in kStatuses.keys)
+          PopupMenuItem(
+              key: Key('menu-status-${name.toLowerCase()}'),
+              value: 'status:$name',
+              child: Text(name)),
+      ],
+    );
+    if (choice == null || !mounted || !identical(a, area)) return;
+    if (choice == 'select') {
+      a.controller.select({number});
+    } else if (choice.startsWith('status:')) {
+      _setStatus(choice.substring('status:'.length));
     }
-    c.setMode(next);
   }
 
   void _save() {
@@ -187,6 +226,10 @@ class DemoHomeState extends State<DemoHome> {
       area.controller.load(stored);
     }
     _log('${area.name}: reloaded');
+    // A load in the service starts from the design: the layout goes back.
+    if (area.controller.mode.value == FloorPlanMode.selection) {
+      _restoreLayout(area);
+    }
   }
 
   /// The statuses a POS would set (14c S10): by the selected tables.
@@ -284,6 +327,11 @@ class DemoHomeState extends State<DemoHome> {
                   '${e.bytes.length} bytes'),
               onTableTap: (n) => _log('${area.name}: tapped $n'),
               onLayoutChanged: () => _log('${area.name}: layout changed'),
+              serviceMoves: moves,
+              longPress: longPressMenu
+                  ? FloorPlanLongPress.contextMenu
+                  : FloorPlanLongPress.toggleSelection,
+              onTableContextMenu: _tableMenu,
             ),
           ),
           SizedBox(
@@ -315,6 +363,20 @@ class DemoHomeState extends State<DemoHome> {
                       onPressed: c.fitToView,
                       child: const Text('Fit')),
                 ]),
+                if (c.mode.value == FloorPlanMode.selection) ...[
+                  SwitchListTile(
+                      key: const Key('moves'),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Moves'),
+                      value: moves,
+                      onChanged: (v) => setState(() => moves = v)),
+                  SwitchListTile(
+                      key: const Key('long-press-menu'),
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Long press: menu'),
+                      value: longPressMenu,
+                      onChanged: (v) => setState(() => longPressMenu = v)),
+                ],
                 const SizedBox(height: 16),
                 TextField(
                   key: const Key('select-number'),

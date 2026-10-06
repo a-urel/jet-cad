@@ -1,6 +1,7 @@
 // Spec 14b-2 H10: the demo host drives the public API end to end -- two
-// areas, the mode toggle and its discard question, selection by number,
-// save and revert in memory, the log.
+// areas, the mode toggle, the service layout kept per area (spec 14d S9),
+// selection by number, save and revert in memory, the table menu, the
+// service options, the log.
 // The tests reach a controller's active plan to make edits the 14b-2 UI
 // cannot (a service move comes with 14c).
 // ignore_for_file: invalid_use_of_internal_member
@@ -15,6 +16,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
     show FloorPlanMode, TableStatus;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryMouseButton;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
@@ -87,8 +90,8 @@ void main() {
   });
 
   testWidgets(
-      'D3 leaving a service with edits asks first; Cancel keeps it, '
-      'Discard drops it', (tester) async {
+      'D3 the service layout is kept across Design and back, and only '
+      'Reset layout drops it (spec 14d S9, M-14d-r)', (tester) async {
     final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
     final c = demo.area.controller;
     await tester.tap(byKey('mode-service'));
@@ -102,21 +105,41 @@ void main() {
           Transform2.translation(400, -300).multiply(node.transform))
     ], label: 'Move'));
     expect(c.serviceEdited, isTrue);
+    await tester.pump();
+    List<double> place() {
+      final d = c.activeDocument;
+      final t = (d.tree[TableSurvey.of(d).withNumber('1').single.instance]!
+              as InstanceNode)
+          .transform;
+      return [t.a, t.b, t.c, t.d, t.e, t.f];
+    }
+
+    final moved = place();
 
     await tester.tap(byKey('mode-design'));
     await tester.pump();
-    expect(byKey('discard-dialog'), findsOneWidget);
-    await tester.tap(byKey('discard-cancel'));
     await tester.pump();
-    expect(c.mode.value, FloorPlanMode.selection);
-
-    await tester.tap(byKey('mode-design'));
-    await tester.pump();
-    await tester.tap(byKey('discard-ok'));
-    await tester.pump();
-    await tester.pump();
-    expect(c.mode.value, FloorPlanMode.design);
+    expect(c.mode.value, FloorPlanMode.design, reason: 'no question asked');
     expect(c.dirty.value, isFalse, reason: 'the design never moved');
+    final designed = place();
+    expect(designed, isNot(moved));
+
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    expect(place(), moved, reason: 'the kept layout is back');
+    expect(demo.log.first, 'Salon: layout restored, 1 moved, 0 dropped');
+
+    await tester.tap(byKey('reset-layout'));
+    await tester.pump();
+    await tester.pump();
+    expect(place(), designed);
+    await tester.tap(byKey('mode-design'));
+    await tester.pump();
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    expect(place(), designed, reason: 'Reset layout dropped it');
   });
 
   testWidgets('D4 Save stores the plan in memory; Revert reloads it',
@@ -267,8 +290,8 @@ void main() {
   });
 
   testWidgets(
-      'D10 Revert with nothing stored empties the area; Teras asks before '
-      'discarding its own service edits', (tester) async {
+      'D10 Revert with nothing stored empties the area; Teras keeps its own '
+      'service layout', (tester) async {
     final demo = await pumpDemo(tester, plans: {'Teras': salonPlan()});
     await tester.tap(byKey('area-1'));
     await tester.pump();
@@ -279,13 +302,13 @@ void main() {
     await tester.pump();
     await tester.pump();
     serviceMove(demo, '2');
-    await tester.tap(byKey('mode-design'));
     await tester.pump();
-    expect(byKey('discard-dialog'), findsOneWidget);
-    await tester.tap(byKey('discard-ok'));
+    await tester.tap(byKey('mode-design'));
     await tester.pump();
     await tester.pump();
     expect(teras.mode.value, FloorPlanMode.design);
+    expect(demo.area.layout, contains('"number":"2"'));
+    expect(demo.areas.first.layout, isNull);
     expect(demo.areas.first.controller.mode.value, FloorPlanMode.design);
 
     await tester.tap(byKey('area-0'));
@@ -424,5 +447,76 @@ void main() {
         [for (var i = 1; i <= 6; i++) '$i']);
     expect(salon.numberingWarnings, isEmpty);
     expect(teras.numberingWarnings, isEmpty);
+  });
+
+  testWidgets(
+      'D16 a Revert in the service, and the mode switches, keep the stored '
+      'layout (spec 14d S4, M-14d-r)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    serviceMove(demo, '1');
+    await tester.pump();
+    final layout = demo.area.layout;
+    expect(layout, contains('"number":"1"'));
+    await tester.tap(byKey('revert'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.serviceEdited, isTrue, reason: 'restored after the load');
+    expect(demo.area.layout, layout);
+    expect(demo.log.first, 'Salon: layout restored, 1 moved, 0 dropped');
+  });
+
+  /// Table [n]'s base point on the screen.
+  Offset onScreen(WidgetTester tester, DemoHomeState demo, String n) {
+    final c = demo.area.controller;
+    final d = c.activeDocument;
+    final node = d.tree[TableSurvey.of(d).withNumber(n).single.instance]!
+        as InstanceNode;
+    final def = d.tree.definition(node.definition)!;
+    final w = node.transform.transformPoint(def.basePoint);
+    final s = c.camera.value.worldToScreen(w);
+    return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
+  }
+
+  testWidgets(
+      'D17 a right click opens the table\'s menu; a status chosen there is '
+      'set on the table (spec 14d S6, S9)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tapAt(onScreen(tester, demo, '2'),
+        buttons: kSecondaryMouseButton, kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(find.text('Table 2'), findsOneWidget);
+    expect(c.selectedTables.value, {'2'});
+    await tester.tap(byKey('menu-status-bill'));
+    await tester.pumpAndSettle();
+    expect(c.tableStatuses.value.keys, ['2']);
+    expect(demo.log, contains('Salon: menu for 2'));
+  });
+
+  testWidgets(
+      'D18 with Moves off a drag from a table pans and changes no layout '
+      '(spec 14d S5, S9)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(byKey('moves'));
+    await tester.pump();
+    expect(demo.moves, isFalse);
+    final g = await tester.startGesture(onScreen(tester, demo, '1'));
+    await g.moveBy(const Offset(40, 0));
+    await g.moveBy(const Offset(40, 0));
+    await g.up();
+    await tester.pump();
+    expect(c.serviceEdited, isFalse);
+    expect(demo.log, isNot(contains('Salon: layout changed')));
   });
 }
