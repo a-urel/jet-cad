@@ -209,7 +209,9 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// The Number field's last refusal and the table it was for (14a T14):
   /// shown under the field until its next edit or a selection change.
-  String? _numberError;
+  /// The number field's error, worded at build, so a language switch
+  /// re-words it (review 14d-1 F-3).
+  String Function(FloorPlanStrings)? _numberError;
   Handle? _numberErrorFor;
 
   /// Whether the Wall tool was active at the last check: the tool
@@ -398,8 +400,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
     // re-reads the reverted text, which must not end it (T14).
     if (problem == null && !clash) return t;
     _numberError = problem != null
-        ? _strings.tableNumberProblem(problem)
-        : _strings.tableNumberUsed(t);
+        ? (s) => s.tableNumberProblem(problem)
+        : (s) => s.tableNumberUsed(t);
     _numberErrorFor = table;
     return null;
   }
@@ -1133,7 +1135,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   /// The Table section (14a T14, T16).
   List<Widget> _tableSection(TableInfo table, TextStyle? title) {
-    final error = _numberErrorFor == table.instance ? _numberError : null;
+    final error =
+        _numberErrorFor == table.instance ? _numberError?.call(_strings) : null;
     final shared =
         table.number == null ? 0 : _tables.withNumber(table.number!).length;
     final theme = Theme.of(context);

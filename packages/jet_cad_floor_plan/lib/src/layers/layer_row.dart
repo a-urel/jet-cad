@@ -114,8 +114,10 @@ class _LayerRowState extends State<LayerRow> {
   final PanelFieldFocusNode _focus =
       PanelFieldFocusNode(debugLabel: 'layer name');
 
-  /// The reason the last Enter was refused, shown under the field.
-  String? _error;
+  /// The name the last Enter refused; its reason is asked of
+  /// [LayerRow.validate] at build, so a language switch re-words it (review
+  /// 14d-1 F-3).
+  String? _refused;
 
   /// Whether the field is open and has not been closed by Enter, Escape or
   /// focus loss: a close hands the focus back, and the focus listener must
@@ -148,7 +150,7 @@ class _LayerRowState extends State<LayerRow> {
 
   void _begin() {
     _open = true;
-    _error = null;
+    _refused = null;
     _text.value = TextEditingValue(
         text: widget.record.name,
         selection: TextSelection(
@@ -172,7 +174,7 @@ class _LayerRowState extends State<LayerRow> {
     final name = _text.text.trim();
     final error = widget.validate(name);
     if (error != null) {
-      setState(() => _error = error);
+      setState(() => _refused = name);
       return;
     }
     _close(commit: name);
@@ -341,7 +343,10 @@ class _LayerRowState extends State<LayerRow> {
               border: const OutlineInputBorder(),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-              errorText: _error,
+              errorText: switch (_refused) {
+                null => null,
+                final name => widget.validate(name),
+              },
               errorMaxLines: 3,
             ),
           ),
