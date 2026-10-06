@@ -11,6 +11,10 @@
 // label string is at least 0.0005 m² from a rounding tie. Seeds are
 // fractional, and the fixtures run at the origin and at the corpus far
 // origin with every wall and separator in its own rotated group.
+import 'package:jet_cad_floor_plan/src/l10n/strings_tr.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings_de.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings_en.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings.dart';
 import 'package:jet_cad_floor_plan/src/planner_shell.dart';
 import 'package:jet_cad_floor_plan/src/parametric/dimension.dart';
 import 'package:jet_cad_floor_plan/src/parametric/room.dart';
@@ -39,13 +43,14 @@ typedef Rig = ({RoomTool tool, ToolContext ctx, RoomInputs inputs});
 /// A Room tool over [doc] with its own [RoomInputs]: a camera at [scale]
 /// pixels per mm (1 gives a 10 mm aperture), object snap on, no page (no
 /// grid).
-Rig roomRig(DraftDocument doc, {double scale = 1}) {
+Rig roomRig(DraftDocument doc,
+    {double scale = 1, FloorPlanStrings strings = const FloorPlanStringsEn()}) {
   final index = SpatialIndex(doc);
   final camera = CameraController(
       ViewportTransform(worldToScreenMatrix: Transform2.scale(scale, scale)));
   final selection = SelectionController(doc);
   final inputs = RoomInputs(doc);
-  final tool = RoomTool(inputs);
+  final tool = RoomTool(inputs, strings: () => strings);
   addTearDown(() {
     tool.dispose();
     inputs.dispose();
@@ -495,6 +500,29 @@ void main() {
     final living = addedRoom(doc, before);
     expect(doc.components.get<RoomParams>(living)!.name, 'Room 4');
     expect(driftOf(doc), isEmpty);
+  });
+
+  test(
+      'TT4b a new room is named in the language of the moment, its N counted '
+      'over every built-in language (spec 14d L7, M-14d-k)', () {
+    final plan = samplePlan(corpusGroups);
+    final doc = plan.doc;
+    Vector2 at(String name) {
+      final (x, y) = sampleSeeds[name]!;
+      return plan.at(x, y);
+    }
+
+    addRoom(doc, at('Hall'), 'Room 1');
+    addRoom(doc, at('Bedroom 1'), 'Oda 2');
+    addRoom(doc, at('Kitchen'), 'Raum 4');
+    var before = rooms(doc);
+    pressAt(roomRig(doc, strings: const FloorPlanStringsDe()), at('Bath'));
+    expect(
+        doc.components.get<RoomParams>(addedRoom(doc, before))!.name, 'Raum 3');
+    before = rooms(doc);
+    pressAt(roomRig(doc, strings: const FloorPlanStringsTr()), at('Living'));
+    expect(
+        doc.components.get<RoomParams>(addedRoom(doc, before))!.name, 'Oda 5');
   });
 
   test('TT5 the seed is the raw point with object snap on beside a vertex', () {

@@ -384,4 +384,28 @@ class FloorPlanStringsDe extends FloorPlanStrings {
         9 => 'Hellgrau',
         _ => '$aci',
       };
+
+  @override
+  String roomName(int n) => 'Raum $n';
+
+  @override
+  String layerName(int n) => 'Ebene $n';
+
+  @override
+  String get sampleHall => 'Flur';
+
+  @override
+  String get sampleKitchen => 'Küche';
+
+  @override
+  String get sampleBath => 'Bad';
+
+  @override
+  String get sampleLiving => 'Wohnen';
+
+  @override
+  String get sampleDining => 'Essen';
+
+  @override
+  String sampleBedroom(int n) => 'Schlafzimmer $n';
 }

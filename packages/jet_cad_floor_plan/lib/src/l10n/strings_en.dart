@@ -380,4 +380,28 @@ class FloorPlanStringsEn extends FloorPlanStrings {
         9 => 'Light grey',
         _ => '$aci',
       };
+
+  @override
+  String roomName(int n) => 'Room $n';
+
+  @override
+  String layerName(int n) => 'Layer $n';
+
+  @override
+  String get sampleHall => 'Hall';
+
+  @override
+  String get sampleKitchen => 'Kitchen';
+
+  @override
+  String get sampleBath => 'Bath';
+
+  @override
+  String get sampleLiving => 'Living';
+
+  @override
+  String get sampleDining => 'Dining';
+
+  @override
+  String sampleBedroom(int n) => 'Bedroom $n';
 }

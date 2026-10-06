@@ -318,6 +318,21 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
   String get layerColour => record(inner.layerColour);
 
   @override
+  String get sampleHall => record(inner.sampleHall);
+
+  @override
+  String get sampleKitchen => record(inner.sampleKitchen);
+
+  @override
+  String get sampleBath => record(inner.sampleBath);
+
+  @override
+  String get sampleLiving => record(inner.sampleLiving);
+
+  @override
+  String get sampleDining => record(inner.sampleDining);
+
+  @override
   String layerNameProblem(LayerNameProblem problem) =>
       record(inner.layerNameProblem(problem));
 
@@ -357,4 +372,13 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
 
   @override
   String colourName(int aci) => record(inner.colourName(aci));
+
+  @override
+  String roomName(int n) => record(inner.roomName(n));
+
+  @override
+  String layerName(int n) => record(inner.layerName(n));
+
+  @override
+  String sampleBedroom(int n) => record(inner.sampleBedroom(n));
 }

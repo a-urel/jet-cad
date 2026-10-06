@@ -33,6 +33,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'l10n/strings_en.dart';
+import 'l10n/strings.dart';
 import 'new_document.dart';
 import 'parametric/catalog.dart';
 import 'parametric/dimension.dart';
@@ -61,8 +63,10 @@ const DraftColor _finishColor = TrueColor(0xBBBBBB);
 
 /// Builds the sample flat (File > Open sample, spec 12a D4) over
 /// [measurer]. `DraftCanvas` refuses a document whose measurer is not a
-/// `FlutterTextMeasurer`, so the caller supplies one it owns.
-DraftDocument startupPlan(FlutterTextMeasurer measurer) {
+/// `FlutterTextMeasurer`, so the caller supplies one it owns. Its rooms are
+/// named in [strings]' language (spec 14d L7), English by default.
+DraftDocument startupPlan(FlutterTextMeasurer measurer,
+    {FloorPlanStrings strings = const FloorPlanStringsEn()}) {
   // Spec 12a D4: the set-up every document the app makes shares -- the
   // app's component types (the page's and the catalog's, once), units in
   // millimetres, and the DASHED record in the tables outside the history
@@ -201,13 +205,13 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer) {
 
   // Seven rooms (spec 10 D23's table): the six spaces, and the dining area
   // the separator splits off the living room. Each seed lies in no band.
-  p.room(14500, 10500, 'Hall');
-  p.room(13300, 15000, 'Bedroom 1');
-  p.room(15800, 15000, 'Bedroom 2');
-  p.room(19000, 10000, 'Kitchen');
-  p.room(23500, 10000, 'Bath');
-  p.room(24500, 16000, 'Living');
-  p.room(19000, 16000, 'Dining');
+  p.room(14500, 10500, strings.sampleHall);
+  p.room(13300, 15000, strings.sampleBedroom(1));
+  p.room(15800, 15000, strings.sampleBedroom(2));
+  p.room(19000, 10000, strings.sampleKitchen);
+  p.room(23500, 10000, strings.sampleBath);
+  p.room(24500, 16000, strings.sampleLiving);
+  p.room(19000, 16000, strings.sampleDining);
 
   // Spec 11 D17 (R-30): five dimensions, after the rooms (so they draw over
   // them), through the plan's system, each in its own root-level group at

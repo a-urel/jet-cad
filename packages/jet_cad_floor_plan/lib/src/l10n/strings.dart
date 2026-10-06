@@ -371,4 +371,30 @@ abstract class FloorPlanStrings {
 
   /// The name of ACI colour [aci], 1 to 9, in the colour menu.
   String colourName(int aci);
+
+  // Names written into the document once (Task 5, L7).
+
+  /// A new room's name.
+  String roomName(int n);
+
+  /// A new layer's name.
+  String layerName(int n);
+
+  /// The sample plan's "Hall".
+  String get sampleHall;
+
+  /// The sample plan's "Kitchen".
+  String get sampleKitchen;
+
+  /// The sample plan's "Bath".
+  String get sampleBath;
+
+  /// The sample plan's "Living".
+  String get sampleLiving;
+
+  /// The sample plan's "Dining".
+  String get sampleDining;
+
+  /// The sample plan's bedroom [n].
+  String sampleBedroom(int n);
 }

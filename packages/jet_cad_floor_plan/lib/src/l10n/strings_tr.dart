@@ -378,4 +378,28 @@ class FloorPlanStringsTr extends FloorPlanStrings {
         9 => 'Açık gri',
         _ => '$aci',
       };
+
+  @override
+  String roomName(int n) => 'Oda $n';
+
+  @override
+  String layerName(int n) => 'Katman $n';
+
+  @override
+  String get sampleHall => 'Hol';
+
+  @override
+  String get sampleKitchen => 'Mutfak';
+
+  @override
+  String get sampleBath => 'Banyo';
+
+  @override
+  String get sampleLiving => 'Oturma odası';
+
+  @override
+  String get sampleDining => 'Yemek odası';
+
+  @override
+  String sampleBedroom(int n) => 'Yatak odası $n';
 }

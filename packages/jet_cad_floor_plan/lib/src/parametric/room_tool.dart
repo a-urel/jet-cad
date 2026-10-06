@@ -9,6 +9,9 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../l10n/strings_en.dart';
+import '../l10n/strings.dart';
+import '../l10n/numbered_names.dart';
 import 'live_objects.dart';
 import 'room.dart';
 import 'room_inputs.dart';
@@ -25,10 +28,6 @@ enum _Verdict {
   /// A face that already holds a live room's seed (decision 26): no room.
   occupied,
 }
-
-/// A name the Room tool gives (spec 10 D19): `Room N`, `N` a positive
-/// integer written without a leading zero.
-final RegExp _roomN = RegExp(r'^Room ([1-9][0-9]*)$');
 
 /// The Room tool's notice (spec 10 D19; spec 14d L5): the hovered face
 /// already holds the room named [name].
@@ -108,13 +107,18 @@ final class RoomOccupied {
 /// edit elsewhere) re-reads the verdict at the pointer's last point, so
 /// neither outlives the face it describes until the next pointer move.
 class RoomTool extends PlacementTool {
-  RoomTool(this.inputs) {
+  RoomTool(this.inputs, {this.strings = _english}) {
     _changes = inputs.document.changes.listen((_) => _onDocumentChange());
   }
 
   /// The shell's document adapter, shared with the Separator tool and the
   /// separator grips (Ruling 10-11). The tool never disposes it.
   final RoomInputs inputs;
+
+  /// The words of the moment, read when a room is named (spec 14d L7).
+  final FloorPlanStrings Function() strings;
+
+  static FloorPlanStrings _english() => const FloorPlanStringsEn();
 
   /// The raw world point of the last press (R-18): `accept` is handed the
   /// resolved point only.
@@ -368,18 +372,23 @@ class RoomTool extends PlacementTool {
 
   /// `Room N`, `N` the lowest positive integer such that no live room of
   /// [doc] is named exactly `Room N` (spec 10 D19).
-  static String _nextName(DraftDocument doc) {
-    final used = <int>{};
-    for (final h in liveObjectsOf<RoomParams>(doc)) {
-      final m = _roomN.firstMatch(doc.components.get<RoomParams>(h)!.name);
-      if (m == null) continue;
-      if (int.tryParse(m[1]!) case final n?) used.add(n);
-    }
+  /// A name the Room tool gives (spec 10 D19, spec 14d L7): `Room N` in
+  /// the words of the moment, `N` the smallest positive integer no live
+  /// room's name takes in any built-in language.
+  String _nextName(DraftDocument doc) {
+    final current = strings();
+    final used = <int>{
+      for (final h in liveObjectsOf<RoomParams>(doc))
+        if (numberedNameIndex(doc.components.get<RoomParams>(h)!.name,
+                (s, n) => s.roomName(n), current)
+            case final n?)
+          n,
+    };
     var n = 1;
     while (used.contains(n)) {
       n++;
     }
-    return 'Room $n';
+    return current.roomName(n);
   }
 
   /// A document change while a preview or a notice shows: the verdict at

@@ -4,6 +4,8 @@ import 'dart:async' show StreamSubscription;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/strings_en.dart';
+import '../l10n/numbered_names.dart';
 import '../l10n/strings.dart';
 import 'layer_row.dart';
 
@@ -33,11 +35,22 @@ List<LayerRecord> layersInPanelOrder(Iterable<LayerRecord> layers) {
   return out;
 }
 
-/// The name the panel's + gives a new layer (spec 12b D4): `Layer N`, the
-/// smallest `N ≥ 1` that [layerNameError] accepts in [target].
-String nextLayerName(CommandTarget target) {
+/// The name the panel's + gives a new layer (spec 12b D4, spec 14d L7):
+/// [strings]' `Layer N`, the smallest `N ≥ 1` that no layer's name already
+/// takes in any built-in language (by `toLowerCase()`, the table's own
+/// folding) and that [layerNameError] accepts in [target].
+String nextLayerName(CommandTarget target,
+    [FloorPlanStrings strings = const FloorPlanStringsEn()]) {
+  final used = <int>{
+    for (final r in target.tables.layers.records)
+      if (numberedNameIndex(r.name, (s, n) => s.layerName(n), strings,
+              fold: (s) => s.toLowerCase())
+          case final n?)
+        n,
+  };
   for (var n = 1;; n++) {
-    final name = 'Layer $n';
+    if (used.contains(n)) continue;
+    final name = strings.layerName(n);
     if (layerNameError(target, name) == null) return name;
   }
 }
@@ -174,7 +187,7 @@ class LayerPanelState extends State<LayerPanel> {
     final handle = _doc.handleSeed.next();
     _execute(AddLayerCommand(LayerRecord(
       handle: handle,
-      name: nextLayerName(_doc),
+      name: nextLayerName(_doc, FloorPlanStrings.of(context)),
       color: const IndexedColor(7),
       linetype: zero.linetype,
       lineweight: zero.lineweight,

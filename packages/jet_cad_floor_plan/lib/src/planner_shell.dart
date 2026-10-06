@@ -248,7 +248,8 @@ class _PlannerShellState extends State<PlannerShell> {
   // Spec 10 D19-D21, Ruling 10-11: one room-input cache, shared by the
   // Room tool, the Separator tool and the separator grips.
   late final RoomInputs _roomInputs = RoomInputs(_document);
-  late final RoomTool _room = RoomTool(_roomInputs);
+  late final RoomTool _room =
+      RoomTool(_roomInputs, strings: () => FloorPlanStrings.of(context));
   late final SeparatorTool _separator = SeparatorTool(_roomInputs);
   // Spec 11 D12: the Dimension tool (I).
   late final DimensionTool _dimension = DimensionTool();
