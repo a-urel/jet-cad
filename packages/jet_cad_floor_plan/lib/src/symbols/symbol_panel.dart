@@ -11,6 +11,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../l10n/strings.dart';
 import '../new_document.dart';
 import '../panel_focus.dart';
 import '../shortcut_guard.dart';
@@ -255,7 +256,7 @@ class _SymbolPanelState extends State<SymbolPanel> {
             onTapOutside: (_) => _handBack(),
             decoration: InputDecoration(
               isDense: true,
-              hintText: 'Search symbols',
+              hintText: FloorPlanStrings.of(context).searchSymbols,
               prefixIcon: const Icon(Icons.search, size: 18),
               border: const OutlineInputBorder(),
               suffixIcon: _query.text.isEmpty
@@ -263,7 +264,7 @@ class _SymbolPanelState extends State<SymbolPanel> {
                   : ExcludeFocus(
                       child: IconButton(
                         key: const Key('symbol-search-clear'),
-                        tooltip: 'Clear',
+                        tooltip: FloorPlanStrings.of(context).clear,
                         icon: const Icon(Icons.close, size: 18),
                         onPressed: _clear,
                       ),
@@ -278,16 +279,16 @@ class _Loading extends StatelessWidget {
   const _Loading();
 
   @override
-  Widget build(BuildContext context) => const Center(
-        key: Key('symbol-loading'),
+  Widget build(BuildContext context) => Center(
+        key: const Key('symbol-loading'),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox.square(
+            const SizedBox.square(
                 dimension: 24,
                 child: CircularProgressIndicator(strokeWidth: 2.5)),
-            SizedBox(height: 8),
-            Text('Loading symbols…'),
+            const SizedBox(height: 8),
+            Text(FloorPlanStrings.of(context).loadingSymbols),
           ],
         ),
       );
@@ -307,23 +308,18 @@ class _Failed extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('The symbols could not be loaded.'),
-              const SizedBox(height: 4),
-              Text(
-                '$error',
-                key: const Key('symbol-error'),
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
+              // The words only (spec 14d I-4, V-17): the loader logs the
+              // error itself.
+              Text(FloorPlanStrings.of(context).symbolsFailed,
+                  key: const Key('symbol-failed-text'),
+                  textAlign: TextAlign.center),
               const SizedBox(height: 8),
               // Ruling 05-6: a panel button never takes the canvas's focus.
               ExcludeFocus(
                 child: FilledButton.tonal(
                   key: const Key('symbol-retry'),
                   onPressed: onRetry,
-                  child: const Text('Retry'),
+                  child: Text(FloorPlanStrings.of(context).retry),
                 ),
               ),
             ],
@@ -344,7 +340,7 @@ class _NoMatch extends StatelessWidget {
         child: Column(
           children: [
             Text(
-              'No symbols match "$query"',
+              FloorPlanStrings.of(context).noSymbolsMatch(query),
               key: const Key('symbol-search-empty'),
               textAlign: TextAlign.center,
             ),
@@ -353,7 +349,7 @@ class _NoMatch extends StatelessWidget {
               child: TextButton(
                 key: const Key('symbol-search-clear-empty'),
                 onPressed: onClear,
-                child: const Text('Clear'),
+                child: Text(FloorPlanStrings.of(context).clear),
               ),
             ),
           ],

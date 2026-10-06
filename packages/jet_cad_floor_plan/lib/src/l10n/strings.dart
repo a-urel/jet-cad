@@ -56,4 +56,123 @@ abstract class FloorPlanStrings {
 
   /// The Room tool's notice: the face already holds a room.
   String roomOccupied(String name);
+
+  // The shell (Task 3): tools, the status line, commands, dialogs.
+
+  /// The Select tool.
+  String get toolSelect;
+
+  /// "Line".
+  String get toolLine;
+
+  /// "Polyline".
+  String get toolPolyline;
+
+  /// "Rectangle".
+  String get toolRectangle;
+
+  /// "Box".
+  String get toolBox;
+
+  /// "Wall".
+  String get toolWall;
+
+  /// "Door".
+  String get toolDoor;
+
+  /// "Window".
+  String get toolWindow;
+
+  /// "Gap".
+  String get toolGap;
+
+  /// "Room".
+  String get toolRoom;
+
+  /// "Separator".
+  String get toolSeparator;
+
+  /// "Dimension".
+  String get toolDimension;
+
+  /// "Circle".
+  String get toolCircle;
+
+  /// "Arc".
+  String get toolArc;
+
+  /// "Text".
+  String get toolText;
+
+  /// "Symbol".
+  String get toolSymbol;
+
+  /// The Fill toggle.
+  String get fill;
+
+  /// "Tools".
+  String get tabTools;
+
+  /// "Symbols".
+  String get tabSymbols;
+
+  /// "OSNAP".
+  String get objectSnapOn;
+
+  /// "osnap off".
+  String get objectSnapOff;
+
+  /// "Edited".
+  String get edited;
+
+  /// "Undo".
+  String get undo;
+
+  /// "Redo".
+  String get redo;
+
+  /// "Export…".
+  String get exportEllipsis;
+
+  /// "Print…".
+  String get printEllipsis;
+
+  /// The Control key in a shortcut.
+  String get controlKey;
+
+  /// The Shift key in a shortcut.
+  String get shiftKey;
+
+  /// "Export".
+  String get exportTitle;
+
+  /// "Export".
+  String get exportAction;
+
+  /// "Cancel".
+  String get cancel;
+
+  /// "Search symbols".
+  String get searchSymbols;
+
+  /// "Clear".
+  String get clear;
+
+  /// "Loading symbols…".
+  String get loadingSymbols;
+
+  /// "The symbols could not be loaded.".
+  String get symbolsFailed;
+
+  /// "Retry".
+  String get retry;
+
+  /// The status line's selection count.
+  String selectedCount(int count);
+
+  /// A resolution in the Export dialog.
+  String dpi(int dpi);
+
+  /// A search that matches no symbol.
+  String noSymbolsMatch(String query);
 }

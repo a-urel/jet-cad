@@ -15,6 +15,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../l10n/strings.dart';
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
 import '../service/table_picker.dart';
@@ -187,6 +188,7 @@ class _ServiceViewState extends State<ServiceView> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final strings = FloorPlanStrings.of(context);
     final flows = widget.flows;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
@@ -207,20 +209,24 @@ class _ServiceViewState extends State<ServiceView> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  _button(
-                      'service-undo', 'Undo', Icons.undo, _c.canUndo, _c.undo),
-                  _button(
-                      'service-redo', 'Redo', Icons.redo, _c.canRedo, _c.redo),
+                  _button('service-undo', strings.undo, Icons.undo, _c.canUndo,
+                      _c.undo),
+                  _button('service-redo', strings.redo, Icons.redo, _c.canRedo,
+                      _c.redo),
                   const SizedBox(width: 8),
                   if (flows.canExport)
                     _button(
                         'service-export',
-                        'Export…',
+                        strings.exportEllipsis,
                         Icons.ios_share_outlined,
                         _pageReady,
                         () => flows.export(context)),
-                  _button('service-print', 'Print…', Icons.print_outlined,
-                      _pageReady, () => flows.print(context)),
+                  _button(
+                      'service-print',
+                      strings.printEllipsis,
+                      Icons.print_outlined,
+                      _pageReady,
+                      () => flows.print(context)),
                 ],
               ),
             ),

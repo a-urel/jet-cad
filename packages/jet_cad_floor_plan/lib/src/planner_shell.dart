@@ -290,105 +290,105 @@ class _PlannerShellState extends State<PlannerShell> {
   late final List<PaletteEntry> _entries = [
     PaletteEntry(
         keyName: 'tool-select',
-        label: 'Select',
+        label: (s) => s.toolSelect,
         shortcut: 'V',
         logicalKey: LogicalKeyboardKey.keyV,
         tool: _select,
         drawing: false),
     PaletteEntry(
         keyName: 'tool-line',
-        label: 'Line',
+        label: (s) => s.toolLine,
         shortcut: 'L',
         logicalKey: LogicalKeyboardKey.keyL,
         tool: _line,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-polyline',
-        label: 'Polyline',
+        label: (s) => s.toolPolyline,
         shortcut: 'P',
         logicalKey: LogicalKeyboardKey.keyP,
         tool: _polyline,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-rectangle',
-        label: 'Rectangle',
+        label: (s) => s.toolRectangle,
         shortcut: 'R',
         logicalKey: LogicalKeyboardKey.keyR,
         tool: _rectangle,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-box',
-        label: 'Box',
+        label: (s) => s.toolBox,
         shortcut: 'B',
         logicalKey: LogicalKeyboardKey.keyB,
         tool: _box,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-wall',
-        label: 'Wall',
+        label: (s) => s.toolWall,
         shortcut: 'W',
         logicalKey: LogicalKeyboardKey.keyW,
         tool: _wall,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-door',
-        label: 'Door',
+        label: (s) => s.toolDoor,
         shortcut: 'D',
         logicalKey: LogicalKeyboardKey.keyD,
         tool: _openingTools[OpeningKind.door]!,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-window',
-        label: 'Window',
+        label: (s) => s.toolWindow,
         shortcut: 'N',
         logicalKey: LogicalKeyboardKey.keyN,
         tool: _openingTools[OpeningKind.window]!,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-gap',
-        label: 'Gap',
+        label: (s) => s.toolGap,
         shortcut: 'G',
         logicalKey: LogicalKeyboardKey.keyG,
         tool: _openingTools[OpeningKind.gap]!,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-room',
-        label: 'Room',
+        label: (s) => s.toolRoom,
         shortcut: 'M',
         logicalKey: LogicalKeyboardKey.keyM,
         tool: _room,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-separator',
-        label: 'Separator',
+        label: (s) => s.toolSeparator,
         shortcut: 'S',
         logicalKey: LogicalKeyboardKey.keyS,
         tool: _separator,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-dimension',
-        label: 'Dimension',
+        label: (s) => s.toolDimension,
         shortcut: 'I',
         logicalKey: LogicalKeyboardKey.keyI,
         tool: _dimension,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-circle',
-        label: 'Circle',
+        label: (s) => s.toolCircle,
         shortcut: 'C',
         logicalKey: LogicalKeyboardKey.keyC,
         tool: _circle,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-arc',
-        label: 'Arc',
+        label: (s) => s.toolArc,
         shortcut: 'A',
         logicalKey: LogicalKeyboardKey.keyA,
         tool: _arc,
         drawing: true),
     PaletteEntry(
         keyName: 'tool-text',
-        label: 'Text',
+        label: (s) => s.toolText,
         shortcut: 'T',
         logicalKey: LogicalKeyboardKey.keyT,
         tool: _text,
@@ -478,41 +478,52 @@ class _PlannerShellState extends State<PlannerShell> {
   /// holds and the shell is idle; Export and Print also only while the
   /// document has a page (spec 13 D8, [kPageCommandIds]).
   late final List<DerivedFlag> _fileEnabled = [
-    for (final c in widget.fileCommands)
+    for (final c in _firstFileCommands)
       kPageCommandIds.contains(c.id)
           ? DerivedFlag([c.enabled, ..._idleSources, _page],
               () => c.enabled.value && _idle && _page.value != null)
           : DerivedFlag(
               [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
   ];
-  late final List<ShellCommand> _fileCommands = [
-    for (var i = 0; i < widget.fileCommands.length; i++)
-      widget.fileCommands[i].withEnabled(_fileEnabled[i]),
-  ];
+
+  /// The file commands the shell was built with: the set, and the
+  /// conditions [_fileEnabled] watches, are fixed for its life.
+  late final List<ShellCommand> _firstFileCommands = widget.fileCommands;
+
+  /// That set, each command as the current widget names it when it still
+  /// has one of that id (spec 14d L3: a language change renames them),
+  /// each enabled only by [_fileEnabled].
+  List<ShellCommand> get _fileCommands {
+    final current = {for (final c in widget.fileCommands) c.id: c};
+    return [
+      for (final (i, c) in _firstFileCommands.indexed)
+        (current[c.id] ?? c).withEnabled(_fileEnabled[i]),
+    ];
+  }
 
   /// Spec 12a D6: Undo and Redo are the shell's own commands, so a bare
   /// shell keeps them. Their bindings sit above the [InteractionLayer]'s
   /// `Focus`, which returns the active tool's own `KeyEventResult`: an idle
   /// tool ignores Z, so the event keeps bubbling and arrives here, and a
   /// tool part-way through a shape swallows it (spec 05 D3).
-  late final List<ShellCommand> _editCommands = [
-    ShellCommand(
-      id: 'undo',
-      label: 'Undo',
-      icon: Icons.undo,
-      shortcuts: kUndoChords,
-      enabled: _undoEnabled,
-      run: _undo,
-    ),
-    ShellCommand(
-      id: 'redo',
-      label: 'Redo',
-      icon: Icons.redo,
-      shortcuts: kRedoChords,
-      enabled: _redoEnabled,
-      run: _redo,
-    ),
-  ];
+  List<ShellCommand> _editCommands(FloorPlanStrings strings) => [
+        ShellCommand(
+          id: 'undo',
+          label: strings.undo,
+          icon: Icons.undo,
+          shortcuts: kUndoChords,
+          enabled: _undoEnabled,
+          run: _undo,
+        ),
+        ShellCommand(
+          id: 'redo',
+          label: strings.redo,
+          icon: Icons.redo,
+          shortcuts: kRedoChords,
+          enabled: _redoEnabled,
+          run: _redo,
+        ),
+      ];
 
   /// Undo settles pending input first (spec 12a D2, R-9): a typed value
   /// lands as its own step, which this undo then removes. It re-reads
@@ -593,9 +604,20 @@ class _PlannerShellState extends State<PlannerShell> {
   /// would-be value (spec 11 D12, S-8: `Dimension — 4.69`) when one is set.
   /// Only the active tool sets one, and each clears on deactivation.
   String _statusLine() {
-    final base = _tools.active.name;
-    final line =
-        _selection.isEmpty ? base : '$base — ${_selection.length} selected';
+    final strings = FloorPlanStrings.of(context);
+    final active = _tools.active;
+    // A palette tool by its row's words; the symbol placement tool, which
+    // has no row, by its own (spec 14d L5).
+    final base = identical(active, _symbolTool)
+        ? strings.toolSymbol
+        : [
+              for (final e in _entries)
+                if (identical(e.tool, active)) e.label(strings)
+            ].firstOrNull ??
+            active.name;
+    final line = _selection.isEmpty
+        ? base
+        : '$base — ${strings.selectedCount(_selection.length)}';
     final occupied = _room.notice.value;
     final notice = occupied != null
         ? FloorPlanStrings.of(context).roomOccupied(occupied.name)
@@ -696,8 +718,10 @@ class _PlannerShellState extends State<PlannerShell> {
     if (dirty == null) return text(false);
     return ValueListenableBuilder<bool>(
       valueListenable: dirty,
-      builder: (_, isDirty, __) =>
-          isDirty ? Tooltip(message: 'Edited', child: text(true)) : text(false),
+      builder: (_, isDirty, __) => isDirty
+          ? Tooltip(
+              message: FloorPlanStrings.of(context).edited, child: text(true))
+          : text(false),
     );
   }
 
@@ -725,13 +749,15 @@ class _PlannerShellState extends State<PlannerShell> {
             child: SegmentedButton<_LeftTab>(
               key: const Key('left-tabs'),
               showSelectedIcon: false,
-              segments: const [
+              segments: [
                 ButtonSegment(
                     value: _LeftTab.tools,
-                    label: Text('Tools', key: Key('tab-tools'))),
+                    label: Text(FloorPlanStrings.of(context).tabTools,
+                        key: const Key('tab-tools'))),
                 ButtonSegment(
                     value: _LeftTab.symbols,
-                    label: Text('Symbols', key: Key('tab-symbols'))),
+                    label: Text(FloorPlanStrings.of(context).tabSymbols,
+                        key: const Key('tab-symbols'))),
               ],
               selected: {_leftTab},
               onSelectionChanged: (s) => setState(() => _leftTab = s.single),
@@ -762,12 +788,14 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final fileCommands = _fileCommands;
+    final editCommands = _editCommands(FloorPlanStrings.of(context));
     return Scaffold(
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
           // Spec 12a D6: the command table's chords. A disabled command's
           // binding stays and does nothing (S-26), so the key is consumed.
-          for (final c in [..._fileCommands, ..._editCommands])
+          for (final c in [...fileCommands, ...editCommands])
             for (final chord in c.shortcuts) chord: c.invoke,
           // Spec 03 D10: one toggle per press, never per key repeat.
           const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
@@ -799,8 +827,7 @@ class _PlannerShellState extends State<PlannerShell> {
                     // capped at half of their shared width and takes only
                     // what it needs below that.
                     DocumentToolbar(
-                        fileCommands: _fileCommands,
-                        editCommands: _editCommands),
+                        fileCommands: fileCommands, editCommands: editCommands),
                     const SizedBox(width: 16),
                     Expanded(
                       child: LayoutBuilder(builder: (_, constraints) {
@@ -841,7 +868,9 @@ class _PlannerShellState extends State<PlannerShell> {
                     ListenableBuilder(
                       listenable: _snap,
                       builder: (_, __) => Text(
-                          _snap.objectSnap ? 'OSNAP' : 'osnap off',
+                          _snap.objectSnap
+                              ? FloorPlanStrings.of(context).objectSnapOn
+                              : FloorPlanStrings.of(context).objectSnapOff,
                           key: const Key('osnap-text')),
                     ),
                     const SizedBox(width: 16),

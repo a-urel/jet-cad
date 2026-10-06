@@ -98,14 +98,16 @@ final class ShellCommand {
   /// (spec 12a D6, S-26).
   String get tooltip => tooltipFor(defaultTargetPlatform);
 
-  /// [tooltip] as it reads on [platform].
-  String tooltipFor(TargetPlatform platform) {
+  /// [tooltip] as it reads on [platform]; off macOS the modifiers are
+  /// named [control] and [shift] (spec 14d L4: `Strg` in German).
+  String tooltipFor(TargetPlatform platform,
+      {String control = 'Ctrl', String shift = 'Shift'}) {
     if (shortcuts.isEmpty) return label;
     final chord = shortcuts.first;
     final key = chord.trigger.keyLabel;
     final glyph = platform == TargetPlatform.macOS
         ? '⌘${chord.shift ? '⇧' : ''}$key'
-        : 'Ctrl+${chord.shift ? 'Shift+' : ''}$key';
+        : '$control+${chord.shift ? '$shift+' : ''}$key';
     return '$label ($glyph)';
   }
 

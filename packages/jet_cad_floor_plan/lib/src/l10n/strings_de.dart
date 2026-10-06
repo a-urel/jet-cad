@@ -58,4 +58,121 @@ class FloorPlanStringsDe extends FloorPlanStrings {
 
   @override
   String roomOccupied(String name) => 'Bereits ein Raum: $name';
+
+  @override
+  String get toolSelect => 'Auswählen';
+
+  @override
+  String get toolLine => 'Linie';
+
+  @override
+  String get toolPolyline => 'Polylinie';
+
+  @override
+  String get toolRectangle => 'Rechteck';
+
+  @override
+  String get toolBox => 'Kasten';
+
+  @override
+  String get toolWall => 'Wand';
+
+  @override
+  String get toolDoor => 'Tür';
+
+  @override
+  String get toolWindow => 'Fenster';
+
+  @override
+  String get toolGap => 'Öffnung';
+
+  @override
+  String get toolRoom => 'Raum';
+
+  @override
+  String get toolSeparator => 'Trennlinie';
+
+  @override
+  String get toolDimension => 'Bemaßung';
+
+  @override
+  String get toolCircle => 'Kreis';
+
+  @override
+  String get toolArc => 'Bogen';
+
+  @override
+  String get toolText => 'Text';
+
+  @override
+  String get toolSymbol => 'Symbol';
+
+  @override
+  String get fill => 'Füllung';
+
+  @override
+  String get tabTools => 'Werkzeuge';
+
+  @override
+  String get tabSymbols => 'Symbole';
+
+  @override
+  String get objectSnapOn => 'OSNAP';
+
+  @override
+  String get objectSnapOff => 'OSNAP aus';
+
+  @override
+  String get edited => 'Geändert';
+
+  @override
+  String get undo => 'Rückgängig';
+
+  @override
+  String get redo => 'Wiederholen';
+
+  @override
+  String get exportEllipsis => 'Exportieren…';
+
+  @override
+  String get printEllipsis => 'Drucken…';
+
+  @override
+  String get controlKey => 'Strg';
+
+  @override
+  String get shiftKey => 'Umschalt';
+
+  @override
+  String get exportTitle => 'Exportieren';
+
+  @override
+  String get exportAction => 'Exportieren';
+
+  @override
+  String get cancel => 'Abbrechen';
+
+  @override
+  String get searchSymbols => 'Symbole suchen';
+
+  @override
+  String get clear => 'Leeren';
+
+  @override
+  String get loadingSymbols => 'Symbole werden geladen…';
+
+  @override
+  String get symbolsFailed => 'Die Symbole konnten nicht geladen werden.';
+
+  @override
+  String get retry => 'Erneut versuchen';
+
+  @override
+  String selectedCount(int count) => '$count ausgewählt';
+
+  @override
+  String dpi(int dpi) => '$dpi dpi';
+
+  @override
+  String noSymbolsMatch(String query) => 'Keine Symbole zu „$query“';
 }

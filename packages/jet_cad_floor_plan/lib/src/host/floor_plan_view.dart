@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/strings.dart';
 import '../export/page_printer.dart';
 import '../planner_shell.dart';
 import '../shell_commands.dart';
@@ -109,18 +110,18 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     return _fit;
   }
 
-  List<ShellCommand> _commands() => [
+  List<ShellCommand> _commands(FloorPlanStrings strings) => [
         if (_flows.canExport)
           ShellCommand(
               id: 'export',
-              label: 'Export…',
+              label: strings.exportEllipsis,
               icon: Icons.ios_share_outlined,
               shortcuts: kExportChords,
               enabled: _flows.ready,
               run: () => _flows.export(context)),
         ShellCommand(
             id: 'print',
-            label: 'Print…',
+            label: strings.printEllipsis,
             icon: Icons.print_outlined,
             shortcuts: kPrintChords,
             enabled: _flows.ready,
@@ -157,7 +158,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             camera: c.camera,
             fitOnStart: _fitOnStartFor(document),
             fitRequests: c.fitRequests,
-            fileCommands: _commands(),
+            fileCommands: _commands(FloorPlanStrings.of(context)),
             onFitted: c.fitted,
             onSettle: c.registerSettle,
             symbols: c.symbols,

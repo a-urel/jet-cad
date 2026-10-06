@@ -112,6 +112,8 @@ class SymbolLibraryLoader extends ChangeNotifier {
       }
       next = SymbolLibraryReady(SymbolLibrary.merge(parts));
     } catch (e) {
+      // Logged, not shown: the panel words the failure (spec 14d V-17).
+      debugPrint('The symbol library could not be loaded: $e');
       next = SymbolLibraryFailed(e);
     }
     // A load still running when the app went away ends silently.

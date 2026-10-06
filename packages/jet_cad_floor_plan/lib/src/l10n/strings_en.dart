@@ -58,4 +58,121 @@ class FloorPlanStringsEn extends FloorPlanStrings {
 
   @override
   String roomOccupied(String name) => 'Already a room: $name';
+
+  @override
+  String get toolSelect => 'Select';
+
+  @override
+  String get toolLine => 'Line';
+
+  @override
+  String get toolPolyline => 'Polyline';
+
+  @override
+  String get toolRectangle => 'Rectangle';
+
+  @override
+  String get toolBox => 'Box';
+
+  @override
+  String get toolWall => 'Wall';
+
+  @override
+  String get toolDoor => 'Door';
+
+  @override
+  String get toolWindow => 'Window';
+
+  @override
+  String get toolGap => 'Gap';
+
+  @override
+  String get toolRoom => 'Room';
+
+  @override
+  String get toolSeparator => 'Separator';
+
+  @override
+  String get toolDimension => 'Dimension';
+
+  @override
+  String get toolCircle => 'Circle';
+
+  @override
+  String get toolArc => 'Arc';
+
+  @override
+  String get toolText => 'Text';
+
+  @override
+  String get toolSymbol => 'Symbol';
+
+  @override
+  String get fill => 'Fill';
+
+  @override
+  String get tabTools => 'Tools';
+
+  @override
+  String get tabSymbols => 'Symbols';
+
+  @override
+  String get objectSnapOn => 'OSNAP';
+
+  @override
+  String get objectSnapOff => 'osnap off';
+
+  @override
+  String get edited => 'Edited';
+
+  @override
+  String get undo => 'Undo';
+
+  @override
+  String get redo => 'Redo';
+
+  @override
+  String get exportEllipsis => 'Export…';
+
+  @override
+  String get printEllipsis => 'Print…';
+
+  @override
+  String get controlKey => 'Ctrl';
+
+  @override
+  String get shiftKey => 'Shift';
+
+  @override
+  String get exportTitle => 'Export';
+
+  @override
+  String get exportAction => 'Export';
+
+  @override
+  String get cancel => 'Cancel';
+
+  @override
+  String get searchSymbols => 'Search symbols';
+
+  @override
+  String get clear => 'Clear';
+
+  @override
+  String get loadingSymbols => 'Loading symbols…';
+
+  @override
+  String get symbolsFailed => 'The symbols could not be loaded.';
+
+  @override
+  String get retry => 'Retry';
+
+  @override
+  String selectedCount(int count) => '$count selected';
+
+  @override
+  String dpi(int dpi) => '$dpi dpi';
+
+  @override
+  String noSymbolsMatch(String query) => 'No symbols match "$query"';
 }
