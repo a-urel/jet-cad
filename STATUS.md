@@ -1,6 +1,31 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-04 (09c-2 MERGED into `main` at `43dd020`; see below). **Sub-project 14 — restaurant embedding (all
+**Last updated:** 2026-10-06 (**14d-2 done on `claude/exciting-pasteur-9m22jv`, not merged**; 09c-2 MERGED into `main` at `43dd020`; see below).
+- **Slice 14d (POS readiness)** — spec
+  [2026-10-06-pos-readiness-design.md](docs/superpowers/specs/2026-10-06-pos-readiness-design.md),
+  revision 2, **approved by the human** (2026-10-06: *"Q0 evet, diğerleri
+  de önerdiğin gibi, plana geç"*): three built-in languages (en, de, tr;
+  the plan's own text keeps `.` for 0.1.0, no schema change), the service
+  layout and the service options, a release a POS can pin (0.1.0, a host
+  guide, CI on GitHub Actions). Order **14d-2 → 14d-1 → 14d-3**.
+- **14d-2 (the service layout and the service options) is DONE, not
+  merged** (on the human's *"evet, başla"*): plan
+  [2026-10-06-service-layout-and-options.md](docs/superpowers/plans/2026-10-06-service-layout-and-options.md),
+  results [2026-10-06-plan-14d2-results.md](docs/superpowers/notes/2026-10-06-plan-14d2-results.md).
+  `serviceLayoutJson()` / `restoreServiceLayout(json)` (a strict match,
+  the restore as the copy's floor), `serviceEdited` by layout,
+  `serviceLayoutChanges` (never on a mode switch or a load);
+  `FloorPlanView.serviceMoves`, `onTableContextMenu` (a secondary click
+  through the service view's own `Listener`), `longPress`
+  (`FloorPlanLongPress`). The demo keeps each area's layout (no discard
+  question; Reset layout drops it), a table menu, Moves and Long-press
+  switches. Engine and render untouched. Gates: engine 1,241 + 2
+  standing, render 1,240 + 1 skip + 7 standing, planner 1,183,
+  restaurant symbols 94, app 201, demo 20, both web builds, a Chromium
+  smoke. Implemented by the controller without a per-task reviewer; the
+  code has had no independent review yet. **Look owed** (macOS, web, a
+  tablet for the long-press menu). **Next:** 14d-1 (languages), on the
+  human's word, or the merge of 14d-2. **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;

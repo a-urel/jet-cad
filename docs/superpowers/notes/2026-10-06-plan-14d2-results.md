@@ -34,7 +34,7 @@ menu; a Moves switch and a Long press switch show the options.
 | 2 The controller: save, restore, `serviceEdited`, `serviceLayoutChanges` | `2a48a62` |
 | 3 The service options | `0f11c38` |
 | 4 The demo | `fad3ce8` |
-| 5 The exit (this note, STATUS, roadmap) | in progress |
+| 5 The exit (this note, STATUS, roadmap) | this commit |
 
 **Process, stated plainly:** as in 09c-2, the tasks were implemented by
 the controller itself, without a fresh implementer or a per-task
@@ -44,8 +44,27 @@ code has had none yet.
 
 ## Gates (Linux container, Flutter 3.47.6 / Dart 3.13.5)
 
-**Pending:** the exit's gates are running; this section is filled in
-by the next commit, with the web build and the Chromium smoke.
+| Package | Result |
+|---|---|
+| engine `packages/jet_cad_2d` | **1,241 passed** + 2 standing (`generate_document_test`); analyze, format clean; untouched |
+| render `packages/jet_cad_2d_flutter` | **1,240 passed** + 1 skip + 7 standing (the text ladders); analyze, format clean; untouched |
+| planner `packages/jet_cad_floor_plan` | **1,183 passed** (+18: LC1–LC5's 10, C16–C19, SO1–SO4); analyze, format clean |
+| restaurant symbols | **94 passed**; analyze, format clean |
+| app `apps/floor_planner` | **201 passed**; analyze, format clean |
+| demo `apps/restaurant_demo` | **20 passed** (+3: D16–D18; D3 and D10 rewritten for S9); analyze, format clean |
+| `apps/dev_harness_2d` | analyze clean |
+| web builds | `apps/restaurant_demo` and `apps/floor_planner`: `✓ Built build/web` |
+
+The two allocation invariant tests and the goldens are untouched.
+
+**Smoke (Chromium, tr-TR, the demo's web build at `fad3ce8`):** in
+Service, a right click on table 2 opens the demo's menu (*Table 2*,
+*Select only this*, the four statuses) with table 2 selected and no
+browser menu; *Bill* colours it. Table 1 dragged down, then Design (no
+question; the editor shows table 1 at its designed place) and Service
+again: table 1 is moved, the log reads *layout restored, 1 moved, 0
+dropped*. Reset layout puts it back. Moves off: a drag from table 3 pans
+the whole plan and logs no layout change. No page or console error.
 
 ## Mutants fired
 
