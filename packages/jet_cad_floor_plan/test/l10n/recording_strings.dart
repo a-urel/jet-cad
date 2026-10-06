@@ -138,6 +138,186 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
   String get retry => record(inner.retry);
 
   @override
+  String get tableTitle => record(inner.tableTitle);
+
+  @override
+  String get width => record(inner.width);
+
+  @override
+  String get height => record(inner.height);
+
+  @override
+  String get thickness => record(inner.thickness);
+
+  @override
+  String get justifyLeft => record(inner.justifyLeft);
+
+  @override
+  String get justifyCentre => record(inner.justifyCentre);
+
+  @override
+  String get justifyRight => record(inner.justifyRight);
+
+  @override
+  String get position => record(inner.position);
+
+  @override
+  String get flipHinge => record(inner.flipHinge);
+
+  @override
+  String get flipSwing => record(inner.flipSwing);
+
+  @override
+  String get name => record(inner.name);
+
+  @override
+  String get area => record(inner.area);
+
+  @override
+  String get value => record(inner.value);
+
+  @override
+  String get aligned => record(inner.aligned);
+
+  @override
+  String get horizontal => record(inner.horizontal);
+
+  @override
+  String get vertical => record(inner.vertical);
+
+  @override
+  String get end1 => record(inner.end1);
+
+  @override
+  String get end2 => record(inner.end2);
+
+  @override
+  String get endFixed => record(inner.endFixed);
+
+  @override
+  String get leftFace => record(inner.leftFace);
+
+  @override
+  String get centreline => record(inner.centreline);
+
+  @override
+  String get rightFace => record(inner.rightFace);
+
+  @override
+  String get size => record(inner.size);
+
+  @override
+  String get rotation => record(inner.rotation);
+
+  @override
+  String get mirror => record(inner.mirror);
+
+  @override
+  String get number => record(inner.number);
+
+  @override
+  String get seats => record(inner.seats);
+
+  @override
+  String get rotateLeft => record(inner.rotateLeft);
+
+  @override
+  String get rotateRight => record(inner.rotateRight);
+
+  @override
+  String get pageTitle => record(inner.pageTitle);
+
+  @override
+  String get customSize => record(inner.customSize);
+
+  @override
+  String get portrait => record(inner.portrait);
+
+  @override
+  String get landscape => record(inner.landscape);
+
+  @override
+  String get scale => record(inner.scale);
+
+  @override
+  String get grid => record(inner.grid);
+
+  @override
+  String get snapToGrid => record(inner.snapToGrid);
+
+  @override
+  String get pageBreaks => record(inner.pageBreaks);
+
+  @override
+  String get paper => record(inner.paper);
+
+  @override
+  String get layersLocked => record(inner.layersLocked);
+
+  @override
+  String get selectLayerToDelete => record(inner.selectLayerToDelete);
+
+  @override
+  String get layerZeroUndeletable => record(inner.layerZeroUndeletable);
+
+  @override
+  String get currentLayerUndeletable => record(inner.currentLayerUndeletable);
+
+  @override
+  String get layerInUse => record(inner.layerInUse);
+
+  @override
+  String get layers => record(inner.layers);
+
+  @override
+  String get newLayer => record(inner.newLayer);
+
+  @override
+  String get deleteLayer => record(inner.deleteLayer);
+
+  @override
+  String get mixed => record(inner.mixed);
+
+  @override
+  String get readOnlyDocument => record(inner.readOnlyDocument);
+
+  @override
+  String get plainGroupNoLayer => record(inner.plainGroupNoLayer);
+
+  @override
+  String get layer => record(inner.layer);
+
+  @override
+  String get moveSelectionToLayer => record(inner.moveSelectionToLayer);
+
+  @override
+  String get hiddenLayerNotCurrent => record(inner.hiddenLayerNotCurrent);
+
+  @override
+  String get currentLayer => record(inner.currentLayer);
+
+  @override
+  String get makeCurrent => record(inner.makeCurrent);
+
+  @override
+  String get currentLayerNotHidden => record(inner.currentLayerNotHidden);
+
+  @override
+  String get hideLayer => record(inner.hideLayer);
+
+  @override
+  String get showLayer => record(inner.showLayer);
+
+  @override
+  String get unlockLayer => record(inner.unlockLayer);
+
+  @override
+  String get lockLayer => record(inner.lockLayer);
+
+  @override
+  String get layerColour => record(inner.layerColour);
+
+  @override
   String layerNameProblem(LayerNameProblem problem) =>
       record(inner.layerNameProblem(problem));
 
@@ -164,4 +344,17 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
 
   @override
   String noSymbolsMatch(String query) => record(inner.noSymbolsMatch(query));
+
+  @override
+  String axesTurned(String degrees) => record(inner.axesTurned(degrees));
+
+  @override
+  String endOnWall(String wall, bool atStart, String side) =>
+      record(inner.endOnWall(wall, atStart, side));
+
+  @override
+  String missingLayer(String hex) => record(inner.missingLayer(hex));
+
+  @override
+  String colourName(int aci) => record(inner.colourName(aci));
 }

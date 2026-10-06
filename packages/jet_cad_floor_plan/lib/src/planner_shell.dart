@@ -9,13 +9,13 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
 import 'document_toolbar.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
-import 'panel_number.dart';
 import 'parametric/box_tool.dart';
 import 'parametric/catalog.dart';
 import 'parametric/dimension_tool.dart';
@@ -629,7 +629,9 @@ class _PlannerShellState extends State<PlannerShell> {
     final page = _page.value;
     if (page == null) return '';
     final zoom = zoomOf(_camera.value.scale, page, kLogicalPixelsPerMm);
-    return '1:${panelNumberText(page.scaleDenominator)} · ${(zoom * 100).round()}%';
+    final scale =
+        formatPanelNumber(page.scaleDenominator, FloorPlanStrings.of(context));
+    return '1:$scale · ${(zoom * 100).round()}%';
   }
 
   @override

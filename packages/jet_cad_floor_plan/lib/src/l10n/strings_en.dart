@@ -175,4 +175,209 @@ class FloorPlanStringsEn extends FloorPlanStrings {
 
   @override
   String noSymbolsMatch(String query) => 'No symbols match "$query"';
+
+  @override
+  String get tableTitle => 'Table';
+
+  @override
+  String get width => 'Width';
+
+  @override
+  String get height => 'Height';
+
+  @override
+  String get thickness => 'Thickness';
+
+  @override
+  String get justifyLeft => 'Left';
+
+  @override
+  String get justifyCentre => 'Centre';
+
+  @override
+  String get justifyRight => 'Right';
+
+  @override
+  String get position => 'Position';
+
+  @override
+  String get flipHinge => 'Flip hinge';
+
+  @override
+  String get flipSwing => 'Flip swing';
+
+  @override
+  String get name => 'Name';
+
+  @override
+  String get area => 'Area';
+
+  @override
+  String get value => 'Value';
+
+  @override
+  String get aligned => 'Aligned';
+
+  @override
+  String get horizontal => 'Horizontal';
+
+  @override
+  String get vertical => 'Vertical';
+
+  @override
+  String get end1 => 'End 1';
+
+  @override
+  String get end2 => 'End 2';
+
+  @override
+  String get endFixed => 'Fixed';
+
+  @override
+  String get leftFace => 'left face';
+
+  @override
+  String get centreline => 'centreline';
+
+  @override
+  String get rightFace => 'right face';
+
+  @override
+  String get size => 'Size';
+
+  @override
+  String get rotation => 'Rotation';
+
+  @override
+  String get mirror => 'Mirror';
+
+  @override
+  String get number => 'Number';
+
+  @override
+  String get seats => 'Seats';
+
+  @override
+  String get rotateLeft => 'Rotate 90° left';
+
+  @override
+  String get rotateRight => 'Rotate 90° right';
+
+  @override
+  String get pageTitle => 'Page';
+
+  @override
+  String get customSize => 'Custom';
+
+  @override
+  String get portrait => 'Portrait';
+
+  @override
+  String get landscape => 'Landscape';
+
+  @override
+  String get scale => 'Scale';
+
+  @override
+  String get grid => 'Grid';
+
+  @override
+  String get snapToGrid => 'Snap to grid';
+
+  @override
+  String get pageBreaks => 'Page breaks';
+
+  @override
+  String get paper => 'Paper';
+
+  @override
+  String axesTurned(String degrees) => 'Axes turned $degrees°';
+
+  @override
+  String endOnWall(String wall, bool atStart, String side) =>
+      'Wall $wall, ${atStart ? 'start' : 'end'}, $side';
+
+  @override
+  String get layersLocked => 'Layers cannot be changed in this document';
+
+  @override
+  String get selectLayerToDelete => 'Select a layer to delete it';
+
+  @override
+  String get layerZeroUndeletable => 'Layer 0 cannot be deleted';
+
+  @override
+  String get currentLayerUndeletable => 'The current layer cannot be deleted';
+
+  @override
+  String get layerInUse => 'This layer is in use';
+
+  @override
+  String get layers => 'Layers';
+
+  @override
+  String get newLayer => 'New layer';
+
+  @override
+  String get deleteLayer => 'Delete layer';
+
+  @override
+  String get mixed => 'Mixed';
+
+  @override
+  String get readOnlyDocument => 'Read-only document';
+
+  @override
+  String get plainGroupNoLayer =>
+      'A plain group has no layer: it cannot be moved';
+
+  @override
+  String get layer => 'Layer';
+
+  @override
+  String get moveSelectionToLayer => 'Move the selection to a layer';
+
+  @override
+  String get hiddenLayerNotCurrent => 'A hidden layer cannot be current';
+
+  @override
+  String get currentLayer => 'Current layer';
+
+  @override
+  String get makeCurrent => 'Make current';
+
+  @override
+  String get currentLayerNotHidden => 'The current layer cannot be hidden';
+
+  @override
+  String get hideLayer => 'Hide layer';
+
+  @override
+  String get showLayer => 'Show layer';
+
+  @override
+  String get unlockLayer => 'Unlock layer';
+
+  @override
+  String get lockLayer => 'Lock layer';
+
+  @override
+  String get layerColour => 'Layer colour';
+
+  @override
+  String missingLayer(String hex) => 'Missing layer $hex';
+
+  @override
+  String colourName(int aci) => switch (aci) {
+        1 => 'Red',
+        2 => 'Yellow',
+        3 => 'Green',
+        4 => 'Cyan',
+        5 => 'Blue',
+        6 => 'Magenta',
+        7 => 'Foreground',
+        8 => 'Dark grey',
+        9 => 'Light grey',
+        _ => '$aci',
+      };
 }

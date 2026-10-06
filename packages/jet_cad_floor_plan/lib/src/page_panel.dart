@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'l10n/strings_en.dart';
+import 'l10n/strings.dart';
+import 'l10n/number_text.dart';
 import 'panel_focus.dart';
-import 'panel_number.dart';
 
 /// The smallest panel that lets a human change the page (spec D12). Every
 /// control executes one `SetComponentCommand`; the panel rebuilds from the
@@ -30,11 +32,24 @@ class PagePanelState extends State<PagePanel> {
     ('Blueprint', 0xFF1F3A5F),
   ];
 
+  /// The panel's words (spec 14d L12): set before the first build; a
+  /// change of language shows the scale again in it.
+  FloorPlanStrings _strings = const FloorPlanStringsEn();
+
   @override
   void initState() {
     super.initState();
     _syncScale();
     widget.page.addListener(_syncScale);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final next = FloorPlanStrings.of(context);
+    if (identical(next, _strings)) return;
+    _strings = next;
+    if (!_scaleFocus.hasFocus) _syncScale();
   }
 
   @override
@@ -53,7 +68,7 @@ class PagePanelState extends State<PagePanel> {
     final document = widget.document;
     final page = document.components.get<PageComponent>(document.rootHandle);
     if (page == null) return;
-    final text = panelNumberText(page.scaleDenominator);
+    final text = formatPanelNumber(page.scaleDenominator, _strings);
     if (_scale.text != text) _scale.text = text;
   }
 
@@ -102,7 +117,7 @@ class PagePanelState extends State<PagePanel> {
       SetComponentCommand<PageComponent>(widget.document.rootHandle, next));
 
   void _submitScale(PageComponent page, String text) {
-    final value = double.tryParse(text.trim());
+    final value = parsePanelNumber(text, _strings);
     if (value == null || !value.isFinite || value <= 0) {
       _syncScale();
       return;
@@ -127,8 +142,8 @@ class PagePanelState extends State<PagePanel> {
             child: ListView(
               padding: const EdgeInsets.all(12),
               children: [
-                const Text('Page',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(_strings.pageTitle,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 DropdownButton<SheetSize?>(
                   key: const Key('page-preset'),
@@ -138,13 +153,15 @@ class PagePanelState extends State<PagePanel> {
                   // `value` is null, so a custom size needs this to read
                   // "Custom" while closed; the disabled entry below is what
                   // makes it read "Custom" in the opened list too.
-                  hint: const Text('Custom'),
+                  hint: Text(_strings.customSize),
                   items: [
                     for (final s in SheetSize.presets)
                       DropdownMenuItem(value: s, child: Text(s.name)),
                     if (page.preset == null)
-                      const DropdownMenuItem<SheetSize?>(
-                          value: null, enabled: false, child: Text('Custom')),
+                      DropdownMenuItem<SheetSize?>(
+                          value: null,
+                          enabled: false,
+                          child: Text(_strings.customSize)),
                   ],
                   onChanged: (s) {
                     if (s != null) {
@@ -155,15 +172,15 @@ class PagePanelState extends State<PagePanel> {
                 ),
                 const SizedBox(height: 8),
                 SegmentedButton<PageOrientation>(
-                  segments: const [
+                  segments: [
                     ButtonSegment(
                         value: PageOrientation.portrait,
-                        label: Text('Portrait',
-                            key: Key('page-orientation-portrait'))),
+                        label: Text(_strings.portrait,
+                            key: const Key('page-orientation-portrait'))),
                     ButtonSegment(
                         value: PageOrientation.landscape,
-                        label: Text('Landscape',
-                            key: Key('page-orientation-landscape'))),
+                        label: Text(_strings.landscape,
+                            key: const Key('page-orientation-landscape'))),
                   ],
                   selected: {page.orientation},
                   onSelectionChanged: (s) =>
@@ -174,8 +191,8 @@ class PagePanelState extends State<PagePanel> {
                   key: const Key('page-scale'),
                   controller: _scale,
                   focusNode: _scaleFocus,
-                  decoration: const InputDecoration(
-                      prefixText: '1:', labelText: 'Scale'),
+                  decoration: InputDecoration(
+                      prefixText: '1:', labelText: _strings.scale),
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                   onSubmitted: (text) => _submitScale(page, text),
@@ -212,24 +229,24 @@ class PagePanelState extends State<PagePanel> {
                 ),
                 CheckboxListTile(
                   key: const Key('page-grid'),
-                  title: const Text('Grid'),
+                  title: Text(_strings.grid),
                   value: page.gridVisible,
                   onChanged: (v) => _set(page.copyWith(gridVisible: v)),
                 ),
                 CheckboxListTile(
                   key: const Key('page-snap'),
-                  title: const Text('Snap to grid'),
+                  title: Text(_strings.snapToGrid),
                   value: page.snapToGrid,
                   onChanged: (v) => _set(page.copyWith(snapToGrid: v)),
                 ),
                 CheckboxListTile(
                   key: const Key('page-breaks'),
-                  title: const Text('Page breaks'),
+                  title: Text(_strings.pageBreaks),
                   value: page.pageBreaks,
                   onChanged: (v) => _set(page.copyWith(pageBreaks: v)),
                 ),
                 const SizedBox(height: 8),
-                const Text('Paper'),
+                Text(_strings.paper),
                 Row(
                   children: [
                     for (var i = 0; i < _swatches.length; i++)

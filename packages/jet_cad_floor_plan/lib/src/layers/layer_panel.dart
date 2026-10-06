@@ -194,15 +194,15 @@ class LayerPanelState extends State<LayerPanel> {
   }
 
   /// Why the selected row cannot be deleted, or null when it can.
-  String? _deleteBlocked(Handle? layer) {
-    if (layer == null) return 'Select a layer to delete it';
+  String? _deleteBlocked(Handle? layer, FloorPlanStrings strings) {
+    if (layer == null) return strings.selectLayerToDelete;
     if (layer == ReservedHandles.layerZero) {
-      return 'Layer 0 cannot be deleted';
+      return strings.layerZeroUndeletable;
     }
     if (layer == drawingLayer(_doc)) {
-      return 'The current layer cannot be deleted';
+      return strings.currentLayerUndeletable;
     }
-    if (!layerIsEmpty(_doc, layer)) return 'This layer is in use';
+    if (!layerIsEmpty(_doc, layer)) return strings.layerInUse;
     return null;
   }
 
@@ -218,7 +218,9 @@ class LayerPanelState extends State<LayerPanel> {
     final current = drawingLayer(_doc);
     final rows = layersInPanelOrder(layers.records);
     final title = Theme.of(context).textTheme.titleSmall;
-    final blocked = allowed ? _deleteBlocked(_selected) : kLayersLocked;
+    final strings = FloorPlanStrings.of(context);
+    final blocked =
+        allowed ? _deleteBlocked(_selected, strings) : strings.layersLocked;
     return Material(
       key: const Key('layers-panel'),
       color: Colors.transparent,
@@ -234,7 +236,7 @@ class LayerPanelState extends State<LayerPanel> {
               child: SizedBox(
                 height: 32,
                 child: Row(children: [
-                  Expanded(child: Text('Layers', style: title)),
+                  Expanded(child: Text(strings.layers, style: title)),
                   Icon(_open ? Icons.expand_less : Icons.expand_more, size: 18),
                 ]),
               ),
@@ -304,12 +306,12 @@ class LayerPanelState extends State<LayerPanel> {
                   key: const Key('layers-add'),
                   icon: const Icon(Icons.add),
                   iconSize: 18,
-                  tooltip: 'New layer',
+                  tooltip: strings.newLayer,
                   visualDensity: VisualDensity.compact,
                   onPressed: allowed ? _add : null,
                 ),
                 Tooltip(
-                  message: blocked ?? 'Delete layer',
+                  message: blocked ?? strings.deleteLayer,
                   child: IconButton(
                     key: const Key('layers-delete'),
                     icon: const Icon(Icons.delete_outline),

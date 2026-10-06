@@ -175,4 +175,200 @@ abstract class FloorPlanStrings {
 
   /// A search that matches no symbol.
   String noSymbolsMatch(String query);
+
+  // The panels (Task 4).
+
+  /// "Table".
+  String get tableTitle;
+
+  /// "Width".
+  String get width;
+
+  /// "Height".
+  String get height;
+
+  /// "Thickness".
+  String get thickness;
+
+  /// "Left".
+  String get justifyLeft;
+
+  /// "Centre".
+  String get justifyCentre;
+
+  /// "Right".
+  String get justifyRight;
+
+  /// "Position".
+  String get position;
+
+  /// "Flip hinge".
+  String get flipHinge;
+
+  /// "Flip swing".
+  String get flipSwing;
+
+  /// "Name".
+  String get name;
+
+  /// "Area".
+  String get area;
+
+  /// "Value".
+  String get value;
+
+  /// "Aligned".
+  String get aligned;
+
+  /// "Horizontal".
+  String get horizontal;
+
+  /// "Vertical".
+  String get vertical;
+
+  /// "End 1".
+  String get end1;
+
+  /// "End 2".
+  String get end2;
+
+  /// "Fixed".
+  String get endFixed;
+
+  /// "left face".
+  String get leftFace;
+
+  /// "centreline".
+  String get centreline;
+
+  /// "right face".
+  String get rightFace;
+
+  /// "Size".
+  String get size;
+
+  /// "Rotation".
+  String get rotation;
+
+  /// "Mirror".
+  String get mirror;
+
+  /// "Number".
+  String get number;
+
+  /// "Seats".
+  String get seats;
+
+  /// "Rotate 90° left".
+  String get rotateLeft;
+
+  /// "Rotate 90° right".
+  String get rotateRight;
+
+  /// "Page".
+  String get pageTitle;
+
+  /// "Custom".
+  String get customSize;
+
+  /// "Portrait".
+  String get portrait;
+
+  /// "Landscape".
+  String get landscape;
+
+  /// "Scale".
+  String get scale;
+
+  /// "Grid".
+  String get grid;
+
+  /// "Snap to grid".
+  String get snapToGrid;
+
+  /// "Page breaks".
+  String get pageBreaks;
+
+  /// "Paper".
+  String get paper;
+
+  /// A dimension whose axes are turned by [degrees], already formatted.
+  String axesTurned(String degrees);
+
+  /// A dimension end on a wall: its handle, its start or end, its side.
+  String endOnWall(String wall, bool atStart, String side);
+
+  // The layer panel, row and picker (Task 4).
+
+  /// "Layers cannot be changed in this document".
+  String get layersLocked;
+
+  /// "Select a layer to delete it".
+  String get selectLayerToDelete;
+
+  /// "Layer 0 cannot be deleted".
+  String get layerZeroUndeletable;
+
+  /// "The current layer cannot be deleted".
+  String get currentLayerUndeletable;
+
+  /// "This layer is in use".
+  String get layerInUse;
+
+  /// "Layers".
+  String get layers;
+
+  /// "New layer".
+  String get newLayer;
+
+  /// "Delete layer".
+  String get deleteLayer;
+
+  /// "Mixed".
+  String get mixed;
+
+  /// "Read-only document".
+  String get readOnlyDocument;
+
+  /// "A plain group has no layer: it cannot be moved".
+  String get plainGroupNoLayer;
+
+  /// "Layer".
+  String get layer;
+
+  /// "Move the selection to a layer".
+  String get moveSelectionToLayer;
+
+  /// "A hidden layer cannot be current".
+  String get hiddenLayerNotCurrent;
+
+  /// "Current layer".
+  String get currentLayer;
+
+  /// "Make current".
+  String get makeCurrent;
+
+  /// "The current layer cannot be hidden".
+  String get currentLayerNotHidden;
+
+  /// "Hide layer".
+  String get hideLayer;
+
+  /// "Show layer".
+  String get showLayer;
+
+  /// "Unlock layer".
+  String get unlockLayer;
+
+  /// "Lock layer".
+  String get lockLayer;
+
+  /// "Layer colour".
+  String get layerColour;
+
+  /// A layer the document does not have, by its handle.
+  String missingLayer(String hex);
+
+  /// The name of ACI colour [aci], 1 to 9, in the colour menu.
+  String colourName(int aci);
 }

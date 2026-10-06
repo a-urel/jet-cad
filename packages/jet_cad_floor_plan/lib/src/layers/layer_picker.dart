@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../l10n/strings_en.dart';
+import '../l10n/strings.dart';
 import '../parametric/box.dart';
 import '../parametric/dimension.dart';
 import '../parametric/live_objects.dart';
@@ -79,14 +81,17 @@ Handle? layerOfKey(DraftDocument doc, SelectionKey key) {
 /// Why the picker is disabled for [keys] in [doc], or null when it is
 /// enabled: a permission set without `Capability.components` (D11), or a
 /// plain group among the keys (D12).
-String? layerPickerBlocked(DraftDocument doc, Iterable<SelectionKey> keys) {
+/// In [strings]' language (spec 14d); English by default, the constants
+/// above.
+String? layerPickerBlocked(DraftDocument doc, Iterable<SelectionKey> keys,
+    [FloorPlanStrings strings = const FloorPlanStringsEn()]) {
   if (!doc.commands.permissions.allows(Capability.components)) {
-    return kLayerPickerReadOnly;
+    return strings.readOnlyDocument;
   }
   for (final k in keys) {
     final node = doc.tree[k.target];
     if (node is GroupNode && !isParametricObject(doc, k.target)) {
-      return kLayerPickerPlainGroup;
+      return strings.plainGroupNoLayer;
     }
   }
   return null;
@@ -199,7 +204,8 @@ class LayerPicker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final keys = selection.keys;
-    final blocked = layerPickerBlocked(document, keys);
+    final strings = FloorPlanStrings.of(context);
+    final blocked = layerPickerBlocked(document, keys, strings);
     Handle? common;
     var mixed = false;
     for (final k in keys) {
@@ -214,18 +220,18 @@ class LayerPicker extends StatelessWidget {
     }
     final layers = document.tables.layers;
     final label = mixed
-        ? kMixedLayers
+        ? strings.mixed
         : switch (common) {
             null => '—',
-            final h => layers[h]?.name ?? 'Missing layer ${h.toHex()}',
+            final h => layers[h]?.name ?? strings.missingLayer(h.toHex()),
           };
     return Row(
       children: [
-        const Text('Layer'),
+        Text(strings.layer),
         const SizedBox(width: 12),
         Expanded(
           child: Tooltip(
-            message: blocked ?? 'Move the selection to a layer',
+            message: blocked ?? strings.moveSelectionToLayer,
             child: PopupMenuButton<Handle>(
               key: const Key('layer-picker'),
               enabled: blocked == null,
