@@ -154,7 +154,11 @@ class DemoHomeState extends State<DemoHome> {
     // need not call `load()` (14b-2 review F-3).
     for (final a in areas) {
       final c = a.controller;
-      c.mode.addListener(() => _log(_words.logMode(a.name, c.mode.value.name)));
+      c.mode.addListener(() => _log(_words.logMode(
+          a.name,
+          c.mode.value == FloorPlanMode.design
+              ? _words.design
+              : _words.service)));
       c.selectedTables.addListener(() => _log(_words.logSelected(
           a.name, (c.selectedTables.value.toList()..sort()).join(', '))));
       c.dirty.addListener(() => _log(_words.logDirty(a.name, c.dirty.value)));

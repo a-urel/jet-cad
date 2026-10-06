@@ -67,13 +67,13 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(byKey('service-bar'), findsOneWidget);
-    expect(demo.log.first, 'Salon: mode selection');
+    expect(demo.log.first, 'Salon: mode Service');
 
     await tester.tap(byKey('mode-design'));
     await tester.pump();
     await tester.pump();
     expect(byKey('service-bar'), findsNothing);
-    expect(demo.log.first, 'Salon: mode design');
+    expect(demo.log.first, 'Salon: mode Design');
   });
 
   testWidgets('D2 a seeded plan\'s tables; selection by number',
@@ -534,7 +534,7 @@ void main() {
     await tester.tap(byKey('mode-service'));
     await tester.pump();
     await tester.pump();
-    expect(demo.log, contains('Salon: mod selection'));
+    expect(demo.log, contains('Salon: mod Servis'));
     c.select({'2'});
     await tester.pump();
     await tester.tap(byKey('status-bill'));
