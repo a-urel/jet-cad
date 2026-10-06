@@ -1,0 +1,14 @@
+name: jet_cad_ci
+description: >-
+  The repository's CI tools (spec 14d P5, P2): the standing comparison of a
+  test run against the failures and skips it is known to have, and the
+  host guide's check against the host probe. Not a product package.
+publish_to: none
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+
+dev_dependencies:
+  test: ^1.31.0
