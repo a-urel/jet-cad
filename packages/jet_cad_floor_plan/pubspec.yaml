@@ -5,7 +5,7 @@ description: >-
   apps/floor_planner builds its application frame from, and that a host
   application embeds. The design / selection split is built in (14b-2).
 publish_to: none
-version: 0.0.1
+version: 0.1.0
 resolution: workspace
 
 environment:
