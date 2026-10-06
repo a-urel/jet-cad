@@ -9,6 +9,7 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'l10n/strings.dart';
 import 'document_toolbar.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
@@ -595,7 +596,10 @@ class _PlannerShellState extends State<PlannerShell> {
     final base = _tools.active.name;
     final line =
         _selection.isEmpty ? base : '$base — ${_selection.length} selected';
-    final notice = _room.notice.value ?? _dimension.notice.value;
+    final occupied = _room.notice.value;
+    final notice = occupied != null
+        ? FloorPlanStrings.of(context).roomOccupied(occupied.name)
+        : _dimension.notice.value;
     return notice == null ? line : '$line — $notice';
   }
 

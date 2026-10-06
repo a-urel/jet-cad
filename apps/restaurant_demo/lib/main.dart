@@ -415,7 +415,7 @@ class DemoHomeState extends State<DemoHome> {
                               '${t.number ?? '—'} (${t.seats})'
                           ].join(', ')),
                 for (final (i, w) in c.numberingWarnings.indexed)
-                  Text(w,
+                  Text(FloorPlanStrings.of(context).numberingWarning(w),
                       key: Key('numbering-warning-$i'),
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.error)),

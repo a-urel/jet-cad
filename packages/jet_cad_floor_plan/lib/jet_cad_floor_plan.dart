@@ -12,12 +12,15 @@ export 'src/fonts.dart' show ensureFloorPlanFonts;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
     show
+        DuplicateNumber,
         FloorPlanExport,
         FloorPlanLongPress,
         FloorPlanMode,
         FloorPlanTable,
         ServiceLayoutRestore,
-        TableStatus;
+        NumberingWarning,
+        TableStatus,
+        Unnumbered;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
 export 'src/l10n/localizations.dart'
     show

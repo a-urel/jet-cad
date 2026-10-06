@@ -250,7 +250,7 @@ void main() {
     expect(labelStrings(doc, room), ['Room 1', '29.64 m²']);
     expect(driftOf(doc), isEmpty);
     expect(rig.tool.debugPreview, isEmpty, reason: 'the face now holds a room');
-    expect(rig.tool.notice.value, 'Already a room: Room 1');
+    expect(rig.tool.notice.value, const RoomOccupied('Room 1'));
     doc.commands.undo();
     expect(rooms(doc), isEmpty, reason: 'one undo takes it away');
 
@@ -435,7 +435,11 @@ void main() {
       for (final (what, (x, y), notice) in [
         ('in the south wall\'s band', (4000.5, 30.25), null),
         ('outside the box', (-2000.5, 2000.25), null),
-        ('in the occupied face', (6000.75, 1200.5), 'Already a room: Pantry'),
+        (
+          'in the occupied face',
+          (6000.75, 1200.5),
+          const RoomOccupied('Pantry')
+        ),
       ]) {
         final why = '$what, $place';
         final p = plan.at(x, y);
@@ -463,7 +467,7 @@ void main() {
       pressAt(frig, q);
       expect(free.doc.commands.undoDepth, fdepth,
           reason: 'a same-task edit, $place');
-      expect(frig.tool.notice.value, 'Already a room: Study');
+      expect(frig.tool.notice.value, const RoomOccupied('Study'));
     }
   });
 
@@ -870,11 +874,11 @@ void main() {
       pressAt(rig, kitchen);
       expect(rooms(doc), hasLength(1), reason: 'placed, $place');
       expect(tool.debugTraces, greaterThan(traces), reason: 'traced, $place');
-      expect(tool.notice.value, 'Already a room: Room 1');
+      expect(tool.notice.value, const RoomOccupied('Room 1'));
       expect(tool.debugContourBuilds, builds, reason: 'the click, $place');
       // The change listener re-reads the notice's face.
       await Future<void>.delayed(Duration.zero);
-      expect(tool.notice.value, 'Already a room: Room 1');
+      expect(tool.notice.value, const RoomOccupied('Room 1'));
       expect(tool.debugContourBuilds, builds,
           reason: 'the listener\'s re-read, $place');
       // An undo: the listener re-reads to a free face, and shows it.
@@ -969,7 +973,7 @@ void main() {
       expect(
           doc.components.get<RoomParams>(room), RoomParams(p.x, p.y, 'Room 1'),
           reason: 'Room 1 is free: no live room holds it, $place');
-      expect(rig.tool.notice.value, 'Already a room: Room 1',
+      expect(rig.tool.notice.value, const RoomOccupied('Room 1'),
           reason: 'control: a live room occupies the face, $place');
     }
   });

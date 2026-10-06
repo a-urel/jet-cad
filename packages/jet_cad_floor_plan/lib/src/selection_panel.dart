@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'l10n/strings.dart';
 import 'layers/layer_picker.dart';
 import 'panel_focus.dart';
 import 'panel_number.dart';
@@ -372,13 +373,16 @@ class _SelectionPanelState extends State<SelectionPanel> {
     // brought -- is nothing, never an error (T14, review F-1).
     final current = _read(_Kind.number, table);
     if (t == current) return t;
-    final error = tableNumberError(t);
-    final clash = error == null &&
+    final problem = tableNumberProblem(t);
+    final clash = problem == null &&
         _tables.withNumber(t).any((other) => other.instance != table);
     // The error line is not cleared here: Enter's focus-loss commit
     // re-reads the reverted text, which must not end it (T14).
-    if (error == null && !clash) return t;
-    _numberError = error ?? 'Number $t is already used';
+    if (problem == null && !clash) return t;
+    final strings = FloorPlanStrings.of(context);
+    _numberError = problem != null
+        ? strings.tableNumberProblem(problem)
+        : strings.tableNumberUsed(t);
     _numberErrorFor = table;
     return null;
   }

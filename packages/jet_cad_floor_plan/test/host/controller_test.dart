@@ -188,7 +188,7 @@ void main() {
     expect(c.selectedTables.value, {'2'});
     c.select({'99'});
     expect(c.activeSelection.keys, isEmpty);
-    expect(c.numberingWarnings, ['Number 2 is used by 2 tables']);
+    expect(c.numberingWarnings, const [DuplicateNumber(number: '2', count: 2)]);
     await tester.pump();
   });
 

@@ -113,3 +113,51 @@ enum FloorPlanLongPress {
   /// secondary click does; a touch screen then has no multiple selection.
   contextMenu,
 }
+
+/// A problem with the plan's table numbers (spec 14a T15), as a value the
+/// host words, or asks `FloorPlanStrings.numberingWarning` to (spec 14d
+/// L6). Never a handle (D18).
+sealed class NumberingWarning {
+  const NumberingWarning();
+}
+
+/// [count] live tables carry [number].
+final class DuplicateNumber extends NumberingWarning {
+  const DuplicateNumber({required this.number, required this.count});
+
+  final String number;
+  final int count;
+
+  @override
+  bool operator ==(Object other) =>
+      other is DuplicateNumber &&
+      other.number == number &&
+      other.count == count;
+
+  @override
+  int get hashCode => Object.hash(number, count);
+
+  @override
+  String toString() => 'DuplicateNumber($number, $count)';
+}
+
+/// A live table carries no number. Two of one symbol read alike: the host
+/// sees how many there are.
+final class Unnumbered extends NumberingWarning {
+  const Unnumbered({required this.seats, required this.symbolKey});
+
+  final int seats;
+  final String? symbolKey;
+
+  @override
+  bool operator ==(Object other) =>
+      other is Unnumbered &&
+      other.seats == seats &&
+      other.symbolKey == symbolKey;
+
+  @override
+  int get hashCode => Object.hash(seats, symbolKey);
+
+  @override
+  String toString() => 'Unnumbered($seats, $symbolKey)';
+}

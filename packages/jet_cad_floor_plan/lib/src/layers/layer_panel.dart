@@ -4,6 +4,7 @@ import 'dart:async' show StreamSubscription;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/strings.dart';
 import 'layer_row.dart';
 
 /// How many rows the list shows before it scrolls (spec 12b D9: "about
@@ -279,8 +280,12 @@ class LayerPanelState extends State<LayerPanel> {
                               _selected = r.handle;
                               _editing = r.handle;
                             }),
-                            validate: (name) =>
-                                layerNameError(_doc, name, self: r.handle),
+                            validate: (name) => switch (
+                                layerNameProblem(_doc, name, self: r.handle)) {
+                              null => null,
+                              final p => FloorPlanStrings.of(context)
+                                  .layerNameProblem(p),
+                            },
                             onRename: (name) => _update(
                                 r.handle, (l) => l.copyWith(name: name)),
                             onEndRename: () {

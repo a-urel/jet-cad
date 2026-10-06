@@ -13,6 +13,51 @@ const int kMaxLayerNameLength = 255;
 /// The characters DXF forbids in a table name (spec 12b D4).
 const String kForbiddenLayerNameCharacters = '<>/\\":;?*|=`';
 
+/// Why a name cannot be a layer's (spec 12b D4), as a value (spec 14d L6):
+/// the engine speaks no language, so a UI words it. [toString] is the
+/// engine's own English, for its `ArgumentError`s.
+sealed class LayerNameProblem {
+  const LayerNameProblem();
+}
+
+/// The name is empty.
+final class LayerNameEmpty extends LayerNameProblem {
+  const LayerNameEmpty();
+  @override
+  String toString() => 'A layer name cannot be empty.';
+}
+
+/// The name starts or ends with white space.
+final class LayerNameEdgeSpace extends LayerNameProblem {
+  const LayerNameEdgeSpace();
+  @override
+  String toString() => 'A layer name cannot start or end with a space.';
+}
+
+/// The name is longer than [max] UTF-16 code units.
+final class LayerNameTooLong extends LayerNameProblem {
+  const LayerNameTooLong(this.max);
+  final int max;
+  @override
+  String toString() => 'A layer name can be at most $max characters.';
+}
+
+/// The name holds [character], one of [kForbiddenLayerNameCharacters].
+final class LayerNameBadCharacter extends LayerNameProblem {
+  const LayerNameBadCharacter(this.character);
+  final String character;
+  @override
+  String toString() => 'A layer name cannot contain $character.';
+}
+
+/// Another layer, named [existing], has the name under `toLowerCase()`.
+final class LayerNameDuplicate extends LayerNameProblem {
+  const LayerNameDuplicate(this.existing);
+  final String existing;
+  @override
+  String toString() => 'A layer named $existing already exists.';
+}
+
 /// Why [name] cannot be a layer's name in [target], or null when it can
 /// (spec 12b D4).
 ///
@@ -25,26 +70,29 @@ const String kForbiddenLayerNameCharacters = '<>/\\":;?*|=`';
 ///
 /// The user forms of the layer commands and the panel both call this; a name
 /// loaded from a file is a stored value and is never checked against it.
-String? layerNameError(CommandTarget target, String name, {Handle? self}) {
-  if (name.isEmpty) return 'A layer name cannot be empty.';
-  if (name != name.trim()) {
-    return 'A layer name cannot start or end with a space.';
-  }
+LayerNameProblem? layerNameProblem(CommandTarget target, String name,
+    {Handle? self}) {
+  if (name.isEmpty) return const LayerNameEmpty();
+  if (name != name.trim()) return const LayerNameEdgeSpace();
   if (name.length > kMaxLayerNameLength) {
-    return 'A layer name can be at most $kMaxLayerNameLength characters.';
+    return const LayerNameTooLong(kMaxLayerNameLength);
   }
   for (var i = 0; i < name.length; i++) {
     final c = name[i];
     if (kForbiddenLayerNameCharacters.contains(c)) {
-      return 'A layer name cannot contain $c.';
+      return LayerNameBadCharacter(c);
     }
   }
   final existing = target.tables.layers.byName(name);
   if (existing != null && existing.handle != self) {
-    return 'A layer named ${existing.name} already exists.';
+    return LayerNameDuplicate(existing.name);
   }
   return null;
 }
+
+/// [layerNameProblem] in the engine's English, or null.
+String? layerNameError(CommandTarget target, String name, {Handle? self}) =>
+    layerNameProblem(target, name, self: self)?.toString();
 
 /// The **effective** current layer: the layer new drawing goes to (spec 12b
 /// D3).

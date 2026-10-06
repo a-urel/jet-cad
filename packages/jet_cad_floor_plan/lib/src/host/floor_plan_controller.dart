@@ -509,14 +509,24 @@ class FloorPlanController extends ChangeNotifier {
               number: t.number, seats: t.seats, symbolKey: t.symbolKey)
       ];
 
-  /// The active plan's numbering problems, as text (umbrella D5, R-13):
-  /// numbers used by several tables, and tables with no number.
-  List<String> get numberingWarnings => [
-        for (final d in _tables.diagnostics())
-          if (d.code == TableDiagnosticCodes.duplicateNumber ||
-              d.code == TableDiagnosticCodes.unnumbered)
-            d.message
-      ];
+  /// The active plan's numbering problems (umbrella D5, R-13; spec 14d
+  /// L6): numbers used by several tables, by first appearance, then the
+  /// tables with no number, ascending. Values, not text:
+  /// `FloorPlanStrings.numberingWarning` words one.
+  List<NumberingWarning> get numberingWarnings {
+    final survey = _tables;
+    final byNumber = <String, int>{};
+    for (final t in survey.tables) {
+      if (t.number case final n?) byNumber[n] = (byNumber[n] ?? 0) + 1;
+    }
+    return [
+      for (final MapEntry(key: number, value: count) in byNumber.entries)
+        if (count > 1) DuplicateNumber(number: number, count: count),
+      for (final t in survey.tables)
+        if (t.number == null)
+          Unnumbered(seats: t.seats, symbolKey: t.symbolKey),
+    ];
+  }
 
   /// Selects every live table carrying one of [numbers] that the selection
   /// can hold -- visible, on an unlocked layer -- replacing the selection

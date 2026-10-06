@@ -3,7 +3,7 @@ import 'dart:typed_data' show Float64List;
 import 'dart:ui' show Canvas, Size;
 
 import 'package:flutter/foundation.dart'
-    show ValueListenable, ValueNotifier, visibleForTesting;
+    show ValueListenable, ValueNotifier, immutable, visibleForTesting;
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -29,6 +29,24 @@ enum _Verdict {
 /// A name the Room tool gives (spec 10 D19): `Room N`, `N` a positive
 /// integer written without a leading zero.
 final RegExp _roomN = RegExp(r'^Room ([1-9][0-9]*)$');
+
+/// The Room tool's notice (spec 10 D19; spec 14d L5): the hovered face
+/// already holds the room named [name].
+@immutable
+final class RoomOccupied {
+  const RoomOccupied(this.name);
+
+  final String name;
+
+  @override
+  bool operator ==(Object other) => other is RoomOccupied && other.name == name;
+
+  @override
+  int get hashCode => name.hashCode;
+
+  @override
+  String toString() => 'RoomOccupied($name)';
+}
 
 /// Spec 10 D19: the Room tool (M). A `PlacementTool` whose **one click
 /// commits** one room; it stays active, and Escape (with nothing pending,
@@ -106,7 +124,8 @@ class RoomTool extends PlacementTool {
   /// change re-reads the verdict.
   final Vector2 _pointer = Vector2.zero();
 
-  final ValueNotifier<String?> _notice = ValueNotifier<String?>(null);
+  final ValueNotifier<RoomOccupied?> _notice =
+      ValueNotifier<RoomOccupied?>(null);
   bool _disposed = false;
   StreamSubscription<DocChange>? _changes;
 
@@ -115,9 +134,8 @@ class RoomTool extends PlacementTool {
   Traced? _face;
   _Verdict _faceVerdict = _Verdict.none;
 
-  /// The cached face's notice, `Already a room: <name>`, built once per
-  /// face, or null.
-  String? _occupied;
+  /// The cached face's notice, built once per face, or null.
+  RoomOccupied? _occupied;
   List<GeometryPayload> _facePreview = const [];
   List<Vector2>? _band;
 
@@ -155,10 +173,11 @@ class RoomTool extends PlacementTool {
   @visibleForTesting
   List<GeometryPayload> get debugPreview => _preview;
 
-  /// `Already a room: <name>` while the hovered face already holds a room,
-  /// and after a click there (decision 26, R-29); null otherwise, and
-  /// cleared when the tool deactivates. The shell's status line appends it.
-  ValueListenable<String?> get notice => _notice;
+  /// The room the hovered face already holds, and after a click there
+  /// (decision 26, R-29); null otherwise, and cleared when the tool
+  /// deactivates. The shell's status line words it (spec 14d L5:
+  /// `Already a room: <name>`).
+  ValueListenable<RoomOccupied?> get notice => _notice;
 
   @override
   String get name => 'Room';
@@ -281,7 +300,7 @@ class RoomTool extends PlacementTool {
       final r = doc.components.get<RoomParams>(h)!;
       final s = doc.tree.accumulatedTransform(h).transformPoint(r.seed);
       if (s.x.isFinite && s.y.isFinite && _inFace(s, f)) {
-        _occupied = 'Already a room: ${r.name}';
+        _occupied = RoomOccupied(r.name);
         break;
       }
     }
