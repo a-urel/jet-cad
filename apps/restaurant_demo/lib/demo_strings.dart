@@ -197,7 +197,7 @@ final class _De extends DemoStrings {
   String get save => 'Speichern';
 
   @override
-  String get revert => 'Zurücksetzen';
+  String get revert => 'Verwerfen';
 
   @override
   String get resetLayout => 'Anordnung zurücksetzen';
@@ -394,7 +394,8 @@ final class _Tr extends DemoStrings {
       '$area: $file dışa aktarıldı, $bytes bayt';
 
   @override
-  String logTapped(String area, String number) => '$area: $number dokunuldu';
+  String logTapped(String area, String number) =>
+      '$area: $number numaralı masaya dokunuldu';
 
   @override
   String logLayoutChanged(String area) => '$area: düzen değişti';

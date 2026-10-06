@@ -227,5 +227,6 @@ final class _Tr extends AppStrings {
   String couldNotSave(String name) => '$name kaydedilemedi';
 
   @override
-  String saveChangesTo(String name) => '$name değişiklikleri kaydedilsin mi?';
+  String saveChangesTo(String name) =>
+      '$name belgesindeki değişiklikler kaydedilsin mi?';
 }

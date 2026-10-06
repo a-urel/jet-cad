@@ -15,6 +15,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:jet_cad_floor_plan/editor.dart';
+import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
+    show FloorPlanStringsEn;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -23,6 +25,9 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import '../support/document_rig.dart' as rig;
 import '../support/fake_document_files.dart';
 import '../support/layer_fixture.dart';
+
+/// The English the picker's words are checked against.
+const _en = FloorPlanStringsEn();
 
 Finder byKey(String k) => find.byKey(Key(k));
 
@@ -217,7 +222,7 @@ void main() {
     final doc = p.doc;
     final selection = await pumpPanel(tester, doc);
     await select(tester, selection, [p.line, p.door]);
-    expect(valueOf(tester), kMixedLayers);
+    expect(valueOf(tester), _en.mixed);
     await select(tester, selection, [p.door]);
     expect(valueOf(tester), 'B');
     await select(tester, selection, [p.symbol.attrib]);
@@ -299,7 +304,7 @@ void main() {
       final bytes = DraftDocumentCodec.encodeToString(doc);
       if (permissions == DraftPermissions.readOnly) {
         expect(pickerEnabled(tester), isFalse);
-        expect(pickerTooltip(tester), kLayerPickerReadOnly);
+        expect(pickerTooltip(tester), _en.readOnlyDocument);
         await tester.tap(byKey('layer-picker'), warnIfMissed: false);
         await tester.pumpAndSettle();
         expect(byKey('layer-picker-item-${p.d.toHex()}'), findsNothing,
@@ -338,10 +343,10 @@ void main() {
     final selection = await pumpPanel(tester, doc);
     await select(tester, selection, [p.line, plain]);
     expect(pickerEnabled(tester), isFalse);
-    expect(pickerTooltip(tester), kLayerPickerPlainGroup);
+    expect(pickerTooltip(tester), _en.plainGroupNoLayer);
     await select(tester, selection, [p.line]);
     expect(pickerEnabled(tester), isTrue);
-    expect(pickerTooltip(tester), isNot(kLayerPickerPlainGroup));
+    expect(pickerTooltip(tester), isNot(_en.plainGroupNoLayer));
   });
 
   testWidgets(
@@ -433,8 +438,7 @@ void main() {
       expect(isParametricObject(doc, h), isTrue, reason: type);
       await select(tester, selection, [h]);
       expect(pickerEnabled(tester), isTrue, reason: type);
-      expect(pickerTooltip(tester), isNot(kLayerPickerPlainGroup),
-          reason: type);
+      expect(pickerTooltip(tester), isNot(_en.plainGroupNoLayer), reason: type);
       expect(valueOf(tester), name, reason: type);
     }
     // And one of them moves: the separator, from layer 0 to D.
@@ -461,7 +465,7 @@ void main() {
     var selection = await pumpPanel(tester, doc);
     await select(tester, selection, [p.line, p.wall]);
     expect(pickerEnabled(tester), isFalse);
-    expect(pickerTooltip(tester), kLayerPickerReadOnly);
+    expect(pickerTooltip(tester), _en.readOnlyDocument);
 
     p = PickerDoc();
     doc = p.doc;

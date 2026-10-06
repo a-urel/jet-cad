@@ -13,18 +13,6 @@ import '../parametric/separator.dart';
 import '../parametric/wall.dart';
 import 'layer_panel.dart' show layersInPanelOrder;
 
-/// The picker's label when the selection's layers differ.
-const String kMixedLayers = 'Mixed';
-
-/// The reason the picker is disabled under a permission set that forbids
-/// `Capability.components` (spec 12b D11).
-const String kLayerPickerReadOnly = 'Read-only document';
-
-/// The reason the picker is disabled for a selection holding a plain
-/// (non-parametric) group (spec 12b D12, R-14).
-const String kLayerPickerPlainGroup =
-    'A plain group has no layer: it cannot be moved';
-
 /// Whether [h] is a live parametric object of one of the floor planner's
 /// registered types (`parametricCatalog`), by the engine's own rule
 /// ([isLiveObject]): a root-level group carrying a registered component.
@@ -165,10 +153,10 @@ DraftCommand? layerMoveCommand(
 }
 
 /// Spec 12b D12: the Selection section's layer menu. It shows the
-/// selection's common layer ([layerOfKey]), or [kMixedLayers]; choosing a
-/// layer dispatches [layerMoveCommand]'s one command, built from the
-/// document and the selection as they are at the choice, not at the last
-/// build.
+/// selection's common layer ([layerOfKey]), or the strings' `mixed`;
+/// choosing a layer dispatches [layerMoveCommand]'s one command, built from
+/// the document and the selection as they are at the choice, not at the
+/// last build.
 ///
 /// Disabled, with the reason as its tooltip, when [layerPickerBlocked]
 /// says so. Moving to a hidden or locked layer is allowed: the moved keys

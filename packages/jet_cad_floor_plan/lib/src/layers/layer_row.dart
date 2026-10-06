@@ -10,19 +10,9 @@ import '../l10n/strings.dart';
 import '../panel_focus.dart';
 import '../shortcut_guard.dart';
 
-/// The colours a layer may be given (spec 12b decision 6): ACI 1–9, with
-/// their names in the colour menu.
-const List<(int, String)> kLayerColours = [
-  (1, 'Red'),
-  (2, 'Yellow'),
-  (3, 'Green'),
-  (4, 'Cyan'),
-  (5, 'Blue'),
-  (6, 'Magenta'),
-  (7, 'Foreground'),
-  (8, 'Dark grey'),
-  (9, 'Light grey'),
-];
+/// The colours a layer may be given (spec 12b decision 6): ACI 1-9. Their
+/// names are `FloorPlanStrings.colourName`'s, in the UI's language.
+const List<int> kLayerColours = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /// The `0xRRGGBB` a layer of [color] is drawn in, as the style resolver
 /// draws it: ACI 7 (and anything that is not a colour of its own) in the
@@ -253,7 +243,7 @@ class _LayerRowState extends State<LayerRow> {
                   padding: EdgeInsets.zero,
                   onSelected: widget.onColour,
                   itemBuilder: (context) => [
-                    for (final (aci, _) in kLayerColours)
+                    for (final aci in kLayerColours)
                       PopupMenuItem<int>(
                         key: Key('layer-colour-item-$aci'),
                         value: aci,

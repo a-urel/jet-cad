@@ -39,7 +39,7 @@ class FloorPlanStringsTr extends FloorPlanStrings {
   @override
   String tableNumberProblem(TableNumberProblem problem) => switch (problem) {
         TableNumberProblem.length =>
-          '1 ile $kTableNumberMaxLength karakter arası',
+          '1 ile $kTableNumberMaxLength karakter arasında olmalı',
         TableNumberProblem.control =>
           'Satır sonu veya kontrol karakteri olamaz',
       };
@@ -233,13 +233,13 @@ class FloorPlanStringsTr extends FloorPlanStrings {
   String get endFixed => 'Sabit';
 
   @override
-  String get leftFace => 'sol yüz';
+  String get leftFace => 'sol yüzey';
 
   @override
   String get centreline => 'eksen';
 
   @override
-  String get rightFace => 'sağ yüz';
+  String get rightFace => 'sağ yüzey';
 
   @override
   String get size => 'Boyut';
@@ -284,7 +284,7 @@ class FloorPlanStringsTr extends FloorPlanStrings {
   String get snapToGrid => 'Izgaraya yapış';
 
   @override
-  String get pageBreaks => 'Sayfa sınırları';
+  String get pageBreaks => 'Sayfa sonları';
 
   @override
   String get paper => 'Kâğıt';
