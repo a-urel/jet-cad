@@ -58,9 +58,25 @@
   comparing failures and skips exactly with `tool/ci/standing_*.txt`,
   and builds the probe by git at the commit under test. **CI run 1
   green** (all nine jobs). `tool/ci` is a workspace member with its own
-  tests (19). **Next, on the human's word:** the merge of 14d into
-  `main`, then the tag `v0.1.0` on the merge (P3); an independent review
-  of 14d's code; the looks and the German and Turkish reads owed above.
+  tests (19).
+- **14d's independent code review is DONE** (on the human's *"evet,
+  bağımsız kod incelemesi yap"*): three fresh reviewers, one per slice,
+  each *Approved with fixes*, nothing critical. Every finding and its
+  disposition: [2026-10-06-14d-review.md](docs/superpowers/notes/2026-10-06-14d-review.md).
+  Fixed: CI read a test that fails after it completed as passed; the
+  scripts' exit codes untested; the guide's service flow could save a
+  drag over the stored layout; the demo's menu on a locked table acted
+  on the selection; the right panel overflowed at 656 x 700 with a table
+  (4 px English, 24 px German), now one scroll; the leak guard covered a
+  wall only, now every section; stale error words after a language
+  switch; Undo then `setMode` never heard by `serviceLayoutChanges`;
+  English constants removed from `editor.dart` (breaking); six
+  translations. Gates after: planner 1,222, app 203, demo 24, `tool/ci`
+  31; CI runs 3 and 4 green. **Owed the human:** the floor planner's
+  English save-panel file-type labels (localise or waive, 14d-1 F-5).
+  **Next, on the human's word:** the merge of 14d into `main`, then the
+  tag `v0.1.0` on the merge (P3); the looks and the German and Turkish
+  reads owed above.
   **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
