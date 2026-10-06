@@ -1,0 +1,6 @@
+# Written by tool/ci/host_probe.sh, and by pub and the build.
+/pubspec.yaml
+/pubspec.lock
+/.dart_tool/
+/build/
+/.flutter-plugins-dependencies
