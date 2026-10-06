@@ -43,12 +43,17 @@ abstract class DemoStrings {
   String get tables;
 
   String get none;
+  String get groups;
 
   String get log;
 
   String get selectOnlyThis;
 
   String statusName(String name);
+  String logGroupStatus(String area, String status, String group);
+  String logMerged(String area, String numbers, String id);
+  String logSplit(String area, String id);
+  String logGroupTapped(String area, String id, String number);
 
   String tableTitle(String number);
 
@@ -114,7 +119,7 @@ final class _En extends DemoStrings {
   String get select => 'Select';
 
   @override
-  String get statusOfSelected => 'Status of the selected tables';
+  String get statusOfSelected => 'Status of the selected tables or group';
 
   @override
   String get randomStatuses => 'Random statuses';
@@ -124,6 +129,24 @@ final class _En extends DemoStrings {
 
   @override
   String get none => 'none';
+
+  @override
+  String get groups => 'Groups';
+
+  @override
+  String logGroupStatus(String area, String status, String group) =>
+      '$area: $status for $group';
+
+  @override
+  String logMerged(String area, String numbers, String id) =>
+      '$area: Merged {$numbers} as $id';
+
+  @override
+  String logSplit(String area, String id) => '$area: Split $id';
+
+  @override
+  String logGroupTapped(String area, String id, String number) =>
+      '$area: group $id tapped at $number';
 
   @override
   String get log => 'Log';
@@ -218,7 +241,7 @@ final class _De extends DemoStrings {
   String get select => 'Auswählen';
 
   @override
-  String get statusOfSelected => 'Status der ausgewählten Tische';
+  String get statusOfSelected => 'Status der ausgewählten Tische oder Gruppe';
 
   @override
   String get randomStatuses => 'Zufällige Status';
@@ -228,6 +251,24 @@ final class _De extends DemoStrings {
 
   @override
   String get none => 'keine';
+
+  @override
+  String get groups => 'Gruppen';
+
+  @override
+  String logGroupStatus(String area, String status, String group) =>
+      '$area: $status für $group';
+
+  @override
+  String logMerged(String area, String numbers, String id) =>
+      '$area: {$numbers} als $id zusammengelegt';
+
+  @override
+  String logSplit(String area, String id) => '$area: $id getrennt';
+
+  @override
+  String logGroupTapped(String area, String id, String number) =>
+      '$area: Gruppe $id bei $number angetippt';
 
   @override
   String get log => 'Protokoll';
@@ -328,7 +369,7 @@ final class _Tr extends DemoStrings {
   String get select => 'Seç';
 
   @override
-  String get statusOfSelected => 'Seçili masaların durumu';
+  String get statusOfSelected => 'Seçili masaların veya grubun durumu';
 
   @override
   String get randomStatuses => 'Rastgele durumlar';
@@ -338,6 +379,24 @@ final class _Tr extends DemoStrings {
 
   @override
   String get none => 'yok';
+
+  @override
+  String get groups => 'Gruplar';
+
+  @override
+  String logGroupStatus(String area, String status, String group) =>
+      '$area: $group için $status';
+
+  @override
+  String logMerged(String area, String numbers, String id) =>
+      '$area: {$numbers}, $id olarak birleştirildi';
+
+  @override
+  String logSplit(String area, String id) => '$area: $id ayrıldı';
+
+  @override
+  String logGroupTapped(String area, String id, String number) =>
+      '$area: $id grubunda $number masasına dokunuldu';
 
   @override
   String get log => 'Günlük';

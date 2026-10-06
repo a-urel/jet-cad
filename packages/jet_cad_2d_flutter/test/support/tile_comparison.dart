@@ -552,15 +552,18 @@ Future<ByteData> captureTiled(WidgetTester t, TiledHarness h) =>
 ///
 /// **The key is the whole reason this returns a different image at all, and
 /// without it this instrument was blind to every mutant.**
-/// `_DraftCustomPainter.shouldRepaint` returns `false` unconditionally and
-/// says why — `repaint` is the only trigger, and answering `true` there would
-/// repaint on every unrelated rebuild. Pumping a tree that differs only in
-/// `tiles` therefore re-runs `didUpdateWidget` (which does tear the cache
-/// down) and then **keeps the retained picture**: the "live" capture came back
-/// byte-for-byte equal to the tiled one, and `differingPixels` read zero under
-/// M3, M7, M9, M9b, M10 and M11 alike. A key the tiled tree does not carry
-/// makes this a different element, so the render object is new and has no
-/// picture to retain.
+/// When this was written, `_DraftCustomPainter.shouldRepaint` returned `false`
+/// unconditionally — `repaint` was the only trigger, and answering `true`
+/// there would repaint on every unrelated rebuild. Pumping a tree that differed
+/// only in `tiles` therefore re-ran `didUpdateWidget` (which does tear the
+/// cache down) and then **kept the retained picture**: the "live" capture came
+/// back byte-for-byte equal to the tiled one, and `differingPixels` read zero
+/// under M3, M7, M9, M9b, M10 and M11 alike. `shouldRepaint` now also answers
+/// `true` for a resident rebuilder or device pixel ratio change and, since the
+/// dark theme's R-C4-1, for a new `DraftPainter` (which a re-attach makes), so
+/// it is no longer unconditionally false. The key stays regardless: a key the
+/// tiled tree does not carry makes this a different element, so the render
+/// object is new and has no picture to retain, whatever `shouldRepaint` says.
 Future<ByteData> captureLive(WidgetTester t, TiledHarness h) async {
   final controller = CameraController(quantiseCamera(h.camera.value, kTileDpr));
   addTearDown(controller.dispose);

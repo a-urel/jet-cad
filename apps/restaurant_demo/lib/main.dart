@@ -5,8 +5,9 @@
 // a plan kept in memory, with its service layout kept beside it (spec 14d
 // S4, S9: Design and back shows the moves again; Reset layout drops them);
 // a Design / Service toggle; selection by table number; a table's context
-// menu; the service options; and a log of the API's state. An example and
-// an integration surface, not a product.
+// menu; the service options; table groups merged and split from the service
+// bar (table-groups spec G6); and a log of the API's state, in English,
+// German or Turkish. An example and an integration surface, not a product.
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -55,6 +56,9 @@ Future<Map<String, String>> loadSamplePlans(AssetBundle bundle) async {
   return plans;
 }
 
+/// The demo's theme seed, for the light and the dark theme alike.
+const Color _seed = Colors.teal;
+
 /// The demo. [plans] seeds the areas' stored plans by name (tests); an area
 /// without one starts empty.
 class RestaurantDemo extends StatefulWidget {
@@ -79,7 +83,12 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
   @override
   Widget build(BuildContext context) => MaterialApp(
         onGenerateTitle: (context) => DemoStrings.of(context).title,
-        theme: ThemeData(colorSchemeSeed: Colors.teal),
+        // Dark theme spec D1: the planner follows the host's theme, and the
+        // OS picks light or dark.
+        theme: ThemeData(colorSchemeSeed: _seed),
+        darkTheme:
+            ThemeData(colorSchemeSeed: _seed, brightness: Brightness.dark),
+        themeMode: ThemeMode.system,
         // Spec 14d L17: the three languages, switched in the app bar
         // through `MaterialApp.locale` (V-4), so all three can be looked at
         // without changing the system's language.
@@ -108,6 +117,9 @@ final class Area {
   /// Each table's status by its [DemoHomeState.kStatuses] name, so the
   /// captions are worded again when the language changes (review F-6).
   final Map<String, String> statusNames = {};
+
+  /// Each group's status by name, as [statusNames] (G6).
+  final Map<String, String> groupStatusNames = {};
 }
 
 class DemoHome extends StatefulWidget {
@@ -166,10 +178,13 @@ class DemoHomeState extends State<DemoHome> {
       c.selectedTables.addListener(() => _log(_words.logSelected(
           a.name, (c.selectedTables.value.toList()..sort()).join(', '))));
       c.dirty.addListener(() => _log(_words.logDirty(a.name, c.dirty.value)));
-      // The tables and warnings follow every change of the active plan.
-      c.revision.addListener(() {
-        if (mounted) setState(() {});
-      });
+      // The tables and warnings follow every change of the active plan;
+      // the groups line follows the groups and their statuses.
+      for (final l in [c.revision, c.tableGroups, c.groupStatuses]) {
+        l.addListener(() {
+          if (mounted) setState(() {});
+        });
+      }
       // Kept on every change of the layout, never on a mode switch or a
       // load, which start from the design (S4).
       c.serviceLayoutChanges
@@ -264,7 +279,8 @@ class DemoHomeState extends State<DemoHome> {
     if (choice == 'select') {
       a.controller.select({number});
     } else if (choice.startsWith('status:')) {
-      _setStatus(choice.substring('status:'.length), tables);
+      // A locked table alone; otherwise the selection, a group's whole.
+      _setStatus(choice.substring('status:'.length), locked ? tables : null);
     }
   }
 
@@ -303,9 +319,22 @@ class DemoHomeState extends State<DemoHome> {
     return TableStatus(color: status.color, caption: _words.statusName(name));
   }
 
-  /// Sets status [name] on [tables], the selected ones when null.
+  /// Sets status [name] on [tables], the selected ones when null. A
+  /// selected group, when no [tables] are given, gets a group status (G6),
+  /// which overrides its members' own; Free clears it.
   void _setStatus(String name, [Set<String>? tables]) {
     final a = area;
+    final group = tables == null ? a.controller.selectedGroup.value : null;
+    if (group != null) {
+      if (kStatuses[name] == null) {
+        a.groupStatusNames.remove(group);
+      } else {
+        a.groupStatusNames[group] = name;
+      }
+      _applyStatuses(a);
+      _log(_words.logGroupStatus(a.name, _words.statusName(name), group));
+      return;
+    }
     final targets = tables ?? a.controller.selectedTables.value;
     for (final n in targets) {
       if (kStatuses[name] == null) {
@@ -319,10 +348,14 @@ class DemoHomeState extends State<DemoHome> {
         (targets.toList()..sort()).join(', ')));
   }
 
-  /// [a]'s statuses, worded in the app's language.
+  /// [a]'s table and group statuses, worded in the app's language.
   void _applyStatuses(Area a) {
     a.controller.setTableStatus({
       for (final e in a.statusNames.entries)
+        if (_statusFor(e.value) case final status?) e.key: status,
+    });
+    a.controller.setGroupStatus({
+      for (final e in a.groupStatusNames.entries)
         if (_statusFor(e.value) case final status?) e.key: status,
     });
   }
@@ -341,6 +374,131 @@ class DemoHomeState extends State<DemoHome> {
     _log(_words.logRandom(a.name, a.controller.tableStatuses.value.length));
   }
 
+  /// Orders numbers and group ids as people read them: a shared prefix,
+  /// then the digits by value (`G2` before `G10`, `3` before `12`).
+  static int byNumber(String a, String b) {
+    final x = _tail.firstMatch(a), y = _tail.firstMatch(b);
+    if (x != null && y != null && x[1] == y[1]) {
+      final order = BigInt.parse(x[2]!).compareTo(BigInt.parse(y[2]!));
+      if (order != 0) return order;
+    }
+    return a.compareTo(b);
+  }
+
+  static final RegExp _tail = RegExp(r'^(\D*)(\d+)$');
+
+  /// The trailing digits of any group id, whatever its prefix: a POS's own
+  /// `VIP9` counts as 9, so the next id is `G10` (G6).
+  static final RegExp _idSuffix = RegExp(r'(\d+)$');
+
+  static String _sorted(Iterable<String> numbers) =>
+      (numbers.toList()..sort(byNumber)).join(', ');
+
+  /// `G<n>`, n the largest numeric suffix among [ids] plus one; `G1` when
+  /// none has one (G6).
+  static String nextGroupId(Iterable<String> ids) {
+    var max = BigInt.zero;
+    for (final id in ids) {
+      final m = _idSuffix.firstMatch(id.trim());
+      if (m == null) continue;
+      final n = BigInt.parse(m[1]!);
+      if (n > max) max = n;
+    }
+    return 'G${max + BigInt.one}';
+  }
+
+  /// G6's merge rule for the requested [numbers] over [groups]: the groups
+  /// to set and the id merged into. [selectable] gives a group's selectable
+  /// members' numbers over the same [groups] (in `_merge`,
+  /// `FloorPlanController.selectableMembers`, table-groups fixes spec X2).
+  ///
+  /// **Grow:** when exactly one group has selectable members and [numbers]
+  /// include all of them, that group grows by the other numbers under its
+  /// id and label. Those numbers leave any other group they were in; a group
+  /// left empty goes. A request of exactly that group's selectable members
+  /// grows it by nothing: the same groups again.
+  ///
+  /// **New group:** otherwise [numbers] leave every group they are in (a
+  /// group left empty goes) and form [nextGroupId] of the groups before the
+  /// merge. [numbers] are not empty (a group needs a member).
+  static ({Map<String, TableGroup> groups, String id}) mergeGroups(
+      Map<String, TableGroup> groups,
+      Set<String> numbers,
+      Set<String> Function(String id) selectable) {
+    final whole = [
+      for (final id in groups.keys)
+        if (selectable(id) case final s
+            when s.isNotEmpty && numbers.containsAll(s))
+          id
+    ];
+    final id = whole.length == 1 ? whole.single : nextGroupId(groups.keys);
+    final next = <String, TableGroup>{};
+    for (final e in groups.entries) {
+      final rest = e.value.members.difference(numbers);
+      if (e.key == id) {
+        next[id] = TableGroup(
+            members: {...e.value.members, ...numbers}, label: e.value.label);
+      } else if (rest.length == e.value.members.length) {
+        next[e.key] = e.value;
+      } else if (rest.isNotEmpty) {
+        next[e.key] = TableGroup(members: rest, label: e.value.label);
+      }
+    }
+    next.putIfAbsent(id, () => TableGroup(members: numbers));
+    return (groups: next, id: id);
+  }
+
+  /// The service bar's Merge (G6): any request is accepted, an empty one
+  /// changes nothing. A group the merge empties takes its group status with
+  /// it (ruling R-C5-2).
+  void _merge(Area a, Set<String> numbers) {
+    if (numbers.isEmpty) return;
+    final c = a.controller;
+    final before = c.tableGroups.value;
+    final merged = mergeGroups(before, numbers, c.selectableMembers);
+    c.setTableGroups(merged.groups);
+    final gone = {
+      for (final id in before.keys)
+        if (!merged.groups.containsKey(id)) id
+    };
+    if (gone.any(a.groupStatusNames.containsKey)) {
+      a.groupStatusNames.removeWhere((id, _) => gone.contains(id));
+      _applyStatuses(a);
+    }
+    _log(_words.logMerged(a.name, _sorted(numbers), merged.id));
+  }
+
+  /// The service bar's Split (G6): the group goes, and its status with it.
+  void _split(Area a, String id) {
+    final c = a.controller;
+    c.setTableGroups({...c.tableGroups.value}..remove(id));
+    a.groupStatusNames.remove(id);
+    _applyStatuses(a);
+    _log(_words.logSplit(a.name, id));
+  }
+
+  /// The name [kStatuses] gives [status], by its colour (a caption is
+  /// worded), or `status` for another one.
+  static String _statusName(TableStatus status) => kStatuses.entries
+      .firstWhere((e) => e.value?.color == status.color,
+          orElse: () => const MapEntry('status', null))
+      .key;
+
+  /// The groups line: `G1: 3+7+12 (Bill)`, by id.
+  String _groupsText(FloorPlanController c) {
+    final groups = c.tableGroups.value;
+    if (groups.isEmpty) return _words.none;
+    final statuses = c.groupStatuses.value;
+    return [
+      for (final id in groups.keys.toList()..sort(byNumber))
+        [
+          '$id: ${(groups[id]!.members.toList()..sort(byNumber)).join('+')}',
+          if (statuses[id] case final s?)
+            ' (${_words.statusName(_statusName(s))})',
+        ].join()
+    ].join(', ');
+  }
+
   void _select() {
     final numbers = {for (final n in _number.text.split(',')) n.trim()}
       ..remove('');
@@ -349,7 +507,8 @@ class DemoHomeState extends State<DemoHome> {
 
   @override
   Widget build(BuildContext context) {
-    final c = area.controller;
+    final a = area;
+    final c = a.controller;
     final words = _words;
     final title = Theme.of(context).textTheme.titleSmall;
     return Scaffold(
@@ -418,6 +577,9 @@ class DemoHomeState extends State<DemoHome> {
                   ? FloorPlanLongPress.contextMenu
                   : FloorPlanLongPress.toggleSelection,
               onTableContextMenu: _tableMenu,
+              onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
+              onMergeRequested: (numbers) => _merge(a, numbers),
+              onSplitRequested: (id) => _split(a, id),
             ),
           ),
           SizedBox(
@@ -500,6 +662,9 @@ class DemoHomeState extends State<DemoHome> {
                             for (final t in c.tables)
                               '${t.number ?? '—'} (${t.seats})'
                           ].join(', ')),
+                const SizedBox(height: 8),
+                Text(words.groups, style: title),
+                Text(key: const Key('groups'), _groupsText(c)),
                 for (final (i, w) in c.numberingWarnings.indexed)
                   Text(FloorPlanStrings.of(context).numberingWarning(w),
                       key: Key('numbering-warning-$i'),

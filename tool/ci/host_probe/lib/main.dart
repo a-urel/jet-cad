@@ -155,6 +155,35 @@ class _FloorScreenState extends State<FloorScreen> {
       '4': TableStatus(color: const Color(0x8000C853), caption: 'Free'),
       '7': TableStatus(color: const Color(0x80FF6D00), caption: '12:40'),
     });
+    controller.setGroupStatus({
+      'G1': TableStatus(color: const Color(0x80E53935), caption: 'Bill'),
+    });
+  }
+
+  /// Merge (the service bar's, when the host passes the callback): a new
+  /// group of [numbers], taken out of any group that held them, since a
+  /// number belongs to one group at most.
+  void mergeTables(Set<String> numbers) {
+    final groups = <String, TableGroup>{};
+    for (final MapEntry(key: id, value: group)
+        in controller.tableGroups.value.entries) {
+      final rest = group.members.difference(numbers);
+      if (rest.isNotEmpty) {
+        groups[id] = TableGroup(members: rest, label: group.label);
+      }
+    }
+    var n = 1;
+    while (controller.tableGroups.value.containsKey('G$n')) {
+      n++;
+    }
+    groups['G$n'] = TableGroup(members: numbers);
+    controller.setTableGroups(groups);
+  }
+
+  /// Split: the group goes, and its status with it.
+  void splitGroup(String id) {
+    controller.setTableGroups({...controller.tableGroups.value}..remove(id));
+    controller.setGroupStatus({...controller.groupStatuses.value}..remove(id));
   }
 
   void showOrders() {
@@ -242,6 +271,9 @@ class _FloorScreenState extends State<FloorScreen> {
               printer: const PrintingPagePrinter(),
               onTableTap: openOrder,
               onTableContextMenu: showTableMenu,
+              onGroupTap: (group, number) => openOrder(number),
+              onMergeRequested: mergeTables,
+              onSplitRequested: splitGroup,
               serviceMoves: staffMayMoveTables,
               longPress: FloorPlanLongPress.toggleSelection,
             ),

@@ -541,7 +541,8 @@ void main() {
         reason: 'premise: a seed there would be in a wall');
     // No snap marker: the seed is not snapped (the plain, no-snap glyph).
     final spy = CanvasSpy();
-    rig.tool.paintOverlay(spy, rig.ctx.camera.value, const Size(800, 600));
+    rig.tool.paintOverlay(
+        spy, rig.ctx.camera.value, const Size(800, 600), PaperPalette.light);
     expect(spy.calls, isEmpty, reason: 'no snap marker drawn');
     pressAt(rig, raw);
     final room = rooms(doc).single;

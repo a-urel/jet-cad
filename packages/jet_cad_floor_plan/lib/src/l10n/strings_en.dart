@@ -132,6 +132,12 @@ class FloorPlanStringsEn extends FloorPlanStrings {
   String get redo => 'Redo';
 
   @override
+  String get merge => 'Merge';
+
+  @override
+  String get split => 'Split';
+
+  @override
   String get exportEllipsis => 'Export…';
 
   @override

@@ -4,6 +4,7 @@ import 'dart:ui';
 // `Float32List` arrives with `ValueNotifier`: `dart:foundation` re-exports
 // `dart:typed_data`, and importing both trips `unnecessary_import`.
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show Center, CustomPaint, SizedBox;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -57,7 +58,15 @@ List<double> oracleMajorXs(
     {PageComponent? page, CameraController? camera}) {
   final n = ValueNotifier<PageComponent?>(page ?? standardPage());
   final cam = camera ?? standardCamera();
-  return (PageChromePainter(camera: cam, page: n), n, cam);
+  return (
+    PageChromePainter(
+        camera: cam,
+        page: n,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light),
+    n,
+    cam
+  );
 }
 
 /// Vertical lines' x from a recorded `drawRawPoints` list: every pair
@@ -79,6 +88,34 @@ void main() {
     // the value `PageComponent.background` actually stores.
     expect(rects.first.color?.toARGB32(), 0xFFFAF6EC);
     expect(canvas.calls.first.name, 'drawRect');
+  });
+
+  test(
+      'M-DC-1: sheetArgb fills the sheet in its place, the page keeps its '
+      'background, and shouldRepaint follows it (dark canvas K2)', () {
+    final n = ValueNotifier<PageComponent?>(
+        standardPage().copyWith(background: 0xFFFAF6EC));
+    final cam = standardCamera();
+    PageChromePainter make(int? sheet) => PageChromePainter(
+        camera: cam,
+        page: n,
+        chrome: ChromePalette.dark,
+        paper: PaperPalette.dark,
+        sheetArgb: sheet);
+    final canvas = SpyCanvas();
+    make(kDarkCanvasPaper).paint(canvas, kChromeSize);
+    expect(canvas.calls.first.name, 'drawRect');
+    expect(canvas.named('drawRect').first.color?.toARGB32(), kDarkCanvasPaper);
+    expect(n.value!.background, 0xFFFAF6EC, reason: 'display only');
+
+    final plain = SpyCanvas();
+    make(null).paint(plain, kChromeSize);
+    expect(plain.named('drawRect').first.color?.toARGB32(), 0xFFFAF6EC);
+
+    expect(make(kDarkCanvasPaper).shouldRepaint(make(null)), isTrue);
+    expect(make(null).shouldRepaint(make(kDarkCanvasPaper)), isTrue);
+    expect(
+        make(kDarkCanvasPaper).shouldRepaint(make(kDarkCanvasPaper)), isFalse);
   });
 
   test('major lines sit where the oracle says, anchored at the sheet corner',
@@ -217,7 +254,11 @@ void main() {
     addTearDown(index.dispose);
     final n = PageNotifier(doc);
     addTearDown(n.dispose);
-    final painter = PageChromePainter(camera: standardCamera(), page: n);
+    final painter = PageChromePainter(
+        camera: standardCamera(),
+        page: n,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light);
     final entities = doc.entities.liveCount;
     final rebuilds = index.rebuildCount;
     for (final flag in [true, false, true]) {
@@ -237,8 +278,17 @@ void main() {
     final page = standardPage().copyWith(gridVisible: true, pageBreaks: true);
     final n = ValueNotifier<PageComponent?>(page);
     final cam = standardCamera();
-    final shown = PageChromePainter(camera: cam, page: n);
-    final hidden = PageChromePainter(camera: cam, page: n, grid: false);
+    final shown = PageChromePainter(
+        camera: cam,
+        page: n,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light);
+    final hidden = PageChromePainter(
+        camera: cam,
+        page: n,
+        grid: false,
+        chrome: ChromePalette.light,
+        paper: PaperPalette.light);
     final a = SpyCanvas(), b = SpyCanvas();
     shown.paint(a, kChromeSize);
     hidden.paint(b, kChromeSize);
@@ -251,6 +301,40 @@ void main() {
         reason: 'the page breaks stay');
     expect(b.named('drawRect').length, a.named('drawRect').length,
         reason: 'the sheet stays');
+  });
+
+  testWidgets(
+      'a rebuild that turns the grid off repaints, though neither the camera '
+      'nor the page moves; a rebuild that keeps it does not', (tester) async {
+    final n = ValueNotifier<PageComponent?>(
+        standardPage().copyWith(gridVisible: true));
+    final cam = standardCamera();
+    final repaint = Listenable.merge([cam, n]);
+    var paints = 0;
+    late PageChromePainter last;
+    Future<void> pumpWith({required bool grid}) {
+      last = PageChromePainter(
+          camera: cam,
+          page: n,
+          grid: grid,
+          chrome: ChromePalette.light,
+          paper: PaperPalette.light,
+          repaint: repaint,
+          onPaintForTest: () => paints++);
+      return tester.pumpWidget(Center(
+          child: SizedBox.fromSize(
+              size: kChromeSize, child: CustomPaint(painter: last))));
+    }
+
+    await pumpWith(grid: true);
+    expect(paints, 1, reason: 'premise');
+    expect(last.debugLastMajorCount + last.debugLastMinorCount, greaterThan(0),
+        reason: 'premise: the grid shows');
+    await pumpWith(grid: true);
+    expect(paints, 1, reason: 'the same switch: nothing to repaint');
+    await pumpWith(grid: false);
+    expect(paints, 2, reason: 'the switch alone repaints');
+    expect(last.debugLastMajorCount + last.debugLastMinorCount, 0);
   });
 
   test('null page and zero size paint nothing', () {

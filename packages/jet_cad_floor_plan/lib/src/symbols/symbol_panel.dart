@@ -242,6 +242,9 @@ class _SymbolPanelState extends State<SymbolPanel> {
                   },
                   thumbnails: widget.thumbnails,
                   foreground: foregroundFor(cellColor.toARGB32() & 0xFFFFFF),
+                  // Dark theme spec D9b: the selected cell's own background.
+                  selectedForeground: foregroundFor(
+                      scheme.primaryContainer.toARGB32() & 0xFFFFFF),
                   cellColor: cellColor,
                 ),
         ),

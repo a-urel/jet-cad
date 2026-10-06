@@ -46,6 +46,7 @@ void main() {
       'FloorPlanStringsEn',
       'FloorPlanStringsDe',
       'FloorPlanStringsTr',
+      'TableGroup',
       'ensureFloorPlanFonts',
       'registerFontLicences',
       'SymbolLibraryLoader',

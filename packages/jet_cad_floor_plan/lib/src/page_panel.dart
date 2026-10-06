@@ -132,6 +132,9 @@ class PagePanelState extends State<PagePanel> {
         valueListenable: widget.page,
         builder: (context, page, _) {
           if (page == null) return const SizedBox.shrink();
+          // Dark theme spec D6a: the swatch border is the scheme's, read at
+          // build so a theme switch follows.
+          final scheme = Theme.of(context).colorScheme;
           // The shell's `chrome-right` slot is a `Container` with its own
           // background color (a `ColoredBox`); without a `Material` of its
           // own in between, the checkboxes' `ListTile` ink surface has no
@@ -268,8 +271,8 @@ class PagePanelState extends State<PagePanel> {
                               color: Color(_swatches[i].$2),
                               border: Border.all(
                                   color: page.background == _swatches[i].$2
-                                      ? Colors.blue
-                                      : Colors.black26,
+                                      ? scheme.primary
+                                      : scheme.outline,
                                   width: page.background == _swatches[i].$2
                                       ? 2
                                       : 1),

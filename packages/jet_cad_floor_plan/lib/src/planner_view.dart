@@ -26,12 +26,16 @@ class PlannerView extends StatefulWidget {
     required this.selection,
     required this.tools,
     required this.outlines,
+    required this.chrome,
+    required this.paper,
+    this.sheetArgb,
     this.grips,
     this.textTool,
     this.fitRequests,
     this.fitOnStart = true,
     this.onFitted,
     this.underlay,
+    this.overlay,
     this.rulers = true,
     this.grid = true,
   });
@@ -51,6 +55,22 @@ class PlannerView extends StatefulWidget {
 
   /// Owned by the shell since 03 (spec D6).
   final OutlineCache outlines;
+
+  /// The rulers' and the sheet edge's colours, from the host's theme (dark
+  /// theme spec D2, D5): the shell and the service view compute it in
+  /// `build`, so a theme switch hands a new one down.
+  final ChromePalette chrome;
+
+  /// The colours of everything drawn on the paper -- the grid, the page
+  /// breaks, the selection and the tools' overlays -- picked by the paper
+  /// (dark theme spec D3, D4): the page's background, or the theme's
+  /// surface with no page.
+  final PaperPalette paper;
+
+  /// The sheet's fill when the canvas shows a paper other than the page's
+  /// ([kDarkCanvasPaper] on a dark canvas, decision note K2); null fills it
+  /// with the page's background.
+  final int? sheetArgb;
 
   /// The selection's grips. A member of the overlay's repaint merge; null
   /// where no grips show (the selection mode, spec 14b-2 H7).
@@ -75,6 +95,11 @@ class PlannerView extends StatefulWidget {
   /// Painted between the page chrome and the drafting (spec 14c S7): the
   /// selection mode's status fills, under the lines.
   final Widget? underlay;
+
+  /// Painted above the drafting and below the selection overlay
+  /// (table-groups spec G3, F-11): the selection mode's group label chips,
+  /// which a chair's lines must not paint over. Null draws nothing there.
+  final Widget? overlay;
 
   /// The rulers around the drawing area; false in the selection mode,
   /// which shows the plan, not the drafting aids.
@@ -158,7 +183,12 @@ class _PlannerViewState extends State<PlannerView> {
   Widget build(BuildContext context) {
     final area = _drawingArea();
     return widget.rulers
-        ? RulerFrame(camera: widget.camera, page: widget.page, child: area)
+        ? RulerFrame(
+            camera: widget.camera,
+            page: widget.page,
+            chrome: widget.chrome,
+            child: area,
+          )
         : area;
   }
 
@@ -216,6 +246,9 @@ class _PlannerViewState extends State<PlannerView> {
                               camera: widget.camera,
                               page: widget.page,
                               grid: widget.grid,
+                              chrome: widget.chrome,
+                              paper: widget.paper,
+                              sheetArgb: widget.sheetArgb,
                               repaint: _chromeRepaint,
                             ),
                           ),
@@ -230,6 +263,8 @@ class _PlannerViewState extends State<PlannerView> {
                         resolver: widget.resolver,
                         tiles: false,
                       ), // already inside its own RepaintBoundary
+                      if (widget.overlay case final over?)
+                        Positioned.fill(child: over),
                       Positioned.fill(
                         child: RepaintBoundary(
                           child: CustomPaint(
@@ -238,6 +273,7 @@ class _PlannerViewState extends State<PlannerView> {
                               tools: widget.tools,
                               camera: widget.camera,
                               outlines: widget.outlines,
+                              paper: widget.paper,
                               repaint: _repaint,
                             ),
                             size: Size.infinite,

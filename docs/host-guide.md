@@ -163,6 +163,9 @@ The view, with the host's options:
               printer: const PrintingPagePrinter(),
               onTableTap: openOrder,
               onTableContextMenu: showTableMenu,
+              onGroupTap: (group, number) => openOrder(number),
+              onMergeRequested: mergeTables,
+              onSplitRequested: splitGroup,
               serviceMoves: staffMayMoveTables,
               longPress: FloorPlanLongPress.toggleSelection,
             ),
@@ -279,6 +282,9 @@ Tables are known by their **numbers** (strings), never by handles.
       '4': TableStatus(color: const Color(0x8000C853), caption: 'Free'),
       '7': TableStatus(color: const Color(0x80FF6D00), caption: '12:40'),
     });
+    controller.setGroupStatus({
+      'G1': TableStatus(color: const Color(0x80E53935), caption: 'Bill'),
+    });
   }
 ```
 
@@ -320,6 +326,56 @@ word them in its language:
 Word them where you build, not when they change: a sentence kept in
 state stays in the old language after a language switch.
 
+### Table groups
+
+A host can merge tables into a **group** — a party seated across tables.
+In the selection mode a group's members are framed and labelled, a tap on
+a member selects the whole group (Shift or Ctrl adds or removes it
+whole), and a drag moves it as one. Groups, like statuses, are the
+host's: never saved, exported, printed or undone, kept across mode
+switches and loads.
+
+- `controller.setTableGroups({id: TableGroup(members: {...}, label: ...)})`
+  replaces every group. It throws an `ArgumentError`, assigning nothing,
+  for a blank or repeated id, an empty group, or a number in two groups.
+- `controller.setGroupStatus({id: status})`: a group's status fills
+  every member and overrides their own while it is set.
+- `controller.selectedGroup` is the id of the group the selection is
+  exactly, or null; `controller.selectableMembers(id)` gives a group's
+  visible, unlocked member numbers.
+- The service bar shows **Merge** and **Split** only when you pass
+  `onMergeRequested` and `onSplitRequested`. The planner only asks; you
+  decide and call `setTableGroups`:
+
+```dart
+  void mergeTables(Set<String> numbers) {
+    final groups = <String, TableGroup>{};
+    for (final MapEntry(key: id, value: group)
+        in controller.tableGroups.value.entries) {
+      final rest = group.members.difference(numbers);
+      if (rest.isNotEmpty) {
+        groups[id] = TableGroup(members: rest, label: group.label);
+      }
+    }
+    var n = 1;
+    while (controller.tableGroups.value.containsKey('G$n')) {
+      n++;
+    }
+    groups['G$n'] = TableGroup(members: numbers);
+    controller.setTableGroups(groups);
+  }
+
+  /// Split: the group goes, and its status with it.
+  void splitGroup(String id) {
+    controller.setTableGroups({...controller.tableGroups.value}..remove(id));
+    controller.setGroupStatus({...controller.groupStatuses.value}..remove(id));
+  }
+```
+
+- `onGroupTap(groupId, number)` follows `onTableTap` for a member.
+- A context click or a long-press menu on an unselected member selects
+  its whole group first, as a tap does, so your menu acts on the group.
+
 ## 8. Callbacks, options, and the web's context menu
 
 - `onTableTap(number)`: a tap on a numbered table in the selection mode
@@ -346,7 +402,13 @@ unless you turn it off, app-wide, before `runApp` (the `main` of
 [§ 2](#2-fonts)): `if (kIsWeb) await
 BrowserContextMenu.disableContextMenu();`.
 
-## 9. Touch
+## 9. Themes
+
+The planner follows your `MaterialApp`'s theme. In a dark theme a light
+page is shown on a dark canvas with its drawing re-toned to keep its
+contrast; exports and prints are never re-toned.
+
+## 10. Touch
 
 Both modes work on a touch screen. Two fingers pinch about their
 midpoint and pan together; once two fingers are down nothing reaches a
@@ -357,7 +419,7 @@ under `serviceMoves: false`), and a long press does what `longPress`
 says, about 500 ms from contact. Mouse, trackpad and stylus behave as on
 a desktop.
 
-## 10. What a host must never assume
+## 11. What a host must never assume
 
 - **Handles.** A table's identity is its number. The plan's internal
   handles are not API.

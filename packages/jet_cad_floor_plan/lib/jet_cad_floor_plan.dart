@@ -19,6 +19,7 @@ export 'src/host/floor_plan_types.dart'
         FloorPlanTable,
         ServiceLayoutRestore,
         NumberingWarning,
+        TableGroup,
         TableStatus,
         Unnumbered;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;

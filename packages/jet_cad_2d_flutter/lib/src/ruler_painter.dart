@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'camera_controller.dart';
+import 'canvas_palette.dart';
 import 'chrome_style.dart';
 
 enum RulerAxis { horizontal, vertical }
@@ -23,6 +24,7 @@ class RulerPainter extends CustomPainter {
     required this.camera,
     required this.page,
     required this.pointer,
+    required this.chrome,
     super.repaint,
   });
 
@@ -31,24 +33,37 @@ class RulerPainter extends CustomPainter {
   final ValueListenable<PageComponent?> page;
   final ValueListenable<Offset?> pointer;
 
+  /// The bar, the ticks, the labels and the pointer marker (dark theme
+  /// spec D2).
+  final ChromePalette chrome;
+
   /// Test-only: (screen coordinate along the axis, isMajor, label).
   @visibleForTesting
   List<(double, bool, String?)> debugLastTicks = const [];
 
-  final Paint _background = Paint()..color = kRulerBackground;
-  final Paint _ink = Paint()
-    ..color = kRulerInk
-    ..strokeWidth = 1.0;
-  final Paint _marker = Paint()
-    ..color = kRulerPointer
-    ..strokeWidth = 1.0;
+  // Colours assigned from [chrome] in `paint` (dark theme spec D5).
+  final Paint _background = Paint();
+  final Paint _ink = Paint()..strokeWidth = 1.0;
+  final Paint _marker = Paint()..strokeWidth = 1.0;
   final TextPainter _text = TextPainter(textDirection: TextDirection.ltr);
+
+  /// Built once per painter instance from [chrome] (dark theme spec D5, R-8):
+  /// a new palette comes only with a new painter, so no frame builds one.
+  late final TextStyle _labelStyle =
+      TextStyle(color: chrome.rulerInk, fontSize: kRulerLabelSize);
+
+  /// Test-only: the span of the last label laid out, or null before one.
+  @visibleForTesting
+  TextSpan? get debugLastLabel => _text.text as TextSpan?;
 
   bool get _horizontal => axis == RulerAxis.horizontal;
 
   @override
   void paint(Canvas canvas, Size size) {
     final ticks = <(double, bool, String?)>[];
+    _background.color = chrome.rulerBackground;
+    _ink.color = chrome.rulerInk;
+    _marker.color = chrome.rulerPointer;
     canvas.drawRect(Offset.zero & size, _background);
     if (_horizontal) {
       canvas.drawLine(Offset(0, size.height - 0.5),
@@ -129,9 +144,7 @@ class RulerPainter extends CustomPainter {
   }
 
   void _label(Canvas canvas, String text, Offset at, double angle) {
-    _text.text = TextSpan(
-        text: text,
-        style: const TextStyle(color: kRulerInk, fontSize: kRulerLabelSize));
+    _text.text = TextSpan(text: text, style: _labelStyle);
     _text.layout();
     canvas.save();
     canvas.translate(at.dx, at.dy);
@@ -140,32 +153,46 @@ class RulerPainter extends CustomPainter {
     canvas.restore();
   }
 
+  /// True exactly when the palette changed (dark theme spec D5); every other
+  /// reason to repaint is in the `repaint` listenable.
   @override
-  bool shouldRepaint(RulerPainter old) => false;
+  bool shouldRepaint(RulerPainter old) => old.chrome != chrome;
 }
 
 /// The 24 × 24 box where the bars meet: the unit's symbol.
 class RulerCornerPainter extends CustomPainter {
-  RulerCornerPainter({required this.page, super.repaint});
+  RulerCornerPainter({required this.page, required this.chrome, super.repaint});
 
   final ValueListenable<PageComponent?> page;
-  final Paint _background = Paint()..color = kRulerBackground;
+
+  /// The box and the unit symbol (dark theme spec D2).
+  final ChromePalette chrome;
+
+  // Colour assigned from [chrome] in `paint` (dark theme spec D5).
+  final Paint _background = Paint();
   final TextPainter _text = TextPainter(textDirection: TextDirection.ltr);
+
+  /// Built once per painter instance (dark theme spec D5, R-8).
+  late final TextStyle _labelStyle =
+      TextStyle(color: chrome.rulerInk, fontSize: kRulerLabelSize);
   String? _lastSymbol;
 
   /// Test-only.
   @visibleForTesting
   String? debugLastSymbol() => _lastSymbol;
 
+  /// Test-only: the span of the last symbol laid out, or null before one.
+  @visibleForTesting
+  TextSpan? get debugLastLabel => _text.text as TextSpan?;
+
   @override
   void paint(Canvas canvas, Size size) {
+    _background.color = chrome.rulerBackground;
     canvas.drawRect(Offset.zero & size, _background);
     final symbol = page.value?.displayUnit.symbol;
     _lastSymbol = symbol;
     if (symbol == null) return;
-    _text.text = TextSpan(
-        text: symbol,
-        style: const TextStyle(color: kRulerInk, fontSize: kRulerLabelSize));
+    _text.text = TextSpan(text: symbol, style: _labelStyle);
     _text.layout();
     _text.paint(
         canvas,
@@ -173,6 +200,7 @@ class RulerCornerPainter extends CustomPainter {
             (size.width - _text.width) / 2, (size.height - _text.height) / 2));
   }
 
+  /// True exactly when the palette changed (dark theme spec D5).
   @override
-  bool shouldRepaint(RulerCornerPainter old) => false;
+  bool shouldRepaint(RulerCornerPainter old) => old.chrome != chrome;
 }

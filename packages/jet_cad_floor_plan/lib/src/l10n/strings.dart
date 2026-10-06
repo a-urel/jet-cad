@@ -131,6 +131,10 @@ abstract class FloorPlanStrings {
   /// "Redo".
   String get redo;
 
+  /// The service bar's Merge and Split (table-groups spec G5).
+  String get merge;
+  String get split;
+
   /// "Export…".
   String get exportEllipsis;
 

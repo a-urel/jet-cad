@@ -2,6 +2,7 @@ import 'package:flutter/services.dart' show KeyEvent;
 import 'package:flutter/widgets.dart' show Canvas, KeyEventResult, Offset, Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
 import 'package:jet_cad_2d_flutter/src/selection.dart';
 import 'package:jet_cad_2d_flutter/src/tool.dart';
 import 'package:jet_cad_2d_flutter/src/viewport_transform.dart';
@@ -48,7 +49,8 @@ class _CountingTool extends Tool {
   }
 
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {}
 
   /// `notifyListeners` is `@protected` on `ChangeNotifier`; this exposes it
   /// so the test can simulate the tool announcing a change of its own.

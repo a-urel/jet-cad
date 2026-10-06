@@ -132,6 +132,12 @@ class FloorPlanStringsDe extends FloorPlanStrings {
   String get redo => 'Wiederholen';
 
   @override
+  String get merge => 'Zusammenlegen';
+
+  @override
+  String get split => 'Trennen';
+
+  @override
   String get exportEllipsis => 'Exportieren…';
 
   @override

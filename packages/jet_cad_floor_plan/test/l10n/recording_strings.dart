@@ -102,6 +102,12 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
   String get redo => record(inner.redo);
 
   @override
+  String get merge => record(inner.merge);
+
+  @override
+  String get split => record(inner.split);
+
+  @override
   String get exportEllipsis => record(inner.exportEllipsis);
 
   @override

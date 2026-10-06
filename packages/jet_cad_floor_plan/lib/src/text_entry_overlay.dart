@@ -150,8 +150,16 @@ class _TextEntryOverlayState extends State<TextEntryOverlay> {
                   onEditingComplete: () {},
                   onSubmitted: _submit,
                   onTapOutside: _onTapOutside,
-                  decoration: const InputDecoration(
-                      isDense: true, border: OutlineInputBorder()),
+                  // Dark theme spec D6b: filled from the theme, so the
+                  // field (its text the theme's onSurface) reads on any
+                  // paper, in either theme.
+                  decoration: InputDecoration(
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest),
                 ),
               ),
             ),

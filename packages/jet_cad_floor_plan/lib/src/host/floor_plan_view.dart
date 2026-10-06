@@ -32,6 +32,9 @@ class FloorPlanView extends StatefulWidget {
     this.serviceMoves = true,
     this.onTableContextMenu,
     this.longPress = FloorPlanLongPress.toggleSelection,
+    this.onGroupTap,
+    this.onMergeRequested,
+    this.onSplitRequested,
   });
 
   final FloorPlanController controller;
@@ -64,6 +67,20 @@ class FloorPlanView extends StatefulWidget {
   /// What a long press on a table does in the selection mode (spec 14d
   /// S7).
   final FloorPlanLongPress longPress;
+
+  /// A member of a group was tapped in the selection mode (table-groups
+  /// spec G4): the group's id and the tapped number, after [onTableTap]. A
+  /// locked member reports its tap too.
+  final void Function(String groupId, String number)? onGroupTap;
+
+  /// The service bar's Merge was pressed (G5): the selected numbers. The
+  /// planner only asks; the host decides and calls
+  /// [FloorPlanController.setTableGroups].
+  final void Function(Set<String> numbers)? onMergeRequested;
+
+  /// The service bar's Split was pressed (G5): the selected group's id. The
+  /// planner only asks, as for [onMergeRequested].
+  final void Function(String groupId)? onSplitRequested;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -143,6 +160,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                 callbacks: () => (
                       onTableTap: widget.onTableTap,
                       onLayoutChanged: widget.onLayoutChanged,
+                      onGroupTap: widget.onGroupTap,
+                      onMergeRequested: widget.onMergeRequested,
+                      onSplitRequested: widget.onSplitRequested,
                     ),
                 options: () => (
                       serviceMoves: widget.serviceMoves,

@@ -78,6 +78,189 @@
   tag `v0.1.0` on the merge (P3); the looks and the German and Turkish
   reads owed above.
   **Sub-project 14 — restaurant embedding (all
+
+**2026-10-05 — dark canvas (a dark theme shows the drawing dark):
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), a merge
+commit, on the human's word ("main'e merge et", 2026-10-05), together
+with the table groups fixes below. Branch history:
+- decision note at `deaadca`;
+- implementation at `118d707`;
+- review fixes at `4543dd6`.
+
+Results:
+[2026-10-05-dark-canvas-results.md](docs/superpowers/notes/2026-10-05-dark-canvas-results.md);
+decision note
+[2026-10-05-dark-canvas-design.md](docs/superpowers/specs/2026-10-05-dark-canvas-design.md)
+(approved "Onaylıyorum, başla"; amended at execution: the blend constants,
+the RGB cache, white is the paper). The fast process the human chose: a
+short note, one implementation, one review, screenshots before the merge.
+No SDD ledger.
+- **What landed:**
+  - **Sheet.** In a dark theme a light page is shown on `#1E1F22`.
+  - **Colours.** A display-only `DarkCanvasStyleResolver` re-tones every
+    drawing colour to keep its contrast on white: black walls go white,
+    light-grey floors go dark grey, coloured colours only lighten.
+  - **Unchanged:** Blueprint, the light theme, page-less views and every
+    export.
+  - **Superseded tests.** Ten tests asserted D4's "dark theme keeps a white
+    sheet" and now assert K1.
+- **Review:** "Approved with findings", nothing blocking. Findings 1–6 and
+  8 were fixed in `4543dd6`. M-DC-1..10 and R-1..R-8b are all killed.
+- **Gates** (Flutter 3.47.6):
+  - render: +1333 ~1 −7, the standing failures;
+  - planner: +1293;
+  - restaurant symbols +94, app +201, demo +28, dev harness +82;
+  - engine: +1241 −2, the standing failures;
+  - analyze and format clean;
+  - `flutter build web --release` ✓ for both apps.
+
+  The Chromium screenshots are in
+  `docs/superpowers/notes/2026-10-05-dark-canvas/`.
+- **Human look:** "tamam iyi görünüyor" (2026-10-05), given on the web
+  screenshots. macOS and a tablet are still owed.
+- **Owed:** the human's look on macOS and a tablet.
+- **Next:** pick the next sub-project (roadmap).
+
+**2026-10-05 — table groups fixes (F-1, the chip at low zoom): plan
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#9](https://github.com/a-urel/jet-cad/pull/9), with the
+dark canvas (restarted from
+`main` at `3753ca4`; spec `ee553e1`, plan `cfee751`; Tasks 1–2 at
+`d8d06ed`, `7a96dc5`; Task 3's docs on top). Results:
+[2026-10-05-table-groups-fixes-results.md](docs/superpowers/notes/2026-10-05-table-groups-fixes-results.md);
+spec [2026-10-05-table-groups-fixes-design.md](docs/superpowers/specs/2026-10-05-table-groups-fixes-design.md)
+rev 2 (approved "Onaylıyorum, planı yaz"); plan
+[2026-10-05-table-groups-fixes.md](docs/superpowers/plans/2026-10-05-table-groups-fixes.md).
+Ledger: archived at `docs/superpowers/ledgers/2026-10-05-table-groups-fixes/`.
+- **What landed:**
+  - `d8d06ed`: `FloorPlanController.selectableMembers(groupId)`, which
+    gives the numbers of a group's visible, unlocked, live members, fresh
+    at every call. It closes F-1. The demo grows a group by G6's literal
+    rule: the request includes all of exactly one group's (non-empty)
+    selectable members. R-C5-1 is retired.
+  - `7a96dc5`: the group label chip rests on the frame, outside it (its
+    bottom edge on the frame bounds' top line), so it covers no member
+    at any zoom. Only TG-L7 and TG-V2 changed, as X3 says.
+- **Reviews:** both Approved, with no findings (2 notes each).
+  M-TGF-1..10 are all killed (M-TGF-5 by D18), and M-TG-22 is still
+  killed.
+- **Gates** (Flutter 3.47.6, Linux, at `7a96dc5`): render +1304 ~1 −7
+  (standing, package unchanged since `3753ca4`), planner +1283 (+5 on
+  +1278), restaurant symbols +94, app +201, demo +28 (+4 on +24), dev
+  harness +82; analyze and format are clean.
+  `flutter build web --release` ✓ for the demo. A Chromium smoke at the
+  default fit (light and dark) and zoomed in: the chip is clear of the
+  chairs. Screenshots are in
+  `docs/superpowers/notes/2026-10-05-table-groups-fixes/`.
+- **Debt:**
+  - frames jump on release during a drag;
+  - a hull may enclose non-members;
+  - the chip may float above a slanted frame;
+  - the chip is clipped at the canvas top edge.
+- **Owed:** the human's look on macOS, web and a tablet, never
+  simulated.
+- **Next:** the human's look (owed).
+
+**2026-10-05 — table groups (merging and splitting tables): plan
+EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#8](https://github.com/a-urel/jet-cad/pull/8), a merge
+commit, on the human's word ("main'e merge et", 2026-10-05), before the
+look below was given. Branch history:
+- restarted from `main` at `4490cd9`; spec and plan at `eed5856`;
+- Tasks 1–5 at `638048b`..`9c09121`, Task 6's docs at `0d931d3`;
+- `main` merged in twice (PRs #3–#6 at `8026f1b`, PR #7 at `07136f7`),
+  with no conflict;
+- Copilot's single finding (the demo's next group id ignored non-`G`
+  prefixes) fixed at `8f56773`, with D17b;
+- the ledger archive, `docs/superpowers/ledgers/2026-10-04-table-groups/`,
+  is the branch's last commit. Results:
+[2026-10-04-table-groups-results.md](docs/superpowers/notes/2026-10-04-table-groups-results.md);
+spec [2026-10-04-table-groups-design.md](docs/superpowers/specs/2026-10-04-table-groups-design.md)
+rev 2 (approved "Onaylıyorum, planı yaz"), with "Amended at execution"
+(R-C5-1 and F-1, R-C3-2, R-C3-5, R-C2-1, R-C1-2, R-C1-3, R-C4-1 and
+others); plan [2026-10-04-table-groups.md](docs/superpowers/plans/2026-10-04-table-groups.md).
+Ledger: archived at `docs/superpowers/ledgers/2026-10-04-table-groups/`.
+- **What landed:**
+  - POS-owned runtime groups: `TableGroup`, `setTableGroups` (validated,
+    nothing assigned on a throw), `setGroupStatus`, `selectedGroup`;
+    `onGroupTap`, `onMergeRequested`, `onSplitRequested` on
+    `FloorPlanView`. The document is untouched.
+  - Selection mode: a tap, a long press and a drag act on the whole
+    group; `select` expands to groups; a locked visible member spends the
+    drag.
+  - The look: a purple frame (hull of the members' boxes, 150 mm round
+    offset, `paper.gripMove`), one label chip in a new `PlannerView.overlay`
+    above the drafting, a group status overriding the members' own with
+    one caption under the lead.
+  - Merge and Split on the service bar, shown only with their callbacks;
+    the demo merges (grow or new `G<n>`), splits and sets group statuses.
+- **Reviews:** five task reviews, all Approved with minor test-only
+  findings, each fixed by a "b" commit (1b..5b). M-TG-1..22 all killed
+  (M-TG-19 an invariant check, green).
+- **Gates** (Flutter 3.47.6, Linux, at `9c09121`): render +1304 ~1 −7
+  (standing, package unchanged), planner +1278 (+65), restaurant symbols
+  +94, app +201, demo +23 (+5), dev harness +82; analyze and format clean;
+  engine +1241 −2 (standing, unchanged). `flutter build web --release` ✓
+  for both apps; a Chromium smoke (merge, grow, Bill, drag, split; light,
+  dark, Blueprint), screenshots in
+  `docs/superpowers/notes/2026-10-04-table-groups/`.
+- **Debt:** F-1 (a host cannot ask which members are selectable; a
+  locked/hidden-only remainder group only the POS can clear) (fixed by
+  the table groups fixes, see above); at the default fit the chip covers
+  the members' chair lines (fixed by the table groups fixes, see above);
+  frames jump on release during a drag (spec'd).
+- **Owed:** the human's look on macOS, web and a tablet — never simulated.
+- **Next:** the human's look (owed, above). After that, the human's
+  choice of the next sub-project.
+
+**2026-10-04 — dark theme: plan EXECUTED and MERGED into `main`** through
+[a-urel/jet-cad#2](https://github.com/a-urel/jet-cad/pull/2), a merge
+commit, on the human's word ("main'e merge et", 2026-10-04), before the
+look below was given (branch `claude/dreamy-gates-2kgh4o`, off `main` at
+`5ba6fb2`; Tasks 1–6 at `23314be`..`36902c0`, Task 7's docs on top; the
+ledger archive, `docs/superpowers/ledgers/2026-10-04-dark-theme/`, at
+`de2b75e`; then `main` merged in for PR #1, the one conflict being
+`PageChromePainter.shouldRepaint`, resolved to keep both terms: the grid
+switch and the palettes). Copilot's PR review: no findings. Results:
+[2026-10-04-dark-theme-results.md](docs/superpowers/notes/2026-10-04-dark-theme-results.md);
+spec [2026-10-04-dark-theme-design.md](docs/superpowers/specs/2026-10-04-dark-theme-design.md)
+rev 2 (approved "Onaylıyorum"), with "Amended at execution" (R-C4-1,
+R-C4-2, R-C5-1, R-C2-1, R-C6-2); plan
+[2026-10-04-dark-theme.md](docs/superpowers/plans/2026-10-04-dark-theme.md).
+- **What landed:**
+  - `ChromePalette` and `PaperPalette` (`canvas_palette.dart`): the host's
+    theme decides the panels and the canvas chrome; the paper keeps the
+    document's colour, and the grid, breaks, selection, grips, previews
+    and snap follow the paper (`forPaper`, ACI 7's switch).
+  - The painters and both tool paint methods take their palettes;
+    `PlannerShell` / `ServiceView` derive them from the theme and the page
+    (`scheme.surface` with no page); both apps add `darkTheme` and
+    `ThemeMode.system`.
+  - Canvas UI: the swatch border and the filled text entry (the two
+    deliberate light-theme changes), the status caption's ink from the
+    status over the paper; the selected symbol cell's own ink, a
+    literal-colour source scan, a live theme switch.
+  - Light theme on light paper is pixel-identical, but for a status
+    caption that takes white ink over its paper (R-C5-1; the demo's
+    statuses do not); export, walls, the file format and the engine
+    unchanged.
+- **Reviews:** six task reviews: Tasks 1, 2 and 4 Approved; 3, 5 and 6
+  "Needs fixes" (minor, test-only), fixed in 3b, 5b and 6b. M-DT-1..20
+  all killed.
+- **Gates** (Flutter 3.47.6, Linux): render +1303 ~1 −7 (standing),
+  planner +1211, restaurant symbols +94, app +201, demo +18, dev harness
+  +82; analyze and format clean throughout; engine untouched (+1241 −2
+  standing). `flutter build web --release` ✓ for both apps; a Chromium
+  smoke under a dark colour scheme, screenshots in
+  `docs/superpowers/notes/2026-10-04-dark-theme/`.
+- **Owed:** the human's look on macOS and web, both themes (spec exit
+  gate 5: four papers per theme, the symbol list, the layer panel, the
+  service view with statuses, a live OS theme switch), never simulated.
+  The macOS build was not run here (Linux container).
+- **Next:** the human's look (owed, above). After that, the human's choice of the next sub-project.
+
+**Last updated:** 2026-10-04 (the dark theme MERGED into `main` at `4490cd9`; see above). **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
@@ -216,6 +399,34 @@ mode** built in; what is missing for that comes first.
   already moves on screen by the design editor's left panel (240 px) and
   now also by the rulers (24 px); keeping it in place is a change to R-13
   for the human to rule on.
+- **The selection mode picks a table by its symbol's bounding box**
+  (the human, 2026-10-04: "semboller bounding-box tıklanınca seçilebilsin,
+  çizgiye tıklamak gerekmemeli"; spec 14c, amendment B-1..B-4):
+  `TablePicker` tries the tops first (a top beats a neighbour's chairs),
+  then each table's definition box in definition space (it turns and
+  mirrors with the table), the highest handle winning; a finger's reach
+  measures to the box; a table with no closed top is picked by its box,
+  still unfilled. Tests TP1, TP4, TP7, TP7b, TP8, TP10, ST10; the mutants
+  (no top pass, no box pass, the lowest handle among boxes, the world
+  bounds, an unscaled reach) are red. Gates: planner 1,167, demo 17;
+  engine and render untouched.
+- **Review fixes for the two commits above are MERGED into `main` at
+  `d94d72d`** (PR 1, a merge commit, on the human's word "merge it",
+  2026-10-04; found by a codex review of each commit):
+  `PageChromePainter.shouldRepaint` answers `grid != old.grid`, so a
+  rebuild that only flips `grid` repaints (no mode switch does that yet:
+  each mode mounts its own painter); `TablePicker` builds
+  `leavesByOwner()` once per candidate build and hands it to
+  `definitionBounds` and `tableTopOf` (`firstLeafOf` takes it too), not
+  one entity-store scan per definition. Tests: the painter's rebuild test,
+  TP11; the mutants (`shouldRepaint` always false, always true; the shared
+  map's lowest slot taken for the lowest handle; a leaf dropped) are red.
+  On Copilot's review of the PR (TP11 stays green with no map shared),
+  `TablePicker` takes a test-only `leavesByOwner` source and TP12 hands it
+  a counting, doctored one; the mutants (the bounds or the top without
+  the map, a scan per definition, a scan per build, the source ignored)
+  are red. Gates: engine 1,241 + 2 standing, render 1,241 + 1 skip + 7
+  standing, planner 1,169, app 201, demo 17.
 - **Next:** the human's looks (14 on a touch device too, 09c-1, 09c-2);
   then the roadmap.
 

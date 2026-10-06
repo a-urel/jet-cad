@@ -34,8 +34,12 @@ export and printing.
   caption; selection by number; tap and context-menu callbacks (a
   secondary click, or a long press when the host chooses); numbering
   warnings as values;
+- table groups: merged and split by the host, framed and labelled, a
+  member selecting and moving its whole group, group statuses;
 - the service layout saved and restored as JSON; a view that forbids
   moves; touch;
+- a dark theme: the planner follows the host's theme, and a light page
+  is shown on a dark canvas;
 - English, German and Turkish built in, chosen by the host's locale;
 - `jet_cad_restaurant_symbols`: 69 restaurant symbols with German and
   Turkish names.

@@ -79,7 +79,8 @@ class IdleTool extends Tool {
   void cancel(ToolContext ctx) {}
 
   @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport) {}
+  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+      PaperPalette paper) {}
 }
 
 class Host {

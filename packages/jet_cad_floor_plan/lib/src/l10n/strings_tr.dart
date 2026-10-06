@@ -131,6 +131,12 @@ class FloorPlanStringsTr extends FloorPlanStrings {
   String get redo => 'Yinele';
 
   @override
+  String get merge => 'Birleştir';
+
+  @override
+  String get split => 'Ayır';
+
+  @override
   String get exportEllipsis => 'Dışa aktar…';
 
   @override

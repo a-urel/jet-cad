@@ -161,3 +161,46 @@ final class Unnumbered extends NumberingWarning {
   @override
   String toString() => 'Unnumbered($seats, $symbolKey)';
 }
+
+/// A group of tables the host merged (table-groups spec G1): in the
+/// selection mode its members are framed, labelled, selected and moved as
+/// one. Addressed by the host's group id, the key of
+/// `FloorPlanController.setTableGroups`. Not document state: never saved,
+/// exported, printed or undone.
+@immutable
+final class TableGroup {
+  /// [members] are table numbers, each trimmed, a blank one dropped (G2).
+  /// [label] is trimmed, a blank one meaning none, then cut to [maxLabel]
+  /// characters (grapheme clusters, R-12).
+  TableGroup({required Set<String> members, String? label})
+      : members = Set.unmodifiable(<String>{
+          for (final m in members)
+            if (m.trim().isNotEmpty) m.trim()
+        }),
+        label = switch (label?.trim()) {
+          null || '' => null,
+          final l => l.characters.take(maxLabel).toString(),
+        };
+
+  /// The longest label, in characters.
+  static const int maxLabel = 24;
+
+  /// The member numbers, trimmed, none blank; unmodifiable. A number with
+  /// no live table is kept and resolves once such a table exists (G2).
+  final Set<String> members;
+
+  /// The host's text for the group's chip, or null for its numbers (G3).
+  final String? label;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TableGroup &&
+      other.label == label &&
+      setEquals(other.members, members);
+
+  @override
+  int get hashCode => Object.hash(Object.hashAllUnordered(members), label);
+
+  @override
+  String toString() => 'TableGroup($members, $label)';
+}

@@ -87,11 +87,10 @@ class SymbolPlaceTool extends Tool {
   final DragPoint _at = DragPoint();
   final SnapResult _scratch = SnapResult();
   final GhostMatrix _matrix = GhostMatrix();
-  final ui.Paint _ghostPaint = ui.Paint()
-    ..color = kPreviewColor
-    ..style = ui.PaintingStyle.stroke;
+  // Coloured from the overlay's paper set where they are drawn (dark theme
+  // spec D5): the ghost `preview`, the marker `snap`.
+  final ui.Paint _ghostPaint = ui.Paint()..style = ui.PaintingStyle.stroke;
   final ui.Paint _markerPaint = ui.Paint()
-    ..color = kSnapMarkerColor
     ..style = ui.PaintingStyle.stroke
     ..strokeWidth = kSnapMarkerStrokePixels;
 
@@ -454,9 +453,10 @@ class SymbolPlaceTool extends Tool {
   /// The snap marker, in screen space (`placement_tool.dart`'s pattern).
   /// Attached (spec 09c D6), the nearest glyph at the face point `q`.
   @override
-  void paintOverlay(
-      ui.Canvas canvas, ViewportTransform camera, ui.Size viewport) {
+  void paintOverlay(ui.Canvas canvas, ViewportTransform camera,
+      ui.Size viewport, PaperPalette paper) {
     if (!ghostVisible) return;
+    _markerPaint.color = paper.snap;
     final m = camera.worldToScreenMatrix;
     final attached = _attached;
     final p = attached?.q ?? _at.point;
@@ -476,7 +476,8 @@ class SymbolPlaceTool extends Tool {
   /// paint: `P` is the transform stored on the last event (09c D5, W-15),
   /// and the matrix rewrites its linear part only when `P` changed.
   @override
-  void paintWorldOverlay(ui.Canvas canvas, Vector2 origin, double scale) {
+  void paintWorldOverlay(
+      ui.Canvas canvas, Vector2 origin, double scale, PaperPalette paper) {
     final entry = armed.value;
     final path = _path;
     final placement = _placement;
@@ -486,6 +487,7 @@ class SymbolPlaceTool extends Tool {
     final base = entry.definition.basePoint;
     _matrix.update(placement: placement);
     final Float64List m = _matrix.forOrigin(origin);
+    _ghostPaint.color = paper.preview;
     _ghostPaint.strokeWidth = kPreviewStrokePixels / scale;
     final k = kGhostCrossPixels / scale;
     canvas.save();

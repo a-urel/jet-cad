@@ -61,6 +61,11 @@ const double kGalleryThumbnailAspect = 4 / 3;
 /// `primaryContainer` instead of [cellColor], with a `primary` border. Both
 /// come from the one `selected` value per cell.
 ///
+/// **A cell's thumbnail ink** is the foreground of its own background (dark
+/// theme spec D9b): [selectedForeground] on the selected cell's
+/// `primaryContainer`, [foreground] on [cellColor] otherwise. A selection
+/// change re-requests the two cells whose ink changes.
+///
 /// **A displayed image is a clone**: a cell takes `image.clone()` in the
 /// completion callback of [SymbolThumbnails.imageFor] and disposes its own
 /// clone when it is disposed or its image changes, so the cache may dispose
@@ -74,6 +79,7 @@ class SymbolGallery extends StatefulWidget {
     required this.onSelect,
     required this.thumbnails,
     required this.foreground,
+    required this.selectedForeground,
     required this.cellColor,
   });
 
@@ -88,9 +94,15 @@ class SymbolGallery extends StatefulWidget {
   final void Function(String id) onSelect;
   final SymbolThumbnails thumbnails;
 
-  /// The thumbnails' ACI 7 colour (`0xRRGGBB`), e.g.
-  /// `foregroundFor(cellColor.toARGB32())` (spec F-8).
+  /// The unselected thumbnails' ACI 7 colour (`0xRRGGBB`), e.g.
+  /// `foregroundFor(cellColor.toARGB32() & 0xFFFFFF)` (spec F-8).
   final int foreground;
+
+  /// The selected thumbnail's ACI 7 colour (`0xRRGGBB`): the foreground of
+  /// the scheme's `primaryContainer`, the selected cell's background, e.g.
+  /// `foregroundFor(scheme.primaryContainer.toARGB32() & 0xFFFFFF)` (dark
+  /// theme spec D9b).
+  final int selectedForeground;
 
   /// A cell's background when it is not selected.
   final Color cellColor;
@@ -148,6 +160,7 @@ class _SymbolGalleryState extends State<SymbolGallery> {
                           onSelect: widget.onSelect,
                           thumbnails: widget.thumbnails,
                           foreground: widget.foreground,
+                          selectedForeground: widget.selectedForeground,
                           cellColor: widget.cellColor,
                           devicePixelRatio: dpr,
                         );
@@ -212,6 +225,7 @@ class _Cell extends StatelessWidget {
     required this.onSelect,
     required this.thumbnails,
     required this.foreground,
+    required this.selectedForeground,
     required this.cellColor,
     required this.devicePixelRatio,
   });
@@ -222,6 +236,7 @@ class _Cell extends StatelessWidget {
   final void Function(String id) onSelect;
   final SymbolThumbnails thumbnails;
   final int foreground;
+  final int selectedForeground;
   final Color cellColor;
   final double devicePixelRatio;
 
@@ -259,7 +274,9 @@ class _Cell extends StatelessWidget {
                             symbol: symbol,
                             logicalSize: size,
                             devicePixelRatio: devicePixelRatio,
-                            foreground: foreground,
+                            // D9b: the ink of this cell's own background.
+                            foreground:
+                                selected ? selectedForeground : foreground,
                             thumbnails: thumbnails,
                           ),
                         );
