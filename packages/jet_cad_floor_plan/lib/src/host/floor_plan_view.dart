@@ -28,6 +28,9 @@ class FloorPlanView extends StatefulWidget {
     this.exportName = 'plan',
     this.onTableTap,
     this.onLayoutChanged,
+    this.serviceMoves = true,
+    this.onTableContextMenu,
+    this.longPress = FloorPlanLongPress.toggleSelection,
   });
 
   final FloorPlanController controller;
@@ -41,6 +44,25 @@ class FloorPlanView extends StatefulWidget {
 
   /// Tables were moved in the selection mode, one call per drag (14c S8).
   final void Function()? onLayoutChanged;
+
+  /// Whether staff may move tables in the selection mode (spec 14d S5).
+  /// When false, a drag from a table pans as one on the floor does; taps
+  /// and long presses are unchanged. Read at each press.
+  final bool serviceMoves;
+
+  /// A table's context menu was asked for in the selection mode (spec 14d
+  /// S6): a secondary click, or a long press under
+  /// [FloorPlanLongPress.contextMenu]. Its number and the pointer's global
+  /// position. An unselected table is first selected alone, a selected one
+  /// keeps the selection, so the menu acts on `selectedTables`; a locked
+  /// table is reported without a selection change; an unnumbered one is
+  /// not reported. On the web the browser's own menu opens too, unless the
+  /// host calls `BrowserContextMenu.disableContextMenu()` (S8).
+  final void Function(String number, Offset globalPosition)? onTableContextMenu;
+
+  /// What a long press on a table does in the selection mode (spec 14d
+  /// S7).
+  final FloorPlanLongPress longPress;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -120,6 +142,11 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                 callbacks: () => (
                       onTableTap: widget.onTableTap,
                       onLayoutChanged: widget.onLayoutChanged,
+                    ),
+                options: () => (
+                      serviceMoves: widget.serviceMoves,
+                      longPress: widget.longPress,
+                      onTableContextMenu: widget.onTableContextMenu,
                     ));
           }
           c.startSymbols();

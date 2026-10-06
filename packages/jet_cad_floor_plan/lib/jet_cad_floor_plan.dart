@@ -13,6 +13,7 @@ export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
     show
         FloorPlanExport,
+        FloorPlanLongPress,
         FloorPlanMode,
         FloorPlanTable,
         ServiceLayoutRestore,

@@ -103,3 +103,13 @@ final class ServiceLayoutRestore {
   String toString() => 'ServiceLayoutRestore(applied: $applied, '
       'dropped: $dropped)';
 }
+
+/// What a long press on a table does in the selection mode (spec 14d S7).
+enum FloorPlanLongPress {
+  /// Adds the table to the selection or removes it (umbrella decision 9).
+  toggleSelection,
+
+  /// Reports the table to `FloorPlanView.onTableContextMenu`, as a
+  /// secondary click does; a touch screen then has no multiple selection.
+  contextMenu,
+}

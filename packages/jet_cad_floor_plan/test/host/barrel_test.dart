@@ -35,6 +35,7 @@ void main() {
       'FloorPlanExport',
       'TableStatus',
       'ServiceLayoutRestore',
+      'FloorPlanLongPress',
       'ensureFloorPlanFonts',
       'registerFontLicences',
       'SymbolLibraryLoader',
@@ -60,7 +61,10 @@ void main() {
     FloorPlanExport? last;
     await tester.pumpWidget(MaterialApp(
         home: FloorPlanView(
-            controller: c, printer: printer, onExport: (e) => last = e)));
+            controller: c,
+            printer: printer,
+            onExport: (e) => last = e,
+            longPress: FloorPlanLongPress.toggleSelection)));
     expect(c.mode.value, FloorPlanMode.design);
     expect(c.tables, const <FloorPlanTable>[]);
     expect(last, isNull);

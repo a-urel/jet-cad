@@ -8,9 +8,12 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, kSecondaryButton, kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
@@ -31,7 +34,8 @@ class ServiceView extends StatefulWidget {
       required this.controller,
       required this.flows,
       required this.fitOnStart,
-      required this.callbacks});
+      required this.callbacks,
+      this.options = _defaultOptions});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -41,6 +45,11 @@ class ServiceView extends StatefulWidget {
 
   /// The host's callbacks, read at each call (14c R-5).
   final ServiceCallbacks Function() callbacks;
+
+  /// The host's service options, read at each press (spec 14d S5-S7).
+  final ServiceOptions Function() options;
+
+  static ServiceOptions _defaultOptions() => kDefaultServiceOptions;
 
   @override
   State<ServiceView> createState() => _ServiceViewState();
@@ -56,8 +65,57 @@ class _ServiceViewState extends State<ServiceView> {
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   // Spec 14c S3: the table tool, over this copy's tables.
   late final TablePicker _picker = TablePicker(_document);
-  late final TableSelectTool _tool =
-      TableSelectTool(picker: _picker, callbacks: widget.callbacks);
+  late final TableSelectTool _tool = TableSelectTool(
+      picker: _picker,
+      callbacks: widget.callbacks,
+      options: widget.options,
+      toGlobal: _toGlobal);
+
+  /// The canvas, whose origin is the interaction layer's (no rulers).
+  final GlobalKey _canvas = GlobalKey();
+
+  Offset _toGlobal(Offset local) {
+    final box = _canvas.currentContext?.findRenderObject();
+    return box is RenderBox && box.attached ? box.localToGlobal(local) : local;
+  }
+
+  // Spec 14d S6: a secondary click on a table. The interaction layer never
+  // sees a press without the primary button (V-1), so the view listens.
+  int? _secondary;
+  Offset _secondaryAt = Offset.zero;
+
+  static bool _isPrecise(PointerDeviceKind kind) =>
+      kind == PointerDeviceKind.mouse ||
+      kind == PointerDeviceKind.stylus ||
+      kind == PointerDeviceKind.invertedStylus;
+
+  void _onSecondaryDown(PointerDownEvent e) {
+    if (!_isPrecise(e.kind) ||
+        e.buttons & kSecondaryButton == 0 ||
+        _tool.phase != ToolPhase.idle) {
+      return;
+    }
+    _secondary = e.pointer;
+    _secondaryAt = e.localPosition;
+  }
+
+  void _onSecondaryUp(PointerUpEvent e) {
+    if (e.pointer != _secondary) return;
+    _secondary = null;
+    if ((e.localPosition - _secondaryAt).distance > kTouchSlop) return;
+    final report = widget.options().onTableContextMenu;
+    final world = _c.camera.value
+        .screenToWorld(Vector2(e.localPosition.dx, e.localPosition.dy));
+    final hit = _picker.pick(world);
+    if (hit == null) return;
+    final number = contextSelect(hit, _selection);
+    if (number != null) report?.call(number, e.position);
+  }
+
+  void _onSecondaryCancel(PointerCancelEvent e) {
+    if (e.pointer == _secondary) _secondary = null;
+  }
+
   late final ToolController _tools = ToolController(
       initial: _tool,
       context: ToolContext(
@@ -169,27 +227,33 @@ class _ServiceViewState extends State<ServiceView> {
             Expanded(
               child: ColoredBox(
                 color: scheme.surface,
-                child: PlannerView(
-                  document: _document,
-                  index: _index,
-                  resolver: _resolver,
-                  camera: _c.camera,
-                  page: _page,
-                  policy: _policy,
-                  selection: _selection,
-                  tools: _tools,
-                  outlines: _outlines,
-                  fitRequests: _c.fitRequests,
-                  fitOnStart: _fitOnStart,
-                  onFitted: _c.fitted,
-                  // The service shows the plan, not the drafting aids.
-                  rulers: false,
-                  grid: false,
-                  underlay: RepaintBoundary(
-                    child: CustomPaint(
-                      key: const Key('table-status-layer'),
-                      painter: _statusPainter,
-                      size: Size.infinite,
+                child: Listener(
+                  key: _canvas,
+                  onPointerDown: _onSecondaryDown,
+                  onPointerUp: _onSecondaryUp,
+                  onPointerCancel: _onSecondaryCancel,
+                  child: PlannerView(
+                    document: _document,
+                    index: _index,
+                    resolver: _resolver,
+                    camera: _c.camera,
+                    page: _page,
+                    policy: _policy,
+                    selection: _selection,
+                    tools: _tools,
+                    outlines: _outlines,
+                    fitRequests: _c.fitRequests,
+                    fitOnStart: _fitOnStart,
+                    onFitted: _c.fitted,
+                    // The service shows the plan, not the drafting aids.
+                    rulers: false,
+                    grid: false,
+                    underlay: RepaintBoundary(
+                      child: CustomPaint(
+                        key: const Key('table-status-layer'),
+                        painter: _statusPainter,
+                        size: Size.infinite,
+                      ),
                     ),
                   ),
                 ),
