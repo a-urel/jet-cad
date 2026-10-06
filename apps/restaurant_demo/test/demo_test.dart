@@ -353,8 +353,8 @@ void main() {
   testWidgets(
       'Dark theme (spec D9, review 6 finding 1): under a dark platform the '
       'demo is dark and its own UI paints without an exception: the areas, '
-      'the service with statuses, the discard dialog, back to design',
-      (tester) async {
+      'the service with statuses, back to design with the layout kept (spec '
+      '14d S9: no discard dialog)', (tester) async {
     tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
     addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
     final demo = await pumpDemo(tester,
@@ -378,14 +378,13 @@ void main() {
     await tester.pump();
     dark('service with statuses');
     serviceMove(demo, '2');
+    await tester.pump();
     await tester.tap(byKey('mode-design'));
     await tester.pump();
-    expect(byKey('discard-dialog'), findsOneWidget);
-    dark('discard dialog');
-    await tester.tap(byKey('discard-ok'));
     await tester.pump();
-    await tester.pump();
+    expect(byKey('discard-dialog'), findsNothing, reason: 'spec 14d S9');
     expect(demo.area.controller.mode.value, FloorPlanMode.design);
+    expect(demo.area.layout, isNotNull, reason: 'the layout is kept');
     dark('back to design');
   });
 

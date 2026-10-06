@@ -165,6 +165,14 @@ void main() {
       expect(o.ok, isTrue);
     });
 
+    test('ST19 the root may end in a slash or a dot (`--root .`)', () {
+      for (final root in ['$renderRoot/', '$renderRoot/.', '$renderRoot/./']) {
+        final o = compareRun(run,
+            root: root, failures: renderFailures, skips: renderSkips);
+        expect(o.report(), isEmpty, reason: root);
+      }
+    });
+
     test(
         'ST10 the standing skip missing from the list is red; listed but '
         'run is red', () {

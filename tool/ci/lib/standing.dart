@@ -88,7 +88,8 @@ Outcome compareRun(
   required Set<String> failures,
   required Set<String> skips,
 }) {
-  final base = root.endsWith('/') ? root : '$root/';
+  // `--root .` arrives as `<dir>/.`: normalised, with one trailing slash.
+  final base = Uri.directory(root).normalizePath().toFilePath();
   final suites = <int, String>{};
   final names = <int, String>{};
   final skipReasons = <int, String>{};
