@@ -1,0 +1,137 @@
+# Spec 14d P4-P7: every gate on every push and pull request. Nothing here
+# writes: no commit, no push, no diff of the analysis_options.yaml files
+# `pub get` rewrites (CLAUDE.md). Known failures and skips are compared
+# exactly against tool/ci/standing_failures.txt and standing_skips.txt,
+# never skipped.
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  # The version every gate of 14d ran on.
+  FLUTTER_VERSION: '3.47.6'
+
+jobs:
+  package:
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: packages/jet_cad_2d
+            tool: dart
+          - package: packages/jet_cad_2d_flutter
+            tool: flutter
+          - package: packages/jet_cad_floor_plan
+            tool: flutter
+          - package: packages/jet_cad_restaurant_symbols
+            tool: flutter
+          - package: apps/floor_planner
+            tool: flutter
+          - package: apps/restaurant_demo
+            tool: flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: flutter pub get
+      - name: Tests
+        working-directory: ${{ matrix.package }}
+        # The runner's own exit code is not the verdict: the next step is.
+        run: ${{ matrix.tool }} test --file-reporter "json:$RUNNER_TEMP/tests.json" || true
+      - name: Failures and skips against the standing lists
+        run: >-
+          dart run tool/ci/expect_failures.dart
+          --package ${{ matrix.package }}
+          --root ${{ matrix.package }}
+          "$RUNNER_TEMP/tests.json"
+      - name: Analyze
+        working-directory: ${{ matrix.package }}
+        run: ${{ matrix.tool == 'dart' && 'dart analyze --fatal-infos' || 'flutter analyze' }}
+      - name: Format
+        working-directory: ${{ matrix.package }}
+        run: dart format --output=none --set-exit-if-changed .
+
+  web:
+    name: web builds, dev_harness_2d
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: flutter pub get
+      - name: Build the restaurant demo
+        working-directory: apps/restaurant_demo
+        run: flutter build web
+      - name: Build the floor planner
+        working-directory: apps/floor_planner
+        run: flutter build web
+      - name: Analyze dev_harness_2d
+        working-directory: apps/dev_harness_2d
+        run: flutter analyze
+
+  ci-tools:
+    name: CI tools, the host guide
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: flutter pub get
+      - name: Tests
+        working-directory: tool/ci
+        run: dart test
+      - name: Analyze
+        working-directory: tool/ci
+        run: dart analyze --fatal-infos lib test expect_failures.dart check_guide.dart
+      - name: Format
+        working-directory: tool/ci
+        run: >-
+          dart format --output=none --set-exit-if-changed
+          lib test expect_failures.dart check_guide.dart host_probe/lib
+      - name: The host guide's code is the probe's
+        run: dart run tool/ci/check_guide.dart
+
+  host-probe:
+    name: an external host, by git
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      # The repository checked out here, at the commit under test (merge
+      # commits included): no token, whatever the repository's visibility.
+      - name: Resolve, analyze and build the probe
+        run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
