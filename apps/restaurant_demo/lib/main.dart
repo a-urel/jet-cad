@@ -104,6 +104,10 @@ final class Area {
 
   /// The service layout, kept on `serviceLayoutChanges` (spec 14d S4).
   String? layout;
+
+  /// Each table's status by its [DemoHomeState.kStatuses] name, so the
+  /// captions are worded again when the language changes (review F-6).
+  final Map<String, String> statusNames = {};
 }
 
 class DemoHome extends StatefulWidget {
@@ -187,6 +191,21 @@ class DemoHomeState extends State<DemoHome> {
   /// The demo's words in the app's language (spec 14d L17).
   DemoStrings get _words => DemoStrings.of(context);
 
+  /// The language the statuses were last worded in.
+  Type? _wordedIn;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final language = _words.runtimeType;
+    if (_wordedIn != null && _wordedIn != language) {
+      for (final a in areas) {
+        _applyStatuses(a);
+      }
+    }
+    _wordedIn = language;
+  }
+
   void _log(String line) {
     if (!mounted) return;
     setState(() {
@@ -213,9 +232,14 @@ class DemoHomeState extends State<DemoHome> {
   }
 
   /// A table's context menu (spec 14d S6): the table is already selected
-  /// alone, or with the selection that held it.
+  /// alone, or with the selection that held it -- unless it is locked,
+  /// which leaves the selection alone: the menu then acts on the table
+  /// only (review F-1).
   Future<void> _tableMenu(String number, Offset at) async {
     final a = area;
+    final selected = a.controller.selectedTables.value;
+    final locked = !selected.contains(number);
+    final tables = locked ? {number} : selected;
     _log(_words.logMenu(a.name, number));
     final words = _words;
     final choice = await showMenu<String>(
@@ -226,6 +250,7 @@ class DemoHomeState extends State<DemoHome> {
         PopupMenuItem(
             key: const Key('menu-select'),
             value: 'select',
+            enabled: !locked,
             child: Text(words.selectOnlyThis)),
         const PopupMenuDivider(),
         for (final name in kStatuses.keys)
@@ -239,7 +264,7 @@ class DemoHomeState extends State<DemoHome> {
     if (choice == 'select') {
       a.controller.select({number});
     } else if (choice.startsWith('status:')) {
-      _setStatus(choice.substring('status:'.length));
+      _setStatus(choice.substring('status:'.length), tables);
     }
   }
 
@@ -278,34 +303,42 @@ class DemoHomeState extends State<DemoHome> {
     return TableStatus(color: status.color, caption: _words.statusName(name));
   }
 
-  void _setStatus(String name) {
-    final c = area.controller;
-    final next = Map<String, TableStatus>.of(c.tableStatuses.value);
-    final status = _statusFor(name);
-    for (final n in c.selectedTables.value) {
-      if (status == null) {
-        next.remove(n);
+  /// Sets status [name] on [tables], the selected ones when null.
+  void _setStatus(String name, [Set<String>? tables]) {
+    final a = area;
+    final targets = tables ?? a.controller.selectedTables.value;
+    for (final n in targets) {
+      if (kStatuses[name] == null) {
+        a.statusNames.remove(n);
       } else {
-        next[n] = status;
+        a.statusNames[n] = name;
       }
     }
-    c.setTableStatus(next);
-    _log(_words.logStatus(area.name, _words.statusName(name),
-        (c.selectedTables.value.toList()..sort()).join(', ')));
+    _applyStatuses(a);
+    _log(_words.logStatus(a.name, _words.statusName(name),
+        (targets.toList()..sort()).join(', ')));
+  }
+
+  /// [a]'s statuses, worded in the app's language.
+  void _applyStatuses(Area a) {
+    a.controller.setTableStatus({
+      for (final e in a.statusNames.entries)
+        if (_statusFor(e.value) case final status?) e.key: status,
+    });
   }
 
   void _randomStatuses() {
-    final c = area.controller;
+    final a = area;
     final names = kStatuses.keys.toList();
-    final next = <String, TableStatus>{};
-    for (final t in c.tables) {
+    a.statusNames.clear();
+    for (final t in a.controller.tables) {
       final n = t.number;
       if (n == null) continue;
-      final status = _statusFor(names[_random.nextInt(names.length)]);
-      if (status != null) next[n] = status;
+      final name = names[_random.nextInt(names.length)];
+      if (kStatuses[name] != null) a.statusNames[n] = name;
     }
-    c.setTableStatus(next);
-    _log(_words.logRandom(area.name, next.length));
+    _applyStatuses(a);
+    _log(_words.logRandom(a.name, a.controller.tableStatuses.value.length));
   }
 
   void _select() {

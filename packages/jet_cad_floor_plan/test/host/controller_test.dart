@@ -491,6 +491,27 @@ void main() {
   });
 
   testWidgets(
+      'C20 an Undo followed at once by a switch to the design is heard, '
+      'before the switch: a host saving on it keeps the undone layout '
+      '(review 14d-2)', (tester) async {
+    final c = controller(tester, planJson());
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    final saved = <String?>[];
+    c.serviceLayoutChanges.addListener(() => saved.add(c.serviceLayoutJson()));
+    move(c, '1', 20.25, 5);
+    await tester.pump();
+    expect(saved, hasLength(1), reason: 'premise: the move is heard');
+    expect(saved.last, contains('"tables":[{'), reason: 'premise: a move');
+    c.undo();
+    c.setMode(FloorPlanMode.design);
+    expect(saved, hasLength(2), reason: 'heard before the switch');
+    expect(saved.last, contains('"tables":[]'));
+    await tester.pump();
+    expect(saved, hasLength(2), reason: 'and only once');
+  });
+
+  testWidgets(
       'C19 a restore in the design mode is a StateError; a text that is not '
       'a layout changes nothing; a stale entry is dropped (spec 14d S2)',
       (tester) async {

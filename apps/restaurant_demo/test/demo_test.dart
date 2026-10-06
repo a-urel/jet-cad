@@ -26,7 +26,10 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 /// A Salon plan: a four-seat table (1, turned) and a six-seat round one
 /// (2, mirrored), off the page's centre.
-String salonPlan() {
+String salonPlan() => DraftDocumentCodec.encodeToString(salonDocument());
+
+/// [salonPlan]'s document, for fixtures that change it.
+DraftDocument salonDocument() {
   final doc = newDocument(MetricModelMeasurer());
   final lib = buildSymbolLibrary(restaurantCatalog);
   final entries = SymbolLibrary.decode(Uint8List.fromList(
@@ -37,6 +40,27 @@ String salonPlan() {
       at: Vector2(-1800, 2400), quarterTurns: 1));
   doc.commands.execute(placeSymbol(doc, entry('restaurant.table.round.six'),
       at: Vector2(2600, 900), mirrored: true));
+  return doc;
+}
+
+/// [salonPlan] with table 2 on a locked layer (review F-1).
+String lockedSalonPlan() {
+  final doc = salonDocument();
+  final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+  final locked = doc.handleSeed.next();
+  doc.commands.execute(AddLayerCommand(LayerRecord(
+      handle: locked,
+      name: 'Locked',
+      color: const IndexedColor(1),
+      linetype: zero.linetype,
+      lineweight: zero.lineweight,
+      transparency: zero.transparency,
+      visible: true,
+      locked: false)));
+  doc.commands.execute(SetInstanceLayerCommand(
+      TableSurvey.of(doc).withNumber('2').single.instance, locked));
+  doc.commands.execute(
+      SetLayerCommand(doc.tables.layers[locked]!.copyWith(locked: true)));
   return DraftDocumentCodec.encodeToString(doc);
 }
 
@@ -547,5 +571,76 @@ void main() {
     await tester.pump();
     expect(find.text('Entwurf'), findsOneWidget);
     expect(find.text('Anordnung zurücksetzen'), findsOneWidget);
+  });
+
+  testWidgets(
+      'D20 a locked table\'s menu acts on that table, never on the '
+      'selection (spec 14d S6, review F-1)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': lockedSalonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    c.select({'1'});
+    await tester.pump();
+    expect(c.selectedTables.value, {'1'}, reason: 'premise');
+    await tester.tapAt(onScreen(tester, demo, '2'),
+        buttons: kSecondaryMouseButton, kind: PointerDeviceKind.mouse);
+    await tester.pumpAndSettle();
+    expect(find.text('Table 2'), findsOneWidget);
+    expect(c.selectedTables.value, {'1'},
+        reason: 'premise: a locked table leaves the selection alone');
+    expect(tester.widget<PopupMenuItem<String>>(byKey('menu-select')).enabled,
+        isFalse,
+        reason: 'a locked table cannot be selected');
+    await tester.tap(byKey('menu-status-bill'));
+    await tester.pumpAndSettle();
+    expect(c.tableStatuses.value.keys, ['2']);
+  });
+
+  testWidgets(
+      'D21 a status caption is worded again when the language changes '
+      '(review 14d-1 F-6)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('lang-tr'));
+    await tester.pump();
+    await tester.pump();
+    c.select({'2'});
+    await tester.pump();
+    await tester.tap(byKey('status-bill'));
+    await tester.pump();
+    expect(c.tableStatuses.value['2']!.caption, 'Hesap', reason: 'premise');
+    await tester.tap(byKey('lang-de'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.tableStatuses.value['2']!.caption, 'Rechnung');
+    expect(c.tableStatuses.value['2']!.color,
+        DemoHomeState.kStatuses['Bill']!.color);
+  });
+
+  testWidgets(
+      'D22 with Long press: menu on, a finger\'s long press opens the '
+      'table\'s menu and toggles nothing (spec 14d S7, review F-6)',
+      (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(byKey('long-press-menu'));
+    await tester.pump();
+    expect(demo.longPressMenu, isTrue);
+    c.select({'2'});
+    await tester.pump();
+    final g = await tester.startGesture(onScreen(tester, demo, '1'),
+        kind: PointerDeviceKind.touch);
+    await tester.pump(const Duration(milliseconds: 700));
+    await g.up();
+    await tester.pumpAndSettle();
+    expect(find.text('Table 1'), findsOneWidget);
+    expect(c.selectedTables.value, {'1'},
+        reason: 'an unselected table is selected alone, never toggled in');
+    expect(demo.log, contains('Salon: menu for 1'));
   });
 }

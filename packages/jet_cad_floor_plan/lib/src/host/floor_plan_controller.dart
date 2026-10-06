@@ -38,6 +38,11 @@ final class _Plan {
   StreamSubscription<DocChange>? changes;
   VoidCallback? onSelection;
 
+  /// The history state last announced on `serviceLayoutChanges`, for a
+  /// service copy: an Undo is announced at once and again by the change
+  /// stream, which is heard once (review 14d-2).
+  int? announced;
+
   /// Cancels what listens to it, at once (R-2).
   void detach() {
     changes?.cancel();
@@ -278,6 +283,8 @@ class FloorPlanController extends ChangeNotifier {
   /// Whether the service copy has a layout (spec 14d S3): a table stands
   /// elsewhere than in the design. Not the undo depth: a restored layout
   /// has none, and a table dragged back exactly to its place is no edit.
+  /// Surveys the copy's tables at each read: read it on a change, not per
+  /// frame.
   bool get serviceEdited {
     final service = _service;
     return service != null &&
@@ -286,8 +293,9 @@ class FloorPlanController extends ChangeNotifier {
 
   /// Fires after every change of the service layout a mode switch or a
   /// load did not make (spec 14d S4, revision 2): a move, an Undo or a
-  /// Redo in the selection mode, [resetLayout], [restoreServiceLayout].
-  /// Never on [setMode], [load] or [newPlan], so a host that saves
+  /// Redo in the selection mode, [resetLayout], [restoreServiceLayout];
+  /// for [undo] and [redo], before they return. Never on [setMode], [load]
+  /// or [newPlan], so a host that saves
   /// [serviceLayoutJson] on it never overwrites its stored layout with the
   /// empty one a new copy starts with.
   Listenable get serviceLayoutChanges => _layoutChanges;
@@ -473,12 +481,27 @@ class FloorPlanController extends ChangeNotifier {
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canUndo) commands.undo();
+    _announceLayout();
   }
 
   void redo() {
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canRedo) commands.redo();
+    _announceLayout();
+  }
+
+  /// Fires [serviceLayoutChanges] if the service copy's history moved since
+  /// it last did. The change stream is asynchronous: without this, a host
+  /// that calls [undo] and then [setMode] in one synchronous step would
+  /// never hear the Undo, and would keep the undone move (review 14d-2).
+  void _announceLayout() {
+    final service = _service;
+    if (service == null) return;
+    final state = service.document.commands.stateId;
+    if (state == service.announced) return;
+    service.announced = state;
+    _layoutChanges.bump();
   }
 
   // ---------------------------------------------------------------------
@@ -580,8 +603,9 @@ class FloorPlanController extends ChangeNotifier {
       if (_disposed) return;
       _refreshFlags();
       if (identical(plan, _active)) _revision.value++;
-      if (identical(plan, _service)) _layoutChanges.bump();
+      if (identical(plan, _service)) _announceLayout();
     });
+    plan.announced = plan.document.commands.stateId;
     void onSelection() {
       if (!_disposed && identical(plan, _active)) _refreshSelected();
     }

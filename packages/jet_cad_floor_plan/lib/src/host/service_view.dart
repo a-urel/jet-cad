@@ -105,12 +105,15 @@ class _ServiceViewState extends State<ServiceView> {
     _secondary = null;
     if ((e.localPosition - _secondaryAt).distance > kTouchSlop) return;
     final report = widget.options().onTableContextMenu;
+    // A host without a menu: a right click is nothing, as before 14d; the
+    // selection rule exists for the menu's sake (review F-2).
+    if (report == null) return;
     final world = _c.camera.value
         .screenToWorld(Vector2(e.localPosition.dx, e.localPosition.dy));
     final hit = _picker.pick(world);
     if (hit == null) return;
     final number = contextSelect(hit, _selection);
-    if (number != null) report?.call(number, e.position);
+    if (number != null) report(number, e.position);
   }
 
   void _onSecondaryCancel(PointerCancelEvent e) {

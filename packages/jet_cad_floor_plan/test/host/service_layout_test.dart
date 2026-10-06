@@ -154,6 +154,28 @@ void main() {
     expect(sameTransform(a.single.from, b.single.from), isTrue);
   });
 
+  test(
+      'LC6 an unnumbered table moved is listed with a null number and '
+      'applied by the match (S1, S2, review F-3)', () {
+    final d = design();
+    final spare = TableSurvey.of(d).withNumber('2').single;
+    d.commands.execute(SetEntityTextCommand(spare.label!, '', kTableLabelTag));
+    expect(
+        TableSurvey.of(d).tables.where((t) => t.number == null), hasLength(1),
+        reason: 'premise: one unnumbered table');
+    final copy = copyOf(d);
+    final node = copy.tree[spare.instance]! as InstanceNode;
+    copy.commands.execute(TransformNodeCommand(node.handle,
+        Transform2.translation(-310.375, 58.25).multiply(node.transform)));
+    final entries =
+        decodeServiceLayout(encodeServiceLayout(serviceLayoutOf(d, copy)));
+    expect([for (final e in entries) e.number], [null]);
+    expect(entries.single.handle, spare.instance);
+    final m = matchServiceLayout(d, entries);
+    expect([for (final e in m.applied) e.number], [null]);
+    expect(m.dropped, isEmpty);
+  });
+
   group('LC5 the strict match (S2, M-14d-l)', () {
     late DraftDocument d;
     late List<ServiceLayoutEntry> entries;
@@ -215,18 +237,25 @@ void main() {
       expect(matchServiceLayout(d, entries).applied, isEmpty);
     });
 
-    test('an entry that turns the table, or holds a NaN, is dropped', () {
+    test(
+        'an entry that turns the table, shears it in one term, or holds a '
+        'NaN or an infinity, is dropped (review F-5)', () {
       final e = entries.first;
-      final turned = Transform2.rotation(0.25).multiply(e.to);
-      final nan =
-          Transform2(e.to.a, e.to.b, e.to.c, e.to.d, double.nan, e.to.f);
-      entries = [
-        ServiceLayoutEntry(
-            handle: e.handle, number: e.number, from: e.from, to: turned),
-        ServiceLayoutEntry(
-            handle: e.handle, number: e.number, from: e.from, to: nan),
-      ];
-      expect(matchServiceLayout(d, entries).applied, isEmpty);
+      final t = e.to;
+      for (final to in [
+        Transform2.rotation(0.25).multiply(t),
+        Transform2(t.a, t.b + 0.25, t.c, t.d, t.e, t.f),
+        Transform2(t.a, t.b, t.c, t.d, double.nan, t.f),
+        Transform2(t.a, t.b, t.c, t.d, t.e, double.infinity),
+      ]) {
+        final one = [
+          ServiceLayoutEntry(
+              handle: e.handle, number: e.number, from: e.from, to: to)
+        ];
+        expect(matchServiceLayout(d, one).applied, isEmpty, reason: '$to');
+      }
+      expect(matchServiceLayout(d, [e]).applied, hasLength(1),
+          reason: 'premise: the entry itself applies');
     });
   });
 }

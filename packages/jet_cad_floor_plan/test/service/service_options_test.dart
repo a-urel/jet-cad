@@ -89,6 +89,7 @@ class Host {
 
   Widget view(
           {bool serviceMoves = true,
+          bool menu = true,
           FloorPlanLongPress longPress = FloorPlanLongPress.toggleSelection}) =>
       MaterialApp(
           home: Scaffold(
@@ -97,18 +98,20 @@ class Host {
                   onTableTap: taps.add,
                   serviceMoves: serviceMoves,
                   longPress: longPress,
-                  onTableContextMenu: (n, p) => menus.add((n, p)))));
+                  onTableContextMenu:
+                      menu ? (n, p) => menus.add((n, p)) : null)));
 }
 
 Future<Host> pumpService(WidgetTester tester,
     {bool serviceMoves = true,
+    bool menu = true,
     FloorPlanLongPress longPress = FloorPlanLongPress.toggleSelection}) async {
   final h = Host()..c = FloorPlanController(json: optionsPlan());
   addTearDown(h.c.dispose);
   await tester.binding.setSurfaceSize(const Size(1440, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
-  await tester
-      .pumpWidget(h.view(serviceMoves: serviceMoves, longPress: longPress));
+  await tester.pumpWidget(
+      h.view(serviceMoves: serviceMoves, menu: menu, longPress: longPress));
   h.c.setMode(FloorPlanMode.selection);
   await tester.pump();
   await tester.pump();
@@ -265,5 +268,37 @@ void main() {
     await tester.pump();
     expect(c.selectedTables.value, {'1', '2'}, reason: 'toggled in');
     expect(h.menus, hasLength(2));
+  });
+
+  testWidgets(
+      'SO5 without onTableContextMenu a secondary click changes nothing: a '
+      'selection of three stays (review F-2)', (tester) async {
+    final h = await pumpService(tester, menu: false);
+    final c = h.c;
+    c.select({'1', '2', '5'});
+    await tester.pump();
+    await rightClick(tester, at(tester, c, '1'));
+    await rightClick(tester, at(tester, c, '4'));
+    expect(c.selectedTables.value, {'1', '2', '5'});
+    expect(h.taps, isEmpty);
+  });
+
+  testWidgets(
+      'SO6 a secondary click while a primary gesture is held reports '
+      'nothing and changes nothing (spec 14d S6, review F-4)', (tester) async {
+    final h = await pumpService(tester);
+    final c = h.c;
+    c.select({'5'});
+    await tester.pump();
+    final pen = await tester.startGesture(at(tester, c, '1'),
+        kind: PointerDeviceKind.stylus);
+    await tester.pump();
+    await rightClick(tester, at(tester, c, '2'));
+    expect(h.menus, isEmpty);
+    expect(c.selectedTables.value, {'5'});
+    await pen.cancel();
+    await tester.pump();
+    await rightClick(tester, at(tester, c, '2'));
+    expect(h.menus.single.$1, '2', reason: 'premise: idle, it reports');
   });
 }
