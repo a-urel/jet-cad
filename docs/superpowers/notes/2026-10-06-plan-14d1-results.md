@@ -38,7 +38,7 @@ switch; the floor planner follows the system.
 | 6 Symbol names | `e5b66ea` |
 | 7 The apps | `b482b2f` |
 | 8 The guards (leak, determinism) | `7560148` |
-| Exit (this note, STATUS, roadmap) | in progress |
+| Exit (this note, STATUS, roadmap; the demo's mode word) | this commit |
 
 **Process, stated plainly:** implemented by the controller, without a
 fresh implementer or a per-task reviewer, as 14d-2; every mutant below
@@ -48,8 +48,35 @@ owed the human's read, German a native speaker's.
 
 ## Gates (Linux container, Flutter 3.47.6 / Dart 3.13.5)
 
-**Pending:** the exit's gates are running; this section is filled in
-by the next commit, with the web builds and the Chromium smoke.
+| Package | Result |
+|---|---|
+| engine `packages/jet_cad_2d` | **1,242 passed** (+1: the layer-name values) + 2 standing (`generate_document_test`); analyze, format clean |
+| render `packages/jet_cad_2d_flutter` | **1,240 passed** + 1 skip + 7 standing (the text ladders); analyze, format clean (`GalleryCategory.id` only) |
+| planner `packages/jet_cad_floor_plan` | **1,212 passed** (+29: `test/l10n/`, TT4b, the failed-load check rewritten); analyze, format clean |
+| restaurant symbols | **97 passed** (+3: the names); analyze, format clean |
+| app `apps/floor_planner` | **203 passed** (+2: AW1–AW2); analyze, format clean |
+| demo `apps/restaurant_demo` | **21 passed** (+1: D19); analyze, format clean |
+| `apps/dev_harness_2d` | analyze clean |
+| web builds | `apps/restaurant_demo` and `apps/floor_planner`: `✓ Built build/web` |
+
+The two allocation invariant tests and the goldens are untouched.
+
+**Smoke (Chromium, the web builds of this commit's code).** The demo in a
+`de-DE` browser opens in German (*Restaurant-Demo*, *Werkzeuge*,
+*Ebenen*, *Querformat*, *Am Raster fangen*). TR in the app bar: the
+whole screen turns Turkish, the palette, the Page panel, the demo's side
+panel. The Symbols tab: categories and cells in Turkish; the search
+`kose` finds *Köşe loca, 5 kişilik* and *Köşe bar tezgâhı*. Service: a
+right click on table 2 opens *Masa 2*, *Yalnız bunu seç* and the four
+statuses; DE, then a right click on table 3: *Tisch 3*, *Nur diesen
+auswählen*, *Frei*, *Bestellt*, *Beim Essen*, *Rechnung*. The floor
+planner in a `tr-TR` browser: Turkish, the document *Adsız*. No page or
+console error.
+
+**Found by the smoke and fixed in this commit:** the demo's log worded
+the mode by its enum name (*Salon: mod selection*); D19 had pinned it.
+The log now uses the mode's word (*Salon: mod Servis*); D1 and D19
+updated; the mutant (the enum name back) fails D1 and D19.
 
 ## Mutants fired
 
@@ -144,6 +171,11 @@ parsing is pinned by Task 1's and Task 4's tests instead.
 - **A layer name's uniqueness folds by `toLowerCase()`**, which is not
   Turkish-aware (`I`/`ı`); unchanged, as stored-value rules are the
   engine's.
+- **The demo's log keeps each line in the language it was written in**;
+  the area names (*Salon*, *Teras*) are the demo's data, not words.
+- **German, for the native reader:** *Am Raster fangen* (snap to grid),
+  *Zufällige Status*; the demo's number field hint is cut at the side
+  panel's width (*Tischnummern (durch Komma getr…*).
 - **The leak test covers the planner**, not the two apps; theirs are
   covered by targeted tests (AW1–AW2, D19).
 

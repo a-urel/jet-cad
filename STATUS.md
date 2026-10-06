@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-06 (**14d-2 done on `claude/exciting-pasteur-9m22jv`, not merged**; 09c-2 MERGED into `main` at `43dd020`; see below).
+**Last updated:** 2026-10-06 (**14d-2 and 14d-1 done on `claude/exciting-pasteur-9m22jv`, not merged**; 09c-2 MERGED into `main` at `43dd020`; see below).
 - **Slice 14d (POS readiness)** — spec
   [2026-10-06-pos-readiness-design.md](docs/superpowers/specs/2026-10-06-pos-readiness-design.md),
   revision 2, **approved by the human** (2026-10-06: *"Q0 evet, diğerleri
@@ -24,8 +24,30 @@
   restaurant symbols 94, app 201, demo 20, both web builds, a Chromium
   smoke. Implemented by the controller without a per-task reviewer; the
   code has had no independent review yet. **Look owed** (macOS, web, a
-  tablet for the long-press menu). **Next:** 14d-1 (languages), on the
-  human's word, or the merge of 14d-2. **Sub-project 14 — restaurant embedding (all
+  tablet for the long-press menu).
+- **14d-1 (three languages: en, de, tr) is DONE, not merged** (on the
+  human's *"evet, 14d-1'e başla"*): plan
+  [2026-10-06-three-languages.md](docs/superpowers/plans/2026-10-06-three-languages.md),
+  results [2026-10-06-plan-14d1-results.md](docs/superpowers/notes/2026-10-06-plan-14d1-results.md).
+  `FloorPlanStrings` (one hand-written class per language),
+  `floorPlanSupportedLocales` / `floorPlanLocalizationsDelegates`; the
+  engine and the planner hand out values (`LayerNameProblem`,
+  `TableNumberProblem`, `NumberingWarning` — a breaking host API —,
+  `RoomOccupied`); panel numbers in the language's separator; new rooms
+  and layers named in the language, numbered over all three; 110 symbols
+  and 12 categories in German and Turkish, the document keeping the
+  library's English; a fold for search. The demo has an EN / DE / TR
+  switch, the floor planner follows the system. Guards: a leak test (the
+  planner in Turkish through a recording language) and a determinism test
+  (the same UI edits in English and Turkish encode the same). Gates:
+  engine 1,242 + 2 standing, render 1,240 + 1 skip + 7 standing, planner
+  1,212, restaurant symbols 97, app 203, demo 21, both web builds, a
+  Chromium smoke in German and Turkish. Implemented by the controller
+  without a per-task reviewer; no independent code review yet. **The
+  German and Turkish text is the controller's:** Turkish owed the human's
+  read, German a native speaker's. **Look owed** (macOS, web).
+  **Next:** 14d-3 (the release: 0.1.0, the host guide, CI), on the
+  human's word, or the merge of 14d-2 and 14d-1. **Sub-project 14 — restaurant embedding (all
 six slices) is MERGED into `main` at `95d6e0e`**, `--no-ff`, on the human's
 word ("merge into main and clean up branches", 2026-10-04). The looks and
 the amendments listed under **Owed** were not given before the merge;
