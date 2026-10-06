@@ -1,7 +1,9 @@
 # POS readiness (14d) — design
 
-**Date:** 2026-10-06. **Status:** design, **revision 1**, for an
-independent review and then the human's approval. **Sub-project:** 14
+**Date:** 2026-10-06. **Status:** design, **revision 2**: revision 1
+(`82942ea`) reviewed independently, "Needs revision" (findings V-1 to
+V-21); [Revision 2](#revision-2) is binding where it differs. For the
+human's approval, with its questions Q0–Q4. **Sub-project:** 14
 (restaurant embedding), slice **14d**, after 14b-1, 14s, 14a, 14b-2,
 14c, 14t (all merged at `95d6e0e`) and 09c (merged at `43dd020`).
 **Umbrella:** [2026-10-03-restaurant-embedding-design.md](2026-10-03-restaurant-embedding-design.md)
@@ -615,3 +617,260 @@ place across a mode switch (14b-2 R-13, the human's ruling pending);
 right-to-left languages and any language beyond the three (L1's shape
 admits more); translating a stored name; live sync between terminals;
 publishing to pub.dev; Plan G; DXF.
+
+## Revision 2
+
+An independent review of revision 1 (`82942ea`, a fresh reviewer,
+read-only) found one false fact (F-11), a persistence flow that saves an
+empty layout, and twenty more items; verdict "Needs revision". Its
+findings are **V-1 to V-21** here (renamed from the report's R-n, which
+collided with this spec's risks). Each is applied below; where this
+section and the text above differ, **this section is binding**. To end
+the same collision, the release decisions R1–R7 of 14d-3 are renamed
+**P1–P7** (same order, same content unless amended here).
+
+### Facts, corrected
+
+- **F-11, corrected (V-1).** A press without the primary button never
+  reaches a tool: `InteractionLayer._onDown` returns on
+  `e.buttons & kPrimaryButton == 0` (`interaction_layer.dart:353`),
+  before `_tool.onPointerDown`. Line 343 is the middle button's rule
+  only. A secondary click therefore needs its own path (S6, amended).
+- **F-13, corrected (V-7).** `jet_cad_2d` and `jet_cad_2d_flutter` are
+  already `0.1.0` (`jet_cad_2d` has no `publish_to: none`); only
+  `jet_cad_floor_plan` and `jet_cad_restaurant_symbols` are `0.0.1`.
+- **F-4, corrected (V-17).** `Custom` is shown by `page_panel.dart:141,147`
+  (literals); `:144` shows the presets' `SheetSize.name`.
+- **F-14 (new, V-5).** `PageComponent.fromJson` reads named keys and
+  ignores unknown ones: an older reader would *tolerate* a new page field
+  and drop it silently. Every committed encoding is at schema 7: the two
+  `.jetlib` assets and the demo's `salon.json` and `teras.json`; the
+  `furniture_pre_09c.jetlib` fixtures (planner and app tests) are
+  historical. Expectations embedding the version or the page's key list:
+  `json_codec_test.dart:516,586-587`, `instance_style_codec_test.dart:81`,
+  `layer_header_test.dart:99,104`, `page_component_test.dart:53`, and the
+  macOS fingerprints of `generate_document_test`.
+- **F-15 (new, V-6).** The allocation invariant tests skip themselves
+  when the VM service is unreachable (`query_allocation_test.dart:540,591`
+  via `vm_allocation_meter.dart:228`; also `layer_filter_test.dart:637`,
+  `packed_rtree_test.dart:133`); the render package has one standing
+  skip.
+
+### Q0 — the plan's own text: recommended to defer (V-14)
+
+The document's decimal separator (L13, L14 and their mutants M-14d-d,
+M-14d-e) is the costliest and riskiest part of 14d — an engine change,
+schema 8, every committed encoding moved (F-14), a macOS re-baseline —
+and the human asked for three UI languages, not for it. **New question
+Q0: is `.` in the plan's own text (dimensions, room areas, rulers, the
+PDF and PNG) acceptable for 0.1.0?** A restaurant plan's purpose is its
+tables; dimensions and areas are the designer's.
+
+- **Recommended: yes, defer.** 14d-1 then drops L13, L14, M-14d-d and
+  M-14d-e; `FloorPlanController` gains no `locale`; the engine,
+  `formatLength`, the rulers and every encoding stay as they are, and
+  nothing is re-baselined. L12 reads: **panels follow the UI language;
+  everything on the canvas and the paper keeps `.`.** The Area and
+  Value rows, which echo stored text, show `.` in a German or Turkish UI
+  (recorded, not a defect: they are the plan's text). The Dimension
+  tool's notice is that stored text (`dimension_tool.dart:462`), so `.`
+  too (V-16).
+- **If the human answers no**, L13 and L14 apply as written, amended:
+  L8 reads "the `.jetlib` *format* does not change; the bytes move only
+  by L14"; L14's list of encodings is F-14's (the `pre_09c` fixtures are
+  **not** regenerated: they become the v7-read fixtures); M-14d-e is
+  restated as "`kSchemaVersion` is 8, and a v7 encoding decodes as
+  `point`" (there is no v7 reader in the build, V-18); L14's rationale
+  rests on F-14 (an old reader tolerates the field, so the bump is what
+  makes it refuse); and the shell's New is `apps/floor_planner`'s
+  `document_host.dart`, added to Files (V-21).
+
+### 14d-1, amended
+
+- **L1, amended (V-10).** The strings stay hand-written classes; a
+  test-only `RecordingFloorPlanStrings implements FloorPlanStrings`
+  forwards every member to a language and records each string it returns
+  (the compiler keeps it complete). "A host can subclass a language" is
+  L2's custom delegate (the undefined "H-1" is dropped, V-21).
+- **L2, amended (V-4).** The lookup is the delegate's instance, else the
+  built-in language for `Localizations.localeOf(context)` — the
+  **resolved** locale — else English. Stated plainly: a `MaterialApp`
+  resolves to one of its `supportedLocales` (default `[en_US]`), so a
+  host gets German or Turkish only if it lists `de`/`tr` there, and it
+  must then add `GlobalMaterialLocalizations` and its siblings or
+  Material widgets throw. The host guide (P2) gives the exact
+  `MaterialApp` lines; `floorPlanLocalizationsDelegates` (exported) lists
+  the planner's delegate with Flutter's three. `Localizations.override`
+  around the view alone is **not supported**: dialogs on the root
+  navigator (Export) would not see it. The demo's switch sets
+  `MaterialApp.locale` (L17).
+- **L5, amended (V-16).** The status line's label comes from the palette
+  map; the Symbol placement tool, which is no palette entry, is labelled
+  by `FloorPlanStrings.symbolTool`; the service view has no status line.
+  Notices become values the shell words: the Room tool's
+  `'Already a room: …'` (cached in `_occupied`, `room_tool.dart:284`)
+  becomes `RoomOccupied(name)`. "The placement ghost's notice" (L9) does
+  not exist and is struck.
+- **L6, amended (V-17).** `LayerNameProblem` keeps an English
+  `toString()` for the engine's own `ArgumentError`s
+  (`layer_commands.dart:168,294`). `Unnumbered` carries `symbolKey` and
+  `seats` and no handle (D18), so two unnumbered tables of one symbol
+  word alike — accepted; the host sees the count. The symbol panel's
+  `'$error'` (`symbol_panel.dart:313`) becomes a worded failure, the
+  exception going to `FlutterError.reportError` only (I-4).
+  `apps/floor_planner/test/layers/layer_panel_test.dart:526,534` change
+  with it.
+- **I-3, amended (V-9).** Placement copies the **library's** `entry.name`
+  — the asset's English text (`symbol_placer.dart:132`) — never the
+  shown name; the stored names of L7 are the only language-bearing bytes.
+- **L11, amended (V-20).** The fold maps `İ` and `I` to `i` **before**
+  lower-casing, and folds `â î û` too (`Kâğıt`). Containment only, so
+  `ß→ss` changing a length is harmless.
+- **L15, amended (V-12).** iOS's `decimalPad` shows the **device
+  region's** separator, not the app's, so a Turkish UI on an English iPad
+  could never type a comma. A field therefore accepts its language's
+  separator, **and** the other one when it occurs once and is not
+  followed by exactly three digits: `1.5` is 1.5 in German, `1.600` is
+  refused; `1,5` is 1.5 in English, `1,600` is refused. No grouping is
+  ever accepted.
+
+### 14d-2, amended
+
+- **S2, amended (V-8).** An entry is also dropped unless `to`'s linear
+  part equals `from`'s (exact `==`: a restore only translates, F-10) and
+  all twelve values are finite; numbers are read as `(v as num).toDouble()`
+  (the web writes `1` where the VM writes `1.0`, V-21). Duplicate handles
+  make the text a `FormatException`. The result carries **counts and
+  entries**, not bare numbers (a number may be `null` or shared). The
+  entries are applied and the history cleared **before** the copy is
+  attached, so flags and listeners see one settled copy.
+- **S1, amended (V-21).** Determinism is per platform: the VM's and the
+  web's encodings of one layout may differ in number form, and each reads
+  the other's.
+- **S4, replaced (V-2).** `revision` also moves on `setMode` and `load`
+  (`floor_plan_controller.dart:340-365`), so a host saving on it would
+  overwrite its stored layout with an empty one before it could restore.
+  The controller gains **`Listenable serviceLayoutChanges`**, which fires
+  after every change of the service layout that the host did not ask for
+  by a mode switch or `load`: a drag, Undo or Redo in the selection mode,
+  `resetLayout`, and `restoreServiceLayout`. It never fires on
+  `setMode` or `load`. A host saves `serviceLayoutJson()` on it and
+  restores after `setMode(selection)` and after a `load` in the
+  selection mode. 14c S8 stands.
+- **S9, amended (V-3).** With the layout kept by the host, the demo no
+  longer discards it on the way to Design: its dialog *"Discard the
+  service layout?"* is removed; leaving Service keeps the stored layout,
+  entering Service restores it and logs the dropped entries; **Reset
+  layout** is the one way to discard it. This amends 14b-2's demo
+  behaviour ("the demo asks first", D12) and nothing of the controller:
+  the design is never changed by service moves, as before.
+- **S6, replaced (V-1, V-15).** The service view wraps its canvas in a
+  `Listener` for the **secondary** button (mouse or stylus): on its
+  down, it records the press; on its up within the touch slop, it picks
+  through the copy's `TablePicker` at the up's world point (containment,
+  no reach: a mouse) and, on a hit, applies S6's selection rule and calls
+  `onTableContextMenu(number, event.position)` (already global). The
+  render package is untouched. Settled cases:
+  - modifiers held with the secondary button change nothing;
+  - Ctrl+primary on macOS stays 14c's toggle, never a context click;
+  - `onTableTap` never fires for a context gesture;
+  - an **unnumbered** table is selected by S6's rule and not reported
+    (D18);
+  - the secondary press is ignored while a primary gesture or a touch
+    session is live.
+- **S7, amended (V-15, V-13).** Under `contextMenu`, the long-press
+  timer also starts on a **locked** table (amending 14c R-1 and D14 for
+  this mode only), which is reported without a selection change; the
+  timer keeps 14t's touch value (`kLongPressTimeout - kTouchHoldBack`
+  from contact, `table_select_tool.dart:80-82`); the position given is
+  the tool's screen point converted by the view's render box.
+- **S5, amended (V-15).** Under `serviceMoves: false` a drag from any
+  table, locked or not, pans.
+
+### 14d-3, amended
+
+- **P1, amended (V-7).** `jet_cad_floor_plan` and
+  `jet_cad_restaurant_symbols` go from `0.0.1` to `0.1.0`;
+  `jet_cad_2d` and `jet_cad_2d_flutter` stay at `0.1.0`. No
+  `publish_to` changes.
+- **P4, amended (V-19).** CI's scope is the gates' packages and apps:
+  `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
+  `jet_cad_restaurant_symbols`, `apps/floor_planner`,
+  `apps/restaurant_demo` (tests, analyze, format, web builds) and
+  `apps/dev_harness_2d` (analyze). `packages/jet_cad` and
+  `apps/dev_harness` are left out; the plan records why after checking
+  their state.
+- **P5, amended (V-6).** `expect_failures.dart` compares the **skipped**
+  set exactly as the failing set, against `standing_skips.txt` beside
+  `standing_failures.txt`; a skip whose reason is the VM service's
+  absence is always red, so a runner without loopback cannot pass the
+  allocation invariants by skipping them.
+- **P6, amended (V-19).** The probe's git URL is the checked-out
+  repository itself (`file://$GITHUB_WORKSPACE`) at `git rev-parse HEAD`
+  — the commit CI is testing, merge commits included — so no token is
+  needed for a private repository.
+
+### Tests, amended
+
+- **M-14d-a, replaced (V-10).** The leak test installs
+  `RecordingFloorPlanStrings` over Turkish, pumps the shell and the
+  service view with every panel, dialog and menu opened in turn (the
+  Export dialog, the layer colour menu, the size menu, the page menus)
+  and the selections of revision 1; then every `Text`, tooltip, label
+  and hint in the tree must be a **recorded** string, document text, or
+  on a short allowlist (digits and number text, unit symbols, `A4` `A3`
+  `Letter` `Tabloid`, `PDF` `PNG`, shortcut letters and modifier glyphs).
+  Fixture names (rooms, layers, numbers) are chosen never to collide with
+  a UI word. Mutant: one label put back as a literal — it is never
+  recorded, so it is red whatever its language.
+- **M-14d-b, amended (V-4).** Tested through a `MaterialApp` with
+  `floorPlanSupportedLocales` and `floorPlanLocalizationsDelegates`
+  (German and Turkish resolved), with the delegate absent (the resolved
+  locale still chooses), and with a default `MaterialApp` on a Turkish
+  platform locale (English, documented).
+- **M-14d-c, amended (V-11).** The mutant lengthens a label that sits in
+  a `Row` without wrapping (a palette entry or the top bar); the
+  existing 656 px sweep (`apps/floor_planner/test/document_commands_test.dart:986-1001`)
+  runs in `de` and `tr` too.
+- **M-14d-f, extended (V-12).** `1.5` in German is 1.5, `1.600` and
+  `1.234,5` are refused; the English mirror; mutants: the foreign
+  separator always refused (the iPad case); always accepted.
+- **M-14d-g, amended (V-9).** From a **loaded** plan, with the same
+  edits in English and in Turkish — a symbol placement, a room named
+  explicitly, a layer named explicitly, a renumber, a table rotation —
+  the encodings are byte-equal. Mutant: placement copying the shown
+  name.
+- **M-14d-l, extended (V-8).** Adds a table hidden in the design since,
+  an entry whose `to` turns the table, a non-finite value, and duplicate
+  handles (`FormatException`).
+- **M-14d-m, replaced (V-13).** Cases that tell the mutants apart: a
+  restore, then Undo → nothing changes and `serviceEdited` is true
+  (mutant: history not cleared); a move dragged back exactly to its
+  design place → `serviceEdited` false although the depth is 1 (mutant:
+  by depth); a restore, a move and its Undo → true (mutant: by depth).
+- **M-14d-n, amended (V-18).** The fixture moves tables in
+  **descending** handle order to off-grid positions.
+- **M-14d-p, amended (V-1).** Driven through `FloorPlanView` with
+  `tester.tapAt(…, buttons: kSecondaryMouseButton)`, never by feeding the
+  tool.
+- **M-14d-q, extended (V-6).** A recorded run with an extra skip, and one
+  with a VM-service skip → exit 1. Mutant: skips ignored.
+- **New, M-14d-r (V-2).** `serviceLayoutChanges` fires on a drag, Undo,
+  Redo, `resetLayout` and a restore, and never on `setMode` or `load`;
+  the demo's start-up, a mode round trip and a `load` keep the stored
+  layout. Mutant: the controller notifying on `setMode`.
+- **New, M-14d-s (V-13).** The locale switched while mounted: the status
+  line, an open tool notice, the Page panel and the palette's headers
+  follow; the gallery's collapsed categories stay collapsed. Mutants:
+  strings captured in `initState`; the collapsed set keyed by the shown
+  name.
+- **New, M-14d-t (V-13).** Each `LayerNameProblem` and each
+  `NumberingWarning` is worded in all three languages; S1 returns `null`
+  in the design mode; under S7 a finger's long press reports at 500 ms
+  from contact.
+
+### Questions for the human, now
+
+- **Q0** (above): `.` in the plan's text for 0.1.0 — recommended yes.
+- **Q1–Q4** stand; Q2 is moot if Q0 is yes. Q4's order stands
+  (14d-2 → 14d-1 → 14d-3).
