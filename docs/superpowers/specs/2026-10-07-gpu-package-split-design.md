@@ -1,6 +1,8 @@
 # The GPU renderer in its own package — design
 
-**Date:** 2026-10-07. **Status:** design, revision 1, for review.
+**Date:** 2026-10-07. **Status:** design, **revision 2**. Revision 1
+(`567fbf9`) was reviewed independently: *Approved with fixes*, V-1 to
+V-15. The fixes are folded in here; see [Review](#review).
 
 **Asked by the human:** *"POS entegrasyonuna geç"*, then, at the question
 of where to start, *"Önce jet-cad ön koşulu"*. The POS, Monépro
@@ -120,6 +122,41 @@ by `RenderBackend.residentGpu`, never by default (F-3).
   is `shaders/cad_stroke.{vert,frag}`, built by `tool/build_shaders.sh`.
 - **F-9. The lock.** A pub workspace has a single lock, so only an
   out-of-workspace app (the host probe) can show what a host resolves.
+  **But build hooks follow the built app's own dependencies.** The
+  reviewer's experiment E3: a workspace member that does not depend on
+  `flutter_scene` builds for the web without running the hook, even
+  when a sibling member does depend on it. So after the split, the floor
+  planner's and the demo's web builds lose the hook and the 12 MB too.
+- **F-10. The trial split** (the reviewer's E1 and E2, in a clone):
+  - **The lock.** With `flutter_scene` gone from core, the probe's lock
+    holds none of F-6's names. It was the only package with a build
+    hook: `pdf`, `printing`, `image`, `archive`, `posix` and `ffi` have
+    none.
+  - **The web build.**
+    - The log reads "No packages with native assets".
+    - There is no `.dart_tool/hooks_runner` and no
+      `assets/packages/flutter_scene`.
+    - `main.dart.js` names `cad.shaderbundle` zero times, against two at
+      HEAD.
+    - `build/web` falls from 54 MB to 42 MB.
+  - **The SDK floor.** After `flutter pub downgrade` it is Dart 3.12 and
+    Flutter 3.44. A fresh lock says Dart 3.13 only because pub picks the
+    newest `xml` and `petitparser`.
+- **F-11. What the new package needs from core.**
+  - **Not exported:** `kFloatsPerInstance` and `InstanceFieldOffset`
+    (`instance_record.dart`). The trial split had 21 analyzer errors,
+    all on these two.
+  - **`@visibleForTesting`:** `kCornerVertices` carries it, so reading it
+    from another package warns.
+- **F-12. Core's tests that read GPU files.**
+  - `test/support/instance_expander.dart` is the Dart copy of
+    `shaders/cad_stroke.vert`, and `instance_expander_test.dart:428`
+    reads that shader source by a path relative to core.
+  - Tests that use the pure statics or functions:
+    - `instance_expander_test` and `resident_collection_test:139`;
+    - `frame_info_test`;
+    - `gpu_comparison.dart:775`.
+  - `render_backend_test.dart:6` imports the facade directly.
 
 ## Decisions
 
@@ -129,9 +166,22 @@ by `RenderBackend.residentGpu`, never by default (F-3).
   - `ResidentGeometry`, without its pure statics (S3);
   - `GpuDrawBackend`, without its pure functions (S3);
   - `uploadResidentCollection`;
-  - the shader sources, the bundle and `tool/build_shaders.sh`.
+  - the bundle and `tool/build_shaders.sh`.
 
   The asset key becomes `packages/jet_cad_2d_gpu/assets/shaders/cad.shaderbundle`.
+
+  **The shader sources `shaders/cad_stroke.{vert,frag}` stay in core**
+  (V-5): core's Dart expander (`test/support/instance_expander.dart`)
+  mirrors them, and `instance_expander_test` reads them. The build script
+  compiles `../jet_cad_2d_flutter/shaders/`, which works inside the
+  workspace, where the harness builds.
+
+  The package's pubspec:
+  - environment: `flutter: ">=3.47.0"`, which is `flutter_scene`'s own
+    floor (V-13);
+  - its error reports name `library: 'jet_cad_2d_gpu'`.
+
+  `installResidentGpu()` is idempotent.
 
   It has its own barrel, `package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart`, and
   its own `analysis_options.yaml`, created like its siblings' and never
@@ -147,16 +197,22 @@ by `RenderBackend.residentGpu`, never by default (F-3).
     - `ResidentCollection` and `GeometryCollector`;
     - the text patches and the compositor;
     - `DraftCanvas`.
-- **S3. The pure helpers stay in core.**
-  - `buildFrameInfo` and `dashScaleFor` move to a GPU-free file in
-    `jet_cad_2d_flutter`.
-  - `ResidentGeometry`'s pure statics move to a new core class,
-    `ResidentLayout`, with the same members: `kCornerVertices`,
-    `kFloatsPerCorner`, `cornerVertexCount(…)` and `byteLengthFor(…)`.
-    `ResidentCollection` uses it.
-  - `ResidentGeometry` keeps forwarding statics for the harness, or the
-    harness is updated; the plan decides.
-  - The tests of these helpers stay where they are.
+- **S3. The pure helpers stay in core**, and the core barrel exports
+  them.
+  - `buildFrameInfo` and `dashScaleFor` move to
+    `lib/src/gpu/frame_info.dart`.
+  - `ResidentGeometry`'s pure statics move to `ResidentLayout`, in
+    `lib/src/gpu/resident_layout.dart`, with the same members:
+    `kCornerVertices`, `kFloatsPerCorner`, `cornerVertexCount(…)` and
+    `byteLengthFor(…)`. `kCornerVertices` loses `@visibleForTesting`
+    (F-11).
+  - There are no forwarding statics: the harness (`gpu_arm.dart:349,
+    466`) and core's tests switch to `ResidentLayout` (V-14).
+  - `kFloatsPerInstance` and `InstanceFieldOffset` are exported from the
+    barrel with `show` (F-11, V-3). The GPU package imports only core's
+    barrel.
+  - The import cycle between the rebuilder and the GPU backend goes away
+    with the move. The rebuilder drops the imports it no longer uses.
 - **S4. A registry is the seam.** Core gains a small registry in
   `lib/src/gpu/resident_gpu.dart`:
   - `abstract interface class ResidentGpu`, with:
@@ -177,7 +233,19 @@ by `RenderBackend.residentGpu`, never by default (F-3).
   - The harness calls `installResidentGpu()` at startup. No host does.
 
   Core's tests that used `debugSetGpuAvailable(true)` register a fake
-  `ResidentGpu` instead, and reset it in `tearDown`.
+  `ResidentGpu` instead, and reset it in `tearDown`. Registering `null`
+  clears the registration.
+  - **The fallback report** (`draft_canvas.dart:334`, which names
+    `gpuAvailable()` today) gains two wordings, still reported once per
+    process (V-9):
+    - "no resident GPU is installed";
+    - "the installed resident GPU is unavailable".
+  - **The widget's own `residentUploader`**, when given, wins over the
+    registry.
+  - **The harness** calls `installResidentGpu()` first in `main()`, before
+    each of its `runApp` branches, and in
+    `integration_test/frame_timing_test.dart`, which pumps `HarnessApp`
+    itself (V-11).
 - **S5. Behaviour is unchanged.** A process that calls
   `installResidentGpu()` draws exactly as today in every backend. One
   that does not draws exactly as today in `canvas` and `vertices`. When
@@ -188,21 +256,48 @@ by `RenderBackend.residentGpu`, never by default (F-3).
     `installResidentGpu()`, `resolveBackend` follows `gpuAvailable()`.
   - Core keeps `backend_selection`, `render_backend`,
     `draft_canvas_fallback` and `draft_canvas_resident`, rewritten on the
-    registry.
+    registry. `render_backend_test` no longer imports the facade.
+  - Core's tests of the pure helpers (F-12) switch to `ResidentLayout`
+    and `frame_info.dart`; `instance_expander_test` keeps reading the
+    shader source from core.
   - Every test stays green, and the goldens and the standing sets are
     unchanged.
 - **S7. A guard in core.** A source test in `jet_cad_2d_flutter` fails if
   either of these holds:
-  - its pubspec names `flutter_scene`, `flutter_gpu` or `jet_cad_2d_gpu`;
-  - a file under `lib/` imports any of them.
+  - its pubspec has `flutter_scene`, `flutter_gpu` or `jet_cad_2d_gpu` as
+    a dependency key, matched as a key rather than as free text. The
+    pubspec's comment naming `flutter_scene` goes.
+  - a file under `lib/` has a `package:` URI to any of them, whether in an
+    import, an export or a conditional import (V-12).
 - **S8. A guard in CI.**
-  - `tool/ci` gains `check_host_lock.dart`. Given a `pubspec.lock`, it
-    exits 1 if any of `flutter_scene`, `flutter_gpu`,
-    `flutter_gpu_shaders` or `scene` is in it. It is tested on a lock
-    recorded before the split (red) and one recorded after (green).
-  - `host_probe.sh` runs it after `pub get`, and after the web build
-    asserts that `build/web/assets/packages/flutter_scene` does not exist.
-  - The CI matrix gains `packages/jet_cad_2d_gpu`.
+  - **`check_host_lock.dart`** is new in `tool/ci`. Given a `pubspec.lock`,
+    it exits 1 if any of these is a key under `packages:`:
+    - `flutter_scene`;
+    - `flutter_gpu`;
+    - `flutter_gpu_shaders`;
+    - `scene`;
+    - `jet_cad_2d_gpu`.
+
+    It matches keys exactly, not text. Its tests (V-2):
+    - one red fixture per name;
+    - a green fixture recorded after the split, with look-alike names
+      added (`scene_x`, `my_flutter_scene_tools`).
+
+    The fixtures are named `*.lock.txt`, because `*.lock` is git-ignored.
+  - **`host_probe.sh`** (V-8):
+    - first removes `build`, `.dart_tool` and `pubspec.lock`, because
+      stale output survives a build (the reviewer's E4);
+    - runs the check, by absolute path, after `pub get`;
+    - after the web build, asserts that none of these hold:
+      - `.dart_tool/hooks_runner` exists, which is the POS's literal
+        requirement;
+      - `build/web/assets/packages/flutter_scene` exists;
+      - `main.dart.js` contains `cad.shaderbundle`.
+  - **`ci.yml`:**
+    - the analysis and format lists name `check_host_lock.dart`;
+    - the matrix gains `packages/jet_cad_2d_gpu`;
+    - the web job asserts that the floor planner's and the demo's builds
+      have no `assets/packages/flutter_scene` (F-9, V-7).
 - **S9. Docs.**
   - **CHANGELOG, Unreleased:**
     - the split;
@@ -211,10 +306,18 @@ by `RenderBackend.residentGpu`, never by default (F-3).
       `jet_cad_2d_flutter`'s barrel: `GpuDrawBackend`,
       `ResidentGeometry`, `debugSetGpuAvailable` and
       `uploadResidentCollection`. No host did.
-  - **The host guide:** the floor is set by the remaining dependencies,
-    measured from the probe's fresh lock; the guide says what it is.
-  - **The roadmap:** its package bullets, and its "web included" line
-    (`flutter_scene`'s shim has a WebGL2 path).
+  - **The host guide:** "Flutter 3.44" becomes true again. It is
+    measured by `flutter pub downgrade` in the probe (F-10). The CHANGELOG
+    says the host floor falls from 3.47 to 3.44, and that
+    `jet_cad_2d_gpu` is not a host package. Its breaking names include
+    `ResidentPatch` (V-1, V-13).
+  - **CLAUDE.md and AGENTS.md:** "every task ends green" names the new
+    package's gate (V-13).
+  - **The roadmap:**
+    - its package bullets;
+    - its line on `.vscode/launch.json`, which was already wrong (V-15);
+    - its "web included" line: `flutter_scene`'s shim has a WebGL2 path,
+      and the GPU is used only where `installResidentGpu()` was called.
 
 ## Invariants
 
@@ -235,7 +338,10 @@ by `RenderBackend.residentGpu`, never by default (F-3).
 - **M-G2, the lock guard.**
   - The test: S8's `check_host_lock` on the recorded locks; a script test
     by exit code, as SC1–SC8 do.
-  - Mutants: the check dropped; one name missing from the list.
+  - Mutants:
+    - the check dropped;
+    - each name missing from the list, in turn;
+    - text matching instead of keys, which the look-alike names catch.
 - **M-G3, the registry.**
   - The tests:
     - with nothing registered, `residentGpu` falls back to `vertices`,
@@ -243,12 +349,21 @@ by `RenderBackend.residentGpu`, never by default (F-3).
     - with an available fake registered, `DraftCanvas` uses its uploader
       and paints through its painter;
     - with an unavailable fake, it falls back.
+    - registering `null` clears it;
+    - the widget's own `residentUploader` wins.
+
+    These tests pass no `residentUploader`, except the one that
+    exercises it.
   - Mutants:
     - `resolveBackend` ignoring `available`;
-    - `DraftCanvas` ignoring the registered uploader.
+    - `DraftCanvas` ignoring the registered uploader;
+    - the two fallback wordings swapped.
 - **M-G4, the install.**
-  - The test: `installResidentGpu()` registers a `ResidentGpu` whose
-    `available` follows `debugSetGpuFactory`.
+  - The tests (V-10):
+    - after `installResidentGpu()`, the registered `ResidentGpu`'s
+      `available` follows `debugSetGpuAvailable`, flipped after install;
+    - `upload` returns null with a throwing factory;
+    - installing twice registers one.
   - Mutant: `available` hard-coded to true.
 - **The probe, the real acceptance.** Built at the commit, its lock holds
   none of the four names. Its web build has no
@@ -265,6 +380,39 @@ by `RenderBackend.residentGpu`, never by default (F-3).
   as `debugSetGpuAvailable` was. Tests reset it in `tearDown`.
 - **R-3. Breaking barrel names.** The GPU names leave the core barrel. Only
   the harness used them.
+
+## Review
+
+Revision 1 (`567fbf9`) was reviewed independently: *Approved with fixes*.
+The reviewer ran four experiments in clones:
+- the probe's lock without `flutter_scene`;
+- a trial split and its web build;
+- a minimal workspace;
+- stale build output.
+
+Their results are F-9, F-10 and S8. No finding was critical.
+
+| # | Finding | Disposition |
+|---|---|---|
+| V-1 important | The floor came from a fresh lock: Dart 3.13 is pub's newest `xml`, not the floor. | Measured by `flutter pub downgrade`: 3.44 (F-10, S9). |
+| V-2 important | "One name missing" survived a fixture holding all four names. | One red fixture per name; look-alikes; `jet_cad_2d_gpu` listed; keys matched exactly. |
+| V-3 important | `kFloatsPerInstance` and `InstanceFieldOffset` are not exported. | Exported with `show` (S3). |
+| V-4 important | `kCornerVertices` is `@visibleForTesting`. | Dropped (S3). |
+| V-5 important | `instance_expander_test` reads the shader source from core. | The sources stay in core (S1). |
+| V-6 minor | Core tests unnamed. | F-12, S6. |
+| V-7 minor | In-workspace apps also lose the hook (E3). | F-9; the web job asserts it. |
+| V-8 minor | Stale output, the hook directory, the shader path in JS, the analysis list. | S8. |
+| V-9 minor | The fallback wording names `gpuAvailable()`. | Two wordings (S4). |
+| V-10 minor | Mutant gaps in M-G3 and M-G4. | Added. |
+| V-11 minor | The harness's four `runApp` branches and its integration test. | S4. |
+| V-12 minor | The S7 guard matched text, imports only. | Keys and every `package:` URI (S7). |
+| V-13 nit | The new package's floor, the gate lines, the CHANGELOG, the report's library. | S1, S9. |
+| V-14 nit | S3 left open. | Decided: `ResidentLayout`, no forwarding. |
+| V-15 nit | The roadmap's launch-entry line and its web line. | S9. |
+
+The registry seam (S4) was judged the right shape. The alternative, a
+public uploader with an availability callback, would have to be threaded
+through every `DraftCanvas` the planner builds.
 
 ## Not in scope
 
