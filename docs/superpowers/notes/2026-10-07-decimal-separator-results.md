@@ -9,7 +9,7 @@ V-1 to V-19. Q2 is assumed as proposed (N1).
 **Plan:** [2026-10-07-decimal-separator.md](../plans/2026-10-07-decimal-separator.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `0ca8b64`.
-**Not merged.**
+**Not merged: ready, on the human's word.**
 
 **Process.** Each of Tasks 1–4 had a fresh implementer, then an
 independent reviewer working in its own clone. Task 5 (the docs and the
@@ -93,22 +93,22 @@ The reviewers' own mutants are recorded in their reviews. Every survivor
 they found is now red, with one exception: a `toString` without the field,
 which the testing bar does not ask for.
 
-## Gates (at `f4afa58`)
+## Gates (at `d8f596a`, after the review's fixes)
 
 | Package | Result |
 |---|---|
 | engine `packages/jet_cad_2d` | `+1253 -2`: the standing comparison reads "1255 tests; the standing failures and skips, exactly". Analyze and format clean. |
 | render `packages/jet_cad_2d_flutter` | `+1334 ~1 -7`: the standing comparison reads "1342 tests; the standing failures and skips, exactly". Analyze and format clean. |
-| planner `packages/jet_cad_floor_plan` | **1,375 passed**. Analyze and format clean. |
+| planner `packages/jet_cad_floor_plan` | **1,380 passed** (1,359 before Q0). Analyze and format clean. |
 | restaurant symbols | **97 passed**. Analyze and format clean. |
-| app `apps/floor_planner` | **212 passed**. Analyze and format clean. `flutter build web` ✓ |
-| demo `apps/restaurant_demo` | **37 passed**. Analyze and format clean. `flutter build web` ✓ |
+| app `apps/floor_planner` | **212 passed** (207 before). Analyze and format clean. `flutter build web` ✓ |
+| demo `apps/restaurant_demo` | **37 passed** (35 before). Analyze and format clean. `flutter build web` ✓ |
 | `tool/ci` | **32 passed**. `check_guide` is green; the guide's code blocks are unchanged. |
 
 The two allocation invariant tests and the goldens are untouched.
 
-**Smoke test** in Chromium, on the web build of the floor planner at this
-commit:
+**Smoke test** in Chromium, on the web build of the floor planner at
+`f4afa58` (the review's fixes after it are tests, docs and two guards):
 - **`de-DE`:**
   - The launch plan's Page panel shows *Dezimaltrennzeichen* with `1,5`
     selected.

@@ -51,8 +51,11 @@ room areas and the rulers print it; a new plan takes the UI language's
 Spec [2026-10-07-decimal-separator-design.md](docs/superpowers/specs/2026-10-07-decimal-separator-design.md)
 (rev 2, reviewed), plan [2026-10-07-decimal-separator.md](docs/superpowers/plans/2026-10-07-decimal-separator.md),
 results [2026-10-07-decimal-separator-results.md](docs/superpowers/notes/2026-10-07-decimal-separator-results.md).
-Tasks 1–5 done, each reviewed; gates green; the independent review of
-the range in progress.
+Tasks 1–5 done, each reviewed; the independent review of the range
+(*Approved with fixes*) applied in `d8f596a`; every gate green (planner
+1,380, app 212, demo 35→37, the standing sets exactly). **Ready to merge,
+on the human's word.** Owed: the Q2 ruling (N1 assumed), a look in German
+and Turkish, the macOS fingerprints.
 
 ## Owed to the human
 
@@ -73,10 +76,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** Offered on 2026-10-07: the real POS
-integration (the POS repository added to a session, the host guide
-followed), or the plan's own text in the UI's decimal separator (14d's
-deferred Q0: schema 8).
+**Next: Q0's merge, on the human's word**, then the human's choice: the
+real POS integration (the POS repository added to a session, the host
+guide followed), or a release (0.2.0: schema 8 is unreleased on `main`
+once merged).
 
 ---
 
