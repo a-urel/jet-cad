@@ -442,7 +442,9 @@ a desktop.
   the plan, not to the terminal: a plan you load keeps its own, whatever
   the language. An empty plan a controller creates takes the language of
   the first `FloorPlanView` that shows it; until then, and with no view,
-  it is `.`. In 0.1.0 dimensions and areas always print with `.`.
+  it is `.`. `newPlan()` takes the language a view of that controller
+  last showed, which may be stale if the language changed while none was
+  mounted. In 0.1.0 dimensions and areas always print with `.`.
 - **Schema 8** *(unreleased on `main`)*. A plan saved by this version is
   at schema 8, which 0.1.0 refuses (`load` throws a `FormatException`
   that says why); a 0.1.0 plan opens here unchanged. Move every terminal

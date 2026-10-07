@@ -422,8 +422,11 @@ class FloorPlanController extends ChangeNotifier {
   void reportLanguage(FloorPlanStrings strings) {
     final separator = documentSeparatorFor(strings);
     _reported = separator;
-    if (!_untouched) return;
+    // The first language settles the plan or finds it touched; either way
+    // it is unsettled no more (Task 4 review).
+    final untouched = _untouched;
     _unsettledAt = null;
+    if (!untouched) return;
     final d = _design.document;
     final page = d.components.get<PageComponent>(d.rootHandle)!;
     if (page.decimalSeparator == separator) return;

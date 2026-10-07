@@ -68,6 +68,28 @@ void addLayer(FloorPlanController c) {
 
 void main() {
   testWidgets(
+      'NS6 the constructor\'s empty plan shown first in English is settled '
+      'at point: a later Turkish view leaves it point, with no undo step '
+      'and clean (Task 4 review)', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = FloorPlanController();
+    addTearDown(c.dispose);
+    final made = c.activeDocument;
+    await show(tester, c, const Locale('en'));
+    expect(separatorOf(made), DecimalSeparator.point);
+    await show(tester, c, const Locale('tr'));
+    await tester.pump();
+    expect(identical(c.activeDocument, made), isTrue);
+    expect(separatorOf(made), DecimalSeparator.point,
+        reason: 'settled by the first language, already point (N2)');
+    expect(panelShows(tester), {DecimalSeparator.point});
+    expect(made.commands.undoDepth, 0);
+    expect(c.canUndo.value, isFalse);
+    expect(c.dirty.value, isFalse);
+  });
+
+  testWidgets(
       'NS1 the constructor\'s empty plan, shown in Turkish, prints comma as '
       'if made so: no undo step, clean, nothing on serviceLayoutChanges; a '
       'switch to English keeps it; newPlan() in English is point and stays '
