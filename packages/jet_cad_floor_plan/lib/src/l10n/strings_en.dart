@@ -294,6 +294,9 @@ class FloorPlanStringsEn extends FloorPlanStrings {
   String get pageBreaks => 'Page breaks';
 
   @override
+  String get pageDecimalSeparator => 'Decimal separator';
+
+  @override
   String get paper => 'Paper';
 
   @override

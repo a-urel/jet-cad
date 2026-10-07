@@ -235,6 +235,29 @@ class PagePanelState extends State<PagePanel> {
                     if (u != null) _set(page.copyWith(displayUnit: u));
                   },
                 ),
+                // Spec Q0 P1: the page's own separator, the one its text
+                // prints with. It shows the page's value, never the UI's
+                // (`_strings.decimalSeparator`); the segments are digits,
+                // the same in every language.
+                const SizedBox(height: 8),
+                Text(_strings.pageDecimalSeparator),
+                const SizedBox(height: 4),
+                SegmentedButton<DecimalSeparator>(
+                  key: const Key('page-decimal-separator'),
+                  segments: const [
+                    ButtonSegment(
+                        value: DecimalSeparator.point,
+                        label: Text('1.5',
+                            key: Key('page-decimal-separator-point'))),
+                    ButtonSegment(
+                        value: DecimalSeparator.comma,
+                        label: Text('1,5',
+                            key: Key('page-decimal-separator-comma'))),
+                  ],
+                  selected: {page.decimalSeparator},
+                  onSelectionChanged: (s) =>
+                      _set(page.copyWith(decimalSeparator: s.single)),
+                ),
                 CheckboxListTile(
                   key: const Key('page-grid'),
                   title: Text(_strings.grid),

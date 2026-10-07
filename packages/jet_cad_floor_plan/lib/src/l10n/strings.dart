@@ -293,6 +293,10 @@ abstract class FloorPlanStrings {
   /// "Page breaks".
   String get pageBreaks;
 
+  /// "Decimal separator": the caption of the page's own separator, the
+  /// one the plan's text prints with (not [decimalSeparator]).
+  String get pageDecimalSeparator;
+
   /// "Paper".
   String get paper;
 

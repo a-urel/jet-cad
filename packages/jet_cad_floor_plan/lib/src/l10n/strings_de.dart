@@ -294,6 +294,9 @@ class FloorPlanStringsDe extends FloorPlanStrings {
   String get pageBreaks => 'Seitenumbrüche';
 
   @override
+  String get pageDecimalSeparator => 'Dezimaltrennzeichen';
+
+  @override
   String get paper => 'Papier';
 
   @override

@@ -293,6 +293,9 @@ class FloorPlanStringsTr extends FloorPlanStrings {
   String get pageBreaks => 'Sayfa sonları';
 
   @override
+  String get pageDecimalSeparator => 'Ondalık ayırıcı';
+
+  @override
   String get paper => 'Kâğıt';
 
   @override
