@@ -348,8 +348,6 @@ More gates: `packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`
   shared `printInvariants` line. Old greps will miss it.
 - **The `plan-3c` ledger is the only progress record** for that plan — TodoWrite
   was unavailable in the session that ran it. Keep appending to it.
-
----
 - **This session's git proxy refuses tag pushes** (2026-10-06: *unexpected
   disconnect*, four tries); branch pushes work. A tag is pushed by the
   human.

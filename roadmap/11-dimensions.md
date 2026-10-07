@@ -10,7 +10,7 @@ the human's report. Spec
 results
 [2026-09-28-plan-11-results.md](../docs/superpowers/notes/2026-09-28-plan-11-results.md),
 ledger `docs/superpowers/ledgers/2026-09-28-dimensions/`.
-See [STATUS.md](../STATUS.md).
+See [STATUS-HISTORY.md](../STATUS-HISTORY.md#plan-11--dimensions-executed-on-plan-11dimensions-not-merged).
 
 *Before Plan 11 ran, this line read:* **Status:** not started
 **Depends on:** 06, 03

@@ -64,6 +64,7 @@ class FloorPlannerApp extends StatefulWidget {
   const FloorPlannerApp(
       {super.key,
       this.files,
+      this.createFiles = createDocumentFiles,
       this.exitGuard,
       this.symbols,
       this.thumbnails,
@@ -71,6 +72,12 @@ class FloorPlannerApp extends StatefulWidget {
       this.printer = const PrintingPagePrinter()});
 
   final DocumentFiles? files;
+
+  /// Makes the files when [files] is null: the platform's, a test seam
+  /// that sees the prompt and the type names the app hands over.
+  final DocumentFiles Function(
+      {required DocumentNamePrompt askName,
+      required FileTypeLabel typeLabel}) createFiles;
 
   /// Handed to the [DocumentHost], which owns it (spec 12a D11).
   final ExitGuard? exitGuard;
@@ -100,7 +107,7 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
   final DocumentSession _session = DocumentSession.untitled();
   late final DocumentFiles _files = widget.files ??
-      createDocumentFiles(askName: _askName, typeLabel: _typeLabel);
+      widget.createFiles(askName: _askName, typeLabel: _typeLabel);
 
   /// The loader this app made itself, disposed with it; null when the
   /// caller gave one.

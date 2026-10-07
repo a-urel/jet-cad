@@ -92,11 +92,7 @@ final class _En extends AppStrings {
   String get untitled => 'Untitled';
 
   @override
-  String fileTypeLabel(FileKind kind) => switch (kind) {
-        FileKind.jetplan => 'Jet plan',
-        FileKind.pdf => 'PDF document',
-        FileKind.png => 'PNG image',
-      };
+  String fileTypeLabel(FileKind kind) => kind.label;
 
   @override
   String get couldNotOpenFile => 'Could not open the file';

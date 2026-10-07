@@ -6,7 +6,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/widgets.dart' show Size;
+import 'package:flutter/widgets.dart' show Offset, Size;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
@@ -24,6 +24,17 @@ import 'service_layout.dart';
 /// The thumbnail capacity of a controller's own cache: the app's (spec
 /// 14b-2 R-11), above the 96 symbols of both libraries.
 const int kFloorPlanThumbnailCapacity = 128;
+
+/// Where each mode's canvas starts in a `FloorPlanView`, until a view has
+/// measured it (R-13 as amended): the editor's top bar (44), left panel
+/// (240) and rulers; the service bar (44). Read when a controller is made;
+/// a test seam.
+@visibleForTesting
+final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds = {
+  FloorPlanMode.design:
+      const Offset(240 + kRulerThickness, 44 + kRulerThickness),
+  FloorPlanMode.selection: const Offset(0, 44),
+};
 
 /// One plan the controller holds: the document, the measurer it was built
 /// with, the selection over it, and the controller's subscription to it.
@@ -319,6 +330,40 @@ class FloorPlanController extends ChangeNotifier {
   @internal
   void fitted() => _fitPending = false;
 
+  // R-13, amended by the human (2026-10-07, "planın yeri korunsun"): a mode
+  // switch keeps the plan where it is on the screen. The camera's numbers
+  // are in the shown canvas's coordinates, and the two modes' canvases
+  // start at different places in the view, so [setMode] reframes the
+  // camera by the difference of their origins -- here, not in a view, so a
+  // switch made while no view is shown keeps the place too. The origins
+  // are seeded ([floorPlanCanvasSeeds]) and replaced by what a view
+  // measures; a reframing made with an origin a measurement then corrects
+  // is corrected with it.
+  final Map<FloorPlanMode, Offset> _canvasAt = Map.of(floorPlanCanvasSeeds);
+
+  /// The origins a reframing used and no measurement has confirmed yet.
+  final Map<FloorPlanMode, Offset> _assumed = {};
+
+  void _reframe(FloorPlanMode from, FloorPlanMode to) {
+    final a = _canvasAt[from]!, b = _canvasAt[to]!;
+    _assumed.putIfAbsent(from, () => a);
+    _assumed.putIfAbsent(to, () => b);
+    if (a != b) camera.panBy(a - b);
+  }
+
+  /// A view measured where mode [shown]'s canvas starts in it, after the
+  /// frame that first showed a plan in that mode. When a reframing assumed
+  /// another origin, the camera is corrected: into the shown mode, by what
+  /// the assumption missed; out of a mode no longer shown, by the same the
+  /// other way.
+  @internal
+  void canvasMeasured(FloorPlanMode shown, Offset origin) {
+    _canvasAt[shown] = origin;
+    final assumed = _assumed.remove(shown);
+    if (assumed == null || assumed == origin) return;
+    camera.panBy(shown == _mode.value ? assumed - origin : origin - assumed);
+  }
+
   /// Starts loading the symbol library, once, when the design view first
   /// mounts (R-11): the binding exists then.
   @internal
@@ -502,6 +547,7 @@ class FloorPlanController extends ChangeNotifier {
       _drop(_service!);
       _service = null;
     }
+    _reframe(_mode.value, next);
     _mode.value = next;
     _select(numbers);
     _refreshFlags();

@@ -30,11 +30,10 @@ void main() {
       'DS3 the app names the panels\' types through its strings (spec 14d '
       'L16, review 14d-1 F-5)', () {
     final main = File('lib/main.dart').readAsStringSync();
-    expect(
-        main,
-        contains(
-            'createDocumentFiles(askName: _askName, typeLabel: _typeLabel)'));
-    expect(main, contains('AppStrings.of(context).fileTypeLabel(kind)'));
+    expect(main,
+        contains('createFiles(askName: _askName, typeLabel: _typeLabel)'));
+    expect(main, contains('this.createFiles = createDocumentFiles'),
+        reason: 'the platform\'s files by default');
   });
 
   test('DS2 the web save names the file and types the blob by the kind', () {

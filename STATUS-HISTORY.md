@@ -1,4 +1,4 @@
-# jet-cad — status history
+**jet-cad — status history.**
 
 The project's STATUS file as it stood on 2026-10-07, before it was cut
 down to the current state ([STATUS.md](STATUS.md)). **Nothing here was
