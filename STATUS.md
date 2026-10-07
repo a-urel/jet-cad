@@ -31,21 +31,19 @@ one's spec, plan and results.
 - **Main's own line before the 14d merge** (PRs 1–9, 2026-10-05): the dark
   theme and dark canvas, table groups and their fixes; their records are
   in STATUS-HISTORY.md's first entries.
+- **The cleanup batch** (the human, 2026-10-07: *"2 ile devam et, R-13'te
+  planın yeri korunsun"*), merged into `main` at `c667ed6` on the human's
+  *"evet, main'e merge et"*: R-13 as amended (a mode switch keeps the plan
+  in place on the screen; the controller reframes the camera), the floor
+  planner's file panels worded in the app's language (14d-1 review F-5),
+  `actions/checkout@v5`, this STATUS cut down with its history moved
+  whole; an independent review (*Approved with fixes*), fixed in
+  `6c7b5c9`. Record:
+  [2026-10-07-cleanup.md](docs/superpowers/notes/2026-10-07-cleanup.md).
 
 ## In flight
 
-**The cleanup batch** (the human, 2026-10-07: *"2 ile devam et, R-13'te
-planın yeri korunsun"*), on `claude/exciting-pasteur-9m22jv`, not merged:
-- **R-13 as amended:** a mode switch keeps the plan in place on the
-  screen (`98481c3`);
-- **the floor planner's file panels** name their types in the app's
-  language (`1895e36`; 14d-1 review F-5);
-- **CI:** `actions/checkout@v5`;
-- **this STATUS**, cut down, its history moved whole;
-- an independent review (*Approved with fixes*), its fixes in `6c7b5c9`:
-  R-13's reframing moved into the controller.
-Gates green (planner 1,359, app 207, demo 35, the standing sets).
-**Ready to merge, on the human's word.** Record: [2026-10-07-cleanup.md](docs/superpowers/notes/2026-10-07-cleanup.md).
+Nothing. The last batch, below, is merged.
 
 ## Owed to the human
 
@@ -69,8 +67,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 **Next: the human's choice.** Offered on 2026-10-07: the real POS
 integration (the POS repository added to a session, the host guide
 followed), or the plan's own text in the UI's decimal separator (14d's
-deferred Q0: schema 8). Before either, the cleanup batch's merge, on the
-human's word.
+deferred Q0: schema 8).
 
 ---
 
