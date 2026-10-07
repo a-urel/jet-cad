@@ -38,6 +38,7 @@ flight.
 ```sh
 cd packages/jet_cad_2d       && dart test && dart analyze && dart format --output=none --set-exit-if-changed .
 cd packages/jet_cad_2d_flutter && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
+cd packages/jet_cad_2d_gpu     && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
 ```
 
 ## Testing bar

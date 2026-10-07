@@ -50,7 +50,11 @@ with the planner. Import only the two barrels:
 Anything under `src/` is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-the release was built and tested with Flutter 3.47.6.
+the release was built and tested with Flutter 3.47.6. On `main` since the
+GPU split they bring no build hook and no GPU renderer: nothing runs at
+build time beyond Flutter's own. **0.1.0 itself still resolves
+`flutter_scene`**, whose build hook compiles shaders and needs Flutter
+3.47; the next release drops it.
 
 ## 2. Fonts
 

@@ -28,6 +28,21 @@ On `main`, not yet released.
   language inherits it).
 - `jet_cad_2d`: `PageComponent.decimalSeparator`, `DecimalSeparator`,
   and `formatLength(…, decimalSeparator:)`.
+- **The GPU renderer moves to its own package, `jet_cad_2d_gpu`.**
+  `jet_cad_2d_flutter` no longer depends on `flutter_scene`, so a host's
+  graph holds no `flutter_scene`, `flutter_gpu`, `flutter_gpu_shaders`
+  or `scene`, and runs no build hook: no shader compiler at build time,
+  and about 12 MB less in a web build. **The host's Flutter floor falls
+  from 3.47 back to 3.44**, as the host guide says (measured by
+  `flutter pub downgrade`). `jet_cad_2d_gpu` is not a host package: it is
+  the dev harness's, and a host never depends on it. Nothing a host
+  draws changes: the GPU path was only ever chosen by the harness.
+- **Breaking for code that imported the GPU types** from
+  `jet_cad_2d_flutter`'s barrel (no host did): `GpuDrawBackend`,
+  `ResidentGeometry`, `ResidentPatch`, `debugSetGpuAvailable` and
+  `uploadResidentCollection` now come from
+  `package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart`, and the GPU is used only
+  after `installResidentGpu()`.
 
 ## 0.1.0
 
