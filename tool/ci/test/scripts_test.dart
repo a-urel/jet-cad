@@ -1,5 +1,6 @@
-// Review F-2 (spec 14d M-14d-q): the two scripts that give CI its verdict,
-// run as CI runs them, by their exit codes.
+// Review F-2 (spec 14d M-14d-q): the scripts that give CI its verdict, run
+// as CI runs them, by their exit codes. check_host_lock.dart is the GPU
+// split's (spec S8, M-G2).
 import 'dart:io';
 
 import 'package:test/test.dart';
@@ -69,6 +70,61 @@ void main() {
       final guide = File('${tmp.path}/guide.md')..writeAsStringSync('# Text\n');
       final r = await dartRun('check_guide.dart', ['--guide', guide.path]);
       expect(r.exitCode, 1);
+    });
+  });
+
+  group('check_host_lock.dart', () {
+    late Directory tmp;
+    setUp(() => tmp = Directory.systemTemp.createTempSync('check_host_lock'));
+    tearDown(() => tmp.deleteSync(recursive: true));
+
+    test('SC9 the lock after the split, look-alikes and all: exit 0', () async {
+      final r = await dartRun(
+          'check_host_lock.dart', ['test/fixtures/host_post_split.lock.txt']);
+      expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+      expect(r.stdout, contains('42 packages, none of flutter_scene, '));
+    });
+
+    test('SC10 the lock before the split: exit 1, each package named',
+        () async {
+      final r = await dartRun(
+          'check_host_lock.dart', ['test/fixtures/host_pre_split.lock.txt']);
+      expect(r.exitCode, 1);
+      for (final name in const [
+        'flutter_gpu',
+        'flutter_gpu_shaders',
+        'flutter_scene',
+        'scene',
+      ]) {
+        expect(r.stdout, contains('a host must not resolve $name\n'));
+      }
+    });
+
+    test('SC11 the GPU package alone: exit 1', () async {
+      final green =
+          File('test/fixtures/host_post_split.lock.txt').readAsStringSync();
+      expect(green, contains('\n  jet_cad_2d_flutter:\n'), reason: 'premise');
+      final lock = File('${tmp.path}/pubspec.lock')
+        ..writeAsStringSync(green.replaceFirst('\n  jet_cad_2d_flutter:\n',
+            '\n  jet_cad_2d_gpu:\n    source: git\n  jet_cad_2d_flutter:\n'));
+      final r = await dartRun('check_host_lock.dart', [lock.path]);
+      expect(r.exitCode, 1);
+      expect(r.stdout, contains('a host must not resolve jet_cad_2d_gpu'));
+    });
+
+    test('SC12 no lock to read, or not a lock: exit 2', () async {
+      final missing =
+          await dartRun('check_host_lock.dart', ['${tmp.path}/no_such.lock']);
+      expect(missing.exitCode, 2);
+      final text = File('${tmp.path}/pubspec.lock')
+        ..writeAsStringSync('name: host_probe\n');
+      final notLock = await dartRun('check_host_lock.dart', [text.path]);
+      expect(notLock.exitCode, 2);
+    });
+
+    test('SC13 bad arguments: exit 2', () async {
+      expect((await dartRun('check_host_lock.dart', const [])).exitCode, 2);
+      expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
     });
   });
 }
