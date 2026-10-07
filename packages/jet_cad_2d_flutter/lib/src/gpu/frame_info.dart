@@ -23,7 +23,8 @@ import '../viewport_transform.dart';
 /// to 80 -- the same 80 the block was before this member existed, because
 /// that trailing 4 bytes (float index 19) was always pure alignment padding,
 /// never a second scalar. The 128
-/// `impellerc` reports (`resident_geometry.dart`'s doc comment) is real, but
+/// `impellerc` reports (the doc comment in `resident_geometry.dart`, now in
+/// package `jet_cad_2d_gpu`) is real, but
 /// it is *reflected struct size*, not *bytes the runtime requires bound* --
 /// neither `RenderPass.bindUniform` nor `HostBuffer.emplace` on the native
 /// side ever reads `UniformSlot.sizeInBytes`

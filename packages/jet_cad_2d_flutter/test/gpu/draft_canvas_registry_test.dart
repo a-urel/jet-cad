@@ -124,6 +124,20 @@ void main() {
         reason: 'the landed frame went through the registered painter');
     expect(painter.lastViewport, kCanvas);
     expect(gpu.uploader.collections.single, same(s.resident!.collection));
+    // What the canvas handed the registered upload. Not degenerate: the
+    // viewport is the 400x300 canvas, not `Size.zero` or a default; the
+    // measurer is the document's own instance, the one this test built.
+    expect(doc.textMeasurer, same(measurer));
+    expect(gpu.lastCollection, same(s.resident!.collection));
+    // MUTATION: `Size.zero` passed as the upload viewport (the patch-target
+    // ceiling) instead of the canvas's.
+    expect(gpu.lastViewport, kCanvas);
+    // MUTATION: a fresh `FlutterTextMeasurer()` passed instead of the
+    // document's -- the text patches would measure into a second cache.
+    expect(gpu.lastMeasurer, same(measurer));
+    // MUTATION: another style lookup passed (a closure, or another
+    // document's). Tear-offs of one method on one receiver compare equal.
+    expect(gpu.lastTextStyleOf, doc.textStyleOf);
     expect(t.takeException(), isNull);
     expect(DraftCanvas.debugResidentFallbackReports, 0);
   });

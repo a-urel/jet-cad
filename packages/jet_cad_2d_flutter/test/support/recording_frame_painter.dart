@@ -6,8 +6,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 /// A `ResidentFramePainter` that draws nothing and remembers being asked.
 /// Stands in for `GpuDrawBackend` (package `jet_cad_2d_gpu`), which cannot
-/// be constructed without a live GPU (`resident_geometry.dart`'s own doc
-/// comment on `create`).
+/// be constructed without a live GPU (the doc comment on `create` in
+/// `jet_cad_2d_gpu`'s `resident_geometry.dart`).
 class RecordingFramePainter implements ResidentFramePainter {
   RecordingFramePainter(this.collection);
   final ResidentCollection collection;
@@ -67,7 +67,10 @@ ViewportTransform zoomedAbout(ViewportTransform base, Offset centre, double s) {
 
 /// A `ResidentGpu` the test controls: [available] is a plain field, and
 /// [upload] forwards to its own [uploader] (a [FakeUploader]), counting
-/// calls in [uploads]. Registered with `registerResidentGpu` and cleared in
+/// calls in [uploads] and recording the last call's arguments -- the
+/// viewport is the patch-target ceiling and the measurer and style lookup
+/// drive the text patches, so what `DraftCanvas` hands over is asserted,
+/// not assumed. Registered with `registerResidentGpu` and cleared in
 /// `tearDown` -- the registry is process-wide.
 class FakeResidentGpu implements ResidentGpu {
   FakeResidentGpu({this.available = true});
@@ -77,6 +80,10 @@ class FakeResidentGpu implements ResidentGpu {
 
   final FakeUploader uploader = FakeUploader();
   int uploads = 0;
+  ResidentCollection? lastCollection;
+  Size? lastViewport;
+  FlutterTextMeasurer? lastMeasurer;
+  TextStyleRecord Function(Handle)? lastTextStyleOf;
 
   @override
   Future<ResidentFramePainter?> upload(
@@ -86,6 +93,10 @@ class FakeResidentGpu implements ResidentGpu {
     required TextStyleRecord Function(Handle) textStyleOf,
   }) {
     uploads++;
+    lastCollection = collection;
+    lastViewport = viewport;
+    lastMeasurer = measurer;
+    lastTextStyleOf = textStyleOf;
     return uploader.call(collection, viewport);
   }
 }
