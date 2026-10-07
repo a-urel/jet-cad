@@ -7,6 +7,7 @@ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
     show floorPlanLocalizationsDelegates, floorPlanSupportedLocales;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
+import 'app_strings.dart';
 import 'document_files.dart';
 import 'document_host.dart';
 import 'exit_guard.dart';
@@ -63,6 +64,7 @@ class FloorPlannerApp extends StatefulWidget {
   const FloorPlannerApp(
       {super.key,
       this.files,
+      this.createFiles = createDocumentFiles,
       this.exitGuard,
       this.symbols,
       this.thumbnails,
@@ -70,6 +72,12 @@ class FloorPlannerApp extends StatefulWidget {
       this.printer = const PrintingPagePrinter()});
 
   final DocumentFiles? files;
+
+  /// Makes the files when [files] is null: the platform's, a test seam
+  /// that sees the prompt and the type names the app hands over.
+  final DocumentFiles Function(
+      {required DocumentNamePrompt askName,
+      required FileTypeLabel typeLabel}) createFiles;
 
   /// Handed to the [DocumentHost], which owns it (spec 12a D11).
   final ExitGuard? exitGuard;
@@ -98,8 +106,8 @@ class FloorPlannerApp extends StatefulWidget {
 class _FloorPlannerAppState extends State<FloorPlannerApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
   final DocumentSession _session = DocumentSession.untitled();
-  late final DocumentFiles _files =
-      widget.files ?? createDocumentFiles(askName: _askName);
+  late final DocumentFiles _files = widget.files ??
+      widget.createFiles(askName: _askName, typeLabel: _typeLabel);
 
   /// The loader this app made itself, disposed with it; null when the
   /// caller gave one.
@@ -125,6 +133,15 @@ class _FloorPlannerAppState extends State<FloorPlannerApp> {
     final context = _navigator.currentContext;
     if (context == null) return null;
     return showDocumentNamePrompt(context, suggested);
+  }
+
+  /// A file type's name in the panels, in the app's language (spec 14d
+  /// L16), read at each panel: English before the navigator exists.
+  String _typeLabel(FileKind kind) {
+    final context = _navigator.currentContext;
+    return context == null
+        ? englishFileTypeLabel(kind)
+        : AppStrings.of(context).fileTypeLabel(kind);
   }
 
   /// Marks a file chord handled, and does nothing.

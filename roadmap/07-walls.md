@@ -8,7 +8,7 @@ The human reported "it works". Spec
 (rev 1, amended at execution), plan
 [2026-09-24-walls.md](../docs/superpowers/plans/2026-09-24-walls.md), results
 [2026-09-24-plan-07-results.md](../docs/superpowers/notes/2026-09-24-plan-07-results.md).
-See [STATUS.md](../STATUS.md#plan-07--walls-executed-on-plan-07walls-not-merged).
+See [STATUS-HISTORY.md](../STATUS-HISTORY.md#plan-07--walls-executed-on-plan-07walls-not-merged).
 **Depends on:** 06 (hard — this is 06's first real client)
 **Blocks:** 08, 10
 **Size:** L

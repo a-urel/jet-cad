@@ -3,6 +3,8 @@
 // controller's active plan.
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show InteractionLayer;
 
 import '../l10n/strings.dart';
 import '../export/page_printer.dart';
@@ -89,6 +91,43 @@ class FloorPlanView extends StatefulWidget {
 class _FloorPlanViewState extends State<FloorPlanView> {
   late PageFlows _flows = _flowsFor(widget.controller);
 
+  /// The plan last measured (R-13 as amended): each plan shown, a mode's
+  /// or a new copy's, is measured once, after its first frame.
+  DraftDocument? _measuredFor;
+
+  /// After the frame that first shows [document] in mode [shown], the
+  /// controller is told where that mode's canvas starts in this view.
+  void _measureAfterFrame(FloorPlanMode shown, DraftDocument document) {
+    if (identical(_measuredFor, document)) return;
+    _measuredFor = document;
+    final c = widget.controller;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(c, widget.controller)) return;
+      final origin = _canvasOrigin();
+      if (origin != null) c.canvasMeasured(shown, origin);
+    });
+  }
+
+  /// The top left of the shown canvas (its interaction layer's, whose
+  /// coordinates the camera's are) in this view, or null before layout.
+  Offset? _canvasOrigin() {
+    final view = context.findRenderObject();
+    if (view is! RenderBox || !view.attached) return null;
+    RenderBox? canvas;
+    void visit(Element e) {
+      if (canvas != null) return;
+      if (e.widget is InteractionLayer) {
+        final r = e.findRenderObject();
+        if (r is RenderBox && r.attached && r.hasSize) canvas = r;
+        return;
+      }
+      e.visitChildElements(visit);
+    }
+
+    context.visitChildElements(visit);
+    return canvas?.localToGlobal(Offset.zero, ancestor: view);
+  }
+
   /// The fit-on-start answer, taken once per plan shown (R-13).
   DraftDocument? _fitFor;
   bool _fit = true;
@@ -151,6 +190,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
         builder: (context, _) {
           final c = widget.controller;
           final document = c.activeDocument;
+          _measureAfterFrame(c.mode.value, document);
           if (c.mode.value == FloorPlanMode.selection) {
             return ServiceView(
                 key: ObjectKey(document),

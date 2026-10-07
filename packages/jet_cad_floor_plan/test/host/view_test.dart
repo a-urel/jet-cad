@@ -264,19 +264,219 @@ void main() {
     doc.commands.expander = inner;
   });
 
-  testWidgets('V7 the camera survives a mode switch (R-13)', (tester) async {
+  /// Where world point [w] is on the screen: the canvas's top left (the
+  /// interaction layer's, whose coordinates the camera's are) plus the
+  /// camera's image of [w].
+  Offset globalOf(WidgetTester tester, FloorPlanController c, Vector2 w) {
+    final s = c.camera.value.worldToScreen(w);
+    return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
+  }
+
+  testWidgets(
+      'V7a a mode switch keeps the plan in place on the screen, from the '
+      'first frame, both ways; there and back gives the camera\'s numbers '
+      'again; fitToView still fits (R-13 as amended)', (tester) async {
     final c = await pumpView(tester);
     c.camera.value = ViewportTransform(
-        worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310, 2400));
+        worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310.5, 2400.25));
+    await tester.pump();
+    final w = Vector2(3170.5, -820.25);
+    final before = globalOf(tester, c, w);
+    final canvas = tester.getTopLeft(find.byType(InteractionLayer));
+
     c.setMode(FloorPlanMode.selection);
+    // Before any frame: already shifted by the chrome's difference, so the
+    // first frame of the service draws the plan in place.
+    expect(c.camera.value.worldToScreenMatrix.e, -310.5 + 240 + 24);
+    expect(c.camera.value.worldToScreenMatrix.f, 2400.25 + 24);
     await tester.pump();
+    expect(tester.getTopLeft(find.byType(InteractionLayer)), isNot(canvas),
+        reason: 'premise: the canvas starts elsewhere in the service');
+    final there = globalOf(tester, c, w);
+    expect(there.dx, closeTo(before.dx, 1e-9));
+    expect(there.dy, closeTo(before.dy, 1e-9));
+    expect(c.camera.value.worldToScreenMatrix.a, 0.07, reason: 'no zoom');
+
+    c.setMode(FloorPlanMode.design);
     await tester.pump();
-    expect(c.camera.value.worldToScreenMatrix.a, 0.07);
-    expect(c.camera.value.worldToScreenMatrix.e, -310);
+    final back = globalOf(tester, c, w);
+    expect(back.dx, closeTo(before.dx, 1e-9));
+    expect(back.dy, closeTo(before.dy, 1e-9));
+    expect(c.camera.value.worldToScreenMatrix.e, -310.5);
+    expect(c.camera.value.worldToScreenMatrix.f, 2400.25);
+
     c.fitToView();
     await tester.pump();
     await tester.pump();
     expect(c.camera.value.worldToScreenMatrix.a, isNot(0.07));
+  });
+
+  testWidgets(
+      'V7b a canvas origin that is not the seeded one is measured after the '
+      'frame and the plan put back in place (R-13 as amended)', (tester) async {
+    final seeds = Map.of(floorPlanCanvasSeeds);
+    addTearDown(() => floorPlanCanvasSeeds
+      ..clear()
+      ..addAll(seeds));
+    floorPlanCanvasSeeds[FloorPlanMode.selection] = const Offset(130, 7);
+    final c = await pumpView(tester);
+    c.camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2(0.05, 0, 0, -0.05, 120.75, 610.5));
+    await tester.pump();
+    final w = Vector2(-1450.25, 2210.5);
+    final before = globalOf(tester, c, w);
+    c.setMode(FloorPlanMode.selection);
+    expect(c.camera.value.worldToScreenMatrix.e, 120.75 + 240 + 24 - 130,
+        reason: 'premise: shifted by the wrong seed');
+    await tester.pump();
+    final after = globalOf(tester, c, w);
+    expect(after.dx, closeTo(before.dx, 1e-9));
+    expect(after.dy, closeTo(before.dy, 1e-9));
+    // Back to the design: the measured origin is the one used now.
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    final back = globalOf(tester, c, w);
+    expect(back.dx, closeTo(before.dx, 1e-9));
+    expect(back.dy, closeTo(before.dy, 1e-9));
+  });
+
+  Widget viewApp(FloorPlanController? c) => MaterialApp(
+      home: Scaffold(
+          body: c == null ? const SizedBox() : FloorPlanView(controller: c)));
+
+  final cam = ViewportTransform(
+      worldToScreenMatrix: Transform2(0.05, 0, 0, -0.05, 120.75, 610.5));
+  final w = Vector2(-1450.25, 2210.5);
+
+  void expectSame(Offset a, Offset b, String reason) {
+    expect(a.dx, closeTo(b.dx, 1e-9), reason: reason);
+    expect(a.dy, closeTo(b.dy, 1e-9), reason: reason);
+  }
+
+  testWidgets(
+      'V7c the seeds are where each mode\'s canvas starts in the view (so '
+      'the first frame after a switch needs no correction)', (tester) async {
+    final c = await pumpView(tester);
+    Offset canvas() =>
+        tester.getTopLeft(find.byType(InteractionLayer)) -
+        tester.getTopLeft(find.byType(FloorPlanView));
+    expect(canvas(), floorPlanCanvasSeeds[FloorPlanMode.design]);
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    expect(canvas(), floorPlanCanvasSeeds[FloorPlanMode.selection]);
+  });
+
+  testWidgets(
+      'V7d a switch while no view is shown keeps the place the next view '
+      'shows (review F-3)', (tester) async {
+    final c = FloorPlanController(json: pagePlan());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    c.camera.value = cam;
+    await tester.pump();
+    final before = globalOf(tester, c, w);
+    await tester.pumpWidget(viewApp(null));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    expectSame(globalOf(tester, c, w), before, 'remounted in the service');
+  });
+
+  testWidgets(
+      'V7e a switch right after the first frame keeps the place (review '
+      'F-1)', (tester) async {
+    final c = FloorPlanController(json: pagePlan());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    c.takeFitOnStart(); // a host whose plan was already shown and fitted
+    c.camera.value = cam;
+    var switched = false;
+    tester.binding.addPostFrameCallback((_) {
+      c.setMode(FloorPlanMode.selection);
+      switched = true;
+    });
+    await tester.pumpWidget(viewApp(c));
+    expect(switched, isTrue, reason: 'premise');
+    final s = cam.worldToScreen(w);
+    final before = tester.getTopLeft(find.byType(FloorPlanView)) +
+        floorPlanCanvasSeeds[FloorPlanMode.design]! +
+        Offset(s.x, s.y);
+    await tester.pump();
+    await tester.pump();
+    expectSame(globalOf(tester, c, w), before, 'in the service');
+  });
+
+  testWidgets(
+      'V7h a wrong seed for the mode switched out of, measured only after '
+      'the switch: the plan is put back in place', (tester) async {
+    final seeds = Map.of(floorPlanCanvasSeeds);
+    addTearDown(() => floorPlanCanvasSeeds
+      ..clear()
+      ..addAll(seeds));
+    floorPlanCanvasSeeds[FloorPlanMode.design] = const Offset(190, 31);
+    final c = FloorPlanController(json: pagePlan());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    c.takeFitOnStart();
+    c.camera.value = cam;
+    tester.binding
+        .addPostFrameCallback((_) => c.setMode(FloorPlanMode.selection));
+    await tester.pumpWidget(viewApp(c));
+    final s = cam.worldToScreen(w);
+    final before = tester.getTopLeft(find.byType(FloorPlanView)) +
+        seeds[FloorPlanMode.design]! +
+        Offset(s.x, s.y);
+    await tester.pump();
+    await tester.pump();
+    expectSame(globalOf(tester, c, w), before, 'in the service');
+  });
+
+  testWidgets(
+      'V7f a controller swapped on the view: the new one keeps its place, '
+      'the old one is not moved by the view', (tester) async {
+    final a = FloorPlanController(json: pagePlan());
+    final b = FloorPlanController(json: pagePlan());
+    addTearDown(a.dispose);
+    addTearDown(b.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(viewApp(a));
+    await tester.pump();
+    await tester.pumpWidget(viewApp(b));
+    await tester.pump();
+    b.camera.value = cam;
+    await tester.pump();
+    final before = globalOf(tester, b, w);
+    b.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    expectSame(globalOf(tester, b, w), before, 'b in the service');
+    a.camera.value = cam;
+    await tester.pump();
+    expect(a.camera.value.worldToScreenMatrix.e, 120.75);
+  });
+
+  testWidgets(
+      'V7g a load and a switch before a frame: the fit wins, nothing is '
+      'shifted on top of it', (tester) async {
+    final c = await pumpView(tester);
+    c.camera.value = cam;
+    await tester.pump();
+    c.load(pagePlan());
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    final fitted = c.camera.value.worldToScreenMatrix;
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    final again = c.camera.value.worldToScreenMatrix;
+    expect([fitted.a, fitted.e, fitted.f], [again.a, again.e, again.f]);
   });
 
   testWidgets(

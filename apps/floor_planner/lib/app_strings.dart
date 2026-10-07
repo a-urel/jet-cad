@@ -3,6 +3,8 @@
 // planner's words come from the package.
 import 'package:flutter/widgets.dart';
 
+import 'document_files.dart' show FileKind;
+
 /// The app's words in one language.
 abstract class AppStrings {
   const AppStrings();
@@ -32,6 +34,10 @@ abstract class AppStrings {
 
   /// "Untitled".
   String get untitled;
+
+  /// A file type's name in the open and save panels (L16, review 14d-1
+  /// F-5).
+  String fileTypeLabel(FileKind kind);
 
   /// "Could not open the file".
   String get couldNotOpenFile;
@@ -84,6 +90,9 @@ final class _En extends AppStrings {
 
   @override
   String get untitled => 'Untitled';
+
+  @override
+  String fileTypeLabel(FileKind kind) => kind.label;
 
   @override
   String get couldNotOpenFile => 'Could not open the file';
@@ -141,6 +150,13 @@ final class _De extends AppStrings {
   String get untitled => 'Unbenannt';
 
   @override
+  String fileTypeLabel(FileKind kind) => switch (kind) {
+        FileKind.jetplan => 'Jet-Plan',
+        FileKind.pdf => 'PDF-Dokument',
+        FileKind.png => 'PNG-Bild',
+      };
+
+  @override
   String get couldNotOpenFile => 'Die Datei konnte nicht geöffnet werden';
 
   @override
@@ -195,6 +211,13 @@ final class _Tr extends AppStrings {
 
   @override
   String get untitled => 'Adsız';
+
+  @override
+  String fileTypeLabel(FileKind kind) => switch (kind) {
+        FileKind.jetplan => 'Jet planı',
+        FileKind.pdf => 'PDF belgesi',
+        FileKind.png => 'PNG görüntüsü',
+      };
 
   @override
   String get couldNotOpenFile => 'Dosya açılamadı';

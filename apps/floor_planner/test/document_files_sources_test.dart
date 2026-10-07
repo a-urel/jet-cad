@@ -13,10 +13,27 @@ void main() {
   final io = File('lib/document_files_io.dart').readAsStringSync();
   final web = File('lib/document_files_web.dart').readAsStringSync();
 
-  test('DS1 the io save panel offers the kind\'s type groups', () {
-    expect(io, contains('acceptedTypeGroups: saveTypeGroupsFor(kind)'));
-    expect('kJetplanTypeGroup'.allMatches(io), hasLength(1),
-        reason: 'the open panel only');
+  test(
+      'DS1 the io save panel offers the kind\'s type groups, named in the '
+      'app\'s language', () {
+    expect(
+        io,
+        contains(
+            'acceptedTypeGroups: saveTypeGroupsFor(kind, label: typeLabel)'));
+    expect(io, contains('openTypeGroups(label: typeLabel)'),
+        reason: 'the open panel, named too');
+    expect(io, isNot(contains('kJetplanTypeGroup')),
+        reason: 'no fixed English group');
+  });
+
+  test(
+      'DS3 the app names the panels\' types through its strings (spec 14d '
+      'L16, review 14d-1 F-5)', () {
+    final main = File('lib/main.dart').readAsStringSync();
+    expect(main,
+        contains('createFiles(askName: _askName, typeLabel: _typeLabel)'));
+    expect(main, contains('this.createFiles = createDocumentFiles'),
+        reason: 'the platform\'s files by default');
   });
 
   test('DS2 the web save names the file and types the blob by the kind', () {

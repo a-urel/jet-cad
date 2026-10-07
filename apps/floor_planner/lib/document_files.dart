@@ -54,11 +54,27 @@ enum FileKind {
       XTypeGroup(label: label, extensions: <String>[extension]);
 }
 
+/// A file type's name in the open and save panels, in the app's language
+/// (spec 14d L16, review 14d-1 F-5). [englishFileTypeLabel] is
+/// [FileKind.label].
+typedef FileTypeLabel = String Function(FileKind kind);
+
+/// [kind]'s English name, the default [FileTypeLabel].
+String englishFileTypeLabel(FileKind kind) => kind.label;
+
 /// The type groups the native save panel offers for [kind] (spec 13 D8):
-/// that kind's alone. The panel enforces and appends the extension itself,
-/// so the io side appends nothing to the path it returns.
-List<XTypeGroup> saveTypeGroupsFor(FileKind kind) =>
-    <XTypeGroup>[kind.typeGroup];
+/// that kind's alone, named by [label]. The panel enforces and appends the
+/// extension itself, so the io side appends nothing to the path it returns.
+List<XTypeGroup> saveTypeGroupsFor(FileKind kind,
+        {FileTypeLabel label = englishFileTypeLabel}) =>
+    <XTypeGroup>[
+      XTypeGroup(label: label(kind), extensions: <String>[kind.extension])
+    ];
+
+/// The one type group the open panels offer (spec 12a D9), named by
+/// [label].
+List<XTypeGroup> openTypeGroups({FileTypeLabel label = englishFileTypeLabel}) =>
+    saveTypeGroupsFor(FileKind.jetplan, label: label);
 
 /// Asks the person for a file name, starting from [suggested]; null when
 /// they cancelled (spec 12a D9 web, T-12). The host supplies it (an app

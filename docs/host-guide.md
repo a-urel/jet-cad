@@ -177,7 +177,9 @@ The view, with the host's options:
 `serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it.)
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
-or `FloorPlanMode.selection`, read back from `controller.mode`. The
+or `FloorPlanMode.selection`, read back from `controller.mode`. A switch
+keeps the plan where it is on the screen, zoom included; `fitToView()`
+and `load` fit it again. The
 design mode is the full editor; the selection mode shows the canvas
 alone, on a **service copy** of the plan.
 

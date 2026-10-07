@@ -5,5 +5,7 @@ import 'document_files.dart';
 
 /// No platform implementation exists here; always throws
 /// [UnsupportedError].
-DocumentFiles createDocumentFiles({required DocumentNamePrompt askName}) =>
+DocumentFiles createDocumentFiles(
+        {required DocumentNamePrompt askName,
+        FileTypeLabel typeLabel = englishFileTypeLabel}) =>
     throw UnsupportedError('DocumentFiles: no file access on this platform');

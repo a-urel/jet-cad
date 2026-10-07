@@ -18,25 +18,32 @@ import 'package:web/web.dart' as web;
 import 'document_files.dart';
 
 /// The platform's [DocumentFiles]: here, [WebDocumentFiles] over [askName].
-DocumentFiles createDocumentFiles({required DocumentNamePrompt askName}) =>
-    WebDocumentFiles(askName);
+/// The browser's picker shows no type names: [typeLabel] names the group
+/// for form's sake.
+DocumentFiles createDocumentFiles(
+        {required DocumentNamePrompt askName,
+        FileTypeLabel typeLabel = englishFileTypeLabel}) =>
+    WebDocumentFiles(askName, typeLabel: typeLabel);
 
 /// The file picker to open, [askName] and a download to save. A location
 /// is the file name to download as; [open] returns none, since the browser
 /// cannot write back to the file it read.
 class WebDocumentFiles implements DocumentFiles {
-  const WebDocumentFiles(this.askName);
+  const WebDocumentFiles(this.askName, {this.typeLabel = englishFileTypeLabel});
 
   /// Asks for the save name (spec 12a T-12).
   final DocumentNamePrompt askName;
+
+  /// The file types' names (spec 14d L16).
+  final FileTypeLabel typeLabel;
 
   @override
   bool get writesInPlace => false;
 
   @override
   Future<({String name, Uint8List bytes, Object? location})?> open() async {
-    final file = await openFile(
-        acceptedTypeGroups: const <XTypeGroup>[kJetplanTypeGroup]);
+    final file =
+        await openFile(acceptedTypeGroups: openTypeGroups(label: typeLabel));
     if (file == null) return null;
     try {
       return (name: file.name, bytes: await file.readAsBytes(), location: null);
