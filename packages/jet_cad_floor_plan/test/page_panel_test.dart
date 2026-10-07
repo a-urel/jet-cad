@@ -142,6 +142,16 @@ void main() {
       expect(find.text('1.5'), findsOneWidget);
       expect(find.text('1,5'), findsOneWidget);
       expect(shown(tester), {DecimalSeparator.comma});
+      // P1's place: after the unit menu, the caption above the control,
+      // the grid's check box below (the Task 3 review's finding 2).
+      final unit = tester.getRect(find.byKey(const Key('page-unit')));
+      final caption = tester.getRect(find.text('Decimal separator'));
+      final control =
+          tester.getRect(find.byKey(const Key('page-decimal-separator')));
+      final grid = tester.getRect(find.byKey(const Key('page-grid')));
+      expect(caption.top, greaterThanOrEqualTo(unit.bottom));
+      expect(control.top, greaterThanOrEqualTo(caption.bottom));
+      expect(grid.top, greaterThanOrEqualTo(control.bottom));
 
       await tester.tap(find.text('1.5'));
       await tester.pump();

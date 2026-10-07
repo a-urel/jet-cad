@@ -250,8 +250,10 @@ belongs to the **document**, not to the terminal.
   - `RecordingFloorPlanStrings` **records** it with
     `record(inner.pageDecimalSeparator)`, unlike `decimalSeparator`;
     otherwise the leak guards would report it (V-13).
-  - The leak test (LK2) opens the Page panel, so it covers the caption in
-    de and tr.
+  - The leak tests (LK1, LK2) open the Page panel. They run in Turkish
+    only, which guards against a caption that bypasses the strings class
+    in any language; PS3 pins the German word (corrected after Task 3's
+    review: revision 2 said the leak test covered de and tr).
   - The overflow guards (OV-*, OV-H-*) pump the Page panel too. Inside a
     fixed 280 px scrolling column they cannot fail for this control, so no
     overflow test is added.
