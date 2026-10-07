@@ -41,8 +41,11 @@ planın yeri korunsun"*), on `claude/exciting-pasteur-9m22jv`, not merged:
 - **the floor planner's file panels** name their types in the app's
   language (`1895e36`; 14d-1 review F-5);
 - **CI:** `actions/checkout@v5`;
-- **this STATUS**, cut down, its history moved whole.
-Record: [2026-10-07-cleanup.md](docs/superpowers/notes/2026-10-07-cleanup.md).
+- **this STATUS**, cut down, its history moved whole;
+- an independent review (*Approved with fixes*), its fixes in `6c7b5c9`:
+  R-13's reframing moved into the controller.
+Gates green (planner 1,359, app 207, demo 35, the standing sets).
+**Ready to merge, on the human's word.** Record: [2026-10-07-cleanup.md](docs/superpowers/notes/2026-10-07-cleanup.md).
 
 ## Owed to the human
 
