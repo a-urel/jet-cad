@@ -644,7 +644,7 @@ human to look at. The checks are about the picture, and the picture was not
 seen.
 
 The command to run for all five, with `SPIKE_FILL_SCALE=20` so Plan D's fills
-are visible to the eye, is in [STATUS.md](../../../STATUS.md#resume-here).
+are visible to the eye, is in [STATUS-HISTORY.md](../../../STATUS-HISTORY.md#resume-here).
 
 ---
 

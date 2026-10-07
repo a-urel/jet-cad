@@ -17,7 +17,7 @@ half and criterion 17 (the look) are OWED. Spec
 [2026-09-25-openings.md](../docs/superpowers/plans/2026-09-25-openings.md),
 results
 [2026-09-25-plan-08-results.md](../docs/superpowers/notes/2026-09-25-plan-08-results.md).
-See [STATUS.md](../STATUS.md#plan-08--openings-executed-on-plan-08openings-not-merged).
+See [STATUS-HISTORY.md](../STATUS-HISTORY.md#plan-08--openings-executed-on-plan-08openings-not-merged).
 
 *Before Plan 08 ran, this line read:* **Status:** not started
 

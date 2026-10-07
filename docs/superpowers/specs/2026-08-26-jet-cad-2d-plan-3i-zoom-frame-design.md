@@ -36,7 +36,7 @@ background until the gesture ends**. See D3.
   about 350–450 ms of catch-up after every zoom", labelled there as an
   inference rather than a measurement.
 - `STATUS.md`,
-  [After Plan 3h](../../../STATUS.md#after-plan-3h--what-the-window-showed-2026-08-26)
+  [After Plan 3h](../../../STATUS-HISTORY.md#after-plan-3h--what-the-window-showed-2026-08-26)
   — measured 2026-08-26: one zoom step takes a covered generation of 12 tiles
   to **1**, and a 20-step gesture takes the generation counter from 2 to
   **22** while the tile count never rises above 1.
