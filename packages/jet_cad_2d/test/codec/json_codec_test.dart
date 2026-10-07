@@ -510,10 +510,11 @@ void main() {
   });
 
   test(
-      'the schema version is 7, and a future document is refused by '
+      'the schema version is 8, and a future document is refused by '
       'version', () {
     // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
-    expect(kSchemaVersion, 7);
+    // Plan Q0 Task 1: 8 since PageComponent gained decimalSeparator.
+    expect(kSchemaVersion, 8);
     // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
     // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
     // the loose matcher passed whenever N was the *current* version rather
@@ -583,7 +584,8 @@ void main() {
 
     // No schema change: flags was already a free int (spec 11 D19, S-16).
     // Plan 12b Task 1: the pin moved to 7 with header.currentLayer.
-    expect(kSchemaVersion, 7);
-    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 7);
+    // Plan Q0 Task 1: to 8 with the page's decimalSeparator.
+    expect(kSchemaVersion, 8);
+    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 8);
   });
 }

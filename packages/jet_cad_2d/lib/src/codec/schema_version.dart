@@ -28,7 +28,14 @@
 /// did: without it a v6 build would load a v7 file, drop the current layer
 /// and every object's layer, and draw every object on layer 0. With it, that
 /// build refuses the file and says why.
-const int kSchemaVersion = 7;
+///
+/// 8: `PageComponent.toJson` gained `decimalSeparator`; `fromJson` defaults
+/// it to `point` when absent, which is the whole of the v7->v8 migration.
+/// The bump exists for the reader, as 6's and 7's did: without it a v7 build
+/// would load a v8 file, drop the separator, and regenerate the plan's texts
+/// with `.` on the next edit. With it, that build refuses the file and says
+/// why.
+const int kSchemaVersion = 8;
 
 class SchemaVersionError implements Exception {
   final Object? found;
