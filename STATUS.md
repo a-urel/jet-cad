@@ -43,7 +43,16 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. The last batch, below, is merged.
+**Q0, the plan's decimal separator** (the human, 2026-10-07: *"Q0 ile
+devam et"*), on `claude/exciting-pasteur-9m22jv`, not merged: a plan
+carries its separator (`.` or `,`), chosen on the Page panel; dimensions,
+room areas and the rulers print it; a new plan takes the UI language's
+(Q2 assumed yes, N1); schema 8 (0.1.0 refuses a plan saved by it).
+Spec [2026-10-07-decimal-separator-design.md](docs/superpowers/specs/2026-10-07-decimal-separator-design.md)
+(rev 2, reviewed), plan [2026-10-07-decimal-separator.md](docs/superpowers/plans/2026-10-07-decimal-separator.md),
+results [2026-10-07-decimal-separator-results.md](docs/superpowers/notes/2026-10-07-decimal-separator-results.md).
+Tasks 1–5 done, each reviewed; gates green; the independent review of
+the range in progress.
 
 ## Owed to the human
 
