@@ -60,8 +60,8 @@ final entries = {
 void main() {
   test('HL1 the lock after the split: its packages, and none forbidden', () {
     final packages = lockPackages(green);
-    expect(packages, hasLength(42),
-        reason: 'the 40 the probe resolved at 2b35b69, and two look-alikes');
+    expect(packages, hasLength(43),
+        reason: 'the 40 the probe resolved at 2b35b69, and three look-alikes');
     expect(
         packages,
         containsAll([
@@ -70,6 +70,7 @@ void main() {
           'jet_cad_2d',
           'jet_cad_2d_flutter',
           'my_flutter_scene_tools',
+          'my_scene',
           'scene_x',
         ]));
     expect(packages, isNot(contains('sdks')), reason: 'a top-level key');
@@ -103,7 +104,7 @@ void main() {
     ]) {
       test(name, () {
         final red = withEntry(green, name, entries[name]!);
-        expect(lockPackages(red), hasLength(43), reason: 'premise');
+        expect(lockPackages(red), hasLength(44), reason: 'premise');
         expect(lockPackages(red), contains(name), reason: 'premise');
         expect(forbiddenInLock(red), [name]);
       });
@@ -146,5 +147,24 @@ void main() {
         throwsFormatException);
     expect(() => lockPackages(''), throwsFormatException);
     expect(lockPackages('packages: {}\nsdks:\n  dart: ">=3"\n'), isEmpty);
+    expect(
+        lockPackages('packages: {} # none\nsdks:\n  dart: ">=3"\n'), isEmpty);
+  });
+
+  test(
+      'HL8 a layout pub never writes is an error, not a clean lock '
+      '(Task 2 review R-3)', () {
+    // A flow map: its keys are on the packages: line itself.
+    expect(() => lockPackages('packages: {flutter_scene: {}}\n'),
+        throwsFormatException);
+    // A key indented less than the first: read as a field, it would hide
+    // flutter_scene.
+    final shallow = withEntry(
+        green,
+        'flutter_scene',
+        entries['flutter_scene']!
+            .replaceFirst('  flutter_scene:', ' flutter_scene:'));
+    expect(shallow, contains('\n flutter_scene:\n'), reason: 'premise');
+    expect(() => lockPackages(shallow), throwsFormatException);
   });
 }

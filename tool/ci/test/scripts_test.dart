@@ -82,7 +82,7 @@ void main() {
       final r = await dartRun(
           'check_host_lock.dart', ['test/fixtures/host_post_split.lock.txt']);
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
-      expect(r.stdout, contains('42 packages, none of flutter_scene, '));
+      expect(r.stdout, contains('43 packages, none of flutter_scene, '));
     });
 
     test('SC10 the lock before the split: exit 1, each package named',
@@ -126,5 +126,32 @@ void main() {
       expect((await dartRun('check_host_lock.dart', const [])).exitCode, 2);
       expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
     });
+  });
+
+  // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
+  // probe that stopped running the check would pass unseen. Its commands,
+  // comments aside, in their order.
+  test('SC14 host_probe.sh checks the lock after pub get, before the build',
+      () {
+    final commands = [
+      for (final line in File('host_probe.sh').readAsLinesSync())
+        if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))
+          line.trim(),
+    ];
+    int at(String command) {
+      final i = commands.indexOf(command);
+      expect(i, isNot(-1), reason: 'host_probe.sh runs `$command`');
+      return i;
+    }
+
+    expect(commands, contains('set -euo pipefail'));
+    final get = at('flutter pub get');
+    final check =
+        at(r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"');
+    final analyze = at('flutter analyze');
+    final build = at('flutter build web');
+    expect(get < check && check < analyze && analyze < build, isTrue,
+        reason: 'pub get, the check, analyze, build: $get, $check, '
+            '$analyze, $build');
   });
 }

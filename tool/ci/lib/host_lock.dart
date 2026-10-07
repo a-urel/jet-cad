@@ -15,16 +15,22 @@ const List<String> forbiddenHostPackages = [
 
 /// The keys of the top-level `packages:` map of the pubspec.lock [lock],
 /// in the lock's order: exact keys, not text. Throws a [FormatException]
-/// when [lock] has no top-level `packages:` key, so a file that is not a
-/// lock cannot pass for a clean one.
+/// when [lock] has no top-level `packages:` key, or lays it out as pub
+/// never does (a flow map, a key indented less than the first), so a file
+/// that is not a lock cannot pass for a clean one.
 List<String> lockPackages(String lock) {
   final lines = lock.split('\n');
   final start = lines.indexWhere((l) => RegExp(r'^packages:').hasMatch(l));
   if (start == -1) {
     throw const FormatException('no top-level "packages:" key');
   }
-  if (RegExp(r'^packages:\s*\{\s*\}\s*$').hasMatch(lines[start])) {
-    return const [];
+  // Pub writes the map as a block, or `{}` when it is empty. A flow map's
+  // keys would sit on this line, unread: refuse it rather than pass it.
+  final inline =
+      lines[start].substring('packages:'.length).split('#').first.trim();
+  if (inline == '{}') return const [];
+  if (inline.isNotEmpty) {
+    throw FormatException('a flow map under "packages:": ${lines[start]}');
   }
   final keys = <String>[];
   int? indent;
@@ -34,6 +40,10 @@ List<String> lockPackages(String lock) {
     final depth = line.length - content.length;
     if (depth == 0) break; // The next top-level key: the map has ended.
     indent ??= depth;
+    if (depth < indent) {
+      // Read as a field it would be skipped, and a package with it.
+      throw FormatException('a key indented less than the first: $line');
+    }
     if (depth != indent) continue; // A package's own fields.
     final key = RegExp(r'''^(?:"([^"]*)"|'([^']*)'|([^\s:#'"][^:]*?))\s*:''')
         .firstMatch(content);
