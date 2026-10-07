@@ -4,13 +4,17 @@
 // or edited it first; `newPlan()` takes the language a view last reported;
 // a loaded plan is never settled. The UI language differs from the page's
 // separator wherever it could leak in (the fixture rule).
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
+import 'package:jet_cad_floor_plan/src/l10n/document_separator.dart';
 import 'package:jet_cad_floor_plan/src/l10n/localizations.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings.dart';
+import 'package:jet_cad_floor_plan/src/l10n/strings_en.dart';
 import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
 import 'package:jet_cad_floor_plan/src/parametric/room.dart';
 
@@ -66,7 +70,101 @@ void addLayer(FloorPlanController c) {
       locked: false)));
 }
 
+/// A host's own language (the final review's F-1): English words, French
+/// numbers, so only the class -- not a built-in language of its locale --
+/// can give `,`.
+class _Fr extends FloorPlanStringsEn {
+  const _Fr();
+  @override
+  String get languageCode => 'fr';
+  @override
+  String get decimalSeparator => ',';
+}
+
+class _FrDelegate extends LocalizationsDelegate<FloorPlanStrings> {
+  const _FrDelegate();
+  @override
+  bool isSupported(Locale locale) => true;
+  @override
+  Future<FloorPlanStrings> load(Locale locale) =>
+      SynchronousFuture(const _Fr());
+  @override
+  bool shouldReload(_FrDelegate old) => false;
+}
+
 void main() {
+  test(
+      'NS7a documentSeparatorFor reads the class\'s separator, not its '
+      'language code', () {
+    expect(documentSeparatorFor(const _Fr()), DecimalSeparator.comma);
+    expect(documentSeparatorFor(const FloorPlanStringsEn()),
+        DecimalSeparator.point);
+  });
+
+  testWidgets(
+      'NS7 a host\'s own language class settles the empty plan by its '
+      'separator (V-5): French, which no built-in language covers, gives '
+      'comma', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = FloorPlanController();
+    addTearDown(c.dispose);
+    await tester.pumpWidget(MaterialApp(
+        locale: const Locale('fr'),
+        supportedLocales: const [Locale('fr')],
+        localizationsDelegates: [
+          const _FrDelegate(),
+          ...floorPlanLocalizationsDelegates
+              .where((d) => d != FloorPlanLocalizations.delegate),
+        ],
+        home: Scaffold(body: FloorPlanView(controller: c))));
+    await tester.pump();
+    expect(FloorPlanStrings.forLocale(const Locale('fr')).decimalSeparator, '.',
+        reason: 'premise: the built-in language for fr would give point');
+    expect(separatorOf(c.activeDocument), DecimalSeparator.comma);
+    expect(c.activeDocument.commands.undoDepth, 0);
+    expect(c.dirty.value, isFalse);
+  });
+
+  testWidgets(
+      'NS8 newPlan() before any view is unsettled, as the constructor\'s '
+      'plan is: shown in Turkish it is comma, no step, clean '
+      '(the final review\'s F-2)', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = FloorPlanController();
+    addTearDown(c.dispose);
+    final first = c.activeDocument;
+    c.newPlan();
+    expect(identical(c.activeDocument, first), isFalse,
+        reason: 'premise: a new plan');
+    expect(separatorOf(c.activeDocument), DecimalSeparator.point);
+    await show(tester, c, const Locale('tr'));
+    await tester.pump();
+    expect(separatorOf(c.activeDocument), DecimalSeparator.comma);
+    expect(c.activeDocument.commands.undoDepth, 0);
+    expect(c.canUndo.value, isFalse);
+    expect(c.dirty.value, isFalse);
+  });
+
+  testWidgets(
+      'NS9 a plan loaded over the unsettled one and edited once before any '
+      'view keeps point and its step under a Turkish view (the final '
+      'review\'s F-4: state ids are per history)', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = FloorPlanController();
+    addTearDown(c.dispose);
+    c.load(q0Json());
+    addLayer(c);
+    expect(c.activeDocument.commands.undoDepth, 1, reason: 'premise');
+    await show(tester, c, const Locale('tr'));
+    await tester.pump();
+    expect(separatorOf(c.activeDocument), DecimalSeparator.point);
+    expect(c.activeDocument.commands.undoDepth, 1,
+        reason: 'the edit\'s step is kept');
+  });
+
   testWidgets(
       'NS6 the constructor\'s empty plan shown first in English is settled '
       'at point: a later Turkish view leaves it point, with no undo step '

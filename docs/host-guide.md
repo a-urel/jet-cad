@@ -118,8 +118,9 @@ delegates in your `MaterialApp`:
   language, and its `languageCode`.
 - Panel numbers show and read with the language's decimal separator,
   per language, not per region: `de_CH` gets German's `,`.
-  The plan's own text — dimensions, room areas, the rulers, and so the
-  PDF and PNG — uses the separator **the plan** carries (the Page panel's
+  The plan's own text — dimensions and room areas, on screen and on the
+  PDF and PNG, and the rulers on screen — uses the separator **the plan**
+  carries (the Page panel's
   *Decimal separator*), the same on every terminal; a new plan takes the
   UI language's. *Unreleased on `main`; in 0.1.0 it is always `.`.*
 
@@ -214,7 +215,13 @@ like:
   Service moves never make it dirty.
 - `load` throws a `FormatException`, and changes nothing, when the text
   is not a plan. So does the constructor's `json:`.
-- `newPlan()` starts an empty plan.
+- `newPlan()` starts an empty plan. Its decimal separator is that of the
+  language a `FloorPlanView` of this controller last showed (*unreleased
+  on `main`*).
+- *Unreleased on `main`:* the constructor's empty plan takes the
+  language of the first `FloorPlanView` that shows it. Read it with
+  `designJson()`, or edit it, before any view shows it, and it keeps
+  `.`.
 
 ## 6. The service layout
 

@@ -132,7 +132,9 @@ String _trim(double value, int decimals, DecimalSeparator decimalSeparator) {
     s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
   }
   if (s == '-0') return '0';
-  return s.replaceFirst('.', decimalSeparator.char);
+  return decimalSeparator == DecimalSeparator.point
+      ? s
+      : s.replaceFirst('.', decimalSeparator.char);
 }
 
 String _feetInches(double mm) {

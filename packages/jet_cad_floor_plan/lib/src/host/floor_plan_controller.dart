@@ -143,7 +143,9 @@ class FloorPlanController extends ChangeNotifier {
             SymbolThumbnails(maxEntries: kFloorPlanThumbnailCapacity) {
     _design = _attach(design);
     _savedState = design.document.commands.stateId;
-    if (unsettled) _unsettledAt = _savedState;
+    if (unsettled) {
+      _unsettled = (document: design.document, at: _savedState);
+    }
     _placeNominally();
     _refreshFlags();
   }
@@ -392,21 +394,23 @@ class FloorPlanController extends ChangeNotifier {
   /// The separator of the language a view last reported; null before any.
   DecimalSeparator? _reported;
 
-  /// The designed plan's state id when it was made with no language known,
-  /// while it is unsettled; null for a settled or a loaded plan (N2).
-  int? _unsettledAt;
+  /// The designed plan and its state id when it was made with no language
+  /// known, while it is unsettled; null for a settled or a loaded plan
+  /// (N2). The plan is kept with the id: state ids are per history, so an
+  /// id alone could match another plan's (the final review's F-4).
+  ({DraftDocument document, int at})? _unsettled;
 
   /// Whether the designed plan is unsettled and untouched: no command since
   /// it was made -- its state is still the one it was made in, and no
   /// command was undone back to it (an undone step leaves a redo) -- and no
-  /// [designJson] since (which clears [_unsettledAt]). Read when a language
+  /// [designJson] since (which clears [_unsettled]). Read when a language
   /// is reported, synchronously, so an edit whose change has not been
   /// heard yet counts.
   bool get _untouched {
-    final at = _unsettledAt;
-    if (at == null) return false;
-    final commands = _design.document.commands;
-    return commands.stateId == at && !commands.canRedo;
+    final u = _unsettled;
+    if (u == null || !identical(u.document, _design.document)) return false;
+    final commands = u.document.commands;
+    return commands.stateId == u.at && !commands.canRedo;
   }
 
   /// A view's language (spec Q0 N1): [FloorPlanView] reports
@@ -425,7 +429,7 @@ class FloorPlanController extends ChangeNotifier {
     // The first language settles the plan or finds it touched; either way
     // it is unsettled no more (Task 4 review).
     final untouched = _untouched;
-    _unsettledAt = null;
+    _unsettled = null;
     if (!untouched) return;
     final d = _design.document;
     final page = d.components.get<PageComponent>(d.rootHandle)!;
@@ -548,7 +552,7 @@ class FloorPlanController extends ChangeNotifier {
   /// as it is (spec Q0 N2): no language reported later changes it.
   String designJson() {
     _settle?.call();
-    _unsettledAt = null;
+    _unsettled = null;
     _encodedState = _design.document.commands.stateId;
     return DraftDocumentCodec.encodeToString(_design.document);
   }
@@ -602,7 +606,9 @@ class FloorPlanController extends ChangeNotifier {
     if (_service case final s?) _drop(s);
     _design = _attach(next);
     _savedState = next.document.commands.stateId;
-    _unsettledAt = unsettled ? _savedState : null;
+    _unsettled = unsettled
+        ? (document: next.document, at: next.document.commands.stateId)
+        : null;
     _encodedState = null;
     if (_mode.value == FloorPlanMode.selection) {
       _service = _attach(_copyOf(_design));

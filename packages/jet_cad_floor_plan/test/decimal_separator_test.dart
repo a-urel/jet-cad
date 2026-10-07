@@ -230,6 +230,21 @@ void main() {
     expect(driftOf(doc), isEmpty);
   });
 
+  test(
+      'Q0-S2 at feet-and-inches the stored area prints the page\'s comma '
+      '(F-1: formatArea swaps in every unit; the final review\'s F-3)', () {
+    final f = q0Plan();
+    final doc = f.plan.doc;
+    doc.commands.execute(SetComponentCommand<PageComponent>(
+        doc.rootHandle,
+        pageOf(doc).copyWith(
+            displayUnit: DisplayUnit.feetInches,
+            decimalSeparator: DecimalSeparator.comma)));
+    expect(labelStrings(doc, f.room), ['Kitchen', '133,15 ft²']);
+    doc.commands.undo();
+    expect(labelStrings(doc, f.room), ['Kitchen', '12.37 m²']);
+  });
+
   testWidgets(
       'Q0-E1 under an English UI the Area and Value rows follow a switch to '
       'comma made while their object stays selected', (tester) async {

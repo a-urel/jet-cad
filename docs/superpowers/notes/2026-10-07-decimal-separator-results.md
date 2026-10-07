@@ -41,10 +41,34 @@ closed the slice.
 | 3 — the Page panel control (P1) | `0c7bfca` | Approved; nothing tested the control's place | `7e3632f`: PS1 asserts the order. Spec P1 corrected: the leak tests run in Turkish only, and PS3 pins the German word |
 | 4 — new plans, the settling (N1, N2) | `f100a11` | Approved; a mutant survived in the planner (the first report on a matching page not ending the unsettled state, killed only by the demo) | `f4afa58`: NS6; the first report always ends the state |
 | 5 — docs, exit | `314a3e3`, this note | — | — |
+| the range `0ca8b64..f4afa58` | — | **Independent review: Approved with fixes** (no code defect; tests and wording) | the commit after this note's first version: see below |
 
 Per-task briefs, reports and reviews:
 `.superpowers/sdd/2026-10-07-decimal-separator/` (git-ignored), archived
 to `docs/superpowers/ledgers/` on merge.
+
+## The independent review of the range
+
+A fresh reviewer, its own clone, every gate re-run (the same counts), ten
+mutants of its own: five red, five survived. All five are red now, or
+equivalent by construction:
+
+- **F-1 (important):** no test used a host's own language class, so
+  keying `documentSeparatorFor` on the language code, or reporting
+  `forLocale` instead of `FloorPlanStrings.of`, survived. NS7, NS7a.
+- **F-2:** `newPlan()` before any view settled at once survived. NS8.
+- **F-3:** the room passing `point` at imperial units survived. Q0-S2
+  (`133,15 ft²`).
+- **F-4:** the unsettled guard compared state ids across plans (ids are
+  per history). `load` not clearing the mark was equivalent only by
+  accident. The guard now keeps the plan with its id; NS9 pins the
+  scenario (load, one edit, a Turkish view: `point`, the step kept).
+- **F-5 to F-9:** the guide's paper sentence and its `newPlan()` and
+  empty-plan lines; the CHANGELOG's "implements or directly extends";
+  the schema comment (mixed texts, not all `.`); the three captions
+  pinned (LB5); `_trim` swaps only for `comma`.
+- **F-10, F-11:** recorded. There is no app-level `comma` save-and-reopen
+  test; that path is the codec's, which the engine tests cover.
 
 ## Named mutants (all red)
 
@@ -63,6 +87,7 @@ to `docs/superpowers/ledgers/` on merge.
 | M-Q0-f: the shell setting the page's separator from the UI on open | DT1 (extended) |
 | M-Q0-g: the control showing the UI's separator; bound to a constant; the change dropped or wrong; the caption unrecorded, literal or misplaced | PS1–PS3, LK1, LK2 |
 | M-Q0-h: the rows' memo not cleared on a page change; the UI's separator substituted into the Area row, the Value row or the notice | Q0-E1, Q0-E3, Q0-E3b |
+| the final review's: `documentSeparatorFor` by language code; the view reporting `forLocale`; `newPlan()` with no language settled; the room `point` at imperial units; the guard without the plan's identity, with `load` keeping the mark | NS7a, NS7, NS8, Q0-S2, NS9 |
 
 The reviewers' own mutants are recorded in their reviews. Every survivor
 they found is now red, with one exception: a `toString` without the field,

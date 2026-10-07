@@ -23,9 +23,9 @@ On `main`, not yet released.
   of a restaurant must move together. The bundled symbol libraries are
   re-encoded.
 - **Breaking for a host's own strings:** `FloorPlanStrings` gains the
-  abstract `pageDecimalSeparator`; a class that `implements
-  FloorPlanStrings` must add it (a subclass of a built-in language
-  inherits it).
+  abstract `pageDecimalSeparator`; a class that implements or directly
+  extends `FloorPlanStrings` must add it (a subclass of a built-in
+  language inherits it).
 - `jet_cad_2d`: `PageComponent.decimalSeparator`, `DecimalSeparator`,
   and `formatLength(…, decimalSeparator:)`.
 
