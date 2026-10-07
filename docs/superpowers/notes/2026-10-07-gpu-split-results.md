@@ -71,13 +71,44 @@ slice.
 |---|---|---|---|
 | 1, the split (S1–S7) | `2b35b69` | **Approved with fixes.** (1) The new package's `analysis_options.yaml` was left untracked, so CI and fresh checkouts would analyse it with Dart's defaults; all nine siblings' are tracked. (2) Nothing checked the arguments `DraftCanvas` passes to the registered upload. (3) The S7 guard missed quoted, re-indented and flow-map pubspec keys. (5) Stale comments. | `e1ddf4e`: the file committed once, at scaffold, per plan 01's Ruling 01-1; the plan's constraint was wrong and is corrected. `6a2b3b2`: (2), (3), (5). |
 | 2, the guards (S8) | `d399303` | **Approved with fixes**, R-1 to R-5. Nothing CI runs saw the check dropped from the probe; a missing `main.dart.js` passed the probe silently; two lock layouts pub never writes passed as clean; no look-alike key ended in a forbidden name; the full-sha requirement was undocumented. | `c0248b3`: all five. |
-| 3, docs and exit (S9) | `7aeaa5b`, this note | — | — |
+| 3, docs and exit (S9) | `7aeaa5b`, `02bd3c7` (this note) | — | — |
+| the range `23a8950..02bd3c7` | — | **Independent review: Approved with fixes.** No correctness defect; tests and wording (F-1 to F-7), below | `de0315e`, `2fa292f` |
 
 Per-task reports, reviews and fix records:
 `.superpowers/sdd/2026-10-07-gpu-split/` (git-ignored), archived to
 `docs/superpowers/ledgers/` on merge.
 
-## Named mutants (all red)
+## The independent review of the range
+
+A fresh reviewer, its own clones, every gate re-run, the probe run at
+`02bd3c7` (green; `pub downgrade` gives Dart 3.12 and Flutter 3.44), CI's
+ten jobs green on `02bd3c7`, 19 mutants of its own. The moves are
+faithful: the bundle is the same git object and the moved script rebuilds
+it `cmp`-identical; the registry is per isolate and its resets are needed
+(shuffled orders go red without them). Its survivors are red now, or
+recorded:
+
+- **F-1:** nothing off a device checked the new asset key: a typo'd key
+  or a dropped pubspec asset silently sends the harness to `vertices`.
+  The key is `ResidentGeometry.bundleAssetKey`; `bundle_asset_key_test`
+  checks it against the pubspec's name and assets and the file on disk.
+- **F-2:** this note said "`upload` unwired" was killed; only its
+  throwing variant was. `install_test` now counts the factory's calls,
+  so an `upload` returning null is red. **An `upload` forwarding the
+  wrong viewport still survives**: the viewport is read after the native
+  shader load, which no test can construct. The device run covers it.
+- **F-3:** nothing read `ci.yml`, and the probe was checked only for
+  command order. SC14 now checks the clean step; SC15 runs the probe's
+  post-build block under bash, one red case per check; SC16 checks every
+  live package is in the matrix; SC17 checks both web builds assert.
+- **F-4:** S7's red cases read the list under test; they spell the
+  names now.
+- **F-5:** reading the registered GPU once, at attach, was unpinned; a
+  test now unregisters after mounting and rebuilds.
+- **F-6, F-7:** the CHANGELOG's API list completed; the host guide says
+  0.1.0 needs 3.47 and the next release 3.44.
+
+## Named mutants (all red, except one)
 
 | Mutant | Killed by |
 |---|---|
@@ -89,10 +120,13 @@ Per-task reports, reviews and fix records:
 | M-G2, after review: a flow map accepted; a shallow key skipped; the `{}` branch dropped | HL8, HL7 |
 | M-G3: `resolveBackend` ignoring `available`; `DraftCanvas` ignoring the registered uploader, or preferring it over the widget's; the fallback wordings swapped | `backend_selection_test`, `draft_canvas_registry_test`, `draft_canvas_fallback_test` |
 | M-G3, after review: the upload given `Size.zero`, a fresh `FlutterTextMeasurer`, a foreign `textStyleOf` | `draft_canvas_registry_test` |
-| M-G4: `available` true; false; captured at install; `upload` unwired; install not idempotent | `install_test` |
+| M-G4: `available` true; false; captured at install; `upload` throwing; install not idempotent | `install_test` |
+| the final review's: `upload` returning null (MU1); the asset key typo'd (MU2); the asset dropped from the pubspec (MU3); a name dropped from S7's list (MU8); the GPU re-read after attach (MU13) | `install_test`, `bundle_asset_key_test`, S7, `draft_canvas_registry_test` |
+| the final review's: the GPU matrix row (MU4); a web build's assertion (MU5); the probe's clean step (MU6); each post-build `fail=1`, and the final `exit 1` (MU7) | SC16, SC17, SC14, SC15 |
+| **survives:** `upload` forwarding a wrong viewport (MU1b) | the device run (owed) |
 
 The reviewers' own mutants are in their reviews. Their survivors are all
-red now, except three. Removing install's early return is equivalent: the
+red now, except MU1b above and three more. Removing install's early return is equivalent: the
 same `const` instance is re-registered. The probe's `hooks_runner` check
 depends on Flutter's folder name; a comment says so, and the lock check is
 the main guard. Where the harness calls `installResidentGpu()` relative to
@@ -115,7 +149,7 @@ full sha. A short sha fails `pub get`: the restaurant package reaches the
 planner at the full sha. CI passes `git rev-parse HEAD`, and the script's
 usage says so. CI's probe was green at `7aeaa5b`.
 
-## Gates (at `6a2b3b2`, `tool/ci` at `c0248b3`)
+## Gates (at `6a2b3b2`, `tool/ci` at `c0248b3`; after the review's fixes, below)
 
 | Package | Result |
 |---|---|
@@ -128,6 +162,11 @@ usage says so. CI's probe was green at `7aeaa5b`.
 | demo `apps/restaurant_demo` | **37 passed**. Analyze and format clean. `flutter build web` ✓, from a clean `build/`: the same, 42M. |
 | harness `apps/dev_harness_2d` | **82 passed**. Analyze and format clean. |
 | `tool/ci` | **50 passed**. Analyze and format clean. `check_guide`: all 14 code blocks in the probe. |
+
+**After the final review's fixes** (`2fa292f`): render "1363 tests; the
+standing failures and skips, exactly"; `jet_cad_2d_gpu` **20 passed**;
+the harness **82 passed**; `tool/ci` **58 passed**; analyze and format
+clean in each. No other package changed.
 
 The allocation invariant tests and the goldens are untouched. The
 standing sets are unchanged: engine 2, render 7 plus 1 skip.
@@ -149,8 +188,9 @@ clean; a local run should do the same.
 ## Owed to the human
 
 - **A GPU run of the harness on a device** (macOS): `BACKEND=residentGpu`
-  now loads the bundle from `jet_cad_2d_gpu`'s asset key. Every GPU run
-  was the human's.
+  now loads the bundle from `jet_cad_2d_gpu`'s asset key, and the upload
+  forwards the viewport (MU1b's survivor). Every GPU run was the
+  human's.
 - **The merge**, on the human's word. No release and no tag: the split is
   unreleased on `main` (CHANGELOG *Unreleased*), as are schema 8 and the
   separator.
