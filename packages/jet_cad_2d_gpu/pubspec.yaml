@@ -1,0 +1,40 @@
+name: jet_cad_2d_gpu
+description: >-
+  The GPU-resident render backend for jet_cad_2d_flutter, in its own package
+  so flutter_scene and its build hook stay out of every host's build. Only
+  an app that calls installResidentGpu() draws through it; no host does.
+version: 0.1.0
+repository: https://github.com/ahmeturel/jet-cad
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.5.0
+  # flutter_scene 0.23.0's own floor. jet_cad_2d_flutter stays at 3.44.
+  flutter: ">=3.47.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  jet_cad_2d:
+    path: ../jet_cad_2d
+  jet_cad_2d_flutter:
+    path: ../jet_cad_2d_flutter
+  meta: ^1.18.0
+  vector_math: ^2.2.0
+  # **For its internal `flutter_gpu` shim only, not its scene graph.**
+  # `flutter_scene/lib/src/gpu/gpu.dart` re-exports `package:flutter_gpu`
+  # verbatim on native and falls back to a WebGL2 backend on web; bare
+  # `flutter_gpu` imports `dart:ffi` and cannot compile for the web at all.
+  # The import is off contract and pre-1.0, which is why exactly one file in
+  # this package is allowed to make it (`lib/src/gpu_facade.dart`).
+  flutter_scene: ^0.23.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+flutter:
+  assets:
+    - assets/shaders/cad.shaderbundle

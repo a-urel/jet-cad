@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d_flutter/src/gpu/gpu_facade.dart';
+import 'package:jet_cad_2d_gpu/src/gpu_facade.dart';
 
 void main() {
   tearDown(() => debugSetGpuFactory(null));

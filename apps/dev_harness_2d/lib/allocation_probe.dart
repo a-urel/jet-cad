@@ -17,6 +17,9 @@ import 'package:vm_service/vm_service_io.dart' as vms_io;
 /// GPU shim's per-pass objects, reported beside ours.
 const List<String> kProbedLibraryPrefixes = <String>[
   'package:jet_cad_2d_flutter/',
+  // The GPU backend's own per-frame objects (`GpuDrawBackend`), in their
+  // own package since the GPU split.
+  'package:jet_cad_2d_gpu/',
   'dart:ui',
   'dart:typed_data',
   'package:flutter_gpu/',

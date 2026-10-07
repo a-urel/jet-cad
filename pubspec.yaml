@@ -6,6 +6,7 @@ workspace:
   - packages/jet_cad
   - packages/jet_cad_2d
   - packages/jet_cad_2d_flutter
+  - packages/jet_cad_2d_gpu
   - apps/dev_harness
   - apps/dev_harness_2d
   - packages/jet_cad_floor_plan

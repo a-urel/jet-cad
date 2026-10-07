@@ -12,6 +12,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 // `main.dart`'s `_addPatchedLabels` reads.
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart';
 
 import 'allocation_probe.dart';
 import 'measurement_rig.dart';
@@ -346,7 +347,7 @@ class GpuSpikeState extends State<GpuSpikeApp> {
   /// cost of drawing.
   int patches = 0;
 
-  /// `geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount)` --
+  /// `geometry.byteLength - ResidentLayout.byteLengthFor(instanceCount)` --
   /// the device memory every patch's sub-buffer of instances occupies, beside
   /// the main buffer [ResidentGeometry.byteLength] already counts.
   int subBufferBytes = 0;
@@ -463,7 +464,7 @@ class GpuSpikeState extends State<GpuSpikeApp> {
               textStyleOf: widget.document.textStyleOf);
       subBufferBytes = geometry == null
           ? 0
-          : geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount);
+          : geometry.byteLength - ResidentLayout.byteLengthFor(instanceCount);
       patchTargetBytes = geometry?.patchTargetBytes ?? 0;
       uploadMs = stopwatch.elapsedMicroseconds / 1000.0;
     });

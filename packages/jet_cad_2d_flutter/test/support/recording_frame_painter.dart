@@ -5,8 +5,9 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 /// A `ResidentFramePainter` that draws nothing and remembers being asked.
-/// Stands in for `GpuDrawBackend`, which cannot be constructed without a
-/// live GPU (`resident_geometry.dart`'s own doc comment on `create`).
+/// Stands in for `GpuDrawBackend` (package `jet_cad_2d_gpu`), which cannot
+/// be constructed without a live GPU (`resident_geometry.dart`'s own doc
+/// comment on `create`).
 class RecordingFramePainter implements ResidentFramePainter {
   RecordingFramePainter(this.collection);
   final ResidentCollection collection;
@@ -62,4 +63,29 @@ ViewportTransform zoomedAbout(ViewportTransform base, Offset centre, double s) {
       .multiply(Transform2.translation(-centre.dx, -centre.dy))
       .multiply(base.worldToScreenMatrix);
   return ViewportTransform(worldToScreenMatrix: m);
+}
+
+/// A `ResidentGpu` the test controls: [available] is a plain field, and
+/// [upload] forwards to its own [uploader] (a [FakeUploader]), counting
+/// calls in [uploads]. Registered with `registerResidentGpu` and cleared in
+/// `tearDown` -- the registry is process-wide.
+class FakeResidentGpu implements ResidentGpu {
+  FakeResidentGpu({this.available = true});
+
+  @override
+  bool available;
+
+  final FakeUploader uploader = FakeUploader();
+  int uploads = 0;
+
+  @override
+  Future<ResidentFramePainter?> upload(
+    ResidentCollection collection,
+    Size viewport, {
+    required FlutterTextMeasurer measurer,
+    required TextStyleRecord Function(Handle) textStyleOf,
+  }) {
+    uploads++;
+    return uploader.call(collection, viewport);
+  }
 }

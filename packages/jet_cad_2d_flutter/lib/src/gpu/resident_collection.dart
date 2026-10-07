@@ -7,7 +7,7 @@ import '../draft_painter.dart';
 import '../viewport_transform.dart';
 import 'collection_frame.dart';
 import 'geometry_collector.dart';
-import 'resident_geometry.dart';
+import 'resident_layout.dart';
 import 'resident_text.dart';
 import 'text_patches.dart';
 
@@ -58,7 +58,7 @@ class ResidentCollection {
 
   /// The budget row's number, before upload: main buffer plus every patch
   /// sub-buffer, as `ResidentGeometry.byteLength` will report it.
-  int get byteLength => ResidentGeometry.byteLengthFor(instanceCount,
+  int get byteLength => ResidentLayout.byteLengthFor(instanceCount,
       patchInstances: patchInstanceCount);
 
   /// Walks [document] through [painter] under the frame [collectionFrameFor]

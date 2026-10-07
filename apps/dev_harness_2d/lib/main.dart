@@ -17,6 +17,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
 import 'measurement_rig.dart';
@@ -826,6 +827,10 @@ final int kSpikeRepeats = _intDefine(
     minimum: 1);
 
 void main() {
+  // **First, before any `runApp`.** `DraftCanvas` resolves `residentGpu`
+  // against the registry when it attaches; a canvas attached before this
+  // call falls back to `vertices` -- silently wrong numbers in a profile run.
+  installResidentGpu();
   final doc = switch (kCorpus) {
     HarnessCorpus.measure => harnessDocument(),
     HarnessCorpus.simple => seamCorpus(measurer: harnessMeasurer),

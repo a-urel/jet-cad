@@ -37,7 +37,6 @@ import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart';
 
 /// The shader's `kMinMiterCosine` literal, mirrored so a test can assert it
 /// against `VerticesDrawSink.kMinMiterCosine`.
@@ -52,7 +51,7 @@ const double kExpanderDashCollapsePx = 3.0;
 
 /// The corner table's six entries, `(corner.xy, join_weight.xyzw)`.
 ///
-/// Read from [ResidentGeometry.kCornerVertices] rather than restated, so a
+/// Read from [ResidentLayout.kCornerVertices] rather than restated, so a
 /// reordering there is a change here too.
 class _Corner {
   const _Corner(this.x, this.y, this.wv, this.wa, this.wb, this.wm);
@@ -60,10 +59,10 @@ class _Corner {
 }
 
 List<_Corner> _corners() {
-  const stride = ResidentGeometry.kFloatsPerCorner;
-  final src = ResidentGeometry.kCornerVertices;
+  const stride = ResidentLayout.kFloatsPerCorner;
+  final src = ResidentLayout.kCornerVertices;
   return List<_Corner>.generate(
-      ResidentGeometry.cornerVertexCount,
+      ResidentLayout.cornerVertexCount,
       (i) => _Corner(src[i * stride], src[i * stride + 1], src[i * stride + 2],
           src[i * stride + 3], src[i * stride + 4], src[i * stride + 5]));
 }
@@ -111,7 +110,7 @@ ExpandedTriangles expandInstances(
     Float32List data, int instanceCount, Transform2 collectionToDevice,
     {required double dashScale}) {
   final corners = _corners();
-  final cornerVertexCount = ResidentGeometry.cornerVertexCount;
+  final cornerVertexCount = ResidentLayout.cornerVertexCount;
   final positions = Float32List(instanceCount * cornerVertexCount * 2);
   final colors = Int32List(instanceCount * cornerVertexCount);
   final dashVaryings = Float32List(instanceCount * cornerVertexCount * 3);

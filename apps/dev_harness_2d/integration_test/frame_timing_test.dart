@@ -17,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2, Colors;
 
 /// Entity count for one run of the whole file, so both corpus sizes are
@@ -101,6 +102,10 @@ Handle addLineAt(
 
 void main() {
   final binding = IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  // This file pumps `HarnessApp` itself and never runs the app's `main`, so
+  // it installs the resident GPU the way that `main` does, before any canvas
+  // attaches: `BACKEND=residentGpu` would otherwise fall back to vertices.
+  installResidentGpu();
 
   /// Builds the app and hands back everything a rig drives.
   Future<

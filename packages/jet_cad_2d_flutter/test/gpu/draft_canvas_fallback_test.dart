@@ -22,7 +22,7 @@ void main() {
   // no swap of `FlutterError.onError` -- which the binding checks at the end
   // of every test anyway.
   setUp(() {
-    addTearDown(() => debugSetGpuAvailable(null));
+    addTearDown(() => registerResidentGpu(null));
     DraftCanvas.debugResetResidentFallbackReport();
     measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);
@@ -58,7 +58,9 @@ void main() {
       t.state<DraftCanvasState>(find.byType(DraftCanvas));
 
   testWidgets('no GPU: two canvases, vertices both, one report', (t) async {
-    debugSetGpuAvailable(false);
+    // No `ResidentGpu` registered: the registry's "no GPU" (a pinned-false
+    // probe before the GPU split).
+    registerResidentGpu(null);
     await t.pumpWidget(canvas(RenderBackend.residentGpu));
     final s = state(t);
     expect(s.resolvedBackend, RenderBackend.vertices);
@@ -68,7 +70,7 @@ void main() {
     final first = t.takeException();
     expect(first, isA<FlutterError>());
     expect(first.toString(), contains('residentGpu'));
-    expect(first.toString(), contains('gpuAvailable'));
+    expect(first.toString(), contains('no resident GPU is installed'));
     expect(DraftCanvas.debugResidentFallbackReports, 1);
     await t.pumpWidget(wrap(const SizedBox()));
     await t.pumpWidget(canvas(RenderBackend.residentGpu));
@@ -82,7 +84,7 @@ void main() {
 
   testWidgets('a failed upload: vertices from then on, one report, no retry',
       (t) async {
-    debugSetGpuAvailable(true);
+    registerResidentGpu(FakeResidentGpu());
     uploader.failing = true;
     await t.pumpWidget(canvas(RenderBackend.residentGpu));
     await t.pump();
@@ -112,7 +114,7 @@ void main() {
   testWidgets(
       'a throwing upload falls back for good: two reports, vertices still '
       'paints', (t) async {
-    debugSetGpuAvailable(true);
+    registerResidentGpu(FakeResidentGpu());
     uploader.throwing = true;
     // Both reports below fire synchronously and in the same microtask, from
     // inside the post-frame callback `pumpWidget`'s own frame schedules:
@@ -157,7 +159,7 @@ void main() {
   });
 
   testWidgets('a canvas whose upload succeeds reports nothing', (t) async {
-    debugSetGpuAvailable(true);
+    registerResidentGpu(FakeResidentGpu());
     await t.pumpWidget(canvas(RenderBackend.residentGpu));
     await t.pump();
     await t.pump();

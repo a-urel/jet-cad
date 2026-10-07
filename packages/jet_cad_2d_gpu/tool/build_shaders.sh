@@ -2,6 +2,12 @@
 # Compiles the shader bundle. Checked in so the committed bundle is
 # reproducible rather than a binary somebody once produced.
 #
+# **The sources are not in this package.** `shaders/cad_stroke.{vert,frag}`
+# stay in `jet_cad_2d_flutter`, beside the Dart expander that mirrors them
+# (`test/support/instance_expander.dart`) and the test that reads them; this
+# script compiles them from `../jet_cad_2d_flutter/shaders/`, which resolves
+# inside the workspace checkout, where the bundle is built.
+#
 # `impellerc` ships in the engine artifacts and is not on PATH.
 # `--runtime-stage-gles` is the stage `flutter_scene`'s web loader reads
 # (`entry.openglEs`, then `transpileGlslEs100To300`); the metal and vulkan
@@ -54,6 +60,6 @@ fi
 cd "$(dirname "$0")/.."
 "$IMPELLERC" \
   --runtime-stage-metal --runtime-stage-vulkan --runtime-stage-gles \
-  --shader-bundle='{"CadStrokeVertex":{"type":"vertex","file":"shaders/cad_stroke.vert"},"CadStrokeFragment":{"type":"fragment","file":"shaders/cad_stroke.frag"}}' \
+  --shader-bundle='{"CadStrokeVertex":{"type":"vertex","file":"../jet_cad_2d_flutter/shaders/cad_stroke.vert"},"CadStrokeFragment":{"type":"fragment","file":"../jet_cad_2d_flutter/shaders/cad_stroke.frag"}}' \
   --sl=assets/shaders/cad.shaderbundle
 echo "wrote assets/shaders/cad.shaderbundle"

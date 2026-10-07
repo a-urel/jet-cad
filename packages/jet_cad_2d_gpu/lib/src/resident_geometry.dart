@@ -1,9 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'gpu_facade.dart' as gpu;
-import 'instance_record.dart';
-import 'resident_text.dart';
-import 'text_patches.dart';
 
 /// One covered label's GPU-side patch: its sub-buffer and its target.
 ///
@@ -49,7 +47,7 @@ class ResidentGeometry {
       this.texts,
       this.patches);
 
-  /// **Package-prefixed, because this is a library asset.** `jet_cad_2d_flutter`
+  /// **Package-prefixed, because this is a library asset.** `jet_cad_2d_gpu`
   /// declares `assets/shaders/cad.shaderbundle` in its own `pubspec.yaml`, and
   /// Flutter namespaces a package-declared asset under `packages/<name>/` in
   /// the built asset bundle regardless of which package's code loads it — the
@@ -72,76 +70,15 @@ class ResidentGeometry {
   /// the bare key to make such a test pass. Task 9's harness run (a real
   /// app depending on this package) is where the prefixed key was actually
   /// exercised, successfully -- see the task-9 report.
+  ///
+  /// **The key moved with the package** (the GPU split, spec
+  /// `2026-10-07-gpu-package-split-design.md` S1): the bundle was declared by
+  /// `jet_cad_2d_flutter` until then, under that package's prefix. Its
+  /// sources, `shaders/cad_stroke.{vert,frag}`, stay in `jet_cad_2d_flutter`
+  /// beside the Dart expander that mirrors them; `tool/build_shaders.sh`
+  /// here compiles them from there.
   static const String _bundlePath =
-      'packages/jet_cad_2d_flutter/assets/shaders/cad.shaderbundle';
-
-  /// The six per-vertex records: two triangles, not a triangle strip, because
-  /// a strip cannot mix kinds and Plans C and D add kinds to this same buffer.
-  ///
-  /// **Six floats per vertex: `corner.xy` then `join_weight.xyzw`.**
-  ///
-  /// `corner` is the quad parameterisation Plan A shipped — `x` picks the
-  /// endpoint (0 = p0, 1 = p1), `y` picks the side (-1 or +1) — and the
-  /// stroke and point branches still read only it.
-  ///
-  /// `join_weight` exists because the join branch needs **six distinct
-  /// vertex roles** and `corner` alone offers only four: `(1,-1)` and `(0,1)`
-  /// each appear twice, since the two triangles share the quad's diagonal.
-  /// A join's two triangles are the bevel `(V, A, B)` and the miter tip
-  /// `(A, M, B)` — four distinct points across six vertices, and the
-  /// duplicated corners need *different* roles in each triangle, so they
-  /// cannot be told apart by `corner`. The weight vector selects one of
-  /// `(V, A, B, M)` per vertex, and the shader reads the position as
-  /// `w.x*V + w.y*A + w.z*B + w.w*M` — no float-equality test on an index,
-  /// which ES 100 makes unpleasant.
-  ///
-  /// Triangle 0 is `(V, A, B)` and triangle 1 is `(A, M, B)`. Both wind
-  /// **either way** depending on the turn direction, because `_emitJoin`
-  /// flips the outer side with the sign of the cross product — which is why
-  /// `GpuDrawBackend.render` pins `CullMode.none`.
-  ///
-  /// **A fill (Plan D's Ruling D1) reads this same table, with its own role
-  /// mapping.** A fill has only three points, not a join's four, so `M` is
-  /// folded onto `A` rather than computed:
-  ///
-  /// | role | join reads      | fill reads |
-  /// |------|------------------|------------|
-  /// | V    | the corner       | `p0`       |
-  /// | A    | the incoming leg | `p1`       |
-  /// | B    | the outgoing leg | `p2`       |
-  /// | M    | the miter tip    | `p1` (== A)|
-  ///
-  /// Triangle 0 is therefore `(p0, p1, p2)` — the fill's real triangle — and
-  /// triangle 1 is `(p1, p1, p2)` — zero area, so it rasterises nothing. A
-  /// reader who has only seen the join-branch explanation above would not
-  /// know this table is shared with a fourth kind; this paragraph is that
-  /// pointer.
-  ///
-  /// `@visibleForTesting`: no test can reach this data through `create`
-  /// itself (it runs only with a real GPU context), so it is hoisted here to
-  /// be asserted directly by a plain `flutter test`.
-  @visibleForTesting
-  static const List<double> kCornerVertices = <double>[
-    // corner.x corner.y | join_weight V, A, B, M
-    0, -1, /*  */ 1, 0, 0, 0, // triangle 0, vertex 0 -> V
-    0, 1, /*   */ 0, 1, 0, 0, // triangle 0, vertex 1 -> A
-    1, -1, /*  */ 0, 0, 1, 0, // triangle 0, vertex 2 -> B
-    1, -1, /*  */ 0, 1, 0, 0, // triangle 1, vertex 0 -> A
-    0, 1, /*   */ 0, 0, 0, 1, // triangle 1, vertex 1 -> M
-    1, 1, /*   */ 0, 0, 1, 0, // triangle 1, vertex 2 -> B
-  ];
-
-  /// Floats per entry in the corner buffer: `corner` (2) + `join_weight` (4).
-  static const int kFloatsPerCorner = 6;
-
-  /// The number of per-vertex records in [kCornerVertices] — six today, two
-  /// triangles' worth. Derived rather than restated: `GpuDrawBackend.render`
-  /// reads this instead of a hardcoded `6` in its `pass.draw` call, and
-  /// `test/support/instance_expander.dart` reads it for the same reason, so
-  /// a kind Plans C or D add to this buffer moves the draw call and the
-  /// test expander together instead of leaving either at a stale count.
-  static int get cornerVertexCount =>
-      kCornerVertices.length ~/ kFloatsPerCorner;
+      'packages/jet_cad_2d_gpu/assets/shaders/cad.shaderbundle';
 
   /// The pipeline's vertex input layout: `corner` in its own buffer at slot
   /// 0 (per vertex), the instance record in its own buffer at slot 1 (per
@@ -183,7 +120,8 @@ class ResidentGeometry {
   /// `assets/shaders/cad.shaderbundle` have declared `kind_half` and `dash`
   /// to match since Task 8 regenerated the bundle.
   ///
-  /// `@visibleForTesting`: same reason as [kCornerVertices] — this is pure
+  /// `@visibleForTesting`: no test can reach it through `create` itself,
+  /// which runs only with a real GPU context — this is pure
   /// configuration data, constructible and assertable without a GPU context,
   /// but only reachable through `create`'s GPU-gated path otherwise.
   ///
@@ -198,7 +136,7 @@ class ResidentGeometry {
   static const gpu.VertexLayout kInstanceVertexLayout = gpu.VertexLayout(
     buffers: <gpu.VertexBuffer>[
       gpu.VertexBuffer(
-          strideInBytes: kFloatsPerCorner * 4,
+          strideInBytes: ResidentLayout.kFloatsPerCorner * 4,
           attributes: <gpu.VertexAttribute>[
             gpu.VertexAttribute(
                 name: 'corner',
@@ -245,12 +183,6 @@ class ResidentGeometry {
       ),
     ],
   );
-
-  /// Bytes a buffer of [instances] records occupies, plus [patchInstances]
-  /// more records -- every patch sub-buffer's instances, summed, at the same
-  /// per-record price as the main buffer's.
-  static int byteLengthFor(int instances, {int patchInstances = 0}) =>
-      (instances + patchInstances) * kFloatsPerInstance * 4;
 
   /// Uploads [instances], or returns null if this platform has no GPU, or if
   /// the upload itself failed.
@@ -301,7 +233,7 @@ class ResidentGeometry {
       FlutterError.reportError(FlutterErrorDetails(
         exception: error,
         stack: stackTrace,
-        library: 'jet_cad_2d_flutter',
+        library: 'jet_cad_2d_gpu',
         context:
             ErrorDescription('uploading the resident GPU geometry backend'),
       ));
@@ -328,7 +260,7 @@ class ResidentGeometry {
       // library comes back null and is caught by `create`'s try/catch via
       // `library?[...]` never populating). What reaches here instead is a
       // present bundle missing a named entry point -- typically a rename or
-      // typo between this file's lookup keys and `tool/build_shaders.sh:57`'s
+      // typo between this file's lookup keys and `tool/build_shaders.sh:63`'s
       // `--shader-bundle` JSON. Throwing (rather than returning null) routes
       // this through `create`'s catch at :149-158, so it is reported via
       // `FlutterError.reportError` like every other upload failure instead of
@@ -342,7 +274,7 @@ class ResidentGeometry {
           '--shader-bundle JSON against these lookup keys');
     }
 
-    final corners = Float32List.fromList(kCornerVertices);
+    final corners = Float32List.fromList(ResidentLayout.kCornerVertices);
 
     final context = gpu.gpuContext;
 
@@ -411,7 +343,7 @@ class ResidentGeometry {
   /// sub-buffer into its own target, after the main pass.
   final List<ResidentPatch> patches;
 
-  int get byteLength => byteLengthFor(instanceCount,
+  int get byteLength => ResidentLayout.byteLengthFor(instanceCount,
       patchInstances: patches.fold(0, (sum, p) => sum + p.instanceCount));
 
   /// Sum of every patch target's `width * height * 4` -- the device memory

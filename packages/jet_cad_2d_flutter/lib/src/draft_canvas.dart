@@ -9,6 +9,7 @@ import 'canvas_draw_sink.dart';
 import 'vertices_draw_sink.dart';
 import 'draft_painter.dart';
 import 'flutter_text_measurer.dart';
+import 'gpu/resident_gpu.dart';
 import 'gpu/resident_rebuilder.dart';
 import 'render_backend.dart';
 import 'tile_cache.dart';
@@ -170,9 +171,12 @@ class DraftCanvas extends StatefulWidget {
   /// a revision read inside the paint can be right and unreachable.
   final void Function()? onPaintForTest;
 
-  /// **Test-only.** Replaces the production uploader
-  /// (`uploadResidentCollection`) on the `residentGpu` path, so a widget test
-  /// can take that path without a GPU (Ruling F14). Not compared in
+  /// **Test-only.** Replaces the production uploader -- the registered
+  /// [ResidentGpu]'s `upload` ([registeredResidentGpu]) -- on the
+  /// `residentGpu` path, so a widget test can take that path without a GPU
+  /// (Ruling F14). When given, it wins over the registry's uploader; the
+  /// path itself is still chosen by `resolveBackend`, which needs an
+  /// available [ResidentGpu] registered. Not compared in
   /// [DraftCanvasState.didUpdateWidget]: a test that re-pumps the same canvas
   /// passes a fresh tear-off each time, and a re-attach on that alone would
   /// make "a resize does not rebuild" untestable.
@@ -194,9 +198,10 @@ class DraftCanvas extends StatefulWidget {
   }
 
   /// The spec's "falls back to `VerticesDrawSink` and says so once" (Ruling
-  /// F5). One `FlutterError.reportError` per process, whichever of the two
-  /// fallbacks fires first: no GPU on this platform, or an upload that
-  /// returned null. Observable through `FlutterError.onError` and
+  /// F5). One `FlutterError.reportError` per process, whichever of the
+  /// fallbacks fires first: no resident GPU installed, an installed one that
+  /// is unavailable on this platform, or an upload that returned null.
+  /// Observable through `FlutterError.onError` and
   /// [debugResidentFallbackReports]; never thrown.
   static void _reportResidentFallback(String message) {
     if (_residentFallbackReported) return;
@@ -328,13 +333,25 @@ class DraftCanvasState extends State<DraftCanvas> {
         measurer: measurer,
         textStyleOf: widget.document.textStyleOf);
     final requested = widget.backend ?? defaultRenderBackend();
+    // Read once, here: the registry is what `resolveBackend` decides from,
+    // and the same instance is the one whose uploader is used below.
+    final residentGpu = registeredResidentGpu;
     resolvedBackend = resolveBackend(requested);
     if (requested == RenderBackend.residentGpu &&
         resolvedBackend != RenderBackend.residentGpu) {
-      DraftCanvas._reportResidentFallback(
-          'DraftCanvas was asked for RenderBackend.residentGpu, but this '
-          'platform has no Flutter GPU (gpuAvailable() is false). Drawing '
-          'through VerticesDrawSink instead. Reported once per process.');
+      // Two diagnoses, one report per process (spec V-9): nothing installed
+      // is a wiring bug in the app; installed but unavailable is the
+      // platform.
+      DraftCanvas._reportResidentFallback(residentGpu == null
+          ? 'DraftCanvas was asked for RenderBackend.residentGpu, but no '
+              'resident GPU is installed (no ResidentGpu is registered; an '
+              'app that wants this backend calls installResidentGpu() from '
+              'package:jet_cad_2d_gpu first). Drawing through '
+              'VerticesDrawSink instead. Reported once per process.'
+          : 'DraftCanvas was asked for RenderBackend.residentGpu, but the '
+              'installed resident GPU is unavailable on this platform '
+              '(ResidentGpu.available is false). Drawing through '
+              'VerticesDrawSink instead. Reported once per process.');
     }
     // **`residentGpu` still builds the vertices sink** -- it is what draws
     // before the first rebuild lands and after an upload fails (Ruling F5).
@@ -358,8 +375,11 @@ class DraftCanvasState extends State<DraftCanvas> {
         ? ResidentRebuilder(
             document: widget.document,
             painter: painter,
+            // The widget's own uploader wins; otherwise the registered
+            // GPU's, which `resolveBackend` has just found available -- so
+            // it is non-null on this branch.
             uploader: widget.residentUploader ??
-                (collection, viewport) => uploadResidentCollection(
+                (collection, viewport) => residentGpu!.upload(
                     collection, viewport,
                     measurer: measurer,
                     textStyleOf: widget.document.textStyleOf),

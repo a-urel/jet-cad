@@ -80,10 +80,10 @@ final Float32List pointBuffer = (() {
 
 /// The three vertices of [triangle] (0 or 1) of [instance]'s expanded quad,
 /// read straight off `ExpandedTriangles.positions` -- the per-instance
-/// stride and vertex order match `ResidentGeometry.kCornerVertices`.
+/// stride and vertex order match `ResidentLayout.kCornerVertices`.
 List<Offset> triangleOf(ExpandedTriangles e,
     {required int instance, required int triangle}) {
-  final stride = ResidentGeometry.cornerVertexCount;
+  final stride = ResidentLayout.cornerVertexCount;
   final base = (instance * stride + triangle * 3) * 2;
   return <Offset>[
     Offset(e.positions[base], e.positions[base + 1]),
@@ -104,7 +104,7 @@ void main() {
   test('a solid instance signals solid with a negative fracStart', () {
     final e = expandInstances(solidStrokeBuffer, 1, Transform2.identity(),
         dashScale: 1.0);
-    for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++) {
+    for (var v = 0; v < ResidentLayout.cornerVertexCount; v++) {
       expect(e.dashVaryings[v * 3 + 1], lessThan(0.0));
     }
   });
@@ -115,7 +115,7 @@ void main() {
     final e = expandInstances(oneDashedStroke, 1, Transform2.identity(),
         dashScale: 1.0);
     final ts = <double>[
-      for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++)
+      for (var v = 0; v < ResidentLayout.cornerVertexCount; v++)
         e.dashVaryings[v * 3],
     ];
     expect(ts.reduce(math.min), closeTo(3.0 / 18.0, 1e-6));
@@ -393,7 +393,7 @@ void main() {
     writeFill(data, 0,
         x0: 10, y0: 10, x1: 40, y1: 12, x2: 25, y2: 38, argb: 0xFF2E7D32);
     final e = expandInstances(data, 1, Transform2.identity(), dashScale: 0.01);
-    for (var v = 0; v < ResidentGeometry.cornerVertexCount; v++) {
+    for (var v = 0; v < ResidentLayout.cornerVertexCount; v++) {
       expect(e.dashVaryings[v * 3 + 1], lessThan(0.0),
           reason: 'a negative fracStart is the solid sentinel; a fill must '
               'carry it at every camera, collapse scale included');
