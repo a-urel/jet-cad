@@ -3,6 +3,8 @@
 // controller's active plan.
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show InteractionLayer, ViewportTransform, kRulerThickness;
 
 import '../l10n/strings.dart';
 import '../export/page_printer.dart';
@@ -86,8 +88,85 @@ class FloorPlanView extends StatefulWidget {
   State<FloorPlanView> createState() => _FloorPlanViewState();
 }
 
+/// Where each mode's canvas starts in the view, before a frame has shown it
+/// (R-13 as amended): the editor's top bar (44), left panel (240) and
+/// rulers; the service bar (44). A test seam: a wrong seed is measured and
+/// corrected after the frame.
+@visibleForTesting
+final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds = {
+  FloorPlanMode.design:
+      const Offset(240 + kRulerThickness, 44 + kRulerThickness),
+  FloorPlanMode.selection: const Offset(0, 44),
+};
+
 class _FloorPlanViewState extends State<FloorPlanView> {
   late PageFlows _flows = _flowsFor(widget.controller);
+
+  // R-13, amended by the human (2026-10-07, "planın yeri korunsun"): a mode
+  // switch keeps the plan where it is on the screen. The camera's numbers
+  // are in the canvas's coordinates and the two modes' canvases start at
+  // different places in the view, so a switch shifts the camera by the
+  // difference of their origins: seeded, then measured after each frame
+  // that follows a switch, a measured difference corrected then.
+  final Map<FloorPlanMode, Offset> _canvasAt = Map.of(floorPlanCanvasSeeds);
+  late FloorPlanMode _shown = widget.controller.mode.value;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.mode.addListener(_onMode);
+    _measureAfterFrame(correct: false);
+  }
+
+  void _onMode() {
+    final next = widget.controller.mode.value;
+    if (next == _shown) return;
+    _shift(_canvasAt[_shown]! - _canvasAt[next]!);
+    _shown = next;
+    _measureAfterFrame(correct: true);
+  }
+
+  /// The camera moved by [by] on the screen, its zoom kept.
+  void _shift(Offset by) {
+    if (by == Offset.zero) return;
+    final camera = widget.controller.camera;
+    camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2.translation(by.dx, by.dy)
+            .multiply(camera.value.worldToScreenMatrix));
+  }
+
+  /// After the next frame, the shown canvas's origin measured and kept;
+  /// with [correct], the camera shifted by what the kept one missed.
+  void _measureAfterFrame({required bool correct}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final actual = _canvasOrigin();
+      if (actual == null) return;
+      final expected = _canvasAt[_shown]!;
+      _canvasAt[_shown] = actual;
+      if (correct) _shift(expected - actual);
+    });
+  }
+
+  /// The top left of the shown canvas (its interaction layer's, whose
+  /// coordinates the camera's are) in this view, or null before layout.
+  Offset? _canvasOrigin() {
+    final view = context.findRenderObject();
+    if (view is! RenderBox || !view.attached) return null;
+    RenderBox? canvas;
+    void visit(Element e) {
+      if (canvas != null) return;
+      if (e.widget is InteractionLayer) {
+        final r = e.findRenderObject();
+        if (r is RenderBox && r.attached && r.hasSize) canvas = r;
+        return;
+      }
+      e.visitChildElements(visit);
+    }
+
+    context.visitChildElements(visit);
+    return canvas?.localToGlobal(Offset.zero, ancestor: view);
+  }
 
   /// The fit-on-start answer, taken once per plan shown (R-13).
   DraftDocument? _fitFor;
@@ -110,11 +189,15 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     if (oldWidget.controller != widget.controller) {
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
+      oldWidget.controller.mode.removeListener(_onMode);
+      widget.controller.mode.addListener(_onMode);
+      _shown = widget.controller.mode.value;
     }
   }
 
   @override
   void dispose() {
+    widget.controller.mode.removeListener(_onMode);
     _flows.dispose();
     super.dispose();
   }
