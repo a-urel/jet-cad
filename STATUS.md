@@ -11,12 +11,11 @@ selects its whole group), then fixed (`29820b6`) and checked: planner
 app 203, demo 35, restaurant symbols 97, `tool/ci` 32, the probe built
 by git over the merged commit, CI run 7 green. `main`'s tree is that
 commit's.
-- **The tag `v0.1.0` is made but NOT pushed:** this session's git proxy
-  refuses tag pushes (*unexpected disconnect*, four tries), and the
-  GitHub tools here cannot create a tag. **Owed the human:** push it —
-  `git tag -a v0.1.0 22206f527e32e4677fe706731a751ec9de0d751e -m "jet-cad
-  0.1.0"` and `git push origin v0.1.0`, or a GitHub release with tag
-  `v0.1.0` on that commit. The host guide names the SHA.
+- **The tag `v0.1.0` is pushed** (by the human, 2026-10-07; this
+  session's git proxy refuses tag pushes): `refs/tags/v0.1.0` →
+  `22206f5`, CI run 8 green. A test of the guide check (GD4) found the
+  placeholder the guide's ref line no longer had once it named the SHA;
+  run 10 on `main` was red on it, fixed with the next commit.
 - **Owed, as before:** the looks (macOS, web, a tablet); the German
   text's native read; the floor planner's English save-panel labels
   (localise or waive).

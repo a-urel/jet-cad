@@ -41,7 +41,8 @@ void main() {
         reason: 'premise: the public URL, not the probe\'s');
     expect(yaml, contains('url: @URL@'), reason: 'premise');
     final dropped =
-        guide.replaceFirst('      ref: <the commit SHA of v0.1.0>\n', '');
+        guide.replaceFirst(RegExp(r'^ +ref: .*\n', multiLine: true), '');
+    expect(dropped, isNot(guide), reason: 'premise: a ref line removed');
     expect(
         missingBlocks(dropped, dart: dart, yaml: yaml), ['yaml: dependencies:'],
         reason: 'a ref line left out is a difference');
