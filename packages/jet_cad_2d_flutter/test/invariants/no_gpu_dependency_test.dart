@@ -278,6 +278,11 @@ String _pubspecWith(String body) =>
     'name: x\n${body}flutter:\n  uses-material-design: true\n';
 
 void main() {
+  // Spelled out here, not read from [kForbiddenPackages], for the reason
+  // `sections` is below: a name dropped from that list must turn the red
+  // cases red, not drop out of them.
+  const names = <String>['flutter_scene', 'flutter_gpu', 'jet_cad_2d_gpu'];
+
   test("the pubspec names no GPU package as a dependency", () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     // Not vacuous: the same reading finds the keys the pubspec does have.
@@ -314,10 +319,11 @@ void main() {
     ];
     // MUTATIONS, one shape each: the key indent fixed at 2; quoted keys not
     // unquoted; flow maps skipped; a bare flow key skipped; comments kept;
-    // a section dropped from `_dependencySections`.
+    // a section dropped from `_dependencySections`; a name dropped from
+    // `kForbiddenPackages` (MU8: `'flutter_gpu'`).
     for (final MapEntry(key: shape, value: write) in _shapes.entries) {
       test('is red on each name under each section: $shape', () {
-        for (final name in kForbiddenPackages) {
+        for (final name in names) {
           for (final section in sections) {
             expect(forbiddenDependencyKeys(_pubspecWith(write(section, name))),
                 <String>[name],
@@ -383,7 +389,9 @@ void main() {
   });
 
   group('the URI matcher', () {
-    for (final name in kForbiddenPackages) {
+    // MUTATION (MU8): a name dropped from `kForbiddenPackages` -- that name's
+    // test goes red.
+    for (final name in names) {
       test('is red on $name by import, export and conditional import', () {
         expect(forbiddenPackageUris("import 'package:$name/x.dart';"),
             <String>[name]);

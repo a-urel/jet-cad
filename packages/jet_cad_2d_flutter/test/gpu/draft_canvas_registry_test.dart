@@ -159,6 +159,40 @@ void main() {
     expect(gpu.uploads, 1, reason: 'only the first canvas uploaded');
   });
 
+  testWidgets(
+      'the GPU is read once, at attach: cleared afterwards, a rebuild still '
+      'uploads through the attached one', (t) async {
+    // Spec S4 and `ResidentGpu.available`'s doc: the registry is read once
+    // per attachment, and `_attach`'s comment says the instance read there
+    // is the one whose uploader is used. Only a new attachment reads again.
+    final gpu = FakeResidentGpu();
+    registerResidentGpu(gpu);
+    await t.pumpWidget(canvas());
+    await land(t);
+    final s = state(t);
+    final r = s.resident!;
+    expect(r.landed, 1);
+    expect(gpu.uploads, 1);
+
+    registerResidentGpu(null);
+    addLine(doc, doc.rootHandle, doc.handleSeed.next(), 100, 100, 900, 700);
+    await land(t);
+    await t.pump();
+    // MUTATION (MU13): the uploader closure re-reading
+    // `registeredResidentGpu!` at upload time -- it throws on the cleared
+    // registry, the rebuilder reports it and gives up (`uploadFailed`), and
+    // nothing reaches the fake a second time.
+    expect(t.takeException(), isNull);
+    expect(r.uploadFailed, isFalse);
+    expect(r.lastTrigger, RebuildTrigger.document);
+    expect(r.landed, 2);
+    expect(gpu.uploads, 2, reason: 'the attached GPU, not the registry');
+    expect(r.backend, same(gpu.uploader.painters.last));
+    expect(gpu.uploader.painters, hasLength(2));
+    expect(s.resolvedBackend, RenderBackend.residentGpu);
+    expect(DraftCanvas.debugResidentFallbackReports, 0);
+  });
+
   testWidgets("the widget's own residentUploader wins over the registry's",
       (t) async {
     final gpu = FakeResidentGpu();

@@ -72,12 +72,26 @@ void main() {
         reason: 'anti-vacuity: there is geometry to upload');
 
     installResidentGpu();
-    debugSetGpuFactory(() => throw StateError('no gpu'));
+    // A counting factory: the probe is the first thing
+    // `ResidentGeometry.create` does, so a consulted factory is the evidence
+    // that `upload` reached `uploadResidentCollection` and `create`. No fake
+    // can go further: `create`'s next steps need a real `GpuContext` and a
+    // loaded shader library, which no test can construct.
+    var probes = 0;
+    debugSetGpuFactory(() {
+      probes++;
+      throw StateError('no gpu');
+    });
+    expect(probes, 0, reason: 'install itself does not probe');
     final painterOut = await registeredResidentGpu!.upload(collection, viewport,
         measurer: measurer, textStyleOf: doc.textStyleOf);
     expect(painterOut, isNull,
         reason: 'uploadResidentCollection: ResidentGeometry.create gives '
             'null with no GPU, and the rebuilder falls back on null');
+    // MUTATION (MU1): `upload` returning `Future.value(null)` without
+    // calling `uploadResidentCollection` -- null all the same, but the
+    // factory is never consulted.
+    expect(probes, 1, reason: 'upload went through ResidentGeometry.create');
   });
 
   test('installing twice registers one, the same instance', () {

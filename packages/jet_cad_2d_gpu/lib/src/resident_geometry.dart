@@ -77,7 +77,13 @@ class ResidentGeometry {
   /// sources, `shaders/cad_stroke.{vert,frag}`, stay in `jet_cad_2d_flutter`
   /// beside the Dart expander that mirrors them; `tool/build_shaders.sh`
   /// here compiles them from there.
-  static const String _bundlePath =
+  ///
+  /// **Visible for testing because only a device would otherwise check it**
+  /// (spec R-1): `test/bundle_asset_key_test.dart` reads this package's
+  /// `pubspec.yaml` and pins this key to `packages/<name>/<declared asset>`,
+  /// the declaration, and the file on disk.
+  @visibleForTesting
+  static const String bundleAssetKey =
       'packages/jet_cad_2d_gpu/assets/shaders/cad.shaderbundle';
 
   /// The pipeline's vertex input layout: `corner` in its own buffer at slot
@@ -251,7 +257,7 @@ class ResidentGeometry {
       int maxPatchHeight) async {
     // **The async loader, not `fromAsset`.** `ShaderLibrary.fromAsset` is
     // synchronous and throws on web, where asset loading is not.
-    final library = await gpu.loadShaderLibraryAsync(_bundlePath);
+    final library = await gpu.loadShaderLibraryAsync(bundleAssetKey);
     final vertex = library?['CadStrokeVertex'];
     final fragment = library?['CadStrokeFragment'];
     if (vertex == null || fragment == null) {
@@ -269,7 +275,8 @@ class ResidentGeometry {
         if (vertex == null) 'CadStrokeVertex',
         if (fragment == null) 'CadStrokeFragment',
       ];
-      throw StateError('shader bundle "$_bundlePath" is missing entry point(s) '
+      throw StateError(
+          'shader bundle "$bundleAssetKey" is missing entry point(s) '
           '${missing.join(', ')} -- check tool/build_shaders.sh\'s '
           '--shader-bundle JSON against these lookup keys');
     }
