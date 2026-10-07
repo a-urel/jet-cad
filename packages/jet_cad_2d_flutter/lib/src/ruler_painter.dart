@@ -99,7 +99,10 @@ class RulerPainter extends CustomPainter {
           final screen = _horizontal
               ? cam.worldToScreen(Vector2(world, 0)).x
               : cam.worldToScreen(Vector2(0, world)).y;
-          final label = isMajor ? formatLength(i * step, p.displayUnit) : null;
+          final label = isMajor
+              ? formatLength(i * step, p.displayUnit,
+                  decimalSeparator: p.decimalSeparator)
+              : null;
           ticks.add((screen, isMajor, label));
           _tick(canvas, size, screen, isMajor, label);
         }

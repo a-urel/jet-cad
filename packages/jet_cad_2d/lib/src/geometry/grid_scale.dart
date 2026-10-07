@@ -109,21 +109,30 @@ class GridScale {
   }
 }
 
-/// A length in the display unit, spec D7's table.
-String formatLength(double mm, DisplayUnit unit) => switch (unit) {
-      DisplayUnit.millimeters => '${_trim(mm, 3)} mm',
-      DisplayUnit.centimeters => '${_trim(mm / 10, 3)} cm',
-      DisplayUnit.meters => '${_trim(mm / 1000, 3)} m',
-      DisplayUnit.inches => '${_trim(mm / 25.4, 4)} in',
+/// A length in the display unit, spec D7's table, its decimal separator
+/// [decimalSeparator] (spec Q0 T1). Feet-inches print fractions, so they
+/// carry no separator.
+String formatLength(double mm, DisplayUnit unit,
+        {DecimalSeparator decimalSeparator = DecimalSeparator.point}) =>
+    switch (unit) {
+      DisplayUnit.millimeters => '${_trim(mm, 3, decimalSeparator)} mm',
+      DisplayUnit.centimeters => '${_trim(mm / 10, 3, decimalSeparator)} cm',
+      DisplayUnit.meters => '${_trim(mm / 1000, 3, decimalSeparator)} m',
+      DisplayUnit.inches => '${_trim(mm / 25.4, 4, decimalSeparator)} in',
       DisplayUnit.feetInches => _feetInches(mm),
     };
 
-String _trim(double value, int decimals) {
+/// [value] to [decimals] places, trailing zeros and a bare point trimmed,
+/// then the point printed as [decimalSeparator]. The trimming is decided on
+/// the `.` form, before the swap (spec Q0 T1, V-9): swapped first, `2.500`
+/// would keep its zeros and print `2,500`.
+String _trim(double value, int decimals, DecimalSeparator decimalSeparator) {
   var s = value.toStringAsFixed(decimals);
   if (s.contains('.')) {
     s = s.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
   }
-  return s == '-0' ? '0' : s;
+  if (s == '-0') return '0';
+  return s.replaceFirst('.', decimalSeparator.char);
 }
 
 String _feetInches(double mm) {

@@ -9,7 +9,8 @@ import 'package:jet_cad_floor_plan/src/parametric/dimension.dart';
 import 'package:jet_cad_floor_plan/src/parametric/opening_geometry.dart'
     show wallsInDocument;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:jet_cad_2d/jet_cad_2d.dart' show DisplayUnit, DraftDocument;
+import 'package:jet_cad_2d/jet_cad_2d.dart'
+    show DecimalSeparator, DisplayUnit, DraftDocument;
 
 import 'support/dimension_fixture.dart';
 
@@ -271,6 +272,43 @@ void main() {
           'the half, text ${dimText(l.doc, corner)}');
       expect(dimText(l.doc, corner), '3451', reason: 'two corners at $place');
       expect(driftOf(l.doc), isEmpty);
+    }
+  });
+
+  test(
+      'Q0-DF1 a comma page prints its separator in cm and m only; mm, inches '
+      'and feet-inches print no decimal and are unchanged; a point page '
+      'prints today\'s strings', () {
+    // M-Q0-b (spec Q0 F-1's table, T1): formatDimension prints a decimal in
+    // cm (one, always) and m (two, always); mm is an integer, inches and
+    // feet-inches fractions.
+    const comma = DecimalSeparator.comma, point = DecimalSeparator.point;
+    final cases = <(double, DisplayUnit, String, String)>[
+      // 3,457.3 mm: 3,457 tenths of a cm (0.2 from the half 3,457.5).
+      (3457.3, cm, '345,7', '345.7'),
+      // 2,500 mm: 2,500 tenths of a cm; cm keeps its trailing zero (R-14).
+      (2500, cm, '250,0', '250.0'),
+      // 3,457.3 mm: 345.73 hundredths of a metre, 346 (2.3 mm from the half
+      // 3,455).
+      (3457.3, m, '3,46', '3.46'),
+      // 14,000 mm: 1,400 hundredths, two decimals always.
+      (14000, m, '14,00', '14.00'),
+      // 50 mm: 5 hundredths, padded: 0.05.
+      (50, m, '0,05', '0.05'),
+      // 3,457.3 mm to the millimetre: 3,457, an integer either way.
+      (3457.3, mm, '3457', '3457'),
+      // 3,450 mm / 3.175 = 1,086.61 eighths, 1,087 = 135 × 8 + 7.
+      (3450, inch, '135 7/8', '135 7/8'),
+      // 3,450 mm / 6.35 = 543.31 quarters, 543 = 11 × 48 + 15: 3 3/4".
+      (3450, ftIn, '11\'-3 3/4"', '11\'-3 3/4"'),
+    ];
+    for (final (v, unit, withComma, withPoint) in cases) {
+      expect(formatDimension(v, unit, decimalSeparator: comma), withComma,
+          reason: '$v mm in ${unit.name}, comma');
+      expect(formatDimension(v, unit, decimalSeparator: point), withPoint,
+          reason: '$v mm in ${unit.name}, point');
+      expect(formatDimension(v, unit), withPoint,
+          reason: '$v mm in ${unit.name}, the default');
     }
   });
 }
