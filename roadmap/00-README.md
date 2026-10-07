@@ -84,8 +84,11 @@ default on every platform, `canvas` is the fallback an explicit argument can
 choose, and **`residentGpu`** uploads the document's geometry once, keeps the
 camera as a uniform, and draws one instanced call per frame. It is **explicit
 only, never a default and never automatic**; `resolveBackend` routes it back
-to `vertices` where Flutter GPU is absent (web included — `flutter_gpu` cannot
-compile there). `DraftCanvas(backend: RenderBackend.residentGpu)` is real
+to `vertices` where no resident GPU is registered and available. Since the
+GPU split (2026-10-07) the GPU path lives in `packages/jet_cad_2d_gpu` and is
+used only where `installResidentGpu()` was called — today, the dev harness;
+`flutter_scene`'s shim has a WebGL2 path, so availability is read at run
+time, not assumed per platform. `DraftCanvas(backend: RenderBackend.residentGpu)` is real
 since Plan F: it collects over the document's whole extents at the live
 scale, rebuilds on the spec's five triggers (document change, table revision,
 device pixel ratio, band exit — **never on a pan**), and paints through the
@@ -340,15 +343,21 @@ implementer and an independent reviewer per task.
 - `packages/jet_cad_2d` — the pure-Dart engine. **No Flutter, no `dart:ui`,
   ever.** Dependencies: `meta`, `vector_math`; dev: `test`, `vm_service`.
 - `packages/jet_cad_2d_flutter` — the Flutter render layer. In this package
-  `unused_import` and `unused_element` are **errors**, not warnings. Depends
-  on `flutter_scene` **for its `flutter_gpu` shim only** (never its scene
-  graph); every GPU import is confined to `lib/src/gpu/gpu_facade.dart`, the
-  resident backend lives under `lib/src/gpu/`, and its shaders are
-  `shaders/cad_stroke.{vert,frag}` (GLSL ES 100, at most eight attributes,
-  bundled at `assets/shaders/cad.shaderbundle`).
+  `unused_import` and `unused_element` are **errors**, not warnings. It
+  does **not** depend on `flutter_scene` (a test guards it): it keeps the
+  resident layout, the frame info and the registry (`ResidentGpu`,
+  `registerResidentGpu`), and the shader sources
+  `shaders/cad_stroke.{vert,frag}` (GLSL ES 100, at most eight attributes).
+- `packages/jet_cad_2d_gpu` — the GPU renderer: the `flutter_gpu` facade
+  (`flutter_scene`'s shim only, never its scene graph), `ResidentGeometry`,
+  `GpuDrawBackend`, the upload, `installResidentGpu()`, and the bundle
+  `assets/shaders/cad.shaderbundle` (`tool/build_shaders.sh`). **Never a
+  host dependency**; CI's host probe fails if a host's lock resolves it.
 - `apps/dev_harness_2d` — the measurement harness. It is an instrument, not a
-  product. Do not grow the product inside it. Its GPU spike and its
-  `BACKEND=residentGpu` main view are launch entries in `.vscode/launch.json`;
+  product. Do not grow the product inside it. It depends on
+  `jet_cad_2d_gpu` and calls `installResidentGpu()` first in `main()`. Its
+  GPU spike and its `BACKEND=residentGpu` main view run with
+  `--dart-define` (they left `.vscode/launch.json`, which `git log` keeps);
   `SPIKE_FILL_SCALE=20` is for the eye and is never used for a timing number.
 
 **Non-negotiables (`CLAUDE.md`):**
@@ -373,6 +382,7 @@ implementer and an independent reviewer per task.
 ```sh
 cd packages/jet_cad_2d          && dart test && dart analyze && dart format --output=none --set-exit-if-changed .
 cd packages/jet_cad_2d_flutter  && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
+cd packages/jet_cad_2d_gpu      && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .
 ```
 
 **Prefix test commands with `CI=true`.** Otherwise Dart's analytics

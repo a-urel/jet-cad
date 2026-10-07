@@ -83,8 +83,6 @@ import 'dart:ui';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:jet_cad_2d_flutter/src/gpu/instance_record.dart'
-    show kFloatsPerInstance;
 
 import 'fixtures.dart' show fillFixture, kViewport;
 import 'instance_expander.dart';

@@ -53,7 +53,17 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Q0, below, is merged.
+**The GPU split** (the human, 2026-10-07: *"POS entegrasyonuna geç"*,
+then *"Önce jet-cad ön koşulu"*: Monépro's spec 103 §10 lists it first),
+on `claude/exciting-pasteur-9m22jv`, not merged: the GPU renderer moves
+out of `jet_cad_2d_flutter` into `packages/jet_cad_2d_gpu`, so a host's
+graph holds no `flutter_scene` and runs no build hook, and the host's
+Flutter floor is 3.44 again. CI's host probe now fails on a lock that
+resolves the GPU renderer. Spec
+[2026-10-07-gpu-package-split-design.md](docs/superpowers/specs/2026-10-07-gpu-package-split-design.md)
+(rev 2), plan [2026-10-07-gpu-package-split.md](docs/superpowers/plans/2026-10-07-gpu-package-split.md),
+results [2026-10-07-gpu-split-results.md](docs/superpowers/notes/2026-10-07-gpu-split-results.md),
+ledger `.superpowers/sdd/2026-10-07-gpu-split/`.
 
 ## Owed to the human
 
@@ -71,6 +81,9 @@ Nothing. Q0, below, is merged.
   fingerprints (moved by 12b's schema 7 and Q0's schema 8).
 - **A look at Q0** in German and Turkish: the Page panel's control, the
   plan's text, the PDF.
+- **The GPU split's device run:** the dev harness's `BACKEND=residentGpu`
+  on macOS, which now loads the bundle from `jet_cad_2d_gpu`'s asset key
+  (every GPU run was the human's).
 
 ## Standing failures and skips
 
@@ -81,9 +94,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice**: the real POS integration (the POS
-repository added to a session, the host guide followed), or a release
-(0.2.0: schema 8 and the separator are unreleased on `main`).
+**Next: the GPU split's merge**, on the human's word. Then Monépro's
+next jet-cad prerequisite (spec 103 §10): a consumable version — a
+release (0.2.0: schema 8, the separator and the split are unreleased on
+`main`) whose SHA the POS pins.
 
 ---
 
@@ -94,7 +108,8 @@ and nothing else**.
 
 - **The live line, the 2D floor planner:** `jet_cad_2d` (a pure-Dart 2D
   CAD engine and document model: no OCCT, no FFI, no Flutter),
-  `jet_cad_2d_flutter` (rendering and interaction), `jet_cad_floor_plan`
+  `jet_cad_2d_flutter` (rendering and interaction), `jet_cad_2d_gpu` (the
+  GPU renderer, the dev harness's only; never a host's), `jet_cad_floor_plan`
   (the planner: shell, tools, parametric objects, panels, the host API),
   `jet_cad_restaurant_symbols` (the restaurant library), the apps
   `floor_planner` and `restaurant_demo`.
@@ -108,6 +123,7 @@ and nothing else**.
 packages/
   jet_cad_2d/                  # the engine (pure Dart)
   jet_cad_2d_flutter/          # rendering, interaction, the gallery
+  jet_cad_2d_gpu/              # the GPU renderer (harness only)
   jet_cad_floor_plan/          # the planner and its host API
   jet_cad_restaurant_symbols/  # the restaurant symbol library
   jet_cad/                     # DORMANT — OCCT 3D over FFI

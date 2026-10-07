@@ -23,35 +23,24 @@ export 'src/draw/rectangle_tool.dart';
 export 'src/draw/text_tool.dart';
 export 'src/flutter_text_measurer.dart';
 export 'src/gesture_policy.dart';
-// The resident-GPU backend's own public surface. `gpu_facade.dart` stays
-// unexported -- it is the one file allowed to import a GPU package, and it
-// carries more than the two small functions (`gpuAvailable`,
-// `debugSetGpuFactory`) and the public typedef `GpuContextFactory` an app
-// assembling a frame might want: its
-// `export 'package:flutter_scene/src/gpu/gpu.dart';` republishes that
-// package's *entire* internal GPU shim -- an off-contract, pre-1.0 `lib/src/`
-// API this package depends on but does not control. Exporting
-// `gpu_facade.dart` from this barrel would republish all of that through
-// `jet_cad_2d_flutter`'s own public API, which is the thing this barrel
-// exists to not do; these members are not enough reason to accept
-// that. `ResidentGeometry`'s own handful of members that still resolve
-// through that shim (`kInstanceVertexLayout` and its five `gpu.*`-typed
-// getters) are marked `@internal` for the same reason, one file down.
-// `instance_record.dart` stays unexported too, for an unrelated reason: it is
-// `GeometryCollector`'s own wire format, not something a caller writes.
-//
-// One symbol from that file is the exception: `debugSetGpuAvailable` (Ruling
-// F14) is the seam a `DraftCanvas` widget test needs to take the
-// `residentGpu` path without a GPU, and callers reach it through this
-// barrel like everything else. `show` filters the export down to that one
-// name -- it does not re-admit the wildcard `flutter_scene` re-export the
-// paragraph above is about.
-export 'src/gpu/gpu_facade.dart' show debugSetGpuAvailable;
+// The resident backend's GPU-free half. The GPU half -- `ResidentGeometry`,
+// `GpuDrawBackend`, the `flutter_scene` facade and `uploadResidentCollection`
+// -- lives in package `jet_cad_2d_gpu`, so `flutter_scene` and its build hook
+// never enter the build of an app that depends on this package. That package
+// plugs in through `resident_gpu.dart`'s registry (`installResidentGpu()`);
+// this one never imports it (`test/invariants/no_gpu_dependency_test.dart`).
 export 'src/gpu/collection_frame.dart';
+export 'src/gpu/frame_info.dart';
 export 'src/gpu/geometry_collector.dart';
-export 'src/gpu/gpu_draw_backend.dart';
+// `instance_record.dart` is `GeometryCollector`'s own wire format, not
+// something a caller writes, so it stays unexported -- except for the record's
+// size and its field offsets, which the GPU package's vertex layout derives
+// its strides and attribute offsets from. `show` keeps the writers out.
+export 'src/gpu/instance_record.dart'
+    show kFloatsPerInstance, InstanceFieldOffset;
 export 'src/gpu/resident_collection.dart';
-export 'src/gpu/resident_geometry.dart';
+export 'src/gpu/resident_gpu.dart';
+export 'src/gpu/resident_layout.dart';
 export 'src/gpu/resident_rebuilder.dart';
 export 'src/gpu/resident_text.dart';
 export 'src/gpu/text_compositor.dart';

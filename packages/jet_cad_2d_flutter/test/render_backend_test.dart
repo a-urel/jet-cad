@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
-import 'package:jet_cad_2d_flutter/src/gpu/gpu_facade.dart';
 
 Future<DraftCanvasState> _pump(WidgetTester tester,
     {RenderBackend? backend}) async {
@@ -63,9 +62,9 @@ void main() {
       expect(state.resolvedBackend, expectedBackend, reason: '$backend');
     }
     // The `residentGpu` iteration above is exactly the fallback Ruling F5
-    // reports through `FlutterError.reportError`, but only on a platform
-    // with no GPU under `flutter test`; expected there, not a defect. On a
-    // platform where `resolveBackend(RenderBackend.residentGpu)` actually
+    // reports through `FlutterError.reportError`, but only when no available
+    // `ResidentGpu` is registered (always, in this file); expected there, not
+    // a defect. Where `resolveBackend(RenderBackend.residentGpu)` actually
     // returns `residentGpu`, no fallback fires and there is nothing to
     // consume. `flutter_test` fails a test that ends with a reported error
     // still pending, so it is consumed here rather than left for teardown to
@@ -125,8 +124,9 @@ void main() {
     // MUTATION: if DraftCanvas does not route through `resolveBackend()`,
     // `residentGpu` silently uses the canvas sink instead of vertices. This
     // assertion fails: state.vertices would be null instead of notNull.
-    debugSetGpuFactory(() => throw StateError('no gpu'));
-    addTearDown(() => debugSetGpuFactory(null));
+    // Nothing installed, as in every host: `resolveBackend` has no
+    // available `ResidentGpu` to route `residentGpu` to.
+    registerResidentGpu(null);
     final state = await _pump(tester, backend: RenderBackend.residentGpu);
     expect(state.resolvedBackend, RenderBackend.vertices);
     expect(state.vertices, isNotNull);

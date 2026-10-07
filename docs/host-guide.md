@@ -49,8 +49,11 @@ with the planner. Import only the two barrels:
 `package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
 Anything under `src/` is not API.
 
-The packages need Flutter 3.44 or later (the Dart that comes with it);
-the release was built and tested with Flutter 3.47.6.
+**0.1.0 needs Flutter 3.47 or later**: it still resolves `flutter_scene`,
+whose build hook compiles shaders at build time. It was built and tested
+with Flutter 3.47.6. The release after it drops `flutter_scene` (the GPU
+split): its packages need Flutter 3.44 (the Dart that comes with it) and
+bring no build hook and no GPU renderer.
 
 ## 2. Fonts
 

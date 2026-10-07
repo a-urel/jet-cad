@@ -136,7 +136,7 @@ void main() {
     expect(c.patches.length, 2, reason: 'COVERED and GRAZED (Plan E)');
     expect(
         c.byteLength,
-        ResidentGeometry.byteLengthFor(c.instanceCount,
+        ResidentLayout.byteLengthFor(c.instanceCount,
             patchInstances: c.patchInstanceCount));
     expect(c.patchInstanceCount, greaterThan(0));
   });

@@ -1,4 +1,4 @@
-import 'gpu/gpu_facade.dart' show gpuAvailable;
+import 'gpu/resident_gpu.dart';
 
 /// Which sink `DraftCanvas` draws through.
 ///
@@ -19,13 +19,17 @@ enum RenderBackend {
   /// camera a uniform, one instanced draw call per frame.
   ///
   /// **Never a default and never automatic.** It is chosen explicitly, and
-  /// [resolveBackend] routes it back to [vertices] on a platform without
-  /// Flutter GPU rather than throwing per frame.
+  /// [resolveBackend] routes it back to [vertices] when no [ResidentGpu] is
+  /// registered, or the registered one is not available on this platform,
+  /// rather than throwing per frame. The GPU itself is package
+  /// `jet_cad_2d_gpu`'s, installed by an app that calls its
+  /// `installResidentGpu()`; this package never depends on it.
   ///
   /// `DraftCanvas` builds a `ResidentRebuilder` for this value (Plan F):
   /// the document is collected over its whole extents at the live scale,
   /// rebuilt on the spec's five triggers and never on a pan, and painted
-  /// through `GpuDrawBackend` once the first rebuild lands. Before that,
+  /// through the registered GPU's painter (`GpuDrawBackend`) once the first
+  /// rebuild lands. Before that,
   /// and after an upload that fails, the canvas paints through
   /// `VerticesDrawSink` and says so once -- see
   /// `DraftCanvas.debugResidentFallbackReports`.
@@ -71,7 +75,14 @@ RenderBackend defaultRenderBackend() => RenderBackend.vertices;
 /// **The fallback is here and nowhere else.** Two call sites that each decided
 /// would eventually disagree — the reason [defaultRenderBackend] gives for
 /// itself, applied to the same problem one layer up.
+///
+/// `residentGpu` resolves to itself only when a [ResidentGpu] is registered
+/// ([registerResidentGpu]) and reports itself [ResidentGpu.available];
+/// otherwise to [RenderBackend.vertices].
 RenderBackend resolveBackend(RenderBackend requested) {
   if (requested != RenderBackend.residentGpu) return requested;
-  return gpuAvailable() ? RenderBackend.residentGpu : RenderBackend.vertices;
+  final gpu = registeredResidentGpu;
+  return gpu != null && gpu.available
+      ? RenderBackend.residentGpu
+      : RenderBackend.vertices;
 }

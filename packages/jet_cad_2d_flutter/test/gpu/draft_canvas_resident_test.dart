@@ -18,8 +18,10 @@ void main() {
   var paints = 0;
 
   setUp(() {
-    debugSetGpuAvailable(true);
-    addTearDown(() => debugSetGpuAvailable(null));
+    // An available GPU registered; every canvas below still passes its own
+    // `residentUploader`, which wins over the registered one's.
+    registerResidentGpu(FakeResidentGpu());
+    addTearDown(() => registerResidentGpu(null));
     DraftCanvas.debugResetResidentFallbackReport();
     measurer = FlutterTextMeasurer();
     addTearDown(measurer.clear);

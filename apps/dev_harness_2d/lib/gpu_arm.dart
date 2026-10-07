@@ -12,6 +12,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 // `main.dart`'s `_addPatchedLabels` reads.
 import 'package:jet_cad_2d/testing.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart';
 
 import 'allocation_probe.dart';
 import 'measurement_rig.dart';
@@ -26,7 +27,8 @@ import 'measurement_rig.dart';
 // (`docs/superpowers/plans/2026-08-29-gpu-backend-plan-a-seam-and-strokes.md`)
 // answered it by building the collector, the upload and the frame path as
 // real package code -- `GeometryCollector`, `ResidentGeometry.create`,
-// `GpuDrawBackend`, all from `package:jet_cad_2d_flutter` -- and Task 9
+// `GpuDrawBackend` (the first from `package:jet_cad_2d_flutter`, the other
+// two from `package:jet_cad_2d_gpu` since the GPU split) -- and Task 9
 // deleted the spike's two files in the same commit that pointed this arm at
 // them. What remains here is harness-side glue only: the widget that hosts
 // the backend and turns its output into a `ui.Image` on the canvas, and the
@@ -346,7 +348,7 @@ class GpuSpikeState extends State<GpuSpikeApp> {
   /// cost of drawing.
   int patches = 0;
 
-  /// `geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount)` --
+  /// `geometry.byteLength - ResidentLayout.byteLengthFor(instanceCount)` --
   /// the device memory every patch's sub-buffer of instances occupies, beside
   /// the main buffer [ResidentGeometry.byteLength] already counts.
   int subBufferBytes = 0;
@@ -381,7 +383,8 @@ class GpuSpikeState extends State<GpuSpikeApp> {
   /// **`ResidentGeometry.create` does not throw.** It returns `null` for two
   /// different reasons -- no GPU on this platform, or a real upload failure,
   /// the latter already reported through `FlutterError.reportError` by the
-  /// package itself (`resident_geometry.dart`'s own doc comment) -- so this
+  /// package itself (the doc comment in `resident_geometry.dart`, package
+  /// `jet_cad_2d_gpu` since the GPU split) -- so this
   /// method does not need to distinguish them to stay safe; it only needs to
   /// leave [backend] null and say so, which is exactly what makes
   /// `runGpuSpike`'s "arm C submitted no GPU frame" guard fire instead of the
@@ -463,7 +466,7 @@ class GpuSpikeState extends State<GpuSpikeApp> {
               textStyleOf: widget.document.textStyleOf);
       subBufferBytes = geometry == null
           ? 0
-          : geometry.byteLength - ResidentGeometry.byteLengthFor(instanceCount);
+          : geometry.byteLength - ResidentLayout.byteLengthFor(instanceCount);
       patchTargetBytes = geometry?.patchTargetBytes ?? 0;
       uploadMs = stopwatch.elapsedMicroseconds / 1000.0;
     });

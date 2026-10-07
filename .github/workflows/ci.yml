@@ -38,6 +38,8 @@ jobs:
             tool: dart
           - package: packages/jet_cad_2d_flutter
             tool: flutter
+          - package: packages/jet_cad_2d_gpu
+            tool: flutter
           - package: packages/jet_cad_floor_plan
             tool: flutter
           - package: packages/jet_cad_restaurant_symbols
@@ -85,12 +87,18 @@ jobs:
           cache: true
       - name: Resolve the workspace
         run: flutter pub get
+      # GPU split spec S8 (F-9, V-7): build hooks follow the built app's own
+      # dependencies, so neither app ships flutter_scene's assets.
       - name: Build the restaurant demo
         working-directory: apps/restaurant_demo
-        run: flutter build web
+        run: |
+          flutter build web
+          test ! -e build/web/assets/packages/flutter_scene
       - name: Build the floor planner
         working-directory: apps/floor_planner
-        run: flutter build web
+        run: |
+          flutter build web
+          test ! -e build/web/assets/packages/flutter_scene
       - name: Analyze dev_harness_2d
         working-directory: apps/dev_harness_2d
         run: flutter analyze
@@ -113,12 +121,15 @@ jobs:
         run: dart test
       - name: Analyze
         working-directory: tool/ci
-        run: dart analyze --fatal-infos lib test expect_failures.dart check_guide.dart
+        run: >-
+          dart analyze --fatal-infos lib test expect_failures.dart
+          check_guide.dart check_host_lock.dart
       - name: Format
         working-directory: tool/ci
         run: >-
           dart format --output=none --set-exit-if-changed
-          lib test expect_failures.dart check_guide.dart host_probe/lib
+          lib test expect_failures.dart check_guide.dart check_host_lock.dart
+          host_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
 
@@ -135,5 +146,7 @@ jobs:
           cache: true
       # The repository checked out here, at the commit under test (merge
       # commits included): no token, whatever the repository's visibility.
-      - name: Resolve, analyze and build the probe
+      # GPU split spec S8: its lock and its web build hold no GPU renderer
+      # and no build hook.
+      - name: Resolve, check, analyze and build the probe
         run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"

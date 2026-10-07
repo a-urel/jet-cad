@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'dart:ui' show Canvas, Size;
 
 import 'package:flutter/foundation.dart';
@@ -7,11 +6,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../draft_painter.dart';
-import '../flutter_text_measurer.dart';
 import '../viewport_transform.dart';
-import 'gpu_draw_backend.dart';
 import 'resident_collection.dart';
-import 'resident_geometry.dart';
 import 'text_patches.dart';
 
 /// Why a rebuild ran. The spec's five triggers, plus the first build.
@@ -24,9 +20,9 @@ enum RebuildTrigger { initial, document, tables, devicePixelRatio, band }
 
 /// What the frame path paints through once a rebuild has landed.
 ///
-/// `GpuDrawBackend` is the production implementation. Tests substitute a
-/// recorder, because a `GpuDrawBackend` needs a `ResidentGeometry` and
-/// `ResidentGeometry.create` needs a live GPU.
+/// `GpuDrawBackend` (package `jet_cad_2d_gpu`) is the production
+/// implementation. Tests substitute a recorder, because a `GpuDrawBackend`
+/// needs a `ResidentGeometry` and `ResidentGeometry.create` needs a live GPU.
 abstract interface class ResidentFramePainter {
   void paint(
       Canvas canvas, ViewportTransform camera, Size viewport, double dpr);
@@ -34,36 +30,12 @@ abstract interface class ResidentFramePainter {
 }
 
 /// Turns one collection into a frame painter, or `null` when it cannot.
+///
+/// The production one is the registered `ResidentGpu`'s `upload`
+/// (`resident_gpu.dart`), bound by `DraftCanvas`; in `jet_cad_2d_gpu` that
+/// is `uploadResidentCollection`.
 typedef ResidentUploader = Future<ResidentFramePainter?> Function(
     ResidentCollection collection, Size viewport);
-
-/// The production uploader: `ResidentGeometry.create`, then a
-/// `GpuDrawBackend` over it. `null` when the platform has no GPU or the
-/// upload failed -- `create` has already reported the failure through
-/// `FlutterError.reportError` (its own doc comment), so nothing is reported
-/// twice here.
-///
-/// [viewport] is the widget's logical size, the ceiling for the patch
-/// targets; a `Size.zero` first layout still asks for a 1x1 ceiling rather
-/// than a texture the driver refuses.
-Future<ResidentFramePainter?> uploadResidentCollection(
-  ResidentCollection collection,
-  Size viewport, {
-  required FlutterTextMeasurer measurer,
-  required TextStyleRecord Function(Handle) textStyleOf,
-}) async {
-  final dpr = collection.devicePixelRatio;
-  final geometry = await ResidentGeometry.create(
-      collection.data, collection.instanceCount,
-      texts: collection.texts,
-      patches: collection.patches,
-      devicePixelRatio: dpr,
-      maxPatchWidth: math.max(1, (viewport.width * dpr).round()),
-      maxPatchHeight: math.max(1, (viewport.height * dpr).round()));
-  if (geometry == null) return null;
-  return GpuDrawBackend(geometry, collection.collectionCamera,
-      measurer: measurer, textStyleOf: textStyleOf);
-}
 
 /// Owns the resident backend's lifecycle for one `DraftCanvas` attachment:
 /// when to rebuild, and what the frame paints through meanwhile.
