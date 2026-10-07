@@ -105,7 +105,8 @@ class FloorPlannerApp extends StatefulWidget {
 
 class _FloorPlannerAppState extends State<FloorPlannerApp> {
   final GlobalKey<NavigatorState> _navigator = GlobalKey<NavigatorState>();
-  final DocumentSession _session = DocumentSession.untitled();
+  final DocumentSession _session =
+      DocumentSession.untitled(decimalSeparator: launchDecimalSeparator());
   late final DocumentFiles _files = widget.files ??
       widget.createFiles(askName: _askName, typeLabel: _typeLabel);
 

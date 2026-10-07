@@ -30,18 +30,27 @@ DraftDocument prepareDocument(TextMeasurer measurer) {
 /// the sample's page is: an empty document's extents have a NaN centre,
 /// which the page refuses.
 ///
+/// Its [decimalSeparator] is the one the plan's text prints with (spec Q0
+/// N1): a caller with a language passes that language's
+/// (`documentSeparatorFor`); without one it is the engine's default,
+/// [DecimalSeparator.point].
+///
 /// A function, not a constant: `PageComponent`'s constructor validates its
 /// fields, so it is not `const`.
-PageComponent defaultPage() => PageComponent(originX: -7425, originY: -5250);
+PageComponent defaultPage(
+        {DecimalSeparator decimalSeparator = DecimalSeparator.point}) =>
+    PageComponent(
+        originX: -7425, originY: -5250, decimalSeparator: decimalSeparator);
 
 /// The document New and launch open (spec 12a D4): [prepareDocument], then
-/// [defaultPage] attached through the log, then the history cleared, so a
-/// fresh document has Undo disabled and the host's save point finds it
-/// clean.
-DraftDocument newDocument(TextMeasurer measurer) {
+/// [defaultPage] with [decimalSeparator] attached through the log (spec Q0
+/// N1), then the history cleared, so a fresh document has Undo disabled
+/// and the host's save point finds it clean.
+DraftDocument newDocument(TextMeasurer measurer,
+    {DecimalSeparator decimalSeparator = DecimalSeparator.point}) {
   final doc = prepareDocument(measurer);
-  doc.commands.execute(
-      SetComponentCommand<PageComponent>(doc.rootHandle, defaultPage()));
+  doc.commands.execute(SetComponentCommand<PageComponent>(
+      doc.rootHandle, defaultPage(decimalSeparator: decimalSeparator)));
   doc.commands.clearHistory();
   return doc;
 }

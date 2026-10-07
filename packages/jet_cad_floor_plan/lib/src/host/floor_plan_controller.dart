@@ -12,6 +12,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import '../export/export_dialog.dart';
 import '../export/export_font.dart';
+import '../l10n/document_separator.dart';
+import '../l10n/strings.dart';
 import '../new_document.dart';
 import '../parametric/catalog.dart';
 import '../service/table_groups.dart';
@@ -88,10 +90,21 @@ final class _Requests extends ChangeNotifier {
 ///
 /// Notifies when the active plan changes (a mode switch, [load],
 /// [newPlan], [resetLayout]).
+///
+/// An empty plan the controller makes takes the decimal separator of the
+/// language of the [FloorPlanView] that first shows it (spec Q0 N1), unless
+/// something read or edited it first; a plan given as JSON keeps its own
+/// (N2).
 class FloorPlanController extends ChangeNotifier {
   /// A controller over [json], or over an empty plan. Throws a
   /// [FormatException] when [json] is not a plan, as [load] does, before
   /// it builds anything it would have to dispose (review F-5).
+  ///
+  /// The empty plan prints the decimal separator of the language of the
+  /// first [FloorPlanView] that shows it (spec Q0 N1): until a view has
+  /// reported its language it is the engine's `point`, and it settles on
+  /// the language as if it had been made so -- no undo step, not [dirty] --
+  /// unless [designJson] read it or an edit touched it first.
   factory FloorPlanController({
     List<SymbolLibrarySource> symbolSources = const [furnitureSymbolSource],
     SymbolLibraryLoader? symbols,
@@ -111,11 +124,15 @@ class FloorPlanController extends ChangeNotifier {
       }
     }
     return FloorPlanController._(_Plan(document, measurer),
-        symbolSources: symbolSources, symbols: symbols, thumbnails: thumbnails);
+        unsettled: json == null,
+        symbolSources: symbolSources,
+        symbols: symbols,
+        thumbnails: thumbnails);
   }
 
   FloorPlanController._(
     _Plan design, {
+    required bool unsettled,
     required List<SymbolLibrarySource> symbolSources,
     SymbolLibraryLoader? symbols,
     SymbolThumbnails? thumbnails,
@@ -126,6 +143,7 @@ class FloorPlanController extends ChangeNotifier {
             SymbolThumbnails(maxEntries: kFloorPlanThumbnailCapacity) {
     _design = _attach(design);
     _savedState = design.document.commands.stateId;
+    if (unsettled) _unsettledAt = _savedState;
     _placeNominally();
     _refreshFlags();
   }
@@ -364,6 +382,58 @@ class FloorPlanController extends ChangeNotifier {
     camera.panBy(shown == _mode.value ? assumed - origin : origin - assumed);
   }
 
+  // Spec Q0 N1 (R-4): an empty plan the controller makes is unsettled
+  // until a language is known. A controller cannot know its host's
+  // language and a host passes none (it makes the controller where no
+  // locale can be read), so each [FloorPlanView] reports the language of
+  // its context; the first report settles the designed plan, if nothing
+  // has touched it, and [newPlan] uses the last one.
+
+  /// The separator of the language a view last reported; null before any.
+  DecimalSeparator? _reported;
+
+  /// The designed plan's state id when it was made with no language known,
+  /// while it is unsettled; null for a settled or a loaded plan (N2).
+  int? _unsettledAt;
+
+  /// Whether the designed plan is unsettled and untouched: no command since
+  /// it was made -- its state is still the one it was made in, and no
+  /// command was undone back to it (an undone step leaves a redo) -- and no
+  /// [designJson] since (which clears [_unsettledAt]). Read when a language
+  /// is reported, synchronously, so an edit whose change has not been
+  /// heard yet counts.
+  bool get _untouched {
+    final at = _unsettledAt;
+    if (at == null) return false;
+    final commands = _design.document.commands;
+    return commands.stateId == at && !commands.canRedo;
+  }
+
+  /// A view's language (spec Q0 N1): [FloorPlanView] reports
+  /// `FloorPlanStrings.of(context)` when its dependencies change and when
+  /// it is handed this controller. Kept for [newPlan]. An unsettled,
+  /// untouched designed plan takes its separator now, as if made so: the
+  /// page's command and then the history cleared, so no undo step is left;
+  /// the save point moved with it, so it stays clean; nothing goes out on
+  /// [serviceLayoutChanges], and a service copy already taken keeps its
+  /// page (it holds no text). Only the page changes (I-2), and none of its
+  /// geometry, so the camera stays.
+  @internal
+  void reportLanguage(FloorPlanStrings strings) {
+    final separator = documentSeparatorFor(strings);
+    _reported = separator;
+    if (!_untouched) return;
+    _unsettledAt = null;
+    final d = _design.document;
+    final page = d.components.get<PageComponent>(d.rootHandle)!;
+    if (page.decimalSeparator == separator) return;
+    d.commands.execute(SetComponentCommand<PageComponent>(
+        d.rootHandle, page.copyWith(decimalSeparator: separator)));
+    d.commands.clearHistory();
+    // Untouched, so it was clean: no designJson, so no other save point.
+    _savedState = d.commands.stateId;
+  }
+
   /// Starts loading the symbol library, once, when the design view first
   /// mounts (R-11): the binding exists then.
   @internal
@@ -471,9 +541,11 @@ class FloorPlanController extends ChangeNotifier {
   // The designed plan.
 
   /// The designed plan's encoding, whatever the mode (H1, D9). [markSaved]
-  /// marks the state encoded here (R-8).
+  /// marks the state encoded here (R-8). An empty plan read here is settled
+  /// as it is (spec Q0 N2): no language reported later changes it.
   String designJson() {
     _settle?.call();
+    _unsettledAt = null;
     _encodedState = _design.document.commands.stateId;
     return DraftDocumentCodec.encodeToString(_design.document);
   }
@@ -504,18 +576,30 @@ class FloorPlanController extends ChangeNotifier {
     _replaceDesign(_Plan(document, measurer));
   }
 
-  /// Replaces the designed plan with an empty one (H3), as [load] does.
+  /// Replaces the designed plan with an empty one (H3), as [load] does. It
+  /// prints the decimal separator of the language a [FloorPlanView] last
+  /// reported (spec Q0 N1); with none reported yet, it is unsettled, as the
+  /// constructor's empty plan is.
   void newPlan() {
     _settle?.call();
     final measurer = FlutterTextMeasurer();
-    _replaceDesign(_Plan(newDocument(measurer), measurer));
+    final reported = _reported;
+    _replaceDesign(
+        _Plan(
+            newDocument(measurer,
+                decimalSeparator: reported ?? DecimalSeparator.point),
+            measurer),
+        unsettled: reported == null);
   }
 
-  void _replaceDesign(_Plan next) {
+  /// [next] becomes the designed plan; [unsettled] for an empty one made
+  /// with no language known (spec Q0 N1), never for a loaded one (N2).
+  void _replaceDesign(_Plan next, {bool unsettled = false}) {
     _drop(_design);
     if (_service case final s?) _drop(s);
     _design = _attach(next);
     _savedState = next.document.commands.stateId;
+    _unsettledAt = unsettled ? _savedState : null;
     _encodedState = null;
     if (_mode.value == FloorPlanMode.selection) {
       _service = _attach(_copyOf(_design));

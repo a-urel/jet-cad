@@ -143,12 +143,22 @@ class _FloorPlanViewState extends State<FloorPlanView> {
         ),
       );
 
+  /// Reports this view's language to the controller (spec Q0 N1): it
+  /// settles an empty plan nothing has touched, and a new plan takes it.
+  /// Again on every change of the language, and on a controller swap.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    widget.controller.reportLanguage(FloorPlanStrings.of(context));
+  }
+
   @override
   void didUpdateWidget(FloorPlanView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
+      widget.controller.reportLanguage(FloorPlanStrings.of(context));
     }
   }
 
