@@ -18,9 +18,12 @@ Monépro's first jet-cad prerequisite, from its spec 103 §10.
   may change only to follow a moved name or the registry, and each such
   change is recorded.
 - **No host code changes.** B1 stays unchanged.
-- **Never commit an `analysis_options.yaml`.** The new package's is
-  created and left uncommitted, as its siblings' are. Check
-  `git status` before each commit.
+- **Never commit an `analysis_options.yaml` rewrite.** The new package's
+  is committed once, at scaffold, as its siblings' were (plan 01's Ruling
+  01-1); a rewrite by `pub get` is never committed. Check `git status`
+  before each commit. (Corrected after Task 1's review: this line first
+  said "left uncommitted, as its siblings' are", which was wrong; all nine
+  siblings' are tracked.)
 - **Never `git checkout` a file to revert it.** Use
   `git show HEAD:path > path`.
 - Each named mutant is applied, seen red and reverted; record the result.
