@@ -40,22 +40,20 @@ one's spec, plan and results.
   whole; an independent review (*Approved with fixes*), fixed in
   `6c7b5c9`. Record:
   [2026-10-07-cleanup.md](docs/superpowers/notes/2026-10-07-cleanup.md).
+- **Q0, the plan's decimal separator** (the human, 2026-10-07: *"Q0 ile
+  devam et"*), merged into `main` at `032880c` on the human's *"evet,
+  main'e merge et"*: a plan carries its separator (`.` or `,`), chosen on
+  the Page panel; dimensions, room areas and the rulers print it; a new
+  plan takes the UI language's (Q2 assumed yes, N1); **schema 8**, which
+  0.1.0 refuses (unreleased: CHANGELOG). Spec
+  [2026-10-07-decimal-separator-design.md](docs/superpowers/specs/2026-10-07-decimal-separator-design.md)
+  (rev 2), plan [2026-10-07-decimal-separator.md](docs/superpowers/plans/2026-10-07-decimal-separator.md),
+  results [2026-10-07-decimal-separator-results.md](docs/superpowers/notes/2026-10-07-decimal-separator-results.md),
+  ledger [docs/superpowers/ledgers/2026-10-07-decimal-separator/](docs/superpowers/ledgers/2026-10-07-decimal-separator/).
 
 ## In flight
 
-**Q0, the plan's decimal separator** (the human, 2026-10-07: *"Q0 ile
-devam et"*), on `claude/exciting-pasteur-9m22jv`, not merged: a plan
-carries its separator (`.` or `,`), chosen on the Page panel; dimensions,
-room areas and the rulers print it; a new plan takes the UI language's
-(Q2 assumed yes, N1); schema 8 (0.1.0 refuses a plan saved by it).
-Spec [2026-10-07-decimal-separator-design.md](docs/superpowers/specs/2026-10-07-decimal-separator-design.md)
-(rev 2, reviewed), plan [2026-10-07-decimal-separator.md](docs/superpowers/plans/2026-10-07-decimal-separator.md),
-results [2026-10-07-decimal-separator-results.md](docs/superpowers/notes/2026-10-07-decimal-separator-results.md).
-Tasks 1–5 done, each reviewed; the independent review of the range
-(*Approved with fixes*) applied in `d8f596a`; every gate green (planner
-1,380, app 212, demo 35→37, the standing sets exactly). **Ready to merge,
-on the human's word.** Owed: the Q2 ruling (N1 assumed), a look in German
-and Turkish, the macOS fingerprints.
+Nothing. Q0, below, is merged.
 
 ## Owed to the human
 
@@ -66,6 +64,13 @@ and Turkish, the macOS fingerprints.
   *Zufällige Status* among others); the Turkish read.
 - **A ruling:** a context click on a group member selects its whole group
   (made at the 14d merge, documented in the host guide).
+- **Q2's ruling:** does a new plan's decimal separator follow the UI
+  language (Q0's N1, assumed yes)? If "`.` always", `documentSeparatorFor`
+  becomes a constant and the settling goes.
+- **The macOS re-baseline** of the engine's two `generate_document_test`
+  fingerprints (moved by 12b's schema 7 and Q0's schema 8).
+- **A look at Q0** in German and Turkish: the Page panel's control, the
+  plan's text, the PDF.
 
 ## Standing failures and skips
 
@@ -76,10 +81,9 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Q0's merge, on the human's word**, then the human's choice: the
-real POS integration (the POS repository added to a session, the host
-guide followed), or a release (0.2.0: schema 8 is unreleased on `main`
-once merged).
+**Next: the human's choice**: the real POS integration (the POS
+repository added to a session, the host guide followed), or a release
+(0.2.0: schema 8 and the separator are unreleased on `main`).
 
 ---
 

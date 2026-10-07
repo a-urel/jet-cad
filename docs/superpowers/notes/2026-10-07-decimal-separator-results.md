@@ -9,7 +9,7 @@ V-1 to V-19. Q2 is assumed as proposed (N1).
 **Plan:** [2026-10-07-decimal-separator.md](../plans/2026-10-07-decimal-separator.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `0ca8b64`.
-**Not merged: ready, on the human's word.**
+**Merged** into `main` at `032880c` on the human's *"evet, main'e merge et"*.
 
 **Process.** Each of Tasks 1–4 had a fresh implementer, then an
 independent reviewer working in its own clone. Task 5 (the docs and the
