@@ -125,4 +125,19 @@ void main() {
           <String>['a.png', 'b.jetplan', 'c.pdf']);
     });
   });
+
+  test(
+      'DK-L the panels\' groups are named by the label given, the '
+      'extension kept; English by default (spec 14d L16)', () {
+    String named(FileKind k) => '<${k.name}>';
+    for (final kind in FileKind.values) {
+      final group = saveTypeGroupsFor(kind, label: named).single;
+      expect(group.label, '<${kind.name}>');
+      expect(group.extensions, <String>[kind.extension]);
+      expect(saveTypeGroupsFor(kind).single.label, kind.label);
+    }
+    expect(openTypeGroups(label: named).single.label, '<jetplan>');
+    expect(openTypeGroups(label: named).single.extensions,
+        kJetplanTypeGroup.extensions);
+  });
 }

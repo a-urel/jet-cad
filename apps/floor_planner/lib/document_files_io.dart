@@ -13,20 +13,26 @@ import 'document_files.dart';
 /// The platform's [DocumentFiles]: here, [IoDocumentFiles]. [askName] is
 /// the web's save-name prompt; the native save panel asks instead, so it
 /// is not used here.
-DocumentFiles createDocumentFiles({required DocumentNamePrompt askName}) =>
-    const IoDocumentFiles();
+DocumentFiles createDocumentFiles(
+        {required DocumentNamePrompt askName,
+        FileTypeLabel typeLabel = englishFileTypeLabel}) =>
+    IoDocumentFiles(typeLabel: typeLabel);
 
 /// Native panels; a location is the file's path, and [write] overwrites it.
 class IoDocumentFiles implements DocumentFiles {
-  const IoDocumentFiles();
+  const IoDocumentFiles({this.typeLabel = englishFileTypeLabel});
+
+  /// The file types' names in the panels, in the app's language (spec 14d
+  /// L16).
+  final FileTypeLabel typeLabel;
 
   @override
   bool get writesInPlace => true;
 
   @override
   Future<({String name, Uint8List bytes, Object? location})?> open() async {
-    final file = await openFile(
-        acceptedTypeGroups: const <XTypeGroup>[kJetplanTypeGroup]);
+    final file =
+        await openFile(acceptedTypeGroups: openTypeGroups(label: typeLabel));
     if (file == null) return null;
     final bytes = await file.readAsBytes();
     return (name: _baseName(file.path), bytes: bytes, location: file.path);
@@ -41,7 +47,7 @@ class IoDocumentFiles implements DocumentFiles {
   Future<({String name, Object location})?> saveLocation(String suggestedName,
       {FileKind kind = FileKind.jetplan}) async {
     final location = await getSaveLocation(
-        acceptedTypeGroups: saveTypeGroupsFor(kind),
+        acceptedTypeGroups: saveTypeGroupsFor(kind, label: typeLabel),
         suggestedName: suggestedName);
     if (location == null) return null;
     return (name: _baseName(location.path), location: location.path);

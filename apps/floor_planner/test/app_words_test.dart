@@ -1,6 +1,8 @@
 // Spec 14d L16: the app follows the system's language -- its own file
 // commands, the untitled name, the sample's rooms -- and English for any
 // other.
+import 'package:floor_planner/app_strings.dart';
+import 'package:floor_planner/document_files.dart' show FileKind;
 import 'package:floor_planner/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -38,5 +40,26 @@ void main() {
     await pumpIn(tester, const Locale('fr'));
     expect(tooltipOf(tester, 'toolbar-new'), 'New (Ctrl+N)');
     expect(find.text('Untitled'), findsOneWidget);
+  });
+
+  testWidgets(
+      'AW3 the file types\' names in each language (spec 14d L16, review '
+      '14d-1 F-5)', (tester) async {
+    final names = <String, List<String>>{};
+    for (final code in ['en', 'de', 'tr']) {
+      await tester.pumpWidget(Localizations(
+          locale: Locale(code),
+          delegates: const [DefaultWidgetsLocalizations.delegate],
+          child: Builder(builder: (context) {
+            final words = AppStrings.of(context);
+            names[code] = [
+              for (final k in FileKind.values) words.fileTypeLabel(k)
+            ];
+            return const SizedBox();
+          })));
+    }
+    expect(names['en'], ['Jet plan', 'PDF document', 'PNG image']);
+    expect(names['de'], ['Jet-Plan', 'PDF-Dokument', 'PNG-Bild']);
+    expect(names['tr'], ['Jet planı', 'PDF belgesi', 'PNG görüntüsü']);
   });
 }
