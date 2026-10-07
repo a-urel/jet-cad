@@ -145,7 +145,12 @@ void main() {
     }
 
     expect(commands, contains('set -euo pipefail'));
+    // The final review's F-3 (MU6): stale output survives a build, so the
+    // probe starts clean.
+    final clean =
+        at(r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"');
     final get = at('flutter pub get');
+    expect(clean, lessThan(get), reason: 'cleaned before pub get');
     final check =
         at(r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"');
     final analyze = at('flutter analyze');
@@ -153,5 +158,107 @@ void main() {
     expect(get < check && check < analyze && analyze < build, isTrue,
         reason: 'pub get, the check, analyze, build: $get, $check, '
             '$analyze, $build');
+  });
+
+  // The final review's F-3 (MU7): the probe's checks after the build, run
+  // as bash runs them, in a scratch probe; one red case per check.
+  group('SC15 host_probe.sh after the build', () {
+    final script = File('host_probe.sh').readAsStringSync();
+    final from = script.indexOf('\nfail=0\n');
+    final tail = script.substring(from + 1);
+
+    late Directory probe;
+    setUp(() {
+      probe = Directory.systemTemp.createTempSync('host_probe_tail');
+      Directory('${probe.path}/build/web/assets/packages/jet_cad_floor_plan')
+          .createSync(recursive: true);
+      File('${probe.path}/build/web/main.dart.js')
+          .writeAsStringSync('main();\n');
+    });
+    tearDown(() => probe.deleteSync(recursive: true));
+
+    Future<ProcessResult> runTail() =>
+        Process.run('bash', ['-c', 'set -euo pipefail\n$tail'],
+            workingDirectory: probe.path);
+
+    test('premise: the block is the script\'s last', () {
+      expect(from, isNot(-1));
+      expect(tail, contains('exit 1'));
+      expect(tail, contains('du -sh build/web'));
+    });
+
+    test('a clean build: exit 0', () async {
+      final r = await runTail();
+      expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+      expect(r.stdout, contains('no GPU renderer, no build hook'));
+    });
+
+    test('a build hook ran: exit 1', () async {
+      Directory('${probe.path}/.dart_tool/hooks_runner')
+          .createSync(recursive: true);
+      final r = await runTail();
+      expect(r.exitCode, 1);
+      expect(r.stderr, contains('a build hook ran'));
+    });
+
+    test("flutter_scene's assets: exit 1", () async {
+      Directory('${probe.path}/build/web/assets/packages/flutter_scene')
+          .createSync();
+      final r = await runTail();
+      expect(r.exitCode, 1);
+      expect(r.stderr, contains("ships flutter_scene's assets"));
+    });
+
+    test('main.dart.js names cad.shaderbundle: exit 1', () async {
+      File('${probe.path}/build/web/main.dart.js').writeAsStringSync(
+          'load("packages/jet_cad_2d_gpu/assets/shaders/cad.shaderbundle");\n');
+      final r = await runTail();
+      expect(r.exitCode, 1);
+      expect(r.stderr, contains('loads cad.shaderbundle'));
+    });
+
+    test('no main.dart.js: exit 1', () async {
+      File('${probe.path}/build/web/main.dart.js').deleteSync();
+      final r = await runTail();
+      expect(r.exitCode, 1);
+      expect(r.stderr, contains('has no main.dart.js'));
+    });
+  });
+
+  // The final review's F-3 (MU4, MU5): ci.yml read as text.
+  final workflow = File('../../.github/workflows/ci.yml').readAsStringSync();
+
+  test('SC16 every live package is in the CI matrix', () {
+    final listed = RegExp(r'^\s+- package: (\S+)$', multiLine: true)
+        .allMatches(workflow)
+        .map((m) => m[1])
+        .toSet();
+    final live = [
+      for (final dir in Directory('../../packages').listSync())
+        if (dir is Directory &&
+            File('${dir.path}/pubspec.yaml').existsSync() &&
+            !dir.path.endsWith('/jet_cad')) // dormant, outside CI
+          'packages/${dir.uri.pathSegments.where((s) => s.isNotEmpty).last}',
+    ];
+    expect(live, contains('packages/jet_cad_2d_gpu'), reason: 'premise');
+    expect(listed, containsAll(live));
+  });
+
+  test("SC17 each app's web build asserts no flutter_scene assets", () {
+    final builds = RegExp(r'^\s+flutter build web$', multiLine: true)
+        .allMatches(workflow)
+        .length;
+    final asserts = RegExp(
+            r'^\s+flutter build web\n\s+test ! -e '
+            r'build/web/assets/packages/flutter_scene$',
+            multiLine: true)
+        .allMatches(workflow)
+        .length;
+    expect(builds, 2, reason: 'premise: the demo and the floor planner');
+    expect(asserts, builds);
+    expect(
+        workflow,
+        contains('run: tool/ci/host_probe.sh "file://\$GITHUB_WORKSPACE" '
+            '"\$(git rev-parse HEAD)"'));
   });
 }

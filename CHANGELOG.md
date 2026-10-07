@@ -41,8 +41,14 @@ On `main`, not yet released.
   `jet_cad_2d_flutter`'s barrel (no host did): `GpuDrawBackend`,
   `ResidentGeometry`, `ResidentPatch`, `debugSetGpuAvailable` and
   `uploadResidentCollection` now come from
-  `package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart`, and the GPU is used only
-  after `installResidentGpu()`.
+  `package:jet_cad_2d_gpu/jet_cad_2d_gpu.dart`, which also exports
+  `installResidentGpu`, `gpuAvailable`, `debugSetGpuFactory` and
+  `GpuContextFactory`; the GPU is used only after `installResidentGpu()`.
+  `ResidentGeometry`'s four layout statics stay in `jet_cad_2d_flutter`,
+  as `ResidentLayout`.
+- `jet_cad_2d_flutter` gains the GPU registry (`ResidentGpu`,
+  `registerResidentGpu`, `registeredResidentGpu`), `ResidentLayout`,
+  `kFloatsPerInstance` and `InstanceFieldOffset`.
 
 ## 0.1.0
 
