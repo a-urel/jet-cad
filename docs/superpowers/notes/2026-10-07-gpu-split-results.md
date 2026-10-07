@@ -11,6 +11,7 @@ fixes are folded in.
 **Plan:** [2026-10-07-gpu-package-split.md](../plans/2026-10-07-gpu-package-split.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `23a8950`.
+**Merged** into `main` at `56974b6` on the human's *"evet, main'e merge et"*.
 
 **Process.** Tasks 1 and 2 each had a fresh implementer, then an
 independent reviewer working in its own clone. Task 3 (docs and exit) was

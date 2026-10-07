@@ -50,20 +50,22 @@ one's spec, plan and results.
   (rev 2), plan [2026-10-07-decimal-separator.md](docs/superpowers/plans/2026-10-07-decimal-separator.md),
   results [2026-10-07-decimal-separator-results.md](docs/superpowers/notes/2026-10-07-decimal-separator-results.md),
   ledger [docs/superpowers/ledgers/2026-10-07-decimal-separator/](docs/superpowers/ledgers/2026-10-07-decimal-separator/).
+- **The GPU split** (the human, 2026-10-07: *"POS entegrasyonuna geç"*,
+  then *"Önce jet-cad ön koşulu"*: Monépro's spec 103 §10 lists it
+  first), merged into `main` at `56974b6` on the human's *"evet, main'e
+  merge et"*: the GPU renderer moves out of `jet_cad_2d_flutter` into
+  `packages/jet_cad_2d_gpu`, so a host's graph holds no `flutter_scene`
+  and runs no build hook, its web build is 12 MB smaller and its Flutter
+  floor is 3.44 again (unreleased: CHANGELOG). CI's host probe fails on a
+  lock that resolves the GPU renderer. Spec
+  [2026-10-07-gpu-package-split-design.md](docs/superpowers/specs/2026-10-07-gpu-package-split-design.md)
+  (rev 2), plan [2026-10-07-gpu-package-split.md](docs/superpowers/plans/2026-10-07-gpu-package-split.md),
+  results [2026-10-07-gpu-split-results.md](docs/superpowers/notes/2026-10-07-gpu-split-results.md),
+  ledger [docs/superpowers/ledgers/2026-10-07-gpu-split/](docs/superpowers/ledgers/2026-10-07-gpu-split/).
 
 ## In flight
 
-**The GPU split** (the human, 2026-10-07: *"POS entegrasyonuna geç"*,
-then *"Önce jet-cad ön koşulu"*: Monépro's spec 103 §10 lists it first),
-on `claude/exciting-pasteur-9m22jv`, not merged: the GPU renderer moves
-out of `jet_cad_2d_flutter` into `packages/jet_cad_2d_gpu`, so a host's
-graph holds no `flutter_scene` and runs no build hook, and the host's
-Flutter floor is 3.44 again. CI's host probe now fails on a lock that
-resolves the GPU renderer. Spec
-[2026-10-07-gpu-package-split-design.md](docs/superpowers/specs/2026-10-07-gpu-package-split-design.md)
-(rev 2), plan [2026-10-07-gpu-package-split.md](docs/superpowers/plans/2026-10-07-gpu-package-split.md),
-results [2026-10-07-gpu-split-results.md](docs/superpowers/notes/2026-10-07-gpu-split-results.md),
-ledger `.superpowers/sdd/2026-10-07-gpu-split/`.
+Nothing. The GPU split, above, is merged.
 
 ## Owed to the human
 
@@ -94,10 +96,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the GPU split's merge**, on the human's word. Then Monépro's
-next jet-cad prerequisite (spec 103 §10): a consumable version — a
-release (0.2.0: schema 8, the separator and the split are unreleased on
-`main`) whose SHA the POS pins.
+**Next: the human's choice.** Monépro's next jet-cad prerequisite
+(spec 103 §10) is a consumable version: a release (0.2.0: schema 8, the
+separator and the GPU split are unreleased on `main`) whose SHA the POS
+pins. The tag is the human's to push.
 
 ---
 
