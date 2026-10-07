@@ -29,6 +29,20 @@ extension DisplayUnitConversion on DisplayUnit {
       this == DisplayUnit.inches || this == DisplayUnit.feetInches;
 }
 
+/// The character the plan's own text writes between a number's whole and
+/// fractional parts (spec Q0 E1). It belongs to the document, not to the
+/// terminal, so a plan prints the same way in every UI language.
+enum DecimalSeparator {
+  point,
+  comma;
+
+  /// `.` for [point], `,` for [comma].
+  String get char => switch (this) {
+        DecimalSeparator.point => '.',
+        DecimalSeparator.comma => ',',
+      };
+}
+
 /// A sheet's portrait dimensions in paper millimetres.
 class SheetSize {
   const SheetSize(this.widthMm, this.heightMm);
@@ -67,8 +81,9 @@ class SheetSize {
 const Object _keep = Object();
 
 /// The page (spec D3): sheet, orientation, drawing scale, the sheet's world
-/// origin, display unit, paper colour, grid and snap settings. Attached to
-/// the root handle by the application; not an engine built-in.
+/// origin, display unit, decimal separator, paper colour, grid and snap
+/// settings. Attached to the root handle by the application; not an engine
+/// built-in.
 ///
 /// Immutable and value-equal, like every [Component]; `toJson` keys are
 /// alphabetical, so the order is fixed by construction.
@@ -87,6 +102,10 @@ class PageComponent implements Component {
   final double originX;
   final double originY;
   final DisplayUnit displayUnit;
+
+  /// The separator the plan's own text prints (spec Q0 E1). Part of `==`, so
+  /// a change of separator is a page change regeneration sees.
+  final DecimalSeparator decimalSeparator;
   final int background;
   final bool gridVisible;
   final double? gridStepMm;
@@ -101,6 +120,7 @@ class PageComponent implements Component {
     this.originX = 0,
     this.originY = 0,
     this.displayUnit = DisplayUnit.meters,
+    this.decimalSeparator = DecimalSeparator.point,
     this.background = 0xFFFFFFFF,
     this.gridVisible = true,
     this.gridStepMm,
@@ -149,6 +169,7 @@ class PageComponent implements Component {
     double? originX,
     double? originY,
     DisplayUnit? displayUnit,
+    DecimalSeparator? decimalSeparator,
     int? background,
     bool? gridVisible,
     Object? gridStepMm = _keep,
@@ -163,6 +184,7 @@ class PageComponent implements Component {
         originX: originX ?? this.originX,
         originY: originY ?? this.originY,
         displayUnit: displayUnit ?? this.displayUnit,
+        decimalSeparator: decimalSeparator ?? this.decimalSeparator,
         background: background ?? this.background,
         gridVisible: gridVisible ?? this.gridVisible,
         gridStepMm: identical(gridStepMm, _keep)
@@ -186,6 +208,7 @@ class PageComponent implements Component {
   @override
   Map<String, Object?> toJson() => {
         'background': background,
+        'decimalSeparator': decimalSeparator.name,
         'displayUnit': displayUnit.name,
         'gridStepMm': gridStepMm,
         'gridVisible': gridVisible,
@@ -209,6 +232,11 @@ class PageComponent implements Component {
         originY: _requiredDouble(json, 'originY'),
         displayUnit:
             DisplayUnit.values.byName(_required(json, 'displayUnit') as String),
+        // Optional: a v7 page has no key and is `point` (spec Q0 E2).
+        decimalSeparator: switch (json['decimalSeparator'] as String?) {
+          null => DecimalSeparator.point,
+          final name => DecimalSeparator.values.byName(name),
+        },
         background: (json['background'] as int?) ?? 0xFFFFFFFF,
         gridVisible: (json['gridVisible'] as bool?) ?? true,
         gridStepMm: (json['gridStepMm'] as num?)?.toDouble(),
@@ -235,6 +263,7 @@ class PageComponent implements Component {
       other.originX == originX &&
       other.originY == originY &&
       other.displayUnit == displayUnit &&
+      other.decimalSeparator == decimalSeparator &&
       other.background == background &&
       other.gridVisible == gridVisible &&
       other.gridStepMm == gridStepMm &&
@@ -250,6 +279,7 @@ class PageComponent implements Component {
       originX,
       originY,
       displayUnit,
+      decimalSeparator,
       background,
       gridVisible,
       gridStepMm,
@@ -259,5 +289,6 @@ class PageComponent implements Component {
   @override
   String toString() =>
       'PageComponent(${preset?.name ?? 'custom'} ${orientation.name} '
-      '1:$scaleDenominator at ($originX, $originY), ${displayUnit.name})';
+      '1:$scaleDenominator at ($originX, $originY), ${displayUnit.name}, '
+      '${decimalSeparator.name})';
 }

@@ -33,6 +33,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'l10n/document_separator.dart';
 import 'l10n/strings_en.dart';
 import 'l10n/strings.dart';
 import 'new_document.dart';
@@ -64,7 +65,8 @@ const DraftColor _finishColor = TrueColor(0xBBBBBB);
 /// Builds the sample flat (File > Open sample, spec 12a D4) over
 /// [measurer]. `DraftCanvas` refuses a document whose measurer is not a
 /// `FlutterTextMeasurer`, so the caller supplies one it owns. Its rooms are
-/// named in [strings]' language (spec 14d L7), English by default.
+/// named in [strings]' language (spec 14d L7), English by default, and its
+/// page prints that language's decimal separator (spec Q0 N1).
 DraftDocument startupPlan(FlutterTextMeasurer measurer,
     {FloorPlanStrings strings = const FloorPlanStringsEn()}) {
   // Spec 12a D4: the set-up every document the app makes shares -- the
@@ -199,9 +201,13 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer,
   // through the log like everything else. Spec 10 D23 (R-27): it is set
   // through the plan's system before the rooms, so they read the real page,
   // not the fallback (10 D11). Centred on the extents, which the rooms do
-  // not change. (The page's type and the units are the set-up's.)
+  // not change. (The page's type and the units are the set-up's.) Its
+  // decimal separator is [strings]' (spec Q0 N1), set before the rooms and
+  // the dimensions, so their text is generated with it.
   doc.commands.execute(SetComponentCommand<PageComponent>(
-      doc.rootHandle, startupPage(doc.extents)));
+      doc.rootHandle,
+      startupPage(doc.extents,
+          decimalSeparator: documentSeparatorFor(strings))));
 
   // Seven rooms (spec 10 D23's table): the six spaces, and the dining area
   // the separator splits off the living room. Each seed lies in no band.
@@ -249,10 +255,11 @@ DraftDocument startupPlan(FlutterTextMeasurer measurer,
 }
 
 /// The sample's page: A4 landscape at 1:50 in metres, centred on
-/// [extents] (spec D4). A new document's page is `defaultPage()` (spec 12a
-/// D4).
-PageComponent startupPage(Aabb2 extents) {
-  final page = PageComponent();
+/// [extents] (spec D4), printing [decimalSeparator] (spec Q0 N1). A new
+/// document's page is `defaultPage()` (spec 12a D4).
+PageComponent startupPage(Aabb2 extents,
+    {DecimalSeparator decimalSeparator = DecimalSeparator.point}) {
+  final page = PageComponent(decimalSeparator: decimalSeparator);
   final w = page.effectiveWidthMm * page.scaleDenominator;
   final h = page.effectiveHeightMm * page.scaleDenominator;
   return page.copyWith(

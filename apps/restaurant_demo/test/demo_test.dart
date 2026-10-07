@@ -1149,4 +1149,76 @@ void main() {
     expect(c.groupStatuses.value, isEmpty);
     expect(tester.takeException(), isNull, reason: 'split');
   });
+
+  // Spec Q0 N1 (M-Q0-e): an empty area takes the language of the view that
+  // shows it, as if made so; Revert with nothing stored makes a new plan in
+  // the language of the moment; a stored plan keeps its own (N2).
+  DecimalSeparator shownSeparator(DemoHomeState demo) {
+    final doc = demo.area.controller.activeDocument;
+    return doc.components.get<PageComponent>(doc.rootHandle)!.decimalSeparator;
+  }
+
+  testWidgets(
+      'DQ1 no samples, in German: the shown area\'s empty plan prints comma, '
+      'clean, with no undo step and no dirty line; Teras too once shown',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1600, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(const RestaurantDemo(locale: Locale('de')));
+    await tester.pump();
+    await tester.pump();
+    final demo = tester.state<DemoHomeState>(find.byType(DemoHome));
+    expect(demo.area.name, 'Salon');
+    expect(find.text('Entwurf'), findsOneWidget, reason: 'premise: German');
+    expect(demo.area.stored, isNull, reason: 'premise: no sample');
+    final c = demo.area.controller;
+    expect(shownSeparator(demo), DecimalSeparator.comma);
+    expect(c.dirty.value, isFalse);
+    expect(c.canUndo.value, isFalse);
+    expect(c.activeDocument.commands.undoDepth, 0);
+    expect(demo.log.where((l) => l.startsWith('Salon:')), isEmpty,
+        reason: 'no dirty line, no layout line');
+    expect(tester.widget<FilledButton>(byKey('save')).onPressed, isNull,
+        reason: 'nothing to save');
+
+    await tester.tap(byKey('area-1'));
+    await tester.pump();
+    await tester.pump();
+    expect(demo.area.name, 'Teras');
+    expect(shownSeparator(demo), DecimalSeparator.comma);
+    expect(demo.area.controller.dirty.value, isFalse);
+  });
+
+  testWidgets(
+      'DQ2 Revert after a switch to German: an area with nothing stored gets '
+      'a comma plan; one with a stored point plan reloads it as point (N2)',
+      (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Teras': salonPlan()});
+    expect(demo.area.name, 'Salon');
+    expect(shownSeparator(demo), DecimalSeparator.point,
+        reason: 'premise: settled in English');
+    await tester.tap(byKey('lang-de'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Entwurf'), findsOneWidget, reason: 'premise: German');
+    expect(shownSeparator(demo), DecimalSeparator.point,
+        reason: 'a settled plan is not converted (N2)');
+
+    await tester.tap(byKey('revert'));
+    await tester.pump();
+    await tester.pump();
+    expect(shownSeparator(demo), DecimalSeparator.comma);
+    expect(demo.area.controller.dirty.value, isFalse);
+    expect(demo.area.controller.canUndo.value, isFalse);
+
+    await tester.tap(byKey('area-1'));
+    await tester.pump();
+    await tester.pump();
+    expect(demo.area.name, 'Teras');
+    await tester.tap(byKey('revert'));
+    await tester.pump();
+    await tester.pump();
+    expect(tablesText(tester), '1 (4), 2 (6)', reason: 'premise: reloaded');
+    expect(shownSeparator(demo), DecimalSeparator.point);
+  });
 }

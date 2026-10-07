@@ -255,6 +255,9 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
   String get pageBreaks => record(inner.pageBreaks);
 
   @override
+  String get pageDecimalSeparator => record(inner.pageDecimalSeparator);
+
+  @override
   String get paper => record(inner.paper);
 
   @override

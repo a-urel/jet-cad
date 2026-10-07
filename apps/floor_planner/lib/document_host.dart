@@ -16,7 +16,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
-    show FloorPlanStrings;
+    show FloorPlanStrings, floorPlanSupportedLocales;
 
 import 'app_strings.dart';
 import 'document_files.dart';
@@ -40,6 +40,18 @@ String documentNameOf(String fileName) {
       : fileName;
 }
 
+/// The decimal separator of the launch document (spec Q0 N1, V-2): that of
+/// the language the app starts in. The app's `MaterialApp` sets no
+/// `locale:` and no resolution callback, so it resolves the system's
+/// locales against [floorPlanSupportedLocales] by
+/// [basicLocaleListResolution]; this does the same, read through
+/// [FloorPlanStrings.forLocale], because the launch document is made above
+/// the `MaterialApp`, where no context has a locale yet.
+DecimalSeparator launchDecimalSeparator() =>
+    documentSeparatorFor(FloorPlanStrings.forLocale(basicLocaleListResolution(
+        WidgetsBinding.instance.platformDispatcher.locales,
+        floorPlanSupportedLocales)));
+
 /// The current document and what the app knows about its file (spec 12a
 /// D2, D5; plan 12a P-3): the document and the measurer it was built with,
 /// its file name and location, its save point, and the dirty and busy
@@ -60,10 +72,14 @@ class DocumentSession extends ChangeNotifier {
     _listen();
   }
 
-  /// The launch document: [newDocument], untitled and clean (spec 12a D4).
-  factory DocumentSession.untitled() {
+  /// The launch document: [newDocument], untitled and clean (spec 12a D4),
+  /// printing [decimalSeparator] (spec Q0 N1): the app computes it from the
+  /// language it starts in ([launchDecimalSeparator]).
+  factory DocumentSession.untitled(
+      {required DecimalSeparator decimalSeparator}) {
     final measurer = FlutterTextMeasurer();
-    return DocumentSession(newDocument(measurer), measurer);
+    return DocumentSession(
+        newDocument(measurer, decimalSeparator: decimalSeparator), measurer);
   }
 
   DraftDocument _document;
@@ -424,12 +440,16 @@ class DocumentHostState extends State<DocumentHost> {
   void _armExitGuard() => _exitGuard.armed = _session.dirty.value;
 
   /// New (spec 12a D4): the empty document, untitled and clean, once the
-  /// current one may go (D10).
+  /// current one may go (D10). It prints the decimal separator of the
+  /// language of the moment (spec Q0 N1).
   Future<void> newFlow() => _flow(() async {
         _settlePendingInput();
+        // Read before the first await, as Open sample does (V-17).
+        final separator = documentSeparatorFor(FloorPlanStrings.of(context));
         if (!await _mayDiscard()) return;
         final measurer = FlutterTextMeasurer();
-        _session.replace(newDocument(measurer), measurer);
+        _session.replace(
+            newDocument(measurer, decimalSeparator: separator), measurer);
       });
 
   /// Open sample (spec 12a D4): the sample flat, untitled and clean, once

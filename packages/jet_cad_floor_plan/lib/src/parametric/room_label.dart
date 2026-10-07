@@ -4,7 +4,7 @@
 // and `vector_math` only (spec 10 D1).
 import 'dart:math' as math;
 
-import 'package:jet_cad_2d/jet_cad_2d.dart' show DisplayUnit;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show DecimalSeparator, DisplayUnit;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'room_trace.dart' show distToSegment, pointInRing;
@@ -160,13 +160,20 @@ final class _MaxHeap {
 /// The area label's string for [mm2] mm² in the page's [unit] (spec 10
 /// D11, decision 6): m² for millimetres, centimetres and metres, ft² for
 /// inches and feet-inches (`304.8 × 304.8` mm² to the square foot, in double
-/// arithmetic); always two decimals, `.` as the separator, no grouping.
-String formatArea(double mm2, DisplayUnit unit) => switch (unit) {
+/// arithmetic); always two decimals, the page's [decimalSeparator] as the
+/// separator (spec Q0 T1), no grouping.
+String formatArea(double mm2, DisplayUnit unit,
+        {DecimalSeparator decimalSeparator = DecimalSeparator.point}) =>
+    switch (unit) {
       DisplayUnit.millimeters ||
       DisplayUnit.centimeters ||
       DisplayUnit.meters =>
-        '${(mm2 / 1e6).toStringAsFixed(2)} m²',
+        '${_twoDecimals(mm2 / 1e6, decimalSeparator)} m²',
       DisplayUnit.inches ||
       DisplayUnit.feetInches =>
-        '${(mm2 / (304.8 * 304.8)).toStringAsFixed(2)} ft²',
+        '${_twoDecimals(mm2 / (304.8 * 304.8), decimalSeparator)} ft²',
     };
+
+/// [value] to two decimals, the point printed as [decimalSeparator].
+String _twoDecimals(double value, DecimalSeparator decimalSeparator) =>
+    value.toStringAsFixed(2).replaceFirst('.', decimalSeparator.char);

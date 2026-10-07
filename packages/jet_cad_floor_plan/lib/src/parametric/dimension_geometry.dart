@@ -287,7 +287,7 @@ const double kDimMaxValueMm = 1e15;
 /// [layoutDimension]:
 ///
 /// - [value]: what it measures, never negative; [text], its format in the
-///   page's unit;
+///   page's unit with the page's decimal separator;
 /// - [u], [n]: the measuring direction and its left normal;
 /// - [q0], [q1]: the dimension line's ends;
 /// - [ext0], [ext1]: the extension lines at `a` and `b`, (start, end);
@@ -414,7 +414,8 @@ DimLayout? layoutDimension(Vector2 p0, Vector2 p1, DimKind kind, Transform2 m,
     textAt: textAt,
     textAngle: textAngle,
     textHeight: textHeight,
-    text: formatDimension(value, page.displayUnit),
+    text: formatDimension(value, page.displayUnit,
+        decimalSeparator: page.decimalSeparator),
   );
 }
 
@@ -440,8 +441,9 @@ int roundHalfUp(double mm, double quantumMm) {
 }
 
 /// A dimension's text for a length of [mm] in the page's display [unit]
-/// (spec 11 D9, decision 7): no unit symbol, `.` as the decimal separator,
-/// no grouping, each unit at its plan precision:
+/// (spec 11 D9, decision 7): no unit symbol, the page's [decimalSeparator]
+/// (spec Q0 T1; `.` in the examples below), no grouping, each unit at its
+/// plan precision:
 ///
 /// - **mm**, to 1 mm: the integer (`3450`);
 /// - **cm**, to 0.1 cm: one decimal, **always** (`345.0`, R-14);
@@ -455,18 +457,21 @@ int roundHalfUp(double mm, double quantumMm) {
 /// The total is rounded ([roundHalfUp]) in quanta of the precision before
 /// it is split into whole units and a fraction, so a carry reaches the next
 /// unit: 143 7/8" is 575.5 quarters and prints `12'-0"`, never `11'-12"`.
-/// The magnitude of [mm] is formatted.
-String formatDimension(double mm, DisplayUnit unit) {
+/// The magnitude of [mm] is formatted. Only cm and m print a decimal
+/// separator; mm prints an integer, inches and feet-inches fractions.
+String formatDimension(double mm, DisplayUnit unit,
+    {DecimalSeparator decimalSeparator = DecimalSeparator.point}) {
   final v = mm.abs();
   switch (unit) {
     case DisplayUnit.millimeters:
       return '${roundHalfUp(v, 1)}';
     case DisplayUnit.centimeters:
       final n = roundHalfUp(v, 1); // millimetres, tenths of a cm
-      return '${n ~/ 10}.${n % 10}';
+      return '${n ~/ 10}${decimalSeparator.char}${n % 10}';
     case DisplayUnit.meters:
       final n = roundHalfUp(v, 10); // hundredths of a metre
-      return '${n ~/ 100}.${(n % 100).toString().padLeft(2, '0')}';
+      return '${n ~/ 100}${decimalSeparator.char}'
+          '${(n % 100).toString().padLeft(2, '0')}';
     case DisplayUnit.inches:
       final n = roundHalfUp(v, 25.4 / 8); // eighths of an inch
       return '${n ~/ 8}${_fraction(n % 8, 8)}';

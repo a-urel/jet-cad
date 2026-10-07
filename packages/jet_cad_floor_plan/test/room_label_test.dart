@@ -194,4 +194,45 @@ void main() {
     expect(formatArea(tieMm2, DisplayUnit.inches), '28.12 ft²');
     expect(formatArea(tieMm2, DisplayUnit.meters), '2.61 m²');
   });
+
+  test(
+      'Q0-RA1 a comma page prints its separator in every unit, m² and ft²; a '
+      'point page prints today\'s strings', () {
+    // M-Q0-b (spec Q0 F-1's table, T1): formatArea prints two decimals in
+    // every unit, so every cell is "yes". Hand arithmetic, each at least
+    // 0.0004 from a rounding tie:
+    //   12,370,050: 12.37005 m²; 12,370,050 / 92,903.04 = 133.15011 ft²
+    //     (92,903.04 × 133.15 = 12,370,039.776);
+    //   1,149,250: 1.14925 m² (0.00425 above the tie 1.145); 1,149,250 /
+    //     92,903.04 = 12.37042 ft² (92,903.04 × 12.37 = 1,149,210.6);
+    //   1,234,567,890: 1,234.5679 m², 13,288.7782 ft², no grouping;
+    //   0: 0.00 either way.
+    const comma = DecimalSeparator.comma, point = DecimalSeparator.point;
+    const cases = [
+      (12370050.0, '12,37 m²', '133,15 ft²', '12.37 m²', '133.15 ft²'),
+      (1149250.0, '1,15 m²', '12,37 ft²', '1.15 m²', '12.37 ft²'),
+      (
+        1234567890.0,
+        '1234,57 m²',
+        '13288,78 ft²',
+        '1234.57 m²',
+        '13288.78 ft²'
+      ),
+      (0.0, '0,00 m²', '0,00 ft²', '0.00 m²', '0.00 ft²'),
+    ];
+    for (final (mm2, mComma, ftComma, mPoint, ftPoint) in cases) {
+      for (final unit in DisplayUnit.values) {
+        final imperial =
+            unit == DisplayUnit.inches || unit == DisplayUnit.feetInches;
+        expect(formatArea(mm2, unit, decimalSeparator: comma),
+            imperial ? ftComma : mComma,
+            reason: '$mm2 mm2 in $unit, comma');
+        expect(formatArea(mm2, unit, decimalSeparator: point),
+            imperial ? ftPoint : mPoint,
+            reason: '$mm2 mm2 in $unit, point');
+        expect(formatArea(mm2, unit), imperial ? ftPoint : mPoint,
+            reason: '$mm2 mm2 in $unit, the default');
+      }
+    }
+  });
 }

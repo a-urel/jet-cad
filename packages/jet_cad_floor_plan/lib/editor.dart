@@ -10,6 +10,7 @@ export 'src/export/export_dialog.dart';
 export 'src/export/export_font.dart';
 export 'src/export/page_printer.dart';
 export 'src/fonts.dart';
+export 'src/l10n/document_separator.dart';
 export 'src/layers/layer_panel.dart';
 export 'src/layers/layer_picker.dart';
 export 'src/layers/layer_row.dart';

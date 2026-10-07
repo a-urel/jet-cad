@@ -195,7 +195,8 @@ TraceResult _traceOf(ParametricView view, Handle self) {
 /// - It is a place **reader** ([readsPlaces]): an edit that changes a
 ///   wall's band or a separator's segment touching its [readBox]
 ///   regenerates it.
-/// - [pageKey]: the page's unit and scale, which its labels read.
+/// - [pageKey]: the page's unit, scale and decimal separator, which its
+///   labels read.
 /// - [dissolves] when its seed lies in a wall or no bounded face holds it
 ///   (D8).
 /// - [diagnose] reports D22's `room.shared`, `room.broken`, `room.tint` and
@@ -226,14 +227,16 @@ final class RoomType extends ParametricType<RoomParams> {
     return box.expandedBy(kRoomReadMargin);
   }
 
-  /// The record `(unit, scaleDenominator)` of [page], or of
-  /// `PageComponent()`'s defaults when it is null (spec 10 D14, R-14): what
-  /// [generate] reads of the page, and nothing else, so a paper colour or a
-  /// grid change regenerates no room.
+  /// The record `(unit, scaleDenominator, decimalSeparator)` of [page], or
+  /// of `PageComponent()`'s defaults when it is null (spec 10 D14, R-14;
+  /// spec Q0 T3): what [generate] reads of the page, and nothing else, so a
+  /// paper colour or a grid change regenerates no room. A change of
+  /// separator regenerates every room's area text in the same undo step as
+  /// the page change, and Undo restores the bytes.
   @override
   Object? pageKey(PageComponent? page) {
     final p = page ?? _defaultPage;
-    return (p.displayUnit, p.scaleDenominator);
+    return (p.displayUnit, p.scaleDenominator, p.decimalSeparator);
   }
 
   /// True for D8's `SeedInWall` and `Unbounded`: the room is deleted in the
@@ -253,7 +256,7 @@ final class RoomType extends ParametricType<RoomParams> {
   ///    POLYLINE of the outer ring, [kRoomTintColor];
   /// 2. **the name**, a TEXT, [RoomParams.name];
   /// 3. **the area**, a TEXT, [formatArea] of the trace's net area in the
-  ///    page's unit (D11).
+  ///    page's unit (D11), with the page's decimal separator (spec Q0 T2).
   ///
   /// Both labels ByLayer, `STANDARD`, [kRoomLabelAttrs], flags 0. The anchor
   /// is `toLocal(pole) + label` (`label = (0, 0)` when auto or non-finite),
@@ -309,7 +312,8 @@ final class RoomType extends ParametricType<RoomParams> {
           textAttrs: kRoomLabelAttrs),
       Generated.text(
           label(anchorW - Vector2(0, kRoomLineOffset * hArea), hArea),
-          formatArea(trace.area, page.displayUnit),
+          formatArea(trace.area, page.displayUnit,
+              decimalSeparator: page.decimalSeparator),
           textAttrs: kRoomLabelAttrs),
     ];
   }

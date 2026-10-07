@@ -115,6 +115,12 @@ void main() {
     expect(const FloorPlanStringsEn().decimalSeparator, '.');
     expect(const FloorPlanStringsDe().decimalSeparator, ',');
     expect(const FloorPlanStringsTr().decimalSeparator, ',');
+    // The Page panel's caption (spec Q0 P1; the final review's F-8).
+    expect(
+        const FloorPlanStringsEn().pageDecimalSeparator, 'Decimal separator');
+    expect(
+        const FloorPlanStringsDe().pageDecimalSeparator, 'Dezimaltrennzeichen');
+    expect(const FloorPlanStringsTr().pageDecimalSeparator, 'Ondalık ayırıcı');
   });
 
   group('NT the panels\' numbers (L12, L15 as amended, M-14d-f)', () {

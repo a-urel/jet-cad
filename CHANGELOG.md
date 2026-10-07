@@ -6,6 +6,29 @@ together, under one version and one git tag. None is published to
 pub.dev: a host depends on them by git (see
 [docs/host-guide.md](docs/host-guide.md)).
 
+## Unreleased
+
+On `main`, not yet released.
+
+- **The plan's decimal separator** (Q0): a plan carries its own decimal
+  separator, `.` or `,`, chosen on the Page panel (*Decimal separator*).
+  Dimension text, room areas and the rulers print with it, and so do the
+  PDF and PNG; the change is one undo step. A new plan takes the UI
+  language's separator (`,` in German and Turkish); an empty plan a
+  `FloorPlanController` creates takes the language of the first
+  `FloorPlanView` that shows it. A plan that exists keeps its own.
+- **Schema 8.** The JSON codec writes schema 8 (the page's
+  `decimalSeparator`). A schema-7 plan opens unchanged, as `.`; **0.1.0
+  refuses a plan saved by this version**, and says why, so every terminal
+  of a restaurant must move together. The bundled symbol libraries are
+  re-encoded.
+- **Breaking for a host's own strings:** `FloorPlanStrings` gains the
+  abstract `pageDecimalSeparator`; a class that implements or directly
+  extends `FloorPlanStrings` must add it (a subclass of a built-in
+  language inherits it).
+- `jet_cad_2d`: `PageComponent.decimalSeparator`, `DecimalSeparator`,
+  and `formatLength(…, decimalSeparator:)`.
+
 ## 0.1.0
 
 The first release a point-of-sale application can pin.

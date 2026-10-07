@@ -62,6 +62,10 @@ void main() {
     // macOS values (Ruling 07-7: the hash covers trig-dependent output) and
     // were NOT re-baselined: Task 1 ran in a Linux container, which cannot
     // compute them. Re-baseline owed on macOS.
+    //
+    // Plan Q0 Task 1: kSchemaVersion moved from 7 to 8 (PageComponent gained
+    // `decimalSeparator`; the generated document has no page, so only the
+    // version shifts both values). Not re-baselined either: owed on macOS.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
         1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
@@ -247,6 +251,9 @@ void main() {
     // Plan 12b Task 1: not re-baselined, in step with the sibling test above
     // (header key `currentLayer`, kSchemaVersion 6 to 7; macOS values, owed
     // on macOS).
+    //
+    // Plan Q0 Task 1: not re-baselined, in step with the sibling test above
+    // (kSchemaVersion 7 to 8; owed on macOS).
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
         1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),

@@ -76,9 +76,10 @@ void main() {
     expect(a.hashCode == b.hashCode, isFalse);
   });
 
-  test('the schema this build writes is 7', () {
+  test('the schema this build writes is 8', () {
     // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
-    expect(kSchemaVersion, 7);
+    // Plan Q0 Task 1: 8 since PageComponent gained decimalSeparator.
+    expect(kSchemaVersion, 8);
   });
 
   group('a v5 document resolves bit-identically under a v6 build', () {

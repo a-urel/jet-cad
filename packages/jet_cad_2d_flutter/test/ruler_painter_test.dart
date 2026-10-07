@@ -119,6 +119,58 @@ void main() {
     expect(painter.debugLastTicks, isEmpty);
   });
 
+  test(
+      'Q0-R1 a comma page labels its majors with a comma, a point page with '
+      'a point: 0,5 cm and 0,5 m', () {
+    // M-Q0-d (spec Q0 T2, V-8). The fixture (the spec's fixture rule): a
+    // page at cm, 1:20, its origin off zero; only the separator differs.
+    final comma = PageComponent(
+        originX: -4180.5,
+        originY: 2645.25,
+        scaleDenominator: 20,
+        displayUnit: DisplayUnit.centimeters,
+        decimalSeparator: DecimalSeparator.comma);
+    final point = comma.copyWith(decimalSeparator: DecimalSeparator.point);
+    expect(comma.gridStepMm, isNull, reason: 'premise: the plain ladder');
+    for (final (unit, pxPerMm, e, step, pageX, withComma, withPoint) in [
+      // 20 px/mm: 2 mm is 40 px, 5 mm 100 px, so the major is 5 mm, its
+      // minor 1 mm (20 px). Page x 0 is world −4,180.5, at screen
+      // 20 · −4,180.5 + 83,647.37 = 37.37; page x 5 at 137.37.
+      (DisplayUnit.centimeters, 20.0, 83647.37, 5.0, 5.0, '0,5 cm', '0.5 cm'),
+      // 0.2 px/mm: 200 mm is 40 px, 500 mm 100 px, so the major is 500 mm,
+      // its minor 100 mm (20 px). Page x 500 is world −3,680.5, at screen
+      // 0.2 · −3,680.5 + 863.55 = 127.45.
+      (DisplayUnit.meters, 0.2, 863.55, 500.0, 500.0, '0,5 m', '0.5 m'),
+    ]) {
+      final scale = GridScale.pick(unit, pxPerMm, floorMm: comma.gridStepMm)!;
+      expect(scale.majorMm, step, reason: 'premise: the major in $unit');
+      final camera = CameraController(ViewportTransform(
+          worldToScreenMatrix: Transform2(pxPerMm, 0, 0, -pxPerMm, e, 412.25)));
+      String labelAt(PageComponent page) {
+        final painter = RulerPainter(
+          axis: RulerAxis.horizontal,
+          camera: camera,
+          page: ValueNotifier<PageComponent?>(page.copyWith(displayUnit: unit)),
+          pointer: ValueNotifier<Offset?>(null),
+          chrome: ChromePalette.light,
+        );
+        painter.paint(SpyCanvas(), barH);
+        final majors = painter.debugLastTicks.where((t) => t.$2);
+        return majors
+            .firstWhere(
+                (t) =>
+                    ((t.$1 - e) / pxPerMm - page.originX).roundToDouble() ==
+                    pageX,
+                orElse: () => throw StateError('no major at page x = $pageX '
+                    'among ${majors.map((t) => t.$3)}'))
+            .$3!;
+      }
+
+      expect(labelAt(comma), withComma, reason: '$unit, comma');
+      expect(labelAt(point), withPoint, reason: '$unit, point');
+    }
+  });
+
   test('the corner shows the unit symbol', () {
     final n = ValueNotifier<PageComponent?>(
         standardPage().copyWith(displayUnit: DisplayUnit.feetInches));

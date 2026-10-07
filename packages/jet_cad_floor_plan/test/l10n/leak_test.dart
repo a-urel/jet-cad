@@ -45,7 +45,9 @@ const Set<String> _allowed = {
 final RegExp _letter = RegExp(r'^[A-Z]$');
 
 /// The plan's own text, a number and its unit (a room's area, a
-/// dimension's value): stored, and kept with `.` in every language (Q0).
+/// dimension's value): stored, with the page's decimal separator, which a
+/// new plan takes from the UI's language (spec Q0 N1). LK2's sample is
+/// built in Turkish, so it prints `,`.
 final RegExp _planText = RegExp(r'^[-\d.,\s]+ ?(m²|ft²|mm|cm|m|in|ft)$');
 
 /// Every visible string: Text data, rich text, tooltip messages.

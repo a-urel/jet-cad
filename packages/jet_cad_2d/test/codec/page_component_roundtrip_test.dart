@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 
@@ -52,6 +54,70 @@ void main() {
     expect(unknown, hasLength(1));
     expect(unknown.single['typeId'], PageComponent.componentTypeId);
     expect(DraftDocumentCodec.encodeToString(back), first);
+  });
+
+  group('the decimal separator through the codec (spec Q0 M-Q0-c)', () {
+    // The fixture rule: centimetres at 1:20, the origin off zero, `comma`.
+    final commaPage = PageComponent(
+        scaleDenominator: 20,
+        originX: -4180.5,
+        originY: 2645.25,
+        displayUnit: DisplayUnit.centimeters,
+        decimalSeparator: DecimalSeparator.comma);
+
+    DraftDocument withCommaPage() {
+      final doc = DraftDocument.empty();
+      PageComponent.register(doc.components);
+      doc.commands.execute(
+          SetComponentCommand<PageComponent>(doc.rootHandle, commaPage));
+      return doc;
+    }
+
+    Map<String, Object?> pageJsonOf(Map<String, Object?> json) =>
+        ((json['components']
+                    as Map<String, Object?>)[PageComponent.componentTypeId]
+                as Map<String, Object?>)
+            .values
+            .single as Map<String, Object?>;
+
+    test('Q0-C1 this build writes schema 8', () {
+      expect(kSchemaVersion, 8);
+      final json =
+          jsonDecode(DraftDocumentCodec.encodeToString(withCommaPage()))
+              as Map<String, Object?>;
+      expect(json['schemaVersion'], 8);
+    });
+
+    test('Q0-C2 a comma page round-trips, and the bytes are stable', () {
+      final doc = withCommaPage();
+      final first = DraftDocumentCodec.encodeToString(doc);
+      expect(
+          pageJsonOf(
+              jsonDecode(first) as Map<String, Object?>)['decimalSeparator'],
+          'comma');
+      final back = DraftDocumentCodec.decodeString(first,
+          registerComponents: PageComponent.register);
+      final page = back.components.get<PageComponent>(back.rootHandle)!;
+      expect(page.decimalSeparator, DecimalSeparator.comma);
+      expect(page, commaPage);
+      expect(DraftDocumentCodec.encodeToString(back), first);
+    });
+
+    test('Q0-C3 a v7 document, whose page has no key, loads as point', () {
+      // Derived from this build's encoding: the key stripped and the version
+      // declared back down to 7, read through bytes as a file would be.
+      final json =
+          jsonDecode(DraftDocumentCodec.encodeToString(withCommaPage()))
+              as Map<String, Object?>;
+      pageJsonOf(json).remove('decimalSeparator');
+      json['schemaVersion'] = 7;
+      final back = DraftDocumentCodec.decodeString(jsonEncode(json),
+          registerComponents: PageComponent.register);
+      final page = back.components.get<PageComponent>(back.rootHandle)!;
+      expect(page.decimalSeparator, DecimalSeparator.point);
+      expect(
+          page, commaPage.copyWith(decimalSeparator: DecimalSeparator.point));
+    });
   });
 
   test('decode (the map form) takes the same hook', () {

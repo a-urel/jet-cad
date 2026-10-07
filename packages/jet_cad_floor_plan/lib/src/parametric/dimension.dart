@@ -132,7 +132,8 @@ Vector2? endPointInView(ParametricView view, Handle self, DimEnd end) {
 /// - [references] are its attached ends' walls, in `a`, `b` order,
 ///   deduplicated, with the default policy, `cascade`: deleting a measured
 ///   wall deletes the dimension in the same edit (decision 3).
-/// - [pageKey]: the page's unit and scale, which its text reads.
+/// - [pageKey]: the page's unit, scale and decimal separator, which its
+///   text reads.
 /// - [diagnose]: D15's `dimension.broken` and `dimension.degenerate`.
 final class DimensionType extends ParametricType<DimensionParams> {
   const DimensionType();
@@ -151,14 +152,16 @@ final class DimensionType extends ParametricType<DimensionParams> {
         if (params.b case AttachedEnd(:final wall)) wall,
       };
 
-  /// The record `(unit, scaleDenominator)` of [page], or of
-  /// `PageComponent()`'s defaults when it is null (spec 11 D3): what
-  /// [generate] reads of the page, and nothing else, so a paper colour or a
-  /// grid change regenerates no dimension.
+  /// The record `(unit, scaleDenominator, decimalSeparator)` of [page], or
+  /// of `PageComponent()`'s defaults when it is null (spec 11 D3; spec Q0
+  /// T3): what [generate] reads of the page, and nothing else, so a paper
+  /// colour or a grid change regenerates no dimension. A change of separator
+  /// regenerates every dimension's text in the same undo step as the page
+  /// change, and Undo restores the bytes.
   @override
   Object? pageKey(PageComponent? page) {
     final p = page ?? _defaultPage;
-    return (p.displayUnit, p.scaleDenominator);
+    return (p.displayUnit, p.scaleDenominator, p.decimalSeparator);
   }
 
   /// Six children, in this order, fixed for the object's life (spec 11 D7,

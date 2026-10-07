@@ -107,6 +107,51 @@ void main() {
       expect(formatLength(0, DisplayUnit.feetInches), '0\'-0"');
       expect(formatLength(-0.5, DisplayUnit.feetInches), '0\'-0"');
     });
+
+    test(
+        'Q0-F1 a comma page prints its separator in every unit that prints '
+        'a decimal, trimmed as the point is; feet-inches are unchanged', () {
+      // M-Q0-b (spec Q0 F-1's table, T1): mm, cm, m and in are "yes,
+      // trimmed"; ft-in is "no (fractions)".
+      const comma = DecimalSeparator.comma;
+      String f(double mm, DisplayUnit u) =>
+          formatLength(mm, u, decimalSeparator: comma);
+      // 1,234.5 mm: toStringAsFixed(3) 1234.500, trimmed 1234.5.
+      expect(f(1234.5, DisplayUnit.millimeters), '1234,5 mm');
+      // 0.05 mm: 0.050, trimmed 0.05.
+      expect(f(0.05, DisplayUnit.millimeters), '0,05 mm');
+      // 25 mm = 2.5 cm: 2.500, the trailing zeros trimmed on the point form
+      // before the swap (V-9: swapped first it would read 2,500).
+      expect(f(25, DisplayUnit.centimeters), '2,5 cm');
+      // 1,500 mm = 150 cm: 150.000, trimmed to the integer, no separator.
+      expect(f(1500, DisplayUnit.centimeters), '150 cm');
+      // 2,750 mm = 2.75 m, and its negative.
+      expect(f(2750, DisplayUnit.meters), '2,75 m');
+      expect(f(-2750, DisplayUnit.meters), '-2,75 m');
+      // 311.15 mm = 12.25 in: 12.2500, trimmed 12.25.
+      expect(f(311.15, DisplayUnit.inches), '12,25 in');
+      // 100 mm / 25.4 = 3.93700787…: four places 3.9370, trimmed 3.937.
+      expect(f(100, DisplayUnit.inches), '3,937 in');
+      // −0.0004 mm: −0.000, trimmed to −0, printed 0 (the sign of a zero is
+      // dropped on the trimmed point form).
+      expect(f(-0.0004, DisplayUnit.millimeters), '0 mm');
+      // Feet-inches print fractions: no separator to swap.
+      expect(f(1079.5, DisplayUnit.feetInches), '3\'-6 1/2"');
+      expect(f(1066.8, DisplayUnit.feetInches), '3\'-6"');
+    });
+
+    test('Q0-F2 an explicit point page prints today\'s literals', () {
+      // I-4: `point` is byte for byte the default.
+      const point = DecimalSeparator.point;
+      String f(double mm, DisplayUnit u) =>
+          formatLength(mm, u, decimalSeparator: point);
+      expect(f(1234.5, DisplayUnit.millimeters), '1234.5 mm');
+      expect(f(25, DisplayUnit.centimeters), '2.5 cm');
+      expect(f(1500, DisplayUnit.meters), '1.5 m');
+      expect(f(311.15, DisplayUnit.inches), '12.25 in');
+      expect(f(-0.0004, DisplayUnit.millimeters), '0 mm');
+      expect(f(1079.5, DisplayUnit.feetInches), '3\'-6 1/2"');
+    });
   });
 
   group('snapToGrid', () {

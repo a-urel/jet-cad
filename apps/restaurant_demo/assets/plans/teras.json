@@ -1,5 +1,5 @@
 {
- "schemaVersion": 7,
+ "schemaVersion": 8,
  "header": {
   "units": "millimeters",
   "scale": 1.0,
@@ -1098,6 +1098,7 @@
   "jetcad.page": {
    "17": {
     "background": 4294967295,
+    "decimalSeparator": "point",
     "displayUnit": "meters",
     "gridStepMm": null,
     "gridVisible": true,

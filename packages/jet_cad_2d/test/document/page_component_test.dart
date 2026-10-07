@@ -18,6 +18,15 @@ void main() {
       snapToGrid: false,
       pageBreaks: true);
 
+  // Spec Q0's fixture rule: centimetres, 1:20 (not the default 1:50), the
+  // origin off zero, and `comma` against the default `point`.
+  final centimetreComma = PageComponent(
+      scaleDenominator: 20,
+      originX: -4180.5,
+      originY: 2645.25,
+      displayUnit: DisplayUnit.centimeters,
+      decimalSeparator: DecimalSeparator.comma);
+
   test('effective size follows orientation on a non-square sheet', () {
     // M-04e.
     expect(letterPortrait.effectiveWidthMm, 215.9);
@@ -40,6 +49,7 @@ void main() {
     final json = letterPortrait.toJson();
     expect(json.keys.toList(), [
       'background',
+      'decimalSeparator',
       'displayUnit',
       'gridStepMm',
       'gridVisible',
@@ -120,6 +130,65 @@ void main() {
     registry.attach(const Handle(16), letterPortrait);
     expect(registry.get<PageComponent>(const Handle(16)), letterPortrait);
     expect(registry.isInternal(PageComponent.componentTypeId), isFalse);
+  });
+
+  test(
+      'Q0-P1 decimalSeparator is written by name in its alphabetical place '
+      'and read back', () {
+    // M-Q0-c: the key not written; the key not read.
+    final json = centimetreComma.toJson();
+    expect(json['decimalSeparator'], 'comma');
+    final keys = json.keys.toList();
+    expect(keys.indexOf('decimalSeparator'), keys.indexOf('background') + 1);
+    final back = PageComponent.fromJson(json);
+    expect(back.decimalSeparator, DecimalSeparator.comma);
+    expect(back, centimetreComma);
+    expect(back.hashCode, centimetreComma.hashCode);
+  });
+
+  test('Q0-P2 a v7 page (no decimalSeparator key) reads as point', () {
+    final json = centimetreComma.toJson()..remove('decimalSeparator');
+    final back = PageComponent.fromJson(json);
+    expect(back.decimalSeparator, DecimalSeparator.point);
+    // Nothing else moves: the rest is the fixture's.
+    expect(back,
+        centimetreComma.copyWith(decimalSeparator: DecimalSeparator.point));
+  });
+
+  test('Q0-P3 an unknown separator name is refused with an ArgumentError', () {
+    // As the sibling enums are, through `values.byName` (spec Q0 V-6).
+    final json = centimetreComma.toJson()..['decimalSeparator'] = 'semicolon';
+    expect(() => PageComponent.fromJson(json), throwsArgumentError);
+  });
+
+  test('Q0-P4 == and hashCode distinguish the separator', () {
+    // M-Q0-a / F-3: without the field in `==`, a change of separator is
+    // invisible to regeneration and to PageNotifier.
+    final point =
+        centimetreComma.copyWith(decimalSeparator: DecimalSeparator.point);
+    expect(point == centimetreComma, isFalse);
+    expect(point.hashCode == centimetreComma.hashCode, isFalse);
+    expect(point.copyWith(decimalSeparator: DecimalSeparator.comma),
+        centimetreComma);
+  });
+
+  test('Q0-P5 copyWith sets the separator and otherwise keeps it', () {
+    expect(centimetreComma.copyWith().decimalSeparator, DecimalSeparator.comma);
+    final rescaled = centimetreComma.copyWith(
+        scaleDenominator: 25, displayUnit: DisplayUnit.millimeters);
+    expect(rescaled.decimalSeparator, DecimalSeparator.comma);
+    final point =
+        centimetreComma.copyWith(decimalSeparator: DecimalSeparator.point);
+    expect(point.decimalSeparator, DecimalSeparator.point);
+    expect(point.scaleDenominator, 20);
+    expect(point.displayUnit, DisplayUnit.centimeters);
+    expect(point.originX, -4180.5);
+    expect(PageComponent().decimalSeparator, DecimalSeparator.point);
+  });
+
+  test('Q0-P6 DecimalSeparator prints its character', () {
+    expect(DecimalSeparator.point.char, '.');
+    expect(DecimalSeparator.comma.char, ',');
   });
 
   test('DisplayUnit conversions are exact', () {
