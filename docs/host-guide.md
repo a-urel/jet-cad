@@ -118,8 +118,10 @@ delegates in your `MaterialApp`:
   language, and its `languageCode`.
 - Panel numbers show and read with the language's decimal separator,
   per language, not per region: `de_CH` gets German's `,`.
-  The plan's own text — dimensions, room areas, the rulers, the PDF and
-  PNG — keeps `.` in every language in 0.1.0.
+  The plan's own text — dimensions, room areas, the rulers, and so the
+  PDF and PNG — uses the separator **the plan** carries (the Page panel's
+  *Decimal separator*), the same on every terminal; a new plan takes the
+  UI language's. *Unreleased on `main`; in 0.1.0 it is always `.`.*
 
 ## 4. The controller and the view
 
@@ -436,5 +438,12 @@ a desktop.
 - **A stored name's language.** A placed symbol keeps the library's
   English name in the plan; the planner shows it in the UI's language.
   Room and layer names are stored in the language they were created in.
-- **The plan's text separator.** Dimensions and areas print with `.` in
-  0.1.0, whatever the language.
+- **The plan's text separator** *(unreleased on `main`)*. It belongs to
+  the plan, not to the terminal: a plan you load keeps its own, whatever
+  the language. An empty plan a controller creates takes the language of
+  the first `FloorPlanView` that shows it; until then, and with no view,
+  it is `.`. In 0.1.0 dimensions and areas always print with `.`.
+- **Schema 8** *(unreleased on `main`)*. A plan saved by this version is
+  at schema 8, which 0.1.0 refuses (`load` throws a `FormatException`
+  that says why); a 0.1.0 plan opens here unchanged. Move every terminal
+  that shares stored plans to the same commit together.
