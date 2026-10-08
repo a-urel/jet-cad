@@ -5,7 +5,7 @@ description: >-
   symbols, the servable ones carrying their seats. A host adds
   restaurantSymbolSource to the planner's symbol sources.
 publish_to: none
-version: 0.1.0
+version: 0.2.0
 resolution: workspace
 
 environment:
