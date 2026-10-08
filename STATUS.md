@@ -70,8 +70,8 @@ one's spec, plan and results.
   (*Approved with fixes*) is applied; ledger
   [docs/superpowers/ledgers/2026-10-08-release-0.2.0/](docs/superpowers/ledgers/2026-10-08-release-0.2.0/).
   Merged on the human's *"evet, main'e merge et"*; the guide names
-  `7355c00`. **The tag `v0.2.0` → `7355c00` is the human's to push** (the
-  git proxy refuses an agent's tag push).
+  `7355c00`. The human pushed the tag `v0.2.0` →
+  `7355c00` (2026-10-08).
 
 ## In flight
 
@@ -79,8 +79,6 @@ Nothing. Release 0.2.0, above, is merged.
 
 ## Owed to the human
 
-- **The tag `v0.2.0`** → `7355c001f585910a1c61a76db11203f6d451bfc4`:
-  `git tag v0.2.0 7355c00 && git push origin v0.2.0`.
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -110,7 +108,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 **Next: the human's choice.** Monépro's spec 103 §10 jet-cad
 prerequisites now stand: the GPU split, touch, a consumable version
-(0.2.0, once its tag is pushed), the outside-app check (the host probe),
+(0.2.0, tagged), the outside-app check (the host probe),
 placement and open/save. **Zones** in the editor remain; then the floor
 view's integration on Monépro's side (its phase 2).
 ---
