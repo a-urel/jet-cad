@@ -91,16 +91,15 @@ one's spec, plan and results.
   them. An independent review (*Approved with fixes*, CHANGELOG wording
   only) is applied; ledger
   [docs/superpowers/ledgers/2026-10-08-release-0.3.0/](docs/superpowers/ledgers/2026-10-08-release-0.3.0/).
-  The guide names `1b0c37a`. **The tag `v0.3.0` → `1b0c37a` is owed to the
-  human** (this session's proxy refuses tag pushes).
+  The guide names `1b0c37a`. The human pushed the tag `v0.3.0` →
+  `1b0c37a` (2026-10-08).
 
 ## In flight
 
-Nothing. Release 0.3.0, above, is merged; its tag is the human's.
+Nothing. Release 0.3.0, above, is merged and tagged.
 
 ## Owed to the human
 
-- **The tag `v0.3.0`** on `1b0c37a` (`git tag v0.3.0 1b0c37a && git push origin v0.3.0`).
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -131,9 +130,9 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice**, once the tag `v0.3.0` is pushed.
+**Next: the human's choice.**
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
-touch, a consumable version (0.3.0, `1b0c37a`), the outside-app check
+touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
 (the host probe), placement and open/save, and zones (0.3.0). Monépro
 owes two answers (zone focus Q-Z1, Q-Z4); its floor view is its phase 2.
 ---
