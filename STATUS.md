@@ -69,9 +69,12 @@ one's spec, plan and results.
 başla"*), on `claude/exciting-pasteur-9m22jv`: the four host packages
 (and `jet_cad_2d_gpu`) at 0.2.0; the CHANGELOG's Unreleased section
 becomes 0.2.0 (Q0's separator and schema 8, the GPU split); the host
-guide's "unreleased" markers read "since 0.2.0". As for 0.1.0: the merge
-into `main` on the human's word, the human pushes the tag `v0.2.0` at the
-merge commit, and the next commit names that SHA in the guide.
+guide's "unreleased" markers read "since 0.2.0". An independent review
+(*Approved with fixes*) is applied; ledger
+[docs/superpowers/ledgers/2026-10-08-release-0.2.0/](docs/superpowers/ledgers/2026-10-08-release-0.2.0/).
+Merged on the human's *"evet, main'e merge et"*. As for 0.1.0: the human
+pushes the tag `v0.2.0` at the merge commit, and the next commit names
+that SHA in the guide.
 
 ## Owed to the human
 
