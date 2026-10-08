@@ -363,4 +363,47 @@ void main() {
         regions: {'L': (x, y) => locked.holds(x, y, 0)});
     expect(hidden.counts['L'] ?? 0, greaterThan(20000), reason: 'clear');
   });
+
+  testWidgets(
+      'FP7 the Task 2 review\'s R-4: with F and the mirrored G both focused, '
+      'a faded table J laid over their overlap is clear there: the focused '
+      'quads add up, never cancel (O13)', (tester) async {
+    final doc = zoneDoc();
+    addCluster(doc);
+    final f = quadsNumbered(doc, 'F').single;
+    final g = quadsNumbered(doc, 'G').single;
+    expect(f.transform.determinant, greaterThan(0), reason: 'premise');
+    expect(g.transform.determinant, lessThan(0), reason: 'premise: mirrored');
+    // J, centred (its base point is its box's centre) on the centroid of a
+    // 10 mm sampling of F and G's overlap.
+    var sx = 0.0, sy = 0.0, n = 0;
+    for (var x = 40000.0; x <= 44000; x += 10) {
+      for (var y = -47000.0; y <= -43000; y += 10) {
+        if (f.holds(x, y, 0) && g.holds(x, y, 0)) {
+          sx += x;
+          sy += y;
+          n++;
+        }
+      }
+    }
+    expect(n, greaterThan(1000), reason: 'premise: F and G overlap');
+    placeZoneTable(doc, tableSymbol(), sx / n, sy / n, 'J');
+    final j = quadsNumbered(doc, 'J').single;
+    final camera = ValueNotifier(cameraAt(sx / n, sy / n));
+    final focus = ValueNotifier<Set<String>?>({'F', 'G'});
+    final painter = painterOn(doc, camera, focus, ValueNotifier<int>(kPaper));
+    final check =
+        await shot(tester, painter, camera.value, fadedBut(doc, {'F', 'G'}), [
+      f,
+      g
+    ], regions: {
+      'F, G and J': (x, y) =>
+          f.holds(x, y, 0) && g.holds(x, y, 0) && j.holds(x, y, 0),
+      'J outside F and G': (x, y) =>
+          j.holds(x, y, 0) && !f.holds(x, y, 0) && !g.holds(x, y, 0),
+    });
+    for (final name in check.regions) {
+      expect(check.counts[name] ?? 0, greaterThan(200), reason: name);
+    }
+  });
 }

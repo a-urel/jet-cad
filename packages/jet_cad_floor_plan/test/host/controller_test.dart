@@ -802,4 +802,119 @@ void main() {
     c.dispose();
     expect(() => focus.addListener(() {}), throwsFlutterError);
   });
+
+  // Zone spec Z24 (ruling on V-9): `FloorPlanTable.visible` is false for a
+  // table on a hidden layer, read from the table's own layer at the call;
+  // `tables` keeps listing it and the numbering warnings ignore it.
+
+  /// The numbers of [c]'s tables with [FloorPlanTable.visible] false.
+  List<String?> hiddenNumbers(FloorPlanController c) => [
+        for (final t in c.tables)
+          if (!t.visible) t.number
+      ];
+
+  testWidgets(
+      'CV1 M-Z42: the hidden 5 is not visible, every other table is (the '
+      'locked L too), in both modes; showing its layer flips it once '
+      '`revision` moves, an undo flips it back', (tester) async {
+    final c = controller(tester, zonePlanJson());
+    final numbers = [
+      for (final t in TableSurvey.of(c.activeDocument).tables) t.number
+    ];
+    expect(numbers, hasLength(10), reason: 'premise');
+    expect([for (final t in c.tables) t.number], numbers,
+        reason: 'hidden tables stay listed');
+    expect(hiddenNumbers(c), ['5']);
+    expect(c.tables.firstWhere((t) => t.number == 'L').visible, isTrue,
+        reason: 'locked is not hidden');
+    expect(
+        c.tables.firstWhere((t) => t.number == '5'),
+        FloorPlanTable(
+            number: '5',
+            seats: tableSymbol().seats!,
+            symbolKey: tableSymbol().key,
+            visible: false));
+
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    expect(hiddenNumbers(c), ['5'], reason: 'the service copy');
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+
+    var revisions = 0;
+    void count() => revisions++;
+    c.revision.addListener(count);
+    addTearDown(() => c.revision.removeListener(count));
+    final d = c.activeDocument;
+    final hidden = d.tables.layers.byName('Hidden')!;
+    d.commands.execute(SetLayerCommand(hidden.copyWith(visible: true)));
+    await tester.pump();
+    expect(revisions, greaterThan(0), reason: 'premise: revision moved');
+    expect(hiddenNumbers(c), isEmpty);
+    expect(c.tables.firstWhere((t) => t.number == '5').visible, isTrue);
+
+    final seen = revisions;
+    c.undo();
+    await tester.pump();
+    expect(revisions, greaterThan(seen));
+    expect(hiddenNumbers(c), ['5']);
+  });
+
+  testWidgets(
+      'CV2 M-Z42: hiding the layer of one 2 and of the unnumbered table '
+      'leaves the numbering warnings and the listed numbers unchanged; '
+      'only their visible flips', (tester) async {
+    final c = controller(tester, zonePlanJson());
+    final d = c.activeDocument;
+    final back = addZoneLayer(d, 'Back');
+    final survey = TableSurvey.of(d);
+    final moved = [
+      survey.withNumber('2').last.instance,
+      survey.tables.firstWhere((t) => t.number == null).instance,
+    ];
+    for (final h in moved) {
+      d.commands.execute(SetInstanceLayerCommand(h, back));
+    }
+    await tester.pump();
+    final warnings = c.numberingWarnings;
+    expect(warnings, hasLength(2), reason: 'premise: the 2s, the unnumbered');
+    final listed = [for (final t in c.tables) (t.number, t.seats)];
+    expect(hiddenNumbers(c), ['5']);
+
+    d.commands.execute(
+        SetLayerCommand(d.tables.layers[back]!.copyWith(visible: false)));
+    await tester.pump();
+    expect(c.numberingWarnings, warnings);
+    expect([for (final t in c.tables) (t.number, t.seats)], listed);
+    expect(hiddenNumbers(c)..sort((a, b) => '$a'.compareTo('$b')),
+        ['2', '5', null]..sort((a, b) => '$a'.compareTo('$b')));
+    final twos = [
+      for (final t in c.tables)
+        if (t.number == '2') t.visible
+    ];
+    expect(twos, [true, false], reason: 'the first 2 stays shown');
+  });
+
+  testWidgets(
+      'CV3 M-Z42: the spec\'s unplacedTables recipe (Z21), verbatim, counts '
+      'the hidden 5 and an unknown code as unplaced, and not 5 once its '
+      'layer is shown', (tester) async {
+    final controller = FloorPlanController(json: zonePlanJson());
+    addTearDown(controller.dispose);
+
+    /// The tables the POS knows that this floor does not draw: a table on
+    /// a hidden layer is not drawn, so it counts as unplaced.
+    Set<String> unplacedTables(Set<String> codes) => codes.difference({
+          for (final table in controller.tables)
+            if (table.visible && table.number != null) table.number!,
+        });
+
+    const codes = {'2', '3', '5', '7', 'A1', 'A2', 'B4', 'L', '99'};
+    expect(unplacedTables(codes), {'5', '99'});
+    final d = controller.activeDocument;
+    d.commands.execute(SetLayerCommand(
+        d.tables.layers.byName('Hidden')!.copyWith(visible: true)));
+    await tester.pump();
+    expect(unplacedTables(codes), {'99'});
+  });
 }

@@ -820,12 +820,30 @@ class FloorPlanController extends ChangeNotifier {
     return _survey!;
   }
 
-  /// The active plan's live tables, ascending (H3).
-  List<FloorPlanTable> get tables => [
-        for (final t in _tables.tables)
-          FloorPlanTable(
-              number: t.number, seats: t.seats, symbolKey: t.symbolKey)
-      ];
+  /// The active plan's live tables, ascending (H3). A table on a hidden
+  /// layer is listed, [FloorPlanTable.visible] false (zone spec Z24): read
+  /// from its layer at the call, so a layer shown or hidden reads at the
+  /// next [revision].
+  List<FloorPlanTable> get tables {
+    final d = _active.document;
+    return [
+      for (final t in _tables.tables)
+        FloorPlanTable(
+            number: t.number,
+            seats: t.seats,
+            symbolKey: t.symbolKey,
+            visible: _onVisibleLayer(d, t.instance))
+    ];
+  }
+
+  /// Whether [instance]'s own layer is shown, as the picker reads it (a
+  /// layer missing from the table counts as shown): a table is at the root
+  /// (14a T1), so no enclosing layer hides it.
+  static bool _onVisibleLayer(DraftDocument d, Handle instance) {
+    final node = d.tree[instance];
+    if (node is! InstanceNode) return true;
+    return d.tables.layers[node.layer]?.visible ?? true;
+  }
 
   /// The active plan's numbering problems (umbrella D5, R-13; spec 14d
   /// L6): numbers used by several tables, by first appearance, then the

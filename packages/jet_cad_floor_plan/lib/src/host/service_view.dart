@@ -197,9 +197,10 @@ class _ServiceViewState extends State<ServiceView> {
 
   // Table-groups spec G3: the group frames (under the status fills) and
   // label chips (above the drafting) repaint on the camera, the groups,
-  // every change of this copy and the paper.
-  late final Listenable _groupRepaint =
-      Listenable.merge([_c.camera, _c.tableGroups, _changed, _paper]);
+  // every change of this copy and the paper; zone spec Z14: and on the
+  // focus, which fades a group with no focused member.
+  late final Listenable _groupRepaint = Listenable.merge(
+      [_c.camera, _c.tableGroups, _c.tableFocus, _changed, _paper]);
   late final TableGroupPainter _framePainter =
       _groupPainter(TableGroupLayer.frames);
   late final TableGroupPainter _chipPainter =
@@ -212,6 +213,7 @@ class _ServiceViewState extends State<ServiceView> {
         camera: _c.camera,
         groups: _c.tableGroups,
         paper: _paper,
+        tableFocus: _c.tableFocus,
         repaint: _groupRepaint,
       );
 

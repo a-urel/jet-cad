@@ -1633,4 +1633,94 @@ void main() {
         focus: {}, paper: white, regions: regions);
     expect(check.counts['7'] ?? 0, greaterThan(10000), reason: '7 veiled');
   });
+
+  // The Task 2 review's R-1 to R-3 (zone spec Z13, Z16): the veil repaints
+  // on a change of the service copy and on a paper change, and lies under
+  // the selection outlines. Landed as the review quotes them.
+
+  testWidgets('RV1 a service move of a faded table moves the veil',
+      (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    c.setTableFocus({'3'});
+    await tester.pump();
+    final before = quad(c, '7');
+    move(c, '7', 610.5, -455.25);
+    await tester.pump();
+    await tester.pump();
+    final after = quad(c, '7');
+    final got = await shoot(tester);
+    c.setTableFocus(null);
+    await tester.pump();
+    final check = compare(tester, c, await shoot(tester), got,
+        focus: {'3'},
+        paper: white,
+        regions: {
+          'left': (x, y) => before.holds(x, y, 0) && !after.holds(x, y, 0),
+          'reached': (x, y) => after.holds(x, y, 0) && !before.holds(x, y, 0),
+        });
+    expect(check.counts['left'] ?? 0, greaterThan(1000));
+    expect(check.counts['reached'] ?? 0, greaterThan(1000));
+  });
+
+  testWidgets('RV2 a theme switch recolours the veil with the new paper',
+      (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    c.setTableFocus({'3'});
+    await tester.pump();
+    await pumpThemed(
+        tester, Scaffold(body: FloorPlanView(controller: c)), ThemeMode.dark);
+    await tester.pump();
+    await tester.pump();
+    final got = await shoot(tester);
+    c.setTableFocus(null);
+    await tester.pump();
+    final seven = quad(c, '7');
+    final check = compare(tester, c, await shoot(tester), got,
+        focus: {'3'},
+        paper: kDarkCanvasPaper,
+        regions: {'7': (x, y) => seven.holds(x, y, 0)});
+    expect(check.counts['7'] ?? 0, greaterThan(10000));
+  });
+
+  testWidgets('RV3 a selected faded table\'s outline lies above the veil',
+      (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    final plain = await shoot(tester);
+    c.select({'7'});
+    await tester.pump();
+    final selected = await shoot(tester);
+    c.setTableFocus({'3'});
+    await tester.pump();
+    final both = await shoot(tester);
+    final area = tester.getTopLeft(find.byType(InteractionLayer));
+    final size = tester.getSize(find.byType(InteractionLayer));
+    final counts = <int, int>{};
+    for (var y = area.dy.toInt(); y < (area.dy + size.height).toInt(); y++) {
+      for (var x = area.dx.toInt(); x < (area.dx + size.width).toInt(); x++) {
+        final s = selected.rgbAt(x, y);
+        if (s != plain.rgbAt(x, y)) counts[s] = (counts[s] ?? 0) + 1;
+      }
+    }
+    // The outline's opaque colour: the commonest changed colour.
+    final ink = counts.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+    var outline = 0, wrong = 0;
+    for (var y = area.dy.toInt(); y < (area.dy + size.height).toInt(); y++) {
+      for (var x = area.dx.toInt(); x < (area.dx + size.width).toInt(); x++) {
+        if (selected.rgbAt(x, y) != ink || plain.rgbAt(x, y) == ink) continue;
+        outline++;
+        if (both.rgbAt(x, y) != ink) wrong++;
+      }
+    }
+    expect(outline, greaterThan(200), reason: 'premise: an outline');
+    expect(wrong, 0, reason: '$wrong of $outline outline pixels changed');
+  });
 }

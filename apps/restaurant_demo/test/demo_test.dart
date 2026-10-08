@@ -17,7 +17,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
-    show FloorPlanMode, FloorPlanView, TableGroup, TableStatus;
+    show
+        FloorPlanController,
+        FloorPlanMode,
+        FloorPlanView,
+        TableGroup,
+        TableStatus;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, ViewportTransform;
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
@@ -1220,5 +1225,154 @@ void main() {
     await tester.pump();
     expect(tablesText(tester), '1 (4), 2 (6)', reason: 'premise: reloaded');
     expect(shownSeparator(demo), DecimalSeparator.point);
+  });
+
+  // Zone spec Z22: the Salon's zones A = 1-5, B = 6-7, C = 8-11, through
+  // the spec's showZone and showAllZones; none for the Teras.
+
+  /// The four screen corners, in the drawing area's coordinates, of the
+  /// box of each table numbered [n] in [c]'s active plan.
+  List<Offset> boxOnScreen(FloorPlanController c, String n) {
+    final d = c.activeDocument;
+    return [
+      for (final t in TableSurvey.of(d).withNumber(n))
+        for (final (x, y) in [
+          for (final b in [d.definitionBounds(t.definition)]) ...[
+            (b.minX, b.minY),
+            (b.maxX, b.minY),
+            (b.maxX, b.maxY),
+            (b.minX, b.maxY),
+          ]
+        ])
+          () {
+            final w = (d.tree[t.instance]! as InstanceNode)
+                .transform
+                .transformPoint(Vector2(x, y));
+            final s = c.camera.value.worldToScreen(w);
+            return Offset(s.x, s.y);
+          }(),
+    ];
+  }
+
+  /// Scrolls the side panel until [key] is in view.
+  Future<void> reveal(WidgetTester tester, String key) async {
+    await tester.scrollUntilVisible(byKey(key), 100,
+        scrollable: find
+            .descendant(
+                of: byKey('side-panel'), matching: find.byType(Scrollable))
+            .first);
+    await tester.pump();
+  }
+
+  List<double> coefficients(ViewportTransform v) {
+    final m = v.worldToScreenMatrix;
+    return [m.a, m.b, m.c, m.d, m.e, m.f];
+  }
+
+  testWidgets(
+      'DZ1 M-Z29: zone B frames tables 6 and 7, not 1; "Fade the others" '
+      'focuses {6, 7}; All clears the focus and fits the page; the zone and '
+      'the switch are kept per area, and the Teras has none', (tester) async {
+    final plans = (await tester.runAsync(() => loadSamplePlans(rootBundle)))!;
+    final demo = await pumpDemo(tester, plans: plans);
+    final c = demo.area.controller;
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    await reveal(tester, 'fade-others');
+    expect(byKey('zone-toggle'), findsOneWidget);
+    expect(byKey('fade-others'), findsOneWidget);
+    final canvas = Offset.zero & tester.getSize(find.byType(InteractionLayer));
+    final page = c.camera.value;
+    for (final n in ['1', '6', '7']) {
+      expect(boxOnScreen(c, n), hasLength(4), reason: 'premise: one $n');
+    }
+
+    await tester.tap(byKey('zone-B'));
+    await tester.pump();
+    await tester.pump();
+    expect(coefficients(c.camera.value), isNot(coefficients(page)),
+        reason: 'premise: the camera moved');
+    for (final n in ['6', '7']) {
+      for (final p in boxOnScreen(c, n)) {
+        expect(canvas.contains(p), isTrue, reason: '$n\'s corner $p');
+      }
+    }
+    final one = boxOnScreen(c, '1');
+    expect(one.every((p) => !canvas.contains(p)), isTrue,
+        reason: 'table 1 is outside: $one in $canvas');
+    expect(c.tableFocus.value, isNull, reason: 'fading is off');
+
+    await tester.tap(byKey('fade-others'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.tableFocus.value, {'6', '7'});
+    expect(demo.area.fadeOthers, isTrue);
+
+    // Kept per area: the Teras has no zones; back in the Salon, B and the
+    // switch are as they were.
+    await tester.tap(byKey('area-1'));
+    await tester.pump();
+    await tester.pump();
+    // The panel's end, where the zones would be: none.
+    await tester.drag(byKey('side-panel'), const Offset(0, -5000));
+    await tester.pump();
+    expect(find.text('Log'), findsOneWidget, reason: 'premise: the end');
+    expect(byKey('zone-toggle'), findsNothing);
+    expect(byKey('fade-others'), findsNothing);
+    expect(demo.area.controller.tableFocus.value, isNull);
+    await tester.tap(byKey('area-0'));
+    await tester.pump();
+    await tester.pump();
+    await reveal(tester, 'fade-others');
+    expect(
+        tester.widget<SegmentedButton<String>>(byKey('zone-toggle')).selected,
+        {'B'});
+    expect(tester.widget<SwitchListTile>(byKey('fade-others')).value, isTrue);
+    expect(c.tableFocus.value, {'6', '7'});
+
+    await tester.tap(byKey('zone-all'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.tableFocus.value, isNull);
+    final all = coefficients(c.camera.value);
+    c.camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2(0.37, 0, 0, -0.37, 211.5, 307.25));
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    expect(coefficients(c.camera.value), all, reason: 'All fits the page');
+    for (final n in ['1', '6', '7']) {
+      for (final p in boxOnScreen(c, n)) {
+        expect(canvas.contains(p), isTrue, reason: 'the page shows $n');
+      }
+    }
+
+    // Fading on, zone C: the focus follows the zone.
+    await tester.tap(byKey('zone-C'));
+    await tester.pump();
+    await tester.pump();
+    expect(c.tableFocus.value, {'8', '9', '10', '11'});
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('DZ2 the zones\' three strings in German and Turkish (Z22)',
+      (tester) async {
+    await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    expect(find.text('Zones'), findsOneWidget);
+    expect(find.text('All'), findsOneWidget);
+    expect(find.text('Fade the others'), findsOneWidget);
+    await tester.tap(byKey('lang-de'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Bereiche'), findsOneWidget);
+    expect(find.text('Alle'), findsOneWidget);
+    expect(find.text('Andere abblenden'), findsOneWidget);
+    await tester.tap(byKey('lang-tr'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Bölgeler'), findsOneWidget);
+    expect(find.text('Tümü'), findsOneWidget);
+    expect(find.text('Diğerlerini soldur'), findsOneWidget);
   });
 }

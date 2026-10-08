@@ -6,8 +6,9 @@
 // S4, S9: Design and back shows the moves again; Reset layout drops them);
 // a Design / Service toggle; selection by table number; a table's context
 // menu; the service options; table groups merged and split from the service
-// bar (table-groups spec G6); and a log of the API's state, in English,
-// German or Turkish. An example and an integration surface, not a product.
+// bar (table-groups spec G6); the Salon's zones, framed and optionally
+// focused (zone spec Z22); and a log of the API's state, in English, German
+// or Turkish. An example and an integration surface, not a product.
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -102,14 +103,35 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
       );
 }
 
+/// The demo's zones by area (zone spec Z22): host data, a table's
+/// attribute in a POS's database, never the plan's. Zone names are data,
+/// not translated.
+const Map<String, Map<String, Set<String>>> kDemoZones = {
+  'Salon': {
+    'A': {'1', '2', '3', '4', '5'},
+    'B': {'6', '7'},
+    'C': {'8', '9', '10', '11'},
+  },
+};
+
 /// One dining area: its controller, the plan last saved and the service
 /// layout last seen, in memory.
 final class Area {
-  Area(this.name, this.controller, this.stored);
+  Area(this.name, this.controller, this.stored, {this.zones = const {}});
 
   final String name;
   final FloorPlanController controller;
   String? stored;
+
+  /// The area's zones by name, each its table numbers (Z22): none for an
+  /// area without zones.
+  final Map<String, Set<String>> zones;
+
+  /// The zone shown, null for all of them; kept with the area.
+  String? zone;
+
+  /// Whether the tables outside [zone] fade; kept with the area.
+  bool fadeOthers = false;
 
   /// The service layout, kept on `serviceLayoutChanges` (spec 14d S4).
   String? layout;
@@ -148,7 +170,8 @@ class DemoHomeState extends State<DemoHome> {
               symbols: _symbols,
               thumbnails: _thumbnails,
               json: widget.plans[name]),
-          widget.plans[name]),
+          widget.plans[name],
+          zones: kDemoZones[name] ?? const {}),
   ];
   int _area = 0;
   late final math.Random _random = widget.random ?? math.Random();
@@ -505,6 +528,39 @@ class DemoHomeState extends State<DemoHome> {
     area.controller.select(numbers);
   }
 
+  /// A zone tab (zone spec Z19, Z21): the zone's tables framed, the page
+  /// when none is drawn, and the others faded when [fadeOthers].
+  void showZone(Area a, Set<String> numbers, {required bool fadeOthers}) {
+    final controller = a.controller;
+    if (!controller.fitToTables(numbers)) controller.fitToView();
+    controller.setTableFocus(fadeOthers ? numbers : null);
+  }
+
+  /// The All tab (Z19, Z21): the page, no focus.
+  void showAllZones(Area a) {
+    final controller = a.controller;
+    controller.fitToView();
+    controller.setTableFocus(null);
+  }
+
+  /// [zone] of [a], or all of them when null.
+  void _setZone(Area a, String? zone) {
+    setState(() => a.zone = zone);
+    if (zone == null) {
+      showAllZones(a);
+    } else {
+      showZone(a, a.zones[zone]!, fadeOthers: a.fadeOthers);
+    }
+  }
+
+  /// "Fade the others": applied at once to the zone shown.
+  void _setFadeOthers(Area a, bool fade) {
+    setState(() => a.fadeOthers = fade);
+    if (a.zone case final zone?) {
+      showZone(a, a.zones[zone]!, fadeOthers: fade);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final a = area;
@@ -585,6 +641,7 @@ class DemoHomeState extends State<DemoHome> {
           SizedBox(
             width: 300,
             child: ListView(
+              key: const Key('side-panel'),
               padding: const EdgeInsets.all(12),
               children: [
                 Text(area.name, style: title),
@@ -670,6 +727,37 @@ class DemoHomeState extends State<DemoHome> {
                       key: Key('numbering-warning-$i'),
                       style: TextStyle(
                           color: Theme.of(context).colorScheme.error)),
+                // Zone spec Z22: only an area with zones; below the lines the
+                // tests read, above the log.
+                if (a.zones.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text(words.zones, style: title),
+                  const SizedBox(height: 4),
+                  SegmentedButton<String>(
+                    key: const Key('zone-toggle'),
+                    showSelectedIcon: false,
+                    segments: [
+                      // '' is All: a zone name is never empty.
+                      ButtonSegment(
+                          value: '',
+                          label:
+                              Text(words.allZones, key: const Key('zone-all'))),
+                      for (final zone in a.zones.keys)
+                        ButtonSegment(
+                            value: zone,
+                            label: Text(zone, key: Key('zone-$zone'))),
+                    ],
+                    selected: {a.zone ?? ''},
+                    onSelectionChanged: (s) =>
+                        _setZone(a, s.single.isEmpty ? null : s.single),
+                  ),
+                  SwitchListTile(
+                      key: const Key('fade-others'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(words.fadeOthers),
+                      value: a.fadeOthers,
+                      onChanged: (v) => _setFadeOthers(a, v)),
+                ],
                 const SizedBox(height: 16),
                 Text(words.log, style: title),
                 for (final (i, line) in log.indexed)
