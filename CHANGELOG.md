@@ -8,7 +8,22 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released. Nothing yet.
+On `main`, not yet released.
+
+- **Zones: framing and focus.** A zone stays the host's (the table's
+  attribute in its database); the plan stores none and the schema is
+  unchanged.
+  - `FloorPlanController.fitToTables(numbers)` frames the tables
+    carrying those numbers, in either mode, with a 500 mm margin and at
+    least 3 m per axis. It returns `false` and changes nothing when no
+    table matches; with no view shown, the next view frames on its
+    first frame, as `fitToView()` does.
+  - `setTableFocus(numbers)` and `tableFocus`: the selection mode fades
+    the tables outside the focus under a veil of the paper's colour.
+    Faded tables still work. The focus is not saved, and is kept across
+    loads and mode switches.
+  - `FloorPlanTable.visible` (named, default `true`): false for a table
+    on a hidden layer. `tables` still lists such tables.
 
 ## 0.2.0
 
