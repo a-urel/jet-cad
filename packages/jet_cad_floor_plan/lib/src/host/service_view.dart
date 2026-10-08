@@ -401,6 +401,7 @@ class _ServiceViewState extends State<ServiceView> {
                     fitRequests: _c.fitRequests,
                     fitOnStart: _fitOnStart,
                     onFitted: _c.fitted,
+                    framing: _c.framingFor,
                     // The service shows the plan, not the drafting aids.
                     rulers: false,
                     grid: false,

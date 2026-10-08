@@ -34,6 +34,7 @@ class PlannerView extends StatefulWidget {
     this.fitRequests,
     this.fitOnStart = true,
     this.onFitted,
+    this.framing,
     this.underlay,
     this.overlay,
     this.rulers = true,
@@ -91,6 +92,11 @@ class PlannerView extends StatefulWidget {
 
   /// Called after each fit this view performs (review F-2).
   final VoidCallback? onFitted;
+
+  /// The camera a fit sets at the drawing area's size, asked when the fit
+  /// is performed (zone spec Z7); null from it, or no [framing], fits the
+  /// page as before.
+  final ViewportTransform? Function(Size size)? framing;
 
   /// Painted between the page chrome and the drafting (spec 14c S7): the
   /// selection mode's status fills, under the lines.
@@ -155,24 +161,27 @@ class _PlannerViewState extends State<PlannerView> {
   }
 
   void _onFitRequest() {
-    final size = _size;
-    if (size == null) {
+    if (_size == null) {
       // Not laid out yet: the first layout fits (review F-2).
       _fitted = false;
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
+    // The size is read when the fit runs, after this frame's layout (zone
+    // spec Z7): a request made with a layout change fits the new size.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fit(_size!));
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  /// Spec D4/D11: the page when there is one, at the drawing area's size --
-  /// inside the frame, so the bars are excluded.
+  /// Spec D4/D11: the [PlannerView.framing], else the page when there is
+  /// one, at the drawing area's size -- inside the frame, so the bars are
+  /// excluded.
   void _fit(Size size) {
     if (!mounted) return;
     final page = widget.page.value;
-    widget.camera.value = page != null
-        ? fitToPage(page, size)
-        : ViewportTransform.fit(widget.document.extents, size);
+    widget.camera.value = widget.framing?.call(size) ??
+        (page != null
+            ? fitToPage(page, size)
+            : ViewportTransform.fit(widget.document.extents, size));
     widget.onFitted?.call();
   }
 

@@ -16,6 +16,7 @@ import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
 import 'package:jet_cad_floor_plan/src/host/page_flows.dart';
+import 'package:jet_cad_floor_plan/src/host/table_fit.dart';
 import 'package:jet_cad_floor_plan/src/export/page_printer.dart';
 import 'package:jet_cad_floor_plan/src/new_document.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_library_loader.dart';
@@ -27,6 +28,7 @@ import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_fixture.dart';
+import 'zone_fixture.dart';
 
 /// A plan on the default page: tables 1 (turned, mirrored) and 2.
 String pagePlan() {
@@ -867,5 +869,310 @@ void main() {
     await tester.pump();
     expect(find.byType(RulerFrame), findsOneWidget);
     expect(chrome().grid, isTrue);
+  });
+
+  // Zone spec Z5-Z8: a framing performed by the view, pending with none.
+  // The fixture is `zone_fixture.dart`'s; a non-identity camera is set
+  // before every call.
+
+  /// A controller over the zone fixture, its camera elsewhere, no view.
+  FloorPlanController zoneController() {
+    final c = FloorPlanController(json: zonePlanJson());
+    addTearDown(c.dispose);
+    c.camera.value = zoneCamera();
+    return c;
+  }
+
+  Future<void> mountAt1440(WidgetTester tester, FloorPlanController c) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    await tester.pump();
+  }
+
+  /// The camera frames the tables [numbers] of the active plan in the
+  /// shown canvas: Z3's camera on the test's own bound at the canvas's
+  /// size, the bound's centre at the canvas's within 1e-6 px.
+  void expectFramed(
+      WidgetTester tester, FloorPlanController c, Set<String> numbers,
+      {String? reason}) {
+    final canvas = find.byType(InteractionLayer);
+    final box = boundOf(c.activeDocument, numbers);
+    expectCamera(c.camera.value, frameTables(box, tester.getSize(canvas)),
+        reason: reason);
+    final centre = globalOf(tester, c, box.center);
+    final want = tester.getCenter(canvas);
+    expect(centre.dx, closeTo(want.dx, 1e-6), reason: reason);
+    expect(centre.dy, closeTo(want.dy, 1e-6), reason: reason);
+  }
+
+  /// The page fit of the mounted view: what [FloorPlanController.fitToView]
+  /// gives from another camera. Leaves the camera there.
+  Future<ViewportTransform> pageFit(
+      WidgetTester tester, FloorPlanController c) async {
+    c.camera.value = zoneCamera();
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    expect(c.camera.value.worldToScreenMatrix.a, isNot(0.37),
+        reason: 'premise: refitted');
+    return c.camera.value;
+  }
+
+  testWidgets(
+      'VZ1 with no view mounted, a framing is pending: the next view frames '
+      'on its first frame, in both modes (M-Z8)', (tester) async {
+    final c = zoneController();
+    c.takeFitOnStart(); // a host whose plan was already shown and fitted
+    expect(c.fitToTables({'3'}), isTrue);
+    await mountAt1440(tester, c);
+    expectFramed(tester, c, {'3'}, reason: 'design');
+    expect(c.takeFitOnStart(), isFalse, reason: 'performed');
+
+    await tester.pumpWidget(viewApp(null));
+    c.setMode(FloorPlanMode.selection);
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'A1', 'A2'}), isTrue);
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    expectFramed(tester, c, {'A1', 'A2'}, reason: 'selection');
+  });
+
+  testWidgets(
+      'VZ2 load and newPlan drop a framing: the next view fits the page '
+      '(M-Z9, M-Z32)', (tester) async {
+    final c = zoneController();
+    expect(c.fitToTables({'3'}), isTrue);
+    c.load(zonePlanJson());
+    c.camera.value = zoneCamera();
+    await mountAt1440(tester, c);
+    final first = c.camera.value;
+    expectCamera(first, await pageFit(tester, c), reason: 'load');
+
+    await tester.pumpWidget(viewApp(null));
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3'}), isTrue);
+    c.newPlan();
+    // The new plan gets a table 3 before a view shows it: the old
+    // request named the old plan's.
+    placeZoneTable(c.activeDocument, trapezoidTable, 40000, -27000, '3',
+        mirrored: true);
+    c.camera.value = zoneCamera();
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    final second = c.camera.value;
+    expectCamera(second, await pageFit(tester, c), reason: 'newPlan');
+  });
+
+  testWidgets(
+      'VZ3 a framing is resolved when performed: a restore moving the '
+      'table before the view mounts is followed (M-Z10)', (tester) async {
+    final c = zoneController();
+    c.setMode(FloorPlanMode.selection);
+    move(c, '3', 4300.5, -2100.25);
+    final json = c.serviceLayoutJson()!;
+    c.resetLayout();
+    final designed = boundOf(c.activeDocument, {'3'});
+    c.takeFitOnStart();
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3'}), isTrue);
+    expect(c.restoreServiceLayout(json).applied, ['3']);
+    expect(boundOf(c.activeDocument, {'3'}).minX, isNot(designed.minX),
+        reason: 'premise: 3 moved');
+    await mountAt1440(tester, c);
+    expectFramed(tester, c, {'3'});
+  });
+
+  testWidgets(
+      'VZ4 the last request wins: fitToTables then fitToView fits the page; '
+      'the reverse frames the tables (M-Z12)', (tester) async {
+    final c = zoneController();
+    await mountAt1440(tester, c);
+    final page = await pageFit(tester, c);
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3'}), isTrue);
+    c.fitToView();
+    await tester.pump();
+    await tester.pump();
+    expectCamera(c.camera.value, page, reason: 'the page');
+
+    c.camera.value = zoneCamera();
+    c.fitToView();
+    expect(c.fitToTables({'3'}), isTrue);
+    await tester.pump();
+    await tester.pump();
+    expectFramed(tester, c, {'3'}, reason: 'the tables');
+
+    // With no view mounted, the same.
+    await tester.pumpWidget(viewApp(null));
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3'}), isTrue);
+    c.fitToView();
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    expectCamera(c.camera.value, page, reason: 'the page, remounted');
+  });
+
+  testWidgets(
+      'VZ5 the framed tables\' centre is the canvas\'s; the upper table is '
+      'drawn above (M-Z6)', (tester) async {
+    final c = zoneController();
+    c.setMode(FloorPlanMode.selection);
+    await mountAt1440(tester, c);
+    final box = boundOf(c.activeDocument, {'3', '7'});
+    expect(box.maxX - box.minX + 1000, lessThan(3000),
+        reason: 'premise: x at the minimum span');
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3', '7'}), isTrue);
+    await tester.pump();
+    await tester.pump();
+    expectFramed(tester, c, {'3', '7'});
+    final upper = boundOf(c.activeDocument, {'7'}).center;
+    final lower = boundOf(c.activeDocument, {'3'}).center;
+    expect(upper.y, greaterThan(lower.y), reason: 'premise: 7 is above');
+    expect(
+        globalOf(tester, c, upper).dy, lessThan(globalOf(tester, c, lower).dy));
+  });
+
+  testWidgets(
+      'VZ6 a pending framing lands after the measured origin\'s correction: '
+      'no view, a switch, a framing, a view whose canvas is not where the '
+      'seed says (M-Z14)', (tester) async {
+    final seeds = Map.of(floorPlanCanvasSeeds);
+    addTearDown(() => floorPlanCanvasSeeds
+      ..clear()
+      ..addAll(seeds));
+    floorPlanCanvasSeeds[FloorPlanMode.selection] = const Offset(130, 7);
+    final c = zoneController();
+    c.setMode(FloorPlanMode.selection);
+    expect(c.fitToTables({'3'}), isTrue);
+    await mountAt1440(tester, c);
+    expect(
+        tester.getTopLeft(find.byType(InteractionLayer)) -
+            tester.getTopLeft(find.byType(FloorPlanView)),
+        isNot(const Offset(130, 7)),
+        reason: 'premise: the seed is wrong');
+    expectFramed(tester, c, {'3'});
+  });
+
+  testWidgets(
+      'VZ7 the design mode frames too, through the editor\'s view (M-Z15)',
+      (tester) async {
+    final c = zoneController();
+    await mountAt1440(tester, c);
+    expect(find.byType(PlannerShell), findsOneWidget);
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'7'}), isTrue);
+    await tester.pump();
+    await tester.pump();
+    expectFramed(tester, c, {'7'});
+  });
+
+  testWidgets(
+      'VZ8 a failed framing leaves a pending one: no view, 3, then an '
+      'unknown number; the view frames 3 (M-Z30)', (tester) async {
+    final c = zoneController();
+    c.takeFitOnStart();
+    expect(c.fitToTables({'3'}), isTrue);
+    expect(c.fitToTables({'nope'}), isFalse);
+    await mountAt1440(tester, c);
+    expectFramed(tester, c, {'3'});
+  });
+
+  testWidgets(
+      'VZ9 a framing with no table left when performed fits the page and '
+      'is done: the table undone, or its layer hidden (M-Z31)', (tester) async {
+    final c = zoneController();
+    c.takeFitOnStart();
+    final d = c.activeDocument;
+    d.commands.execute(placeSymbol(d, entryOf(trapezoidTable),
+        at: Vector2(44000, -24000), mirrored: true));
+    final number = TableSurvey.of(d).tables.last.number!;
+    expect(c.fitToTables({number}), isTrue);
+    c.undo();
+    expect(TableSurvey.of(d).withNumber(number), isEmpty, reason: 'premise');
+    await mountAt1440(tester, c);
+    final first = c.camera.value;
+    expect(c.takeFitOnStart(), isFalse, reason: 'done');
+    expectCamera(first, await pageFit(tester, c), reason: 'undone');
+
+    await tester.pumpWidget(viewApp(null));
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3'}), isTrue);
+    final hidden =
+        d.tables.layers.records.firstWhere((l) => l.name == 'Hidden');
+    d.commands.execute(SetInstanceLayerCommand(
+        TableSurvey.of(d).withNumber('3').single.instance, hidden.handle));
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    final second = c.camera.value;
+    expect(c.takeFitOnStart(), isFalse, reason: 'done');
+    expectCamera(second, await pageFit(tester, c), reason: 'hidden');
+  });
+
+  testWidgets(
+      'VZ10 a framing asked in the design and a switch in one step: the old '
+      'view does nothing; the selection mode\'s frames after its '
+      'correction. A view unmounted in the step that asked does nothing '
+      'either: the framing stays pending (M-Z33)', (tester) async {
+    final seeds = Map.of(floorPlanCanvasSeeds);
+    addTearDown(() => floorPlanCanvasSeeds
+      ..clear()
+      ..addAll(seeds));
+    floorPlanCanvasSeeds[FloorPlanMode.selection] = const Offset(130, 7);
+    final c = zoneController();
+    await mountAt1440(tester, c);
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'3'}), isTrue);
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    expectFramed(tester, c, {'3'});
+
+    // The host leaves the floor in the step that asks: the unmounted
+    // view's posted fit neither moves the camera nor ends the request, so
+    // the next view, in the other mode, frames.
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    await tester.pump();
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'A1', 'A2'}), isTrue);
+    await tester.pumpWidget(viewApp(null));
+    c.setMode(FloorPlanMode.selection);
+    await tester.pumpWidget(viewApp(c));
+    await tester.pump();
+    expectFramed(tester, c, {'A1', 'A2'}, reason: 'remounted');
+  });
+
+  testWidgets(
+      'VZ11 the view narrowed and a framing asked in one step: framed in '
+      'the new canvas (M-Z41)', (tester) async {
+    final c = zoneController();
+    c.setMode(FloorPlanMode.selection);
+    final width = ValueNotifier<double>(1440);
+    addTearDown(width.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: ValueListenableBuilder<double>(
+                valueListenable: width,
+                builder: (context, w, _) => Align(
+                    alignment: Alignment.topLeft,
+                    child: SizedBox(
+                        width: w, child: FloorPlanView(controller: c)))))));
+    await tester.pump();
+    await tester.pump();
+    final wide = tester.getSize(find.byType(InteractionLayer));
+    c.camera.value = zoneCamera();
+    width.value = 1010;
+    expect(c.fitToTables({'3'}), isTrue);
+    await tester.pump();
+    await tester.pump();
+    expect(tester.getSize(find.byType(InteractionLayer)).width,
+        lessThan(wide.width),
+        reason: 'premise: narrowed');
+    expectFramed(tester, c, {'3'});
   });
 }

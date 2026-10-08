@@ -419,4 +419,28 @@ void main() {
     expect(picker.pick(off(1650), reach: 240), isNull,
         reason: '150 local, 300 mm in the world (review F-5)');
   });
+
+  test(
+      'TP13 a table whose box has a corner not finite in the world is no '
+      'candidate: a NaN translation, an infinite corner, a singular '
+      'transform (zone spec Z0)', () {
+    final doc = plan();
+    final kept = placeTurned(doc, trapezoidTable, Vector2(40000, -27000));
+    final nan = placeTurned(doc, tableSymbol(), Vector2(-38000, 26000));
+    final far = placeTurned(doc, tableSymbol(), Vector2(41000, 27500));
+    final flat = placeTurned(doc, stoolSymbol, Vector2(-39000, -26000));
+    doc.commands.execute(TransformNodeCommand(
+        nan.handle, Transform2(0.8, 0.6, -0.6, 0.8, double.nan, 26000)));
+    // det 1, finite; x' = 1e306 * x overflows for every x of the box.
+    doc.commands.execute(TransformNodeCommand(
+        far.handle, const Transform2(1e306, 0, 0, 1e-306, 41000, 27500)));
+    doc.commands.execute(TransformNodeCommand(
+        flat.handle, const Transform2(1, 2, 2, 4, -39000, -26000)));
+    expect(
+        TablePicker.candidatesOf(doc, boxes: {}, leaves: doc.leavesByOwner)
+            .map((c) => c.table.instance),
+        [kept.handle]);
+    expect(TablePicker(doc).candidates.map((c) => c.table.instance),
+        [kept.handle]);
+  });
 }

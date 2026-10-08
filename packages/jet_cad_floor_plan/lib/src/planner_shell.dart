@@ -90,6 +90,7 @@ class PlannerShell extends StatefulWidget {
     this.camera,
     this.fitOnStart = true,
     this.onFitted,
+    this.framing,
   });
 
   final DraftDocument? document;
@@ -149,6 +150,10 @@ class PlannerShell extends StatefulWidget {
 
   /// Forwarded to the view: called after each fit.
   final VoidCallback? onFitted;
+
+  /// Forwarded to the view: the camera a fit sets, asked when the fit is
+  /// performed (zone spec Z7); null fits the page.
+  final ViewportTransform? Function(Size size)? framing;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -976,6 +981,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         fitRequests: widget.fitRequests,
                         fitOnStart: widget.fitOnStart,
                         onFitted: widget.onFitted,
+                        framing: widget.framing,
                       ),
                     ),
                   ),
