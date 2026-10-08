@@ -37,12 +37,21 @@ was built and tested with Flutter 3.47.6.
   - Two small changes a host may notice: `fitToView()` now reads the
     view's size when the fit is performed, not when it is requested; and
     a table whose corners are not finite (a hand-edited file) is no
-    longer picked.
+    longer picked, framed or counted in a group's frame.
+  - A class that `implements FloorPlanController` (a hand-written test
+    double, not a mock) must add the new members.
+- `jet_cad_floor_plan`'s `editor.dart`: `PlannerShell` and `PlannerView`
+  take an optional `framing:`, the camera a fit sets at the drawing
+  area's size (null fits the page, as before).
 
 **Known limits.**
 
 - The focus's look (the margin, the 3 m minimum span, the veil's 0.6) has
   not been checked on a tablet or a terminal, in light or dark.
+- A host has no public world-to-screen mapping: it colours tables
+  through `setTableStatus` and `setGroupStatus`, and cannot place its
+  own widgets over them (Monépro's Q-Z1 is open). A table is linked to
+  the POS by its number (Q-Z4).
 - A new plan's separator still follows the UI language by assumption
   (Q2, as in 0.2.0).
 - The German and Turkish text has not been read by native speakers.

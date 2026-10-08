@@ -91,8 +91,11 @@ one's spec, plan and results.
   becomes 0.3.0 (zones; plans and service layouts unchanged, so 0.2.0
   and 0.3.0 terminals share them); the host guide's "unreleased"
   markers read "since 0.3.0", and §1 carries a placeholder ref that the
-  commit after the merge fills in. Then an independent review, the
-  merge on the human's word, the tag pushed by the human.
+  commit after the merge fills in. An independent review (*Approved
+  with fixes*: CHANGELOG wording only; plans and layouts round-trip
+  byte for byte between 0.2.0 and 0.3.0; the probe green at the full
+  SHA, the 3.44 floor held) is applied. Waiting on the human's word to
+  merge; the tag is then pushed by the human.
 
 ## Owed to the human
 
@@ -126,7 +129,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.3.0**, above: its review, then the merge question.
+**Next: release 0.3.0**, above: the merge question to the human.
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
 touch, a consumable version (0.2.0, tagged), the outside-app check (the
 host probe), placement and open/save, and zones (on `main`; 0.3.0
