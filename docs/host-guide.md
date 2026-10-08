@@ -413,7 +413,9 @@ several zones in one plan.
 - A framing is a camera request, as `fitToView()` is: with no view shown
   the next view frames on its first frame, the last request wins, and a
   mode switch keeps it. `load` and `newPlan()` drop it (the numbers named
-  the old plan): frame after a load. Nothing goes into the plan, its
+  the old plan): frame after a load, and set the focus again — it is kept
+  by number, and after loading another area into the same controller the
+  numbers may name its tables or none of them. Nothing goes into the plan, its
   undo or `serviceLayoutChanges`.
 - `controller.setTableFocus(numbers)` fades every other table in the
   selection mode under a veil of the paper's colour; `null` ends the
@@ -424,10 +426,11 @@ several zones in one plan.
 - **A faded table still works:** it can be tapped, selected, dragged
   and merged, because a waiter under "My tables" still acts on a
   colleague's table. If you want it inert, check
-  `controller.tableFocus.value` in your `onTableTap`,
-  `onTableContextMenu` and `selectedTables` listener — the table is
-  already selected when `onTableTap` fires — and pass
-  `serviceMoves: false` for no moves.
+  `controller.tableFocus.value` in your `onTableTap`, `onGroupTap` (it
+  fires right after `onTableTap` for a member), `onTableContextMenu`,
+  `onMergeRequested` and `selectedTables` listener — the table is already
+  selected when `onTableTap` fires — and pass `serviceMoves: false` for
+  no moves.
 
 A zone tab frames its tables and, if you choose, fades the rest; *All*
 shows the floor again:
@@ -456,17 +459,24 @@ layer, which is not drawn, so it counts as unplaced:
 
 ```dart
   /// The tables the POS knows that this floor does not draw: a table on
-  /// a hidden layer is not drawn, so it counts as unplaced.
-  Set<String> unplacedTables(Set<String> codes) => codes.difference({
-        for (final table in controller.tables)
-          if (table.visible && table.number != null) table.number!,
-      });
+  /// a hidden layer is not drawn, so it counts as unplaced. Codes compare
+  /// trimmed, as `fitToTables` and `setTableFocus` trim them.
+  Set<String> unplacedTables(Set<String> codes) {
+    final drawn = {
+      for (final table in controller.tables)
+        if (table.visible && table.number != null) table.number!,
+    };
+    return {
+      for (final code in codes)
+        if (!drawn.contains(code.trim())) code,
+    };
+  }
 ```
 
 Your codes are compared with the plan's numbers trimmed and
-case-sensitively. A table number is 1 to 8 characters (UTF-16 units)
-with no control character, so a code that breaks those rules can never
-match a table in the plan.
+case-sensitively. The planner lets staff type a number of 1 to 8
+characters (UTF-16 units) with no control character, so keep your codes
+within those rules: a longer code matches only a plan edited by hand.
 
 ## 8. Callbacks, options, and the web's context menu
 

@@ -197,11 +197,18 @@ class _FloorScreenState extends State<FloorScreen> {
   }
 
   /// The tables the POS knows that this floor does not draw: a table on
-  /// a hidden layer is not drawn, so it counts as unplaced.
-  Set<String> unplacedTables(Set<String> codes) => codes.difference({
-        for (final table in controller.tables)
-          if (table.visible && table.number != null) table.number!,
-      });
+  /// a hidden layer is not drawn, so it counts as unplaced. Codes compare
+  /// trimmed, as `fitToTables` and `setTableFocus` trim them.
+  Set<String> unplacedTables(Set<String> codes) {
+    final drawn = {
+      for (final table in controller.tables)
+        if (table.visible && table.number != null) table.number!,
+    };
+    return {
+      for (final code in codes)
+        if (!drawn.contains(code.trim())) code,
+    };
+  }
 
   void showOrders() {
     final numbers = controller.selectedTables.value;

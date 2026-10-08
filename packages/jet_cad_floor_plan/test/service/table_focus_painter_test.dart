@@ -406,4 +406,17 @@ void main() {
       expect(check.counts[name] ?? 0, greaterThan(200), reason: name);
     }
   });
+
+  test(
+      'FX1 a veil drawn, then every table focused: nothing is drawn (the '
+      'region of the last build is dropped, not kept)', () {
+    final doc = rowOfTables(4);
+    final camera =
+        ValueNotifier(cameraOn(quadsOf(doc, (t) => t.number == '1').single));
+    final focus = ValueNotifier<Set<String>?>({'1', '2', '3'});
+    final painter = painterOn(doc, camera, focus, ValueNotifier<int>(kPaper));
+    expect(spyFrame(painter).seen, hasLength(3), reason: 'premise: one faded');
+    focus.value = {'1', '2', '3', '4'};
+    expect(spyFrame(painter).seen, isEmpty, reason: 'every table focused');
+  });
 }

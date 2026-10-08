@@ -25,6 +25,10 @@ On `main`, not yet released.
   - `FloorPlanTable.visible` (named, default `true`): false for a table
     on a hidden layer. `tables` still lists such tables. It joins `==`,
     `hashCode` and `toString`, whose text gains `visible`.
+  - Two small changes a host may notice: `fitToView()` now reads the
+    view's size when the fit is performed, not when it is requested; and
+    a table whose corners are not finite (a hand-edited file) is no
+    longer picked.
 
 ## 0.2.0
 

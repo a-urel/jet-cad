@@ -325,6 +325,10 @@ class DemoHomeState extends State<DemoHome> {
     if (area.controller.mode.value == FloorPlanMode.selection) {
       _restoreLayout(area);
     }
+    // A load drops a framing (the guide: frame after a load).
+    if (area.zone case final z?) {
+      showZone(area, area.zones[z]!, fadeOthers: area.fadeOthers);
+    }
   }
 
   /// The statuses a POS would set (14c S10): by the selected tables.

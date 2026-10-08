@@ -56,11 +56,44 @@ closes the slice.
 | 1, the candidate rule and the framing (Z0–Z9) | `ba7eec2` | **Approved.** R-1: a table near the double range gave an infinite camera. R-2: aliasing the host's set was unpinned. R-4: a doc word. | In `fdc8918`: an overflow-safe centre and a page fallback; VZ12; the doc |
 | 2, the focus and the veil (Z10–Z13, Z15–Z17) | `fdc8918` | **Approved; tests only.** The veil's repaint on a service move and on a paper change, and its order under the outlines and chips, were unpinned (O1–O4, O13). | In `3531e7d`: RV1–RV3, TG-Z4, FP7 |
 | 3, groups, `visible`, the demo (Z14, Z22, Z24) | `3531e7d` | **Approved.** R-1: a locked focused member, unpinned. R-3: the demo's per-area state, unpinned. R-4: `visible`'s doc. | `3d9c827`: RX1, DZ1's two lines, the doc, the CHANGELOG's `toString` line |
-| 4, docs and the exit (Z20, Z21, Z23) | `5022cc9`, this note | — | — |
+| 4, docs and the exit (Z20, Z21, Z23) | `5022cc9`, `03a6805` (this note) | — | — |
+| the range `14616d9..03a6805` | — | **Independent review: Approve with fixes**; no correctness defect where the tasks meet (F-1 to F-9, below) | the commit after this note's first version |
 
 Per-task reports, reviews and fixes are in
 `.superpowers/sdd/2026-10-08-zone-focus/` (git-ignored). They are archived
 to `docs/superpowers/ledgers/` on merge.
+
+## The independent review of the range
+
+A fresh reviewer worked in its own clones. It re-ran every gate (planner
+1,436, demo 39, `tool/ci` 58) and ran the host probe at the full SHA,
+which was green. It ran 16 mutants of its own: 13 red, 2 survived and 1
+equivalent. Both survivors are now red or recorded.
+
+- **F-1:** the guide's recipe for making faded tables inert left out
+  `onGroupTap`, which fires right after `onTableTap`, and
+  `onMergeRequested`. The guide now names both.
+- **F-2:** X12, which keeps the last veil when a focus grows to cover
+  every table, survived 138 tests. FX1 is now red under it.
+- **F-3:** the unplaced-tables recipe compared codes untrimmed, while
+  `fitToTables` and `setTableFocus` trim them. The recipe now trims its
+  codes in the guide, the probe and CV3, and CV3's codes `' 2'` and
+  `'7 '` turn the untrimmed recipe red. The number-rule sentence no
+  longer says "can never match": the 8-character rule binds only typed
+  numbers.
+- **F-4:** the guide now says to set the focus again after a load, since
+  the focus is kept by number.
+- **F-5:** the demo's *Reload* now applies its zone again.
+- **F-8:** the CHANGELOG now names two small changes:
+  - `fitToView()` reads the view's size when the fit is performed;
+  - a table with non-finite corners is no longer picked.
+- **F-9:** this note's owed list, below.
+- **Accepted:**
+  - **F-6:** a table whose own node is invisible still reads
+    `visible: true` and is framed. Only a hand-edited file produces one.
+  - **F-7 (X16):** dropping `visible` from both the guide's and the
+    probe's recipe passes `check_guide`. CV3 runs its own copy of the
+    recipe, so it is not tied to the guide.
 
 ## Named mutants
 
@@ -90,7 +123,8 @@ list each one with its killer.
 **Accepted gaps:**
 - **R-2 of Task 3's review:** a layer missing from the table counts as
   shown. Only a corrupt file reaches it.
-- **R-5:** the demo's toggle keeps its zone after *Fit*.
+- **R-5 of Task 3's review:** the demo's toggle keeps its zone after
+  *Fit*.
 - **R-5 of Task 2's review:** measuring the service painters with the VM
   allocation profiler is left as a follow-up. The structural recording
   canvas (14c R-3) is the gate today.
@@ -151,6 +185,8 @@ Playwright:
     - the 0.6 veil;
     - a caption overhanging the veil at low zoom (R-5 of the spec).
   - The German and Turkish read of the demo's three strings.
+  - Task 2's review R-7: a table far out (about 1e308) on the web
+    renderers, not tried.
 - **To Monépro:**
   - Q-Z1: whether its phase 2 needs a public world-to-screen mapping for
     its own status widgets.
