@@ -18,6 +18,12 @@ decimal separator, and a host graph without the GPU renderer.
 refuses a plan 0.2.0 saves (schema 8). The packages need Flutter 3.44 or
 later; 0.2.0 was built and tested with Flutter 3.47.6.
 
+- **A mode switch keeps the plan in place** (R-13, amended): switching
+  between design and selection no longer moves the plan on the screen by
+  the editor's panels and rulers. `setMode` reframes the camera by the
+  difference of the two canvases' origins, its zoom kept, also when no
+  view is shown; `fitToView` and `load` still fit. The camera's numbers
+  are no longer kept across a switch.
 - **The plan's decimal separator** (Q0): a plan carries its own decimal
   separator, `.` or `,`, chosen on the Page panel (*Decimal separator*).
   Dimension text, room areas and the rulers print with it, and so do the
