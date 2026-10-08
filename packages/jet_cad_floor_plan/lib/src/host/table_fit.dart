@@ -23,11 +23,15 @@ const double kTableFitMinSpanMm = 3000;
 /// [kTableFitMinSpanMm] per axis, fitted as [ViewportTransform.fit] fits
 /// (5 % margin, y flipped), its scale clamped to `[kMinScale, kMaxScale]`
 /// about the same centre.
+///
+/// The centre is taken as `min / 2 + max / 2`, which cannot overflow where
+/// `(min + max) / 2` would (Task 1 review R-1: a table near the double
+/// range); halving is exact, so elsewhere the two are the same number.
 ViewportTransform frameTables(Aabb2 box, Size viewport) {
   assert(!box.isEmpty, 'frameTables needs a non-empty box');
   var minX = box.minX - kTableFitMarginMm, maxX = box.maxX + kTableFitMarginMm;
   var minY = box.minY - kTableFitMarginMm, maxY = box.maxY + kTableFitMarginMm;
-  final cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  final cx = minX / 2 + maxX / 2, cy = minY / 2 + maxY / 2;
   if (maxX - minX < kTableFitMinSpanMm) {
     minX = cx - kTableFitMinSpanMm / 2;
     maxX = cx + kTableFitMinSpanMm / 2;
@@ -36,14 +40,15 @@ ViewportTransform frameTables(Aabb2 box, Size viewport) {
     minY = cy - kTableFitMinSpanMm / 2;
     maxY = cy + kTableFitMinSpanMm / 2;
   }
-  final fit =
-      ViewportTransform.fit(Aabb2.raw(minX, minY, maxX, maxY), viewport);
-  final s = fit.worldToScreenMatrix.a;
+  // The fit's scale; its translation is built here, about the safe
+  // centre, since `ViewportTransform.fit` takes `(min + max) / 2`.
+  final s = ViewportTransform.fit(Aabb2.raw(minX, minY, maxX, maxY), viewport)
+      .worldToScreenMatrix
+      .a;
+  // The clamp is dead in practice (a 316,000 px view, a 950 m box), and
+  // harmless: the same centre at the bound's scale.
   final clamped = s.clamp(kMinScale, kMaxScale);
-  if (clamped == s) return fit;
-  // Dead in practice (a 316,000 px view, a 950 m box), and harmless: the
-  // same centre at the bound's scale.
-  final mx = (minX + maxX) / 2, my = (minY + maxY) / 2;
+  final mx = minX / 2 + maxX / 2, my = minY / 2 + maxY / 2;
   return ViewportTransform(
       worldToScreenMatrix: Transform2(
           clamped,

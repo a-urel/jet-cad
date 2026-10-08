@@ -4,6 +4,8 @@
 // twice, `B4`, an unnumbered table; look-alikes far from table 7 -- a TEXT
 // and a room named `7` -- and table 7 itself labelled ` 7 `. Expectations
 // are computed from the symbols' own boxes by the forward transform.
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
@@ -168,4 +170,153 @@ void expectCamera(ViewportTransform? got, ViewportTransform want,
     expect(gs[i], closeTo(ws[i], 1e-12 * ws[i].abs()),
         reason: '${reason ?? ''} [$i]');
   }
+}
+
+/// A table's quad as the test knows it (zone spec Z13): [zoneSymbolBoxes]'
+/// box of its symbol through its transform. Every fixture transform is
+/// rigid, so a distance in definition space is one in the world.
+final class TestQuad {
+  TestQuad(this.transform, this.box) : _inverse = transform.invert();
+
+  final Transform2 transform;
+  final Aabb2 box;
+  final Transform2 _inverse;
+
+  /// The signed distance from world ([x], [y]) to the quad: negative
+  /// inside.
+  double signedDistance(double x, double y) {
+    final i = _inverse;
+    final lx = i.a * x + i.c * y + i.e, ly = i.b * x + i.d * y + i.f;
+    final dx = math.max(box.minX - lx, lx - box.maxX);
+    final dy = math.max(box.minY - ly, ly - box.maxY);
+    if (dx <= 0 && dy <= 0) return math.max(dx, dy);
+    final ox = math.max(dx, 0.0), oy = math.max(dy, 0.0);
+    return math.sqrt(ox * ox + oy * oy);
+  }
+
+  /// The box's centre in the world.
+  Vector2 get centre => transform.transformPoint(box.center);
+
+  /// Whether world ([x], [y]) is inside the quad by more than [margin].
+  bool holds(double x, double y, double margin) =>
+      signedDistance(x, y) < -margin;
+
+  /// Whether world ([x], [y]) is outside the quad by more than [margin].
+  bool misses(double x, double y, double margin) =>
+      signedDistance(x, y) > margin;
+}
+
+/// The quads of [doc]'s tables that [which] keeps, on any layer: the
+/// caller names the tables it expects.
+List<TestQuad> quadsOf(DraftDocument doc, bool Function(TableInfo t) which) => [
+      for (final t in TableSurvey.of(doc).tables)
+        if (which(t))
+          TestQuad((doc.tree[t.instance]! as InstanceNode).transform,
+              zoneSymbolBoxes[t.symbolKey]!),
+    ];
+
+/// The quads of [doc]'s tables numbered [n] (trimmed).
+List<TestQuad> quadsNumbered(DraftDocument doc, String n) =>
+    quadsOf(doc, (t) => t.number == n.trim());
+
+/// [paper] at the veil's 0.6 over [under], both `0xRRGGBB`, per channel.
+int veilOver(int paper, int under) {
+  var rgb = 0;
+  for (final shift in const [16, 8, 0]) {
+    final p = (paper >> shift) & 0xFF, u = (under >> shift) & 0xFF;
+    rgb |= (0.6 * p + 0.4 * u).round() << shift;
+  }
+  return rgb;
+}
+
+/// The largest per-channel difference of two `0xRRGGBB` values.
+int rgbDistance(int a, int b) => [16, 8, 0]
+    .map((s) => (((a >> s) & 0xFF) - ((b >> s) & 0xFF)).abs())
+    .reduce(math.max);
+
+/// What [checkVeil] saw: how many pixels of each named region it checked
+/// (all of them right, or listed in [wrong]), and the mismatches.
+final class VeilCheck {
+  VeilCheck(this.regions);
+
+  /// The regions' names.
+  final List<String> regions;
+  final Map<String, int> counts = {};
+  final List<String> wrong = [];
+  int veiled = 0, clear = 0, mismatched = 0;
+}
+
+/// Compares the veil pixel by pixel over the [width] x [height] drawing
+/// area whose top left is ([left], [top]) in the images, [camera] mapping
+/// the world to the area. [got] is the scene with the veil, [under] the
+/// same scene without it (`0xRRGGBB` at a pixel of the images).
+///
+/// A pixel whose centre lies inside some [faded] quad and outside every
+/// [focused] one by more than [marginPx] is [paper] at 0.6 over [under],
+/// within 1 per channel; one inside a focused quad, or outside every faded
+/// one, by more than the margin is [under] exactly; a pixel within the
+/// margin of an edge that decides it is skipped. [regions] are counted
+/// among the checked pixels, by their world centre.
+VeilCheck checkVeil({
+  required ViewportTransform camera,
+  int left = 0,
+  int top = 0,
+  required int width,
+  required int height,
+  required int Function(int x, int y) under,
+  required int Function(int x, int y) got,
+  required List<TestQuad> faded,
+  required List<TestQuad> focused,
+  required int paper,
+  double marginPx = 1.5,
+  Map<String, bool Function(double x, double y)> regions = const {},
+}) {
+  final m = camera.worldToScreenMatrix;
+  final inv = m.invert();
+  final margin = marginPx / math.sqrt((m.a * m.d - m.b * m.c).abs());
+  final out = VeilCheck(regions.keys.toList());
+  for (var py = 0; py < height; py++) {
+    for (var px = 0; px < width; px++) {
+      final sx = px + 0.5, sy = py + 0.5;
+      final wx = inv.a * sx + inv.c * sy + inv.e;
+      final wy = inv.b * sx + inv.d * sy + inv.f;
+      bool? veiled;
+      if (focused.any((q) => q.holds(wx, wy, margin))) {
+        veiled = false;
+      } else if (focused.every((q) => q.misses(wx, wy, margin))) {
+        if (faded.any((q) => q.holds(wx, wy, margin))) {
+          veiled = true;
+        } else if (faded.every((q) => q.misses(wx, wy, margin))) {
+          veiled = false;
+        }
+      }
+      if (veiled == null) continue;
+      final x = left + px, y = top + py;
+      final u = under(x, y), g = got(x, y);
+      final ok = veiled ? rgbDistance(g, veilOver(paper, u)) <= 1 : g == u;
+      if (!ok) {
+        out.mismatched++;
+        if (out.wrong.length < 8) {
+          out.wrong.add('($x, $y) world (${wx.toStringAsFixed(1)}, '
+              '${wy.toStringAsFixed(1)}): ${veiled ? 'veiled' : 'clear'} '
+              'expected over 0x${u.toRadixString(16)}, got '
+              '0x${g.toRadixString(16)}');
+        } else if (out.wrong.length == 8) {
+          out.wrong.add('...');
+        }
+        continue;
+      }
+      if (veiled) {
+        out.veiled++;
+      } else {
+        out.clear++;
+      }
+      for (final MapEntry(key: name, value: holds) in regions.entries) {
+        if (holds(wx, wy)) {
+          out.counts.update(name, (n) => n + 1, ifAbsent: () => 1);
+        }
+      }
+    }
+  }
+  return out;
 }

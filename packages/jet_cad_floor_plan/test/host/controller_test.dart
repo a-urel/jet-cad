@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' show Color, Size;
 
+import 'package:flutter/foundation.dart' show ChangeNotifier;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
@@ -683,5 +684,122 @@ void main() {
     expectUnmoved(() => expect(c.fitToTables({'2'}), isTrue));
     await tester.pump();
     expect((notified, layouts), (1, 1), reason: 'the switch, the move');
+  });
+
+  // Zone spec Z10: the focus. The fixture is `zone_fixture.dart`'s.
+
+  testWidgets(
+      'CF1 setTableFocus trims, drops blanks and copies into an '
+      'unmodifiable set; {} and {\'\'} are a focus with no table, not none; '
+      'every call notifies, an equal set or a second null included (M-Z34, '
+      'M-Z26)', (tester) async {
+    final c = zoned(tester);
+    expect(c.tableFocus.value, isNull, reason: 'no focus at first');
+    var heard = 0;
+    c.tableFocus.addListener(() => heard++);
+    c.setTableFocus({' 7 ', '', '  ', '3'});
+    expect(c.tableFocus.value, {'7', '3'});
+    expect(() => c.tableFocus.value!.add('2'), throwsUnsupportedError);
+    c.setTableFocus({'3', '7'});
+    expect(heard, 2, reason: 'an equal set notifies');
+    for (final none in [
+      <String>{},
+      {''},
+      {' ', ''}
+    ]) {
+      c.setTableFocus(none);
+      expect(c.tableFocus.value, isNotNull, reason: '$none is a focus');
+      expect(c.tableFocus.value, isEmpty, reason: '$none');
+    }
+    c.setTableFocus(null);
+    c.setTableFocus(null);
+    expect(c.tableFocus.value, isNull);
+    expect(heard, 7, reason: 'every call');
+  });
+
+  testWidgets(
+      'CF2 the host\'s set is copied: changing it after the call changes '
+      'nothing (M-Z35)', (tester) async {
+    final c = zoned(tester);
+    final mine = {'7', '3'};
+    c.setTableFocus(mine);
+    mine
+      ..remove('7')
+      ..add('A1');
+    expect(c.tableFocus.value, {'7', '3'});
+  });
+
+  testWidgets(
+      'CF3 the focus is kept, by number, across setMode, resetLayout, '
+      'restoreServiceLayout, load and newPlan (M-Z20)', (tester) async {
+    final c = zoned(tester);
+    c.setTableFocus({'7'});
+    final focus = c.tableFocus.value;
+    void kept(String after) =>
+        expect(c.tableFocus.value, same(focus), reason: after);
+    c.setMode(FloorPlanMode.selection);
+    kept('setMode');
+    move(c, '3', 410.5, -95.25);
+    final json = c.serviceLayoutJson()!;
+    c.resetLayout();
+    kept('resetLayout');
+    expect(c.restoreServiceLayout(json).applied, ['3']);
+    kept('restoreServiceLayout');
+    c.load(zonePlanJson());
+    kept('load');
+    c.newPlan();
+    kept('newPlan');
+    c.setMode(FloorPlanMode.design);
+    kept('setMode back');
+    await tester.pump();
+  });
+
+  testWidgets(
+      'CF4 the focus is not plan state: no json, dirty, undo depth, '
+      'revision, layout change, notification or settle, in either mode '
+      '(M-Z27)', (tester) async {
+    final c = zoned(tester);
+    drawLine(c);
+    await tester.pump();
+    var notified = 0, layouts = 0, settled = 0;
+    c.addListener(() => notified++);
+    c.serviceLayoutChanges.addListener(() => layouts++);
+    final withdraw = c.registerSettle(() => settled++);
+    addTearDown(withdraw);
+
+    void expectUnmoved(void Function() act) {
+      final json = c.designJson();
+      final dirty = c.dirty.value;
+      final depth = c.activeDocument.commands.undoDepth;
+      final redo = c.activeDocument.commands.canRedo;
+      final revision = c.revision.value;
+      final before = (notified, layouts, settled);
+      act();
+      expect((notified, layouts, settled), before);
+      expect(c.activeDocument.commands.undoDepth, depth);
+      expect(c.activeDocument.commands.canRedo, redo);
+      expect(c.revision.value, revision);
+      expect(c.dirty.value, dirty);
+      expect(c.designJson(), json);
+    }
+
+    expect(c.dirty.value, isTrue, reason: 'premise');
+    expectUnmoved(() => c.setTableFocus({'3', '7'}));
+    expectUnmoved(() => c.setTableFocus(null));
+    c.setMode(FloorPlanMode.selection);
+    move(c, '3', 410.5, -95.25);
+    await tester.pump();
+    expect(c.activeDocument.commands.undoDepth, 1, reason: 'premise');
+    expectUnmoved(() => c.setTableFocus({}));
+    expectUnmoved(() => c.setTableFocus({'2'}));
+    await tester.pump();
+    expect((notified, layouts), (1, 1), reason: 'the switch, the move');
+  });
+
+  testWidgets('CF5 the focus is disposed with the controller', (tester) async {
+    final c = FloorPlanController(json: zonePlanJson());
+    final focus = c.tableFocus as ChangeNotifier;
+    c.dispose();
+    expect(() => focus.addListener(() {}), throwsFlutterError);
   });
 }

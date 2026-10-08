@@ -19,14 +19,21 @@ import 'package:jet_cad_floor_plan/src/host/page_flows.dart';
 import 'package:jet_cad_floor_plan/src/host/table_fit.dart';
 import 'package:jet_cad_floor_plan/src/export/page_printer.dart';
 import 'package:jet_cad_floor_plan/src/new_document.dart';
+import 'package:jet_cad_floor_plan/src/parametric/catalog.dart'
+    show registerAppComponents;
+import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_library_loader.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:jet_cad_floor_plan/src/planner_shell.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
+import 'package:jet_cad_floor_plan/src/tables/table_label.dart'
+    show kTableLabelTag;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../support/palette_fixture.dart'
+    show Shot, pumpThemed, shoot, white, windowAt;
 import '../tables/table_fixture.dart';
 import 'zone_fixture.dart';
 
@@ -1174,5 +1181,456 @@ void main() {
         lessThan(wide.width),
         reason: 'premise: narrowed');
     expectFramed(tester, c, {'3'});
+  });
+
+  // Zone spec Z10-Z16: the focus's veil through the real view. The fixture
+  // is `zone_fixture.dart`'s with a White page; the camera is panned, off
+  // the pixel grid. A shot with the focus is compared with one of the same
+  // scene without it: a faded quad is the paper at 0.6 over what it covers,
+  // everything else unchanged.
+
+  /// The zone fixture with a White page, in a controller; no view.
+  FloorPlanController paged() {
+    final c = FloorPlanController(json: zonePlanJson());
+    addTearDown(c.dispose);
+    final d = c.activeDocument;
+    d.commands.execute(
+        SetComponentCommand<PageComponent>(d.rootHandle, PageComponent()));
+    return c;
+  }
+
+  /// [c]'s view in the window at 1440 x 900, device pixel ratio 1, under
+  /// the planner's seed themes in [mode].
+  Future<void> mountFocus(WidgetTester tester, FloorPlanController c,
+      {ThemeMode mode = ThemeMode.light,
+      void Function(String)? onTableTap,
+      void Function()? onLayoutChanged,
+      void Function(Set<String>)? onMergeRequested}) async {
+    windowAt(tester, const Size(1440, 900));
+    await pumpThemed(
+        tester,
+        Scaffold(
+            body: FloorPlanView(
+                controller: c,
+                onTableTap: onTableTap,
+                onLayoutChanged: onLayoutChanged,
+                onMergeRequested: onMergeRequested)),
+        mode);
+    await tester.pump();
+    await tester.pump();
+  }
+
+  /// The camera on world ([x], [y]) at the canvas's centre, [scale] px/mm,
+  /// off the pixel grid.
+  Future<void> aim(
+      WidgetTester tester, FloorPlanController c, double x, double y,
+      {double scale = 0.25}) async {
+    final size = tester.getSize(find.byType(InteractionLayer));
+    c.camera.value = ViewportTransform(
+        worldToScreenMatrix: Transform2(
+            scale,
+            0,
+            0,
+            -scale,
+            size.width / 2 - scale * x + 0.31,
+            size.height / 2 + scale * y + 0.17));
+    await tester.pump();
+  }
+
+  /// [got] against [under] over the canvas (`checkVeil`), the quads read
+  /// from the active plan now.
+  VeilCheck compare(
+      WidgetTester tester, FloorPlanController c, Shot under, Shot got,
+      {required Set<String> focus,
+      required int paper,
+      Set<String> skipped = const {},
+      Map<String, bool Function(double x, double y)> regions = const {}}) {
+    final area = find.byType(InteractionLayer);
+    final topLeft = tester.getTopLeft(area);
+    final size = tester.getSize(area);
+    expect(topLeft.dx, topLeft.dx.roundToDouble(), reason: 'whole pixels');
+    expect(topLeft.dy, topLeft.dy.roundToDouble(), reason: 'whole pixels');
+    final d = c.activeDocument;
+    final check = checkVeil(
+        camera: c.camera.value,
+        left: topLeft.dx.toInt(),
+        top: topLeft.dy.toInt(),
+        width: size.width.toInt(),
+        height: size.height.toInt(),
+        under: under.rgbAt,
+        got: got.rgbAt,
+        // The hidden 5 is no candidate: neither faded nor focused.
+        faded: quadsOf(
+            d,
+            (t) =>
+                t.number != '5' &&
+                !skipped.contains(t.number) &&
+                !focus.contains(t.number)),
+        focused: quadsOf(d, (t) => focus.contains(t.number)),
+        paper: paper & 0xFFFFFF,
+        regions: regions);
+    expect(check.wrong, isEmpty,
+        reason: '${check.mismatched} pixels wrong: ${check.wrong.join('; ')}');
+    return check;
+  }
+
+  /// Table [n]'s quad in the active plan.
+  TestQuad quad(FloorPlanController c, String n) =>
+      quadsNumbered(c.activeDocument, n).single;
+
+  /// The midpoint of tables 3 and 7, world.
+  const midX = 40000.0, midY = -25800.0;
+
+  testWidgets(
+      'VF1 the design mode draws no veil: no veil layer, every pixel '
+      'unchanged by a focus; the selection mode has the layer (M-Z16)',
+      (tester) async {
+    final c = paged();
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    final before = await shoot(tester);
+    c.setTableFocus({'7'});
+    await tester.pump();
+    await tester.pump();
+    expect(byKey('table-focus-layer'), findsNothing);
+    final three = quad(c, '3');
+    final after = await shoot(tester);
+    final check = compare(tester, c, before, after,
+        // Nothing veiled: every pixel the same.
+        focus: {for (final t in c.tables) t.number ?? ''},
+        paper: 0xFFFFFF,
+        regions: {'3': (x, y) => three.holds(x, y, 0)});
+    expect(check.counts['3'] ?? 0, greaterThan(20000),
+        reason: 'premise: table 3 is on the canvas');
+
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    expect(byKey('table-focus-layer'), findsOneWidget);
+  });
+
+  testWidgets('VF2 the veil repaints on every setTableFocus (M-Z36)',
+      (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    final painter =
+        tester.widget<CustomPaint>(byKey('table-focus-layer')).painter!;
+    var repaints = 0;
+    void count() => repaints++;
+    painter.addListener(count);
+    addTearDown(() => painter.removeListener(count));
+    c.setTableFocus({'3'});
+    expect(repaints, 1);
+    c.setTableFocus({'3'});
+    expect(repaints, 2, reason: 'an equal set');
+    c.setTableFocus(null);
+    expect(repaints, 3);
+  });
+
+  for (final (mode, paper) in [
+    (ThemeMode.light, 0xFFFFFFFF),
+    (ThemeMode.dark, kDarkCanvasPaper),
+  ]) {
+    testWidgets(
+        'VF3 ${mode.name}: a faded statused pixel is the status over the '
+        'paper, then the paper at 0.6 over it; a focused one the status '
+        'alone (M-Z23, M-Z25)', (tester) async {
+      const red = 0xC62828, green = 0x2E7D32;
+      final c = paged();
+      c.setMode(FloorPlanMode.selection);
+      c.setTableStatus({
+        '7': TableStatus(color: const Color(0xFF000000 | red)),
+        '3': TableStatus(color: const Color(0xFF000000 | green)),
+      });
+      await mountFocus(tester, c, mode: mode);
+      await aim(tester, c, midX, midY);
+      final under = await shoot(tester);
+      c.setTableFocus({'3'});
+      await tester.pump();
+      final got = await shoot(tester);
+      final seven = quad(c, '7'), three = quad(c, '3');
+      final check = compare(tester, c, under, got,
+          focus: {'3'},
+          paper: paper,
+          regions: {
+            '7': (x, y) => seven.holds(x, y, 0),
+            '3': (x, y) => three.holds(x, y, 0),
+          });
+      expect(check.counts['7'] ?? 0, greaterThan(10000));
+      expect(check.counts['3'] ?? 0, greaterThan(10000));
+      // On each top, clear of its edges and its number.
+      final area = tester.getTopLeft(find.byType(InteractionLayer));
+      (int, int) pixel(TestQuad q) {
+        final w = q.transform.transformPoint(Vector2(1200, 420));
+        final s = c.camera.value.worldToScreen(w);
+        return ((area.dx + s.x).floor(), (area.dy + s.y).floor());
+      }
+
+      final (x7, y7) = pixel(seven);
+      final (x3, y3) = pixel(three);
+      expect(under.rgbAt(x7, y7), red, reason: 'premise: 7\'s status');
+      expect(rgbDistance(got.rgbAt(x7, y7), veilOver(paper & 0xFFFFFF, red)),
+          lessThanOrEqualTo(1),
+          reason: 'the paper at 0.6 over the status');
+      expect(got.rgbAt(x3, y3), green, reason: 'the focused status alone');
+    });
+  }
+
+  testWidgets(
+      'VF4 the focus is kept by number: set in the design, shown after the '
+      'switch; after a load where 7 is another instance, the veil follows '
+      'the number (M-Z20)', (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    final under = await shoot(tester);
+    final oldSeven = TableSurvey.of(c.activeDocument).withNumber('7').single;
+    final oldThree = TableSurvey.of(c.activeDocument).withNumber('3').single;
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    c.setTableFocus({'7'});
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    final seven = quad(c, '7'), three = quad(c, '3');
+    compare(tester, c, under, await shoot(tester), focus: {'7'}, paper: white);
+
+    // 3 and 7 swap their labels in the plan loaded.
+    final doc = DraftDocumentCodec.decodeString(zonePlanJson(),
+        registerComponents: registerAppComponents);
+    final s = TableSurvey.of(doc);
+    final l3 = s.withNumber('3').single.label!,
+        l7 = s.withNumber('7').single.label!;
+    doc.commands
+      ..execute(SetEntityTextCommand(l3, '7', kTableLabelTag))
+      ..execute(SetEntityTextCommand(l7, '3', kTableLabelTag))
+      ..execute(
+          SetComponentCommand<PageComponent>(doc.rootHandle, PageComponent()));
+    final swapped = DraftDocumentCodec.encodeToString(doc);
+    doc.dispose();
+    c.load(swapped);
+    await tester.pump();
+    await tester.pump();
+    final now = TableSurvey.of(c.activeDocument);
+    expect(now.withNumber('7').single.instance, oldThree.instance,
+        reason: 'premise: 7 is the old 3\'s instance');
+    expect(now.withNumber('3').single.instance, oldSeven.instance);
+    await aim(tester, c, midX, midY);
+    final got = await shoot(tester);
+    c.setTableFocus(null);
+    await tester.pump();
+    final check = compare(tester, c, await shoot(tester), got,
+        focus: {'7'},
+        paper: white,
+        regions: {
+          'the new 7, clear': (x, y) => three.holds(x, y, 0),
+          'the new 3, veiled': (x, y) => seven.holds(x, y, 0),
+        });
+    for (final name in check.regions) {
+      expect(check.counts[name] ?? 0, greaterThan(10000), reason: name);
+    }
+  });
+
+  testWidgets(
+      'VF5 a faded table acts as any other: a tap reports and selects it, '
+      'a drag moves it, select() selects it, the selection keeps it when '
+      'the focus changes, Merge offers it (M-Z22)', (tester) async {
+    final heard = <String>[];
+    final merged = <Set<String>>[];
+    var layouts = 0;
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c,
+        onTableTap: heard.add,
+        onLayoutChanged: () => layouts++,
+        onMergeRequested: merged.add);
+    final three = quad(c, '3');
+    final at = three.centre;
+    await aim(tester, c, at.x, at.y, scale: 0.37);
+    c.setTableFocus({'7'});
+    await tester.pump();
+    Offset onThree() {
+      final s = c.camera.value
+          .worldToScreen(three.transform.transformPoint(Vector2(900, 650)));
+      return tester.getTopLeft(find.byType(InteractionLayer)) +
+          Offset(s.x, s.y);
+    }
+
+    await tester.tapAt(onThree(), kind: PointerDeviceKind.mouse);
+    await tester.pump();
+    expect(heard, ['3']);
+    expect(c.selectedTables.value, {'3'});
+
+    final before = (c.activeDocument.tree[TableSurvey.of(c.activeDocument)
+            .withNumber('3')
+            .single
+            .instance]! as InstanceNode)
+        .transform;
+    final g =
+        await tester.startGesture(onThree(), kind: PointerDeviceKind.mouse);
+    await g.moveBy(const Offset(45, -20));
+    await g.moveBy(const Offset(45, -20));
+    await g.up();
+    await tester.pump();
+    final after = (c.activeDocument.tree[TableSurvey.of(c.activeDocument)
+            .withNumber('3')
+            .single
+            .instance]! as InstanceNode)
+        .transform;
+    expect(after.e, closeTo(before.e + 90 / 0.37, 1e-6), reason: 'moved');
+    expect(after.f, closeTo(before.f + 40 / 0.37, 1e-6), reason: 'moved');
+    expect(layouts, 1);
+
+    c.select({'3', 'A1'});
+    expect(c.selectedTables.value, {'3', 'A1'});
+    c.setTableFocus({});
+    await tester.pump();
+    expect(c.selectedTables.value, {'3', 'A1'}, reason: 'kept');
+    await tester.tap(byKey('service-merge'));
+    await tester.pump();
+    expect(merged, [
+      {'3', 'A1'}
+    ]);
+  });
+
+  testWidgets(
+      'VF6 a table with a NaN translation or a singular transform is '
+      'skipped, in both modes, by the framing, the veil and the pick; '
+      'nothing throws; a table near the double range is framed by a finite '
+      'camera, and a camera not finite is no framing (M-Z43; Task 1 review '
+      'R-1)', (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    final under = await shoot(tester);
+
+    void spoil() {
+      final d = c.activeDocument;
+      final s = TableSurvey.of(d);
+      d.commands
+        ..execute(TransformNodeCommand(s.withNumber('A1').single.instance,
+            Transform2(0.8, 0.6, -0.6, 0.8, double.nan, -36000)))
+        ..execute(TransformNodeCommand(s.withNumber('A2').single.instance,
+            const Transform2(1, 2, 2, 4, 50000, -36000)))
+        // Task 1 review R-1: its four corners finite, near the double
+        // range.
+        ..execute(TransformNodeCommand(s.withNumber('B4').single.instance,
+            Transform2(0.8, 0.6, -0.6, 0.8, 1.7e308, -31000)));
+    }
+
+    void expectSkipped(String mode) {
+      final d = c.activeDocument;
+      c.camera.value = zoneCamera();
+      const size = Size(1200, 900);
+      // R-1: a table near the double range is framed by a finite camera;
+      // a camera that is not finite is no framing.
+      expect(c.fitToTables({'B4'}), isTrue, reason: '$mode: far');
+      final framed = c.framingFor(size);
+      expect(framed, isNotNull, reason: '$mode: far, framed');
+      final far = framed!.worldToScreenMatrix;
+      expect(
+          [far.a, far.b, far.c, far.d, far.e, far.f].every((v) => v.isFinite),
+          isTrue,
+          reason: '$mode: far, finite');
+      expectCamera(c.framingFor(size), frameTables(boundOf(d, {'B4'}), size),
+          reason: '$mode: far');
+      expect(c.framingFor(const Size(double.infinity, 900)), isNull,
+          reason: '$mode: an infinite camera is no framing');
+      expect(c.fitToTables({'A1'}), isFalse, reason: '$mode: NaN');
+      expect(c.fitToTables({'A2'}), isFalse, reason: '$mode: singular');
+      expect(c.fitToTables({'A1', 'A2', '3'}), isTrue, reason: mode);
+      expectCamera(c.framingFor(size), frameTables(boundOf(d, {'3'}), size),
+          reason: '$mode: 3 alone');
+      final skipped = {
+        for (final n in ['A1', 'A2'])
+          TableSurvey.of(d).withNumber(n).single.instance
+      };
+      expect(
+          TablePicker(d)
+              .candidates
+              .where((p) => skipped.contains(p.table.instance)),
+          isEmpty,
+          reason: '$mode: the pick');
+    }
+
+    spoil();
+    await tester.pump();
+    expectSkipped('selection');
+    // The framing of 3 is performed; then the camera goes back.
+    await tester.pump();
+    await tester.pump();
+    expectFramed(tester, c, {'3'});
+    await aim(tester, c, midX, midY);
+    c.setTableFocus({});
+    await tester.pump();
+    await tester.pump();
+    final three = quad(c, '3');
+    final check = compare(tester, c, under, await shoot(tester),
+        focus: {},
+        paper: white,
+        skipped: {'A1', 'A2', 'B4'},
+        regions: {'3, veiled': (x, y) => three.holds(x, y, 0)});
+    expect(check.counts['3, veiled'] ?? 0, greaterThan(10000));
+
+    c.setMode(FloorPlanMode.design);
+    await tester.pumpWidget(const SizedBox());
+    spoil();
+    expectSkipped('design');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'VZ12 fitToTables copies and trims the host\'s set: " 3 " and a blank, '
+      'the set cleared before a view mounts, frames 3 (M-Z34; Task 1 review '
+      'R-2)', (tester) async {
+    final c = zoneController();
+    c.takeFitOnStart(); // a host whose plan was already shown and fitted
+    final mine = {' 3 ', ''};
+    expect(c.fitToTables(mine), isTrue);
+    mine.clear(); // the host reuses its set
+    await mountAt1440(tester, c);
+    expectFramed(tester, c, {'3'});
+  });
+
+  testWidgets(
+      'VF7 a focus asked as " 7 " focuses 7; the host\'s set changed after '
+      'the call changes no veil; {\'\'} veils every table (M-Z34, M-Z35, '
+      'M-Z26)', (tester) async {
+    final c = paged();
+    c.setMode(FloorPlanMode.selection);
+    await mountFocus(tester, c);
+    await aim(tester, c, midX, midY);
+    final under = await shoot(tester);
+    final seven = quad(c, '7'), three = quad(c, '3');
+    final regions = {
+      '7': (double x, double y) => seven.holds(x, y, 0),
+      '3': (double x, double y) => three.holds(x, y, 0),
+    };
+
+    c.setTableFocus({' 7 '});
+    await tester.pump();
+    var check = compare(tester, c, under, await shoot(tester),
+        focus: {'7'}, paper: white, regions: regions);
+    expect(check.counts['7'] ?? 0, greaterThan(10000), reason: '7 clear');
+
+    final mine = {'7'};
+    c.setTableFocus(mine);
+    mine.add('3');
+    // A change off the canvas rebuilds the veil.
+    move(c, 'B4', 300, 0);
+    await tester.pump();
+    await tester.pump();
+    check = compare(tester, c, under, await shoot(tester),
+        focus: {'7'}, paper: white, regions: regions);
+    expect(check.counts['3'] ?? 0, greaterThan(10000), reason: '3 veiled');
+
+    c.setTableFocus({''});
+    await tester.pump();
+    check = compare(tester, c, under, await shoot(tester),
+        focus: {}, paper: white, regions: regions);
+    expect(check.counts['7'] ?? 0, greaterThan(10000), reason: '7 veiled');
   });
 }

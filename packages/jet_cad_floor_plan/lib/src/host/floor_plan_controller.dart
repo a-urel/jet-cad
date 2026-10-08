@@ -81,6 +81,21 @@ final class _Requests extends ChangeNotifier {
   void bump() => notifyListeners();
 }
 
+/// The table focus (zone spec Z10): each [replace] notifies, an equal set
+/// or a second null included.
+final class _Focus extends ChangeNotifier
+    implements ValueListenable<Set<String>?> {
+  Set<String>? _value;
+
+  @override
+  Set<String>? get value => _value;
+
+  void replace(Set<String>? next) {
+    _value = next;
+    notifyListeners();
+  }
+}
+
 /// The planner as a host embeds it (spec 14b-2): with [FloorPlanView].
 ///
 /// Holds the **designed plan** -- the one the host loads with [load], saves
@@ -233,6 +248,7 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<Map<String, TableStatus>> _groupStatuses =
       ValueNotifier(const <String, TableStatus>{});
   final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
+  final _Focus _focus = _Focus();
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
   /// of it, a mode switch, [load], [newPlan], [resetLayout] (demo review
@@ -285,6 +301,33 @@ class FloorPlanController extends ChangeNotifier {
   void setGroupStatus(Map<String, TableStatus> statuses) {
     _groupStatuses.value = Map.unmodifiable(
         {for (final e in statuses.entries) e.key.trim(): e.value});
+  }
+
+  /// The numbers in focus (zone spec Z10), as [setTableFocus] last set
+  /// them: null for no focus. In the selection mode every table outside a
+  /// focus lies under a veil of the paper (Z11-Z13); a focus with no
+  /// number fades every table. Kept by number for the controller's life,
+  /// across mode switches, [load], [newPlan], [resetLayout] and
+  /// [restoreServiceLayout].
+  ValueListenable<Set<String>?> get tableFocus => _focus;
+
+  /// Replaces the focus (Z10): null for none, else [numbers] trimmed, blanks
+  /// dropped, copied into an unmodifiable set -- so `{}` and `{''}` are a
+  /// focus with no table. Every call notifies [tableFocus], an equal set
+  /// included.
+  ///
+  /// Presentation only (Z15): a faded table is tapped, selected, moved and
+  /// merged as any other; a host that wants it inert checks
+  /// [tableFocus] in its own callbacks. Not document state -- no command,
+  /// undo step, [dirty], [revision], [serviceLayoutChanges] or
+  /// notification of this controller; never saved, exported or printed.
+  void setTableFocus(Set<String>? numbers) {
+    _focus.replace(numbers == null
+        ? null
+        : Set<String>.unmodifiable({
+            for (final n in numbers)
+              if (n.trim() case final t when t.isNotEmpty) t,
+          }));
   }
 
   /// The id of the group the selection is exactly (G1, G5's Split rule):
@@ -364,13 +407,19 @@ class FloorPlanController extends ChangeNotifier {
   /// [fitToTables] is a candidate in the active plan now (Z6) -- else the
   /// tables framed ([frameTables]). Resolved here, when the fit is
   /// performed: a restore, an Undo or a mode switch since the request is
-  /// followed. One entity-store scan per call, at fit rate.
+  /// followed. One entity-store scan per call, at fit rate. A camera that
+  /// is not finite is none: the page is fitted (Task 1 review R-1).
   @internal
   ViewportTransform? framingFor(Size viewport) {
     final target = _fitTarget;
     if (target == null) return null;
     final box = _tablesBounds(target);
-    return box == null ? null : frameTables(box, viewport);
+    if (box == null) return null;
+    final framing = frameTables(box, viewport);
+    final m = framing.worldToScreenMatrix;
+    return [m.a, m.b, m.c, m.d, m.e, m.f].every((v) => v.isFinite)
+        ? framing
+        : null;
   }
 
   /// The bound of the four transformed corners of every candidate of the
@@ -914,7 +963,7 @@ class FloorPlanController extends ChangeNotifier {
   /// the camera moves. Numbers are trimmed and blanks dropped; a number
   /// used twice frames both tables; an unknown one is ignored. A table on
   /// a hidden layer is not framed, a locked one is; an unnumbered table or
-  /// a servable instance inside a group never matches.
+  /// a servable instance nested in another block never matches.
   ///
   /// The framed world is the bound of each table's box at its place (its
   /// four corners), grown by [kTableFitMarginMm] per side and to at least
@@ -1010,6 +1059,7 @@ class FloorPlanController extends ChangeNotifier {
     _groups.dispose();
     _groupStatuses.dispose();
     _selectedGroup.dispose();
+    _focus.dispose();
     super.dispose();
   }
 }
