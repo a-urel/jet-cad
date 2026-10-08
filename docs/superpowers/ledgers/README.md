@@ -51,6 +51,7 @@ worktree.
 | `2026-10-07-gpu-split/` | The GPU split (`jet_cad_2d_gpu`, `flutter_scene` out of a host's graph), 3 tasks. The spec review, each of Tasks 1–2's implementer report, independent review (with the controller's disposition appended) and fixes, and the whole-range review `final-review.md` with its fixes. Paths under `/tmp` in them are the reviewers' throwaway clones. |
 | `2026-10-08-release-0.2.0/` | Release 0.2.0's preparation: the independent review of the versions, the CHANGELOG and the host guide (with the controller's disposition appended). |
 | `2026-10-08-zone-focus/` | Zone focus (`fitToTables`, `setTableFocus`, `FloorPlanTable.visible`), 4 tasks. The spec review, each of Tasks 1–3's implementer report and independent review, and the whole-range review `final-review.md` with the controller's disposition. Paths under `/tmp` in them are the reviewers' throwaway clones. |
+| `2026-10-08-release-0.3.0/` | Release 0.3.0's preparation: the independent review of the versions, the CHANGELOG (with an API dump against 0.2.0 and a plan and service-layout round-trip between the two) and the host guide, with the controller's disposition appended. |
 
 Plans 1, 2, 3a and 3b were merged before this directory existed and their
 ledger scratch was deleted; their conclusions survive in `notes/`
