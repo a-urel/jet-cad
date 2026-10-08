@@ -22,16 +22,20 @@ later; 0.2.0 was built and tested with Flutter 3.47.6.
   between design and selection no longer moves the plan on the screen by
   the editor's panels and rulers. `setMode` reframes the camera by the
   difference of the two canvases' origins, its zoom kept, also when no
-  view is shown; `fitToView` and `load` still fit. The camera's numbers
-  are no longer kept across a switch.
+  view is shown; `fitToView`, `load` and `newPlan` still fit. The
+  camera's numbers are no longer kept across a switch.
 - **The plan's decimal separator** (Q0): a plan carries its own decimal
   separator, `.` or `,`, chosen on the Page panel (*Decimal separator*).
   Dimension text, room areas and the rulers print with it, and so do the
   PDF and PNG; the change is one undo step. A new plan takes the UI
   language's separator (`,` in German and Turkish); an empty plan a
   `FloorPlanController` creates takes the language of the first
-  `FloorPlanView` that shows it. A plan that exists keeps its own.
-- **Schema 8.** The JSON codec writes schema 8 (the page's
+  `FloorPlanView` that shows it (read with `designJson()` or edited
+  before any view shows it, it keeps `.`), and `newPlan()` takes the
+  language a view last showed. The language's separator is
+  `FloorPlanStrings.decimalSeparator`, so a host's own strings class
+  decides it for its new plans. A plan that exists keeps its own.
+- **Breaking for stored plans: schema 8.** The JSON codec writes schema 8 (the page's
   `decimalSeparator`). A schema-7 plan opens unchanged, as `.`; **0.1.0
   refuses a plan saved by this version**, and says why, so every terminal
   of a restaurant must move together. The bundled symbol libraries are
@@ -42,6 +46,9 @@ later; 0.2.0 was built and tested with Flutter 3.47.6.
   language inherits it).
 - `jet_cad_2d`: `PageComponent.decimalSeparator`, `DecimalSeparator`,
   and `formatLength(…, decimalSeparator:)`.
+- `jet_cad_floor_plan`'s `editor.dart`: `documentSeparatorFor`, and a
+  `decimalSeparator:` parameter on `newDocument`, `defaultPage`,
+  `startupPage`, `formatArea` and `formatDimension`.
 - **The GPU renderer moves to its own package, `jet_cad_2d_gpu`.**
   `jet_cad_2d_flutter` no longer depends on `flutter_scene`, so a host's
   graph holds no `flutter_scene`, `flutter_gpu`, `flutter_gpu_shaders`
@@ -63,6 +70,16 @@ later; 0.2.0 was built and tested with Flutter 3.47.6.
 - `jet_cad_2d_flutter` gains the GPU registry (`ResidentGpu`,
   `registerResidentGpu`, `registeredResidentGpu`), `ResidentLayout`,
   `kFloatsPerInstance` and `InstanceFieldOffset`.
+
+**Known limits.**
+
+- A new plan's separator follows the UI language by assumption: the
+  human's ruling on it (Q2) is still owed. If it becomes "`.` always", a
+  later release changes only new plans; stored plans keep theirs.
+- The German and Turkish text has not been read by native speakers.
+- `jet_cad_2d_gpu` (the harness's GPU renderer), `packages/jet_cad` (the
+  dormant OCCT 3D line) and `apps/dev_harness` are not part of the
+  release.
 
 ## 0.1.0
 

@@ -4,7 +4,7 @@ This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the floor planner: staff design the restaurant's floors in the
 **design** mode, and during service they see the tables, colour them by
 status and pick them in the **selection** mode. It covers release
-**0.1.0** ([CHANGELOG](../CHANGELOG.md)).
+**0.2.0** ([CHANGELOG](../CHANGELOG.md)).
 
 Every Dart snippet below is taken from
 [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
@@ -15,9 +15,8 @@ that file, so the code in this guide compiles against the release.
 ## 1. The dependency
 
 The packages are not on pub.dev. Depend on them by git, **both pinned to
-the same commit SHA** — the SHA the release tag `v0.1.0` points at,
-`22206f527e32e4677fe706731a751ec9de0d751e` (the merge of 14d into
-`main`):
+the same commit SHA** — the SHA the release tag `v0.2.0` points at
+(`git rev-parse 'v0.2.0^{commit}'`; the guide on `main` names it):
 
 ```yaml
 dependencies:
@@ -27,19 +26,19 @@ dependencies:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_floor_plan
-      ref: 22206f527e32e4677fe706731a751ec9de0d751e
+      ref: <the commit SHA of v0.2.0>
   jet_cad_restaurant_symbols:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_restaurant_symbols
-      ref: 22206f527e32e4677fe706731a751ec9de0d751e
+      ref: <the commit SHA of v0.2.0>
 ```
 
 Why a SHA and not the tag: the restaurant package depends on the planner
 by a path inside the repository, which pub resolves at the commit's SHA.
 If your `ref` is a tag or a branch, pub sees two different refs for the
 planner and refuses. The other form that resolves is the restaurant
-package **alone** at the tag (`ref: v0.1.0`), the planner arriving
+package **alone** at the tag (`ref: v0.2.0`), the planner arriving
 through it; you then import the planner without listing it, which
 `depend_on_referenced_packages` will flag.
 
@@ -184,8 +183,9 @@ The view, with the host's options:
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
 or `FloorPlanMode.selection`, read back from `controller.mode`. A switch
-keeps the plan where it is on the screen, zoom included; `fitToView()`
-and `load` fit it again. The
+keeps the plan where it is on the screen, zoom included (*since 0.2.0*;
+0.1.0 kept the camera's numbers, so the plan moved by the editor's
+panels); `fitToView()`, `load` and `newPlan()` fit it again. The
 design mode is the full editor; the selection mode shows the canvas
 alone, on a **service copy** of the plan.
 
