@@ -23,7 +23,8 @@ On `main`, not yet released.
     Faded tables still work. The focus is not saved, and is kept across
     loads and mode switches.
   - `FloorPlanTable.visible` (named, default `true`): false for a table
-    on a hidden layer. `tables` still lists such tables.
+    on a hidden layer. `tables` still lists such tables. It joins `==`,
+    `hashCode` and `toString`, whose text gains `visible`.
 
 ## 0.2.0
 

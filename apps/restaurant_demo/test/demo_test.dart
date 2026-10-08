@@ -1308,6 +1308,8 @@ void main() {
     await tester.pump();
     expect(c.tableFocus.value, {'6', '7'});
     expect(demo.area.fadeOthers, isTrue);
+    expect(demo.areas[1].zone, isNull, reason: 'the Teras keeps its own');
+    expect(demo.areas[1].fadeOthers, isFalse);
 
     // Kept per area: the Teras has no zones; back in the Salon, B and the
     // switch are as they were.

@@ -1055,6 +1055,30 @@ void main() {
         [rebuilt[0] + 1, rebuilt[1] + 1]);
   });
 
+  test(
+      'RX1 a group whose only focused member is on a locked layer draws as '
+      'before (Z14: a locked table is a visible member)', () {
+    final doc = groupedPlan();
+    final locked = addLayer(doc, 'Locked', visible: true);
+    doc.commands.execute(
+        SetLayerCommand(doc.tables.layers[locked]!.copyWith(locked: true)));
+    doc.commands.execute(SetInstanceLayerCommand(
+        TableSurvey.of(doc).withNumber('7').single.instance, locked));
+    final camera = ValueNotifier(cameraAt(0.06));
+    final groups = ValueNotifier(zoneGroups());
+    final focus = ValueNotifier<Set<String>?>({'7'});
+    final paper = ValueNotifier<int>(0xFFFFFFFF);
+    final frames = focusedPainter(
+        TableGroupLayer.frames, doc, camera, groups, focus, paper);
+    final chips = focusedPainter(
+        TableGroupLayer.chips, doc, camera, groups, focus, paper);
+    final spy = frame(frames);
+    expect(spy.paths, hasLength(2), reason: 'premise: GA and GB framed');
+    expect(spy.paints[0].color.a, closeTo(0.4, 1e-6), reason: 'GA faded');
+    expect(spy.paints[1].color.a, 1, reason: 'GB: 7 is focused, locked');
+    expect(frame(chips).rrects, hasLength(3), reason: 'GA veiled, GB not');
+  });
+
   test('premise: the lead order of {12, 3, 7} is 3, 7, 12', () {
     expect(
         inLeadOrder([

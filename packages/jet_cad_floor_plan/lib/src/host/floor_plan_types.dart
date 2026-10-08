@@ -33,9 +33,10 @@ final class FloorPlanTable {
   /// The library key of its symbol, or null for a hand-made one.
   final String? symbolKey;
 
-  /// Whether the plan draws it: false for a table on a hidden layer (zone
+  /// Whether its layer is shown: false for a table on a hidden layer (zone
   /// spec Z24), which the view neither shows nor lets anyone pick, so a
-  /// host counts it as unplaced (Z18).
+  /// host counts it as unplaced (Z18). The layer rule only: a table with
+  /// a degenerate transform reads true yet is never drawn.
   final bool visible;
 
   @override
