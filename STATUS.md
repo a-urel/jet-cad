@@ -72,20 +72,20 @@ one's spec, plan and results.
   Merged on the human's *"evet, main'e merge et"*; the guide names
   `7355c00`. The human pushed the tag `v0.2.0` →
   `7355c00` (2026-10-08).
+- **Zone focus** (the human, 2026-10-08: *"evet, bölgelerle devam et"*;
+  ruled that a zone lives in the host's database), merged into `main` at
+  `ffe8cb8` on the human's *"evet, main'e merge et"*: `fitToTables` frames
+  a set of tables by number, `setTableFocus` fades the others in the
+  selection mode, `FloorPlanTable.visible`; the host guide's "Zones:
+  framing and focus"; the demo's Salon zones (unreleased: CHANGELOG).
+  Spec [2026-10-08-zone-focus-design.md](docs/superpowers/specs/2026-10-08-zone-focus-design.md)
+  (rev 2), plan [2026-10-08-zone-focus.md](docs/superpowers/plans/2026-10-08-zone-focus.md),
+  results [2026-10-08-zone-focus-results.md](docs/superpowers/notes/2026-10-08-zone-focus-results.md),
+  ledger [docs/superpowers/ledgers/2026-10-08-zone-focus/](docs/superpowers/ledgers/2026-10-08-zone-focus/).
 
 ## In flight
 
-**Zone focus** (the human, 2026-10-08: *"evet, bölgelerle devam et"*;
-ruled that a zone lives in the host's database), on
-`claude/exciting-pasteur-9m22jv`, not merged: `fitToTables` frames a set
-of tables by number, `setTableFocus` fades the others in the selection
-mode, `FloorPlanTable.visible`; the host guide's "Zones: framing and
-focus"; the demo's Salon zones. Spec
-[2026-10-08-zone-focus-design.md](docs/superpowers/specs/2026-10-08-zone-focus-design.md)
-(rev 2), plan [2026-10-08-zone-focus.md](docs/superpowers/plans/2026-10-08-zone-focus.md),
-results [2026-10-08-zone-focus-results.md](docs/superpowers/notes/2026-10-08-zone-focus-results.md),
-ledger `.superpowers/sdd/2026-10-08-zone-focus/`. Next: the independent
-review of the range, its fixes, the merge on the human's word.
+Nothing. Zone focus, above, is merged.
 
 ## Owed to the human
 
@@ -120,10 +120,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 ## Resume here
 
 **Next: the human's choice.** Monépro's spec 103 §10 jet-cad
-prerequisites now stand: the GPU split, touch, a consumable version
-(0.2.0, tagged), the outside-app check (the host probe),
-placement and open/save. **Zones** in the editor remain; then the floor
-view's integration on Monépro's side (its phase 2).
+prerequisites are met: the GPU split, touch, a consumable version (0.2.0,
+tagged), the outside-app check (the host probe), placement and open/save,
+and zones (on `main`, unreleased: a 0.3.0 would carry them). Monépro
+owes two answers (zone focus Q-Z1, Q-Z4); its floor view is its phase 2.
 ---
 
 ## What this project is

@@ -11,7 +11,8 @@ fixes*, V-1 to V-19, all accepted).
 **Plan:** [2026-10-08-zone-focus.md](../plans/2026-10-08-zone-focus.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `14616d9`
-(release 0.2.0).
+(release 0.2.0). **Merged** into `main` at `ffe8cb8` on the human's
+*"evet, main'e merge et"*.
 
 **Process.** Each of Tasks 1–3 had a fresh implementer, then an
 independent reviewer working in its own clone. Task 4, the docs and the
