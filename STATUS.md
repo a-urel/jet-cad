@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-08. **`main` carries release 0.2.0** (tag
-`v0.2.0` → `7355c00`, after `v0.1.0` → `22206f5`) and everything since. The history of every plan
+**Last updated:** 2026-10-08. **`main` carries release 0.3.0** (tag
+`v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -77,28 +77,30 @@ one's spec, plan and results.
   `ffe8cb8` on the human's *"evet, main'e merge et"*: `fitToTables` frames
   a set of tables by number, `setTableFocus` fades the others in the
   selection mode, `FloorPlanTable.visible`; the host guide's "Zones:
-  framing and focus"; the demo's Salon zones (unreleased: CHANGELOG).
+  framing and focus"; the demo's Salon zones (released in 0.3.0).
   Spec [2026-10-08-zone-focus-design.md](docs/superpowers/specs/2026-10-08-zone-focus-design.md)
   (rev 2), plan [2026-10-08-zone-focus.md](docs/superpowers/plans/2026-10-08-zone-focus.md),
   results [2026-10-08-zone-focus-results.md](docs/superpowers/notes/2026-10-08-zone-focus-results.md),
   ledger [docs/superpowers/ledgers/2026-10-08-zone-focus/](docs/superpowers/ledgers/2026-10-08-zone-focus/).
+- **Release 0.3.0** (the human, 2026-10-08: *"evet, 0.3.0 sürümünü
+  hazırla"*), merged into `main` at `1b0c37a` on the human's *"evet, main'e
+  merge et"*: the four host packages (and `jet_cad_2d_gpu`) at 0.3.0;
+  the CHANGELOG's 0.3.0 carries zones, with known limits (no public
+  world-to-screen mapping, Q-Z1; tables linked by number, Q-Z4). Plans
+  and service layouts are unchanged, so 0.2.0 and 0.3.0 terminals share
+  them. An independent review (*Approved with fixes*, CHANGELOG wording
+  only) is applied; ledger
+  [docs/superpowers/ledgers/2026-10-08-release-0.3.0/](docs/superpowers/ledgers/2026-10-08-release-0.3.0/).
+  The guide names `1b0c37a`. **The tag `v0.3.0` → `1b0c37a` is owed to the
+  human** (this session's proxy refuses tag pushes).
 
 ## In flight
 
-- **Release 0.3.0** (the human, 2026-10-08: *"evet, 0.3.0 sürümünü
-  hazırla"*), on `claude/exciting-pasteur-9m22jv`: the four host packages
-  (and `jet_cad_2d_gpu`) at 0.3.0; the CHANGELOG's Unreleased section
-  becomes 0.3.0 (zones; plans and service layouts unchanged, so 0.2.0
-  and 0.3.0 terminals share them); the host guide's "unreleased"
-  markers read "since 0.3.0", and §1 carries a placeholder ref that the
-  commit after the merge fills in. An independent review (*Approved
-  with fixes*: CHANGELOG wording only; plans and layouts round-trip
-  byte for byte between 0.2.0 and 0.3.0; the probe green at the full
-  SHA, the 3.44 floor held) is applied. Waiting on the human's word to
-  merge; the tag is then pushed by the human.
+Nothing. Release 0.3.0, above, is merged; its tag is the human's.
 
 ## Owed to the human
 
+- **The tag `v0.3.0`** on `1b0c37a` (`git tag v0.3.0 1b0c37a && git push origin v0.3.0`).
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -129,11 +131,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.3.0**, above: the merge question to the human.
+**Next: the human's choice**, once the tag `v0.3.0` is pushed.
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
-touch, a consumable version (0.2.0, tagged), the outside-app check (the
-host probe), placement and open/save, and zones (on `main`; 0.3.0
-carries them). Monépro
+touch, a consumable version (0.3.0, `1b0c37a`), the outside-app check
+(the host probe), placement and open/save, and zones (0.3.0). Monépro
 owes two answers (zone focus Q-Z1, Q-Z4); its floor view is its phase 2.
 ---
 
