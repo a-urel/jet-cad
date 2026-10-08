@@ -8,7 +8,15 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released.
+On `main`, not yet released. Nothing yet.
+
+## 0.2.0
+
+The second release a point-of-sale application can pin: the plan's own
+decimal separator, and a host graph without the GPU renderer.
+**Move every terminal that shares stored plans together**: 0.1.0
+refuses a plan 0.2.0 saves (schema 8). The packages need Flutter 3.44 or
+later; 0.2.0 was built and tested with Flutter 3.47.6.
 
 - **The plan's decimal separator** (Q0): a plan carries its own decimal
   separator, `.` or `,`, chosen on the Page panel (*Decimal separator*).

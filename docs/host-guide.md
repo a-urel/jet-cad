@@ -49,11 +49,11 @@ with the planner. Import only the two barrels:
 `package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
 Anything under `src/` is not API.
 
-**0.1.0 needs Flutter 3.47 or later**: it still resolves `flutter_scene`,
-whose build hook compiles shaders at build time. It was built and tested
-with Flutter 3.47.6. The release after it drops `flutter_scene` (the GPU
-split): its packages need Flutter 3.44 (the Dart that comes with it) and
-bring no build hook and no GPU renderer.
+The packages need Flutter 3.44 or later (the Dart that comes with it);
+0.2.0 was built and tested with Flutter 3.47.6. They bring no build hook
+and no GPU renderer: nothing runs at build time beyond Flutter's own.
+(0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
+hook compiles shaders.)
 
 ## 2. Fonts
 
@@ -125,7 +125,7 @@ delegates in your `MaterialApp`:
   PDF and PNG, and the rulers on screen — uses the separator **the plan**
   carries (the Page panel's
   *Decimal separator*), the same on every terminal; a new plan takes the
-  UI language's. *Unreleased on `main`; in 0.1.0 it is always `.`.*
+  UI language's. *Since 0.2.0; in 0.1.0 it is always `.`.*
 
 ## 4. The controller and the view
 
@@ -219,9 +219,9 @@ like:
 - `load` throws a `FormatException`, and changes nothing, when the text
   is not a plan. So does the constructor's `json:`.
 - `newPlan()` starts an empty plan. Its decimal separator is that of the
-  language a `FloorPlanView` of this controller last showed (*unreleased
-  on `main`*).
-- *Unreleased on `main`:* the constructor's empty plan takes the
+  language a `FloorPlanView` of this controller last showed (*since
+  0.2.0*).
+- *Since 0.2.0:* the constructor's empty plan takes the
   language of the first `FloorPlanView` that shows it. Read it with
   `designJson()`, or edit it, before any view shows it, and it keeps
   `.`.
@@ -448,14 +448,14 @@ a desktop.
 - **A stored name's language.** A placed symbol keeps the library's
   English name in the plan; the planner shows it in the UI's language.
   Room and layer names are stored in the language they were created in.
-- **The plan's text separator** *(unreleased on `main`)*. It belongs to
+- **The plan's text separator** *(since 0.2.0)*. It belongs to
   the plan, not to the terminal: a plan you load keeps its own, whatever
   the language. An empty plan a controller creates takes the language of
   the first `FloorPlanView` that shows it; until then, and with no view,
   it is `.`. `newPlan()` takes the language a view of that controller
   last showed, which may be stale if the language changed while none was
   mounted. In 0.1.0 dimensions and areas always print with `.`.
-- **Schema 8** *(unreleased on `main`)*. A plan saved by this version is
+- **Schema 8** *(since 0.2.0)*. A plan saved by 0.2.0 is
   at schema 8, which 0.1.0 refuses (`load` throws a `FormatException`
   that says why); a 0.1.0 plan opens here unchanged. Move every terminal
   that shares stored plans to the same commit together.

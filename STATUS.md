@@ -65,7 +65,13 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. The GPU split, above, is merged.
+**Release 0.2.0** (the human, 2026-10-08: *"devam, 0.2.0 sürümüyle
+başla"*), on `claude/exciting-pasteur-9m22jv`: the four host packages
+(and `jet_cad_2d_gpu`) at 0.2.0; the CHANGELOG's Unreleased section
+becomes 0.2.0 (Q0's separator and schema 8, the GPU split); the host
+guide's "unreleased" markers read "since 0.2.0". As for 0.1.0: the merge
+into `main` on the human's word, the human pushes the tag `v0.2.0` at the
+merge commit, and the next commit names that SHA in the guide.
 
 ## Owed to the human
 
