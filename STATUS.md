@@ -85,7 +85,14 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Zone focus, above, is merged.
+- **Release 0.3.0** (the human, 2026-10-08: *"evet, 0.3.0 sürümünü
+  hazırla"*), on `claude/exciting-pasteur-9m22jv`: the four host packages
+  (and `jet_cad_2d_gpu`) at 0.3.0; the CHANGELOG's Unreleased section
+  becomes 0.3.0 (zones; plans and service layouts unchanged, so 0.2.0
+  and 0.3.0 terminals share them); the host guide's "unreleased"
+  markers read "since 0.3.0", and §1 carries a placeholder ref that the
+  commit after the merge fills in. Then an independent review, the
+  merge on the human's word, the tag pushed by the human.
 
 ## Owed to the human
 
@@ -119,10 +126,11 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** Monépro's spec 103 §10 jet-cad
-prerequisites are met: the GPU split, touch, a consumable version (0.2.0,
-tagged), the outside-app check (the host probe), placement and open/save,
-and zones (on `main`, unreleased: a 0.3.0 would carry them). Monépro
+**Next: release 0.3.0**, above: its review, then the merge question.
+Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
+touch, a consumable version (0.2.0, tagged), the outside-app check (the
+host probe), placement and open/save, and zones (on `main`; 0.3.0
+carries them). Monépro
 owes two answers (zone focus Q-Z1, Q-Z4); its floor view is its phase 2.
 ---
 

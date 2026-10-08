@@ -8,7 +8,16 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released.
+Nothing yet.
+
+## 0.3.0
+
+Zones: a host frames a set of tables and fades the others. Nothing is
+stored: **plans and service layouts are the same as 0.2.0's** (schema 8),
+so 0.2.0 and 0.3.0 terminals can share them, and a restaurant may move
+its terminals one at a time. Nothing a 0.2.0 host calls changes its
+signature. The packages need Flutter 3.44 or later, as 0.2.0 did; 0.3.0
+was built and tested with Flutter 3.47.6.
 
 - **Zones: framing and focus.** A zone stays the host's (the table's
   attribute in its database); the plan stores none and the schema is
@@ -29,6 +38,16 @@ On `main`, not yet released.
     view's size when the fit is performed, not when it is requested; and
     a table whose corners are not finite (a hand-edited file) is no
     longer picked.
+
+**Known limits.**
+
+- The focus's look (the margin, the 3 m minimum span, the veil's 0.6) has
+  not been checked on a tablet or a terminal, in light or dark.
+- A new plan's separator still follows the UI language by assumption
+  (Q2, as in 0.2.0).
+- The German and Turkish text has not been read by native speakers.
+- `jet_cad_2d_gpu` (the harness's GPU renderer), `packages/jet_cad` (the
+  dormant OCCT 3D line) and the apps are not part of the release.
 
 ## 0.2.0
 
