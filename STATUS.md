@@ -75,7 +75,17 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Release 0.2.0, above, is merged.
+**Zone focus** (the human, 2026-10-08: *"evet, bölgelerle devam et"*;
+ruled that a zone lives in the host's database), on
+`claude/exciting-pasteur-9m22jv`, not merged: `fitToTables` frames a set
+of tables by number, `setTableFocus` fades the others in the selection
+mode, `FloorPlanTable.visible`; the host guide's "Zones: framing and
+focus"; the demo's Salon zones. Spec
+[2026-10-08-zone-focus-design.md](docs/superpowers/specs/2026-10-08-zone-focus-design.md)
+(rev 2), plan [2026-10-08-zone-focus.md](docs/superpowers/plans/2026-10-08-zone-focus.md),
+results [2026-10-08-zone-focus-results.md](docs/superpowers/notes/2026-10-08-zone-focus-results.md),
+ledger `.superpowers/sdd/2026-10-08-zone-focus/`. Next: the independent
+review of the range, its fixes, the merge on the human's word.
 
 ## Owed to the human
 
@@ -86,6 +96,9 @@ Nothing. Release 0.2.0, above, is merged.
   *Zufällige Status* among others); the Turkish read.
 - **A ruling:** a context click on a group member selects its whole group
   (made at the 14d merge, documented in the host guide).
+- **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
+  a tablet and a terminal, light and dark; the demo's three zone strings
+  in German and Turkish.
 - **Q2's ruling:** does a new plan's decimal separator follow the UI
   language (Q0's N1, assumed yes)? If "`.` always", `documentSeparatorFor`
   becomes a constant and the settling goes.
