@@ -70,17 +70,25 @@ one's spec, plan and results.
   (*Approved with fixes*) is applied; ledger
   [docs/superpowers/ledgers/2026-10-08-release-0.2.0/](docs/superpowers/ledgers/2026-10-08-release-0.2.0/).
   Merged on the human's *"evet, main'e merge et"*; the guide names
-  `7355c00`. **The tag `v0.2.0` → `7355c00` is the human's to push** (the
-  git proxy refuses an agent's tag push).
+  `7355c00`. The human pushed the tag `v0.2.0` →
+  `7355c00` (2026-10-08).
 
 ## In flight
 
-Nothing. Release 0.2.0, above, is merged.
+**Zone focus** (the human, 2026-10-08: *"evet, bölgelerle devam et"*;
+ruled that a zone lives in the host's database), on
+`claude/exciting-pasteur-9m22jv`, not merged: `fitToTables` frames a set
+of tables by number, `setTableFocus` fades the others in the selection
+mode, `FloorPlanTable.visible`; the host guide's "Zones: framing and
+focus"; the demo's Salon zones. Spec
+[2026-10-08-zone-focus-design.md](docs/superpowers/specs/2026-10-08-zone-focus-design.md)
+(rev 2), plan [2026-10-08-zone-focus.md](docs/superpowers/plans/2026-10-08-zone-focus.md),
+results [2026-10-08-zone-focus-results.md](docs/superpowers/notes/2026-10-08-zone-focus-results.md),
+ledger `.superpowers/sdd/2026-10-08-zone-focus/`. Next: the independent
+review of the range, its fixes, the merge on the human's word.
 
 ## Owed to the human
 
-- **The tag `v0.2.0`** → `7355c001f585910a1c61a76db11203f6d451bfc4`:
-  `git tag v0.2.0 7355c00 && git push origin v0.2.0`.
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -88,6 +96,9 @@ Nothing. Release 0.2.0, above, is merged.
   *Zufällige Status* among others); the Turkish read.
 - **A ruling:** a context click on a group member selects its whole group
   (made at the 14d merge, documented in the host guide).
+- **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
+  a tablet and a terminal, light and dark; the demo's three zone strings
+  in German and Turkish.
 - **Q2's ruling:** does a new plan's decimal separator follow the UI
   language (Q0's N1, assumed yes)? If "`.` always", `documentSeparatorFor`
   becomes a constant and the settling goes.
@@ -110,7 +121,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 **Next: the human's choice.** Monépro's spec 103 §10 jet-cad
 prerequisites now stand: the GPU split, touch, a consumable version
-(0.2.0, once its tag is pushed), the outside-app check (the host probe),
+(0.2.0, tagged), the outside-app check (the host probe),
 placement and open/save. **Zones** in the editor remain; then the floor
 view's integration on Monépro's side (its phase 2).
 ---

@@ -89,4 +89,24 @@ void main() {
         c.restoreServiceLayout(c.serviceLayoutJson()!);
     expect(restored.applied, isEmpty);
   });
+
+  test(
+      'B3 FloorPlanTable.visible through the barrel: named, true by default, '
+      'in ==, hashCode and toString (zone spec Z24)', () {
+    const shown = FloorPlanTable(number: '5', seats: 4, symbolKey: 'k');
+    const hidden =
+        FloorPlanTable(number: '5', seats: 4, symbolKey: 'k', visible: false);
+    expect(shown.visible, isTrue);
+    expect(hidden.visible, isFalse);
+    expect(
+        shown,
+        const FloorPlanTable(
+            number: '5', seats: 4, symbolKey: 'k', visible: true));
+    expect(shown == hidden, isFalse);
+    expect(shown.hashCode,
+        const FloorPlanTable(number: '5', seats: 4, symbolKey: 'k').hashCode);
+    expect(shown.hashCode == hidden.hashCode, isFalse);
+    expect(shown.toString(), 'FloorPlanTable(5, 4, k, visible: true)');
+    expect(hidden.toString(), 'FloorPlanTable(5, 4, k, visible: false)');
+  });
 }

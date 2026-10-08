@@ -28,6 +28,13 @@ abstract class DemoStrings {
 
   String get fit;
 
+  /// Zone spec Z22: the zones' title, the All tab and the fade switch.
+  String get zones;
+
+  String get allZones;
+
+  String get fadeOthers;
+
   String get moves;
 
   String get longPressMenu;
@@ -105,6 +112,15 @@ final class _En extends DemoStrings {
 
   @override
   String get fit => 'Fit';
+
+  @override
+  String get zones => 'Zones';
+
+  @override
+  String get allZones => 'All';
+
+  @override
+  String get fadeOthers => 'Fade the others';
 
   @override
   String get moves => 'Moves';
@@ -227,6 +243,15 @@ final class _De extends DemoStrings {
 
   @override
   String get fit => 'Einpassen';
+
+  @override
+  String get zones => 'Bereiche';
+
+  @override
+  String get allZones => 'Alle';
+
+  @override
+  String get fadeOthers => 'Andere abblenden';
 
   @override
   String get moves => 'Verschieben';
@@ -355,6 +380,15 @@ final class _Tr extends DemoStrings {
 
   @override
   String get fit => 'Sığdır';
+
+  @override
+  String get zones => 'Bölgeler';
+
+  @override
+  String get allZones => 'Tümü';
+
+  @override
+  String get fadeOthers => 'Diğerlerini soldur';
 
   @override
   String get moves => 'Taşıma';

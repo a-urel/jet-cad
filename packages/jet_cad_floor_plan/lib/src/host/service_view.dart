@@ -19,6 +19,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../l10n/strings.dart';
 import '../parametric/catalog.dart';
 import '../planner_view.dart';
+import '../service/table_focus_painter.dart';
 import '../service/table_group_painter.dart';
 import '../service/table_groups.dart' show mergeQualifies;
 import '../service/table_picker.dart';
@@ -196,9 +197,10 @@ class _ServiceViewState extends State<ServiceView> {
 
   // Table-groups spec G3: the group frames (under the status fills) and
   // label chips (above the drafting) repaint on the camera, the groups,
-  // every change of this copy and the paper.
-  late final Listenable _groupRepaint =
-      Listenable.merge([_c.camera, _c.tableGroups, _changed, _paper]);
+  // every change of this copy and the paper; zone spec Z14: and on the
+  // focus, which fades a group with no focused member.
+  late final Listenable _groupRepaint = Listenable.merge(
+      [_c.camera, _c.tableGroups, _c.tableFocus, _changed, _paper]);
   late final TableGroupPainter _framePainter =
       _groupPainter(TableGroupLayer.frames);
   late final TableGroupPainter _chipPainter =
@@ -211,8 +213,20 @@ class _ServiceViewState extends State<ServiceView> {
         camera: _c.camera,
         groups: _c.tableGroups,
         paper: _paper,
+        tableFocus: _c.tableFocus,
         repaint: _groupRepaint,
       );
+
+  // Zone spec Z11, Z13, Z16: the veil over the tables outside the host's
+  // focus, above the drafting and under the chips; it repaints on the
+  // camera, the focus, every change of this copy and the paper.
+  late final TableFocusPainter _focusPainter = TableFocusPainter(
+    document: _document,
+    camera: _c.camera,
+    focus: _c.tableFocus,
+    paper: _paper,
+    repaint: Listenable.merge([_c.camera, _c.tableFocus, _changed, _paper]),
+  );
 
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
@@ -401,6 +415,7 @@ class _ServiceViewState extends State<ServiceView> {
                     fitRequests: _c.fitRequests,
                     fitOnStart: _fitOnStart,
                     onFitted: _c.fitted,
+                    framing: _c.framingFor,
                     // The service shows the plan, not the drafting aids.
                     rulers: false,
                     grid: false,
@@ -424,13 +439,26 @@ class _ServiceViewState extends State<ServiceView> {
                         ),
                       ],
                     ),
-                    // The label chips above the drafting (G3, F-11).
-                    overlay: RepaintBoundary(
-                      child: CustomPaint(
-                        key: const Key('table-group-chips'),
-                        painter: _chipPainter,
-                        size: Size.infinite,
-                      ),
+                    // Above the drafting: the focus's veil (zone spec Z13),
+                    // then the label chips (G3, F-11).
+                    overlay: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            key: const Key('table-focus-layer'),
+                            painter: _focusPainter,
+                            size: Size.infinite,
+                          ),
+                        ),
+                        RepaintBoundary(
+                          child: CustomPaint(
+                            key: const Key('table-group-chips'),
+                            painter: _chipPainter,
+                            size: Size.infinite,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

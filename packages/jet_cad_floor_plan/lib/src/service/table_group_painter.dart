@@ -11,6 +11,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import '../host/floor_plan_types.dart' show TableGroup;
+import 'table_focus_painter.dart' show kTableFocusVeilAlpha;
 import 'table_groups.dart';
 import 'table_picker.dart';
 import 'table_status_painter.dart' show kStatusCaptionSize;
@@ -157,11 +158,15 @@ Path offsetHull(List<double> hull, double margin) {
 /// One group with a frame, prebuilt at rebuild rate (R-3, R-7): the frame
 /// reads it and creates nothing.
 final class _Group {
-  _Group(this.order, this.frame, this.width, this.anchorX, this.anchorY,
-      this.text, this.chip, this.rrect);
+  _Group(this.order, this.faded, this.frame, this.width, this.anchorX,
+      this.anchorY, this.text, this.chip, this.rrect);
 
   /// The lowest member handle: the draw order.
   final int order;
+
+  /// No visible member is in the host's focus (zone spec Z14): the frame
+  /// is drawn faded and the chip veiled.
+  final bool faded;
 
   /// The world-space outline ([TableGroupLayer.frames] only).
   final Path? frame;
@@ -200,11 +205,20 @@ final class _Group {
 /// and the ink [foregroundFor] picks on `gripMove`. A chip is skipped when
 /// the frame is narrower on screen than it.
 ///
-/// Rebuilt only when the groups map is replaced, the plan's state id or
-/// its tables' revision moves, or [paper] changes. Each frame then draws
-/// the prebuilt paths under one reused matrix with one reused [Paint]
-/// whose stroke width alone is set, or translates to each chip's anchor and
-/// draws its prebuilt [RRect] and [ui.Paragraph] (14c S7, R-3).
+/// The groups follow the host's focus, [tableFocus] (zone spec Z14): a
+/// group with no visible member in a non-null focus has its frame stroked
+/// with one prebuilt faded [Paint], `gripMove` at its alpha times
+/// 1 - [kTableFocusVeilAlpha], and its chip drawn as before, then its
+/// [RRect] again in the veil's paint, the paper's RGB at
+/// [kTableFocusVeilAlpha]. A group with a focused visible member draws as
+/// before; the veil covers its outside members.
+///
+/// Rebuilt only when the groups map or the focus is replaced, the plan's
+/// state id or its tables' revision moves, or [paper] changes. Each frame
+/// then draws the prebuilt paths under one reused matrix with one of two
+/// reused [Paint]s whose stroke width alone is set, or translates to each
+/// chip's anchor and draws its prebuilt [RRect] and [ui.Paragraph] (14c
+/// S7, R-3).
 class TableGroupPainter extends CustomPainter {
   TableGroupPainter({
     required this.layer,
@@ -213,9 +227,10 @@ class TableGroupPainter extends CustomPainter {
     required this.camera,
     required this.groups,
     required this.paper,
+    this.tableFocus,
     required Listenable repaint,
   }) : super(repaint: repaint) {
-    debugAllocations += 2; // the paint and the matrix
+    debugAllocations += 3; // the two paints and the matrix
   }
 
   final TableGroupLayer layer;
@@ -233,7 +248,18 @@ class TableGroupPainter extends CustomPainter {
   /// (dark theme spec D3, D4), as the view's own overlays.
   final ValueListenable<int> paper;
 
+  /// The host's focus, as `FloorPlanController.tableFocus` holds it (zone
+  /// spec Z14); none when null.
+  final ValueListenable<Set<String>?>? tableFocus;
+
   late final Paint _paint = Paint()
+    ..style = layer == TableGroupLayer.frames
+        ? PaintingStyle.stroke
+        : PaintingStyle.fill;
+
+  /// A faded group's paint (Z14): [TableGroupLayer.frames]' faded stroke,
+  /// [TableGroupLayer.chips]' veil over the chip.
+  late final Paint _faded = Paint()
     ..style = layer == TableGroupLayer.frames
         ? PaintingStyle.stroke
         : PaintingStyle.fill;
@@ -243,6 +269,7 @@ class TableGroupPainter extends CustomPainter {
   int? _state;
   int? _tablesRevision;
   Map<String, TableGroup>? _builtFor;
+  Set<String>? _focusBuilt;
   int? _paperBuilt;
 
   /// Keyed by (text, ink): a steady frame builds none.
@@ -264,11 +291,15 @@ class TableGroupPainter extends CustomPainter {
           if (g.text case final text?) text
       ];
 
-  void _rebuild() {
+  void _rebuild(Set<String>? focus) {
     debugRebuilds++;
     final map = groups.value;
     final gripMove = PaperPalette.forPaper(paper.value).gripMove;
     _paint.color = gripMove;
+    _faded.color = layer == TableGroupLayer.frames
+        ? gripMove.withValues(alpha: gripMove.a * (1 - kTableFocusVeilAlpha))
+        // The paper's RGB; its own alpha is replaced, as the veil's.
+        : Color(paper.value).withValues(alpha: kTableFocusVeilAlpha);
     final out = <_Group>[];
     if (map.isNotEmpty) {
       final candidates = picker.candidates;
@@ -337,6 +368,7 @@ class TableGroupPainter extends CustomPainter {
         }
         out.add(_Group(
             members.first.handle.value,
+            focus != null && !members.any((m) => focus.contains(m.number)),
             frame,
             maxX - minX + 2 * kGroupFrameMarginMm,
             (minX + maxX) / 2,
@@ -374,15 +406,18 @@ class TableGroupPainter extends CustomPainter {
     final state = document.commands.stateId;
     final revision = document.tables.mutationRevision;
     final map = groups.value;
+    final focus = tableFocus?.value;
     final paperArgb = paper.value;
     if (_state != state ||
         _tablesRevision != revision ||
         !identical(_builtFor, map) ||
+        !identical(_focusBuilt, focus) ||
         _paperBuilt != paperArgb) {
-      _rebuild();
+      _rebuild(focus);
       _state = state;
       _tablesRevision = revision;
       _builtFor = map;
+      _focusBuilt = focus;
       _paperBuilt = paperArgb;
     }
     final list = _groups;
@@ -400,12 +435,13 @@ class TableGroupPainter extends CustomPainter {
       m[12] = cam.e;
       m[13] = cam.f;
       m[15] = 1;
-      _paint.strokeWidth = kGroupFrameStrokePixels / scale;
+      _paint.strokeWidth = _faded.strokeWidth = kGroupFrameStrokePixels / scale;
       canvas
         ..save()
         ..transform(m);
       for (var i = 0; i < list.length; i++) {
-        canvas.drawPath(list[i].frame!, _paint);
+        final g = list[i];
+        canvas.drawPath(g.frame!, g.faded ? _faded : _paint);
       }
       canvas.restore();
       return;
@@ -424,8 +460,10 @@ class TableGroupPainter extends CustomPainter {
         ..save()
         ..translate(sx - p.width / 2, sy - (p.height + kGroupChipPaddingY))
         ..drawRRect(rrect, _paint)
-        ..drawParagraph(p, Offset.zero)
-        ..restore();
+        ..drawParagraph(p, Offset.zero);
+      // A faded group's chip under the veil (Z14).
+      if (g.faded) canvas.drawRRect(rrect, _faded);
+      canvas.restore();
     }
   }
 
@@ -436,5 +474,6 @@ class TableGroupPainter extends CustomPainter {
       !identical(oldDelegate.picker, picker) ||
       !identical(oldDelegate.camera, camera) ||
       !identical(oldDelegate.groups, groups) ||
+      !identical(oldDelegate.tableFocus, tableFocus) ||
       !identical(oldDelegate.paper, paper);
 }

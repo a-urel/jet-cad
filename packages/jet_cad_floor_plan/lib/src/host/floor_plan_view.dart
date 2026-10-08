@@ -230,6 +230,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             fitRequests: c.fitRequests,
             fileCommands: _commands(FloorPlanStrings.of(context)),
             onFitted: c.fitted,
+            framing: c.framingFor,
             onSettle: c.registerSettle,
             symbols: c.symbols,
             thumbnails: c.thumbnails,

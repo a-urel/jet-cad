@@ -186,7 +186,9 @@ The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
 or `FloorPlanMode.selection`, read back from `controller.mode`. A switch
 keeps the plan where it is on the screen, zoom included (*since 0.2.0*;
 0.1.0 kept the camera's numbers, so the plan moved by the editor's
-panels); `fitToView()`, `load` and `newPlan()` fit it again. The
+panels); `fitToView()`, `load` and `newPlan()` fit it again, and
+`fitToTables` frames a set of tables (*unreleased on `main`*, see
+[Zones](#zones-framing-and-focus)). The
 design mode is the full editor; the selection mode shows the canvas
 alone, on a **service copy** of the plan.
 
@@ -392,6 +394,89 @@ switches and loads.
 - `onGroupTap(groupId, number)` follows `onTableTap` for a member.
 - A context click or a long-press menu on an unselected member selects
   its whole group first, as a tap does, so your menu acts on the group.
+
+### Zones: framing and focus
+
+*Unreleased on `main`.* A zone (Salon, Teras, Bar…) is **yours**: the
+table's attribute in your database. The plan stores no zone. One plan
+per dining area still works; these two calls serve a floor that holds
+several zones in one plan.
+
+- `controller.fitToTables(numbers)` frames the tables carrying those
+  numbers, in either mode, with half a metre of floor round them and at
+  least 3 m in each direction, so one table never fills the screen.
+  Numbers are trimmed; unknown ones are ignored; a number used twice
+  frames both tables; a table on a hidden layer is not framed. It
+  returns `false`, and changes nothing, when no table matches: the zone
+  is not drawn yet, so decide yourself — keep the view, call
+  `fitToView()`, or say so.
+- A framing is a camera request, as `fitToView()` is: with no view shown
+  the next view frames on its first frame, the last request wins, and a
+  mode switch keeps it. `load` and `newPlan()` drop it (the numbers named
+  the old plan): frame after a load, and set the focus again — it is kept
+  by number, and after loading another area into the same controller the
+  numbers may name its tables or none of them. Nothing goes into the plan, its
+  undo or `serviceLayoutChanges`.
+- `controller.setTableFocus(numbers)` fades every other table in the
+  selection mode under a veil of the paper's colour; `null` ends the
+  focus, and an empty set fades every table. `controller.tableFocus` is
+  its listenable. It is kept across mode switches and loads, never
+  saved. A group with a focused member draws as before; a group with
+  none fades with its tables.
+- **A faded table still works:** it can be tapped, selected, dragged
+  and merged, because a waiter under "My tables" still acts on a
+  colleague's table. If you want it inert, check
+  `controller.tableFocus.value` in your `onTableTap`, `onGroupTap` (it
+  fires right after `onTableTap` for a member), `onTableContextMenu`,
+  `onMergeRequested` and `selectedTables` listener — the table is already
+  selected when `onTableTap` fires — and pass `serviceMoves: false` for
+  no moves.
+
+A zone tab frames its tables and, if you choose, fades the rest; *All*
+shows the floor again:
+
+```dart
+  void showZone(Set<String> numbers, {required bool fadeOthers}) {
+    if (!controller.fitToTables(numbers)) controller.fitToView();
+    controller.setTableFocus(fadeOthers ? numbers : null);
+  }
+
+  void showAllZones() {
+    controller.fitToView();
+    controller.setTableFocus(null);
+  }
+```
+
+"My tables" is a focus on the waiter's numbers, renewed as they change;
+with a zone tab, focus the intersection. A framing frames only the
+numbers you give: a group that straddles two zones is cut unless you add
+its members.
+
+The tables your POS knows that a floor does not draw are a set
+difference; over several plans, take it against every plan of the
+location. `FloorPlanTable.visible` is false for a table on a hidden
+layer, which is not drawn, so it counts as unplaced:
+
+```dart
+  /// The tables the POS knows that this floor does not draw: a table on
+  /// a hidden layer is not drawn, so it counts as unplaced. Codes compare
+  /// trimmed, as `fitToTables` and `setTableFocus` trim them.
+  Set<String> unplacedTables(Set<String> codes) {
+    final drawn = {
+      for (final table in controller.tables)
+        if (table.visible && table.number != null) table.number!,
+    };
+    return {
+      for (final code in codes)
+        if (!drawn.contains(code.trim())) code,
+    };
+  }
+```
+
+Your codes are compared with the plan's numbers trimmed and
+case-sensitively. The planner lets staff type a number of 1 to 8
+characters (UTF-16 units) with no control character, so keep your codes
+within those rules: a longer code matches only a plan edited by hand.
 
 ## 8. Callbacks, options, and the web's context menu
 

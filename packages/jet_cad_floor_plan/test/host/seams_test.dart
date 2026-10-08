@@ -66,4 +66,43 @@ void main() {
     expect([again.a, again.b, again.c, again.d, again.e, again.f],
         [fitted.a, fitted.b, fitted.c, fitted.d, fitted.e, fitted.f]);
   });
+
+  testWidgets(
+      'SM3 a fit asks the shell\'s framing at the drawing area\'s size; '
+      'null from it fits as before (zone spec Z7, M-Z15)', (tester) async {
+    final measurer = FlutterTextMeasurer();
+    addTearDown(measurer.clear);
+    final requests = _Requests();
+    addTearDown(requests.dispose);
+    final framed = ViewportTransform(
+        worldToScreenMatrix: Transform2(0.37, 0, 0, -0.37, -14800.5, 9950.25));
+    final asked = <Size>[];
+    ViewportTransform? answer = framed;
+    await tester.pumpWidget(MaterialApp(
+        home: PlannerShell(
+            document: startupPlan(measurer),
+            fitRequests: requests,
+            framing: (size) {
+              asked.add(size);
+              return answer;
+            })));
+    await tester.pump();
+    await tester.pump();
+    final view = tester.widget<PlannerView>(find.byType(PlannerView));
+    final area = tester.getSize(find.byType(InteractionLayer));
+    expect(asked, [area], reason: 'the first frame\'s fit');
+    expect(view.camera.value, same(framed));
+
+    answer = null;
+    requests.bump();
+    await tester.pump();
+    expect(asked, [area, area]);
+    final page = view.camera.value.worldToScreenMatrix;
+    expect(page.a, isNot(0.37), reason: 'the page');
+
+    answer = framed;
+    requests.bump();
+    await tester.pump();
+    expect(view.camera.value, same(framed));
+  });
 }

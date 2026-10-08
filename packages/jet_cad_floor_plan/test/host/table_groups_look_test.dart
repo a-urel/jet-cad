@@ -20,6 +20,8 @@ import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
 import 'package:jet_cad_floor_plan/src/new_document.dart';
+import 'package:jet_cad_floor_plan/src/service/table_focus_painter.dart'
+    show kTableFocusVeilAlpha;
 import 'package:jet_cad_floor_plan/src/service/table_group_painter.dart';
 import 'package:jet_cad_floor_plan/src/service/table_status_painter.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
@@ -31,6 +33,7 @@ import '../service/table_group_painter_test.dart' show GroupSpy;
 import '../service/table_status_painter_test.dart' show SpyCanvas;
 import '../support/palette_fixture.dart';
 import '../tables/table_fixture.dart';
+import 'zone_fixture.dart' show TestQuad, veilOver, zoneSymbolBoxes;
 
 /// The demo's statuses (`apps/restaurant_demo/lib/main.dart`).
 const Color ordered = Color(0x99FFB300), eating = Color(0x9943A047);
@@ -405,5 +408,106 @@ void main() {
     expect(path.contains(const Offset(9900, 3800)), isTrue, reason: '3');
     groupSpy(tester, 'table-group-chips');
     expect(chips(tester).debugChipTexts, ['3+99']);
+  });
+
+  testWidgets(
+      'TG-Z3 M-Z38: the frames and the chips repaint on setTableFocus alone; '
+      'focused on 20, G7\'s chip is the paper at 0.6 over gripMove on the '
+      'screen; focused on 3 it is gripMove again (zone spec Z14)',
+      (tester) async {
+    final c = lookController(white);
+    c.setTableGroups({
+      'G7': TableGroup(members: const {'12', '3', '7'}, label: 'G7')
+    });
+    await pumpLook(tester, c, ThemeMode.light);
+    final repaints = <String, int>{};
+    for (final key in ['table-group-layer', 'table-group-chips']) {
+      final painter = tester.widget<CustomPaint>(find.byKey(Key(key))).painter!;
+      void count() => repaints[key] = (repaints[key] ?? 0) + 1;
+      painter.addListener(count);
+      addTearDown(() => painter.removeListener(count));
+    }
+    final camera = c.camera.value;
+    final state = c.activeDocument.commands.stateId;
+    c.setTableFocus({'20'});
+    expect(repaints, {'table-group-layer': 1, 'table-group-chips': 1});
+    await tester.pump();
+    expect(identical(c.camera.value, camera), isTrue);
+    expect(c.activeDocument.commands.stateId, state);
+
+    final spy = groupSpy(tester, 'table-group-chips');
+    expect(spy.rrects, hasLength(2), reason: 'the chip, then its veil');
+    final t = spy.translations.single;
+    final o = tester.getTopLeft(find.byKey(const Key('table-group-chips')));
+    final chip = spy.rrects.first.shift(o + Offset(t.dx, t.dy));
+    final sx = (o.dx + t.dx - kGroupChipPaddingX / 2).floor();
+    final sy = (chip.top + chip.bottom) ~/ 2;
+    for (final (dx, dy) in const [(0, 0), (1, 0), (0, 1), (1, 1)]) {
+      expect(chip.contains(Offset(sx + 0.1 + 0.8 * dx, sy + 0.1 + 0.8 * dy)),
+          isTrue,
+          reason: 'premise: pixel ($sx, $sy) inside the chip $chip');
+    }
+    final grip = rgbOf(PaperPalette.forPaper(white).gripMove);
+    var shot = await shoot(tester);
+    expectRgb(shot.rgbAt(sx, sy), veilOver(0xFFFFFF, grip), 1, 'veiled');
+    final frame = groupSpy(tester, 'table-group-layer').paints.single;
+    expect(frame.color.a, closeTo(1 - kTableFocusVeilAlpha, 1e-6),
+        reason: 'the faded frame');
+
+    c.setTableFocus({'3'});
+    expect(repaints, {'table-group-layer': 2, 'table-group-chips': 2});
+    await tester.pump();
+    shot = await shoot(tester);
+    expectRgb(shot.rgbAt(sx, sy), grip, 1, 'a focused member: unveiled');
+    expect(groupSpy(tester, 'table-group-layer').paints.single.color.a, 1);
+  });
+
+  testWidgets(
+      'TG-Z4 the Task 2 review\'s O3: the chips lie above the veil -- focused '
+      'on 3, G7 straddles the focus and its chip, over the faded table 20, '
+      'is gripMove unveiled, while 20 beside it is veiled (zone spec Z13, '
+      'Z14)', (tester) async {
+    final c = lookController(white);
+    c.setTableGroups({
+      'G7': TableGroup(members: const {'12', '3', '7'}, label: 'G7')
+    });
+    await pumpLook(tester, c, ThemeMode.light);
+    final under = await shoot(tester);
+    c.setTableFocus({'3'});
+    await tester.pump();
+    final spy = groupSpy(tester, 'table-group-chips');
+    expect(spy.rrects, hasLength(1), reason: 'premise: G7 straddles');
+    final t = spy.translations.single;
+    final layer = find.byKey(const Key('table-group-chips'));
+    final o = tester.getTopLeft(layer);
+    final chip = spy.rrects.single.shift(o + Offset(t.dx, t.dy));
+    // Four rows above 20's chair line: inside the chip and inside 20's quad
+    // (the chair is the box's lower edge, fixes X3's fixture).
+    final sx = (o.dx + t.dx - kGroupChipPaddingX / 2).floor();
+    final sy = (o.dy + kAnchorRow - kChairRowsUp - 4).toInt();
+    final doc = c.activeDocument;
+    final node = doc.tree[TableSurvey.of(doc).withNumber('20').single.instance]!
+        as InstanceNode;
+    final twenty = TestQuad(node.transform, zoneSymbolBoxes['test.table']!);
+    final inv = c.camera.value.worldToScreenMatrix.invert();
+    bool inTwenty(int x, int y) {
+      final px = x + 0.5 - o.dx, py = y + 0.5 - o.dy;
+      return twenty.holds(inv.a * px + inv.c * py + inv.e,
+          inv.b * px + inv.d * py + inv.f, 1 / pxPerMm);
+    }
+
+    for (final (dx, dy) in const [(0, 0), (1, 0), (0, 1), (1, 1)]) {
+      expect(chip.contains(Offset(sx + 0.1 + 0.8 * dx, sy + 0.1 + 0.8 * dy)),
+          isTrue,
+          reason: 'premise: pixel ($sx, $sy) inside the chip $chip');
+    }
+    expect(inTwenty(sx, sy), isTrue, reason: 'premise: over 20');
+    final bx = chip.left.floor() - 12;
+    expect(inTwenty(bx, sy), isTrue, reason: 'premise: 20 beside the chip');
+    final grip = rgbOf(PaperPalette.forPaper(white).gripMove);
+    final shot = await shoot(tester);
+    expectRgb(shot.rgbAt(bx, sy), veilOver(0xFFFFFF, under.rgbAt(bx, sy)), 1,
+        'premise: 20 is veiled');
+    expectRgb(shot.rgbAt(sx, sy), grip, 1, 'G7\'s chip over the veil');
   });
 }

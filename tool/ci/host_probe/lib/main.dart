@@ -186,6 +186,30 @@ class _FloorScreenState extends State<FloorScreen> {
     controller.setGroupStatus({...controller.groupStatuses.value}..remove(id));
   }
 
+  void showZone(Set<String> numbers, {required bool fadeOthers}) {
+    if (!controller.fitToTables(numbers)) controller.fitToView();
+    controller.setTableFocus(fadeOthers ? numbers : null);
+  }
+
+  void showAllZones() {
+    controller.fitToView();
+    controller.setTableFocus(null);
+  }
+
+  /// The tables the POS knows that this floor does not draw: a table on
+  /// a hidden layer is not drawn, so it counts as unplaced. Codes compare
+  /// trimmed, as `fitToTables` and `setTableFocus` trim them.
+  Set<String> unplacedTables(Set<String> codes) {
+    final drawn = {
+      for (final table in controller.tables)
+        if (table.visible && table.number != null) table.number!,
+    };
+    return {
+      for (final code in codes)
+        if (!drawn.contains(code.trim())) code,
+    };
+  }
+
   void showOrders() {
     final numbers = controller.selectedTables.value;
     debugPrint('orders for tables $numbers');
@@ -249,6 +273,16 @@ class _FloorScreenState extends State<FloorScreen> {
           IconButton(
               icon: const Icon(Icons.restart_alt),
               onPressed: () => controller.resetLayout()),
+          IconButton(
+              icon: const Icon(Icons.filter_center_focus),
+              onPressed: () => showZone({'1', '2'}, fadeOthers: true)),
+          IconButton(
+              icon: const Icon(Icons.select_all),
+              onPressed: () => showAllZones()),
+          IconButton(
+              icon: const Icon(Icons.help_outline),
+              onPressed: () =>
+                  debugPrint('unplaced: ${unplacedTables({'1', '2', '99'})}')),
           Switch(
               value: staffMayMoveTables,
               onChanged: (v) => setState(() => staffMayMoveTables = v)),

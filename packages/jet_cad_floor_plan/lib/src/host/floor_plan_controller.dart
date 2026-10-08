@@ -17,11 +17,13 @@ import '../l10n/strings.dart';
 import '../new_document.dart';
 import '../parametric/catalog.dart';
 import '../service/table_groups.dart';
+import '../service/table_picker.dart';
 import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
 import '../tables/table_index.dart';
 import 'floor_plan_types.dart';
 import 'service_layout.dart';
+import 'table_fit.dart';
 
 /// The thumbnail capacity of a controller's own cache: the app's (spec
 /// 14b-2 R-11), above the 96 symbols of both libraries.
@@ -77,6 +79,21 @@ final class _Plan {
 /// A bump-only notifier: each [bump] is one request.
 final class _Requests extends ChangeNotifier {
   void bump() => notifyListeners();
+}
+
+/// The table focus (zone spec Z10): each [replace] notifies, an equal set
+/// or a second null included.
+final class _Focus extends ChangeNotifier
+    implements ValueListenable<Set<String>?> {
+  Set<String>? _value;
+
+  @override
+  Set<String>? get value => _value;
+
+  void replace(Set<String>? next) {
+    _value = next;
+    notifyListeners();
+  }
 }
 
 /// The planner as a host embeds it (spec 14b-2): with [FloorPlanView].
@@ -205,9 +222,14 @@ class FloorPlanController extends ChangeNotifier {
   final _Requests _fits = _Requests();
   bool _fitOnStart = true;
 
-  /// A [fitToView] no mounted view has performed yet (review F-2): the
-  /// next view fits on its first frame.
+  /// A [fitToView] or [fitToTables] no mounted view has performed yet
+  /// (review F-2): the next view fits on its first frame.
   bool _fitPending = false;
+
+  /// What the next fit frames (zone spec Z5): null for the page, else the
+  /// numbers of the last [fitToTables] that found a table, trimmed. The
+  /// last request wins.
+  Set<String>? _fitTarget;
   VoidCallback? _settle;
   bool _disposed = false;
 
@@ -226,6 +248,7 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<Map<String, TableStatus>> _groupStatuses =
       ValueNotifier(const <String, TableStatus>{});
   final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
+  final _Focus _focus = _Focus();
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
   /// of it, a mode switch, [load], [newPlan], [resetLayout] (demo review
@@ -278,6 +301,33 @@ class FloorPlanController extends ChangeNotifier {
   void setGroupStatus(Map<String, TableStatus> statuses) {
     _groupStatuses.value = Map.unmodifiable(
         {for (final e in statuses.entries) e.key.trim(): e.value});
+  }
+
+  /// The numbers in focus (zone spec Z10), as [setTableFocus] last set
+  /// them: null for no focus. In the selection mode every table outside a
+  /// focus lies under a veil of the paper (Z11-Z13); a focus with no
+  /// number fades every table. Kept by number for the controller's life,
+  /// across mode switches, [load], [newPlan], [resetLayout] and
+  /// [restoreServiceLayout].
+  ValueListenable<Set<String>?> get tableFocus => _focus;
+
+  /// Replaces the focus (Z10): null for none, else [numbers] trimmed, blanks
+  /// dropped, copied into an unmodifiable set -- so `{}` and `{''}` are a
+  /// focus with no table. Every call notifies [tableFocus], an equal set
+  /// included.
+  ///
+  /// Presentation only (Z15): a faded table is tapped, selected, moved and
+  /// merged as any other; a host that wants it inert checks
+  /// [tableFocus] in its own callbacks. Not document state -- no command,
+  /// undo step, [dirty], [revision], [serviceLayoutChanges] or
+  /// notification of this controller; never saved, exported or printed.
+  void setTableFocus(Set<String>? numbers) {
+    _focus.replace(numbers == null
+        ? null
+        : Set<String>.unmodifiable({
+            for (final n in numbers)
+              if (n.trim() case final t when t.isNotEmpty) t,
+          }));
   }
 
   /// The id of the group the selection is exactly (G1, G5's Split rule):
@@ -338,7 +388,8 @@ class FloorPlanController extends ChangeNotifier {
   Listenable get fitRequests => _fits;
 
   /// Whether the next view fits its camera on its first frame: after
-  /// construction, [load], [newPlan]; not after a mode switch (R-13).
+  /// construction, [load], [newPlan], or a fit no view has performed yet;
+  /// not after a mode switch (R-13).
   @internal
   bool takeFitOnStart() {
     final fit = _fitOnStart || _fitPending;
@@ -346,9 +397,43 @@ class FloorPlanController extends ChangeNotifier {
     return fit;
   }
 
-  /// A view performed a fit: a pending [fitToView] is done (review F-2).
+  /// A view performed a fit: a pending [fitToView] or [fitToTables] is
+  /// done (review F-2). The fit target stays (zone spec Z5).
   @internal
   void fitted() => _fitPending = false;
+
+  /// The camera a fit sets in a drawing area of [viewport] (zone spec Z7):
+  /// null for the page -- the target is the page, or no table of the last
+  /// [fitToTables] is a candidate in the active plan now (Z6) -- else the
+  /// tables framed ([frameTables]). Resolved here, when the fit is
+  /// performed: a restore, an Undo or a mode switch since the request is
+  /// followed. One entity-store scan per call, at fit rate. A camera that
+  /// is not finite is none: the page is fitted (Task 1 review R-1).
+  @internal
+  ViewportTransform? framingFor(Size viewport) {
+    final target = _fitTarget;
+    if (target == null) return null;
+    final box = _tablesBounds(target);
+    if (box == null) return null;
+    final framing = frameTables(box, viewport);
+    final m = framing.worldToScreenMatrix;
+    return [m.a, m.b, m.c, m.d, m.e, m.f].every((v) => v.isFinite)
+        ? framing
+        : null;
+  }
+
+  /// The bound of the four transformed corners of every candidate of the
+  /// active plan (zone spec Z0, Z2) numbered in [numbers]; null when there
+  /// is none. A fresh box cache per call: the design mode has no picker.
+  Aabb2? _tablesBounds(Set<String> numbers) {
+    final document = _active.document;
+    var box = Aabb2.empty();
+    for (final c in TablePicker.candidatesOf(document,
+        boxes: <Handle, Aabb2>{}, leaves: document.leavesByOwner)) {
+      if (numbers.contains(c.table.number)) box = box.union(c.worldBounds);
+    }
+    return box.isEmpty ? null : box;
+  }
 
   // R-13, amended by the human (2026-10-07, "planın yeri korunsun"): a mode
   // switch keeps the plan where it is on the screen. The camera's numbers
@@ -616,6 +701,9 @@ class FloorPlanController extends ChangeNotifier {
       _service = null;
     }
     _fitOnStart = true;
+    // The numbers named the old plan (zone spec Z8): a host frames after
+    // a load.
+    _fitTarget = null;
     _placeNominally();
     _refreshFlags();
     _revision.value++;
@@ -732,12 +820,30 @@ class FloorPlanController extends ChangeNotifier {
     return _survey!;
   }
 
-  /// The active plan's live tables, ascending (H3).
-  List<FloorPlanTable> get tables => [
-        for (final t in _tables.tables)
-          FloorPlanTable(
-              number: t.number, seats: t.seats, symbolKey: t.symbolKey)
-      ];
+  /// The active plan's live tables, ascending (H3). A table on a hidden
+  /// layer is listed, [FloorPlanTable.visible] false (zone spec Z24): read
+  /// from its layer at the call, so a layer shown or hidden reads at the
+  /// next [revision].
+  List<FloorPlanTable> get tables {
+    final d = _active.document;
+    return [
+      for (final t in _tables.tables)
+        FloorPlanTable(
+            number: t.number,
+            seats: t.seats,
+            symbolKey: t.symbolKey,
+            visible: _onVisibleLayer(d, t.instance))
+    ];
+  }
+
+  /// Whether [instance]'s own layer is shown, as the picker reads it (a
+  /// layer missing from the table counts as shown): a table is at the root
+  /// (14a T1), so no enclosing layer hides it.
+  static bool _onVisibleLayer(DraftDocument d, Handle instance) {
+    final node = d.tree[instance];
+    if (node is! InstanceNode) return true;
+    return d.tables.layers[node.layer]?.visible ?? true;
+  }
 
   /// The active plan's numbering problems (umbrella D5, R-13; spec 14d
   /// L6): numbers used by several tables, by first appearance, then the
@@ -862,10 +968,46 @@ class FloorPlanController extends ChangeNotifier {
     _selectedGroup.value = id;
   }
 
-  /// The active view frames the plan as on its first frame (H3, F-7).
+  /// The active view frames the plan as on its first frame (H3, F-7). It
+  /// replaces an earlier [fitToTables] not yet performed (zone spec Z5).
   void fitToView() {
+    _fitTarget = null;
     _fitPending = true;
     _fits.bump();
+  }
+
+  /// Frames the tables of the active plan carrying one of [numbers] (zone
+  /// spec Z1-Z9), in either mode, as [fitToView] frames the page: only
+  /// the camera moves. Numbers are trimmed and blanks dropped; a number
+  /// used twice frames both tables; an unknown one is ignored. A table on
+  /// a hidden layer is not framed, a locked one is; an unnumbered table or
+  /// a servable instance nested in another block never matches.
+  ///
+  /// The framed world is the bound of each table's box at its place (its
+  /// four corners), grown by [kTableFitMarginMm] per side and to at least
+  /// [kTableFitMinSpanMm] per axis.
+  ///
+  /// Returns whether at least one such table exists now. When none does,
+  /// nothing changes: no request is made, the camera stays, and an earlier
+  /// request not yet performed stays. Otherwise the last request wins, as
+  /// for [fitToView]; with no view mounted, the next view frames on its
+  /// first frame. The tables are found again when the view performs it,
+  /// so a restore, an Undo or a mode switch in between is followed, and
+  /// the page is fitted if none is left. [load] and [newPlan] drop a
+  /// request: the numbers named the old plan.
+  ///
+  /// Not document state: no command, undo step, [dirty], [revision],
+  /// [serviceLayoutChanges] or notification; nothing typed is settled.
+  bool fitToTables(Set<String> numbers) {
+    final wanted = Set<String>.unmodifiable({
+      for (final n in numbers)
+        if (n.trim() case final t when t.isNotEmpty) t,
+    });
+    if (_tablesBounds(wanted) == null) return false;
+    _fitTarget = wanted;
+    _fitPending = true;
+    _fits.bump();
+    return true;
   }
 
   // ---------------------------------------------------------------------
@@ -935,6 +1077,7 @@ class FloorPlanController extends ChangeNotifier {
     _groups.dispose();
     _groupStatuses.dispose();
     _selectedGroup.dispose();
+    _focus.dispose();
     super.dispose();
   }
 }

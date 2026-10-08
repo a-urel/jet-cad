@@ -96,6 +96,48 @@ TableTop? tableTopOf(DraftDocument doc, Handle definition,
   }
 }
 
+/// A table the planner can show and act on (zone spec Z0): a survey table
+/// on a visible layer, its transform's determinant finite and non-zero,
+/// its box non-empty, and the box's four corners finite in the world. The
+/// one rule for the picker, the framing and the focus.
+final class TableCandidate {
+  TableCandidate(
+      {required this.table,
+      required this.transform,
+      required this.box,
+      required this.corners,
+      required this.locked});
+
+  final TableInfo table;
+
+  /// Definition space to world: the instance's transform.
+  final Transform2 transform;
+
+  /// The symbol's bounding box in definition space.
+  final Aabb2 box;
+
+  /// [box]'s corners in the world, `x0, y0, ..., x3, y3`: its (min, min),
+  /// (max, min), (max, max) and (min, max) through [transform], every one
+  /// finite. Counter-clockwise unless the transform mirrors.
+  final Float64List corners;
+
+  /// On a locked layer (S9).
+  final bool locked;
+
+  /// The axis-aligned bound of [corners] (zone spec Z2): what a framing
+  /// frames.
+  Aabb2 get worldBounds {
+    var minX = corners[0], minY = corners[1], maxX = minX, maxY = minY;
+    for (var i = 2; i < 8; i += 2) {
+      minX = math.min(minX, corners[i]);
+      maxX = math.max(maxX, corners[i]);
+      minY = math.min(minY, corners[i + 1]);
+      maxY = math.max(maxY, corners[i + 1]);
+    }
+    return Aabb2.raw(minX, minY, maxX, maxY);
+  }
+}
+
 /// One table the picker can hit.
 final class PickCandidate {
   PickCandidate(
@@ -163,32 +205,66 @@ class TablePicker {
   }
 
   List<PickCandidate> _build() {
-    final out = <PickCandidate>[];
     // One entity-store scan per build, shared by every definition not yet
     // cached, never one per definition (`DraftDocument.definitionBounds`).
     Map<Handle, List<int>>? leaves;
+    Map<Handle, List<int>> scan() => leaves ??= _leavesByOwner();
+    return [
+      for (final c in candidatesOf(document, boxes: _boxes, leaves: scan))
+        PickCandidate(
+            table: c.table,
+            inverse: c.transform.invert(),
+            top: _tops.putIfAbsent(c.table.definition,
+                () => tableTopOf(document, c.table.definition, scan())),
+            box: c.box,
+            locked: c.locked,
+            scale: math.sqrt(c.transform.determinant.abs())),
+    ];
+  }
+
+  /// The candidates of [document] (zone spec Z0), ascending by instance
+  /// handle. [boxes] caches the definitions' boxes: the picker keeps its
+  /// own for its life; a caller with none passes a fresh map. [leaves] is
+  /// [DraftDocument.leavesByOwner] or a stand-in, called at most once, and
+  /// only when a definition's box is not cached.
+  ///
+  /// O(nodes + entities): at document-change rate, or at call rate for a
+  /// framing, never per frame.
+  static List<TableCandidate> candidatesOf(DraftDocument document,
+      {required Map<Handle, Aabb2> boxes,
+      required Map<Handle, List<int>> Function() leaves}) {
+    final out = <TableCandidate>[];
+    Map<Handle, List<int>>? scanned;
     for (final t in TableSurvey.of(document).tables) {
       final node = document.tree[t.instance];
       if (node is! InstanceNode) continue;
       final layer = document.tables.layers[node.layer];
       if (layer != null && !layer.visible) continue;
-      final det = node.transform.determinant;
+      final m = node.transform;
+      final det = m.determinant;
       if (det == 0 || !det.isFinite) continue;
-      final box = _boxes.putIfAbsent(
-          t.definition,
-          () => document.definitionBounds(
-              t.definition, leaves ??= _leavesByOwner()));
+      final box = boxes.putIfAbsent(t.definition,
+          () => document.definitionBounds(t.definition, scanned ??= leaves()));
       if (box.isEmpty) continue;
-      out.add(PickCandidate(
+      final corners = Float64List(8);
+      void corner(int i, double x, double y) {
+        corners[2 * i] = m.a * x + m.c * y + m.e;
+        corners[2 * i + 1] = m.b * x + m.d * y + m.f;
+      }
+
+      corner(0, box.minX, box.minY);
+      corner(1, box.maxX, box.minY);
+      corner(2, box.maxX, box.maxY);
+      corner(3, box.minX, box.maxY);
+      // A NaN or infinite corner (a hand-edited file) is no place: it
+      // would poison a framing's bound and a region's path (zone spec Z0).
+      if (!corners.every((v) => v.isFinite)) continue;
+      out.add(TableCandidate(
           table: t,
-          inverse: node.transform.invert(),
-          top: _tops.putIfAbsent(
-              t.definition,
-              () => tableTopOf(
-                  document, t.definition, leaves ??= _leavesByOwner())),
+          transform: m,
           box: box,
-          locked: layer?.locked ?? false,
-          scale: math.sqrt(det.abs())));
+          corners: corners,
+          locked: layer?.locked ?? false));
     }
     return out;
   }

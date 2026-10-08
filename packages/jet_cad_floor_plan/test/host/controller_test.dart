@@ -5,12 +5,14 @@
 // hand-edited file).
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:ui' show Color;
+import 'dart:ui' show Color, Size;
 
+import 'package:flutter/foundation.dart' show ChangeNotifier;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
+import 'package:jet_cad_floor_plan/src/host/table_fit.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
@@ -18,6 +20,7 @@ import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_fixture.dart';
+import 'zone_fixture.dart';
 
 /// A plan: tables 1 (turned, mirrored), 2 and 3, a planter, and a line;
 /// [duplicate] renames table 3 to "2".
@@ -539,5 +542,387 @@ void main() {
     expect(parts(tableNode(c.activeDocument, '2').transform), designed2,
         reason: 'a dropped entry leaves the table at its designed place');
     await tester.pump();
+  });
+
+  // Zone spec Z1-Z9: framing tables by number. The fixture is
+  // `zone_fixture.dart`'s; a non-identity camera is set before every call.
+
+  FloorPlanController zoned(WidgetTester tester) {
+    final c = controller(tester, zonePlanJson());
+    c.camera.value = zoneCamera();
+    return c;
+  }
+
+  const zoneSize = Size(1200, 900);
+
+  testWidgets(
+      'CZ1 a turned, mirrored table 40 m off the origin is framed by the '
+      'four corners of its box; table " 7 " by 7, not the TEXT or the room '
+      'named 7 (M-Z1, M-Z3)', (tester) async {
+    final c = zoned(tester);
+    final d = c.activeDocument;
+    final three = tableNode(d, '3').transform;
+    expect(three.determinant, lessThan(0), reason: 'premise: mirrored');
+    expect(three.b, isNot(0), reason: 'premise: turned');
+    expect(three.e.abs(), greaterThan(30000), reason: 'premise: off origin');
+    expect(c.fitToTables({'3'}), isTrue);
+    expectCamera(
+        c.framingFor(zoneSize), frameTables(boundOf(d, {'3'}), zoneSize));
+
+    final label = TableSurvey.of(d).withNumber('7').single.label!;
+    expect(d.entities.read(d.entities.slotOf(label)!).text, ' 7 ',
+        reason: 'premise: labelled with spaces');
+    final seven = boundOf(d, {'7'});
+    final looks = sevenTexts(d);
+    expect(looks, hasLength(2), reason: 'premise: the TEXT and the room name');
+    for (final p in looks) {
+      expect(seven.expandedBy(15000).containsPoint(p), isFalse,
+          reason: 'premise: far from table 7');
+    }
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'7'}), isTrue);
+    expectCamera(c.framingFor(zoneSize), frameTables(seven, zoneSize));
+  });
+
+  testWidgets('CZ2 a hidden table is not framed, a locked one is (M-Z2, M-Z40)',
+      (tester) async {
+    final c = zoned(tester);
+    final d = c.activeDocument;
+    expect(c.fitToTables({'5'}), isFalse, reason: 'hidden');
+    expect(c.framingFor(zoneSize), isNull);
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'5', '3'}), isTrue);
+    expectCamera(
+        c.framingFor(zoneSize), frameTables(boundOf(d, {'3'}), zoneSize),
+        reason: '3 alone');
+    c.camera.value = zoneCamera();
+    expect(c.fitToTables({'L'}), isTrue, reason: 'locked');
+    expectCamera(
+        c.framingFor(zoneSize), frameTables(boundOf(d, {'L'}), zoneSize));
+  });
+
+  testWidgets(
+      'CZ3 two tables 10 m apart in x, where x binds: the scale holds the '
+      'bound and twice the 500 mm margin (M-Z5)', (tester) async {
+    final c = zoned(tester);
+    final box = boundOf(c.activeDocument, {'A1', 'A2'});
+    final w = box.maxX - box.minX, h = box.maxY - box.minY;
+    expect(w, greaterThan(10000), reason: 'premise');
+    expect(h + 2 * 500, lessThan(3000), reason: 'premise: y at the minimum');
+    expect(zoneSize.width / (w + 1000), lessThan(zoneSize.height / 3000),
+        reason: 'premise: x binds');
+    expect(c.fitToTables({'A1', 'A2'}), isTrue);
+    final a = c.framingFor(zoneSize)!.worldToScreenMatrix.a;
+    final want = 0.95 * zoneSize.width / (w + 2 * 500);
+    expect(a, closeTo(want, 1e-12 * want));
+  });
+
+  testWidgets('CZ4 a number used twice frames both tables (M-Z13)',
+      (tester) async {
+    final c = zoned(tester);
+    final both = boundOf(c.activeDocument, {'2'});
+    expect(both.maxY - both.minY, greaterThan(6000), reason: 'premise: two');
+    expect(c.fitToTables({'2'}), isTrue);
+    expectCamera(c.framingFor(zoneSize), frameTables(both, zoneSize));
+  });
+
+  testWidgets(
+      'CZ5 none found: false, and nothing changes -- no request, the '
+      'camera, no pending fit (M-Z7)', (tester) async {
+    final c = zoned(tester);
+    c.takeFitOnStart(); // a host whose plan was already shown and fitted
+    var requests = 0;
+    c.fitRequests.addListener(() => requests++);
+    final camera = c.camera.value;
+    for (final none in [
+      {'nope'},
+      {'5'},
+      {'', '  '},
+      <String>{},
+    ]) {
+      expect(c.fitToTables(none), isFalse, reason: '$none');
+    }
+    expect(requests, 0);
+    expect(c.camera.value, same(camera));
+    expect(c.framingFor(zoneSize), isNull);
+    expect(c.takeFitOnStart(), isFalse);
+  });
+
+  testWidgets(
+      'CZ6 framing is not plan state: no json, dirty, undo depth, revision, '
+      'layout change, notification or settle, in either mode (M-Z11)',
+      (tester) async {
+    final c = zoned(tester);
+    drawLine(c);
+    await tester.pump();
+    var notified = 0, layouts = 0, settled = 0;
+    c.addListener(() => notified++);
+    c.serviceLayoutChanges.addListener(() => layouts++);
+    final withdraw = c.registerSettle(() => settled++);
+    addTearDown(withdraw);
+
+    void expectUnmoved(void Function() act) {
+      final json = c.designJson();
+      final dirty = c.dirty.value;
+      final depth = c.activeDocument.commands.undoDepth;
+      final revision = c.revision.value;
+      final before = (notified, layouts, settled);
+      act();
+      expect((notified, layouts, settled), before);
+      expect(c.activeDocument.commands.undoDepth, depth);
+      expect(c.revision.value, revision);
+      expect(c.dirty.value, dirty);
+      expect(c.designJson(), json);
+    }
+
+    expect(c.dirty.value, isTrue, reason: 'premise');
+    expectUnmoved(() => expect(c.fitToTables({'3', '7'}), isTrue));
+    c.setMode(FloorPlanMode.selection);
+    move(c, '3', 410.5, -95.25);
+    await tester.pump();
+    expect(c.activeDocument.commands.undoDepth, 1, reason: 'premise');
+    expectUnmoved(() => expect(c.fitToTables({'2'}), isTrue));
+    await tester.pump();
+    expect((notified, layouts), (1, 1), reason: 'the switch, the move');
+  });
+
+  // Zone spec Z10: the focus. The fixture is `zone_fixture.dart`'s.
+
+  testWidgets(
+      'CF1 setTableFocus trims, drops blanks and copies into an '
+      'unmodifiable set; {} and {\'\'} are a focus with no table, not none; '
+      'every call notifies, an equal set or a second null included (M-Z34, '
+      'M-Z26)', (tester) async {
+    final c = zoned(tester);
+    expect(c.tableFocus.value, isNull, reason: 'no focus at first');
+    var heard = 0;
+    c.tableFocus.addListener(() => heard++);
+    c.setTableFocus({' 7 ', '', '  ', '3'});
+    expect(c.tableFocus.value, {'7', '3'});
+    expect(() => c.tableFocus.value!.add('2'), throwsUnsupportedError);
+    c.setTableFocus({'3', '7'});
+    expect(heard, 2, reason: 'an equal set notifies');
+    for (final none in [
+      <String>{},
+      {''},
+      {' ', ''}
+    ]) {
+      c.setTableFocus(none);
+      expect(c.tableFocus.value, isNotNull, reason: '$none is a focus');
+      expect(c.tableFocus.value, isEmpty, reason: '$none');
+    }
+    c.setTableFocus(null);
+    c.setTableFocus(null);
+    expect(c.tableFocus.value, isNull);
+    expect(heard, 7, reason: 'every call');
+  });
+
+  testWidgets(
+      'CF2 the host\'s set is copied: changing it after the call changes '
+      'nothing (M-Z35)', (tester) async {
+    final c = zoned(tester);
+    final mine = {'7', '3'};
+    c.setTableFocus(mine);
+    mine
+      ..remove('7')
+      ..add('A1');
+    expect(c.tableFocus.value, {'7', '3'});
+  });
+
+  testWidgets(
+      'CF3 the focus is kept, by number, across setMode, resetLayout, '
+      'restoreServiceLayout, load and newPlan (M-Z20)', (tester) async {
+    final c = zoned(tester);
+    c.setTableFocus({'7'});
+    final focus = c.tableFocus.value;
+    void kept(String after) =>
+        expect(c.tableFocus.value, same(focus), reason: after);
+    c.setMode(FloorPlanMode.selection);
+    kept('setMode');
+    move(c, '3', 410.5, -95.25);
+    final json = c.serviceLayoutJson()!;
+    c.resetLayout();
+    kept('resetLayout');
+    expect(c.restoreServiceLayout(json).applied, ['3']);
+    kept('restoreServiceLayout');
+    c.load(zonePlanJson());
+    kept('load');
+    c.newPlan();
+    kept('newPlan');
+    c.setMode(FloorPlanMode.design);
+    kept('setMode back');
+    await tester.pump();
+  });
+
+  testWidgets(
+      'CF4 the focus is not plan state: no json, dirty, undo depth, '
+      'revision, layout change, notification or settle, in either mode '
+      '(M-Z27)', (tester) async {
+    final c = zoned(tester);
+    drawLine(c);
+    await tester.pump();
+    var notified = 0, layouts = 0, settled = 0;
+    c.addListener(() => notified++);
+    c.serviceLayoutChanges.addListener(() => layouts++);
+    final withdraw = c.registerSettle(() => settled++);
+    addTearDown(withdraw);
+
+    void expectUnmoved(void Function() act) {
+      final json = c.designJson();
+      final dirty = c.dirty.value;
+      final depth = c.activeDocument.commands.undoDepth;
+      final redo = c.activeDocument.commands.canRedo;
+      final revision = c.revision.value;
+      final before = (notified, layouts, settled);
+      act();
+      expect((notified, layouts, settled), before);
+      expect(c.activeDocument.commands.undoDepth, depth);
+      expect(c.activeDocument.commands.canRedo, redo);
+      expect(c.revision.value, revision);
+      expect(c.dirty.value, dirty);
+      expect(c.designJson(), json);
+    }
+
+    expect(c.dirty.value, isTrue, reason: 'premise');
+    expectUnmoved(() => c.setTableFocus({'3', '7'}));
+    expectUnmoved(() => c.setTableFocus(null));
+    c.setMode(FloorPlanMode.selection);
+    move(c, '3', 410.5, -95.25);
+    await tester.pump();
+    expect(c.activeDocument.commands.undoDepth, 1, reason: 'premise');
+    expectUnmoved(() => c.setTableFocus({}));
+    expectUnmoved(() => c.setTableFocus({'2'}));
+    await tester.pump();
+    expect((notified, layouts), (1, 1), reason: 'the switch, the move');
+  });
+
+  testWidgets('CF5 the focus is disposed with the controller', (tester) async {
+    final c = FloorPlanController(json: zonePlanJson());
+    final focus = c.tableFocus as ChangeNotifier;
+    c.dispose();
+    expect(() => focus.addListener(() {}), throwsFlutterError);
+  });
+
+  // Zone spec Z24 (ruling on V-9): `FloorPlanTable.visible` is false for a
+  // table on a hidden layer, read from the table's own layer at the call;
+  // `tables` keeps listing it and the numbering warnings ignore it.
+
+  /// The numbers of [c]'s tables with [FloorPlanTable.visible] false.
+  List<String?> hiddenNumbers(FloorPlanController c) => [
+        for (final t in c.tables)
+          if (!t.visible) t.number
+      ];
+
+  testWidgets(
+      'CV1 M-Z42: the hidden 5 is not visible, every other table is (the '
+      'locked L too), in both modes; showing its layer flips it once '
+      '`revision` moves, an undo flips it back', (tester) async {
+    final c = controller(tester, zonePlanJson());
+    final numbers = [
+      for (final t in TableSurvey.of(c.activeDocument).tables) t.number
+    ];
+    expect(numbers, hasLength(10), reason: 'premise');
+    expect([for (final t in c.tables) t.number], numbers,
+        reason: 'hidden tables stay listed');
+    expect(hiddenNumbers(c), ['5']);
+    expect(c.tables.firstWhere((t) => t.number == 'L').visible, isTrue,
+        reason: 'locked is not hidden');
+    expect(
+        c.tables.firstWhere((t) => t.number == '5'),
+        FloorPlanTable(
+            number: '5',
+            seats: tableSymbol().seats!,
+            symbolKey: tableSymbol().key,
+            visible: false));
+
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    expect(hiddenNumbers(c), ['5'], reason: 'the service copy');
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+
+    var revisions = 0;
+    void count() => revisions++;
+    c.revision.addListener(count);
+    addTearDown(() => c.revision.removeListener(count));
+    final d = c.activeDocument;
+    final hidden = d.tables.layers.byName('Hidden')!;
+    d.commands.execute(SetLayerCommand(hidden.copyWith(visible: true)));
+    await tester.pump();
+    expect(revisions, greaterThan(0), reason: 'premise: revision moved');
+    expect(hiddenNumbers(c), isEmpty);
+    expect(c.tables.firstWhere((t) => t.number == '5').visible, isTrue);
+
+    final seen = revisions;
+    c.undo();
+    await tester.pump();
+    expect(revisions, greaterThan(seen));
+    expect(hiddenNumbers(c), ['5']);
+  });
+
+  testWidgets(
+      'CV2 M-Z42: hiding the layer of one 2 and of the unnumbered table '
+      'leaves the numbering warnings and the listed numbers unchanged; '
+      'only their visible flips', (tester) async {
+    final c = controller(tester, zonePlanJson());
+    final d = c.activeDocument;
+    final back = addZoneLayer(d, 'Back');
+    final survey = TableSurvey.of(d);
+    final moved = [
+      survey.withNumber('2').last.instance,
+      survey.tables.firstWhere((t) => t.number == null).instance,
+    ];
+    for (final h in moved) {
+      d.commands.execute(SetInstanceLayerCommand(h, back));
+    }
+    await tester.pump();
+    final warnings = c.numberingWarnings;
+    expect(warnings, hasLength(2), reason: 'premise: the 2s, the unnumbered');
+    final listed = [for (final t in c.tables) (t.number, t.seats)];
+    expect(hiddenNumbers(c), ['5']);
+
+    d.commands.execute(
+        SetLayerCommand(d.tables.layers[back]!.copyWith(visible: false)));
+    await tester.pump();
+    expect(c.numberingWarnings, warnings);
+    expect([for (final t in c.tables) (t.number, t.seats)], listed);
+    expect(hiddenNumbers(c)..sort((a, b) => '$a'.compareTo('$b')),
+        ['2', '5', null]..sort((a, b) => '$a'.compareTo('$b')));
+    final twos = [
+      for (final t in c.tables)
+        if (t.number == '2') t.visible
+    ];
+    expect(twos, [true, false], reason: 'the first 2 stays shown');
+  });
+
+  testWidgets(
+      'CV3 M-Z42: the spec\'s unplacedTables recipe (Z21), verbatim, counts '
+      'the hidden 5 and an unknown code as unplaced, and not 5 once its '
+      'layer is shown', (tester) async {
+    final controller = FloorPlanController(json: zonePlanJson());
+    addTearDown(controller.dispose);
+
+    /// The tables the POS knows that this floor does not draw: a table on
+    /// a hidden layer is not drawn, so it counts as unplaced. Codes compare
+    /// trimmed, as `fitToTables` and `setTableFocus` trim them.
+    Set<String> unplacedTables(Set<String> codes) {
+      final drawn = {
+        for (final table in controller.tables)
+          if (table.visible && table.number != null) table.number!,
+      };
+      return {
+        for (final code in codes)
+          if (!drawn.contains(code.trim())) code,
+      };
+    }
+
+    const codes = {' 2', '3', '5', '7 ', 'A1', 'A2', 'B4', 'L', '99'};
+    expect(unplacedTables(codes), {'5', '99'},
+        reason: 'the final review F-3: " 2" and "7 " are drawn tables');
+    final d = controller.activeDocument;
+    d.commands.execute(SetLayerCommand(
+        d.tables.layers.byName('Hidden')!.copyWith(visible: true)));
+    await tester.pump();
+    expect(unplacedTables(codes), {'99'});
   });
 }

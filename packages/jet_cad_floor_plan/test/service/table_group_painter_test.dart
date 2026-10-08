@@ -17,6 +17,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
+import 'package:jet_cad_floor_plan/src/service/table_focus_painter.dart'
+    show kTableFocusVeilAlpha;
 import 'package:jet_cad_floor_plan/src/service/table_group_painter.dart';
 import 'package:jet_cad_floor_plan/src/service/table_groups.dart';
 import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
@@ -28,6 +30,7 @@ import 'package:jet_cad_floor_plan/symbols.dart'
     show FurnitureSymbol, PolylineShape;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../host/zone_fixture.dart' show rgbDistance, veilOver;
 import '../tables/table_fixture.dart';
 import 'table_status_painter_test.dart' show SpyCanvas;
 
@@ -850,6 +853,230 @@ void main() {
     expect(square.contains(const ui.Offset(2.8, 2.8)), isFalse);
     expect(square.contains(const ui.Offset(1, 2.9)), isTrue);
     expect(square.contains(const ui.Offset(1, 3.1)), isFalse);
+  });
+
+  // Zone spec Z14: the groups follow the host's focus. A group with no
+  // focused visible member strokes its frame with the faded paint and
+  // veils its chip; a group straddling the focus draws as before.
+
+  /// A group painter of [layer] over [doc] that follows [focus].
+  TableGroupPainter focusedPainter(
+      TableGroupLayer layer,
+      DraftDocument doc,
+      ValueNotifier<ViewportTransform> camera,
+      ValueNotifier<Map<String, TableGroup>> groups,
+      ValueNotifier<Set<String>?> focus,
+      ValueNotifier<int> paper,
+      {TablePicker? picker}) {
+    return TableGroupPainter(
+        layer: layer,
+        document: doc,
+        picker: picker ?? TablePicker(doc),
+        camera: camera,
+        groups: groups,
+        paper: paper,
+        tableFocus: focus,
+        repaint: Listenable.merge([camera, groups, focus, paper]));
+  }
+
+  /// GA = {12, 20, 9} (9 hidden) and GB = {7, 3}: GA draws first (its
+  /// lowest member, 12, has the lowest handle).
+  Map<String, TableGroup> zoneGroups() => {
+        'GB': tg({'7', '3'}),
+        'GA': tg({'12', '20', '9'}),
+      };
+
+  /// The pixel strictly inside chip [i]'s left padding, at its middle row:
+  /// clear of its glyphs, its rounded corners and its edges.
+  (int, int) paddingPixel(GroupSpy spy, int i, int at) {
+    final t = spy.translations[i];
+    final r = spy.rrects[at];
+    final x = (t.dx + r.left + 1).ceil();
+    final y = (t.dy + (r.top + r.bottom) / 2).floor();
+    expect(x + 1 <= t.dx + r.left + kGroupChipPaddingX - 1, isTrue,
+        reason: 'premise: pixel $x in the padding');
+    return (x, y);
+  }
+
+  testWidgets(
+      'TG-Z1 M-Z24: focus {3, 9}: GA (no focused visible member; 9 is '
+      'hidden) strokes the faded paint and its chip is veiled; GB straddles '
+      'the focus and draws as before; {} fades both, null neither',
+      (tester) async {
+    final doc = groupedPlan();
+    final camera = ValueNotifier(cameraAt(0.06));
+    final groups = ValueNotifier(zoneGroups());
+    final focus = ValueNotifier<Set<String>?>({'3', '9'});
+    final paper = ValueNotifier<int>(0xFFFFFFFF);
+    final picker = TablePicker(doc);
+    final frames = focusedPainter(
+        TableGroupLayer.frames, doc, camera, groups, focus, paper,
+        picker: picker);
+    final chips = focusedPainter(
+        TableGroupLayer.chips, doc, camera, groups, focus, paper,
+        picker: picker);
+    const grip = 0x7A3FD1;
+    final fadedAlpha = 1 - kTableFocusVeilAlpha;
+
+    var spy = frame(frames);
+    expect(spy.paths, hasLength(2), reason: 'premise: GA and GB framed');
+    expect(spy.paths[0].contains(ui.Offset(kAt[0].$1, kAt[0].$2)), isTrue,
+        reason: 'premise: GA (12) first');
+    final faded = spy.paints[0], normal = spy.paints[1];
+    expect(identical(faded, normal), isFalse);
+    expect(faded.style, ui.PaintingStyle.stroke);
+    expect(faded.color.toARGB32() & 0xFFFFFF, grip, reason: 'gripMove\'s RGB');
+    expect(faded.color.a, closeTo(fadedAlpha, 1e-6),
+        reason: 'gripMove\'s alpha (1) times 0.4');
+    expect(normal.color.toARGB32(), 0xFF000000 | grip);
+    expect(spy.strokeWidths, [closeTo(2 / 0.06, 1e-4), closeTo(2 / 0.06, 1e-4)],
+        reason: 'the faded frame is as wide');
+
+    var chipSpy = frame(chips);
+    expect(chipSpy.paragraphs, hasLength(2));
+    expect(chipSpy.rrects, hasLength(3), reason: 'GA, its veil, GB');
+    expect(chipSpy.rrects[1], chipSpy.rrects[0], reason: 'the same rect');
+    expect([
+      for (final p in chipSpy.paints) p.color.toARGB32()
+    ], [
+      0xFF000000 | grip,
+      0x99FFFFFF,
+      0xFF000000 | grip
+    ], reason: 'GA\'s chip, then the paper at 0.6 over it; GB\'s alone');
+    expect(chipSpy.paints[1].style, ui.PaintingStyle.fill);
+    expect(
+        chipSpy.seen.indexOf(chipSpy.paragraphs[0]) <
+            chipSpy.seen.lastIndexOf(chipSpy.paints[1]),
+        isTrue,
+        reason: 'the veil over GA\'s label');
+
+    // The chips' pixels: GA's padding is the paper at 0.6 over gripMove,
+    // GB's gripMove.
+    Future<ByteData> render() async => (await tester.runAsync(() async {
+          final recorder = ui.PictureRecorder();
+          final canvas = ui.Canvas(recorder)
+            ..drawColor(Color(paper.value), ui.BlendMode.src);
+          chips.paint(canvas, kSize);
+          final image = await recorder
+              .endRecording()
+              .toImage(kSize.width.toInt(), kSize.height.toInt());
+          final data = await image.toByteData();
+          image.dispose();
+          return data!;
+        }))!;
+    int rgbAt(ByteData bytes, (int, int) at) {
+      final i = (at.$2 * kSize.width.toInt() + at.$1) * 4;
+      return (bytes.getUint8(i) << 16) |
+          (bytes.getUint8(i + 1) << 8) |
+          bytes.getUint8(i + 2);
+    }
+
+    final bytes = await render();
+    final ga = paddingPixel(chipSpy, 0, 0), gb = paddingPixel(chipSpy, 1, 2);
+    expect(rgbDistance(rgbAt(bytes, ga), veilOver(0xFFFFFF, grip)),
+        lessThanOrEqualTo(1),
+        reason: 'GA veiled: ${rgbAt(bytes, ga).toRadixString(16)}');
+    expect(rgbAt(bytes, gb), grip, reason: 'GB unveiled');
+
+    focus.value = const {};
+    spy = frame(frames);
+    expect(identical(spy.paints[0], faded) && identical(spy.paints[1], faded),
+        isTrue,
+        reason: 'an empty focus fades both');
+    expect(frame(chips).rrects, hasLength(4));
+    focus.value = null;
+    spy = frame(frames);
+    expect(identical(spy.paints[0], normal) && identical(spy.paints[1], normal),
+        isTrue,
+        reason: 'no focus, nothing fades');
+    expect(frame(chips).rrects, hasLength(2));
+
+    // On the dark set's paper the veil is that paper's RGB, its own alpha
+    // replaced; the faded frame the lilac at 0.4.
+    focus.value = {'3'};
+    paper.value = 0x801F3A5F;
+    expect(frame(chips).paints[1].color.toARGB32(), 0x991F3A5F);
+    final dark = frame(frames).paints[0].color;
+    expect(dark.toARGB32() & 0xFFFFFF,
+        PaperPalette.forPaper(0x801F3A5F).gripMove.toARGB32() & 0xFFFFFF);
+    expect(dark.a, closeTo(fadedAlpha, 1e-6));
+  });
+
+  test(
+      'TG-Z2 M-Z38: a focus set after the first paint switches GA to the '
+      'faded frame and veils its chip; one rebuild, then steady frames '
+      'build nothing', () {
+    final doc = groupedPlan();
+    final camera = ValueNotifier(cameraAt(0.06));
+    final groups = ValueNotifier(zoneGroups());
+    final focus = ValueNotifier<Set<String>?>(null);
+    final paper = ValueNotifier<int>(0xFFFFFFFF);
+    final frames = focusedPainter(
+        TableGroupLayer.frames, doc, camera, groups, focus, paper);
+    final chips = focusedPainter(
+        TableGroupLayer.chips, doc, camera, groups, focus, paper);
+    final before = frame(frames);
+    expect(identical(before.paints[0], before.paints[1]), isTrue,
+        reason: 'premise: no focus, one paint');
+    expect(frame(chips).rrects, hasLength(2), reason: 'premise: no veil');
+    final rebuilt = [frames.debugRebuilds, chips.debugRebuilds];
+
+    focus.value = {'7'};
+    final after = frame(frames);
+    expect(identical(after.paints[0], before.paints[0]), isFalse,
+        reason: 'GA now faded');
+    expect(after.paints[0].color.a, closeTo(1 - kTableFocusVeilAlpha, 1e-6));
+    expect(identical(after.paints[1], before.paints[1]), isTrue,
+        reason: 'GB straddles: 7 is focused');
+    final veiled = frame(chips);
+    expect(veiled.rrects, hasLength(3));
+    expect(veiled.paints[1].color.toARGB32(), 0x99FFFFFF);
+    expect([frames.debugRebuilds, chips.debugRebuilds],
+        [rebuilt[0] + 1, rebuilt[1] + 1]);
+
+    final made = [frames.debugAllocations, chips.debugAllocations];
+    final reference = [frame(frames).seen, frame(chips).seen];
+    for (var i = 0; i < 5; i++) {
+      camera.value = cameraAt(0.05 + 0.003 * i);
+      frame(frames);
+      frame(chips);
+    }
+    camera.value = cameraAt(0.06);
+    final again = [frame(frames).seen, frame(chips).seen];
+    for (var k = 0; k < 2; k++) {
+      expect(again[k].length, reference[k].length);
+      for (var i = 0; i < again[k].length; i++) {
+        expect(identical(again[k][i], reference[k][i]), isTrue,
+            reason: 'painter $k item $i');
+      }
+    }
+    expect([frames.debugAllocations, chips.debugAllocations], made);
+    expect([frames.debugRebuilds, chips.debugRebuilds],
+        [rebuilt[0] + 1, rebuilt[1] + 1]);
+  });
+
+  test(
+      'RX1 a group whose only focused member is on a locked layer draws as '
+      'before (Z14: a locked table is a visible member)', () {
+    final doc = groupedPlan();
+    final locked = addLayer(doc, 'Locked', visible: true);
+    doc.commands.execute(
+        SetLayerCommand(doc.tables.layers[locked]!.copyWith(locked: true)));
+    doc.commands.execute(SetInstanceLayerCommand(
+        TableSurvey.of(doc).withNumber('7').single.instance, locked));
+    final camera = ValueNotifier(cameraAt(0.06));
+    final groups = ValueNotifier(zoneGroups());
+    final focus = ValueNotifier<Set<String>?>({'7'});
+    final paper = ValueNotifier<int>(0xFFFFFFFF);
+    final frames = focusedPainter(
+        TableGroupLayer.frames, doc, camera, groups, focus, paper);
+    final chips = focusedPainter(
+        TableGroupLayer.chips, doc, camera, groups, focus, paper);
+    final spy = frame(frames);
+    expect(spy.paths, hasLength(2), reason: 'premise: GA and GB framed');
+    expect(spy.paints[0].color.a, closeTo(0.4, 1e-6), reason: 'GA faded');
+    expect(spy.paints[1].color.a, 1, reason: 'GB: 7 is focused, locked');
+    expect(frame(chips).rrects, hasLength(3), reason: 'GA veiled, GB not');
   });
 
   test('premise: the lead order of {12, 3, 7} is 3, 7, 12', () {

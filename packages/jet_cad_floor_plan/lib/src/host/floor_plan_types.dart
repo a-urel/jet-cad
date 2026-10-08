@@ -19,7 +19,10 @@ enum FloorPlanMode {
 @immutable
 final class FloorPlanTable {
   const FloorPlanTable(
-      {required this.number, required this.seats, required this.symbolKey});
+      {required this.number,
+      required this.seats,
+      required this.symbolKey,
+      this.visible = true});
 
   /// The table's number, or null while it has none.
   final String? number;
@@ -30,18 +33,26 @@ final class FloorPlanTable {
   /// The library key of its symbol, or null for a hand-made one.
   final String? symbolKey;
 
+  /// Whether its layer is shown: false for a table on a hidden layer (zone
+  /// spec Z24), which the view neither shows nor lets anyone pick, so a
+  /// host counts it as unplaced (Z18). The layer rule only: a table with
+  /// a degenerate transform reads true yet is never drawn.
+  final bool visible;
+
   @override
   bool operator ==(Object other) =>
       other is FloorPlanTable &&
       other.number == number &&
       other.seats == seats &&
-      other.symbolKey == symbolKey;
+      other.symbolKey == symbolKey &&
+      other.visible == visible;
 
   @override
-  int get hashCode => Object.hash(number, seats, symbolKey);
+  int get hashCode => Object.hash(number, seats, symbolKey, visible);
 
   @override
-  String toString() => 'FloorPlanTable($number, $seats, $symbolKey)';
+  String toString() =>
+      'FloorPlanTable($number, $seats, $symbolKey, visible: $visible)';
 }
 
 /// What Export hands the host (spec 14b-2 H6): the bytes and what to call
