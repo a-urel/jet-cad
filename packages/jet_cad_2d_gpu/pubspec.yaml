@@ -3,7 +3,7 @@ description: >-
   The GPU-resident render backend for jet_cad_2d_flutter, in its own package
   so flutter_scene and its build hook stay out of every host's build. Only
   an app that calls installResidentGpu() draws through it; no host does.
-version: 0.2.0
+version: 0.3.0
 repository: https://github.com/ahmeturel/jet-cad
 publish_to: none
 resolution: workspace
