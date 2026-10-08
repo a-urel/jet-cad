@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-07. **`main` carries release 0.1.0** (tag
-`v0.1.0` → `22206f5`) and everything since. The history of every plan
+**Last updated:** 2026-10-08. **`main` carries release 0.2.0** (tag
+`v0.2.0` → `7355c00`, after `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -45,7 +45,7 @@ one's spec, plan and results.
   main'e merge et"*: a plan carries its separator (`.` or `,`), chosen on
   the Page panel; dimensions, room areas and the rulers print it; a new
   plan takes the UI language's (Q2 assumed yes, N1); **schema 8**, which
-  0.1.0 refuses (unreleased: CHANGELOG). Spec
+  0.1.0 refuses (released in 0.2.0). Spec
   [2026-10-07-decimal-separator-design.md](docs/superpowers/specs/2026-10-07-decimal-separator-design.md)
   (rev 2), plan [2026-10-07-decimal-separator.md](docs/superpowers/plans/2026-10-07-decimal-separator.md),
   results [2026-10-07-decimal-separator-results.md](docs/superpowers/notes/2026-10-07-decimal-separator-results.md),
@@ -56,28 +56,31 @@ one's spec, plan and results.
   merge et"*: the GPU renderer moves out of `jet_cad_2d_flutter` into
   `packages/jet_cad_2d_gpu`, so a host's graph holds no `flutter_scene`
   and runs no build hook, its web build is 12 MB smaller and its Flutter
-  floor is 3.44 again (unreleased: CHANGELOG). CI's host probe fails on a
+  floor is 3.44 again (released in 0.2.0). CI's host probe fails on a
   lock that resolves the GPU renderer. Spec
   [2026-10-07-gpu-package-split-design.md](docs/superpowers/specs/2026-10-07-gpu-package-split-design.md)
   (rev 2), plan [2026-10-07-gpu-package-split.md](docs/superpowers/plans/2026-10-07-gpu-package-split.md),
   results [2026-10-07-gpu-split-results.md](docs/superpowers/notes/2026-10-07-gpu-split-results.md),
   ledger [docs/superpowers/ledgers/2026-10-07-gpu-split/](docs/superpowers/ledgers/2026-10-07-gpu-split/).
+- **Release 0.2.0** (the human, 2026-10-08: *"devam, 0.2.0 sürümüyle
+  başla"*), merged into `main` at `7355c00`: the four host packages
+  (and `jet_cad_2d_gpu`) at 0.2.0; the CHANGELOG's Unreleased section
+  becomes 0.2.0 (Q0's separator and schema 8, the GPU split); the host
+  guide's "unreleased" markers read "since 0.2.0". An independent review
+  (*Approved with fixes*) is applied; ledger
+  [docs/superpowers/ledgers/2026-10-08-release-0.2.0/](docs/superpowers/ledgers/2026-10-08-release-0.2.0/).
+  Merged on the human's *"evet, main'e merge et"*; the guide names
+  `7355c00`. **The tag `v0.2.0` → `7355c00` is the human's to push** (the
+  git proxy refuses an agent's tag push).
 
 ## In flight
 
-**Release 0.2.0** (the human, 2026-10-08: *"devam, 0.2.0 sürümüyle
-başla"*), on `claude/exciting-pasteur-9m22jv`: the four host packages
-(and `jet_cad_2d_gpu`) at 0.2.0; the CHANGELOG's Unreleased section
-becomes 0.2.0 (Q0's separator and schema 8, the GPU split); the host
-guide's "unreleased" markers read "since 0.2.0". An independent review
-(*Approved with fixes*) is applied; ledger
-[docs/superpowers/ledgers/2026-10-08-release-0.2.0/](docs/superpowers/ledgers/2026-10-08-release-0.2.0/).
-Merged on the human's *"evet, main'e merge et"*. As for 0.1.0: the human
-pushes the tag `v0.2.0` at the merge commit, and the next commit names
-that SHA in the guide.
+Nothing. Release 0.2.0, above, is merged.
 
 ## Owed to the human
 
+- **The tag `v0.2.0`** → `7355c001f585910a1c61a76db11203f6d451bfc4`:
+  `git tag v0.2.0 7355c00 && git push origin v0.2.0`.
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -105,11 +108,11 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** Monépro's next jet-cad prerequisite
-(spec 103 §10) is a consumable version: a release (0.2.0: schema 8, the
-separator and the GPU split are unreleased on `main`) whose SHA the POS
-pins. The tag is the human's to push.
-
+**Next: the human's choice.** Monépro's spec 103 §10 jet-cad
+prerequisites now stand: the GPU split, touch, a consumable version
+(0.2.0, once its tag is pushed), the outside-app check (the host probe),
+placement and open/save. **Zones** in the editor remain; then the floor
+view's integration on Monépro's side (its phase 2).
 ---
 
 ## What this project is
