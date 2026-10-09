@@ -124,13 +124,27 @@ one's spec, plan and results.
   in `8f813b2` … `e6a1d06`). **Merged into `main` at `fe93d23`** on the human's
   *"evet, main'e merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-2/](docs/superpowers/ledgers/2026-10-09-embedding-slice-2/).
-  Unreleased (CHANGELOG). Slices 3 (`FloorPlanTheme`) and 4 (bars,
-  keyboard, editor capabilities) to come.
+  Unreleased (CHANGELOG). **Slice 3** (the human: *"tamam, Dilim 3 ile
+  devam et"*): `FloorPlanTheme`, a `ThemeExtension` merged field by field
+  with `FloorPlanView(theme:)`: status captions and fills, group frames
+  and chips, the selection per paper and its width (both modes), the
+  focus veil, `canvasBackground`, the service bar's height; with no
+  theme every pixel is today's. Plan
+  [2026-10-09-embedding-slice-3.md](docs/superpowers/plans/2026-10-09-embedding-slice-3.md),
+  results [2026-10-09-embedding-slice-3-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-3-results.md);
+  Tasks 1–4 done, each of 1–3 reviewed independently and fixed; the whole
+  range reviewed independently (*Approve with fixes*, applied in `237a28e`,
+  `9eb8434`). **Merged into `main`** on the human's *"evet, main'e merge
+  et"*; ledger
+  [docs/superpowers/ledgers/2026-10-09-embedding-slice-3/](docs/superpowers/ledgers/2026-10-09-embedding-slice-3/).
+  Unreleased (CHANGELOG). Slice 4 (bars, keyboard, editor capabilities)
+  to come.
 
 ## In flight
 
-Nothing. Slices 1 and 2, above, are merged; Slice 3 (`FloorPlanTheme`)
-is next on the human's word.
+**The host embedding API's Slice 4** (the bars, keyboard, editor
+capabilities), on the human's *"tamam, Dilim 4 ile devam et"*
+(2026-10-09): its plan is being committed after Slice 3's merge.
 
 ## Owed to the human
 
@@ -147,6 +161,9 @@ is next on the human's word.
 - **Slice 2, a look:** the demo's double tap, pointer line and *Link
   tables* on a tablet and a terminal; the German and Turkish read of its
   new strings.
+- **Slice 3, a look:** the demo's POS look on a tablet and a terminal,
+  light and dark; a native read of its new strings (de "Aussehen /
+  Kasse", tr "Görünüm / Standart / Kasa").
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
@@ -171,14 +188,17 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Slice 3** of the host embedding API (`FloorPlanTheme`), on the
-human's word; or a release carrying Slices 1 and 2 (0.4.0: **schema 9**,
-every terminal that shares stored plans moves together), the human's call.
-Found in Slice 2, each its own task: O-10 (an undone delete re-appends
-the node at its parent's end) and O-11 (non-finite corners trip a debug
-assertion in the selection grips). Monépro owes Q-H3 and can now name
-`controller.camera`, `tableOverlayBuilder` (Q-Z1) and
-`FloorPlanTableDetail.data` (Q-Z4) in its spec 103.
+**Next: Slice 4** of the host embedding API (the bars, keyboard, editor
+capabilities), started on the human's word; a release carrying Slices
+1–3 (0.4.0: **schema 9**, every terminal that shares stored plans moves
+together) is the human's call. Found and recorded, each its own task:
+O-10 (an undone delete re-appends the node at its parent's end), O-11
+(non-finite corners trip a debug assertion in the selection grips, and
+the PDF export asserts NaN on such a table), and removing a design view
+while a pointer hovers a line throws (Slice 3's results). Monépro owes
+Q-H3 and its real shadcn tokens, and can name `controller.camera`,
+`tableOverlayBuilder` (Q-Z1), `FloorPlanTableDetail.data` (Q-Z4) and
+`FloorPlanTheme` in its spec 103.
 ---
 
 ## What this project is

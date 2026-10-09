@@ -45,6 +45,92 @@ class MemoryStore implements PosStore {
   Future<void> delete(String key) async => _values.remove(key);
 }
 
+/// The floor plan's look in the POS's light theme: bold captions in the
+/// planner's own Roboto, fills a little lighter, group frames in the
+/// POS's primary (the chips follow the frame), rounder chips, the POS's
+/// muted colour around the page, a taller service bar and the POS's
+/// accent for the selection, per paper.
+const FloorPlanTheme floorLookLight = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(
+      fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
+  statusFillOpacity: 0.8,
+  groupFrameColor: Color(0xFF18181B),
+  groupChipTextStyle: TextStyle(fontFamily: 'Roboto'),
+  groupChipRadius: 6,
+  selectionOnLight: Color(0xFFEA580C),
+  selectionOnDark: Color(0xFFFB923C),
+  canvasBackground: Color(0xFFF4F4F5),
+  serviceBarHeight: 52,
+);
+
+/// The same in the POS's dark theme: its dark primary and muted colours.
+/// The selection colours stay: they are chosen by the paper, not by the
+/// theme.
+const FloorPlanTheme floorLookDark = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(
+      fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
+  statusFillOpacity: 0.8,
+  groupFrameColor: Color(0xFFFAFAFA),
+  groupChipTextStyle: TextStyle(fontFamily: 'Roboto'),
+  groupChipRadius: 6,
+  selectionOnLight: Color(0xFFEA580C),
+  selectionOnDark: Color(0xFFFB923C),
+  canvasBackground: Color(0xFF27272A),
+  serviceBarHeight: 52,
+);
+
+final ThemeData posLightTheme = ThemeData(
+  colorSchemeSeed: Colors.teal,
+  extensions: const [floorLookLight],
+);
+
+final ThemeData posDarkTheme = ThemeData(
+  colorSchemeSeed: Colors.teal,
+  brightness: Brightness.dark,
+  extensions: const [floorLookDark],
+);
+
+/// The POS's own colour tokens as a Material colour scheme, by hand: a
+/// seeded scheme cannot reproduce another design system's colours.
+ColorScheme posColorScheme(Brightness brightness) =>
+    brightness == Brightness.light
+        ? const ColorScheme(
+            brightness: Brightness.light,
+            primary: Color(0xFF18181B),
+            onPrimary: Color(0xFFFAFAFA),
+            secondary: Color(0xFFF4F4F5),
+            onSecondary: Color(0xFF18181B),
+            error: Color(0xFFEF4444),
+            onError: Color(0xFFFAFAFA),
+            surface: Color(0xFFFFFFFF),
+            onSurface: Color(0xFF09090B),
+            onSurfaceVariant: Color(0xFF71717A),
+            surfaceContainer: Color(0xFFF4F4F5),
+            outline: Color(0xFFE4E4E7),
+          )
+        : const ColorScheme(
+            brightness: Brightness.dark,
+            primary: Color(0xFFFAFAFA),
+            onPrimary: Color(0xFF18181B),
+            secondary: Color(0xFF27272A),
+            onSecondary: Color(0xFFFAFAFA),
+            error: Color(0xFF7F1D1D),
+            onError: Color(0xFFFAFAFA),
+            surface: Color(0xFF09090B),
+            onSurface: Color(0xFFFAFAFA),
+            onSurfaceVariant: Color(0xFFA1A1AA),
+            surfaceContainer: Color(0xFF18181B),
+            outline: Color(0xFF27272A),
+          );
+
+/// The theme around the floor plan: the POS's colour scheme, for the
+/// planner's bars, panels and dialogs, and the app theme's extensions
+/// carried over, or the view would find no `FloorPlanTheme`.
+ThemeData floorTheme(ThemeData app) => ThemeData(
+      colorScheme: posColorScheme(app.brightness),
+      extensions: app.extensions.values,
+    );
+
 class PosApp extends StatelessWidget {
   const PosApp({super.key, required this.store, this.locale});
 
@@ -56,6 +142,8 @@ class PosApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: posLightTheme,
+      darkTheme: posDarkTheme,
       locale: locale,
       supportedLocales: floorPlanSupportedLocales,
       localizationsDelegates: floorPlanLocalizationsDelegates,
@@ -449,27 +537,31 @@ class _FloorScreenState extends State<FloorScreen> {
                 Text(number == null ? '' : 'Table $number'),
           ),
           Expanded(
-            child: FloorPlanView(
-              controller: controller,
-              exportName: 'floor-1',
-              onExport: saveExport,
-              printer: const PrintingPagePrinter(),
-              onTableTap: openOrder,
-              onTableContextMenu: showTableMenu,
-              onGroupTap: (group, number) => openOrder(number),
-              onMergeRequested: mergeTables,
-              onSplitRequested: splitGroup,
-              serviceMoves: staffMayMoveTables,
-              longPress: FloorPlanLongPress.toggleSelection,
-              tableOverlayBuilder: tableBadge,
-              tableOverlayLayout: const FloorPlanOverlayLayout(
-                anchor: Alignment.bottomCenter,
-                detailBreakpoints: [0.05],
+            child: Theme(
+              data: floorTheme(Theme.of(context)),
+              child: FloorPlanView(
+                controller: controller,
+                exportName: 'floor-1',
+                onExport: saveExport,
+                printer: const PrintingPagePrinter(),
+                onTableTap: openOrder,
+                onTableContextMenu: showTableMenu,
+                onGroupTap: (group, number) => openOrder(number),
+                onMergeRequested: mergeTables,
+                onSplitRequested: splitGroup,
+                serviceMoves: staffMayMoveTables,
+                longPress: FloorPlanLongPress.toggleSelection,
+                tableOverlayBuilder: tableBadge,
+                tableOverlayLayout: const FloorPlanOverlayLayout(
+                  anchor: Alignment.bottomCenter,
+                  detailBreakpoints: [0.05],
+                ),
+                onTablesMoved: tablesMoved,
+                onTableDoubleTap: openBill,
+                onFloorTap: floorTapped,
+                onTableHover: showHover,
+                theme: const FloorPlanTheme(selectionWidth: 3),
               ),
-              onTablesMoved: tablesMoved,
-              onTableDoubleTap: openBill,
-              onFloorTap: floorTapped,
-              onTableHover: showHover,
             ),
           ),
         ],

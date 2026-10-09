@@ -30,6 +30,7 @@ export 'src/host/floor_plan_types.dart'
         TableGroup,
         TableStatus,
         Unnumbered;
+export 'src/host/floor_plan_theme.dart' show FloorPlanTheme;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
 export 'src/host/table_detail.dart' show FloorPlanTableDetail;
 export 'src/host/table_overlay.dart'

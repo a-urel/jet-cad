@@ -39,6 +39,7 @@ void main() {
       'FloorPlanTableChanged',
       'FloorPlanPlanReplaced',
       'FloorPlanCamera',
+      'FloorPlanTheme',
       'FloorPlanTableOverlay',
       'FloorPlanTableOverlayBuilder',
       'FloorPlanOverlayLayout',

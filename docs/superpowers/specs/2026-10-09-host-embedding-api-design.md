@@ -624,15 +624,18 @@ rebuild key; a painter rebuilds its paints only when it changes, as a
 paper change recolours today. The painters' allocation tests
 (`table_status_painter_test`, `table_group_painter_test`,
 `table_focus_painter_test`, and the render package's
-`paint_allocation_test` for the selection colours) also run with a
-non-default theme.
+`selection_overlay_test` reuse test for the selection colours;
+`paint_allocation_test` paints none of them and stays untouched, S-1)
+also run with a non-default theme.
 
 ### T-4. Fonts
 
-Painted text (captions, chips) uses the bundled Roboto by default, as the
-plan does, so a terminal without the host's fonts draws the same. A
-`fontFamily` in the theme's styles is honoured when the host has loaded
-it; documented as the host's responsibility.
+Painted text (captions, chips) keeps today's default: no family, the
+platform's default font (making Roboto the default would move every
+caption's glyphs and widths, against P-6; S-2). A `fontFamily` in the
+theme's styles is honoured when the host has loaded it; the guide
+recommends `'Roboto'` (registered by `ensureFloorPlanFonts`) so every
+terminal draws the same; documented as the host's responsibility.
 
 ## Slice 4 — toolbars, keyboard, the editor
 
@@ -1030,3 +1033,17 @@ yet delivered (a `load` in the same step), then done (final review F-1);
 E-6's id is read as it is written: a number on two tables names neither,
 so the guide's `idOf` and the demo read no id for it, as `setTableData`
 refuses the link (final review F-3).
+
+**Settled by Slice 3's plan** (`docs/superpowers/plans/2026-10-09-embedding-slice-3.md`,
+its *Spec points to settle*; the controller's rulings, each the plan's
+recommendation): S-1 T-3 names `selection_overlay_test`, not
+`paint_allocation_test`; S-2 T-4 keeps today's default font; S-3 the two
+styles merge with `TextStyle.merge`; S-4 `lerp` snaps a field null on one
+side at 0.5; S-5 the fields' types and ranges, checked at build; S-6 the
+automatic ink follows the drawn colour; S-7 a null chip colour is the
+resolved frame colour, a faded group takes the veil; S-8 `selectionWidth`
+reaches the selection's strokes, the hover stays 1.5 px at the selection's
+alpha × 0.6; S-9 a host veil colour's alpha is multiplied by the opacity;
+S-10 the view re-measures the selection canvas after a bar-height change;
+S-11 the theme is resolved in a scope just below `FloorPlanView`; S-12 the
+readings the plan pins.

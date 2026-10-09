@@ -122,6 +122,14 @@ abstract class DemoStrings {
 
   String logPlanReplaced(String area);
 
+  /// Host embedding API spec T-1, T-2: the look switch in the app bar,
+  /// its tooltip and its two looks, today's and the POS's.
+  String get look;
+
+  String get lookStandard;
+
+  String get lookPos;
+
   /// [mm] in metres, one decimal, with [separator] and a real minus sign.
   static String metres(double mm, String separator) {
     var text = (mm / 1000).toStringAsFixed(1);
@@ -306,6 +314,15 @@ final class _En extends DemoStrings {
 
   @override
   String logPlanReplaced(String area) => '$area: plan replaced';
+
+  @override
+  String get look => 'Look';
+
+  @override
+  String get lookStandard => 'Standard';
+
+  @override
+  String get lookPos => 'POS';
 }
 
 final class _De extends DemoStrings {
@@ -491,6 +508,15 @@ final class _De extends DemoStrings {
 
   @override
   String logPlanReplaced(String area) => '$area: Plan ersetzt';
+
+  @override
+  String get look => 'Aussehen';
+
+  @override
+  String get lookStandard => 'Standard';
+
+  @override
+  String get lookPos => 'Kasse';
 }
 
 final class _Tr extends DemoStrings {
@@ -675,4 +701,13 @@ final class _Tr extends DemoStrings {
 
   @override
   String logPlanReplaced(String area) => '$area: plan değiştirildi';
+
+  @override
+  String get look => 'Görünüm';
+
+  @override
+  String get lookStandard => 'Standart';
+
+  @override
+  String get lookPos => 'Kasa';
 }

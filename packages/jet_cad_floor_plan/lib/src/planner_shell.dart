@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
 import 'document_toolbar.dart';
+import 'host/floor_plan_theme.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
@@ -216,13 +217,20 @@ class _PlannerShellState extends State<PlannerShell> {
   bool _darkCanvas = false;
 
   /// The theme's surface, ARGB: the paper when the document has no page
-  /// (dark theme spec D4). Set in [didChangeDependencies], the only place
-  /// this state reads the theme for the paper.
+  /// (dark theme spec D4), or the host's `canvasBackground` in its place
+  /// (host embedding API spec T-1). Set in [didChangeDependencies], the
+  /// only place this state reads the theme for the paper.
   late int _surfaceArgb;
 
   /// The theme's brightness: a dark one shows a light page dark (decision
   /// note K1). Set in [didChangeDependencies].
   late Brightness _brightness;
+
+  /// The host's resolved look (host embedding API spec T-2): the scope's
+  /// under a `FloorPlanView`, the ambient extension in a bare shell; null
+  /// for today's. Set in [didChangeDependencies]; the selection's colours
+  /// and width and the canvas's background read it (T-1).
+  FloorPlanTheme? _floorTheme;
 
   /// The paper the drafting and the overlays lie on (dark theme spec D4,
   /// dark canvas K1–K2): [kDarkCanvasPaper] on a dark canvas, else the
@@ -264,11 +272,17 @@ class _PlannerShellState extends State<PlannerShell> {
     setState(() => _resolver = next);
   }
 
+  /// The canvas around the page and a page-less plan's paper: the host's
+  /// `canvasBackground`, else the theme's surface (spec T-1).
+  Color _canvasColour(ColorScheme scheme) =>
+      _floorTheme?.canvasBackground ?? scheme.surface;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final theme = Theme.of(context);
-    _surfaceArgb = theme.colorScheme.surface.toARGB32();
+    _floorTheme = FloorPlanThemeScope.of(context);
+    _surfaceArgb = _canvasColour(theme.colorScheme).toARGB32();
     _brightness = theme.brightness;
     // A `build` follows, so no setState: a theme switch can change the
     // key, and only a change builds a new resolver.
@@ -983,7 +997,7 @@ class _PlannerShellState extends State<PlannerShell> {
                   ),
                   Expanded(
                     child: ColoredBox(
-                      color: scheme.surface,
+                      color: _canvasColour(scheme),
                       child: PlannerView(
                         document: _document,
                         index: _index,
@@ -997,7 +1011,11 @@ class _PlannerShellState extends State<PlannerShell> {
                         // Dark theme spec D5: the chrome follows the theme,
                         // the overlays the paper, both computed here.
                         chrome: ChromePalette.of(theme.brightness),
-                        paper: PaperPalette.forPaper(_paperArgb()),
+                        // Host embedding API spec T-1: the host's
+                        // selection colour for the paper's set, its width.
+                        paper: paperPaletteFor(_paperArgb(), _floorTheme),
+                        selectionStrokePixels: _floorTheme?.selectionWidth ??
+                            kSelectionStrokePixels,
                         sheetArgb: _darkCanvas ? _paperArgb() : null,
                         grips: _grips,
                         textTool: _text,

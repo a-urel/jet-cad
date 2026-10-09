@@ -29,6 +29,7 @@ class PlannerView extends StatefulWidget {
     required this.outlines,
     required this.chrome,
     required this.paper,
+    this.selectionStrokePixels = kSelectionStrokePixels,
     this.sheetArgb,
     this.grips,
     this.textTool,
@@ -73,6 +74,11 @@ class PlannerView extends StatefulWidget {
   /// (dark theme spec D3, D4): the page's background, or the theme's
   /// surface with no page.
   final PaperPalette paper;
+
+  /// The selected outline's stroke in screen pixels (host embedding API
+  /// spec T-1's `selectionWidth`), handed to the selection overlay;
+  /// [kSelectionStrokePixels] by default.
+  final double selectionStrokePixels;
 
   /// The sheet's fill when the canvas shows a paper other than the page's
   /// ([kDarkCanvasPaper] on a dark canvas, decision note K2); null fills it
@@ -421,6 +427,8 @@ class _PlannerViewState extends State<PlannerView> {
                               camera: widget.camera,
                               outlines: widget.outlines,
                               paper: widget.paper,
+                              selectionStrokePixels:
+                                  widget.selectionStrokePixels,
                               repaint: _repaint,
                             ),
                             size: Size.infinite,

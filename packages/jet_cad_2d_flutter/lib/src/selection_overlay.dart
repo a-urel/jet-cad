@@ -52,7 +52,9 @@ class SelectionOverlayPainter extends CustomPainter {
     required this.paper,
     super.repaint,
     this.onPaintForTest,
-  });
+    this.selectionStrokePixels = kSelectionStrokePixels,
+  }) : assert(selectionStrokePixels > 0 && selectionStrokePixels.isFinite,
+            'the selection stroke must be finite and above 0');
 
   final SelectionController selection;
   final ToolController tools;
@@ -65,6 +67,13 @@ class SelectionOverlayPainter extends CustomPainter {
 
   /// Counts frames in a widget test — the seam criterion 6 is measured on.
   final void Function()? onPaintForTest;
+
+  /// The selected outline's stroke in **screen** pixels, finite and above
+  /// 0; [kSelectionStrokePixels] by default. It also sizes a selected
+  /// point's cross (its stroke and its 3× half-length) and the move
+  /// preview's point cross. The hover keeps [kHoverStrokePixels] (host
+  /// embedding API spec S-8).
+  final double selectionStrokePixels;
 
   /// `worldToScreen ∘ translate(origin)`, column-major, refilled per frame.
   /// `[10]` and `[15]` are the untouched z and w diagonal entries.
@@ -142,7 +151,7 @@ class SelectionOverlayPainter extends CustomPainter {
     // screen width divided by the scale; that is what holds the outline at
     // two pixels through a zoom.
     final scale = cam.scale;
-    _selected.strokeWidth = kSelectionStrokePixels / scale;
+    _selected.strokeWidth = selectionStrokePixels / scale;
     _hover.strokeWidth = kHoverStrokePixels / scale;
     final tool = tools.active;
 
@@ -187,10 +196,10 @@ class SelectionOverlayPainter extends CustomPainter {
     // own widths.
     canvas.save();
     canvas.clipRect(Offset.zero & size);
-    _selected.strokeWidth = kSelectionStrokePixels;
+    _selected.strokeWidth = selectionStrokePixels;
     _hover.strokeWidth = kHoverStrokePixels;
     for (final key in selection.keys) {
-      _drawPointCross(canvas, key, m, _selected, 3 * kSelectionStrokePixels);
+      _drawPointCross(canvas, key, m, _selected, 3 * selectionStrokePixels);
     }
     if (hoverOnly != null) {
       _drawPointCross(canvas, hoverOnly, m, _hover, 3 * kHoverStrokePixels);
@@ -203,7 +212,7 @@ class SelectionOverlayPainter extends CustomPainter {
       for (final key in selection.keys) {
         if (grips?.isMovable(key) == false) continue;
         _drawPointCross(
-            canvas, key, m, _previewPaint, 3 * kSelectionStrokePixels, preview);
+            canvas, key, m, _previewPaint, 3 * selectionStrokePixels, preview);
       }
     }
     if (grips != null) _paintGrips(canvas, grips, m, preview);
@@ -318,13 +327,15 @@ class SelectionOverlayPainter extends CustomPainter {
     canvas.drawLine(Offset(x, y - half), Offset(x, y + half), paint);
   }
 
-  /// True exactly when the paper's palette changed (dark theme spec D5): the
-  /// repaint merge does not include the page, so a paper flip reaches this
-  /// painter only here. Every other reason to repaint is in the `repaint`
-  /// listenable the caller merged; answering true for anything else would
-  /// repaint on every ancestor rebuild, which is exactly the cost the
-  /// boundary split exists to avoid.
+  /// True exactly when the paper's palette or the selection's stroke
+  /// changed (dark theme spec D5; host embedding API spec T-3): the repaint
+  /// merge includes neither the page nor the host's theme, so a paper flip
+  /// or a new width reaches this painter only here. Every other reason to
+  /// repaint is in the `repaint` listenable the caller merged; answering
+  /// true for anything else would repaint on every ancestor rebuild, which
+  /// is exactly the cost the boundary split exists to avoid.
   @override
   bool shouldRepaint(covariant SelectionOverlayPainter oldDelegate) =>
-      oldDelegate.paper != paper;
+      oldDelegate.paper != paper ||
+      oldDelegate.selectionStrokePixels != selectionStrokePixels;
 }

@@ -10,11 +10,26 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../host/floor_plan_theme.dart' show FloorPlanTheme;
 import 'table_picker.dart';
 
 /// The veil's opacity (Z13): a faded table shows at 1 - 0.6 = 0.4 over the
 /// paper.
 const double kTableFocusVeilAlpha = 0.6;
+
+/// The veil's colour on [paper] (ARGB) under [theme] (host embedding API
+/// spec T-1, S-9): the theme's `focusVeilColor` with its alpha multiplied
+/// by the opacity, else the paper's RGB at the opacity, the paper's own
+/// alpha replaced (the paper is opaque). The opacity is the theme's
+/// `focusVeilOpacity`, else [kTableFocusVeilAlpha]. With no theme, today's
+/// veil. Read when a painter recolours, never per frame.
+Color focusVeilColour(int paper, FloorPlanTheme? theme) {
+  final opacity = theme?.focusVeilOpacity ?? kTableFocusVeilAlpha;
+  final colour = theme?.focusVeilColor;
+  return colour == null
+      ? Color(paper).withValues(alpha: opacity)
+      : colour.withValues(alpha: colour.a * opacity);
+}
 
 /// Paints the veil over [document]'s tables outside [focus] through
 /// [camera] (Z12, Z13).
@@ -31,10 +46,11 @@ const double kTableFocusVeilAlpha = 0.6;
 /// the focused ones, one `Path.combine` per rebuild, so a focused table is
 /// never veiled where a faded neighbour overlaps it. It is filled with the
 /// RGB of [paper] (its alpha ignored, as the paper is opaque) at
-/// [kTableFocusVeilAlpha].
+/// [kTableFocusVeilAlpha], or as [theme] sets it ([focusVeilColour]).
 ///
 /// Rebuilt only when the plan's state id or its tables' revision moves, or
-/// the focus is replaced; a paper change only recolours the [Paint]. Each
+/// the focus is replaced; a paper or a theme change only recolours the
+/// [Paint]. Each
 /// frame then draws the one prebuilt path with one reused [Paint] under one
 /// reused matrix: nothing per table (Z16).
 class TableFocusPainter extends CustomPainter {
@@ -43,6 +59,7 @@ class TableFocusPainter extends CustomPainter {
     required this.camera,
     required this.focus,
     required this.paper,
+    this.theme,
     required Listenable repaint,
   }) : super(repaint: repaint) {
     debugAllocations += 2; // the paint and the matrix
@@ -57,6 +74,11 @@ class TableFocusPainter extends CustomPainter {
   /// The paper, ARGB: the veil takes its RGB.
   final ValueListenable<int> paper;
 
+  /// The resolved look (host embedding API spec T-3): its veil colour and
+  /// opacity; null, or a null value, is today's. The host puts it in
+  /// [repaint] too, so a theme change recolours.
+  final ValueListenable<FloorPlanTheme?>? theme;
+
   final Paint _paint = Paint();
   final Float64List _matrix = Float64List(16);
 
@@ -69,6 +91,7 @@ class TableFocusPainter extends CustomPainter {
   int? _tablesRevision;
   Set<String>? _builtFor;
   int? _paperBuilt;
+  FloorPlanTheme? _themeBuilt;
 
   /// Every `Path`, `Paint` and buffer this painter created: the allocation
   /// bar (Z16).
@@ -78,6 +101,11 @@ class TableFocusPainter extends CustomPainter {
   /// How many times the veil was rebuilt.
   @visibleForTesting
   int debugRebuilds = 0;
+
+  /// How many times the veil's colour was derived (a paper or a theme
+  /// change; never per frame, host embedding API spec P-4).
+  @visibleForTesting
+  int debugRecolours = 0;
 
   void _rebuild(Set<String>? focused) {
     debugRebuilds++;
@@ -135,10 +163,13 @@ class TableFocusPainter extends CustomPainter {
     final region = _region;
     if (region == null) return;
     final paperArgb = paper.value;
-    if (_paperBuilt != paperArgb) {
-      // The paper's RGB; its own alpha is replaced, not multiplied.
-      _paint.color = Color(paperArgb).withValues(alpha: kTableFocusVeilAlpha);
+    final look = theme?.value;
+    if (_paperBuilt != paperArgb || !identical(_themeBuilt, look)) {
+      // The paper's RGB, its own alpha replaced, or the theme's colour.
+      debugRecolours++;
+      _paint.color = focusVeilColour(paperArgb, look);
       _paperBuilt = paperArgb;
+      _themeBuilt = look;
     }
     final cam = camera.value.worldToScreenMatrix;
     final scale = math.sqrt((cam.a * cam.d - cam.b * cam.c).abs());
@@ -164,5 +195,6 @@ class TableFocusPainter extends CustomPainter {
       !identical(oldDelegate.document, document) ||
       !identical(oldDelegate.camera, camera) ||
       !identical(oldDelegate.focus, focus) ||
-      !identical(oldDelegate.paper, paper);
+      !identical(oldDelegate.paper, paper) ||
+      !identical(oldDelegate.theme, theme);
 }

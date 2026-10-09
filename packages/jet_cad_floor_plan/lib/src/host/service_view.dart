@@ -28,6 +28,7 @@ import '../service/table_status_painter.dart';
 import '../shell_commands.dart';
 import '../tables/table_label_system.dart';
 import 'floor_plan_controller.dart';
+import 'floor_plan_theme.dart';
 import 'page_flows.dart';
 import 'table_detail.dart';
 
@@ -45,7 +46,8 @@ class ServiceView extends StatefulWidget {
       this.options = _defaultOptions,
       this.userCamera = _always,
       this.tableOverlays,
-      this.events = _noEvents});
+      this.events = _noEvents,
+      this.onCanvasMoved});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -83,9 +85,19 @@ class ServiceView extends StatefulWidget {
 
   static ServiceEvents<FloorPlanTableDetail> _noEvents() => kNoServiceEvents;
 
+  /// The canvas moved in the view (host embedding API spec S-10): called
+  /// once after the first frame laid out with a bar height other than the
+  /// last frame's (a theme's `serviceBarHeight` changed while this copy is
+  /// shown), so the view measures the canvas again (R-13). Null: nothing.
+  final VoidCallback? onCanvasMoved;
+
   @override
   State<ServiceView> createState() => _ServiceViewState();
 }
+
+/// The service bar's height with no theme, in logical pixels (spec T-1's
+/// `serviceBarHeight`).
+const double kServiceBarHeight = 44;
 
 class _ServiceViewState extends State<ServiceView> {
   late final FloorPlanController _c = widget.controller;
@@ -225,7 +237,8 @@ class _ServiceViewState extends State<ServiceView> {
   int _foreground = -1;
   bool _darkCanvas = false;
 
-  /// The theme's surface, ARGB: the paper with no page (D4). Set in
+  /// The theme's surface, ARGB: the paper with no page (D4), or the host's
+  /// `canvasBackground` in its place (host embedding API spec T-1). Set in
   /// [didChangeDependencies], the only place this state reads the theme for
   /// the paper.
   late int _surfaceArgb;
@@ -241,11 +254,18 @@ class _ServiceViewState extends State<ServiceView> {
   /// the first [didChangeDependencies], which runs before that `build`.
   final ValueNotifier<int> _paper = ValueNotifier<int>(0xFFFFFFFF);
 
+  /// The resolved look (host embedding API spec T-2, T-3): set from the
+  /// scope above in [didChangeDependencies]; it notifies only when the
+  /// theme is a different value. Null: today's look.
+  final ValueNotifier<FloorPlanTheme?> _theme =
+      ValueNotifier<FloorPlanTheme?>(null);
+
   // Spec 14c S7: the status layer repaints on the camera, the statuses and
   // every change of this copy (a move, an undo, a redo; R-4), and (dark
   // theme D6c, F-16) on the paper, which a theme switch with no page
   // changes with no document change. Table-groups spec G3: and on the
-  // groups and their statuses.
+  // groups and their statuses. Host embedding API spec T-3: and on the
+  // resolved theme, which joins every painter's rebuild key.
   final _Bump _changed = _Bump();
   StreamSubscription<DocChange>? _changes;
   late final TableStatusPainter _statusPainter = TableStatusPainter(
@@ -255,22 +275,30 @@ class _ServiceViewState extends State<ServiceView> {
     tableGroups: _c.tableGroups,
     groupStatuses: _c.groupStatuses,
     paper: _paper,
+    theme: _theme,
     repaint: Listenable.merge([
       _c.cameraController,
       _c.tableStatuses,
       _c.tableGroups,
       _c.groupStatuses,
       _changed,
-      _paper
+      _paper,
+      _theme
     ]),
   );
 
   // Table-groups spec G3: the group frames (under the status fills) and
   // label chips (above the drafting) repaint on the camera, the groups,
-  // every change of this copy and the paper; zone spec Z14: and on the
-  // focus, which fades a group with no focused member.
-  late final Listenable _groupRepaint = Listenable.merge(
-      [_c.cameraController, _c.tableGroups, _c.tableFocus, _changed, _paper]);
+  // every change of this copy, the paper and the theme; zone spec Z14: and
+  // on the focus, which fades a group with no focused member.
+  late final Listenable _groupRepaint = Listenable.merge([
+    _c.cameraController,
+    _c.tableGroups,
+    _c.tableFocus,
+    _changed,
+    _paper,
+    _theme
+  ]);
   late final TableGroupPainter _framePainter =
       _groupPainter(TableGroupLayer.frames);
   late final TableGroupPainter _chipPainter =
@@ -284,20 +312,45 @@ class _ServiceViewState extends State<ServiceView> {
         groups: _c.tableGroups,
         paper: _paper,
         tableFocus: _c.tableFocus,
+        theme: _theme,
         repaint: _groupRepaint,
       );
 
   // Zone spec Z11, Z13, Z16: the veil over the tables outside the host's
   // focus, above the drafting and under the chips; it repaints on the
-  // camera, the focus, every change of this copy and the paper.
+  // camera, the focus, every change of this copy, the paper and the theme.
   late final TableFocusPainter _focusPainter = TableFocusPainter(
     document: _document,
     camera: _c.cameraController,
     focus: _c.tableFocus,
     paper: _paper,
+    theme: _theme,
     repaint: Listenable.merge(
-        [_c.cameraController, _c.tableFocus, _changed, _paper]),
+        [_c.cameraController, _c.tableFocus, _changed, _paper, _theme]),
   );
+
+  /// The bar height the last build laid out; null before the first.
+  double? _barHeight;
+
+  /// Whether a [ServiceView.onCanvasMoved] call is due after this frame.
+  bool _canvasMoveDue = false;
+
+  /// The bar's height (spec T-1): the theme's, else [kServiceBarHeight].
+  /// After the first frame laid out with another height than the last, the
+  /// view is told the canvas moved, once (S-10).
+  double _barHeightNow() {
+    final height = _theme.value?.serviceBarHeight ?? kServiceBarHeight;
+    final last = _barHeight;
+    _barHeight = height;
+    if (last != null && last != height && !_canvasMoveDue) {
+      _canvasMoveDue = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _canvasMoveDue = false;
+        if (mounted) widget.onCanvasMoved?.call();
+      });
+    }
+    return height;
+  }
 
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
@@ -356,11 +409,17 @@ class _ServiceViewState extends State<ServiceView> {
     setState(() => _resolver = next);
   }
 
+  /// The canvas around the page and a page-less plan's paper: the host's
+  /// `canvasBackground`, else the theme's surface (spec T-1).
+  Color _canvasColour(ColorScheme scheme) =>
+      _theme.value?.canvasBackground ?? scheme.surface;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final theme = Theme.of(context);
-    _surfaceArgb = theme.colorScheme.surface.toARGB32();
+    _theme.value = FloorPlanThemeScope.of(context);
+    _surfaceArgb = _canvasColour(theme.colorScheme).toARGB32();
     _brightness = theme.brightness;
     _paper.value = _paperArgb();
     // A `build` follows: only a key change builds a new resolver.
@@ -385,6 +444,7 @@ class _ServiceViewState extends State<ServiceView> {
     _changes?.cancel();
     _changed.dispose();
     _paper.dispose();
+    _theme.dispose();
     _pageReady.dispose();
     _canMerge.dispose();
     _canSplit.dispose();
@@ -422,7 +482,7 @@ class _ServiceViewState extends State<ServiceView> {
           children: [
             Container(
               key: const Key('service-bar'),
-              height: 44,
+              height: _barHeightNow(),
               color: scheme.surfaceContainer,
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
@@ -462,7 +522,7 @@ class _ServiceViewState extends State<ServiceView> {
             ),
             Expanded(
               child: ColoredBox(
-                color: scheme.surface,
+                color: _canvasColour(scheme),
                 child: Listener(
                   key: _canvas,
                   onPointerDown: _onSecondaryDown,
@@ -481,7 +541,11 @@ class _ServiceViewState extends State<ServiceView> {
                     // Dark theme spec D5: the chrome (here the sheet edge)
                     // follows the theme, the overlays the paper.
                     chrome: ChromePalette.of(theme.brightness),
-                    paper: PaperPalette.forPaper(_paperArgb()),
+                    // Host embedding API spec T-1: the host's selection
+                    // colour for the paper's set, its width.
+                    paper: paperPaletteFor(_paperArgb(), _theme.value),
+                    selectionStrokePixels:
+                        _theme.value?.selectionWidth ?? kSelectionStrokePixels,
                     sheetArgb: _darkCanvas ? _paperArgb() : null,
                     fitRequests: _c.fitRequests,
                     fitOnStart: _fitOnStart,

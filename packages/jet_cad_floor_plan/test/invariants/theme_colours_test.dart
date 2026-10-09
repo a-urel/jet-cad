@@ -36,6 +36,9 @@ final List<RegExp> kPatterns = [
 /// `/`-separated): the palettes and the two status caption inks.
 const List<String> kAllowedFiles = [
   '../jet_cad_2d_flutter/lib/src/canvas_palette.dart',
+  // The demo's POS look: a hand-built ColorScheme of another design
+  // system's tokens (host embedding API spec F-4), literal by nature.
+  '../../apps/restaurant_demo/lib/demo_theme.dart',
 ];
 
 /// Allowed (file, exact literal) pairs (spec D9a): a match is allowed when

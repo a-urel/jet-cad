@@ -12,7 +12,10 @@
 // table 7 (host embedding API spec G-1 to G-7); the tables linked to the
 // POS's ids through their host data, a double tap that opens a table, the
 // moved tables, the pointer's table or floor point, and the design's table
-// changes (spec E-1 to E-8); and a log of the API's state, in English,
+// changes (spec E-1 to E-8); a Standard / POS look switch, the POS's look
+// a `FloorPlanTheme` in the app's themes, a local `Theme` with a hand-built
+// `ColorScheme` around the view and one field of the view's own (spec T-1,
+// T-2, F-4; lib/demo_theme.dart); and a log of the API's state, in English,
 // German or Turkish. An example and an integration surface, not a product.
 import 'dart:async' show StreamSubscription, Timer, unawaited;
 import 'dart:math' as math;
@@ -25,6 +28,7 @@ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
 import 'demo_strings.dart';
+import 'demo_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -87,14 +91,24 @@ class RestaurantDemo extends StatefulWidget {
 class _RestaurantDemoState extends State<RestaurantDemo> {
   late Locale? _locale = widget.locale;
 
+  /// The look the app bar switches (spec T-1): today's by default.
+  DemoLook _look = DemoLook.standard;
+
+  /// The app's theme for [brightness]: the seed's; under the POS look it
+  /// carries the POS's `FloorPlanTheme` for that brightness, one extension
+  /// per `ThemeData` (spec T-1). A switch animates as any theme change.
+  ThemeData _theme(Brightness brightness) =>
+      ThemeData(colorSchemeSeed: _seed, brightness: brightness, extensions: [
+        if (_look == DemoLook.pos) posFloorPlanTheme(brightness),
+      ]);
+
   @override
   Widget build(BuildContext context) => MaterialApp(
         onGenerateTitle: (context) => DemoStrings.of(context).title,
         // Dark theme spec D1: the planner follows the host's theme, and the
         // OS picks light or dark.
-        theme: ThemeData(colorSchemeSeed: _seed),
-        darkTheme:
-            ThemeData(colorSchemeSeed: _seed, brightness: Brightness.dark),
+        theme: _theme(Brightness.light),
+        darkTheme: _theme(Brightness.dark),
         themeMode: ThemeMode.system,
         // Spec 14d L17: the three languages, switched in the app bar
         // through `MaterialApp.locale` (V-4), so all three can be looked at
@@ -105,7 +119,9 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
         home: DemoHome(
             plans: widget.plans,
             random: widget.random,
-            onLocale: (l) => setState(() => _locale = l)),
+            onLocale: (l) => setState(() => _locale = l),
+            look: _look,
+            onLook: (look) => setState(() => _look = look)),
       );
 }
 
@@ -196,13 +212,26 @@ final class Area {
 }
 
 class DemoHome extends StatefulWidget {
-  const DemoHome({super.key, required this.plans, this.random, this.onLocale});
+  const DemoHome(
+      {super.key,
+      required this.plans,
+      this.random,
+      this.onLocale,
+      this.look = DemoLook.standard,
+      this.onLook});
 
   final Map<String, String> plans;
   final math.Random? random;
 
   /// Switches the app's language (spec 14d L17).
   final void Function(Locale locale)? onLocale;
+
+  /// The app's look (spec T-1): under [DemoLook.pos] the view sits in a
+  /// local `Theme` ([posViewTheme]) and passes [kPosViewOverride].
+  final DemoLook look;
+
+  /// Switches the app's look.
+  final void Function(DemoLook look)? onLook;
 
   @override
   State<DemoHome> createState() => DemoHomeState();
@@ -798,6 +827,24 @@ class DemoHomeState extends State<DemoHome> {
     }
   }
 
+  /// The ambient theme [posViewTheme] last built from, and what it built:
+  /// built again only when the ambient one changes, not at every build.
+  ThemeData? _posAmbient;
+  ThemeData? _posTheme;
+
+  /// The view's `Theme`: under the POS look [posViewTheme] of [ambient];
+  /// otherwise [ambient] itself, so the tree keeps its shape (a view
+  /// remounted on its controller within one frame would throw) and the
+  /// standard look is today's.
+  ThemeData _viewTheme(ThemeData ambient) {
+    if (widget.look != DemoLook.pos) return ambient;
+    if (!identical(ambient, _posAmbient)) {
+      _posAmbient = ambient;
+      _posTheme = posViewTheme(ambient);
+    }
+    return _posTheme!;
+  }
+
   /// [zone] of [a], or all of them when null.
   void _setZone(Area a, String? zone) {
     setState(() => a.zone = zone);
@@ -840,6 +887,26 @@ class DemoHomeState extends State<DemoHome> {
             onSelectionChanged: (s) => widget.onLocale?.call(Locale(s.single)),
           ),
           const SizedBox(width: 16),
+          // Spec T-1, T-2: today's look or the POS's.
+          Tooltip(
+            message: words.look,
+            child: SegmentedButton<DemoLook>(
+              key: const Key('look-toggle'),
+              showSelectedIcon: false,
+              segments: [
+                ButtonSegment(
+                    value: DemoLook.standard,
+                    label: Text(words.lookStandard,
+                        key: const Key('look-standard'))),
+                ButtonSegment(
+                    value: DemoLook.pos,
+                    label: Text(words.lookPos, key: const Key('look-pos'))),
+              ],
+              selected: {widget.look},
+              onSelectionChanged: (s) => widget.onLook?.call(s.single),
+            ),
+          ),
+          const SizedBox(width: 16),
           SegmentedButton<int>(
             key: const Key('area-toggle'),
             showSelectedIcon: false,
@@ -878,29 +945,34 @@ class DemoHomeState extends State<DemoHome> {
       body: Row(
         children: [
           Expanded(
-            child: FloorPlanView(
-              key: ObjectKey(c),
-              controller: c,
-              exportName: area.name.toLowerCase(),
-              onExport: (e) => _log(
-                  _words.logExported(area.name, e.fileName, e.bytes.length)),
-              onTableTap: (n) => _log(_words.logTapped(area.name, n)),
-              onLayoutChanged: () => _log(_words.logLayoutChanged(area.name)),
-              serviceMoves: moves,
-              longPress: longPressMenu
-                  ? FloorPlanLongPress.contextMenu
-                  : FloorPlanLongPress.toggleSelection,
-              onTableContextMenu: _tableMenu,
-              onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
-              onMergeRequested: (numbers) => _merge(a, numbers),
-              onSplitRequested: (id) => _split(a, id),
-              tableOverlayBuilder: a.badges ? tableBadge : null,
-              tableOverlayLayout: kBadgeLayout,
-              onTableDoubleTap: (n) => _opened(a, n),
-              onTablesMoved: (moved) => _log(_words.logMoved(a.name,
-                  _sorted([for (final d in moved) d.table.number ?? '—']))),
-              onTableHover: (n) => pointer.value = (table: n, floor: null),
-              onFloorTap: (w) => pointer.value = (table: null, floor: w),
+            child: Theme(
+              data: _viewTheme(Theme.of(context)),
+              child: FloorPlanView(
+                key: ObjectKey(c),
+                controller: c,
+                exportName: area.name.toLowerCase(),
+                onExport: (e) => _log(
+                    _words.logExported(area.name, e.fileName, e.bytes.length)),
+                onTableTap: (n) => _log(_words.logTapped(area.name, n)),
+                onLayoutChanged: () => _log(_words.logLayoutChanged(area.name)),
+                serviceMoves: moves,
+                longPress: longPressMenu
+                    ? FloorPlanLongPress.contextMenu
+                    : FloorPlanLongPress.toggleSelection,
+                onTableContextMenu: _tableMenu,
+                onGroupTap: (id, n) =>
+                    _log(_words.logGroupTapped(a.name, id, n)),
+                onMergeRequested: (numbers) => _merge(a, numbers),
+                onSplitRequested: (id) => _split(a, id),
+                tableOverlayBuilder: a.badges ? tableBadge : null,
+                tableOverlayLayout: kBadgeLayout,
+                onTableDoubleTap: (n) => _opened(a, n),
+                onTablesMoved: (moved) => _log(_words.logMoved(a.name,
+                    _sorted([for (final d in moved) d.table.number ?? '—']))),
+                onTableHover: (n) => pointer.value = (table: n, floor: null),
+                onFloorTap: (w) => pointer.value = (table: null, floor: w),
+                theme: widget.look == DemoLook.pos ? kPosViewOverride : null,
+              ),
             ),
           ),
           SizedBox(
