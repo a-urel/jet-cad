@@ -6,9 +6,11 @@
 // repaints (M-H33(repaint)); pans rebuild nothing (M-H31); an equal theme
 // rebuilds nothing (T-3's ==); the veil with no colour is the paper's
 // (M-H32); the bar takes `serviceBarHeight` and each runtime change is
-// measured (S-10, T3-d, RV5); the theme reaches neither the design, the
-// service layout nor an export (invariant 4); and `RenderFloorPlanOverlays`
-// keeps its bars under a full theme (invariant 7).
+// measured, growing or shrinking (S-10, T3-d, RV5); an animated switch
+// between two full themes rebuilds each layer at most once a frame; a theme
+// removed at runtime restores today's pixels; the theme reaches neither the
+// design, the service layout nor an export (invariant 4); and
+// `RenderFloorPlanOverlays` keeps its bars under a full theme (invariant 7).
 //
 // Read back in pixels at device pixel ratio 1 under the floor planner's
 // seed (support/palette_fixture.dart): the groups look fixture (members
@@ -39,7 +41,7 @@ import 'table_groups_look_test.dart'
     show groupSpy, insideTop, kCorners, lookCamera, lookController;
 import 'table_overlay_test.dart' show Calls, layerOf, shownCount;
 import 'view_test.dart' show move;
-import 'theme_canvas_test.dart' show exportPng, fullTheme;
+import 'theme_canvas_test.dart' show exportPng, fullTheme, withExtension;
 import 'zone_fixture.dart' show quadsNumbered, zonePlanJson;
 
 /// The demo's Bill (`apps/restaurant_demo/lib/main.dart`).
@@ -66,6 +68,26 @@ int composite(int colour, double alpha, int under) {
 void expectRgb(int got, int want, int within, String reason) =>
     expect(channelDistance(got, want), lessThanOrEqualTo(within),
         reason: '$reason: ${hex(got)}, want ${hex(want)}');
+
+/// A second full theme, every field different from [fullTheme]'s.
+const FloorPlanTheme otherFullTheme = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(fontSize: 16, color: Color(0xFF00FF00)),
+  statusFillOpacity: 0.9,
+  groupFrameColor: Color(0xFFAA00AA),
+  groupFrameWidth: 1.5,
+  groupFrameMargin: 80,
+  groupChipColor: Color(0xFF884400),
+  groupChipTextStyle: TextStyle(fontSize: 10, color: Color(0xFFFFFFFF)),
+  groupChipRadius: 2,
+  groupChipPadding: EdgeInsets.fromLTRB(3, 1, 2, 6),
+  selectionOnLight: Color(0xFF0000FF),
+  selectionOnDark: Color(0xFFFF8800),
+  selectionWidth: 1,
+  focusVeilColor: Color(0xFF113355),
+  focusVeilOpacity: 0.9,
+  canvasBackground: Color(0xFFEEEEEE),
+  serviceBarHeight: 50,
+);
 
 /// The four selection-mode layers, by their keys.
 const List<String> kLayers = [
@@ -284,6 +306,136 @@ void main() {
     }
   });
 
+  testWidgets(
+      'an animated switch (easeOutBack) from the light theme with a full '
+      'theme to the dark one with another, and back: no frame throws; each '
+      'layer rebuilds and recolours at most once a frame; pans afterwards '
+      'rebuild nothing; the overlay builder is not called (G-5)',
+      (tester) async {
+    windowAt(tester, const Size(1440, 900));
+    final c = lookController(white);
+    c.setTableStatus({
+      '3': TableStatus(color: bill, caption: 'Bill'),
+      '20': TableStatus(color: const Color(0xFF1B1B1B), caption: 'Dark'),
+    });
+    c.setTableGroups({
+      'G7': TableGroup(members: const {'12', '3', '7'}, label: 'G7')
+    });
+    c.setTableFocus({'20'});
+    c.setMode(FloorPlanMode.selection);
+    var built = 0;
+    // One instance across the pumps: only the theme changes above it.
+    final home = Scaffold(
+        body: FloorPlanView(
+            controller: c,
+            tableOverlayBuilder: (_, __) {
+              built++;
+              return const SizedBox(width: 4, height: 4);
+            },
+            tableOverlayLayout: const FloorPlanOverlayLayout(
+                size: FloorPlanOverlaySize.natural)));
+    Future<void> pumpMode(ThemeMode mode) => tester.pumpWidget(MaterialApp(
+          theme: withExtension(lightTheme, fullTheme),
+          darkTheme: withExtension(darkTheme, otherFullTheme),
+          themeMode: mode,
+          themeAnimationCurve: Curves.easeOutBack,
+          home: RepaintBoundary(key: shotKey, child: home),
+        ));
+    await pumpMode(ThemeMode.light);
+    await tester.pump(const Duration(milliseconds: 400));
+    c.cameraController.value = lookCamera();
+    await tester.pump();
+    final builtBefore = built;
+    expect(builtBefore, greaterThan(0), reason: 'premise: overlays shown');
+    for (final mode in [ThemeMode.dark, ThemeMode.light]) {
+      await pumpMode(mode);
+      var prev = countersOf(tester);
+      var rebuildFrames = 0;
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 10));
+        expect(tester.takeException(), isNull, reason: '$mode frame $i');
+        final now = countersOf(tester);
+        for (var k = 0; k < kLayers.length; k++) {
+          expect(now[k].$1 - prev[k].$1, lessThanOrEqualTo(1),
+              reason: '${kLayers[k]} rebuilds, $mode frame $i');
+          expect(now[k].$3 - prev[k].$3, lessThanOrEqualTo(1),
+              reason: '${kLayers[k]} recolours, $mode frame $i');
+        }
+        if (now[0].$1 != prev[0].$1) rebuildFrames++;
+        prev = now;
+      }
+      expect(rebuildFrames, greaterThan(5),
+          reason: 'premise: the look animated ($mode)');
+    }
+    final settled = countersOf(tester);
+    for (var i = 0; i < 10; i++) {
+      c.panBy(Offset(3.5 + i, -2.25));
+      await tester.pump();
+    }
+    expect(countersOf(tester), settled, reason: 'pans rebuild nothing');
+    expect(built, builtBefore,
+        reason: 'a theme switch builds no overlay (G-5)');
+  });
+
+  for (final scale in const [1.0, 0.32]) {
+    testWidgets(
+        'a full view theme removed at runtime restores today\'s pixels '
+        'exactly, at $scale x the look camera\'s scale: the capture equals '
+        'a fresh view\'s that never had a theme (no value set at a rebuild '
+        'outlives the theme)', (tester) async {
+      final base = lookCamera().worldToScreenMatrix;
+      expect((base.b, base.c), (0, 0), reason: 'premise: axis-aligned');
+      final camera = ViewportTransform(
+          worldToScreenMatrix: Transform2(base.a * scale, 0, 0, base.d * scale,
+              base.e * scale + 300, base.f * scale));
+
+      /// The scene's pixels under [theme], then (with a theme) after the
+      /// host removed it.
+      Future<(List<int>, List<int>)> capture(FloorPlanTheme? theme) async {
+        final c = lookController(white);
+        c.setTableStatus({
+          '3': TableStatus(color: bill, caption: 'Bill'),
+          '20': TableStatus(color: const Color(0xFF1B1B1B), caption: 'Dark'),
+          '12': TableStatus(color: const Color(0xFFFFE082), caption: 'Lt'),
+        });
+        c.setTableGroups({
+          'G7': TableGroup(members: const {'12', '3', '7'}, label: 'G7'),
+        });
+        c.setTableFocus({'20'});
+        final host = await pumpHost(tester, c, theme: theme, camera: camera);
+        List<int> pixels(Shot shot) => [
+              for (var y = 0; y < 900; y++)
+                for (var x = 0; x < 1440; x++) shot.rgbAt(x, y)
+            ];
+        final under = pixels(await shoot(tester));
+        if (theme != null) {
+          host.value = null;
+          await tester.pump();
+          await tester.pump();
+        }
+        c.cameraController.value = camera;
+        await tester.pump();
+        final after = pixels(await shoot(tester));
+        await tester.pumpWidget(const SizedBox());
+        return (under, after);
+      }
+
+      int differing(List<int> a, List<int> b) {
+        var n = 0;
+        for (var i = 0; i < a.length; i++) {
+          if (a[i] != b[i]) n++;
+        }
+        return n;
+      }
+
+      final (_, fresh) = await capture(null);
+      final (themed, restored) = await capture(fullTheme);
+      expect(differing(fresh, themed), greaterThan(1000),
+          reason: 'premise: the theme shows');
+      expect(differing(fresh, restored), 0, reason: 'pixels differing');
+    });
+  }
+
   group('the veil with no colour is the paper\'s (M-H32)', () {
     /// The zone fixture on a Blueprint page, or none.
     FloorPlanController zone({int? page}) {
@@ -463,6 +615,33 @@ void main() {
       final there = globalOf(tester, c, w);
       expect(there.dx, closeTo(at72.dx, 1e-9), reason: 'design');
       expect(there.dy, closeTo(at72.dy, 1e-9), reason: 'design');
+    });
+    testWidgets(
+        'a runtime change that shrinks the bar, 60 -> 44, then design: a '
+        'table keeps its global position (S-10 both ways)', (tester) async {
+      final c = lookController(white);
+      final host = await pumpHost(tester, c,
+          theme: const FloorPlanTheme(serviceBarHeight: 60));
+      expect(tester.getSize(find.byKey(const Key('service-bar'))).height, 60);
+      final doc = c.activeDocument;
+      final node =
+          doc.tree[TableSurvey.of(doc).withNumber('3').single.instance]!
+              as InstanceNode;
+      final w = node.transform.transformPoint(Vector2(450, 700));
+      final at60 = globalOf(tester, c, w);
+      host.value = null;
+      await tester.pump();
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('service-bar'))).height, 44);
+      expect(canvasIn(tester), const Offset(0, 44));
+      final at44 = globalOf(tester, c, w);
+      expect(at44, at60 - const Offset(0, 16),
+          reason: 'premise: the plan moved with the canvas');
+      c.setMode(FloorPlanMode.design);
+      await tester.pump();
+      final there = globalOf(tester, c, w);
+      expect(there.dx, closeTo(at44.dx, 1e-9), reason: 'design');
+      expect(there.dy, closeTo(at44.dy, 1e-9), reason: 'design');
     });
   });
 

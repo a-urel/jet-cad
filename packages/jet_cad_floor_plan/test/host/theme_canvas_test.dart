@@ -2,8 +2,9 @@
 // Task 2): `selectionOnLight`, `selectionOnDark` and `selectionWidth` reach
 // the selection overlay in both modes, per paper; `canvasBackground` is the
 // surround and a page-less plan's paper, so the ink, the paper's set and
-// the selection follow it as they follow `scheme.surface` today. The theme
-// reaches neither `designJson()` nor the PNG export (invariant 4).
+// the selection follow it as they follow `scheme.surface` today, a
+// translucent one by its RGB. The theme reaches neither `designJson()` nor
+// the PNG export (invariant 4).
 //
 // Read back in pixels on the dark theme's planner fixture
 // (support/palette_fixture.dart: the real seed's themes at zero animation,
@@ -322,6 +323,31 @@ void main() {
           identical(tester.widget<PlannerView>(find.byType(PlannerView)).paper,
               PaperPalette.dark),
           isTrue);
+    });
+
+    testWidgets(
+        'the guide ($m): a translucent canvasBackground (0x40000000) on a '
+        'page-less plan under the light theme: the ink is chosen on its '
+        'RGB, black, so the ink is white and the overlays take the dark set',
+        (tester) async {
+      const translucent = Color(0x40000000);
+      expect(foregroundFor(rgbOf(translucent)), 0xFFFFFF);
+      expect(
+          foregroundFor(rgbOf(
+              Color.alphaBlend(translucent, lightTheme.colorScheme.surface))),
+          0x000000,
+          reason: 'premise: composited over the surface it would read light');
+      final v = controllerOn(null);
+      await pumpView(tester, v, ThemeMode.light, viewMode,
+          theme: const FloorPlanTheme(canvasBackground: translucent));
+      expect(
+          identical(tester.widget<PlannerView>(find.byType(PlannerView)).paper,
+              PaperPalette.dark),
+          isTrue);
+      expect(identical(overlayOf(tester).paper, PaperPalette.dark), isTrue);
+      final seen = look(tester, await shoot(tester));
+      expectLightInk(seen, 'translucent canvas');
+      expectSelection(seen, PaperPalette.dark, 'translucent canvas');
     });
 
     testWidgets(
