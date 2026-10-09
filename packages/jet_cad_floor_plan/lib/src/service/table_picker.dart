@@ -19,8 +19,20 @@ sealed class TableTop {
   const TableTop();
 
   /// Whether ([x], [y]) is inside, a point within [tolerance] of the
-  /// boundary counting as inside (S1).
-  bool contains(double x, double y, Tolerance tolerance);
+  /// boundary counting as inside (S1). [containsAt] with the point in a
+  /// list of its own.
+  bool contains(double x, double y, Tolerance tolerance) => containsAt(
+      Float64List(2)
+        ..[0] = x
+        ..[1] = y,
+      tolerance);
+
+  /// [contains] for the point `(point[0], point[1])`. The picker's own
+  /// call: the point reaches the top in a list it keeps, never as two
+  /// doubles through this dynamic call, which the VM's JIT boxes unless it
+  /// inlines the call -- two objects per table at every pick (Slice 2's
+  /// final review F-2).
+  bool containsAt(Float64List point, Tolerance tolerance);
 }
 
 /// A closed polyline's vertices, `x0, y0, x1, y1, ...`.
@@ -30,7 +42,8 @@ final class PolygonTop extends TableTop {
   final Float64List xy;
 
   @override
-  bool contains(double x, double y, Tolerance tolerance) {
+  bool containsAt(Float64List point, Tolerance tolerance) {
+    final x = point[0], y = point[1];
     final n = xy.length ~/ 2;
     if (n < 3) return false;
     var inside = false;
@@ -66,8 +79,8 @@ final class CircleTop extends TableTop {
   final double cx, cy, r;
 
   @override
-  bool contains(double x, double y, Tolerance tolerance) {
-    final dx = x - cx, dy = y - cy;
+  bool containsAt(Float64List point, Tolerance tolerance) {
+    final dx = point[0] - cx, dy = point[1] - cy;
     return math.sqrt(dx * dx + dy * dy) <= r + tolerance.linear;
   }
 }
@@ -172,7 +185,8 @@ final class PickCandidate {
 /// pointer event; the tops and boxes are kept per definition for the
 /// picker's life (R-8: under `runtime` a definition cannot change). A
 /// pick allocates nothing per table (`CLAUDE.md`): a hover picks at every
-/// mouse move (host embedding API spec E-4).
+/// mouse move (host embedding API spec E-4). Measured by the VM's
+/// allocation profiler in `test/invariants/pick_allocation_test.dart`.
 class TablePicker {
   TablePicker(this.document,
       {@visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner,
@@ -195,6 +209,9 @@ class TablePicker {
 
   /// The boundary tolerance (S1): a point on a top's edge is inside.
   static const Tolerance tolerance = Tolerance(linear: 1e-6, angular: 1e-9);
+
+  /// The local point a pick hands a candidate's top ([TableTop.containsAt]).
+  final Float64List _point = Float64List(2);
 
   List<PickCandidate> _candidates = const [];
   final Map<Handle, TableTop?> _tops = {};
@@ -289,15 +306,26 @@ class TablePicker {
   /// Allocates nothing per table: each candidate's local point is written
   /// out from its inverse's coefficients, as [Transform2.transformPoint]
   /// computes it (the same products in the same order, so the same
-  /// doubles), never a `Vector2` per candidate.
+  /// doubles), never a `Vector2` per candidate; and no double is handed
+  /// through a call the JIT may leave out of line, which would box it:
+  /// [world] is read from its storage, not its getters, and a candidate's
+  /// top reads the local point from a list the picker keeps
+  /// ([TableTop.containsAt]), not as two arguments.
   PickCandidate? pick(Vector2 world, {double reach = 0}) {
     final list = candidates;
-    final wx = world.x, wy = world.y;
+    // The storage, not the `x` and `y` getters: a getter the JIT does not
+    // inline returns its double boxed.
+    final storage = world.storage;
+    final wx = storage[0], wy = storage[1];
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
       final m = c.inverse;
-      final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
-      if (c.top?.contains(x, y, tolerance) ?? false) return c;
+      final top = c.top;
+      if (top == null) continue;
+      _point
+        ..[0] = m.a * wx + m.c * wy + m.e
+        ..[1] = m.b * wx + m.d * wy + m.f;
+      if (top.containsAt(_point, tolerance)) return c;
     }
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
