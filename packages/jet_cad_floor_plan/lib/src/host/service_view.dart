@@ -28,6 +28,7 @@ import '../service/table_status_painter.dart';
 import '../shell_commands.dart';
 import '../tables/table_label_system.dart';
 import 'floor_plan_controller.dart';
+import 'floor_plan_theme.dart';
 import 'page_flows.dart';
 import 'table_detail.dart';
 
@@ -241,6 +242,12 @@ class _ServiceViewState extends State<ServiceView> {
   /// the first [didChangeDependencies], which runs before that `build`.
   final ValueNotifier<int> _paper = ValueNotifier<int>(0xFFFFFFFF);
 
+  /// The resolved look (host embedding API spec T-2, T-3): set from the
+  /// scope above in [didChangeDependencies]; it notifies only when the
+  /// theme is a different value. Null: today's look.
+  final ValueNotifier<FloorPlanTheme?> _theme =
+      ValueNotifier<FloorPlanTheme?>(null);
+
   // Spec 14c S7: the status layer repaints on the camera, the statuses and
   // every change of this copy (a move, an undo, a redo; R-4), and (dark
   // theme D6c, F-16) on the paper, which a theme switch with no page
@@ -362,6 +369,7 @@ class _ServiceViewState extends State<ServiceView> {
     final theme = Theme.of(context);
     _surfaceArgb = theme.colorScheme.surface.toARGB32();
     _brightness = theme.brightness;
+    _theme.value = FloorPlanThemeScope.of(context);
     _paper.value = _paperArgb();
     // A `build` follows: only a key change builds a new resolver.
     if (_nextResolver() case final next?) _resolver = next;
@@ -385,6 +393,7 @@ class _ServiceViewState extends State<ServiceView> {
     _changes?.cancel();
     _changed.dispose();
     _paper.dispose();
+    _theme.dispose();
     _pageReady.dispose();
     _canMerge.dispose();
     _canSplit.dispose();

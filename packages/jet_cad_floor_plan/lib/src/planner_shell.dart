@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
 import 'document_toolbar.dart';
+import 'host/floor_plan_theme.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
@@ -224,6 +225,13 @@ class _PlannerShellState extends State<PlannerShell> {
   /// note K1). Set in [didChangeDependencies].
   late Brightness _brightness;
 
+  /// The host's resolved look (host embedding API spec T-2): the scope's
+  /// under a `FloorPlanView`, the ambient extension in a bare shell; null
+  /// for today's. Set in [didChangeDependencies]; the selection's colours
+  /// and width read it (Slice 3, Task 2).
+  // ignore: unused_field
+  FloorPlanTheme? _floorTheme;
+
   /// The paper the drafting and the overlays lie on (dark theme spec D4,
   /// dark canvas K1–K2): [kDarkCanvasPaper] on a dark canvas, else the
   /// page's background. A document without a page has no sheet to draw on:
@@ -270,6 +278,7 @@ class _PlannerShellState extends State<PlannerShell> {
     final theme = Theme.of(context);
     _surfaceArgb = theme.colorScheme.surface.toARGB32();
     _brightness = theme.brightness;
+    _floorTheme = FloorPlanThemeScope.of(context);
     // A `build` follows, so no setState: a theme switch can change the
     // key, and only a change builds a new resolver.
     if (_nextResolver() case final next?) _resolver = next;

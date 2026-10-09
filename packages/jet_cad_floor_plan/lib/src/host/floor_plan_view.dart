@@ -12,6 +12,7 @@ import '../planner_shell.dart';
 import '../service/table_select_tool.dart' show ServiceEvents;
 import '../shell_commands.dart';
 import 'floor_plan_controller.dart';
+import 'floor_plan_theme.dart';
 import 'floor_plan_types.dart';
 import 'page_flows.dart';
 import 'service_view.dart';
@@ -48,6 +49,7 @@ class FloorPlanView extends StatefulWidget {
     this.onTableDoubleTap,
     this.onFloorTap,
     this.onTableHover,
+    this.theme,
   });
 
   final FloorPlanController controller;
@@ -174,6 +176,18 @@ class FloorPlanView extends StatefulWidget {
   /// hover state when the mode or the plan changes. Without it, a hover
   /// does no work. Read at each move.
   final void Function(String? number)? onTableHover;
+
+  /// This view's look (host embedding API spec T-2): its set fields
+  /// override, field by field, the [FloorPlanTheme] in the ambient
+  /// `Theme`'s extensions (a text style property by property), and the
+  /// fields set in neither are today's. Null: the ambient extension alone,
+  /// or today's look without one. Read at each build; an [ArgumentError]
+  /// naming the field when the resolved theme is out of range.
+  ///
+  /// It reaches this view only: the export dialog and other routes follow
+  /// the ambient Material `Theme` where the view is, and a host that wants
+  /// them themed wraps the view in a local `Theme`.
+  final FloorPlanTheme? theme;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -332,6 +346,16 @@ class _FloorPlanViewState extends State<FloorPlanView> {
         _tableOverlays(widget.controller, FloorPlanMode.selection);
     final designOverlays =
         _tableOverlays(widget.controller, FloorPlanMode.design);
+    // Always the scope, with a theme or without, so giving one remounts
+    // neither mode. It alone reads the ambient theme: a theme switch
+    // rebuilds it, not this view, so no host overlay is built again (G-5).
+    return FloorPlanThemeScope(
+      view: widget.theme,
+      child: _modes(serviceOverlays, designOverlays),
+    );
+  }
+
+  Widget _modes(Widget? serviceOverlays, Widget? designOverlays) {
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
