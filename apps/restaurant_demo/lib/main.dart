@@ -7,8 +7,12 @@
 // a Design / Service toggle; selection by table number; a table's context
 // menu; the service options; table groups merged and split from the service
 // bar (table-groups spec G6); the Salon's zones, framed and optionally
-// focused (zone spec Z22); and a log of the API's state, in English, German
-// or Turkish. An example and an integration surface, not a product.
+// focused (zone spec Z22); the Salon's badges on its tables, through the
+// host's own widgets on the tables, and a button that centres the view on
+// table 7 (host embedding API spec G-1 to G-7); and a log of the API's
+// state, in English, German or Turkish. An example and an integration
+// surface, not a product.
+import 'dart:async' show Timer;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -114,10 +118,28 @@ const Map<String, Map<String, Set<String>>> kDemoZones = {
   },
 };
 
+/// The areas whose service view offers badges on its tables (host
+/// embedding API spec G-5): the Salon's.
+const Set<String> kBadgeAreas = {'Salon'};
+
+/// The camera scale, in logical pixels per millimetre, below which a badge
+/// is a dot (spec G-7): the Salon fitted in a canvas 700 px wide or more is
+/// above it, and a zoom out to half of that is below.
+const double kBadgeDetailScale = 0.025;
+
+/// Where the badges sit (spec G-6): at the bottom of each table's box on
+/// the screen, so the table's number chip stays visible; a dot below
+/// [kBadgeDetailScale].
+const FloorPlanOverlayLayout kBadgeLayout = FloorPlanOverlayLayout(
+  anchor: Alignment.bottomCenter,
+  detailBreakpoints: [kBadgeDetailScale],
+);
+
 /// One dining area: its controller, the plan last saved and the service
 /// layout last seen, in memory.
 final class Area {
-  Area(this.name, this.controller, this.stored, {this.zones = const {}});
+  Area(this.name, this.controller, this.stored,
+      {this.zones = const {}, this.offersBadges = false});
 
   final String name;
   final FloorPlanController controller;
@@ -132,6 +154,13 @@ final class Area {
 
   /// Whether the tables outside [zone] fade; kept with the area.
   bool fadeOthers = false;
+
+  /// Whether the service view offers the "Badges" switch ([kBadgeAreas]).
+  final bool offersBadges;
+
+  /// Whether the service view shows a badge on each table; kept with the
+  /// area.
+  bool badges = false;
 
   /// The service layout, kept on `serviceLayoutChanges` (spec 14d S4).
   String? layout;
@@ -171,7 +200,8 @@ class DemoHomeState extends State<DemoHome> {
               thumbnails: _thumbnails,
               json: widget.plans[name]),
           widget.plans[name],
-          zones: kDemoZones[name] ?? const {}),
+          zones: kDemoZones[name] ?? const {},
+          offersBadges: kBadgeAreas.contains(name)),
   ];
   int _area = 0;
   late final math.Random _random = widget.random ?? math.Random();
@@ -184,11 +214,23 @@ class DemoHomeState extends State<DemoHome> {
   /// The newest line first.
   final List<String> log = [];
 
+  /// Minutes since the demo started, one tick a minute. The badges' minute
+  /// counters read it through a `ValueListenableBuilder` inside the badge:
+  /// a tick rebuilds the counters, never the overlays (spec G-5: live data
+  /// is the host's own state management).
+  final ValueNotifier<int> minutes = ValueNotifier(0);
+  Timer? _ticker;
+
+  /// How many times the badge builder ran (tests: pan and zoom build none).
+  int badgeBuilds = 0;
+
   Area get area => areas[_area];
 
   @override
   void initState() {
     super.initState();
+    _ticker =
+        Timer.periodic(const Duration(minutes: 1), (_) => minutes.value++);
     // The shared library is loaded by the first view that shows it; a host
     // need not call `load()` (14b-2 review F-3).
     for (final a in areas) {
@@ -217,6 +259,8 @@ class DemoHomeState extends State<DemoHome> {
 
   @override
   void dispose() {
+    _ticker?.cancel();
+    minutes.dispose();
     for (final a in areas) {
       a.controller.dispose();
     }
@@ -547,6 +591,96 @@ class DemoHomeState extends State<DemoHome> {
     controller.setTableFocus(null);
   }
 
+  /// A badge's figures (spec G-5's demo): the guests at table [number] of
+  /// [seats] seats and the minutes they had been seated when the demo
+  /// started, under the [kStatuses] status [name]; null for a free table
+  /// (no status, Free, or a status the demo does not know). Made up, but
+  /// fixed by the number, the seats and the status, so a seeded "Random
+  /// statuses" gives the same badges every run.
+  static ({int guests, int minutes})? badgeFigures(
+      String number, int seats, String? name) {
+    final k = int.tryParse(number) ?? number.length;
+    final minutes = switch (name) {
+      'Ordered' => 5 + k % 10,
+      'Eating' => 20 + 3 * k % 25,
+      'Bill' => 45 + 7 * k % 30,
+      _ => null,
+    };
+    if (minutes == null) return null;
+    return (guests: 1 + k % math.max(seats, 1), minutes: minutes);
+  }
+
+  /// A table's badge (spec G-5): its guests over its seats and their
+  /// minutes, framed in the table's status colour (the effective one: a
+  /// group's over the table's), outlined when selected, a dot below
+  /// [kBadgeDetailScale] (G-7), faded when the zone focus leaves the table
+  /// out -- the badges paint above the planner's veil, so the host fades
+  /// them with [FloorPlanTableOverlay.focused].
+  Widget? tableBadge(BuildContext context, FloorPlanTableOverlay table) {
+    badgeBuilds++;
+    final number = table.detail.table.number!;
+    final seats = table.detail.table.seats;
+    final status = table.status;
+    final figures = badgeFigures(
+        number, seats, status == null ? null : _statusName(status));
+    final scheme = Theme.of(context).colorScheme;
+    final tone = status?.color.withAlpha(255) ?? scheme.outline;
+    final Widget badge;
+    if (table.detailLevel == 0) {
+      badge = Container(
+        key: Key('badge-dot-$number'),
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+            color: figures == null ? scheme.surface : tone,
+            shape: BoxShape.circle,
+            border: Border.all(color: tone, width: 2)),
+      );
+    } else {
+      final style = Theme.of(context).textTheme.labelSmall;
+      final words = DemoStrings.of(context);
+      badge = Container(
+        key: Key('badge-$number'),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: table.selected ? scheme.primary : tone,
+                width: table.selected ? 2 : 1)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(Icons.person, size: 12, color: tone),
+          Text('${figures?.guests ?? 0}/$seats',
+              key: Key('badge-guests-$number'), style: style),
+          if (figures != null) ...[
+            const SizedBox(width: 6),
+            ValueListenableBuilder<int>(
+              valueListenable: minutes,
+              builder: (context, now, _) => Text(
+                  words.minutes(figures.minutes + now),
+                  key: Key('badge-minutes-$number'),
+                  style: style),
+            ),
+          ],
+        ]),
+      );
+    }
+    return Opacity(opacity: table.focused ? 1 : 0.35, child: badge);
+  }
+
+  /// Table 7 in the middle of [a]'s view, its zoom kept (spec G-3): its
+  /// centre from `tableDetails`. Nothing when the plan draws no table 7.
+  void centerOnSeven(Area a) {
+    final c = a.controller;
+    for (final detail in c.tableDetails) {
+      final center = detail.center;
+      if (detail.table.number == '7' && center != null) {
+        c.centerOn(center);
+        return;
+      }
+    }
+  }
+
   /// [zone] of [a], or all of them when null.
   void _setZone(Area a, String? zone) {
     setState(() => a.zone = zone);
@@ -640,6 +774,8 @@ class DemoHomeState extends State<DemoHome> {
               onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
               onMergeRequested: (numbers) => _merge(a, numbers),
               onSplitRequested: (id) => _split(a, id),
+              tableOverlayBuilder: a.badges ? tableBadge : null,
+              tableOverlayLayout: kBadgeLayout,
             ),
           ),
           SizedBox(
@@ -761,6 +897,22 @@ class DemoHomeState extends State<DemoHome> {
                       title: Text(words.fadeOthers),
                       value: a.fadeOthers,
                       onChanged: (v) => _setFadeOthers(a, v)),
+                ],
+                // Spec G-3, G-5: the Salon's badges and its table 7, in the
+                // service; below the zones, above the log.
+                if (a.offersBadges &&
+                    c.mode.value == FloorPlanMode.selection) ...[
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                      key: const Key('badges'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(words.badges),
+                      value: a.badges,
+                      onChanged: (v) => setState(() => a.badges = v)),
+                  OutlinedButton(
+                      key: const Key('center-7'),
+                      onPressed: () => centerOnSeven(a),
+                      child: Text(words.centerOnTable('7'))),
                 ],
                 const SizedBox(height: 16),
                 Text(words.log, style: title),
