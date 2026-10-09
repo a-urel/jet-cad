@@ -80,12 +80,12 @@ void main() {
             .values
             .single as Map<String, Object?>;
 
-    test('Q0-C1 this build writes schema 8', () {
-      expect(kSchemaVersion, 8);
+    test('Q0-C1 this build writes schema 9', () {
+      expect(kSchemaVersion, 9);
       final json =
           jsonDecode(DraftDocumentCodec.encodeToString(withCommaPage()))
               as Map<String, Object?>;
-      expect(json['schemaVersion'], 8);
+      expect(json['schemaVersion'], 9);
     });
 
     test('Q0-C2 a comma page round-trips, and the bytes are stable', () {

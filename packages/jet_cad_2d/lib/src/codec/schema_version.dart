@@ -35,7 +35,17 @@
 /// would load a v8 file and drop the separator; every room or dimension an
 /// edit regenerates would then print `.` beside the others' `,`. With it,
 /// that build refuses the file and says why.
-const int kSchemaVersion = 8;
+///
+/// 9: no new field and nothing to default; the v8->v9 migration is empty, so
+/// a v8 (or v7) document is read unchanged. The bump exists not for the
+/// reader's drawing, as 6's to 8's did, but so that no build silently carries
+/// host links it can neither see nor keep consistent: the floor planner's
+/// `jetcad.table_data` component (the host embedding API's Slice 2) holds the
+/// host's data on a table. A v8 build would keep that payload as
+/// preserve-unknown data, but deleting the table would leave its data
+/// orphaned in the file. With the bump, that build refuses the file and says
+/// why.
+const int kSchemaVersion = 9;
 
 class SchemaVersionError implements Exception {
   final Object? found;
