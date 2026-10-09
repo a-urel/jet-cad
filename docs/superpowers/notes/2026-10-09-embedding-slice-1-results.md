@@ -13,7 +13,8 @@ reviewed independently (*Approve with fixes*, V-1 to V-22).
 **Plan:** [2026-10-09-embedding-slice-1.md](../plans/2026-10-09-embedding-slice-1.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `85905bd`
-(release 0.3.0). **Not merged:** the merge is the human's word.
+(release 0.3.0). **Merged** into `main` at `1b32e0a` on the human's
+*"evet, main'e merge et"*.
 
 **Process.** Each of Tasks 1–4 had a fresh implementer, then an
 independent reviewer in its own clone, then its fixes. Task 5 (the demo,
@@ -132,4 +133,5 @@ about 0.09 ms per move against 0.05–0.06 ms without.
 - **To Monépro:** spec 103 B.1 can name `controller.camera` and
   `tableOverlayBuilder` (Q-Z1 is answered); Q-H3, the overlay sizes and
   detail levels phase 2 wants.
-- **The merge**, on the human's word. Unreleased: CHANGELOG *Unreleased*.
+- **A release** carrying Slice 1 is the human's call; until then it is
+  CHANGELOG *Unreleased*.

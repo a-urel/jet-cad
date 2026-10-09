@@ -93,9 +93,6 @@ one's spec, plan and results.
   [docs/superpowers/ledgers/2026-10-08-release-0.3.0/](docs/superpowers/ledgers/2026-10-08-release-0.3.0/).
   The guide names `1b0c37a`. The human pushed the tag `v0.3.0` →
   `1b0c37a` (2026-10-08).
-
-## In flight
-
 - **The host embedding API** (the human, 2026-10-08: *"Monépro
   entegrasyonuna geç. Önce beyin fırtınası. Temel nokta, başka bir
   uygulamaya gömecek esnekliğe sahip olması…"*): brainstormed with the
@@ -113,8 +110,15 @@ one's spec, plan and results.
   results [2026-10-09-embedding-slice-1-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-1-results.md);
   Tasks 1–5 done, each reviewed independently and fixed (`85918c4` …
   `84ee8e9`); the whole range reviewed independently (*Approve with
-  fixes*, F-1 to F-8, applied in `98c0c1d`). Waiting on the human's word
-  to merge.
+  fixes*, F-1 to F-8, applied in `98c0c1d`). **Merged into `main` at
+  `1b32e0a`** on the human's *"evet, main'e merge et"*; ledger
+  [docs/superpowers/ledgers/2026-10-09-embedding-slice-1/](docs/superpowers/ledgers/2026-10-09-embedding-slice-1/).
+  Unreleased (CHANGELOG). Slices 2–4 to come.
+
+## In flight
+
+Nothing. Slice 1, above, is merged; Slice 2 (events and table data,
+schema 9) is next on the human's word.
 
 ## Owed to the human
 
@@ -125,6 +129,9 @@ one's spec, plan and results.
   *Zufällige Status* among others); the Turkish read.
 - **A ruling:** a context click on a group member selects its whole group
   (made at the 14d merge, documented in the host guide).
+- **Slice 1, a look:** the demo's badges, pan and zoom smoothness and
+  interactive badges by touch, on a tablet and a terminal; the German
+  and Turkish read of the demo's new strings.
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
@@ -148,7 +155,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the merge question for Slice 1**, above; then Slice 2 (events and table data, schema 9).
+**Next: Slice 2** of the host embedding API (events and table data, schema 9), on the human's word.
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
 touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
 (the host probe), placement and open/save, and zones (0.3.0). Monépro
