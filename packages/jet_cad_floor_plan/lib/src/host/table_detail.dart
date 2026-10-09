@@ -74,8 +74,10 @@ final class FloorPlanTableDetail {
   /// tapped, never moved.
   final bool locked;
 
-  /// The host's data on the table. Empty until host data is stored with a
-  /// plan (spec E-6).
+  /// The host's data on the table (spec E-6), as `setTableData` stored it
+  /// with the plan: keys ascending, unmodifiable as the controller lists
+  /// it. Empty for a table with none, and for one whose stored data is
+  /// outside the limits (a hand-edited file: kept as read, never refused).
   final Map<String, String> data;
 
   @override
@@ -114,14 +116,16 @@ final class FloorPlanTableDetail {
 /// over the symbol box [box] (definition space), whose world corners are
 /// [corners] (`x0, y0, ..., x3, y3`: the box's (min, min), (max, min),
 /// (max, max) and (min, max) through [transform], every one finite), as
-/// `TableCandidate` carries them (spec F-8).
+/// `TableCandidate` carries them (spec F-8), carrying the host's [data]
+/// (spec E-6).
 FloorPlanTableDetail tableDetailOf(
     {required FloorPlanTable table,
     required Transform2 transform,
     required Aabb2 box,
     required Float64List corners,
     required String layer,
-    required bool locked}) {
+    required bool locked,
+    Map<String, String> data = const <String, String>{}}) {
   final m = transform;
   var rotation = math.atan2(m.b, m.a);
   if (rotation <= -math.pi) rotation += 2 * math.pi;
@@ -145,15 +149,18 @@ FloorPlanTableDetail tableDetailOf(
         mirrored ? [at(0), at(3), at(2), at(1)] : [at(0), at(1), at(2), at(3)]),
     layer: layer,
     locked: locked,
+    data: data,
   );
 }
 
 /// The detail of a table that reports no geometry (spec G-1): on a hidden
-/// layer, or no candidate of the picker.
+/// layer, or no candidate of the picker. It carries the host's [data]
+/// all the same (spec E-6).
 FloorPlanTableDetail tableDetailWithoutGeometry(
         {required FloorPlanTable table,
         required String layer,
-        required bool locked}) =>
+        required bool locked,
+        Map<String, String> data = const <String, String>{}}) =>
     FloorPlanTableDetail(
         table: table,
         center: null,
@@ -162,4 +169,5 @@ FloorPlanTableDetail tableDetailWithoutGeometry(
         mirrored: false,
         corners: const <Offset>[],
         layer: layer,
-        locked: locked);
+        locked: locked,
+        data: data);

@@ -8,15 +8,17 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released: the host embedding API's Slice 1, a host's
-own widgets on the tables. Nothing is stored: **plans and service
-layouts are the same as 0.3.0's** (schema 8). Nothing a 0.3.0 host
-calls changes its signature; CI analyses the 0.3.0 host probe against
-every commit.
+On `main`, not yet released: the host embedding API's Slices 1 and 2, a
+host's own widgets on the tables, then the selection mode's events and a
+host's own data on a table. **Move every terminal that shares stored
+plans together**: 0.3.0 and earlier refuse a plan this version saves
+(schema 9), with or without table data. Service layouts are the same as
+0.3.0's. Nothing a 0.3.0 host calls changes its signature; CI analyses
+the 0.3.0 host probe against every commit.
 
 - **A table's place.** `FloorPlanTableDetail` (`table`, `center`,
-  `size`, `rotation`, `mirrored`, `corners`, `layer`, `locked`, `data`,
-  empty until a later slice) and `FloorPlanController.tableDetails`, the
+  `size`, `rotation`, `mirrored`, `corners`, `layer`, `locked`, and
+  `data`, the host's own, below) and `FloorPlanController.tableDetails`, the
   active plan's tables in the order of `tables`, cached; a table on a
   hidden layer or with corners that are not finite has no geometry.
   `tableAt(canvasPoint, {kind})`: the number of the table a tap there
@@ -73,11 +75,67 @@ every commit.
 - One `FloorPlanView` per controller at a time: a second one mounted
   beside the first throws a `StateError`, as it did before (now in the
   host guide).
+- **Breaking for stored plans: schema 9.** The JSON codec writes schema 9
+  for every plan, with or without table data. Nothing new is needed to
+  read one: the bump exists so that no older terminal silently carries a
+  table's host data it can neither see nor keep consistent (0.3.0 would
+  keep it, and leave a deleted table's data behind). A schema-8 or
+  schema-7 plan opens unchanged; **0.3.0 and earlier refuse a plan saved
+  by this version**, and say why, so every terminal of a restaurant must
+  move together. The bundled symbol libraries are re-encoded. The
+  service layout's format is unchanged: it holds no table data.
+- **Your data on a table.** `FloorPlanController.setTableData(number,
+  data)` and `setTablesData(byNumber)` store a map of strings on a table
+  (an id of the POS's, say), read back as `FloorPlanTableDetail.data` in
+  either mode: design edits, undoable (`setTablesData` one step, all or
+  nothing), `dirty`, `revision`; false, changing nothing, for a number
+  that names no table or more than one; a `StateError` in the selection
+  mode; an `ArgumentError` outside the limits (at most 32 keys, a key of
+  1 to 64 of `[a-z0-9_.-]`, a value of at most 1024 UTF-16 code units
+  with no control character). A hidden or locked table takes data. The
+  plan stores it as the component `jetcad.table_data` on the table's
+  placement, keys sorted. Deleting a table in the editor drops its data
+  in the same step, and undo brings it back; renumbering keeps it. A
+  stored map outside the limits reads as empty data and is kept as read
+  (re-encoded); editor code sees it as the table diagnostic
+  `table.invalid_data`.
+- **The design's changes.** `FloorPlanController.designChanges`, a
+  broadcast stream of the sealed `FloorPlanDesignChange`:
+  `FloorPlanTableAdded(table)`, `FloorPlanTableRemoved(table)`,
+  `FloorPlanTableChanged(before, after)` and `FloorPlanPlanReplaced()`
+  (for `load` and `newPlan()`, in either mode), each with `==`,
+  `hashCode` and `toString`. A table is followed as itself, never by its
+  number: an undone delete is one `FloorPlanTableAdded`. Delivered
+  asynchronously, one report per synchronous step; nothing on listen;
+  nothing for the selection mode's moves; the tables compared only while
+  someone listens; closed by `dispose()`, after which nothing is
+  delivered, not even a change reported before it.
+- **The selection mode's events**, four new `FloorPlanView` callbacks:
+  `onTablesMoved(moved)` after a drag, with the moved tables' details,
+  once, after `onLayoutChanged` (never on Undo, Redo, `resetLayout()` or
+  a restore); `onTableDoubleTap(number)`, a second tap on the same table
+  within 300 ms and 100 logical pixels of the first one's down, a locked
+  table included, none with Shift, Ctrl or Cmd held. **The single tap is
+  not delayed**: both taps report `onTableTap` first, so a tap's action
+  runs on each tap of a double tap. `onFloorTap(world)` for a tap that
+  misses every table, after the selection logic, modifier or not, in
+  world millimetres; `onTableHover(number)` for the mouse or a stylus
+  over a numbered table, null off it, only on a change, never for a
+  finger, and no null when the view is built afresh.
+- `jet_cad_2d_flutter`: `ToolPointerEvent.timeStamp` (default
+  `Duration.zero`), the raw pointer event's time; `InteractionLayer`
+  passes it, and a finger held back keeps its down's.
+- `jet_cad_floor_plan`'s `editor.dart`: `isControlCodeUnit`, the table
+  numbers' control-character rule, now shared with the table data's
+  limits; `TableDiagnosticCodes.invalidData`.
 
 **Known limits.** The badges' look and the smoothness of pan and zoom
-with them have not been checked on a tablet or a terminal; the demo's
-new German and Turkish strings have not been read by native speakers.
-`canvasRect` ignores an ancestor that scales or turns the view.
+with them have not been checked on a tablet or a terminal, nor have the
+demo's double tap, pointer line and Link tables; the demo's new German
+and Turkish strings have not been read by native speakers. `canvasRect`
+ignores an ancestor that scales or turns the view. The planner checks a
+table's data for shape, never for meaning: a plan saved at one location
+and loaded at another carries the first location's ids.
 
 ## 0.3.0
 

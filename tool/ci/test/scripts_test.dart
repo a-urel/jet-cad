@@ -285,6 +285,26 @@ void main() {
     expect(old, greaterThan(probe), reason: 'after the probe is resolved');
   });
 
+  // Slice 2's final review F-2: the planner's pick allocation test reads
+  // the VM's allocation profiler, which `flutter test` serves only with
+  // `--enable-vmservice`; without it the test skips, and the standing
+  // comparison reads that as red. The flag is the planner's, passed to the
+  // one test step every package runs.
+  test('SC20 the planner\'s tests run with --enable-vmservice', () {
+    expect(
+        workflow,
+        contains('          - package: packages/jet_cad_floor_plan\n'
+            '            tool: flutter\n'));
+    final entry = workflow.indexOf('- package: packages/jet_cad_floor_plan');
+    final next = workflow.indexOf('- package: ', entry + 1);
+    expect(workflow.substring(entry, next),
+        contains('\n            test_flags: --enable-vmservice\n'));
+    expect(
+        workflow,
+        contains('run: \${{ matrix.tool }} test \${{ matrix.test_flags }} '
+            '--file-reporter "json:\$RUNNER_TEMP/tests.json" || true\n'));
+  });
+
   // The script itself, run by bash in a scratch repository with the tag
   // and a stand-in `flutter` that records what it analysed.
   group('SC19 old_host_probe.sh', () {

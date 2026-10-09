@@ -33,6 +33,11 @@ void main() {
       'FloorPlanMode',
       'FloorPlanTable',
       'FloorPlanTableDetail',
+      'FloorPlanDesignChange',
+      'FloorPlanTableAdded',
+      'FloorPlanTableRemoved',
+      'FloorPlanTableChanged',
+      'FloorPlanPlanReplaced',
       'FloorPlanCamera',
       'FloorPlanTableOverlay',
       'FloorPlanTableOverlayBuilder',
@@ -175,5 +180,46 @@ void main() {
     expect(seen, isNull, reason: 'an empty plan has no table');
     expect(layout.size, FloorPlanOverlaySize.box);
     expect(FloorPlanOverlaySize.values, hasLength(2));
+  });
+
+  testWidgets(
+      'B6 the design changes through the barrel alone (host embedding API '
+      'spec E-5): the stream, the five types, an exhaustive switch',
+      (tester) async {
+    final c = FloorPlanController();
+    addTearDown(c.dispose);
+    final seen = <FloorPlanDesignChange>[];
+    final sub = c.designChanges.listen(seen.add);
+    addTearDown(sub.cancel);
+    c.newPlan();
+    await tester.pump();
+    expect(seen, [const FloorPlanPlanReplaced()]);
+
+    const table = FloorPlanTableDetail(
+        table: FloorPlanTable(number: '3', seats: 2, symbolKey: null),
+        center: Offset(41000, -27000),
+        size: Size(800, 600),
+        rotation: -0.5,
+        mirrored: false,
+        corners: [],
+        layer: '0',
+        locked: false,
+        data: {'id': 'a'});
+    String word(FloorPlanDesignChange change) => switch (change) {
+          FloorPlanTableAdded(:final table) => 'added ${table.table.number}',
+          FloorPlanTableRemoved(:final table) =>
+            'removed ${table.table.number}',
+          FloorPlanTableChanged(:final before, :final after) =>
+            'changed ${before.data} to ${after.data}',
+          FloorPlanPlanReplaced() => 'replaced',
+        };
+    expect(
+        [
+          const FloorPlanTableAdded(table),
+          const FloorPlanTableRemoved(table),
+          const FloorPlanTableChanged(table, table),
+          ...seen,
+        ].map(word),
+        ['added 3', 'removed 3', 'changed {id: a} to {id: a}', 'replaced']);
   });
 }

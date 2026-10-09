@@ -457,6 +457,13 @@ ascending by handle) with its new geometry, once per drag, after
 `onLayoutChanged`. Undo, Redo, reset and restore do not fire it (they fire
 `serviceLayoutChanges`).
 
+*Amended during Slice 2's implementation* (the Task 4 review's rulings,
+ledger `s2-task-4-review.md`): it is **not called** when the host's
+`onLayoutChanged` replaced the service copy (a `resetLayout()`, a `load`,
+a mode switch): the moved tables are gone, and the new copy's details
+would describe places the drag did not produce (ruling 3). The list a
+host is handed is **unmodifiable**, as `tableDetails` is (R-4).
+
 ### E-2. Double tap
 
 `onTableDoubleTap: void Function(String number)?`: a second tap on the
@@ -470,13 +477,22 @@ With a modifier held it is not a double tap (each click toggles).
 ### E-3. A tap on the floor
 
 `onFloorTap: void Function(Offset world)?`: a tap that misses every table
-in the selection mode, after today's behaviour (the selection clears).
+in the selection mode, after today's behaviour (the selection clears, or
+with a modifier held stays); it fires with or without a modifier (S-4).
 
 ### E-4. Hover
 
 `onTableHover: void Function(String? number)?`: a mouse or stylus pointer
 entering a numbered table, or leaving it (null); only on a change; never
-for touch.
+for touch. A remount of the service view (a mode switch, reset, restore,
+load) sends no null: the host clears its hover state then (S-5).
+
+*Amended during Slice 2's implementation* (the Task 4 review's rulings,
+ledger `s2-task-4-review.md`): a hover picks at the point **with no
+reach**, a table's top or box only, never the mouse's or a finger's reach
+(R-4); over an **interactive overlay** (G-5's input claim) the pointer is
+off the canvas, so the hover reads **null** while it is on the host's
+widget, `n → null → n` as it crosses it (ruling 2).
 
 ### E-5. Design changes
 
@@ -512,9 +528,13 @@ final class FloorPlanPlanReplaced extends FloorPlanDesignChange {} // load, newP
   keys written sorted; an empty map is no component.
 - **Limits, on write only** (`ArgumentError`): at most 32 keys; a key 1–64
   characters of `[a-z0-9_.-]`; a value at most 1024 UTF-16 units, no
-  control characters. **On read** a payload outside them is kept as
-  unknown data and written back, reads as empty `data`, and is reported
-  as a `Diagnostic`; a plan is never refused for it (a later release may
+  control characters (the table numbers' rule: U+0000–U+001F,
+  U+007F–U+009F). **On read** a payload outside them is kept verbatim by
+  the planner's own component (the engine's preserve-unknown store holds
+  only unregistered types, S-2) and written back, reads as empty `data`,
+  and is reported as the table diagnostic `table.invalid_data` (editor
+  code's `tableDiagnostics`; no host channel in this slice, S-3); a plan
+  is never refused for it (a later release may
   relax a limit without another schema bump).
 - `bool setTableData(String number, Map<String, String> data)` and `bool
   setTablesData(Map<String, Map<String, String>> byNumber)` (one undo
@@ -558,8 +578,10 @@ compares ids, not codes.
 - The service layout's format is unchanged (it holds no table data).
 - The bundled symbol libraries are re-encoded at 9, as at 8.
 - **Gates:** (1) an 8 plan loads and saves as 9, its drawing unchanged
-  (the round-trip goldens re-encoded, the fingerprints' standing values
-  moved and recorded); (2) a 9 plan with table data round-trips byte for
+  (the round-trip goldens re-encoded; the engine's two fingerprints are
+  standing failures on Linux, macOS values not re-baselined since 7, so
+  they shift and stay standing, a comment records it and the macOS
+  re-baseline stays owed, S-1); (2) a 9 plan with table data round-trips byte for
   byte; (3) a delete through Slice 2's registry removes the component and
   undo restores it; (4) a 10 plan is refused.
 - The orphaning on delete still happens to **every** other component of
@@ -905,6 +927,20 @@ sharing a number, an unnumbered table, a camera not at identity.
   task.
 - **O-9.** Accessibility semantics for tables beyond what the overlay
   widgets bring.
+- **O-10.** An undone node removal re-appends the node at its parent's
+  end: `AddNodeCommand`, a delete's inverse, links through
+  `DocumentTree._link` (`jet_cad_2d/lib/src/document/tree.dart:557-570`),
+  so after Delete then Undo `designJson()` differs in the order of the
+  parent's `children` while `dirty` reads false. Nothing drawn changes
+  (draw order is by handle). Pre-existing, independent of table data;
+  found by Slice 2's Task 2 (M-H27's amended killer). Its own task
+  (`AddNodeCommand` restoring the child's index), beside O-8.
+- **O-11.** Selecting a table whose corners are not finite (the
+  fixture's `9`, a hand-edited file) trips a NaN-offset debug assertion
+  in `SelectionOverlayPainter._paintGrips`
+  (`jet_cad_2d_flutter/lib/src/selection_overlay.dart`). Unreachable from
+  the UI: the editor has no free scale for an instance. Found by Slice
+  2's Task 2 (its review's R-4). Its own task (skip non-finite grips).
 
 ## Files (expected)
 
@@ -972,3 +1008,25 @@ overlay (R-7) and H-8's box cache rate (R-9).
 **Amended by Slice 1's final review** (the controller's ruling, ledger
 `s1-final-review.md`): G-3's `centerOn` without a scale before a plan's
 first fit takes the page fit's scale at the real canvas (F-1).
+
+**Settled by Slice 2's plan** (`docs/superpowers/plans/2026-10-09-embedding-slice-2.md`,
+its *Spec points to settle*; the controller's rulings, each the plan's
+recommendation): S-1 the fingerprints stay standing (E-9 gate 1); S-2
+the planner's component keeps an out-of-limit payload verbatim (E-6);
+S-3 the diagnostic is `table.invalid_data` in the table survey, no host
+channel yet (E-6); S-4 `onFloorTap` with a modifier too (E-3); S-5 no
+hover null on a remount (E-4); S-6 the readings the plan pins (control
+characters, an empty value, re-sorting, a no-op write, two keys trimming
+to one number, hidden and locked tables take data, inclusive timeout and
+slop between the two downs).
+
+**Amended by Slice 2's reviews** (the controller's rulings, ledger
+`s2-task-4-review.md` and `s2-final-review.md`), beyond S-1 to S-6: E-1's
+`onTablesMoved` is not called when the host's `onLayoutChanged` replaced
+the service copy, and the moved list is unmodifiable; E-4's hover has no
+reach, and reads null over an interactive overlay; E-5's stream delivers
+nothing after `dispose()`, not even a change reported before it and not
+yet delivered (a `load` in the same step), then done (final review F-1);
+E-6's id is read as it is written: a number on two tables names neither,
+so the guide's `idOf` and the demo read no id for it, as `setTableData`
+refuses the link (final review F-3).

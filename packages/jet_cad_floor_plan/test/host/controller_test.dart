@@ -955,4 +955,94 @@ void main() {
     expect(x(), closeTo(designed.x, 1e-12 * designed.x.abs()));
     expect(y(), closeTo(designed.y, 1e-12 * designed.y.abs()));
   });
+
+  // Host embedding API spec E-9 (Slice 2 plan, Task 1): schema 9. The
+  // older and newer plans are derived from this build's own encoding of the
+  // embedding fixture (the version set, then through bytes).
+
+  group('schema 9 (E-9)', () {
+    String withVersion(String encoding, int version) {
+      final json = jsonDecode(encoding) as Map<String, Object?>;
+      json['schemaVersion'] = version;
+      return jsonEncode(json);
+    }
+
+    int versionOf(String encoding) =>
+        (jsonDecode(encoding) as Map<String, Object?>)['schemaVersion']! as int;
+
+    testWidgets('CS1 M-H26a: designJson() of the fixture declares 9',
+        (tester) async {
+      final c = controller(tester, embedding.embeddingPlanJson());
+      expect(versionOf(c.designJson()), 9);
+      drawLine(c);
+      expect(versionOf(c.designJson()), 9, reason: 'after an edit as well');
+    });
+
+    testWidgets(
+        'CS2 M-H26b: an 8 plan opens unchanged through the constructor and '
+        'load, and saves to the 9 bytes, tables and all', (tester) async {
+      final nine = embedding.embeddingPlanJson();
+      final eight = withVersion(nine, 8);
+      expect(versionOf(eight), 8, reason: 'premise: the file declares 8');
+      expect(eight, isNot(nine), reason: 'premise');
+      final reference = controller(tester, nine);
+      final details = reference.tableDetails;
+      expect(details, hasLength(embedding.embeddingTables.length),
+          reason: 'premise: the fixture\'s tables');
+
+      final built = controller(tester, eight);
+      expect(built.tableDetails, details);
+      expect(built.designJson(), nine);
+
+      final loaded = controller(tester, planJson());
+      loaded.load(eight);
+      expect(loaded.tableDetails, details);
+      expect(loaded.designJson(), nine);
+      expect(loaded.designJson(), reference.designJson());
+    });
+
+    testWidgets(
+        'CS3 a 10 plan is refused by load and the constructor, saying why, '
+        'and the plan is left as it was', (tester) async {
+      final ten = withVersion(embedding.embeddingPlanJson(), 10);
+      final refusal = isA<FormatException>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+              startsWith('Not a floor plan: '),
+              contains('unsupported schemaVersion 10'),
+              contains('this build writes 9')));
+
+      final c = controller(tester, embedding.embeddingPlanJson());
+      drawLine(c);
+      await tester.pump();
+      expect(c.canUndo.value, isTrue, reason: 'premise: an edit');
+      final document = c.activeDocument;
+      final before = c.designJson();
+      final details = c.tableDetails;
+      expect(() => c.load(ten), throwsA(refusal));
+      await tester.pump();
+      expect(c.activeDocument, same(document));
+      expect(c.designJson(), before);
+      expect(c.tableDetails, details);
+      expect(c.canUndo.value, isTrue, reason: 'the edit is still undoable');
+
+      expect(() => FloorPlanController(json: ten), throwsA(refusal));
+    });
+
+    testWidgets(
+        'CS4 the service layout\'s format is its own: still version 1, '
+        'with no schemaVersion', (tester) async {
+      final c = controller(tester, embedding.embeddingPlanJson());
+      c.setMode(FloorPlanMode.selection);
+      move(c, '1', 750, -250);
+      await tester.pump();
+      final layout = jsonDecode(c.serviceLayoutJson()!) as Map<String, Object?>;
+      expect(layout['format'], 'jet_cad.service_layout');
+      expect(layout['version'], 1);
+      expect(layout.containsKey('schemaVersion'), isFalse);
+      expect((layout['tables']! as List<Object?>), hasLength(1),
+          reason: 'premise: the move is in it');
+    });
+  });
 }

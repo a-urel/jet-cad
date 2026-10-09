@@ -29,6 +29,7 @@ final class ToolPointerEvent {
     required this.pickRadiusWorld,
     this.kind = PointerDeviceKind.mouse,
     double? reachRadiusWorld,
+    this.timeStamp = Duration.zero,
   }) : _reach = reachRadiusWorld;
 
   final Offset screen;
@@ -51,6 +52,14 @@ final class ToolPointerEvent {
 
   /// Whether a fingertip sent this event (spec 14t T1).
   bool get isTouch => kind == PointerDeviceKind.touch;
+
+  /// The raw pointer event's time (`PointerEvent.timeStamp`), not the time
+  /// the tool hears it (host embedding API spec E-2): a finger's down held
+  /// back by `InteractionLayer` keeps its own down's stamp whenever it is
+  /// routed, so a tool times a double tap from the raw downs.
+  /// [Duration.zero] when the caller gives none, as `PointerEvent`'s own
+  /// default.
+  final Duration timeStamp;
 }
 
 /// How `InteractionLayer` hands a tool a finger's press (spec 14t R-1).

@@ -23,7 +23,9 @@ import '../service/table_groups.dart';
 import '../service/table_picker.dart';
 import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
+import '../tables/table_data_component.dart';
 import '../tables/table_index.dart';
+import 'design_changes.dart';
 import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
 import 'service_layout.dart';
@@ -150,6 +152,27 @@ final class _Focus extends ChangeNotifier
     _value = next;
     notifyListeners();
   }
+}
+
+/// The designed plan's tables as [FloorPlanController.designChanges] last
+/// reported them (spec E-5): the details and their instances, index for
+/// index, and the plan's state they were read at.
+final class _DesignBaseline {
+  const _DesignBaseline(
+      this.document, this.state, this.layers, this.instances, this.details);
+
+  final DraftDocument document;
+  final int state;
+  final int layers;
+  final List<Handle> instances;
+  final List<FloorPlanTableDetail> details;
+
+  /// Whether [d] is still where this was read: the same plan, history
+  /// state and layers.
+  bool isAt(DraftDocument d) =>
+      identical(document, d) &&
+      state == d.commands.stateId &&
+      layers == d.tables.mutationRevision;
 }
 
 /// The planner as a host embeds it (spec 14b-2): with [FloorPlanView].
@@ -923,6 +946,9 @@ class FloorPlanController extends ChangeNotifier {
   /// [next] becomes the designed plan; [unsettled] for an empty one made
   /// with no language known (spec Q0 N1), never for a loaded one (N2).
   void _replaceDesign(_Plan next, {bool unsettled = false}) {
+    // Spec E-5: the old design's changes not reported yet first, now -- its
+    // change events still queued are never delivered once it is dropped.
+    _reportDesign();
     _drop(_design);
     if (_service case final s?) _drop(s);
     _design = _attach(next);
@@ -935,6 +961,10 @@ class FloorPlanController extends ChangeNotifier {
       _service = _attach(_copyOf(_design));
     } else {
       _service = null;
+    }
+    if (_baseline != null) {
+      _designChanges.add(const FloorPlanPlanReplaced());
+      _baseline = _designNow();
     }
     _fitOnStart = true;
     // The numbers named the old plan (zone spec Z8): a host frames after
@@ -1106,7 +1136,7 @@ class FloorPlanController extends ChangeNotifier {
         _detailsState != state ||
         _detailsLayers != layers) {
       final instances = <Handle>[];
-      _details = _detailsOf(d, instances);
+      _details = _detailsOf(d, _tables, instances);
       _detailInstances = List.unmodifiable(instances);
       _detailsDocument = d;
       _detailsState = state;
@@ -1125,13 +1155,12 @@ class FloorPlanController extends ChangeNotifier {
     return _detailInstances;
   }
 
-  /// The survey's tables joined to the picker's candidates by instance
-  /// (spec F-8), each one's instance added to [instances] in the same
-  /// order. O(nodes + entities): `candidatesOf`'s own survey and a
-  /// `leavesByOwner` scan, on top of the controller's cached survey; at
-  /// document-change rate.
+  /// [survey]'s tables (of [d]) joined to the picker's candidates by
+  /// instance (spec F-8), each one's instance added to [instances] in the
+  /// same order. O(nodes + entities): `candidatesOf`'s own survey and a
+  /// `leavesByOwner` scan, on top of the survey; at document-change rate.
   List<FloorPlanTableDetail> _detailsOf(
-      DraftDocument d, List<Handle> instances) {
+      DraftDocument d, TableSurvey survey, List<Handle> instances) {
     final candidates = {
       for (final c in TablePicker.candidatesOf(d,
           boxes: <Handle, Aabb2>{}, leaves: d.leavesByOwner))
@@ -1139,7 +1168,7 @@ class FloorPlanController extends ChangeNotifier {
     };
     final layers = d.tables.layers;
     final details = <FloorPlanTableDetail>[];
-    for (final t in _tables.tables) {
+    for (final t in survey.tables) {
       if (d.tree[t.instance] case final InstanceNode node) {
         instances.add(t.instance);
         details.add(_detailOf(
@@ -1149,19 +1178,22 @@ class FloorPlanController extends ChangeNotifier {
                 symbolKey: t.symbolKey,
                 visible: layers[node.layer]?.visible ?? true),
             candidates[t.instance],
-            layers[node.layer]));
+            layers[node.layer],
+            // Spec E-6: unmodifiable already; empty when absent or kept.
+            d.components.get<FloorPlanTableData>(t.instance)?.data ??
+                const <String, String>{}));
       }
     }
     return List.unmodifiable(details);
   }
 
-  static FloorPlanTableDetail _detailOf(
-      FloorPlanTable table, TableCandidate? c, LayerRecord? layer) {
+  static FloorPlanTableDetail _detailOf(FloorPlanTable table, TableCandidate? c,
+      LayerRecord? layer, Map<String, String> data) {
     final name = layer?.name ?? '';
     final locked = layer?.locked ?? false;
     if (c == null) {
       return tableDetailWithoutGeometry(
-          table: table, layer: name, locked: locked);
+          table: table, layer: name, locked: locked, data: data);
     }
     return tableDetailOf(
         table: table,
@@ -1169,7 +1201,164 @@ class FloorPlanController extends ChangeNotifier {
         box: c.box,
         corners: c.corners,
         layer: name,
-        locked: locked);
+        locked: locked,
+        data: data);
+  }
+
+  /// Stores the host's [data] on the table numbered [number] (spec E-6):
+  /// one design edit, labelled "Table data", undoable, saved with the plan
+  /// and read back as [FloorPlanTableDetail.data]. An empty map removes the
+  /// table's data. Returns true when the table's data is now [data] (with
+  /// no edit when it already was), false -- changing nothing -- when the
+  /// trimmed [number] names no table or more than one (an ambiguous link is
+  /// refused, not guessed). A table on a hidden or locked layer takes data:
+  /// a link is not a drawing edit.
+  ///
+  /// Throws a [StateError] in the selection mode (P-5: nothing done there
+  /// reaches the design), and an [ArgumentError] -- changing nothing --
+  /// when [data] is outside the limits: at most 32 keys, each 1 to 64
+  /// characters of `[a-z0-9_.-]`, each value at most 1024 UTF-16 code
+  /// units with no control character.
+  ///
+  /// [dirty] and [canUndo] read the edit on return; [revision] moves as
+  /// for any edit.
+  bool setTableData(String number, Map<String, String> data) =>
+      setTablesData({number: data});
+
+  /// [setTableData] for several tables at once, **all or nothing**, as one
+  /// undo step: every map is checked first (an [ArgumentError] for any
+  /// outside the limits); then false, changing nothing, when any number
+  /// names no table or more than one, or when two keys trim to the same
+  /// number. Entries already equal to the table's data are skipped;
+  /// nothing left to change is true with no edit. A [StateError] in the
+  /// selection mode.
+  bool setTablesData(Map<String, Map<String, String>> byNumber) {
+    if (_service != null) {
+      throw StateError('setTableData needs the design mode (P-5)');
+    }
+    final wanted = <String, FloorPlanTableData?>{};
+    for (final MapEntry(key: number, value: data) in byNumber.entries) {
+      if (tableDataProblem(data) case final problem?) {
+        throw ArgumentError.value(data, 'data', problem);
+      }
+      wanted[number] = data.isEmpty ? null : FloorPlanTableData(data);
+    }
+    _settle?.call();
+    final survey = _tables;
+    final components = _design.document.components;
+    final numbers = <String>{};
+    final edits = <DraftCommand>[];
+    for (final MapEntry(key: raw, value: next) in wanted.entries) {
+      if (!numbers.add(raw.trim())) return false;
+      final found = survey.withNumber(raw);
+      if (found.length != 1) return false;
+      final instance = found.single.instance;
+      if (components.get<FloorPlanTableData>(instance) == next) continue;
+      edits.add(SetComponentCommand<FloorPlanTableData>(instance, next));
+    }
+    if (edits.isEmpty) return true;
+    _design.document.commands
+        .execute(CompoundCommand(edits, label: 'Table data'));
+    _refreshFlags();
+    return true;
+  }
+
+  // ---------------------------------------------------------------------
+  // The design's changes (spec E-5).
+
+  late final StreamController<FloorPlanDesignChange> _designChanges =
+      StreamController<FloorPlanDesignChange>.broadcast(
+          onListen: _watchDesign, onCancel: _unwatchDesign);
+
+  /// The design's tables as last reported, while [designChanges] has a
+  /// listener; null otherwise, and then nothing is surveyed for it.
+  _DesignBaseline? _baseline;
+
+  int _designScans = 0;
+
+  /// How many times the design's tables were read for [designChanges]: a
+  /// test seam proving that nothing is read while no one listens.
+  @visibleForTesting
+  int get designScans => _designScans;
+
+  /// The designed plan's table changes (spec E-5), a broadcast stream:
+  /// after every design edit, undo or redo -- in the editor, through
+  /// [setTableData] or [setTablesData], a layer locked, hidden or shown
+  /// (one change per table on it) -- the tables added, removed and changed
+  /// since the last report, in ascending order of the tables' placement (a
+  /// table keeps its place in that order for its life, whatever its
+  /// number). A table is matched by its instance, never by its number: a
+  /// renumbering is one [FloorPlanTableChanged], an undone delete one
+  /// [FloorPlanTableAdded] equal to the [FloorPlanTableRemoved] the delete
+  /// reported.
+  ///
+  /// [load] and [newPlan], in either mode, report the changes still owed
+  /// for the plan they replace and then [FloorPlanPlanReplaced] alone: no
+  /// change per table. Nothing done in the selection mode is reported: the
+  /// service copy is not the design (P-5).
+  ///
+  /// Delivered asynchronously, as the plan's own changes are: the edits made
+  /// in one synchronous step arrive as one report, from the tables before
+  /// the first to the tables after the last.
+  ///
+  /// Nothing is sent on listen: a host reads the starting tables itself,
+  /// from [tableDetails] in the design mode (in the selection mode
+  /// [tableDetails] is the service copy's, not the design's). The tables are
+  /// compared only while the stream has a listener. The first listener
+  /// starts from the design as it is when it listens; a listener added
+  /// while another listens starts where that one is, so its first report
+  /// may include an edit made just before it listened.
+  ///
+  /// Closed by [dispose]: nothing reaches a listener after it, not even a
+  /// change reported before it and not yet delivered (a [load] or
+  /// [newPlan] in the same synchronous step as the [dispose]); then the
+  /// stream is done. A listener on a controller you dispose needs no
+  /// cancel.
+  Stream<FloorPlanDesignChange> get designChanges => _designStream;
+
+  /// [_designChanges]' stream, read at delivery: once [dispose] has run, a
+  /// change already added is not passed on (Slice 2's final review F-1).
+  late final Stream<FloorPlanDesignChange> _designStream =
+      _designChanges.stream.where((_) => !_disposed);
+
+  void _watchDesign() {
+    if (_disposed) return;
+    _baseline = _designNow();
+  }
+
+  void _unwatchDesign() => _baseline = null;
+
+  /// The design's tables now: the cached [tableDetails] while the design
+  /// is the active plan, else read from the design's own survey.
+  _DesignBaseline _designNow() {
+    _designScans++;
+    final plan = _design;
+    final d = plan.document;
+    final List<FloorPlanTableDetail> details;
+    final List<Handle> instances;
+    if (identical(plan, _active)) {
+      details = tableDetails;
+      instances = _detailInstances;
+    } else {
+      final found = <Handle>[];
+      details = _detailsOf(d, TableSurvey.of(d), found);
+      instances = List.unmodifiable(found);
+    }
+    return _DesignBaseline(
+        d, d.commands.stateId, d.tables.mutationRevision, instances, details);
+  }
+
+  /// Reports what changed in the design since the baseline, and moves the
+  /// baseline: nothing while no one listens, or when the design has not
+  /// moved since (a second change of one synchronous step).
+  void _reportDesign() {
+    final before = _baseline;
+    if (before == null || _disposed || before.isAt(_design.document)) return;
+    final after = _baseline = _designNow();
+    for (final change in diffTableDetails(
+        before.instances, before.details, after.instances, after.details)) {
+      _designChanges.add(change);
+    }
   }
 
   TablePicker? _picker;
@@ -1481,6 +1670,8 @@ class FloorPlanController extends ChangeNotifier {
       _refreshFlags();
       if (identical(plan, _active)) _revision.value++;
       if (identical(plan, _service)) _announceLayout();
+      // Spec E-5: the design's changes, never a service copy's.
+      if (identical(plan, _design)) _reportDesign();
     });
     plan.announced = plan.document.commands.stateId;
     void onSelection() {
@@ -1541,6 +1732,8 @@ class FloorPlanController extends ChangeNotifier {
     _groupStatuses.dispose();
     _selectedGroup.dispose();
     _focus.dispose();
+    _baseline = null;
+    unawaited(_designChanges.close());
     super.dispose();
   }
 }

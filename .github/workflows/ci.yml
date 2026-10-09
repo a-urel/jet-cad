@@ -42,6 +42,11 @@ jobs:
             tool: flutter
           - package: packages/jet_cad_floor_plan
             tool: flutter
+            # The pick's allocation test reads the VM's allocation profiler,
+            # which flutter_tester serves only with this flag (Slice 2's
+            # final review F-2): without it the test skips, and the
+            # comparison reads that skip as red.
+            test_flags: --enable-vmservice
           - package: packages/jet_cad_restaurant_symbols
             tool: flutter
           - package: apps/floor_planner
@@ -60,7 +65,7 @@ jobs:
       - name: Tests
         working-directory: ${{ matrix.package }}
         # The runner's own exit code is not the verdict: the next step is.
-        run: ${{ matrix.tool }} test --file-reporter "json:$RUNNER_TEMP/tests.json" || true
+        run: ${{ matrix.tool }} test ${{ matrix.test_flags }} --file-reporter "json:$RUNNER_TEMP/tests.json" || true
       - name: Failures and skips against the standing lists
         run: >-
           dart run tool/ci/expect_failures.dart
