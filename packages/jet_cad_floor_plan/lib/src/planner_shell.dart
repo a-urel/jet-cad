@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
 import 'document_toolbar.dart';
+import 'host/bars.dart';
 import 'host/floor_plan_theme.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
@@ -49,6 +50,12 @@ import 'tool_palette.dart';
 /// shell calls it on dispose, and it withdraws only [settle] itself, since
 /// a swap builds the next shell before the old one is disposed.
 typedef ShellSettleRegistrar = VoidCallback Function(VoidCallback settle);
+
+/// Registers the shell's idle probe with its host (host embedding API spec
+/// S-4): true while no tool is part-way through a shape, so the host's own
+/// Undo and Redo wait as the shell's do. Returns the withdrawal, which the
+/// shell calls on dispose, as [ShellSettleRegistrar]'s.
+typedef ShellIdleRegistrar = VoidCallback Function(bool Function() idle);
 
 /// Owns the index, the camera and -- since 03 -- the outline cache and the
 /// grip cache for the document's lifetime; since 05, the tools and the Fill
@@ -97,6 +104,8 @@ class PlannerShell extends StatefulWidget {
     this.userCamera = true,
     this.onCanvasPlaced,
     this.tableOverlays,
+    this.editorBar = const FloorPlanEditorBar(),
+    this.onIdle,
   });
 
   final DraftDocument? document;
@@ -178,6 +187,14 @@ class PlannerShell extends StatefulWidget {
   /// The host's widgets on the tables when the host shows them in the
   /// design mode (host embedding API spec G-5); null for none.
   final Widget? tableOverlays;
+
+  /// The top bar as the host shapes it (host embedding API spec C-2, S-2),
+  /// read at each build; the default is today's bar. It shapes the bar
+  /// only: every command stays bound to its chords (S-20).
+  final FloorPlanEditorBar editorBar;
+
+  /// Where the shell registers its idle probe (spec S-4).
+  final ShellIdleRegistrar? onIdle;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -304,6 +321,9 @@ class _PlannerShellState extends State<PlannerShell> {
 
   /// Withdraws [_settlePendingInput]'s registration with the host.
   VoidCallback? _releaseSettle;
+
+  /// Withdraws the idle probe's registration with the host (spec S-4).
+  VoidCallback? _releaseIdle;
 
   // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
   late final ParametricSystem _parametric;
@@ -754,6 +774,7 @@ class _PlannerShellState extends State<PlannerShell> {
     _tableLabels = TableLabelSystem(_document)..install();
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
+    _releaseIdle = widget.onIdle?.call(() => _idle);
     _history = _document.commands.changes.listen((_) {
       _undoEnabled.update();
       _redoEnabled.update();
@@ -804,6 +825,7 @@ class _PlannerShellState extends State<PlannerShell> {
         'the expander slot was not released: dispose order');
     _index.dispose();
     _releaseSettle?.call();
+    _releaseIdle?.call();
     _ownMeasurer?.clear();
     super.dispose();
   }
@@ -887,6 +909,134 @@ class _PlannerShellState extends State<PlannerShell> {
     );
   }
 
+  /// The top bar (spec 12a D7; host embedding API spec C-2, S-2): the
+  /// host's [FloorPlanEditorBar.leading]; the toolbar's buttons; 16 px;
+  /// the document's name and the status line, flexible; the read-outs; the
+  /// host's [FloorPlanEditorBar.trailing]. The default bar is today's. The
+  /// host's widgets sit under a [ShellShortcutGuard], never inside the
+  /// toolbar's `ExcludeFocus` (S-19): a host field there takes the focus
+  /// and its keystrokes.
+  Widget _topBar(ColorScheme scheme, List<ShellCommand> fileCommands,
+      List<ShellCommand> editCommands) {
+    final bar = widget.editorBar;
+    final toolbar = listEquals(bar.actions, FloorPlanEditorAction.values)
+        ? DocumentToolbar(
+            fileCommands: fileCommands, editCommands: editCommands)
+        : _toolbarFor(bar.actions, fileCommands, editCommands);
+    final readOuts = <Widget>[];
+    for (final action in bar.actions) {
+      final readOut = switch (action) {
+        FloorPlanEditorAction.snap => ListenableBuilder(
+            listenable: _snap,
+            builder: (_, __) => Text(
+                _snap.objectSnap
+                    ? FloorPlanStrings.of(context).objectSnapOn
+                    : FloorPlanStrings.of(context).objectSnapOff,
+                key: const Key('osnap-text')),
+          ),
+        FloorPlanEditorAction.zoom => ListenableBuilder(
+            listenable: Listenable.merge([_camera, _page]),
+            builder: (_, __) => Text(_zoomLine(), key: const Key('zoom-text')),
+          ),
+        _ => null,
+      };
+      if (readOut == null) continue;
+      if (readOuts.isNotEmpty) readOuts.add(const SizedBox(width: 16));
+      readOuts.add(readOut);
+    }
+    final row = Row(
+      children: [
+        ...bar.leading,
+        // Spec 12a D7: the toolbar, the document's name, then the status
+        // line; the name and the status give way (ellipsis) before the row
+        // would overflow. The status takes all the width the name leaves:
+        // the name is capped at half of their shared width and takes only
+        // what it needs below that.
+        if (toolbar != null) ...[toolbar, const SizedBox(width: 16)],
+        Expanded(
+          child: LayoutBuilder(builder: (_, constraints) {
+            // In a narrow window the two 16 px gaps (after the name, before
+            // OSNAP) shrink with the free width, down to 0, so they never
+            // overflow the bar; the half cap gives way to them below 32 px.
+            final free = constraints.maxWidth;
+            final tail = math.min(16.0, free);
+            final shared = free - tail;
+            final gap = math.min(16.0, shared);
+            return Row(
+              children: [
+                if (widget.documentName != null) ...[
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: math.min(shared / 2, shared - gap)),
+                    child: _documentName(widget.documentName!),
+                  ),
+                  SizedBox(width: gap),
+                ],
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: _status,
+                    builder: (_, __) => Text(_statusLine(),
+                        key: const Key('status-text'),
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                SizedBox(width: tail),
+              ],
+            );
+          }),
+        ),
+        ...readOuts,
+        ...bar.trailing,
+      ],
+    );
+    return Container(
+      key: const Key('chrome-top'),
+      height: 44,
+      color: scheme.surfaceContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: bar.leading.isEmpty && bar.trailing.isEmpty
+            ? row
+            : ShellShortcutGuard(child: row),
+      ),
+    );
+  }
+
+  /// The toolbar for a host's [actions] (spec S-2): a bare shell's other
+  /// file commands first (New to Save As, as today), then the buttons in
+  /// the host's order, a run of file buttons (Export, Print) and a run of
+  /// edit buttons (Undo, Redo) [DocumentToolbar.groupGap] apart. Export
+  /// shows only when the shell was given it. Null with no button at all.
+  DocumentToolbar? _toolbarFor(List<FloorPlanEditorAction> actions,
+      List<ShellCommand> fileCommands, List<ShellCommand> editCommands) {
+    ShellCommand? byId(List<ShellCommand> commands, String id) =>
+        commands.where((c) => c.id == id).firstOrNull;
+    final groups = <List<ShellCommand>>[
+      [
+        for (final c in fileCommands)
+          if (!kPageCommandIds.contains(c.id)) c
+      ],
+    ];
+    bool? lastFile;
+    for (final action in actions) {
+      final (command, file) = switch (action) {
+        FloorPlanEditorAction.export => (byId(fileCommands, 'export'), true),
+        FloorPlanEditorAction.print => (byId(fileCommands, 'print'), true),
+        FloorPlanEditorAction.undo => (byId(editCommands, 'undo'), false),
+        FloorPlanEditorAction.redo => (byId(editCommands, 'redo'), false),
+        _ => (null, false),
+      };
+      if (command == null) continue;
+      if (file != lastFile) groups.add([]);
+      lastFile = file;
+      groups.last.add(command);
+    }
+    if (groups.every((g) => g.isEmpty)) return null;
+    return DocumentToolbar.groups(groups: groups);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -915,77 +1065,10 @@ class _PlannerShellState extends State<PlannerShell> {
         },
         child: Column(
           children: [
-            Container(
-              key: const Key('chrome-top'),
-              height: 44,
-              color: scheme.surfaceContainer,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    // Spec 12a D7: the toolbar, the document's name, then
-                    // the status line; the name and the status give way
-                    // (ellipsis) before the row would overflow. The status
-                    // takes all the width the name leaves: the name is
-                    // capped at half of their shared width and takes only
-                    // what it needs below that.
-                    DocumentToolbar(
-                        fileCommands: fileCommands, editCommands: editCommands),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: LayoutBuilder(builder: (_, constraints) {
-                        // In a narrow window the two 16 px gaps (after the
-                        // name, before OSNAP) shrink with the free width,
-                        // down to 0, so they never overflow the bar; the
-                        // half cap gives way to them below 32 px.
-                        final free = constraints.maxWidth;
-                        final tail = math.min(16.0, free);
-                        final shared = free - tail;
-                        final gap = math.min(16.0, shared);
-                        return Row(
-                          children: [
-                            if (widget.documentName != null) ...[
-                              ConstrainedBox(
-                                constraints: BoxConstraints(
-                                    maxWidth:
-                                        math.min(shared / 2, shared - gap)),
-                                child: _documentName(widget.documentName!),
-                              ),
-                              SizedBox(width: gap),
-                            ],
-                            Expanded(
-                              child: ListenableBuilder(
-                                listenable: _status,
-                                builder: (_, __) => Text(_statusLine(),
-                                    key: const Key('status-text'),
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    overflow: TextOverflow.ellipsis),
-                              ),
-                            ),
-                            SizedBox(width: tail),
-                          ],
-                        );
-                      }),
-                    ),
-                    ListenableBuilder(
-                      listenable: _snap,
-                      builder: (_, __) => Text(
-                          _snap.objectSnap
-                              ? FloorPlanStrings.of(context).objectSnapOn
-                              : FloorPlanStrings.of(context).objectSnapOff,
-                          key: const Key('osnap-text')),
-                    ),
-                    const SizedBox(width: 16),
-                    ListenableBuilder(
-                      listenable: Listenable.merge([_camera, _page]),
-                      builder: (_, __) =>
-                          Text(_zoomLine(), key: const Key('zoom-text')),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            // Host embedding API spec C-2: with `visible: false` no top
+            // bar, and the canvas takes its height.
+            if (widget.editorBar.visible)
+              _topBar(scheme, fileCommands, editCommands),
             Expanded(
               child: Row(
                 children: [

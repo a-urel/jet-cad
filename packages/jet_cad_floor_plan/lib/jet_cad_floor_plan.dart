@@ -9,6 +9,12 @@ library;
 export 'src/export/export_font.dart' show registerFontLicences;
 export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/fonts.dart' show ensureFloorPlanFonts;
+export 'src/host/bars.dart'
+    show
+        FloorPlanEditorAction,
+        FloorPlanEditorBar,
+        FloorPlanServiceAction,
+        FloorPlanServiceBar;
 export 'src/host/design_changes.dart'
     show
         FloorPlanDesignChange,

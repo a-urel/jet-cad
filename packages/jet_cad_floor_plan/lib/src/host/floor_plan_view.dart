@@ -11,6 +11,7 @@ import '../export/page_printer.dart';
 import '../planner_shell.dart';
 import '../service/table_select_tool.dart' show ServiceEvents;
 import '../shell_commands.dart';
+import 'bars.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_theme.dart';
 import 'floor_plan_types.dart';
@@ -52,6 +53,8 @@ class FloorPlanView extends StatefulWidget {
     this.theme,
     this.onExportDialog,
     this.onPageFlowError,
+    this.serviceBar = const FloorPlanServiceBar(),
+    this.editorBar = const FloorPlanEditorBar(),
   });
 
   final FloorPlanController controller;
@@ -211,6 +214,22 @@ class FloorPlanView extends StatefulWidget {
   /// their `Future` completes with the error. Read at each error.
   final void Function(Object error)? onPageFlowError;
 
+  /// The selection mode's bar (host embedding API spec C-1): hidden, its
+  /// buttons cut down or reordered, the host's widgets before and after
+  /// them. The default is today's bar. Hidden, the canvas takes its height,
+  /// and the view measures where the canvas now starts, so a mode switch
+  /// keeps the plan in place (R-13). Its actions shape the bar only: the
+  /// chords stay bound (S-20). Read at each build; an [ArgumentError]
+  /// naming `actions` for an action listed twice.
+  final FloorPlanServiceBar serviceBar;
+
+  /// The design mode's top bar (spec C-2, S-2), as [serviceBar]: hidden
+  /// (the tools stay in the left panel), its buttons and read-outs cut
+  /// down or reordered, the host's widgets at its two ends. The default is
+  /// today's bar. Read at each build; an [ArgumentError] naming `actions`
+  /// for an action listed twice.
+  final FloorPlanEditorBar editorBar;
+
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
 }
@@ -235,15 +254,42 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     });
   }
 
-  /// The selection mode's canvas moved in this view with the plan
-  /// unchanged (host embedding API spec S-10: the theme's
-  /// `serviceBarHeight` changed): measured again now, after the frame, so
-  /// the next mode switch reframes from where it is (R-13).
-  void _serviceCanvasMoved() {
+  /// The mode the last build showed; null before the first.
+  FloorPlanMode? _shown;
+
+  /// The chrome the last build laid out (spec C-1, C-2): whether each bar
+  /// is shown. Null before the first build.
+  (bool, bool)? _chrome;
+
+  /// Whether a [_canvasMoved] is due after this frame.
+  bool _canvasMoveDue = false;
+
+  /// After the frame that lays out chrome other than the last frame's
+  /// (a bar shown or hidden, spec C-1, C-2), the shown canvas is measured
+  /// again: the plan is unchanged, so [_measureAfterFrame] would not.
+  void _measureChrome() {
+    final chrome = (widget.serviceBar.visible, widget.editorBar.visible);
+    final last = _chrome;
+    _chrome = chrome;
+    if (last == null || last == chrome || _canvasMoveDue) return;
+    _canvasMoveDue = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasMoveDue = false;
+      _canvasMoved();
+    });
+  }
+
+  /// The shown mode's canvas moved in this view with the plan unchanged
+  /// (host embedding API spec S-10, generalised: the theme's
+  /// `serviceBarHeight` changed, or a bar was shown or hidden): measured
+  /// again now, after the frame, so the next mode switch reframes from
+  /// where it is (R-13).
+  void _canvasMoved() {
     final c = widget.controller;
-    if (!mounted || c.mode.value != FloorPlanMode.selection) return;
+    final shown = _shown;
+    if (!mounted || shown == null || c.mode.value != shown) return;
     final origin = _canvasOrigin();
-    if (origin != null) c.canvasMeasured(FloorPlanMode.selection, origin);
+    if (origin != null) c.canvasMeasured(shown, origin);
   }
 
   /// The top left of the shown canvas (its interaction layer's, whose
@@ -378,6 +424,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     if (widget.tableOverlayBuilder != null) {
       validateOverlayLayout(widget.tableOverlayLayout);
     }
+    validateBars(widget.serviceBar, widget.editorBar);
+    _measureChrome();
     // Made here, once per build of this view (the host's), not in the
     // listener's builder: a layer gets a new widget, and builds every
     // overlay again (G-5), only when the host rebuilds the view.
@@ -400,6 +448,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
       builder: (context, _) {
         final c = widget.controller;
         final document = c.activeDocument;
+        _shown = c.mode.value;
         _measureAfterFrame(c.mode.value, document);
         if (c.mode.value == FloorPlanMode.selection) {
           return ServiceView(
@@ -423,7 +472,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
               userCamera: () => widget.userCamera,
               tableOverlays: serviceOverlays,
               events: _serviceEvents,
-              onCanvasMoved: _serviceCanvasMoved);
+              onCanvasMoved: _canvasMoved,
+              bar: widget.serviceBar);
         }
         c.startSymbols();
         return PlannerShell(
@@ -441,9 +491,11 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           userCamera: widget.userCamera,
           onCanvasPlaced: c.canvasPlaced,
           onSettle: c.registerSettle,
+          onIdle: c.registerIdle,
           symbols: c.symbols,
           thumbnails: c.thumbnails,
           tableOverlays: designOverlays,
+          editorBar: widget.editorBar,
         );
       },
     );

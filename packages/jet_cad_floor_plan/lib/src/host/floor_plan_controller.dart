@@ -459,6 +459,10 @@ class FloorPlanController extends ChangeNotifier {
   /// point of the last [centerOn] (spec G-3). The last request wins.
   _FitTarget? _fitTarget;
   VoidCallback? _settle;
+
+  /// The active editor's idle probe (spec S-4): true while no tool is
+  /// part-way through a shape; null with no editor mounted.
+  bool Function()? _idle;
   bool _disposed = false;
 
   final ValueNotifier<FloorPlanMode> _mode =
@@ -476,6 +480,7 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<Map<String, TableStatus>> _groupStatuses =
       ValueNotifier(const <String, TableStatus>{});
   final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
+  final ValueNotifier<Set<String>?> _mergeCandidate = ValueNotifier(null);
   final _Focus _focus = _Focus();
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
@@ -569,6 +574,18 @@ class FloorPlanController extends ChangeNotifier {
   /// a listener that reads it alongside them listens to it too (e.g. a
   /// `Listenable.merge` of all three).
   ValueListenable<String?> get selectedGroup => _selectedGroup;
+
+  /// The numbers the service bar's Merge would send (host embedding API
+  /// spec C-3, S-5), for a host's own bar: in the selection mode
+  /// [selectedTables], unmodifiable, when they span two or more units
+  /// (table-groups spec G5: a unit is a group or a number in no group), so
+  /// one table, two tables sharing a number and exactly one group give
+  /// null; null otherwise, and always in the design mode. It does not
+  /// depend on whether the view was given `onMergeRequested`.
+  ///
+  /// It notifies only when the set changes, and, like [selectedGroup],
+  /// after [selectedTables] and [tableGroups] have notified.
+  ValueListenable<Set<String>?> get mergeCandidate => _mergeCandidate;
 
   /// The numbers of the selectable members of group [groupId] (trimmed) in
   /// the active plan: its live members on a visible, unlocked layer, by the
@@ -820,6 +837,22 @@ class FloorPlanController extends ChangeNotifier {
       if (identical(_settle, settle)) _settle = null;
     };
   }
+
+  /// Where the active editor registers its idle probe (spec S-4): true
+  /// while no tool is part-way through a shape. Returns the withdrawal,
+  /// which withdraws only [idle] itself, as [registerSettle]'s.
+  @internal
+  VoidCallback registerIdle(bool Function() idle) {
+    _idle = idle;
+    return () {
+      if (identical(_idle, idle)) _idle = null;
+    };
+  }
+
+  /// Whether the design mode's editor has a tool part-way through a shape
+  /// (spec S-4): [undo] and [redo] then wait, as the shell's buttons do.
+  bool get _editorMidShape =>
+      _mode.value == FloorPlanMode.design && !(_idle?.call() ?? true);
 
   /// Settles the active view's pending input (H11): for the view's own
   /// flows (Export, Print) before they read the plan.
@@ -1107,14 +1140,23 @@ class FloorPlanController extends ChangeNotifier {
   // ---------------------------------------------------------------------
   // Undo and redo, of the active plan.
 
+  /// Undoes the active plan's last step, after settling the view's pending
+  /// input. In the design mode it does nothing while the editor's tool is
+  /// part-way through a shape (spec C-3, S-4), as the editor's Undo button
+  /// and key: [canUndo] keeps its meaning (the history), so a host's own
+  /// button enabled by it may press then and nothing happens.
   void undo() {
+    if (_editorMidShape) return;
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canUndo) commands.undo();
     _announceLayout();
   }
 
+  /// Redoes the active plan's next step, as [undo]: in the design mode
+  /// not while the editor's tool is part-way through a shape (S-4).
   void redo() {
+    if (_editorMidShape) return;
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canRedo) commands.redo();
@@ -1594,6 +1636,17 @@ class FloorPlanController extends ChangeNotifier {
           unnumberedSelected: unnumbered);
     }
     _selectedGroup.value = id;
+    // Spec C-3, S-5: what Merge would send, by G5's rule; the design mode
+    // has no Merge.
+    final selected = _selectedTables.value;
+    final candidate = _mode.value == FloorPlanMode.selection &&
+            mergeQualifies(selected, _groups.value)
+        ? selected
+        : null;
+    final last = _mergeCandidate.value;
+    if (candidate == null ? last != null : !setEquals(candidate, last)) {
+      _mergeCandidate.value = candidate;
+    }
   }
 
   /// The active view frames the plan as on its first frame (H3, F-7). It
@@ -1796,6 +1849,7 @@ class FloorPlanController extends ChangeNotifier {
     _groups.dispose();
     _groupStatuses.dispose();
     _selectedGroup.dispose();
+    _mergeCandidate.dispose();
     _focus.dispose();
     _baseline = null;
     unawaited(_designChanges.close());

@@ -21,12 +21,13 @@ import '../parametric/catalog.dart';
 import '../planner_view.dart';
 import '../service/table_focus_painter.dart';
 import '../service/table_group_painter.dart';
-import '../service/table_groups.dart' show mergeQualifies;
 import '../service/table_picker.dart';
 import '../service/table_select_tool.dart';
 import '../service/table_status_painter.dart';
 import '../shell_commands.dart';
+import '../shortcut_guard.dart';
 import '../tables/table_label_system.dart';
+import 'bars.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_theme.dart';
 import 'page_flows.dart';
@@ -47,7 +48,8 @@ class ServiceView extends StatefulWidget {
       this.userCamera = _always,
       this.tableOverlays,
       this.events = _noEvents,
-      this.onCanvasMoved});
+      this.onCanvasMoved,
+      this.bar = const FloorPlanServiceBar()});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -90,6 +92,10 @@ class ServiceView extends StatefulWidget {
   /// last frame's (a theme's `serviceBarHeight` changed while this copy is
   /// shown), so the view measures the canvas again (R-13). Null: nothing.
   final VoidCallback? onCanvasMoved;
+
+  /// The host's bar (host embedding API spec C-1), read at each build: the
+  /// default is today's bar.
+  final FloorPlanServiceBar bar;
 
   @override
   State<ServiceView> createState() => _ServiceViewState();
@@ -337,7 +343,8 @@ class _ServiceViewState extends State<ServiceView> {
 
   /// The bar's height (spec T-1): the theme's, else [kServiceBarHeight].
   /// After the first frame laid out with another height than the last, the
-  /// view is told the canvas moved, once (S-10).
+  /// view is told the canvas moved, once (S-10). Read only while the bar is
+  /// shown (spec C-1): a hidden bar has no height.
   double _barHeightNow() {
     final height = _theme.value?.serviceBarHeight ?? kServiceBarHeight;
     final last = _barHeight;
@@ -356,20 +363,22 @@ class _ServiceViewState extends State<ServiceView> {
   late final DerivedFlag _pageReady = DerivedFlag([widget.flows.ready, _page],
       () => widget.flows.ready.value && _page.value != null);
 
-  /// Table-groups spec G5: Merge and Split follow the selection **and** the
-  /// groups. `selectedGroup` updates after `selectedTables` and
-  /// `tableGroups` have notified, so both flags listen to all three: one
-  /// that missed `selectedGroup` would compute before it moved and stay
-  /// stale.
+  /// Table-groups spec G5: Split follows the selection **and** the groups.
+  /// `selectedGroup` updates after `selectedTables` and `tableGroups` have
+  /// notified, so the flag listens to all three: one that missed
+  /// `selectedGroup` would compute before it moved and stay stale. (Merge
+  /// reads `mergeCandidate`, which updates with `selectedGroup`.)
   late final List<Listenable> _groupSources = [
     _c.selectedTables,
     _c.tableGroups,
     _c.selectedGroup
   ];
 
-  /// Merge: the selected numbers span two or more units (G5).
-  late final DerivedFlag _canMerge = DerivedFlag(_groupSources,
-      () => mergeQualifies(_c.selectedTables.value, _c.tableGroups.value));
+  /// Merge: the selected numbers span two or more units (G5), which the
+  /// controller's `mergeCandidate` says (spec C-3): one source for the
+  /// button and a host's own bar.
+  late final DerivedFlag _canMerge =
+      DerivedFlag([_c.mergeCandidate], () => _c.mergeCandidate.value != null);
 
   /// Split: the selection is exactly one group (G5, `selectedGroup`).
   late final DerivedFlag _canSplit =
@@ -480,46 +489,10 @@ class _ServiceViewState extends State<ServiceView> {
         autofocus: true,
         child: Column(
           children: [
-            Container(
-              key: const Key('service-bar'),
-              height: _barHeightNow(),
-              color: scheme.surfaceContainer,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  _button('service-undo', strings.undo, Icons.undo, _c.canUndo,
-                      _c.undo),
-                  _button('service-redo', strings.redo, Icons.redo, _c.canRedo,
-                      _c.redo),
-                  const SizedBox(width: 8),
-                  // Table-groups spec G5: each shown only when the host
-                  // passed its callback; disabled when the selection does
-                  // not qualify.
-                  if (callbacks.onMergeRequested != null)
-                    _button('service-merge', strings.merge, Icons.merge_type,
-                        _canMerge, _merge),
-                  if (callbacks.onSplitRequested != null)
-                    _button('service-split', strings.split, Icons.call_split,
-                        _canSplit, _split),
-                  if (callbacks.onMergeRequested != null ||
-                      callbacks.onSplitRequested != null)
-                    const SizedBox(width: 8),
-                  if (flows.canExport)
-                    _button(
-                        'service-export',
-                        strings.exportEllipsis,
-                        Icons.ios_share_outlined,
-                        _pageReady,
-                        () => flows.export(context)),
-                  _button(
-                      'service-print',
-                      strings.printEllipsis,
-                      Icons.print_outlined,
-                      _pageReady,
-                      () => flows.print(context)),
-                ],
-              ),
-            ),
+            // Host embedding API spec C-1: with `visible: false` no bar, and
+            // the canvas takes its height.
+            if (widget.bar.visible)
+              _bar(widget.bar, scheme, strings, flows, callbacks),
             Expanded(
               child: ColoredBox(
                 color: _canvasColour(scheme),
@@ -608,6 +581,87 @@ class _ServiceViewState extends State<ServiceView> {
         ),
       ),
     );
+  }
+
+  /// The bar (spec C-1): the host's [FloorPlanServiceBar.leading], the
+  /// actions in the host's order under today's rules (Merge and Split each
+  /// only with its callback, G5; Export only with `onExport`), 8 px
+  /// between two shown actions of different groups, then the host's
+  /// [FloorPlanServiceBar.trailing]. The default is today's row exactly.
+  /// The host's widgets sit under a [ShellShortcutGuard] (S-19): a host
+  /// field there takes its keystrokes, and Undo's and Redo's chords do not
+  /// reach the plan from it.
+  Widget _bar(FloorPlanServiceBar bar, ColorScheme scheme,
+      FloorPlanStrings strings, PageFlows flows, ServiceCallbacks callbacks) {
+    final row = Row(
+      children: [
+        ...bar.leading,
+        ..._actions(bar.actions, strings, flows, callbacks),
+        ...bar.trailing,
+      ],
+    );
+    return Container(
+      key: const Key('service-bar'),
+      height: _barHeightNow(),
+      color: scheme.surfaceContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: bar.leading.isEmpty && bar.trailing.isEmpty
+          ? row
+          : ShellShortcutGuard(child: row),
+    );
+  }
+
+  /// [actions]' buttons in their order, each shown under today's rule, an
+  /// 8 px gap where a shown button's group differs from the last shown
+  /// one's (the history; the groups; the page).
+  List<Widget> _actions(List<FloorPlanServiceAction> actions,
+      FloorPlanStrings strings, PageFlows flows, ServiceCallbacks callbacks) {
+    final children = <Widget>[];
+    int? lastGroup;
+    for (final action in actions) {
+      final button = switch (action) {
+        FloorPlanServiceAction.undo => _button(
+            'service-undo', strings.undo, Icons.undo, _c.canUndo, _c.undo),
+        FloorPlanServiceAction.redo => _button(
+            'service-redo', strings.redo, Icons.redo, _c.canRedo, _c.redo),
+        // Table-groups spec G5: each shown only when the host passed its
+        // callback; disabled when the selection does not qualify.
+        FloorPlanServiceAction.merge => callbacks.onMergeRequested == null
+            ? null
+            : _button('service-merge', strings.merge, Icons.merge_type,
+                _canMerge, _merge),
+        FloorPlanServiceAction.split => callbacks.onSplitRequested == null
+            ? null
+            : _button('service-split', strings.split, Icons.call_split,
+                _canSplit, _split),
+        FloorPlanServiceAction.export => flows.canExport
+            ? _button(
+                'service-export',
+                strings.exportEllipsis,
+                Icons.ios_share_outlined,
+                _pageReady,
+                () => flows.export(context))
+            : null,
+        FloorPlanServiceAction.print => _button(
+            'service-print',
+            strings.printEllipsis,
+            Icons.print_outlined,
+            _pageReady,
+            () => flows.print(context)),
+      };
+      if (button == null) continue;
+      final group = switch (action) {
+        FloorPlanServiceAction.undo || FloorPlanServiceAction.redo => 0,
+        FloorPlanServiceAction.merge || FloorPlanServiceAction.split => 1,
+        FloorPlanServiceAction.export || FloorPlanServiceAction.print => 2,
+      };
+      if (lastGroup != null && group != lastGroup) {
+        children.add(const SizedBox(width: 8));
+      }
+      lastGroup = group;
+      children.add(button);
+    }
+    return children;
   }
 
   /// Exactly the selected numbers: the host decides what a selection

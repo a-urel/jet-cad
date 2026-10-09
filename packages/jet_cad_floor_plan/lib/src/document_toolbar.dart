@@ -8,7 +8,9 @@ import 'shell_commands.dart';
 /// per command of the table (D6), keyed `toolbar-<id>`, with the command's
 /// tooltip, disabled while the command is. The file commands come first,
 /// then a gap, then Undo and Redo. A bare shell has no file commands and
-/// shows Undo and Redo only.
+/// shows Undo and Redo only. [DocumentToolbar.groups] lays out any run of
+/// groups the same way (host embedding API spec C-2): a gap between two
+/// groups that both show a button.
 ///
 /// **It never takes focus** (`ExcludeFocus`, as the tool palette), so the
 /// canvas keeps it and the shortcuts keep working after a click here.
@@ -23,13 +25,40 @@ class DocumentToolbar extends StatelessWidget {
     super.key,
     required this.fileCommands,
     required this.editCommands,
-  });
+  }) : _groups = null;
+
+  /// The buttons of [groups], in order, with a [groupGap] between two
+  /// non-empty groups (spec C-2): today's toolbar is the two groups
+  /// `[fileCommands, editCommands]`.
+  const DocumentToolbar.groups({
+    super.key,
+    required List<List<ShellCommand>> groups,
+  })  : _groups = groups,
+        fileCommands = const <ShellCommand>[],
+        editCommands = const <ShellCommand>[];
 
   final List<ShellCommand> fileCommands;
   final List<ShellCommand> editCommands;
+  final List<List<ShellCommand>>? _groups;
 
   /// The gap between the file group and Undo/Redo.
   static const double groupGap = 12;
+
+  /// The buttons, a [groupGap] between two non-empty groups.
+  List<Widget> _children() {
+    final groups = _groups ?? [fileCommands, editCommands];
+    final children = <Widget>[];
+    for (final group in groups) {
+      if (group.isEmpty) continue;
+      if (children.isNotEmpty) {
+        children.add(const SizedBox(width: groupGap));
+      }
+      for (final c in group) {
+        children.add(_CommandButton(c));
+      }
+    }
+    return children;
+  }
 
   @override
   Widget build(BuildContext context) => TextFieldTapRegion(
@@ -40,12 +69,7 @@ class DocumentToolbar extends StatelessWidget {
             color: Colors.transparent,
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              children: [
-                for (final c in fileCommands) _CommandButton(c),
-                if (fileCommands.isNotEmpty && editCommands.isNotEmpty)
-                  const SizedBox(width: groupGap),
-                for (final c in editCommands) _CommandButton(c),
-              ],
+              children: _children(),
             ),
           ),
         ),
