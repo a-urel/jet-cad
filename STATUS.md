@@ -117,8 +117,12 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Slice 1, above, is merged; Slice 2 (events and table data,
-schema 9) is next on the human's word.
+**The host embedding API's Slice 2** (events and table data, schema 9),
+started on the human's *"tamam, Dilim 2 ile devam et"* (2026-10-09).
+Plan: [2026-10-09-embedding-slice-2.md](docs/superpowers/plans/2026-10-09-embedding-slice-2.md)
+(five tasks; the spec's points S-1 to S-6 ruled as the plan recommends).
+Ledger: `.superpowers/sdd/2026-10-09-host-embedding-api/` (`s2-…`).
+**Resume point:** Task 1 (schema 9).
 
 ## Owed to the human
 
