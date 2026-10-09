@@ -9,10 +9,12 @@
 // bar (table-groups spec G6); the Salon's zones, framed and optionally
 // focused (zone spec Z22); the Salon's badges on its tables, through the
 // host's own widgets on the tables, and a button that centres the view on
-// table 7 (host embedding API spec G-1 to G-7); and a log of the API's
-// state, in English, German or Turkish. An example and an integration
-// surface, not a product.
-import 'dart:async' show Timer;
+// table 7 (host embedding API spec G-1 to G-7); the tables linked to the
+// POS's ids through their host data, a double tap that opens a table, the
+// moved tables, the pointer's table or floor point, and the design's table
+// changes (spec E-1 to E-8); and a log of the API's state, in English,
+// German or Turkish. An example and an integration surface, not a product.
+import 'dart:async' show StreamSubscription, Timer, unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -135,15 +137,35 @@ const FloorPlanOverlayLayout kBadgeLayout = FloorPlanOverlayLayout(
   detailBreakpoints: [kBadgeDetailScale],
 );
 
+/// The POS's own tables by area, by the id it links each to a table of the
+/// plan with (host embedding API spec E-6, E-8): `<area>-<number>`, lower
+/// case, as "Link tables" writes it. Host data, the rows of a POS's
+/// database; the plan carries an id only once a table is linked.
+final Map<String, Set<String>> kDemoTableIds = {
+  'Salon': {for (var n = 1; n <= 11; n++) 'salon-$n'},
+  'Teras': {for (var n = 1; n <= 6; n++) 'teras-$n'},
+};
+
+/// What the service's pointer line shows (spec E-3, E-4): the table the
+/// mouse or stylus is over ([table]), no table (both null), or the floor
+/// point a tap that missed every table went down at ([floor], world
+/// millimetres, y up).
+typedef PointerLine = ({String? table, Offset? floor});
+
 /// One dining area: its controller, the plan last saved and the service
 /// layout last seen, in memory.
 final class Area {
   Area(this.name, this.controller, this.stored,
-      {this.zones = const {}, this.offersBadges = false});
+      {this.zones = const {},
+      this.offersBadges = false,
+      this.tableIds = const {}});
 
   final String name;
   final FloorPlanController controller;
   String? stored;
+
+  /// The POS's tables in this area, by id ([kDemoTableIds]).
+  final Set<String> tableIds;
 
   /// The area's zones by name, each its table numbers (Z22): none for an
   /// area without zones.
@@ -201,7 +223,8 @@ class DemoHomeState extends State<DemoHome> {
               json: widget.plans[name]),
           widget.plans[name],
           zones: kDemoZones[name] ?? const {},
-          offersBadges: kBadgeAreas.contains(name)),
+          offersBadges: kBadgeAreas.contains(name),
+          tableIds: kDemoTableIds[name] ?? const {}),
   ];
   int _area = 0;
   late final math.Random _random = widget.random ?? math.Random();
@@ -213,6 +236,15 @@ class DemoHomeState extends State<DemoHome> {
 
   /// The newest line first.
   final List<String> log = [];
+
+  /// The service's pointer line (spec E-3, E-4), null when there is nothing
+  /// to show: a line of its own, not the log, rebuilt alone at hover rate.
+  /// Cleared when the mode, the area or the plan changes, since the view
+  /// then sends no null for the table it leaves (S-5).
+  final ValueNotifier<PointerLine?> pointer = ValueNotifier(null);
+
+  /// Each area's subscription to its design's table changes (spec E-5).
+  final List<StreamSubscription<FloorPlanDesignChange>> _changes = [];
 
   /// Minutes since the demo started, one tick a minute. The badges' minute
   /// counters read it through a `ValueListenableBuilder` inside the badge:
@@ -240,6 +272,7 @@ class DemoHomeState extends State<DemoHome> {
           c.mode.value == FloorPlanMode.design
               ? _words.design
               : _words.service)));
+      c.mode.addListener(_clearPointer);
       c.selectedTables.addListener(() => _log(_words.logSelected(
           a.name, (c.selectedTables.value.toList()..sort()).join(', '))));
       c.dirty.addListener(() => _log(_words.logDirty(a.name, c.dirty.value)));
@@ -254,6 +287,7 @@ class DemoHomeState extends State<DemoHome> {
       // load, which start from the design (S4).
       c.serviceLayoutChanges
           .addListener(() => a.layout = c.serviceLayoutJson());
+      _changes.add(c.designChanges.listen((e) => _designChanged(a, e)));
     }
   }
 
@@ -261,6 +295,10 @@ class DemoHomeState extends State<DemoHome> {
   void dispose() {
     _ticker?.cancel();
     minutes.dispose();
+    pointer.dispose();
+    for (final s in _changes) {
+      unawaited(s.cancel());
+    }
     for (final a in areas) {
       a.controller.dispose();
     }
@@ -294,6 +332,80 @@ class DemoHomeState extends State<DemoHome> {
       log.insert(0, line);
       if (log.length > 40) log.removeLast();
     });
+  }
+
+  void _clearPointer() => pointer.value = null;
+
+  /// The design's table changes (spec E-5), logged: the tables added and
+  /// removed, and a replaced plan; a changed table (a number, a move, its
+  /// data) is not logged. A plan replaced in the service starts from the
+  /// design, so the area's kept layout goes back on it then (S4), whoever
+  /// replaced it: the report comes after the load, never inside it.
+  void _designChanged(Area a, FloorPlanDesignChange change) {
+    if (!mounted) return;
+    final words = _words;
+    switch (change) {
+      case FloorPlanTableAdded(:final table):
+        _log(words.logTableAdded(a.name, table.table.number ?? '—'));
+      case FloorPlanTableRemoved(:final table):
+        _log(words.logTableRemoved(a.name, table.table.number ?? '—'));
+      case FloorPlanPlanReplaced():
+        _log(words.logPlanReplaced(a.name));
+        if (a.controller.mode.value == FloorPlanMode.selection) {
+          _restoreLayout(a);
+        }
+      case FloorPlanTableChanged():
+        break;
+    }
+  }
+
+  /// "Link tables" (spec E-6): every numbered table without an id gets
+  /// `<area>-<number>`, lower case, beside the data it carries, in one undo
+  /// step. A number two tables share is left out: the planner refuses an
+  /// ambiguous link, and the whole batch with it. Design mode only.
+  void linkTables(Area a) {
+    final c = a.controller;
+    final shared = {
+      for (final w in c.numberingWarnings)
+        if (w is DuplicateNumber) w.number,
+    };
+    final byNumber = <String, Map<String, String>>{};
+    for (final detail in c.tableDetails) {
+      final n = detail.table.number;
+      if (n == null || shared.contains(n) || detail.data.containsKey('id')) {
+        continue;
+      }
+      byNumber[n] = {...detail.data, 'id': '${a.name}-$n'.toLowerCase()};
+    }
+    c.setTablesData(byNumber);
+    _log(_words.logLinked(a.name, byNumber.length));
+  }
+
+  /// The POS's tables in [a] that its floor does not draw, by id (spec E-8,
+  /// the guide's recipe): the ids no visible table carries. A table on a
+  /// hidden layer is not drawn, so its id counts as unlinked.
+  Set<String> unlinkedTables(Area a) {
+    final drawn = {
+      for (final detail in a.controller.tableDetails)
+        if (detail.table.visible && detail.data['id'] != null)
+          detail.data['id']!,
+    };
+    return a.tableIds.difference(drawn);
+  }
+
+  /// A double tap opens table [number] (spec E-2): logged with the id the
+  /// table is linked by, read from the service copy's details, which carry
+  /// the design's data (E-6). Its two taps were logged first: a host that
+  /// acts on a tap acts on each tap of a double tap too (R-3).
+  void _opened(Area a, String number) {
+    String? id;
+    for (final detail in a.controller.tableDetails) {
+      if (detail.table.number == number) {
+        id = detail.data['id'];
+        break;
+      }
+    }
+    _log(_words.logOpened(a.name, number, id));
   }
 
   /// The toggle (H10). The service layout is kept, not discarded (spec
@@ -365,10 +477,9 @@ class DemoHomeState extends State<DemoHome> {
       area.controller.load(stored);
     }
     _log(_words.logReloaded(area.name));
-    // A load in the service starts from the design: the layout goes back.
-    if (area.controller.mode.value == FloorPlanMode.selection) {
-      _restoreLayout(area);
-    }
+    _clearPointer();
+    // A load in the service starts from the design: the layout goes back
+    // when designChanges reports the replaced plan (_designChanged).
     // A load drops a framing (the guide: frame after a load).
     if (area.zone case final z?) {
       showZone(area, area.zones[z]!, fadeOthers: area.fadeOthers);
@@ -738,7 +849,10 @@ class DemoHomeState extends State<DemoHome> {
                     value: i, label: Text(areas[i].name, key: Key('area-$i'))),
             ],
             selected: {_area},
-            onSelectionChanged: (s) => setState(() => _area = s.single),
+            onSelectionChanged: (s) => setState(() {
+              _area = s.single;
+              _clearPointer();
+            }),
           ),
           const SizedBox(width: 16),
           ValueListenableBuilder<FloorPlanMode>(
@@ -782,6 +896,11 @@ class DemoHomeState extends State<DemoHome> {
               onSplitRequested: (id) => _split(a, id),
               tableOverlayBuilder: a.badges ? tableBadge : null,
               tableOverlayLayout: kBadgeLayout,
+              onTableDoubleTap: (n) => _opened(a, n),
+              onTablesMoved: (moved) => _log(_words.logMoved(a.name,
+                  _sorted([for (final d in moved) d.table.number ?? '—']))),
+              onTableHover: (n) => pointer.value = (table: n, floor: null),
+              onFloorTap: (w) => pointer.value = (table: null, floor: w),
             ),
           ),
           SizedBox(
@@ -807,14 +926,46 @@ class DemoHomeState extends State<DemoHome> {
                   if (c.mode.value == FloorPlanMode.selection)
                     OutlinedButton(
                         key: const Key('reset-layout'),
-                        onPressed: c.resetLayout,
+                        onPressed: () {
+                          _clearPointer();
+                          c.resetLayout();
+                        },
                         child: Text(words.resetLayout)),
                   OutlinedButton(
                       key: const Key('fit'),
                       onPressed: c.fitToView,
                       child: Text(words.fit)),
                 ]),
+                // Spec E-6, E-8: the POS's ids written into the design.
+                if (c.mode.value == FloorPlanMode.design) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                      spacing: 8,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        OutlinedButton(
+                            key: const Key('link-tables'),
+                            onPressed: () => linkTables(a),
+                            child: Text(words.linkTables)),
+                        Text(words.unlinked(unlinkedTables(a).length),
+                            key: const Key('unlinked')),
+                      ]),
+                ],
                 if (c.mode.value == FloorPlanMode.selection) ...[
+                  // Spec E-3, E-4: one line, rebuilt alone.
+                  const SizedBox(height: 8),
+                  ValueListenableBuilder<PointerLine?>(
+                    valueListenable: pointer,
+                    builder: (context, line, _) => Text(
+                        key: const Key('pointer-line'),
+                        switch (line) {
+                          null => '',
+                          (table: final n?, floor: _) => words.overTable(n),
+                          (table: null, floor: final w?) =>
+                            words.floorAt(w.dx, w.dy),
+                          (table: null, floor: null) => words.overNoTable,
+                        }),
+                  ),
                   SwitchListTile(
                       key: const Key('moves'),
                       contentPadding: EdgeInsets.zero,

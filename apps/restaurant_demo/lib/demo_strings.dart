@@ -95,6 +95,39 @@ abstract class DemoStrings {
   String logTapped(String area, String number);
 
   String logLayoutChanged(String area);
+
+  /// Host embedding API spec E-1 to E-8: "Link tables", the unlinked count,
+  /// the service's pointer line and the log's lines for a double tap, a
+  /// move, a link and the design's table changes.
+  String get linkTables;
+
+  String unlinked(int count);
+
+  String overTable(String number);
+
+  String get overNoTable;
+
+  /// The floor point ([x], [y]) in millimetres, worded in metres.
+  String floorAt(double x, double y);
+
+  String logLinked(String area, int count);
+
+  String logOpened(String area, String number, String? id);
+
+  String logMoved(String area, String numbers);
+
+  String logTableAdded(String area, String number);
+
+  String logTableRemoved(String area, String number);
+
+  String logPlanReplaced(String area);
+
+  /// [mm] in metres, one decimal, with [separator] and a real minus sign.
+  static String metres(double mm, String separator) {
+    var text = (mm / 1000).toStringAsFixed(1);
+    if (text == '-0.0') text = '0.0';
+    return text.replaceFirst('.', separator).replaceFirst('-', '\u2212');
+  }
 }
 
 final class _En extends DemoStrings {
@@ -235,6 +268,44 @@ final class _En extends DemoStrings {
 
   @override
   String logLayoutChanged(String area) => '$area: layout changed';
+
+  @override
+  String get linkTables => 'Link tables';
+
+  @override
+  String unlinked(int count) => 'Unlinked: $count';
+
+  @override
+  String overTable(String number) => 'over table $number';
+
+  @override
+  String get overNoTable => 'over no table';
+
+  @override
+  String floorAt(double x, double y) =>
+      'floor at ${DemoStrings.metres(x, '.')}, '
+      '${DemoStrings.metres(y, '.')} m';
+
+  @override
+  String logLinked(String area, int count) => '$area: linked $count tables';
+
+  @override
+  String logOpened(String area, String number, String? id) =>
+      '$area: table $number opened (${id == null ? 'no id' : 'id $id'})';
+
+  @override
+  String logMoved(String area, String numbers) => '$area: moved {$numbers}';
+
+  @override
+  String logTableAdded(String area, String number) =>
+      '$area: table $number added';
+
+  @override
+  String logTableRemoved(String area, String number) =>
+      '$area: table $number removed';
+
+  @override
+  String logPlanReplaced(String area) => '$area: plan replaced';
 }
 
 final class _De extends DemoStrings {
@@ -381,6 +452,45 @@ final class _De extends DemoStrings {
 
   @override
   String logLayoutChanged(String area) => '$area: Anordnung geändert';
+
+  @override
+  String get linkTables => 'Tische verknüpfen';
+
+  @override
+  String unlinked(int count) => 'Nicht verknüpft: $count';
+
+  @override
+  String overTable(String number) => 'über Tisch $number';
+
+  @override
+  String get overNoTable => 'über keinem Tisch';
+
+  @override
+  String floorAt(double x, double y) =>
+      'Boden bei ${DemoStrings.metres(x, ',')}; '
+      '${DemoStrings.metres(y, ',')} m';
+
+  @override
+  String logLinked(String area, int count) => '$area: $count Tische verknüpft';
+
+  @override
+  String logOpened(String area, String number, String? id) =>
+      '$area: Tisch $number geöffnet (${id == null ? 'keine ID' : 'ID $id'})';
+
+  @override
+  String logMoved(String area, String numbers) =>
+      '$area: {$numbers} verschoben';
+
+  @override
+  String logTableAdded(String area, String number) =>
+      '$area: Tisch $number hinzugefügt';
+
+  @override
+  String logTableRemoved(String area, String number) =>
+      '$area: Tisch $number entfernt';
+
+  @override
+  String logPlanReplaced(String area) => '$area: Plan ersetzt';
 }
 
 final class _Tr extends DemoStrings {
@@ -527,4 +637,42 @@ final class _Tr extends DemoStrings {
 
   @override
   String logLayoutChanged(String area) => '$area: düzen değişti';
+
+  @override
+  String get linkTables => 'Masaları bağla';
+
+  @override
+  String unlinked(int count) => 'Bağlanmamış: $count';
+
+  @override
+  String overTable(String number) => 'masa $number üzerinde';
+
+  @override
+  String get overNoTable => 'masa üzerinde değil';
+
+  @override
+  String floorAt(double x, double y) => 'zemin: ${DemoStrings.metres(x, ',')}; '
+      '${DemoStrings.metres(y, ',')} m';
+
+  @override
+  String logLinked(String area, int count) => '$area: $count masa bağlandı';
+
+  @override
+  String logOpened(String area, String number, String? id) =>
+      '$area: masa $number açıldı '
+      '(${id == null ? 'kimlik yok' : 'kimlik $id'})';
+
+  @override
+  String logMoved(String area, String numbers) => '$area: {$numbers} taşındı';
+
+  @override
+  String logTableAdded(String area, String number) =>
+      '$area: masa $number eklendi';
+
+  @override
+  String logTableRemoved(String area, String number) =>
+      '$area: masa $number kaldırıldı';
+
+  @override
+  String logPlanReplaced(String area) => '$area: plan değiştirildi';
 }
