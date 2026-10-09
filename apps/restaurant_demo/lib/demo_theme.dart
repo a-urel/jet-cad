@@ -119,7 +119,8 @@ ColorScheme posColorScheme(Brightness brightness) =>
 /// advice), status fills at 0.8 of their colour, group frames in the
 /// primary (the chips follow the frame), rounder chips, the muted token
 /// around the page, a taller service bar, an orange selection, and a
-/// heavier veil of the muted token over the tables out of focus.
+/// heavier veil over the tables out of focus. The veil keeps the paper's
+/// colour: one of another colour would show each faded table's box.
 const FloorPlanTheme kPosFloorPlanLight = FloorPlanTheme(
   statusCaptionStyle: TextStyle(
       fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
@@ -130,7 +131,6 @@ const FloorPlanTheme kPosFloorPlanLight = FloorPlanTheme(
   groupChipRadius: 6,
   selectionOnLight: _orange600,
   selectionOnDark: _orange400,
-  focusVeilColor: _zinc100,
   focusVeilOpacity: 0.75,
   canvasBackground: _zinc100,
   serviceBarHeight: 52,
@@ -150,7 +150,6 @@ const FloorPlanTheme kPosFloorPlanDark = FloorPlanTheme(
   groupChipRadius: 6,
   selectionOnLight: _orange600,
   selectionOnDark: _orange400,
-  focusVeilColor: _zinc950,
   focusVeilOpacity: 0.75,
   canvasBackground: _zinc800,
   serviceBarHeight: 52,

@@ -1390,7 +1390,8 @@ in it is drawn on your light colour, with dark ink.
   `focusVeilOpacity` (as `statusFillOpacity` multiplies a status
   colour's); with no colour the veil is the paper's colour at that
   opacity. Over the paper itself a paper-coloured veil does not show:
-  it fades what is drawn.
+  it fades what is drawn. A veil of another colour shows as a tinted
+  box over each faded table.
 - **The selection's width** reaches the selection's outline, a selected
   point's cross (its stroke and its length) and the move preview's
   cross. The hover stays 1.5 px; its colour is the selection's at 60 %
