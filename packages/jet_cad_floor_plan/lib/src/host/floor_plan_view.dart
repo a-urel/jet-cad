@@ -14,6 +14,7 @@ import 'floor_plan_controller.dart';
 import 'floor_plan_types.dart';
 import 'page_flows.dart';
 import 'service_view.dart';
+import 'table_overlay.dart';
 
 /// The planner, embedded (spec 14b-2 H5): in the design mode today's editor
 /// over the designed plan, with Export and Print and no file dialogs; in
@@ -38,6 +39,9 @@ class FloorPlanView extends StatefulWidget {
     this.onMergeRequested,
     this.onSplitRequested,
     this.userCamera = true,
+    this.tableOverlayBuilder,
+    this.tableOverlayLayout = const FloorPlanOverlayLayout(),
+    this.tableOverlayModes = const {FloorPlanMode.selection},
   });
 
   final FloorPlanController controller;
@@ -94,6 +98,32 @@ class FloorPlanView extends StatefulWidget {
   /// [FloorPlanController.zoomBy], [FloorPlanController.centerOn] and fits
   /// still act. Read at each build and each press.
   final bool userCamera;
+
+  /// The host's widget on each table (host embedding API spec G-5): called
+  /// per numbered table with geometry, again for one table only when its
+  /// [FloorPlanTableOverlay] changes, and for every table when this view is
+  /// rebuilt with a different function; never on pan or zoom. Null builds
+  /// no overlay layer at all.
+  ///
+  /// The widgets sit above the plan, its statuses and the selection
+  /// outlines, inside the canvas and clipped to it, placed by
+  /// [tableOverlayLayout], in the modes of [tableOverlayModes]. They live
+  /// as long as the plan the view shows: a mode switch, a
+  /// `FloorPlanController.resetLayout`, a restore or a load builds them
+  /// afresh, so a host keeps its state in its own objects, not in an
+  /// overlay's `State`. Each table's widget is its own, so two tables
+  /// sharing a number get two. While staff drag tables, the widgets stay at
+  /// the tables' last places and move on the drop.
+  final FloorPlanTableOverlayBuilder? tableOverlayBuilder;
+
+  /// Where and how [tableOverlayBuilder]'s widgets sit on their tables
+  /// (spec G-6, G-7). Read at each build; an [ArgumentError] for a layout
+  /// [FloorPlanOverlayLayout] rejects.
+  final FloorPlanOverlayLayout tableOverlayLayout;
+
+  /// The modes that show [tableOverlayBuilder]'s widgets: the selection
+  /// mode only, by default.
+  final Set<FloorPlanMode> tableOverlayModes;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -205,51 +235,69 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             run: () => _flows.print(context)),
       ];
 
+  /// The overlay layer for [mode], or null when the host shows none there
+  /// (spec G-5).
+  Widget? _tableOverlays(FloorPlanController c, FloorPlanMode mode) {
+    final builder = widget.tableOverlayBuilder;
+    if (builder == null || !widget.tableOverlayModes.contains(mode)) {
+      return null;
+    }
+    return TableOverlayLayer(
+        controller: c, builder: builder, layout: widget.tableOverlayLayout);
+  }
+
   @override
-  Widget build(BuildContext context) => ListenableBuilder(
-        listenable: widget.controller,
-        builder: (context, _) {
-          final c = widget.controller;
-          final document = c.activeDocument;
-          _measureAfterFrame(c.mode.value, document);
-          if (c.mode.value == FloorPlanMode.selection) {
-            return ServiceView(
-                key: ObjectKey(document),
-                controller: c,
-                flows: _flows,
-                fitOnStart: _fitOnStartFor(document),
-                callbacks: () => (
-                      onTableTap: widget.onTableTap,
-                      onLayoutChanged: widget.onLayoutChanged,
-                      onGroupTap: widget.onGroupTap,
-                      onMergeRequested: widget.onMergeRequested,
-                      onSplitRequested: widget.onSplitRequested,
-                    ),
-                options: () => (
-                      serviceMoves: widget.serviceMoves,
-                      longPress: widget.longPress,
-                      onTableContextMenu: widget.onTableContextMenu,
-                    ),
-                userCamera: () => widget.userCamera);
-          }
-          c.startSymbols();
-          return PlannerShell(
-            key: ObjectKey(document),
-            document: document,
-            selection: c.activeSelection,
-            camera: c.cameraController,
-            fitOnStart: _fitOnStartFor(document),
-            fitRequests: c.fitRequests,
-            fileCommands: _commands(FloorPlanStrings.of(context)),
-            onFitted: c.fitted,
-            framing: c.framingFor,
-            cameraEpoch: () => c.cameraEpoch,
-            userCamera: widget.userCamera,
-            onCanvasPlaced: c.canvasPlaced,
-            onSettle: c.registerSettle,
-            symbols: c.symbols,
-            thumbnails: c.thumbnails,
-          );
-        },
-      );
+  Widget build(BuildContext context) {
+    if (widget.tableOverlayBuilder != null) {
+      validateOverlayLayout(widget.tableOverlayLayout);
+    }
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final c = widget.controller;
+        final document = c.activeDocument;
+        _measureAfterFrame(c.mode.value, document);
+        if (c.mode.value == FloorPlanMode.selection) {
+          return ServiceView(
+              key: ObjectKey(document),
+              controller: c,
+              flows: _flows,
+              fitOnStart: _fitOnStartFor(document),
+              callbacks: () => (
+                    onTableTap: widget.onTableTap,
+                    onLayoutChanged: widget.onLayoutChanged,
+                    onGroupTap: widget.onGroupTap,
+                    onMergeRequested: widget.onMergeRequested,
+                    onSplitRequested: widget.onSplitRequested,
+                  ),
+              options: () => (
+                    serviceMoves: widget.serviceMoves,
+                    longPress: widget.longPress,
+                    onTableContextMenu: widget.onTableContextMenu,
+                  ),
+              userCamera: () => widget.userCamera,
+              tableOverlays: _tableOverlays(c, FloorPlanMode.selection));
+        }
+        c.startSymbols();
+        return PlannerShell(
+          key: ObjectKey(document),
+          document: document,
+          selection: c.activeSelection,
+          camera: c.cameraController,
+          fitOnStart: _fitOnStartFor(document),
+          fitRequests: c.fitRequests,
+          fileCommands: _commands(FloorPlanStrings.of(context)),
+          onFitted: c.fitted,
+          framing: c.framingFor,
+          cameraEpoch: () => c.cameraEpoch,
+          userCamera: widget.userCamera,
+          onCanvasPlaced: c.canvasPlaced,
+          onSettle: c.registerSettle,
+          symbols: c.symbols,
+          thumbnails: c.thumbnails,
+          tableOverlays: _tableOverlays(c, FloorPlanMode.design),
+        );
+      },
+    );
+  }
 }

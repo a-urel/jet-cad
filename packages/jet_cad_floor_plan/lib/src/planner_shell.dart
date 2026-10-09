@@ -94,6 +94,7 @@ class PlannerShell extends StatefulWidget {
     this.cameraEpoch,
     this.userCamera = true,
     this.onCanvasPlaced,
+    this.tableOverlays,
   });
 
   final DraftDocument? document;
@@ -167,6 +168,10 @@ class PlannerShell extends StatefulWidget {
 
   /// Forwarded to the view: where its drawing area is (spec G-2).
   final void Function(Object view, Rect? global)? onCanvasPlaced;
+
+  /// The host's widgets on the tables when the host shows them in the
+  /// design mode (host embedding API spec G-5); null for none.
+  final Widget? tableOverlays;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -998,6 +1003,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         cameraEpoch: widget.cameraEpoch,
                         userCamera: widget.userCamera,
                         onCanvasPlaced: widget.onCanvasPlaced,
+                        tableOverlays: widget.tableOverlays,
                       ),
                     ),
                   ),

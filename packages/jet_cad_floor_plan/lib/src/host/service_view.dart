@@ -41,7 +41,8 @@ class ServiceView extends StatefulWidget {
       required this.fitOnStart,
       required this.callbacks,
       this.options = _defaultOptions,
-      this.userCamera = _always});
+      this.userCamera = _always,
+      this.tableOverlays});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -63,6 +64,10 @@ class ServiceView extends StatefulWidget {
   final bool Function() userCamera;
 
   static bool _always() => true;
+
+  /// The host's widgets on the tables (host embedding API spec G-5), above
+  /// the selection outlines; null for none.
+  final Widget? tableOverlays;
 
   @override
   State<ServiceView> createState() => _ServiceViewState();
@@ -452,6 +457,7 @@ class _ServiceViewState extends State<ServiceView> {
                         ),
                       ],
                     ),
+                    tableOverlays: widget.tableOverlays,
                     // Above the drafting: the focus's veil (zone spec Z13),
                     // then the label chips (G3, F-11).
                     overlay: Stack(

@@ -38,6 +38,7 @@ class PlannerView extends StatefulWidget {
     this.framing,
     this.underlay,
     this.overlay,
+    this.tableOverlays,
     this.rulers = true,
     this.grid = true,
     this.cameraEpoch,
@@ -110,6 +111,12 @@ class PlannerView extends StatefulWidget {
   /// (table-groups spec G3, F-11): the selection mode's group label chips,
   /// which a chair's lines must not paint over. Null draws nothing there.
   final Widget? overlay;
+
+  /// Painted above everything else on the canvas, the selection overlay
+  /// included, and inside the canvas's input listeners, clipped to the
+  /// canvas (host embedding API spec G-5): the host's widgets on the
+  /// tables. Null draws nothing there.
+  final Widget? tableOverlays;
 
   /// The rulers around the drawing area; false in the selection mode,
   /// which shows the plan, not the drafting aids.
@@ -364,6 +371,8 @@ class _PlannerViewState extends State<PlannerView> {
                           ),
                         ),
                       ),
+                      if (widget.tableOverlays case final layer?)
+                        Positioned.fill(child: ClipRect(child: layer)),
                     ],
                   ),
                 ),

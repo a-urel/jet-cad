@@ -34,6 +34,10 @@ void main() {
       'FloorPlanTable',
       'FloorPlanTableDetail',
       'FloorPlanCamera',
+      'FloorPlanTableOverlay',
+      'FloorPlanTableOverlayBuilder',
+      'FloorPlanOverlayLayout',
+      'FloorPlanOverlaySize',
       'FloorPlanExport',
       'TableStatus',
       'ServiceLayoutRestore',
@@ -138,5 +142,38 @@ void main() {
     expect(c.zoomBy(2), isTrue);
     expect(c.camera.value.visibleWorld(canvas.size).center.dx,
         closeTo(1000, 1e-9));
+  });
+
+  testWidgets(
+      'B5 the table overlays through the barrel alone (host embedding API '
+      'spec G-5, G-6, G-7)', (tester) async {
+    final c = FloorPlanController();
+    addTearDown(c.dispose);
+    FloorPlanTableOverlay? seen;
+    Widget? badge(BuildContext context, FloorPlanTableOverlay table) {
+      seen = table;
+      return null;
+    }
+
+    final FloorPlanTableOverlayBuilder builder = badge;
+    const layout = FloorPlanOverlayLayout(
+        anchor: Alignment.topCenter,
+        size: FloorPlanOverlaySize.box,
+        maxNaturalSize: Size(80, 40),
+        hideBelowScale: 0.01,
+        detailBreakpoints: [0.05, 0.2]);
+    await tester.pumpWidget(MaterialApp(
+        home: FloorPlanView(
+            controller: c,
+            tableOverlayBuilder: builder,
+            tableOverlayLayout: layout,
+            tableOverlayModes: const {
+          FloorPlanMode.design,
+          FloorPlanMode.selection
+        })));
+    await tester.pump();
+    expect(seen, isNull, reason: 'an empty plan has no table');
+    expect(layout.size, FloorPlanOverlaySize.box);
+    expect(FloorPlanOverlaySize.values, hasLength(2));
   });
 }

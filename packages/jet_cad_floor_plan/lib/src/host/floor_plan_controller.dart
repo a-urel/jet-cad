@@ -1026,6 +1026,7 @@ class FloorPlanController extends ChangeNotifier {
   }
 
   List<FloorPlanTableDetail>? _details;
+  List<Handle> _detailInstances = const [];
   DraftDocument? _detailsDocument;
   int? _detailsState;
   int? _detailsLayers;
@@ -1052,7 +1053,9 @@ class FloorPlanController extends ChangeNotifier {
         !identical(_detailsDocument, d) ||
         _detailsState != state ||
         _detailsLayers != layers) {
-      _details = _detailsOf(d);
+      final instances = <Handle>[];
+      _details = _detailsOf(d, instances);
+      _detailInstances = List.unmodifiable(instances);
       _detailsDocument = d;
       _detailsState = state;
       _detailsLayers = layers;
@@ -1060,29 +1063,44 @@ class FloorPlanController extends ChangeNotifier {
     return _details!;
   }
 
+  /// The instance of each entry of [tableDetails], index for index: the
+  /// overlay layer keys a host's widget by it (spec G-5), so two tables
+  /// sharing a number keep two widgets. Built with [tableDetails] and kept
+  /// as long as it is; never a host's (umbrella D18).
+  @internal
+  List<Handle> get tableDetailInstances {
+    tableDetails;
+    return _detailInstances;
+  }
+
   /// The survey's tables joined to the picker's candidates by instance
-  /// (spec F-8). O(nodes + entities): `candidatesOf`'s own survey and a
+  /// (spec F-8), each one's instance added to [instances] in the same
+  /// order. O(nodes + entities): `candidatesOf`'s own survey and a
   /// `leavesByOwner` scan, on top of the controller's cached survey; at
   /// document-change rate.
-  List<FloorPlanTableDetail> _detailsOf(DraftDocument d) {
+  List<FloorPlanTableDetail> _detailsOf(
+      DraftDocument d, List<Handle> instances) {
     final candidates = {
       for (final c in TablePicker.candidatesOf(d,
           boxes: <Handle, Aabb2>{}, leaves: d.leavesByOwner))
         c.table.instance: c,
     };
     final layers = d.tables.layers;
-    return List.unmodifiable([
-      for (final t in _tables.tables)
-        if (d.tree[t.instance] case final InstanceNode node)
-          _detailOf(
-              FloorPlanTable(
-                  number: t.number,
-                  seats: t.seats,
-                  symbolKey: t.symbolKey,
-                  visible: layers[node.layer]?.visible ?? true),
-              candidates[t.instance],
-              layers[node.layer]),
-    ]);
+    final details = <FloorPlanTableDetail>[];
+    for (final t in _tables.tables) {
+      if (d.tree[t.instance] case final InstanceNode node) {
+        instances.add(t.instance);
+        details.add(_detailOf(
+            FloorPlanTable(
+                number: t.number,
+                seats: t.seats,
+                symbolKey: t.symbolKey,
+                visible: layers[node.layer]?.visible ?? true),
+            candidates[t.instance],
+            layers[node.layer]));
+      }
+    }
+    return List.unmodifiable(details);
   }
 
   static FloorPlanTableDetail _detailOf(
