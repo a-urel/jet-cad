@@ -1420,10 +1420,11 @@ in it is drawn on your light colour, with dark ink.
   padding and text styles interpolate, each number kept between its two
   ends whatever the curve; a field set on one side only, or a style
   whose `color` is set on one side only, switches at the halfway point.
-  An extension only the new theme has applies at once; one only the old
-  theme has stays until the switch ends. While the look changes, the
-  selection mode's painters rebuild at most once per frame of the
-  switch, and never for a pan or a zoom.
+  An extension only the new theme has applies one frame later, from the
+  switch's second frame (its first frame is t = 0, still the old theme);
+  one only the old theme has stays until the switch ends. While the look
+  changes, the selection mode's painters rebuild at most once per frame
+  of the switch, and never for a pan or a zoom.
 - **Never stored.** The look is never saved with the plan or the service
   layout, never exported and never printed.
 

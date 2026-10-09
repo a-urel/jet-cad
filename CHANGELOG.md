@@ -166,6 +166,12 @@ analyses the 0.3.0 host probe against every commit.
   `SelectionOverlayPainter.selectionStrokePixels` (default
   `kSelectionStrokePixels`, 2), the selection's outline and its point
   crosses, asserted finite and above 0, repainting when it changes.
+- `jet_cad_floor_plan`'s `editor.dart`: `PlannerView.selectionStrokePixels`
+  (default `kSelectionStrokePixels`); and a `PlannerShell` with no
+  `FloorPlanView` above it follows the ambient `FloorPlanTheme`'s
+  `selectionOnLight`, `selectionOnDark`, `selectionWidth` and
+  `canvasBackground`, and throws an `ArgumentError` naming the field for
+  an ambient look out of range.
 
 **Known limits.** The badges' look and the smoothness of pan and zoom
 with them have not been checked on a tablet or a terminal, nor have the
