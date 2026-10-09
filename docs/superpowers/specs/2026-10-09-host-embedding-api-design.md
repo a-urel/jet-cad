@@ -913,6 +913,20 @@ sharing a number, an unnumbered table, a camera not at identity.
   task.
 - **O-9.** Accessibility semantics for tables beyond what the overlay
   widgets bring.
+- **O-10.** An undone node removal re-appends the node at its parent's
+  end: `AddNodeCommand`, a delete's inverse, links through
+  `DocumentTree._link` (`jet_cad_2d/lib/src/document/tree.dart:557-570`),
+  so after Delete then Undo `designJson()` differs in the order of the
+  parent's `children` while `dirty` reads false. Nothing drawn changes
+  (draw order is by handle). Pre-existing, independent of table data;
+  found by Slice 2's Task 2 (M-H27's amended killer). Its own task
+  (`AddNodeCommand` restoring the child's index), beside O-8.
+- **O-11.** Selecting a table whose corners are not finite (the
+  fixture's `9`, a hand-edited file) trips a NaN-offset debug assertion
+  in `SelectionOverlayPainter._paintGrips`
+  (`jet_cad_2d_flutter/lib/src/selection_overlay.dart`). Unreachable from
+  the UI: the editor has no free scale for an instance. Found by Slice
+  2's Task 2 (its review's R-4). Its own task (skip non-finite grips).
 
 ## Files (expected)
 
