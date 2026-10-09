@@ -55,7 +55,7 @@ Future<void> pumpView(WidgetTester tester, FloorPlanController c,
   await pumpThemed(tester, Scaffold(body: FloorPlanView(controller: c)), mode);
   await tester.pump();
   await tester.pump();
-  c.camera.value = paletteCamera;
+  c.cameraController.value = paletteCamera;
   await tester.pump();
 }
 

@@ -60,7 +60,7 @@ Future<void> pumpViews(
   await tester.pump();
   await tester.pump();
   for (final v in cs) {
-    v.c.camera.value = paletteCamera;
+    v.c.cameraController.value = paletteCamera;
     v.c.activeSelection.replace([SelectionKey.root(v.selected)]);
   }
   await tester.pump();
@@ -176,13 +176,13 @@ void main() {
     final v = controllerOn(white);
     await pumpViews(tester, [v], ThemeMode.light,
         viewMode: FloorPlanMode.selection);
-    final camera = v.c.camera.value;
+    final camera = v.c.cameraController.value;
     var seen = look(tester, await shoot(tester));
     expectEdge(seen, ChromePalette.light, 'light');
 
     await pumpThemed(tester, views([v.c]), ThemeMode.dark);
     await tester.pump();
-    expect(identical(v.c.camera.value, camera), isTrue);
+    expect(identical(v.c.cameraController.value, camera), isTrue);
     seen = look(tester, await shoot(tester));
     expectEdge(seen, ChromePalette.dark, 'after the switch to dark');
     expectSelection(seen, PaperPalette.dark, 'White shown dark (K1)');

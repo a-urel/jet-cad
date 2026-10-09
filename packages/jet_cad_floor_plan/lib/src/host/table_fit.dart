@@ -21,13 +21,15 @@ const double kTableFitMinSpanMm = 3000;
 /// drawing area of [viewport] (zone spec Z3): [box] grown by
 /// [kTableFitMarginMm] per side, then about its centre to at least
 /// [kTableFitMinSpanMm] per axis, fitted as [ViewportTransform.fit] fits
-/// (5 % margin, y flipped), its scale clamped to `[kMinScale, kMaxScale]`
-/// about the same centre.
+/// (5 % margin, y flipped), its scale clamped to `[minScale, maxScale]`
+/// (by default the planner's own, `[kMinScale, kMaxScale]`; a controller
+/// passes its bounds, host embedding API spec G-3) about the same centre.
 ///
 /// The centre is taken as `min / 2 + max / 2`, which cannot overflow where
 /// `(min + max) / 2` would (Task 1 review R-1: a table near the double
 /// range); halving is exact, so elsewhere the two are the same number.
-ViewportTransform frameTables(Aabb2 box, Size viewport) {
+ViewportTransform frameTables(Aabb2 box, Size viewport,
+    {double minScale = kMinScale, double maxScale = kMaxScale}) {
   assert(!box.isEmpty, 'frameTables needs a non-empty box');
   var minX = box.minX - kTableFitMarginMm, maxX = box.maxX + kTableFitMarginMm;
   var minY = box.minY - kTableFitMarginMm, maxY = box.maxY + kTableFitMarginMm;
@@ -47,7 +49,7 @@ ViewportTransform frameTables(Aabb2 box, Size viewport) {
       .a;
   // The clamp is dead in practice (a 316,000 px view, a 950 m box), and
   // harmless: the same centre at the bound's scale.
-  final clamped = s.clamp(kMinScale, kMaxScale);
+  final clamped = s.clamp(minScale, maxScale);
   final mx = minX / 2 + maxX / 2, my = minY / 2 + maxY / 2;
   return ViewportTransform(
       worldToScreenMatrix: Transform2(

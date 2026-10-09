@@ -46,6 +46,7 @@ const ServiceOptions kDefaultServiceOptions = (
 
 ServiceOptions _defaultOptions() => kDefaultServiceOptions;
 Offset _sameOffset(Offset local) => local;
+bool _always() => true;
 
 /// A context gesture's selection (spec 14d S6): an unselected, unlocked
 /// table becomes the selection alone -- or, a member of a group, its
@@ -71,6 +72,7 @@ class TableSelectTool extends Tool {
       required this.groups,
       required this.callbacks,
       this.options = _defaultOptions,
+      this.userCamera = _always,
       this.toGlobal = _sameOffset});
 
   final TablePicker picker;
@@ -86,6 +88,13 @@ class TableSelectTool extends Tool {
 
   /// The layer's local point as a global one, for a context menu (S7).
   final Offset Function(Offset local) toGlobal;
+
+  /// Whether a drag on the floor pans (host embedding API spec G-3), read
+  /// at each press: false (a view with `userCamera: false`) spends it.
+  final bool Function() userCamera;
+
+  /// [userCamera] as the press read it.
+  bool _pans = true;
 
   ServiceOptions _options = kDefaultServiceOptions;
 
@@ -147,6 +156,7 @@ class TableSelectTool extends Tool {
     _hit = picker.pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
     _toggle = e.shift || e.control || e.meta;
     _options = options();
+    _pans = userCamera();
     _gesture = _Gesture.pressed;
     _dx = _dy = 0;
     final hit = _hit;
@@ -177,6 +187,13 @@ class TableSelectTool extends Tool {
         final hit = _hit;
         if (hit == null || !_options.serviceMoves) {
           // Empty floor pans; so does any table when moves are off (S5).
+          // Unless the host locked the camera (spec G-3): then the drag is
+          // spent, as on a locked table.
+          if (!_pans) {
+            _gesture = _Gesture.spent;
+            notifyListeners();
+            return;
+          }
           _gesture = _Gesture.panning;
         } else if (hit.locked) {
           // A locked table is tapped only (R-1): no move, no pan.

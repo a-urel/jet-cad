@@ -39,14 +39,21 @@ class ServiceView extends StatefulWidget {
       required this.controller,
       required this.flows,
       required this.fitOnStart,
+      this.startFitIsRequest = false,
       required this.callbacks,
-      this.options = _defaultOptions});
+      this.options = _defaultOptions,
+      this.userCamera = _always,
+      this.tableOverlays});
 
   final FloorPlanController controller;
   final PageFlows flows;
 
   /// Whether the camera fits after the first frame (R-13).
   final bool fitOnStart;
+
+  /// Whether that fit performs only a host's request (Task 2 review R-1):
+  /// see [PlannerView.startFitIsRequest].
+  final bool startFitIsRequest;
 
   /// The host's callbacks, read at each call (14c R-5).
   final ServiceCallbacks Function() callbacks;
@@ -55,6 +62,17 @@ class ServiceView extends StatefulWidget {
   final ServiceOptions Function() options;
 
   static ServiceOptions _defaultOptions() => kDefaultServiceOptions;
+
+  /// Whether the user's pan and zoom move the camera (host embedding API
+  /// spec G-3), read at each build and each press: false builds no camera
+  /// gestures and turns a drag on the floor into nothing.
+  final bool Function() userCamera;
+
+  static bool _always() => true;
+
+  /// The host's widgets on the tables (host embedding API spec G-5), above
+  /// the selection outlines; null for none.
+  final Widget? tableOverlays;
 
   @override
   State<ServiceView> createState() => _ServiceViewState();
@@ -65,6 +83,7 @@ class _ServiceViewState extends State<ServiceView> {
   late final DraftDocument _document = _c.activeDocument;
   late final SelectionController _selection = _c.activeSelection;
   late final bool _fitOnStart = widget.fitOnStart;
+  late final bool _startFitIsRequest = widget.startFitIsRequest;
   late final SpatialIndex _index = SpatialIndex(_document);
   late final PageNotifier _page = PageNotifier(_document);
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
@@ -76,6 +95,7 @@ class _ServiceViewState extends State<ServiceView> {
       groups: _c.tableGroups,
       callbacks: widget.callbacks,
       options: widget.options,
+      userCamera: widget.userCamera,
       toGlobal: _toGlobal);
 
   /// The canvas, whose origin is the interaction layer's (no rulers).
@@ -97,7 +117,10 @@ class _ServiceViewState extends State<ServiceView> {
       kind == PointerDeviceKind.invertedStylus;
 
   void _onSecondaryDown(PointerDownEvent e) {
-    if (!_isPrecise(e.kind) ||
+    // A secondary click on an interactive overlay is the overlay's
+    // (host embedding API spec G-5).
+    if (InputClaim.claimed(e) ||
+        !_isPrecise(e.kind) ||
         e.buttons & kSecondaryButton == 0 ||
         _tool.phase != ToolPhase.idle) {
       return;
@@ -114,7 +137,7 @@ class _ServiceViewState extends State<ServiceView> {
     // A host without a menu: a right click is nothing, as before 14d; the
     // selection rule exists for the menu's sake (review F-2).
     if (report == null) return;
-    final world = _c.camera.value
+    final world = _c.cameraController.value
         .screenToWorld(Vector2(e.localPosition.dx, e.localPosition.dy));
     final hit = _picker.pick(world);
     if (hit == null) return;
@@ -132,7 +155,7 @@ class _ServiceViewState extends State<ServiceView> {
       context: ToolContext(
           document: _document,
           index: _index,
-          camera: _c.camera,
+          camera: _c.cameraController,
           selection: _selection));
   final GesturePolicy _policy = GesturePolicy.forPlatform();
 
@@ -180,13 +203,13 @@ class _ServiceViewState extends State<ServiceView> {
   StreamSubscription<DocChange>? _changes;
   late final TableStatusPainter _statusPainter = TableStatusPainter(
     document: _document,
-    camera: _c.camera,
+    camera: _c.cameraController,
     statuses: _c.tableStatuses,
     tableGroups: _c.tableGroups,
     groupStatuses: _c.groupStatuses,
     paper: _paper,
     repaint: Listenable.merge([
-      _c.camera,
+      _c.cameraController,
       _c.tableStatuses,
       _c.tableGroups,
       _c.groupStatuses,
@@ -200,7 +223,7 @@ class _ServiceViewState extends State<ServiceView> {
   // every change of this copy and the paper; zone spec Z14: and on the
   // focus, which fades a group with no focused member.
   late final Listenable _groupRepaint = Listenable.merge(
-      [_c.camera, _c.tableGroups, _c.tableFocus, _changed, _paper]);
+      [_c.cameraController, _c.tableGroups, _c.tableFocus, _changed, _paper]);
   late final TableGroupPainter _framePainter =
       _groupPainter(TableGroupLayer.frames);
   late final TableGroupPainter _chipPainter =
@@ -210,7 +233,7 @@ class _ServiceViewState extends State<ServiceView> {
         layer: layer,
         document: _document,
         picker: _picker,
-        camera: _c.camera,
+        camera: _c.cameraController,
         groups: _c.tableGroups,
         paper: _paper,
         tableFocus: _c.tableFocus,
@@ -222,10 +245,11 @@ class _ServiceViewState extends State<ServiceView> {
   // camera, the focus, every change of this copy and the paper.
   late final TableFocusPainter _focusPainter = TableFocusPainter(
     document: _document,
-    camera: _c.camera,
+    camera: _c.cameraController,
     focus: _c.tableFocus,
     paper: _paper,
-    repaint: Listenable.merge([_c.camera, _c.tableFocus, _changed, _paper]),
+    repaint: Listenable.merge(
+        [_c.cameraController, _c.tableFocus, _changed, _paper]),
   );
 
   /// Export and Print need a page, as the shell's do (R-5, review F-4).
@@ -401,7 +425,7 @@ class _ServiceViewState extends State<ServiceView> {
                     document: _document,
                     index: _index,
                     resolver: _resolver,
-                    camera: _c.camera,
+                    camera: _c.cameraController,
                     page: _page,
                     policy: _policy,
                     selection: _selection,
@@ -414,8 +438,12 @@ class _ServiceViewState extends State<ServiceView> {
                     sheetArgb: _darkCanvas ? _paperArgb() : null,
                     fitRequests: _c.fitRequests,
                     fitOnStart: _fitOnStart,
+                    startFitIsRequest: _startFitIsRequest,
                     onFitted: _c.fitted,
                     framing: _c.framingFor,
+                    cameraEpoch: () => _c.cameraEpoch,
+                    userCamera: widget.userCamera(),
+                    onCanvasPlaced: _c.canvasPlaced,
                     // The service shows the plan, not the drafting aids.
                     rulers: false,
                     grid: false,
@@ -439,6 +467,7 @@ class _ServiceViewState extends State<ServiceView> {
                         ),
                       ],
                     ),
+                    tableOverlays: widget.tableOverlays,
                     // Above the drafting: the focus's veil (zone spec Z13),
                     // then the label chips (G3, F-11).
                     overlay: Stack(

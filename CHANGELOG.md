@@ -8,7 +8,76 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-Nothing yet.
+On `main`, not yet released: the host embedding API's Slice 1, a host's
+own widgets on the tables. Nothing is stored: **plans and service
+layouts are the same as 0.3.0's** (schema 8). Nothing a 0.3.0 host
+calls changes its signature; CI analyses the 0.3.0 host probe against
+every commit.
+
+- **A table's place.** `FloorPlanTableDetail` (`table`, `center`,
+  `size`, `rotation`, `mirrored`, `corners`, `layer`, `locked`, `data`,
+  empty until a later slice) and `FloorPlanController.tableDetails`, the
+  active plan's tables in the order of `tables`, cached; a table on a
+  hidden layer or with corners that are not finite has no geometry.
+  `tableAt(canvasPoint, {kind})`: the number of the table a tap there
+  would hit, a finger's reach for `PointerDeviceKind.touch`.
+- **The camera, public.** `FloorPlanCamera` (`scale`, `worldToCanvas`,
+  `canvasToWorld`, `visibleWorld`, `==` by its matrix) and
+  `FloorPlanController.camera`, a `ValueListenable` with a new value at
+  every pan, zoom and fit. `canvasRect`, the view's drawing area in
+  global coordinates (null with no view), and `worldToGlobal` /
+  `globalToWorld`.
+- **Camera commands and bounds.** `panBy(canvasDelta)` (an
+  `ArgumentError` for a delta that is not finite), `zoomBy(factor,
+  {focus})` (false, changing nothing, with no view, a factor that is not
+  finite and above 0, or a focus that is not finite),
+  `centerOn(world, {scale})` (queued like `fitToView()`, the last request
+  wins; an `ArgumentError` for a point that is not finite or a scale that
+  is not finite and above 0; asked without a scale before a plan's first
+  fit, it takes the scale of that plan's page fit at the real canvas).
+  The constructor's `minScale` and `maxScale` (0.001 and 100 px
+  per mm, as before) bound the user's zoom, the commands and every fit;
+  it throws an `ArgumentError` unless both are finite and
+  `1e-6 <= minScale < maxScale`. A plan's own first fit, after the
+  constructor, `load` or `newPlan()`, still happens after a `panBy` or
+  `zoomBy` made before it; place the camera beforehand with `centerOn`.
+- **Your widgets on the tables.** `FloorPlanView.tableOverlayBuilder`
+  (`FloorPlanTableOverlayBuilder`), called with a
+  `FloorPlanTableOverlay` (`detail`, `selected`, `focused`, the
+  effective `status`, `detailLevel`) per numbered table with geometry:
+  again for one table when its value changes and for every table when
+  the host rebuilds the view, never on pan or zoom.
+  `tableOverlayLayout` (`FloorPlanOverlayLayout`: `anchor`, `size` as
+  `FloorPlanOverlaySize.natural` or `box`, `maxNaturalSize`,
+  `hideBelowScale`, `detailBreakpoints`, `interactive`) and
+  `tableOverlayModes` (the selection mode by default). The widgets paint
+  above the plan, the focus veil and the number chips; a host fades them
+  with `focused`. With `interactive: true` a pointer that goes down on a
+  widget is the widget's alone (no selection, no table drag, no pan, not
+  a finger of a pinch); the wheel over it still zooms the plan. The view
+  throws an `ArgumentError` when it is built with a builder and a
+  `FloorPlanOverlayLayout` whose `detailBreakpoints` are not finite,
+  positive and strictly ascending, or whose `hideBelowScale` or
+  `maxNaturalSize` is negative or not finite.
+- `FloorPlanView.userCamera` (default `true`): `false` switches off the
+  user's pan, pinch and wheel zoom in that view; the commands still act.
+- `jet_cad_2d_flutter`: `InputClaim` and `RenderInputClaim`, a marker
+  whose pointers `InteractionLayer` and `CameraGestureDetector` leave
+  alone.
+- **Changes a host may notice.** Fits (`fitToView()`, `fitToTables`, the
+  first fit) are now clamped to the zoom bounds; with the default bounds
+  no real plan is affected. The `@internal` member
+  `FloorPlanController.camera` (a `CameraController`) is renamed
+  `cameraController`; `camera` is now the public `ValueListenable`. A
+  class that `implements FloorPlanController` must add the new members.
+- One `FloorPlanView` per controller at a time: a second one mounted
+  beside the first throws a `StateError`, as it did before (now in the
+  host guide).
+
+**Known limits.** The badges' look and the smoothness of pan and zoom
+with them have not been checked on a tablet or a terminal; the demo's
+new German and Turkish strings have not been read by native speakers.
+`canvasRect` ignores an ancestor that scales or turns the view.
 
 ## 0.3.0
 

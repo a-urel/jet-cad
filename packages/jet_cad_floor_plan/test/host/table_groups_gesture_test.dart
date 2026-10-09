@@ -125,7 +125,7 @@ Future<Host> mount(WidgetTester tester, {bool duplicate = false}) async {
   c.setMode(FloorPlanMode.selection);
   await tester.pump();
   await tester.pump();
-  c.camera.value = ViewportTransform(
+  c.cameraController.value = ViewportTransform(
       worldToScreenMatrix: Transform2(kScale, 0, 0, -kScale, 690, 420));
   await tester.pump();
   return host;
@@ -139,7 +139,7 @@ Offset onTable(WidgetTester tester, Host h, String n, {int which = 0}) {
   final trapezoid = table.symbolKey == trapezoidTable.key;
   final w = node.transform
       .transformPoint(trapezoid ? Vector2(900, 650) : Vector2(900, 700));
-  final s = h.c.camera.value.worldToScreen(w);
+  final s = h.c.cameraController.value.worldToScreen(w);
   return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
 }
 
@@ -311,12 +311,12 @@ void main() {
     });
     await mouseTap(tester, onTable(tester, h, '20'));
     final before = parts(h.node('5').transform);
-    final camera = parts(h.c.camera.value.worldToScreenMatrix);
+    final camera = parts(h.c.cameraController.value.worldToScreenMatrix);
     await mouseDrag(tester, onTable(tester, h, '5'), const Offset(60, 30));
     expect(parts(h.node('5').transform), before);
     expect(h.doc.commands.undoDepth, 0);
     expect(h.layouts, 0);
-    expect(parts(h.c.camera.value.worldToScreenMatrix), camera,
+    expect(parts(h.c.cameraController.value.worldToScreenMatrix), camera,
         reason: 'no pan');
     expect(h.selected, h.keys({'20'}), reason: 'not replaced');
   });

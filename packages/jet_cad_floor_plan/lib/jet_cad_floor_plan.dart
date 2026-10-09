@@ -9,6 +9,7 @@ library;
 export 'src/export/export_font.dart' show registerFontLicences;
 export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/fonts.dart' show ensureFloorPlanFonts;
+export 'src/host/floor_plan_camera.dart' show FloorPlanCamera;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
     show
@@ -23,6 +24,13 @@ export 'src/host/floor_plan_types.dart'
         TableStatus,
         Unnumbered;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
+export 'src/host/table_detail.dart' show FloorPlanTableDetail;
+export 'src/host/table_overlay.dart'
+    show
+        FloorPlanOverlayLayout,
+        FloorPlanOverlaySize,
+        FloorPlanTableOverlay,
+        FloorPlanTableOverlayBuilder;
 export 'src/l10n/localizations.dart'
     show
         FloorPlanLocalizations,

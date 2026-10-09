@@ -277,7 +277,7 @@ void main() {
   /// interaction layer's, whose coordinates the camera's are) plus the
   /// camera's image of [w].
   Offset globalOf(WidgetTester tester, FloorPlanController c, Vector2 w) {
-    final s = c.camera.value.worldToScreen(w);
+    final s = c.cameraController.value.worldToScreen(w);
     return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
   }
 
@@ -286,7 +286,7 @@ void main() {
       'first frame, both ways; there and back gives the camera\'s numbers '
       'again; fitToView still fits (R-13 as amended)', (tester) async {
     final c = await pumpView(tester);
-    c.camera.value = ViewportTransform(
+    c.cameraController.value = ViewportTransform(
         worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310.5, 2400.25));
     await tester.pump();
     final w = Vector2(3170.5, -820.25);
@@ -296,28 +296,29 @@ void main() {
     c.setMode(FloorPlanMode.selection);
     // Before any frame: already shifted by the chrome's difference, so the
     // first frame of the service draws the plan in place.
-    expect(c.camera.value.worldToScreenMatrix.e, -310.5 + 240 + 24);
-    expect(c.camera.value.worldToScreenMatrix.f, 2400.25 + 24);
+    expect(c.cameraController.value.worldToScreenMatrix.e, -310.5 + 240 + 24);
+    expect(c.cameraController.value.worldToScreenMatrix.f, 2400.25 + 24);
     await tester.pump();
     expect(tester.getTopLeft(find.byType(InteractionLayer)), isNot(canvas),
         reason: 'premise: the canvas starts elsewhere in the service');
     final there = globalOf(tester, c, w);
     expect(there.dx, closeTo(before.dx, 1e-9));
     expect(there.dy, closeTo(before.dy, 1e-9));
-    expect(c.camera.value.worldToScreenMatrix.a, 0.07, reason: 'no zoom');
+    expect(c.cameraController.value.worldToScreenMatrix.a, 0.07,
+        reason: 'no zoom');
 
     c.setMode(FloorPlanMode.design);
     await tester.pump();
     final back = globalOf(tester, c, w);
     expect(back.dx, closeTo(before.dx, 1e-9));
     expect(back.dy, closeTo(before.dy, 1e-9));
-    expect(c.camera.value.worldToScreenMatrix.e, -310.5);
-    expect(c.camera.value.worldToScreenMatrix.f, 2400.25);
+    expect(c.cameraController.value.worldToScreenMatrix.e, -310.5);
+    expect(c.cameraController.value.worldToScreenMatrix.f, 2400.25);
 
     c.fitToView();
     await tester.pump();
     await tester.pump();
-    expect(c.camera.value.worldToScreenMatrix.a, isNot(0.07));
+    expect(c.cameraController.value.worldToScreenMatrix.a, isNot(0.07));
   });
 
   testWidgets(
@@ -329,13 +330,14 @@ void main() {
       ..addAll(seeds));
     floorPlanCanvasSeeds[FloorPlanMode.selection] = const Offset(130, 7);
     final c = await pumpView(tester);
-    c.camera.value = ViewportTransform(
+    c.cameraController.value = ViewportTransform(
         worldToScreenMatrix: Transform2(0.05, 0, 0, -0.05, 120.75, 610.5));
     await tester.pump();
     final w = Vector2(-1450.25, 2210.5);
     final before = globalOf(tester, c, w);
     c.setMode(FloorPlanMode.selection);
-    expect(c.camera.value.worldToScreenMatrix.e, 120.75 + 240 + 24 - 130,
+    expect(
+        c.cameraController.value.worldToScreenMatrix.e, 120.75 + 240 + 24 - 130,
         reason: 'premise: shifted by the wrong seed');
     await tester.pump();
     final after = globalOf(tester, c, w);
@@ -384,7 +386,7 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(viewApp(c));
     await tester.pump();
-    c.camera.value = cam;
+    c.cameraController.value = cam;
     await tester.pump();
     final before = globalOf(tester, c, w);
     await tester.pumpWidget(viewApp(null));
@@ -402,7 +404,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     c.takeFitOnStart(); // a host whose plan was already shown and fitted
-    c.camera.value = cam;
+    c.cameraController.value = cam;
     var switched = false;
     tester.binding.addPostFrameCallback((_) {
       c.setMode(FloorPlanMode.selection);
@@ -432,7 +434,7 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     c.takeFitOnStart();
-    c.camera.value = cam;
+    c.cameraController.value = cam;
     tester.binding
         .addPostFrameCallback((_) => c.setMode(FloorPlanMode.selection));
     await tester.pumpWidget(viewApp(c));
@@ -458,33 +460,33 @@ void main() {
     await tester.pump();
     await tester.pumpWidget(viewApp(b));
     await tester.pump();
-    b.camera.value = cam;
+    b.cameraController.value = cam;
     await tester.pump();
     final before = globalOf(tester, b, w);
     b.setMode(FloorPlanMode.selection);
     await tester.pump();
     await tester.pump();
     expectSame(globalOf(tester, b, w), before, 'b in the service');
-    a.camera.value = cam;
+    a.cameraController.value = cam;
     await tester.pump();
-    expect(a.camera.value.worldToScreenMatrix.e, 120.75);
+    expect(a.cameraController.value.worldToScreenMatrix.e, 120.75);
   });
 
   testWidgets(
       'V7g a load and a switch before a frame: the fit wins, nothing is '
       'shifted on top of it', (tester) async {
     final c = await pumpView(tester);
-    c.camera.value = cam;
+    c.cameraController.value = cam;
     await tester.pump();
     c.load(pagePlan());
     c.setMode(FloorPlanMode.selection);
     await tester.pump();
     await tester.pump();
-    final fitted = c.camera.value.worldToScreenMatrix;
+    final fitted = c.cameraController.value.worldToScreenMatrix;
     c.fitToView();
     await tester.pump();
     await tester.pump();
-    final again = c.camera.value.worldToScreenMatrix;
+    final again = c.cameraController.value.worldToScreenMatrix;
     expect([fitted.a, fitted.e, fitted.f], [again.a, again.e, again.f]);
   });
 
@@ -622,26 +624,26 @@ void main() {
     await tester.pump();
     final odd = ViewportTransform(
         worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310, 2400));
-    c.camera.value = odd;
+    c.cameraController.value = odd;
     c.setMode(FloorPlanMode.selection);
     c.fitToView();
     await tester.pump();
     await tester.pump();
     // The selection mode's canvas is wider than the editor's: its fit.
-    final fitted = c.camera.value.worldToScreenMatrix.a;
+    final fitted = c.cameraController.value.worldToScreenMatrix.a;
     expect(fitted, isNot(0.07));
-    c.camera.value = odd;
+    c.cameraController.value = odd;
     c.fitToView();
     await tester.pump();
     await tester.pump();
-    expect(c.camera.value.worldToScreenMatrix.a, fitted,
+    expect(c.cameraController.value.worldToScreenMatrix.a, fitted,
         reason: 'the same view fits the same');
 
-    c.camera.value = odd;
+    c.cameraController.value = odd;
     c.load(pagePlan());
     await tester.pump();
     await tester.pump();
-    expect(c.camera.value.worldToScreenMatrix.a, fitted);
+    expect(c.cameraController.value.worldToScreenMatrix.a, fitted);
   });
 
   testWidgets(
@@ -673,7 +675,7 @@ void main() {
     final node = d.tree[TableSurvey.of(d).withNumber(n).single.instance]!
         as InstanceNode;
     final w = node.transform.transformPoint(Vector2(900, 700));
-    final s = c.camera.value.worldToScreen(w);
+    final s = c.cameraController.value.worldToScreen(w);
     return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
   }
 
@@ -742,7 +744,7 @@ void main() {
     c.setMode(FloorPlanMode.selection);
     await tester.pump();
     await tester.pump();
-    final scale = c.camera.value.scale;
+    final scale = c.cameraController.value.scale;
     final at2 = tableOnScreen(tester, c, '2');
     final a = await tester.startGesture(at2,
         pointer: 31, kind: PointerDeviceKind.touch);
@@ -761,7 +763,8 @@ void main() {
     expect(c.activeDocument.commands.undoDepth, 0, reason: 'no Move');
     expect(layouts, 0);
     expect(c.serviceEdited, isFalse);
-    expect(c.camera.value.scale, greaterThan(scale * 1.2), reason: 'zoomed');
+    expect(c.cameraController.value.scale, greaterThan(scale * 1.2),
+        reason: 'zoomed');
     expect(c.selectedTables.value, {'2'},
         reason: 'the drag selected it at the slop; the selection stands');
 
@@ -886,7 +889,7 @@ void main() {
   FloorPlanController zoneController() {
     final c = FloorPlanController(json: zonePlanJson());
     addTearDown(c.dispose);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     return c;
   }
 
@@ -906,7 +909,8 @@ void main() {
       {String? reason}) {
     final canvas = find.byType(InteractionLayer);
     final box = boundOf(c.activeDocument, numbers);
-    expectCamera(c.camera.value, frameTables(box, tester.getSize(canvas)),
+    expectCamera(
+        c.cameraController.value, frameTables(box, tester.getSize(canvas)),
         reason: reason);
     final centre = globalOf(tester, c, box.center);
     final want = tester.getCenter(canvas);
@@ -918,13 +922,13 @@ void main() {
   /// gives from another camera. Leaves the camera there.
   Future<ViewportTransform> pageFit(
       WidgetTester tester, FloorPlanController c) async {
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     c.fitToView();
     await tester.pump();
     await tester.pump();
-    expect(c.camera.value.worldToScreenMatrix.a, isNot(0.37),
+    expect(c.cameraController.value.worldToScreenMatrix.a, isNot(0.37),
         reason: 'premise: refitted');
-    return c.camera.value;
+    return c.cameraController.value;
   }
 
   testWidgets(
@@ -939,7 +943,7 @@ void main() {
 
     await tester.pumpWidget(viewApp(null));
     c.setMode(FloorPlanMode.selection);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'A1', 'A2'}), isTrue);
     await tester.pumpWidget(viewApp(c));
     await tester.pump();
@@ -952,23 +956,23 @@ void main() {
     final c = zoneController();
     expect(c.fitToTables({'3'}), isTrue);
     c.load(zonePlanJson());
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     await mountAt1440(tester, c);
-    final first = c.camera.value;
+    final first = c.cameraController.value;
     expectCamera(first, await pageFit(tester, c), reason: 'load');
 
     await tester.pumpWidget(viewApp(null));
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3'}), isTrue);
     c.newPlan();
     // The new plan gets a table 3 before a view shows it: the old
     // request named the old plan's.
     placeZoneTable(c.activeDocument, trapezoidTable, 40000, -27000, '3',
         mirrored: true);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     await tester.pumpWidget(viewApp(c));
     await tester.pump();
-    final second = c.camera.value;
+    final second = c.cameraController.value;
     expectCamera(second, await pageFit(tester, c), reason: 'newPlan');
   });
 
@@ -982,7 +986,7 @@ void main() {
     c.resetLayout();
     final designed = boundOf(c.activeDocument, {'3'});
     c.takeFitOnStart();
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3'}), isTrue);
     expect(c.restoreServiceLayout(json).applied, ['3']);
     expect(boundOf(c.activeDocument, {'3'}).minX, isNot(designed.minX),
@@ -997,14 +1001,14 @@ void main() {
     final c = zoneController();
     await mountAt1440(tester, c);
     final page = await pageFit(tester, c);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3'}), isTrue);
     c.fitToView();
     await tester.pump();
     await tester.pump();
-    expectCamera(c.camera.value, page, reason: 'the page');
+    expectCamera(c.cameraController.value, page, reason: 'the page');
 
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     c.fitToView();
     expect(c.fitToTables({'3'}), isTrue);
     await tester.pump();
@@ -1013,12 +1017,12 @@ void main() {
 
     // With no view mounted, the same.
     await tester.pumpWidget(viewApp(null));
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3'}), isTrue);
     c.fitToView();
     await tester.pumpWidget(viewApp(c));
     await tester.pump();
-    expectCamera(c.camera.value, page, reason: 'the page, remounted');
+    expectCamera(c.cameraController.value, page, reason: 'the page, remounted');
   });
 
   testWidgets(
@@ -1030,7 +1034,7 @@ void main() {
     final box = boundOf(c.activeDocument, {'3', '7'});
     expect(box.maxX - box.minX + 1000, lessThan(3000),
         reason: 'premise: x at the minimum span');
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3', '7'}), isTrue);
     await tester.pump();
     await tester.pump();
@@ -1069,7 +1073,7 @@ void main() {
     final c = zoneController();
     await mountAt1440(tester, c);
     expect(find.byType(PlannerShell), findsOneWidget);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'7'}), isTrue);
     await tester.pump();
     await tester.pump();
@@ -1100,12 +1104,12 @@ void main() {
     c.undo();
     expect(TableSurvey.of(d).withNumber(number), isEmpty, reason: 'premise');
     await mountAt1440(tester, c);
-    final first = c.camera.value;
+    final first = c.cameraController.value;
     expect(c.takeFitOnStart(), isFalse, reason: 'done');
     expectCamera(first, await pageFit(tester, c), reason: 'undone');
 
     await tester.pumpWidget(viewApp(null));
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3'}), isTrue);
     final hidden =
         d.tables.layers.records.firstWhere((l) => l.name == 'Hidden');
@@ -1113,7 +1117,7 @@ void main() {
         TableSurvey.of(d).withNumber('3').single.instance, hidden.handle));
     await tester.pumpWidget(viewApp(c));
     await tester.pump();
-    final second = c.camera.value;
+    final second = c.cameraController.value;
     expect(c.takeFitOnStart(), isFalse, reason: 'done');
     expectCamera(second, await pageFit(tester, c), reason: 'hidden');
   });
@@ -1130,7 +1134,7 @@ void main() {
     floorPlanCanvasSeeds[FloorPlanMode.selection] = const Offset(130, 7);
     final c = zoneController();
     await mountAt1440(tester, c);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'3'}), isTrue);
     c.setMode(FloorPlanMode.selection);
     await tester.pump();
@@ -1143,7 +1147,7 @@ void main() {
     c.setMode(FloorPlanMode.design);
     await tester.pump();
     await tester.pump();
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'A1', 'A2'}), isTrue);
     await tester.pumpWidget(viewApp(null));
     c.setMode(FloorPlanMode.selection);
@@ -1172,7 +1176,7 @@ void main() {
     await tester.pump();
     await tester.pump();
     final wide = tester.getSize(find.byType(InteractionLayer));
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     width.value = 1010;
     expect(c.fitToTables({'3'}), isTrue);
     await tester.pump();
@@ -1226,7 +1230,7 @@ void main() {
       WidgetTester tester, FloorPlanController c, double x, double y,
       {double scale = 0.25}) async {
     final size = tester.getSize(find.byType(InteractionLayer));
-    c.camera.value = ViewportTransform(
+    c.cameraController.value = ViewportTransform(
         worldToScreenMatrix: Transform2(
             scale,
             0,
@@ -1252,7 +1256,7 @@ void main() {
     expect(topLeft.dy, topLeft.dy.roundToDouble(), reason: 'whole pixels');
     final d = c.activeDocument;
     final check = checkVeil(
-        camera: c.camera.value,
+        camera: c.cameraController.value,
         left: topLeft.dx.toInt(),
         top: topLeft.dy.toInt(),
         width: size.width.toInt(),
@@ -1363,7 +1367,7 @@ void main() {
       final area = tester.getTopLeft(find.byType(InteractionLayer));
       (int, int) pixel(TestQuad q) {
         final w = q.transform.transformPoint(Vector2(1200, 420));
-        final s = c.camera.value.worldToScreen(w);
+        final s = c.cameraController.value.worldToScreen(w);
         return ((area.dx + s.x).floor(), (area.dy + s.y).floor());
       }
 
@@ -1452,7 +1456,7 @@ void main() {
     c.setTableFocus({'7'});
     await tester.pump();
     Offset onThree() {
-      final s = c.camera.value
+      final s = c.cameraController.value
           .worldToScreen(three.transform.transformPoint(Vector2(900, 650)));
       return tester.getTopLeft(find.byType(InteractionLayer)) +
           Offset(s.x, s.y);
@@ -1523,7 +1527,7 @@ void main() {
 
     void expectSkipped(String mode) {
       final d = c.activeDocument;
-      c.camera.value = zoneCamera();
+      c.cameraController.value = zoneCamera();
       const size = Size(1200, 900);
       // R-1: a table near the double range is framed by a finite camera;
       // a camera that is not finite is no framing.

@@ -59,7 +59,7 @@ Future<void> commit(WidgetTester tester, String key, String text) async {
 
 /// World [p] as a global position on [c]'s canvas.
 Offset globalOf(WidgetTester tester, FloorPlanController c, Vector2 p) {
-  final s = c.camera.value.worldToScreen(p);
+  final s = c.cameraController.value.worldToScreen(p);
   return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
 }
 

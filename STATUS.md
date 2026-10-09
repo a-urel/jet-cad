@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-08. **`main` carries release 0.3.0** (tag
+**Last updated:** 2026-10-09. **`main` carries release 0.3.0** (tag
 `v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -96,7 +96,25 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Release 0.3.0, above, is merged and tagged.
+- **The host embedding API** (the human, 2026-10-08: *"Monépro
+  entegrasyonuna geç. Önce beyin fırtınası. Temel nokta, başka bir
+  uygulamaya gömecek esnekliğe sahip olması…"*): brainstormed with the
+  human (2026-10-09), umbrella spec
+  [2026-10-09-host-embedding-api-design.md](docs/superpowers/specs/2026-10-09-host-embedding-api-design.md)
+  revision 3 (`4f5c8fc`). Revision 1 reviewed independently (*Approve with
+  fixes*, V-1 to V-22, all folded in); the human ruled schema 9 for host
+  data on a table (Q-H1) and a double tap without delay (Q-H2). Four
+  slices, each its own plan and merge: 1 geometry, public camera and
+  per-table widgets; 2 events and table data (schema 9); 3
+  `FloorPlanTheme`; 4 the bars, keyboard and editor capabilities. Ledger:
+  `.superpowers/sdd/2026-10-09-host-embedding-api/`. **Slice 1**
+  (the human: *"evet, Dilim 1 ile devam et"*): plan
+  [2026-10-09-embedding-slice-1.md](docs/superpowers/plans/2026-10-09-embedding-slice-1.md),
+  results [2026-10-09-embedding-slice-1-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-1-results.md);
+  Tasks 1–5 done, each reviewed independently and fixed (`85918c4` …
+  `84ee8e9`); the whole range reviewed independently (*Approve with
+  fixes*, F-1 to F-8, applied in `98c0c1d`). Waiting on the human's word
+  to merge.
 
 ## Owed to the human
 
@@ -130,7 +148,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.**
+**Next: the merge question for Slice 1**, above; then Slice 2 (events and table data, schema 9).
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
 touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
 (the host probe), placement and open/save, and zones (0.3.0). Monépro

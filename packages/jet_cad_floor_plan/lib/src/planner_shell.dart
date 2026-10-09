@@ -89,8 +89,13 @@ class PlannerShell extends StatefulWidget {
     this.fitRequests,
     this.camera,
     this.fitOnStart = true,
+    this.startFitIsRequest = false,
     this.onFitted,
     this.framing,
+    this.cameraEpoch,
+    this.userCamera = true,
+    this.onCanvasPlaced,
+    this.tableOverlays,
   });
 
   final DraftDocument? document;
@@ -148,12 +153,30 @@ class PlannerShell extends StatefulWidget {
   /// Forwarded to the view: false when [camera] is already placed.
   final bool fitOnStart;
 
+  /// Forwarded to the view: whether that fit performs only a host's
+  /// request (Task 2 review R-1).
+  final bool startFitIsRequest;
+
   /// Forwarded to the view: called after each fit.
   final VoidCallback? onFitted;
 
   /// Forwarded to the view: the camera a fit sets, asked when the fit is
   /// performed (zone spec Z7); null fits the page.
   final ViewportTransform? Function(Size size)? framing;
+
+  /// Forwarded to the view: the host's camera epoch (host embedding API
+  /// spec G-3).
+  final int Function()? cameraEpoch;
+
+  /// Forwarded to the view: false locks the user's pan and zoom (spec G-3).
+  final bool userCamera;
+
+  /// Forwarded to the view: where its drawing area is (spec G-2).
+  final void Function(Object view, Rect? global)? onCanvasPlaced;
+
+  /// The host's widgets on the tables when the host shows them in the
+  /// design mode (host embedding API spec G-5); null for none.
+  final Widget? tableOverlays;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -980,8 +1003,13 @@ class _PlannerShellState extends State<PlannerShell> {
                         textTool: _text,
                         fitRequests: widget.fitRequests,
                         fitOnStart: widget.fitOnStart,
+                        startFitIsRequest: widget.startFitIsRequest,
                         onFitted: widget.onFitted,
                         framing: widget.framing,
+                        cameraEpoch: widget.cameraEpoch,
+                        userCamera: widget.userCamera,
+                        onCanvasPlaced: widget.onCanvasPlaced,
+                        tableOverlays: widget.tableOverlays,
                       ),
                     ),
                   ),

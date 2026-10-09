@@ -35,6 +35,14 @@ abstract class DemoStrings {
 
   String get fadeOthers;
 
+  /// Host embedding API spec G-5, G-3: the badges' switch, the button that
+  /// centres the view on a table, and a badge's minutes.
+  String get badges;
+
+  String centerOnTable(String number);
+
+  String minutes(int minutes);
+
   String get moves;
 
   String get longPressMenu;
@@ -121,6 +129,15 @@ final class _En extends DemoStrings {
 
   @override
   String get fadeOthers => 'Fade the others';
+
+  @override
+  String get badges => 'Badges';
+
+  @override
+  String centerOnTable(String number) => 'Centre on table $number';
+
+  @override
+  String minutes(int minutes) => '$minutes min';
 
   @override
   String get moves => 'Moves';
@@ -252,6 +269,15 @@ final class _De extends DemoStrings {
 
   @override
   String get fadeOthers => 'Andere abblenden';
+
+  @override
+  String get badges => 'Tischanzeigen';
+
+  @override
+  String centerOnTable(String number) => 'Auf Tisch $number zentrieren';
+
+  @override
+  String minutes(int minutes) => '$minutes Min.';
 
   @override
   String get moves => 'Verschieben';
@@ -389,6 +415,15 @@ final class _Tr extends DemoStrings {
 
   @override
   String get fadeOthers => 'Diğerlerini soldur';
+
+  @override
+  String get badges => 'Rozetler';
+
+  @override
+  String centerOnTable(String number) => 'Ortala: masa $number';
+
+  @override
+  String minutes(int minutes) => '$minutes dk';
 
   @override
   String get moves => 'Taşıma';

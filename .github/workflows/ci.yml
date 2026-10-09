@@ -138,7 +138,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      # The whole history and its tags: the released probes are read from
+      # their tags (host embedding API spec, invariant 1).
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -150,3 +154,8 @@ jobs:
       # and no build hook.
       - name: Resolve, check, analyze and build the probe
         run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
+      # Host embedding API spec, invariant 1 (P-1): the 0.3.0 host's code,
+      # analysed in the probe just resolved at the commit under test, still
+      # compiles; the probe's own main.dart is put back.
+      - name: The 0.3.0 host probe against this commit
+        run: tool/ci/old_host_probe.sh v0.3.0
