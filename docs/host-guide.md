@@ -1368,10 +1368,13 @@ in it is drawn on your light colour, with dark ink.
 - **Captions and chip text.** A style's null `color` keeps the automatic
   ink: black or white, whichever reads on the status colour **as drawn**
   (its opacity applied) over the paper; a chip's text, on the chip's
-  colour. A null `fontSize` is 11 px. A caption sits under the table's
-  number, at least its own font size below the number's middle, the
-  resolved size. A caption wider than its table on the screen, or a chip
-  wider than its frame, is not drawn, as before.
+  colour as drawn over the paper (a translucent chip colour is not read
+  as opaque). A null `fontSize` is 11 px. A caption sits under the
+  table's number, at least its own font size below the number's middle,
+  the resolved size. A chip's box is centred on its frame: an uneven
+  `groupChipPadding` moves the label inside the box, not the box. A
+  caption wider than its table on the screen, or a chip wider than its
+  frame, is not drawn, as before.
 - **Fonts.** Without a theme the captions and chips are drawn in the
   platform's default font, not in the plans' Roboto: that is today's
   look, and a theme leaves it so. For the same captions on every

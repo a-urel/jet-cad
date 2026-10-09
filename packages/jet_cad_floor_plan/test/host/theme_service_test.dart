@@ -5,8 +5,8 @@
 // repaint merge and each painter's rebuild key, so a theme change alone
 // repaints (M-H33(repaint)); pans rebuild nothing (M-H31); an equal theme
 // rebuilds nothing (T-3's ==); the veil with no colour is the paper's
-// (M-H32); the bar takes `serviceBarHeight` and a runtime change is
-// measured (S-10, T3-d); the theme reaches neither the design, the
+// (M-H32); the bar takes `serviceBarHeight` and each runtime change is
+// measured (S-10, T3-d, RV5); the theme reaches neither the design, the
 // service layout nor an export (invariant 4); and `RenderFloorPlanOverlays`
 // keeps its bars under a full theme (invariant 7).
 //
@@ -435,6 +435,34 @@ void main() {
       final back = globalOf(tester, c, w);
       expect(back.dx, closeTo(at60.dx, 1e-9), reason: 'selection again');
       expect(back.dy, closeTo(at60.dy, 1e-9), reason: 'selection again');
+    });
+
+    testWidgets(
+        'RV5: two runtime changes in one selection view, 44 -> 60 -> 72, '
+        'then design: a table keeps its global position (each change is '
+        'measured, not only the first)', (tester) async {
+      final c = lookController(white);
+      final host = await pumpHost(tester, c);
+      final doc = c.activeDocument;
+      final node =
+          doc.tree[TableSurvey.of(doc).withNumber('3').single.instance]!
+              as InstanceNode;
+      final w = node.transform.transformPoint(Vector2(450, 700));
+      final at44 = globalOf(tester, c, w);
+      for (final h in const [60.0, 72.0]) {
+        host.value = FloorPlanTheme(serviceBarHeight: h);
+        await tester.pump();
+        await tester.pump();
+      }
+      expect(tester.getSize(find.byKey(const Key('service-bar'))).height, 72);
+      final at72 = globalOf(tester, c, w);
+      expect(at72, at44 + const Offset(0, 28),
+          reason: 'premise: the plan moved with the canvas');
+      c.setMode(FloorPlanMode.design);
+      await tester.pump();
+      final there = globalOf(tester, c, w);
+      expect(there.dx, closeTo(at72.dx, 1e-9), reason: 'design');
+      expect(there.dy, closeTo(at72.dy, 1e-9), reason: 'design');
     });
   });
 

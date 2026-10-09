@@ -29,6 +29,7 @@ import 'design_changes.dart';
 import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
 import 'service_layout.dart';
+import 'service_view.dart' show kServiceBarHeight;
 import 'table_detail.dart';
 import 'table_fit.dart';
 
@@ -38,13 +39,13 @@ const int kFloorPlanThumbnailCapacity = 128;
 
 /// Where each mode's canvas starts in a `FloorPlanView`, until a view has
 /// measured it (R-13 as amended): the editor's top bar (44), left panel
-/// (240) and rulers; the service bar (44). Read when a controller is made;
-/// a test seam.
+/// (240) and rulers; the service bar ([kServiceBarHeight]). Read when a
+/// controller is made; a test seam.
 @visibleForTesting
 final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds = {
   FloorPlanMode.design:
       const Offset(240 + kRulerThickness, 44 + kRulerThickness),
-  FloorPlanMode.selection: const Offset(0, 44),
+  FloorPlanMode.selection: const Offset(0, kServiceBarHeight),
 };
 
 /// One plan the controller holds: the document, the measurer it was built

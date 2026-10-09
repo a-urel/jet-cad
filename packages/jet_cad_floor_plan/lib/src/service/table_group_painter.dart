@@ -15,7 +15,8 @@ import '../host/floor_plan_types.dart' show TableGroup;
 import 'table_focus_painter.dart' show focusVeilColour, kTableFocusVeilAlpha;
 import 'table_groups.dart';
 import 'table_picker.dart';
-import 'table_status_painter.dart' show kStatusCaptionSize, paintedTextStyle;
+import 'table_status_painter.dart'
+    show kStatusCaptionSize, paintedTextStyle, statusCaptionInk;
 
 /// How far the frame stands off its members' boxes, in world millimetres;
 /// also the radius of its round joins (G3).
@@ -218,8 +219,10 @@ final class _Group {
 /// these values field by field when it sets them: the frame's colour,
 /// width and margin; the chip's colour (by default the frame's, as
 /// resolved: S-7), text style, radius and padding; the veil's colour and
-/// opacity for a faded group (S-9). They are read at rebuild, never per
-/// frame.
+/// opacity for a faded group (S-9). The chip's box stays centred on the
+/// frame, whatever the padding on each side; its automatic ink is the one
+/// [statusCaptionInk] picks for the chip's colour over the paper, as for a
+/// status caption (S-6). They are read at rebuild, never per frame.
 ///
 /// Rebuilt only when the groups map or the focus is replaced, the plan's
 /// state id or its tables' revision moves, or [paper] or [theme] changes.
@@ -287,10 +290,13 @@ class TableGroupPainter extends CustomPainter {
   int? _paperBuilt;
   FloorPlanTheme? _themeBuilt;
 
-  /// The frame's stroke width in screen pixels, and the chip's bottom
-  /// padding, set at rebuild (T-1's `groupFrameWidth`, `groupChipPadding`).
+  /// The frame's stroke width in screen pixels, the chip's bottom padding,
+  /// and how far the chip's label sits right of the box's centre (half of
+  /// the right padding less the left), set at rebuild (T-1's
+  /// `groupFrameWidth`, `groupChipPadding`).
   double _frameWidth = kGroupFrameStrokePixels;
   double _chipBottom = kGroupChipPaddingY;
+  double _chipShiftX = 0;
 
   /// Keyed by (text, ink, the theme's chip style): a steady frame builds
   /// none.
@@ -328,6 +334,7 @@ class TableGroupPainter extends CustomPainter {
         padTop = padding?.top ?? kGroupChipPaddingY,
         padRight = padding?.right ?? kGroupChipPaddingX;
     _chipBottom = padding?.bottom ?? kGroupChipPaddingY;
+    _chipShiftX = (padRight - padLeft) / 2;
     _frameWidth = look?.groupFrameWidth ?? kGroupFrameStrokePixels;
     if (layer == TableGroupLayer.frames) {
       _paint.color = frameColour;
@@ -353,10 +360,10 @@ class TableGroupPainter extends CustomPainter {
               visible: true,
               locked: c.locked),
       ]);
-      final ink = chipStyle?.color ??
-          (foregroundFor(chipColour.toARGB32() & 0xFFFFFF) == 0xFFFFFF
-              ? kStatusCaptionOnDark
-              : kStatusCaptionOnLight);
+      // The ink reads on the chip as drawn: its colour over the paper (as
+      // a status caption's, S-6). An opaque colour, `gripMove` among them,
+      // composites to its own RGB.
+      final ink = chipStyle?.color ?? statusCaptionInk(chipColour, paperArgb);
       for (final MapEntry(key: id, value: group) in map.entries) {
         final members = lookup.visibleMembers(id);
         if (members.length < 2) continue;
@@ -505,10 +512,13 @@ class TableGroupPainter extends CustomPainter {
       final sx = cam.a * g.anchorX + cam.c * g.anchorY + cam.e;
       final sy = cam.b * g.anchorX + cam.d * g.anchorY + cam.f;
       // The prebuilt rect spans [-top, height + bottom] in the chip's own
-      // y: its bottom edge lands on the anchor's screen y (fixes X3).
+      // y: its bottom edge lands on the anchor's screen y (fixes X3). It
+      // spans [-left, width + right] in x: the box, not the label, is
+      // centred on the anchor's screen x (fixes F-4).
       canvas
         ..save()
-        ..translate(sx - p.width / 2, sy - (p.height + _chipBottom))
+        ..translate(
+            sx - p.width / 2 - _chipShiftX, sy - (p.height + _chipBottom))
         ..drawRRect(rrect, _paint)
         ..drawParagraph(p, Offset.zero);
       // A faded group's chip under the veil (Z14).

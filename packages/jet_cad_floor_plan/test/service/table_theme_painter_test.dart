@@ -68,6 +68,7 @@ const Color darkFill = Color(0xFF1B1B1B);
 const Color lightFill = Color(0xFFFFE082);
 
 const int white = 0xFFFFFFFF;
+const int blueprint = 0xFF1F3A5F;
 
 /// `0xRRGGBB` of [colour] at [alpha] (straight) over [under] (`0xRRGGBB`),
 /// rounded per channel: the test's own composite.
@@ -513,6 +514,78 @@ void main() {
     });
 
     testWidgets(
+        'S-6 on a dark paper (K12): 0xFFFFE082 at statusFillOpacity 0.3 over '
+        'Blueprint is dark, so the caption takes white ink', (tester) async {
+      const size = ui.Size(800, 600);
+      final f = oneTable(0.2);
+      final painter = themedStatus(
+          f.doc,
+          f.camera,
+          ValueNotifier({'1': TableStatus(color: lightFill, caption: 'Bill')}),
+          ValueNotifier(const FloorPlanTheme(statusFillOpacity: 0.3)),
+          paper: ValueNotifier(blueprint));
+      final box = captionBox(statusFrame(painter, size));
+      final (_, brightest) =
+          glyphs(await render(tester, painter, blueprint, size), 800, box);
+      expect(hex(brightest), hex(0xFFFFFF));
+      expect(foregroundFor(composite(lightFill, 0.3, blueprint)), 0xFFFFFF,
+          reason: 'premise: drawn over Blueprint it is dark');
+      expect(foregroundFor(composite(lightFill, 0.3, 0xFFFFFF)), 0x000000,
+          reason: 'premise: over White it would be light');
+    });
+
+    test(
+        'a themed caption is centred on its anchor as today\'s is (K14): '
+        'its glyphs\' midpoint is the paragraph\'s middle', () {
+      final f = oneTable(0.2);
+      for (final theme in const [
+        null,
+        FloorPlanTheme(statusCaptionStyle: TextStyle(fontSize: 14)),
+      ]) {
+        final p = statusFrame(themedStatus(
+                f.doc,
+                f.camera,
+                ValueNotifier(
+                    {'1': TableStatus(color: lightFill, caption: 'Bill')}),
+                ValueNotifier(theme)))
+            .paragraphs
+            .single;
+        final boxes = p.getBoxesForRange(0, 4);
+        expect(p.width - p.maxIntrinsicWidth, greaterThan(2),
+            reason: 'premise: the paragraph is wider than its text');
+        expect((boxes.first.left + boxes.last.right) / 2,
+            closeTo(p.width / 2, 0.5),
+            reason: '$theme');
+      }
+    });
+
+    test(
+        'a chip style leaves the caption as today (K17): groupChipTextStyle '
+        '16 px alone, the caption is the 11 px paragraph', () {
+      final f = oneTable(0.2);
+      ui.Paragraph captionUnder(FloorPlanTheme? theme) =>
+          statusFrame(themedStatus(
+                  f.doc,
+                  f.camera,
+                  ValueNotifier(
+                      {'1': TableStatus(color: bill, caption: 'Bill')}),
+                  ValueNotifier(theme)))
+              .paragraphs
+              .single;
+      final today = captionUnder(null);
+      final chipStyled = captionUnder(
+          const FloorPlanTheme(groupChipTextStyle: TextStyle(fontSize: 16)));
+      expect(chipStyled.height, today.height);
+      expect(chipStyled.maxIntrinsicWidth, today.maxIntrinsicWidth);
+      expect(
+          captionUnder(const FloorPlanTheme(
+                  statusCaptionStyle: TextStyle(fontSize: 16)))
+              .height,
+          greaterThan(today.height),
+          reason: 'premise: 16 px reads apart');
+    });
+
+    testWidgets(
         'a caption colour is honoured over the automatic ink; 14 px bold is '
         'the paragraph a 14 px bold style lays out, taller than 11 px, with '
         'more glyph rows', (tester) async {
@@ -780,7 +853,8 @@ void main() {
     test(
         'T3-e: the chip is the asymmetric padding\'s rect (-7, -3, w + 9, '
         'h + 4) with radius 8, its bottom edge on the frame bounds\' top '
-        'line (margin 300) at 0.125 and 0.04 px/mm (fixes X3)', () {
+        'line (margin 300) and its box centred on their centre x at 0.125 '
+        'and 0.04 px/mm (fixes X3, F-4)', () {
       final doc = gp.groupedPlan();
       final camera = ValueNotifier(gp.cameraAt(0.125));
       final chips = themedGroups(
@@ -804,8 +878,12 @@ void main() {
         final t = spy.translations.single;
         expect(t.dy + spy.rrects.single.bottom, closeTo(sy, 1e-6),
             reason: 'the bottom edge on the top line at $scale');
-        expect(t.dx + p.width / 2, closeTo(sx, 1e-6),
-            reason: 'the label centred at $scale');
+        final r = spy.rrects.single;
+        expect(t.dx + (r.left + r.right) / 2, closeTo(sx, 1e-6),
+            reason: 'the box centred at $scale');
+        expect(t.dx + p.width / 2 - sx, closeTo(-(9 - 7) / 2, 1e-6),
+            reason: 'premise: the label sits off the centre by half the '
+                'padding\'s difference');
         expect(spy.paints.single.color.toARGB32(), chipColour.toARGB32());
       }
     });
@@ -904,6 +982,95 @@ void main() {
           groupChipTextStyle: const TextStyle(color: Color(0xFFD81B60)));
       expect(hex((await chipGlyphs()).$1), hex(0xD81B60),
           reason: 'the style\'s colour');
+    });
+
+    testWidgets(
+        'the chip\'s automatic ink is taken on the chip as drawn over the '
+        'paper: 0x40FFFFFF on Blueprint (0x576B87) takes white ink, as '
+        'chip colour or as the frame colour the chip falls back to; no '
+        'theme inks gripMove as today', (tester) async {
+      const translucent = Color(0x40FFFFFF);
+      final doc = gp.groupedPlan();
+      final theme = ValueNotifier<FloorPlanTheme?>(
+          const FloorPlanTheme(groupChipColor: translucent));
+      final chips = themedGroups(
+          TableGroupLayer.chips,
+          doc,
+          ValueNotifier(gp.cameraAt(0.08)),
+          ValueNotifier({
+            'G7': gp.tg({'12', '3', '7'})
+          }),
+          theme,
+          paper: ValueNotifier(blueprint));
+      final width = gp.kSize.width.toInt();
+      Future<(int, int, int)> chipPixels() async {
+        final spy = gp.frame(chips);
+        final t = spy.translations.single;
+        final p = spy.paragraphs.single;
+        final r = spy.rrects.single;
+        final bytes = await render(tester, chips, blueprint, gp.kSize);
+        final (darkest, brightest) = glyphs(
+            bytes, width, ui.Rect.fromLTWH(t.dx, t.dy, p.width, p.height));
+        // The left padding, clear of the glyphs and the corners.
+        final pad = rgbAt(bytes, width, (t.dx + r.left + 1.5).floor(),
+            (t.dy + (r.top + r.bottom) / 2).floor());
+        return (darkest, brightest, pad);
+      }
+
+      final drawn = composite(translucent, 0x40 / 255, blueprint);
+      expect(foregroundFor(0xFFFFFF), 0x000000,
+          reason: 'premise: on its RGB the ink would be black');
+      expect(foregroundFor(drawn), 0xFFFFFF,
+          reason: 'premise: on the chip as drawn, white');
+      var (_, brightest, pad) = await chipPixels();
+      expect(channelDistance(pad, drawn), lessThanOrEqualTo(1),
+          reason: 'premise: the chip is drawn translucent: ${hex(pad)}');
+      expect(hex(brightest), hex(0xFFFFFF), reason: 'groupChipColor');
+
+      theme.value = const FloorPlanTheme(groupFrameColor: translucent);
+      (_, brightest, pad) = await chipPixels();
+      expect(channelDistance(pad, drawn), lessThanOrEqualTo(1),
+          reason: 'premise: the chip takes the frame colour');
+      expect(hex(brightest), hex(0xFFFFFF), reason: 'groupFrameColor');
+
+      // No theme (P-6): gripMove is opaque, so its ink is today's.
+      theme.value = null;
+      final grip = PaperPalette.forPaper(blueprint).gripMove;
+      expect(grip.toARGB32() >> 24, 0xFF, reason: 'premise: opaque');
+      final (darkest, bright, _) = await chipPixels();
+      if (foregroundFor(rgbOf(grip)) == 0xFFFFFF) {
+        expect(hex(bright), hex(0xFFFFFF));
+      } else {
+        expect(hex(darkest), hex(rgbOf(kStatusCaptionOnLight)));
+      }
+    });
+
+    test(
+        'a caption style leaves the chip as today (K16): statusCaptionStyle '
+        '16 px alone, the chip is the 11 px paragraph', () {
+      final doc = gp.groupedPlan();
+      ui.Paragraph chipUnder(FloorPlanTheme? theme) => gp
+          .frame(themedGroups(
+              TableGroupLayer.chips,
+              doc,
+              ValueNotifier(gp.cameraAt(0.08)),
+              ValueNotifier({
+                'G7': gp.tg({'12', '3', '7'})
+              }),
+              ValueNotifier(theme)))
+          .paragraphs
+          .single;
+      final today = chipUnder(null);
+      final captionStyled = chipUnder(
+          const FloorPlanTheme(statusCaptionStyle: TextStyle(fontSize: 16)));
+      expect(captionStyled.height, today.height);
+      expect(captionStyled.width, today.width);
+      expect(
+          chipUnder(const FloorPlanTheme(
+                  groupChipTextStyle: TextStyle(fontSize: 16)))
+              .height,
+          greaterThan(today.height),
+          reason: 'premise: 16 px reads apart');
     });
 
     testWidgets(
@@ -1055,6 +1222,17 @@ void main() {
       expect(painter.debugRebuilds, rebuilt, reason: 'recoloured only');
       expect(painter.debugRecolours, recoloured + 3,
           reason: 'once per theme or paper change');
+    });
+
+    test(
+        'a host veil colour with no opacity is at today\'s 0.6 (K13): its '
+        'alpha multiplied by 0.6, its RGB kept', () {
+      for (final colour in const [veilColour, Color(0x806D4C41)]) {
+        final c =
+            focusVeilColour(white, FloorPlanTheme(focusVeilColor: colour));
+        expect(c.a, closeTo(colour.a * kTableFocusVeilAlpha, 1e-6));
+        expect(rgbOf(c), rgbOf(colour));
+      }
     });
 
     test('focusVeilColour: today\'s veil with no theme, exactly', () {
