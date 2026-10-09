@@ -100,6 +100,8 @@ delegates in your `MaterialApp`:
 
 ```dart
     return MaterialApp(
+      theme: posLightTheme,
+      darkTheme: posDarkTheme,
       locale: locale,
       supportedLocales: floorPlanSupportedLocales,
       localizationsDelegates: floorPlanLocalizationsDelegates,
@@ -119,6 +121,8 @@ delegates in your `MaterialApp`:
   the Export dialog opens on the root navigator and would not see it.
 - Your own words: `FloorPlanStrings.of(context)` gives the planner's
   language, and its `languageCode`.
+- `theme` and `darkTheme` carry the floor plan's look:
+  [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
   per language, not per region: `de_CH` gets German's `,`.
   The plan's own text — dimensions and room areas, on screen and on the
@@ -189,6 +193,7 @@ The view, with the host's options:
               onTableDoubleTap: openBill,
               onFloorTap: floorTapped,
               onTableHover: showHover,
+              theme: const FloorPlanTheme(selectionWidth: 3),
             ),
 ```
 
@@ -198,7 +203,9 @@ two arguments after `longPress` draw your own widget on each table, and
 the last four report a drag's moved tables, a double tap, a tap on the
 floor and the table under the mouse, all *unreleased on `main`*: [Your
 own widgets on the tables](#your-own-widgets-on-the-tables), [Events and
-host data](#events-and-host-data).)
+host data](#events-and-host-data). `theme`, this view's own look over
+your app theme's, is also *unreleased on `main`*: [§ 9](#9-themes). In
+the probe the view sits in a local `Theme`, § 9's recipe.)
 
 Show a controller in **one `FloorPlanView` at a time**: a second view of
 the same controller mounted beside the first throws a `StateError`. Two
@@ -1178,6 +1185,243 @@ BrowserContextMenu.disableContextMenu();`.
 The planner follows your `MaterialApp`'s theme. In a dark theme a light
 page is shown on a dark canvas with its drawing re-toned to keep its
 contrast; exports and prints are never re-toned.
+
+*Unreleased on `main`:* the floor plan's own look, `FloorPlanTheme`.
+
+**What it sets.** A `ThemeExtension` with sixteen optional fields; a
+field you leave null is what the planner draws without a theme, so
+`const FloorPlanTheme()` changes nothing. Widths, sizes, radii and
+padding are logical pixels on the screen; the margin is millimetres of
+the plan.
+
+| Fields | What they reach | Null is |
+|---|---|---|
+| `statusCaptionStyle` | the status captions, selection mode | 11 px, the platform's default font, black or white ink |
+| `statusFillOpacity` | multiplies a status colour's alpha, once, selection mode | the colour as you gave it |
+| `groupFrameColor`, `groupFrameWidth`, `groupFrameMargin` | the group frames, selection mode | the paper's grip colour (a violet), 2 px, 150 mm |
+| `groupChipColor`, `groupChipTextStyle`, `groupChipRadius`, `groupChipPadding` | the group label chips, selection mode | the frame's colour, the caption's defaults, 4 px, 5 px left and right and 2 px top and bottom |
+| `selectionOnLight`, `selectionOnDark`, `selectionWidth` | the selection, **both modes** | the planner's blue for that paper, 2 px |
+| `focusVeilColor`, `focusVeilOpacity` | the veil over the tables outside the focus, selection mode | the paper's colour, 0.6 |
+| `canvasBackground` | the canvas around the page **and** a page-less plan's paper, **both modes** | your `ColorScheme.surface` |
+| `serviceBarHeight` | the selection mode's bar | 44 px |
+
+**Where it goes.** One `FloorPlanTheme` in each of your `ThemeData`s, a
+light and a dark one, so the system's mode picks the right one:
+
+```dart
+/// The floor plan's look in the POS's light theme: bold captions in the
+/// planner's own Roboto, fills a little lighter, group frames in the
+/// POS's primary (the chips follow the frame), rounder chips, the POS's
+/// muted colour around the page, a taller service bar and the POS's
+/// accent for the selection, per paper.
+const FloorPlanTheme floorLookLight = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(
+      fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
+  statusFillOpacity: 0.8,
+  groupFrameColor: Color(0xFF18181B),
+  groupChipTextStyle: TextStyle(fontFamily: 'Roboto'),
+  groupChipRadius: 6,
+  selectionOnLight: Color(0xFFEA580C),
+  selectionOnDark: Color(0xFFFB923C),
+  canvasBackground: Color(0xFFF4F4F5),
+  serviceBarHeight: 52,
+);
+
+/// The same in the POS's dark theme: its dark primary and muted colours.
+/// The selection colours stay: they are chosen by the paper, not by the
+/// theme.
+const FloorPlanTheme floorLookDark = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(
+      fontFamily: 'Roboto', fontSize: 12, fontWeight: FontWeight.bold),
+  statusFillOpacity: 0.8,
+  groupFrameColor: Color(0xFFFAFAFA),
+  groupChipTextStyle: TextStyle(fontFamily: 'Roboto'),
+  groupChipRadius: 6,
+  selectionOnLight: Color(0xFFEA580C),
+  selectionOnDark: Color(0xFFFB923C),
+  canvasBackground: Color(0xFF27272A),
+  serviceBarHeight: 52,
+);
+
+final ThemeData posLightTheme = ThemeData(
+  colorSchemeSeed: Colors.teal,
+  extensions: const [floorLookLight],
+);
+
+final ThemeData posDarkTheme = ThemeData(
+  colorSchemeSeed: Colors.teal,
+  brightness: Brightness.dark,
+  extensions: const [floorLookDark],
+);
+```
+
+and both in your `MaterialApp`, as in [§ 3](#3-languages):
+
+```dart
+      theme: posLightTheme,
+      darkTheme: posDarkTheme,
+```
+
+**One view's own look.** `FloorPlanView(theme: …)` sets fields for that
+view over the extension it finds in the `Theme` where it is, **field by
+field**: the extension first, the view's set fields over it, today's
+values for the rest. The two text styles merge property by property
+(`TextStyle.merge`): a view style that sets only `fontWeight` keeps the
+extension's `fontSize`. With `theme: null` the view takes the extension
+alone. In [§ 4](#4-the-controller-and-the-view) the view adds a 3 px
+selection to whatever the app theme says:
+
+```dart
+              theme: const FloorPlanTheme(selectionWidth: 3),
+```
+
+The resolved look is compared by value (`==`) when the view builds: a
+rebuild of yours with an equal theme, `const` or not, rebuilds none of
+the planner's painters.
+
+**The rest of the chrome.** The service bar, the editor's panels and
+toolbars, their text and borders, and the Export dialog read the
+ambient Material `ColorScheme`, as any Material widget does. A seeded
+scheme (`colorSchemeSeed`, `ColorScheme.fromSeed`) cannot reproduce
+another design system's tokens, so if your POS's own UI is not Material
+(shadcn, say), wrap the view in a local `Theme` with a `ColorScheme`
+built by hand from your tokens:
+
+```dart
+/// The POS's own colour tokens as a Material colour scheme, by hand: a
+/// seeded scheme cannot reproduce another design system's colours.
+ColorScheme posColorScheme(Brightness brightness) =>
+    brightness == Brightness.light
+        ? const ColorScheme(
+            brightness: Brightness.light,
+            primary: Color(0xFF18181B),
+            onPrimary: Color(0xFFFAFAFA),
+            secondary: Color(0xFFF4F4F5),
+            onSecondary: Color(0xFF18181B),
+            error: Color(0xFFEF4444),
+            onError: Color(0xFFFAFAFA),
+            surface: Color(0xFFFFFFFF),
+            onSurface: Color(0xFF09090B),
+            onSurfaceVariant: Color(0xFF71717A),
+            surfaceContainer: Color(0xFFF4F4F5),
+            outline: Color(0xFFE4E4E7),
+          )
+        : const ColorScheme(
+            brightness: Brightness.dark,
+            primary: Color(0xFFFAFAFA),
+            onPrimary: Color(0xFF18181B),
+            secondary: Color(0xFF27272A),
+            onSecondary: Color(0xFFFAFAFA),
+            error: Color(0xFF7F1D1D),
+            onError: Color(0xFFFAFAFA),
+            surface: Color(0xFF09090B),
+            onSurface: Color(0xFFFAFAFA),
+            onSurfaceVariant: Color(0xFFA1A1AA),
+            surfaceContainer: Color(0xFF18181B),
+            outline: Color(0xFF27272A),
+          );
+
+/// The theme around the floor plan: the POS's colour scheme, for the
+/// planner's bars, panels and dialogs, and the app theme's extensions
+/// carried over, or the view would find no `FloorPlanTheme`.
+ThemeData floorTheme(ThemeData app) => ThemeData(
+      colorScheme: posColorScheme(app.brightness),
+      extensions: app.extensions.values,
+    );
+```
+
+```dart
+          Expanded(
+            child: Theme(
+              data: floorTheme(Theme.of(context)),
+              child: FloorPlanView(
+```
+
+(The colours above are shadcn's published zinc tokens, an example: take
+your own design system's.)
+
+- A local `Theme` **replaces** the whole `ThemeData` below it: carry
+  your extensions into it, as `floorTheme` does, or put the
+  `FloorPlanTheme` in it yourself; otherwise the view finds none.
+- **The Export dialog follows the local `Theme`** (a dialog takes the
+  themes where it was opened), but **never the view's `theme:`**, which
+  reaches that view only. It draws none of the floor plan's look anyway:
+  exports and prints have a white page and the plan's own colours.
+- The screen that builds the local `Theme` from `Theme.of(context)`
+  rebuilds when the app's theme changes, and the view with it: your
+  overlay builder then runs again for every table ([Your own widgets on
+  the tables](#your-own-widgets-on-the-tables)). A theme switch is rare;
+  pan and zoom are unaffected.
+
+**Light and dark.** Put one `FloorPlanTheme` in each `ThemeData`. The
+selection colours are chosen **by the paper**, as the planner chooses
+its own: `selectionOnLight` on a light page or a light page-less canvas,
+`selectionOnDark` on a dark one, whatever the theme. A light page in a
+dark theme is shown on the dark canvas (above), so it takes
+`selectionOnDark`. **`canvasBackground` does not decide the dark canvas:
+your theme's brightness does.** A light `canvasBackground` in a dark
+theme puts that dark-canvas sheet on a light surround; a page-less plan
+in it is drawn on your light colour, with dark ink.
+
+**What each field does, exactly.**
+
+- **Captions and chip text.** A style's null `color` keeps the automatic
+  ink: black or white, whichever reads on the status colour **as drawn**
+  (its opacity applied) over the paper; a chip's text, on the chip's
+  colour. A null `fontSize` is 11 px. A caption sits under the table's
+  number, at least its own font size below the number's middle, the
+  resolved size. A caption wider than its table on the screen, or a chip
+  wider than its frame, is not drawn, as before.
+- **Fonts.** Without a theme the captions and chips are drawn in the
+  platform's default font, not in the plans' Roboto: that is today's
+  look, and a theme leaves it so. For the same captions on every
+  terminal, set `fontFamily: 'Roboto'` in both styles, as above:
+  `ensureFloorPlanFonts` ([§ 2](#2-fonts)) registers it, and on the web
+  your pubspec's `fonts` entry declares it. Only the regular face ships;
+  a bold style is drawn emboldened from it. A family you have not loaded
+  falls back to the platform's font.
+- **Defaults that follow another field.** A null `groupChipColor` is the
+  frame's colour as resolved: set only `groupFrameColor` and the chips
+  match it. With the focus on, a group none of whose tables is in it is
+  faded: its frame in the frame's colour at its alpha × (1 − the veil's
+  opacity), its chip under the veil's colour and opacity, one veil for
+  tables and groups.
+- **The veil.** `focusVeilColor`'s own alpha is **multiplied** by
+  `focusVeilOpacity` (as `statusFillOpacity` multiplies a status
+  colour's); with no colour the veil is the paper's colour at that
+  opacity. Over the paper itself a paper-coloured veil does not show:
+  it fades what is drawn.
+- **The selection's width** reaches the selection's outline, a selected
+  point's cross (its stroke and its length) and the move preview's
+  cross. The hover stays 1.5 px; its colour is the selection's at 60 %
+  of its alpha. The grips, the preview and the snap marks keep the
+  paper's colours.
+- **The bar.** `serviceBarHeight` sets the bar; the plan's canvas starts
+  under it. Changed while a plan is shown, the canvas moves and the plan
+  with it, as on any change of your layout; a mode switch afterwards
+  keeps the plan where it is on the screen, as always.
+- **The canvas.** `canvasBackground` is the colour around the page and
+  the paper of a plan with no page: the drawing's ink, the selection's
+  colour set and the veil follow it as they follow a page. A translucent
+  colour is used as given; the ink is chosen on its RGB.
+- **Out of range.** The constructor is `const` and never throws. The
+  view checks the resolved look when it builds and throws an
+  `ArgumentError` naming the field: the two opacities must be in
+  [0, 1]; `selectionWidth`, `groupFrameWidth` and `serviceBarHeight`
+  finite and above 0; `groupFrameMargin`, `groupChipRadius` and each
+  side of `groupChipPadding` finite and not negative; a style's
+  `fontSize`, when set, finite and above 0.
+- **An animated switch.** `MaterialApp` animates a theme change (200 ms
+  by default), and the look follows frame by frame: colours, numbers,
+  padding and text styles interpolate, each number kept between its two
+  ends whatever the curve; a field set on one side only, or a style
+  whose `color` is set on one side only, switches at the halfway point.
+  An extension only the new theme has applies at once; one only the old
+  theme has stays until the switch ends. While the look changes, the
+  selection mode's painters rebuild at most once per frame of the
+  switch, and never for a pan or a zoom.
+- **Never stored.** The look is never saved with the plan or the service
+  layout, never exported and never printed.
 
 ## 10. Touch
 
