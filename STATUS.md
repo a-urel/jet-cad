@@ -96,7 +96,19 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Release 0.3.0, above, is merged and tagged.
+- **The host embedding API** (the human, 2026-10-08: *"Monépro
+  entegrasyonuna geç. Önce beyin fırtınası. Temel nokta, başka bir
+  uygulamaya gömecek esnekliğe sahip olması…"*): brainstormed with the
+  human (2026-10-09), umbrella spec
+  [2026-10-09-host-embedding-api-design.md](docs/superpowers/specs/2026-10-09-host-embedding-api-design.md)
+  revision 3 (`4f5c8fc`). Revision 1 reviewed independently (*Approve with
+  fixes*, V-1 to V-22, all folded in); the human ruled schema 9 for host
+  data on a table (Q-H1) and a double tap without delay (Q-H2). Four
+  slices, each its own plan and merge: 1 geometry, public camera and
+  per-table widgets; 2 events and table data (schema 9); 3
+  `FloorPlanTheme`; 4 the bars, keyboard and editor capabilities. Ledger:
+  `.superpowers/sdd/2026-10-09-host-embedding-api/`. **Next: Slice 1's
+  plan.**
 
 ## Owed to the human
 
@@ -130,7 +142,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.**
+**Next: the host embedding API's Slice 1 plan**, above.
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
 touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
 (the host probe), placement and open/save, and zones (0.3.0). Monépro
