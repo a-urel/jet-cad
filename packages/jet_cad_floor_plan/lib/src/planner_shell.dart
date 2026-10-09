@@ -89,6 +89,7 @@ class PlannerShell extends StatefulWidget {
     this.fitRequests,
     this.camera,
     this.fitOnStart = true,
+    this.startFitIsRequest = false,
     this.onFitted,
     this.framing,
     this.cameraEpoch,
@@ -151,6 +152,10 @@ class PlannerShell extends StatefulWidget {
 
   /// Forwarded to the view: false when [camera] is already placed.
   final bool fitOnStart;
+
+  /// Forwarded to the view: whether that fit performs only a host's
+  /// request (Task 2 review R-1).
+  final bool startFitIsRequest;
 
   /// Forwarded to the view: called after each fit.
   final VoidCallback? onFitted;
@@ -998,6 +1003,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         textTool: _text,
                         fitRequests: widget.fitRequests,
                         fitOnStart: widget.fitOnStart,
+                        startFitIsRequest: widget.startFitIsRequest,
                         onFitted: widget.onFitted,
                         framing: widget.framing,
                         cameraEpoch: widget.cameraEpoch,

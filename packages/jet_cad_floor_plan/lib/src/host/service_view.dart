@@ -39,6 +39,7 @@ class ServiceView extends StatefulWidget {
       required this.controller,
       required this.flows,
       required this.fitOnStart,
+      this.startFitIsRequest = false,
       required this.callbacks,
       this.options = _defaultOptions,
       this.userCamera = _always,
@@ -49,6 +50,10 @@ class ServiceView extends StatefulWidget {
 
   /// Whether the camera fits after the first frame (R-13).
   final bool fitOnStart;
+
+  /// Whether that fit performs only a host's request (Task 2 review R-1):
+  /// see [PlannerView.startFitIsRequest].
+  final bool startFitIsRequest;
 
   /// The host's callbacks, read at each call (14c R-5).
   final ServiceCallbacks Function() callbacks;
@@ -78,6 +83,7 @@ class _ServiceViewState extends State<ServiceView> {
   late final DraftDocument _document = _c.activeDocument;
   late final SelectionController _selection = _c.activeSelection;
   late final bool _fitOnStart = widget.fitOnStart;
+  late final bool _startFitIsRequest = widget.startFitIsRequest;
   late final SpatialIndex _index = SpatialIndex(_document);
   late final PageNotifier _page = PageNotifier(_document);
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
@@ -429,6 +435,7 @@ class _ServiceViewState extends State<ServiceView> {
                     sheetArgb: _darkCanvas ? _paperArgb() : null,
                     fitRequests: _c.fitRequests,
                     fitOnStart: _fitOnStart,
+                    startFitIsRequest: _startFitIsRequest,
                     onFitted: _c.fitted,
                     framing: _c.framingFor,
                     cameraEpoch: () => _c.cameraEpoch,

@@ -18,6 +18,7 @@ import 'package:jet_cad_floor_plan/src/host/floor_plan_camera.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
+import 'package:jet_cad_floor_plan/src/planner_shell.dart';
 
 import 'embedding_fixture.dart';
 
@@ -98,6 +99,24 @@ Offset canvasOfCamera(ViewportTransform t, Offset w) {
   final p = canvasOf(t, w.dx, w.dy);
   return Offset(p.x, p.y);
 }
+
+/// The page fitted to [c]'s canvas as the engine fits it, unclamped (the
+/// default bounds hold it).
+ViewportTransform pageFitOf(FloorPlanController c) => fitToPage(
+    c.activeDocument.components
+        .get<PageComponent>(c.activeDocument.rootHandle)!,
+    c.canvasRect.value!.size);
+
+/// The host's view of [c] at the top left, [width] x 700, in a 1440 x 900
+/// window: 0 wide, it has no size yet.
+Widget sizedHostOf(FloorPlanController c, double width) => MaterialApp(
+    home: Scaffold(
+        body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+                width: width,
+                height: 700,
+                child: FloorPlanView(controller: c)))));
 
 void main() {
   test(
@@ -194,19 +213,30 @@ void main() {
   });
 
   testWidgets(
-      'CM5 panBy with no view acts at once, drops a fit not yet performed, '
-      'and the next view keeps it', (tester) async {
+      'CM5 panBy with no view acts at once and drops a request not yet '
+      'performed with its target; the plan\'s own first fit still frames '
+      'the page (Task 2 review R-1)', (tester) async {
     final c = controller();
     final before = c.cameraController.value;
-    c.fitToView();
+    c.centerOn(centreOf('3'), scale: 0.2);
     const d = Offset(37.25, -11.5);
     c.panBy(d);
     expect(parts(c.cameraController.value), panned(before, d));
     expect(() => c.panBy(const Offset(double.nan, 0)), throwsArgumentError);
     expect(parts(c.cameraController.value), panned(before, d));
     await mount(tester, c);
-    expect(parts(c.cameraController.value), panned(before, d),
-        reason: 'no fit on the first frame');
+    expect(parts(c.cameraController.value), parts(pageFitOf(c)),
+        reason: 'the plan\'s own fit, not centerOn\'s');
+
+    final t = controller();
+    expect(t.fitToTables({'2'}), isTrue);
+    expect(t.zoomBy(2), isFalse, reason: 'no view: no command');
+    t.panBy(d);
+    await tester.pumpWidget(hostOf(t));
+    await tester.pump();
+    await tester.pump();
+    expect(parts(t.cameraController.value), parts(pageFitOf(t)),
+        reason: 'the plan\'s own fit, not the tables\'');
   });
 
   testWidgets(
@@ -570,5 +600,192 @@ void main() {
     await tester.sendEventToBinding(mouse.scroll(const Offset(0, -120)));
     await tester.pump();
     expect(c.cameraController.value, same(before));
+  });
+
+  testWidgets(
+      'CM12 a load then panBy with a view mounted: the new plan\'s own first '
+      'fit frames the page (Task 2 review R-1, probe P3)', (tester) async {
+    final c = controller();
+    await mount(tester, c);
+    c.cameraController.value = embeddingCamera();
+    c.load(embeddingPlanJson());
+    c.panBy(const Offset(5, 5));
+    await tester.pump();
+    await tester.pump();
+    expect(parts(c.cameraController.value), parts(pageFitOf(c)));
+  });
+
+  testWidgets(
+      'CM13 a view with no size owes the plan\'s own first fit: a panBy '
+      'before it is sized does not cancel it (Task 2 review R-1)',
+      (tester) async {
+    final c = controller();
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(sizedHostOf(c, 0));
+    await tester.pump();
+    expect(c.canvasRect.value, isNull, reason: 'no size: no report (R-3)');
+    c.cameraController.value = embeddingCamera();
+    c.panBy(const Offset(37.25, -11.5));
+    await tester.pumpWidget(sizedHostOf(c, 1000));
+    await tester.pump();
+    await tester.pump();
+    expect(c.canvasRect.value!.size.width, 1000, reason: 'premise');
+    expect(parts(c.cameraController.value), parts(pageFitOf(c)));
+  });
+
+  testWidgets(
+      'CM14 a requested fit owed by a view with no size takes the epoch '
+      'when it becomes due: a panBy before the view is sized wins (Task 2 '
+      'review R-2, O3)', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const d = Offset(37.25, -11.5);
+
+    // A request made with no view, owed by the next view, mounted with no
+    // size: the epoch is taken when that view is created.
+    final a = controller();
+    await tester.pumpWidget(sizedHostOf(a, 1000));
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    a.fitToView();
+    await tester.pumpWidget(sizedHostOf(a, 0));
+    await tester.pump();
+    a.cameraController.value = embeddingCamera();
+    a.panBy(d);
+    await tester.pumpWidget(sizedHostOf(a, 1000));
+    await tester.pump();
+    await tester.pump();
+    expect(parts(a.cameraController.value), panned(embeddingCamera(), d),
+        reason: 'a request owed from the start');
+
+    // A request heard by a view with no size (a fresh service copy shown
+    // at 0 wide): the epoch is taken when the request is heard.
+    final b = controller();
+    await tester.pumpWidget(sizedHostOf(b, 1000));
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpWidget(sizedHostOf(b, 0));
+    await tester.pump();
+    b.resetLayout();
+    await tester.pump();
+    await tester.pump();
+    b.fitToView();
+    b.cameraController.value = embeddingCamera();
+    b.panBy(d);
+    await tester.pumpWidget(sizedHostOf(b, 1000));
+    await tester.pump();
+    await tester.pump();
+    expect(parts(b.cameraController.value), panned(embeddingCamera(), d),
+        reason: 'a request heard with no size');
+  });
+
+  testWidgets(
+      'CM15 minScale has a floor of 1e-6, the bound decisions\' tolerance '
+      'times a thousand; at the floor the bound holds (Task 2 review R-6)',
+      (tester) async {
+    for (final min in [1e-9, 1e-10, 9.99e-7]) {
+      expect(() => FloorPlanController(minScale: min), throwsArgumentError,
+          reason: '$min');
+    }
+    final c = controller(minScale: 1e-6);
+    expect(c.cameraController.minScale, 1e-6);
+    await mount(tester, c);
+    expect(c.zoomBy(1e-12), isTrue);
+    expect(c.camera.value.scale, closeTo(1e-6, 1e-18), reason: 'min');
+  });
+
+  testWidgets(
+      'CR3 the first canvasRect report follows the view\'s first fit: a host '
+      'that zooms on it zooms the fitted page (Task 2 review R-3, O3)',
+      (tester) async {
+    final c = controller();
+    var zoomed = false;
+    c.canvasRect.addListener(() {
+      if (!zoomed && c.canvasRect.value != null) {
+        zoomed = true;
+        expect(c.zoomBy(2), isTrue);
+      }
+    });
+    await mount(tester, c);
+    expect(zoomed, isTrue, reason: 'premise');
+    final centre = c.canvasRect.value!.size.center(Offset.zero);
+    final p = pageFitOf(c).worldToScreenMatrix;
+    // The page fit scaled by 2 about the canvas centre, by hand.
+    final z = c.cameraController.value.worldToScreenMatrix;
+    expect([
+      z.a,
+      z.b,
+      z.c,
+      z.d
+    ], [
+      closeTo(2 * p.a, 1e-15),
+      closeTo(2 * p.b, 1e-15),
+      closeTo(2 * p.c, 1e-15),
+      closeTo(2 * p.d, 1e-15)
+    ]);
+    expect(z.e, closeTo(2 * (p.e - centre.dx) + centre.dx, 1e-9));
+    expect(z.f, closeTo(2 * (p.f - centre.dy) + centre.dy, 1e-9));
+  });
+
+  testWidgets(
+      'CR4 setMode sets canvasRect at once to the new mode\'s canvas when a '
+      'view has shown that mode; worldToGlobal follows (Task 2 review R-4)',
+      (tester) async {
+    final c = controller(design: true);
+    await mount(tester, c);
+    final design = c.canvasRect.value!;
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    await tester.pump();
+    final service = c.canvasRect.value!;
+    expect(service, canvasOnScreen(tester));
+    expect(service.topLeft, isNot(design.topLeft), reason: 'premise');
+    c.cameraController.value = embeddingCamera();
+    final w = centreOf('1');
+
+    c.setMode(FloorPlanMode.design);
+    expect(c.canvasRect.value, design, reason: 'into design, at once');
+    final early = c.worldToGlobal(w)!;
+    await tester.pump();
+    await tester.pump();
+    expect(c.canvasRect.value, canvasOnScreen(tester));
+    expect(c.canvasRect.value, design);
+    expectPixel(early, c.worldToGlobal(w)!, 'design');
+
+    c.setMode(FloorPlanMode.selection);
+    expect(c.canvasRect.value, service, reason: 'into selection, at once');
+    final again = c.worldToGlobal(w)!;
+    await tester.pump();
+    await tester.pump();
+    expect(c.canvasRect.value, service);
+    expectPixel(again, c.worldToGlobal(w)!, 'selection');
+  });
+
+  testWidgets(
+      'CR5 a reporter replaced while a rect is registered with it is told '
+      'null, and the new one hears the rect (Task 2 review R-8)',
+      (tester) async {
+    final a = <Rect?>[], b = <Rect?>[];
+    void toA(Object view, Rect? rect) => a.add(rect);
+    void toB(Object view, Rect? rect) => b.add(rect);
+    Widget shell(void Function(Object, Rect?)? reporter) =>
+        MaterialApp(home: PlannerShell(onCanvasPlaced: reporter));
+    await tester.pumpWidget(shell(toA));
+    await tester.pump();
+    await tester.pump();
+    final rect = canvasOnScreen(tester);
+    expect(a, [rect]);
+
+    await tester.pumpWidget(shell(toB));
+    await tester.pump();
+    expect(a, [rect, null], reason: 'the old reporter');
+    expect(b, [rect], reason: 'the new reporter');
+
+    await tester.pumpWidget(shell(null));
+    await tester.pump();
+    expect(b, [rect, null], reason: 'no reporter');
   });
 }

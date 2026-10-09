@@ -169,9 +169,12 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     return canvas?.localToGlobal(Offset.zero, ancestor: view);
   }
 
-  /// The fit-on-start answer, taken once per plan shown (R-13).
+  /// The fit-on-start answer, taken once per plan shown (R-13), and
+  /// whether that fit performs only a request (Task 2 review R-1): not the
+  /// plan's own first fit.
   DraftDocument? _fitFor;
   bool _fit = true;
+  bool _fitIsRequest = false;
 
   /// One per controller: the settings are read from the current widget
   /// at each call (review F-1).
@@ -212,6 +215,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   bool _fitOnStartFor(DraftDocument document) {
     if (!identical(_fitFor, document)) {
       _fitFor = document;
+      _fitIsRequest = !widget.controller.owesFirstFit;
       _fit = widget.controller.takeFitOnStart();
     }
     return _fit;
@@ -263,6 +267,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
               controller: c,
               flows: _flows,
               fitOnStart: _fitOnStartFor(document),
+              startFitIsRequest: _fitIsRequest,
               callbacks: () => (
                     onTableTap: widget.onTableTap,
                     onLayoutChanged: widget.onLayoutChanged,
@@ -285,6 +290,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           selection: c.activeSelection,
           camera: c.cameraController,
           fitOnStart: _fitOnStartFor(document),
+          startFitIsRequest: _fitIsRequest,
           fitRequests: c.fitRequests,
           fileCommands: _commands(FloorPlanStrings.of(context)),
           onFitted: c.fitted,

@@ -178,7 +178,9 @@ class FloorPlanController extends ChangeNotifier {
   /// per millimetre (spec G-3): the user's pinch and wheel, [zoomBy],
   /// [centerOn] and every fit stay inside them. The defaults, 0.001 and
   /// 100, are the planner's own. Throws an [ArgumentError] unless both are
-  /// finite and `0 < minScale < maxScale`.
+  /// finite and `1e-6 <= minScale < maxScale`: the bounds are decided with
+  /// the engine's absolute tolerance of 1e-9, which below 1e-6 would be a
+  /// sizable part of the bound (Task 2 review R-6).
   factory FloorPlanController({
     List<SymbolLibrarySource> symbolSources = const [furnitureSymbolSource],
     SymbolLibraryLoader? symbols,
@@ -187,9 +189,9 @@ class FloorPlanController extends ChangeNotifier {
     double minScale = kMinScale,
     double maxScale = kMaxScale,
   }) {
-    if (!minScale.isFinite || minScale <= 0) {
+    if (!minScale.isFinite || minScale < _minScaleFloor) {
       throw ArgumentError.value(
-          minScale, 'minScale', 'must be finite and above 0');
+          minScale, 'minScale', 'must be finite and at least 1e-6');
     }
     if (!maxScale.isFinite || maxScale <= minScale) {
       throw ArgumentError.value(
@@ -281,6 +283,10 @@ class FloorPlanController extends ChangeNotifier {
   /// The zoom bounds (spec G-3), as the constructor was given them.
   final double _minScale, _maxScale;
 
+  /// The least `minScale` (Task 2 review R-6): a thousand times the
+  /// tolerance the bound decisions use.
+  static const double _minScaleFloor = 1e-6;
+
   /// The one camera every view of this controller uses (R-13): a mode
   /// switch keeps its pan and zoom. Bounded by the constructor's
   /// `minScale` and `maxScale`. Named `camera` before the host embedding
@@ -307,6 +313,10 @@ class FloorPlanController extends ChangeNotifier {
   /// reporter last.
   final Map<Object, Rect> _canvases = {};
 
+  /// The last rect reported in each mode (Task 2 review R-4), for
+  /// [setMode].
+  final Map<FloorPlanMode, Rect> _canvasIn = {};
+
   /// The canvas of the last [FloorPlanView] laid out, in global logical
   /// pixels (spec G-2): its origin and size, reported after every frame in
   /// which the view moved or was resized -- an ancestor's padding included.
@@ -314,6 +324,15 @@ class FloorPlanController extends ChangeNotifier {
   /// places itself on the plan ([worldToGlobal], [globalToWorld]). The rect
   /// is the canvas's top left and its own size: an ancestor that scales or
   /// turns the view is not accounted for.
+  ///
+  /// A view first reports after its first fit (Task 2 review R-3): a host
+  /// that waits for a non-null rect to [zoomBy] zooms the fitted plan. A
+  /// view that has no size yet reports nothing.
+  ///
+  /// [setMode] sets it at once to where the new mode's canvas was when a
+  /// view last showed that mode (review R-4), so [zoomBy]'s default focus
+  /// and [worldToGlobal] are right from the switch; a mode no view has shown
+  /// yet keeps the old mode's rect until the end of the next frame.
   ValueListenable<Rect?> get canvasRect => _canvasRect;
 
   /// The global point that shows [world] (millimetres, y up), or null with
@@ -345,6 +364,7 @@ class FloorPlanController extends ChangeNotifier {
       _canvases
         ..remove(view)
         ..[view] = global;
+      _canvasIn[_mode.value] = global;
       _canvasRect.value = global;
       return;
     }
@@ -359,7 +379,7 @@ class FloorPlanController extends ChangeNotifier {
 
   /// Moves at every camera request a host makes (spec G-3): [fitToView],
   /// [fitToTables] that found a table, [centerOn], [panBy] and a [zoomBy]
-  /// that acts. A view's fit reads it when it is scheduled and is dropped
+  /// that acts. A view's fit reads it when it becomes due and is dropped
   /// when it has moved, so the last request wins.
   int _cameraEpoch = 0;
 
@@ -379,6 +399,10 @@ class FloorPlanController extends ChangeNotifier {
   int? _encodedState;
 
   final _Requests _fits = _Requests();
+
+  /// The plan's own first fit (Ruling 01-2), owed from construction,
+  /// [load] and [newPlan] until a view takes it. A camera command does not
+  /// cancel it (Task 2 review R-1): it is not a host request.
   bool _fitOnStart = true;
 
   /// A [fitToView] or [fitToTables] no mounted view has performed yet
@@ -555,6 +579,13 @@ class FloorPlanController extends ChangeNotifier {
     _fitOnStart = false;
     return fit;
   }
+
+  /// Whether the next view's fit on start is the plan's own first fit
+  /// ([takeFitOnStart] not called since construction, [load] or
+  /// [newPlan]), which no camera command cancels (Task 2 review R-1);
+  /// otherwise it performs only a request, which a later command drops.
+  @internal
+  bool get owesFirstFit => _fitOnStart;
 
   /// A view performed a fit: a pending [fitToView] or [fitToTables] is
   /// done (review F-2). The fit target stays (zone spec Z5).
@@ -918,6 +949,11 @@ class FloorPlanController extends ChangeNotifier {
       _service = null;
     }
     _reframe(_mode.value, next);
+    // Review R-4: the new mode's canvas, where a view last showed it.
+    final shownIn = _canvasIn[next];
+    if (_canvasRect.value != null && shownIn != null) {
+      _canvasRect.value = shownIn;
+    }
     _mode.value = next;
     _select(numbers);
     _refreshFlags();
@@ -1333,8 +1369,14 @@ class FloorPlanController extends ChangeNotifier {
 
   /// Pans the camera by [canvasDelta], logical pixels (spec G-3): the plan
   /// moves by it on the screen. Acts at once, with or without a view; a fit
-  /// requested before it and not performed yet is dropped. Throws an
-  /// [ArgumentError] for a delta that is not finite.
+  /// requested before it ([fitToView], [fitToTables], [centerOn]) and not
+  /// performed yet is dropped. Throws an [ArgumentError] for a delta that
+  /// is not finite.
+  ///
+  /// Before a plan's first frame -- after construction, [load] or
+  /// [newPlan], until a view has fitted the plan -- the plan's own fit is
+  /// still performed after it and overwrites it (Task 2 review R-1): place
+  /// the camera before a view shows with [centerOn].
   void panBy(Offset canvasDelta) {
     if (!canvasDelta.isFinite) {
       throw ArgumentError.value(canvasDelta, 'canvasDelta', 'must be finite');
@@ -1346,8 +1388,11 @@ class FloorPlanController extends ChangeNotifier {
   /// Zooms the camera by [factor] about [focus], a canvas point, by default
   /// the canvas's centre (spec G-3); the result is clamped to the zoom
   /// bounds as the user's pinch is, landing on a bound it would pass. Acts
-  /// at once, and a fit requested before it and not performed yet is
-  /// dropped.
+  /// at once, and a fit requested before it ([fitToView], [fitToTables],
+  /// [centerOn]) and not performed yet is dropped. Before a plan's first
+  /// frame the plan's own fit overwrites it, as for [panBy]; a view
+  /// reports [canvasRect] only after that fit, so a [zoomBy] made once
+  /// [canvasRect] is known acts on the fitted plan.
   ///
   /// Returns false, changing nothing, while no view is mounted
   /// ([canvasRect] null), or for a [factor] that is not finite and above 0
@@ -1362,12 +1407,16 @@ class FloorPlanController extends ChangeNotifier {
   }
 
   /// A camera command (spec G-3): the epoch moves, so a view's fit
-  /// scheduled before it is dropped, and a fit no view has performed yet --
-  /// a request, or a new plan's first fit -- is dropped too.
+  /// requested before it is dropped, and a request no view has performed
+  /// yet is dropped with its target -- the plan's own first fit, which
+  /// stays, then frames the page. That fit is not a host request (Task 2
+  /// review R-1): a view performs it whatever the epoch.
   void _command() {
     _cameraEpoch++;
-    _fitPending = false;
-    _fitOnStart = false;
+    if (_fitPending) {
+      _fitPending = false;
+      _fitTarget = null;
+    }
   }
 
   /// Frames the tables of the active plan carrying one of [numbers] (zone

@@ -34,6 +34,7 @@ class PlannerView extends StatefulWidget {
     this.textTool,
     this.fitRequests,
     this.fitOnStart = true,
+    this.startFitIsRequest = false,
     this.onFitted,
     this.framing,
     this.underlay,
@@ -95,6 +96,13 @@ class PlannerView extends StatefulWidget {
   /// switch keeps the pan and zoom (spec 14b-2 R-13).
   final bool fitOnStart;
 
+  /// Whether the fit on start ([fitOnStart]) performs only a host's
+  /// request, which a camera command made before it drops (spec G-3);
+  /// false for a plan's own first fit, which no command cancels (Task 2
+  /// review R-1), nor a request merged into it, whose target the command
+  /// clears.
+  final bool startFitIsRequest;
+
   /// Called after each fit this view performs (review F-2).
   final VoidCallback? onFitted;
 
@@ -126,9 +134,11 @@ class PlannerView extends StatefulWidget {
   final bool grid;
 
   /// The host's camera epoch (host embedding API spec G-3): a fit captures
-  /// it when it is scheduled and is dropped when it has moved by the end of
-  /// the frame, so a camera command made after a fit request wins. Null
-  /// performs every fit, as before.
+  /// it when it becomes due -- when it is scheduled, or, for the fit a view
+  /// with no size yet owes, when the view is created or the request is
+  /// heard (Task 2 review R-2) -- and is dropped when it has moved by the
+  /// end of the frame, so a camera command made after a fit request wins.
+  /// Null performs every fit, as before.
   final int Function()? cameraEpoch;
 
   /// Whether the user's pan, pinch and wheel zoom move the camera (spec
@@ -138,8 +148,11 @@ class PlannerView extends StatefulWidget {
 
   /// Told, after every frame in which it moved or was resized, where the
   /// drawing area is in global coordinates (spec G-2), with this view's
-  /// state as the reporter; told null once when the view is disposed. Null
-  /// reports nothing.
+  /// state as the reporter; told null once when the view is disposed, or
+  /// when it is replaced by another reporter (Task 2 review R-8). The
+  /// first report follows the view's first fit when it owes one (review
+  /// R-3), so a reporter that moves the camera on it acts on the fitted
+  /// camera. Null reports nothing.
   final void Function(Object view, Rect? global)? onCanvasPlaced;
 
   @override
@@ -167,9 +180,25 @@ class _PlannerViewState extends State<PlannerView> {
   /// The drawing area's size at the last layout, for a fit request.
   Size? _size;
 
+  /// The plan's own first fit is still to be scheduled (Task 2 review
+  /// R-1): no command cancels it, so it captures no epoch.
+  late bool _ownFit = !_fitted && !widget.startFitIsRequest;
+
+  /// The camera epoch when the fit the next sized layout performs became
+  /// due (Task 2 review R-2): when this view was created owing a requested
+  /// fit, or when a request came while it had no size. Read when the fit
+  /// is scheduled, so a command made in between, while the view had no
+  /// size, still wins. Unused for the plan's own first fit.
+  int? _dueEpoch;
+
+  /// A fit a layout scheduled and the end of the frame has not run yet:
+  /// the first report waits for it (Task 2 review R-3).
+  bool _fitAhead = false;
+
   @override
   void initState() {
     super.initState();
+    if (!_ownFit && !_fitted) _dueEpoch = widget.cameraEpoch?.call();
     widget.fitRequests?.addListener(_onFitRequest);
     _watch();
   }
@@ -180,6 +209,13 @@ class _PlannerViewState extends State<PlannerView> {
     if (oldWidget.fitRequests != widget.fitRequests) {
       oldWidget.fitRequests?.removeListener(_onFitRequest);
       widget.fitRequests?.addListener(_onFitRequest);
+    }
+    // Task 2 review R-8: the reporter replaced while a rect is registered
+    // with it is told the view is gone from it; the new one hears the rect
+    // at the end of the frame.
+    if (oldWidget.onCanvasPlaced != widget.onCanvasPlaced && _placed != null) {
+      oldWidget.onCanvasPlaced?.call(this, null);
+      _placed = null;
     }
     _watch();
   }
@@ -193,8 +229,10 @@ class _PlannerViewState extends State<PlannerView> {
 
   void _onFitRequest() {
     if (_size == null) {
-      // Not laid out yet: the first layout fits (review F-2).
+      // Not laid out yet: the first layout fits (review F-2), dropped if a
+      // command comes before it (Task 2 review R-2).
       _fitted = false;
+      if (!_ownFit) _dueEpoch = widget.cameraEpoch?.call();
       return;
     }
     // The size is read when the fit runs, after this frame's layout (zone
@@ -253,16 +291,27 @@ class _PlannerViewState extends State<PlannerView> {
       _watching = false;
       return;
     }
+    // Task 2 review R-3: the first report waits for the first fit -- one
+    // owed and not yet scheduled (no size yet), or scheduled and not yet
+    // run, which reports itself after it runs.
+    if (_placed != null || (_fitted && !_fitAhead)) _report();
+    // Once per frame that happens: a post-frame callback asks for none.
+    WidgetsBinding.instance.addPostFrameCallback(_check);
+  }
+
+  /// Reports the drawing area's global rect when it differs from the last
+  /// one reported.
+  void _report() {
+    final reporter = widget.onCanvasPlaced;
+    if (!mounted || reporter == null) return;
     final box = _area.currentContext?.findRenderObject();
     if (box is RenderBox && box.attached && box.hasSize) {
       final rect = box.localToGlobal(Offset.zero) & box.size;
       if (rect != _placed) {
         _placed = rect;
-        widget.onCanvasPlaced!(this, rect);
+        reporter(this, rect);
       }
     }
-    // Once per frame that happens: a post-frame callback asks for none.
-    WidgetsBinding.instance.addPostFrameCallback(_check);
   }
 
   late final Listenable _chromeRepaint =
@@ -291,7 +340,8 @@ class _PlannerViewState extends State<PlannerView> {
               constraints.biggest.height > 0) {
             _fitted = true;
             final size = constraints.biggest;
-            final epoch = widget.cameraEpoch?.call();
+            final epoch = _ownFit ? null : _dueEpoch;
+            _ownFit = false;
             // Assigning `camera.value` during layout would notify the
             // zoom text's builder mid-build, which Flutter forbids
             // (Ruling 04-16). Posting it defers the notification to the
@@ -299,9 +349,15 @@ class _PlannerViewState extends State<PlannerView> {
             // nominal fit, the second at the real size. The latch is set
             // synchronously, so the fit still happens exactly once
             // (Ruling 01-2).
-            // The epoch is read with the size (spec G-3).
-            WidgetsBinding.instance
-                .addPostFrameCallback((_) => _fit(size, epoch));
+            // The epoch is the one read when the fit became due (spec G-3,
+            // Task 2 review R-2), none for the plan's own first fit (R-1);
+            // the first report follows the fit (R-3).
+            _fitAhead = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _fitAhead = false;
+              _fit(size, epoch);
+              _report();
+            });
           }
           // Spec 05 D9: the field sits outside the InteractionLayer, so a
           // click on it is not a canvas click.
