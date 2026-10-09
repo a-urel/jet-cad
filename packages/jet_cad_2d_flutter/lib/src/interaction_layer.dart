@@ -82,6 +82,7 @@ class InteractionLayer extends StatefulWidget {
     super.key,
     required this.tools,
     required this.child,
+    this.autofocus = true,
   });
 
   /// The controller whose `active` tool receives the events and whose
@@ -89,6 +90,12 @@ class InteractionLayer extends StatefulWidget {
   final ToolController tools;
 
   final Widget child;
+
+  /// Whether the layer's `Focus` takes the focus when it is first built
+  /// (host embedding API spec C-7, S-21); true by default, as before. False
+  /// leaves the focus where a host put it, a search field beside the plan
+  /// say. Either way a pointer down on the layer requests the focus.
+  final bool autofocus;
 
   @override
   State<InteractionLayer> createState() => _InteractionLayerState();
@@ -481,7 +488,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   @override
   Widget build(BuildContext context) => Focus(
         focusNode: _focus,
-        autofocus: true,
+        autofocus: widget.autofocus,
         onKeyEvent: (_, event) => _tool.onKey(event, _ctx),
         // Spec 03 D5: a cursor is a widget parameter, so it needs a
         // rebuild. Only the MouseRegion is rebuilt, and only when the tool

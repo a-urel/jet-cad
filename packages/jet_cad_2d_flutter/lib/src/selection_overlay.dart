@@ -254,6 +254,11 @@ class SelectionOverlayPainter extends CustomPainter {
   /// (Ruling 03-10).
   ///
   /// [preview] is the move's or rotate's `T` while one is dragging.
+  ///
+  /// A role whose gate is closed (`GripCache.moveGripsLive`,
+  /// `stretchGripsLive`; host embedding API Slice 4) is skipped: its points
+  /// are neither projected nor drawn, and its buffer is still sized by the
+  /// role's count, so a gate toggled across frames reallocates nothing.
   void _paintGrips(
       Canvas canvas, GripCache grips, Transform2 m, Transform2? preview) {
     if (grips.leafGripsLive) {
@@ -264,12 +269,16 @@ class SelectionOverlayPainter extends CustomPainter {
       if (_movePoints.length != 2 * grips.moveCount) {
         _movePoints = Float32List(2 * grips.moveCount);
       }
+      final moveLive = grips.moveGripsLive;
+      final stretchLive = grips.stretchGripsLive;
       var s = 0, mv = 0;
       for (var i = 0; i < list.length; i++) {
         final g = list[i].grip;
+        final move = g.role == GripRole.move;
+        if (!(move ? moveLive : stretchLive)) continue;
         final x = m.a * g.x + m.c * g.y + m.e;
         final y = m.b * g.x + m.d * g.y + m.f;
-        if (g.role == GripRole.move) {
+        if (move) {
           _movePoints[mv++] = x;
           _movePoints[mv++] = y;
         } else {
@@ -284,7 +293,9 @@ class SelectionOverlayPainter extends CustomPainter {
         canvas.drawRawPoints(PointMode.points, _movePoints, _gripMovePaint);
       }
       final hot = grips.hot;
-      if (hot >= 0 && hot < list.length) {
+      if (hot >= 0 &&
+          hot < list.length &&
+          (list[hot].grip.role == GripRole.move ? moveLive : stretchLive)) {
         final g = list[hot].grip;
         _hotPoint[0] = m.a * g.x + m.c * g.y + m.e;
         _hotPoint[1] = m.b * g.x + m.d * g.y + m.f;

@@ -7,6 +7,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import 'outline_cache.dart';
+import 'select_gates.dart';
 import 'selection.dart';
 import 'selection_style.dart';
 
@@ -184,8 +185,14 @@ final class GripRef {
 /// With [objects], a selected root-level group also shows the grips that
 /// provider gives it (spec 07 D11). Without one, a group has no grips, as
 /// before.
+///
+/// With [gates] (host embedding API Slice 4), a closed `move` or `reshape`
+/// gate takes its role's grips out of [hitTest] and the overlay's frame,
+/// and a closed `rotate` gate the rotation grip; the grips themselves are
+/// still listed, so a gate change rebuilds nothing.
 class GripCache extends ChangeNotifier {
-  GripCache(this.document, this.selection, this.outlines, {this.objects}) {
+  GripCache(this.document, this.selection, this.outlines,
+      {this.objects, this.gates}) {
     selection.addListener(_onSelection);
     outlines.addListener(_rebuild);
     _rebuild();
@@ -197,6 +204,10 @@ class GripCache extends ChangeNotifier {
 
   /// The object grip seam (spec 07 D11); null: groups have no grips.
   final ObjectGripProvider? objects;
+
+  /// What the select tool may do (host embedding API Slice 4), asked live at
+  /// each hit test and frame, never captured; null: every gate open.
+  final SelectGates? gates;
 
   final List<GripRef> _grips = <GripRef>[];
 
@@ -254,7 +265,9 @@ class GripCache extends ChangeNotifier {
   /// captures a fill (03 D4). Some key with an outline must be movable
   /// ([movableKey], spec 08 D16): a selection of openings alone, or of a
   /// fill alone, has nothing to rotate.
-  bool get rotatable => _box != null && _movable;
+  ///
+  /// With [gates], also needs `rotate`.
+  bool get rotatable => _box != null && _movable && (gates?.rotate ?? true);
 
   /// Whether a move or rotate of the selection moves [key]: a selected key
   /// with an outline that is [movableKey] (spec 08 D16) and not a fill leaf
@@ -276,15 +289,36 @@ class GripCache extends ChangeNotifier {
   bool get leafGripsLive =>
       document.commands.permissions.allows(Capability.geometry);
 
+  /// The centre (`GripRole.move`) grips are drawn and hit: [leafGripsLive]
+  /// and, with [gates], `move`. Read live, per hit test and per frame.
+  bool get moveGripsLive => leafGripsLive && (gates?.move ?? true);
+
+  /// Every other grip (stretch, radius) is drawn and hit: [leafGripsLive]
+  /// and, with [gates], `reshape`. Read live, per hit test and per frame.
+  bool get stretchGripsLive => leafGripsLive && (gates?.reshape ?? true);
+
+  /// A host changed [gates]' answers: [hot] is reset, since it may name a
+  /// grip that is no longer live, and the listeners (the overlay's repaint)
+  /// are notified. Nothing is rebuilt: the grips are read through the gates
+  /// at each hit test and frame anyway.
+  void gatesChanged() {
+    hot = -1;
+    notifyListeners();
+  }
+
   /// The grip under [screen] within [radius] screen pixels
   /// ([kGripHitPixels] by default), or -1.
   ///
   /// The nearest wins, then the greater handle (coincident grips of two
   /// objects: the later-drawn one moves), then the lower ordinal. Nothing
-  /// hits while leaf grips are not live.
+  /// hits while leaf grips are not live, and no grip whose role's gate is
+  /// closed ([moveGripsLive], [stretchGripsLive]).
   int hitTest(Offset screen, Transform2 worldToScreen,
       {double radius = kGripHitPixels}) {
     if (!leafGripsLive) return -1;
+    final g = gates;
+    final moveLive = g == null || g.move;
+    final stretchLive = g == null || g.reshape;
     final m = worldToScreen;
     var best = -1;
     var bestDistance = double.infinity;
@@ -292,9 +326,10 @@ class GripCache extends ChangeNotifier {
     var bestOrdinal = 0;
     for (var i = 0; i < _grips.length; i++) {
       final ref = _grips[i];
-      final g = ref.grip;
-      final dx = m.a * g.x + m.c * g.y + m.e - screen.dx;
-      final dy = m.b * g.x + m.d * g.y + m.f - screen.dy;
+      final grip = ref.grip;
+      if (!(grip.role == GripRole.move ? moveLive : stretchLive)) continue;
+      final dx = m.a * grip.x + m.c * grip.y + m.e - screen.dx;
+      final dy = m.b * grip.x + m.d * grip.y + m.f - screen.dy;
       final d = math.sqrt(dx * dx + dy * dy);
       if (d > radius) continue;
       final h = ref.key.target.value;
