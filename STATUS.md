@@ -143,8 +143,13 @@ one's spec, plan and results.
 ## In flight
 
 **The host embedding API's Slice 4** (the bars, keyboard, editor
-capabilities), on the human's *"tamam, Dilim 4 ile devam et"*
-(2026-10-09): its plan is being committed after Slice 3's merge.
+capabilities), started on the human's *"tamam, Dilim 4 ile devam et"*
+(2026-10-09). Plan:
+[2026-10-09-embedding-slice-4.md](docs/superpowers/plans/2026-10-09-embedding-slice-4.md)
+(seven tasks; the spec's points S-1 to S-24 ruled, S-16 by adding
+`deleteSelection()`). Ledger:
+`.superpowers/sdd/2026-10-09-host-embedding-api/` (`s4-…`). **Resume
+point:** Task 1 (page flows without their dialogs).
 
 ## Owed to the human
 

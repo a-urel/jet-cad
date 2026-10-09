@@ -674,7 +674,9 @@ final class FloorPlanEditorBar {
 ```
 
 `visible: false` removes the top bar; the tools stay in the left panel
-(or are hidden by C-4).
+(or are hidden by C-5). The actions are declared in today's order
+(export, print, undo, redo, snap, zoom) so the default bar is today's
+(S-2).
 
 ### C-3. What a host-built bar needs
 
@@ -696,6 +698,11 @@ final class FloorPlanEditorBar {
   `FloorPlanExportFormat` and `FloorPlanExportDpi`.
 - `FloorPlanView.onPageFlowError: void Function(Object error)?`: an export
   or print that fails reports here (today it is lost).
+- `bool deleteSelection()` (added by Slice 4's plan, S-16): in the design
+  mode, with an editor mounted and `delete` allowed, deletes the editor's
+  selection exactly as the select tool's idle Delete does (one undo step,
+  the table-data expander) and answers true; false otherwise. A host that
+  owns the keyboard (`shortcuts: false`, C-7) deletes through it.
 
 ### C-4. The dialog hook
 
@@ -1047,3 +1054,29 @@ alpha × 0.6; S-9 a host veil colour's alpha is multiplied by the opacity;
 S-10 the view re-measures the selection canvas after a bar-height change;
 S-11 the theme is resolved in a scope just below `FloorPlanView`; S-12 the
 readings the plan pins.
+
+**Settled by Slice 4's plan** (`docs/superpowers/plans/2026-10-09-embedding-slice-4.md`,
+its *Spec points to settle*; the controller's rulings, each the plan's
+recommendation but S-16): S-1 M-H46's chord is Cmd/Ctrl+E (no Ctrl+Shift+E
+exists); S-2 the editor's actions in today's order, so the default bar is
+today's; S-3 C-2 reads C-5; S-4 in the design mode `undo()` and `redo()`
+wait for an idle tool (a fix for a 0.3.0 host, named in the CHANGELOG);
+S-5 `mergeCandidate` null in the design mode; S-6 `FloorPlanTool`'s
+values and `selectTool` where there is no editor; S-7 one export/print
+guard per controller; S-8 `onPageFlowError` absent is today's behaviour;
+S-9 the edit paths F-15 misses (the centre grip, the symbol tool's R and
+M, an armed symbol, the door, wall and dimension fields, the panels'
+edits, the Fill row, a selection or a drag across a change) each with its
+flag; S-10 `reshape` governs object fields and Change size; S-11 hidden
+versus read-only controls, hidden panels kept offstage; S-12 the profiles'
+every field, `tools` must hold `select`; S-13 no left column under
+`readOnly`; S-14 what `snapping` turns off; S-15 `selectTablesOnly`
+picks through the table picker; **S-16 ruled otherwise: `shortcuts:
+false` unbinds every idle key, and the controller gains
+`deleteSelection()` (C-3) so a host that owns the keyboard can still
+delete**; S-17 `editorSelectedTables` empty in the selection mode; S-18
+"exactly one numbered table"; S-19 host widgets in the bars; S-20 a
+bar's `actions` shape the bar, not the chords; S-21 F-9's `autofocus`
+is new on both modes; S-22 capabilities are the editor's alone; S-23
+`FloorPlanSymbol.name` is the stored name; S-24 F-12 amended (the
+dispatcher's permissions are mutable; V-5 stands on its other grounds).
