@@ -98,9 +98,14 @@ final class _Tables extends _FitTarget {
 }
 
 final class _Centre extends _FitTarget {
-  const _Centre(this.world, this.scale);
+  const _Centre(this.world, this.scale, {required this.pageScale});
   final Offset world;
   final double? scale;
+
+  /// Asked with no [scale] before the plan's own first fit, while the
+  /// camera's scale is still the 1440 x 900 placeholder's: the fit takes
+  /// the page fit's scale at the canvas's size (final review F-1).
+  final bool pageScale;
 }
 
 /// The public camera (spec G-2): the camera controller's value wrapped, one
@@ -247,18 +252,21 @@ class FloorPlanController extends ChangeNotifier {
   /// (review F-6), inside the zoom bounds as every fit is (spec G-3). Set
   /// here, never during a build.
   void _placeNominally() {
-    final d = _design.document;
     const size = Size(1440, 900);
+    cameraController.value = clampCameraScale(
+        _pageFit(_design.document, size), size,
+        minScale: _minScale, maxScale: _maxScale);
+  }
+
+  /// [d]'s page fitted to a drawing area of [size], unclamped, as a view
+  /// fits it: the page when there is one, else the extents.
+  static ViewportTransform _pageFit(DraftDocument d, Size size) {
     final page = d.components.isRegistered<PageComponent>()
         ? d.components.get<PageComponent>(d.rootHandle)
         : null;
-    cameraController.value = clampCameraScale(
-        page != null
-            ? fitToPage(page, size)
-            : ViewportTransform.fit(d.extents, size),
-        size,
-        minScale: _minScale,
-        maxScale: _maxScale);
+    return page != null
+        ? fitToPage(page, size)
+        : ViewportTransform.fit(d.extents, size);
   }
 
   /// The symbol library the design mode's palette shows (H3, R-11): the
@@ -602,8 +610,9 @@ class FloorPlanController extends ChangeNotifier {
   ///
   /// A [centerOn] target is the camera with the point at the drawing
   /// area's centre, at the scale asked or else the camera's own when the
-  /// fit is performed; the view then clamps it to the bounds about that
-  /// centre.
+  /// fit is performed -- but one asked with no scale before the plan's own
+  /// first fit takes the scale of the page fitted to [viewport] (final
+  /// review F-1); the view then clamps it to the bounds about that centre.
   @internal
   ViewportTransform? framingFor(Size viewport) {
     final ViewportTransform framing;
@@ -615,8 +624,15 @@ class FloorPlanController extends ChangeNotifier {
         if (box == null) return null;
         framing = frameTables(box, viewport,
             minScale: _minScale, maxScale: _maxScale);
-      case _Centre(:final world, :final scale):
-        framing = _centred(world, scale, viewport);
+      case _Centre(:final world, :final scale, :final pageScale):
+        framing = _centred(
+            world,
+            pageScale
+                ? _pageFit(_active.document, viewport)
+                    .worldToScreenMatrix
+                    .scaleMagnitude
+                : scale,
+            viewport);
     }
     final m = framing.worldToScreenMatrix;
     return [m.a, m.b, m.c, m.d, m.e, m.f].every((v) => v.isFinite)
@@ -1347,6 +1363,10 @@ class FloorPlanController extends ChangeNotifier {
   /// Puts [world] (millimetres, y up) at the centre of the canvas (spec
   /// G-3), at [scale] (logical pixels per millimetre) when given, else at
   /// the camera's scale; clamped to the zoom bounds about the centre.
+  /// Asked with no [scale] before the plan's first frame (after
+  /// construction, [load] or [newPlan], until a view has fitted the plan),
+  /// it takes the scale the plan's own page fit has at the canvas's size
+  /// when it is performed (final review F-1).
   ///
   /// Queued like [fitToView]: the active view performs it at the end of
   /// the frame, at its canvas's size; with no view mounted, the next view
@@ -1363,7 +1383,7 @@ class FloorPlanController extends ChangeNotifier {
     if (scale != null && (!scale.isFinite || scale <= 0)) {
       throw ArgumentError.value(scale, 'scale', 'must be finite and above 0');
     }
-    _fitTarget = _Centre(world, scale);
+    _fitTarget = _Centre(world, scale, pageScale: scale == null && _fitOnStart);
     _request();
   }
 

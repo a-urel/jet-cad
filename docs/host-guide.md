@@ -576,12 +576,18 @@ opened from a list of orders; the builder below needs neither:
 **Moving the camera.** Three commands, in either mode:
 
 - `panBy(canvasDelta)` moves the plan on the screen by that many logical
-  pixels. It needs no view.
+  pixels. It needs no view. It throws an `ArgumentError` for a delta that
+  is not finite.
 - `zoomBy(factor, focus: point)` zooms about a canvas point, the canvas's
   centre by default. It returns `false`, changing nothing, while no view
-  is shown, or for a factor that is not finite and above 0.
+  is shown, for a factor that is not finite and above 0, or for a focus
+  that is not finite.
 - `centerOn(world, scale: s)` puts a world point at the canvas's centre,
-  at that scale or at the camera's own.
+  at that scale or at the camera's own. Asked without a scale before a
+  view has fitted the plan, it takes the scale of the plan's own fit at
+  the real canvas, so the plan shows at the zoom it would have had. It
+  throws an `ArgumentError` for a point that is not finite, or a scale
+  that is not finite and above 0.
 
 ```dart
   /// Brings table [number] to the middle of the view, close enough to read.
@@ -736,6 +742,8 @@ the widget's alone, from that down to its up:
 A pointer that goes down off every overlay, or on a transparent gap in
 one, is the canvas's as before, wherever it then moves: a pan may cross
 a badge. Use `onTap` and `onLongPress` on your own `GestureDetector`.
+The layer marks an interactive widget with `InputClaim`, a name of
+`jet_cad_2d_flutter` the CHANGELOG lists; a host never needs it.
 
 The wheel over a badge goes to the plan through Flutter's
 `PointerSignalResolver`, so there it wins over a scrollable of yours
@@ -764,6 +772,117 @@ and paints each `natural` overlay on the canvas at its new place; a
 widget light. Overlays off the canvas, and all of them below
 `hideBelowScale`, are not painted. Each overlay sits behind its own
 `RepaintBoundary`, so a widget that changes repaints alone.
+
+**A kiosk.** A wall display or a self-service terminal puts most of the
+above together: zoom bounds of its own, no pan or zoom by hand, its own
+arrows for `panBy`, and each table one button the size of the table,
+hidden when the plan is too small to press it:
+
+```dart
+/// A floor on a kiosk: staff cannot pan or zoom it by hand, the arrows
+/// move it, and each table is a button that opens its order.
+class KioskFloor extends StatefulWidget {
+  const KioskFloor({super.key, required this.json, required this.onOrder});
+
+  /// The floor's plan, as `designJson()` wrote it.
+  final String json;
+
+  /// Opens the order of table [number].
+  final void Function(String number) onOrder;
+
+  @override
+  State<KioskFloor> createState() => _KioskFloorState();
+}
+
+class _KioskFloorState extends State<KioskFloor> {
+  late final FloorPlanController controller = FloorPlanController(
+    json: widget.json,
+    minScale: 0.02,
+    maxScale: 0.5,
+  )..setMode(FloorPlanMode.selection);
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  /// The floor point (millimetres) under a global point, such as a
+  /// waiter's tag dropped on the plan; null while no view is shown.
+  Offset? floorPointAt(Offset global) => controller.globalToWorld(global);
+
+  /// The floor point at the middle of the canvas, or null.
+  Offset? middle() {
+    final rect = controller.canvasRect.value;
+    if (rect == null) return null;
+    return controller.camera.value.canvasToWorld(rect.size.center(Offset.zero));
+  }
+
+  /// How many tables are off the screen now.
+  int tablesOutOfSight() {
+    final rect = controller.canvasRect.value;
+    if (rect == null) return 0;
+    final shown = controller.camera.value.visibleWorld(rect.size);
+    return controller.tableDetails
+        .where((d) => d.center != null && !shown.contains(d.center!))
+        .length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => controller.panBy(const Offset(200, 0))),
+            IconButton(
+                icon: const Icon(Icons.arrow_forward),
+                onPressed: () => controller.panBy(const Offset(-200, 0))),
+            ValueListenableBuilder<FloorPlanCamera>(
+              valueListenable: controller.camera,
+              builder: (context, camera, _) =>
+                  Text('${tablesOutOfSight()} tables out of sight'),
+            ),
+          ],
+        ),
+        Expanded(
+          child: FloorPlanView(
+            controller: controller,
+            userCamera: false,
+            tableOverlayModes: const {FloorPlanMode.selection},
+            tableOverlayBuilder: (context, table) => Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                onTap: () => widget.onOrder(table.detail.table.number!),
+              ),
+            ),
+            tableOverlayLayout: const FloorPlanOverlayLayout(
+              interactive: true,
+              size: FloorPlanOverlaySize.box,
+              hideBelowScale: 0.04,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+```
+
+- `userCamera: false` leaves the user no pan or zoom; the arrows'
+  `panBy` still moves the plan, so the camera, and the read-out that
+  listens to it, change only when an arrow is pressed. The read-out
+  walks every table: fine at that rate, not at a pan's.
+- `tableOverlayModes` is the default written out: a kiosk never shows
+  the editor, and an overlay that takes taps would get in its way.
+- `FloorPlanOverlaySize.box` makes each button exactly the table's
+  bounding box on the screen; with `interactive: true` a tap on it is the
+  button's, not the table's. Below 0.04 px/mm (`hideBelowScale`) the
+  buttons are gone and a tap reaches the table, as with no overlays.
+- `visibleWorld` is a `Rect` in world millimetres, y up, so its `top` is
+  the least y; `contains` works as for any `Rect`.
 
 ## 8. Callbacks, options, and the web's context menu
 

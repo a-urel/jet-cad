@@ -387,3 +387,94 @@ class _FloorScreenState extends State<FloorScreen> {
     );
   }
 }
+
+/// A floor on a kiosk: staff cannot pan or zoom it by hand, the arrows
+/// move it, and each table is a button that opens its order.
+class KioskFloor extends StatefulWidget {
+  const KioskFloor({super.key, required this.json, required this.onOrder});
+
+  /// The floor's plan, as `designJson()` wrote it.
+  final String json;
+
+  /// Opens the order of table [number].
+  final void Function(String number) onOrder;
+
+  @override
+  State<KioskFloor> createState() => _KioskFloorState();
+}
+
+class _KioskFloorState extends State<KioskFloor> {
+  late final FloorPlanController controller = FloorPlanController(
+    json: widget.json,
+    minScale: 0.02,
+    maxScale: 0.5,
+  )..setMode(FloorPlanMode.selection);
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  /// The floor point (millimetres) under a global point, such as a
+  /// waiter's tag dropped on the plan; null while no view is shown.
+  Offset? floorPointAt(Offset global) => controller.globalToWorld(global);
+
+  /// The floor point at the middle of the canvas, or null.
+  Offset? middle() {
+    final rect = controller.canvasRect.value;
+    if (rect == null) return null;
+    return controller.camera.value.canvasToWorld(rect.size.center(Offset.zero));
+  }
+
+  /// How many tables are off the screen now.
+  int tablesOutOfSight() {
+    final rect = controller.canvasRect.value;
+    if (rect == null) return 0;
+    final shown = controller.camera.value.visibleWorld(rect.size);
+    return controller.tableDetails
+        .where((d) => d.center != null && !shown.contains(d.center!))
+        .length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => controller.panBy(const Offset(200, 0))),
+            IconButton(
+                icon: const Icon(Icons.arrow_forward),
+                onPressed: () => controller.panBy(const Offset(-200, 0))),
+            ValueListenableBuilder<FloorPlanCamera>(
+              valueListenable: controller.camera,
+              builder: (context, camera, _) =>
+                  Text('${tablesOutOfSight()} tables out of sight'),
+            ),
+          ],
+        ),
+        Expanded(
+          child: FloorPlanView(
+            controller: controller,
+            userCamera: false,
+            tableOverlayModes: const {FloorPlanMode.selection},
+            tableOverlayBuilder: (context, table) => Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                onTap: () => widget.onOrder(table.detail.table.number!),
+              ),
+            ),
+            tableOverlayLayout: const FloorPlanOverlayLayout(
+              interactive: true,
+              size: FloorPlanOverlaySize.box,
+              hideBelowScale: 0.04,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}

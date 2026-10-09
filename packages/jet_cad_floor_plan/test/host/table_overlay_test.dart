@@ -7,6 +7,7 @@
 // panned camera at 0.37 px/mm. Expected places are computed here by the
 // forward transform of the fixture's box, never read back from the code.
 import 'dart:math' as math;
+import 'dart:ui' as ui show ImageByteFormat;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryButton;
 import 'package:flutter/material.dart';
@@ -1313,6 +1314,118 @@ void main() {
     await tester.pump();
     expect(find.byType(InputClaim), findsNothing);
     expect(Badge.created - created, 2 * kOverlaid.length);
+  });
+
+  testWidgets(
+      'TO32 each overlay is keyed by its own table\'s instance: with the '
+      'hidden 5 before L and the 7s, showing and hiding its layer keeps '
+      'every other badge\'s State (final review F-4)', (tester) async {
+    final c = controller(design: true);
+    final calls = Calls();
+    await mount(tester, c,
+        builder: calls.builder(), modes: {FloorPlanMode.design});
+    Map<Offset, State> states() => {
+          for (final e in find.byType(Badge).evaluate())
+            (e.widget as Badge).overlay.detail.center!:
+                (e as StatefulElement).state,
+        };
+    final before = states();
+    expect(before.length, 7, reason: 'premise: 5 is hidden');
+    final created = Badge.created;
+    final d = c.activeDocument;
+    final hidden = d.tables.layers.byName(kEmbeddingHidden)!;
+
+    d.commands.execute(SetLayerCommand(hidden.copyWith(visible: true)));
+    await tester.pump();
+    await tester.pump();
+    final shown = states();
+    expect(shown.length, 8, reason: '5 is shown');
+    expect(Badge.created, created + 1, reason: 'only 5\'s badge is new');
+    for (final MapEntry(key: at, value: state) in before.entries) {
+      expect(identical(shown[at], state), isTrue,
+          reason: 'the badge at $at keeps its State');
+    }
+
+    final again = Badge.created;
+    d.commands.execute(SetLayerCommand(
+        d.tables.layers.byName(kEmbeddingHidden)!.copyWith(visible: false)));
+    await tester.pump();
+    await tester.pump();
+    final after = states();
+    expect(after.length, 7, reason: '5 is hidden again');
+    expect(Badge.created, again, reason: 'no badge is new');
+    for (final MapEntry(key: at, value: state) in before.entries) {
+      expect(identical(after[at], state), isTrue,
+          reason: 'the badge at $at keeps its State');
+    }
+  });
+
+  testWidgets(
+      'TO33 a badge straddling the canvas\'s top edge is clipped to the '
+      'canvas: it does not paint over the service bar (G-5, final review '
+      'F-2)', (tester) async {
+    final c = controller();
+    final calls = Calls();
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final frame = GlobalKey();
+    await tester.pumpWidget(RepaintBoundary(
+        key: frame,
+        child: hostOf(c,
+            builder: ValueNotifier(calls.builder()),
+            layout: ValueNotifier(const FloorPlanOverlayLayout()))));
+    await tester.pump();
+    await tester.pump();
+    // The fixture's camera moved up so table 1's centre is 4 px below the
+    // canvas's top edge: its 20 px high badge sits across it.
+    final one = canvasBox(tableNumbered('1'), embeddingCamera()).center;
+    final m = embeddingCamera().worldToScreenMatrix;
+    c.cameraController.value = ViewportTransform(
+        worldToScreenMatrix:
+            Transform2(m.a, m.b, m.c, m.d, m.e, m.f + 4 - one.dy));
+    await tester.pump();
+
+    final canvas = tester.getRect(find.byType(InteractionLayer));
+    final badge = tester.getRect(badgeOf('1'));
+    expect(canvas.top, greaterThan(10), reason: 'premise: a bar above');
+    expect(badge.top, closeTo(canvas.top - 6, 1e-6), reason: 'premise');
+    expect(badge.bottom, closeTo(canvas.top + 14, 1e-6), reason: 'premise');
+
+    // The nearest clip above the badge is the layer's own, the canvas's
+    // rect (G-5). The drawing area's `Flow` clips to the same rect today,
+    // so the pixels below would not tell this one gone (final review F-2,
+    // mutant I); they guard the two together.
+    final clip =
+        find.ancestor(of: badgeOf('1'), matching: find.byType(ClipRect)).first;
+    expect(tester.widget<ClipRect>(clip).clipBehavior, isNot(Clip.none));
+    final clipBox = tester.renderObject<RenderBox>(clip);
+    expect(clipBox.localToGlobal(Offset.zero) & clipBox.size, canvas);
+
+    // What is painted: the badge's colour below the edge, not above it.
+    final boundary = tester.renderObject<RenderBox>(find.byKey(frame));
+    final layer = boundary.debugLayer! as OffsetLayer;
+    final bytes = (await tester.runAsync(() async {
+      final image = await layer.toImage(Offset.zero & boundary.size);
+      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      image.dispose();
+      return data;
+    }))!;
+    final width = boundary.size.width.round();
+    int pixel(double x, double y) {
+      final i = (y.floor() * width + x.floor()) * 4;
+      return bytes.getUint8(i) << 24 |
+          bytes.getUint8(i + 1) << 16 |
+          bytes.getUint8(i + 2) << 8 |
+          bytes.getUint8(i + 3);
+    }
+
+    const blue = 0x3060C0FF;
+    final x = badge.center.dx;
+    expect(pixel(x, canvas.top + 3).toRadixString(16), blue.toRadixString(16),
+        reason: 'premise: the badge is painted on the canvas');
+    expect(pixel(x, canvas.top - 3).toRadixString(16),
+        isNot(blue.toRadixString(16)),
+        reason: 'the bar above the canvas is not painted over');
   });
 }
 

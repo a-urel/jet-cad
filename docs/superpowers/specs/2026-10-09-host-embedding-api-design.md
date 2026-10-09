@@ -319,7 +319,11 @@ final class FloorPlanTableDetail {
   fitted it) acts at once and drops a pending request (a fit request,
   `fitToTables`, `centerOn`), but does not cancel that plan's own fit,
   which then overwrites it. A host places the camera before a view shows
-  with `centerOn`.
+  with `centerOn`. **A `centerOn` without `scale:` asked before a plan's
+  first fit** (no view has measured its canvas for that plan yet) takes,
+  when it is performed, the scale of the plan's own page fit at the real
+  canvas size, not the camera's placeholder scale for a nominal 1440×900
+  window (final review F-1); with `scale:` it takes that scale.
 - `bool userCamera = true` on `FloorPlanView`: false locks the user's pan,
   pinch and wheel zoom in that view (a kiosk or wall display); the
   commands still act.
@@ -964,3 +968,7 @@ first fit (Task 2, R-6 and R-1); G-5's host rebuild, confirmed as written
 and made explicit for a method tear-off (Task 3, R-1); P-4, G-6 and H-8's
 paint offset and `box` cost (Task 3, R-2), G-6's culling of a `natural`
 overlay (R-7) and H-8's box cache rate (R-9).
+
+**Amended by Slice 1's final review** (the controller's ruling, ledger
+`s1-final-review.md`): G-3's `centerOn` without a scale before a plan's
+first fit takes the page fit's scale at the real canvas (F-1).

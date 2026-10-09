@@ -27,10 +27,15 @@ every commit.
   every pan, zoom and fit. `canvasRect`, the view's drawing area in
   global coordinates (null with no view), and `worldToGlobal` /
   `globalToWorld`.
-- **Camera commands and bounds.** `panBy(canvasDelta)`,
-  `zoomBy(factor, {focus})` (false with no view or a bad factor),
+- **Camera commands and bounds.** `panBy(canvasDelta)` (an
+  `ArgumentError` for a delta that is not finite), `zoomBy(factor,
+  {focus})` (false, changing nothing, with no view, a factor that is not
+  finite and above 0, or a focus that is not finite),
   `centerOn(world, {scale})` (queued like `fitToView()`, the last request
-  wins). The constructor's `minScale` and `maxScale` (0.001 and 100 px
+  wins; an `ArgumentError` for a point that is not finite or a scale that
+  is not finite and above 0; asked without a scale before a plan's first
+  fit, it takes the scale of that plan's page fit at the real canvas).
+  The constructor's `minScale` and `maxScale` (0.001 and 100 px
   per mm, as before) bound the user's zoom, the commands and every fit;
   it throws an `ArgumentError` unless both are finite and
   `1e-6 <= minScale < maxScale`. A plan's own first fit, after the
@@ -49,7 +54,11 @@ every commit.
   above the plan, the focus veil and the number chips; a host fades them
   with `focused`. With `interactive: true` a pointer that goes down on a
   widget is the widget's alone (no selection, no table drag, no pan, not
-  a finger of a pinch); the wheel over it still zooms the plan.
+  a finger of a pinch); the wheel over it still zooms the plan. The view
+  throws an `ArgumentError` when it is built with a builder and a
+  `FloorPlanOverlayLayout` whose `detailBreakpoints` are not finite,
+  positive and strictly ascending, or whose `hideBelowScale` or
+  `maxNaturalSize` is negative or not finite.
 - `FloorPlanView.userCamera` (default `true`): `false` switches off the
   user's pan, pinch and wheel zoom in that view; the commands still act.
 - `jet_cad_2d_flutter`: `InputClaim` and `RenderInputClaim`, a marker

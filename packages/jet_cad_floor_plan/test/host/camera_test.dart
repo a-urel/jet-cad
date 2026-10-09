@@ -788,4 +788,87 @@ void main() {
     await tester.pump();
     expect(b, [rect, null], reason: 'no reporter');
   });
+
+  testWidgets(
+      'CM16 centerOn with no scale before the first mount takes the scale of '
+      'the plan\'s own page fit at the real canvas, not the 1440 x 900 '
+      'placeholder\'s (final review F-1)', (tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final size in [const Size(600, 450), const Size(1300, 900)]) {
+      await tester.binding.setSurfaceSize(size);
+      // The plan's own fit at this size, by a controller asked nothing.
+      final reference = controller();
+      await tester.pumpWidget(hostOf(reference));
+      await tester.pump();
+      await tester.pump();
+      final fitted = reference.camera.value.scale;
+      final referenceCanvas = reference.canvasRect.value!.size;
+      expect(
+          fitted,
+          closeTo(
+              pageFitOf(reference).worldToScreenMatrix.scaleMagnitude, 1e-15),
+          reason: '$size: premise, the page fit');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+
+      final c = controller();
+      final placeholder = c.camera.value.scale;
+      expect((placeholder - fitted).abs(), greaterThan(1e-3 * fitted),
+          reason: '$size: premise, the placeholder is another scale');
+      final seven = centreOf('7');
+      c.centerOn(seven);
+      await tester.pumpWidget(hostOf(c));
+      await tester.pump();
+      await tester.pump();
+      final canvas = c.canvasRect.value!.size;
+      expect(canvas, referenceCanvas, reason: '$size');
+      expect(c.camera.value.scale, closeTo(fitted, 1e-15),
+          reason: '$size: the page fit\'s scale');
+      final centre = canvas.center(Offset.zero);
+      expectPixel(c.camera.value.worldToCanvas(seven), centre, '$size: 7');
+      final back = c.camera.value.canvasToWorld(centre);
+      expect(back.dx, closeTo(seven.dx, 1e-6), reason: '$size: world x');
+      expect(back.dy, closeTo(seven.dy, 1e-6), reason: '$size: world y');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    }
+  });
+
+  testWidgets(
+      'CR6 a host whose State owns the controller disposes it in the frame '
+      'its view goes: the view\'s null report finds it disposed and does '
+      'nothing (final review F-3, probe X8)', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: _Owner()));
+    await tester.pump();
+    await tester.pump();
+    final owner = tester.state<_OwnerState>(find.byType(_Owner));
+    expect(owner.c.canvasRect.value, isNotNull, reason: 'premise: reported');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+}
+
+/// A host that owns its controller, as the guide's does: the view's State
+/// is disposed first (children before parents), then this one disposes
+/// the controller, in the same frame.
+class _Owner extends StatefulWidget {
+  const _Owner();
+
+  @override
+  State<_Owner> createState() => _OwnerState();
+}
+
+class _OwnerState extends State<_Owner> {
+  final FloorPlanController c = FloorPlanController(json: embeddingPlanJson());
+
+  @override
+  void dispose() {
+    c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      Scaffold(body: FloorPlanView(controller: c));
 }
