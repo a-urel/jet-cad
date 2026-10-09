@@ -23,6 +23,7 @@ import 'package:jet_cad_floor_plan/src/export/page_printer.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
+import 'package:jet_cad_floor_plan/src/host/page_flows.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
@@ -334,8 +335,8 @@ void main() {
 
   testWidgets(
       'PF6 (M-H46) onExportDialog at every Export entry point: Cmd+E and '
-      'Ctrl+E and the bar in the design mode, Ctrl+E and the bar in the '
-      'selection mode; never the Material dialog', (tester) async {
+      'Ctrl+E and the bar in the design mode, Cmd+E and Ctrl+E and the bar '
+      'in the selection mode; never the Material dialog', (tester) async {
     final got = <FloorPlanExport>[];
     final hook = RecordingHook(png300);
     final c = await pumpFlows(tester,
@@ -362,10 +363,12 @@ void main() {
         () => chord(tester, LogicalKeyboardKey.keyE, meta: false));
     await exportBy('toolbar-export', () => tester.tap(byKey('toolbar-export')));
     await toMode(tester, c, FloorPlanMode.selection);
+    await exportBy('selection Cmd+E',
+        () => chord(tester, LogicalKeyboardKey.keyE, meta: true));
     await exportBy('selection Ctrl+E',
         () => chord(tester, LogicalKeyboardKey.keyE, meta: false));
     await exportBy('service-export', () => tester.tap(byKey('service-export')));
-    expect(hook.initials, [pdf150, png300, png300, png300, png300],
+    expect(hook.initials, [pdf150, png300, png300, png300, png300, png300],
         reason: 'the remembered choice is each call\'s initial');
   });
 
@@ -685,5 +688,165 @@ void main() {
     await letRun(tester, () => c.pageFlowReady.value);
     expect(tester.takeException(), isNull);
     expect(await tester.runAsync(() => c.exportPlan(png96)), isNotNull);
+  });
+
+  // The review's probes (s4-task-1-review R-1 to R-5): each holds a mutant
+  // the tests above let survive.
+
+  testWidgets(
+      'PF16 (R-5) onExportDialog and onPageFlowError given by a host rebuild '
+      'after the flows exist are the ones used at the next Export and the '
+      'next error: read at each call, never captured', (tester) async {
+    final got = <FloorPlanExport>[];
+    final c = FloorPlanController(json: finitePlanJson());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final printer = FakePagePrinter();
+    Widget view({RecordingHook? hook, void Function(Object)? onError}) =>
+        MaterialApp(
+            home: Scaffold(
+                body: FloorPlanView(
+                    controller: c,
+                    onExport: got.add,
+                    printer: printer,
+                    onExportDialog: hook?.call,
+                    onPageFlowError: onError)));
+    await tester.pumpWidget(view());
+    await tester.pump();
+    await tester.pump();
+    // The flows used once without a hook, so they exist before the rebuild.
+    await tester.tap(byKey('toolbar-export'));
+    await tester.pump();
+    expect(byKey('export-dialog'), findsOneWidget, reason: 'premise');
+    await tester.tap(byKey('export-cancel'));
+    await tester.pump();
+    await tester.pump();
+    await letRun(tester, () => c.pageFlowReady.value);
+
+    final hook = RecordingHook(png96);
+    final errors = <Object>[];
+    await tester.pumpWidget(view(hook: hook, onError: errors.add));
+    await tester.pump();
+    await tester.tap(byKey('toolbar-export'));
+    await tester.pump();
+    expect(byKey('export-dialog'), findsNothing);
+    await letRun(tester, () => got.isNotEmpty);
+    expect(hook.initials, hasLength(1));
+    expect(got, hasLength(1));
+    expect(got.single.mimeType, 'image/png');
+    await letRun(tester, () => c.pageFlowReady.value);
+
+    printer.failNext = StateError('jam');
+    await tester.tap(byKey('toolbar-print'));
+    await tester.pump();
+    await letRun(tester, () => errors.isNotEmpty);
+    expect(errors, hasLength(1));
+    expect(errors.single, isA<StateError>());
+    await letRun(tester, () => c.pageFlowReady.value);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'PF17 (R-2) exportPlan settles pending input first: a table number '
+      'typed and not committed is in the bytes', (tester) async {
+    final c = await pumpFlows(tester, json: finitePlanJson());
+    c.select({'1'});
+    await tester.pump();
+    final before = (await tester.runAsync(() => c.exportPlan(png96)))!;
+    await tester.tap(byKey('table-number'));
+    await tester.pump();
+    await tester.enterText(byKey('table-number'), '42');
+    await tester.pump();
+    expect([for (final t in c.tables) t.number], isNot(contains('42')),
+        reason: 'premise: typed, not committed');
+    final typed = (await tester.runAsync(() => c.exportPlan(png96)))!;
+    expect([for (final t in c.tables) t.number], contains('42'));
+    final after = (await tester.runAsync(() => c.exportPlan(png96)))!;
+    expect(typed.bytes, isNot(before.bytes));
+    expect(typed.bytes, after.bytes);
+  });
+
+  testWidgets(
+      'PF18 (R-3) dispose() while printPlan awaits its printer: it answers '
+      'false', (tester) async {
+    final c = FloorPlanController(json: finitePlanJson());
+    final printer = FakePagePrinter()..hold = true;
+    late Future<bool> printing;
+    await tester.runAsync(() async {
+      printing = c.printPlan(printer: printer);
+      while (printer.held.isEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    c.dispose();
+    printer.held.single.complete();
+    expect(await tester.runAsync(() => printing), isFalse);
+  });
+
+  testWidgets(
+      'PF19 (R-4) flows disposed while Print makes its bytes: nothing is '
+      'printed', (tester) async {
+    final printer = FakePagePrinter();
+    final c = await pumpFlows(tester, json: finitePlanJson(), printer: printer);
+    await tester.runAsync(() => c.exportFont.bytes);
+    final flows = PageFlows(
+        controller: c,
+        settings: () => (onExport: null, printer: printer, exportName: 'plan'));
+    final printing = flows.print(tester.element(find.byType(FloorPlanView)));
+    var done = false;
+    unawaited(printing.whenComplete(() => done = true));
+    scheduleMicrotask(flows.dispose);
+    await letRun(tester, () => done);
+    expect(done, isTrue);
+    expect(printer.calls, isEmpty);
+  });
+
+  testWidgets(
+      'PF20 (R-4) the view removed while Export makes its bytes: onExport '
+      'is not called', (tester) async {
+    final got = <FloorPlanExport>[];
+    final hook = RecordingHook(png96);
+    await pumpFlows(tester, onExport: got.add, hook: hook);
+    await tester.tap(byKey('toolbar-export'));
+    await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 1500)));
+    await tester.pump();
+    expect(hook.initials, hasLength(1), reason: 'premise: the hook answered');
+    expect(got, isEmpty);
+  });
+
+  testWidgets(
+      "PF21 (R-5) the hook's answer is remembered even when the plan is "
+      'replaced while it is open (as the dialog\'s always was); nothing is '
+      'exported', (tester) async {
+    final got = <FloorPlanExport>[];
+    final c = FloorPlanController(json: embeddingPlanJson());
+    addTearDown(c.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    var asked = 0;
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: FloorPlanView(
+                controller: c,
+                onExport: got.add,
+                onExportDialog: (context, initial) async {
+                  asked++;
+                  c.resetLayout();
+                  return png300;
+                }))));
+    await tester.pump();
+    await tester.pump();
+    await toMode(tester, c, FloorPlanMode.selection);
+    await tester.tap(byKey('service-export'));
+    await tester.pump();
+    await letRun(tester, () => c.pageFlowReady.value);
+    await tester.pump();
+    expect(asked, 1);
+    expect(got, isEmpty);
+    expect(c.exportChoice,
+        const ExportChoice(format: ExportFormat.png, dpi: ExportDpi.d300));
   });
 }
