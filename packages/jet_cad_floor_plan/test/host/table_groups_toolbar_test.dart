@@ -127,7 +127,7 @@ Future<Host> mount(WidgetTester tester,
   c.setMode(FloorPlanMode.selection);
   await tester.pump();
   await tester.pump();
-  c.camera.value = ViewportTransform(
+  c.cameraController.value = ViewportTransform(
       worldToScreenMatrix: Transform2(kScale, 0, 0, -kScale, 690, 420));
   await tester.pump();
   return host;
@@ -139,7 +139,7 @@ Offset onSurveyed(WidgetTester tester, Host h, TableInfo table) {
   final trapezoid = table.symbolKey == trapezoidTable.key;
   final w = node.transform
       .transformPoint(trapezoid ? Vector2(900, 650) : Vector2(900, 700));
-  final s = h.c.camera.value.worldToScreen(w);
+  final s = h.c.cameraController.value.worldToScreen(w);
   return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
 }
 

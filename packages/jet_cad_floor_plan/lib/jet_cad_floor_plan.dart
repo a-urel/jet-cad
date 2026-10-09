@@ -9,6 +9,7 @@ library;
 export 'src/export/export_font.dart' show registerFontLicences;
 export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/fonts.dart' show ensureFloorPlanFonts;
+export 'src/host/floor_plan_camera.dart' show FloorPlanCamera;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
     show

@@ -91,6 +91,9 @@ class PlannerShell extends StatefulWidget {
     this.fitOnStart = true,
     this.onFitted,
     this.framing,
+    this.cameraEpoch,
+    this.userCamera = true,
+    this.onCanvasPlaced,
   });
 
   final DraftDocument? document;
@@ -154,6 +157,16 @@ class PlannerShell extends StatefulWidget {
   /// Forwarded to the view: the camera a fit sets, asked when the fit is
   /// performed (zone spec Z7); null fits the page.
   final ViewportTransform? Function(Size size)? framing;
+
+  /// Forwarded to the view: the host's camera epoch (host embedding API
+  /// spec G-3).
+  final int Function()? cameraEpoch;
+
+  /// Forwarded to the view: false locks the user's pan and zoom (spec G-3).
+  final bool userCamera;
+
+  /// Forwarded to the view: where its drawing area is (spec G-2).
+  final void Function(Object view, Rect? global)? onCanvasPlaced;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -982,6 +995,9 @@ class _PlannerShellState extends State<PlannerShell> {
                         fitOnStart: widget.fitOnStart,
                         onFitted: widget.onFitted,
                         framing: widget.framing,
+                        cameraEpoch: widget.cameraEpoch,
+                        userCamera: widget.userCamera,
+                        onCanvasPlaced: widget.onCanvasPlaced,
                       ),
                     ),
                   ),

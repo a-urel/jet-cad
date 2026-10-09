@@ -142,7 +142,7 @@ Future<void> pumpLook(
   await pumpThemed(tester, Scaffold(body: FloorPlanView(controller: c)), mode);
   await tester.pump();
   await tester.pump();
-  c.camera.value = lookCamera();
+  c.cameraController.value = lookCamera();
   await tester.pump();
 }
 
@@ -294,11 +294,11 @@ void main() {
     expectRgb(shot.rgbAt(x3, y3), over(ordered, white), 2, '3 Ordered');
     expectRgb(shot.rgbAt(x12, y12), 0xFFFFFF, 0, '12 no status');
 
-    final camera = c.camera.value;
+    final camera = c.cameraController.value;
     final state = c.activeDocument.commands.stateId;
     c.setGroupStatus({'G7': TableStatus(color: bill, caption: 'Bill')});
     await tester.pump();
-    expect(identical(c.camera.value, camera), isTrue);
+    expect(identical(c.cameraController.value, camera), isTrue);
     expect(c.activeDocument.commands.stateId, state);
     shot = await shoot(tester);
     expectRgb(shot.rgbAt(x3, y3), over(bill, white), 2, '3 Bill');
@@ -400,7 +400,7 @@ void main() {
     c.setMode(FloorPlanMode.selection);
     await tester.pump();
     await tester.pump();
-    c.camera.value = lookCamera();
+    c.cameraController.value = lookCamera();
     await tester.pump();
     final path = groupSpy(tester, 'table-group-layer').paths.single;
     expect(path.contains(const Offset(10600, 6000)), isTrue,
@@ -427,12 +427,12 @@ void main() {
       painter.addListener(count);
       addTearDown(() => painter.removeListener(count));
     }
-    final camera = c.camera.value;
+    final camera = c.cameraController.value;
     final state = c.activeDocument.commands.stateId;
     c.setTableFocus({'20'});
     expect(repaints, {'table-group-layer': 1, 'table-group-chips': 1});
     await tester.pump();
-    expect(identical(c.camera.value, camera), isTrue);
+    expect(identical(c.cameraController.value, camera), isTrue);
     expect(c.activeDocument.commands.stateId, state);
 
     final spy = groupSpy(tester, 'table-group-chips');
@@ -489,7 +489,7 @@ void main() {
     final node = doc.tree[TableSurvey.of(doc).withNumber('20').single.instance]!
         as InstanceNode;
     final twenty = TestQuad(node.transform, zoneSymbolBoxes['test.table']!);
-    final inv = c.camera.value.worldToScreenMatrix.invert();
+    final inv = c.cameraController.value.worldToScreenMatrix.invert();
     bool inTwenty(int x, int y) {
       final px = x + 0.5 - o.dx, py = y + 0.5 - o.dy;
       return twenty.holds(inv.a * px + inv.c * py + inv.e,

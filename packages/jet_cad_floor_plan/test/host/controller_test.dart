@@ -550,7 +550,7 @@ void main() {
 
   FloorPlanController zoned(WidgetTester tester) {
     final c = controller(tester, zonePlanJson());
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     return c;
   }
 
@@ -580,7 +580,7 @@ void main() {
       expect(seven.expandedBy(15000).containsPoint(p), isFalse,
           reason: 'premise: far from table 7');
     }
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'7'}), isTrue);
     expectCamera(c.framingFor(zoneSize), frameTables(seven, zoneSize));
   });
@@ -591,12 +591,12 @@ void main() {
     final d = c.activeDocument;
     expect(c.fitToTables({'5'}), isFalse, reason: 'hidden');
     expect(c.framingFor(zoneSize), isNull);
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'5', '3'}), isTrue);
     expectCamera(
         c.framingFor(zoneSize), frameTables(boundOf(d, {'3'}), zoneSize),
         reason: '3 alone');
-    c.camera.value = zoneCamera();
+    c.cameraController.value = zoneCamera();
     expect(c.fitToTables({'L'}), isTrue, reason: 'locked');
     expectCamera(
         c.framingFor(zoneSize), frameTables(boundOf(d, {'L'}), zoneSize));
@@ -634,7 +634,7 @@ void main() {
     c.takeFitOnStart(); // a host whose plan was already shown and fitted
     var requests = 0;
     c.fitRequests.addListener(() => requests++);
-    final camera = c.camera.value;
+    final camera = c.cameraController.value;
     for (final none in [
       {'nope'},
       {'5'},
@@ -644,7 +644,7 @@ void main() {
       expect(c.fitToTables(none), isFalse, reason: '$none');
     }
     expect(requests, 0);
-    expect(c.camera.value, same(camera));
+    expect(c.cameraController.value, same(camera));
     expect(c.framingFor(zoneSize), isNull);
     expect(c.takeFitOnStart(), isFalse);
   });

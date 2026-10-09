@@ -2,6 +2,7 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'camera_bounds.dart';
 import 'text_entry_overlay.dart';
 
 /// The rulers around the drawing area: a [RulerFrame] whose child is a
@@ -39,6 +40,9 @@ class PlannerView extends StatefulWidget {
     this.overlay,
     this.rulers = true,
     this.grid = true,
+    this.cameraEpoch,
+    this.userCamera = true,
+    this.onCanvasPlaced,
   });
 
   final DraftDocument document;
@@ -114,6 +118,23 @@ class PlannerView extends StatefulWidget {
   /// The page's grid; false in the selection mode. The sheet stays.
   final bool grid;
 
+  /// The host's camera epoch (host embedding API spec G-3): a fit captures
+  /// it when it is scheduled and is dropped when it has moved by the end of
+  /// the frame, so a camera command made after a fit request wins. Null
+  /// performs every fit, as before.
+  final int Function()? cameraEpoch;
+
+  /// Whether the user's pan, pinch and wheel zoom move the camera (spec
+  /// G-3): false builds no [CameraGestureDetector]. Fits and the host's
+  /// commands still act.
+  final bool userCamera;
+
+  /// Told, after every frame in which it moved or was resized, where the
+  /// drawing area is in global coordinates (spec G-2), with this view's
+  /// state as the reporter; told null once when the view is disposed. Null
+  /// reports nothing.
+  final void Function(Object view, Rect? global)? onCanvasPlaced;
+
   @override
   State<PlannerView> createState() => _PlannerViewState();
 }
@@ -143,6 +164,7 @@ class _PlannerViewState extends State<PlannerView> {
   void initState() {
     super.initState();
     widget.fitRequests?.addListener(_onFitRequest);
+    _watch();
   }
 
   @override
@@ -152,11 +174,13 @@ class _PlannerViewState extends State<PlannerView> {
       oldWidget.fitRequests?.removeListener(_onFitRequest);
       widget.fitRequests?.addListener(_onFitRequest);
     }
+    _watch();
   }
 
   @override
   void dispose() {
     widget.fitRequests?.removeListener(_onFitRequest);
+    if (_placed != null) widget.onCanvasPlaced?.call(this, null);
     super.dispose();
   }
 
@@ -167,22 +191,71 @@ class _PlannerViewState extends State<PlannerView> {
       return;
     }
     // The size is read when the fit runs, after this frame's layout (zone
-    // spec Z7): a request made with a layout change fits the new size.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fit(_size!));
+    // spec Z7): a request made with a layout change fits the new size. The
+    // epoch is read now, when the fit is asked (spec G-3).
+    final epoch = widget.cameraEpoch?.call();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fit(_size!, epoch));
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   /// Spec D4/D11: the [PlannerView.framing], else the page when there is
   /// one, at the drawing area's size -- inside the frame, so the bars are
-  /// excluded.
-  void _fit(Size size) {
+  /// excluded -- clamped to the camera's zoom bounds about the drawing
+  /// area's centre (host embedding API spec G-3). Dropped when the camera
+  /// epoch moved since [epoch] was read: a later command has placed the
+  /// camera.
+  void _fit(Size size, int? epoch) {
     if (!mounted) return;
+    if (epoch != null && widget.cameraEpoch?.call() != epoch) return;
     final page = widget.page.value;
-    widget.camera.value = widget.framing?.call(size) ??
-        (page != null
-            ? fitToPage(page, size)
-            : ViewportTransform.fit(widget.document.extents, size));
+    final camera = widget.camera;
+    camera.value = clampCameraScale(
+        widget.framing?.call(size) ??
+            (page != null
+                ? fitToPage(page, size)
+                : ViewportTransform.fit(widget.document.extents, size)),
+        size,
+        minScale: camera.minScale,
+        maxScale: camera.maxScale);
     widget.onFitted?.call();
+  }
+
+  // Spec G-2: the drawing area's global place, checked after every frame
+  // while a reporter is given. A view moved by an ancestor without being
+  // laid out again (a parent's padding) is seen too: no layout callback
+  // would hear it. One `localToGlobal` per frame, nothing per entity.
+
+  /// The drawing area's subtree: its render box is the canvas whose
+  /// coordinates the camera's are. Global, so a [PlannerView.userCamera]
+  /// switch moves it under or out of the gesture detector without
+  /// remounting the interaction layer and the drafting.
+  final GlobalKey _area = GlobalKey();
+
+  /// The rect last reported; null before the first report.
+  Rect? _placed;
+  bool _watching = false;
+
+  void _watch() {
+    if (_watching || widget.onCanvasPlaced == null) return;
+    _watching = true;
+    WidgetsBinding.instance.addPostFrameCallback(_check);
+  }
+
+  void _check(Duration _) {
+    if (!mounted || widget.onCanvasPlaced == null) {
+      _watching = false;
+      return;
+    }
+    final box = _area.currentContext?.findRenderObject();
+    if (box is RenderBox && box.attached && box.hasSize) {
+      final rect = box.localToGlobal(Offset.zero) & box.size;
+      if (rect != _placed) {
+        _placed = rect;
+        widget.onCanvasPlaced!(this, rect);
+      }
+    }
+    // Once per frame that happens: a post-frame callback asks for none.
+    WidgetsBinding.instance.addPostFrameCallback(_check);
   }
 
   late final Listenable _chromeRepaint =
@@ -211,6 +284,7 @@ class _PlannerViewState extends State<PlannerView> {
               constraints.biggest.height > 0) {
             _fitted = true;
             final size = constraints.biggest;
+            final epoch = widget.cameraEpoch?.call();
             // Assigning `camera.value` during layout would notify the
             // zoom text's builder mid-build, which Flutter forbids
             // (Ruling 04-16). Posting it defers the notification to the
@@ -218,7 +292,9 @@ class _PlannerViewState extends State<PlannerView> {
             // nominal fit, the second at the real size. The latch is set
             // synchronously, so the fit still happens exactly once
             // (Ruling 01-2).
-            WidgetsBinding.instance.addPostFrameCallback((_) => _fit(size));
+            // The epoch is read with the size (spec G-3).
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _fit(size, epoch));
           }
           // Spec 05 D9: the field sits outside the InteractionLayer, so a
           // click on it is not a canvas click.
@@ -241,9 +317,8 @@ class _PlannerViewState extends State<PlannerView> {
                 )
               else
                 const SizedBox.shrink(),
-              CameraGestureDetector(
-                camera: widget.camera,
-                policy: widget.policy,
+              _userCamera(KeyedSubtree(
+                key: _area,
                 child: InteractionLayer(
                   tools: widget.tools,
                   child: Stack(
@@ -292,11 +367,18 @@ class _PlannerViewState extends State<PlannerView> {
                     ],
                   ),
                 ),
-              ),
+              )),
             ],
           );
         },
       );
+
+  /// [area] under the user's pan and zoom, or alone when the host locked
+  /// them (spec G-3).
+  Widget _userCamera(Widget area) => widget.userCamera
+      ? CameraGestureDetector(
+          camera: widget.camera, policy: widget.policy, child: area)
+      : area;
 }
 
 /// Paints child 1, the canvas, and then child 0, the text field, above it.

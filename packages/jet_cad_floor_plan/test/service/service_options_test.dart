@@ -76,7 +76,7 @@ InstanceNode node(FloorPlanController c, String n) {
 /// Table [n]'s top centre on the screen.
 Offset at(WidgetTester tester, FloorPlanController c, String n) {
   final w = node(c, n).transform.transformPoint(Vector2(900, 700));
-  final s = c.camera.value.worldToScreen(w);
+  final s = c.cameraController.value.worldToScreen(w);
   return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
 }
 
@@ -135,14 +135,14 @@ void main() {
     await tester.pump();
     final before = parts(node(c, '2').transform);
     for (final n in ['2', '3', '1']) {
-      final pan = c.camera.value.worldToScreen(Vector2.zero());
+      final pan = c.cameraController.value.worldToScreen(Vector2.zero());
       final g = await tester.startGesture(at(tester, c, n),
           kind: PointerDeviceKind.mouse);
       await g.moveBy(const Offset(40, 0));
       await g.moveBy(const Offset(35, 25));
       await g.up();
       await tester.pump();
-      final now = c.camera.value.worldToScreen(Vector2.zero());
+      final now = c.cameraController.value.worldToScreen(Vector2.zero());
       expect(now.x - pan.x, closeTo(75, 1e-6), reason: 'table $n pans');
       expect(now.y - pan.y, closeTo(25, 1e-6), reason: 'table $n pans');
     }

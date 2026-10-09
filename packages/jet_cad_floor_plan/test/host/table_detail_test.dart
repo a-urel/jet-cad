@@ -20,7 +20,7 @@ import 'embedding_fixture.dart';
 FloorPlanController embeddingController() {
   final c = FloorPlanController(json: embeddingPlanJson());
   addTearDown(c.dispose);
-  c.camera.value = embeddingCamera();
+  c.cameraController.value = embeddingCamera();
   return c;
 }
 
@@ -52,7 +52,7 @@ Iterable<(EmbeddingTable, FloorPlanTableDetail)> shown(
 /// The canvas point of [t]'s local ([x], [y]) under [c]'s camera.
 Offset canvasAt(FloorPlanController c, Transform2 t, double x, double y) {
   final w = world(t, x, y);
-  final p = canvasOf(c.camera.value, w.dx, w.dy);
+  final p = canvasOf(c.cameraController.value, w.dx, w.dy);
   return Offset(p.x, p.y);
 }
 
@@ -391,13 +391,13 @@ void main() {
     final at = canvasAt(c, one.transform, 600, 0);
     expect(c.tableAt(at), '1');
     // A pan of 200 px moves what is under the point.
-    c.camera.panBy(const Offset(200, 0));
+    c.cameraController.panBy(const Offset(200, 0));
     expect(c.tableAt(at), isNull);
-    c.camera.value = embeddingCamera();
+    c.cameraController.value = embeddingCamera();
 
     c.setMode(FloorPlanMode.selection);
     // A mode switch reframes the camera (R-13): the fixture's again.
-    c.camera.value = embeddingCamera();
+    c.cameraController.value = embeddingCamera();
     final d = c.activeDocument;
     final h = TableSurvey.of(d).withNumber('1').single.instance;
     final node = d.tree[h]! as InstanceNode;
@@ -410,7 +410,7 @@ void main() {
     expect(c.tableAt(at), isNull);
 
     c.setMode(FloorPlanMode.design);
-    c.camera.value = embeddingCamera();
+    c.cameraController.value = embeddingCamera();
     expect(c.tableAt(at), '1');
     expect(c.tableAt(canvasAt(c, moved, 600, 0)), isNull);
   });

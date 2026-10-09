@@ -37,6 +37,7 @@ class FloorPlanView extends StatefulWidget {
     this.onGroupTap,
     this.onMergeRequested,
     this.onSplitRequested,
+    this.userCamera = true,
   });
 
   final FloorPlanController controller;
@@ -83,6 +84,16 @@ class FloorPlanView extends StatefulWidget {
   /// The service bar's Split was pressed (G5): the selected group's id. The
   /// planner only asks, as for [onMergeRequested].
   final void Function(String groupId)? onSplitRequested;
+
+  /// Whether the user moves the camera in this view (host embedding API
+  /// spec G-3): pan by dragging (the middle button in the design mode, the
+  /// floor in the selection mode), two-finger pinch, trackpad and wheel
+  /// zoom. False locks them all, for a kiosk or a wall display: a drag on
+  /// the floor then does nothing; taps, selections and table moves are
+  /// unchanged, and the controller's [FloorPlanController.panBy],
+  /// [FloorPlanController.zoomBy], [FloorPlanController.centerOn] and fits
+  /// still act. Read at each build and each press.
+  final bool userCamera;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -218,19 +229,23 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                       serviceMoves: widget.serviceMoves,
                       longPress: widget.longPress,
                       onTableContextMenu: widget.onTableContextMenu,
-                    ));
+                    ),
+                userCamera: () => widget.userCamera);
           }
           c.startSymbols();
           return PlannerShell(
             key: ObjectKey(document),
             document: document,
             selection: c.activeSelection,
-            camera: c.camera,
+            camera: c.cameraController,
             fitOnStart: _fitOnStartFor(document),
             fitRequests: c.fitRequests,
             fileCommands: _commands(FloorPlanStrings.of(context)),
             onFitted: c.fitted,
             framing: c.framingFor,
+            cameraEpoch: () => c.cameraEpoch,
+            userCamera: widget.userCamera,
+            onCanvasPlaced: c.canvasPlaced,
             onSettle: c.registerSettle,
             symbols: c.symbols,
             thumbnails: c.thumbnails,

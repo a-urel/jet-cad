@@ -33,6 +33,7 @@ void main() {
       'FloorPlanMode',
       'FloorPlanTable',
       'FloorPlanTableDetail',
+      'FloorPlanCamera',
       'FloorPlanExport',
       'TableStatus',
       'ServiceLayoutRestore',
@@ -109,5 +110,33 @@ void main() {
     expect(shown.hashCode == hidden.hashCode, isFalse);
     expect(shown.toString(), 'FloorPlanTable(5, 4, k, visible: true)');
     expect(hidden.toString(), 'FloorPlanTable(5, 4, k, visible: false)');
+  });
+
+  testWidgets(
+      'B4 the camera through the barrel alone (host embedding API spec G-2, '
+      'G-3): the bounds, the camera, the canvas, the commands, userCamera',
+      (tester) async {
+    final c = FloorPlanController(minScale: 0.01, maxScale: 10);
+    addTearDown(c.dispose);
+    expect(() => FloorPlanController(minScale: 1, maxScale: 1),
+        throwsArgumentError);
+    final FloorPlanCamera before = c.camera.value;
+    expect(c.canvasRect.value, isNull);
+    expect(c.worldToGlobal(Offset.zero), isNull);
+    expect(c.zoomBy(2), isFalse);
+    c.panBy(const Offset(3, 4));
+    expect(c.camera.value == before, isFalse);
+    c.centerOn(const Offset(1000, 2000), scale: 0.5);
+    await tester.pumpWidget(
+        MaterialApp(home: FloorPlanView(controller: c, userCamera: false)));
+    await tester.pump();
+    final Rect canvas = c.canvasRect.value!;
+    expect(c.camera.value.scale, closeTo(0.5, 1e-12));
+    expect(c.worldToGlobal(const Offset(1000, 2000))!.dx,
+        closeTo(canvas.center.dx, 1e-6));
+    expect(c.globalToWorld(canvas.center)!.dy, closeTo(2000, 1e-9));
+    expect(c.zoomBy(2), isTrue);
+    expect(c.camera.value.visibleWorld(canvas.size).center.dx,
+        closeTo(1000, 1e-9));
   });
 }

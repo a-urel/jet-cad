@@ -7,11 +7,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/scheduler.dart';
-import 'package:flutter/widgets.dart' show Offset, Size;
+import 'package:flutter/widgets.dart' show Offset, Rect, Size;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../camera_bounds.dart';
 import '../export/export_dialog.dart';
 import '../export/export_font.dart';
 import '../l10n/document_separator.dart';
@@ -23,6 +24,7 @@ import '../service/table_picker.dart';
 import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
 import '../tables/table_index.dart';
+import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
 import 'service_layout.dart';
 import 'table_detail.dart';
@@ -84,6 +86,52 @@ final class _Requests extends ChangeNotifier {
   void bump() => notifyListeners();
 }
 
+/// What the next fit frames (zone spec Z5; host embedding API spec G-3):
+/// tables by number, or a world point at the canvas's centre.
+sealed class _FitTarget {
+  const _FitTarget();
+}
+
+final class _Tables extends _FitTarget {
+  const _Tables(this.numbers);
+  final Set<String> numbers;
+}
+
+final class _Centre extends _FitTarget {
+  const _Centre(this.world, this.scale);
+  final Offset world;
+  final double? scale;
+}
+
+/// The public camera (spec G-2): the camera controller's value wrapped, one
+/// [FloorPlanCamera] per camera value, made at the first read after a
+/// change and kept while the value is the same object. Listening is the
+/// camera controller's own.
+final class _CameraValue implements ValueListenable<FloorPlanCamera> {
+  _CameraValue(this._camera);
+
+  final CameraController _camera;
+  ViewportTransform? _for;
+  FloorPlanCamera? _value;
+
+  @override
+  FloorPlanCamera get value {
+    final now = _camera.value;
+    if (!identical(now, _for)) {
+      _for = now;
+      _value = FloorPlanCamera(now);
+    }
+    return _value!;
+  }
+
+  @override
+  void addListener(VoidCallback listener) => _camera.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) =>
+      _camera.removeListener(listener);
+}
+
 /// The table focus (zone spec Z10): each [replace] notifies, an equal set
 /// or a second null included.
 final class _Focus extends ChangeNotifier
@@ -125,12 +173,28 @@ class FloorPlanController extends ChangeNotifier {
   /// reported its language it is the engine's `point`, and it settles on
   /// the language as if it had been made so -- no undo step, not [dirty] --
   /// unless [designJson] read it or an edit touched it first.
+  ///
+  /// [minScale] and [maxScale] bound the camera's zoom, in logical pixels
+  /// per millimetre (spec G-3): the user's pinch and wheel, [zoomBy],
+  /// [centerOn] and every fit stay inside them. The defaults, 0.001 and
+  /// 100, are the planner's own. Throws an [ArgumentError] unless both are
+  /// finite and `0 < minScale < maxScale`.
   factory FloorPlanController({
     List<SymbolLibrarySource> symbolSources = const [furnitureSymbolSource],
     SymbolLibraryLoader? symbols,
     SymbolThumbnails? thumbnails,
     String? json,
+    double minScale = kMinScale,
+    double maxScale = kMaxScale,
   }) {
+    if (!minScale.isFinite || minScale <= 0) {
+      throw ArgumentError.value(
+          minScale, 'minScale', 'must be finite and above 0');
+    }
+    if (!maxScale.isFinite || maxScale <= minScale) {
+      throw ArgumentError.value(
+          maxScale, 'maxScale', 'must be finite and above minScale');
+    }
     final measurer = FlutterTextMeasurer();
     final DraftDocument document;
     if (json == null) {
@@ -147,7 +211,9 @@ class FloorPlanController extends ChangeNotifier {
         unsettled: json == null,
         symbolSources: symbolSources,
         symbols: symbols,
-        thumbnails: thumbnails);
+        thumbnails: thumbnails,
+        minScale: minScale,
+        maxScale: maxScale);
   }
 
   FloorPlanController._(
@@ -156,7 +222,11 @@ class FloorPlanController extends ChangeNotifier {
     required List<SymbolLibrarySource> symbolSources,
     SymbolLibraryLoader? symbols,
     SymbolThumbnails? thumbnails,
-  })  : _ownsSymbols = symbols == null,
+    required double minScale,
+    required double maxScale,
+  })  : _minScale = minScale,
+        _maxScale = maxScale,
+        _ownsSymbols = symbols == null,
         symbols = symbols ?? SymbolLibraryLoader(sources: symbolSources),
         _ownsThumbnails = thumbnails == null,
         thumbnails = thumbnails ??
@@ -172,16 +242,21 @@ class FloorPlanController extends ChangeNotifier {
 
   /// The shell's nominal fit (1440 x 900), so the first frame of a new
   /// plan's view is drawn near the right place before the real fit
-  /// (review F-6). Set here, never during a build.
+  /// (review F-6), inside the zoom bounds as every fit is (spec G-3). Set
+  /// here, never during a build.
   void _placeNominally() {
     final d = _design.document;
     const size = Size(1440, 900);
     final page = d.components.isRegistered<PageComponent>()
         ? d.components.get<PageComponent>(d.rootHandle)
         : null;
-    camera.value = page != null
-        ? fitToPage(page, size)
-        : ViewportTransform.fit(d.extents, size);
+    cameraController.value = clampCameraScale(
+        page != null
+            ? fitToPage(page, size)
+            : ViewportTransform.fit(d.extents, size),
+        size,
+        minScale: _minScale,
+        maxScale: _maxScale);
   }
 
   /// The symbol library the design mode's palette shows (H3, R-11): the
@@ -203,13 +278,94 @@ class FloorPlanController extends ChangeNotifier {
   @internal
   ExportChoice exportChoice = ExportChoice.initial;
 
+  /// The zoom bounds (spec G-3), as the constructor was given them.
+  final double _minScale, _maxScale;
+
   /// The one camera every view of this controller uses (R-13): a mode
-  /// switch keeps its pan and zoom.
+  /// switch keeps its pan and zoom. Bounded by the constructor's
+  /// `minScale` and `maxScale`. Named `camera` before the host embedding
+  /// API (spec G-2), which gave that name to the public [camera].
   @internal
-  late final CameraController camera = CameraController(
+  late final CameraController cameraController = CameraController(
       ViewportTransform(worldToScreenMatrix: Transform2(1, 0, 0, -1, 0, 0)),
-      minScale: kMinScale,
-      maxScale: kMaxScale);
+      minScale: _minScale,
+      maxScale: _maxScale);
+
+  late final _CameraValue _camera = _CameraValue(cameraController);
+
+  /// Where the plan is on the canvas (spec G-2): a new [FloorPlanCamera] at
+  /// every pan, zoom and fit, by the user or by the host; one per position,
+  /// so two reads with no camera change in between are the identical
+  /// object. One camera for both modes: a mode switch keeps the plan where
+  /// it is on the screen (R-13), moving the camera by the difference of the
+  /// two canvases' origins.
+  ValueListenable<FloorPlanCamera> get camera => _camera;
+
+  final ValueNotifier<Rect?> _canvasRect = ValueNotifier(null);
+
+  /// Each mounted view's drawing area, as it last reported it, the last
+  /// reporter last.
+  final Map<Object, Rect> _canvases = {};
+
+  /// The canvas of the last [FloorPlanView] laid out, in global logical
+  /// pixels (spec G-2): its origin and size, reported after every frame in
+  /// which the view moved or was resized -- an ancestor's padding included.
+  /// Null while no view is mounted. With it a widget outside the view
+  /// places itself on the plan ([worldToGlobal], [globalToWorld]). The rect
+  /// is the canvas's top left and its own size: an ancestor that scales or
+  /// turns the view is not accounted for.
+  ValueListenable<Rect?> get canvasRect => _canvasRect;
+
+  /// The global point that shows [world] (millimetres, y up), or null with
+  /// no view mounted ([canvasRect] null).
+  Offset? worldToGlobal(Offset world) {
+    final rect = _canvasRect.value;
+    if (rect == null) return null;
+    return camera.value.worldToCanvas(world) + rect.topLeft;
+  }
+
+  /// The world point (millimetres, y up) shown at the global point
+  /// [global], or null with no view mounted ([canvasRect] null).
+  Offset? globalToWorld(Offset global) {
+    final rect = _canvasRect.value;
+    if (rect == null) return null;
+    return camera.value.canvasToWorld(global - rect.topLeft);
+  }
+
+  /// A view's drawing area is at [global] (spec G-2), or, null, [view] is
+  /// going. [canvasRect] is the last report's; when a view goes, at the end
+  /// of that frame it is the rect of the view that reported last among
+  /// those left, or null with none. A mode switch's new view reports in the
+  /// same frame, before that, so no listener hears a null between the two;
+  /// and no listener is told anything while the tree is locked.
+  @internal
+  void canvasPlaced(Object view, Rect? global) {
+    if (_disposed) return;
+    if (global != null) {
+      _canvases
+        ..remove(view)
+        ..[view] = global;
+      _canvasRect.value = global;
+      return;
+    }
+    if (_canvases.remove(view) == null) return;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        if (_disposed) return;
+        _canvasRect.value = _canvases.isEmpty ? null : _canvases.values.last;
+      })
+      ..ensureVisualUpdate();
+  }
+
+  /// Moves at every camera request a host makes (spec G-3): [fitToView],
+  /// [fitToTables] that found a table, [centerOn], [panBy] and a [zoomBy]
+  /// that acts. A view's fit reads it when it is scheduled and is dropped
+  /// when it has moved, so the last request wins.
+  int _cameraEpoch = 0;
+
+  /// [_cameraEpoch], for the views' fits.
+  @internal
+  int get cameraEpoch => _cameraEpoch;
 
   late _Plan _design;
   _Plan? _service;
@@ -230,9 +386,9 @@ class FloorPlanController extends ChangeNotifier {
   bool _fitPending = false;
 
   /// What the next fit frames (zone spec Z5): null for the page, else the
-  /// numbers of the last [fitToTables] that found a table, trimmed. The
-  /// last request wins.
-  Set<String>? _fitTarget;
+  /// numbers of the last [fitToTables] that found a table, trimmed, or the
+  /// point of the last [centerOn] (spec G-3). The last request wins.
+  _FitTarget? _fitTarget;
   VoidCallback? _settle;
   bool _disposed = false;
 
@@ -412,17 +568,46 @@ class FloorPlanController extends ChangeNotifier {
   /// performed: a restore, an Undo or a mode switch since the request is
   /// followed. One entity-store scan per call, at fit rate. A camera that
   /// is not finite is none: the page is fitted (Task 1 review R-1).
+  ///
+  /// A [centerOn] target is the camera with the point at the drawing
+  /// area's centre, at the scale asked or else the camera's own when the
+  /// fit is performed; the view then clamps it to the bounds about that
+  /// centre.
   @internal
   ViewportTransform? framingFor(Size viewport) {
-    final target = _fitTarget;
-    if (target == null) return null;
-    final box = _tablesBounds(target);
-    if (box == null) return null;
-    final framing = frameTables(box, viewport);
+    final ViewportTransform framing;
+    switch (_fitTarget) {
+      case null:
+        return null;
+      case _Tables(:final numbers):
+        final box = _tablesBounds(numbers);
+        if (box == null) return null;
+        framing = frameTables(box, viewport,
+            minScale: _minScale, maxScale: _maxScale);
+      case _Centre(:final world, :final scale):
+        framing = _centred(world, scale, viewport);
+    }
     final m = framing.worldToScreenMatrix;
     return [m.a, m.b, m.c, m.d, m.e, m.f].every((v) => v.isFinite)
         ? framing
         : null;
+  }
+
+  /// The camera with [world] at the centre of a drawing area of
+  /// [viewport]: the camera's linear part, scaled to [scale] when one is
+  /// given, translated to put the point there.
+  ViewportTransform _centred(Offset world, double? scale, Size viewport) {
+    final m = cameraController.value.worldToScreenMatrix;
+    final k = scale == null ? 1.0 : scale / m.scaleMagnitude;
+    final a = m.a * k, b = m.b * k, c = m.c * k, d = m.d * k;
+    return ViewportTransform(
+        worldToScreenMatrix: Transform2(
+            a,
+            b,
+            c,
+            d,
+            viewport.width / 2 - (a * world.dx + c * world.dy),
+            viewport.height / 2 - (b * world.dx + d * world.dy)));
   }
 
   /// The bound of the four transformed corners of every candidate of the
@@ -456,7 +641,7 @@ class FloorPlanController extends ChangeNotifier {
     final a = _canvasAt[from]!, b = _canvasAt[to]!;
     _assumed.putIfAbsent(from, () => a);
     _assumed.putIfAbsent(to, () => b);
-    if (a != b) camera.panBy(a - b);
+    if (a != b) cameraController.panBy(a - b);
   }
 
   /// A view measured where mode [shown]'s canvas starts in it, after the
@@ -469,7 +654,8 @@ class FloorPlanController extends ChangeNotifier {
     _canvasAt[shown] = origin;
     final assumed = _assumed.remove(shown);
     if (assumed == null || assumed == origin) return;
-    camera.panBy(shown == _mode.value ? assumed - origin : origin - assumed);
+    cameraController
+        .panBy(shown == _mode.value ? assumed - origin : origin - assumed);
   }
 
   // Spec Q0 N1 (R-4): an empty plan the controller makes is unsettled
@@ -945,7 +1131,7 @@ class FloorPlanController extends ChangeNotifier {
       _pickerState = state;
       _pickerLayers = layers;
     }
-    final cam = camera.value;
+    final cam = cameraController.value;
     final world = cam.screenToWorld(Vector2(canvasPoint.dx, canvasPoint.dy));
     final reach = kind == PointerDeviceKind.touch
         ? kTouchPickRadiusPixels / cam.scale
@@ -1086,11 +1272,82 @@ class FloorPlanController extends ChangeNotifier {
   }
 
   /// The active view frames the plan as on its first frame (H3, F-7). It
-  /// replaces an earlier [fitToTables] not yet performed (zone spec Z5).
+  /// replaces an earlier [fitToTables] or [centerOn] not yet performed
+  /// (zone spec Z5), and a camera command made after it, before the view
+  /// performs it, wins over it (spec G-3). The framing is clamped to the
+  /// zoom bounds.
   void fitToView() {
     _fitTarget = null;
+    _request();
+  }
+
+  /// A fit request (spec G-3): the epoch moves, then the views hear it.
+  void _request() {
     _fitPending = true;
+    _cameraEpoch++;
     _fits.bump();
+  }
+
+  /// Puts [world] (millimetres, y up) at the centre of the canvas (spec
+  /// G-3), at [scale] (logical pixels per millimetre) when given, else at
+  /// the camera's scale; clamped to the zoom bounds about the centre.
+  ///
+  /// Queued like [fitToView]: the active view performs it at the end of
+  /// the frame, at its canvas's size; with no view mounted, the next view
+  /// does it on its first frame. The last request wins: a later
+  /// [fitToView], [fitToTables], [centerOn], [panBy] or [zoomBy] replaces
+  /// it. Throws an [ArgumentError] for a [world] that is not finite or a
+  /// [scale] that is not finite and above 0.
+  ///
+  /// Not document state, as [fitToTables].
+  void centerOn(Offset world, {double? scale}) {
+    if (!world.isFinite) {
+      throw ArgumentError.value(world, 'world', 'must be finite');
+    }
+    if (scale != null && (!scale.isFinite || scale <= 0)) {
+      throw ArgumentError.value(scale, 'scale', 'must be finite and above 0');
+    }
+    _fitTarget = _Centre(world, scale);
+    _request();
+  }
+
+  /// Pans the camera by [canvasDelta], logical pixels (spec G-3): the plan
+  /// moves by it on the screen. Acts at once, with or without a view; a fit
+  /// requested before it and not performed yet is dropped. Throws an
+  /// [ArgumentError] for a delta that is not finite.
+  void panBy(Offset canvasDelta) {
+    if (!canvasDelta.isFinite) {
+      throw ArgumentError.value(canvasDelta, 'canvasDelta', 'must be finite');
+    }
+    _command();
+    cameraController.panBy(canvasDelta);
+  }
+
+  /// Zooms the camera by [factor] about [focus], a canvas point, by default
+  /// the canvas's centre (spec G-3); the result is clamped to the zoom
+  /// bounds as the user's pinch is, landing on a bound it would pass. Acts
+  /// at once, and a fit requested before it and not performed yet is
+  /// dropped.
+  ///
+  /// Returns false, changing nothing, while no view is mounted
+  /// ([canvasRect] null), or for a [factor] that is not finite and above 0
+  /// or a [focus] that is not finite.
+  bool zoomBy(double factor, {Offset? focus}) {
+    final rect = _canvasRect.value;
+    if (rect == null || !factor.isFinite || factor <= 0) return false;
+    if (focus != null && !focus.isFinite) return false;
+    _command();
+    cameraController.zoomAt(focus ?? rect.size.center(Offset.zero), factor);
+    return true;
+  }
+
+  /// A camera command (spec G-3): the epoch moves, so a view's fit
+  /// scheduled before it is dropped, and a fit no view has performed yet --
+  /// a request, or a new plan's first fit -- is dropped too.
+  void _command() {
+    _cameraEpoch++;
+    _fitPending = false;
+    _fitOnStart = false;
   }
 
   /// Frames the tables of the active plan carrying one of [numbers] (zone
@@ -1121,9 +1378,8 @@ class FloorPlanController extends ChangeNotifier {
         if (n.trim() case final t when t.isNotEmpty) t,
     });
     if (_tablesBounds(wanted) == null) return false;
-    _fitTarget = wanted;
-    _fitPending = true;
-    _fits.bump();
+    _fitTarget = _Tables(wanted);
+    _request();
     return true;
   }
 
@@ -1181,7 +1437,8 @@ class FloorPlanController extends ChangeNotifier {
     }
     if (_ownsSymbols) symbols.dispose();
     if (_ownsThumbnails) thumbnails.dispose();
-    camera.dispose();
+    cameraController.dispose();
+    _canvasRect.dispose();
     _fits.dispose();
     _layoutChanges.dispose();
     _mode.dispose();

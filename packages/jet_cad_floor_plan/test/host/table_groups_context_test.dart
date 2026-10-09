@@ -33,7 +33,7 @@ Future<(Host, List<String>)> mountMenu(WidgetTester tester,
   c.setMode(FloorPlanMode.selection);
   await tester.pump();
   await tester.pump();
-  c.camera.value = ViewportTransform(
+  c.cameraController.value = ViewportTransform(
       worldToScreenMatrix: Transform2(kScale, 0, 0, -kScale, 690, 420));
   await tester.pump();
   c.setTableGroups({

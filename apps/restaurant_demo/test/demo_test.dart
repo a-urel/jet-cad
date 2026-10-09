@@ -309,13 +309,13 @@ void main() {
     await tester.tap(byKey('fit'));
     await tester.pump();
     await tester.pump();
-    final fitted = c.camera.value.worldToScreenMatrix.a;
-    c.camera.value = ViewportTransform(
+    final fitted = c.cameraController.value.worldToScreenMatrix.a;
+    c.cameraController.value = ViewportTransform(
         worldToScreenMatrix: Transform2(0.07, 0, 0, -0.07, -310, 2400));
     await tester.tap(byKey('fit'));
     await tester.pump();
     await tester.pump();
-    expect(c.camera.value.worldToScreenMatrix.a, fitted);
+    expect(c.cameraController.value.worldToScreenMatrix.a, fitted);
   });
 
   testWidgets(
@@ -478,7 +478,7 @@ void main() {
           as InstanceNode;
       final def = d.tree.definition(node.definition)!;
       final w = node.transform.transformPoint(def.basePoint);
-      final s = c.camera.value.worldToScreen(w);
+      final s = c.cameraController.value.worldToScreen(w);
       return tester.getTopLeft(find.byType(InteractionLayer)) +
           Offset(s.x, s.y);
     }
@@ -544,7 +544,7 @@ void main() {
         as InstanceNode;
     final def = d.tree.definition(node.definition)!;
     final w = node.transform.transformPoint(def.basePoint);
-    final s = c.camera.value.worldToScreen(w);
+    final s = c.cameraController.value.worldToScreen(w);
     return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
   }
 
@@ -766,7 +766,7 @@ void main() {
     final c = demo.area.controller;
     final node = instanceOf(demo, n);
     final def = c.activeDocument.tree.definition(node.definition)!;
-    final s = c.camera.value
+    final s = c.cameraController.value
         .worldToScreen(node.transform.transformPoint(def.basePoint));
     return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
   }
@@ -1248,7 +1248,7 @@ void main() {
             final w = (d.tree[t.instance]! as InstanceNode)
                 .transform
                 .transformPoint(Vector2(x, y));
-            final s = c.camera.value.worldToScreen(w);
+            final s = c.cameraController.value.worldToScreen(w);
             return Offset(s.x, s.y);
           }(),
     ];
@@ -1283,7 +1283,7 @@ void main() {
     expect(byKey('zone-toggle'), findsOneWidget);
     expect(byKey('fade-others'), findsOneWidget);
     final canvas = Offset.zero & tester.getSize(find.byType(InteractionLayer));
-    final page = c.camera.value;
+    final page = c.cameraController.value;
     for (final n in ['1', '6', '7']) {
       expect(boxOnScreen(c, n), hasLength(4), reason: 'premise: one $n');
     }
@@ -1291,7 +1291,7 @@ void main() {
     await tester.tap(byKey('zone-B'));
     await tester.pump();
     await tester.pump();
-    expect(coefficients(c.camera.value), isNot(coefficients(page)),
+    expect(coefficients(c.cameraController.value), isNot(coefficients(page)),
         reason: 'premise: the camera moved');
     for (final n in ['6', '7']) {
       for (final p in boxOnScreen(c, n)) {
@@ -1337,13 +1337,14 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(c.tableFocus.value, isNull);
-    final all = coefficients(c.camera.value);
-    c.camera.value = ViewportTransform(
+    final all = coefficients(c.cameraController.value);
+    c.cameraController.value = ViewportTransform(
         worldToScreenMatrix: Transform2(0.37, 0, 0, -0.37, 211.5, 307.25));
     c.fitToView();
     await tester.pump();
     await tester.pump();
-    expect(coefficients(c.camera.value), all, reason: 'All fits the page');
+    expect(coefficients(c.cameraController.value), all,
+        reason: 'All fits the page');
     for (final n in ['1', '6', '7']) {
       for (final p in boxOnScreen(c, n)) {
         expect(canvas.contains(p), isTrue, reason: 'the page shows $n');

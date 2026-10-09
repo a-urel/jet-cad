@@ -83,7 +83,7 @@ Future<void> pumpService(
   await tester.pump();
   await tester.pump();
   expect(find.byType(ServiceView), findsOneWidget);
-  c.camera.value = ViewportTransform(
+  c.cameraController.value = ViewportTransform(
       worldToScreenMatrix: const Transform2(
           0.07, 0, 0, -0.07, 700 - 0.07 * tableX, 400 + 0.07 * tableY));
   c.setTableStatus({'1': TableStatus(color: bill, caption: 'Bill')});
@@ -153,12 +153,12 @@ void main() {
     final c = statusController(null);
     await pumpService(tester, c, ThemeMode.light);
     final box = captionBox(tester);
-    final camera = c.camera.value;
+    final camera = c.cameraController.value;
     expectDarkCaption(await shoot(tester), box, 'no page, light');
 
     await pumpThemed(tester, view(c), ThemeMode.dark);
     await tester.pump();
-    expect(identical(c.camera.value, camera), isTrue);
+    expect(identical(c.cameraController.value, camera), isTrue);
     expectLightCaption(
         await shoot(tester), box, 'no page, after the switch to dark');
 
