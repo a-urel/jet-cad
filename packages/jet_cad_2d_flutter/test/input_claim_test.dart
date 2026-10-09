@@ -68,6 +68,7 @@ const Rect kBadge = Rect.fromLTWH(40, 30, 80, 40); // a tappable claim
 const Rect kScroller = Rect.fromLTWH(240, 30, 80, 40); // takes the wheel
 const Rect kGap = Rect.fromLTWH(40, 200, 80, 40); // a claim that hits nothing
 const Rect kPlain = Rect.fromLTWH(240, 200, 80, 40); // no recognizer at all
+const Rect kNested = Rect.fromLTWH(330, 110, 60, 40); // a claim in a claim
 const Offset kFloor = Offset(180, 160); // on no claim
 const Offset kTopLeft = Offset(200, 150);
 
@@ -95,6 +96,7 @@ final class Rig {
   late final ToolController tools;
 
   int badgeTaps = 0;
+  int nestedTaps = 0;
   final List<Offset> badgeDowns = [];
   int scrollerSignals = 0;
 
@@ -150,6 +152,17 @@ Future<Rig> pumpRig(WidgetTester tester) async {
                   kPlain,
                   const InputClaim(
                       child: ColoredBox(color: Color(0xFFC06030)))),
+              // A claim inside a claim: both hear the same down.
+              at(
+                  kNested,
+                  InputClaim(
+                    child: InputClaim(
+                      child: GestureDetector(
+                        onTap: () => rig.nestedTaps++,
+                        child: const ColoredBox(color: Color(0xFF9030C0)),
+                      ),
+                    ),
+                  )),
             ]),
           ),
         ),
@@ -178,6 +191,7 @@ void main() {
       'tool and no camera does; the claim ends with the pointer',
       (tester) async {
     final rig = await pumpRig(tester);
+    final before = RenderInputClaim.debugClaimedPointers;
     final camera = rig.camera.value;
     await tester.tapAt(g(kBadge.center), kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 500));
@@ -186,7 +200,7 @@ void main() {
     expect(rig.badgeDowns, [kBadge.size.center(Offset.zero)]);
     expect(rig.tool.routed, isEmpty, reason: 'the tool heard a claimed tap');
     expect(identical(rig.camera.value, camera), isTrue);
-    expect(RenderInputClaim.debugClaimedPointers, 0);
+    expect(RenderInputClaim.debugClaimedPointers, before);
     // Off every claim, a tap is the tool's as before.
     await tester.tapAt(g(kFloor), kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 500));
@@ -201,6 +215,7 @@ void main() {
       'IC2 the claim does not leak to the next pointer: the same id, down '
       'off the claim, is the tool\'s from down to up', (tester) async {
     final rig = await pumpRig(tester);
+    final before = RenderInputClaim.debugClaimedPointers;
     await tester.tapAt(g(kBadge.center),
         pointer: 5, kind: PointerDeviceKind.mouse);
     await tester.pump(const Duration(milliseconds: 500));
@@ -211,7 +226,7 @@ void main() {
     await drag.up();
     expect(
         rig.tool.routed, ['down 5 180,160', 'move 5 210,180', 'up 5 210,180']);
-    expect(RenderInputClaim.debugClaimedPointers, 0);
+    expect(RenderInputClaim.debugClaimedPointers, before);
   });
 
   testWidgets(
@@ -280,6 +295,7 @@ void main() {
       'IC5 a pinch with one finger on a claim does not count that finger, '
       'whichever lands first; two fingers on the floor pinch', (tester) async {
     final rig = await pumpRig(tester);
+    final before = RenderInputClaim.debugClaimedPointers;
     final camera = rig.camera.value;
     // A finger on the claim, then one on the floor moving away from it:
     // a pinch of the two would zoom by the span's ratio.
@@ -327,7 +343,7 @@ void main() {
             1e-9));
     await p1.up();
     await p2.up();
-    expect(RenderInputClaim.debugClaimedPointers, 0);
+    expect(RenderInputClaim.debugClaimedPointers, before);
   });
 
   testWidgets(
@@ -406,5 +422,50 @@ void main() {
         ['down 41 180,160', 'move 41 200,170', 'up 41 200,170']);
     expect(RenderInputClaim.debugClaimedPointers, before);
     expect(lost, isNotNull);
+  });
+
+  testWidgets(
+      'IC10 a claimed pointer\'s cancel ends the claim, and no tool hears '
+      'it: a finger and a mouse', (tester) async {
+    final rig = await pumpRig(tester);
+    final before = RenderInputClaim.debugClaimedPointers;
+    final camera = rig.camera.value;
+    // A finger on the badge, then cancelled (the platform took it).
+    final touch = await finger(tester, 21, kBadge.center);
+    expect(RenderInputClaim.debugClaimedPointers, before + 1);
+    await tester.pump(const Duration(milliseconds: 50));
+    await touch.cancel();
+    expect(RenderInputClaim.debugClaimedPointers, before,
+        reason: 'a cancelled finger left its claim behind');
+    expect(rig.tool.log, isEmpty,
+        reason: 'the layer acted on a claimed finger\'s cancel');
+    // A mouse on the plain claim, dragged, then cancelled.
+    final mouse = await tester.startGesture(g(kPlain.center),
+        pointer: 22, kind: PointerDeviceKind.mouse);
+    expect(RenderInputClaim.debugClaimedPointers, before + 1);
+    await mouse.moveTo(g(kPlain.center + const Offset(-30, -20)));
+    await mouse.cancel();
+    expect(RenderInputClaim.debugClaimedPointers, before,
+        reason: 'a cancelled mouse left its claim behind');
+    expect(rig.tool.log, isEmpty);
+    expect(rig.badgeTaps, 0);
+    expect(identical(rig.camera.value, camera), isTrue);
+  });
+
+  testWidgets(
+      'IC11 a claim inside a claim: one record, one route; the tap is the '
+      'inner widget\'s and the claim ends with the pointer', (tester) async {
+    final rig = await pumpRig(tester);
+    final before = RenderInputClaim.debugClaimedPointers;
+    final press = await tester.startGesture(g(kNested.center),
+        kind: PointerDeviceKind.mouse);
+    expect(RenderInputClaim.debugClaimedPointers, before + 1,
+        reason: 'the two claims recorded the pointer twice');
+    await press.up();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(rig.nestedTaps, 1);
+    expect(rig.tool.routed, isEmpty,
+        reason: 'the tool heard a pointer claimed twice');
+    expect(RenderInputClaim.debugClaimedPointers, before);
   });
 }

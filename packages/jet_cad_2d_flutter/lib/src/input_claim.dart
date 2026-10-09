@@ -15,6 +15,11 @@ import 'package:flutter/widgets.dart';
 /// the mark hears an event before any ancestor's listener does, and an
 /// ancestor asks [claimed] what it heard.
 ///
+/// A claim must therefore sit below (deeper than) every listener that
+/// consults it: a listener inside or below a claim hears a down before the
+/// claim records it, so the down reads as unclaimed and its moves and up as
+/// claimed, which leaves that listener's tool pressed.
+///
 /// What a claim takes:
 ///
 /// - **A pointer that goes down on it**, of any kind and any button, from
