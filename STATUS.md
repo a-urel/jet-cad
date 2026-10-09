@@ -134,8 +134,8 @@ one's spec, plan and results.
   results [2026-10-09-embedding-slice-3-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-3-results.md);
   Tasks 1–4 done, each of 1–3 reviewed independently and fixed; the whole
   range reviewed independently (*Approve with fixes*, applied in `237a28e`,
-  `9eb8434`). **Merged into `main`** on the human's *"evet, main'e merge
-  et"*; ledger
+  `9eb8434`). **Merged into `main` at `d26c9fe`** on the human's *"evet, main'e
+  merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-3/](docs/superpowers/ledgers/2026-10-09-embedding-slice-3/).
   Unreleased (CHANGELOG). Slice 4 (bars, keyboard, editor capabilities)
   to come.

@@ -13,8 +13,8 @@ seat). The Review section lists them.
 **Plan:** [2026-10-09-embedding-slice-3.md](../plans/2026-10-09-embedding-slice-3.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `8fd7483`
-(Slice 2 merged). **Merged** into `main` on the human's *"evet, main'e
-merge et"*.
+(Slice 2 merged). **Merged** into `main` at `d26c9fe` on the human's
+*"evet, main'e merge et"*.
 
 **Process.** Each of Tasks 1–3 had a fresh implementer, then an
 independent reviewer in its own clone, then its fixes. Task 4 (the demo,
