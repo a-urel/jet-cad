@@ -1,7 +1,10 @@
 # The host embedding API (umbrella) — design
 
-**Date:** 2026-10-09. **Status:** design, **revision 1**, for independent
-review.
+**Date:** 2026-10-09. **Status:** design, **revision 2**. Revision 1
+(`5bdb823`) was reviewed independently: *Approve with fixes*, V-1 to V-22,
+no redesign. This text folds in every fix and the controller's rulings on
+the four that needed a decision (V-2, V-4, V-5, V-8); see
+[Review](#review). Two questions stay with the human (Q-H1, Q-H2).
 
 **Asked for by the human, 2026-10-08:** *"Monépro entegrasyonuna geç. Önce
 beyin fırtınası. Temel nokta, başka bir uygulamaya gömecek esnekliğe
@@ -14,7 +17,8 @@ first host, not the only one.
 paraphrased):**
 
 - **Scope:** all four areas: per-table host widgets; a look/theme object;
-  the toolbars and the editor's capabilities; events and camera control.
+  the toolbars (the service bar, the editor's top bar, the dialogs) and
+  the editor's capabilities; events and camera control.
 - **Shape:** one umbrella spec (this one: shared principles and the API
   shape of all four areas), implemented as **four slices**, each its own
   plan, review and merge, in the order below.
@@ -28,7 +32,7 @@ paraphrased):**
   (`full`, `tablesOnly`, `readOnly`), adjusted with `copyWith`.
 - **Toolbars:** **both** roads: jet-cad's bar with host items added or
   built-ins hidden, **and** the bar switched off with every command and
-  its `canX` exposed so the host builds its own; a dialog hook (export).
+  its state exposed so the host builds its own; a dialog hook (export).
 - **The look:** a `ThemeExtension` (`FloorPlanTheme`) **plus** a view
   parameter that overrides it.
 - **Events:** today's split continues: user gestures are **view
@@ -41,13 +45,15 @@ paraphrased):**
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `85905bd`
 (release 0.3.0 + its STATUS). **Size:** L in total; each slice S–M.
-**Touched:** `jet_cad_floor_plan` above all; `jet_cad_2d_flutter` (the
-palette's colours become parameters, Slice 3; the camera's bounds,
-Slice 1); `jet_cad_2d` only if [E-9](#e-9-the-schema-stays-8) is
-overturned; `apps/restaurant_demo`, `tool/ci/host_probe`, the host
-guide, the CHANGELOG in every slice.
+**Touched:** `jet_cad_floor_plan` above all; `jet_cad_2d_flutter` (Slice 1:
+the overlay's input marker in `InteractionLayer` and
+`CameraGestureDetector`; Slice 2: `ToolPointerEvent.timeStamp`; Slice 3:
+the palette's colours as parameters; Slice 4: `SelectTool`'s gates);
+`jet_cad_2d` only if [E-9](#e-9-the-schema-stays-8) is overturned;
+`apps/restaurant_demo`, `tool/ci/host_probe`, the host guide, the
+CHANGELOG in every slice.
 
-## Facts (at `85905bd`)
+## Facts (at `85905bd`; verified by the review at `5bdb823`)
 
 **Monépro** (`monepro-frontend`, `develop @ 88c96e0`, read only).
 
@@ -58,111 +64,152 @@ guide, the CHANGELOG in every slice.
   (unsent, sıra waiting, ready, bill printed, part-paid). **SH** (`:276`):
   several open tabs per table, aggregated. None of this fits one colour
   and a 12-character caption.
-- **F-2. D21** (`:239`): identity lives in the database; the drawing is
+- **F-2. D21** (`:239-242`): identity lives in the database; the drawing is
   *"linked by an app component carrying the table's id"*. **App. A**
   (`:835`): `pos_tables (id, location_id, code, capacity, zone,
   is_active)`. jet-cad links by the number alone (Q-Z4).
 - **F-3. B.2** (`:886-890`, `:913`): zone tabs, "My tables", a long-press
-  menu, and in phase 2 "edit floor drawing", beside "unplaced tables".
-  §5.3 (`:401`): a waiter may claim, move, merge a table; editing the
-  drawing is not covered (a manager's).
+  menu, and in phase 2 "edit floor drawing", beside "unplaced tables";
+  `PosShortcutsHost` owns the POS's keyboard (`:901`). §5.3 (`:401`): a
+  waiter may claim, move, merge a table; editing the drawing is not
+  covered (a manager's).
 - **F-4. Monépro's UI** is shadcn_ui; feedback is `ShadToaster` /
   `ShadDialog`, never a Material `SnackBar` (`wiki/conventions/ui.md:26-45`);
-  its Material `ThemeData` is built from the Shad theme with
-  `ColorScheme.fromSeed` (`lib/app.dart:149-190`), so a planner that reads
-  only `ColorScheme` cannot match shadcn tokens exactly.
+  its Material `ThemeData` is built with `ColorScheme.fromSeed`
+  (`lib/app.dart:149-190`). A **hand-built** `ColorScheme` in a local
+  `Theme` around the view matches shadcn tokens exactly (review V-15).
 
 **jet-cad** (paths under `packages/jet_cad_floor_plan/lib/src/` unless
 named).
 
 - **F-5. The host barrel** exports through `show` lists only;
-  `test/host/barrel_test.dart` pins the exact name set. `@internal` marks
-  controller members only the views use.
-- **F-6. `FloorPlanTable`** (`host/floor_plan_types.dart:20-60`) is a
-  `final class` of `number`, `seats`, `symbolKey`, `visible`; no position,
-  size, rotation, layer, lock or host data. `TableInfo` and `TableSurvey`
-  (`tables/table_index.dart`) read tables at document-change rate.
+  `test/host/barrel_test.dart` pins the exact name set and `toString`s
+  (`:109-110`). `@internal` marks controller members only the views use;
+  it is an analyzer warning, and `apps/restaurant_demo/test/demo_test.dart`
+  ignores it to write `c.camera.value` (`:7, 312-318`).
+- **F-6. `FloorPlanTable`** (`host/floor_plan_types.dart:20-56`) is a
+  `final class` of `number`, `seats`, `symbolKey`, `visible`, with `==`;
+  `controller_test.dart:87-90, 832-837` compare whole lists of it. It
+  follows the **active** plan already (`host/floor_plan_controller.dart:827-838`)
+  and is rebuilt at each read; it moves with `revision`, **not** with the
+  controller's `ChangeNotifier`, which fires only on a plan replacement
+  (`:614-616, 717-739, 1019-1024`; `docs/host-guide.md:316-333`).
 - **F-7. The camera.** `FloorPlanController.camera` is an `@internal`
-  `CameraController` (`host/floor_plan_controller.dart:205-209`), a
-  `ValueNotifier<ViewportTransform>` (`jet_cad_2d_flutter`
-  `camera_controller.dart:44`) with **final** `minScale` / `maxScale`
-  (here `kMinScale = 0.001`, `kMaxScale = 100`, `startup_plan.dart:50-51`),
-  `panBy` and `zoomAt`. `ViewportTransform.worldToScreen` / `screenToWorld`
-  exist (`viewport_transform.dart:56-59`) and map **world millimetres,
-  y up** to the **canvas's** local logical pixels (the drawing area,
-  without the editor's panels and rulers). The controller records each
-  mode's canvas origin (`canvasMeasured`, `:464-470`, R-13).
+  `CameraController` (`:203-209`), a `ValueNotifier<ViewportTransform>`
+  (`jet_cad_2d_flutter` `camera_controller.dart:44-56`) with **final**
+  `minScale` / `maxScale` (`kMinScale = 0.001`, `kMaxScale = 100`,
+  `startup_plan.dart:50-51`, not exported), `panBy` and `zoomAt`.
+  `ViewportTransform.worldToScreen` / `screenToWorld` map **world
+  millimetres, y up** to the **canvas's** local logical pixels and
+  allocate a `Vector2` per call (`viewport_transform.dart:56-59`). The
+  controller learns each mode's canvas **origin** (`canvasMeasured`,
+  `:465-470`), not its size (`_PlannerViewState._size`). A fit is a
+  post-frame callback that never re-checks whether it is still wanted
+  (`planner_view.dart:156-177`), and fits assign the camera **without**
+  the zoom bounds.
 - **F-8. Table geometry** has one source: `TablePicker.candidatesOf`
-  (`service/table_picker.dart:233`) yields `TableCandidate{transform, box,
-  corners, worldBounds, locked}` (`:103-137`); the fit, the veil and the
+  (`service/table_picker.dart:233-268`) yields `TableCandidate{transform,
+  box, corners, worldBounds, locked}` (`:103-137`; corners in the box's
+  order, reversed when mirrored, `:113-116`); the fit, the veil and the
   group frames share it; a table with non-finite corners is no candidate.
-  `TablePicker.pick` answers "which table is here" (top, then box, then
-  finger reach; `:270-306`).
-- **F-9. Paint slots.** `PlannerView` has `underlay` and `overlay` widget
-  slots (`planner_view.dart:100-110`); the service view fills them with
-  `CustomPaint` stacks (`host/service_view.dart:423-460`). Every painter
-  prebuilds its paths at status, group or plan rate and counts its
-  allocations (`debugAllocations`), tested.
-- **F-10. Fixed look.** Status caption 11 px, ink `0xFF202020` or white
-  (`service/table_status_painter.dart:39-43`; `jet_cad_2d_flutter`
-  `canvas_palette.dart:206-210`); group frame `PaperPalette.gripMove`,
+  It costs a `TableSurvey` and a `leavesByOwner` scan, O(entities).
+  `TablePicker.pick` answers "which table is here" (`:278-306`). The
+  label's decomposition of a placement is `tableLabelStamp`
+  (`tables/table_label.dart:55-64`): `phi = atan2(b, a)`, mirrored when
+  `det < 0`.
+- **F-9. Paint and input layers.** `PlannerView` has `underlay` and
+  `overlay` widget slots (`planner_view.dart:97-107`), filled by the
+  service view's `CustomPaint` stacks (`host/service_view.dart:420-462`);
+  every painter counts its allocations (`debugAllocations`), tested. The
+  canvas's input is raw `Listener`s with `HitTestBehavior.opaque`:
+  `InteractionLayer` (`jet_cad_2d_flutter` `interaction_layer.dart:467-474`),
+  `CameraGestureDetector` (`camera_gesture_detector.dart:195-196`) and the
+  service view's secondary click (`service_view.dart:395-399`). Both modes
+  take `autofocus` (`service_view.dart:349`; `interaction_layer.dart:454`).
+  `ServiceView` is keyed by the service copy (`floor_plan_view.dart:206`),
+  so a reset, restore, load or mode switch remounts it.
+- **F-10. Fixed look.** Status caption 11 px, ink `0xFF202020` or white by
+  the fill (`service/table_status_painter.dart:39`; `jet_cad_2d_flutter`
+  `canvas_palette.dart:206-211`); group frame `PaperPalette.gripMove`,
   margin 150 mm, 2 px, chip 11 px (`service/table_group_painter.dart:21-52`);
-  selection `PaperPalette.selection`, 2 px (`selection_style.dart:9`);
+  selection `PaperPalette.selection`, chosen **per paper** (light or dark,
+  `canvas_palette.dart:131-156`), shared by both modes
+  (`service_view.dart:413`; `planner_shell.dart:977`), 2 px (`selection_style.dart:9`);
   veil the paper at 0.6 (`service/table_focus_painter.dart:17`). The views
-  read `colorScheme.surface`, `surfaceContainer`, `surfaceContainerLow`
-  (`host/service_view.dart:291-394`; `planner_shell.dart:902-989`).
+  read `colorScheme.surface`, `surfaceContainer`, `surfaceContainerLow`;
+  a page-less plan's paper is `colorScheme.surface` (`displayPaperFor`,
+  `service_view.dart:258-261`; `planner_shell.dart:211-214`).
 - **F-11. Fixed chrome.** The service bar (`host/service_view.dart:352-390`)
-  is 44 px of Undo, Redo, Merge, Split (shown only with their callbacks),
-  Export (only with `onExport`), Print (always). Export's dialog is a
-  Material `AlertDialog` (`export/export_dialog.dart:43-63`). The editor
-  (`planner_shell.dart`) has 15 tools (`:354-460`) with letter shortcuts,
+  is 44 px of Undo, Redo, Merge, Split (only with their callbacks), Export
+  (only with `onExport`), Print (always); its chords are always bound
+  (`:333-341`). Export's dialog is a Material `AlertDialog`
+  (`export/export_dialog.dart:41-62`); `ExportChoice` is `{format:
+  ExportFormat, dpi: ExportDpi}` (`:15-37`), neither enum exported. The
+  export and print flows read the view's `exportName` and `printer` and
+  run one at a time (`host/page_flows.dart:16-92`). The editor
+  (`planner_shell.dart`) has 15 tools (`:337-460`) with letter shortcuts,
   a 240 px left panel (Tools, Symbols), a 280 px right panel (Selection,
-  Layer, Page), a top bar; its unused parameters include `fileCommands`,
-  `documentName`, `snap`, `initialCamera` (`:74-157`).
-- **F-12. Permissions.** The design plan always decodes with
-  `DraftPermissions.all` (`host/floor_plan_controller.dart:137, 663`); the
-  service copy with `runtime`. `DraftPermissions.readOnly` exists
-  (`jet_cad_2d` `document/command.dart:56`); the shell already refuses
-  drawing tools without `geometry` (`planner_shell.dart:638-648`).
-  **Placing a symbol is `structure`** (it adds a node), so "tables only"
-  cannot be expressed by `DraftPermissions` alone.
+  Layer, Page), a top bar; `FloorPlanView` passes the editor's Export and
+  Print through the shell's `fileCommands` (`floor_plan_view.dart:173-190,
+  231`).
+- **F-12. Permissions.** The design plan decodes with `DraftPermissions.all`
+  in the constructor and `load` (`host/floor_plan_controller.dart:137,
+  663`); a `CommandDispatcher`'s permissions are fixed at construction
+  (`jet_cad_2d` `undo.dart:153-157`). `DraftPermissions.readOnly` exists
+  (`document/command.dart:61`). **Placing a symbol is `structure`**, so
+  "tables only" cannot be expressed by `DraftPermissions`.
 - **F-13. Service callbacks and options** are records read at each call
   or press (`service/table_select_tool.dart:20-45`; R-5); the drag knows
-  the moved handles and the offset (`:101-106`). There is no double tap,
-  hover, floor tap or which-table-moved event; `onLayoutChanged` carries
-  nothing.
-- **F-14. Components and unknown data.** A component is attached per
-  handle (`doc.components.get<T>(handle)`); a reader that has **not
-  registered** a type keeps its payload as preserve-unknown data
-  (`jet_cad_2d` `document/component.dart:209-286`, spec 04 D9) and writes
-  it back; `RemoveDefinition`/`AddDefinition` snapshot and restore every
-  component, unknown ones included (`document/commands.dart:490, 552`).
-  The planner has no copy, paste or duplicate command. Schema 7 bumped for
-  a component (`jet_cad.object_layer`) because an older reader would have
-  **drawn** the plan differently (`codec/schema_version.dart:25-31`).
+  the moved handles (`:98-106, 410-421`). `ToolPointerEvent` carries no
+  timestamp (`jet_cad_2d_flutter` `tool.dart:19-37`); a finger's down
+  reaches the tool up to `kTouchHoldBack` (100 ms) late
+  (`interaction_layer.dart:33, 199`).
+- **F-14. Components.** A component is attached per handle. A reader that
+  has **not registered** a type keeps its payload as preserve-unknown data
+  and writes it back byte for byte (`jet_cad_2d` `document/component.dart:209-286`,
+  spec 04 D9; the review ran it on `salon.json`). **Removing a node does
+  not detach its components** (`document/commands.dart:410-432`); only
+  `RemoveDefinitionCommand` snapshots and detaches (`:552-553`). The
+  editor's Delete is `RemoveNodeCommand` (`jet_cad_2d_flutter`
+  `select_tool.dart:707-714`). `SetComponentCommand` with `null` detaches,
+  undoably (`commands.dart:595-596`). The planner has no copy, paste or
+  duplicate command. Schema 7 bumped for a component because an older
+  reader would have **drawn** the plan differently
+  (`codec/schema_version.dart:25-31`).
+- **F-15. The editor's edit paths** (review V-7): the 15 tools and their
+  letters; the Symbols tab; in `SelectTool`, body drag (with wall attach),
+  the rotation grip, **reshape grips** (`grip_cache.dart:367-389`), the
+  rubber band, Delete/Backspace; the Selection panel's number, rotation
+  field and ±90, **Mirror** (`selection_panel.dart:656-670`), **Change
+  size** (`:674-690`), wall/opening/room/box fields, **the layer picker**
+  (`layers/layer_picker.dart:105-151`); the Layer and Page panels; Undo
+  and Redo; Export and Print; F3 (snap), F (fill). `SelectTool` lives in
+  `jet_cad_2d_flutter` and has no gate seam. A table symbol is
+  `SymbolEntry.seats != null` (`symbols/symbol_library.dart:47-49`).
 
 ## Principles (bind every slice)
 
-- **P-1. Additive only.** No existing signature changes; every new
-  parameter is named and optional; every default is today's behaviour.
-  A 0.3.0 host compiles and behaves the same against every slice. The one
-  semantic widening, `FloorPlanTable`'s `==` over new fields, is listed in
-  the CHANGELOG.
-- **P-2. Numbers stay the identity** (spec 14 D18). Callbacks, queries
-  and commands name tables by number. Host data ([E-6](#e-6-host-data-on-a-table))
+- **P-1. Additive only.** No existing signature, `==`, `hashCode` or
+  `toString` changes; every new parameter is named and optional; every
+  default is today's behaviour. A 0.3.0 host compiles and behaves the same
+  against every slice. New information arrives in **new types**, never by
+  widening an existing value type (review V-2).
+- **P-2. Numbers stay the identity** (spec 14 D18). Callbacks, queries and
+  commands name tables by number. Host data ([E-6](#e-6-host-data-on-a-table))
   rides beside the number and never replaces it; an opaque handle is
   never exported.
 - **P-3. Where things live.** A user **gesture** is a `FloorPlanView`
-  callback; a **state change** is a controller `ValueListenable` (for a
-  current value) or `Stream` (for a sequence of changes); a **command** is
+  callback; a **state change** is a controller `ValueListenable` (a current
+  value) or a broadcast `Stream` (a sequence of changes); a **command** is
   a controller method. A view parameter is read at each build or press,
   never captured (R-5).
-- **P-4. The frame path.** Pan and zoom rebuild **no widget** and allocate
-  nothing per table in the painters (CLAUDE.md). Style values are read
-  when a painter rebuilds, never per frame. Host overlay widgets are
-  **repositioned** per camera change, not rebuilt; the cost per camera
-  frame is O(overlays on screen) and is measured
-  ([H-8](#h-8-the-overlays-cost)).
+- **P-4. The frame path.** Pan and zoom rebuild **no widget beyond
+  today's zoom read-out** (`planner_shell.dart:943-947`) and allocate
+  nothing per table in the painters and the overlay layer (CLAUDE.md).
+  Style values are read when a painter rebuilds, never per frame. Host
+  overlay widgets are **repositioned** per camera change, not rebuilt; the
+  per-frame cost is O(tables) of arithmetic and O(overlays on screen) of
+  paint, measured ([H-8](#h-8-the-overlays-cost)).
 - **P-5. The service copy** (14b D11, D12). Nothing done in the selection
   mode reaches the design. Statuses, focus, overlays and the theme are
   never saved, exported, printed or undone.
@@ -176,64 +223,88 @@ named).
 - **P-8. One slice, one release.** Each slice ends merged on the human's
   word; whether it is released (0.4.0, 0.5.0, …) is the human's call. The
   CHANGELOG's *Unreleased* carries it until then.
+- **P-9. Names.** Every public type carries the `FloorPlan` prefix (a host
+  imports the barrel whole and has its own `TableMoved`); value types are
+  `final class` with `==` and `hashCode`.
 
 ## Slice 1 — geometry, camera, per-table widgets
 
 Unblocks Monépro's B.1 and D22, closes Q-Z1.
 
-### G-1. A table's geometry
+### G-1. A table's detail
 
-`FloorPlanTable` gains, all named and defaulted so P-1 holds:
+`FloorPlanTable` is **unchanged** (P-1). A new value type carries what it
+lacks:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `center` | `Offset?` | the definition box's centre in **world millimetres, y up** |
-| `size` | `Size?` | the box's width and height in millimetres, the instance's scale applied |
-| `rotation` | `double` | radians, counter-clockwise in world space, 0 when `center` is null |
-| `mirrored` | `bool` | the transform's determinant is negative |
-| `corners` | `List<Offset>` | the four world corners, counter-clockwise; empty when not finite |
-| `layer` | `String` | the instance's layer name |
-| `locked` | `bool` | the layer is locked (it is picked, never moved) |
+```dart
+final class FloorPlanTableDetail {
+  final FloorPlanTable table;      // number, seats, symbolKey, visible
+  final Offset? center;            // world mm, y up: the box's centre
+  final Size? size;                // mm: box width × |column 0|, height × |column 1|
+  final double rotation;           // radians, counter-clockwise: atan2(b, a)
+  final bool mirrored;             // det < 0: the local y axis flipped
+  final List<Offset> corners;      // world mm, counter-clockwise; [] when not finite
+  final String layer;              // the instance's layer name
+  final bool locked;               // the layer is locked: picked, never moved
+  final Map<String, String> data;  // Slice 2; empty until then
+}
+```
 
-- The geometry is read from `TablePicker.candidatesOf`'s transform and
-  box (F-8), the same numbers the fit, veil and frames use. A table that
-  is no candidate (hidden layer, non-finite corners) has `center: null`,
-  `size: null`, `corners: const []`.
-- `tables` reports the plan **the current mode shows**: in the selection
-  mode a service move changes `center` and `rotation`. `tables`
-  notifies (through the controller's `ChangeNotifier`) when they change,
-  at document-change rate.
-- `==`, `hashCode` and `toString` cover the new fields.
+- **Decomposition:** the placement is `R(rotation) · diag(sx, sy)` with
+  `sx > 0`; `mirrored` means `sy < 0`, the same reading as
+  `tableLabelStamp` (F-8). `corners` are normalised counter-clockwise
+  whatever the mirror.
+- The geometry comes from `TablePicker.candidatesOf` (F-8), the numbers
+  the fit, veil and frames use. A table that is no candidate (hidden
+  layer, non-finite corners) has `center: null`, `size: null`,
+  `corners: const []`, `rotation: 0`.
+- `List<FloorPlanTableDetail> get tableDetails`, ascending by handle like
+  `tables`, for **the plan the current mode shows** (a service move
+  changes it). It moves with `revision`, as `tables` does (F-6), and is
+  **cached** by (active document, `commands.stateId`,
+  `tables.mutationRevision`), as `_tables` and `_groupLookup` are, so a
+  read inside `build` costs nothing after the first.
 
 ### G-2. The camera, public
 
 - `ValueListenable<FloorPlanCamera> get camera` replaces the `@internal`
-  member of that name (the internal `CameraController` becomes
-  `@internal cameraController`; no host could reach it).
-- `FloorPlanCamera` (immutable, public) wraps a `ViewportTransform`:
+  member of that name; the internal `CameraController` becomes
+  `@internal cameraController`. The rename updates every internal and
+  test use, and the demo test that writes it (F-5); the CHANGELOG names
+  the rename for anyone who ignored `@internal`.
+- `FloorPlanCamera` (`final class`, immutable) wraps a `ViewportTransform`:
   `double get scale` (logical pixels per millimetre),
   `Offset worldToCanvas(Offset world)`, `Offset canvasToWorld(Offset
-  canvas)`, `Rect visibleWorld(Size canvas)` (y-up, world mm). **Canvas**
+  canvas)`, `Rect visibleWorld(Size canvas)` (world mm, y up). **Canvas**
   is the view's drawing area, origin top-left.
-- `Rect? get canvasRect` on the controller: the drawing area of the last
-  laid-out view, in that view's global coordinates, null with none
-  mounted; with it `Offset? worldToGlobal(Offset)` and `Offset?
-  globalToWorld(Offset)`. A host overlay **outside** the view needs them;
-  the builder of G-5 does not.
+- `ValueListenable<Rect?> get canvasRect`: the drawing area of the last
+  laid-out view in global coordinates (origin **and size**, both reported
+  by the view after layout), null with none mounted; with it `Offset?
+  worldToGlobal(Offset)` and `Offset? globalToWorld(Offset)`. A host
+  overlay **outside** the view needs them; the builder of G-5 does not.
 
 ### G-3. Camera commands and bounds
 
-- `FloorPlanController({…, double minScale = kMinScale, double maxScale =
-  kMaxScale})`: the zoom bounds, in logical pixels per millimetre;
-  `ArgumentError` unless `0 < minScale < maxScale`, both finite.
-- `bool panBy(Offset canvasDelta)`, `bool zoomBy(double factor, {Offset?
-  focus})` (focus in canvas pixels, default the canvas centre), `bool
-  centerOn(Offset world, {double? scale})`. Each clamps to the bounds as
-  `CameraController.zoomAt` does, and returns false, changing nothing,
-  when no canvas has been measured (a view must have laid out once) or an
-  argument is not finite. A camera command cancels a pending
-  `fitToView` / `fitToTables` (the last request wins, as zone spec Z7).
-- Pan and zoom by the user keep working; the commands are additions.
+- `FloorPlanController({…, double minScale = 0.001, double maxScale =
+  100})`: the zoom bounds, in logical pixels per millimetre (today's
+  values, now documented); `ArgumentError` unless `0 < minScale <
+  maxScale`, both finite. **Fits clamp** to the bounds too (today they do
+  not, F-7; with today's bounds no real plan is affected, and P-6 holds).
+- `void panBy(Offset canvasDelta)`: always acts; it needs no canvas.
+- `bool zoomBy(double factor, {Offset? focus})` (focus in canvas pixels,
+  default the canvas centre) and `void centerOn(Offset world, {double?
+  scale})`: clamped as `CameraController.zoomAt` is. `zoomBy` returns
+  false, changing nothing, with no measured canvas or a non-finite or
+  non-positive factor. **`centerOn` queues like a fit**: with no view
+  mounted, the next view centres on its first frame (zone spec Z7's
+  machinery); the last request wins.
+- **A camera epoch** orders requests: every fit request, `fitToTables`,
+  `centerOn`, `zoomBy` and `panBy` bumps it; the post-frame fit captures it
+  and returns when it has moved. So a camera command after a fit request
+  wins, and a fit after a command wins.
+- `bool userCamera = true` on `FloorPlanView`: false locks the user's pan,
+  pinch and wheel zoom in that view (a kiosk or wall display); the
+  commands still act.
 
 ### G-4. A table at a point
 
@@ -247,7 +318,7 @@ or for an unnumbered table. At call rate; no allocation bar.
 `FloorPlanView` gains:
 
 ```dart
-FloorPlanTableOverlayBuilder? tableOverlayBuilder; // null: no overlay at all
+FloorPlanTableOverlayBuilder? tableOverlayBuilder; // null: no overlay layer at all
 FloorPlanOverlayLayout tableOverlayLayout = const FloorPlanOverlayLayout();
 Set<FloorPlanMode> tableOverlayModes = const {FloorPlanMode.selection};
 
@@ -255,67 +326,88 @@ typedef FloorPlanTableOverlayBuilder =
     Widget? Function(BuildContext context, FloorPlanTableOverlay table);
 ```
 
-- `FloorPlanTableOverlay` (immutable): `FloorPlanTable table` (number,
-  data from Slice 2, geometry), `bool selected`, `bool focused` (in the
-  focus, or no focus set), `TableStatus? status`, `int detail` (G-7). It
+- `FloorPlanTableOverlay` (`final class`): `FloorPlanTableDetail detail`,
+  `bool selected`, `bool focused` (in the focus, or no focus set),
+  `TableStatus? status` — **the effective one drawn**: a group status
+  over the table's own (table-groups G3) — and `int detailLevel` (G-7). It
   carries **no** screen position or scale: those change with the camera
   and would force a rebuild.
-- The builder runs once per numbered, candidate table when the view
-  builds, and again for a table when its `FloorPlanTableOverlay` changes
-  (plan revision, selection, focus, status, detail band) or the host
-  rebuilds the view. It never runs on pan or zoom. Returning null shows
-  nothing for that table. A host that wants live data inside the widget
-  uses its own state management there (`BlocBuilder`, `ValueListenableBuilder`).
-- The overlays live in one layer above the canvas's painted layers (fills,
-  drafting, veil, chips, selection) and below the service bar.
-- **Pointers:** by default the layer ignores pointers, so taps reach the
-  tables (`tableOverlayLayout.interactive = false`). With `true`, an
-  overlay widget's own hit area takes the pointer and the table under it
-  gets nothing there.
+- **When it builds:** once per numbered, candidate table when the layer
+  builds; again **for that table only** when its `FloorPlanTableOverlay`
+  changes (plan revision, selection, focus, status, detail level) or when
+  the host rebuilds the view. Never on pan or zoom. Returning null shows
+  nothing for that table. Live data inside the widget is the host's own
+  state management (`BlocBuilder`, `ValueListenableBuilder`).
+- **Lifetime:** the layer lives inside the keyed `ServiceView` (F-9), so a
+  reset, restore, load or mode switch remounts every overlay; a host keeps
+  state in its own blocs, not in an overlay's `State`. Elements are keyed
+  by instance internally, so two tables sharing a number keep two
+  overlays. During a service drag the overlays stay at the tables' last
+  committed places and move on drop, as the drafting does
+  (`selectionPreviewTransform` moves only the outline).
+- **Where it sits:** a new `PlannerView` slot, `tableOverlays`, painted
+  after the selection overlay and **inside** the canvas's input listeners;
+  clipped to the canvas; below the service bar.
+- **Pointers.** By default (`tableOverlayLayout.interactive = false`) the
+  layer ignores pointers, so every gesture reaches the canvas. With
+  `true`, an overlay child that hits a pointer down puts a **marker**
+  render object on the hit path; `InteractionLayer`,
+  `CameraGestureDetector` and the service view's secondary-click
+  `Listener` ignore a pointer whose down carried the marker. So a tap on a
+  badge is the badge's alone (no selection, no `onTableTap`, no drag), and
+  pan and zoom still start anywhere off a badge.
 
 ### G-6. Placement
 
-`FloorPlanOverlayLayout` (immutable, `const`):
+`FloorPlanOverlayLayout` (`final class`, `const`):
 
 - `anchor: Alignment` (default `Alignment.center`): the point of the
   table's **screen bounding box** the widget is pinned to, and the
-  widget's own alignment there (as `Align` would place it).
+  widget's own alignment there (as `Align` places it).
 - `size: FloorPlanOverlaySize.natural` (default): the widget keeps its own
-  size at every zoom, laid out once with loose constraints (max
-  `maxNaturalSize`, default 200×120). `FloorPlanOverlaySize.box`: the
-  widget is sized to the table's screen bounding box (tight constraints)
-  and relaid out on each camera change.
-- `minScale: double` (default 0): below this camera scale no overlay is
-  shown (laid out or painted); the host's other way is G-7.
-- Off-canvas overlays are neither laid out (for `box`) nor painted.
+  size at every zoom, laid out once with loose constraints up to
+  `maxNaturalSize` (default 200×120). `FloorPlanOverlaySize.box`: sized to
+  the table's screen bounding box (tight) and relaid out on each camera
+  change.
+- `hideBelowScale: double` (default 0): below this camera scale no overlay
+  is laid out or painted.
+- `detailBreakpoints` (G-7). `interactive` (G-5).
+- Overlays whose box is off the canvas are neither laid out (`box`) nor
+  painted.
 
-### G-7. Detail bands
+### G-7. Detail levels
 
-`detailBreakpoints: List<double>` on `FloorPlanOverlayLayout` (default
-empty), ascending camera scales. `FloorPlanTableOverlay.detail` is the
-number of breakpoints at or below the current scale. Crossing a
-breakpoint rebuilds every overlay once; nothing else about zoom rebuilds.
-A host shows a dot below 0.05 px/mm and the full badge above with one
-breakpoint.
+`detailBreakpoints: List<double>` (default empty), ascending camera
+scales; `ArgumentError` if not strictly ascending and positive.
+`FloorPlanTableOverlay.detailLevel` is the number of breakpoints **at or
+below** the current scale. Crossing a breakpoint rebuilds every overlay
+once; nothing else about zoom rebuilds. A host shows a dot below 0.05
+px/mm and the full badge above with one breakpoint.
 
 ### H-8. The overlays' cost
 
-- No builder: no overlay layer is built; the paint allocation tests read
-  exactly as today.
-- With a builder: one render object (`RenderFloorPlanOverlays`, a
-  multi-child render object) listens to the camera. A camera change
-  `markNeedsPaint` for `natural` children (layout untouched) and
-  `markNeedsLayout` for `box` children; it rebuilds nothing. A widget test
-  counts builder calls across 50 camera changes (must be 0) and across a
-  detail crossing (exactly one per table); the render object's positions
-  come from a per-table box cache rebuilt at document, mode or camera
-  rate, reused per frame.
+- **No builder:** no layer is built; every existing test reads as today.
+- **The render object.** `RenderFloorPlanOverlays`, a `Flow`-like
+  multi-child render box: each child behind a `RepaintBoundary`, its
+  offset in its parent data, recomputed in the camera listener from a
+  per-table **box cache** (rebuilt at document or mode rate; the per-frame
+  pass is arithmetic into reused `Float64List`s, no `Vector2`).
+  `paint`, `hitTestChildren` and `applyPaintTransform` (behind
+  `localToGlobal`, `showMenu`, tooltips) all read that one offset; a
+  camera change calls `markNeedsPaint` and `markNeedsSemanticsUpdate` for
+  `natural` children (layout untouched) and `markNeedsLayout` for `box`
+  children. It rebuilds nothing.
+- **Measured:** a widget test counts builder calls across 50 camera
+  changes (0) and across a detail crossing (one per table); a status
+  change on one table (one call); the render object carries
+  `debugAllocations`, read across 50 camera changes in steady state (0 per
+  table).
 
 ### G-9. Today's fill and caption
 
 `setTableStatus` keeps painting as today; a host that draws its own
-status widgets simply does not set statuses (or sets a colour without a
-caption). Documented, no new switch.
+status widgets does not set statuses, or sets a colour without a
+caption. Documented, no new switch.
 
 ## Slice 2 — events and host data
 
@@ -323,18 +415,21 @@ Closes Q-Z4: D21's "component carrying the table's id" becomes real.
 
 ### E-1. Tables moved (selection mode)
 
-`FloorPlanView.onTablesMoved: void Function(Map<String, FloorPlanTable>
-moved)?`: after a service drag ends, the moved numbered tables with their
-new geometry (G-1), fired once per drag, after `onLayoutChanged`. Undo,
-Redo, reset and restore do not fire it (they fire
+`FloorPlanView.onTablesMoved: void Function(List<FloorPlanTableDetail>
+moved)?`: after a service drag ends, every moved table (numbered or not,
+ascending by handle) with its new geometry, once per drag, after
+`onLayoutChanged`. Undo, Redo, reset and restore do not fire it (they fire
 `serviceLayoutChanges`).
 
 ### E-2. Double tap
 
 `onTableDoubleTap: void Function(String number)?`: a second tap on the
-same table within `kDoubleTapTimeout` and `kDoubleTapSlop`. **The single
-tap is not delayed**: both taps report `onTableTap` (and select) as
-today, then `onTableDoubleTap` fires. Q-H2.
+**same instance** within `kDoubleTapTimeout` of the first tap's **down**
+and within `kDoubleTapSlop` of it, timed from the raw pointer events
+(`ToolPointerEvent` gains `timeStamp`, F-13). A locked table reports it.
+With a modifier held it is not a double tap (each click toggles).
+**The single tap is not delayed**: both taps report `onTableTap` (and
+select) as today, then `onTableDoubleTap` fires. Q-H2.
 
 ### E-3. A tap on the floor
 
@@ -352,45 +447,53 @@ for touch.
 `Stream<FloorPlanDesignChange> get designChanges` on the controller
 (broadcast): after every committed design edit, undo or redo, the
 differences of the design's tables before and after, by instance (kept
-internal):
+internal; `AddNodeCommand` re-adds the same handle, so an undone delete
+is not remove + add):
 
 ```dart
 sealed class FloorPlanDesignChange {}
-final class TableAdded       extends FloorPlanDesignChange { FloorPlanTable table; }
-final class TableRemoved     extends FloorPlanDesignChange { FloorPlanTable table; }
-final class TableRenumbered  extends FloorPlanDesignChange { String? from; FloorPlanTable table; }
-final class TableMoved       extends FloorPlanDesignChange { FloorPlanTable table; }
-final class TableDataChanged extends FloorPlanDesignChange { Map<String, String> from; FloorPlanTable table; }
-final class PlanReplaced     extends FloorPlanDesignChange {} // load, newPlan
+final class FloorPlanTableAdded   extends FloorPlanDesignChange { FloorPlanTableDetail table; }
+final class FloorPlanTableRemoved extends FloorPlanDesignChange { FloorPlanTableDetail table; }
+final class FloorPlanTableChanged extends FloorPlanDesignChange {
+  FloorPlanTableDetail before, after; // number, geometry, layer, lock, visibility, data
+}
+final class FloorPlanPlanReplaced extends FloorPlanDesignChange {} // load, newPlan
 ```
 
-- One edit can emit several changes, in ascending instance order. Seats
-  changing is `TableMoved`'s sibling only if a later slice needs it; not
-  in v1 (seats come from the definition and cannot change in a plan).
-- Computed by diffing two `TableSurvey`s at document-change rate, only
-  while the stream has a listener. Never fired by the selection mode.
+- One edit can emit several changes, in ascending instance order.
+- Computed by diffing two cached detail lists (G-1) at document-change
+  rate, only while the stream has a listener (one scan per design edit
+  then).
+- Service moves never fire it. **`FloorPlanPlanReplaced` fires on any
+  design replacement, in either mode** (a `load` in the selection mode
+  replaces the design).
 
 ### E-6. Host data on a table
 
-- A table carries `Map<String, String> data` (`FloorPlanTable.data`,
+- A table carries `Map<String, String> data` (`FloorPlanTableDetail.data`,
   unmodifiable, empty by default), stored in the plan as a component
   `jetcad.table_data` on the **instance** node: `{"data": {key: value}}`,
-  keys written sorted.
-- **Limits** (`ArgumentError` on write, `FormatException` on read):
-  at most 32 keys; a key 1–64 characters of `[a-z0-9_.-]`; a value at most
-  1024 UTF-16 units, no control characters. An empty map removes the
-  component.
-- `bool setTableData(String number, Map<String, String> data)` and
-  `bool setTablesData(Map<String, Map<String, String>> byNumber)` (one
-  undo step): design-mode edits (undoable, `dirty`, `revision`,
+  keys written sorted; an empty map is no component.
+- **Limits, on write only** (`ArgumentError`): at most 32 keys; a key 1–64
+  characters of `[a-z0-9_.-]`; a value at most 1024 UTF-16 units, no
+  control characters. **On read** a payload outside them is kept as
+  unknown data and written back, reads as empty `data`, and is reported
+  as a `Diagnostic`; a plan is never refused for it (a later release may
+  relax a limit without a schema bump).
+- `bool setTableData(String number, Map<String, String> data)` and `bool
+  setTablesData(Map<String, Map<String, String>> byNumber)` (one undo
+  step, **all or nothing**): design edits (undoable, `dirty`, `revision`,
   `designChanges`). **They throw `StateError` in the selection mode**
-  (P-5: the service copy never edits the design). They return false,
-  changing nothing, when a number names no table **or more than one**
-  (an ambiguous link is refused, not guessed). Numbers are trimmed as
-  everywhere.
-- The data travels with the instance: deleting the table drops it
-  (undo restores it); renumbering keeps it; the service copy carries it,
-  read-only.
+  (P-5). They return false, changing nothing, when any number names no
+  table **or more than one** (an ambiguous link is refused, not guessed).
+  Numbers are trimmed as everywhere.
+- **Delete drops it.** `RemoveNodeCommand` keeps components (F-14), so
+  Slice 2's expander on `TableLabelSystem` (`tables/table_label_system.dart`)
+  appends `SetComponentCommand<FloorPlanTableData>(h, null)` when a
+  compound removes an instance carrying it; undo restores it. Data is read
+  only through live instances.
+- Renumbering keeps the data (it is the instance's). The service copy
+  carries it, read only.
 
 ### E-7. Who edits the data in the editor
 
@@ -404,55 +507,67 @@ compares ids, not codes.
 
 ### E-9. The schema stays 8
 
-- A 0.3.0 reader has not registered `jetcad.table_data`, so it keeps the
-  payload as unknown data and writes it back byte for byte (F-14); it
-  draws nothing differently, because nothing it draws reads the data. The
-  rule that made 7 bump (an older reader **drawing** the plan
-  differently) does not apply; no 0.3.0 command copies an instance.
-- So **`kSchemaVersion` stays 8**: 0.2.0, 0.3.0 and this slice's
-  terminals keep sharing plans. A 0.3.0 terminal that renumbers a table
-  keeps the data on it (it is the instance's); one that deletes the table
-  drops it, as this slice does.
-- **Gate:** a test decodes a plan carrying table data **without
-  registering the type**, re-encodes it, and compares the bytes; a second
-  test applies 0.3.0's design edits (move, rotate, renumber, delete,
-  undo) through a registry without the type and checks the payload
-  survives. If either cannot pass, the slice bumps to 9 instead, with the
-  migration and a CHANGELOG line, and says so.
-- **Q-H1:** the human accepted 9; this is better news, but it is a
-  change from the brainstorm answer, so it is confirmed before Slice 2's
-  plan.
+- A 0.3.0 (or 0.2.0) reader has not registered `jetcad.table_data`, so it
+  keeps the payload as unknown data and writes it back byte for byte
+  (F-14; the review ran it); it draws nothing differently, because
+  nothing it draws reads the data. The rule that made 7 bump (an older
+  reader **drawing** the plan differently) does not apply.
+- So **`kSchemaVersion` stays 8**: 0.2.0, 0.3.0 and later terminals keep
+  sharing plans. On a 0.3.0 terminal: a renumbered table keeps its data; a
+  deleted table leaves its data **orphaned** on a dead handle, harmless and
+  never surfaced (data is read through live instances). The guide says
+  so.
+- **Gates:** (1) a plan with table data decoded **without registering the
+  type** re-encodes byte for byte; (2) 0.3.0's design edits (move,
+  rotate, renumber, delete, undo) through a registry without the type
+  keep the payload, and after the delete it is on a dead handle and no
+  `tableDetails` shows it; (3) through Slice 2's registry a delete removes
+  the component and undo restores it. If (1) or (2) cannot pass, the
+  slice bumps to 9 instead, with the migration and a CHANGELOG line.
+- **Q-H1:** the human accepted 9; this is better news, but it changes the
+  brainstorm answer, so it is confirmed before Slice 2's plan.
+- The same orphaning on delete happens to **every** component of every
+  deleted node today (a wall's or room's parameters); that predates this
+  spec and is its own task (O-8).
 
 ## Slice 3 — the look
 
 ### T-1. `FloorPlanTheme`
 
 `final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme>`, every
-field nullable (null = today's value), `copyWith` and `lerp`:
+field nullable (null = today's value), with `copyWith`, `lerp` and
+`merge`:
 
-| Group | Fields |
-|---|---|
-| status | `statusCaptionStyle` (`TextStyle`: size, weight, colour; family see T-4), `statusFillOpacity` (`double?`, multiplies the host colour's alpha) |
-| groups | `groupFrameColor`, `groupFrameWidth` (px), `groupFrameMargin` (mm), `groupChipColor`, `groupChipTextStyle`, `groupChipRadius`, `groupChipPadding` |
-| selection | `selectionColor`, `selectionWidth` (px) |
-| focus | `focusVeilColor` (null: the paper's), `focusVeilOpacity` |
-| chrome | `serviceBarColor`, `serviceBarHeight`, `serviceBarForeground`, `canvasBackground`, `panelColor`, `panelBorderColor`, `panelForeground` |
+| Group | Fields | Reaches |
+|---|---|---|
+| status | `statusCaptionStyle` (`TextStyle`; a null `color` keeps today's automatic black or white ink by the fill; family see T-4), `statusFillOpacity` (multiplies the host colour's alpha once) | selection mode |
+| groups | `groupFrameColor`, `groupFrameWidth` (px), `groupFrameMargin` (mm), `groupChipColor`, `groupChipTextStyle`, `groupChipRadius`, `groupChipPadding` | selection mode |
+| selection | `selectionOnLight`, `selectionOnDark` (per paper, as `PaperPalette` chooses today; hover derives from it), `selectionWidth` (px) | **both modes** |
+| focus | `focusVeilColor` (null: the paper's), `focusVeilOpacity` | selection mode |
+| canvas | `canvasBackground`: the canvas around the page **and** a page-less plan's paper (`displayPaperFor`), so a page-less plan inks right on it | both modes |
+| chrome | `serviceBarHeight` | selection mode |
 
+- **Everything else of the chrome** (bar and panel colours, text,
+  borders) follows the ambient Material `Theme`; the guide's recipe wraps
+  the view in a local `Theme` with a hand-built `ColorScheme` (F-4).
 - Light and dark: the host puts one `FloorPlanTheme` in each `ThemeData`;
-  the paper's own brightness rules (light page on a dark canvas, 14d)
-  stay: a theme colour that is `null` falls back to the paper palette.
+  the paper's own rules (a light page on a dark canvas, 14d) stay.
 
 ### T-2. Resolution
 
 `FloorPlanView(theme: FloorPlanTheme?)` overrides the ambient extension
-field by field (`ambient.merge(view)`); then defaults. The export
+**field by field** (`ambient.merge(view)`), then the defaults. The export
 dialog and other routes on the root navigator read the ambient one.
 
 ### T-3. Paint-rate reading
 
-The resolved theme is compared by `==` at build; a painter rebuilds its
-paints only when it changes (as a paper change recolours today). The
-paint allocation tests run with a non-default theme too.
+The resolved theme is compared by `==` at build and joins each painter's
+rebuild key; a painter rebuilds its paints only when it changes, as a
+paper change recolours today. The painters' allocation tests
+(`table_status_painter_test`, `table_group_painter_test`,
+`table_focus_painter_test`, and the render package's
+`paint_allocation_test` for the selection colours) also run with a
+non-default theme.
 
 ### T-4. Fonts
 
@@ -461,14 +576,14 @@ plan does, so a terminal without the host's fonts draws the same. A
 `fontFamily` in the theme's styles is honoured when the host has loaded
 it; documented as the host's responsibility.
 
-## Slice 4 — toolbars and the editor
+## Slice 4 — toolbars, keyboard, the editor
 
-### C-1. The service bar's items
+### C-1. The service bar
 
 ```dart
 FloorPlanServiceBar serviceBar = const FloorPlanServiceBar();
 
-class FloorPlanServiceBar {
+final class FloorPlanServiceBar {
   const FloorPlanServiceBar({
     this.visible = true,
     this.actions = FloorPlanServiceAction.values, // order and subset
@@ -479,142 +594,202 @@ enum FloorPlanServiceAction { undo, redo, merge, split, export, print }
 ```
 
 Today's rules stay inside the subset: merge and split need their
-callbacks, export needs `onExport`.
+callbacks, export needs `onExport`. With `visible: false` the bar is gone
+and the canvas takes its height; the R-13 canvas-origin measurement
+follows (no stale 44 px).
 
-### C-2. Building your own bar
-
-With `visible: false` the bar is gone and the canvas takes its height.
-The controller exposes what a bar needs:
-
-- `ValueListenable<bool> canUndo`, `canRedo` (the existing getters stay);
-  `undo()`, `redo()` exist.
-- `ValueListenable<Set<String>?> mergeCandidate`: the numbers the Merge
-  button would send, null when it would be disabled;
-  `ValueListenable<String?> splitCandidate`: the group id Split would send.
-- `Future<FloorPlanExport?> exportPlan(FloorPlanExportChoice choice)` and
-  `Future<bool> printPlan({PagePrinter? printer})`: the export and print
-  flows without their dialogs (the controller already holds the font cache
-  and the last choice, R-9). `FloorPlanExportChoice` is today's internal
-  `ExportChoice` made public (format, scale, area).
-
-### C-3. The dialog hook
-
-`FloorPlanView.onExportDialog: Future<FloorPlanExportChoice?> Function(
-BuildContext context, FloorPlanExportChoice initial)?`: when given, the
-bar's Export (in both modes) calls it instead of the Material dialog; null
-from it cancels. Print has no dialog of jet-cad's (the platform's).
-
-### C-4. Editor capabilities
+### C-2. The editor's bar
 
 ```dart
-FloorPlanEditorCapabilities editor = FloorPlanEditorCapabilities.full;
+FloorPlanEditorBar editorBar = const FloorPlanEditorBar();
+
+final class FloorPlanEditorBar {
+  const FloorPlanEditorBar({
+    this.visible = true,
+    this.actions = FloorPlanEditorAction.values, // undo, redo, export, print, snap, zoom read-out
+    this.leading = const [], this.trailing = const [],
+  });
+}
+```
+
+`visible: false` removes the top bar; the tools stay in the left panel
+(or are hidden by C-4).
+
+### C-3. What a host-built bar needs
+
+- `canUndo`, `canRedo` are already `ValueListenable<bool>`; `undo()`,
+  `redo()` exist. In the design mode they also wait for an idle tool, as
+  the shell's buttons do.
+- `ValueListenable<Set<String>?> mergeCandidate`: the numbers the Merge
+  button would send, null when it would be disabled. (Split's candidate is
+  `selectedGroup`, which exists.)
+- `ValueListenable<FloorPlanTool> activeTool` and `bool
+  selectTool(FloorPlanTool tool)` (false when not allowed by C-5): the
+  editor's tool, for a host's own tool strip.
+- `Future<FloorPlanExport?> exportPlan(FloorPlanExportChoice choice,
+  {String name = 'plan'})` and `Future<bool> printPlan({PagePrinter?
+  printer, String name = 'plan'})`: the flows without their dialogs, each
+  with `page_flows.dart`'s one-at-a-time guard, settle and
+  `identical(document, activeDocument)` checks. `FloorPlanExportChoice`
+  (format, dpi) is today's `ExportChoice` made public, with
+  `FloorPlanExportFormat` and `FloorPlanExportDpi`.
+- `FloorPlanView.onPageFlowError: void Function(Object error)?`: an export
+  or print that fails reports here (today it is lost).
+
+### C-4. The dialog hook
+
+`FloorPlanView.onExportDialog: Future<FloorPlanExportChoice?> Function(
+BuildContext context, FloorPlanExportChoice initial)?`: when given,
+**every** Export entry point (both bars, the shell's file commands, the
+chords, both modes) calls it instead of the Material dialog, through
+`PageFlows.export`; null from it cancels. Print has no dialog of
+jet-cad's (the platform's).
+
+### C-5. Editor capabilities
+
+```dart
+FloorPlanEditorCapabilities editorCapabilities = FloorPlanEditorCapabilities.full;
 
 final class FloorPlanEditorCapabilities {
   static const full, tablesOnly, readOnly;
-  final Set<FloorPlanTool> tools;      // select, wall, room, door, window,
-                                       // line, polyline, rectangle, circle,
-                                       // arc, text, dimension, symbol, …
+  final Set<FloorPlanTool> tools;      // select, wall, room, door, window, line,
+                                       // polyline, rectangle, circle, arc, text,
+                                       // dimension, symbol, …
   final bool symbolPalette;            // the Symbols tab
-  final bool Function(FloorPlanSymbol symbol)? symbolFilter; // which symbols
+  final bool Function(FloorPlanSymbol symbol)? symbolFilter; // palette and search
   final bool selectionPanel, layerPanel, pagePanel;
   final bool editLayers, editPage;     // the panels' editing, apart from showing
-  final bool selectTablesOnly;         // the select tool picks tables only
-  final bool move, rotate, delete, renumber;
+  final bool selectTablesOnly;         // pick and rubber band reach tables only
+  final bool move, rotate, mirror, reshape, delete, renumber, changeLayer;
   final bool undo, export, print;
-  final bool rulers, grid, snapping, keyboardShortcuts;
+  final bool rulers, grid, snapping;
   FloorPlanEditorCapabilities copyWith({…});
 }
 ```
 
+- `FloorPlanSymbol` (`final class`): `key`, `name`, `category`, `tags`,
+  `seats` (null when not a table), from the library's `SymbolEntry`.
 - **`full`** is today's editor. **`tablesOnly`**: tools `{select,
-  symbol}`, the palette filtered to tables (servable symbols), the
+  symbol}`, the palette filtered to tables (`seats != null`), the
   Selection panel, `selectTablesOnly`, move, rotate, delete, renumber,
-  undo; no layer or page panel, no drawing tools. **`readOnly`**: select
-  (no edit), pan and zoom; the design plan opens with
-  `DraftPermissions.readOnly`.
-- **Enforcement** is the shell's: tools, tabs, panels, shortcuts and the
-  select tool's filter. `DraftPermissions` alone cannot express
-  `tablesOnly` (F-12); `readOnly` is also enforced by the engine.
+  undo; no mirror, reshape grips, change size, layer picker, layer or page
+  panel, or drawing tool. **`readOnly`**: select (nothing edits), pan and
+  zoom; every edit flag false.
+- **Enforcement is the shell's and the select tool's**, for every path of
+  F-15: tools, tabs, panels and panel fields, shortcuts, and `SelectTool`
+  gates in `jet_cad_2d_flutter` (a pick filter, and move, rotate, reshape
+  and delete gates). `DraftPermissions` is not used: it is fixed when a
+  plan is decoded (F-12) and cannot express `tablesOnly`. A host's own
+  `setTableData`, `undo()` and `load` calls are the host's and stay
+  allowed under every profile.
 - **Changing it at runtime** takes effect at the next build; a tool that
   is no longer allowed falls back to select; a hidden panel's state is
   kept.
 
-### C-5. The editor's bars
-
-`FloorPlanView.editorActions: List<Widget>` (leading, trailing) in the
-editor's top bar, as the service bar's `leading`/`trailing`. The shell's
-unused `fileCommands` is not exposed: a host's Save or Open is one of
-these actions.
-
 ### C-6. The table inspector slot
 
 `FloorPlanView.tableInspectorBuilder: Widget? Function(BuildContext,
-FloorPlanTable table)?`: shown in the editor's Selection panel under
+FloorPlanTableDetail table)?`: shown in the editor's Selection panel under
 jet-cad's own fields when **exactly one numbered table** is selected.
 Monépro links a drawn table to a `pos_tables` row here, with Slice 2's
-`setTableData`. With it, the controller exposes
-`ValueListenable<Set<String>> editorSelectedTables` (numbers selected in
-the design mode), so a host can also build its own side panel.
+`setTableData`. With it, `ValueListenable<Set<String>>
+editorSelectedTables` (numbers selected in the design mode) lets a host
+build its own side panel instead.
 
-### C-7. Material widgets inside the editor
+### C-7. Keyboard and focus
+
+- `FloorPlanView.shortcuts: bool = true`: false unbinds jet-cad's chords
+  and letters in **both** modes (service Undo, Redo, Export, Print; the
+  editor's tool letters, F3, F, Delete), so a host's own
+  (`PosShortcutsHost`, F-3) owns the keyboard; the commands stay callable.
+- `FloorPlanView.autofocus: bool = true`: false stops both modes taking
+  focus on mount, so a search field beside the plan keeps it.
+
+### C-8. Material widgets inside the editor
 
 The layer panel's menus and the editor's own controls stay Material and
-follow `ThemeData` plus `FloorPlanTheme`'s chrome colours; a host that
-must not show them uses `tablesOnly`, which hides them. Replacing them
-is out of scope (O-3).
+follow the ambient `Theme`; a host that must not show them uses
+`tablesOnly`, which hides them. Replacing them is out of scope (O-3).
 
 ## Invariants
 
-1. **P-1:** the 0.3.0 host probe's source compiles unchanged against
-   every slice (the probe keeps a frozen 0.3.0 copy of its `main.dart`
-   for this, built in CI).
-2. **P-6:** with no new parameter given, the goldens and the
-   painted-output tests are unchanged.
+1. **P-1:** the 0.3.0 host probe (`git show v0.3.0:tool/ci/host_probe/lib/main.dart`)
+   is analysed against each slice in CI; it proves the API compiles;
+   invariant 2 carries behaviour.
+2. **P-6:** with no new parameter given, the goldens, the painted-output
+   tests and `controller_test`'s and `barrel_test`'s existing expectations
+   are unchanged.
 3. Pan or zoom never calls a host builder (H-8).
 4. The selection mode never changes the design: `setTableData` throws
-   there; `designChanges` never fires from it; overlays, statuses, the
-   theme are never saved, exported or printed.
+   there; service moves never fire `designChanges`; overlays, statuses,
+   the theme are never saved, exported or printed.
 5. Every callback and query names tables by number; no handle crosses the
    barrel.
-6. `FloorPlanTable.data` round-trips through `designJson`/`load`; a
-   reader without the type preserves it (E-9).
-7. The frame path: the paint and query allocation gates stay green, run
-   also with a theme and with overlays shown.
+6. Table data round-trips through `designJson`/`load`; a reader without
+   the type preserves it; a delete drops it undoably (E-6, E-9).
+7. The frame path: `query_allocation_test`, `paint_allocation_test`, the
+   floor-plan painters' counter tests and `RenderFloorPlanOverlays`'
+   counter test stay at their bars, the last three also with a theme and
+   overlays shown.
 
 ## Testing and named mutants
 
 Each slice's plan lists its tests; each named mutant must be seen red
-(Ruling 49/50). The fixtures are **non-degenerate**: rotated, mirrored,
-scaled tables away from the origin, a hidden and a locked layer, two
-tables sharing a number, an unnumbered table, a camera not at identity.
+(Ruling 49/50). The fixtures are **non-degenerate**: rotated, mirrored and
+non-uniformly scaled tables away from the origin, a table definition whose
+box is **off its base point**, a hidden and a locked layer, two tables
+sharing a number, an unnumbered table, a camera not at identity.
 
 **Slice 1**
 
 - M-H1: `center` read from the box's corner, not its centre.
-- M-H2: `rotation` sign flipped (killer: a 30° table, not 0° or 180°).
-- M-H3: `mirrored` from `scale.x < 0` only (killer: a table mirrored in
-  y).
-- M-H4: `tables` reports the design in the selection mode (killer: a
-  service move then `tables`).
+- M-H2: `rotation` sign flipped (killer: a 30° table).
+- M-H3: `mirrored = a < 0` (killers: an unmirrored 180° table; a
+  mirrored 90° table).
+- M-H4: `tableDetails` reports the design in the selection mode (killer:
+  a service move then read).
 - M-H5: `worldToCanvas` omits the y flip.
-- M-H6: `zoomBy` ignores the bounds.
-- M-H7: a camera command does not cancel a pending fit.
+- M-H6: `zoomBy` ignores the bounds; M-H6b: a fit ignores them.
+- M-H7: the post-frame fit ignores the camera epoch (a command after a
+  fit request loses).
 - M-H8: the overlay rebuilds on a camera change (builder counter).
-- M-H9: `detail` counts breakpoints strictly below the scale (killer: a
-  scale exactly on a breakpoint).
+- M-H9: `detailLevel` counts breakpoints strictly below the scale
+  (killer: a scale exactly on a breakpoint).
 - M-H10: `box` sizing uses the unrotated box (killer: a 45° table).
-- M-H11: the overlay layer takes pointers when `interactive` is false.
+- M-H11: the layer takes pointers when `interactive` is false.
 - M-H12: off-canvas overlays still laid out (render counter).
+- M-H13: `center` = the instance's translation (killer: the off-base box).
+- M-H14: `size` ignores the instance's scale.
+- M-H15: the detail cache key misses the tables' revision (killer: hide a
+  layer, read `center == null` at the next `revision`).
+- M-H16: an interactive overlay's tap also reaches the table tool.
+- M-H17: an interactive overlay's `localToGlobal` is off by the pan
+  (non-identity camera).
+- M-H18: one table's status change rebuilds every overlay (per-table
+  counter).
+- M-H19: an overlay off its table after pan and zoom (`closeTo` 1e-6).
+- M-H19b: overlays shown in the design mode by default; `tableAt` ignores
+  the finger's reach; `canvasRect` stale after the view moves without
+  relayout; `userCamera: false` still pans.
 
 **Slice 2**
 
-- M-H20: double tap fires on two different tables.
-- M-H21: `onTablesMoved` fires on Undo.
+- M-H20: double tap fires on two different instances; M-H20b: after
+  `kDoubleTapTimeout`; M-H20c: beyond `kDoubleTapSlop`.
+- M-H21: `onTablesMoved` fires on Undo; M-H21b: two moved tables sharing a
+  number, one lost.
 - M-H22: `setTableData` on a duplicated number writes the first.
 - M-H23: `setTableData` allowed in the selection mode.
-- M-H24: keys written unsorted (killer: byte-exact golden JSON).
-- M-H25: `designChanges` reports a renumber as remove + add.
-- M-H26: an unknown-type round-trip drops the payload (E-9's gate).
+- M-H24: keys written unsorted (killer: byte-exact golden JSON); M-H24b:
+  an empty map leaves an empty component.
+- M-H25: an undone delete reported as remove + add.
+- M-H26: the unknown-type round trip drops the payload (E-9 gate 1).
+- M-H27: the expander does not detach on delete (E-9 gate 3).
+- M-H28: an over-limit payload throws on load.
+- M-H29: `setTablesData` writes part of a batch with one bad entry;
+  `onTableHover` fires per move or for touch; service moves fire
+  `designChanges`; `FloorPlanPlanReplaced` not fired by a `load` in the
+  selection mode.
 
 **Slice 3**
 
@@ -622,50 +797,59 @@ tables sharing a number, an unnumbered table, a camera not at identity.
   merging (killer: one field each).
 - M-H31: a theme read per frame (allocation counter).
 - M-H32: `focusVeilColor: null` ignores the paper (killer: dark paper).
+- M-H33: a theme change without a paper change does not repaint (painter
+  key); `statusFillOpacity` applied twice; a null caption colour forces
+  black (killer: a dark fill); `canvasBackground` not reaching a page-less
+  plan's paper; the editor's selection not following `selectionOnLight`.
 
 **Slice 4**
 
-- M-H40: `actions` order ignored.
-- M-H41: `tablesOnly` leaves the wall tool's shortcut active.
-- M-H42: `selectTablesOnly` still picks a wall.
-- M-H43: `readOnly` opens the design with `DraftPermissions.all`.
+- M-H40: `actions` order ignored (both bars).
+- M-H41: `tablesOnly` leaves the wall tool's letter active; M-H41b:
+  `shortcuts: false` leaves a service chord bound.
+- M-H42: the rubber band picks a wall under `selectTablesOnly`.
+- M-H43: `tablesOnly` shows Mirror; M-H43b: shows the layer picker;
+  M-H43c: reshape grips active.
 - M-H44: `mergeCandidate` non-null for one table.
 - M-H45: the inspector shows for two selected tables.
+- M-H46: Ctrl+Shift+E opens the Material dialog when `onExportDialog` is
+  given.
+- M-H47: a capability change at runtime leaves a forbidden tool active;
+  `symbolFilter` not applied to search results; `serviceBar.visible:
+  false` leaves the 44 px seed in the R-13 measurement.
 
 ## Risks
 
-- **R-1. API size.** Four slices add roughly forty public names. Each
-  slice's review checks the barrel diff against this spec; nothing
-  unnamed here enters without a revision.
+- **R-1. API size.** About fifty public names over four slices (the
+  export enums included). Each slice's review checks the barrel diff
+  against this spec; nothing unnamed here enters without a revision.
 - **R-2. Overlay performance on low-end tablets** with 100+ tables and
   `box` sizing: a relayout per camera frame. Mitigation: `natural` is the
-  default; `minScale` and culling; a measured row in the slice's results
-  (the dev harness on the web build).
+  default; `hideBelowScale` and culling; a measured row in the slice's
+  results (the web build).
 - **R-3. Double tap without delay** (E-2) means a host that opens a tab on
   tap and something else on double tap does both. Documented; Q-H2.
-- **R-4. `tablesOnly` holes.** The editor has paths besides tools
-  (keyboard delete, grips, the selection panel's fields). The slice's
-  review enumerates every edit path in `planner_shell.dart` against the
-  capability table.
+- **R-4. `tablesOnly` holes.** F-15 lists every edit path known at
+  `85905bd`; Slice 4's review re-enumerates them against the flags.
 - **R-5. Host data and plan exchange.** A host can write ids into one
-  location's plan and load that plan at another location; jet-cad cannot
-  know. Documented: data is the host's to validate.
-- **R-6. E-9 rests on preserve-unknown** staying true in 0.2.0 and 0.3.0;
-  the gate tests the current code's path, and the release review repeats
-  the cross-tree round trip with the real 0.3.0 tree.
+  location's plan and load that plan at another; jet-cad cannot know.
+  Documented: data is the host's to validate.
+- **R-6. E-9 rests on preserve-unknown** staying true; the gates test the
+  current code's path, and the release review repeats the cross-tree
+  round trip with the real 0.3.0 tree.
 
 ## Open questions
 
-- **Q-H1 (the human):** the schema stays 8 for host data (E-9) instead
-  of the 9 you accepted. Confirm.
+- **Q-H1 (the human):** the schema stays 8 for host data (E-9) instead of
+  the 9 you accepted. Confirm.
 - **Q-H2 (the human):** double tap reports both single taps first (no
   delay). Or delay single taps on tables when a double-tap callback is
   given?
-- **Q-H3 (Monépro):** which overlay sizes and detail bands phase 2 wants;
+- **Q-H3 (Monépro):** which overlay sizes and detail levels phase 2 wants;
   whether the id goes in `data["id"]` (the guide will suggest it).
 - **Q-Z1 and Q-Z4** (zone spec) are answered by Slices 1 and 2; Monépro's
   spec 103 B.1 and D21 should name `controller.camera` and
-  `FloorPlanTable.data`.
+  `FloorPlanTableDetail.data`.
 
 ## Out of scope, recorded
 
@@ -677,27 +861,64 @@ tables sharing a number, an unnumbered table, a camera not at identity.
 - **O-5.** Animation of camera commands.
 - **O-6.** A per-table colour on the plan itself (status is not plan
   data).
+- **O-7.** String overrides beyond subclassing a built-in language
+  (today's way); a fourth built-in language.
+- **O-8.** Components orphaned by node deletion in general (F-14): its own
+  task.
+- **O-9.** Accessibility semantics for tables beyond what the overlay
+  widgets bring.
 
 ## Files (expected)
 
 - `jet_cad_floor_plan/lib/src/host/`: `floor_plan_controller.dart`,
-  `floor_plan_view.dart`, `floor_plan_types.dart`, `service_view.dart`;
-  new `floor_plan_camera.dart`, `table_overlay.dart`
-  (`RenderFloorPlanOverlays`), `floor_plan_theme.dart`,
-  `editor_capabilities.dart`, `service_bar.dart`, `design_changes.dart`.
+  `floor_plan_view.dart`, `floor_plan_types.dart`, `service_view.dart`,
+  `page_flows.dart`; new `floor_plan_camera.dart`, `table_detail.dart`,
+  `table_overlay.dart` (`RenderFloorPlanOverlays`), `floor_plan_theme.dart`,
+  `editor_capabilities.dart`, `bars.dart`, `design_changes.dart`.
 - `jet_cad_floor_plan/lib/src/tables/`: `table_data_component.dart`,
-  `table_index.dart` (data, geometry).
+  `table_label_system.dart` (the delete expander), `table_index.dart`.
 - `jet_cad_floor_plan/lib/src/service/`: the painters (theme), the select
   tool (events).
-- `jet_cad_floor_plan/lib/src/planner_shell.dart`, `planner_view.dart`
-  (capabilities, inspector slot, bars).
-- `jet_cad_2d_flutter/lib/src/canvas_palette.dart`, `selection_style.dart`
-  (theme parameters).
+- `jet_cad_floor_plan/lib/src/planner_shell.dart`, `planner_view.dart`,
+  `selection_panel.dart`, `export/export_dialog.dart`.
+- `jet_cad_2d_flutter/lib/src/`: `interaction_layer.dart`,
+  `camera_gesture_detector.dart` (the overlay marker), `tool.dart`
+  (`timeStamp`), `canvas_palette.dart`, `selection_style.dart` (theme),
+  `select_tool.dart` (gates).
 - `jet_cad_floor_plan/lib/jet_cad_floor_plan.dart`,
-  `test/host/barrel_test.dart`.
+  `test/host/barrel_test.dart`, `.github/workflows/ci.yml` (invariant 1).
 - `apps/restaurant_demo`, `tool/ci/host_probe/lib/main.dart`,
   `docs/host-guide.md`, `CHANGELOG.md`.
 
 ## Review
 
-To be filled by the independent review of revision 1.
+Revision 1 (`5bdb823`) was reviewed by an independent reviewer:
+**Approve with fixes**; the full review is in the ledger
+(`.superpowers/sdd/2026-10-09-host-embedding-api/spec-review.md`,
+archived on merge). Every fact but F-11 (`fileCommands`) and F-14 (node
+deletion) held; both are corrected above. Dispositions:
+
+| Finding | Disposition |
+|---|---|
+| V-1 delete keeps component data | Accepted: E-6's expander, E-9 rewritten, gates 2–3, M-H27, O-8 |
+| V-2 widening `FloorPlanTable.==` breaks | **Ruled (a):** `FloorPlanTableDetail`, a new type; `FloorPlanTable` unchanged; P-1 reworded |
+| V-3 `tables` moves with `revision`; scan per read | Accepted: G-1's cache and wording; M-H15 |
+| V-4 overlay pointers and render model | **Ruled:** a `Flow`-like render box with one per-child offset, a `PlannerView` slot inside the input listeners, an input marker for interactive overlays; M-H16, M-H17 |
+| V-5 `readOnly` vs decode-time permissions | **Ruled (a):** enforcement in the shell and the select tool only; `DraftPermissions` unused; host calls stay allowed |
+| V-6 `ExportChoice` is format+dpi | Accepted: C-3, C-4; public export enums; every entry point; M-H46 |
+| V-7 capability table misses paths | Accepted: F-15, `mirror`, `reshape`, `changeLayer`, `FloorPlanSymbol`, `SelectTool` gates; M-H42, M-H43 |
+| V-8 the editor bar | **Ruled: in scope** (the human's toolbar ruling named the editor's top bar): C-2 `FloorPlanEditorBar`, `activeTool`, `selectTool`; F-11 corrected |
+| V-9 strict reader without a bump | Accepted: validate on write only; lenient read with a diagnostic; M-H28 |
+| V-10 camera mechanics | Accepted: the epoch, the canvas size, fits clamp, `panBy` always, `centerOn` queues |
+| V-11 decomposition, degenerate fixture | Accepted: G-1's decomposition, M-H3 rewritten, M-H13, M-H14 |
+| V-12 design-change coverage | Accepted: `FloorPlanTableChanged(before, after)`, `FloorPlanPlanReplaced` in either mode |
+| V-13 moved map loses tables | Accepted: a list |
+| V-14 double-tap timing | Accepted: `timeStamp`, same instance, locked reports, modifiers excluded |
+| V-15 theme reach | Accepted: per-paper selection in both modes, `canvasBackground` into the paper, automatic caption ink, chrome cut to `serviceBarHeight` plus the local-`Theme` recipe |
+| V-16 generic-host gaps | Accepted: `shortcuts`, `autofocus`, `userCamera`, `onPageFlowError`; O-7, O-9 |
+| V-17 overlay lifetime | Accepted and documented (G-5): remount on a new service copy, keyed by instance, the effective status, still during a drag |
+| V-18 allocation gates | Accepted: the render object's counter, invariant 7 names the gates, P-4 reworded |
+| V-19 cut `splitCandidate` | Accepted |
+| V-20 naming | Accepted: P-9, prefixed events, `hideBelowScale`, `editorCapabilities`, `final class` |
+| V-21 facts, invariant 1 | Accepted: F-12 line, the `@internal` rename note, invariant 1 by `git show v0.3.0:` |
+| V-22 missing mutants | Accepted: added per slice |
