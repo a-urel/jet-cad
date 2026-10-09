@@ -1297,10 +1297,18 @@ class FloorPlanController extends ChangeNotifier {
   /// change per table. Nothing done in the selection mode is reported: the
   /// service copy is not the design (P-5).
   ///
-  /// Delivered asynchronously, as the plan's own changes are: several edits
-  /// made in one synchronous step may arrive as one report. The tables are
-  /// compared only while the stream has a listener: a listener hears the
-  /// changes made after it started listening. Closed by [dispose].
+  /// Delivered asynchronously, as the plan's own changes are: the edits made
+  /// in one synchronous step arrive as one report, from the tables before
+  /// the first to the tables after the last.
+  ///
+  /// Nothing is sent on listen: a host reads the starting tables itself,
+  /// from [tableDetails] in the design mode (in the selection mode
+  /// [tableDetails] is the service copy's, not the design's). The tables are
+  /// compared only while the stream has a listener. The first listener
+  /// starts from the design as it is when it listens; a listener added
+  /// while another listens starts where that one is, so its first report
+  /// may include an edit made just before it listened. Closed by [dispose]:
+  /// changes not yet delivered then are dropped.
   Stream<FloorPlanDesignChange> get designChanges => _designChanges.stream;
 
   void _watchDesign() {

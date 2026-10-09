@@ -602,4 +602,81 @@ void main() {
     ]);
     expect(diffTableDetails(const [], const [], const [], const []), isEmpty);
   });
+
+  testWidgets(
+      'DC15 O7: a listen in the selection mode after a service move of 1 '
+      'takes the design\'s tables, not the copy\'s: back in the design mode, '
+      'nothing; then setTableData on 2 is exactly one Changed for 2',
+      (tester) async {
+    final c = fixtureController();
+    final b2 = detailOf(c, instancesOf(c, '2').single);
+    final b1 = detailOf(c, instancesOf(c, '1').single);
+    c.setMode(FloorPlanMode.selection);
+    await tester.pump();
+    final one = instancesOf(c, '1').single;
+    final fixture = fixtureTable('1');
+    final shift = Transform2.translation(1200, -700);
+    c.activeDocument.commands
+        .execute(TransformNodeCommand(one, shift.multiply(fixture.transform)));
+    await tester.pump();
+    expect(c.serviceEdited, isTrue, reason: 'premise: a service move');
+    expectNear(detailOf(c, one).center,
+        boxCentre(shift.multiply(fixture.transform)), 'premise: 1 moved');
+    final seen = listen(c);
+
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    expect(seen, isEmpty, reason: 'a mode switch is no design change');
+    expect(detailOf(c, one), b1, reason: 'premise: the design never moved');
+    expect(c.setTableData('2', hostData()), isTrue);
+    await tester.pump();
+    expect(seen, [FloorPlanTableChanged(b2, copyOf(b2, data: hostData()))],
+        reason: 'the service move of 1 is no design change');
+  });
+
+  testWidgets(
+      'DC16 M-H29(service moves), the trigger alone: an edit then '
+      'setMode(selection) in one synchronous step is reported at the next '
+      'pump, not withheld until the design moves again', (tester) async {
+    final c = fixtureController();
+    final b2 = detailOf(c, instancesOf(c, '2').single);
+    final seen = listen(c);
+
+    expect(c.setTableData('2', hostData()), isTrue);
+    c.setMode(FloorPlanMode.selection);
+    expect(seen, isEmpty, reason: 'delivered asynchronously');
+    await tester.pump();
+    expect(seen, [FloorPlanTableChanged(b2, copyOf(b2, data: hostData()))]);
+    expect(c.mode.value, FloorPlanMode.selection, reason: 'premise');
+  });
+
+  testWidgets(
+      'DC17 O10: a failed load reports nothing and drops nothing owed: an '
+      'edit, then load of "not json" and of a JSON that is no plan, both '
+      'throwing, is exactly the edit\'s Changed, no FloorPlanPlanReplaced',
+      (tester) async {
+    final c = fixtureController();
+    final b1 = detailOf(c, instancesOf(c, '1').single);
+    final seen = listen(c);
+
+    expect(c.setTableData('1', hostData()), isTrue);
+    expect(() => c.load('not json'), throwsFormatException);
+    expect(() => c.load('{"x": 1}'), throwsFormatException);
+    await tester.pump();
+    final changed = FloorPlanTableChanged(b1, copyOf(b1, data: hostData()));
+    expect(seen, [changed]);
+
+    expect(() => c.load('not json'), throwsFormatException);
+    await tester.pump();
+    expect(seen, [changed], reason: 'nothing owed, nothing reported');
+    expect(c.setTableData('1', {'id': 'next'}), isTrue);
+    await tester.pump();
+    expect(
+        seen,
+        [
+          changed,
+          FloorPlanTableChanged(changed.after, copyOf(b1, data: {'id': 'next'}))
+        ],
+        reason: 'the same plan, the same baseline');
+  });
 }
