@@ -457,6 +457,13 @@ ascending by handle) with its new geometry, once per drag, after
 `onLayoutChanged`. Undo, Redo, reset and restore do not fire it (they fire
 `serviceLayoutChanges`).
 
+*Amended during Slice 2's implementation* (the Task 4 review's rulings,
+ledger `s2-task-4-review.md`): it is **not called** when the host's
+`onLayoutChanged` replaced the service copy (a `resetLayout()`, a `load`,
+a mode switch): the moved tables are gone, and the new copy's details
+would describe places the drag did not produce (ruling 3). The list a
+host is handed is **unmodifiable**, as `tableDetails` is (R-4).
+
 ### E-2. Double tap
 
 `onTableDoubleTap: void Function(String number)?`: a second tap on the
@@ -479,6 +486,13 @@ with a modifier held stays); it fires with or without a modifier (S-4).
 entering a numbered table, or leaving it (null); only on a change; never
 for touch. A remount of the service view (a mode switch, reset, restore,
 load) sends no null: the host clears its hover state then (S-5).
+
+*Amended during Slice 2's implementation* (the Task 4 review's rulings,
+ledger `s2-task-4-review.md`): a hover picks at the point **with no
+reach**, a table's top or box only, never the mouse's or a finger's reach
+(R-4); over an **interactive overlay** (G-5's input claim) the pointer is
+off the canvas, so the hover reads **null** while it is on the host's
+widget, `n → null → n` as it crosses it (ruling 2).
 
 ### E-5. Design changes
 
@@ -1005,3 +1019,14 @@ hover null on a remount (E-4); S-6 the readings the plan pins (control
 characters, an empty value, re-sorting, a no-op write, two keys trimming
 to one number, hidden and locked tables take data, inclusive timeout and
 slop between the two downs).
+
+**Amended by Slice 2's reviews** (the controller's rulings, ledger
+`s2-task-4-review.md` and `s2-final-review.md`), beyond S-1 to S-6: E-1's
+`onTablesMoved` is not called when the host's `onLayoutChanged` replaced
+the service copy, and the moved list is unmodifiable; E-4's hover has no
+reach, and reads null over an interactive overlay; E-5's stream delivers
+nothing after `dispose()`, not even a change reported before it and not
+yet delivered (a `load` in the same step), then done (final review F-1);
+E-6's id is read as it is written: a number on two tables names neither,
+so the guide's `idOf` and the demo read no id for it, as `setTableData`
+refuses the link (final review F-3).
