@@ -107,8 +107,13 @@ one's spec, plan and results.
   slices, each its own plan and merge: 1 geometry, public camera and
   per-table widgets; 2 events and table data (schema 9); 3
   `FloorPlanTheme`; 4 the bars, keyboard and editor capabilities. Ledger:
-  `.superpowers/sdd/2026-10-09-host-embedding-api/`. **Next: Slice 1's
-  plan.**
+  `.superpowers/sdd/2026-10-09-host-embedding-api/`. **Slice 1**
+  (the human: *"evet, Dilim 1 ile devam et"*): plan
+  [2026-10-09-embedding-slice-1.md](docs/superpowers/plans/2026-10-09-embedding-slice-1.md),
+  results [2026-10-09-embedding-slice-1-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-1-results.md);
+  Tasks 1–5 done, each reviewed independently and fixed (`85918c4` …
+  `84ee8e9`); the whole range's independent review next, then the merge
+  on the human's word.
 
 ## Owed to the human
 
@@ -142,7 +147,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the host embedding API's Slice 1 plan**, above.
+**Next: Slice 1's range review, then the merge question**, above.
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
 touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
 (the host probe), placement and open/save, and zones (0.3.0). Monépro
