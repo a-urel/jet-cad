@@ -13,10 +13,13 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer, kRulerThickness;
+    show InteractionLayer, ViewportTransform, kRulerThickness;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart' as host;
+import 'package:jet_cad_floor_plan/src/document_toolbar.dart';
 import 'package:jet_cad_floor_plan/src/host/bars.dart';
+import 'package:jet_cad_floor_plan/src/host/editor_capabilities.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
+import 'package:jet_cad_floor_plan/src/host/floor_plan_theme.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
 import 'package:jet_cad_floor_plan/src/host/service_view.dart'
@@ -186,13 +189,14 @@ const Map<String, double> kBareEdges = {
 List<String> get kBareKeys =>
     [for (final id in kBareIds) 'toolbar-$id', ...kEditorKeys.skip(2)];
 
-Future<void> mountBare(WidgetTester tester) async {
+Future<void> mountBare(WidgetTester tester,
+    {FloorPlanEditorBar editorBar = const FloorPlanEditorBar()}) async {
   final on = ValueNotifier(true);
   addTearDown(on.dispose);
   await tester.binding.setSurfaceSize(const Size(1440, 900));
   addTearDown(() => tester.binding.setSurfaceSize(null));
   await tester.pumpWidget(MaterialApp(
-      home: PlannerShell(fileCommands: [
+      home: PlannerShell(editorBar: editorBar, fileCommands: [
     for (final id in kBareIds)
       ShellCommand(
           id: id, label: id, icon: Icons.add, enabled: on, run: () async {}),
@@ -222,7 +226,8 @@ Future<BarHost> mountHost(WidgetTester tester,
     FloorPlanServiceBar service = const FloorPlanServiceBar(),
     FloorPlanEditorBar editor = const FloorPlanEditorBar(),
     bool export = true,
-    bool groups = true}) async {
+    bool groups = true,
+    FloorPlanTheme? theme}) async {
   final c = FloorPlanController(json: embeddingPlanJson());
   addTearDown(c.dispose);
   c.setMode(mode);
@@ -240,7 +245,8 @@ Future<BarHost> mountHost(WidgetTester tester,
                   onMergeRequested: groups ? h.merged.add : null,
                   onSplitRequested: groups ? (_) {} : null,
                   serviceBar: bars.$1,
-                  editorBar: bars.$2)))));
+                  editorBar: bars.$2,
+                  theme: theme)))));
   await tester.pump();
   await tester.pump();
   c.cameraController.value = embeddingCamera();
@@ -886,11 +892,22 @@ void main() {
       }
       final tools = tester.widget<PlannerView>(find.byType(PlannerView)).tools;
       expect(tools.active.isMidShape, isTrue, reason: 'premise: part-way');
+      // Each call alone (Task 2 review R-1): an undo and a redo that both
+      // act would cancel out.
       c.undo();
+      await tester.pump();
+      expect(c.activeDocument.commands.stateId, state, reason: 'undo() alone');
+      expect(DraftDocumentCodec.encodeToString(c.activeDocument), before,
+          reason: 'undo() alone');
+      expect(c.canUndo.value && c.canRedo.value, isTrue,
+          reason: 'undo() alone: the history as it was');
       c.redo();
       await tester.pump();
-      expect(c.activeDocument.commands.stateId, state);
-      expect(DraftDocumentCodec.encodeToString(c.activeDocument), before);
+      expect(c.activeDocument.commands.stateId, state, reason: 'redo() alone');
+      expect(DraftDocumentCodec.encodeToString(c.activeDocument), before,
+          reason: 'redo() alone');
+      expect(c.canUndo.value && c.canRedo.value, isTrue,
+          reason: 'redo() alone: the history as it was');
       expect(tools.active.isMidShape, isTrue, reason: 'still pending');
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pump();
@@ -903,6 +920,36 @@ void main() {
       c.redo();
       await tester.pump();
       expect(centreOf(c, '1'), moved, reason: 'redone');
+    });
+
+    testWidgets(
+        'T2-c after a load() in the design mode (a new shell replaces the '
+        'old, which withdraws only its own probe): undo() mid-shape leaves '
+        'the plan', (tester) async {
+      final h = await mountHost(tester, mode: FloorPlanMode.design);
+      final c = h.c;
+      c.load(embeddingPlanJson());
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+      move(c, '1', 500, -300);
+      await tester.pump();
+      final before = DraftDocumentCodec.encodeToString(c.activeDocument);
+      final state = c.activeDocument.commands.stateId;
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+      await tester.pump();
+      for (final (x, y) in const [(40500.0, -26000.0), (41000.0, -26500.0)]) {
+        await tester.tapAt(globalOf(tester, c, Vector2(x, y)));
+        await tester.pump();
+      }
+      final tools = tester.widget<PlannerView>(find.byType(PlannerView)).tools;
+      expect(tools.active.isMidShape, isTrue, reason: 'premise: part-way');
+      c.undo();
+      await tester.pump();
+      expect(c.activeDocument.commands.stateId, state);
+      expect(DraftDocumentCodec.encodeToString(c.activeDocument), before);
+      expect(tools.active.isMidShape, isTrue, reason: 'still pending');
     });
 
     testWidgets('the selection mode is unchanged: undo() acts', (tester) async {
@@ -1037,6 +1084,339 @@ void main() {
       await tester.pump();
       await expectKept(tester, c,
           [FloorPlanMode.design, FloorPlanMode.selection], 'editor hidden');
+    });
+  });
+
+  group('the review fixes (s4-task-2-review R-2, R-3, R-5)', () {
+    testWidgets(
+        "R-2 a bare shell with only the read-outs swapped keeps the buttons' "
+        'places: Export joins the other file commands, no gap after Save As',
+        (tester) async {
+      await mountBare(tester,
+          editorBar: const FloorPlanEditorBar(actions: [
+            FloorPlanEditorAction.export,
+            FloorPlanEditorAction.print,
+            FloorPlanEditorAction.undo,
+            FloorPlanEditorAction.redo,
+            FloorPlanEditorAction.zoom,
+            FloorPlanEditorAction.snap,
+          ]));
+      for (final k in [
+        for (final id in kBareIds) 'toolbar-$id',
+        'toolbar-undo',
+        'toolbar-redo',
+        'status-text',
+      ]) {
+        expect(left(tester, k), kBareEdges[k], reason: k);
+      }
+    });
+
+    testWidgets(
+        'R-5 the editor bar [snap, zoom]: no button left, so no toolbar and '
+        'no 16 px: the status line starts at the bar\'s padding',
+        (tester) async {
+      await mountHost(tester,
+          mode: FloorPlanMode.design,
+          editor: const FloorPlanEditorBar(actions: [
+            FloorPlanEditorAction.snap,
+            FloorPlanEditorAction.zoom
+          ]));
+      expect(find.byType(DocumentToolbar), findsNothing);
+      expect(left(tester, 'status-text'), 12);
+    });
+
+    testWidgets(
+        "R-5 a host TextField in the service bar's trailing: Ctrl+Z stays in "
+        'the field (the guard covers the whole row)', (tester) async {
+      final text = TextEditingController();
+      addTearDown(text.dispose);
+      final h = await mountHost(tester,
+          service: FloorPlanServiceBar(trailing: [
+            SizedBox(
+                width: 120,
+                child:
+                    TextField(key: const Key('host-field'), controller: text))
+          ]));
+      move(h.c, '1', 500, -300);
+      await tester.pump();
+      final moved = centreOf(h.c, '1');
+      await tester.tap(byKey('host-field'));
+      await tester.pump();
+      await ctrl(tester, LogicalKeyboardKey.keyZ);
+      expect(centreOf(h.c, '1'), moved, reason: 'nothing undone');
+      expect(h.c.canRedo.value, isFalse);
+    });
+
+    /// A switch into [mode], and table 1 at its place: in the first frame
+    /// (drawn with the camera the switch left, before any correction after
+    /// it), with no correction after that frame, and, when [rect], by
+    /// `worldToGlobal` at the switch itself.
+    Future<void> expectFirstFrame(WidgetTester tester, FloorPlanController c,
+        FloorPlanMode mode, String reason,
+        {required bool rect}) async {
+      final w = centreOf(c, '1');
+      final at = globalOf(tester, c, w);
+      c.setMode(mode);
+      final m = c.cameraController.value.worldToScreenMatrix;
+      if (rect) {
+        expectAt(c.worldToGlobal(Offset(w.x, w.y))!, at,
+            '$reason: worldToGlobal at the switch');
+      }
+      await tester.pump();
+      final n = c.cameraController.value.worldToScreenMatrix;
+      expect([n.a, n.b, n.c, n.d, n.e, n.f], [m.a, m.b, m.c, m.d, m.e, m.f],
+          reason: '$reason: no correction after the frame');
+      final layer = tester.getTopLeft(find.byType(InteractionLayer));
+      final frame =
+          canvasOf(ViewportTransform(worldToScreenMatrix: m), w.x, w.y);
+      expectAt(
+          layer + Offset(frame.x, frame.y), at, '$reason: the first frame');
+      await tester.pump();
+      expectAt(globalOf(tester, c, w), at, '$reason: settled');
+    }
+
+    testWidgets(
+        'R-3 the service bar hidden from the start: the first switch into '
+        'the selection mode is exact from its first frame', (tester) async {
+      final h = await mountHost(tester,
+          mode: FloorPlanMode.design,
+          service: const FloorPlanServiceBar(visible: false));
+      await expectFirstFrame(tester, h.c, FloorPlanMode.selection, 'hidden',
+          rect: false);
+      expect(canvasIn(tester), Offset.zero, reason: 'premise');
+      await expectFirstFrame(tester, h.c, FloorPlanMode.design, 'back',
+          rect: true);
+    });
+
+    testWidgets(
+        "R-3 the theme's 60 px service bar: the first switch into the "
+        'selection mode is exact from its first frame', (tester) async {
+      final h = await mountHost(tester,
+          mode: FloorPlanMode.design,
+          theme: const FloorPlanTheme(serviceBarHeight: 60));
+      await expectFirstFrame(tester, h.c, FloorPlanMode.selection, 'theme 60',
+          rect: false);
+      expect(canvasIn(tester), const Offset(0, 60), reason: 'premise');
+      await expectFirstFrame(tester, h.c, FloorPlanMode.design, 'back',
+          rect: true);
+    });
+
+    testWidgets(
+        'R-3 the editor bar hidden while the selection mode is shown: the '
+        'switch into the design mode is exact from its first frame, and '
+        'worldToGlobal from the switch', (tester) async {
+      final h = await mountHost(tester);
+      final c = h.c;
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'first',
+          rect: false);
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'back',
+          rect: true);
+      h.editor = const FloorPlanEditorBar(visible: false);
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'hidden',
+          rect: true);
+      expect(canvasIn(tester),
+          const Offset(240 + kRulerThickness, kRulerThickness),
+          reason: 'premise');
+      expect(c.canvasRect.value!.topLeft,
+          tester.getTopLeft(find.byType(InteractionLayer)));
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'again',
+          rect: true);
+      h.editor = const FloorPlanEditorBar();
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'shown',
+          rect: true);
+    });
+
+    testWidgets(
+        'R-3 the service bar hidden, then the theme\'s bar changed, while '
+        'the design mode is shown: each switch into the selection mode is '
+        'exact from its first frame, and worldToGlobal from the switch',
+        (tester) async {
+      final h = await mountHost(tester);
+      final c = h.c;
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'first',
+          rect: false);
+      h.service = const FloorPlanServiceBar(visible: false);
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'hidden',
+          rect: true);
+      expect(canvasIn(tester), Offset.zero, reason: 'premise');
+      final size = c.canvasRect.value!.size;
+      expect(size.height, tester.getSize(find.byType(InteractionLayer)).height,
+          reason: 'the rect taken at the switch: the far corner kept');
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'back',
+          rect: true);
+      h.service = const FloorPlanServiceBar();
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'shown',
+          rect: true);
+    });
+
+    testWidgets(
+        'R-3 a switch made while no view is shown, then a view whose service '
+        'bar is hidden, unlike the last view\'s: the plan keeps its place '
+        '(the shown mode is left to its measurement)', (tester) async {
+      final c = FloorPlanController(json: embeddingPlanJson());
+      addTearDown(c.dispose);
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      Widget app(FloorPlanServiceBar? bar) => MaterialApp(
+          home: Scaffold(
+              body: bar == null
+                  ? const SizedBox()
+                  : FloorPlanView(controller: c, serviceBar: bar)));
+      await tester.pumpWidget(app(const FloorPlanServiceBar()));
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+      final w = centreOf(c, '1');
+      final at = globalOf(tester, c, w);
+      await tester.pumpWidget(app(null));
+      c.setMode(FloorPlanMode.selection);
+      await tester.pumpWidget(app(const FloorPlanServiceBar(visible: false)));
+      await tester.pump();
+      expect(canvasIn(tester), Offset.zero, reason: 'premise');
+      expectAt(globalOf(tester, c, w), at, 'remounted in the selection mode');
+    });
+
+    testWidgets(
+        'R-3 a bar hidden while its mode is shown, shown again while it is '
+        'not: the next switch into it is exact from its first frame',
+        (tester) async {
+      final h = await mountHost(tester, mode: FloorPlanMode.design);
+      final c = h.c;
+      h.editor = const FloorPlanEditorBar(visible: false);
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'away',
+          rect: false);
+      h.editor = const FloorPlanEditorBar();
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'editor back',
+          rect: true);
+      expect(canvasIn(tester),
+          const Offset(240 + kRulerThickness, 44 + kRulerThickness),
+          reason: 'premise');
+      h.service = const FloorPlanServiceBar(visible: false);
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'hidden',
+          rect: true);
+      h.service = const FloorPlanServiceBar();
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'away again',
+          rect: true);
+      h.service = const FloorPlanServiceBar(visible: false);
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'service back',
+          rect: true);
+    });
+
+    testWidgets(
+        "R-3 the ambient theme's service bar height changed while the design "
+        'mode is shown, the view not rebuilt: the next switch into the '
+        'selection mode is exact from its first frame', (tester) async {
+      final c = FloorPlanController(json: embeddingPlanJson());
+      addTearDown(c.dispose);
+      final height = ValueNotifier<double?>(null);
+      addTearDown(height.dispose);
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      var builds = 0;
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ValueListenableBuilder<double?>(
+                  valueListenable: height,
+                  // The view is the builder's child: a theme change does not
+                  // rebuild it.
+                  child: Builder(builder: (context) {
+                    builds++;
+                    return FloorPlanView(controller: c);
+                  }),
+                  builder: (context, h, child) => Theme(
+                      data: ThemeData(extensions: [
+                        if (h != null) FloorPlanTheme(serviceBarHeight: h)
+                      ]),
+                      child: child!)))));
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+      height.value = 60;
+      await tester.pump();
+      await tester.pump();
+      expect(builds, 1, reason: 'premise: the view was not rebuilt');
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'theme 60',
+          rect: false);
+      expect(canvasIn(tester), const Offset(0, 60), reason: 'premise');
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'back',
+          rect: true);
+      height.value = 52;
+      await tester.pump();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.selection, 'theme 52',
+          rect: true);
+      expect(canvasIn(tester), const Offset(0, 52), reason: 'premise');
+    });
+
+    testWidgets(
+        "R-3 the editor's rulers and left column gone and back while the "
+        'selection mode is shown: each switch into the design mode is exact '
+        'from its first frame', (tester) async {
+      final c = FloorPlanController(json: embeddingPlanJson());
+      addTearDown(c.dispose);
+      c.setMode(FloorPlanMode.selection);
+      final caps = ValueNotifier(FloorPlanEditorCapabilities.full);
+      addTearDown(caps.dispose);
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: ValueListenableBuilder(
+                  valueListenable: caps,
+                  builder: (_, v, __) =>
+                      FloorPlanView(controller: c, editorCapabilities: v)))));
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+      await expectFirstFrame(tester, c, FloorPlanMode.design, 'full',
+          rect: false);
+      for (final (name, value, origin) in [
+        (
+          'no rulers',
+          FloorPlanEditorCapabilities.full.copyWith(rulers: false),
+          const Offset(240, 44)
+        ),
+        (
+          'readOnly, no left column',
+          FloorPlanEditorCapabilities.readOnly,
+          const Offset(kRulerThickness, 44 + kRulerThickness)
+        ),
+        (
+          'full again',
+          FloorPlanEditorCapabilities.full,
+          const Offset(240 + kRulerThickness, 44 + kRulerThickness)
+        ),
+      ]) {
+        await expectFirstFrame(tester, c, FloorPlanMode.selection, name,
+            rect: true);
+        caps.value = value;
+        await tester.pump();
+        await tester.pump();
+        await expectFirstFrame(tester, c, FloorPlanMode.design, name,
+            rect: true);
+        expect(canvasIn(tester), origin, reason: '$name: premise');
+      }
     });
   });
 }

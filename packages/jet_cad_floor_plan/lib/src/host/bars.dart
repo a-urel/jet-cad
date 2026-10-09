@@ -28,7 +28,9 @@ enum FloorPlanEditorAction { export, print, undo, redo, snap, zoom }
 /// - [leading], [trailing]: the host's widgets before and after the
 ///   buttons, laid out in the bar's row at its height (each needs a
 ///   bounded width). A host text field there takes the focus and its
-///   keystrokes; the bar's chords do not reach the plan from it.
+///   keystrokes: Undo and Redo (Ctrl+Z, Ctrl+Y and their Cmd forms) stay
+///   in the field; the file chords (Export's Ctrl+E, Print's Ctrl+P and
+///   their Cmd forms) still reach the plan from it.
 ///
 /// [actions] shapes the bar only: the chords (Ctrl+Z, Ctrl+E, ...) stay
 /// bound whatever it lists (spec S-20).
@@ -81,8 +83,10 @@ final class FloorPlanServiceBar {
 ///   [ArgumentError] when the view builds.
 /// - [leading], [trailing]: the host's widgets at the bar's two ends, laid
 ///   out in its row at its height (each needs a bounded width). A host
-///   text field there takes the focus and its keystrokes: the tool letters
-///   and Undo do not reach the plan from it.
+///   text field there takes the focus and its keystrokes: the tool
+///   letters, Undo, Redo and Escape stay in the field; the file chords
+///   (Export's Ctrl+E, Print's Ctrl+P, a bare shell's others) and F3 still
+///   act on the plan from it.
 ///
 /// [actions] shapes the bar only: the chords and keys (Ctrl+Z, Ctrl+E,
 /// F3, ...) stay bound whatever it lists (spec S-20).

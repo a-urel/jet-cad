@@ -4,7 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer;
+    show InteractionLayer, kRulerThickness;
 
 import '../l10n/strings.dart';
 import '../export/page_printer.dart';
@@ -218,11 +218,12 @@ class FloorPlanView extends StatefulWidget {
 
   /// The selection mode's bar (host embedding API spec C-1): hidden, its
   /// buttons cut down or reordered, the host's widgets before and after
-  /// them. The default is today's bar. Hidden, the canvas takes its height,
-  /// and the view measures where the canvas now starts, so a mode switch
-  /// keeps the plan in place (R-13). Its actions shape the bar only: the
-  /// chords stay bound (S-20). Read at each build; an [ArgumentError]
-  /// naming `actions` for an action listed twice.
+  /// them. The default is today's bar. Hidden, the canvas takes its height;
+  /// the view tells the controller where each mode's canvas starts before a
+  /// switch can use it and measures it after, so a mode switch keeps the
+  /// plan in place from its first frame (R-13). Its actions shape the bar
+  /// only: the chords stay bound (S-20). Read at each build; an
+  /// [ArgumentError] naming `actions` for an action listed twice.
   final FloorPlanServiceBar serviceBar;
 
   /// The design mode's top bar (spec C-2, S-2), as [serviceBar]: hidden
@@ -266,8 +267,46 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !identical(c, widget.controller)) return;
       final origin = _canvasOrigin();
-      if (origin != null) c.canvasMeasured(shown, origin);
+      if (origin != null) {
+        c.canvasMeasured(shown, origin, chrome: _chromeOrigin(shown));
+      }
     });
+  }
+
+  /// The selection mode's bar height under this view's resolved theme, as
+  /// [_ChromeOrigins] last read it (spec T-2's `serviceBarHeight`).
+  double _serviceBarHeight = kServiceBarHeight;
+
+  /// Where [mode]'s canvas starts in this view by its chrome alone, as the
+  /// modes lay it out (Task 2 review R-3): the selection mode's bar, when
+  /// shown, at the theme's height; the editor's top bar (44), left column
+  /// (240) and rulers, each when shown.
+  Offset _chromeOrigin(FloorPlanMode mode) {
+    switch (mode) {
+      case FloorPlanMode.selection:
+        return Offset(0, widget.serviceBar.visible ? _serviceBarHeight : 0);
+      case FloorPlanMode.design:
+        final caps = widget.editorCapabilities;
+        final ruler = caps.rulers ? kRulerThickness : 0.0;
+        // A view always gives the editor a symbol library.
+        final left = leftColumnShown(caps, symbols: true) ? 240.0 : 0.0;
+        final top = widget.editorBar.visible ? 44.0 : 0.0;
+        return Offset(left + ruler, top + ruler);
+    }
+  }
+
+  /// At each build of this view and each change of its theme, before any
+  /// switch can reframe from them: the controller is told where the mode
+  /// not shown starts by its chrome (a bar hidden, the theme's bar height,
+  /// the editor's rulers or left column), so the first frame after a
+  /// switch into it is exact (Task 2 review R-3). The shown mode is
+  /// measured after the frame ([_measureChrome]).
+  void _assumeCanvases(FloorPlanTheme? theme) {
+    _serviceBarHeight = theme?.serviceBarHeight ?? kServiceBarHeight;
+    final c = widget.controller;
+    for (final mode in FloorPlanMode.values) {
+      if (mode != c.mode.value) c.canvasAssumed(mode, _chromeOrigin(mode));
+    }
   }
 
   /// The mode the last build showed; null before the first.
@@ -314,7 +353,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     final shown = _shown;
     if (!mounted || shown == null || c.mode.value != shown) return;
     final origin = _canvasOrigin();
-    if (origin != null) c.canvasMeasured(shown, origin);
+    if (origin != null) {
+      c.canvasMeasured(shown, origin, chrome: _chromeOrigin(shown));
+    }
   }
 
   /// The top left of the shown canvas (its interaction layer's, whose
@@ -464,7 +505,10 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     // rebuilds it, not this view, so no host overlay is built again (G-5).
     return FloorPlanThemeScope(
       view: widget.theme,
-      child: _modes(serviceOverlays, designOverlays),
+      child: _ChromeOrigins(
+        onTheme: _assumeCanvases,
+        child: _modes(serviceOverlays, designOverlays),
+      ),
     );
   }
 
@@ -528,5 +572,22 @@ class _FloorPlanViewState extends State<FloorPlanView> {
         );
       },
     );
+  }
+}
+
+/// Reads the resolved theme under the view's scope for [onTheme], at each
+/// build of the view and at each change of the theme, and builds [child]
+/// as it was given: a theme change rebuilds this alone, so no host overlay
+/// is built again (G-5).
+class _ChromeOrigins extends StatelessWidget {
+  const _ChromeOrigins({required this.onTheme, required this.child});
+
+  final void Function(FloorPlanTheme? theme) onTheme;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    onTheme(FloorPlanThemeScope.of(context));
+    return child;
   }
 }

@@ -40,16 +40,24 @@ import 'table_fit.dart';
 /// 14b-2 R-11), above the 96 symbols of both libraries.
 const int kFloorPlanThumbnailCapacity = 128;
 
+/// Where each mode's canvas starts in a `FloorPlanView` whose chrome is
+/// the default (R-13 as amended): the editor's top bar (44), left panel
+/// (240) and rulers; the service bar ([kServiceBarHeight]). A view whose
+/// chrome differs tells the controller where its canvases start by their
+/// chrome (`FloorPlanController.canvasAssumed`), and the origins move by
+/// the difference.
+const Map<FloorPlanMode, Offset> _defaultChromeOrigins = {
+  FloorPlanMode.design: Offset(240 + kRulerThickness, 44 + kRulerThickness),
+  FloorPlanMode.selection: Offset(0, kServiceBarHeight),
+};
+
 /// Where each mode's canvas starts in a `FloorPlanView`, until a view has
 /// measured it (R-13 as amended): the editor's top bar (44), left panel
 /// (240) and rulers; the service bar ([kServiceBarHeight]). Read when a
 /// controller is made; a test seam.
 @visibleForTesting
-final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds = {
-  FloorPlanMode.design:
-      const Offset(240 + kRulerThickness, 44 + kRulerThickness),
-  FloorPlanMode.selection: const Offset(0, kServiceBarHeight),
-};
+final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds =
+    Map.of(_defaultChromeOrigins);
 
 /// One plan the controller holds: the document, the measurer it was built
 /// with, the selection over it, and the controller's subscription to it.
@@ -376,9 +384,11 @@ class FloorPlanController extends ChangeNotifier {
   /// view that has no size yet reports nothing.
   ///
   /// [setMode] sets it at once to where the new mode's canvas was when a
-  /// view last showed that mode (review R-4), so [zoomBy]'s default focus
-  /// and [worldToGlobal] are right from the switch; a mode no view has shown
-  /// yet keeps the old mode's rect until the end of the next frame.
+  /// view last showed that mode (review R-4), moved by what the view's
+  /// chrome for it changed since (a bar shown or hidden, the theme's bar
+  /// height), so [zoomBy]'s default focus and [worldToGlobal] are right
+  /// from the switch; a mode no view has shown yet keeps the old mode's
+  /// rect until the end of the next frame.
   ValueListenable<Rect?> get canvasRect => _canvasRect;
 
   /// The global point that shows [world] (millimetres, y up), or null with
@@ -809,6 +819,36 @@ class FloorPlanController extends ChangeNotifier {
   /// The origins a reframing used and no measurement has confirmed yet.
   final Map<FloorPlanMode, Offset> _assumed = {};
 
+  /// Where each mode's chrome alone put its canvas when [_canvasAt]'s
+  /// origin for it was seeded or measured: the basis [canvasAssumed] moves
+  /// that origin from.
+  final Map<FloorPlanMode, Offset> _chromeAt = Map.of(_defaultChromeOrigins);
+
+  /// A view lays out mode [mode]'s chrome so that, by the chrome alone, its
+  /// canvas starts at [chrome] (a bar shown or hidden, the theme's bar
+  /// height, the editor's rulers and left column; Task 2 review R-3). For
+  /// a mode not shown, the origin a switch into it reframes by moves by
+  /// what the chrome moved since that origin was seeded or measured, and
+  /// so do a reframing's assumption still awaiting its measurement and the
+  /// rect [canvasRect] takes at the switch (the canvas's far corner stays):
+  /// the first frame after the switch is exact. The shown mode is left to
+  /// its measurement after the frame.
+  @internal
+  void canvasAssumed(FloorPlanMode mode, Offset chrome) {
+    if (mode == _mode.value) return;
+    final delta = chrome - _chromeAt[mode]!;
+    _chromeAt[mode] = chrome;
+    if (delta == Offset.zero) return;
+    _canvasAt[mode] = _canvasAt[mode]! + delta;
+    final assumed = _assumed[mode];
+    if (assumed != null) _assumed[mode] = assumed + delta;
+    final rect = _canvasIn[mode];
+    if (rect != null) {
+      _canvasIn[mode] = Rect.fromLTRB(
+          rect.left + delta.dx, rect.top + delta.dy, rect.right, rect.bottom);
+    }
+  }
+
   void _reframe(FloorPlanMode from, FloorPlanMode to) {
     final a = _canvasAt[from]!, b = _canvasAt[to]!;
     _assumed.putIfAbsent(from, () => a);
@@ -820,10 +860,12 @@ class FloorPlanController extends ChangeNotifier {
   /// frame that first showed a plan in that mode. When a reframing assumed
   /// another origin, the camera is corrected: into the shown mode, by what
   /// the assumption missed; out of a mode no longer shown, by the same the
-  /// other way.
+  /// other way. [chrome], where the view's chrome alone puts that canvas,
+  /// is the basis a later [canvasAssumed] moves the origin from.
   @internal
-  void canvasMeasured(FloorPlanMode shown, Offset origin) {
+  void canvasMeasured(FloorPlanMode shown, Offset origin, {Offset? chrome}) {
     _canvasAt[shown] = origin;
+    if (chrome != null) _chromeAt[shown] = chrome;
     final assumed = _assumed.remove(shown);
     if (assumed == null || assumed == origin) return;
     cameraController

@@ -1191,7 +1191,10 @@ class _PlannerShellState extends State<PlannerShell> {
           if (!kPageCommandIds.contains(c.id)) c
       ],
     ];
-    bool? lastFile;
+    // A bare shell's other file commands (New to Save As) are file
+    // buttons: Export or Print right after them joins their group, with no
+    // gap between two file buttons (S-2; Task 2 review R-2).
+    bool? lastFile = groups.first.isEmpty ? null : true;
     for (final action in actions) {
       final (command, file) = switch (action) {
         FloorPlanEditorAction.export => (byId(fileCommands, 'export'), true),
