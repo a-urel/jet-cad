@@ -62,6 +62,11 @@ class SelectTool extends Tool {
   /// press and hover, a drag's gate at the slop and again at the up, the
   /// band at its release, the keys at each key. Null: every gate open, as
   /// [SelectGates.all].
+  ///
+  /// The grip cache has its own `GripCache.gates`: a host passes the same
+  /// object to both. With only this one gated, the cache still draws and
+  /// hits a closed role's grips (and shows their cursor and hot grip), and
+  /// only the drag is refused.
   final SelectGates? gates;
 
   /// The drag began from a body with exactly one key selected (09c D8).
@@ -727,18 +732,32 @@ class SelectTool extends Tool {
       if (g != null && !(g.idleKeys && g.delete)) {
         return KeyEventResult.ignored;
       }
-      _deleteSelection(ctx);
+      deleteSelection(ctx);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  /// Deletes the selection as the idle Delete key does: one command (one
+  /// undo step, executed through [ToolContext.execute]), or none. It acts
+  /// only while no gesture runs (idle), is gated by [gates]' `delete` but
+  /// not by `idleKeys` (a command is not a key), and answers whether a
+  /// command was executed: false mid-gesture, under a closed `delete`, with
+  /// nothing selected, or when every selected object is refused.
+  bool deleteSelection(ToolContext ctx) {
+    if (_phase != ToolPhase.idle) return false;
+    final g = gates;
+    if (g != null && !g.delete) return false;
+    return _deleteSelection(ctx);
   }
 
   /// Per selected key, in ascending `target` order: builds the object's full
   /// command list, checks every command against [DraftPermissions] before
   /// executing any of them, and only removes the selection entry once the
   /// whole list has run. A refused object is skipped whole — it stays
-  /// selected and untouched — never partially deleted.
-  void _deleteSelection(ToolContext ctx) {
+  /// selected and untouched — never partially deleted. Answers whether a
+  /// command was executed.
+  bool _deleteSelection(ToolContext ctx) {
     final doc = ctx.document;
     final permissions = doc.commands.permissions;
     final keys = ctx.selection.keys.toList()
@@ -797,9 +816,10 @@ class SelectTool extends Tool {
       named.addAll(names);
       removed.add(key);
     }
-    if (commands.isEmpty) return;
+    if (commands.isEmpty) return false;
     ctx.execute(CompoundCommand(commands, label: 'Delete'));
     ctx.selection.remove(removed);
+    return true;
   }
 
   /// Leaves first (fills whose boundary is here skipped), child instances,

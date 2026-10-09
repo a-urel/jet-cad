@@ -11,7 +11,9 @@
 
 import 'dart:math' as math;
 import 'dart:typed_data';
-import 'dart:ui' show Offset, Size;
+import 'dart:ui' show Offset, PointerDeviceKind, Size;
+
+import 'package:flutter/gestures.dart' show kPrimaryButton;
 
 import 'package:flutter/material.dart'
     show
@@ -243,6 +245,25 @@ List<RecordedCall> rawPoints(List<RecordedCall> calls, int argb) => [
       for (final c in calls)
         if (c.name == 'drawRawPoints' && c.color?.toARGB32() == argb) c,
     ];
+
+/// A finger at [p], resolved as `InteractionLayer` resolves one: the
+/// precise radius plus a 24 px reach (spec 14t R-3).
+ToolPointerEvent finger(GatedRig r, Offset p, {int buttons = kPrimaryButton}) {
+  final cam = r.camera.value;
+  return ToolPointerEvent(
+    screen: p,
+    world: cam.screenToWorld(Vector2(p.dx, p.dy)),
+    pointer: 7,
+    buttons: buttons,
+    shift: false,
+    control: false,
+    meta: false,
+    alt: false,
+    pickRadiusWorld: kPickRadiusPixels / cam.scale,
+    reachRadiusWorld: 24 / cam.scale,
+    kind: PointerDeviceKind.touch,
+  );
+}
 
 final int kGrip = PaperPalette.light.grip.toARGB32();
 final int kGripMove = PaperPalette.light.gripMove.toARGB32();
@@ -720,6 +741,209 @@ void main() {
         }
       }
     }
+  });
+
+  // The review's probes (s4-task-3-review R-1): each holds one mutant the
+  // T3 killers let survive.
+
+  test(
+      'a centre grip drag whose move closed before the up commits nothing; '
+      'one whose reshape closed still moves (S-9h; RV-1)', () {
+    for (final close in const ['move', 'reshape']) {
+      final s = gripScene();
+      final g = TestGates();
+      final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+      r.selection.replace([k(s.arcPos)]);
+      final before = snapshot(r.document);
+      final c = r.at(arcCentre.$1, arcCentre.$2);
+      r.down(c);
+      r.moveTo(c + const Offset(-30, 18));
+      expect(r.tool.dragKind, DragKind.move, reason: 'premise');
+      close == 'move' ? g.move = false : g.reshape = false;
+      r.up(c + const Offset(-30, 18));
+      expect(r.document.commands.undoDepth, close == 'move' ? 0 : 1,
+          reason: close);
+      if (close == 'move') expect(snapshot(r.document), before);
+    }
+  });
+
+  test(
+      "a closed move role's buffer is the same object across frames, and is "
+      'not drawn (RV-2)', () {
+    final s = gripScene();
+    final g = TestGates();
+    final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+    r.selection.replace([k(s.arcPos), k(s.circle)]);
+    final painter = r.overlay();
+    Float32List move(List<RecordedCall> calls) =>
+        rawPoints(calls, kGripMove).single.args[1] as Float32List;
+    final buffer = move(r.paint(painter));
+    for (var frame = 0; frame < 4; frame++) {
+      g.move = frame.isOdd;
+      final m = r.camera.value.worldToScreenMatrix;
+      r.camera.value = ViewportTransform(
+          worldToScreenMatrix:
+              Transform2(m.a, m.b, m.c, m.d, m.e + 11, m.f - 7));
+      final calls = r.paint(painter);
+      if (g.move) {
+        expect(identical(move(calls), buffer), isTrue, reason: 'frame $frame');
+      } else {
+        expect(rawPoints(calls, kGripMove), isEmpty, reason: 'frame $frame');
+      }
+    }
+  });
+
+  test(
+      'a finger press and a finger hover go through the pick override too '
+      '(S-15; RV-3)', () {
+    final s = gripScene();
+    final g = TestGates()
+      ..restricts = true
+      ..picker = (e, ctx) => k(s.instB);
+    final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+    final p = r.at(lineBody.$1, lineBody.$2);
+    r.tool.onPointerMove(finger(r, p, buttons: 0), r.context);
+    expect(r.selection.hover, k(s.instB), reason: 'the finger hover');
+    r.tool.onPointerDown(finger(r, p), r.context);
+    r.tool.onPointerUp(finger(r, p, buttons: 0), r.context);
+    expect(r.selection.keys, {k(s.instB)}, reason: 'the finger press');
+  });
+
+  test("a finger's wider grip hit test honours reshape: false (RV-4)", () {
+    final s = gripScene();
+    final g = TestGates()..reshape = false;
+    final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+    r.selection.replace([k(s.line)]);
+    final end = r.at(lineEnd.$1, lineEnd.$2) + const Offset(9, 0);
+    expect(
+        r.grips.hitTest(end, r.camera.value.worldToScreenMatrix,
+            radius: kTouchGripHitPixels),
+        -1);
+    r.tool.onPointerDown(finger(r, end), r.context);
+    expect(r.tool.pressClass, isNot(PressClass.grip));
+  });
+
+  test('a band leaves out an instance the gates refuse, in both modes (RV-5)',
+      () {
+    for (final crossing in const [false, true]) {
+      final s = gripScene();
+      final g = TestGates()..accepts = (d, key) => key.target != s.instB;
+      final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+      final a = r.at(6990, 2980), b = r.at(7580, 3360);
+      final (from, to) = crossing == (b.dx >= a.dx) ? (b, a) : (a, b);
+      r.drag(from, to);
+      expect(r.selection.keys, contains(k(s.instA)), reason: 'premise');
+      expect(r.selection.keys, isNot(contains(k(s.instB))),
+          reason: 'crossing $crossing');
+    }
+  });
+
+  test('a hot centre grip is not drawn under move: false (RV-6)', () {
+    final s = gripScene();
+    final g = TestGates()..move = false;
+    final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+    r.selection.replace([k(s.arcPos)]);
+    r.grips.hot =
+        r.grips.grips.indexWhere((ref) => ref.grip.role == GripRole.move);
+    expect(r.grips.hot, greaterThanOrEqualTo(0));
+    expect(rawPoints(r.paint(), kGripHot), isEmpty);
+  });
+
+  test('under every edit gate closed (readOnly) a band still selects (RV-7)',
+      () {
+    final s = gripScene();
+    final g = TestGates()
+      ..move = false
+      ..rotate = false
+      ..reshape = false
+      ..delete = false;
+    final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+    r.drag(r.at(6990, 2980), r.at(7580, 3360));
+    expect(r.selection.keys, containsAll([k(s.line), k(s.instA)]));
+  });
+
+  // deleteSelection (s4-task-3-review R-2): the idle Delete key's command,
+  // public for the controller's `deleteSelection()` (Task 6).
+
+  test(
+      'deleteSelection deletes exactly as the idle Delete key does: one '
+      'command, the same document, the same selection; one undo undoes it '
+      'as it undoes the key (D-1)', () {
+    final byKey = gripScene(), byCall = gripScene();
+    final rk = gatedRig(byKey.document), rc = gatedRig(byCall.document);
+    final before = snapshot(byCall.document);
+    for (final (r, s) in [(rk, byKey), (rc, byCall)]) {
+      r.selection.replace([k(s.line), k(s.instA), k(s.group)]);
+    }
+    expect(rk.deleteKey(), KeyEventResult.handled);
+    expect(rc.tool.deleteSelection(rc.context), isTrue);
+    expect(rc.document.commands.undoDepth, 1);
+    expect(snapshot(rc.document), snapshot(rk.document));
+    expect(snapshot(rc.document), isNot(before));
+    expect(rc.selection.keys, rk.selection.keys);
+    expect(rc.document.entities.slotOf(byCall.line), isNull);
+    expect(rc.document.tree[byCall.instA], isNull);
+    rk.document.commands.undo();
+    rc.document.commands.undo();
+    expect(rc.document.commands.undoDepth, 0);
+    expect(snapshot(rc.document), snapshot(rk.document));
+    expect(rc.document.entities.slotOf(byCall.line), isNotNull);
+    expect(rc.document.tree[byCall.instA], isNotNull);
+  });
+
+  test(
+      'deleteSelection is gated by delete, not by idleKeys: under idleKeys '
+      'false the key deletes nothing while the call deletes (D-2)', () {
+    for (final (idleKeys, delete) in const [
+      (false, true),
+      (true, false),
+      (false, false),
+    ]) {
+      final s = gripScene();
+      final g = TestGates()
+        ..idleKeys = idleKeys
+        ..delete = delete;
+      final r = gatedRig(s.document, toolGates: g, cacheGates: g);
+      // Two leaves: an undo restores the encoding byte for byte.
+      r.selection.replace([k(s.line), k(s.circle)]);
+      final before = snapshot(r.document);
+      final why = 'idleKeys $idleKeys, delete $delete';
+      expect(r.deleteKey(), KeyEventResult.ignored, reason: why);
+      expect(snapshot(r.document), before, reason: '$why: the key');
+      expect(r.tool.deleteSelection(r.context), delete, reason: why);
+      expect(r.document.commands.undoDepth, delete ? 1 : 0, reason: why);
+      if (delete) {
+        expect(r.document.entities.slotOf(s.line), isNull, reason: why);
+        expect(r.selection.keys, isEmpty, reason: why);
+        r.document.commands.undo();
+      } else {
+        expect(r.selection.keys, {k(s.line), k(s.circle)}, reason: why);
+      }
+      expect(snapshot(r.document), before, reason: why);
+    }
+  });
+
+  test(
+      'deleteSelection answers false mid-press, mid-drag and with nothing '
+      'selected, and deletes nothing (D-3)', () {
+    final s = gripScene();
+    final r = gatedRig(s.document, toolGates: TestGates());
+    final before = snapshot(r.document);
+    expect(r.tool.deleteSelection(r.context), isFalse, reason: 'empty');
+    r.selection.replace([k(s.line)]);
+    final body = r.at(lineBody.$1, lineBody.$2);
+    r.down(body);
+    expect(r.tool.phase, ToolPhase.pressed, reason: 'premise');
+    expect(r.tool.deleteSelection(r.context), isFalse, reason: 'pressed');
+    r.moveTo(body + const Offset(40, 25));
+    expect(r.tool.dragKind, DragKind.move, reason: 'premise');
+    expect(r.tool.deleteSelection(r.context), isFalse, reason: 'dragging');
+    expect(r.tool.dragKind, DragKind.move, reason: 'the drag goes on');
+    r.escape();
+    expect(snapshot(r.document), before);
+    expect(r.document.commands.undoDepth, 0);
+    expect(r.selection.keys, {k(s.line)});
+    expect(r.tool.deleteSelection(r.context), isTrue, reason: 'idle again');
   });
 
   // T3-i.

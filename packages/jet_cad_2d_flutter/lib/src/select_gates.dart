@@ -32,6 +32,9 @@ class SelectGates {
   /// The key a press or hover at [e] picks, or null for none; asked only
   /// while [restrictsPick]. A pick filtered after the index's topmost hit
   /// would miss what lies under it (S-15), so this answers the whole pick.
+  /// That includes a finger's reach: for a touch (`e.isTouch`) it answers
+  /// within `e.reachRadiusWorld` when the precise radius misses, as the
+  /// tool's own pick does (spec 14t R-3).
   SelectionKey? pick(ToolPointerEvent e, ToolContext ctx) => null;
 
   /// Whether a rubber band may select [key] of [d]: a band selects only the
@@ -48,7 +51,8 @@ class SelectGates {
   /// Every grip but the centre one is drawn, hit and dragged.
   bool get reshape => true;
 
-  /// Delete and Backspace delete the selection while no gesture runs.
+  /// Delete and Backspace delete the selection while no gesture runs, and
+  /// so does `SelectTool.deleteSelection`.
   bool get delete => true;
 
   /// The tool's own keys act while no gesture runs: Escape (clearing the

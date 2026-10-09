@@ -71,7 +71,8 @@ one body.
   **and every image golden stay untouched** (invariant 7). The engine
   (`jet_cad_2d`) is **not edited**; `jet_cad_2d_flutter` is edited **only**
   in Task 3 (`SelectGates`, `SelectTool.gates`, `GripCache.gates`,
-  `InteractionLayer.autofocus`).
+  `InteractionLayer.autofocus` and, by the review,
+  `SelectTool.deleteSelection`).
 - **P-1 and P-6:** no existing signature, `==`, `hashCode` or `toString`
   changes; every new parameter is named and optional with today's
   behaviour as its default. **With no new parameter, every code path is
@@ -473,6 +474,12 @@ format), demo, floor planner.
   notifies, for a host's runtime change.
 - `InteractionLayer({…, this.autofocus = true})`, passed to its `Focus`;
   the pointer-down requests unchanged.
+- **Added by the review (s4-task-3-review R-2, ruled as recommended):**
+  `bool SelectTool.deleteSelection(ToolContext ctx)`, the idle Delete's
+  command made public: it acts only while idle, is gated by `delete` and
+  not by `idleKeys`, and answers whether a command ran; the idle Delete
+  and Backspace call it, so the keys are unchanged. Task 6's
+  `FloorPlanController.deleteSelection()` (S-16 as ruled) is built on it.
 
 **Tests** (render `test/select_gates_test.dart`, on `support/selection_fixture.dart`
 and `support/grip_fixture.dart`: a line, an arc, a root group and two
@@ -764,6 +771,9 @@ format), demo, floor planner.
   drawing tool's Escape and Enter, the symbol tool's R and M). The
   commands stay callable (`undo()`, `redo()`, `exportPlan`, `printPlan`,
   `selectTool`).
+- **`deleteSelection()`** (S-16 as ruled by the controller): over Task
+  3's `SelectTool.deleteSelection` (s4-task-3-review R-2), with its
+  killers as S-16 names them.
 - **`autofocus: false`:** the service view's `Focus` and, through a new
   optional `PlannerView.autofocus`, the canvas's `InteractionLayer`, in
   both modes; a tap on the canvas still takes the focus.
@@ -982,16 +992,19 @@ Each mutant and its killer:
   answers instance B → a press selects B and a hover sets B; an override
   answering null over the line → neither selects nor hovers.
 - **T3-c:** the centre (move-role) grip escapes `move`. Killer: under
-  `move: false` a drag of a line's centre grip and a body drag both leave
-  the document unchanged (no command) and show no move cursor; under
-  `move: true` both move it.
+  `move: false` a drag of an arc's centre grip (a line has none) and a
+  body drag both leave the document unchanged (no command) and show no
+  move cursor; under `move: true` both move it.
 - **T3-d:** the rotation grip drawn or hit under `rotate: false`. Killer:
   the overlay's recorded calls hold no rotation disc; a press at its place
   is not `rotationGrip`; no command.
 - **T3-e:** a stretch grip drawn or hit under `reshape: false`. Killer:
   no `drawRawPoints` with the stretch paint; `hitTest` at an end grip is
-  -1; a drag from it is a band or a click, never a reshape; the centre
-  grips still drawn under `move: true`.
+  -1; a drag from it is a band, a click or a body move, never a reshape
+  (with the shell's wiring, one gates object on the tool and the cache,
+  the hidden end grip is not there and the press falls through to the
+  line's body: a selected line's end pressed under `reshape: false` is a
+  body move); the centre grips still drawn under `move: true`.
 - **T3-f:** Delete under `delete: false`. Killer: Delete and Backspace
   remove nothing and return `ignored`.
 - **T3-g:** idle keys under `idleKeys: false`. Killer: idle Escape and

@@ -206,7 +206,9 @@ class GripCache extends ChangeNotifier {
   final ObjectGripProvider? objects;
 
   /// What the select tool may do (host embedding API Slice 4), asked live at
-  /// each hit test and frame, never captured; null: every gate open.
+  /// each hit test and frame, never captured; null: every gate open. A host
+  /// passes the same object as `SelectTool.gates`: the tool's own gate
+  /// refuses the drag, this one hides the grip.
   final SelectGates? gates;
 
   final List<GripRef> _grips = <GripRef>[];
@@ -300,7 +302,9 @@ class GripCache extends ChangeNotifier {
   /// A host changed [gates]' answers: [hot] is reset, since it may name a
   /// grip that is no longer live, and the listeners (the overlay's repaint)
   /// are notified. Nothing is rebuilt: the grips are read through the gates
-  /// at each hit test and frame anyway.
+  /// at each hit test and frame anyway. The select tool's cursor is not
+  /// recomputed: it stays stale until the next pointer move (`precise` over
+  /// a grip now hidden, `move` over a body under a now closed `move`).
   void gatesChanged() {
     hot = -1;
     notifyListeners();
