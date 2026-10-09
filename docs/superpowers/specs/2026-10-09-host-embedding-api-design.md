@@ -1,10 +1,11 @@
 # The host embedding API (umbrella) — design
 
-**Date:** 2026-10-09. **Status:** design, **revision 2**. Revision 1
+**Date:** 2026-10-09. **Status:** design, **revision 3**. Revision 1
 (`5bdb823`) was reviewed independently: *Approve with fixes*, V-1 to V-22,
-no redesign. This text folds in every fix and the controller's rulings on
-the four that needed a decision (V-2, V-4, V-5, V-8); see
-[Review](#review). Two questions stay with the human (Q-H1, Q-H2).
+no redesign. Revision 2 (`6f90e0e`) folded in every fix and the
+controller's rulings on the four that needed a decision (V-2, V-4, V-5,
+V-8); see [Review](#review). Revision 3 records the human's answers to
+Q-H1 (**schema 9**) and Q-H2 (**double tap without delay**).
 
 **Asked for by the human, 2026-10-08:** *"Monépro entegrasyonuna geç. Önce
 beyin fırtınası. Temel nokta, başka bir uygulamaya gömecek esnekliğe
@@ -39,9 +40,12 @@ paraphrased):**
   callbacks**; state changes are **controller listenables or streams**;
   commands are controller methods.
 - **Host data on a table:** **yes**, a table carries a host map (e.g. the
-  database id) **stored in the plan**. The human accepted schema 9 as its
-  price; [E-9](#e-9-the-schema-stays-8) finds the price is not owed and
-  asks for confirmation (Q-H1).
+  database id) **stored in the plan**, at the price of **schema 9**.
+  Asked again after revision 2 showed an older reader would keep the
+  data (Q-H1), the human kept **schema 9** (2026-10-09): terminals move
+  together, as at 0.2.0. See [E-9](#e-9-schema-9).
+- **Double tap (Q-H2, 2026-10-09):** **without delay**: both taps report
+  as taps, then the double tap.
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `85905bd`
 (release 0.3.0 + its STATUS). **Size:** L in total; each slice S–M.
@@ -49,7 +53,7 @@ paraphrased):**
 the overlay's input marker in `InteractionLayer` and
 `CameraGestureDetector`; Slice 2: `ToolPointerEvent.timeStamp`; Slice 3:
 the palette's colours as parameters; Slice 4: `SelectTool`'s gates);
-`jet_cad_2d` only if [E-9](#e-9-the-schema-stays-8) is overturned;
+`jet_cad_2d` (Slice 2: `kSchemaVersion` 9, E-9);
 `apps/restaurant_demo`, `tool/ci/host_probe`, the host guide, the
 CHANGELOG in every slice.
 
@@ -428,8 +432,8 @@ ascending by handle) with its new geometry, once per drag, after
 and within `kDoubleTapSlop` of it, timed from the raw pointer events
 (`ToolPointerEvent` gains `timeStamp`, F-13). A locked table reports it.
 With a modifier held it is not a double tap (each click toggles).
-**The single tap is not delayed**: both taps report `onTableTap` (and
-select) as today, then `onTableDoubleTap` fires. Q-H2.
+**The single tap is not delayed** (the human, Q-H2): both taps report
+`onTableTap` (and select) as today, then `onTableDoubleTap` fires.
 
 ### E-3. A tap on the floor
 
@@ -479,7 +483,7 @@ final class FloorPlanPlanReplaced extends FloorPlanDesignChange {} // load, newP
   control characters. **On read** a payload outside them is kept as
   unknown data and written back, reads as empty `data`, and is reported
   as a `Diagnostic`; a plan is never refused for it (a later release may
-  relax a limit without a schema bump).
+  relax a limit without another schema bump).
 - `bool setTableData(String number, Map<String, String> data)` and `bool
   setTablesData(Map<String, Map<String, String>> byNumber)` (one undo
   step, **all or nothing**): design edits (undoable, `dirty`, `revision`,
@@ -505,29 +509,29 @@ or programmatically. jet-cad shows no data field of its own.
 The guide's recipe gains the id form: a host that stores `id` in `data`
 compares ids, not codes.
 
-### E-9. The schema stays 8
+### E-9. Schema 9
 
-- A 0.3.0 (or 0.2.0) reader has not registered `jetcad.table_data`, so it
-  keeps the payload as unknown data and writes it back byte for byte
-  (F-14; the review ran it); it draws nothing differently, because
-  nothing it draws reads the data. The rule that made 7 bump (an older
-  reader **drawing** the plan differently) does not apply.
-- So **`kSchemaVersion` stays 8**: 0.2.0, 0.3.0 and later terminals keep
-  sharing plans. On a 0.3.0 terminal: a renumbered table keeps its data; a
-  deleted table leaves its data **orphaned** on a dead handle, harmless and
-  never surfaced (data is read through live instances). The guide says
-  so.
-- **Gates:** (1) a plan with table data decoded **without registering the
-  type** re-encodes byte for byte; (2) 0.3.0's design edits (move,
-  rotate, renumber, delete, undo) through a registry without the type
-  keep the payload, and after the delete it is on a dead handle and no
-  `tableDetails` shows it; (3) through Slice 2's registry a delete removes
-  the component and undo restores it. If (1) or (2) cannot pass, the
-  slice bumps to 9 instead, with the migration and a CHANGELOG line.
-- **Q-H1:** the human accepted 9; this is better news, but it changes the
-  brainstorm answer, so it is confirmed before Slice 2's plan.
-- The same orphaning on delete happens to **every** component of every
-  deleted node today (a wall's or room's parameters); that predates this
+- **The human's ruling (Q-H1):** `kSchemaVersion` moves from 8 to **9** with
+  Slice 2. The codec writes 9 for **every** plan saved from then on, with
+  or without table data; a 0.3.0 or 0.2.0 terminal refuses it
+  (`SchemaVersionError`, which `load` turns into a `FormatException` that
+  says why). **Every terminal that shares stored plans moves together**,
+  as at 0.2.0; the CHANGELOG heads it *Breaking for stored plans*.
+- **Migration 8 → 9 is empty:** an 8 plan has no `jetcad.table_data`, and
+  its absence means empty data. A schema-8 (and 7) plan opens unchanged.
+  `schema_version.dart`'s comment records 9 and why: not for the reader's
+  drawing, as 6–8 were, but so that no terminal silently carries host
+  links it cannot see or keep consistent (a 0.3.0 terminal would leave a
+  deleted table's data orphaned, F-14).
+- The service layout's format is unchanged (it holds no table data).
+- The bundled symbol libraries are re-encoded at 9, as at 8.
+- **Gates:** (1) an 8 plan loads and saves as 9, its drawing unchanged
+  (the round-trip goldens re-encoded, the fingerprints' standing values
+  moved and recorded); (2) a 9 plan with table data round-trips byte for
+  byte; (3) a delete through Slice 2's registry removes the component and
+  undo restores it; (4) a 10 plan is refused.
+- The orphaning on delete still happens to **every** other component of
+  every deleted node (a wall's or room's parameters); that predates this
   spec and is its own task (O-8).
 
 ## Slice 3 — the look
@@ -725,8 +729,9 @@ follow the ambient `Theme`; a host that must not show them uses
    the theme are never saved, exported or printed.
 5. Every callback and query names tables by number; no handle crosses the
    barrel.
-6. Table data round-trips through `designJson`/`load`; a reader without
-   the type preserves it; a delete drops it undoably (E-6, E-9).
+6. Table data round-trips through `designJson`/`load`; a delete drops it
+   undoably; every plan saved after Slice 2 is schema 9 and an 8 plan
+   opens unchanged (E-6, E-9).
 7. The frame path: `query_allocation_test`, `paint_allocation_test`, the
    floor-plan painters' counter tests and `RenderFloorPlanOverlays`'
    counter test stay at their bars, the last three also with a theme and
@@ -783,7 +788,8 @@ sharing a number, an unnumbered table, a camera not at identity.
 - M-H24: keys written unsorted (killer: byte-exact golden JSON); M-H24b:
   an empty map leaves an empty component.
 - M-H25: an undone delete reported as remove + add.
-- M-H26: the unknown-type round trip drops the payload (E-9 gate 1).
+- M-H26: the codec still writes 8 (E-9 gate 1); an 8 plan refused
+  (migration gate).
 - M-H27: the expander does not detach on delete (E-9 gate 3).
 - M-H28: an over-limit payload throws on load.
 - M-H29: `setTablesData` writes part of a batch with one bad entry;
@@ -827,24 +833,24 @@ sharing a number, an unnumbered table, a camera not at identity.
   `box` sizing: a relayout per camera frame. Mitigation: `natural` is the
   default; `hideBelowScale` and culling; a measured row in the slice's
   results (the web build).
-- **R-3. Double tap without delay** (E-2) means a host that opens a tab on
-  tap and something else on double tap does both. Documented; Q-H2.
+- **R-3. Double tap without delay** (E-2, the human's choice) means a
+  host that opens a tab on tap and something else on double tap does
+  both. The guide says so.
 - **R-4. `tablesOnly` holes.** F-15 lists every edit path known at
   `85905bd`; Slice 4's review re-enumerates them against the flags.
 - **R-5. Host data and plan exchange.** A host can write ids into one
   location's plan and load that plan at another; jet-cad cannot know.
   Documented: data is the host's to validate.
-- **R-6. E-9 rests on preserve-unknown** staying true; the gates test the
-  current code's path, and the release review repeats the cross-tree
-  round trip with the real 0.3.0 tree.
+- **R-6. Schema 9 splits fleets.** A restaurant that updates one
+  terminal first can no longer open that terminal's plans elsewhere. The
+  CHANGELOG and the guide say so in bold, as for 8; the release that
+  carries Slice 2 is the human's to time.
 
 ## Open questions
 
-- **Q-H1 (the human):** the schema stays 8 for host data (E-9) instead of
-  the 9 you accepted. Confirm.
-- **Q-H2 (the human):** double tap reports both single taps first (no
-  delay). Or delay single taps on tables when a double-tap callback is
-  given?
+- **Q-H1 (the human), answered 2026-10-09:** schema 9 (E-9).
+- **Q-H2 (the human), answered 2026-10-09:** double tap without delay
+  (E-2).
 - **Q-H3 (Monépro):** which overlay sizes and detail levels phase 2 wants;
   whether the id goes in `data["id"]` (the guide will suggest it).
 - **Q-Z1 and Q-Z4** (zone spec) are answered by Slices 1 and 2; Monépro's
@@ -900,7 +906,7 @@ deletion) held; both are corrected above. Dispositions:
 
 | Finding | Disposition |
 |---|---|
-| V-1 delete keeps component data | Accepted: E-6's expander, E-9 rewritten, gates 2–3, M-H27, O-8 |
+| V-1 delete keeps component data | Accepted: E-6's expander, E-9's gate 3, M-H27, O-8 |
 | V-2 widening `FloorPlanTable.==` breaks | **Ruled (a):** `FloorPlanTableDetail`, a new type; `FloorPlanTable` unchanged; P-1 reworded |
 | V-3 `tables` moves with `revision`; scan per read | Accepted: G-1's cache and wording; M-H15 |
 | V-4 overlay pointers and render model | **Ruled:** a `Flow`-like render box with one per-child offset, a `PlannerView` slot inside the input listeners, an input marker for interactive overlays; M-H16, M-H17 |
@@ -908,7 +914,7 @@ deletion) held; both are corrected above. Dispositions:
 | V-6 `ExportChoice` is format+dpi | Accepted: C-3, C-4; public export enums; every entry point; M-H46 |
 | V-7 capability table misses paths | Accepted: F-15, `mirror`, `reshape`, `changeLayer`, `FloorPlanSymbol`, `SelectTool` gates; M-H42, M-H43 |
 | V-8 the editor bar | **Ruled: in scope** (the human's toolbar ruling named the editor's top bar): C-2 `FloorPlanEditorBar`, `activeTool`, `selectTool`; F-11 corrected |
-| V-9 strict reader without a bump | Accepted: validate on write only; lenient read with a diagnostic; M-H28 |
+| V-9 strict reader without a bump | Accepted: validate on write only; lenient read with a diagnostic; M-H28 (kept under schema 9: a later release may relax a limit within 9) |
 | V-10 camera mechanics | Accepted: the epoch, the canvas size, fits clamp, `panBy` always, `centerOn` queues |
 | V-11 decomposition, degenerate fixture | Accepted: G-1's decomposition, M-H3 rewritten, M-H13, M-H14 |
 | V-12 design-change coverage | Accepted: `FloorPlanTableChanged(before, after)`, `FloorPlanPlanReplaced` in either mode |
