@@ -1131,7 +1131,8 @@ the designed tables added, removed and changed since the last report.
   edit made just before it listened.
 - The tables are compared only while the stream has a listener.
   `dispose()` closes it, so a listener on a controller you dispose needs
-  no cancel; changes not yet delivered then are dropped.
+  no cancel: nothing reaches it after `dispose()`, not even a change
+  reported before it and not yet delivered (a `load` in the same step).
 
 ## 8. Callbacks, options, and the web's context menu
 

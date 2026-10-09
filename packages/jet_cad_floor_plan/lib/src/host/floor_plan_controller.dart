@@ -1307,9 +1307,19 @@ class FloorPlanController extends ChangeNotifier {
   /// compared only while the stream has a listener. The first listener
   /// starts from the design as it is when it listens; a listener added
   /// while another listens starts where that one is, so its first report
-  /// may include an edit made just before it listened. Closed by [dispose]:
-  /// changes not yet delivered then are dropped.
-  Stream<FloorPlanDesignChange> get designChanges => _designChanges.stream;
+  /// may include an edit made just before it listened.
+  ///
+  /// Closed by [dispose]: nothing reaches a listener after it, not even a
+  /// change reported before it and not yet delivered (a [load] or
+  /// [newPlan] in the same synchronous step as the [dispose]); then the
+  /// stream is done. A listener on a controller you dispose needs no
+  /// cancel.
+  Stream<FloorPlanDesignChange> get designChanges => _designStream;
+
+  /// [_designChanges]' stream, read at delivery: once [dispose] has run, a
+  /// change already added is not passed on (Slice 2's final review F-1).
+  late final Stream<FloorPlanDesignChange> _designStream =
+      _designChanges.stream.where((_) => !_disposed);
 
   void _watchDesign() {
     if (_disposed) return;

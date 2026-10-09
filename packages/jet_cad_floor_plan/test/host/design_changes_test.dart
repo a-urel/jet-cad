@@ -679,4 +679,55 @@ void main() {
         ],
         reason: 'the same plan, the same baseline');
   });
+
+  testWidgets(
+      'DC18 final review F-1: an edit, a load and dispose() in one '
+      'synchronous step deliver nothing -- not the edit\'s Changed nor the '
+      'FloorPlanPlanReplaced the load reported -- and then done',
+      (tester) async {
+    final c = FloorPlanController(json: embeddingPlanJson());
+    final seen = <FloorPlanDesignChange>[];
+    var done = false;
+    c.designChanges.listen(seen.add, onDone: () => done = true);
+    expect(c.setTableData('1', hostData()), isTrue);
+    c.load(embeddingPlanJson());
+    c.dispose();
+    await tester.pump();
+    expect(seen, isEmpty);
+    expect(done, isTrue);
+
+    // newPlan, too.
+    final d = FloorPlanController(json: embeddingPlanJson());
+    final seenD = <FloorPlanDesignChange>[];
+    var doneD = false;
+    d.designChanges.listen(seenD.add, onDone: () => doneD = true);
+    d.newPlan();
+    d.dispose();
+    await tester.pump();
+    expect(seenD, isEmpty);
+    expect(doneD, isTrue);
+  });
+
+  testWidgets(
+      'DC19 final review F-1: a listener that disposes the controller on the '
+      'first change of a report hears no second one, and then done',
+      (tester) async {
+    final c = FloorPlanController(json: embeddingPlanJson());
+    final seen = <FloorPlanDesignChange>[];
+    var done = false;
+    c.designChanges.listen((change) {
+      seen.add(change);
+      c.dispose();
+    }, onDone: () => done = true);
+    expect(
+        c.setTablesData({
+          '1': {'id': 'one'},
+          '2': {'id': 'two'},
+        }),
+        isTrue);
+    await tester.pump();
+    expect(seen, hasLength(1), reason: 'the report had two changes');
+    expect(seen.single, isA<FloorPlanTableChanged>());
+    expect(done, isTrue);
+  });
 }

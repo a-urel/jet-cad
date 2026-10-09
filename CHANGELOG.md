@@ -108,7 +108,8 @@ the 0.3.0 host probe against every commit.
   number: an undone delete is one `FloorPlanTableAdded`. Delivered
   asynchronously, one report per synchronous step; nothing on listen;
   nothing for the selection mode's moves; the tables compared only while
-  someone listens; closed by `dispose()`.
+  someone listens; closed by `dispose()`, after which nothing is
+  delivered, not even a change reported before it.
 - **The selection mode's events**, four new `FloorPlanView` callbacks:
   `onTablesMoved(moved)` after a drag, with the moved tables' details,
   once, after `onLayoutChanged` (never on Undo, Redo, `resetLayout()` or
