@@ -11,6 +11,7 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../host/floor_plan_theme.dart' show FloorPlanTheme;
 import '../host/floor_plan_types.dart';
 import '../tables/table_index.dart';
 import 'table_groups.dart';
@@ -69,6 +70,14 @@ Color statusCaptionInk(Color colour, int paper) =>
         ? kStatusCaptionOnDark
         : kStatusCaptionOnLight;
 
+/// A host's text [style] for painted text (host embedding API spec T-1,
+/// T-4, S-3) with today's values where it leaves them null: [ink] as its
+/// colour when it has none (a style with a foreground paint keeps it), and
+/// [kStatusCaptionSize] as its size. Its family, weight and the rest as
+/// given. Built when a painter rebuilds, never per frame.
+TextStyle paintedTextStyle(TextStyle style, Color ink) => style.copyWith(
+    color: style.color ?? ink, fontSize: style.fontSize ?? kStatusCaptionSize);
+
 /// Paints the statuses of [document]'s tables through [camera] (S7).
 ///
 /// Each visible table's effective status is its group's (table-groups spec
@@ -88,6 +97,12 @@ Color statusCaptionInk(Color colour, int paper) =>
 /// status colour over [paper], through [statusCaptionInk]. The host puts
 /// [paper] in [repaint] too (F-16), so a paper change repaints, and the
 /// rebuild then builds each flipped caption once.
+///
+/// The host's look, [theme] (host embedding API spec T-1, T-3), joins the
+/// rebuild key: its `statusFillOpacity` multiplies each status colour's
+/// alpha once, at rebuild, and the caption's ink is taken on that drawn
+/// colour (S-6); its `statusCaptionStyle` styles the captions, the null
+/// properties today's ([paintedTextStyle]).
 class TableStatusPainter extends CustomPainter {
   TableStatusPainter({
     required this.document,
@@ -96,6 +111,7 @@ class TableStatusPainter extends CustomPainter {
     required this.tableGroups,
     required this.groupStatuses,
     required this.paper,
+    this.theme,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
@@ -112,6 +128,11 @@ class TableStatusPainter extends CustomPainter {
   /// theme's surface with no page (D4, D6c).
   final ValueListenable<int> paper;
 
+  /// The resolved look (host embedding API spec T-3); null, or a null
+  /// value, is today's. The host puts it in [repaint] too, so a theme
+  /// change repaints, and the rebuild then builds what it changed.
+  final ValueListenable<FloorPlanTheme?>? theme;
+
   List<_Fill> _fills = const [];
   int? _state;
   int? _tablesRevision;
@@ -119,13 +140,22 @@ class TableStatusPainter extends CustomPainter {
   Map<String, TableGroup>? _groupsBuilt;
   Map<String, TableStatus>? _groupStatusesBuilt;
   int? _paperBuilt;
+  FloorPlanTheme? _themeBuilt;
+
+  /// The caption's least distance below the number's anchor, in logical
+  /// pixels: its size, set at rebuild (S7; T-1's `statusCaptionStyle`).
+  double _captionSize = kStatusCaptionSize;
 
   final Map<Handle, Path?> _paths = {};
+
+  /// Keyed by the drawn colour's ARGB (the status colour, its alpha
+  /// multiplied by the theme's `statusFillOpacity`).
   final Map<int, Paint> _paints = {};
 
-  /// Keyed by (caption, status colour, ink): a paper flip that flips the
-  /// ink builds the new paragraph once; steady frames build none (D6c).
-  final Map<(String, int, Color), ui.Paragraph> _captions = {};
+  /// Keyed by (caption, drawn colour, ink, the theme's caption style): a
+  /// paper flip that flips the ink builds the new paragraph once; steady
+  /// frames build none (D6c).
+  final Map<(String, int, Color, TextStyle?), ui.Paragraph> _captions = {};
   final Float64List _matrix = Float64List(16);
 
   /// Every `Path`, `Paint`, `Paragraph` and matrix this painter created: a
@@ -142,11 +172,14 @@ class TableStatusPainter extends CustomPainter {
   @visibleForTesting
   int get debugCached => _paints.length + _captions.length;
 
-  void _rebuild() {
+  void _rebuild(FloorPlanTheme? look) {
     debugRebuilds++;
     final map = statuses.value;
     final groupMap = groupStatuses.value;
     final paperArgb = paper.value;
+    final opacity = look?.statusFillOpacity;
+    final style = look?.statusCaptionStyle;
+    _captionSize = style?.fontSize ?? kStatusCaptionSize;
     final fills = <_Fill>[];
     // With neither map set nothing can fill: no survey.
     if (map.isNotEmpty || groupMap.isNotEmpty) {
@@ -187,12 +220,16 @@ class TableStatusPainter extends CustomPainter {
       };
       for (final (t, path, status, id) in statused) {
         final bounds = path.getBounds();
-        final colour = status.color.toARGB32();
+        // The theme's opacity multiplies the host colour's alpha, once.
+        final drawn = opacity == null
+            ? status.color
+            : status.color.withValues(alpha: status.color.a * opacity);
+        final colour = drawn.toARGB32();
         final paint = _paints.putIfAbsent(colour, () {
           debugAllocations++;
           return Paint()
             ..style = PaintingStyle.fill
-            ..color = status.color;
+            ..color = drawn;
         });
         final caption = status.caption;
         final captioned = caption != null &&
@@ -204,8 +241,8 @@ class TableStatusPainter extends CustomPainter {
           path,
           paint,
           captioned
-              ? _captionOf(
-                  caption, colour, statusCaptionInk(status.color, paperArgb))
+              ? _captionOf(caption, colour,
+                  style?.color ?? statusCaptionInk(drawn, paperArgb), style)
               : null,
           label?.x ?? bounds.center.dx,
           label?.y ?? bounds.center.dy,
@@ -259,15 +296,27 @@ class TableStatusPainter extends CustomPainter {
     }
   }
 
-  ui.Paragraph _captionOf(String caption, int colour, Color ink) => _captions
-      .putIfAbsent((caption, colour, ink), () => _paragraph(caption, ink));
+  ui.Paragraph _captionOf(
+          String caption, int colour, Color ink, TextStyle? style) =>
+      _captions.putIfAbsent(
+          (caption, colour, ink, style), () => _paragraph(caption, ink, style));
 
-  ui.Paragraph _paragraph(String text, Color ink) {
+  /// Today's caption with no [style]; with one, the host's style with
+  /// today's values where it leaves them null (T-1, T-4).
+  ui.Paragraph _paragraph(String text, Color ink, TextStyle? style) {
     debugAllocations++;
-    final b = ui.ParagraphBuilder(ui.ParagraphStyle(
-        fontSize: kStatusCaptionSize, textAlign: TextAlign.center))
-      ..pushStyle(ui.TextStyle(color: ink, fontSize: kStatusCaptionSize))
-      ..addText(text);
+    final ui.ParagraphBuilder b;
+    if (style == null) {
+      b = ui.ParagraphBuilder(ui.ParagraphStyle(
+          fontSize: kStatusCaptionSize, textAlign: TextAlign.center))
+        ..pushStyle(ui.TextStyle(color: ink, fontSize: kStatusCaptionSize));
+    } else {
+      final resolved = paintedTextStyle(style, ink);
+      b = ui.ParagraphBuilder(
+          resolved.getParagraphStyle(textAlign: TextAlign.center))
+        ..pushStyle(resolved.getTextStyle());
+    }
+    b.addText(text);
     return b.build()..layout(const ui.ParagraphConstraints(width: 120));
   }
 
@@ -279,19 +328,22 @@ class TableStatusPainter extends CustomPainter {
     final groups = tableGroups.value;
     final groupMap = groupStatuses.value;
     final paperArgb = paper.value;
+    final look = theme?.value;
     if (_state != state ||
         _tablesRevision != revision ||
         !identical(_builtFor, map) ||
         !identical(_groupsBuilt, groups) ||
         !identical(_groupStatusesBuilt, groupMap) ||
-        _paperBuilt != paperArgb) {
-      _rebuild();
+        _paperBuilt != paperArgb ||
+        !identical(_themeBuilt, look)) {
+      _rebuild(look);
       _state = state;
       _tablesRevision = revision;
       _builtFor = map;
       _groupsBuilt = groups;
       _groupStatusesBuilt = groupMap;
       _paperBuilt = paperArgb;
+      _themeBuilt = look;
     }
     final fills = _fills;
     if (fills.isEmpty) return;
@@ -331,8 +383,7 @@ class TableStatusPainter extends CustomPainter {
       final sy = b * f.lx + d * f.ly + g;
       // Below the number: its half height on screen and a gap, at least
       // one caption height from the anchor.
-      final below =
-          math.max(kStatusCaptionSize, f.half * scale + kStatusCaptionGap);
+      final below = math.max(_captionSize, f.half * scale + kStatusCaptionGap);
       canvas
         ..save()
         ..translate(sx - caption.width / 2, sy + below)
@@ -347,5 +398,6 @@ class TableStatusPainter extends CustomPainter {
       !identical(oldDelegate.statuses, statuses) ||
       !identical(oldDelegate.tableGroups, tableGroups) ||
       !identical(oldDelegate.groupStatuses, groupStatuses) ||
-      !identical(oldDelegate.paper, paper);
+      !identical(oldDelegate.paper, paper) ||
+      !identical(oldDelegate.theme, theme);
 }

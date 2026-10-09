@@ -10,11 +10,12 @@ import 'package:flutter/widgets.dart' hide Tolerance;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import '../host/floor_plan_theme.dart' show FloorPlanTheme;
 import '../host/floor_plan_types.dart' show TableGroup;
-import 'table_focus_painter.dart' show kTableFocusVeilAlpha;
+import 'table_focus_painter.dart' show focusVeilColour, kTableFocusVeilAlpha;
 import 'table_groups.dart';
 import 'table_picker.dart';
-import 'table_status_painter.dart' show kStatusCaptionSize;
+import 'table_status_painter.dart' show kStatusCaptionSize, paintedTextStyle;
 
 /// How far the frame stands off its members' boxes, in world millimetres;
 /// also the radius of its round joins (G3).
@@ -213,12 +214,19 @@ final class _Group {
 /// [kTableFocusVeilAlpha]. A group with a focused visible member draws as
 /// before; the veil covers its outside members.
 ///
+/// The host's look, [theme] (host embedding API spec T-1, T-3), replaces
+/// these values field by field when it sets them: the frame's colour,
+/// width and margin; the chip's colour (by default the frame's, as
+/// resolved: S-7), text style, radius and padding; the veil's colour and
+/// opacity for a faded group (S-9). They are read at rebuild, never per
+/// frame.
+///
 /// Rebuilt only when the groups map or the focus is replaced, the plan's
-/// state id or its tables' revision moves, or [paper] changes. Each frame
-/// then draws the prebuilt paths under one reused matrix with one of two
-/// reused [Paint]s whose stroke width alone is set, or translates to each
-/// chip's anchor and draws its prebuilt [RRect] and [ui.Paragraph] (14c
-/// S7, R-3).
+/// state id or its tables' revision moves, or [paper] or [theme] changes.
+/// Each frame then draws the prebuilt paths under one reused matrix with
+/// one of two reused [Paint]s whose stroke width alone is set, or
+/// translates to each chip's anchor and draws its prebuilt [RRect] and
+/// [ui.Paragraph] (14c S7, R-3).
 class TableGroupPainter extends CustomPainter {
   TableGroupPainter({
     required this.layer,
@@ -228,6 +236,7 @@ class TableGroupPainter extends CustomPainter {
     required this.groups,
     required this.paper,
     this.tableFocus,
+    this.theme,
     required Listenable repaint,
   }) : super(repaint: repaint) {
     debugAllocations += 3; // the two paints and the matrix
@@ -252,6 +261,11 @@ class TableGroupPainter extends CustomPainter {
   /// spec Z14); none when null.
   final ValueListenable<Set<String>?>? tableFocus;
 
+  /// The resolved look (host embedding API spec T-3); null, or a null
+  /// value, is today's. The host puts it in [repaint] too, so a theme
+  /// change repaints, and the rebuild then builds what it changed.
+  final ValueListenable<FloorPlanTheme?>? theme;
+
   late final Paint _paint = Paint()
     ..style = layer == TableGroupLayer.frames
         ? PaintingStyle.stroke
@@ -271,9 +285,16 @@ class TableGroupPainter extends CustomPainter {
   Map<String, TableGroup>? _builtFor;
   Set<String>? _focusBuilt;
   int? _paperBuilt;
+  FloorPlanTheme? _themeBuilt;
 
-  /// Keyed by (text, ink): a steady frame builds none.
-  final Map<(String, Color), ui.Paragraph> _chips = {};
+  /// The frame's stroke width in screen pixels, and the chip's bottom
+  /// padding, set at rebuild (T-1's `groupFrameWidth`, `groupChipPadding`).
+  double _frameWidth = kGroupFrameStrokePixels;
+  double _chipBottom = kGroupChipPaddingY;
+
+  /// Keyed by (text, ink, the theme's chip style): a steady frame builds
+  /// none.
+  final Map<(String, Color, TextStyle?), ui.Paragraph> _chips = {};
 
   /// Every `Path`, `Paint`, `Paragraph`, `RRect` and matrix this painter
   /// created: the allocation bar (spec invariant 1).
@@ -291,15 +312,35 @@ class TableGroupPainter extends CustomPainter {
           if (g.text case final text?) text
       ];
 
-  void _rebuild(Set<String>? focus) {
+  void _rebuild(Set<String>? focus, FloorPlanTheme? look) {
     debugRebuilds++;
     final map = groups.value;
-    final gripMove = PaperPalette.forPaper(paper.value).gripMove;
-    _paint.color = gripMove;
-    _faded.color = layer == TableGroupLayer.frames
-        ? gripMove.withValues(alpha: gripMove.a * (1 - kTableFocusVeilAlpha))
-        // The paper's RGB; its own alpha is replaced, as the veil's.
-        : Color(paper.value).withValues(alpha: kTableFocusVeilAlpha);
+    final paperArgb = paper.value;
+    // The look (T-1): each value the theme leaves null is today's.
+    final frameColour =
+        look?.groupFrameColor ?? PaperPalette.forPaper(paperArgb).gripMove;
+    final chipColour = look?.groupChipColor ?? frameColour;
+    final margin = look?.groupFrameMargin ?? kGroupFrameMarginMm;
+    final chipStyle = look?.groupChipTextStyle;
+    final radius = Radius.circular(look?.groupChipRadius ?? kGroupChipRadius);
+    final padding = look?.groupChipPadding;
+    final padLeft = padding?.left ?? kGroupChipPaddingX,
+        padTop = padding?.top ?? kGroupChipPaddingY,
+        padRight = padding?.right ?? kGroupChipPaddingX;
+    _chipBottom = padding?.bottom ?? kGroupChipPaddingY;
+    _frameWidth = look?.groupFrameWidth ?? kGroupFrameStrokePixels;
+    if (layer == TableGroupLayer.frames) {
+      _paint.color = frameColour;
+      // Faded by the veil's opacity (Z14, S-7).
+      _faded.color = frameColour.withValues(
+          alpha: frameColour.a *
+              (1 - (look?.focusVeilOpacity ?? kTableFocusVeilAlpha)));
+    } else {
+      _paint.color = chipColour;
+      // The veil's own colour: the paper's RGB, its own alpha replaced, or
+      // the theme's (S-9).
+      _faded.color = focusVeilColour(paperArgb, look);
+    }
     final out = <_Group>[];
     if (map.isNotEmpty) {
       final candidates = picker.candidates;
@@ -312,9 +353,10 @@ class TableGroupPainter extends CustomPainter {
               visible: true,
               locked: c.locked),
       ]);
-      final ink = foregroundFor(gripMove.toARGB32() & 0xFFFFFF) == 0xFFFFFF
-          ? kStatusCaptionOnDark
-          : kStatusCaptionOnLight;
+      final ink = chipStyle?.color ??
+          (foregroundFor(chipColour.toARGB32() & 0xFFFFFF) == 0xFFFFFF
+              ? kStatusCaptionOnDark
+              : kStatusCaptionOnLight);
       for (final MapEntry(key: id, value: group) in map.entries) {
         final members = lookup.visibleMembers(id);
         if (members.length < 2) continue;
@@ -352,27 +394,23 @@ class TableGroupPainter extends CustomPainter {
         RRect? rrect;
         if (layer == TableGroupLayer.frames) {
           debugAllocations++;
-          frame = offsetHull(hull, kGroupFrameMarginMm);
+          frame = offsetHull(hull, margin);
         } else {
           final label = text = groupLabel(group, members);
-          final p =
-              _chips.putIfAbsent((label, ink), () => _paragraph(label, ink));
+          final p = _chips.putIfAbsent(
+              (label, ink, chipStyle), () => _paragraph(label, ink, chipStyle));
           chip = p;
           debugAllocations++;
-          rrect = RRect.fromLTRBR(
-              -kGroupChipPaddingX,
-              -kGroupChipPaddingY,
-              p.width + kGroupChipPaddingX,
-              p.height + kGroupChipPaddingY,
-              const Radius.circular(kGroupChipRadius));
+          rrect = RRect.fromLTRBR(-padLeft, -padTop, p.width + padRight,
+              p.height + _chipBottom, radius);
         }
         out.add(_Group(
             members.first.handle.value,
             focus != null && !members.any((m) => focus.contains(m.number)),
             frame,
-            maxX - minX + 2 * kGroupFrameMarginMm,
+            maxX - minX + 2 * margin,
             (minX + maxX) / 2,
-            maxY + kGroupFrameMarginMm,
+            maxY + margin,
             text,
             chip,
             rrect));
@@ -387,13 +425,22 @@ class TableGroupPainter extends CustomPainter {
   }
 
   /// The label on one line at its intrinsic width: never wrapped, so a
-  /// 24-character label never breaks (G3).
-  ui.Paragraph _paragraph(String text, Color ink) {
+  /// 24-character label never breaks (G3). Today's paragraph with no
+  /// [style]; with one, the host's style with today's values where it
+  /// leaves them null (T-1, T-4).
+  ui.Paragraph _paragraph(String text, Color ink, TextStyle? style) {
     debugAllocations++;
-    final b = ui.ParagraphBuilder(
-        ui.ParagraphStyle(fontSize: kStatusCaptionSize, maxLines: 1))
-      ..pushStyle(ui.TextStyle(color: ink, fontSize: kStatusCaptionSize))
-      ..addText(text);
+    final ui.ParagraphBuilder b;
+    if (style == null) {
+      b = ui.ParagraphBuilder(
+          ui.ParagraphStyle(fontSize: kStatusCaptionSize, maxLines: 1))
+        ..pushStyle(ui.TextStyle(color: ink, fontSize: kStatusCaptionSize));
+    } else {
+      final resolved = paintedTextStyle(style, ink);
+      b = ui.ParagraphBuilder(resolved.getParagraphStyle(maxLines: 1))
+        ..pushStyle(resolved.getTextStyle());
+    }
+    b.addText(text);
     final p = b.build()
       ..layout(const ui.ParagraphConstraints(width: double.infinity));
     return p
@@ -408,17 +455,20 @@ class TableGroupPainter extends CustomPainter {
     final map = groups.value;
     final focus = tableFocus?.value;
     final paperArgb = paper.value;
+    final look = theme?.value;
     if (_state != state ||
         _tablesRevision != revision ||
         !identical(_builtFor, map) ||
         !identical(_focusBuilt, focus) ||
-        _paperBuilt != paperArgb) {
-      _rebuild(focus);
+        _paperBuilt != paperArgb ||
+        !identical(_themeBuilt, look)) {
+      _rebuild(focus, look);
       _state = state;
       _tablesRevision = revision;
       _builtFor = map;
       _focusBuilt = focus;
       _paperBuilt = paperArgb;
+      _themeBuilt = look;
     }
     final list = _groups;
     if (list.isEmpty) return;
@@ -435,7 +485,7 @@ class TableGroupPainter extends CustomPainter {
       m[12] = cam.e;
       m[13] = cam.f;
       m[15] = 1;
-      _paint.strokeWidth = _faded.strokeWidth = kGroupFrameStrokePixels / scale;
+      _paint.strokeWidth = _faded.strokeWidth = _frameWidth / scale;
       canvas
         ..save()
         ..transform(m);
@@ -454,11 +504,11 @@ class TableGroupPainter extends CustomPainter {
       if (g.width * scale < rrect.width) continue;
       final sx = cam.a * g.anchorX + cam.c * g.anchorY + cam.e;
       final sy = cam.b * g.anchorX + cam.d * g.anchorY + cam.f;
-      // The prebuilt rect spans [-padY, height + padY] in the chip's own
+      // The prebuilt rect spans [-top, height + bottom] in the chip's own
       // y: its bottom edge lands on the anchor's screen y (fixes X3).
       canvas
         ..save()
-        ..translate(sx - p.width / 2, sy - (p.height + kGroupChipPaddingY))
+        ..translate(sx - p.width / 2, sy - (p.height + _chipBottom))
         ..drawRRect(rrect, _paint)
         ..drawParagraph(p, Offset.zero);
       // A faded group's chip under the veil (Z14).
@@ -475,5 +525,6 @@ class TableGroupPainter extends CustomPainter {
       !identical(oldDelegate.camera, camera) ||
       !identical(oldDelegate.groups, groups) ||
       !identical(oldDelegate.tableFocus, tableFocus) ||
-      !identical(oldDelegate.paper, paper);
+      !identical(oldDelegate.paper, paper) ||
+      !identical(oldDelegate.theme, theme);
 }

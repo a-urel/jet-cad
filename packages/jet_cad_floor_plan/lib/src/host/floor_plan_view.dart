@@ -213,6 +213,17 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     });
   }
 
+  /// The selection mode's canvas moved in this view with the plan
+  /// unchanged (host embedding API spec S-10: the theme's
+  /// `serviceBarHeight` changed): measured again now, after the frame, so
+  /// the next mode switch reframes from where it is (R-13).
+  void _serviceCanvasMoved() {
+    final c = widget.controller;
+    if (!mounted || c.mode.value != FloorPlanMode.selection) return;
+    final origin = _canvasOrigin();
+    if (origin != null) c.canvasMeasured(FloorPlanMode.selection, origin);
+  }
+
   /// The top left of the shown canvas (its interaction layer's, whose
   /// coordinates the camera's are) in this view, or null before layout.
   Offset? _canvasOrigin() {
@@ -383,7 +394,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                   ),
               userCamera: () => widget.userCamera,
               tableOverlays: serviceOverlays,
-              events: _serviceEvents);
+              events: _serviceEvents,
+              onCanvasMoved: _serviceCanvasMoved);
         }
         c.startSymbols();
         return PlannerShell(
