@@ -29,6 +29,7 @@ import '../shell_commands.dart';
 import '../tables/table_label_system.dart';
 import 'floor_plan_controller.dart';
 import 'page_flows.dart';
+import 'table_detail.dart';
 
 /// The canvas over [controller]'s service copy (H7). Built per copy: the
 /// view is keyed by it, so a [FloorPlanController.resetLayout] or a load
@@ -43,7 +44,8 @@ class ServiceView extends StatefulWidget {
       required this.callbacks,
       this.options = _defaultOptions,
       this.userCamera = _always,
-      this.tableOverlays});
+      this.tableOverlays,
+      this.events = _noEvents});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -74,6 +76,13 @@ class ServiceView extends StatefulWidget {
   /// the selection outlines; null for none.
   final Widget? tableOverlays;
 
+  /// The host's view events (spec E-1 to E-4), read at each call (R-5); a
+  /// hover reads them at each button-less move, so a caller hands back a
+  /// record it keeps while nothing changed.
+  final ServiceEvents<FloorPlanTableDetail> Function() events;
+
+  static ServiceEvents<FloorPlanTableDetail> _noEvents() => kNoServiceEvents;
+
   @override
   State<ServiceView> createState() => _ServiceViewState();
 }
@@ -96,7 +105,45 @@ class _ServiceViewState extends State<ServiceView> {
       callbacks: widget.callbacks,
       options: widget.options,
       userCamera: widget.userCamera,
-      toGlobal: _toGlobal);
+      toGlobal: _toGlobal,
+      events: _toolEvents);
+
+  /// The host's events as the tool reports them (spec E-1 to E-4): the
+  /// same record, but for the moves, which the tool reports by instance.
+  /// Rebuilt only when the host's record is a new one, so a hover's read
+  /// allocates nothing.
+  ServiceEvents<Handle> _toolEvents() {
+    final host = widget.events();
+    if (!identical(host, _hostEvents)) {
+      _hostEvents = host;
+      _events = (
+        onTablesMoved: host.onTablesMoved == null ? null : _moved,
+        onTableDoubleTap: host.onTableDoubleTap,
+        onFloorTap: host.onFloorTap,
+        onTableHover: host.onTableHover,
+      );
+    }
+    return _events;
+  }
+
+  ServiceEvents<FloorPlanTableDetail>? _hostEvents;
+  ServiceEvents<Handle> _events = kNoServiceEvents;
+
+  /// Spec E-1: the moved instances as the controller's fresh details,
+  /// ascending by handle, numbered or not. Nothing when this copy is no
+  /// longer the plan shown (the host's `onLayoutChanged` replaced it).
+  void _moved(List<Handle> instances) {
+    final report = widget.events().onTablesMoved;
+    if (report == null || !identical(_c.activeDocument, _document)) return;
+    final details = _c.tableDetails;
+    final at = <Handle, int>{
+      for (final (i, h) in _c.tableDetailInstances.indexed) h: i
+    };
+    report(List.unmodifiable([
+      for (final h in instances)
+        if (at[h] case final i?) details[i]
+    ]));
+  }
 
   /// The canvas, whose origin is the interaction layer's (no rulers).
   final GlobalKey _canvas = GlobalKey();

@@ -7,7 +7,12 @@ import 'dart:ui' show Canvas, Offset, Size;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart'
-    show kLongPressTimeout, kPrimaryButton, kTouchSlop;
+    show
+        kDoubleTapSlop,
+        kDoubleTapTimeout,
+        kLongPressTimeout,
+        kPrimaryButton,
+        kTouchSlop;
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show KeyEventResult;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -44,7 +49,29 @@ const ServiceOptions kDefaultServiceOptions = (
   onTableContextMenu: null,
 );
 
+/// The view events (host embedding API spec E-1 to E-4), read at each call
+/// (R-5), in a record of their own so [ServiceCallbacks] keeps its five
+/// fields (P-1). [M] is what a drag reports as moved: the live instances
+/// at the tool (handles never leave the package), the controller's fresh
+/// details at the view.
+typedef ServiceEvents<M> = ({
+  void Function(List<M> moved)? onTablesMoved,
+  void Function(String number)? onTableDoubleTap,
+  void Function(Offset world)? onFloorTap,
+  void Function(String? number)? onTableHover,
+});
+
+/// No view event: today's behaviour. Its fields are `Null`, so it is a
+/// [ServiceEvents] whatever its type argument.
+const kNoServiceEvents = (
+  onTablesMoved: null,
+  onTableDoubleTap: null,
+  onFloorTap: null,
+  onTableHover: null,
+);
+
 ServiceOptions _defaultOptions() => kDefaultServiceOptions;
+ServiceEvents<Handle> _noEvents() => kNoServiceEvents;
 Offset _sameOffset(Offset local) => local;
 bool _always() => true;
 
@@ -73,7 +100,8 @@ class TableSelectTool extends Tool {
       required this.callbacks,
       this.options = _defaultOptions,
       this.userCamera = _always,
-      this.toGlobal = _sameOffset});
+      this.toGlobal = _sameOffset,
+      this.events = _noEvents});
 
   final TablePicker picker;
 
@@ -93,8 +121,24 @@ class TableSelectTool extends Tool {
   /// at each press: false (a view with `userCamera: false`) spends it.
   final bool Function() userCamera;
 
+  /// The view events (spec E-1 to E-4), read at each call (R-5). A hover
+  /// reads it at each button-less move, so the view hands in a record it
+  /// keeps, not one built per call.
+  final ServiceEvents<Handle> Function() events;
+
   /// [userCamera] as the press read it.
   bool _pans = true;
+
+  /// The press's raw down time (spec E-2).
+  Duration _pressTime = Duration.zero;
+
+  /// The last tap that reported `onTableTap` with no modifier (spec E-2):
+  /// its instance, its down's time and screen point; null when the next
+  /// tap cannot complete a double tap.
+  ({Handle instance, Duration time, Offset screen})? _lastTap;
+
+  /// The number last reported to `onTableHover` (spec E-4).
+  String? _hovered;
 
   ServiceOptions _options = kDefaultServiceOptions;
 
@@ -148,6 +192,7 @@ class TableSelectTool extends Tool {
   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
     if (e.buttons & kPrimaryButton == 0 || _gesture != _Gesture.none) return;
     _pointer = e.pointer;
+    _pressTime = e.timeStamp;
     _pressScreen = e.screen;
     _lastScreen = e.screen;
     _pressWorld.setFrom(e.world);
@@ -175,7 +220,9 @@ class TableSelectTool extends Tool {
 
   @override
   void onPointerMove(ToolPointerEvent e, ToolContext ctx) {
-    // A hover (no button) is not a gesture (R-6).
+    // A hover (no button) is not a gesture (R-6); a mouse's or a stylus's
+    // is reported (spec E-4), a finger's never.
+    if (e.buttons == 0 && !e.isTouch) _hover(e);
     if (e.pointer != _pointer || e.buttons & kPrimaryButton == 0) return;
     switch (_gesture) {
       case _Gesture.none || _Gesture.spent:
@@ -184,6 +231,8 @@ class TableSelectTool extends Tool {
         if ((e.screen - _pressScreen).distance <= kTouchSlop) return;
         _timer?.cancel();
         _timer = null;
+        // A drag, a pan or a spent drag is no tap (spec E-2).
+        _lastTap = null;
         final hit = _hit;
         if (hit == null || !_options.serviceMoves) {
           // Empty floor pans; so does any table when moves are off (S5).
@@ -277,15 +326,36 @@ class TableSelectTool extends Tool {
     notifyListeners();
   }
 
+  /// The pointer's table under a hover (spec E-4): picked with no reach,
+  /// only while the host listens; reported only when its number differs
+  /// from the last reported, null over the floor or an unnumbered table.
+  void _hover(ToolPointerEvent e) {
+    final report = events().onTableHover;
+    if (report == null) return;
+    final number = picker.pick(e.world)?.table.number;
+    if (number == _hovered) return;
+    _hovered = number;
+    report(number);
+  }
+
   /// A tap (S3): a table alone, or toggled with Shift or Ctrl/Cmd; empty
   /// floor clears, unless a modifier is held (R-6). A member of a group
   /// stands for the whole group (G4): it replaces the selection, or with a
   /// modifier is added or removed whole. A locked table selects nothing;
   /// its tap is reported, a member's with its group.
+  ///
+  /// Then the view events (spec E-2, E-3): a miss reports the floor at the
+  /// down's world point, modifier or not (S-4); a numbered table's tap with
+  /// no modifier on the same instance as the last such tap, its down at
+  /// most [kDoubleTapTimeout] after that one's and at most [kDoubleTapSlop]
+  /// screen pixels from it, is a double tap, reported after its own tap;
+  /// the chain then starts anew. Nothing is delayed (Q-H2).
   void _tap(ToolContext ctx) {
     final hit = _hit;
     if (hit == null) {
       if (!_toggle) ctx.selection.clear();
+      _lastTap = null;
+      events().onFloorTap?.call(Offset(_pressWorld.x, _pressWorld.y));
       return;
     }
     final lookup = _groupLookup();
@@ -303,9 +373,32 @@ class TableSelectTool extends Tool {
       }
     }
     final number = hit.table.number;
-    if (number == null) return;
+    if (number == null) {
+      _lastTap = null;
+      return;
+    }
+    final doubleTap = !_toggle && _completesDoubleTap(hit.table.instance);
+    _lastTap = _toggle || doubleTap
+        ? null
+        : (
+            instance: hit.table.instance,
+            time: _pressTime,
+            screen: _pressScreen
+          );
     callbacks().onTableTap?.call(number);
     if (group != null) callbacks().onGroupTap?.call(group, number);
+    if (doubleTap) events().onTableDoubleTap?.call(number);
+  }
+
+  /// Whether this press's down, on [instance], follows the kept tap's
+  /// closely enough (spec E-2): inclusive bounds, between the two downs.
+  bool _completesDoubleTap(Handle instance) {
+    final last = _lastTap;
+    if (last == null || last.instance != instance) return false;
+    final gap = _pressTime - last.time;
+    return gap >= Duration.zero &&
+        gap <= kDoubleTapTimeout &&
+        (_pressScreen - last.screen).distance <= kDoubleTapSlop;
   }
 
   /// The selectable members' keys of the group [hit] belongs to, or null:
@@ -381,6 +474,13 @@ class TableSelectTool extends Tool {
     if (commands.isEmpty) return;
     ctx.execute(CompoundCommand(commands, label: 'Move'));
     callbacks().onLayoutChanged?.call();
+    // Spec E-1: the live instances moved, ascending, once per drag.
+    final moved = events().onTablesMoved;
+    if (moved == null) return;
+    moved(List.unmodifiable([
+      for (final h in _moving)
+        if (ctx.document.tree[h] is InstanceNode) h
+    ]));
   }
 
   /// A long press (decision 9): the table toggled, a member's group added
@@ -393,6 +493,8 @@ class TableSelectTool extends Tool {
     _timer = null;
     final hit = _hit;
     if (_gesture != _Gesture.pressed || hit == null) return;
+    // A long press is no tap (spec E-2).
+    _lastTap = null;
     if (_options.longPress == FloorPlanLongPress.contextMenu) {
       final number = contextSelect(hit, ctx.selection, group: groupKeysOf(hit));
       if (number != null) {
@@ -414,8 +516,14 @@ class TableSelectTool extends Tool {
     notifyListeners();
   }
 
+  /// The pointer left the canvas (spec E-4): the host hears null when the
+  /// last number it heard was not.
   @override
-  void onPointerExit(ToolContext ctx) {}
+  void onPointerExit(ToolContext ctx) {
+    if (_hovered == null) return;
+    _hovered = null;
+    events().onTableHover?.call(null);
+  }
 
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
@@ -432,6 +540,8 @@ class TableSelectTool extends Tool {
   /// nothing is executed (R-5).
   @override
   void cancel(ToolContext ctx) {
+    // A cancelled press is no tap (spec E-2).
+    _lastTap = null;
     if (_gesture == _Gesture.none && _timer == null) return;
     _reset();
     notifyListeners();

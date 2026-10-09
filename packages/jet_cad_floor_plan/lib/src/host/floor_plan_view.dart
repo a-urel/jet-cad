@@ -9,11 +9,13 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import '../l10n/strings.dart';
 import '../export/page_printer.dart';
 import '../planner_shell.dart';
+import '../service/table_select_tool.dart' show ServiceEvents;
 import '../shell_commands.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_types.dart';
 import 'page_flows.dart';
 import 'service_view.dart';
+import 'table_detail.dart';
 import 'table_overlay.dart';
 
 /// The planner, embedded (spec 14b-2 H5): in the design mode today's editor
@@ -42,6 +44,10 @@ class FloorPlanView extends StatefulWidget {
     this.tableOverlayBuilder,
     this.tableOverlayLayout = const FloorPlanOverlayLayout(),
     this.tableOverlayModes = const {FloorPlanMode.selection},
+    this.onTablesMoved,
+    this.onTableDoubleTap,
+    this.onFloorTap,
+    this.onTableHover,
   });
 
   final FloorPlanController controller;
@@ -126,6 +132,42 @@ class FloorPlanView extends StatefulWidget {
   /// The modes that show [tableOverlayBuilder]'s widgets: the selection
   /// mode only, by default.
   final Set<FloorPlanMode> tableOverlayModes;
+
+  /// Tables were moved in the selection mode (host embedding API spec
+  /// E-1): after a drag ends, every moved table, numbered or not, ascending
+  /// by handle, with its new geometry, as
+  /// [FloorPlanController.tableDetails] reads it; once per drag, after
+  /// [onLayoutChanged]. Undo, Redo, `resetLayout` and
+  /// `restoreServiceLayout` do not call it (they fire
+  /// `serviceLayoutChanges`). Read at each call.
+  final void Function(List<FloorPlanTableDetail> moved)? onTablesMoved;
+
+  /// A table was tapped twice in the selection mode (spec E-2): a second
+  /// tap on the same table whose down is within `kDoubleTapTimeout` (300
+  /// ms) of the first tap's down and within `kDoubleTapSlop` (100 logical
+  /// pixels) of it, both timed and measured from the raw pointer events. A
+  /// locked table reports it; an unnumbered one does not. With Shift, Ctrl
+  /// or Cmd held on either tap it is no double tap (each tap toggles). The
+  /// single tap is **not delayed**: both taps report [onTableTap] (and
+  /// select) as before, then this fires; a third tap starts anew. So a host
+  /// that acts on a tap acts on each tap of a double tap too. Read at each
+  /// call.
+  final void Function(String number)? onTableDoubleTap;
+
+  /// A tap in the selection mode missed every table (spec E-3): the world
+  /// point of its down, in millimetres with y up. Called after the tap's
+  /// own effect (the selection cleared, or kept with a modifier held), with
+  /// or without a modifier. Read at each call.
+  final void Function(Offset world)? onFloorTap;
+
+  /// The mouse or stylus pointer moved onto a numbered table, or off it
+  /// (null: over the floor or an unnumbered table), in the selection mode
+  /// (spec E-4): only when the number changes, and null when the pointer
+  /// leaves the canvas; never for touch. A mode switch, `resetLayout`, a
+  /// restore or a load builds the view afresh and sends no null: a host
+  /// clears its hover state when the mode or the plan changes. Without it,
+  /// a hover does no work. Read at each move.
+  final void Function(String? number)? onTableHover;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -214,6 +256,26 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     super.dispose();
   }
 
+  /// The view events (spec E-1 to E-4) of the current widget, read at each
+  /// call (R-5): the record is rebuilt only when the widget is a new one,
+  /// so a hover's read allocates nothing.
+  ServiceEvents<FloorPlanTableDetail> _serviceEvents() {
+    final w = widget;
+    if (!identical(w, _eventsOf)) {
+      _eventsOf = w;
+      _events = (
+        onTablesMoved: w.onTablesMoved,
+        onTableDoubleTap: w.onTableDoubleTap,
+        onFloorTap: w.onFloorTap,
+        onTableHover: w.onTableHover,
+      );
+    }
+    return _events;
+  }
+
+  FloorPlanView? _eventsOf;
+  late ServiceEvents<FloorPlanTableDetail> _events;
+
   bool _fitOnStartFor(DraftDocument document) {
     if (!identical(_fitFor, document)) {
       _fitFor = document;
@@ -290,7 +352,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                     onTableContextMenu: widget.onTableContextMenu,
                   ),
               userCamera: () => widget.userCamera,
-              tableOverlays: serviceOverlays);
+              tableOverlays: serviceOverlays,
+              events: _serviceEvents);
         }
         c.startSymbols();
         return PlannerShell(

@@ -165,11 +165,12 @@ class _InteractionLayerState extends State<InteractionLayer> {
   /// Resolves one pointer sample into both spaces and snapshots the modifier
   /// state, so a tool never inverts the camera or reads the keyboard itself.
   ToolPointerEvent _wrap(PointerEvent e) =>
-      _event(e.localPosition, e.pointer, e.buttons, e.kind);
+      _event(e.localPosition, e.pointer, e.buttons, e.kind, e.timeStamp);
 
-  /// One sample at [local], through the camera as it is now (R-9d).
-  ToolPointerEvent _event(
-      Offset local, int pointer, int buttons, PointerDeviceKind kind) {
+  /// One sample at [local], through the camera as it is now (R-9d),
+  /// stamped [timeStamp]: the raw pointer event's time (spec E-2).
+  ToolPointerEvent _event(Offset local, int pointer, int buttons,
+      PointerDeviceKind kind, Duration timeStamp) {
     final cam = _ctx.camera.value;
     final keyboard = HardwareKeyboard.instance;
     final touch = kind == PointerDeviceKind.touch;
@@ -185,6 +186,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
       pickRadiusWorld: kPickRadiusPixels / cam.scale,
       kind: kind,
       reachRadiusWorld: touch ? kTouchPickRadiusPixels / cam.scale : null,
+      timeStamp: timeStamp,
     );
   }
 
@@ -271,7 +273,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
         // Aiming: a hover the tool can show, never a press.
         _aiming = true;
         _tool.onPointerMove(
-            _event(e.localPosition, e.pointer, 0, e.kind), _ctx);
+            _event(e.localPosition, e.pointer, 0, e.kind, e.timeStamp), _ctx);
       }
       return;
     }
@@ -303,11 +305,13 @@ class _InteractionLayerState extends State<InteractionLayer> {
           return;
         }
         _focus.requestFocus();
-        // A tap: press mode at the down's position, lift mode at the lift's.
+        // A tap: press mode at the down's position, lift mode at the lift's;
+        // either way stamped with the raw down's time (spec E-2).
         _tool.onPointerDown(
             press
                 ? _wrap(held)
-                : _event(e.localPosition, e.pointer, held.buttons, e.kind),
+                : _event(e.localPosition, e.pointer, held.buttons, e.kind,
+                    held.timeStamp),
             _ctx);
         _activePointer = -1;
         _lastButtons = 0;
