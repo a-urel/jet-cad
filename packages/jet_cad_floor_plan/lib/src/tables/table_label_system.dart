@@ -1,10 +1,13 @@
 // The table system (spec 14a T12): keeps every table's number upright,
-// inside the edit that turns or mirrors the table, as one undo step.
+// inside the edit that turns or mirrors the table, as one undo step; and
+// drops a deleted table's host data inside the edit that deletes it (host
+// embedding API spec E-6, E-9 gate 3).
 //
 // No Flutter import: this file is Dart over `package:jet_cad_2d` only.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../symbols/seating_component.dart';
+import 'table_data_component.dart';
 import 'table_label.dart';
 
 /// Stacks on the dispatcher's one expander slot (spec 06 D2, 14a F-1):
@@ -50,10 +53,15 @@ class TableLabelSystem {
   }
 }
 
-/// An edit and the label stamps it makes necessary (T12): [inner] applies,
-/// then every touched table whose label no longer matches
-/// [tableLabelStamp] for its transform is re-stamped, by exact `==` on the
-/// stored values. Created only by [TableLabelSystem], once per `execute`.
+/// An edit and the derived commands it makes necessary: [inner] applies,
+/// then, per touched handle in `touched`'s order, a handle that no longer
+/// names anything live and still carries [FloorPlanTableData] has it
+/// detached (E-6: `RemoveNodeCommand` keeps components, F-14, so a deleted
+/// table would leave its host data orphaned in the plan), and a table whose
+/// label no longer matches [tableLabelStamp] for its transform is
+/// re-stamped (T12), by exact `==` on the stored values. All or nothing;
+/// undo restores both. Created only by [TableLabelSystem], once per
+/// `execute`.
 final class TableLabelEdit extends DraftCommand {
   TableLabelEdit._(this.inner);
 
@@ -81,23 +89,33 @@ final class TableLabelEdit extends DraftCommand {
     final r = inner.apply(target);
     final inverses = <DraftCommand>[];
     final written = <Handle>{};
+    var stamps = 0;
     try {
       for (final h in r.touched) {
-        final stamp = _stampFor(target, h);
-        if (stamp == null) continue;
-        final result = stamp.apply(target);
+        final DraftCommand derived;
+        if (_detachFor(target, h) case final detach?) {
+          derived = detach;
+        } else if (_stampFor(target, h) case final stamp?) {
+          derived = stamp;
+          stamps++;
+        } else {
+          continue;
+        }
+        final result = derived.apply(target);
         inverses.add(result.inverse);
         written.addAll(result.touched);
       }
     } catch (_) {
-      // All or nothing: the stamps written so far, then the edit itself.
+      // All or nothing: the derived commands applied so far (the data
+      // detached and the stamps written), then the edit itself.
       for (final inverse in inverses.reversed) {
         inverse.apply(target);
       }
       r.inverse.apply(target);
       rethrow;
     }
-    _stamped = inverses.isNotEmpty;
+    // A detach alone writes no label: the capability is not raised for it.
+    _stamped = stamps > 0;
     if (inverses.isEmpty) return r;
     // A replay with the edit's own authority: undo and redo need exactly
     // what the edit needed, not the stamps' `geometry` (review R-5).
@@ -107,6 +125,20 @@ final class TableLabelEdit extends DraftCommand {
           inner.capabilities),
       touched: {...r.touched, ...written},
     );
+  }
+
+  /// The detach [h] needs, or null: [h] names no live node, entity or
+  /// definition (the edit removed it; a nested instance of a deleted group
+  /// is touched by its own `RemoveNodeCommand`) and still carries host data
+  /// (E-6). Its inverse puts the same value back, so undo restores it.
+  static DraftCommand? _detachFor(CommandTarget target, Handle h) {
+    if (target.components.get<FloorPlanTableData>(h) == null) return null;
+    if (target.tree[h] != null ||
+        target.tree.definition(h) != null ||
+        target.entities.slotOf(h) != null) {
+      return null;
+    }
+    return SetComponentCommand<FloorPlanTableData>(h, null);
   }
 
   /// The stamp [h] needs, or null: [h] is a table (a live, root-level

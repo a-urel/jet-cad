@@ -23,6 +23,7 @@ import '../service/table_groups.dart';
 import '../service/table_picker.dart';
 import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
+import '../tables/table_data_component.dart';
 import '../tables/table_index.dart';
 import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
@@ -1149,19 +1150,22 @@ class FloorPlanController extends ChangeNotifier {
                 symbolKey: t.symbolKey,
                 visible: layers[node.layer]?.visible ?? true),
             candidates[t.instance],
-            layers[node.layer]));
+            layers[node.layer],
+            // Spec E-6: unmodifiable already; empty when absent or kept.
+            d.components.get<FloorPlanTableData>(t.instance)?.data ??
+                const <String, String>{}));
       }
     }
     return List.unmodifiable(details);
   }
 
-  static FloorPlanTableDetail _detailOf(
-      FloorPlanTable table, TableCandidate? c, LayerRecord? layer) {
+  static FloorPlanTableDetail _detailOf(FloorPlanTable table, TableCandidate? c,
+      LayerRecord? layer, Map<String, String> data) {
     final name = layer?.name ?? '';
     final locked = layer?.locked ?? false;
     if (c == null) {
       return tableDetailWithoutGeometry(
-          table: table, layer: name, locked: locked);
+          table: table, layer: name, locked: locked, data: data);
     }
     return tableDetailOf(
         table: table,
@@ -1169,7 +1173,66 @@ class FloorPlanController extends ChangeNotifier {
         box: c.box,
         corners: c.corners,
         layer: name,
-        locked: locked);
+        locked: locked,
+        data: data);
+  }
+
+  /// Stores the host's [data] on the table numbered [number] (spec E-6):
+  /// one design edit, labelled "Table data", undoable, saved with the plan
+  /// and read back as [FloorPlanTableDetail.data]. An empty map removes the
+  /// table's data. Returns true when the table's data is now [data] (with
+  /// no edit when it already was), false -- changing nothing -- when the
+  /// trimmed [number] names no table or more than one (an ambiguous link is
+  /// refused, not guessed). A table on a hidden or locked layer takes data:
+  /// a link is not a drawing edit.
+  ///
+  /// Throws a [StateError] in the selection mode (P-5: nothing done there
+  /// reaches the design), and an [ArgumentError] -- changing nothing --
+  /// when [data] is outside the limits: at most 32 keys, each 1 to 64
+  /// characters of `[a-z0-9_.-]`, each value at most 1024 UTF-16 code
+  /// units with no control character.
+  ///
+  /// [dirty] and [canUndo] read the edit on return; [revision] moves as
+  /// for any edit.
+  bool setTableData(String number, Map<String, String> data) =>
+      setTablesData({number: data});
+
+  /// [setTableData] for several tables at once, **all or nothing**, as one
+  /// undo step: every map is checked first (an [ArgumentError] for any
+  /// outside the limits); then false, changing nothing, when any number
+  /// names no table or more than one, or when two keys trim to the same
+  /// number. Entries already equal to the table's data are skipped;
+  /// nothing left to change is true with no edit. A [StateError] in the
+  /// selection mode.
+  bool setTablesData(Map<String, Map<String, String>> byNumber) {
+    if (_service != null) {
+      throw StateError('setTableData needs the design mode (P-5)');
+    }
+    final wanted = <String, FloorPlanTableData?>{};
+    for (final MapEntry(key: number, value: data) in byNumber.entries) {
+      if (tableDataProblem(data) case final problem?) {
+        throw ArgumentError.value(data, 'data', problem);
+      }
+      wanted[number] = data.isEmpty ? null : FloorPlanTableData(data);
+    }
+    _settle?.call();
+    final survey = _tables;
+    final components = _design.document.components;
+    final numbers = <String>{};
+    final edits = <DraftCommand>[];
+    for (final MapEntry(key: raw, value: next) in wanted.entries) {
+      if (!numbers.add(raw.trim())) return false;
+      final found = survey.withNumber(raw);
+      if (found.length != 1) return false;
+      final instance = found.single.instance;
+      if (components.get<FloorPlanTableData>(instance) == next) continue;
+      edits.add(SetComponentCommand<FloorPlanTableData>(instance, next));
+    }
+    if (edits.isEmpty) return true;
+    _design.document.commands
+        .execute(CompoundCommand(edits, label: 'Table data'));
+    _refreshFlags();
+    return true;
   }
 
   TablePicker? _picker;

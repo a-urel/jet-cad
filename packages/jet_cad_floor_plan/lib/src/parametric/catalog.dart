@@ -2,6 +2,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../symbols/seating_component.dart';
 import '../symbols/symbol_component.dart';
+import '../tables/table_data_component.dart';
 import 'box.dart';
 import 'dimension.dart';
 import 'opening.dart';
@@ -38,8 +39,9 @@ final ParametricCatalog parametricCatalog = ParametricCatalog()
 
 /// Registers every component type the app's documents carry (spec 12a D8,
 /// S-1): [PageComponent], the parametric catalog's types, then
-/// [SymbolComponent] (spec 09 D1; not a parametric type), and the
-/// [SeatingComponent] (spec 14 S1; not a parametric type either). The one
+/// [SymbolComponent] (spec 09 D1; not a parametric type), the
+/// [SeatingComponent] (spec 14 S1; not a parametric type either), and the
+/// host's [FloorPlanTableData] (host embedding API spec E-6). The one
 /// registration New, the sample and Open use — pass it as
 /// `DraftDocumentCodec.decode(…, registerComponents: registerAppComponents)`.
 /// Without the page's registration a file's page loads as preserve-unknown;
@@ -53,6 +55,7 @@ void registerAppComponents(ComponentRegistry r) {
   parametricCatalog.registerComponents(r);
   SymbolComponent.register(r);
   SeatingComponent.register(r);
+  FloorPlanTableData.register(r);
 }
 
 /// Builds and installs the document's parametric system.
