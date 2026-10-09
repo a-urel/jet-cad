@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-08. **`main` carries release 0.3.0** (tag
+**Last updated:** 2026-10-09. **`main` carries release 0.3.0** (tag
 `v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -112,8 +112,9 @@ one's spec, plan and results.
   [2026-10-09-embedding-slice-1.md](docs/superpowers/plans/2026-10-09-embedding-slice-1.md),
   results [2026-10-09-embedding-slice-1-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-1-results.md);
   Tasks 1–5 done, each reviewed independently and fixed (`85918c4` …
-  `84ee8e9`); the whole range's independent review next, then the merge
-  on the human's word.
+  `84ee8e9`); the whole range reviewed independently (*Approve with
+  fixes*, F-1 to F-8, applied in `98c0c1d`). Waiting on the human's word
+  to merge.
 
 ## Owed to the human
 
@@ -147,7 +148,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Slice 1's range review, then the merge question**, above.
+**Next: the merge question for Slice 1**, above; then Slice 2 (events and table data, schema 9).
 Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
 touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
 (the host probe), placement and open/save, and zones (0.3.0). Monépro

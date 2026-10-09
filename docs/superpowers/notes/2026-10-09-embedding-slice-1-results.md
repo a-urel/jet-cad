@@ -65,7 +65,7 @@ it. An independent review of the whole range closes the slice.
 | 3, the overlay layer (G-5–G-7, H-8) | `b420493` | **Approved with fixes**: R-1 (decided: every host rebuild runs the builder, tear-offs included), R-2 (accepted: one paint `Offset` per shown overlay), paint position, detach, semantics and box-cull unpinned | `31db289`: TO19–TO27, the box-cache reuse, spec P-4/G-5/G-6/H-8 |
 | 4, interactive overlays (G-5's pointers) | `89e29b2` | **Approved with fixes**: a cancel ending a claim and nested claims unpinned; a placement sentence | `84ee8e9`: IC10 (a cancel ends a claim), a nested claim, baseline-relative counts, the placement sentence |
 | 5, demo, guide, probe, CI, CHANGELOG | `e7b1c78`, `65fefab`, `ae3a566`, `d2bd37f`, `59eb206` | gated by the controller | `59eb206`: each badge its own semantics node (found by the smoke check) |
-| the range `85905bd..` | — | independent review: pending | — |
+| the range `85905bd..56be3fa` | — | **Independent review: Approve with fixes**; no defect where the tasks meet; the v0.3.0 and tip camera behaviour identical over 120 cases | `98c0c1d`: F-1 (an early `centerOn` takes the page fit's scale), F-2–F-4 tests, F-5 (a kiosk block in the guide and probe), F-8 (the errors in the CHANGELOG and guide); F-6, F-7 in this note and STATUS |
 
 Per-task reports, reviews and fixes are in
 `.superpowers/sdd/2026-10-09-host-embedding-api/` (git-ignored); they are
@@ -82,19 +82,19 @@ M-H18, M-H19, M-H19b(design default)), Task 4's two (M-H16, M-H17), Task
 their own; every survivor is now red or recorded as equivalent (Task 3's
 O10, a listener leak with no behaviour; O16) in the reviews.
 
-## Gates (at `59eb206`)
+## Gates (at `98c0c1d`; render and engine at `84ee8e9`, untouched after)
 
 | Package | Result |
 |---|---|
 | engine `packages/jet_cad_2d` | 1255 tests; the standing failures and skips, exactly. Untouched. |
-| render `packages/jet_cad_2d_flutter` | 1372 tests (1363 at `85905bd`); the standing failures and skips, exactly. Analyze and format clean. Both allocation invariants green. |
-| planner `packages/jet_cad_floor_plan` | **1510 passed** (1436 at `85905bd`). Analyze and format clean. |
+| render `packages/jet_cad_2d_flutter` | 1374 tests (1363 at `85905bd`); the standing failures and skips, exactly. Analyze and format clean. Both allocation invariants green. |
+| planner `packages/jet_cad_floor_plan` | **1514 passed** (1437 at `v0.3.0`). Analyze and format clean. |
 | demo `apps/restaurant_demo` | **47 passed** (39). |
 | app `apps/floor_planner` | **212 passed**. |
-| `tool/ci` | **62 passed**; `check_guide`: all 22 code blocks are in the host probe. |
+| `tool/ci` | **62 passed**; `check_guide`: all 23 code blocks are in the host probe. |
 | web builds | both 42M from a clean `build/`, no `flutter_scene` assets. |
-| host probe | exit 0 at `ae3a566` by `file://`; v0.3.0's probe analyses against it. |
-| CI on GitHub | green on every pushed commit through `d2bd37f`. |
+| host probe | exit 0 at `98c0c1d` by `file://`; v0.3.0's probe analyses against `56be3fa` (`old_host_probe.sh`), and in CI. |
+| CI on GitHub | green on every pushed commit through `56be3fa`. |
 
 **Smoke check** (Chromium, Playwright, on the demo's web build): 11
 badges after the switch; a 200 × −100 px pan moved every badge by exactly
@@ -126,6 +126,9 @@ about 0.09 ms per move against 0.05–0.06 ms without.
 - **To the human:** a look on a tablet and a terminal (the badges, pan and
   zoom smoothness, interactive badges by touch); the German and Turkish
   read of the demo's new strings.
+- **Known gap from the final review:** the canvas's own `Flow` already
+  clips the overlays, so the overlay layer's `ClipRect` is a second
+  guard today (F-2); TO33 pins both.
 - **To Monépro:** spec 103 B.1 can name `controller.camera` and
   `tableOverlayBuilder` (Q-Z1 is answered); Q-H3, the overlay sizes and
   detail levels phase 2 wants.
