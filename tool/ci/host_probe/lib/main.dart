@@ -90,6 +90,9 @@ class _FloorScreenState extends State<FloorScreen> {
   /// Whether staff may drag tables during service.
   bool staffMayMoveTables = true;
 
+  /// The guests at each table, by number: the POS's own data.
+  final Map<String, int> guestsAt = {'4': 2, '7': 5};
+
   @override
   void initState() {
     super.initState();
@@ -210,6 +213,50 @@ class _FloorScreenState extends State<FloorScreen> {
     };
   }
 
+  /// A badge on each table with guests: their count over the seats, faded
+  /// outside the focus, a dot when the plan is zoomed far out.
+  Widget? tableBadge(BuildContext context, FloorPlanTableOverlay table) {
+    final number = table.detail.table.number!;
+    final guests = guestsAt[number];
+    if (guests == null) return null;
+    final Widget badge = table.detailLevel == 0
+        ? const Icon(Icons.circle, size: 10)
+        : Chip(label: Text('$guests / ${table.detail.table.seats}'));
+    return Opacity(opacity: table.focused ? 1 : 0.4, child: badge);
+  }
+
+  /// Brings table [number] to the middle of the view, close enough to read.
+  void showTable(String number) {
+    for (final detail in controller.tableDetails) {
+      final center = detail.center;
+      if (detail.table.number == number && center != null) {
+        final scale = controller.camera.value.scale;
+        controller.centerOn(center, scale: scale < 0.1 ? 0.1 : null);
+        return;
+      }
+    }
+  }
+
+  /// Opens table [number]'s menu from outside the view (a list of open
+  /// orders, say), at the table's centre on the screen.
+  Future<void> openMenuAt(String number) async {
+    for (final detail in controller.tableDetails) {
+      final center = detail.center;
+      if (detail.table.number != number || center == null) continue;
+      final at = controller.worldToGlobal(center);
+      if (at != null) await showTableMenu(number, at);
+      return;
+    }
+  }
+
+  /// The table under a global point (an order dropped on the plan), or
+  /// null.
+  String? tableUnder(Offset global) {
+    final rect = controller.canvasRect.value;
+    if (rect == null) return null;
+    return controller.tableAt(global - rect.topLeft);
+  }
+
   void showOrders() {
     final numbers = controller.selectedTables.value;
     debugPrint('orders for tables $numbers');
@@ -283,6 +330,24 @@ class _FloorScreenState extends State<FloorScreen> {
               icon: const Icon(Icons.help_outline),
               onPressed: () =>
                   debugPrint('unplaced: ${unplacedTables({'1', '2', '99'})}')),
+          IconButton(
+              icon: const Icon(Icons.zoom_in),
+              onPressed: () => controller.zoomBy(1.25)),
+          IconButton(
+              icon: const Icon(Icons.my_location),
+              onPressed: () => showTable('7')),
+          IconButton(
+              icon: const Icon(Icons.receipt_long),
+              onPressed: () => openMenuAt('4')),
+          IconButton(
+              icon: const Icon(Icons.ads_click),
+              onPressed: () => debugPrint(
+                  'at (400, 300): ${tableUnder(const Offset(400, 300))}')),
+          ValueListenableBuilder<FloorPlanCamera>(
+            valueListenable: controller.camera,
+            builder: (context, camera, _) =>
+                Text('${(camera.scale * 1000).round()} px/m'),
+          ),
           Switch(
               value: staffMayMoveTables,
               onChanged: (v) => setState(() => staffMayMoveTables = v)),
@@ -310,6 +375,11 @@ class _FloorScreenState extends State<FloorScreen> {
               onSplitRequested: splitGroup,
               serviceMoves: staffMayMoveTables,
               longPress: FloorPlanLongPress.toggleSelection,
+              tableOverlayBuilder: tableBadge,
+              tableOverlayLayout: const FloorPlanOverlayLayout(
+                anchor: Alignment.bottomCenter,
+                detailBreakpoints: [0.05],
+              ),
             ),
           ),
         ],

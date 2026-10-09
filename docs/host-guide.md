@@ -176,11 +176,23 @@ The view, with the host's options:
               onSplitRequested: splitGroup,
               serviceMoves: staffMayMoveTables,
               longPress: FloorPlanLongPress.toggleSelection,
+              tableOverlayBuilder: tableBadge,
+              tableOverlayLayout: const FloorPlanOverlayLayout(
+                anchor: Alignment.bottomCenter,
+                detailBreakpoints: [0.05],
+              ),
             ),
 ```
 
 (`onLayoutChanged`, one call per service drag, still exists; for saving,
-`serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it.)
+`serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it. The
+last two arguments draw your own widget on each table, *unreleased on
+`main`*: [Your own widgets on the
+tables](#your-own-widgets-on-the-tables).)
+
+Show a controller in **one `FloorPlanView` at a time**: a second view of
+the same controller mounted beside the first throws a `StateError`. Two
+floors side by side are two controllers.
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
 or `FloorPlanMode.selection`, read back from `controller.mode`. A switch
@@ -188,7 +200,11 @@ keeps the plan where it is on the screen, zoom included (*since 0.2.0*;
 0.1.0 kept the camera's numbers, so the plan moved by the editor's
 panels); `fitToView()`, `load` and `newPlan()` fit it again, and
 `fitToTables` frames a set of tables (*since 0.3.0*, see
-[Zones](#zones-framing-and-focus)). The
+[Zones](#zones-framing-and-focus)). The camera itself is public
+(*unreleased on `main`*): `controller.camera` says where the plan is on
+the screen, and `panBy`, `zoomBy` and `centerOn` move it, within the
+zoom bounds the constructor's `minScale` and `maxScale` set (see [Your
+own widgets on the tables](#your-own-widgets-on-the-tables)). The
 design mode is the full editor; the selection mode shows the canvas
 alone, on a **service copy** of the plan.
 
@@ -477,6 +493,277 @@ Your codes are compared with the plan's numbers trimmed and
 case-sensitively. The planner lets staff type a number of 1 to 8
 characters (UTF-16 units) with no control character, so keep your codes
 within those rules: a longer code matches only a plan edited by hand.
+
+### Your own widgets on the tables
+
+*Unreleased on `main`.* A POS shows its own things on a table: the
+guests, the minutes since they sat down, the waiter, a bill to print.
+The planner tells you where each table is and where the plan is on the
+screen, and draws a widget of yours on each table, pinned to it while
+staff pan and zoom. None of it is stored in the plan, exported, printed
+or undone.
+
+**A table's place.** `controller.tableDetails` lists the tables of the
+plan the current mode shows — the service copy in the selection mode,
+so a service move changes it — in the order of `controller.tables`, one
+`FloorPlanTableDetail` per table:
+
+- `table`: the `FloorPlanTable` (number, seats, symbol key, `visible`).
+- `center`: the centre of the table's box, in world millimetres, y up.
+  It is the box's centre, not the point the symbol was placed by.
+- `size`: the box's width and height in millimetres, the table's scale
+  included.
+- `rotation` (radians, counter-clockwise) and `mirrored`: the table is
+  its box scaled to `size`, flipped about its own x axis when
+  `mirrored`, then turned by `rotation` about `center`.
+- `corners`: the box's four corners in world millimetres,
+  counter-clockwise, mirrored or not.
+- `layer` and `locked`: the table's layer, and whether it is locked (a
+  locked table can be tapped and selected, never moved).
+- `data`: empty in this release.
+
+A table on a hidden layer, or one whose corners are not finite (a
+hand-edited file), is listed with `center` and `size` null and no
+corners. The list is cached and unmodifiable: read it in `build` as
+often as you like, and again when `controller.revision` moves.
+
+**The camera.** `controller.camera` is a `ValueListenable` of
+`FloorPlanCamera`, a new value at every pan, zoom and fit, by the user
+or by you: `scale` in logical pixels per millimetre, `worldToCanvas`,
+`canvasToWorld`, and `visibleWorld(size)`, the world a canvas of that
+size shows. The **canvas** is the view's drawing area, in logical
+pixels, origin at its top left, y down: below the service bar in the
+selection mode, inside the rulers in the design mode. The camera
+notifies on every frame of a pan, so a widget that listens to it is
+rebuilt at that rate; keep such a widget small, like this read-out:
+
+```dart
+          ValueListenableBuilder<FloorPlanCamera>(
+            valueListenable: controller.camera,
+            builder: (context, camera, _) =>
+                Text('${(camera.scale * 1000).round()} px/m'),
+          ),
+```
+
+`controller.canvasRect` is where the canvas is on the screen, in global
+coordinates (its top left and its size), null while no view is shown;
+`worldToGlobal` and `globalToWorld` map through it and the camera, null
+without a view. They serve a widget **outside** the view, such as a menu
+opened from a list of orders; the builder below needs neither:
+
+```dart
+  /// Opens table [number]'s menu from outside the view (a list of open
+  /// orders, say), at the table's centre on the screen.
+  Future<void> openMenuAt(String number) async {
+    for (final detail in controller.tableDetails) {
+      final center = detail.center;
+      if (detail.table.number != number || center == null) continue;
+      final at = controller.worldToGlobal(center);
+      if (at != null) await showTableMenu(number, at);
+      return;
+    }
+  }
+```
+
+- A view reports `canvasRect` after its first frame's fit, and again
+  whenever it moves or is resized, an ancestor's padding included. An
+  ancestor that scales or turns the view (a `Transform`, a `FittedBox`)
+  is not accounted for.
+- A mode switch sets it at once to where the new mode's canvas was the
+  last time a view showed that mode; a mode no view has shown yet keeps
+  the old rect until the end of the next frame.
+
+**Moving the camera.** Three commands, in either mode:
+
+- `panBy(canvasDelta)` moves the plan on the screen by that many logical
+  pixels. It needs no view.
+- `zoomBy(factor, focus: point)` zooms about a canvas point, the canvas's
+  centre by default. It returns `false`, changing nothing, while no view
+  is shown, or for a factor that is not finite and above 0.
+- `centerOn(world, scale: s)` puts a world point at the canvas's centre,
+  at that scale or at the camera's own.
+
+```dart
+  /// Brings table [number] to the middle of the view, close enough to read.
+  void showTable(String number) {
+    for (final detail in controller.tableDetails) {
+      final center = detail.center;
+      if (detail.table.number == number && center != null) {
+        final scale = controller.camera.value.scale;
+        controller.centerOn(center, scale: scale < 0.1 ? 0.1 : null);
+        return;
+      }
+    }
+  }
+```
+
+```dart
+          IconButton(
+              icon: const Icon(Icons.zoom_in),
+              onPressed: () => controller.zoomBy(1.25)),
+```
+
+- **The zoom bounds.** `FloorPlanController(minScale: …, maxScale: …)`,
+  in logical pixels per millimetre, 0.001 and 100 by default (the
+  planner's own). The user's pinch and wheel, `zoomBy`, `centerOn` and
+  every fit stay inside them; a zoom that would pass a bound stops on it.
+  The constructor throws an `ArgumentError` unless both are finite and
+  `1e-6 <= minScale < maxScale`. Fits are now clamped to the bounds too;
+  with the default bounds no real plan is affected.
+- **Requests and commands.** `centerOn` is a request, as `fitToView()`
+  and `fitToTables` are: the view performs it at the end of the frame;
+  with no view shown, the next view does it on its first frame; the last
+  request wins. `panBy` and `zoomBy` act at once and drop a request not
+  performed yet.
+- **A plan's first fit is not a request.** After the constructor, `load`
+  or `newPlan()`, the first view to show the plan fits it on its first
+  frame whatever came before: a `panBy` or `zoomBy` made earlier is
+  overwritten. To place the camera before a view shows, use `centerOn`
+  (or `fitToTables`). A host that waits for a non-null `canvasRect`
+  before calling `zoomBy` zooms the fitted plan.
+- **Locking the user out.** `FloorPlanView(userCamera: false)` switches
+  off the user's pan, pinch, wheel and trackpad zoom in that view, for a
+  wall display or a kiosk: a drag on the floor then does nothing; taps,
+  selection and table moves are unchanged, and your commands still act.
+
+**The table at a point.** `controller.tableAt(canvasPoint)` gives the
+number of the table a tap there would hit in the current mode, or null
+for none and for an unnumbered table: a point on the table's top, else
+in its box, the one drawn on top among several. Pass
+`kind: PointerDeviceKind.touch` (from `package:flutter/gestures.dart`)
+for a finger's reach of 24 px. A table on a hidden layer is never found;
+a locked one is. The point is a canvas point; from a global one,
+subtract the canvas's top left:
+
+```dart
+  /// The table under a global point (an order dropped on the plan), or
+  /// null.
+  String? tableUnder(Offset global) {
+    final rect = controller.canvasRect.value;
+    if (rect == null) return null;
+    return controller.tableAt(global - rect.topLeft);
+  }
+```
+
+**The builder.** Give the view a `tableOverlayBuilder` (the last
+arguments of the view in [§ 4](#4-the-controller-and-the-view)); without
+one there is no overlay layer at all. It gets a `FloorPlanTableOverlay`
+per numbered table with geometry and returns that table's widget, or
+null for none:
+
+```dart
+  /// A badge on each table with guests: their count over the seats, faded
+  /// outside the focus, a dot when the plan is zoomed far out.
+  Widget? tableBadge(BuildContext context, FloorPlanTableOverlay table) {
+    final number = table.detail.table.number!;
+    final guests = guestsAt[number];
+    if (guests == null) return null;
+    final Widget badge = table.detailLevel == 0
+        ? const Icon(Icons.circle, size: 10)
+        : Chip(label: Text('$guests / ${table.detail.table.seats}'));
+    return Opacity(opacity: table.focused ? 1 : 0.4, child: badge);
+  }
+```
+
+- `detail`: the table's `FloorPlanTableDetail`.
+- `selected`: its number is in `selectedTables` (two tables sharing a
+  number are both selected when it is).
+- `focused`: its number is in the focus, or no focus is set.
+- `status`: the status the selection mode draws on it — its group's when
+  its group has one, else its own — or null.
+- `detailLevel`: see *Detail levels* below.
+
+It carries no screen position and no scale: those change at every frame
+of a pan, and the widget is not rebuilt for them.
+
+**When the builder runs.** Once per table when the layer is built; again
+for **one table** when its `FloorPlanTableOverlay` changes (the plan,
+the selection, the focus, a status, the detail level); and again for
+**every table** each time your widget rebuilds the `FloorPlanView`,
+whatever the function — a closure written in `build` and a method
+tear-off behave the same — so a builder that reads your own fields, as
+`tableBadge` reads `guestsAt`, sees them after your `setState`. **Never
+on pan or zoom.** Data that changes on its own (an order's total, a
+timer) belongs in your own state management inside the widget — a
+`ValueListenableBuilder`, a `BlocBuilder` — which rebuilds that widget
+and nothing else.
+
+**Placement.** `tableOverlayLayout`, a `FloorPlanOverlayLayout`:
+
+- `anchor` (default `Alignment.center`): the point of the table's
+  bounding box **on the screen** the widget is pinned to, and the
+  widget's own point placed there, as `Align` places a child:
+  `Alignment.bottomCenter` sits the widget on the inside of the box's
+  bottom edge. A turned table's bounding box is larger than the table.
+- `size`: `FloorPlanOverlaySize.natural` (the default) keeps the
+  widget's own size at every zoom, laid out once with loose constraints
+  up to `maxNaturalSize` (default 200 × 120); `FloorPlanOverlaySize.box`
+  sizes it to the table's bounding box on the screen, exactly, and lays
+  it out again at every camera change.
+- `hideBelowScale` (default 0): below this camera scale no overlay is
+  laid out or painted.
+- `interactive`: see *Pointers* below.
+- `tableOverlayModes` on the view (default the selection mode only): the
+  modes that show the overlays; add `FloorPlanMode.design` to see them
+  in the editor too.
+
+**Detail levels.** `detailBreakpoints`, camera scales in strictly
+ascending order (default none): `detailLevel` is how many of them are at
+or below the current scale. Crossing one builds every overlay once;
+nothing else about the zoom builds anything. With `[0.05]`, as above, a
+badge is a dot below 0.05 px/mm (a 20 m floor on a 1000 px canvas) and
+the full badge above it. The view throws an `ArgumentError` when it is
+built with a builder and breakpoints that are not finite, positive and
+strictly ascending, or a `hideBelowScale` or `maxNaturalSize` that is
+negative or not finite.
+
+**Pointers.** By default the overlays ignore every pointer: a tap on a
+badge is a tap on its table (it selects it and calls `onTableTap`), and
+a drag from it moves the table or pans as from the table itself. With
+`interactive: true`, a pointer that goes down on an overlay's widget is
+the widget's alone, from that down to its up:
+
+| Over a badge, with `interactive: true` | What happens |
+|---|---|
+| A tap (mouse, finger, stylus) | The widget's own `GestureDetector` only: no selection, no `onTableTap` |
+| A drag, any button | Nothing under it: the table does not move, the plan does not pan |
+| A long press, a secondary click | Neither the table's long press nor `onTableContextMenu`; the widget's own recognizers decide |
+| A finger of a pinch | Not part of the pinch: a finger on a badge and one on the floor are a one-finger gesture of the floor's |
+| A mouse hovering | Not over the canvas: the editor's hover highlight goes |
+| The mouse wheel | Still zooms the plan, unless the widget takes the wheel itself (a scrollable inside it does) |
+| A trackpad's pan and zoom | Always the plan's |
+
+A pointer that goes down off every overlay, or on a transparent gap in
+one, is the canvas's as before, wherever it then moves: a pan may cross
+a badge. Use `onTap` and `onLongPress` on your own `GestureDetector`.
+
+The wheel over a badge goes to the plan through Flutter's
+`PointerSignalResolver`, so there it wins over a scrollable of yours
+that holds the view, and on the web the browser does not scroll the
+page; off the badges the wheel behaves as before.
+
+**Lifetime.** The overlays live as long as the plan the view shows: a
+mode switch, `resetLayout()`, `restoreServiceLayout`, `load` and
+`newPlan()` build them afresh, and so does switching `interactive`. Keep
+state in your own objects, not in an overlay's `State`. Two tables
+sharing a number get two widgets. While staff drag a table, its widget
+stays at the table's last place and moves on the drop.
+
+**The look.** The overlays paint above the plan, the statuses, the
+selection outlines, the focus veil and the number chips, clipped to the
+canvas and below the service bar. The veil does not fade them: fade an
+unfocused table's widget yourself with `focused`, as `tableBadge` does.
+`setTableStatus` keeps painting its fill and caption under your widgets;
+if your widget shows the status, set none, or set a colour without a
+caption.
+
+**The cost.** Pan and zoom rebuild none of your widgets; they move them.
+At each camera change the planner does a little arithmetic per table
+and paints each `natural` overlay on the canvas at its new place; a
+`box` overlay is also laid out again at its new size, so keep a `box`
+widget light. Overlays off the canvas, and all of them below
+`hideBelowScale`, are not painted. Each overlay sits behind its own
+`RepaintBoundary`, so a widget that changes repaints alone.
 
 ## 8. Callbacks, options, and the web's context menu
 
