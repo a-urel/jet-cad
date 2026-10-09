@@ -103,7 +103,8 @@ class PaperPalette {
   final Color selection;
 
   /// The hover outline: the selection's hue at 60% alpha, so a hovered
-  /// object reads as a weaker statement than a selected one.
+  /// object reads as a weaker statement than a selected one. [withSelection]
+  /// derives it from another selection colour the same way.
   final Color hover;
 
   /// The window (left-to-right) band.
@@ -167,6 +168,26 @@ class PaperPalette {
   /// overlays' switch at exactly the paper where the drafting's ink flips.
   static PaperPalette forPaper(int argb) =>
       foregroundFor(argb & 0xFFFFFF) == 0xFFFFFF ? dark : light;
+
+  /// This set with [selection] as its selection colour and [hover] derived
+  /// from it: [selection]'s colour at its alpha times `0x99 / 0xFF` (60%),
+  /// the ratio both sets' own hover has to their selection, so
+  /// `light.withSelection(light.selection) == light`. The ten other colours
+  /// are this set's (host embedding API spec T-1, S-8).
+  PaperPalette withSelection(Color selection) => PaperPalette(
+        minorGrid: minorGrid,
+        majorGrid: majorGrid,
+        pageBreak: pageBreak,
+        selection: selection,
+        hover: selection.withValues(alpha: selection.a * 0x99 / 0xFF),
+        windowBand: windowBand,
+        crossingBand: crossingBand,
+        grip: grip,
+        gripMove: gripMove,
+        gripHot: gripHot,
+        preview: preview,
+        snap: snap,
+      );
 
   @override
   bool operator ==(Object other) =>

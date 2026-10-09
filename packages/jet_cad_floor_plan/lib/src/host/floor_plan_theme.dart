@@ -6,6 +6,7 @@ import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PaperPalette;
 
 /// The planner's look (host embedding API spec T-1): the colours, widths
 /// and styles a host may set. Every field is optional, and null is
@@ -340,6 +341,24 @@ void validateFloorPlanTheme(FloorPlanTheme theme) {
   positive(theme.selectionWidth, 'selectionWidth');
   opacity(theme.focusVeilOpacity, 'focusVeilOpacity');
   positive(theme.serviceBarHeight, 'serviceBarHeight');
+}
+
+/// The overlays' colours on the display paper [paperArgb] under [theme]
+/// (spec T-1's selection row, Slice 3 plan Task 2): the set
+/// [PaperPalette.forPaper] picks, with the theme's colour for that set
+/// (`selectionOnDark` for the dark set, `selectionOnLight` for the light)
+/// as its selection and hover ([PaperPalette.withSelection]). With no
+/// theme, or no colour for that set, it is the `const` set itself, so a
+/// view with no theme hands its painters today's instance (P-6).
+///
+/// Called where a mode builds, never per frame (P-4).
+@internal
+PaperPalette paperPaletteFor(int paperArgb, FloorPlanTheme? theme) {
+  final set = PaperPalette.forPaper(paperArgb);
+  final colour = identical(set, PaperPalette.dark)
+      ? theme?.selectionOnDark
+      : theme?.selectionOnLight;
+  return colour == null ? set : set.withSelection(colour);
 }
 
 /// Resolves the planner's look just below `FloorPlanView` (spec T-2,

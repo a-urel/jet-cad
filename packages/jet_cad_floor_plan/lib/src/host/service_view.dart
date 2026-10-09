@@ -226,7 +226,8 @@ class _ServiceViewState extends State<ServiceView> {
   int _foreground = -1;
   bool _darkCanvas = false;
 
-  /// The theme's surface, ARGB: the paper with no page (D4). Set in
+  /// The theme's surface, ARGB: the paper with no page (D4), or the host's
+  /// `canvasBackground` in its place (host embedding API spec T-1). Set in
   /// [didChangeDependencies], the only place this state reads the theme for
   /// the paper.
   late int _surfaceArgb;
@@ -363,13 +364,18 @@ class _ServiceViewState extends State<ServiceView> {
     setState(() => _resolver = next);
   }
 
+  /// The canvas around the page and a page-less plan's paper: the host's
+  /// `canvasBackground`, else the theme's surface (spec T-1).
+  Color _canvasColour(ColorScheme scheme) =>
+      _theme.value?.canvasBackground ?? scheme.surface;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final theme = Theme.of(context);
-    _surfaceArgb = theme.colorScheme.surface.toARGB32();
-    _brightness = theme.brightness;
     _theme.value = FloorPlanThemeScope.of(context);
+    _surfaceArgb = _canvasColour(theme.colorScheme).toARGB32();
+    _brightness = theme.brightness;
     _paper.value = _paperArgb();
     // A `build` follows: only a key change builds a new resolver.
     if (_nextResolver() case final next?) _resolver = next;
@@ -471,7 +477,7 @@ class _ServiceViewState extends State<ServiceView> {
             ),
             Expanded(
               child: ColoredBox(
-                color: scheme.surface,
+                color: _canvasColour(scheme),
                 child: Listener(
                   key: _canvas,
                   onPointerDown: _onSecondaryDown,
@@ -490,7 +496,11 @@ class _ServiceViewState extends State<ServiceView> {
                     // Dark theme spec D5: the chrome (here the sheet edge)
                     // follows the theme, the overlays the paper.
                     chrome: ChromePalette.of(theme.brightness),
-                    paper: PaperPalette.forPaper(_paperArgb()),
+                    // Host embedding API spec T-1: the host's selection
+                    // colour for the paper's set, its width.
+                    paper: paperPaletteFor(_paperArgb(), _theme.value),
+                    selectionStrokePixels:
+                        _theme.value?.selectionWidth ?? kSelectionStrokePixels,
                     sheetArgb: _darkCanvas ? _paperArgb() : null,
                     fitRequests: _c.fitRequests,
                     fitOnStart: _fitOnStart,
