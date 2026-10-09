@@ -261,4 +261,112 @@ void main() {
         contains('run: tool/ci/host_probe.sh "file://\$GITHUB_WORKSPACE" '
             '"\$(git rev-parse HEAD)"'));
   });
+
+  // Host embedding API spec, invariant 1 (P-1): the host-probe job also
+  // analyses the 0.3.0 probe against the commit under test, after the
+  // probe is resolved there, from a checkout that has the tag.
+  test('SC18 the host-probe job analyses the 0.3.0 probe, with the tags', () {
+    final from = workflow.indexOf('\n  host-probe:\n');
+    expect(from, isNot(-1), reason: 'premise: the job');
+    final next = RegExp(r'^  \S', multiLine: true)
+        .allMatches(workflow, from + 2)
+        .where((m) => m.start > from + 2)
+        .firstOrNull;
+    final job = workflow.substring(from, next?.start ?? workflow.length);
+    expect(
+        job,
+        contains('      - uses: actions/checkout@v5\n'
+            '        with:\n'
+            '          fetch-depth: 0\n'),
+        reason: 'the whole history: the tag is in the clone');
+    final probe = job.indexOf('run: tool/ci/host_probe.sh ');
+    final old = job.indexOf('run: tool/ci/old_host_probe.sh v0.3.0\n');
+    expect(probe, isNot(-1));
+    expect(old, greaterThan(probe), reason: 'after the probe is resolved');
+  });
+
+  // The script itself, run by bash in a scratch repository with the tag
+  // and a stand-in `flutter` that records what it analysed.
+  group('SC19 old_host_probe.sh', () {
+    late Directory repo;
+    late File main;
+    late File seen;
+    const tagged = 'void main() {} // as v0.3.0 had it\n';
+    const current = 'void main() {} // this commit\n';
+
+    Future<ProcessResult> git(List<String> args) async {
+      final r = await Process.run('git', args, workingDirectory: repo.path);
+      expect(r.exitCode, 0, reason: 'git $args: ${r.stderr}');
+      return r;
+    }
+
+    Future<ProcessResult> runScript({required int flutterExit}) {
+      final bin = Directory('${repo.path}/bin')..createSync();
+      File('${bin.path}/flutter')
+        ..writeAsStringSync('#!/usr/bin/env bash\n'
+            'cp lib/main.dart "${seen.path}"\n'
+            'echo "flutter \$*"\n'
+            'exit $flutterExit\n')
+        ..createSync();
+      Process.runSync('chmod', ['+x', '${bin.path}/flutter']);
+      return Process.run('bash', ['tool/ci/old_host_probe.sh', 'v0.3.0'],
+          workingDirectory: repo.path,
+          environment: {
+            'PATH': '${bin.path}:${Platform.environment['PATH']}',
+          });
+    }
+
+    setUp(() async {
+      repo = Directory.systemTemp.createTempSync('old_host_probe');
+      seen = File('${repo.path}/seen.dart');
+      Directory('${repo.path}/tool/ci/host_probe/lib')
+          .createSync(recursive: true);
+      File('old_host_probe.sh').copySync('${repo.path}/tool/ci/'
+          'old_host_probe.sh');
+      main = File('${repo.path}/tool/ci/host_probe/lib/main.dart')
+        ..writeAsStringSync(tagged);
+      await git(['init', '-q']);
+      await git(['add', 'tool']);
+      await git([
+        '-c', 'user.name=t', '-c', 'user.email=t@t', //
+        'commit', '-q', '-m', 'release',
+      ]);
+      await git(['tag', 'v0.3.0']);
+      // A later commit, so the tag is not HEAD.
+      main.writeAsStringSync(current);
+      await git([
+        '-c', 'user.name=t', '-c', 'user.email=t@t', //
+        'commit', '-q', '-am', 'later',
+      ]);
+    });
+    tearDown(() => repo.deleteSync(recursive: true));
+
+    test('no resolved probe: exit 2, main.dart untouched', () async {
+      final r = await runScript(flutterExit: 0);
+      expect(r.exitCode, 2);
+      expect(r.stderr, contains('run tool/ci/host_probe.sh first'));
+      expect(main.readAsStringSync(), current);
+      expect(seen.existsSync(), isFalse);
+    });
+
+    test("the tag's main.dart analysed; this commit's put back", () async {
+      File('${repo.path}/tool/ci/host_probe/pubspec.lock')
+          .writeAsStringSync('packages: {}\n');
+      final r = await runScript(flutterExit: 0);
+      expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
+      expect(r.stdout, contains('flutter analyze'));
+      expect(r.stdout, contains("old host probe: v0.3.0's main.dart"));
+      expect(seen.readAsStringSync(), tagged);
+      expect(main.readAsStringSync(), current);
+    });
+
+    test('analysis fails: exit non-zero, main.dart put back', () async {
+      File('${repo.path}/tool/ci/host_probe/pubspec.lock')
+          .writeAsStringSync('packages: {}\n');
+      final r = await runScript(flutterExit: 1);
+      expect(r.exitCode, 1);
+      expect(seen.readAsStringSync(), tagged);
+      expect(main.readAsStringSync(), current);
+    });
+  });
 }
