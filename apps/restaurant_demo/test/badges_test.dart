@@ -340,6 +340,20 @@ void main() {
     }
   });
 
+  testWidgets(
+      'DB8 each badge is its own semantics node, named by its table, at its '
+      'badge', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final demo = await badgesOn(tester);
+    for (final n in badged(demo.area.controller)) {
+      final node = find.bySemanticsLabel(RegExp('^Table $n\\n'));
+      expect(node, findsOneWidget, reason: n);
+      final rect = tester.getSemantics(node).rect;
+      expect(rect.size, tester.getSize(byKey('badge-$n')), reason: n);
+    }
+    semantics.dispose();
+  });
+
   test('DB7 the figures: free tables seat nobody; each status its minutes', () {
     expect(DemoHomeState.badgeFigures('3', 4, null), isNull);
     expect(DemoHomeState.badgeFigures('3', 4, 'Free'), isNull);

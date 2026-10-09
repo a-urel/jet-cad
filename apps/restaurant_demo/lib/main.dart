@@ -665,7 +665,13 @@ class DemoHomeState extends State<DemoHome> {
         ]),
       );
     }
-    return Opacity(opacity: table.focused ? 1 : 0.35, child: badge);
+    // One semantics node per badge, named by its table: a screen reader
+    // (and the web's accessibility tree) reads each badge apart.
+    return Semantics(
+      container: true,
+      label: DemoStrings.of(context).tableTitle(number),
+      child: Opacity(opacity: table.focused ? 1 : 0.35, child: badge),
+    );
   }
 
   /// Table 7 in the middle of [a]'s view, its zoom kept (spec G-3): its
