@@ -71,6 +71,60 @@ final class FloorPlanExport {
   final String mimeType;
 }
 
+/// What an export writes (host embedding API spec C-3): a vector PDF of the
+/// page, or a PNG of it at a [FloorPlanExportDpi].
+enum FloorPlanExportFormat { pdf, png }
+
+/// The resolutions a PNG export offers (spec C-3); a PDF ignores it.
+enum FloorPlanExportDpi {
+  d96,
+  d150,
+  d300;
+
+  /// Dots per inch.
+  int get value => switch (this) {
+        FloorPlanExportDpi.d96 => 96,
+        FloorPlanExportDpi.d150 => 150,
+        FloorPlanExportDpi.d300 => 300,
+      };
+}
+
+/// The Export dialog's answer, made public (host embedding API spec C-3,
+/// C-4): the format and, for a PNG, the resolution. A PDF keeps the
+/// resolution, so a dialog switching back to PNG shows it. What
+/// `FloorPlanView.onExportDialog` answers and `FloorPlanController.exportPlan`
+/// takes.
+@immutable
+final class FloorPlanExportChoice {
+  const FloorPlanExportChoice({required this.format, required this.dpi});
+
+  /// The first choice of a controller's life: PDF, 150 dpi, as today's
+  /// dialog's.
+  static const FloorPlanExportChoice initial = FloorPlanExportChoice(
+      format: FloorPlanExportFormat.pdf, dpi: FloorPlanExportDpi.d150);
+
+  final FloorPlanExportFormat format;
+  final FloorPlanExportDpi dpi;
+
+  FloorPlanExportChoice copyWith(
+          {FloorPlanExportFormat? format, FloorPlanExportDpi? dpi}) =>
+      FloorPlanExportChoice(
+          format: format ?? this.format, dpi: dpi ?? this.dpi);
+
+  @override
+  bool operator ==(Object other) =>
+      other is FloorPlanExportChoice &&
+      other.format == format &&
+      other.dpi == dpi;
+
+  @override
+  int get hashCode => Object.hash(format, dpi);
+
+  @override
+  String toString() =>
+      'FloorPlanExportChoice(${format.name}, ${dpi.value} dpi)';
+}
+
 /// A table's status as the host colours it in the selection mode (spec 14c
 /// S5): a fill under the drafting, and an optional short caption. Not
 /// document state: never saved, exported, printed or undone.

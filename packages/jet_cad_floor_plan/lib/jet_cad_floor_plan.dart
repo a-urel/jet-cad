@@ -22,6 +22,9 @@ export 'src/host/floor_plan_types.dart'
     show
         DuplicateNumber,
         FloorPlanExport,
+        FloorPlanExportChoice,
+        FloorPlanExportDpi,
+        FloorPlanExportFormat,
         FloorPlanLongPress,
         FloorPlanMode,
         FloorPlanTable,

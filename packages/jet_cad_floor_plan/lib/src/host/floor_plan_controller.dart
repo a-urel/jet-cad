@@ -15,6 +15,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../camera_bounds.dart';
 import '../export/export_dialog.dart';
 import '../export/export_font.dart';
+import '../export/page_printer.dart';
 import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../new_document.dart';
@@ -28,6 +29,7 @@ import '../tables/table_index.dart';
 import 'design_changes.dart';
 import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
+import 'page_flows.dart' show exportOnce, printOnce, toExportChoice;
 import 'service_layout.dart';
 import 'service_view.dart' show kServiceBarHeight;
 import 'table_detail.dart';
@@ -311,6 +313,17 @@ class FloorPlanController extends ChangeNotifier {
   final ExportFontCache exportFont = ExportFontCache();
   @internal
   ExportChoice exportChoice = ExportChoice.initial;
+
+  /// One export or print at a time, for this controller (host embedding
+  /// API spec S-7): its views' flows and [exportPlan] and [printPlan] share
+  /// it. False while one runs.
+  @internal
+  final ValueNotifier<bool> pageFlowReady = ValueNotifier(true);
+
+  /// Whether [dispose] has run: a flow that outlives its view releases
+  /// [pageFlowReady] unless the controller went too.
+  @internal
+  bool get isDisposed => _disposed;
 
   /// The zoom bounds (spec G-3), as the constructor was given them.
   final double _minScale, _maxScale;
@@ -1042,6 +1055,56 @@ class FloorPlanController extends ChangeNotifier {
           diagnostics: <Diagnostic>[]);
 
   // ---------------------------------------------------------------------
+  // Export and Print without their dialogs (host embedding API spec C-3).
+
+  /// The active plan -- the design, or the service copy on screen -- as
+  /// [choice] says, named `<name>.pdf` or `<name>.png`: what the view's
+  /// Export hands `onExport`, without the dialog (spec C-3). It needs no
+  /// view mounted.
+  ///
+  /// Null when an export or a print already runs for this controller (the
+  /// view's bar or chords included: one at a time, S-7), when the plan has
+  /// no page, when the plan shown is replaced before the bytes are made (a
+  /// mode switch, a `resetLayout`, a `load`), or after [dispose]. Pending
+  /// input is settled first. An error completes the returned `Future` with
+  /// it; `FloorPlanView.onPageFlowError` reports only the flows the view
+  /// starts. The dialog's remembered choice is left as it is. Allowed
+  /// whatever the editor's capabilities.
+  Future<FloorPlanExport?> exportPlan(FloorPlanExportChoice choice,
+          {String name = 'plan'}) =>
+      _pageFlow<FloorPlanExport?>(
+          null,
+          () => exportOnce(this, toExportChoice(choice), name,
+              cancelled: () => _disposed));
+
+  /// The active plan's page as a PDF to [printer] (the platform's print
+  /// dialog when null), named [name]: what the view's Print does (spec
+  /// C-3). It needs no view mounted. True once the printer is done with
+  /// it; false when an export or a print already runs for this controller,
+  /// when the plan has no page, when the plan shown is replaced before the
+  /// bytes are made, or after [dispose]. An error completes the returned
+  /// `Future` with it. Allowed whatever the editor's capabilities.
+  Future<bool> printPlan({PagePrinter? printer, String name = 'plan'}) =>
+      _pageFlow<bool>(
+          false,
+          () => printOnce(this, printer ?? const PrintingPagePrinter(), name,
+              cancelled: () => _disposed));
+
+  /// [flow] under [pageFlowReady], after a settle; [busy] when another
+  /// runs or the controller is disposed, before or after it.
+  Future<T> _pageFlow<T>(T busy, Future<T> Function() flow) async {
+    if (_disposed || !pageFlowReady.value) return busy;
+    pageFlowReady.value = false;
+    try {
+      _settle?.call();
+      final result = await flow();
+      return _disposed ? busy : result;
+    } finally {
+      if (!_disposed) pageFlowReady.value = true;
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Undo and redo, of the active plan.
 
   void undo() {
@@ -1719,6 +1782,7 @@ class FloorPlanController extends ChangeNotifier {
     if (_ownsSymbols) symbols.dispose();
     if (_ownsThumbnails) thumbnails.dispose();
     cameraController.dispose();
+    pageFlowReady.dispose();
     _canvasRect.dispose();
     _fits.dispose();
     _layoutChanges.dispose();

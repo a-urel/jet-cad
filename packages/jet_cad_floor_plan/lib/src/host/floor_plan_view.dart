@@ -50,6 +50,8 @@ class FloorPlanView extends StatefulWidget {
     this.onFloorTap,
     this.onTableHover,
     this.theme,
+    this.onExportDialog,
+    this.onPageFlowError,
   });
 
   final FloorPlanController controller;
@@ -189,6 +191,26 @@ class FloorPlanView extends StatefulWidget {
   /// them themed wraps the view in a local `Theme`.
   final FloorPlanTheme? theme;
 
+  /// The host's export dialog (host embedding API spec C-4): when given,
+  /// **every** Export entry point (the service bar's button, the editor's
+  /// bar, the chords Cmd+E and Ctrl+E, in both modes) calls it instead of
+  /// the Material dialog, with the choice last made in this controller's
+  /// life as [initial] (PDF at 150 dpi at first); the answer is remembered
+  /// as the next [initial], and null from it cancels (nothing is
+  /// exported). Print has no dialog of jet-cad's (the platform's). Read at
+  /// each Export.
+  final Future<FloorPlanExportChoice?> Function(
+      BuildContext context, FloorPlanExportChoice initial)? onExportDialog;
+
+  /// An export or a print this view started failed (spec C-3): the error,
+  /// once, after which the flow ends and Export and Print are enabled
+  /// again. The hook's own error ([onExportDialog]'s) is reported here too.
+  /// Without it the error propagates as it always did, out of a `Future`
+  /// the press drops: an uncaught asynchronous error (spec S-8).
+  /// `FloorPlanController.exportPlan` and `printPlan` do not report here:
+  /// their `Future` completes with the error. Read at each error.
+  final void Function(Object error)? onPageFlowError;
+
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
 }
@@ -251,8 +273,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   bool _fit = true;
   bool _fitIsRequest = false;
 
-  /// One per controller: the settings are read from the current widget
-  /// at each call (review F-1).
+  /// One per controller: the settings and the hooks are read from the
+  /// current widget at each call (review F-1, R-5); the guard is the
+  /// controller's, which its `exportPlan` and `printPlan` share (S-7).
   PageFlows _flowsFor(FloorPlanController c) => PageFlows(
         controller: c,
         settings: () => (
@@ -260,6 +283,11 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           printer: widget.printer ?? const PrintingPagePrinter(),
           exportName: widget.exportName,
         ),
+        hooks: () => (
+          exportDialog: widget.onExportDialog,
+          onError: widget.onPageFlowError,
+        ),
+        ready: c.pageFlowReady,
       );
 
   /// Reports this view's language to the controller (spec Q0 N1): it
