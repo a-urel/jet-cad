@@ -463,4 +463,39 @@ void main() {
     await tester.pump();
     expect(demo.log.first, 'Salon: {7} taşındı');
   });
+
+  testWidgets(
+      'DE10 final review F-3: a double tap on a number two tables carry '
+      'logs no id, on either table, though both are linked; a number on one '
+      'table still logs its id', (tester) async {
+    final demo = await pumpSamples(tester);
+    final c = demo.area.controller;
+    await press(tester, 'link-tables');
+    // After the link: 2 renumbered 1, so two linked tables carry 1.
+    rename(c, '2', '1');
+    await settle(tester);
+    await press(tester, 'mode-service');
+    final ones = [
+      for (final d in c.tableDetails)
+        if (d.table.number == '1') d,
+    ];
+    expect(ones.map((d) => d.data['id']), ['salon-1', 'salon-2'],
+        reason: 'premise: two linked tables numbered 1');
+
+    var at = 10000;
+    for (final one in ones) {
+      final p = c.worldToGlobal(one.center!)!;
+      await click(tester, p, ms(at));
+      await click(tester, p, ms(at + 100));
+      await tester.pump();
+      expect(demo.log.first, 'Salon: table 1 opened (no id)',
+          reason: '${one.data['id']}');
+      at += 10000;
+    }
+    await click(tester, centreOf(c, '7'), ms(at));
+    await click(tester, centreOf(c, '7'), ms(at + 100));
+    await tester.pump();
+    expect(demo.log.first, 'Salon: table 7 opened (id salon-7)');
+    expect(tester.takeException(), isNull);
+  });
 }

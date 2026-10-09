@@ -1015,12 +1015,14 @@ plan with the table, and read back as `FloorPlanTableDetail.data`:
   bool linkTable(String number, String id) =>
       controller.setTableData(number, {'id': id});
 
-  /// The POS's id of table [number], or null.
+  /// The POS's id of table [number]: null when no table carries the
+  /// number, or when two do (it names neither).
   String? idOf(String number) {
-    for (final detail in controller.tableDetails) {
-      if (detail.table.number == number) return detail.data['id'];
-    }
-    return null;
+    final tables = [
+      for (final detail in controller.tableDetails)
+        if (detail.table.number == number) detail,
+    ];
+    return tables.length == 1 ? tables.single.data['id'] : null;
   }
 ```
 
@@ -1032,6 +1034,12 @@ plan with the table, and read back as `FloorPlanTableDetail.data`:
 - It returns **false**, changing nothing, when the number (trimmed, as
   everywhere) names no table **or more than one**: an ambiguous link is
   refused, not guessed. Mend the numbering first (`numberingWarnings`).
+- **Read a link the same way.** A number on two tables names neither:
+  `idOf` above returns null for it rather than the first table's id. A
+  number can come to name two tables after the link, by a renumbering in
+  the editor, which `numberingWarnings` reports but allows; a callback
+  such as `onTableDoubleTap` then carries a number both tables answer to,
+  and the first one's id would open the other table's bill.
 - A table on a hidden or locked layer takes data: a link is not a drawing
   edit.
 - **The selection mode refuses it** with a `StateError`: nothing done

@@ -395,16 +395,16 @@ class DemoHomeState extends State<DemoHome> {
 
   /// A double tap opens table [number] (spec E-2): logged with the id the
   /// table is linked by, read from the service copy's details, which carry
-  /// the design's data (E-6). Its two taps were logged first: a host that
-  /// acts on a tap acts on each tap of a double tap too (R-3).
+  /// the design's data (E-6); no id when two tables carry the number, which
+  /// names neither (the guide's `idOf`: an ambiguous link is refused on
+  /// write and read the same way). Its two taps were logged first: a host
+  /// that acts on a tap acts on each tap of a double tap too (R-3).
   void _opened(Area a, String number) {
-    String? id;
-    for (final detail in a.controller.tableDetails) {
-      if (detail.table.number == number) {
-        id = detail.data['id'];
-        break;
-      }
-    }
+    final tables = [
+      for (final detail in a.controller.tableDetails)
+        if (detail.table.number == number) detail,
+    ];
+    final id = tables.length == 1 ? tables.single.data['id'] : null;
     _log(_words.logOpened(a.name, number, id));
   }
 

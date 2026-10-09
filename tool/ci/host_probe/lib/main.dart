@@ -252,12 +252,14 @@ class _FloorScreenState extends State<FloorScreen> {
   bool linkTable(String number, String id) =>
       controller.setTableData(number, {'id': id});
 
-  /// The POS's id of table [number], or null.
+  /// The POS's id of table [number]: null when no table carries the
+  /// number, or when two do (it names neither).
   String? idOf(String number) {
-    for (final detail in controller.tableDetails) {
-      if (detail.table.number == number) return detail.data['id'];
-    }
-    return null;
+    final tables = [
+      for (final detail in controller.tableDetails)
+        if (detail.table.number == number) detail,
+    ];
+    return tables.length == 1 ? tables.single.data['id'] : null;
   }
 
   /// Links every table the POS knows on this floor, in one undo step;
