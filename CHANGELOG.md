@@ -8,13 +8,15 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released: the host embedding API's Slices 1 and 2, a
+On `main`, not yet released: the host embedding API's Slices 1 to 3, a
 host's own widgets on the tables, then the selection mode's events and a
-host's own data on a table. **Move every terminal that shares stored
-plans together**: 0.3.0 and earlier refuse a plan this version saves
-(schema 9), with or without table data. Service layouts are the same as
-0.3.0's. Nothing a 0.3.0 host calls changes its signature; CI analyses
-the 0.3.0 host probe against every commit.
+host's own data on a table, then the floor plan's look in a host's
+theme. **Move every terminal that shares stored plans together**: 0.3.0
+and earlier refuse a plan this version saves (schema 9), with or without
+table data. Service layouts are the same as 0.3.0's; the look is never
+stored, so Slice 3 changes no stored format. Nothing a 0.3.0 host calls
+changes its signature, and with no theme every pixel is 0.3.0's; CI
+analyses the 0.3.0 host probe against every commit.
 
 - **A table's place.** `FloorPlanTableDetail` (`table`, `center`,
   `size`, `rotation`, `mirrored`, `corners`, `layer`, `locked`, and
@@ -128,11 +130,50 @@ the 0.3.0 host probe against every commit.
 - `jet_cad_floor_plan`'s `editor.dart`: `isControlCodeUnit`, the table
   numbers' control-character rule, now shared with the table data's
   limits; `TableDiagnosticCodes.invalidData`.
+- **The look.** `FloorPlanTheme`, a `ThemeExtension` a host puts in each
+  of its `ThemeData`s (a light and a dark one), with sixteen optional
+  fields, null being today's: `statusCaptionStyle` and
+  `statusFillOpacity` (multiplies a status colour's alpha once);
+  `groupFrameColor`, `groupFrameWidth`, `groupFrameMargin`,
+  `groupChipColor` (null: the frame's), `groupChipTextStyle`,
+  `groupChipRadius`, `groupChipPadding`; `selectionOnLight`,
+  `selectionOnDark` (chosen by the paper; the hover follows at 60 % of
+  the alpha) and `selectionWidth` (the hover stays 1.5 px), in both
+  modes; `focusVeilColor` and `focusVeilOpacity` (the colour's alpha
+  multiplied by it; no colour: the paper's, as today);
+  `canvasBackground`, the canvas around the page and a page-less plan's
+  paper, in both modes (it does not decide the dark canvas: the theme's
+  brightness does); `serviceBarHeight`, the canvas moving with it when
+  it changes. `copyWith`, `merge`, `lerp` (each number clamped between
+  its ends; a field set on one side only switches at halfway), `==`,
+  `hashCode`, `toString`. `FloorPlanView.theme` overrides the ambient
+  extension field by field, the two text styles by `TextStyle.merge`;
+  the view throws an `ArgumentError` naming the field for a resolved
+  look out of range (an opacity outside [0, 1], a width or the bar's
+  height not finite and above 0, a margin, radius or padding side
+  negative or not finite, a `fontSize` not finite and above 0). The rest
+  of the chrome, and the Export dialog, follow the ambient Material
+  theme: the host guide's recipe wraps the view in a local `Theme` with
+  a hand-built `ColorScheme`; the view's `theme:` reaches no dialog.
+  Captions and chips keep the platform's default font unless a style
+  names a family; `fontFamily: 'Roboto'`, registered by
+  `ensureFloorPlanFonts`, draws them alike on every terminal. The look
+  is read when a painter rebuilds, never per frame, and is never saved,
+  exported or printed.
+- `jet_cad_2d_flutter`: `PaperPalette.withSelection(colour)`, a copy
+  with that selection and its hover (the colour at 60 % of its alpha),
+  so `light.withSelection(light.selection) == light`; and
+  `SelectionOverlayPainter.selectionStrokePixels` (default
+  `kSelectionStrokePixels`, 2), the selection's outline and its point
+  crosses, asserted finite and above 0, repainting when it changes.
 
 **Known limits.** The badges' look and the smoothness of pan and zoom
 with them have not been checked on a tablet or a terminal, nor have the
 demo's double tap, pointer line and Link tables; the demo's new German
-and Turkish strings have not been read by native speakers. `canvasRect`
+and Turkish strings have not been read by native speakers; nor has the
+demo's POS look (captions, frames, chips, veil, bar, selection) been
+seen on a tablet or a terminal, its colours being a proposal from
+shadcn's published tokens. `canvasRect`
 ignores an ancestor that scales or turns the view. The planner checks a
 table's data for shape, never for meaning: a plan saved at one location
 and loaded at another carries the first location's ids.
