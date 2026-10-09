@@ -548,7 +548,18 @@ Each mutant and its killer:
 - **M-H27** (E-9 gate 3): the expander does not detach on delete.
   Killer: the design view mounted, table `1` with data selected and
   deleted with the Delete key → `designJson()` has no `jetcad.table_data`
-  for its handle; Undo → `designJson()` byte-equal to before the delete.
+  for its handle; Undo → the `jetcad.table_data` section byte-equal to
+  before the delete, the restored instance last among the root's
+  children, and the whole encoding equal to before once every group's
+  children are sorted (HD12); when the deleted table is its parent's last
+  child, Undo → `designJson()` byte-equal to before, and so again after
+  Redo and Undo (TD7). *Amended in Task 2's review (R-3):* strict byte
+  equality cannot hold for a table that is not its parent's last child,
+  because the engine re-appends an undeleted node (`AddNodeCommand`
+  through `DocumentTree._link`, `jet_cad_2d/lib/src/document/tree.dart:557-570`),
+  which predates Slice 2, changes nothing drawn (draw order is by handle),
+  and is recorded as an engine follow-up beside the spec's O-8
+  (`AddNodeCommand` restores the child's index).
 - **M-H28:** an over-limit payload throws on load. Killer: a plan whose
   `1` carries 33 keys, `2` a key `Bad Key`, `3` a 1025-unit value, `4` a
   number value, `L` `data` as a list → `load` succeeds, each reads empty

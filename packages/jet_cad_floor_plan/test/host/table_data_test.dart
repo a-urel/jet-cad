@@ -41,6 +41,13 @@ final String key64 = 'k${'a_.-9' * 12}xyz';
 /// A value of exactly 1024 UTF-16 units, non-ASCII included.
 final String value1024 = '${'ş' * 1000}${'x' * 24}';
 
+/// A value of exactly 1024 UTF-16 units that is only 512 characters: each
+/// U+1F37D is a surrogate pair (E-6 counts units, review R-1).
+final String astral1024 = '\u{1F37D}' * 512;
+
+/// A value of 1025 UTF-16 units that is only 1024 characters.
+final String astral1025 = '${'x' * 1023}\u{1F37D}';
+
 FloorPlanController controller(WidgetTester tester, [String? json]) {
   final c = FloorPlanController(json: json ?? embeddingPlanJson());
   addTearDown(c.dispose);
@@ -384,6 +391,7 @@ void main() {
       {...full, 'k99': 'x'},
       {'${key64}q': 'v'},
       {'a': '${value1024}x'},
+      {'a': astral1025},
       {'a': 'x\u0085y'},
       {'Id': 'x'},
     ];
@@ -393,6 +401,26 @@ void main() {
     }
     expect(c.designJson(), before);
     expect(detailsOf(c, '4').single.data, full);
+
+    // E-6 counts UTF-16 units, not characters (review R-1): 512 surrogate
+    // pairs are 1024 units, accepted; 1023 units and one pair are 1025,
+    // refused on write, and kept verbatim and read empty on load.
+    expect(c.setTableData('4', {'a': astral1024}), isTrue);
+    expect(detailsOf(c, '4').single.data, {'a': astral1024});
+    final json = fixtureWith({
+      '4': {
+        'data': {'a': astral1025}
+      },
+    });
+    c.load(json);
+    expect(c.designJson(), json, reason: 'written back as read');
+    expect(detailsOf(c, '4').single.data, isEmpty);
+    final doc = c.activeDocument;
+    expect(
+        tableDiagnostics(doc)
+            .where((d) => d.code == 'table.invalid_data')
+            .map((d) => d.handles.single),
+        [instanceOf(doc, '4')]);
   });
 
   testWidgets('HD10 renumbering 1 to 21 keeps its data: it is the instance\'s',

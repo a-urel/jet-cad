@@ -32,6 +32,13 @@ final String key64 = 'k${'a_.-9' * 12}xyz';
 /// A value of exactly 1024 UTF-16 units, non-ASCII included.
 final String value1024 = '${'ş' * 1000}${'x' * 24}';
 
+/// A value of exactly 1024 UTF-16 units that is only 512 characters: each
+/// U+1F37D is a surrogate pair (E-6 counts units, review R-1).
+final String astral1024 = '\u{1F37D}' * 512;
+
+/// A value of 1025 UTF-16 units that is only 1024 characters.
+final String astral1025 = '${'x' * 1023}\u{1F37D}';
+
 /// A plan with the parametric system and the table system installed, in
 /// the shell's order, torn down in reverse.
 DraftDocument rig() {
@@ -108,16 +115,27 @@ void main() {
           reason: 'empty is within the limits: it removes the data');
       expect(tableDataProblem({'a': ' ¡ é'}), isNull,
           reason: 'U+00A0 is past the C1 range');
+      expect(tableDataProblem({'a': 'a~b'}), isNull,
+          reason: 'U+007E is below the DEL and C1 range');
+      expect(astral1024.length, 1024);
+      expect(astral1024.runes.length, 512);
+      expect(tableDataProblem({'a': astral1024}), isNull,
+          reason: '1024 UTF-16 units, though 512 characters');
+      expect(FloorPlanTableData({'a': astral1024}).data, {'a': astral1024});
     });
 
     test(
         'TD2 refused one past each boundary: 33 keys, a 65-character key, a '
         '1025-unit value, each control character range, a bad key', () {
       final over = {for (var i = 0; i < 33; i++) 'k$i': 'v'};
+      expect(astral1025.length, 1025);
+      expect(astral1025.runes.length, 1024,
+          reason: 'over in UTF-16 units, not in characters');
       final refused = <Map<String, String>>[
         over,
         {'${key64}q': 'v'},
         {'a': '${value1024}x'},
+        {'a': astral1025},
         {'a': 'x\u0085y'},
         {'a': '\u0000'},
         {'a': 'line\nbreak'},
@@ -167,6 +185,9 @@ void main() {
         '{"data":{"Bad Key":"x","alpha":"a"}}',
         jsonEncode({
           'data': {'a': '${value1024}x'}
+        }),
+        jsonEncode({
+          'data': {'a': astral1025}
         }),
         '{"data":{"zeta":"z","n":4}}',
         '{"data":["1","2"]}',

@@ -20,6 +20,12 @@ enum TableNumberProblem {
   control,
 }
 
+/// Whether the UTF-16 code unit [u] is a control character: below U+0020
+/// (C0, a line break among them) or U+007F to U+009F (DEL and C1). The one
+/// rule [tableNumberProblem] and the table data limits
+/// (`tableDataProblem`) share.
+bool isControlCodeUnit(int u) => u < 0x20 || (u >= 0x7F && u <= 0x9F);
+
 /// Why [raw], trimmed, is not a table number, or null when it is one (T4):
 /// non-empty, at most [kTableNumberMaxLength] code units, no control
 /// character (no line break).
@@ -28,11 +34,7 @@ TableNumberProblem? tableNumberProblem(String raw) {
   if (n.isEmpty || n.length > kTableNumberMaxLength) {
     return TableNumberProblem.length;
   }
-  for (final u in n.codeUnits) {
-    if (u < 0x20 || (u >= 0x7F && u <= 0x9F)) {
-      return TableNumberProblem.control;
-    }
-  }
+  if (n.codeUnits.any(isControlCodeUnit)) return TableNumberProblem.control;
   return null;
 }
 

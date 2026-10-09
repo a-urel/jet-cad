@@ -8,10 +8,13 @@
 // (invariant 5); a host reads it as `FloorPlanTableDetail.data` and writes
 // it with `FloorPlanController.setTableData`.
 //
-// No Flutter import: this file is Dart over `package:jet_cad_2d` only.
+// No Flutter import: this file is Dart over `package:jet_cad_2d` and
+// `table_numbers.dart` only.
 import 'dart:convert' show jsonEncode;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+
+import 'table_numbers.dart' show isControlCodeUnit;
 
 /// At most this many keys on one table (E-6).
 const int kTableDataMaxKeys = 32;
@@ -28,7 +31,7 @@ final RegExp _key = RegExp('^[a-z0-9_.-]{1,$kTableDataMaxKeyLength}\$');
 /// at most [kTableDataMaxKeys] keys; each key 1 to [kTableDataMaxKeyLength]
 /// characters of `[a-z0-9_.-]`; each value at most
 /// [kTableDataMaxValueLength] UTF-16 code units, none of them a control
-/// character (the table numbers' rule, `tableNumberProblem`: below U+0020,
+/// character ([isControlCodeUnit], the table numbers' rule: below U+0020,
 /// or U+007F to U+009F). An empty map is within them, and so is an empty
 /// value (spec point S-6). The one test the component's constructor and the
 /// controller share.
@@ -45,10 +48,8 @@ String? tableDataProblem(Map<String, String> data) {
       return 'the value of "$key" has ${value.length} code units; at most '
           '$kTableDataMaxValueLength';
     }
-    for (final u in value.codeUnits) {
-      if (u < 0x20 || (u >= 0x7F && u <= 0x9F)) {
-        return 'the value of "$key" has a control character';
-      }
+    if (value.codeUnits.any(isControlCodeUnit)) {
+      return 'the value of "$key" has a control character';
     }
   }
   return null;
