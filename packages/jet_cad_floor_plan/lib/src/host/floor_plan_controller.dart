@@ -5,10 +5,12 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart' show Offset, Size;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../export/export_dialog.dart';
 import '../export/export_font.dart';
@@ -23,6 +25,7 @@ import '../symbols/symbol_library_loader.dart';
 import '../tables/table_index.dart';
 import 'floor_plan_types.dart';
 import 'service_layout.dart';
+import 'table_detail.dart';
 import 'table_fit.dart';
 
 /// The thumbnail capacity of a controller's own cache: the app's (spec
@@ -834,6 +837,120 @@ class FloorPlanController extends ChangeNotifier {
             symbolKey: t.symbolKey,
             visible: _onVisibleLayer(d, t.instance))
     ];
+  }
+
+  List<FloorPlanTableDetail>? _details;
+  DraftDocument? _detailsDocument;
+  int? _detailsState;
+  int? _detailsLayers;
+
+  /// The active plan's live tables with their geometry (host embedding API
+  /// spec G-1), ascending by handle like [tables], one per table: the plan
+  /// the current mode shows, so a service move changes it. Read it again
+  /// when [revision] moves, as [tables].
+  ///
+  /// The geometry is the one the fit, the focus veil and the group frames
+  /// use. A table on a hidden layer, or whose placement is singular or has
+  /// a corner that is not finite, is listed with no geometry
+  /// ([FloorPlanTableDetail.center] null).
+  ///
+  /// Cached: built once per state of the active plan and of its layers, so
+  /// a read inside a `build` costs nothing after the first. The list is
+  /// unmodifiable, and two reads with nothing changed in between return the
+  /// identical list.
+  List<FloorPlanTableDetail> get tableDetails {
+    final d = _active.document;
+    final state = d.commands.stateId;
+    final layers = d.tables.mutationRevision;
+    if (_details == null ||
+        !identical(_detailsDocument, d) ||
+        _detailsState != state ||
+        _detailsLayers != layers) {
+      _details = _detailsOf(d);
+      _detailsDocument = d;
+      _detailsState = state;
+      _detailsLayers = layers;
+    }
+    return _details!;
+  }
+
+  /// The survey's tables joined to the picker's candidates by instance
+  /// (spec F-8). One entity-store scan, at document-change rate.
+  List<FloorPlanTableDetail> _detailsOf(DraftDocument d) {
+    final candidates = {
+      for (final c in TablePicker.candidatesOf(d,
+          boxes: <Handle, Aabb2>{}, leaves: d.leavesByOwner))
+        c.table.instance: c,
+    };
+    final layers = d.tables.layers;
+    return List.unmodifiable([
+      for (final t in _tables.tables)
+        if (d.tree[t.instance] case final InstanceNode node)
+          _detailOf(
+              FloorPlanTable(
+                  number: t.number,
+                  seats: t.seats,
+                  symbolKey: t.symbolKey,
+                  visible: layers[node.layer]?.visible ?? true),
+              candidates[t.instance],
+              layers[node.layer]),
+    ]);
+  }
+
+  static FloorPlanTableDetail _detailOf(
+      FloorPlanTable table, TableCandidate? c, LayerRecord? layer) {
+    final name = layer?.name ?? '';
+    final locked = layer?.locked ?? false;
+    if (c == null) {
+      return tableDetailWithoutGeometry(
+          table: table, layer: name, locked: locked);
+    }
+    return tableDetailOf(
+        table: table,
+        transform: c.transform,
+        box: c.box,
+        corners: c.corners,
+        layer: name,
+        locked: locked);
+  }
+
+  TablePicker? _picker;
+  int? _pickerState;
+  int? _pickerLayers;
+
+  /// The number of the table at [canvasPoint] in the current mode (spec
+  /// G-4), or null for none or for an unnumbered table. [canvasPoint] is in
+  /// the view's drawing area, logical pixels, origin top left, mapped
+  /// through the camera as it is now. A table is found as a tap finds it: a
+  /// point on its top, else in its symbol's box, the one drawn on top among
+  /// several; with [kind] [PointerDeviceKind.touch], failing both, the
+  /// table whose box is nearest within a finger's reach (24 px). A table
+  /// on a hidden layer is never found; a locked one is.
+  ///
+  /// At call rate: the tables are surveyed again only after the active plan
+  /// or its layers changed.
+  String? tableAt(Offset canvasPoint,
+      {PointerDeviceKind kind = PointerDeviceKind.mouse}) {
+    final d = _active.document;
+    final state = d.commands.stateId;
+    final layers = d.tables.mutationRevision;
+    var picker = _picker;
+    // A picker keeps its definitions' boxes for its life, which only a
+    // service copy's runtime permissions make safe: a new one per state.
+    if (picker == null ||
+        !identical(picker.document, d) ||
+        _pickerState != state ||
+        _pickerLayers != layers) {
+      picker = _picker = TablePicker(d);
+      _pickerState = state;
+      _pickerLayers = layers;
+    }
+    final cam = camera.value;
+    final world = cam.screenToWorld(Vector2(canvasPoint.dx, canvasPoint.dy));
+    final reach = kind == PointerDeviceKind.touch
+        ? kTouchPickRadiusPixels / cam.scale
+        : 0.0;
+    return picker.pick(world, reach: reach)?.table.number;
   }
 
   /// Whether [instance]'s own layer is shown, as the picker reads it (a

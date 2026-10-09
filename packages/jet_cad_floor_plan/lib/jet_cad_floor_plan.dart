@@ -23,6 +23,7 @@ export 'src/host/floor_plan_types.dart'
         TableStatus,
         Unnumbered;
 export 'src/host/floor_plan_view.dart' show FloorPlanView;
+export 'src/host/table_detail.dart' show FloorPlanTableDetail;
 export 'src/l10n/localizations.dart'
     show
         FloorPlanLocalizations,

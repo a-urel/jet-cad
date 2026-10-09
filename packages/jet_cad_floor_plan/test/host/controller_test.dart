@@ -20,6 +20,7 @@ import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_fixture.dart';
+import 'embedding_fixture.dart' as embedding;
 import 'zone_fixture.dart';
 
 /// A plan: tables 1 (turned, mirrored), 2 and 3, a planter, and a line;
@@ -924,5 +925,34 @@ void main() {
         d.tables.layers.byName('Hidden')!.copyWith(visible: true)));
     await tester.pump();
     expect(unplacedTables(codes), {'99'});
+  });
+
+  // Host embedding API spec G-1: `tableDetails` follows the plan the mode
+  // shows.
+
+  testWidgets(
+      'CD1 M-H4: a service move changes tableDetails in the selection mode, '
+      'and not the design\'s: back in the design mode the table is where it '
+      'was designed', (tester) async {
+    final c = controller(tester, embedding.embeddingPlanJson());
+    final box = embedding.embeddingBox;
+    final one = embedding.embeddingTables.first;
+    final designed =
+        one.transform.transformPoint(Vector2(box.center.x, box.center.y));
+    double x() => c.tableDetails.first.center!.dx;
+    double y() => c.tableDetails.first.center!.dy;
+    expect(c.tableDetails.first.table.number, '1', reason: 'premise');
+    expect(x(), closeTo(designed.x, 1e-12 * designed.x.abs()));
+
+    c.setMode(FloorPlanMode.selection);
+    move(c, '1', 750, -250);
+    await tester.pump();
+    expect(x(), closeTo(designed.x + 750, 1e-12 * designed.x.abs()));
+    expect(y(), closeTo(designed.y - 250, 1e-12 * designed.y.abs()));
+
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    expect(x(), closeTo(designed.x, 1e-12 * designed.x.abs()));
+    expect(y(), closeTo(designed.y, 1e-12 * designed.y.abs()));
   });
 }

@@ -32,6 +32,7 @@ void main() {
       'FloorPlanView',
       'FloorPlanMode',
       'FloorPlanTable',
+      'FloorPlanTableDetail',
       'FloorPlanExport',
       'TableStatus',
       'ServiceLayoutRestore',
