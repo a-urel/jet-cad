@@ -113,9 +113,12 @@ named).
   the zoom bounds.
 - **F-8. Table geometry** has one source: `TablePicker.candidatesOf`
   (`service/table_picker.dart:233-268`) yields `TableCandidate{transform,
-  box, corners, worldBounds, locked}` (`:103-137`; corners in the box's
-  order, reversed when mirrored, `:113-116`); the fit, the veil and the
-  group frames share it; a table with non-finite corners is no candidate.
+  box, corners, worldBounds, locked}` (`:103-137`; corners always in the
+  box's order, (min, min), (max, min), (max, max), (min, max) through the
+  transform, never reordered: counter-clockwise unless the transform
+  mirrors, clockwise when it does, `:119-122`, `:255-258`; G-1's detail
+  reverses a mirrored table's); the fit, the veil and the group frames
+  share it; a table with non-finite corners is no candidate.
   It costs a `TableSurvey` and a `leavesByOwner` scan, O(entities).
   `TablePicker.pick` answers "which table is here" (`:278-306`). The
   label's decomposition of a placement is `tableLabelStamp`

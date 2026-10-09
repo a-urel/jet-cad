@@ -6,6 +6,7 @@
 // table, non-finite corners, and a panned camera at 0.37 px/mm.
 // Expectations are the fixture's box through each table's own transform.
 import 'dart:math' as math;
+import 'dart:typed_data' show Float64List;
 import 'dart:ui' show Offset, PointerDeviceKind, Size;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -135,8 +136,9 @@ void main() {
   });
 
   testWidgets(
-      'TD4 M-H3: mirrored is det < 0: the 180 degree table is not mirrored, '
-      'the 90 degree one is', (tester) async {
+      'TD4 M-H3, O4: mirrored is det < 0 -- not a < 0, not a·d < 0: the 180 '
+      'degree table is not mirrored, the exact 90 degree one is',
+      (tester) async {
     final c = embeddingController();
     final four = c.tableDetails[3], two = c.tableDetails[1];
     expect(four.table.number, '4');
@@ -144,6 +146,9 @@ void main() {
     // Premise: the first column's x is negative for 4 and not for 2.
     expect(fixtureTable('4').transform.a, lessThan(0));
     expect(fixtureTable('2').transform.a, greaterThanOrEqualTo(0));
+    // Premise: 2's a·d is 0, not negative, while its det is -1.
+    expect(fixtureTable('2').transform.a * fixtureTable('2').transform.d, 0);
+    expect(fixtureTable('2').transform.determinant, -1);
     expect(four.mirrored, isFalse, reason: '180 degrees, unmirrored');
     expect(two.mirrored, isTrue, reason: 'mirrored at 90 degrees');
     for (final (t, d) in shown(c)) {
@@ -282,6 +287,117 @@ void main() {
     expect(l.table.visible, isFalse);
   });
 
+  testWidgets(
+      'TD11 R-1, R-2 (O6, O10): a load of another plan at the same (state, '
+      'revision) key reads the loaded plan: table 1\'s new centre in '
+      'tableDetails, its new place in tableAt', (tester) async {
+    final c = embeddingController();
+    final one = fixtureTable('1');
+    final oldTop = canvasAt(c, one.transform, 600, 0);
+    final before = c.tableDetails;
+    expect(before.first.table.number, '1');
+    expectOffset(
+        before.first.center,
+        world(one.transform, embeddingBox.center.x, embeddingBox.center.y),
+        'premise: 1 where the fixture puts it');
+    expect(c.tableAt(oldTop), '1', reason: 'premise: the picker is built');
+
+    // The fixture with table 1 moved 2 m along x, by a second controller.
+    final other = FloorPlanController(json: embeddingPlanJson());
+    addTearDown(other.dispose);
+    final od = other.activeDocument;
+    final h = TableSurvey.of(od).withNumber('1').single.instance;
+    final node = od.tree[h]! as InstanceNode;
+    od.commands.execute(TransformNodeCommand(
+        h, Transform2.translation(2000, 0).multiply(node.transform)));
+    final json = other.designJson();
+
+    final oldDocument = c.activeDocument;
+    final oldKey =
+        (oldDocument.commands.stateId, oldDocument.tables.mutationRevision);
+    c.load(json);
+    // The load refits the camera: the fixture's again.
+    c.cameraController.value = embeddingCamera();
+    final d = c.activeDocument;
+    expect(identical(d, oldDocument), isFalse, reason: 'premise: a new plan');
+    expect((d.commands.stateId, d.tables.mutationRevision), oldKey,
+        reason: 'premise: the key alone does not tell the plans apart');
+
+    final moved = Transform2.translation(2000, 0).multiply(one.transform);
+    final after = c.tableDetails;
+    expect(after.first.table.number, '1');
+    expectOffset(
+        after.first.center,
+        world(moved, embeddingBox.center.x, embeddingBox.center.y),
+        'O6: 1 moved by the load');
+    expect(c.tableAt(oldTop), isNull, reason: 'O10: 1 is gone from there');
+    expect(c.tableAt(canvasAt(c, moved, 600, 0)), '1',
+        reason: 'O10: 1 is at its loaded place');
+  });
+
+  test(
+      'TD12 R-4 (O2, O3): rotation is in (-pi, pi]: a half turn written with '
+      'b = -0.0 reads +pi, not -pi; no turn written with b = -0.0 reads '
+      '+0.0', () {
+    const table = FloorPlanTable(number: '1', seats: 4, symbolKey: 'k');
+    FloorPlanTableDetail of(Transform2 t) {
+      final b = embeddingBox;
+      final corners = Float64List(8);
+      for (final (i, (x, y)) in [
+        (b.minX, b.minY),
+        (b.maxX, b.minY),
+        (b.maxX, b.maxY),
+        (b.minX, b.maxY)
+      ].indexed) {
+        final p = world(t, x, y);
+        corners[2 * i] = p.dx;
+        corners[2 * i + 1] = p.dy;
+      }
+      return tableDetailOf(
+          table: table,
+          transform: t,
+          box: b,
+          corners: corners,
+          layer: '0',
+          locked: false);
+    }
+
+    // Premise: atan2 reads the sign of a zero b.
+    expect(math.atan2(-0.0, -1), -math.pi);
+    expect(math.atan2(-0.0, 1).isNegative, isTrue);
+
+    final half = of(const Transform2(-1, -0.0, 0, -1, 45000, -33000));
+    expect(half.rotation, math.pi);
+    expect(half.mirrored, isFalse);
+
+    final none = of(const Transform2(1, -0.0, 0, 1, 45000, -33000));
+    expect(none.rotation, 0);
+    expect(none.rotation.isNegative, isFalse);
+    expect(none.toString(), contains('rotation: 0.0,'));
+    expect(none, of(const Transform2(1, 0, 0, 1, 45000, -33000)));
+  });
+
+  testWidgets(
+      'TD13 R-5 (O9): a layer missing from the plan\'s layers (a hand-edited '
+      'file) reads shown and unlocked, named \'\', as the picker reads it',
+      (tester) async {
+    final c = embeddingController();
+    final d = c.activeDocument;
+    final locked = d.tables.layers.byName(kEmbeddingLocked)!;
+    d.tables.layers.remove(locked.handle);
+    final l = fixtureTable('L');
+    final i = embeddingTables.indexOf(l);
+    final detail = c.tableDetails[i];
+    expect(detail.table.number, 'L');
+    expect(detail.table.visible, isTrue);
+    expect(detail.layer, '');
+    expect(detail.locked, isFalse);
+    expectOffset(detail.center,
+        world(l.transform, embeddingBox.center.x, embeddingBox.center.y), 'L');
+    expect(c.tables[i].visible, isTrue, reason: 'as `tables` reads it');
+    expect(c.tableAt(canvasAt(c, l.transform, 600, 0)), 'L');
+  });
+
   test('TD10 FloorPlanTableDetail: ==, hashCode and toString by every field',
       () {
     const table = FloorPlanTable(number: '7', seats: 4, symbolKey: 'k');
@@ -363,9 +479,9 @@ void main() {
   });
 
   testWidgets(
-      'TA2 M-H19b(tableAt): a finger 30 mm (11 px) off a table\'s box finds '
-      'it, a mouse does not; 80 mm (30 px) off, a finger does not',
-      (tester) async {
+      'TA2 M-H19b(tableAt), O8: a finger 30 mm (11 px) off a table\'s box '
+      'finds it, a mouse or a stylus does not; 80 mm (30 px) off, a finger '
+      'does not', (tester) async {
     final c = embeddingController();
     final one = fixtureTable('1');
     final x = embeddingBox.maxX, y = embeddingBox.center.y;
@@ -376,6 +492,8 @@ void main() {
     expect(80 * 0.37, greaterThan(24));
     expect(c.tableAt(near), isNull, reason: 'a mouse picks by containment');
     expect(c.tableAt(near, kind: PointerDeviceKind.mouse), isNull);
+    expect(c.tableAt(near, kind: PointerDeviceKind.stylus), isNull,
+        reason: 'O8: only a finger gets the reach');
     expect(c.tableAt(near, kind: PointerDeviceKind.touch), '1',
         reason: 'within a finger\'s reach');
     expect(c.tableAt(far, kind: PointerDeviceKind.touch), isNull,

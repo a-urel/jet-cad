@@ -88,7 +88,7 @@ const String kEmbeddingLocked = 'Locked';
 
 /// The fixture's tables, in placement order (ascending by handle):
 /// - `1`: turned 30 degrees;
-/// - `2`: mirrored (det < 0) at 90 degrees;
+/// - `2`: mirrored (det < 0) at exactly 90 degrees, `a = d = 0`;
 /// - `3`: scaled (1.5, 0.8), turned -20 degrees;
 /// - `4`: turned 180 degrees, unmirrored;
 /// - `5`: on the hidden layer;
@@ -99,7 +99,9 @@ const String kEmbeddingLocked = 'Locked';
 /// Every one stands 40 m and more off the origin, 3 to 4 m from the next.
 final List<EmbeddingTable> embeddingTables = [
   EmbeddingTable('1', embeddingPlacement(40000, -27000, 30), degrees: 30),
-  EmbeddingTable('2', embeddingPlacement(43000, -27000, 90, sy: -1),
+  // R(90°)·diag(1, -1) written exactly: cos 90° is 6.1e-17 in doubles, and
+  // a = d = 0 is what tells det < 0 from a·d < 0 (review R-3).
+  const EmbeddingTable('2', Transform2(0, 1, 1, 0, 43000, -27000),
       degrees: 90, sy: -1),
   EmbeddingTable('3', embeddingPlacement(46000, -27000, -20, sx: 1.5, sy: 0.8),
       degrees: -20, sx: 1.5, sy: 0.8),

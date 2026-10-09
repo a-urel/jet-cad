@@ -125,7 +125,9 @@ FloorPlanTableDetail tableDetailOf(
   final m = transform;
   var rotation = math.atan2(m.b, m.a);
   if (rotation <= -math.pi) rotation += 2 * math.pi;
-  // `-0.0 == 0.0`, but their hash codes need not agree.
+  // `-0.0 == 0.0` and their hash codes agree (`num.hashCode`), so this
+  // changes no `==`: it keeps a `-0.0` (atan2 of `b = -0.0`, `a > 0`) out
+  // of `toString`.
   if (rotation == 0) rotation = 0.0;
   final mirrored = m.determinant < 0;
   final cx = (box.minX + box.maxX) / 2, cy = (box.minY + box.maxY) / 2;

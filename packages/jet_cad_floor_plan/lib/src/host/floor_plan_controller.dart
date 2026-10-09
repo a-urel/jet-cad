@@ -1061,7 +1061,9 @@ class FloorPlanController extends ChangeNotifier {
   }
 
   /// The survey's tables joined to the picker's candidates by instance
-  /// (spec F-8). One entity-store scan, at document-change rate.
+  /// (spec F-8). O(nodes + entities): `candidatesOf`'s own survey and a
+  /// `leavesByOwner` scan, on top of the controller's cached survey; at
+  /// document-change rate.
   List<FloorPlanTableDetail> _detailsOf(DraftDocument d) {
     final candidates = {
       for (final c in TablePicker.candidatesOf(d,
