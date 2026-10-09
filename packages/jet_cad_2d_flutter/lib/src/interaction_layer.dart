@@ -13,6 +13,7 @@ import 'package:flutter/services.dart' show HardwareKeyboard;
 import 'package:flutter/widgets.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'input_claim.dart';
 import 'tool.dart';
 
 /// Pick radius in **screen** pixels (spec D7).
@@ -69,6 +70,13 @@ const Duration kTouchHoldBack = kPressTimeout;
 /// pinch is `CameraGestureDetector`'s. A finger's move never becomes a
 /// down, a touch hover is never routed, and the tool hears
 /// [Tool.onPointerExit] when a session goes multi or ends.
+///
+/// **Claims** (host embedding API spec G-5): a pointer whose down landed on
+/// an [InputClaim] inside this layer reaches no tool, from that down through
+/// its up or cancel, whatever its kind or buttons: it starts no gesture,
+/// joins no touch session (a finger on a claim is no second finger) and
+/// ends none. A hover that lands on a claim is an exit for the tool, as if
+/// the pointer had left the canvas.
 class InteractionLayer extends StatefulWidget {
   const InteractionLayer({
     super.key,
@@ -132,6 +140,10 @@ class _InteractionLayerState extends State<InteractionLayer> {
 
   /// A [TouchPress.lift] finger past the slop: its moves are hovers.
   bool _aiming = false;
+
+  /// The last hover landed on an [InputClaim], and the tool heard the exit
+  /// it stands for; cleared by the next hover or down the tool hears.
+  bool _overClaim = false;
 
   @override
   void initState() {
@@ -343,6 +355,9 @@ class _InteractionLayerState extends State<InteractionLayer> {
   bool _cameraOwned(int buttons) => buttons & kMiddleMouseButton != 0;
 
   void _onDown(PointerDownEvent e) {
+    // A claimed pointer is the claim's, from this down to its up (G-5).
+    if (InputClaim.claimed(e)) return;
+    _overClaim = false;
     if (_isTouch(e)) return _touchDown(e);
     // No precise pointer while a touch session runs (R-9a).
     if (_cameraOwned(e.buttons) ||
@@ -358,6 +373,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onMove(PointerMoveEvent e) {
+    if (InputClaim.claimed(e)) return;
     if (_isTouch(e)) return _touchMove(e);
     if (_cameraOwned(e.buttons)) return;
     final hadPrimary = _lastButtons & kPrimaryButton != 0;
@@ -382,6 +398,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onUp(PointerUpEvent e) {
+    if (InputClaim.claimed(e)) return;
     if (_isTouch(e)) return _touchUp(e);
     if (e.pointer != _activePointer) return;
     _activePointer = -1;
@@ -390,6 +407,7 @@ class _InteractionLayerState extends State<InteractionLayer> {
   }
 
   void _onCancel(PointerCancelEvent e) {
+    if (InputClaim.claimed(e)) return;
     if (_isTouch(e)) return _touchCancel(e);
     if (e.pointer != _activePointer) return;
     _activePointer = -1;
@@ -400,6 +418,14 @@ class _InteractionLayerState extends State<InteractionLayer> {
   void _onHover(PointerHoverEvent e) {
     // A finger has no hover; the web sends one after every lift (TS-3).
     if (_isTouch(e) || _activePointer != -1 || _touches.isNotEmpty) return;
+    // Over a claim the pointer is not over the canvas (G-5): one exit.
+    if (InputClaim.claimed(e)) {
+      if (_overClaim) return;
+      _overClaim = true;
+      _tool.onPointerExit(_ctx);
+      return;
+    }
+    _overClaim = false;
     _tool.onPointerMove(_wrap(e), _ctx);
   }
 

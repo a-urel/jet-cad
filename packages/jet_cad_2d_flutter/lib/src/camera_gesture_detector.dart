@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 
 import 'camera_controller.dart';
 import 'gesture_policy.dart';
+import 'input_claim.dart';
 
 /// Below this span, in screen pixels, two fingers pan but do not zoom
 /// (spec 14t T2): a ratio of near-coincident fingers is noise.
@@ -32,6 +33,17 @@ const double kPinchMinSpan = 8.0;
 /// point under the fingers' midpoint stays under it. A change of pair takes
 /// a new baseline and never moves the camera. The interaction layer keeps
 /// such a gesture from every tool.
+///
+/// **Claims** (host embedding API spec G-5): a pointer whose down landed on
+/// an [InputClaim] inside this detector moves nothing, from that down
+/// through its up or cancel: a pan-button drag that starts on a claim does
+/// not pan, and a finger on a claim is no finger of a pinch (the pair is
+/// made of the unclaimed fingers alone). A wheel or scale signal over a
+/// claim still zooms or pans, unless something inside the claim registers
+/// for it first with the binding's [PointerSignalResolver] (a scrollable
+/// does): over a claim the camera registers too, and the first registrant
+/// wins. Off every claim the camera acts on a signal at once, as it always
+/// has. A trackpad's pan and zoom is never claimed.
 class CameraGestureDetector extends StatefulWidget {
   const CameraGestureDetector({
     super.key,
@@ -69,7 +81,10 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
   double _span = 0;
 
   void _onDown(PointerDownEvent event) {
-    if (event.kind != PointerDeviceKind.touch) return;
+    // A claimed finger never joins the fingers (G-5).
+    if (event.kind != PointerDeviceKind.touch || InputClaim.claimed(event)) {
+      return;
+    }
     _fingers.add(event.pointer);
     _at[event.pointer] = event.localPosition;
     _rebase();
@@ -130,6 +145,23 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
     _gestureZoom = scale;
   }
 
+  /// A signal over a claim waits for the resolver (G-5); any other is
+  /// acted on at once ([_signal]).
+  void _onSignal(PointerSignalEvent event) {
+    if (InputClaim.claimed(event)) {
+      // Over a claim the first registrant wins (G-5): a scrollable inside
+      // the claim registered before this ancestor did.
+      GestureBinding.instance.pointerSignalResolver
+          .register(event, _onResolvedSignal);
+      return;
+    }
+    _signal(event);
+  }
+
+  /// [_signal] as the resolver's callback, made once: a tear-off per
+  /// signal would be an object per wheel notch.
+  late final PointerSignalResolvedCallback _onResolvedSignal = _signal;
+
   /// The scroll-signal rule, in the spec's order: a modifier held zooms; a
   /// trackpad-kind scroll pans; otherwise the policy decides.
   ///
@@ -143,7 +175,7 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
   /// A [PointerScaleEvent]'s `scale` is per-event -- the engine computes
   /// `exp(-deltaY / 200)` from each DOM event on its own -- so it is applied
   /// raw and **not** divided by the running trackpad value.
-  void _onSignal(PointerSignalEvent event) {
+  void _signal(PointerSignalEvent event) {
     final camera = widget.camera;
     if (event is PointerScaleEvent) {
       camera.zoomAt(event.localPosition, event.scale);
@@ -186,7 +218,8 @@ class _CameraGestureDetectorState extends State<CameraGestureDetector> {
       if (event.pointer == _p1 || event.pointer == _p2) _pinch();
       return;
     }
-    if (event.buttons & widget.policy.panButtons != 0) {
+    if (event.buttons & widget.policy.panButtons != 0 &&
+        !InputClaim.claimed(event)) {
       widget.camera.panBy(event.localDelta);
     }
   }

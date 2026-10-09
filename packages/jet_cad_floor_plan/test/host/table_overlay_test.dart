@@ -8,7 +8,7 @@
 // forward transform of the fixture's box, never read back from the code.
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show OffsetLayer, SemanticsNode;
 import 'package:flutter_test/flutter_test.dart';
@@ -1122,4 +1122,274 @@ void main() {
                 canvasOrigin(tester).dx,
             1e-6));
   });
+
+  // ---- Task 4: interactive overlays (G-5's pointers) ----------------------
+
+  testWidgets(
+      'TO28 interactive: a tap on a badge is the badge\'s alone: its onTap, '
+      'no onTableTap, no selection; a drag from it moves no table and pans '
+      'nothing; a long press and a secondary click on it open no menu '
+      '(M-H16, G-5)', (tester) async {
+    final c = controller();
+    final host = await mountInteractive(tester, c);
+    final camera = c.cameraController.value;
+    final badge = tester.getCenter(find.byKey(const ValueKey('probe-1')));
+    await tester.tapAt(badge, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tapAt(badge, kind: PointerDeviceKind.touch);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(host.badgeTaps, ['1', '1'], reason: 'the badge\'s own tap');
+    expect(host.tableTaps, isEmpty, reason: 'M-H16: the table tool heard it');
+    expect(c.selectedTables.value, isEmpty);
+    // A drag from the badge: the table stays, the camera too.
+    final center = centerOf(c, '1');
+    final drag =
+        await tester.startGesture(badge, kind: PointerDeviceKind.mouse);
+    for (var i = 0; i < 3; i++) {
+      await drag.moveBy(const Offset(40, 25));
+      await tester.pump();
+    }
+    await drag.up();
+    await tester.pump();
+    expect(centerOf(c, '1'), center, reason: 'the table moved');
+    expect(identical(c.cameraController.value, camera), isTrue,
+        reason: 'the camera panned');
+    // A long press (the menu's) and a secondary click on the badge.
+    final hold =
+        await tester.startGesture(badge, kind: PointerDeviceKind.touch);
+    await tester.pump(const Duration(seconds: 1));
+    await hold.up();
+    await tester.pump();
+    await tester.tapAt(badge,
+        kind: PointerDeviceKind.mouse, buttons: kSecondaryButton);
+    await tester.pump();
+    expect(host.menus, isEmpty, reason: 'a menu from a claimed pointer');
+    expect(host.tableTaps, isEmpty);
+    expect(c.selectedTables.value, isEmpty);
+    // The premise: on table 1 off its badge, the same gestures are the
+    // table's.
+    final off = onTableOffBadge(tester, c, '1');
+    await tester.tapAt(off, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tapAt(off,
+        kind: PointerDeviceKind.mouse, buttons: kSecondaryButton);
+    await tester.pump();
+    expect(host.tableTaps, ['1']);
+    expect(host.menus, ['1']);
+    expect(c.selectedTables.value, {'1'});
+    // The badge's own recognizer counted the hold as its third tap.
+    expect(host.badgeTaps, ['1', '1', '1']);
+  });
+
+  testWidgets(
+      'TO29 interactive: a pan that starts off a badge pans, across a badge '
+      'too; a pinch with one finger on a badge does not count it; a wheel '
+      'over a badge zooms (G-5)', (tester) async {
+    final c = controller();
+    final host = await mountInteractive(tester, c);
+    final origin = canvasOrigin(tester);
+    // Empty floor between tables 1 and 2, in the canvas of the camera now.
+    Offset floor() {
+      final p = canvasOf(c.cameraController.value, 41600, -26900);
+      final at = Offset(p.x, p.y);
+      expect(c.tableAt(at), isNull, reason: 'premise: empty floor');
+      expect((Offset.zero & const Size(1440, 856)).contains(at), isTrue,
+          reason: 'premise: on the canvas');
+      return at;
+    }
+
+    Offset probe(String n) {
+      expect(probeData(tester, n).shown, isTrue, reason: 'premise: $n shown');
+      return tester.getCenter(find.byKey(ValueKey('probe-$n')));
+    }
+
+    // A mouse drag from the floor that crosses onto badge 2 and ends there.
+    final from = origin + floor();
+    final to = probe('2');
+    var before = c.cameraController.value.worldToScreenMatrix;
+    final pan = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
+    await pan.moveTo(from + (to - from) / 2);
+    await tester.pump();
+    await pan.moveTo(to);
+    await tester.pump();
+    await pan.up();
+    await tester.pump();
+    var after = c.cameraController.value.worldToScreenMatrix;
+    expect(after.e - before.e, closeTo((to - from).dx, 1e-9));
+    expect(after.f - before.f, closeTo((to - from).dy, 1e-9));
+    expect(after.a, before.a);
+    expect(host.badgeTaps, isEmpty);
+    expect(host.tableTaps, isEmpty);
+    // A finger on badge 1, then one on the floor moving away from it: a
+    // pinch of the two would zoom.
+    final onBadge = probe('1');
+    final onFloor = origin + floor();
+    before = c.cameraController.value.worldToScreenMatrix;
+    final f1 = await tester.startGesture(onBadge,
+        pointer: 31, kind: PointerDeviceKind.touch);
+    final f2 = await tester.startGesture(onFloor,
+        pointer: 32, kind: PointerDeviceKind.touch);
+    for (final step in const [Offset(30, 20), Offset(70, 45)]) {
+      await f2.moveTo(onFloor + step);
+      await tester.pump();
+    }
+    after = c.cameraController.value.worldToScreenMatrix;
+    expect(after.a, before.a, reason: 'the badge finger was in a pinch');
+    // The floor finger alone pans by its own motion.
+    expect(after.e - before.e, closeTo(70, 1e-9));
+    expect(after.f - before.f, closeTo(45, 1e-9));
+    await f2.up();
+    await f1.up();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(host.badgeTaps, ['1'], reason: 'premise: the finger was on it');
+    expect(host.tableTaps, isEmpty);
+    // A wheel notch up over a badge zooms about the pointer.
+    final at = probe('1');
+    final scale = c.cameraController.value.scale;
+    final pointer = TestPointer(1, PointerDeviceKind.mouse);
+    await tester.sendEventToBinding(pointer.hover(at));
+    await tester.sendEventToBinding(pointer.scroll(const Offset(0, -120)));
+    await tester.pump();
+    expect(c.cameraController.value.scale / scale,
+        closeTo(GesturePolicy.forPlatform().wheelZoomStep, 1e-9));
+  });
+
+  testWidgets(
+      'TO30 interactive: under a non-identity camera a badge is hit where it '
+      'is painted, at its own coordinates, before and after a pan and zoom '
+      '(M-H17, G-5)', (tester) async {
+    final c = controller();
+    final host = await mountInteractive(tester, c);
+    Future<void> check(String when) async {
+      final cam = c.cameraController.value;
+      for (final n in ['1', '2', '3']) {
+        if (!probeData(tester, n).shown) continue;
+        final want = badgeWanted(tester, tableNumbered(n), cam);
+        final probe = find.byKey(ValueKey('probe-$n'));
+        expectRect(tester.getRect(probe), want, '$when $n: localToGlobal');
+        final layer = probeSlot(tester, n).debugLayer! as OffsetLayer;
+        final painted = layer.offset + canvasOrigin(tester);
+        expect(painted.dx, closeTo(want.left, 1e-6), reason: '$when $n: x');
+        expect(painted.dy, closeTo(want.top, 1e-6), reason: '$when $n: y');
+        host.downs.clear();
+        // Off the badge's centre, so a mirrored or halved offset shows.
+        const inside = Offset(31, 4);
+        await tester.tapAt(want.topLeft + inside,
+            kind: PointerDeviceKind.mouse);
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(host.downs.map((d) => d.$1), [n], reason: '$when $n: hit');
+        expect(host.downs.single.$2.dx, closeTo(inside.dx, 1e-6),
+            reason: '$when $n: local x');
+        expect(host.downs.single.$2.dy, closeTo(inside.dy, 1e-6),
+            reason: '$when $n: local y');
+      }
+    }
+
+    expect(probeData(tester, '1').shown, isTrue, reason: 'premise: 1 shown');
+    await check('fixture camera');
+    c.panBy(const Offset(-130, 85));
+    expect(c.zoomBy(1.37, focus: const Offset(300, 200)), isTrue);
+    await tester.pump();
+    expect(probeData(tester, '1').shown, isTrue, reason: 'premise: 1 shown');
+    await check('panned and zoomed');
+    expect(host.tableTaps, isEmpty);
+    expect(c.selectedTables.value, isEmpty);
+  });
+
+  testWidgets(
+      'TO31 switching interactive builds every overlay afresh; the default '
+      'puts no claim in the tree (G-5)', (tester) async {
+    final c = controller();
+    final layouts = ValueNotifier(const FloorPlanOverlayLayout());
+    addTearDown(layouts.dispose);
+    await mount(tester, c, builder: Calls().builder(), layouts: layouts);
+    expect(find.byType(InputClaim), findsNothing);
+    final created = Badge.created;
+    layouts.value = const FloorPlanOverlayLayout(interactive: true);
+    await tester.pump();
+    expect(find.byType(InputClaim), findsNWidgets(kOverlaid.length));
+    expect(Badge.created - created, kOverlaid.length);
+    layouts.value = const FloorPlanOverlayLayout();
+    await tester.pump();
+    expect(find.byType(InputClaim), findsNothing);
+    expect(Badge.created - created, 2 * kOverlaid.length);
+  });
 }
+
+/// What an interactive host heard (Task 4).
+final class InteractiveHost {
+  final List<String> badgeTaps = [];
+  final List<(String, Offset)> downs = [];
+  final List<String> tableTaps = [];
+  final List<String> menus = [];
+}
+
+/// Mounts an interactive host at 1440 x 900 with the fixture's camera: each
+/// overlay a 40 x 20 probe that records its taps and where its tap downs
+/// land, in its own coordinates; the long press opens the context menu.
+Future<InteractiveHost> mountInteractive(
+    WidgetTester tester, FloorPlanController c) async {
+  final host = InteractiveHost();
+  await tester.binding.setSurfaceSize(const Size(1440, 900));
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(MaterialApp(
+    home: Scaffold(
+      body: FloorPlanView(
+        controller: c,
+        onTableTap: host.tableTaps.add,
+        onTableContextMenu: (n, _) => host.menus.add(n),
+        longPress: FloorPlanLongPress.contextMenu,
+        tableOverlayLayout: const FloorPlanOverlayLayout(interactive: true),
+        tableOverlayBuilder: (context, table) {
+          final n = table.detail.table.number!;
+          return GestureDetector(
+            key: ValueKey('probe-$n'),
+            onTapDown: (d) => host.downs.add((n, d.localPosition)),
+            onTap: () => host.badgeTaps.add(n),
+            child: SizedBox.fromSize(
+                size: Badge.size,
+                child: const ColoredBox(color: Color(0xFF3060C0))),
+          );
+        },
+      ),
+    ),
+  ));
+  await tester.pump();
+  await tester.pump();
+  c.cameraController.value = embeddingCamera();
+  await tester.pump();
+  return host;
+}
+
+/// Table [n]'s centre in the world, as `tableDetails` reports it.
+Offset? centerOf(FloorPlanController c, String n) =>
+    c.tableDetails.firstWhere((d) => d.table.number == n).center;
+
+/// A screen point on table [n], a quarter of its box's width from its
+/// centre along its own x axis: on the table, off its centred badge.
+Offset onTableOffBadge(WidgetTester tester, FloorPlanController c, String n) {
+  final t = tableNumbered(n);
+  final m = t.transform;
+  final b = embeddingBox;
+  final x = (b.minX + b.maxX) / 2 + (b.maxX - b.minX) / 4;
+  final y = (b.minY + b.maxY) / 2;
+  final p = canvasOf(c.cameraController.value, m.a * x + m.c * y + m.e,
+      m.b * x + m.d * y + m.f);
+  final at = canvasOrigin(tester) + Offset(p.x, p.y);
+  final badge = tester.getRect(find.byKey(ValueKey('probe-$n')));
+  expect(badge.contains(at), isFalse, reason: 'premise: off the badge');
+  expect(c.tableAt(at - canvasOrigin(tester)), n, reason: 'premise: on $n');
+  return at;
+}
+
+/// The layer's direct child holding probe [n], and its parent data.
+RenderBox probeSlot(WidgetTester tester, String n) {
+  RenderObject node = tester.renderObject(find.byKey(ValueKey('probe-$n')));
+  while (node.parent is! RenderFloorPlanOverlays) {
+    node = node.parent!;
+  }
+  return node as RenderBox;
+}
+
+FloorPlanOverlayParentData probeData(WidgetTester tester, String n) =>
+    probeSlot(tester, n).parentData! as FloorPlanOverlayParentData;

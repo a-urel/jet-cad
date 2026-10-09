@@ -11,7 +11,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show ViewportTransform;
+    show InputClaim, ViewportTransform;
 
 import '../service/table_groups.dart' show groupIdsByNumber;
 import 'floor_plan_controller.dart';
@@ -147,10 +147,24 @@ final class FloorPlanOverlayLayout {
   /// overlay once.
   final List<double> detailBreakpoints;
 
-  /// Whether an overlay takes the pointers that land on it, so a tap on it
-  /// is not the table's. Until interactive overlays arrive the layer
-  /// ignores every pointer, whatever this says: each gesture reaches the
-  /// canvas.
+  /// Whether an overlay takes the pointers that land on it (spec G-5).
+  ///
+  /// False (the default): the layer ignores every pointer, and each gesture
+  /// reaches the canvas, a tap on a badge included: it is the table's.
+  ///
+  /// True: a pointer that goes down where an overlay's widget hits it is
+  /// the widget's alone, from that down to its up, whatever its kind or
+  /// button. A tap on it reaches the widget's own `GestureDetector` and is
+  /// not the table's: no selection, no `onTableTap`, no long press, no
+  /// context menu, no drag of the table, no pan; a finger on it is not a
+  /// finger of a pinch. A pointer that goes down off every overlay (or on
+  /// a transparent gap in one) is the canvas's as before, wherever it moves.
+  /// A mouse hovering over an overlay is not over the canvas. A wheel over
+  /// an overlay still zooms the plan, unless the widget takes the wheel
+  /// itself (a scrollable inside it does); a trackpad's pan and zoom is
+  /// always the plan's.
+  ///
+  /// Switching it builds every overlay afresh.
   final bool interactive;
 
   @override
@@ -226,7 +240,8 @@ int overlayDetailLevel(List<double> breakpoints, double scale) {
 /// builds again only the tables whose [FloorPlanTableOverlay] changed. A
 /// new widget from the host's rebuild of the view builds every table again,
 /// whatever [builder] is (G-5). The layer ignores pointers (G-5's
-/// default).
+/// default); with [FloorPlanOverlayLayout.interactive] it takes them, each
+/// overlay inside an [InputClaim], which the canvas's listeners honour.
 class TableOverlayLayer extends StatefulWidget {
   const TableOverlayLayer(
       {super.key,
@@ -411,6 +426,7 @@ class _TableOverlayLayerState extends State<TableOverlayLayer> {
 
   @override
   Widget build(BuildContext context) {
+    final interactive = widget.layout.interactive;
     final children = <Widget>[];
     for (var i = 0; i < _values.length; i++) {
       final h = _instances[i];
@@ -423,19 +439,23 @@ class _TableOverlayLayerState extends State<TableOverlayLayer> {
       children.add(_OverlaySlot(
           key: ValueKey<int>(h.value),
           slot: i,
-          child: RepaintBoundary(child: built.widget)));
+          child: RepaintBoundary(
+              child: interactive
+                  ? InputClaim(child: built.widget)
+                  : built.widget)));
     }
-    // Non-interactive (G-5's default): every gesture reaches the canvas.
-    return IgnorePointer(
-      child: RepaintBoundary(
-        child: _OverlayStack(
-          camera: widget.controller.cameraController,
-          corners: _corners,
-          layout: widget.layout,
-          children: children,
-        ),
+    final layer = RepaintBoundary(
+      child: _OverlayStack(
+        camera: widget.controller.cameraController,
+        corners: _corners,
+        layout: widget.layout,
+        children: children,
       ),
     );
+    // Interactive (G-5): a pointer that goes down on an overlay carries
+    // its claim, so the canvas's listeners leave it to the overlay.
+    // Otherwise (the default) every gesture reaches the canvas.
+    return interactive ? layer : IgnorePointer(child: layer);
   }
 }
 

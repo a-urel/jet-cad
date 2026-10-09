@@ -117,7 +117,10 @@ class _ServiceViewState extends State<ServiceView> {
       kind == PointerDeviceKind.invertedStylus;
 
   void _onSecondaryDown(PointerDownEvent e) {
-    if (!_isPrecise(e.kind) ||
+    // A secondary click on an interactive overlay is the overlay's
+    // (host embedding API spec G-5).
+    if (InputClaim.claimed(e) ||
+        !_isPrecise(e.kind) ||
         e.buttons & kSecondaryButton == 0 ||
         _tool.phase != ToolPhase.idle) {
       return;

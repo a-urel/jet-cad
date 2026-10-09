@@ -114,7 +114,8 @@ class FloorPlanView extends StatefulWidget {
   /// afresh, so a host keeps its state in its own objects, not in an
   /// overlay's `State`. Each table's widget is its own, so two tables
   /// sharing a number get two. While staff drag tables, the widgets stay at
-  /// the tables' last places and move on the drop.
+  /// the tables' last places and move on the drop. They ignore pointers
+  /// unless [tableOverlayLayout] is [FloorPlanOverlayLayout.interactive].
   final FloorPlanTableOverlayBuilder? tableOverlayBuilder;
 
   /// Where and how [tableOverlayBuilder]'s widgets sit on their tables
