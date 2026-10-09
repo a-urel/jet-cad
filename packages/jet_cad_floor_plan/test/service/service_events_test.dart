@@ -697,4 +697,47 @@ void main() {
           reason: 'the candidates are cached, not rebuilt per move');
     });
   });
+
+  group('double tap slop (final review F-6)', () {
+    testWidgets(
+        'SE16 the slop is measured from the first tap\'s down, not where it '
+        'came up: a first tap that drifts 15 px (within kTouchSlop) before '
+        'its up neither breaks a double tap 99 px from its down nor makes '
+        'one 101 px from it', (tester) async {
+      final r = rig();
+      final near = r.at(table('4'), 450, 100);
+      final a = Offset(near.dx.roundToDouble(), near.dy.roundToDouble());
+      const drift = Offset(15, 0);
+      final points = [
+        a,
+        a + drift,
+        a - drift,
+        a + const Offset(-99, 0),
+        a + const Offset(-101, 0)
+      ];
+      for (final p in points) {
+        expect(r.picker.pick(r.ev(p).world)?.table.instance, r.instance(3),
+            reason: 'premise: on 4');
+      }
+
+      /// A tap down at [down], moved to [up] before it comes up there.
+      void drifting(Offset down, Offset up, Duration at) {
+        r.tool.onPointerDown(r.ev(down, time: at), r.ctx);
+        r.tool.onPointerMove(r.ev(up, time: at + ms(20)), r.ctx);
+        r.tool.onPointerUp(r.ev(up, buttons: 0, time: at + ms(40)), r.ctx);
+      }
+
+      // 99 px from the first down, 114 px from its up: a double tap. The
+      // drifting tap is logged as a tap: 15 px is within kTouchSlop.
+      drifting(a, a + drift, ms(1000));
+      r.tap(a + const Offset(-99, 0), ms(1100));
+      expect(r.log, ['tap 4', 'tap 4', 'double 4'], reason: '99 px');
+      r.log.clear();
+
+      // 101 px from the first down, 86 px from its up: two taps.
+      drifting(a, a - drift, ms(3000));
+      r.tap(a + const Offset(-101, 0), ms(3100));
+      expect(r.log, ['tap 4', 'tap 4'], reason: '101 px');
+    });
+  });
 }

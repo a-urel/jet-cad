@@ -576,4 +576,40 @@ void main() {
       expect(heard.moved.single, hasLength(1));
     });
   });
+
+  group('data (final review)', () {
+    testWidgets(
+        'VE18 F-4: the moved table\'s detail carries the data set on it in '
+        'the design, keys sorted; a table the drag did not move is not '
+        'reported; the design keeps the data', (tester) async {
+      final (c, heard) = await mount(tester);
+      const data = {'zeta': 'z', 'id': 'pos-1', 'alpha': 'Masa 1.ğ'};
+      c.setMode(FloorPlanMode.design);
+      expect(
+          c.setTablesData({
+            '1': data,
+            '2': {'id': 'pos-2'},
+          }),
+          isTrue);
+      c.setMode(FloorPlanMode.selection);
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+
+      await drag(tester, onTable(tester, c, table('1')), const Offset(60, 30),
+          ms(1000));
+      await tester.pump();
+      expect(heard.log, ['layout', 'moved [1]']);
+      final moved = heard.moved.single.single;
+      expect(moved.data, data);
+      expect(moved.data.keys, ['alpha', 'id', 'zeta']);
+      expect(moved, c.tableDetails.firstWhere((d) => d.table.number == '1'),
+          reason: 'the controller\'s fresh detail, data and all');
+
+      c.setMode(FloorPlanMode.design);
+      expect(
+          c.tableDetails.firstWhere((d) => d.table.number == '1').data, data);
+    });
+  });
 }

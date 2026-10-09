@@ -465,6 +465,30 @@ void main() {
   });
 
   testWidgets(
+      'DE9 final review F-5: Revert in the design after the service kept a '
+      'layout logs the replaced plan and restores nothing then; entering '
+      'the service puts the kept move back', (tester) async {
+    final demo = await pumpSamples(tester);
+    final c = demo.area.controller;
+    await press(tester, 'mode-service');
+    await drag(tester, centreOf(c, '1'), const Offset(50, 0));
+    await tester.pump();
+    expect(c.serviceEdited, isTrue, reason: 'premise: moved');
+    await press(tester, 'mode-design');
+    expect(demo.area.layout, isNotNull, reason: 'premise: a kept layout');
+
+    await press(tester, 'revert');
+    expect(tester.takeException(), isNull);
+    expect(
+        demo.log.take(2).toList(), ['Salon: plan replaced', 'Salon: reloaded']);
+    expect(byKey('link-tables'), findsOneWidget, reason: 'still the design');
+
+    await press(tester, 'mode-service');
+    expect(demo.log.first, 'Salon: layout restored, 1 moved, 0 dropped');
+    expect(c.serviceEdited, isTrue, reason: 'the kept move goes back');
+  });
+
+  testWidgets(
       'DE10 final review F-3: a double tap on a number two tables carry '
       'logs no id, on either table, though both are linked; a number on one '
       'table still logs its id', (tester) async {
