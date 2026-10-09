@@ -154,9 +154,13 @@ them yourself after the controllers:
     controller.dispose();
     thumbnails.dispose();
     symbols.dispose();
+    hovered.dispose();
     super.dispose();
   }
 ```
+
+(`hovered` is the host's own: [Events and host
+data](#events-and-host-data).)
 
 A single floor can skip both: `FloorPlanController(symbolSources: …)`
 makes and owns its own.
@@ -181,14 +185,20 @@ The view, with the host's options:
                 anchor: Alignment.bottomCenter,
                 detailBreakpoints: [0.05],
               ),
+              onTablesMoved: tablesMoved,
+              onTableDoubleTap: openBill,
+              onFloorTap: floorTapped,
+              onTableHover: showHover,
             ),
 ```
 
 (`onLayoutChanged`, one call per service drag, still exists; for saving,
 `serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it. The
-last two arguments draw your own widget on each table, *unreleased on
-`main`*: [Your own widgets on the
-tables](#your-own-widgets-on-the-tables).)
+two arguments after `longPress` draw your own widget on each table, and
+the last four report a drag's moved tables, a double tap, a tap on the
+floor and the table under the mouse, all *unreleased on `main`*: [Your
+own widgets on the tables](#your-own-widgets-on-the-tables), [Events and
+host data](#events-and-host-data).)
 
 Show a controller in **one `FloorPlanView` at a time**: a second view of
 the same controller mounted beside the first throws a `StateError`. Two
@@ -494,6 +504,23 @@ case-sensitively. The planner lets staff type a number of 1 to 8
 characters (UTF-16 units) with no control character, so keep your codes
 within those rules: a longer code matches only a plan edited by hand.
 
+*Unreleased on `main`:* a POS that links its tables by an id it stores in
+each table's data ([Events and host data](#events-and-host-data))
+compares ids, which no renumbering changes:
+
+```dart
+  /// The POS's tables, by the id stored in each table's `data['id']`, that
+  /// this floor does not draw. Ids compare exactly, whatever the numbers.
+  Set<String> unplacedIds(Set<String> ids) {
+    final drawn = {
+      for (final detail in controller.tableDetails)
+        if (detail.table.visible && detail.data['id'] != null)
+          detail.data['id']!,
+    };
+    return ids.difference(drawn);
+  }
+```
+
 ### Your own widgets on the tables
 
 *Unreleased on `main`.* A POS shows its own things on a table: the
@@ -520,7 +547,8 @@ so a service move changes it — in the order of `controller.tables`, one
   counter-clockwise, mirrored or not.
 - `layer` and `locked`: the table's layer, and whether it is locked (a
   locked table can be tapped and selected, never moved).
-- `data`: empty in this release.
+- `data`: your own data on the table, empty unless you stored some
+  ([Events and host data](#events-and-host-data)).
 
 A table on a hidden layer, or one whose corners are not finite (a
 hand-edited file), is listed with `center` and `size` null and no
@@ -884,6 +912,226 @@ class _KioskFloorState extends State<KioskFloor> {
 - `visibleWorld` is a `Rect` in world millimetres, y up, so its `top` is
   the least y; `contains` works as for any `Rect`.
 
+### Events and host data
+
+*Unreleased on `main`.* Four more gestures of the selection mode reach
+you, a table can carry data of yours that is saved with the plan, and
+the controller reports what changes among the designed tables.
+
+**Four gestures.** The last four arguments of the view in
+[§ 4](#4-the-controller-and-the-view), each read at each call, each in
+the selection mode only:
+
+- `onTablesMoved(moved)`: after a drag of tables ends, every table it
+  moved, numbered or not, in the order of `controller.tables`, as a
+  `FloorPlanTableDetail` with its new geometry; once per drag, right
+  after `onLayoutChanged`. Undo, Redo, `resetLayout()` and
+  `restoreServiceLayout` do not call it: they fire
+  `serviceLayoutChanges`. If your `onLayoutChanged` replaces the service
+  copy (a `resetLayout()`, a `load`, a mode switch), that drag's
+  `onTablesMoved` is not called: the tables it moved are gone.
+- `onTableDoubleTap(number)`: a second tap on the **same table** whose
+  down comes at most 300 ms (`kDoubleTapTimeout`) after the first tap's
+  down and at most 100 logical pixels (`kDoubleTapSlop`) from it, both
+  timed and measured from the raw pointer events. Two tables sharing a
+  number are two tables: a tap on each is no double tap. A locked table
+  reports it; an unnumbered one does not. With Shift, Ctrl or Cmd held on
+  either tap it is no double tap (each tap toggles the selection). A
+  third tap starts anew.
+- `onFloorTap(world)`: a tap that missed every table, with the point its
+  down went on, in world millimetres, y up, as `tableDetails` gives a
+  table's centre. It comes after the tap's own effect: the selection is
+  already cleared, or kept when Shift, Ctrl or Cmd was held. A tap with
+  a modifier reports it too. A tap on an unnumbered table is neither a
+  table's tap nor the floor's.
+- `onTableHover(number)`: the mouse or a stylus moved onto a numbered
+  table, or off it (null: over the floor, over an unnumbered table, or
+  off the canvas); only when the number changes; never for a finger.
+  Over an interactive overlay (`interactive: true`) the pointer is off
+  the canvas, so it reads null while it is on your widget. Without the
+  callback a hover does no work.
+
+**A tap action runs on each tap of a double tap.** The single tap is not
+delayed: both taps select and call `onTableTap` (and `onGroupTap`) as
+before, and `onTableDoubleTap` follows the second. A host that opens a
+table's order on a tap and its bill on a double tap does both on a
+double tap. Make the tap's action harmless to repeat, as opening an
+order that is already open is, and let the double tap's take over.
+
+```dart
+  /// A drag in the service moved these tables: tell the other terminals.
+  void tablesMoved(List<FloorPlanTableDetail> moved) {
+    for (final detail in moved) {
+      debugPrint('${detail.table.number ?? 'a table'} is at ${detail.center}');
+    }
+  }
+
+  /// A double tap: the bill. Its two taps have opened the order already.
+  void openBill(String number) => debugPrint('the bill of $number');
+
+  /// A tap on the floor, in metres.
+  void floorTapped(Offset world) =>
+      debugPrint('floor at ${world.dx / 1000}, ${world.dy / 1000} m');
+
+  /// The table under the mouse, for a line of the host's own.
+  void showHover(String? number) => hovered.value = number;
+```
+
+Keep the hovered table in a `ValueNotifier` and show it with a
+`ValueListenableBuilder`, so a hover rebuilds that line only: a
+`setState` that rebuilds the `FloorPlanView` runs your overlay builder
+for every table.
+
+```dart
+  /// The table the mouse is over, for the host's own line.
+  final ValueNotifier<String?> hovered = ValueNotifier(null);
+```
+
+```dart
+          ValueListenableBuilder<String?>(
+            valueListenable: hovered,
+            builder: (context, number, _) =>
+                Text(number == null ? '' : 'Table $number'),
+          ),
+```
+
+A mode switch, `resetLayout()`, a restore, `load` and `newPlan()` build
+the view afresh with the pointer still where it was, and send **no null**
+for the table it was over. Clear your hover state yourself then: on the
+mode, and on a replaced plan (below).
+
+```dart
+    controller.mode.addListener(() => hovered.value = null);
+```
+
+**Your data on a table.** A table can carry a small map of strings of
+yours, typically the id of its row in your database. It is saved in the
+plan with the table, and read back as `FloorPlanTableDetail.data`:
+
+```dart
+  /// Links table [number] to the POS's own table [id]: false, changing
+  /// nothing, when this floor has no table [number] or two of them.
+  bool linkTable(String number, String id) =>
+      controller.setTableData(number, {'id': id});
+
+  /// The POS's id of table [number], or null.
+  String? idOf(String number) {
+    for (final detail in controller.tableDetails) {
+      if (detail.table.number == number) return detail.data['id'];
+    }
+    return null;
+  }
+```
+
+- `setTableData(number, data)` replaces the table's whole map; an empty
+  map removes it. It is a design edit: undoable (labelled "Table data"),
+  it makes the plan `dirty`, moves `revision` and is reported on
+  `designChanges` (below); `dirty` and `canUndo` read it on return. Data
+  equal to the table's own returns true with no edit.
+- It returns **false**, changing nothing, when the number (trimmed, as
+  everywhere) names no table **or more than one**: an ambiguous link is
+  refused, not guessed. Mend the numbering first (`numberingWarnings`).
+- A table on a hidden or locked layer takes data: a link is not a drawing
+  edit.
+- **The selection mode refuses it** with a `StateError`: nothing done
+  during service reaches the design. The service copy carries the
+  design's data, read only, so `tableDetails` reads it in either mode.
+- `setTablesData({number: data, …})` writes several tables as **one**
+  undo step, all or nothing: a map outside the limits throws before
+  anything changes; a number unknown or shared, or two keys that trim to
+  the same number, return false with nothing changed. Entries equal to
+  the table's own are skipped.
+
+```dart
+  /// Links every table the POS knows on this floor, in one undo step;
+  /// false, changing nothing, if a number is not on the floor or is on two
+  /// tables.
+  bool linkAll(Map<String, String> idByNumber) => controller.setTablesData({
+        for (final MapEntry(key: number, value: id) in idByNumber.entries)
+          number: {'id': id},
+      });
+```
+
+- **The limits**, checked when you write (an `ArgumentError`, nothing
+  changed): at most 32 keys; a key of 1 to 64 characters among `a`–`z`,
+  `0`–`9`, `_`, `.` and `-`; a value of at most 1024 UTF-16 code units
+  (a character outside the Basic Multilingual Plane, an emoji, counts
+  two) with no control character: no code unit below U+0020 or from
+  U+007F to U+009F, the rule of table numbers. A value may be empty.
+- **In the plan** the map is a component of the table's placement,
+  `"jetcad.table_data"`, as `{"data": {key: value}}` with the keys
+  written sorted. You never read or write it there; `data` and
+  `setTableData` are the API.
+- **Delete drops it; Undo brings it back.** Deleting a table in the
+  editor removes its data in the same step.
+- **Renumbering keeps it**: the data is the table's, not its number's.
+- **A stored map outside the limits** (a plan edited by hand, or saved by
+  a later release that relaxed a limit) does not stop the plan from
+  opening. That table reads empty `data`; its stored map is kept as read
+  (re-encoded) and saved back until you `setTableData` that table.
+  Editor code sees it as the table diagnostic `table.invalid_data`; this
+  release gives a host no other channel for it.
+- **The data is yours to validate.** The planner checks shapes, never
+  meaning: a plan saved at one location and loaded at another carries the
+  first location's ids. Check an id against your own records before you
+  act on it.
+- A plan saved by this release is at **schema 9**, data or not
+  ([§ 11](#11-what-a-host-must-never-assume)).
+
+**The design's changes.** `controller.designChanges` is a broadcast
+stream of `FloorPlanDesignChange`: after every design edit, undo or redo
+(in the editor, through `setTableData`, a layer locked, hidden or shown),
+the designed tables added, removed and changed since the last report.
+
+```dart
+    controller.designChanges.listen(designChanged);
+```
+
+```dart
+  /// The designed floor changed: keep the POS's list of tables in step.
+  void designChanged(FloorPlanDesignChange change) {
+    switch (change) {
+      case FloorPlanTableAdded(:final table):
+        debugPrint('placed: ${table.table.number}');
+      case FloorPlanTableRemoved(:final table):
+        debugPrint('removed: ${table.table.number} (${table.data['id']})');
+      case FloorPlanTableChanged(:final before, :final after):
+        if (before.table.number != after.table.number) {
+          debugPrint('${before.table.number} is now ${after.table.number}');
+        }
+      case FloorPlanPlanReplaced():
+        hovered.value = null;
+        debugPrint('another plan: read controller.tableDetails again');
+    }
+  }
+```
+
+- A table is followed as itself, never by its number: a renumbering is
+  one `FloorPlanTableChanged` whose `before` and `after` differ in the
+  number; an undone delete is one `FloorPlanTableAdded` equal to the
+  `FloorPlanTableRemoved` the delete reported. `before` and `after` can
+  differ in the number, the geometry, the layer, the lock, the
+  visibility or the data. One edit can report several tables, in the
+  order of `controller.tables`: locking a layer reports each table on it.
+- `load` and `newPlan()`, in either mode, report what was still owed for
+  the plan they replace, then `FloorPlanPlanReplaced` alone, with no
+  change per table: read `tableDetails` again. A `load` that throws
+  reports nothing.
+- Nothing done in the selection mode is reported: a service move changes
+  the copy, never the design (`onTablesMoved` and `serviceLayoutChanges`
+  report it).
+- **Delivery is asynchronous**, never from inside your call to `load`,
+  `setTableData` or an undo: the edits made in one synchronous step
+  arrive as one report, from the tables before the first edit to the
+  tables after the last.
+- **Nothing is sent on listen.** Read the starting tables from
+  `tableDetails` in the design mode (in the selection mode it reads the
+  service copy). A listener added while another listens may first hear an
+  edit made just before it listened.
+- The tables are compared only while the stream has a listener.
+  `dispose()` closes it, so a listener on a controller you dispose needs
+  no cancel; changes not yet delivered then are dropped.
+
 ## 8. Callbacks, options, and the web's context menu
 
 - `onTableTap(number)`: a tap on a numbered table in the selection mode
@@ -904,6 +1152,11 @@ class _KioskFloorState extends State<KioskFloor> {
 - `onExport(FloorPlanExport)`: Export's bytes, file name and MIME type,
   for you to store or share. `printer` prints; without one, Print uses
   the platform's dialog.
+- *Unreleased on `main`:* `onTablesMoved(moved)` after a drag of tables,
+  `onTableDoubleTap(number)` after a double tap's second `onTableTap`,
+  `onFloorTap(world)` for a tap that misses every table, and
+  `onTableHover(number)` for the mouse or a stylus over a table: [Events
+  and host data](#events-and-host-data).
 
 On the web the browser opens its own menu on a right click as well,
 unless you turn it off, app-wide, before `runApp` (the `main` of
@@ -952,3 +1205,9 @@ a desktop.
   that says why); a 0.1.0 plan opens here unchanged. Terminals that
   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
   plans and service layouts, so they can share them.
+- **Schema 9** *(unreleased on `main`)*. **A plan saved by this release
+  is at schema 9, with or without table data, and 0.3.0 and every
+  earlier release refuse it** (`load` throws a `FormatException` that
+  says why). **Every terminal that shares stored plans moves to it
+  together.** A schema 8 or 7 plan opens here unchanged; the service
+  layout's format is unchanged.

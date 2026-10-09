@@ -93,11 +93,16 @@ class _FloorScreenState extends State<FloorScreen> {
   /// The guests at each table, by number: the POS's own data.
   final Map<String, int> guestsAt = {'4': 2, '7': 5};
 
+  /// The table the mouse is over, for the host's own line.
+  final ValueNotifier<String?> hovered = ValueNotifier(null);
+
   @override
   void initState() {
     super.initState();
     controller.serviceLayoutChanges.addListener(saveLayout);
     controller.selectedTables.addListener(showOrders);
+    controller.mode.addListener(() => hovered.value = null);
+    controller.designChanges.listen(designChanged);
     openDesign();
   }
 
@@ -106,6 +111,7 @@ class _FloorScreenState extends State<FloorScreen> {
     controller.dispose();
     thumbnails.dispose();
     symbols.dispose();
+    hovered.dispose();
     super.dispose();
   }
 
@@ -211,6 +217,72 @@ class _FloorScreenState extends State<FloorScreen> {
       for (final code in codes)
         if (!drawn.contains(code.trim())) code,
     };
+  }
+
+  /// The POS's tables, by the id stored in each table's `data['id']`, that
+  /// this floor does not draw. Ids compare exactly, whatever the numbers.
+  Set<String> unplacedIds(Set<String> ids) {
+    final drawn = {
+      for (final detail in controller.tableDetails)
+        if (detail.table.visible && detail.data['id'] != null)
+          detail.data['id']!,
+    };
+    return ids.difference(drawn);
+  }
+
+  /// A drag in the service moved these tables: tell the other terminals.
+  void tablesMoved(List<FloorPlanTableDetail> moved) {
+    for (final detail in moved) {
+      debugPrint('${detail.table.number ?? 'a table'} is at ${detail.center}');
+    }
+  }
+
+  /// A double tap: the bill. Its two taps have opened the order already.
+  void openBill(String number) => debugPrint('the bill of $number');
+
+  /// A tap on the floor, in metres.
+  void floorTapped(Offset world) =>
+      debugPrint('floor at ${world.dx / 1000}, ${world.dy / 1000} m');
+
+  /// The table under the mouse, for a line of the host's own.
+  void showHover(String? number) => hovered.value = number;
+
+  /// Links table [number] to the POS's own table [id]: false, changing
+  /// nothing, when this floor has no table [number] or two of them.
+  bool linkTable(String number, String id) =>
+      controller.setTableData(number, {'id': id});
+
+  /// The POS's id of table [number], or null.
+  String? idOf(String number) {
+    for (final detail in controller.tableDetails) {
+      if (detail.table.number == number) return detail.data['id'];
+    }
+    return null;
+  }
+
+  /// Links every table the POS knows on this floor, in one undo step;
+  /// false, changing nothing, if a number is not on the floor or is on two
+  /// tables.
+  bool linkAll(Map<String, String> idByNumber) => controller.setTablesData({
+        for (final MapEntry(key: number, value: id) in idByNumber.entries)
+          number: {'id': id},
+      });
+
+  /// The designed floor changed: keep the POS's list of tables in step.
+  void designChanged(FloorPlanDesignChange change) {
+    switch (change) {
+      case FloorPlanTableAdded(:final table):
+        debugPrint('placed: ${table.table.number}');
+      case FloorPlanTableRemoved(:final table):
+        debugPrint('removed: ${table.table.number} (${table.data['id']})');
+      case FloorPlanTableChanged(:final before, :final after):
+        if (before.table.number != after.table.number) {
+          debugPrint('${before.table.number} is now ${after.table.number}');
+        }
+      case FloorPlanPlanReplaced():
+        hovered.value = null;
+        debugPrint('another plan: read controller.tableDetails again');
+    }
   }
 
   /// A badge on each table with guests: their count over the seats, faded
@@ -343,6 +415,13 @@ class _FloorScreenState extends State<FloorScreen> {
               icon: const Icon(Icons.ads_click),
               onPressed: () => debugPrint(
                   'at (400, 300): ${tableUnder(const Offset(400, 300))}')),
+          IconButton(
+              icon: const Icon(Icons.link),
+              onPressed: () =>
+                  debugPrint('linked 4: ${linkTable('4', 'pos-4')}, '
+                      'all: ${linkAll({'1': 'pos-1', '2': 'pos-2'})}, '
+                      'id of 4: ${idOf('4')}, '
+                      'unplaced: ${unplacedIds({'pos-1', 'pos-9'})}')),
           ValueListenableBuilder<FloorPlanCamera>(
             valueListenable: controller.camera,
             builder: (context, camera, _) =>
@@ -362,6 +441,11 @@ class _FloorScreenState extends State<FloorScreen> {
                 Text(describe(warning)),
             ]),
           ),
+          ValueListenableBuilder<String?>(
+            valueListenable: hovered,
+            builder: (context, number, _) =>
+                Text(number == null ? '' : 'Table $number'),
+          ),
           Expanded(
             child: FloorPlanView(
               controller: controller,
@@ -380,6 +464,10 @@ class _FloorScreenState extends State<FloorScreen> {
                 anchor: Alignment.bottomCenter,
                 detailBreakpoints: [0.05],
               ),
+              onTablesMoved: tablesMoved,
+              onTableDoubleTap: openBill,
+              onFloorTap: floorTapped,
+              onTableHover: showHover,
             ),
           ),
         ],
