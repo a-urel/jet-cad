@@ -39,6 +39,7 @@ class ToolPalette extends StatelessWidget {
     required this.fill,
     required this.geometryAllowed,
     required this.onSelect,
+    this.showFill = true,
   });
 
   final List<PaletteEntry> entries;
@@ -46,6 +47,10 @@ class ToolPalette extends StatelessWidget {
   final ValueNotifier<bool> fill;
   final bool geometryAllowed;
   final void Function(Tool tool) onSelect;
+
+  /// Whether the Fill row shows (host embedding API spec S-9 f): false
+  /// while no fill-capable tool is offered. Its divider goes with it.
+  final bool showFill;
 
   @override
   Widget build(BuildContext context) => ExcludeFocus(
@@ -71,16 +76,19 @@ class ToolPalette extends StatelessWidget {
                       trailing: Text(e.shortcut),
                       onTap: () => onSelect(e.tool),
                     ),
-                  const Divider(),
-                  CheckboxListTile(
-                    key: const Key('tool-fill'),
-                    dense: true,
-                    title: Text(strings.fill),
-                    secondary: const Text('F'),
-                    value: fill.value,
-                    onChanged:
-                        geometryAllowed ? (v) => fill.value = v ?? false : null,
-                  ),
+                  if (showFill) ...[
+                    const Divider(),
+                    CheckboxListTile(
+                      key: const Key('tool-fill'),
+                      dense: true,
+                      title: Text(strings.fill),
+                      secondary: const Text('F'),
+                      value: fill.value,
+                      onChanged: geometryAllowed
+                          ? (v) => fill.value = v ?? false
+                          : null,
+                    ),
+                  ],
                 ],
               );
             },

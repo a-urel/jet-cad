@@ -73,7 +73,7 @@ const double kWallAttachPixels = 16.0;
 ///   bands, so the next placement sees the one just made as a neighbour.
 ///   Without [faces], nothing attaches: 09b's behaviour.
 class SymbolPlaceTool extends Tool {
-  SymbolPlaceTool(this.armed, {this.faces}) {
+  SymbolPlaceTool(this.armed, {this.faces, this.canRotate, this.canMirror}) {
     armed.addListener(_onArmed);
     _syncPath();
   }
@@ -83,6 +83,16 @@ class SymbolPlaceTool extends Tool {
 
   /// The shell's wall faces (spec 09c D3, D6), or null: no attachment.
   final WallFaces? faces;
+
+  /// Whether `R` and `Shift+R` turn the next placement (host embedding API
+  /// spec S-9 b, the host's `rotate`), read at each key; null allows. A
+  /// refused key is any other key: it bubbles while armed and is swallowed
+  /// mid-press.
+  final bool Function()? canRotate;
+
+  /// Whether `M` mirrors the next placement (spec S-9 b, the host's
+  /// `mirror`), read at each key as [canRotate]; null allows.
+  final bool Function()? canMirror;
 
   final DragPoint _at = DragPoint();
   final SnapResult _scratch = SnapResult();
@@ -382,7 +392,8 @@ class SymbolPlaceTool extends Tool {
     final key = event.logicalKey;
     final modifier = _hasModifier();
     if (!modifier &&
-        (key == LogicalKeyboardKey.keyR || key == LogicalKeyboardKey.keyM)) {
+        ((key == LogicalKeyboardKey.keyR && (canRotate?.call() ?? true)) ||
+            (key == LogicalKeyboardKey.keyM && (canMirror?.call() ?? true)))) {
       if (event is KeyDownEvent) {
         if (key == LogicalKeyboardKey.keyR) {
           final step = HardwareKeyboard.instance.isShiftPressed ? -1 : 1;

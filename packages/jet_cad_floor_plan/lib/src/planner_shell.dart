@@ -13,6 +13,7 @@ import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
 import 'document_toolbar.dart';
 import 'host/bars.dart';
+import 'host/editor_capabilities.dart';
 import 'host/floor_plan_theme.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
@@ -56,6 +57,13 @@ typedef ShellSettleRegistrar = VoidCallback Function(VoidCallback settle);
 /// Undo and Redo wait as the shell's do. Returns the withdrawal, which the
 /// shell calls on dispose, as [ShellSettleRegistrar]'s.
 typedef ShellIdleRegistrar = VoidCallback Function(bool Function() idle);
+
+/// Registers the shell's tool selector with its host (host embedding API
+/// spec C-3, S-6): [select] activates a tool when the shell's capabilities
+/// allow it and answers whether it did. Returns the withdrawal, which the
+/// shell calls on dispose, as [ShellSettleRegistrar]'s.
+typedef ShellToolRegistrar = VoidCallback Function(
+    bool Function(FloorPlanTool tool) select);
 
 /// Owns the index, the camera and -- since 03 -- the outline cache and the
 /// grip cache for the document's lifetime; since 05, the tools and the Fill
@@ -106,6 +114,9 @@ class PlannerShell extends StatefulWidget {
     this.tableOverlays,
     this.editorBar = const FloorPlanEditorBar(),
     this.onIdle,
+    this.capabilities = FloorPlanEditorCapabilities.full,
+    this.onTools,
+    this.onToolChanged,
   });
 
   final DraftDocument? document;
@@ -195,6 +206,20 @@ class PlannerShell extends StatefulWidget {
 
   /// Where the shell registers its idle probe (spec S-4).
   final ShellIdleRegistrar? onIdle;
+
+  /// What the editor lets its user do (host embedding API spec C-5), read
+  /// at each build, key and arming; the default is today's editor. A
+  /// change that refuses the active tool falls back to select. Its
+  /// `tools` are expected to hold select (the view validates it); the
+  /// shell allows select whatever they say.
+  final FloorPlanEditorCapabilities capabilities;
+
+  /// Where the shell registers its tool selector (spec C-3, S-6).
+  final ShellToolRegistrar? onTools;
+
+  /// Told the active tool after each change (spec C-3, S-6), and select
+  /// once when the shell is created.
+  final void Function(FloorPlanTool tool)? onToolChanged;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -325,6 +350,14 @@ class _PlannerShellState extends State<PlannerShell> {
   /// Withdraws the idle probe's registration with the host (spec S-4).
   VoidCallback? _releaseIdle;
 
+  /// Withdraws the tool selector's registration with the host (spec S-6).
+  VoidCallback? _releaseTools;
+
+  /// Object snap as the tools and drags read it (spec S-14): the user's
+  /// setting, [_snap], while the capabilities allow snapping.
+  late final _CapabilitySnap _toolSnap =
+      _CapabilitySnap(_snap, () => widget.capabilities.snapping);
+
   // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
   late final ParametricSystem _parametric;
 
@@ -386,8 +419,11 @@ class _PlannerShellState extends State<PlannerShell> {
   // its document) and holds no subscription of its own: [_bands] is
   // disposed below.
   late final WallFaces _faces = WallFaces(_bands, accept: isUsableHost);
-  late final SymbolPlaceTool _symbolTool =
-      SymbolPlaceTool(_armed, faces: _faces);
+  late final SymbolPlaceTool _symbolTool = SymbolPlaceTool(_armed,
+      faces: _faces,
+      // Spec S-9 b: R and Shift+R need `rotate`, M needs `mirror`.
+      canRotate: () => widget.capabilities.rotate,
+      canMirror: () => widget.capabilities.mirror);
 
   /// The Symbols tab's search field (spec 09b D7, F-4): a panel field, so
   /// [_settlePendingInput] hands it back.
@@ -540,13 +576,13 @@ class _PlannerShellState extends State<PlannerShell> {
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   late final GripCache _grips = GripCache(_document, _selection, _outlines,
       objects: ObjectGrips(
-          edgeAperture: () => _snap.objectSnap
+          edgeAperture: () => _toolSnap.objectSnap
               ? kSnapAperturePixels / _camera.value.scale
               : null,
           labelAperture: () => kSnapAperturePixels / _camera.value.scale,
           roomInputs: _roomInputs,
           index: _index,
-          objectSnap: () => _snap.objectSnap));
+          objectSnap: () => _toolSnap.objectSnap));
 
   late final ToolContext _context = ToolContext(
       document: _document,
@@ -554,10 +590,13 @@ class _PlannerShellState extends State<PlannerShell> {
       camera: _camera,
       selection: _selection,
       page: _page,
-      snap: _snap,
+      snap: _toolSnap,
       grips: _grips);
+  // Spec C-3: every tool change reaches the host ([_onTools]); attached
+  // where the controller is made, so nothing is made earlier than today.
   late final ToolController _tools =
-      ToolController(initial: _select, context: _context);
+      ToolController(initial: _select, context: _context)
+        ..addListener(_onTools);
   // Spec 10 D19, R-29: the Room tool's notice joins the status line; spec
   // 11 D12 (R-24): so does the Dimension tool's value.
   late final Listenable _status =
@@ -695,23 +734,102 @@ class _PlannerShellState extends State<PlannerShell> {
   bool get _geometryAllowed =>
       _document.commands.permissions.allows(Capability.geometry);
 
+  /// The host's tool for [tool]: a palette row's by its place (the
+  /// palette's order is [FloorPlanTool]'s), the placement tool's `symbol`.
+  /// Allocates nothing: a tool's every notification passes here
+  /// ([_onTools]).
+  FloorPlanTool _floorTool(Tool tool) {
+    if (identical(tool, _symbolTool)) return FloorPlanTool.symbol;
+    for (var i = 0; i < _entries.length; i++) {
+      if (identical(_entries[i].tool, tool)) return FloorPlanTool.values[i];
+    }
+    return FloorPlanTool.select;
+  }
+
+  /// [entry] as the host's filter sees it, made once per entry.
+  final Expando<FloorPlanSymbol> _hostSymbols = Expando<FloorPlanSymbol>();
+  FloorPlanSymbol _hostSymbol(SymbolEntry entry) =>
+      _hostSymbols[entry] ??= FloorPlanSymbol.of(entry);
+
+  /// Whether the capabilities offer placing [entry] (spec C-5): the symbol
+  /// tool, the Symbols tab, and the filter.
+  bool _offers(SymbolEntry entry) {
+    final caps = widget.capabilities;
+    if (!caps.tools.contains(FloorPlanTool.symbol) || !caps.symbolPalette) {
+      return false;
+    }
+    final filter = caps.symbolFilter;
+    return filter == null || filter(_hostSymbol(entry));
+  }
+
+  /// Whether the capabilities allow [tool] (spec C-5): select always; a
+  /// palette tool by `tools`; the placement tool when it offers the armed
+  /// entry.
+  bool _allows(Tool tool) {
+    if (identical(tool, _symbolTool)) {
+      final entry = _armed.value;
+      return entry == null
+          ? widget.capabilities.tools.contains(FloorPlanTool.symbol) &&
+              widget.capabilities.symbolPalette
+          : _offers(entry);
+    }
+    final t = _floorTool(tool);
+    return t == FloorPlanTool.select || widget.capabilities.tools.contains(t);
+  }
+
+  /// Whether a fill-capable tool is offered (spec S-9 f): the Fill row and
+  /// F only then.
+  bool get _fillOffered => widget.capabilities.tools.any((t) =>
+      t == FloorPlanTool.polyline ||
+      t == FloorPlanTool.rectangle ||
+      t == FloorPlanTool.circle);
+
   /// Spec 05 D5: the one way a tool becomes active. A drawing tool clears
   /// the selection first, because the overlay paints the selection's
   /// outlines and grips under any active tool. It is refused while geometry
-  /// is denied. Focus never leaves the canvas (Ruling 05-6).
-  void _activate(Tool tool) {
+  /// is denied, and (host embedding API spec C-5) when the capabilities do
+  /// not allow it. Focus never leaves the canvas (Ruling 05-6). Answers
+  /// whether [tool] is now active.
+  bool _activate(Tool tool) {
+    if (!_allows(tool)) return false;
     final drawing = !identical(tool, _select);
-    if (drawing && !_geometryAllowed) return;
+    if (drawing && !_geometryAllowed) return false;
     if (drawing) _selection.clear();
     _tools.activate(tool);
+    return true;
   }
 
   /// Spec 09b D8: a gallery cell arms [entry] and activates the placement
   /// tool through [_activate], which refuses it while geometry is denied
-  /// and clears the selection.
+  /// and clears the selection. The panel offers no cell the capabilities
+  /// refuse (spec C-5: its filter, and no placement without the symbol
+  /// tool), and [_activate] refuses the tool for an entry they refuse.
   void _armSymbol(SymbolEntry entry) {
     _armed.value = entry;
     _activate(_symbolTool);
+  }
+
+  /// The host's [FloorPlanController.selectTool] (spec C-3, S-6): a palette
+  /// tool through [_activate]; `symbol` re-activates the armed entry, and
+  /// is refused with none armed.
+  bool _selectByHost(FloorPlanTool tool) {
+    if (tool == FloorPlanTool.symbol) {
+      return _armed.value != null && _activate(_symbolTool);
+    }
+    return _activate(_entries[tool.index].tool);
+  }
+
+  /// The tool last told to the host.
+  FloorPlanTool _reportedTool = FloorPlanTool.select;
+
+  /// Tells the host the active tool when it changed (spec C-3): a palette
+  /// tap, a letter, Escape, an arming, the host's own call and a fallback
+  /// all pass through the tool controller.
+  void _onTools() {
+    final tool = _floorTool(_tools.active);
+    if (tool == _reportedTool) return;
+    _reportedTool = tool;
+    widget.onToolChanged?.call(tool);
   }
 
   /// An idle drawing tool leaves Escape unhandled; it arrives here.
@@ -775,10 +893,32 @@ class _PlannerShellState extends State<PlannerShell> {
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
     _releaseIdle = widget.onIdle?.call(() => _idle);
+    _releaseTools = widget.onTools?.call(_selectByHost);
+    widget.onToolChanged?.call(FloorPlanTool.select);
+    assert(() {
+      for (final (i, e) in _entries.indexed) {
+        if (e.keyName != 'tool-${FloorPlanTool.values[i].name}') return false;
+      }
+      return _entries.length == FloorPlanTool.values.length - 1;
+    }(), 'the palette must list the tools in FloorPlanTool order');
     _history = _document.commands.changes.listen((_) {
       _undoEnabled.update();
       _redoEnabled.update();
     });
+  }
+
+  /// Host embedding API spec C-5: a change of the capabilities takes
+  /// effect at this build; a tool they no longer allow (the placement tool
+  /// included, when the palette or the filter now refuses its armed entry)
+  /// falls back to select, which cancels a pending shape. The left tab and
+  /// the search text are the shell's and are kept.
+  @override
+  void didUpdateWidget(PlannerShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.capabilities != widget.capabilities &&
+        !_allows(_tools.active)) {
+      _activate(_select);
+    }
   }
 
   @override
@@ -826,6 +966,8 @@ class _PlannerShellState extends State<PlannerShell> {
     _index.dispose();
     _releaseSettle?.call();
     _releaseIdle?.call();
+    _releaseTools?.call();
+    _toolSnap.dispose();
     _ownMeasurer?.clear();
     super.dispose();
   }
@@ -849,21 +991,44 @@ class _PlannerShellState extends State<PlannerShell> {
     );
   }
 
-  Widget _toolPalette() => ToolPalette(
-        entries: _entries,
-        tools: _tools,
-        fill: _fill,
-        geometryAllowed: _geometryAllowed,
-        onSelect: _activate,
-      );
+  /// The palette: the rows the capabilities allow (spec C-5), in order;
+  /// the Fill row while a fill-capable tool is among them (S-9 f).
+  Widget _toolPalette() {
+    final allowed = _entries.every((e) => _allows(e.tool))
+        ? _entries
+        : [
+            for (final e in _entries)
+              if (_allows(e.tool)) e
+          ];
+    return ToolPalette(
+      entries: allowed,
+      tools: _tools,
+      fill: _fill,
+      geometryAllowed: _geometryAllowed,
+      onSelect: _activate,
+      showFill: _fillOffered,
+    );
+  }
+
+  /// The Symbols tab's filter (spec C-5): the host's, over each entry as a
+  /// [FloorPlanSymbol]; null without one.
+  bool Function(SymbolEntry entry)? _symbolFilter() {
+    final filter = widget.capabilities.symbolFilter;
+    if (filter == null) return null;
+    return (entry) => filter(_hostSymbol(entry));
+  }
 
   /// Spec 09b D8: today's palette in a bare shell; with a loader, a tab
   /// strip (Tools, the default, and Symbols) over the chosen tab. The
   /// strip never takes focus (Ruling 05-6, R-5): the canvas keeps it.
-  /// Switching tabs changes no tool.
+  /// Switching tabs changes no tool. Without the capabilities'
+  /// `symbolPalette` (spec C-5) the palette alone, as a bare shell's; the
+  /// chosen tab is kept for when it returns.
   Widget _leftPanel() {
     final symbols = widget.symbols;
-    if (symbols == null) return _toolPalette();
+    if (symbols == null || !widget.capabilities.symbolPalette) {
+      return _toolPalette();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -902,6 +1067,9 @@ class _PlannerShellState extends State<PlannerShell> {
                 searchFocus: _symbolSearch,
                 query: _symbolQuery,
                 onSelect: _armSymbol,
+                filter: _symbolFilter(),
+                placeable:
+                    widget.capabilities.tools.contains(FloorPlanTool.symbol),
               ),
           },
         ),
@@ -920,12 +1088,16 @@ class _PlannerShellState extends State<PlannerShell> {
       List<ShellCommand> editCommands) {
     final bar = widget.editorBar;
     final toolbar = listEquals(bar.actions, FloorPlanEditorAction.values)
-        ? DocumentToolbar(
-            fileCommands: fileCommands, editCommands: editCommands)
+        ? (fileCommands.isEmpty && editCommands.isEmpty
+            ? null
+            : DocumentToolbar(
+                fileCommands: fileCommands, editCommands: editCommands))
         : _toolbarFor(bar.actions, fileCommands, editCommands);
     final readOuts = <Widget>[];
     for (final action in bar.actions) {
       final readOut = switch (action) {
+        // Spec C-5, S-14: the read-out only while snapping is allowed.
+        FloorPlanEditorAction.snap when !widget.capabilities.snapping => null,
         FloorPlanEditorAction.snap => ListenableBuilder(
             listenable: _snap,
             builder: (_, __) => Text(
@@ -1041,8 +1213,22 @@ class _PlannerShellState extends State<PlannerShell> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final fileCommands = _fileCommands;
-    final editCommands = _editCommands(FloorPlanStrings.of(context));
+    final caps = widget.capabilities;
+    // Host embedding API spec C-5: a command the capabilities refuse is
+    // neither shown nor bound, decided here from the commands the shell
+    // was created with (so a runtime change brings it back).
+    final fileCommands = [
+      for (final c in _fileCommands)
+        if (switch (c.id) {
+          'export' => caps.export,
+          'print' => caps.print,
+          _ => true,
+        })
+          c
+    ];
+    final editCommands = caps.undo
+        ? _editCommands(FloorPlanStrings.of(context))
+        : const <ShellCommand>[];
     return Scaffold(
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
@@ -1050,17 +1236,22 @@ class _PlannerShellState extends State<PlannerShell> {
           // binding stays and does nothing (S-26), so the key is consumed.
           for (final c in [...fileCommands, ...editCommands])
             for (final chord in c.shortcuts) chord: c.invoke,
-          // Spec 03 D10: one toggle per press, never per key repeat.
-          const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
-              _snap.toggleObjectSnap,
-          // Spec 05 D5: the tool letters, then Fill, then Escape.
+          // Spec 03 D10: one toggle per press, never per key repeat. Spec
+          // S-14: only while snapping is allowed.
+          if (caps.snapping)
+            const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
+                _snap.toggleObjectSnap,
+          // Spec 05 D5: the tool letters, then Fill, then Escape. Spec
+          // C-5: only the allowed letters are bound; a refused one bubbles.
           for (final e in _entries)
-            SingleActivator(e.logicalKey, includeRepeats: false): () =>
-                _activate(e.tool),
-          const SingleActivator(LogicalKeyboardKey.keyF, includeRepeats: false):
-              () {
-            if (_geometryAllowed) _fill.value = !_fill.value;
-          },
+            if (_allows(e.tool))
+              SingleActivator(e.logicalKey, includeRepeats: false): () =>
+                  _activate(e.tool),
+          if (_fillOffered)
+            const SingleActivator(LogicalKeyboardKey.keyF,
+                includeRepeats: false): () {
+              if (_geometryAllowed) _fill.value = !_fill.value;
+            },
           const SingleActivator(LogicalKeyboardKey.escape): _escape,
         },
         child: Column(
@@ -1072,12 +1263,14 @@ class _PlannerShellState extends State<PlannerShell> {
             Expanded(
               child: Row(
                 children: [
-                  Container(
-                    key: const Key('chrome-left'),
-                    width: 240,
-                    color: scheme.surfaceContainerLow,
-                    child: _leftPanel(),
-                  ),
+                  // Spec S-13: no column holding the Select row alone.
+                  if (leftColumnShown(caps, symbols: widget.symbols != null))
+                    Container(
+                      key: const Key('chrome-left'),
+                      width: 240,
+                      color: scheme.surfaceContainerLow,
+                      child: _leftPanel(),
+                    ),
                   Expanded(
                     child: ColoredBox(
                       color: _canvasColour(scheme),
@@ -1111,6 +1304,8 @@ class _PlannerShellState extends State<PlannerShell> {
                         userCamera: widget.userCamera,
                         onCanvasPlaced: widget.onCanvasPlaced,
                         tableOverlays: widget.tableOverlays,
+                        rulers: caps.rulers,
+                        grid: caps.grid,
                       ),
                     ),
                   ),
@@ -1162,3 +1357,27 @@ class _PlannerShellState extends State<PlannerShell> {
 
 /// The left panel's tabs (spec 09b D8).
 enum _LeftTab { tools, symbols }
+
+/// Object snap as the editor's tools and drags read it (host embedding API
+/// spec S-14): the user's setting, [_user], while [_allowed] says the
+/// host's capabilities allow snapping, else off. The user's setting is
+/// never changed here, so it returns with the flag; a toggle and the
+/// listeners are the user's.
+class _CapabilitySnap extends SnapSettings {
+  _CapabilitySnap(this._user, this._allowed);
+
+  final SnapSettings _user;
+  final bool Function() _allowed;
+
+  @override
+  bool get objectSnap => _allowed() && _user.objectSnap;
+
+  @override
+  void toggleObjectSnap() => _user.toggleObjectSnap();
+
+  @override
+  void addListener(VoidCallback listener) => _user.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _user.removeListener(listener);
+}

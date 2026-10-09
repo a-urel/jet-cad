@@ -27,6 +27,7 @@ import '../symbols/symbol_library_loader.dart';
 import '../tables/table_data_component.dart';
 import '../tables/table_index.dart';
 import 'design_changes.dart';
+import 'editor_capabilities.dart' show FloorPlanTool;
 import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
 import 'page_flows.dart' show exportOnce, printOnce, toExportChoice;
@@ -463,6 +464,15 @@ class FloorPlanController extends ChangeNotifier {
   /// The active editor's idle probe (spec S-4): true while no tool is
   /// part-way through a shape; null with no editor mounted.
   bool Function()? _idle;
+
+  /// The active editor's tool selector (spec C-3, S-6): it activates a tool
+  /// when the editor's capabilities allow it; null with no editor mounted.
+  bool Function(FloorPlanTool tool)? _toolSelector;
+
+  /// The tool an editor reported during a frame's build, applied after it
+  /// ([_toolChanged]); whether that application is scheduled.
+  FloorPlanTool? _pendingTool;
+  bool _toolDue = false;
   bool _disposed = false;
 
   final ValueNotifier<FloorPlanMode> _mode =
@@ -481,6 +491,8 @@ class FloorPlanController extends ChangeNotifier {
       ValueNotifier(const <String, TableStatus>{});
   final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
   final ValueNotifier<Set<String>?> _mergeCandidate = ValueNotifier(null);
+  final ValueNotifier<FloorPlanTool> _activeTool =
+      ValueNotifier(FloorPlanTool.select);
   final _Focus _focus = _Focus();
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
@@ -586,6 +598,65 @@ class FloorPlanController extends ChangeNotifier {
   /// It notifies only when the set changes, and, like [selectedGroup],
   /// after [selectedTables] and [tableGroups] have notified.
   ValueListenable<Set<String>?> get mergeCandidate => _mergeCandidate;
+
+  /// The editor's active tool (host embedding API spec C-3, S-6), for a
+  /// host's own tool strip: moved by a palette tap, a tool letter, Escape,
+  /// [selectTool], a tool falling back to select when the view's
+  /// `editorCapabilities` no longer allow it, and a mode switch. It reads
+  /// [FloorPlanTool.select] in the selection mode and while no editor is
+  /// mounted. A change the editor makes while the view builds (a fallback,
+  /// a new plan's editor) is announced after that frame.
+  ValueListenable<FloorPlanTool> get activeTool => _activeTool;
+
+  /// Activates [tool] in the mounted editor (spec C-3, S-6), as a palette
+  /// tap would, and answers whether it is now active. False in the
+  /// selection mode, with no editor mounted, and for a tool the view's
+  /// `editorCapabilities` refuse. [FloorPlanTool.symbol] re-activates the
+  /// symbol last armed from the Symbols tab, while its capabilities still
+  /// offer it; with none armed it answers false: a host does not choose a
+  /// symbol through this call.
+  bool selectTool(FloorPlanTool tool) {
+    if (_mode.value != FloorPlanMode.design) return false;
+    return _toolSelector?.call(tool) ?? false;
+  }
+
+  /// Where the active editor registers its tool selector (spec C-3, S-6).
+  /// Returns the withdrawal, which withdraws only [select] itself, as
+  /// [registerSettle]'s; a withdrawn editor's tool is no longer active.
+  @internal
+  VoidCallback registerTools(bool Function(FloorPlanTool tool) select) {
+    _toolSelector = select;
+    return () {
+      if (!identical(_toolSelector, select)) return;
+      _toolSelector = null;
+      toolChanged(FloorPlanTool.select);
+    };
+  }
+
+  /// The active editor's tool is now [tool] (spec C-3): called by the
+  /// editor on every tool change. A change made while a frame builds or
+  /// lays out (a `didUpdateWidget`, a mount, a dispose) is applied after
+  /// the frame, so a host's listener never rebuilds mid-build; any other
+  /// is applied now.
+  @internal
+  void toolChanged(FloorPlanTool tool) {
+    if (_disposed) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      _pendingTool = tool;
+      if (_toolDue) return;
+      _toolDue = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _toolDue = false;
+        final next = _pendingTool;
+        _pendingTool = null;
+        if (!_disposed && next != null) _activeTool.value = next;
+      });
+      return;
+    }
+    _pendingTool = null;
+    _activeTool.value = tool;
+  }
 
   /// The numbers of the selectable members of group [groupId] (trimmed) in
   /// the active plan: its live members on a visible, unlocked layer, by the
@@ -1048,6 +1119,9 @@ class FloorPlanController extends ChangeNotifier {
       _canvasRect.value = shownIn;
     }
     _mode.value = next;
+    // Spec S-6: no editor in the selection mode, and a new one starts with
+    // select.
+    toolChanged(FloorPlanTool.select);
     _select(numbers);
     _refreshFlags();
     _revision.value++;
@@ -1850,6 +1924,7 @@ class FloorPlanController extends ChangeNotifier {
     _groupStatuses.dispose();
     _selectedGroup.dispose();
     _mergeCandidate.dispose();
+    _activeTool.dispose();
     _focus.dispose();
     _baseline = null;
     unawaited(_designChanges.close());

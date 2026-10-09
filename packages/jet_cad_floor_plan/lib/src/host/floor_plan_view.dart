@@ -12,6 +12,7 @@ import '../planner_shell.dart';
 import '../service/table_select_tool.dart' show ServiceEvents;
 import '../shell_commands.dart';
 import 'bars.dart';
+import 'editor_capabilities.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_theme.dart';
 import 'floor_plan_types.dart';
@@ -55,6 +56,7 @@ class FloorPlanView extends StatefulWidget {
     this.onPageFlowError,
     this.serviceBar = const FloorPlanServiceBar(),
     this.editorBar = const FloorPlanEditorBar(),
+    this.editorCapabilities = FloorPlanEditorCapabilities.full,
   });
 
   final FloorPlanController controller;
@@ -230,6 +232,20 @@ class FloorPlanView extends StatefulWidget {
   /// for an action listed twice.
   final FloorPlanEditorBar editorBar;
 
+  /// What the design mode's editor lets its user do (host embedding API
+  /// spec C-5): its tools, the Symbols tab and its filter, the panels, the
+  /// selection's edits, the bar's commands, the drafting aids. The default,
+  /// [FloorPlanEditorCapabilities.full], is today's editor. A refused
+  /// command is neither shown nor bound to its key; a refused tool's row
+  /// and letter are gone (the letter reaches the host's own bindings).
+  /// Read at each build; a change falls back to select from a tool no
+  /// longer allowed, and the view measures where the canvas now starts
+  /// when the rulers or the left column come or go (R-13). It governs the
+  /// editor alone: the selection mode is as it was (spec S-22). An
+  /// [ArgumentError] naming `tools` when they lack
+  /// [FloorPlanTool.select].
+  final FloorPlanEditorCapabilities editorCapabilities;
+
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
 }
@@ -257,18 +273,27 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   /// The mode the last build showed; null before the first.
   FloorPlanMode? _shown;
 
-  /// The chrome the last build laid out (spec C-1, C-2): whether each bar
-  /// is shown. Null before the first build.
-  (bool, bool)? _chrome;
+  /// The chrome the last build laid out (spec C-1, C-2, C-5): whether each
+  /// bar is shown, and the editor's rulers and left column. Null before the
+  /// first build.
+  (bool, bool, bool, bool)? _chrome;
 
   /// Whether a [_canvasMoved] is due after this frame.
   bool _canvasMoveDue = false;
 
   /// After the frame that lays out chrome other than the last frame's
-  /// (a bar shown or hidden, spec C-1, C-2), the shown canvas is measured
-  /// again: the plan is unchanged, so [_measureAfterFrame] would not.
+  /// (a bar, the editor's rulers or its left column shown or hidden, spec
+  /// C-1, C-2, C-5), the shown canvas is measured again: the plan is
+  /// unchanged, so [_measureAfterFrame] would not.
   void _measureChrome() {
-    final chrome = (widget.serviceBar.visible, widget.editorBar.visible);
+    final caps = widget.editorCapabilities;
+    final chrome = (
+      widget.serviceBar.visible,
+      widget.editorBar.visible,
+      caps.rulers,
+      // A view always gives the editor a symbol library.
+      leftColumnShown(caps, symbols: true),
+    );
     final last = _chrome;
     _chrome = chrome;
     if (last == null || last == chrome || _canvasMoveDue) return;
@@ -425,6 +450,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
       validateOverlayLayout(widget.tableOverlayLayout);
     }
     validateBars(widget.serviceBar, widget.editorBar);
+    validateEditorCapabilities(widget.editorCapabilities);
     _measureChrome();
     // Made here, once per build of this view (the host's), not in the
     // listener's builder: a layer gets a new widget, and builds every
@@ -496,6 +522,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           thumbnails: c.thumbnails,
           tableOverlays: designOverlays,
           editorBar: widget.editorBar,
+          capabilities: widget.editorCapabilities,
+          onTools: c.registerTools,
+          onToolChanged: c.toolChanged,
         );
       },
     );

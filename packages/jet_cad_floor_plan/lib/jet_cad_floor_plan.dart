@@ -22,6 +22,8 @@ export 'src/host/design_changes.dart'
         FloorPlanTableAdded,
         FloorPlanTableChanged,
         FloorPlanTableRemoved;
+export 'src/host/editor_capabilities.dart'
+    show FloorPlanEditorCapabilities, FloorPlanSymbol, FloorPlanTool;
 export 'src/host/floor_plan_camera.dart' show FloorPlanCamera;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'

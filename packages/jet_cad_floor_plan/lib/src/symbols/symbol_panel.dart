@@ -91,6 +91,8 @@ class SymbolPanel extends StatefulWidget {
     required this.query,
     required this.onSelect,
     this.measurer = const InsertionPointMeasurer(),
+    this.filter,
+    this.placeable = true,
   });
 
   final SymbolLibraryLoader loader;
@@ -111,6 +113,16 @@ class SymbolPanel extends StatefulWidget {
   /// The thumbnail documents' measurer. A symbol holds no text, so the
   /// default (no font stack) paints the same thumbnail as any other.
   final TextMeasurer measurer;
+
+  /// The symbols offered (host embedding API spec C-5's `symbolFilter`):
+  /// applied before the search, and to a tapped cell's entry; null offers
+  /// every symbol. Read at each build.
+  final bool Function(SymbolEntry entry)? filter;
+
+  /// Whether a placement is offered at all (spec C-5: the symbol tool is
+  /// among the host's tools): false disables the gallery, as a denied
+  /// permission does.
+  final bool placeable;
 
   @override
   State<SymbolPanel> createState() => _SymbolPanelState();
@@ -189,7 +201,9 @@ class _SymbolPanelState extends State<SymbolPanel> {
     return symbolIdOf(entry);
   }
 
-  bool get _enabled => kSymbolPlacementNeeds.every(widget.permissions.allows);
+  bool get _enabled =>
+      widget.placeable &&
+      kSymbolPlacementNeeds.every(widget.permissions.allows);
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -214,7 +228,13 @@ class _SymbolPanelState extends State<SymbolPanel> {
     }
     final scheme = Theme.of(context).colorScheme;
     final cellColor = scheme.surfaceContainerLowest;
-    final groups = searchSymbols(library.entries, _query.text, words);
+    final filter = widget.filter;
+    final groups = searchSymbols(
+        filter == null
+            ? library.entries
+            : library.entries.where(filter).toList(),
+        _query.text,
+        words);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -238,7 +258,9 @@ class _SymbolPanelState extends State<SymbolPanel> {
                   enabled: _enabled,
                   onSelect: (id) {
                     final entry = _byId[id];
-                    if (entry != null) widget.onSelect(entry);
+                    if (entry == null) return;
+                    if (widget.filter case final f? when !f(entry)) return;
+                    widget.onSelect(entry);
                   },
                   thumbnails: widget.thumbnails,
                   foreground: foregroundFor(cellColor.toARGB32() & 0xFFFFFF),
