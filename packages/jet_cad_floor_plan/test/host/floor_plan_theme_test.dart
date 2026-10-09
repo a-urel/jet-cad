@@ -81,8 +81,18 @@ Object? _color(Object a, Object b, double t) =>
     Color.lerp(a as Color, b as Color, t);
 Object? _double(Object a, Object b, double t) =>
     lerpDouble(a as double, b as double, t);
-Object? _style(Object a, Object b, double t) =>
-    TextStyle.lerp(a as TextStyle, b as TextStyle, t);
+
+/// A style's lerp (R-2, R-3): an equal style is itself; a `color` null on
+/// exactly one side (the automatic ink) switches the whole style at 0.5;
+/// else [TextStyle.lerp] (whose `fontSize` the theme clamps between its
+/// ends, a no-op for `t` in [0, 1]).
+Object? _style(Object a, Object b, double t) {
+  final (x, y) = (a as TextStyle, b as TextStyle);
+  if (x == y) return x;
+  if ((x.color == null) != (y.color == null)) return t < 0.5 ? x : y;
+  return TextStyle.lerp(x, y, t);
+}
+
 Object? _insets(Object a, Object b, double t) =>
     EdgeInsets.lerp(a as EdgeInsets, b as EdgeInsets, t);
 
@@ -233,6 +243,62 @@ Future<void> pumpUnder(WidgetTester tester, Widget view,
 ThemeData lightWith(FloorPlanTheme t) => lightTheme.copyWith(extensions: [t]);
 ThemeData darkWith(FloorPlanTheme t) => darkTheme.copyWith(extensions: [t]);
 
+/// A valid theme with its doubles at or near the edges of their ranges
+/// (S-5), the styles' colours set: an overshoot past [edgeB] or back past
+/// it leaves the range unless `lerp` clamps (R-1).
+const FloorPlanTheme edgeA = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(fontSize: 1, color: Color(0xFF7CB342)),
+  statusFillOpacity: 0.8,
+  groupFrameWidth: 0.5,
+  groupFrameMargin: 0,
+  groupChipTextStyle: TextStyle(fontSize: 16, color: Color(0xFF00ACC1)),
+  groupChipRadius: 0,
+  groupChipPadding: EdgeInsets.zero,
+  selectionWidth: 3,
+  focusVeilOpacity: 0,
+  serviceBarHeight: 1,
+);
+
+/// [edgeA]'s partner: every double and each padding side different.
+const FloorPlanTheme edgeB = FloorPlanTheme(
+  statusCaptionStyle: TextStyle(fontSize: 14, color: Color(0xFFD81B60)),
+  statusFillOpacity: 1,
+  groupFrameWidth: 3,
+  groupFrameMargin: 150,
+  groupChipTextStyle: TextStyle(fontSize: 0.5, color: Color(0xFF3949AB)),
+  groupChipRadius: 4,
+  groupChipPadding: EdgeInsets.fromLTRB(7, 3, 9, 4),
+  selectionWidth: 0.5,
+  focusVeilOpacity: 0.3,
+  serviceBarHeight: 60,
+);
+
+/// Every double of [l] (each double field, each padding side, each
+/// style's `fontSize`) lies between its values in [a] and [b] (R-1).
+void expectWithinEnds(
+    FloorPlanTheme l, FloorPlanTheme a, FloorPlanTheme b, String reason) {
+  void within(double? v, double? x, double? y, String name) {
+    if (x == null || y == null) return;
+    expect(v, isNotNull, reason: '$reason: $name');
+    expect(v, inInclusiveRange(x < y ? x : y, x < y ? y : x),
+        reason: '$reason: $name');
+  }
+
+  for (final f in fields) {
+    switch ((f.get(l), f.get(a), f.get(b))) {
+      case (final double? v, final double x, final double y):
+        within(v, x, y, f.name);
+      case (final EdgeInsets? v, final EdgeInsets x, final EdgeInsets y):
+        within(v?.left, x.left, y.left, '${f.name}.left');
+        within(v?.top, x.top, y.top, '${f.name}.top');
+        within(v?.right, x.right, y.right, '${f.name}.right');
+        within(v?.bottom, x.bottom, y.bottom, '${f.name}.bottom');
+      case (final TextStyle? v, final TextStyle x, final TextStyle y):
+        within(v?.fontSize, x.fontSize, y.fontSize, '${f.name}.fontSize');
+    }
+  }
+}
+
 /// A host widget that depends on the resolved theme: it counts its
 /// dependency changes and its builds.
 class ThemeReader extends StatefulWidget {
@@ -332,13 +398,78 @@ void main() {
               '${f.name} at $t');
         }
       }
-      // Every field but the styles is its end at 0 and 1 (TextStyle.lerp
-      // lerps a property one side leaves null, Flutter's own rule).
-      for (final f in fields.where((f) => f.get(fullA) is! TextStyle)) {
+      // Every field is its end at 0 and 1; the styles too, as each has a
+      // colour on one side only and switches whole (R-3).
+      for (final f in fields) {
         expect(f.get(fullA.lerp(fullB, 0)), f.get(fullA), reason: f.name);
         expect(f.get(fullA.lerp(fullB, 1)), f.get(fullB), reason: f.name);
       }
       expect(fullA.lerp(fullB, 0.25) == fullA, isFalse);
+    });
+
+    test(
+        'R-1: two valid themes at t -0.2 and 1.2, both ways: every double, '
+        'padding side and font size within its ends, the theme valid', () {
+      for (final t in [-0.2, 1.2]) {
+        for (final (a, b) in [(edgeA, edgeB), (edgeB, edgeA)]) {
+          final l = a.lerp(b, t);
+          final reason = '${a == edgeA ? 'A to B' : 'B to A'} at $t';
+          expectWithinEnds(l, a, b, reason);
+          expect(() => validateFloorPlanTheme(l), returnsNormally,
+              reason: reason);
+        }
+      }
+      // An overshoot stops at the end it passes.
+      expect(edgeA.lerp(edgeB, 1.2).statusFillOpacity, 1.0);
+      expect(edgeB.lerp(edgeA, 1.2).groupChipPadding, EdgeInsets.zero);
+      expect(edgeA.lerp(edgeB, -0.2).statusCaptionStyle!.fontSize, 1.0);
+    });
+
+    test(
+        'R-2: a theme lerped with an equal one is that theme at every t '
+        '(itself when equal); a field equal on both sides stays exactly '
+        'equal', () {
+      for (var i = 1; i < 100; i++) {
+        final t = i / 100;
+        expect(fullA.lerp(fullA, t), fullA, reason: 'at $t');
+        expect(identical(fullA.lerp(fullA.copyWith(), t), fullA), isTrue,
+            reason: 'at $t');
+        final l = fullA.lerp(fullA.copyWith(selectionWidth: 5), t);
+        expect(l.selectionWidth, closeTo(4 + t, 1e-12), reason: 'at $t');
+        for (final f in fields.where((f) => f.name != 'selectionWidth')) {
+          expect(f.get(l) == f.get(fullA), isTrue, reason: '${f.name} at $t');
+        }
+      }
+    });
+
+    test(
+        'R-3: a style whose colour is null on exactly one side switches '
+        'whole at 0.5, never fading from transparent; with a colour on both '
+        'sides or neither it lerps', () {
+      const ink = TextStyle(fontSize: 14);
+      const white = TextStyle(fontSize: 14, color: Color(0xFFFFFFFF));
+      const red = TextStyle(fontSize: 10, color: Color(0xFFFF0000));
+      for (final f in fields.where((f) => f.get(fullA) is TextStyle)) {
+        FloorPlanTheme only(TextStyle s) => f.set(const FloorPlanTheme(), s);
+        TextStyle at(TextStyle a, TextStyle b, double t) =>
+            f.get(only(a).lerp(only(b), t))! as TextStyle;
+        for (final t in [0.1, 0.25, 0.49]) {
+          expect(at(ink, white, t), ink, reason: '${f.name} at $t');
+          expect(at(ink, white, t).color, isNull, reason: '${f.name} at $t');
+          expect(at(white, ink, t), white, reason: '${f.name} at $t');
+        }
+        for (final t in [0.5, 0.75, 0.9]) {
+          expect(at(ink, white, t), white, reason: '${f.name} at $t');
+          expect(at(ink, white, t).color!.a, 1.0, reason: '${f.name} at $t');
+          expect(at(white, ink, t), ink, reason: '${f.name} at $t');
+        }
+        // A colour on both sides: interpolated, size too.
+        expect(
+            at(red, white, 0.5).color, Color.lerp(red.color, white.color, 0.5));
+        expect(at(red, white, 0.5).fontSize, 12);
+        // Neither: the size interpolated.
+        expect(at(ink, const TextStyle(fontSize: 10), 0.5).fontSize, 12);
+      }
     });
 
     test(
@@ -605,6 +736,36 @@ void main() {
       await tester.pump();
       expect(resolvedIn(tester, FloorPlanMode.design), isNull);
     });
+
+    testWidgets(
+        'R-4: a bare PlannerShell refuses an ambient theme out of range, '
+        'naming the field', (tester) async {
+      for (final (bad, name) in [
+        (const FloorPlanTheme(selectionWidth: -3), 'selectionWidth'),
+        (
+          const FloorPlanTheme(focusVeilOpacity: double.nan),
+          'focusVeilOpacity'
+        ),
+      ]) {
+        await tester.pumpWidget(MaterialApp(
+            key: UniqueKey(),
+            theme: lightWith(fullA.merge(bad)),
+            themeAnimationDuration: Duration.zero,
+            home: const PlannerShell()));
+        expect(tester.takeException(),
+            isA<ArgumentError>().having((e) => e.name, 'name', name),
+            reason: name);
+      }
+      // In range: accepted.
+      await tester.pumpWidget(MaterialApp(
+          key: UniqueKey(),
+          theme: lightWith(fullA),
+          themeAnimationDuration: Duration.zero,
+          home: const PlannerShell()));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(resolvedIn(tester, FloorPlanMode.design), fullA);
+    });
   });
 
   group('T1-c: the scope notifies by value', () {
@@ -708,6 +869,70 @@ void main() {
             tableOverlayBuilder: counting(calls),
             theme: viewTheme)));
     expect(calls[0], 14);
+  });
+
+  testWidgets(
+      'R-1: an AnimatedTheme with Curves.easeOutBack between two valid '
+      'themes, both ways: no exception on any frame, every value within its '
+      'ends', (tester) async {
+    final c = controllerIn(FloorPlanMode.selection);
+    final view = FloorPlanView(controller: c);
+    Widget hostOf(ThemeData data) => AnimatedTheme(
+        data: data,
+        curve: Curves.easeOutBack,
+        duration: const Duration(milliseconds: 200),
+        child: view);
+    await pumpUnder(tester, hostOf(lightWith(edgeA)));
+    expect(resolvedIn(tester, FloorPlanMode.selection), edgeA);
+    for (final (from, to, data) in [
+      (edgeA, edgeB, darkWith(edgeB)),
+      (edgeB, edgeA, lightWith(edgeA)),
+    ]) {
+      await pumpUnder(tester, hostOf(data));
+      for (var i = 0; i < 25; i++) {
+        await tester.pump(const Duration(milliseconds: 10));
+        final reason = '${from == edgeA ? 'A to B' : 'B to A'}, frame $i';
+        expect(tester.takeException(), isNull, reason: reason);
+        expectWithinEnds(
+            resolvedIn(tester, FloorPlanMode.selection)!, from, to, reason);
+      }
+      expect(resolvedIn(tester, FloorPlanMode.selection), to);
+    }
+  });
+
+  testWidgets(
+      'R-2: an animated switch between ThemeData carrying equal themes '
+      'notifies no dependent; one carrying different themes does',
+      (tester) async {
+    final c = controllerIn(FloorPlanMode.selection);
+    final log = <FloorPlanTheme?>[];
+    Widget? reader(BuildContext context, FloorPlanTableOverlay table) =>
+        table.detail.table.number == '1' ? ThemeReader(log: log) : null;
+    final view = FloorPlanView(controller: c, tableOverlayBuilder: reader);
+    Widget hostOf(ThemeData data) => AnimatedTheme(
+        data: data, duration: const Duration(milliseconds: 200), child: view);
+    await pumpUnder(tester, hostOf(lightWith(fullA)));
+    c.cameraController.value = embeddingCamera();
+    await tester.pump();
+    expect(find.byType(ThemeReader), findsOneWidget);
+    expect(log, [fullA]);
+
+    await pumpUnder(tester, hostOf(darkWith(fullA.copyWith())));
+    for (var i = 0; i < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(Theme.of(tester.element(find.byType(ServiceView))).brightness,
+        Brightness.dark,
+        reason: 'the switch ran');
+    expect(log, [fullA], reason: 'an equal theme notifies nobody');
+
+    // The reader counts: a different theme notifies it.
+    await pumpUnder(tester, hostOf(lightWith(fullB)));
+    for (var i = 0; i < 25; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(log.length, greaterThan(1));
+    expect(log.last, fullB);
   });
 
   testWidgets(

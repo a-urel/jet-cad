@@ -2,6 +2,7 @@
 // T-2): a `ThemeExtension` a host puts in its `ThemeData`, overridden field
 // by field by `FloorPlanView.theme`, resolved once below the view and read
 // by both modes when their painters rebuild (T-3), never per frame.
+import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/foundation.dart';
@@ -183,55 +184,95 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
       base == null ? over : base.merge(over);
 
   /// The theme [t] of the way to [other], for an animated theme switch.
+  ///
   /// A field set on both sides is interpolated ([Color.lerp], [lerpDouble],
-  /// [TextStyle.lerp], [EdgeInsets.lerp]); a field null on one side means
-  /// a value that depends on the paper, which cannot be interpolated, so it
-  /// takes the side `t` is nearer (this one below 0.5). A null [other]
-  /// returns this theme itself.
+  /// [TextStyle.lerp], [EdgeInsets.lerp]), and each interpolated double (a
+  /// double field, each padding side, a style's `fontSize`) is clamped
+  /// between its two ends: a host's overshooting curve
+  /// (`Curves.easeOutBack`) drives `t` out of [0, 1], and two valid themes
+  /// must never animate into one the view refuses. A field null on one side
+  /// means a value that depends on the paper, which cannot be interpolated,
+  /// so it takes the side `t` is nearer (this one below 0.5); so does a
+  /// text style whose `color` one side leaves null (that colour is the
+  /// automatic ink), whole, never fading from transparent.
+  ///
+  /// A field equal on both sides is that side's value, and an [other]
+  /// equal to this theme returns this theme itself, so a theme that is the
+  /// same in a host's light and dark `ThemeData` stays `==` on every frame
+  /// of the switch and notifies nobody (T-3). A null [other] returns this
+  /// theme itself.
   @override
   FloorPlanTheme lerp(
       covariant ThemeExtension<FloorPlanTheme>? other, double t) {
-    if (other is! FloorPlanTheme) return this;
+    if (other is! FloorPlanTheme || this == other) return this;
     return FloorPlanTheme(
-      statusCaptionStyle: _lerp(
-          statusCaptionStyle, other.statusCaptionStyle, t, TextStyle.lerp),
+      statusCaptionStyle:
+          _lerp(statusCaptionStyle, other.statusCaptionStyle, t, _lerpStyle),
       statusFillOpacity:
-          _lerp(statusFillOpacity, other.statusFillOpacity, t, lerpDouble),
+          _lerp(statusFillOpacity, other.statusFillOpacity, t, _lerpBetween),
       groupFrameColor:
           _lerp(groupFrameColor, other.groupFrameColor, t, Color.lerp),
       groupFrameWidth:
-          _lerp(groupFrameWidth, other.groupFrameWidth, t, lerpDouble),
+          _lerp(groupFrameWidth, other.groupFrameWidth, t, _lerpBetween),
       groupFrameMargin:
-          _lerp(groupFrameMargin, other.groupFrameMargin, t, lerpDouble),
+          _lerp(groupFrameMargin, other.groupFrameMargin, t, _lerpBetween),
       groupChipColor:
           _lerp(groupChipColor, other.groupChipColor, t, Color.lerp),
-      groupChipTextStyle: _lerp(
-          groupChipTextStyle, other.groupChipTextStyle, t, TextStyle.lerp),
+      groupChipTextStyle:
+          _lerp(groupChipTextStyle, other.groupChipTextStyle, t, _lerpStyle),
       groupChipRadius:
-          _lerp(groupChipRadius, other.groupChipRadius, t, lerpDouble),
+          _lerp(groupChipRadius, other.groupChipRadius, t, _lerpBetween),
       groupChipPadding:
-          _lerp(groupChipPadding, other.groupChipPadding, t, EdgeInsets.lerp),
+          _lerp(groupChipPadding, other.groupChipPadding, t, _lerpInsets),
       selectionOnLight:
           _lerp(selectionOnLight, other.selectionOnLight, t, Color.lerp),
       selectionOnDark:
           _lerp(selectionOnDark, other.selectionOnDark, t, Color.lerp),
       selectionWidth:
-          _lerp(selectionWidth, other.selectionWidth, t, lerpDouble),
+          _lerp(selectionWidth, other.selectionWidth, t, _lerpBetween),
       focusVeilColor:
           _lerp(focusVeilColor, other.focusVeilColor, t, Color.lerp),
       focusVeilOpacity:
-          _lerp(focusVeilOpacity, other.focusVeilOpacity, t, lerpDouble),
+          _lerp(focusVeilOpacity, other.focusVeilOpacity, t, _lerpBetween),
       canvasBackground:
           _lerp(canvasBackground, other.canvasBackground, t, Color.lerp),
       serviceBarHeight:
-          _lerp(serviceBarHeight, other.serviceBarHeight, t, lerpDouble),
+          _lerp(serviceBarHeight, other.serviceBarHeight, t, _lerpBetween),
     );
   }
 
-  /// [a] to [b] at [t] by [lerp] when both are set, else the nearer side.
+  /// [a] to [b] at [t] by [lerp] when both are set and differ, [a] when
+  /// they are equal, else the nearer side.
   static T? _lerp<T extends Object>(
           T? a, T? b, double t, T? Function(T a, T b, double t) lerp) =>
-      a == null || b == null ? (t < 0.5 ? a : b) : lerp(a, b, t);
+      a == null || b == null ? (t < 0.5 ? a : b) : (a == b ? a : lerp(a, b, t));
+
+  /// [lerpDouble] clamped between [a] and [b], whatever [t].
+  static double _lerpBetween(double a, double b, double t) =>
+      clampDouble(lerpDouble(a, b, t)!, math.min(a, b), math.max(a, b));
+
+  /// [EdgeInsets.lerp], each side clamped between its two ends.
+  static EdgeInsets _lerpInsets(EdgeInsets a, EdgeInsets b, double t) =>
+      EdgeInsets.fromLTRB(
+        _lerpBetween(a.left, b.left, t),
+        _lerpBetween(a.top, b.top, t),
+        _lerpBetween(a.right, b.right, t),
+        _lerpBetween(a.bottom, b.bottom, t),
+      );
+
+  /// [TextStyle.lerp] with its `fontSize` clamped between the two ends; a
+  /// `color` null on exactly one side (the automatic ink) switches the
+  /// whole style at 0.5 instead.
+  static TextStyle _lerpStyle(TextStyle a, TextStyle b, double t) {
+    if ((a.color == null) != (b.color == null)) return t < 0.5 ? a : b;
+    final lerped = TextStyle.lerp(a, b, t)!;
+    final size = lerped.fontSize;
+    final from = a.fontSize ?? b.fontSize;
+    final to = b.fontSize ?? a.fontSize;
+    if (size == null || from == null || to == null) return lerped;
+    final clamped = clampDouble(size, math.min(from, to), math.max(from, to));
+    return clamped == size ? lerped : lerped.copyWith(fontSize: clamped);
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -254,9 +295,26 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
       other.serviceBarHeight == serviceBarHeight;
 
   @override
-  int get hashCode => Object.hashAll(_fields.values);
+  int get hashCode => Object.hash(
+        statusCaptionStyle,
+        statusFillOpacity,
+        groupFrameColor,
+        groupFrameWidth,
+        groupFrameMargin,
+        groupChipColor,
+        groupChipTextStyle,
+        groupChipRadius,
+        groupChipPadding,
+        selectionOnLight,
+        selectionOnDark,
+        selectionWidth,
+        focusVeilColor,
+        focusVeilOpacity,
+        canvasBackground,
+        serviceBarHeight,
+      );
 
-  /// Every field by name, in declaration order.
+  /// Every field by name, in declaration order (for [toString]).
   Map<String, Object?> get _fields => {
         'statusCaptionStyle': statusCaptionStyle,
         'statusFillOpacity': statusFillOpacity,
@@ -383,12 +441,16 @@ class FloorPlanThemeScope extends StatelessWidget {
   /// The resolved theme of the nearest scope above [context] (null: no
   /// theme anywhere, today's look), registering [context] as its
   /// dependent; with no scope above (a bare `PlannerShell`), the ambient
-  /// extension.
+  /// extension, validated as the scope validates it (an [ArgumentError]
+  /// naming the field). Read in `didChangeDependencies`, so it is checked
+  /// when the theme changes, never per frame.
   static FloorPlanTheme? of(BuildContext context) {
     final scope =
         context.dependOnInheritedWidgetOfExactType<InheritedFloorPlanTheme>();
     if (scope != null) return scope.theme;
-    return Theme.of(context).extension<FloorPlanTheme>();
+    final ambient = Theme.of(context).extension<FloorPlanTheme>();
+    if (ambient != null) validateFloorPlanTheme(ambient);
+    return ambient;
   }
 
   @override
