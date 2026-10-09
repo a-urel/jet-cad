@@ -368,5 +368,14 @@ void main() {
         expect(frame[1].strokeWidth, closeTo(kHoverStrokePixels / 2.0, 1e-12));
       }
     });
+
+    test('the width is asserted finite and above 0; 0.25 is accepted (R-2)',
+        () {
+      final r = Rig(DraftDocument.empty());
+      for (final w in [0.0, -1.0, double.infinity, double.nan]) {
+        expect(() => r.overlay(width: w), throwsAssertionError, reason: '$w');
+      }
+      expect(r.overlay(width: 0.25).selectionStrokePixels, 0.25);
+    });
   });
 }

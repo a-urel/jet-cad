@@ -422,4 +422,24 @@ void main() {
     expectSelectionRgb(shot, tester, onDark, 'bare shell');
     expect(outerRowsAre(shot, tester, onDark), (true, true));
   });
+
+  for (final viewMode in FloorPlanMode.values) {
+    testWidgets(
+        'R-1 (${viewMode.name}): a page-less plan under the dark theme on a '
+        'light canvasBackground: the surround is it, the ink black, the '
+        'selection selectionOnLight', (tester) async {
+      const lightCanvas = Color(0xFFFFF3E0);
+      expect(foregroundFor(lightCanvas.toARGB32() & 0xFFFFFF), 0x000000);
+      final v = controllerOn(null);
+      await pumpView(tester, v, ThemeMode.dark, viewMode,
+          theme: const FloorPlanTheme(
+              canvasBackground: lightCanvas,
+              selectionOnLight: onLight,
+              selectionOnDark: onDark));
+      final shot = await shoot(tester);
+      expect(hex(surroundAt(shot, tester)), hex(rgbOf(lightCanvas)));
+      expectDarkInk(look(tester, shot), 'page-less on a light canvas');
+      expectSelectionRgb(shot, tester, onLight, 'page-less, dark theme');
+    });
+  }
 }
