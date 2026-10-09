@@ -12,8 +12,8 @@ no id); O-10 and O-11 recorded. The Review section lists them.
 **Plan:** [2026-10-09-embedding-slice-2.md](../plans/2026-10-09-embedding-slice-2.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `672ae52`
-(Slice 1 merged). **Merged** into `main` on the human's *"evet, main'e
-merge et"*.
+(Slice 1 merged). **Merged** into `main` at `fe93d23` on the human's
+*"evet, main'e merge et"*.
 
 **Process.** Each of Tasks 1–4 had a fresh implementer, then an
 independent reviewer in its own clone, then its fixes. Task 5 (the demo,

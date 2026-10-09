@@ -121,8 +121,8 @@ one's spec, plan and results.
   results [2026-10-09-embedding-slice-2-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-2-results.md);
   Tasks 1–5 done, each of 1–4 reviewed independently and fixed; the whole
   range reviewed independently (*Approve with fixes*, F-1 to F-7, applied
-  in `8f813b2` … `e6a1d06`). **Merged into `main`** on the human's *"evet,
-  main'e merge et"*; ledger
+  in `8f813b2` … `e6a1d06`). **Merged into `main` at `fe93d23`** on the human's
+  *"evet, main'e merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-2/](docs/superpowers/ledgers/2026-10-09-embedding-slice-2/).
   Unreleased (CHANGELOG). Slices 3 (`FloorPlanTheme`) and 4 (bars,
   keyboard, editor capabilities) to come.
