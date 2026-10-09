@@ -37,10 +37,15 @@ final class FloorPlanTableOverlay {
   final FloorPlanTableDetail detail;
 
   /// Whether the table's number is in `FloorPlanController.selectedTables`.
+  /// Two tables sharing a number are both selected when it is.
   final bool selected;
 
   /// Whether the table's number is in `FloorPlanController.tableFocus`, or
   /// no focus is set.
+  ///
+  /// The overlays paint above the focus veil and the number chips, so the
+  /// veil does not fade an unfocused table's widget: a host fades it with
+  /// this flag.
   final bool focused;
 
   /// The status the selection mode draws on the table: its group's
@@ -73,11 +78,14 @@ final class FloorPlanTableOverlay {
 
 /// The host's widget for one table (spec G-5), or null for none.
 ///
-/// Called once per numbered table with geometry when the layer is built,
-/// and again for that table only when its [FloorPlanTableOverlay] changes
-/// (the plan, the selection, the focus, a status, the detail level), or
-/// when the view is rebuilt with another builder. Never on pan or zoom.
-/// Live data inside the widget is the host's own state management.
+/// Called once per numbered table with geometry when the layer is built;
+/// again for that table only when its [FloorPlanTableOverlay] changes (the
+/// plan, the selection, the focus, a status, the detail level); and again
+/// for every table each time the host rebuilds the `FloorPlanView`,
+/// whatever the function: a closure written in `build` and a method
+/// tear-off behave the same, so a builder that reads the host's own fields
+/// sees them after the host's `setState`. Never on pan or zoom. Live data
+/// inside the widget is the host's own state management.
 typedef FloorPlanTableOverlayBuilder = Widget? Function(
     BuildContext context, FloorPlanTableOverlay table);
 
@@ -89,6 +97,12 @@ enum FloorPlanOverlaySize {
 
   /// The table's bounding box on the screen, exactly: laid out again on
   /// every camera change.
+  ///
+  /// Its cost per frame, for each overlay on the canvas: a [Size] and a
+  /// [BoxConstraints] for the new box, and a layout and a paint of the
+  /// host's widget at that size. Overlays off the canvas cost nothing.
+  /// [natural] costs one paint offset per overlay on the canvas, and no
+  /// layout.
   box,
 }
 
@@ -208,10 +222,11 @@ int overlayDetailLevel(List<double> breakpoints, double scale) {
 /// [RepaintBoundary], placed by a [RenderFloorPlanOverlays].
 ///
 /// Builds at the rate of the plan, the selection, the focus, the statuses,
-/// the groups and the detail level, never at the camera's; a build builds
-/// again only the tables whose [FloorPlanTableOverlay] changed, or every
-/// table when [builder] is a different function. The layer ignores
-/// pointers (G-5's default).
+/// the groups and the detail level, never at the camera's; such a build
+/// builds again only the tables whose [FloorPlanTableOverlay] changed. A
+/// new widget from the host's rebuild of the view builds every table again,
+/// whatever [builder] is (G-5). The layer ignores pointers (G-5's
+/// default).
 class TableOverlayLayer extends StatefulWidget {
   const TableOverlayLayer(
       {super.key,
@@ -243,8 +258,8 @@ class _TableOverlayLayerState extends State<TableOverlayLayer> {
   List<FloorPlanTableOverlay> _values = const [];
 
   /// Each overlay's table's four world corners, `x0, y0, ..., x3, y3` per
-  /// slot: the render object's box cache, rebuilt with [_values] (at the
-  /// plan's, the selection's, the statuses' rate), never per frame.
+  /// slot: the render object's box cache, rebuilt only when the instances
+  /// or their details change (the plan's rate), never per frame.
   Float64List _corners = Float64List(0);
 
   int _level = 0;
@@ -291,8 +306,12 @@ class _TableOverlayLayerState extends State<TableOverlayLayer> {
       _unlisten(oldWidget.controller);
       _listen(widget.controller);
     }
-    // A different function builds every table again (G-5).
-    if (oldWidget.builder != widget.builder) _built.clear();
+    // The host rebuilt the view: every table again, whatever the builder
+    // (G-5). A tear-off is == across the host's builds, yet may read the
+    // host's fields that changed. The view hands down one widget per
+    // build of its own, so the layer's internal rebuilds (a source, a
+    // detail level) do not come here.
+    _built.clear();
     _recompute();
   }
 
@@ -357,22 +376,36 @@ class _TableOverlayLayerState extends State<TableOverlayLayer> {
       ));
     }
     _level = level;
-    if (listEquals(next, _values) && listEquals(nextInstances, _instances)) {
-      return false;
-    }
-    final corners = Float64List(8 * next.length);
-    for (var i = 0; i < next.length; i++) {
-      final points = next[i].detail.corners;
-      for (var k = 0; k < 4; k++) {
-        corners[8 * i + 2 * k] = points[k].dx;
-        corners[8 * i + 2 * k + 1] = points[k].dy;
+    final sameInstances = listEquals(nextInstances, _instances);
+    if (sameInstances && listEquals(next, _values)) return false;
+    // The box cache follows the geometry alone (H-8): a selection, a focus,
+    // a status or a detail level keeps it, so the render object neither
+    // re-measures nor, in the box mode, relays out.
+    if (!sameInstances || !_sameDetails(next)) {
+      final corners = Float64List(8 * next.length);
+      for (var i = 0; i < next.length; i++) {
+        final points = next[i].detail.corners;
+        for (var k = 0; k < 4; k++) {
+          corners[8 * i + 2 * k] = points[k].dx;
+          corners[8 * i + 2 * k + 1] = points[k].dy;
+        }
       }
+      _corners = corners;
     }
     _instances = List.unmodifiable(nextInstances);
     _values = List.unmodifiable(next);
-    _corners = corners;
     final live = nextInstances.toSet();
     _built.removeWhere((h, _) => !live.contains(h));
+    return true;
+  }
+
+  /// Whether each of [next]'s details is the one of [_values] at its index
+  /// (the instances already equal).
+  bool _sameDetails(List<FloorPlanTableOverlay> next) {
+    if (next.length != _values.length) return false;
+    for (var i = 0; i < next.length; i++) {
+      if (next[i].detail != _values[i].detail) return false;
+    }
     return true;
   }
 
@@ -499,8 +532,10 @@ class FloorPlanOverlayParentData extends ContainerBoxParentData<RenderBox> {
 /// painted nor hit, and a `box` one is not laid out. Nothing is built.
 ///
 /// Painting passes each painted child's offset to the framework as an
-/// [Offset]: one per painted overlay per frame, the paint's own cost
-/// ([debugPaintOffsets]); the culled cost nothing.
+/// [Offset], since `PaintingContext.paintChild` takes one: one per painted
+/// overlay that moved, per frame, the framework's floor
+/// ([debugPaintOffsets], kept apart from [debugAllocations]); the culled
+/// cost nothing.
 class RenderFloorPlanOverlays extends RenderBox
     with ContainerRenderObjectMixin<RenderBox, FloorPlanOverlayParentData> {
   RenderFloorPlanOverlays({

@@ -175,9 +175,11 @@ standing comparison.
     screen bounding box, camera change `markNeedsLayout`; culled off the
     canvas and below `hideBelowScale`; `debugAllocations`.
   - **Builder calls:** per table, only when that table's
-    `FloorPlanTableOverlay` changes or the view rebuilds with a new
-    builder; never on pan or zoom; a detail-level crossing rebuilds every
-    overlay once.
+    `FloorPlanTableOverlay` changes; for every table each time the host
+    rebuilds the view (the layer's `didUpdateWidget`), whatever the
+    builder's identity, as spec G-5 says (a closure and a method tear-off
+    behave the same; Task 3 review R-1); never on pan or zoom; a
+    detail-level crossing rebuilds every overlay once.
 - `PlannerView.tableOverlays` (a new slot) painted after the selection
   overlay, inside the canvas's input listeners, clipped to the canvas;
   `IgnorePointer` around it in this task (interactive is Task 4).

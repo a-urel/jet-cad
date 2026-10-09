@@ -101,9 +101,10 @@ class FloorPlanView extends StatefulWidget {
 
   /// The host's widget on each table (host embedding API spec G-5): called
   /// per numbered table with geometry, again for one table only when its
-  /// [FloorPlanTableOverlay] changes, and for every table when this view is
-  /// rebuilt with a different function; never on pan or zoom. Null builds
-  /// no overlay layer at all.
+  /// [FloorPlanTableOverlay] changes, and again for every table each time
+  /// the host rebuilds this view, whatever the function (a closure written
+  /// in `build` or a method tear-off); never on pan or zoom. Null builds no
+  /// overlay layer at all.
   ///
   /// The widgets sit above the plan, its statuses and the selection
   /// outlines, inside the canvas and clipped to it, placed by
@@ -255,6 +256,13 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     if (widget.tableOverlayBuilder != null) {
       validateOverlayLayout(widget.tableOverlayLayout);
     }
+    // Made here, once per build of this view (the host's), not in the
+    // listener's builder: a layer gets a new widget, and builds every
+    // overlay again (G-5), only when the host rebuilds the view.
+    final serviceOverlays =
+        _tableOverlays(widget.controller, FloorPlanMode.selection);
+    final designOverlays =
+        _tableOverlays(widget.controller, FloorPlanMode.design);
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
@@ -281,7 +289,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                     onTableContextMenu: widget.onTableContextMenu,
                   ),
               userCamera: () => widget.userCamera,
-              tableOverlays: _tableOverlays(c, FloorPlanMode.selection));
+              tableOverlays: serviceOverlays);
         }
         c.startSymbols();
         return PlannerShell(
@@ -301,7 +309,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           onSettle: c.registerSettle,
           symbols: c.symbols,
           thumbnails: c.thumbnails,
-          tableOverlays: _tableOverlays(c, FloorPlanMode.design),
+          tableOverlays: designOverlays,
         );
       },
     );

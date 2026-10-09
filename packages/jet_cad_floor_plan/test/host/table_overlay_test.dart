@@ -10,6 +10,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show OffsetLayer, SemanticsNode;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -215,6 +216,77 @@ int shownCount(RenderFloorPlanOverlays layer) {
     child = data.nextSibling;
   }
   return shown;
+}
+
+/// [layer]'s children, in paint order.
+Iterable<RenderBox> childrenOf(RenderFloorPlanOverlays layer) sync* {
+  var child = layer.firstChild;
+  while (child != null) {
+    yield child;
+    child = (child.parentData! as FloorPlanOverlayParentData).nextSibling;
+  }
+}
+
+/// A builder whose widget is a semantics node labelled by its table: `T`,
+/// the number, and for the shared `7` its centre's x, so both are told
+/// apart.
+Widget? labelled(BuildContext context, FloorPlanTableOverlay t) {
+  final n = t.detail.table.number!;
+  return Semantics(
+    label: 'T$n-${n == '7' ? t.detail.center!.dx.round() : 0}',
+    container: true,
+    child: SizedBox.fromSize(size: Badge.size),
+  );
+}
+
+/// The overlays' semantics nodes in the live tree, by label, each with
+/// its rectangle in the view's physical pixels.
+Map<String, Rect> overlaySemantics(WidgetTester tester) {
+  final out = <String, Rect>{};
+  void walk(SemanticsNode n, Matrix4 m) {
+    final t = n.transform == null ? m : (m.clone()..multiply(n.transform!));
+    if (n.label.startsWith('T')) {
+      out[n.label] = MatrixUtils.transformRect(t, n.rect);
+    }
+    n.visitChildren((child) {
+      walk(child, t);
+      return true;
+    });
+  }
+
+  walk(
+      tester
+          .binding.renderViews.single.owner!.semanticsOwner!.rootSemanticsNode!,
+      Matrix4.identity());
+  return out;
+}
+
+/// A host whose overlay builder is a method tear-off reading its own
+/// field: `==` across its builds.
+class TearOffHost extends StatefulWidget {
+  const TearOffHost({super.key, required this.controller, required this.calls});
+
+  final FloorPlanController controller;
+  final Calls calls;
+
+  @override
+  State<TearOffHost> createState() => TearOffHostState();
+}
+
+class TearOffHostState extends State<TearOffHost> {
+  String prefix = 'a';
+
+  void rename(String next) => setState(() => prefix = next);
+
+  Widget? _badge(BuildContext context, FloorPlanTableOverlay t) {
+    final n = t.detail.table.number!;
+    widget.calls.byNumber[n] = (widget.calls.byNumber[n] ?? 0) + 1;
+    return Text('$prefix-$n', textDirection: TextDirection.ltr);
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      FloorPlanView(controller: widget.controller, tableOverlayBuilder: _badge);
 }
 
 void main() {
@@ -588,8 +660,8 @@ void main() {
 
   testWidgets(
       'TO15 a reset builds every overlay afresh (documented lifetime); a '
-      'host rebuild with the same builder builds none, another builder '
-      'builds all (G-5)', (tester) async {
+      'host rebuild builds every overlay again, keeping its State, with the '
+      'same builder or another (G-5)', (tester) async {
     final c = controller();
     final calls = Calls();
     final builders =
@@ -599,24 +671,27 @@ void main() {
     expect(Badge.created, 7);
     final state = tester.state(badgeOf('1'));
 
-    // The host rebuilds the view with another layout, the same builder.
+    // The host rebuilds the view with another layout, the same builder
+    // (review R-1: the spec's rule, whatever the builder's identity).
     layouts.value = const FloorPlanOverlayLayout(hideBelowScale: 0.001);
     await tester.pump();
-    expect(calls.total, 7, reason: 'the same builder: no call');
-    expect(identical(tester.state(badgeOf('1')), state), isTrue);
+    expect(calls.total, 14, reason: 'a host rebuild: every table again');
+    expect(identical(tester.state(badgeOf('1')), state), isTrue,
+        reason: 'rebuilt, not remounted');
+    expect(Badge.created, 7);
 
     c.resetLayout();
     await tester.pump();
     await tester.pump();
     expect(Badge.created, 14, reason: 'a reset remounts every overlay');
     expect(identical(tester.state(badgeOf('1')), state), isFalse);
-    expect(calls.total, 14);
+    expect(calls.total, 21);
 
     final other = Calls();
     builders.value = other.builder();
     await tester.pump();
     expect(other.total, 7, reason: 'another builder: every table');
-    expect(calls.total, 14);
+    expect(calls.total, 21);
   });
 
   testWidgets(
@@ -750,5 +825,301 @@ void main() {
         const FloorPlanOverlayLayout(detailBreakpoints: [1, 2]).hashCode,
         FloorPlanOverlayLayout(detailBreakpoints: List.of(const [1.0, 2.0]))
             .hashCode);
+  });
+
+  testWidgets(
+      'TO19 a host rebuild with a closure written in build builds every '
+      'overlay again, keeping its State; pan and zoom still build none '
+      '(review R-1, G-5)', (tester) async {
+    final c = controller();
+    final calls = Calls();
+    late StateSetter rebuild;
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: StatefulBuilder(builder: (context, setState) {
+      rebuild = setState;
+      return FloorPlanView(
+          controller: c,
+          tableOverlayBuilder: (context, t) => calls.builder()(context, t));
+    }))));
+    await tester.pump();
+    await tester.pump();
+    c.cameraController.value = embeddingCamera();
+    await tester.pump();
+    expect(calls.byNumber, {'1': 1, '2': 1, '3': 1, '4': 1, 'L': 1, '7': 2});
+    final state = tester.state(badgeOf('1'));
+    rebuild(() {});
+    await tester.pump();
+    expect(calls.byNumber, {'1': 2, '2': 2, '3': 2, '4': 2, 'L': 2, '7': 4},
+        reason: 'a host rebuild: every table once more');
+    expect(identical(tester.state(badgeOf('1')), state), isTrue,
+        reason: 'rebuilt, not remounted');
+    c.panBy(const Offset(-20, 10));
+    c.zoomBy(1.3);
+    await tester.pump();
+    expect(calls.total, 14, reason: 'pan and zoom build nothing');
+  });
+
+  testWidgets(
+      'TO20 a host rebuild with a method tear-off, == across the host\'s '
+      'builds, builds every overlay again: one reading the host\'s field is '
+      'never stale (review R-1, G-5)', (tester) async {
+    final c = controller();
+    final calls = Calls();
+    final host = GlobalKey<TearOffHostState>();
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: TearOffHost(key: host, controller: c, calls: calls))));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('a-1'), findsOneWidget);
+    expect(find.text('a-7'), findsNWidgets(2));
+    host.currentState!.rename('b');
+    await tester.pump();
+    expect(find.text('a-1'), findsNothing, reason: 'stale');
+    expect(find.text('b-1'), findsOneWidget);
+    expect(find.text('b-7'), findsNWidgets(2));
+    expect(calls.byNumber, {'1': 2, '2': 2, '3': 2, '4': 2, 'L': 2, '7': 4});
+    c.select({'2'});
+    await tester.pump();
+    expect(calls.byNumber, {'1': 2, '2': 3, '3': 2, '4': 2, 'L': 2, '7': 4},
+        reason: 'an internal trigger: that table alone');
+  });
+
+  testWidgets(
+      'TO21 box: across 50 camera changes the render object allocates '
+      'nothing, hands the framework one paint offset per overlay shown at '
+      'most, and lays out each shown overlay once per frame (review R-2, '
+      'H-8)', (tester) async {
+    final c = controller();
+    final calls = Calls();
+    await mount(tester, c,
+        builder: calls.builder(),
+        layout: const FloorPlanOverlayLayout(size: FloorPlanOverlaySize.box));
+    final layer = layerOf(tester);
+    c.panBy(const Offset(1, 1));
+    await tester.pump();
+    final allocations = layer.debugAllocations;
+    final layouts = layer.debugChildLayouts;
+    final offsets = layer.debugPaintOffsets;
+    var painted = 0;
+    for (var i = 0; i < 50; i++) {
+      if (i.isEven) {
+        c.panBy(Offset(2.5, -1.25 - i / 10));
+      } else {
+        c.zoomBy(i % 4 == 1 ? 1.02 : 1 / 1.02, focus: const Offset(300, 300));
+      }
+      await tester.pump();
+      painted += shownCount(layer);
+    }
+    expect(layer.debugAllocations, allocations,
+        reason: '0 per table per camera change');
+    expect(layer.debugPaintOffsets - offsets, lessThanOrEqualTo(painted),
+        reason: 'one Offset per painted overlay at most, none for the culled');
+    expect(layer.debugChildLayouts - layouts, painted,
+        reason: 'box: one layout per shown overlay per frame, none else');
+    expect(painted, inExclusiveRange(0, 50 * 7),
+        reason: 'premise: some culled');
+    expect(calls.total, 7);
+  });
+
+  testWidgets(
+      'TO22 each shown overlay is composited at its place after pans and '
+      'zooms; a culled one is not composited (review R-3, H-8)',
+      (tester) async {
+    final c = controller();
+    await mount(tester, c, builder: Calls().builder());
+    for (var i = 0; i < 3; i++) {
+      c.panBy(Offset(-31.5 * (i + 1), 7.25));
+      expect(c.zoomBy(1.13, focus: const Offset(311, 207)), isTrue);
+      await tester.pump();
+      final layer = layerOf(tester);
+      var shown = 0, culled = 0;
+      for (final child in childrenOf(layer)) {
+        final d = child.parentData! as FloorPlanOverlayParentData;
+        final composited = child.debugLayer;
+        if (d.shown) {
+          shown++;
+          expect((composited! as OffsetLayer).offset, Offset(d.dx, d.dy),
+              reason: 'frame $i: painted at its place');
+          expect(composited.parent, isNotNull, reason: 'frame $i: composited');
+          final at = child.localToGlobal(Offset.zero) -
+              layer.localToGlobal(Offset.zero);
+          expect(at.dx, closeTo(d.dx, 1e-9));
+          expect(at.dy, closeTo(d.dy, 1e-9));
+        } else {
+          culled++;
+          expect(composited?.parent, isNull,
+              reason: 'frame $i: culled, not composited');
+        }
+      }
+      expect(shown, greaterThan(0), reason: 'premise: frame $i shows some');
+      expect(culled, greaterThan(0), reason: 'premise: frame $i culls some');
+    }
+    // Where it is painted is where the transform says it is.
+    final cam = c.cameraController.value;
+    final one = slotOf(tester, '1');
+    final layer = layerOf(tester);
+    final want = badgeWanted(tester, tableNumbered('1'), cam)
+        .shift(-layer.localToGlobal(Offset.zero));
+    final offset = (one.debugLayer! as OffsetLayer).offset;
+    expect(offset.dx, closeTo(want.left, 1e-6));
+    expect(offset.dy, closeTo(want.top, 1e-6));
+  });
+
+  testWidgets(
+      'TO23 overlays in both modes across mode switches, then camera '
+      'changes: no listener outlives its render object (review R-4)',
+      (tester) async {
+    final c = controller();
+    await mount(tester, c,
+        builder: Calls().builder(),
+        modes: {FloorPlanMode.selection, FloorPlanMode.design});
+    for (final mode in [FloorPlanMode.design, FloorPlanMode.selection]) {
+      c.setMode(mode);
+      await tester.pump();
+      await tester.pump();
+      c.panBy(const Offset(10, 10));
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: mode.name);
+    }
+    expect(tester.allRenderObjects.whereType<RenderFloorPlanOverlays>(),
+        hasLength(1));
+  });
+
+  testWidgets(
+      'TO24 semantics: the shown overlays alone, at their places after a '
+      'pan; none when every one is panned off (review R-5)', (tester) async {
+    final handle = tester.ensureSemantics();
+    final c = controller();
+    await mount(tester, c, builder: labelled);
+    final layer = layerOf(tester);
+    final before = overlaySemantics(tester);
+    expect(before.length, shownCount(layer), reason: 'the shown alone');
+    expect(before.length, inExclusiveRange(0, 7), reason: 'premise: culled');
+    c.panBy(const Offset(-123.5, 45.25));
+    await tester.pump();
+    final after = overlaySemantics(tester);
+    expect(after.length, shownCount(layer));
+    final dpr = tester.view.devicePixelRatio;
+    for (final MapEntry(key: label, value: rect) in after.entries) {
+      final widget = tester.getRect(find.byWidgetPredicate(
+          (w) => w is Semantics && w.properties.label == label));
+      expect(rect.left / dpr, closeTo(widget.left, 1e-6), reason: label);
+      expect(rect.top / dpr, closeTo(widget.top, 1e-6), reason: label);
+    }
+    c.panBy(const Offset(-5000, 0));
+    await tester.pump();
+    expect(shownCount(layer), 0, reason: 'premise: all off');
+    expect(overlaySemantics(tester), isEmpty);
+    handle.dispose();
+  });
+
+  testWidgets(
+      'TO25 semantics below hideBelowScale: none, after having been shown '
+      '(review R-5, G-6)', (tester) async {
+    final handle = tester.ensureSemantics();
+    final c = controller();
+    await mount(tester, c,
+        builder: labelled,
+        layout: const FloorPlanOverlayLayout(hideBelowScale: 0.3));
+    expect(overlaySemantics(tester), isNotEmpty, reason: 'premise: at 0.37');
+    c.cameraController.value = cameraAt(0.29);
+    await tester.pump();
+    expect(overlaySemantics(tester), isEmpty);
+    handle.dispose();
+  });
+
+  testWidgets(
+      'TO26 box: a canvas resize with the camera unchanged culls and shows '
+      'again (review R-6, G-6)', (tester) async {
+    final c = controller();
+    await mount(tester, c,
+        builder: Calls().builder(),
+        layout: const FloorPlanOverlayLayout(size: FloorPlanOverlaySize.box),
+        camera: cameraAt(0.2));
+    final cam = c.cameraController.value;
+    Map<String, bool> shown() => {
+          for (final n in ['1', '2', '3', '4']) n: dataOf(tester, n).shown
+        };
+    Map<String, bool> wanted() {
+      final layer = layerOf(tester);
+      return {
+        for (final n in ['1', '2', '3', '4'])
+          n: canvasBox(tableNumbered(n), cam).overlaps(Offset.zero & layer.size)
+      };
+    }
+
+    final wide = shown();
+    expect(wide, wanted());
+    await tester.binding.setSurfaceSize(const Size(560, 900));
+    await tester.pump();
+    await tester.pump();
+    expect(identical(c.cameraController.value, cam), isTrue,
+        reason: 'premise: the camera unchanged');
+    final narrow = shown();
+    expect(narrow, wanted(), reason: 'narrower: culled');
+    expect(narrow, isNot(wide), reason: 'premise: the resize culls one');
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    await tester.pump();
+    await tester.pump();
+    expect(identical(c.cameraController.value, cam), isTrue);
+    expect(shown(), wide, reason: 'wider again: shown again');
+    for (final n in ['1', '2', '3']) {
+      if (!wide[n]!) continue;
+      expectRect(tester.getRect(badgeOf(n)),
+          canvasBox(tableNumbered(n), cam).shift(canvasOrigin(tester)), n);
+    }
+  });
+
+  testWidgets(
+      'TO27 the box cache follows the geometry alone: a selection tap, a '
+      'status and a detail crossing keep it (no relayout), a moved table '
+      'replaces it (review R-9, H-8)', (tester) async {
+    final c = controller();
+    await mount(tester, c,
+        builder: Calls().builder(),
+        layout: const FloorPlanOverlayLayout(
+            size: FloorPlanOverlaySize.box, detailBreakpoints: [0.3]),
+        camera: cameraAt(0.2));
+    final layer = layerOf(tester);
+    final corners = layer.corners;
+    final layouts = layer.debugChildLayouts;
+    final start = tester.getRect(badgeOf('1'));
+    await tester.tapAt(start.center, kind: PointerDeviceKind.mouse);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(c.selectedTables.value, {'1'}, reason: 'premise: selected');
+    expect(tester.widget<Badge>(badgeOf('1')).overlay.selected, isTrue);
+    expect(identical(layer.corners, corners), isTrue, reason: 'a selection');
+    c.setTableStatus({'2': TableStatus(color: const Color(0xFFD03030))});
+    await tester.pump();
+    expect(identical(layer.corners, corners), isTrue, reason: 'a status');
+    expect(layer.debugChildLayouts, layouts, reason: 'no relayout');
+    c.cameraController.value = cameraAt(0.31);
+    await tester.pump();
+    expect(tester.widget<Badge>(badgeOf('1')).overlay.detailLevel, 1,
+        reason: 'premise: crossed');
+    expect(identical(layer.corners, corners), isTrue, reason: 'a crossing');
+
+    final at = tester.getRect(badgeOf('1')).center;
+    final g = await tester.startGesture(at, kind: PointerDeviceKind.mouse);
+    await g.moveBy(const Offset(40, 0));
+    await tester.pump();
+    await g.moveBy(const Offset(40, 0));
+    await tester.pump();
+    await g.up();
+    await tester.pump();
+    expect(identical(layer.corners, corners), isFalse,
+        reason: 'a moved table: a new cache');
+    expect(
+        tester.getRect(badgeOf('1')).left,
+        closeTo(
+            canvasBox(tableNumbered('1'), cameraAt(0.31)).left +
+                80 +
+                canvasOrigin(tester).dx,
+            1e-6));
   });
 }

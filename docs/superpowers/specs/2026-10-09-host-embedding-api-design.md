@@ -212,11 +212,14 @@ named).
   never captured (R-5).
 - **P-4. The frame path.** Pan and zoom rebuild **no widget beyond
   today's zoom read-out** (`planner_shell.dart:943-947`) and allocate
-  nothing per table in the painters and the overlay layer (CLAUDE.md).
-  Style values are read when a painter rebuilds, never per frame. Host
-  overlay widgets are **repositioned** per camera change, not rebuilt; the
-  per-frame cost is O(tables) of arithmetic and O(overlays on screen) of
-  paint, measured ([H-8](#h-8-the-overlays-cost)).
+  nothing per table in the painters (CLAUDE.md); the overlay layer
+  allocates nothing per table beyond one paint offset per overlay shown,
+  measured (`PaintingContext.paintChild` takes an `Offset`: the
+  framework's floor). Style values are read when a painter rebuilds, never
+  per frame. Host overlay widgets are **repositioned** per camera change,
+  not rebuilt; the per-frame cost is O(tables) of arithmetic and
+  O(overlays on screen) of paint, measured
+  ([H-8](#h-8-the-overlays-cost)).
 - **P-5. The service copy** (14b D11, D12). Nothing done in the selection
   mode reaches the design. Statuses, focus, overlays and the theme are
   never saved, exported, printed or undone.
@@ -294,8 +297,10 @@ final class FloorPlanTableDetail {
 
 - `FloorPlanController({…, double minScale = 0.001, double maxScale =
   100})`: the zoom bounds, in logical pixels per millimetre (today's
-  values, now documented); `ArgumentError` unless `0 < minScale <
-  maxScale`, both finite. **Fits clamp** to the bounds too (today they do
+  values, now documented); `ArgumentError` unless `1e-6 ≤ minScale <
+  maxScale`, both finite. The floor is the constructor's: the bounds are
+  decided with the engine's absolute tolerance of 1e-9, which below 1e-6
+  would be a sizeable part of the bound (Task 2 review R-6). **Fits clamp** to the bounds too (today they do
   not, F-7; with today's bounds no real plan is affected, and P-6 holds).
 - `void panBy(Offset canvasDelta)`: always acts; it needs no canvas.
 - `bool zoomBy(double factor, {Offset? focus})` (focus in canvas pixels,
@@ -308,7 +313,13 @@ final class FloorPlanTableDetail {
 - **A camera epoch** orders requests: every fit request, `fitToTables`,
   `centerOn`, `zoomBy` and `panBy` bumps it; the post-frame fit captures it
   and returns when it has moved. So a camera command after a fit request
-  wins, and a fit after a command wins.
+  wins, and a fit after a command wins. **A plan's own first fit is not a
+  request** (Task 2 review R-1): a `panBy` or `zoomBy` before a plan's
+  first frame (after construction, `load` or `newPlan`, until a view has
+  fitted it) acts at once and drops a pending request (a fit request,
+  `fitToTables`, `centerOn`), but does not cancel that plan's own fit,
+  which then overwrites it. A host places the camera before a view shows
+  with `centerOn`.
 - `bool userCamera = true` on `FloorPlanView`: false locks the user's pan,
   pinch and wheel zoom in that view (a kiosk or wall display); the
   commands still act.
@@ -341,8 +352,11 @@ typedef FloorPlanTableOverlayBuilder =
   and would force a rebuild.
 - **When it builds:** once per numbered, candidate table when the layer
   builds; again **for that table only** when its `FloorPlanTableOverlay`
-  changes (plan revision, selection, focus, status, detail level) or when
-  the host rebuilds the view. Never on pan or zoom. Returning null shows
+  changes (plan revision, selection, focus, status, detail level); again
+  for **every** table each time the host rebuilds the view, whatever the
+  builder's identity (a closure written in `build` and a method tear-off
+  behave the same, so a builder reading the host's own fields is never
+  stale; Task 3 review R-1). Never on pan or zoom. Returning null shows
   nothing for that table. Live data inside the widget is the host's own
   state management (`BlocBuilder`, `ValueListenableBuilder`).
 - **Lifetime:** the layer lives inside the keyed `ServiceView` (F-9), so a
@@ -375,12 +389,17 @@ typedef FloorPlanTableOverlayBuilder =
   size at every zoom, laid out once with loose constraints up to
   `maxNaturalSize` (default 200×120). `FloorPlanOverlaySize.box`: sized to
   the table's screen bounding box (tight) and relaid out on each camera
-  change.
+  change: per frame, for each overlay on the canvas, a `Size`, a
+  `BoxConstraints` and a layout and paint of the host's widget (Task 3
+  review R-2).
 - `hideBelowScale: double` (default 0): below this camera scale no overlay
   is laid out or painted.
 - `detailBreakpoints` (G-7). `interactive` (G-5).
-- Overlays whose box is off the canvas are neither laid out (`box`) nor
-  painted.
+- Culling (Task 3 review R-7): a `box` overlay whose box is off the
+  canvas is neither laid out nor painted; a `natural` overlay is culled
+  by the widget's own rectangle (not painted when it misses the canvas,
+  so a badge larger than a far-zoomed table does not pop while it still
+  overlaps the canvas), and is laid out once wherever it is.
 
 ### G-7. Detail levels
 
@@ -397,8 +416,10 @@ px/mm and the full badge above with one breakpoint.
 - **The render object.** `RenderFloorPlanOverlays`, a `Flow`-like
   multi-child render box: each child behind a `RepaintBoundary`, its
   offset in its parent data, recomputed in the camera listener from a
-  per-table **box cache** (rebuilt at document or mode rate; the per-frame
-  pass is arithmetic into reused `Float64List`s, no `Vector2`).
+  per-table **box cache** (rebuilt when the tables' geometry changes, at
+  document or mode rate, not on a selection, focus, status or detail
+  level; the per-frame pass is arithmetic into reused `Float64List`s, no
+  `Vector2`).
   `paint`, `hitTestChildren` and `applyPaintTransform` (behind
   `localToGlobal`, `showMenu`, tooltips) all read that one offset; a
   camera change calls `markNeedsPaint` and `markNeedsSemanticsUpdate` for
@@ -407,8 +428,12 @@ px/mm and the full badge above with one breakpoint.
 - **Measured:** a widget test counts builder calls across 50 camera
   changes (0) and across a detail crossing (one per table); a status
   change on one table (one call); the render object carries
-  `debugAllocations`, read across 50 camera changes in steady state (0 per
-  table).
+  `debugAllocations`, read across 50 camera changes in steady state in
+  both size modes (0 per table). Nothing per table in the painters; the
+  overlay layer allocates nothing per table beyond one paint offset per
+  overlay shown, measured apart (`debugPaintOffsets`, at most the painted
+  count; Task 3 review R-2). `box` also lays out each overlay shown once
+  per frame (`debugChildLayouts`).
 
 ### G-9. Today's fill and caption
 
@@ -931,3 +956,11 @@ deletion) held; both are corrected above. Dispositions:
 | V-20 naming | Accepted: P-9, prefixed events, `hideBelowScale`, `editorCapabilities`, `final class` |
 | V-21 facts, invariant 1 | Accepted: F-12 line, the `@internal` rename note, invariant 1 by `git show v0.3.0:` |
 | V-22 missing mutants | Accepted: added per slice |
+
+**Amended during Slice 1's implementation** (the controller's rulings on
+the task reviews, ledger `s1-task-2-review.md` and `s1-task-3-review.md`):
+G-3's `minScale` floor (1e-6) and its rule for a command before a plan's
+first fit (Task 2, R-6 and R-1); G-5's host rebuild, confirmed as written
+and made explicit for a method tear-off (Task 3, R-1); P-4, G-6 and H-8's
+paint offset and `box` cost (Task 3, R-2), G-6's culling of a `natural`
+overlay (R-7) and H-8's box cache rate (R-9).
