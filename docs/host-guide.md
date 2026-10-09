@@ -924,9 +924,9 @@ the selection mode only:
 
 - `onTablesMoved(moved)`: after a drag of tables ends, every table it
   moved, numbered or not, in the order of `controller.tables`, as a
-  `FloorPlanTableDetail` with its new geometry; once per drag, right
-  after `onLayoutChanged`. Undo, Redo, `resetLayout()` and
-  `restoreServiceLayout` do not call it: they fire
+  `FloorPlanTableDetail` with its new geometry, in an unmodifiable list;
+  once per drag, right after `onLayoutChanged`. Undo, Redo,
+  `resetLayout()` and `restoreServiceLayout` do not call it: they fire
   `serviceLayoutChanges`. If your `onLayoutChanged` replaces the service
   copy (a `resetLayout()`, a `load`, a mode switch), that drag's
   `onTablesMoved` is not called: the tables it moved are gone.
@@ -946,7 +946,8 @@ the selection mode only:
   table's tap nor the floor's.
 - `onTableHover(number)`: the mouse or a stylus moved onto a numbered
   table, or off it (null: over the floor, over an unnumbered table, or
-  off the canvas); only when the number changes; never for a finger.
+  off the canvas); only when the number changes; never for a finger. A
+  table is under the pointer on its top or in its box, with no reach.
   Over an interactive overlay (`interactive: true`) the pointer is off
   the canvas, so it reads null while it is on your widget. Without the
   callback a hover does no work.

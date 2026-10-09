@@ -10,12 +10,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
+import 'package:jet_cad_floor_plan/src/tables/table_index.dart'
+    show TableSurvey;
 import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
 import 'package:jet_cad_floor_plan/symbols.dart'
     show FurnitureSymbol, PolylineShape;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../tables/table_fixture.dart';
+import 'service_events_test.dart' show CountingTransform, Tally;
+import 'table_status_painter_test.dart' show rowOfTables;
 
 /// Places [s] turned [quarterTurns] and mirrored at [at]; then turns it by
 /// 37 degrees about [at]. Returns the instance.
@@ -442,5 +446,56 @@ void main() {
         [kept.handle]);
     expect(TablePicker(doc).candidates.map((c) => c.table.instance),
         [kept.handle]);
+  });
+
+  test(
+      'TP14 a pick allocates nothing per table in any pass (CLAUDE.md; '
+      'Task 4 review R-5): on a top, on a box off its top, within a reach, '
+      'a miss with and without one', () {
+    // 20 trapezoid tables 40 m off the origin, turned 37 degrees and
+    // mirrored; each base point (900, 650) at its row's place.
+    final doc = rowOfTables(20);
+    final made = Tally();
+    final inverses = <CountingTransform>[];
+    final picker = TablePicker(doc, invert: (m) {
+      final inverse = CountingTransform(m.invert(), made);
+      inverses.add(inverse);
+      return inverse;
+    });
+    final placed = [
+      for (final t in TableSurvey.of(doc).tables)
+        (t.instance, (doc.tree[t.instance]! as InstanceNode).transform)
+    ];
+    Vector2 on(Transform2 m, double x, double y) =>
+        Vector2(m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f);
+    // Per table: (the point, the reach, the instance expected or null).
+    final cases = [
+      for (final (h, m) in placed) ...[
+        (on(m, 900, 600), 0.0, h), // the top
+        (on(m, 250, 950), 0.0, h), // the box, off the top
+        (on(m, 1700, 650), 0.0, null), // 100 mm beyond the box
+        (on(m, 1700, 650), 150.0, h), // the same, within a reach
+        // The floor 1.77 m from every base point (a box reaches under
+        // 0.79 m from its own): a miss in every pass.
+        (on(m, 900, 650) + Vector2(1250, -1250), 150.0, null),
+      ]
+    ];
+    for (final (p, reach, want) in cases) {
+      expect(picker.pick(p, reach: reach)?.table.instance, want,
+          reason: '$p, reach $reach');
+    }
+    expect(inverses, hasLength(20), reason: 'one inverse per candidate');
+    made.count = 0;
+    final candidates = picker.candidates;
+    for (var pass = 0; pass < 10; pass++) {
+      for (final (p, reach, want) in cases) {
+        expect(picker.pick(p, reach: reach)?.table.instance, want);
+      }
+    }
+    expect(made.count, 0,
+        reason: '1000 picks asked no inverse for a new object');
+    expect(inverses, hasLength(20), reason: 'no inverse built anew');
+    expect(identical(picker.candidates, candidates), isTrue,
+        reason: 'the candidates are cached');
   });
 }

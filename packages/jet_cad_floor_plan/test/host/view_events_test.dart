@@ -442,5 +442,138 @@ void main() {
       await pen.moveTo(onTable(tester, c, table('2')));
       expect(heard.hovers, ['2']);
     });
+
+    testWidgets(
+        'VE16 a hover 3 px outside a table\'s box reports nothing: picked '
+        'at the point, without a mouse\'s 6 px reach', (tester) async {
+      final (c, heard) = await mount(tester);
+      final one = table('1');
+      // Table 1 is turned, not scaled: 3 px are 3 / 0.37 mm in its own
+      // units, beyond or within its box's right edge.
+      const d = 3 / 0.37;
+      final outside = onTable(tester, c, one, embeddingBox.maxX + d, 100);
+      final inside = onTable(tester, c, one, embeddingBox.maxX - d, 100);
+      expect(c.tableAt(inside - canvasOrigin(tester)), '1', reason: 'premise');
+      expect(c.tableAt(outside - canvasOrigin(tester)), isNull,
+          reason: 'premise');
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      addTearDown(mouse.removePointer);
+      await mouse.addPointer(location: screenOf(tester, c, kFloorX, kFloorY));
+      await mouse.moveTo(outside);
+      expect(heard.hovers, isEmpty, reason: '3 px outside');
+      await mouse.moveTo(inside);
+      expect(heard.hovers, ['1'], reason: '3 px inside');
+      await mouse.moveTo(outside);
+      expect(heard.hovers, ['1', null], reason: 'out again');
+    });
+  });
+
+  group('read at each call, a replaced copy, the list (Task 4 review)', () {
+    testWidgets(
+        'VE14 the four events are read at each call (R-5): rebuilt with '
+        'host B\'s callbacks after host A\'s were read, a double tap, a '
+        'hover, a drag and a floor tap are heard by B alone', (tester) async {
+      final c = FloorPlanController(json: embeddingPlanJson());
+      addTearDown(c.dispose);
+      c.setMode(FloorPlanMode.selection);
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final log = <String>[];
+      Widget host(String tag) => MaterialApp(
+            home: Scaffold(
+              body: FloorPlanView(
+                controller: c,
+                onTablesMoved: (m) => log
+                    .add('$tag moved ${[for (final d in m) d.table.number]}'),
+                onTableDoubleTap: (n) => log.add('$tag double $n'),
+                onFloorTap: (_) => log.add('$tag floor'),
+                onTableHover: (n) => log.add('$tag hover $n'),
+              ),
+            ),
+          );
+      await tester.pumpWidget(host('A'));
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+      final one = onTable(tester, c, table('1'));
+      final floor = screenOf(tester, c, kFloorX, kFloorY);
+      // A's events are read, through both views' records: a hover, then
+      // the first tap of a double tap.
+      final a = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await a.addPointer(location: floor);
+      await a.moveTo(one);
+      await a.removePointer();
+      await click(tester, one, ms(1000));
+      expect(log, ['A hover 1', 'A hover null'], reason: 'premise: A read');
+
+      await tester.pumpWidget(host('B'));
+      await click(tester, one, ms(1100));
+      final b = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await b.addPointer(location: floor);
+      await b.moveTo(one);
+      await b.removePointer();
+      await drag(tester, one, const Offset(60, 30), ms(3000));
+      await click(tester, floor, ms(5000));
+      expect(log, [
+        'A hover 1',
+        'A hover null',
+        'B double 1',
+        'B hover 1',
+        'B hover null',
+        'B moved [1]',
+        'B floor',
+      ]);
+    });
+
+    testWidgets(
+        'VE15 an onLayoutChanged that resets the layout: that drag reports '
+        'no onTablesMoved, and nothing throws (the tables it moved are '
+        'gone)', (tester) async {
+      final c = FloorPlanController(json: embeddingPlanJson());
+      addTearDown(c.dispose);
+      c.setMode(FloorPlanMode.selection);
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final log = <String>[];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: FloorPlanView(
+            controller: c,
+            onLayoutChanged: () {
+              log.add('layout');
+              c.resetLayout();
+            },
+            onTablesMoved: (m) => log.add('moved ${m.length}'),
+          ),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump();
+      c.cameraController.value = embeddingCamera();
+      await tester.pump();
+      final one = table('1');
+      await drag(
+          tester, onTable(tester, c, one), const Offset(60, 30), ms(1000));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(log, ['layout']);
+      final (x, y) = centerOf(one);
+      final now = c.tableDetails.firstWhere((d) => d.table.number == '1');
+      expectWorld(now.center!.dx, x, 'premise: reset, x');
+      expectWorld(now.center!.dy, y, 'premise: reset, y');
+    });
+
+    testWidgets('VE17 the moved list a host is handed is unmodifiable',
+        (tester) async {
+      final (c, heard) = await mount(tester);
+      await drag(tester, onTable(tester, c, table('1')), const Offset(60, 30),
+          ms(1000));
+      final moved = heard.moved.single;
+      expect(moved, hasLength(1), reason: 'premise');
+      expect(() => moved.add(moved.first), throwsUnsupportedError);
+      expect(moved.removeLast, throwsUnsupportedError);
+      expect(heard.moved.single, hasLength(1));
+    });
   });
 }

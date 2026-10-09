@@ -170,11 +170,15 @@ final class PickCandidate {
 /// The tables of one plan, ready to pick (S1). The candidates are rebuilt
 /// when the plan's state id or its tables' revision moves, never per
 /// pointer event; the tops and boxes are kept per definition for the
-/// picker's life (R-8: under `runtime` a definition cannot change).
+/// picker's life (R-8: under `runtime` a definition cannot change). A
+/// pick allocates nothing per table (`CLAUDE.md`): a hover picks at every
+/// mouse move (host embedding API spec E-4).
 class TablePicker {
   TablePicker(this.document,
-      {@visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner})
-      : _leavesByOwner = leavesByOwner ?? document.leavesByOwner;
+      {@visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner,
+      @visibleForTesting Transform2 Function(Transform2 transform)? invert})
+      : _leavesByOwner = leavesByOwner ?? document.leavesByOwner,
+        _invert = invert ?? _inverseOf;
 
   final DraftDocument document;
 
@@ -182,6 +186,12 @@ class TablePicker {
   /// a test hands in its own to count the scans and to see that every
   /// definition reads the map it returns.
   final Map<Handle, List<int>> Function() _leavesByOwner;
+
+  /// A candidate's inverse, [Transform2.invert]; a test hands in its own
+  /// to count what a build makes and what a pick asks of each inverse.
+  final Transform2 Function(Transform2 transform) _invert;
+
+  static Transform2 _inverseOf(Transform2 transform) => transform.invert();
 
   /// The boundary tolerance (S1): a point on a top's edge is inside.
   static const Tolerance tolerance = Tolerance(linear: 1e-6, angular: 1e-9);
@@ -213,7 +223,7 @@ class TablePicker {
       for (final c in candidatesOf(document, boxes: _boxes, leaves: scan))
         PickCandidate(
             table: c.table,
-            inverse: c.transform.invert(),
+            inverse: _invert(c.transform),
             top: _tops.putIfAbsent(c.table.definition,
                 () => tableTopOf(document, c.table.definition, scan())),
             box: c.box,
@@ -275,27 +285,36 @@ class TablePicker {
   /// null. On a miss, with a [reach] (a finger's, spec 14t R-11), the
   /// table whose box is nearest within [reach] world units, the higher
   /// handle on a tie.
+  ///
+  /// Allocates nothing per table: each candidate's local point is written
+  /// out from its inverse's coefficients, as [Transform2.transformPoint]
+  /// computes it (the same products in the same order, so the same
+  /// doubles), never a `Vector2` per candidate.
   PickCandidate? pick(Vector2 world, {double reach = 0}) {
     final list = candidates;
+    final wx = world.x, wy = world.y;
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
-      final local = c.inverse.transformPoint(world);
-      if (c.top?.contains(local.x, local.y, tolerance) ?? false) return c;
+      final m = c.inverse;
+      final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
+      if (c.top?.contains(x, y, tolerance) ?? false) return c;
     }
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
-      final local = c.inverse.transformPoint(world);
-      if (_boxDistance(c.box, local.x, local.y) <= tolerance.linear) return c;
+      final m = c.inverse;
+      final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
+      if (_boxDistance(c.box, x, y) <= tolerance.linear) return c;
     }
     if (reach <= 0) return null;
     PickCandidate? best;
     var bestDistance = reach;
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
-      final local = c.inverse.transformPoint(world);
+      final m = c.inverse;
+      final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
       // Local units to world: the instance's scale (placements turn and
       // mirror, so it is 1 unless a table was scaled by hand).
-      final d = _boxDistance(c.box, local.x, local.y) * c.scale;
+      final d = _boxDistance(c.box, x, y) * c.scale;
       if (d < bestDistance || (best == null && d <= bestDistance)) {
         best = c;
         bestDistance = d;

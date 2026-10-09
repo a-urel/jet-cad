@@ -139,7 +139,10 @@ class FloorPlanView extends StatefulWidget {
   /// [FloorPlanController.tableDetails] reads it; once per drag, after
   /// [onLayoutChanged]. Undo, Redo, `resetLayout` and
   /// `restoreServiceLayout` do not call it (they fire
-  /// `serviceLayoutChanges`). Read at each call.
+  /// `serviceLayoutChanges`), and it is not called for a drag whose
+  /// [onLayoutChanged] replaced the plan shown (a `resetLayout`, a `load`,
+  /// a mode switch): the tables it moved are gone. The list is
+  /// unmodifiable. Read at each call.
   final void Function(List<FloorPlanTableDetail> moved)? onTablesMoved;
 
   /// A table was tapped twice in the selection mode (spec E-2): a second
@@ -163,10 +166,13 @@ class FloorPlanView extends StatefulWidget {
   /// The mouse or stylus pointer moved onto a numbered table, or off it
   /// (null: over the floor or an unnumbered table), in the selection mode
   /// (spec E-4): only when the number changes, and null when the pointer
-  /// leaves the canvas; never for touch. A mode switch, `resetLayout`, a
-  /// restore or a load builds the view afresh and sends no null: a host
-  /// clears its hover state when the mode or the plan changes. Without it,
-  /// a hover does no work. Read at each move.
+  /// leaves the canvas or moves onto an interactive overlay
+  /// (`interactive: true`, which takes the pointer off the canvas); never
+  /// for touch. A table is under the pointer when the point is on its top
+  /// or in its box: no reach. A mode switch, `resetLayout`, a restore or a
+  /// load builds the view afresh and sends no null: a host clears its
+  /// hover state when the mode or the plan changes. Without it, a hover
+  /// does no work. Read at each move.
   final void Function(String? number)? onTableHover;
 
   @override

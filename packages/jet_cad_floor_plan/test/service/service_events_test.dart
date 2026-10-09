@@ -17,6 +17,8 @@ import 'package:flutter/gestures.dart'
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart'
+    show TableGroup;
 import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
 import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
 import 'package:jet_cad_floor_plan/src/service/table_select_tool.dart';
@@ -24,6 +26,7 @@ import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../host/embedding_fixture.dart';
+import 'table_status_painter_test.dart' show rowOfTables;
 
 /// A picker that counts its picks.
 class CountingPicker extends TablePicker {
@@ -35,6 +38,59 @@ class CountingPicker extends TablePicker {
   PickCandidate? pick(Vector2 world, {double reach = 0}) {
     picks++;
     return super.pick(world, reach: reach);
+  }
+}
+
+/// What a test counts.
+final class Tally {
+  int count = 0;
+}
+
+/// A candidate's inverse that counts every new object it is asked for:
+/// a point or a direction mapped, a product, an inverse, a list, a string
+/// (Task 4 review R-5). The coefficients are read as fields, which build
+/// nothing.
+final class CountingTransform extends Transform2 {
+  CountingTransform(Transform2 m, this.made)
+      : super(m.a, m.b, m.c, m.d, m.e, m.f);
+
+  /// Shared by every inverse of a picker (a transform is immutable).
+  final Tally made;
+
+  @override
+  Vector2 transformPoint(Vector2 p) {
+    made.count++;
+    return super.transformPoint(p);
+  }
+
+  @override
+  Vector2 transformDirection(Vector2 v) {
+    made.count++;
+    return super.transformDirection(v);
+  }
+
+  @override
+  Transform2 multiply(Transform2 other) {
+    made.count++;
+    return super.multiply(other);
+  }
+
+  @override
+  Transform2 invert() {
+    made.count++;
+    return super.invert();
+  }
+
+  @override
+  List<double> toJson() {
+    made.count++;
+    return super.toJson();
+  }
+
+  @override
+  String toString() {
+    made.count++;
+    return super.toString();
   }
 }
 
@@ -330,6 +386,64 @@ void main() {
       expect(r.log, ['tap L', 'tap L', 'double L']);
       expect(r.selection.isEmpty, isTrue, reason: 'locked: never selected');
     });
+    testWidgets(
+        'SE14 with a group: tap, then groupTap, then the double tap, which '
+        'reports the member\'s own number; taps on two members of one '
+        'group are no double tap', (tester) async {
+      final r = rig();
+      // At 0.025 px/mm the members 1 and 2, 3 m apart, are within the slop.
+      r.camera.value = ViewportTransform(
+          worldToScreenMatrix: Transform2(0.025, 0, 0, -0.025, -425, -375));
+      final groups = ValueNotifier<Map<String, TableGroup>>({
+        'g': TableGroup(members: {'1', '2'})
+      });
+      addTearDown(groups.dispose);
+      final tool = TableSelectTool(
+          picker: r.picker,
+          groups: groups,
+          callbacks: () => (
+                onTableTap: (n) => r.log.add('tap $n'),
+                onLayoutChanged: null,
+                onGroupTap: (g, n) => r.log.add('group $g $n'),
+                onMergeRequested: null,
+                onSplitRequested: null,
+              ),
+          events: () => r.events);
+      addTearDown(tool.dispose);
+      void tap(Offset s, Duration down) {
+        tool.onPointerDown(r.ev(s, time: down), r.ctx);
+        tool.onPointerUp(r.ev(s, buttons: 0, time: down + ms(40)), r.ctx);
+      }
+
+      final one = r.at(table('1'));
+      final two = r.at(table('2'));
+      expect((two - one).distance, lessThan(kDoubleTapSlop),
+          reason: 'premise: within the slop');
+      for (final (p, i) in [(one, 0), (two, 1)]) {
+        expect(r.picker.pick(r.ev(p).world)?.table.instance, r.instance(i),
+            reason: 'premise: on its own table');
+      }
+      tap(one, ms(1000));
+      tap(one, ms(1100));
+      expect(r.log, ['tap 1', 'group g 1', 'tap 1', 'group g 1', 'double 1']);
+      expect(r.selection.keys, hasLength(2),
+          reason: 'premise: a member stands for its group');
+      r.log.clear();
+      tap(two, ms(3000));
+      tap(two, ms(3100));
+      expect(r.log, ['tap 2', 'group g 2', 'tap 2', 'group g 2', 'double 2'],
+          reason: 'the member\'s number, not the first member\'s');
+      r.log.clear();
+      tap(one, ms(5000));
+      tap(two, ms(5100));
+      tap(one, ms(5200));
+      expect(
+          r.log,
+          [
+            'tap 1', 'group g 1', 'tap 2', 'group g 2', 'tap 1', 'group g 1' //
+          ],
+          reason: 'one group, two tables: each tap keeps its own table');
+    });
   });
 
   group('floor tap (E-3)', () {
@@ -468,6 +582,119 @@ void main() {
       r.tool.onPointerMove(r.ev(p + const Offset(2, 1)), r.ctx);
       r.tool.onPointerUp(r.ev(p, buttons: 0), r.ctx);
       expect(r.hovers, ['1'], reason: 'a pressed move is not a hover');
+    });
+
+    testWidgets(
+        'SE15 with onTableHover set, hovers over 60 tables\' tops, their '
+        'boxes and the floor between them allocate nothing per table: no '
+        'inverse is asked for a point, no candidate is rebuilt (CLAUDE.md; '
+        'Task 4 review R-5)', (tester) async {
+      // Trapezoid tables in rows 40 m off the origin, each turned 37
+      // degrees and mirrored, numbered 1..60, the base point (900, 650) of
+      // each at its row's place.
+      final doc = rowOfTables(60);
+      final made = Tally();
+      final inverses = <CountingTransform>[];
+      final picker = TablePicker(doc, invert: (m) {
+        final inverse = CountingTransform(m.invert(), made);
+        inverses.add(inverse);
+        return inverse;
+      });
+      final hovers = <String?>[];
+      final ServiceEvents<Handle> events = (
+        onTablesMoved: null,
+        onTableDoubleTap: null,
+        onFloorTap: null,
+        onTableHover: hovers.add,
+      );
+      final tool = TableSelectTool(
+          picker: picker,
+          groups: ValueNotifier(const {}),
+          callbacks: () => (
+                onTableTap: null,
+                onLayoutChanged: null,
+                onGroupTap: null,
+                onMergeRequested: null,
+                onSplitRequested: null,
+              ),
+          events: () => events);
+      // 0.1 px/mm, y up, panned: a mouse's 6 px are 60 mm.
+      const view = Transform2(0.1, 0, 0, -0.1, -3900, -2600);
+      final camera =
+          CameraController(ViewportTransform(worldToScreenMatrix: view));
+      final index = SpatialIndex(doc);
+      final selection = SelectionController(doc);
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      addTearDown(() {
+        tool.dispose();
+        selection.dispose();
+        index.dispose();
+        camera.dispose();
+        doc.dispose();
+      });
+      void hover(double x, double y) => tool.onPointerMove(
+          ToolPointerEvent(
+              screen: Offset(view.a * x + view.e, view.d * y + view.f),
+              world: Vector2(x, y),
+              pointer: 1,
+              buttons: 0,
+              shift: false,
+              control: false,
+              meta: false,
+              alt: false,
+              pickRadiusWorld: 60),
+          ctx);
+
+      final tables = TableSurvey.of(doc).tables;
+      expect([
+        for (final t in tables) t.number
+      ], [
+        for (var k = 1; k <= 60; k++) '$k'
+      ], reason: 'premise');
+      final placements = [
+        for (final t in tables)
+          (doc.tree[t.instance]! as InstanceNode).transform
+      ];
+      (double, double) on(Transform2 m, double x, double y) =>
+          (m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f);
+      // Per table, by the forward transform: a point of its top; a point
+      // of its box off its top (the second pass); the floor beyond its
+      // base point, 1.77 m from every base and so off every box (each box
+      // reaches 0.79 m from its base), where both passes run in full.
+      final round = [
+        for (final m in placements) ...[
+          on(m, 900, 600),
+          on(m, 250, 950),
+          (on(m, 900, 650).$1 + 1250, on(m, 900, 650).$2 - 1250),
+        ]
+      ];
+      final candidates = picker.candidates;
+      expect(inverses, hasLength(60), reason: 'one inverse per candidate');
+      for (final c in candidates) {
+        expect(c.top!.contains(250, 950, TablePicker.tolerance), isFalse,
+            reason: 'premise: the box point is off the top');
+      }
+      final heard = [
+        for (var k = 1; k <= 60; k++) ...['$k', null]
+      ];
+      for (final (x, y) in round) {
+        hover(x, y); // warm-up
+      }
+      expect(hovers, heard, reason: 'premise: each pick lands');
+
+      made.count = 0;
+      for (var pass = 0; pass < 5; pass++) {
+        for (final (x, y) in round) {
+          hover(x, y);
+        }
+      }
+      expect(hovers, [for (var pass = 0; pass < 6; pass++) ...heard]);
+      expect(made.count, 0,
+          reason: '900 hovers asked no inverse for a new object');
+      expect(inverses, hasLength(60), reason: 'no inverse built anew');
+      expect(identical(picker.candidates, candidates), isTrue,
+          reason: 'the candidates are cached, not rebuilt per move');
     });
   });
 }
