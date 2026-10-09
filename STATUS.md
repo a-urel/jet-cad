@@ -113,16 +113,24 @@ one's spec, plan and results.
   fixes*, F-1 to F-8, applied in `98c0c1d`). **Merged into `main` at
   `1b32e0a`** on the human's *"evet, main'e merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-1/](docs/superpowers/ledgers/2026-10-09-embedding-slice-1/).
-  Unreleased (CHANGELOG). Slices 2–4 to come.
+  **Slice 2** (the human: *"tamam, Dilim 2 ile devam et"*): host data on
+  a table (`setTableData`, `FloorPlanTableDetail.data`, **schema 9**),
+  `designChanges`, `onTablesMoved`, `onTableDoubleTap`, `onFloorTap`,
+  `onTableHover`; plan
+  [2026-10-09-embedding-slice-2.md](docs/superpowers/plans/2026-10-09-embedding-slice-2.md),
+  results [2026-10-09-embedding-slice-2-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-2-results.md);
+  Tasks 1–5 done, each of 1–4 reviewed independently and fixed; the whole
+  range reviewed independently (*Approve with fixes*, F-1 to F-7, applied
+  in `8f813b2` … `e6a1d06`). **Merged into `main`** on the human's *"evet,
+  main'e merge et"*; ledger
+  [docs/superpowers/ledgers/2026-10-09-embedding-slice-2/](docs/superpowers/ledgers/2026-10-09-embedding-slice-2/).
+  Unreleased (CHANGELOG). Slices 3 (`FloorPlanTheme`) and 4 (bars,
+  keyboard, editor capabilities) to come.
 
 ## In flight
 
-**The host embedding API's Slice 2** (events and table data, schema 9),
-started on the human's *"tamam, Dilim 2 ile devam et"* (2026-10-09).
-Plan: [2026-10-09-embedding-slice-2.md](docs/superpowers/plans/2026-10-09-embedding-slice-2.md)
-(five tasks; the spec's points S-1 to S-6 ruled as the plan recommends).
-Ledger: `.superpowers/sdd/2026-10-09-host-embedding-api/` (`s2-…`).
-**Resume point:** Task 1 (schema 9).
+Nothing. Slices 1 and 2, above, are merged; Slice 3 (`FloorPlanTheme`)
+is next on the human's word.
 
 ## Owed to the human
 
@@ -136,6 +144,9 @@ Ledger: `.superpowers/sdd/2026-10-09-host-embedding-api/` (`s2-…`).
 - **Slice 1, a look:** the demo's badges, pan and zoom smoothness and
   interactive badges by touch, on a tablet and a terminal; the German
   and Turkish read of the demo's new strings.
+- **Slice 2, a look:** the demo's double tap, pointer line and *Link
+  tables* on a tablet and a terminal; the German and Turkish read of its
+  new strings.
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
@@ -143,7 +154,8 @@ Ledger: `.superpowers/sdd/2026-10-09-host-embedding-api/` (`s2-…`).
   language (Q0's N1, assumed yes)? If "`.` always", `documentSeparatorFor`
   becomes a constant and the settling goes.
 - **The macOS re-baseline** of the engine's two `generate_document_test`
-  fingerprints (moved by 12b's schema 7 and Q0's schema 8).
+  fingerprints (moved by 12b's schema 7, Q0's schema 8 and Slice 2's
+  schema 9).
 - **A look at Q0** in German and Turkish: the Page panel's control, the
   plan's text, the PDF.
 - **The GPU split's device run:** the dev harness's `BACKEND=residentGpu`
@@ -159,11 +171,14 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Slice 2** of the host embedding API (events and table data, schema 9), on the human's word.
-Monépro's spec 103 §10 jet-cad prerequisites are met: the GPU split,
-touch, a consumable version (0.3.0, tagged at `1b0c37a`), the outside-app check
-(the host probe), placement and open/save, and zones (0.3.0). Monépro
-owes two answers (zone focus Q-Z1, Q-Z4); its floor view is its phase 2.
+**Next: Slice 3** of the host embedding API (`FloorPlanTheme`), on the
+human's word; or a release carrying Slices 1 and 2 (0.4.0: **schema 9**,
+every terminal that shares stored plans moves together), the human's call.
+Found in Slice 2, each its own task: O-10 (an undone delete re-appends
+the node at its parent's end) and O-11 (non-finite corners trip a debug
+assertion in the selection grips). Monépro owes Q-H3 and can now name
+`controller.camera`, `tableOverlayBuilder` (Q-Z1) and
+`FloorPlanTableDetail.data` (Q-Z4) in its spec 103.
 ---
 
 ## What this project is
