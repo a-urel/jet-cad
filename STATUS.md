@@ -129,8 +129,12 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing. Slices 1 and 2, above, are merged; Slice 3 (`FloorPlanTheme`)
-is next on the human's word.
+**The host embedding API's Slice 3** (`FloorPlanTheme`), started on the
+human's *"tamam, Dilim 3 ile devam et"* (2026-10-09). Plan:
+[2026-10-09-embedding-slice-3.md](docs/superpowers/plans/2026-10-09-embedding-slice-3.md)
+(four tasks; the spec's points S-1 to S-12 ruled as the plan recommends).
+Ledger: `.superpowers/sdd/2026-10-09-host-embedding-api/` (`s3-…`).
+**Resume point:** Task 1 (the type and its resolution).
 
 ## Owed to the human
 
