@@ -137,8 +137,28 @@ one's spec, plan and results.
   `9eb8434`). **Merged into `main` at `d26c9fe`** on the human's *"evet, main'e
   merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-3/](docs/superpowers/ledgers/2026-10-09-embedding-slice-3/).
-  Unreleased (CHANGELOG). Slice 4 (bars, keyboard, editor capabilities)
-  to come.
+  Unreleased (CHANGELOG). **Slice 4** (the human: *"tamam, Dilim 4 ile
+  devam et"*): the bars (`FloorPlanServiceBar`, `FloorPlanEditorBar`:
+  shown or not, their actions in order, host widgets at either end), a bar
+  of the host's own (`mergeCandidate`, `activeTool` / `selectTool`,
+  `editorSelectedTables`, `exportPlan` / `printPlan`, `deleteSelection()`;
+  `undo()` / `redo()` wait for an idle tool), `onExportDialog` and
+  `onPageFlowError`, `FloorPlanEditorCapabilities` (`full`, `tablesOnly`,
+  `readOnly`) gating every edit path, the table inspector slot,
+  `shortcuts` and `autofocus`; chrome changes keep the plan in place; the
+  planner's own fields keep their keys from a host's `Shortcuts`. With no
+  new parameter the planner behaves and draws as before, but S-4. Plan
+  [2026-10-09-embedding-slice-4.md](docs/superpowers/plans/2026-10-09-embedding-slice-4.md),
+  results [2026-10-09-embedding-slice-4-results.md](docs/superpowers/notes/2026-10-09-embedding-slice-4-results.md);
+  Tasks 1–7 done, each of 1–6 reviewed independently and fixed, Task 7's
+  finding 1 fixed in the planner; the whole range reviewed independently
+  (*Approve with fixes*, F-1 to F-8, applied in `44b6775`, `492c70c`,
+  `fdf3309`). Removing a design view while a pointer hovers no longer
+  throws (Slice 3's finding; the frame-safe relay `c65a3a0`, pinned by
+  `f0c77cf`). **Merged into `main`** on the human's *"evet, main'e merge
+  et"* (confirmed: *"Yine de sen merge et"*); ledger
+  [docs/superpowers/ledgers/2026-10-09-embedding-slice-4/](docs/superpowers/ledgers/2026-10-09-embedding-slice-4/).
+  Unreleased (CHANGELOG). The umbrella's four slices are all merged.
 - **O-10, an undone node removal restores the node's index** (the human,
   2026-10-10), merged into `main` at `a803f86` on the human's *"evet,
   main'e merge et"*: `RemoveNodeCommand`'s inverse carries the node's
@@ -149,7 +169,8 @@ one's spec, plan and results.
   results [2026-10-10-undo-node-index-results.md](docs/superpowers/notes/2026-10-10-undo-node-index-results.md)
   (independent review *Approve with fixes*, F-1 to F-5 applied). Run
   natively in one session: no SDD ledger. Unreleased (CHANGELOG).
-  Slice 4's DS1 and DS2 (`keyboard_focus_test.dart`) now compare the
+  Its merge commit was never pushed to `main` on its own; it reached
+  `origin/main` through Slice 4's branch (`263e2ca`). Slice 4's DS1 and DS2 (`keyboard_focus_test.dart`) now compare the
   undone encoding with the one before the delete, on Slice 4's branch
   (`a5b1ead`).
 - **O-11, a table whose corners are not finite** (the human, 2026-10-10),
@@ -165,7 +186,8 @@ one's spec, plan and results.
   M-O11i, each killed; an independent review (*Approve with fixes*: the
   NaN hit test, the mutant names, the CHANGELOG's wording), applied in
   `efbb4ef`. Run natively in one session: no SDD ledger; the record is
-  the spec's O-11. Unreleased (CHANGELOG). Slice 4's
+  the spec's O-11. Unreleased (CHANGELOG). As O-10's, its merge commit
+  reached `origin/main` through Slice 4's branch (`263e2ca`). Slice 4's
   `page_flows_test.dart` dropped `finitePlanJson()` for
   `embeddingPlanJson()` on Slice 4's branch (`503c504`). Left as found: `CanvasDrawSink.point` carries a
   non-finite residual by hand into `drawRect` (unreachable for table 9,
@@ -173,34 +195,7 @@ one's spec, plan and results.
 
 ## In flight
 
-**The host embedding API's Slice 4** (the bars, keyboard, editor
-capabilities), started on the human's *"tamam, Dilim 4 ile devam et"*
-(2026-10-09). Plan:
-[2026-10-09-embedding-slice-4.md](docs/superpowers/plans/2026-10-09-embedding-slice-4.md)
-(seven tasks; the spec's points S-1 to S-24 ruled, S-16 by adding
-`deleteSelection()`). Ledger:
-`.superpowers/sdd/2026-10-09-host-embedding-api/` (`s4-…`). Tasks 1–7
-done (`ffe0b9c` … `24af8f7`), the reviews of Tasks 1–6 applied, Task 7's
-finding 1 fixed (`8f45473`). `main` merged in at `263e2ca` (O-10, O-11),
-and the test changes those two owed Slice 4 made: DS1 and DS2 compare the
-undone plan with the one before the delete (`a5b1ead`), and the page
-flows print and export the whole embedding fixture (`503c504`). Gates
-on the merged tip: every standing set exact but two macOS text-metric
-differences recorded in O-10's results note. **Resume point:** Task 7's
-review, then the whole-range final review, the results note and the exit
-gate.
-
-**Fixed on this branch: removing a design view while a pointer hovers**
-(Slice 3's results, "Found, not fixed"). The interaction layer's
-deactivation clears the hover during the build that removes the view,
-and the selection panel, outside the canvas and still active, was marked
-dirty then. The shell's frame-safe selection relay (`c65a3a0`, Task 4
-review R-2) holds that notification. `hover_removal_test.dart` (HR1, a
-bare shell over a hovered line; HR2, the host's design view over a
-hovered table) pins it, in `f0c77cf`: red at `main` and at `c65a3a0~1`,
-red with the panel on the selection directly or the relay's phase check
-removed, green from `c65a3a0`; CI green on Linux. No code change beyond
-the relay.
+Nothing.
 
 ## Owed to the human
 
@@ -220,6 +215,18 @@ the relay.
 - **Slice 3, a look:** the demo's POS look on a tablet and a terminal,
   light and dark; a native read of its new strings (de "Aussehen /
   Kasse", tr "Görünüm / Standart / Kasa").
+- **Slice 4, a look:** the demo's three editor profiles, its own bar
+  and its own keys on a tablet and a terminal; a native read of its new
+  words (de *Host / Editor / Voll / Tische / Nur lesen / Eigene Leiste /
+  Eigener Exportdialog / Tasten des Plans / Tisch suchen / Kassen-ID*, tr
+  *Ana uygulama / Düzenleyici / Tam / Masalar / Salt okunur / Kendi
+  çubuğu / Kendi dışa aktarma penceresi / Planın tuşları / Masa bul / Kasa
+  kimliği*).
+- **macOS, a ruling** (reported by the local session): the render
+  package's text lod ladder rungs 1 and 2 pass there, so its standing set
+  differs from Linux's; Slice 3's T-1 in the planner's
+  `test/service/table_theme_painter_test.dart` fails there, with `main`'s
+  engine too. Fix it as its own task, or leave it recorded?
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
@@ -244,18 +251,18 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Slice 4** of the host embedding API (the bars, keyboard, editor
-capabilities), started on the human's word; a release carrying Slices
-1–3 (0.4.0: **schema 9**, every terminal that shares stored plans moves
-together) is the human's call. O-10 and O-11 are merged, and the
-test changes each owed Slice 4 are made on its branch (above). Removing a design view while a
-pointer hovers a line no longer throws: fixed by Slice 4's selection
-relay and pinned (see In flight). Monépro owes
-Q-H3 and its real shadcn tokens, and can name `controller.camera`,
-`tableOverlayBuilder` (Q-Z1), `FloorPlanTableDetail.data` (Q-Z4) and
-`FloorPlanTheme` in its spec 103.
+**Next: the human's call.** The host embedding API's four slices are
+merged and unreleased; a release carrying them (0.4.0: **schema 9**,
+every terminal that shares stored plans moves together) is the human's
+call. Monépro owes Q-H3 and its real shadcn tokens, and can name
+`controller.camera`, `tableOverlayBuilder` (Q-Z1),
+`FloorPlanTableDetail.data` (Q-Z4), `FloorPlanTheme`, and from Slice 4
+`tablesOnly` for "edit floor drawing", `shortcuts: false` beside
+`PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
+for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
+4's results): F-7 (an `against-wall` table turns to its wall under
+`rotate: false`), a second view on one controller for one frame.
 ---
-
 ## What this project is
 
 A CAD workspace holding **two independent product lines that share a name
