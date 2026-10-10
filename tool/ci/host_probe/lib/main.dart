@@ -6,7 +6,8 @@
 // docs/host-guide.md is in this file, so the guide's code compiles.
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show BrowserContextMenu;
+import 'package:flutter/services.dart'
+    show BrowserContextMenu, HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
@@ -183,6 +184,15 @@ class _FloorScreenState extends State<FloorScreen> {
 
   /// The table the mouse is over, for the host's own line.
   final ValueNotifier<String?> hovered = ValueNotifier(null);
+
+  /// Whether the service shows the POS's own bar instead of the planner's.
+  bool ownBar = false;
+
+  /// Whether the POS's shortcuts own the keyboard.
+  bool posOwnsKeys = false;
+
+  /// What the editor lets the user do.
+  FloorPlanEditorCapabilities editing = FloorPlanEditorCapabilities.full;
 
   @override
   void initState() {
@@ -419,6 +429,171 @@ class _FloorScreenState extends State<FloorScreen> {
     return controller.tableAt(global - rect.topLeft);
   }
 
+  /// The service bar: Undo and Redo, then Print, with the floor's name
+  /// before them.
+  static const serviceBar = FloorPlanServiceBar(
+    actions: [
+      FloorPlanServiceAction.undo,
+      FloorPlanServiceAction.redo,
+      FloorPlanServiceAction.print,
+    ],
+    leading: [
+      Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12),
+        child: Center(child: Text('Floor 1')),
+      ),
+    ],
+  );
+
+  /// The editor's bar: Undo, Redo and the zoom, nothing else.
+  static const editorBar = FloorPlanEditorBar(
+    actions: [
+      FloorPlanEditorAction.undo,
+      FloorPlanEditorAction.redo,
+      FloorPlanEditorAction.zoom,
+    ],
+  );
+
+  /// The POS's own service bar, shown instead of the planner's: each
+  /// button enabled by the controller's state, each press a command.
+  Widget posServiceBar() => Row(
+        children: [
+          ValueListenableBuilder<bool>(
+            valueListenable: controller.canUndo,
+            builder: (context, can, _) => TextButton(
+                onPressed: can ? controller.undo : null,
+                child: const Text('Undo')),
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: controller.canRedo,
+            builder: (context, can, _) => TextButton(
+                onPressed: can ? controller.redo : null,
+                child: const Text('Redo')),
+          ),
+          ValueListenableBuilder<Set<String>?>(
+            valueListenable: controller.mergeCandidate,
+            builder: (context, numbers, _) => TextButton(
+                onPressed: numbers == null ? null : () => mergeTables(numbers),
+                child: const Text('Merge')),
+          ),
+          ValueListenableBuilder<String?>(
+            valueListenable: controller.selectedGroup,
+            builder: (context, group, _) => TextButton(
+                onPressed: group == null ? null : () => splitGroup(group),
+                child: const Text('Split')),
+          ),
+          TextButton(onPressed: exportPng, child: const Text('Export')),
+          TextButton(onPressed: printFloor, child: const Text('Print')),
+        ],
+      );
+
+  /// Export and Print without the planner's dialogs.
+  Future<void> exportPng() async {
+    try {
+      final export = await controller.exportPlan(
+        const FloorPlanExportChoice(
+            format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
+        name: 'floor-1',
+      );
+      if (export != null) saveExport(export);
+    } catch (error) {
+      showProblem('$error');
+    }
+  }
+
+  Future<void> printFloor() async {
+    try {
+      await controller.printPlan(name: 'floor-1');
+    } catch (error) {
+      showProblem('$error');
+    }
+  }
+
+  /// The POS's own export dialog, at every Export of the planner: a PDF,
+  /// or a PNG at 300 dpi; null cancels.
+  Future<FloorPlanExportChoice?> askExport(
+          BuildContext context, FloorPlanExportChoice initial) =>
+      showDialog<FloorPlanExportChoice>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: const Text('Export'),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(
+                  context, initial.copyWith(format: FloorPlanExportFormat.pdf)),
+              child: const Text('PDF'),
+            ),
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(
+                  context,
+                  const FloorPlanExportChoice(
+                      format: FloorPlanExportFormat.png,
+                      dpi: FloorPlanExportDpi.d300)),
+              child: const Text('PNG, 300 dpi'),
+            ),
+          ],
+        ),
+      );
+
+  /// The manager arranges the tables but never turns them, and places the
+  /// round ones only.
+  static final arrangeTables = FloorPlanEditorCapabilities.tablesOnly.copyWith(
+    rotate: false,
+    symbolFilter: roundTables,
+  );
+
+  /// A static function, so the capabilities stay equal at every build.
+  static bool roundTables(FloorPlanSymbol symbol) =>
+      symbol.seats != null && symbol.key.contains('.round');
+
+  /// The POS's table, linked from the one table selected in the editor.
+  Widget? tableInspector(BuildContext context, FloorPlanTableDetail table) {
+    final number = table.table.number!;
+    return ListTile(
+      title: Text('POS table: ${table.data['id'] ?? 'none'}'),
+      trailing: TextButton(
+        onPressed: () => linkTable(number, 'pos-$number'),
+        child: const Text('Link'),
+      ),
+    );
+  }
+
+  /// The POS's own tool strip: the tools it offers, the active one marked.
+  Widget toolStrip() => ValueListenableBuilder<FloorPlanTool>(
+        valueListenable: controller.activeTool,
+        builder: (context, active, _) => Row(children: [
+          for (final tool in const [FloorPlanTool.select, FloorPlanTool.wall])
+            ChoiceChip(
+              label: Text(tool.name),
+              selected: tool == active,
+              onSelected: (_) => controller.selectTool(tool),
+            ),
+        ]),
+      );
+
+  /// The POS's own keys over the plan while it owns the keyboard: its
+  /// commands; never while a text field inside the view (a panel's, the
+  /// inspector's) has the focus, since its keys pass through here too.
+  KeyEventResult posKey(FocusNode node, KeyEvent event) {
+    if (!posOwnsKeys || event is! KeyDownEvent) return KeyEventResult.ignored;
+    final typing = FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<EditableText>() !=
+        null;
+    if (typing) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.delete) {
+      controller.deleteSelection();
+    } else if (key == LogicalKeyboardKey.escape) {
+      controller.selectTool(FloorPlanTool.select);
+    } else if (key == LogicalKeyboardKey.keyZ &&
+        HardwareKeyboard.instance.isControlPressed) {
+      controller.undo();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+
   void showOrders() {
     final numbers = controller.selectedTables.value;
     debugPrint('orders for tables $numbers');
@@ -520,51 +695,88 @@ class _FloorScreenState extends State<FloorScreen> {
           Switch(
               value: staffMayMoveTables,
               onChanged: (v) => setState(() => staffMayMoveTables = v)),
+          Switch(value: ownBar, onChanged: (v) => setState(() => ownBar = v)),
+          Switch(
+              value: editing == arrangeTables,
+              onChanged: (v) => setState(() => editing =
+                  v ? arrangeTables : FloorPlanEditorCapabilities.full)),
+          Switch(
+              value: posOwnsKeys,
+              onChanged: (v) => setState(() => posOwnsKeys = v)),
         ],
       ),
-      body: Column(
-        children: [
-          ValueListenableBuilder<int>(
-            valueListenable: controller.revision,
-            builder: (context, _, __) => Column(children: [
-              for (final warning in controller.numberingWarnings)
-                Text(describe(warning)),
-            ]),
-          ),
-          ValueListenableBuilder<String?>(
-            valueListenable: hovered,
-            builder: (context, number, _) =>
-                Text(number == null ? '' : 'Table $number'),
-          ),
-          Expanded(
-            child: Theme(
-              data: floorTheme(Theme.of(context)),
-              child: FloorPlanView(
-                controller: controller,
-                exportName: 'floor-1',
-                onExport: saveExport,
-                printer: const PrintingPagePrinter(),
-                onTableTap: openOrder,
-                onTableContextMenu: showTableMenu,
-                onGroupTap: (group, number) => openOrder(number),
-                onMergeRequested: mergeTables,
-                onSplitRequested: splitGroup,
-                serviceMoves: staffMayMoveTables,
-                longPress: FloorPlanLongPress.toggleSelection,
-                tableOverlayBuilder: tableBadge,
-                tableOverlayLayout: const FloorPlanOverlayLayout(
-                  anchor: Alignment.bottomCenter,
-                  detailBreakpoints: [0.05],
+      // The POS's own keys, over everything the screen shows.
+      body: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
+        onKeyEvent: posKey,
+        child: Column(
+          children: [
+            ValueListenableBuilder<int>(
+              valueListenable: controller.revision,
+              builder: (context, _, __) => Column(children: [
+                for (final warning in controller.numberingWarnings)
+                  Text(describe(warning)),
+              ]),
+            ),
+            ValueListenableBuilder<String?>(
+              valueListenable: hovered,
+              builder: (context, number, _) =>
+                  Text(number == null ? '' : 'Table $number'),
+            ),
+            ValueListenableBuilder<Set<String>>(
+              valueListenable: controller.editorSelectedTables,
+              builder: (context, numbers, _) =>
+                  Text(numbers.isEmpty ? '' : 'Arranging tables $numbers'),
+            ),
+            toolStrip(),
+            ValueListenableBuilder<FloorPlanMode>(
+              valueListenable: controller.mode,
+              builder: (context, mode, _) =>
+                  ownBar && mode == FloorPlanMode.selection
+                      ? posServiceBar()
+                      : const SizedBox.shrink(),
+            ),
+            Expanded(
+              child: Theme(
+                data: floorTheme(Theme.of(context)),
+                child: FloorPlanView(
+                  controller: controller,
+                  exportName: 'floor-1',
+                  onExport: saveExport,
+                  printer: const PrintingPagePrinter(),
+                  onTableTap: openOrder,
+                  onTableContextMenu: showTableMenu,
+                  onGroupTap: (group, number) => openOrder(number),
+                  onMergeRequested: mergeTables,
+                  onSplitRequested: splitGroup,
+                  serviceMoves: staffMayMoveTables,
+                  longPress: FloorPlanLongPress.toggleSelection,
+                  tableOverlayBuilder: tableBadge,
+                  tableOverlayLayout: const FloorPlanOverlayLayout(
+                    anchor: Alignment.bottomCenter,
+                    detailBreakpoints: [0.05],
+                  ),
+                  onTablesMoved: tablesMoved,
+                  onTableDoubleTap: openBill,
+                  onFloorTap: floorTapped,
+                  onTableHover: showHover,
+                  theme: const FloorPlanTheme(selectionWidth: 3),
+                  serviceBar: ownBar
+                      ? const FloorPlanServiceBar(visible: false)
+                      : serviceBar,
+                  editorBar: editorBar,
+                  editorCapabilities: editing,
+                  tableInspectorBuilder: tableInspector,
+                  onExportDialog: askExport,
+                  onPageFlowError: (error) => showProblem('$error'),
+                  shortcuts: !posOwnsKeys,
+                  autofocus: !posOwnsKeys,
                 ),
-                onTablesMoved: tablesMoved,
-                onTableDoubleTap: openBill,
-                onFloorTap: floorTapped,
-                onTableHover: showHover,
-                theme: const FloorPlanTheme(selectionWidth: 3),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

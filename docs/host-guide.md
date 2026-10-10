@@ -172,40 +172,55 @@ makes and owns its own.
 The view, with the host's options:
 
 ```dart
-            child: FloorPlanView(
-              controller: controller,
-              exportName: 'floor-1',
-              onExport: saveExport,
-              printer: const PrintingPagePrinter(),
-              onTableTap: openOrder,
-              onTableContextMenu: showTableMenu,
-              onGroupTap: (group, number) => openOrder(number),
-              onMergeRequested: mergeTables,
-              onSplitRequested: splitGroup,
-              serviceMoves: staffMayMoveTables,
-              longPress: FloorPlanLongPress.toggleSelection,
-              tableOverlayBuilder: tableBadge,
-              tableOverlayLayout: const FloorPlanOverlayLayout(
-                anchor: Alignment.bottomCenter,
-                detailBreakpoints: [0.05],
-              ),
-              onTablesMoved: tablesMoved,
-              onTableDoubleTap: openBill,
-              onFloorTap: floorTapped,
-              onTableHover: showHover,
-              theme: const FloorPlanTheme(selectionWidth: 3),
-            ),
+                child: FloorPlanView(
+                  controller: controller,
+                  exportName: 'floor-1',
+                  onExport: saveExport,
+                  printer: const PrintingPagePrinter(),
+                  onTableTap: openOrder,
+                  onTableContextMenu: showTableMenu,
+                  onGroupTap: (group, number) => openOrder(number),
+                  onMergeRequested: mergeTables,
+                  onSplitRequested: splitGroup,
+                  serviceMoves: staffMayMoveTables,
+                  longPress: FloorPlanLongPress.toggleSelection,
+                  tableOverlayBuilder: tableBadge,
+                  tableOverlayLayout: const FloorPlanOverlayLayout(
+                    anchor: Alignment.bottomCenter,
+                    detailBreakpoints: [0.05],
+                  ),
+                  onTablesMoved: tablesMoved,
+                  onTableDoubleTap: openBill,
+                  onFloorTap: floorTapped,
+                  onTableHover: showHover,
+                  theme: const FloorPlanTheme(selectionWidth: 3),
+                  serviceBar: ownBar
+                      ? const FloorPlanServiceBar(visible: false)
+                      : serviceBar,
+                  editorBar: editorBar,
+                  editorCapabilities: editing,
+                  tableInspectorBuilder: tableInspector,
+                  onExportDialog: askExport,
+                  onPageFlowError: (error) => showProblem('$error'),
+                  shortcuts: !posOwnsKeys,
+                  autofocus: !posOwnsKeys,
+                ),
 ```
 
 (`onLayoutChanged`, one call per service drag, still exists; for saving,
 `serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it. The
 two arguments after `longPress` draw your own widget on each table, and
-the last four report a drag's moved tables, a double tap, a tap on the
-floor and the table under the mouse, all *unreleased on `main`*: [Your
+the four after them report a drag's moved tables, a double tap, a tap on
+the floor and the table under the mouse, all *unreleased on `main`*: [Your
 own widgets on the tables](#your-own-widgets-on-the-tables), [Events and
 host data](#events-and-host-data). `theme`, this view's own look over
 your app theme's, is also *unreleased on `main`*: [§ 9](#9-themes). In
-the probe the view sits in a local `Theme`, § 9's recipe.)
+the probe the view sits in a local `Theme`, § 9's recipe. The last
+eight, *unreleased on `main`* too, are the host's own chrome and keys:
+`serviceBar`, `editorBar`, `onExportDialog` and `onPageFlowError` in
+[The bars](#the-bars); `editorCapabilities` and `tableInspectorBuilder`
+in [The editor's capabilities](#the-editors-capabilities); `shortcuts`
+and `autofocus` in [Keyboard and focus](#keyboard-and-focus).)
 
 Show a controller in **one `FloorPlanView` at a time**: a second view of
 the same controller mounted beside the first throws a `StateError`. Two
@@ -925,8 +940,8 @@ class _KioskFloorState extends State<KioskFloor> {
 you, a table can carry data of yours that is saved with the plan, and
 the controller reports what changes among the designed tables.
 
-**Four gestures.** The last four arguments of the view in
-[§ 4](#4-the-controller-and-the-view), each read at each call, each in
+**Four gestures.** The four view arguments after `tableOverlayLayout`
+in [§ 4](#4-the-controller-and-the-view), each read at each call, each in
 the selection mode only:
 
 - `onTablesMoved(moved)`: after a drag of tables ends, every table it
@@ -1174,11 +1189,495 @@ the designed tables added, removed and changed since the last report.
   `onFloorTap(world)` for a tap that misses every table, and
   `onTableHover(number)` for the mouse or a stylus over a table: [Events
   and host data](#events-and-host-data).
+- *Unreleased on `main`:* the host's own chrome and keys.
+  `serviceBar` and `editorBar` cut down, reorder, extend or hide the two
+  bars; `onExportDialog` is your export dialog at every Export;
+  `onPageFlowError` hears a failed export or print: [The
+  bars](#the-bars). `editorCapabilities` says what the editor lets its
+  user do, and `tableInspectorBuilder` adds your widget for the one table
+  selected: [The editor's capabilities](#the-editors-capabilities).
+  `shortcuts: false` gives the keys to you, and `autofocus: false` leaves
+  the focus where it is: [Keyboard and focus](#keyboard-and-focus).
 
 On the web the browser opens its own menu on a right click as well,
 unless you turn it off, app-wide, before `runApp` (the `main` of
 [§ 2](#2-fonts)): `if (kIsWeb) await
 BrowserContextMenu.disableContextMenu();`.
+
+### The bars
+
+*Unreleased on `main`.* The selection mode's bar and the editor's top
+bar are yours to cut down, reorder, extend or hide, and everything their
+buttons read and do is on the controller, for a bar of your own. With
+neither argument both bars are today's.
+
+**What a bar takes.** `serviceBar: FloorPlanServiceBar(…)` and
+`editorBar: FloorPlanEditorBar(…)`, each read at each build:
+
+- `visible` (true): false removes the bar. The canvas takes its height
+  and the plan stays where it is on the screen, from the first frame,
+  in both modes; the editor's tools stay in its left panel.
+- `actions`: the buttons shown, **in the order given**. The service
+  bar's are `FloorPlanServiceAction.undo`, `redo`, `merge`, `split`,
+  `export` and `print`; the editor's are `FloorPlanEditorAction.export`,
+  `print`, `undo`, `redo`, `snap` (the object snap's read-out, OSNAP)
+  and `zoom` (the zoom's read-out). Each enum is declared in today's
+  left-to-right order, and the default is all of it. Today's rules hold
+  inside the subset: Merge shows only with `onMergeRequested`, Split only
+  with `onSplitRequested`, Export only with `onExport`. In the service
+  bar, two shown buttons of different groups (Undo and Redo, Merge and
+  Split, Export and Print) stand 8 logical pixels apart. In the editor's,
+  the buttons lie at the left with 12 pixels between a file button
+  (Export, Print) and an edit button (Undo, Redo), the status line keeps
+  the middle, and the read-outs lie at the right, 16 pixels apart, in
+  the order given. An action listed twice is an `ArgumentError` naming
+  `actions` when the view builds.
+- `leading`, `trailing`: your widgets before and after the buttons (at
+  the bar's two ends, in the editor), laid out in the bar's row at its
+  height. Each needs a bounded width; a `Spacer` works.
+
+```dart
+  /// The service bar: Undo and Redo, then Print, with the floor's name
+  /// before them.
+  static const serviceBar = FloorPlanServiceBar(
+    actions: [
+      FloorPlanServiceAction.undo,
+      FloorPlanServiceAction.redo,
+      FloorPlanServiceAction.print,
+    ],
+    leading: [
+      Padding(
+        padding: EdgeInsets.symmetric(horizontal: 12),
+        child: Center(child: Text('Floor 1')),
+      ),
+    ],
+  );
+
+  /// The editor's bar: Undo, Redo and the zoom, nothing else.
+  static const editorBar = FloorPlanEditorBar(
+    actions: [
+      FloorPlanEditorAction.undo,
+      FloorPlanEditorAction.redo,
+      FloorPlanEditorAction.zoom,
+    ],
+  );
+```
+
+**`actions` shapes the bar, never the keys.** A chord stays bound
+whatever the bar shows: with Undo hidden, Ctrl+Z still undoes. To unbind
+keys, refuse the command in the editor's capabilities, or give the view
+`shortcuts: false` ([Keyboard and focus](#keyboard-and-focus)).
+
+**A field of yours in a bar** takes the focus and its keystrokes, but
+for the file chords. In the service bar, Undo and Redo (Ctrl+Z, Ctrl+Y,
+Ctrl+Shift+Z and their Cmd forms) stay in the field, but Export's Ctrl+E
+and Print's Ctrl+P (and Cmd+E, Cmd+P) still reach the plan. In the
+editor's bar, the tool letters, Undo, Redo and Escape stay in the field;
+the file chords and F3 still act on the plan.
+
+**A bar of your own.** Hide the planner's bar
+(`FloorPlanServiceBar(visible: false)`, as the view in
+[§ 4](#4-the-controller-and-the-view) does under `ownBar`) and build
+yours from the controller:
+
+- `canUndo` and `canRedo` (`ValueListenable<bool>`), `undo()` and
+  `redo()`. In the design mode `undo()` and `redo()` do nothing while
+  the editor's tool is part-way through a shape (a wall with its first
+  point placed), as the editor's own Undo does. `canUndo` and `canRedo`
+  keep reading the history, so your button may be enabled then, and a
+  press does nothing.
+- `mergeCandidate` (`ValueListenable<Set<String>?>`): the numbers the
+  planner's Merge would send: in the selection mode the selected tables
+  when they span two or more units (a unit is a group, or a table in no
+  group), so one table, two tables sharing a number or exactly one group
+  give null; always null in the design mode. It does not depend on
+  `onMergeRequested`. Split's candidate is `selectedGroup`.
+- `exportPlan(choice, {name})`, a `Future<FloorPlanExport?>`, and
+  `printPlan({printer, name})`, a `Future<bool>`: Export and Print
+  without any dialog of the planner's; they need no view shown.
+  `FloorPlanExportChoice(format:, dpi:)` takes `FloorPlanExportFormat.pdf`
+  or `png` and `FloorPlanExportDpi.d96`, `d150` or `d300` (`dpi.value` is
+  the number); `FloorPlanExportChoice.initial` is a PDF at 150 dpi, and
+  `copyWith` changes one field.
+  **One export or print at a time per controller**, the view's bars and
+  chords included: while one runs, `exportPlan` answers null and
+  `printPlan` false, and so they do for a plan without a page, for a plan
+  replaced while the bytes are made (a mode switch, `resetLayout()`,
+  `load`) and after `dispose()`. Pending input (a typed value) is settled
+  first. **An error completes the `Future`**: await them in a `try`.
+  `exportPlan` leaves the dialog's remembered choice as it is, and both
+  are allowed under every editor capability.
+- In the design mode: `activeTool` and `selectTool` ([The editor's
+  capabilities](#the-editors-capabilities)) and `deleteSelection()`
+  ([Keyboard and focus](#keyboard-and-focus)).
+
+```dart
+  /// The POS's own service bar, shown instead of the planner's: each
+  /// button enabled by the controller's state, each press a command.
+  Widget posServiceBar() => Row(
+        children: [
+          ValueListenableBuilder<bool>(
+            valueListenable: controller.canUndo,
+            builder: (context, can, _) => TextButton(
+                onPressed: can ? controller.undo : null,
+                child: const Text('Undo')),
+          ),
+          ValueListenableBuilder<bool>(
+            valueListenable: controller.canRedo,
+            builder: (context, can, _) => TextButton(
+                onPressed: can ? controller.redo : null,
+                child: const Text('Redo')),
+          ),
+          ValueListenableBuilder<Set<String>?>(
+            valueListenable: controller.mergeCandidate,
+            builder: (context, numbers, _) => TextButton(
+                onPressed: numbers == null ? null : () => mergeTables(numbers),
+                child: const Text('Merge')),
+          ),
+          ValueListenableBuilder<String?>(
+            valueListenable: controller.selectedGroup,
+            builder: (context, group, _) => TextButton(
+                onPressed: group == null ? null : () => splitGroup(group),
+                child: const Text('Split')),
+          ),
+          TextButton(onPressed: exportPng, child: const Text('Export')),
+          TextButton(onPressed: printFloor, child: const Text('Print')),
+        ],
+      );
+```
+
+```dart
+  /// Export and Print without the planner's dialogs.
+  Future<void> exportPng() async {
+    try {
+      final export = await controller.exportPlan(
+        const FloorPlanExportChoice(
+            format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
+        name: 'floor-1',
+      );
+      if (export != null) saveExport(export);
+    } catch (error) {
+      showProblem('$error');
+    }
+  }
+
+  Future<void> printFloor() async {
+    try {
+      await controller.printPlan(name: 'floor-1');
+    } catch (error) {
+      showProblem('$error');
+    }
+  }
+```
+
+Show it in the selection mode only; a `ValueListenableBuilder` on the
+mode keeps the tree around the view the same shape:
+
+```dart
+          ValueListenableBuilder<FloorPlanMode>(
+            valueListenable: controller.mode,
+            builder: (context, mode, _) =>
+                ownBar && mode == FloorPlanMode.selection
+                    ? posServiceBar()
+                    : const SizedBox.shrink(),
+          ),
+```
+
+**Your own export dialog.** `onExportDialog(context, initial)` replaces
+the planner's Material dialog at **every** Export: both bars, the
+editor's file commands, and Cmd+E and Ctrl+E, in both modes. `initial`
+is the choice last made in this controller's life (a PDF at 150 dpi at
+first); your answer is remembered as the next `initial`, and null
+cancels. Print has no dialog of the planner's: it opens the platform's
+print dialog, or calls your `printer`. Read at each Export.
+
+```dart
+  /// The POS's own export dialog, at every Export of the planner: a PDF,
+  /// or a PNG at 300 dpi; null cancels.
+  Future<FloorPlanExportChoice?> askExport(
+          BuildContext context, FloorPlanExportChoice initial) =>
+      showDialog<FloorPlanExportChoice>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: const Text('Export'),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(
+                  context, initial.copyWith(format: FloorPlanExportFormat.pdf)),
+              child: const Text('PDF'),
+            ),
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(
+                  context,
+                  const FloorPlanExportChoice(
+                      format: FloorPlanExportFormat.png,
+                      dpi: FloorPlanExportDpi.d300)),
+              child: const Text('PNG, 300 dpi'),
+            ),
+          ],
+        ),
+      );
+```
+
+**Errors.** `onPageFlowError(error)` hears an export or a print the
+*view* started that failed, your dialog's own error included, once; the
+flow then ends, and Export and Print are enabled again. Without it the
+error propagates as it always did, out of a `Future` the press drops: an
+uncaught asynchronous error. `exportPlan` and `printPlan` never report
+there: their `Future` carries the error.
+
+### The editor's capabilities
+
+*Unreleased on `main`.* `editorCapabilities`, a
+`FloorPlanEditorCapabilities`, says what the design mode's editor lets
+its user do. The default, `FloorPlanEditorCapabilities.full`, is today's
+editor; two profiles cut it down, `tablesOnly` for a user who places and
+arranges tables, `readOnly` for one who only looks:
+
+| Field | `full` | `tablesOnly` | `readOnly` |
+|---|---|---|---|
+| `tools` | all sixteen | `select`, `symbol` | `select` |
+| `symbolPalette`, `symbolFilter` | yes, none | yes, the tables (`seats != null`) | no, none |
+| `selectionPanel` | yes | yes | yes |
+| `layerPanel`, `pagePanel` | yes | no | yes (read only) |
+| `editLayers`, `editPage` | yes | no | no |
+| `selectTablesOnly` | no | yes | no |
+| `move`, `rotate`, `delete`, `renumber` | yes | yes | no |
+| `mirror`, `reshape`, `changeLayer` | yes | no | no |
+| `undo` | yes | yes | no |
+| `export`, `print`, `rulers`, `grid`, `snapping` | yes | yes | yes |
+
+Field by field:
+
+- `tools`, a `Set<FloorPlanTool>`: `select`, `line`, `polyline`,
+  `rectangle`, `box`, `wall`, `door`, `window`, `gap`, `room`,
+  `separator`, `dimension`, `circle`, `arc`, `text` (the palette's rows,
+  in its order) and `symbol` (the placement the Symbols tab arms). It
+  must hold `select`: an `ArgumentError` naming `tools` when the view
+  builds. A refused tool's row and letter are gone, and the letter
+  reaches your own bindings. The Fill row and its F show only while
+  Polyline, Rectangle or Circle is allowed; the symbol tool needs
+  `symbolPalette` too. A `tools` set given to `copyWith` is copied, and
+  the view takes its own copy of each value: changing your set
+  afterwards changes nothing until you hand the view a new value.
+- `symbolPalette`: the Symbols tab. `symbolFilter`, a
+  `bool Function(FloorPlanSymbol)`: the symbols it offers and searches.
+  A `FloorPlanSymbol` carries `key`, `name` (the library's stored English
+  name, the same in every UI language; the palette shows the UI's
+  words), `category`, `tags` and `seats` (null for what is not a table).
+  The filter is compared by `==`: a static function or a method
+  tear-off is equal to itself, while a closure written in `build` is a
+  new value at each build, which re-applies the capabilities (cheaply).
+  A filter that offers nothing leaves the gallery empty.
+- `selectionPanel`, `layerPanel`, `pagePanel`: the right column's
+  panels. A hidden panel keeps its state; with all three hidden there is
+  no column (and their state is not kept). `editLayers`, `editPage`:
+  refused, the Layer and Page panels' controls are disabled and their
+  values shown.
+- `selectTablesOnly`: a click and a rubber band select tables only. A
+  click picks a table by its top, else its box (a finger within its
+  reach), never one on a hidden or locked layer; a table inside a group
+  is no table here. Turned on at run time, it keeps only the tables of
+  the selection.
+- `move`, `rotate`, `mirror`, `reshape`, `delete`, `renumber`,
+  `changeLayer`: the selection's edits. A refused button or menu
+  (Mirror, ±90, a door's flips, the Size menu, the layer picker) is not
+  shown; a refused value field is shown read only. `reshape` covers an
+  object's own grips and fields (a box's, a wall's thickness and
+  justification, an opening's, a room's name, a dimension's kind) and
+  Change size. A drag whose flag is refused before the pointer lifts
+  executes nothing. `rotate` and `mirror` also bound the symbol tool: its
+  R and M, and the turn and mirror of the next placement.
+- `undo`, `export`, `print`: the bar's buttons **and** their chords.
+- `rulers`, `grid`, `snapping`: the drafting aids. `snapping: false`
+  turns object snap off for the editor's tools and drags and removes F3
+  and the OSNAP read-out; the user's own setting comes back with it.
+  Grid snap stays the page's setting.
+
+`copyWith` changes some fields of a profile. Its null keeps a field, the
+filter included: `copyWith(symbolFilter: null)` keeps the filter, so
+start from `full` for none.
+
+```dart
+  /// The manager arranges the tables but never turns them, and places the
+  /// round ones only.
+  static final arrangeTables = FloorPlanEditorCapabilities.tablesOnly.copyWith(
+    rotate: false,
+    symbolFilter: roundTables,
+  );
+
+  /// A static function, so the capabilities stay equal at every build.
+  static bool roundTables(FloorPlanSymbol symbol) =>
+      symbol.seats != null && symbol.key.contains('.round');
+```
+
+**At run time.** Hand the view another value, and it takes effect at
+that build:
+
+```dart
+          Switch(
+              value: editing == arrangeTables,
+              onChanged: (v) => setState(() => editing =
+                  v ? arrangeTables : FloorPlanEditorCapabilities.full)),
+```
+
+A tool the new value refuses falls back to Select, cancelling a shape
+it had begun; a hidden panel, the left tab and the symbol search keep
+their state. When the left column would hold the Select row alone
+(`readOnly`), it goes, and the canvas starts at the rulers; the plan
+stays where it is on the screen. Turning the rulers off or on at run
+time cancels a shape part-way drawn (its tool stays active).
+
+**A tool strip of your own.** `activeTool`, a
+`ValueListenable<FloorPlanTool>`, moves with a palette tap, a letter,
+Escape, `selectTool`, a fallback and a mode switch; it reads `select` in
+the selection mode and while no editor is shown. A change the editor
+makes while the view builds (a fallback, a new plan's editor) is
+announced after that frame. `selectTool(tool)` activates a tool as a
+palette tap does and answers whether it is now active: false in the
+selection mode, with no editor shown, and for a refused tool.
+
+```dart
+  /// The POS's own tool strip: the tools it offers, the active one marked.
+  Widget toolStrip() => ValueListenableBuilder<FloorPlanTool>(
+        valueListenable: controller.activeTool,
+        builder: (context, active, _) => Row(children: [
+          for (final tool in const [FloorPlanTool.select, FloorPlanTool.wall])
+            ChoiceChip(
+              label: Text(tool.name),
+              selected: tool == active,
+              onSelected: (_) => controller.selectTool(tool),
+            ),
+        ]),
+      );
+```
+
+**The table inspector.** `tableInspectorBuilder(context, table)` puts
+your widget in the editor's Selection panel, below the planner's own
+fields, while **exactly one numbered table** is selected: the selection
+is one object, and it is a numbered table at the plan's root. Two tables
+sharing a number, a table with a wall, a table inside a group and an
+unnumbered table show none. `table` is the table's
+`FloorPlanTableDetail`, its `data` included; null from the builder shows
+nothing. It is called when the selection becomes such a table, at each
+change of the plan (an edit, an undo: the detail is read afresh) and
+each time you rebuild the view, never on pan or zoom. It is the design
+mode's only, and absent while the Selection panel is hidden, so a widget
+of yours there keeps no state across a hide. A field in it takes its
+keystrokes. Link the table to your record there, with `setTableData`:
+
+```dart
+  /// The POS's table, linked from the one table selected in the editor.
+  Widget? tableInspector(BuildContext context, FloorPlanTableDetail table) {
+    final number = table.table.number!;
+    return ListTile(
+      title: Text('POS table: ${table.data['id'] ?? 'none'}'),
+      trailing: TextButton(
+        onPressed: () => linkTable(number, 'pos-$number'),
+        child: const Text('Link'),
+      ),
+    );
+  }
+```
+
+**A side panel of your own** instead: `editorSelectedTables`, a
+`ValueListenable<Set<String>>`, holds the numbers selected in the
+editor, and is empty in the selection mode.
+
+```dart
+          ValueListenableBuilder<Set<String>>(
+            valueListenable: controller.editorSelectedTables,
+            builder: (context, numbers, _) =>
+                Text(numbers.isEmpty ? '' : 'Arranging tables $numbers'),
+          ),
+```
+
+**Material inside the editor.** The editor's panels, menus and dialogs
+are Material widgets and follow the ambient Material `Theme`
+([§ 9](#9-themes)'s local `Theme`); there is no way to replace them.
+`tablesOnly` hides the menus (the layer picker, the Size menu, the Layer
+and Page panels), so under it the Selection panel shows fields and
+buttons only.
+
+**Limits.** While a symbol is armed, a refused R (under `rotate: false`)
+or M (under `mirror: false`) is any other key and reaches the next
+binding: under a value that also allows the Rectangle tool (R) or the
+Room tool (M), it switches to that tool, as W switches to Wall. None of
+the three profiles allows that. `selectTool(FloorPlanTool.symbol)` only brings back the symbol
+last armed from the Symbols tab, while it is still offered: you cannot
+choose a symbol through it.
+
+### Keyboard and focus
+
+*Unreleased on `main`.* For a host whose own shortcuts own the keyboard:
+
+- `shortcuts: false` unbinds, in **both** modes, every key the planner
+  binds while no gesture runs, so those keys reach your own bindings:
+  the selection mode's Undo, Redo, Export and Print chords and its
+  Escape (which clears the selection); the editor's command chords, its
+  tool letters, F3, F, Escape, and the select tool's Delete, Backspace
+  and Escape. A gesture's own keys stay: a drag's Escape and Shift, a
+  drawing tool's Escape and Enter while it draws, the symbol tool's R
+  and M while a symbol is armed. Read at each build and each key.
+- The commands stay callable: `undo()`, `redo()`, `exportPlan`,
+  `printPlan`, `selectTool`, and **`deleteSelection()`**, which deletes
+  the editor's selection exactly as the Delete key does: one undo step,
+  a deleted table's data gone with it and back with its undo. Pending
+  input is settled first. It answers whether anything was deleted: false
+  in the selection mode, with no editor shown, with nothing selected,
+  under `delete: false` (`readOnly`), when the plan's own permissions
+  refuse every selected object, and while a drag or a shape is part-way.
+- `autofocus: false`: the view does not take the focus when it is
+  mounted, at start or when it is built afresh (a mode switch,
+  `resetLayout()`, `load`). It is read at each mount, so a change takes
+  effect at the next one. Flutter's autofocus acts only while nothing in
+  the focus scope has the focus, so even with `true` the view never
+  takes it from your field; `false` matters when nothing has it, at
+  start and after the plan itself had it and was built afresh. A press
+  on the canvas takes the focus either way.
+
+```dart
+  /// The POS's own keys over the plan while it owns the keyboard: its
+  /// commands; never while a text field inside the view (a panel's, the
+  /// inspector's) has the focus, since its keys pass through here too.
+  KeyEventResult posKey(FocusNode node, KeyEvent event) {
+    if (!posOwnsKeys || event is! KeyDownEvent) return KeyEventResult.ignored;
+    final typing = FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<EditableText>() !=
+        null;
+    if (typing) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.delete) {
+      controller.deleteSelection();
+    } else if (key == LogicalKeyboardKey.escape) {
+      controller.selectTool(FloorPlanTool.select);
+    } else if (key == LogicalKeyboardKey.keyZ &&
+        HardwareKeyboard.instance.isControlPressed) {
+      controller.undo();
+    } else {
+      return KeyEventResult.ignored;
+    }
+    return KeyEventResult.handled;
+  }
+```
+
+The probe puts `posKey` on a `Focus(canRequestFocus: false, skipTraversal:
+true, onKeyEvent: posKey, …)` around its screen's body, so the keys reach
+it from the plan and from the screen's own buttons.
+
+**Your keys above the view see the planner's fields too.** A key typed
+into a panel's field (a table number, a page scale) or into your
+inspector passes through your bindings on its way up, so skip them
+while a text field has the focus, as `posKey` does; otherwise your
+Backspace deletes tables while staff type.
+
+**A field of yours beside the plan.** A Material `TextField` loses the
+focus on a mouse press outside it (on a desktop and on the web), after
+the canvas has asked for it: one press on the plan right after typing
+leaves the focus with neither, and the planner's keys reach nothing
+until the next press. A press on one of your buttons unfocuses the field
+too. Give the field `onTapOutside: (_) {}` to keep the focus there until
+the plan or another field takes it.
 
 ## 9. Themes
 
@@ -1443,6 +1942,16 @@ a desktop.
 
 - **Handles.** A table's identity is its number. The plan's internal
   handles are not API.
+- **Capabilities are not a security boundary** *(unreleased on
+  `main`)*. `editorCapabilities` decides what the editor offers its
+  user, nothing more: your own calls (`setTableData`, `undo()`, `load`,
+  `exportPlan`, `printPlan`) stay allowed under every value, and the
+  value is never stored with the plan. Decide who may change a floor in
+  your own application, and check it where the plan is stored.
+- **With `shortcuts: false` nothing deletes in the editor** *(unreleased
+  on `main`)* but your own call: the Delete and Backspace keys are
+  unbound and the planner has no Delete button, so bind a key or a
+  button of yours to `deleteSelection()`.
 - **The service layout's text.** It names tables by internal handles
   and belongs to the one plan it was saved from: store it as it is,
   never parse, edit or move it to another plan.
