@@ -212,18 +212,20 @@ one's spec, plan and results.
 - **A removed node takes its components** (the host embedding API
   spec's O-8): spec
   [2026-10-09-node-components-on-delete-design.md](docs/superpowers/specs/2026-10-09-node-components-on-delete-design.md),
-  **revision 1, not yet reviewed or approved**; no plan. `RemoveNodeCommand`
+  **revision 2, not yet reviewed or approved**; no plan. `RemoveNodeCommand`
   leaves a deleted node's components on its dead handle in the saved
   plan; the spec makes the delete take them and undo restore them,
-  as `RemoveDefinitionCommand` does. Written at `85905bd` (0.3.0) on
-  `claude/dazzling-easley-7e2a09`, rebased onto `6326e87` and merged
-  into `main` as docs only by the human through
+  as `RemoveDefinitionCommand` does. Revision 1 was written at `85905bd`
+  (0.3.0) and merged into `main` as docs only by the human through
   [PR #10](https://github.com/a-urel/jet-cad/pull/10) at `b5bef3a`
-  (2026-10-10); the branch is deleted. **Before review:** its Facts
-  (F-1 to F-8) cite files and lines at `85905bd` and need re-reading at
-  0.4.0, and D-7 still treats the host embedding API as another branch:
-  it shipped in 0.4.0, so Slice 2's expander on `TableLabelSystem` (E-6)
-  and M-H27 are in `main` and fall to this work.
+  (2026-10-10). Revision 2 (branch `spec/node-components-on-delete`, cut
+  from `main` at `e281372`) re-reads every fact at 0.4.0 and re-runs the
+  spike there: `AddNodeCommand` checks the snapshot before `addNode`
+  instead of rolling back (the O-10 index made the rollback inexact),
+  and 0.4.0's table-data expander (`_detachFor`, E-6) goes, since it never
+  fires after the fix; TD7 and HD12 stay and kill M-1. **Next:** an
+  independent review of revision 2, then the human's approval, then a
+  plan.
 
 ## Owed to the human
 
