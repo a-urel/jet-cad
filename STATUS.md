@@ -149,9 +149,9 @@ one's spec, plan and results.
   results [2026-10-10-undo-node-index-results.md](docs/superpowers/notes/2026-10-10-undo-node-index-results.md)
   (independent review *Approve with fixes*, F-1 to F-5 applied). Run
   natively in one session: no SDD ledger. Unreleased (CHANGELOG).
-  **Owed once Slice 4 is on `main`:** its DS1 and DS2
-  (`keyboard_focus_test.dart`) compare the undone encoding with the one
-  before the delete, not around it.
+  Slice 4's DS1 and DS2 (`keyboard_focus_test.dart`) now compare the
+  undone encoding with the one before the delete, on Slice 4's branch
+  (`a5b1ead`).
 - **O-11, a table whose corners are not finite** (the human, 2026-10-10),
   merged into `main` at `aed5c4d` on the human's *"evet, main'e merge
   et"*, from `fix/non-finite-corners`: selecting such a table (the embedding
@@ -165,10 +165,9 @@ one's spec, plan and results.
   M-O11i, each killed; an independent review (*Approve with fixes*: the
   NaN hit test, the mutant names, the CHANGELOG's wording), applied in
   `efbb4ef`. Run natively in one session: no SDD ledger; the record is
-  the spec's O-11. Unreleased (CHANGELOG). **Owed once Slice 4 is on
-  `main`:** its `page_flows_test.dart` drops `finitePlanJson()` for
-  `embeddingPlanJson()` (the fixture now takes `tables:`), a proposed
-  session's task. Left as found: `CanvasDrawSink.point` carries a
+  the spec's O-11. Unreleased (CHANGELOG). Slice 4's
+  `page_flows_test.dart` dropped `finitePlanJson()` for
+  `embeddingPlanJson()` on Slice 4's branch (`503c504`). Left as found: `CanvasDrawSink.point` carries a
   non-finite residual by hand into `drawRect` (unreachable for table 9,
   whose box is culled).
 
@@ -180,8 +179,16 @@ capabilities), started on the human's *"tamam, Dilim 4 ile devam et"*
 [2026-10-09-embedding-slice-4.md](docs/superpowers/plans/2026-10-09-embedding-slice-4.md)
 (seven tasks; the spec's points S-1 to S-24 ruled, S-16 by adding
 `deleteSelection()`). Ledger:
-`.superpowers/sdd/2026-10-09-host-embedding-api/` (`s4-…`). **Resume
-point:** Task 1 (page flows without their dialogs).
+`.superpowers/sdd/2026-10-09-host-embedding-api/` (`s4-…`). Tasks 1–7
+done (`ffe0b9c` … `24af8f7`), the reviews of Tasks 1–6 applied, Task 7's
+finding 1 fixed (`8f45473`). `main` merged in at `263e2ca` (O-10, O-11),
+and the test changes those two owed Slice 4 made: DS1 and DS2 compare the
+undone plan with the one before the delete (`a5b1ead`), and the page
+flows print and export the whole embedding fixture (`503c504`). Gates
+on the merged tip: every standing set exact but two macOS text-metric
+differences recorded in O-10's results note. **Resume point:** Task 7's
+review, then the whole-range final review, the results note and the exit
+gate.
 
 **Fixed on this branch: removing a design view while a pointer hovers**
 (Slice 3's results, "Found, not fixed"). The interaction layer's
@@ -240,8 +247,8 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 **Next: Slice 4** of the host embedding API (the bars, keyboard, editor
 capabilities), started on the human's word; a release carrying Slices
 1–3 (0.4.0: **schema 9**, every terminal that shares stored plans moves
-together) is the human's call. O-10 and O-11 are merged; each leaves
-a test change owed to Slice 4 (above). Removing a design view while a
+together) is the human's call. O-10 and O-11 are merged, and the
+test changes each owed Slice 4 are made on its branch (above). Removing a design view while a
 pointer hovers a line no longer throws: fixed by Slice 4's selection
 relay and pinned (see In flight). Monépro owes
 Q-H3 and its real shadcn tokens, and can name `controller.camera`,
