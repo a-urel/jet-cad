@@ -263,9 +263,11 @@ void main() {
   });
 
   // Host embedding API spec, invariant 1 (P-1): the host-probe job also
-  // analyses the 0.3.0 probe against the commit under test, after the
-  // probe is resolved there, from a checkout that has the tag.
-  test('SC18 the host-probe job analyses the 0.3.0 probe, with the tags', () {
+  // analyses each released probe (0.3.0, 0.4.0) against the commit under
+  // test, after the probe is resolved there, from a checkout that has the
+  // tags.
+  test('SC18 the host-probe job analyses the released probes, with the tags',
+      () {
     final from = workflow.indexOf('\n  host-probe:\n');
     expect(from, isNot(-1), reason: 'premise: the job');
     final next = RegExp(r'^  \S', multiLine: true)
@@ -280,9 +282,12 @@ void main() {
             '          fetch-depth: 0\n'),
         reason: 'the whole history: the tag is in the clone');
     final probe = job.indexOf('run: tool/ci/host_probe.sh ');
-    final old = job.indexOf('run: tool/ci/old_host_probe.sh v0.3.0\n');
     expect(probe, isNot(-1));
-    expect(old, greaterThan(probe), reason: 'after the probe is resolved');
+    for (final tag in ['v0.3.0', 'v0.4.0']) {
+      final old = job.indexOf('run: tool/ci/old_host_probe.sh $tag\n');
+      expect(old, greaterThan(probe),
+          reason: '$tag, after the probe is resolved');
+    }
   });
 
   // Slice 2's final review F-2: the planner's pick allocation test reads
