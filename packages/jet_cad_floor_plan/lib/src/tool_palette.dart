@@ -40,10 +40,16 @@ class ToolPalette extends StatelessWidget {
     required this.geometryAllowed,
     required this.onSelect,
     this.showFill = true,
+    this.toolChanges,
   });
 
   final List<PaletteEntry> entries;
   final ToolController tools;
+
+  /// What the rows rebuild on for the active tool: [tools] when null. The
+  /// shell passes a relay of it that holds a notification sent during a
+  /// build until after the frame (Task 4 review R-2).
+  final Listenable? toolChanges;
   final ValueNotifier<bool> fill;
   final bool geometryAllowed;
   final void Function(Tool tool) onSelect;
@@ -60,7 +66,7 @@ class ToolPalette extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: ListenableBuilder(
-            listenable: Listenable.merge([tools, fill]),
+            listenable: Listenable.merge([toolChanges ?? tools, fill]),
             builder: (context, _) {
               final strings = FloorPlanStrings.of(context);
               return ListView(

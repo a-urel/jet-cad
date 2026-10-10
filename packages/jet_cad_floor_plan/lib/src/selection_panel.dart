@@ -76,6 +76,7 @@ class SelectionPanel extends StatefulWidget {
       {super.key,
       required this.document,
       required this.selection,
+      this.selectionChanges,
       this.tools,
       this.wallTool,
       this.wallSettings,
@@ -85,6 +86,12 @@ class SelectionPanel extends StatefulWidget {
 
   final DraftDocument document;
   final SelectionController selection;
+
+  /// What the panel re-reads [selection] on: [selection] when null. The
+  /// shell passes a relay of it that holds a notification sent during a
+  /// build until after the frame (Task 4 review R-2: a hover cleared as
+  /// the canvas is re-parented).
+  final Listenable? selectionChanges;
 
   /// The shell's tool controller and its Wall tool: while [wallTool] is
   /// active, the Wall section edits [wallSettings]. All three or none.
@@ -241,7 +248,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   @override
   void initState() {
     super.initState();
-    widget.selection.addListener(_sync);
+    (widget.selectionChanges ?? widget.selection).addListener(_sync);
     _changes = widget.document.commands.changes.listen((_) {
       _areaRoom = null;
       _valueDim = null;
@@ -264,7 +271,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
 
   @override
   void dispose() {
-    widget.selection.removeListener(_sync);
+    (widget.selectionChanges ?? widget.selection).removeListener(_sync);
     _changes.cancel();
     widget.tools?.removeListener(_onTools);
     widget.symbols?.removeListener(_sync);

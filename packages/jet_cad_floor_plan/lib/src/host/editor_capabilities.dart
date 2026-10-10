@@ -83,14 +83,19 @@ final class FloorPlanSymbol {
 }
 
 /// What the editor (the design mode) lets its user do (host embedding API
-/// spec C-5). [full], the default, is today's editor; [tablesOnly] places,
-/// moves, turns, renumbers and deletes tables and nothing else; [readOnly]
-/// shows the plan, its panels read-only, with pan and zoom.
+/// spec C-5). [full], the default, is today's editor; [tablesOnly] is the
+/// profile for a host whose user places and arranges tables, [readOnly]
+/// for one whose user only looks at the plan (spec S-12 lists their
+/// fields).
 ///
 /// - [tools]: the tools offered, as palette rows, letters and
 ///   `FloorPlanController.selectTool`; it must hold [FloorPlanTool.select]
 ///   (an [ArgumentError] naming `tools` when the view builds). The symbol
-///   tool needs [symbolPalette] too.
+///   tool needs [symbolPalette] too. [copyWith] copies the set it is given,
+///   unmodifiable; the `const` constructor cannot copy, so it keeps the set
+///   as given, and the view takes its own copy of each value it is handed:
+///   a host that changes its set afterwards changes nothing the editor
+///   has, until it hands the view a new value.
 /// - [symbolPalette]: the Symbols tab; [symbolFilter], when given, the
 ///   symbols it offers and searches. It is compared by `==`: a closure
 ///   written in `build` is a new value at each build, which re-applies the
@@ -101,9 +106,11 @@ final class FloorPlanSymbol {
 ///   edit.
 /// - [selectTablesOnly]: a click and a rubber band select tables only.
 /// - [move], [rotate], [mirror], [reshape], [delete], [renumber],
-///   [changeLayer]: the selection's edits, by every path (grips, keys,
-///   panel fields). [reshape] also governs an object's own fields (a box's,
-///   a wall's, an opening's, a room's, a dimension's) and Change size.
+///   [changeLayer]: which of the selection's edits the user may make;
+///   [reshape] names an object's own fields too (a box's, a wall's, an
+///   opening's, a room's, a dimension's) and Change size. [rotate] and
+///   [mirror] also bound the symbol tool: its `R` and `M`, and the turn and
+///   mirror of a placement, which are not used while refused.
 /// - [undo] (Undo and Redo), [export], [print]: the top bar's buttons and
 ///   their chords.
 /// - [rulers], [grid]: the drafting aids; [snapping]: object snap for the
@@ -165,8 +172,8 @@ final class FloorPlanEditorCapabilities {
     changeLayer: false,
   );
 
-  /// Read only (spec C-5, S-12): select, pan and zoom; the panels shown
-  /// read-only; every edit flag false. Export, print, the rulers, the grid
+  /// Read only (spec C-5, S-12): select, pan and zoom; the panels shown;
+  /// every edit flag false. Export, print, the rulers, the grid
   /// and snapping stay: none is an edit.
   static const FloorPlanEditorCapabilities readOnly =
       FloorPlanEditorCapabilities(
@@ -219,7 +226,7 @@ final class FloorPlanEditorCapabilities {
 
   /// A copy with the given fields replaced; a null argument keeps the
   /// field, so `copyWith(symbolFilter: null)` keeps the filter: start from
-  /// [full] to have none.
+  /// [full] to have none. A given [tools] is copied, unmodifiable.
   FloorPlanEditorCapabilities copyWith({
     Set<FloorPlanTool>? tools,
     bool? symbolPalette,
@@ -245,7 +252,7 @@ final class FloorPlanEditorCapabilities {
     bool? snapping,
   }) =>
       FloorPlanEditorCapabilities(
-        tools: tools ?? this.tools,
+        tools: tools == null ? this.tools : Set.unmodifiable(tools),
         symbolPalette: symbolPalette ?? this.symbolPalette,
         symbolFilter: symbolFilter ?? this.symbolFilter,
         selectionPanel: selectionPanel ?? this.selectionPanel,

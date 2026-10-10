@@ -286,7 +286,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
       case FloorPlanMode.selection:
         return Offset(0, widget.serviceBar.visible ? _serviceBarHeight : 0);
       case FloorPlanMode.design:
-        final caps = widget.editorCapabilities;
+        final caps = _editorCapabilities;
         final ruler = caps.rulers ? kRulerThickness : 0.0;
         // A view always gives the editor a symbol library.
         final left = leftColumnShown(caps, symbols: true) ? 240.0 : 0.0;
@@ -309,6 +309,24 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     }
   }
 
+  /// [FloorPlanView.editorCapabilities] as last handed in, and the view's
+  /// own copy of it (Task 4 review R-4): the `const` constructor keeps a
+  /// host's set as given, so the editor reads a copy, taken once per value
+  /// handed in. A host changing its set afterwards changes nothing here; a
+  /// new value is compared with the copy of the last, so a tool it no
+  /// longer allows falls back.
+  FloorPlanEditorCapabilities? _givenCapabilities;
+  late FloorPlanEditorCapabilities _capabilitiesCopy;
+
+  FloorPlanEditorCapabilities get _editorCapabilities {
+    final given = widget.editorCapabilities;
+    if (!identical(given, _givenCapabilities)) {
+      _givenCapabilities = given;
+      _capabilitiesCopy = given.copyWith(tools: given.tools);
+    }
+    return _capabilitiesCopy;
+  }
+
   /// The mode the last build showed; null before the first.
   FloorPlanMode? _shown;
 
@@ -325,7 +343,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   /// C-1, C-2, C-5), the shown canvas is measured again: the plan is
   /// unchanged, so [_measureAfterFrame] would not.
   void _measureChrome() {
-    final caps = widget.editorCapabilities;
+    final caps = _editorCapabilities;
     final chrome = (
       widget.serviceBar.visible,
       widget.editorBar.visible,
@@ -566,7 +584,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           thumbnails: c.thumbnails,
           tableOverlays: designOverlays,
           editorBar: widget.editorBar,
-          capabilities: widget.editorCapabilities,
+          capabilities: _editorCapabilities,
           onTools: c.registerTools,
           onToolChanged: c.toolChanged,
         );

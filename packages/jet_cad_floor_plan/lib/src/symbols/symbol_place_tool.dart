@@ -87,11 +87,15 @@ class SymbolPlaceTool extends Tool {
   /// Whether `R` and `Shift+R` turn the next placement (host embedding API
   /// spec S-9 b, the host's `rotate`), read at each key; null allows. A
   /// refused key is any other key: it bubbles while armed and is swallowed
-  /// mid-press.
+  /// mid-press. It also bounds the placement: while it refuses, the ghost,
+  /// the wall attachment and a placement use no turn ([quarterTurns] keeps
+  /// the stored one, which returns with the flag; Task 4 review R-1).
   final bool Function()? canRotate;
 
   /// Whether `M` mirrors the next placement (spec S-9 b, the host's
-  /// `mirror`), read at each key as [canRotate]; null allows.
+  /// `mirror`), read at each key and at each use as [canRotate]; null
+  /// allows. While it refuses, nothing is placed mirrored, whatever was
+  /// stored while it allowed ([mirrored]).
   final bool Function()? canMirror;
 
   final DragPoint _at = DragPoint();
@@ -192,11 +196,34 @@ class SymbolPlaceTool extends Tool {
   @visibleForTesting
   WallAttachment? get ghostAttachment => _attached;
 
-  /// The rotation, in counter-clockwise quarter turns, of the next placement.
+  /// The rotation, in counter-clockwise quarter turns, of the next placement
+  /// as stored; a placement uses it only while [canRotate] allows.
   int get quarterTurns => _quarterTurns;
 
-  /// Whether the next placement is mirrored.
+  /// Whether the next placement is mirrored, as stored; a placement uses it
+  /// only while [canMirror] allows.
   bool get mirrored => _mirrored;
+
+  /// The turns every use reads (the ghost, the attachment, a placement):
+  /// the stored ones while [canRotate] allows them, else none (spec S-9 b;
+  /// Task 4 review R-1).
+  int get _turns => (canRotate?.call() ?? true) ? _quarterTurns : 0;
+
+  /// The mirror every use reads: the stored one while [canMirror] allows
+  /// it, else none.
+  bool get _mirror => _mirrored && (canMirror?.call() ?? true);
+
+  /// The host's gates may have changed (spec S-9 b): the ghost and its
+  /// wall attachment are computed again with the turn and the mirror now
+  /// allowed, so a ghost never shows what a click would not place. The
+  /// shell calls it when its capabilities change; nothing happens unarmed.
+  void gatesChanged() {
+    if (armed.value == null) return;
+    final ctx = _listening ?? _context;
+    if (ctx != null) _syncAttachment(ctx);
+    _syncPlacement();
+    notifyListeners();
+  }
 
   void _syncPath() {
     final entry = armed.value;
@@ -239,8 +266,8 @@ class SymbolPlaceTool extends Tool {
             : placementTransform(
                 at: _at.point,
                 basePoint: entry.definition.basePoint,
-                quarterTurns: _quarterTurns,
-                mirrored: _mirrored);
+                quarterTurns: _turns,
+                mirrored: _mirror);
   }
 
   /// Spec 09c D6: [_attached] for the last query's raw point, object snap
@@ -260,7 +287,7 @@ class SymbolPlaceTool extends Tool {
     if (box == null) return;
     _attached = faces.attach(
         ctx.document, box, _raw, kWallAttachPixels / _rawScale,
-        mirrored: _mirrored, edgeCaptureWorld: kSnapAperturePixels / _rawScale);
+        mirrored: _mirror, edgeCaptureWorld: kSnapAperturePixels / _rawScale);
   }
 
   /// F-5: object snap at `kSnapAperturePixels / scale`, else the grid, else
@@ -455,8 +482,8 @@ class SymbolPlaceTool extends Tool {
     if (!needs.every(ctx.document.commands.permissions.allows)) return;
     ctx.execute(placeSymbol(ctx.document, entry,
         at: _at.point,
-        quarterTurns: _quarterTurns,
-        mirrored: _mirrored,
+        quarterTurns: _turns,
+        mirrored: _mirror,
         transform: _attached?.transform));
     faces?.bands.invalidate();
   }

@@ -378,4 +378,72 @@ void main() {
     expect(Caps.tablesOnly.symbolFilter!(t), isTrue);
     expect(Caps.tablesOnly.symbolFilter!(c), isFalse);
   });
+
+  // Task 4 review R-3 (O3): EC3's three profiles share `rulers == grid`
+  // (and other neighbours), so a field copied from its neighbour went
+  // unseen. Two bases alternate every flag, built by the constructor, so
+  // each flag differs from both of its neighbours in each.
+  test(
+      'EC3b copyWith on two bases whose flags alternate: no argument keeps '
+      'every field, each flag replaces that field alone', () {
+    Caps alternating(bool first) {
+      final v = [for (var i = 0; i < kFlagNames.length; i++) i.isEven == first];
+      return Caps(
+        tools: const {Tool.select, Tool.door, Tool.symbol},
+        symbolFilter: anyFour,
+        symbolPalette: v[0],
+        selectionPanel: v[1],
+        layerPanel: v[2],
+        pagePanel: v[3],
+        editLayers: v[4],
+        editPage: v[5],
+        selectTablesOnly: v[6],
+        move: v[7],
+        rotate: v[8],
+        mirror: v[9],
+        reshape: v[10],
+        delete: v[11],
+        renumber: v[12],
+        changeLayer: v[13],
+        undo: v[14],
+        export: v[15],
+        print: v[16],
+        rulers: v[17],
+        grid: v[18],
+        snapping: v[19],
+      );
+    }
+
+    for (final first in [true, false]) {
+      final base = alternating(first);
+      final flags = flagsOf(base);
+      // The premise: the constructor took each value, and they alternate.
+      for (final (i, name) in kFlagNames.indexed) {
+        expect(flags[name], i.isEven == first, reason: name);
+      }
+      expect(base.rulers, isNot(base.grid));
+      final kept = base.copyWith();
+      expect(flagsOf(kept), flags, reason: 'copyWith() on $base');
+      expect(kept.tools, {Tool.select, Tool.door, Tool.symbol});
+      expect(kept.symbolFilter, same(anyFour));
+      for (final name in kFlagNames) {
+        expect(flagsOf(copyFlag(base, name, !flags[name]!)),
+            {...flags, name: !flags[name]!},
+            reason: '$name on $base');
+      }
+    }
+  });
+
+  // Task 4 review R-4: a host's set is copied, so changing it afterwards
+  // changes nothing.
+  test('copyWith copies the tools it is given, unmodifiable', () {
+    final mine = {Tool.select, Tool.wall};
+    final caps = Caps.full.copyWith(tools: mine);
+    mine
+      ..remove(Tool.wall)
+      ..add(Tool.line);
+    expect(caps.tools, {Tool.select, Tool.wall});
+    expect(() => caps.tools.add(Tool.door), throwsUnsupportedError);
+    expect(caps, Caps.full.copyWith(tools: {Tool.wall, Tool.select}));
+  });
 }

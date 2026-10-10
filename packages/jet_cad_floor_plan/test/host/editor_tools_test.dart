@@ -751,17 +751,26 @@ void main() {
       expect(det(m.transform), lessThan(0));
       await press(tester, LogicalKeyboardKey.keyM);
 
-      // Without rotate, R is any other key: it reaches the host and the
-      // next placement keeps its turn.
+      // Without rotate, R is any other key: it reaches the host, and the
+      // turn stored while rotate was allowed is not used (Task 4 review
+      // R-1): the next placement is unturned.
       h.caps.value = Caps.tablesOnly.copyWith(rotate: false);
       await tester.pump();
       expect(c.activeTool.value, FloorPlanTool.symbol);
       await press(tester, LogicalKeyboardKey.keyR);
       expect(h.reached['rectangle'], 1);
       final r = await place(Vector2(25300, 13600));
-      expect(r.transform.a, closeTo(0, 1e-9));
-      expect(r.transform.b, closeTo(1, 1e-9));
+      expect(r.transform.a, closeTo(1, 1e-9));
+      expect(r.transform.b, closeTo(0, 1e-9));
       expect(det(r.transform), greaterThan(0));
+
+      // rotate again: the stored turn returns with it.
+      h.caps.value = Caps.tablesOnly;
+      await tester.pump();
+      final back = await place(Vector2(25300, 14200));
+      expect(back.transform.a, closeTo(0, 1e-9));
+      expect(back.transform.b, closeTo(1, 1e-9));
+      expect(det(back.transform), greaterThan(0));
     });
   });
 

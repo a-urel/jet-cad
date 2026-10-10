@@ -58,7 +58,8 @@ DraftDocument symbolThumbnailDocument(
 ///   symbols", a clear button keyed `symbol-search-clear` while it is not
 ///   empty), then the [SymbolGallery] over [searchSymbols]. An empty result
 ///   shows `No symbols match "<query>"` (key `symbol-search-empty`) and a
-///   Clear button (key `symbol-search-clear-empty`).
+///   Clear button (key `symbol-search-clear-empty`); with no query (a
+///   [filter] offering nothing), an empty area.
 ///
 /// **The field's focus follows the page panel's pattern** (F-4, F-13):
 /// `ShellShortcutGuard › CallbackShortcuts(Escape → handBack) › TextField(
@@ -93,11 +94,17 @@ class SymbolPanel extends StatefulWidget {
     this.measurer = const InsertionPointMeasurer(),
     this.filter,
     this.placeable = true,
+    this.toolChanges,
   });
 
   final SymbolLibraryLoader loader;
   final SymbolThumbnails thumbnails;
   final ToolController tools;
+
+  /// What the panel rebuilds on for the active tool: [tools] when null. The
+  /// shell passes a relay of it that holds a notification sent during a
+  /// build until after the frame (Task 4 review R-2).
+  final Listenable? toolChanges;
   final SymbolPlaceTool tool;
   final ValueNotifier<SymbolEntry?> armed;
   final DraftPermissions permissions;
@@ -207,8 +214,8 @@ class _SymbolPanelState extends State<SymbolPanel> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable:
-            Listenable.merge([widget.loader, widget.tools, widget.armed]),
+        listenable: Listenable.merge(
+            [widget.loader, widget.toolChanges ?? widget.tools, widget.armed]),
         builder: (context, _) => switch (widget.loader.state) {
           SymbolLibraryLoading() => const _Loading(),
           SymbolLibraryFailed(:final error) =>
@@ -244,7 +251,12 @@ class _SymbolPanelState extends State<SymbolPanel> {
         ),
         Expanded(
           child: groups.isEmpty
-              ? _NoMatch(query: _query.text, onClear: _clear)
+              // The no-match line names a query; with none, the host's
+              // filter offers nothing, and the area stays empty (Task 4
+              // review R-4).
+              ? (_query.text.trim().isEmpty
+                  ? const SizedBox.shrink()
+                  : _NoMatch(query: _query.text, onClear: _clear))
               : SymbolGallery(
                   categories: [
                     for (final g in groups)

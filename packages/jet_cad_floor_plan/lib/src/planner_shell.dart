@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -598,9 +599,23 @@ class _PlannerShellState extends State<PlannerShell> {
       ToolController(initial: _select, context: _context)
         ..addListener(_onTools);
   // Spec 10 D19, R-29: the Room tool's notice joins the status line; spec
-  // 11 D12 (R-24): so does the Dimension tool's value.
-  late final Listenable _status =
-      Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]);
+  // 11 D12 (R-24): so does the Dimension tool's value. Through a
+  // [_FrameSafeRelay], as every listener of the shell's outside
+  // [PlannerView] (Task 4 review R-2).
+  late final _FrameSafeRelay _status = _FrameSafeRelay(
+      Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]));
+
+  /// The tools' and the selection's notifications for the shell's widgets
+  /// outside [PlannerView]: the palette, the Symbols tab, the command flags
+  /// and the selection panel. [PlannerView]'s own descendants listen to
+  /// [_tools] and [_selection] directly.
+  ///
+  /// Why (Task 4 review R-2): when the rulers come or go, [PlannerView]
+  /// re-parents its canvas during its build, and the [InteractionLayer]'s
+  /// deactivation cancels the active tool and clears the hover. Both
+  /// notify; a widget outside [PlannerView] marked dirty then asserts.
+  late final _FrameSafeRelay _toolsRelay = _FrameSafeRelay(_tools);
+  late final _FrameSafeRelay _selectionRelay = _FrameSafeRelay(_selection);
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -621,8 +636,12 @@ class _PlannerShellState extends State<PlannerShell> {
   bool get _idle => !(_busy?.value ?? false) && !_tools.active.isMidShape;
 
   /// Everything [_idle] reads that notifies: the tools (a tool's own
-  /// notifications arrive through the controller) and busy.
-  late final List<Listenable> _idleSources = [_tools, if (_busy != null) _busy];
+  /// notifications arrive through the controller, then [_toolsRelay]) and
+  /// busy.
+  late final List<Listenable> _idleSources = [
+    _toolsRelay,
+    if (_busy != null) _busy
+  ];
 
   late final DerivedFlag _undoEnabled =
       DerivedFlag(_idleSources, () => _idle && _document.commands.canUndo);
@@ -915,10 +934,22 @@ class _PlannerShellState extends State<PlannerShell> {
   @override
   void didUpdateWidget(PlannerShell oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.capabilities != widget.capabilities &&
-        !_allows(_tools.active)) {
-      _activate(_select);
+    final old = oldWidget.capabilities, caps = widget.capabilities;
+    if (old != caps) {
+      if (!_allows(_tools.active)) {
+        _activate(_select);
+      } else if (identical(_tools.active, _symbolTool) &&
+          (old.rotate != caps.rotate || old.mirror != caps.mirror)) {
+        // Spec S-9 b (Task 4 review R-1): the ghost shows the orientation
+        // now allowed.
+        _symbolTool.gatesChanged();
+      }
     }
+    // The shell's own update: every listener of the relays is in its
+    // subtree, rebuilt now, so what they hold is delivered now.
+    _status.deliver();
+    _toolsRelay.deliver();
+    _selectionRelay.deliver();
   }
 
   @override
@@ -931,6 +962,10 @@ class _PlannerShellState extends State<PlannerShell> {
     for (final f in _fileEnabled) {
       f.dispose();
     }
+    // The relays listen to the tools and the selection: before them.
+    _status.dispose();
+    _toolsRelay.dispose();
+    _selectionRelay.dispose();
     _tools.dispose();
     for (final e in _entries) {
       e.tool.dispose();
@@ -1003,6 +1038,7 @@ class _PlannerShellState extends State<PlannerShell> {
     return ToolPalette(
       entries: allowed,
       tools: _tools,
+      toolChanges: _toolsRelay,
       fill: _fill,
       geometryAllowed: _geometryAllowed,
       onSelect: _activate,
@@ -1061,6 +1097,7 @@ class _PlannerShellState extends State<PlannerShell> {
                 thumbnails: widget.thumbnails ??
                     (_ownThumbnails ??= SymbolThumbnails()),
                 tools: _tools,
+                toolChanges: _toolsRelay,
                 tool: _symbolTool,
                 armed: _armed,
                 permissions: _document.commands.permissions,
@@ -1330,6 +1367,7 @@ class _PlannerShellState extends State<PlannerShell> {
                             SelectionPanel(
                                 document: _document,
                                 selection: _selection,
+                                selectionChanges: _selectionRelay,
                                 tools: _tools,
                                 wallTool: _wall,
                                 wallSettings: _wallSettings,
@@ -1360,6 +1398,58 @@ class _PlannerShellState extends State<PlannerShell> {
 
 /// The left panel's tabs (spec 09b D8).
 enum _LeftTab { tools, symbols }
+
+/// [_source]'s notifications, forwarded at once, except while a frame
+/// builds ([SchedulerPhase.persistentCallbacks]): then one is held and
+/// delivered after that frame, the pattern of
+/// `FloorPlanController.toolChanged` (Task 4 review R-2). A pointer event,
+/// a key and a host call arrive between frames, so they are forwarded at
+/// once; [deliver] hands a held one on earlier, from the shell's own update.
+class _FrameSafeRelay extends ChangeNotifier {
+  _FrameSafeRelay(this._source) {
+    _source.addListener(_onSource);
+  }
+
+  final Listenable _source;
+
+  /// A notification is held for after the frame.
+  bool _held = false;
+
+  /// The post-frame delivery is scheduled.
+  bool _due = false;
+  bool _disposed = false;
+
+  void _onSource() {
+    final binding = SchedulerBinding.instance;
+    if (binding.schedulerPhase != SchedulerPhase.persistentCallbacks) {
+      _held = false;
+      notifyListeners();
+      return;
+    }
+    _held = true;
+    if (_due) return;
+    _due = true;
+    binding.addPostFrameCallback((_) {
+      _due = false;
+      deliver();
+    });
+  }
+
+  /// Delivers the held notification now, if any; only where every listener
+  /// may be marked dirty (between frames, or in the shell's own update).
+  void deliver() {
+    if (_disposed || !_held) return;
+    _held = false;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _source.removeListener(_onSource);
+    super.dispose();
+  }
+}
 
 /// Object snap as the editor's tools and drags read it (host embedding API
 /// spec S-14): the user's setting, [_user], while [_allowed] says the
