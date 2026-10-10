@@ -227,7 +227,7 @@ one's spec, plan and results.
   [2026-10-10-node-components-results.md](docs/superpowers/notes/2026-10-10-node-components-results.md)
   (M-1 to M-18, the rulings), ledger
   [docs/superpowers/ledgers/2026-10-09-node-components-on-delete/](docs/superpowers/ledgers/2026-10-09-node-components-on-delete/).
-  Not pushed.
+  The human pushed `main` at `bd0e463` (2026-10-10).
 
 ## In flight
 
