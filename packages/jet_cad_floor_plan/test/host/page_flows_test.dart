@@ -820,7 +820,7 @@ void main() {
         const ExportChoice(format: ExportFormat.png, dpi: ExportDpi.d300));
   });
 
-  /// [finitePlanJson] in the design mode under a view whose capabilities
+  /// [embeddingPlanJson] in the design mode under a view whose capabilities
   /// the returned notifier sets, with `onExport`, a fake printer and, when
   /// given, a host's export dialog.
   Future<(FloorPlanController, ValueNotifier<host.FloorPlanEditorCapabilities>)>
@@ -830,7 +830,7 @@ void main() {
           Future<FloorPlanExportChoice?> Function(
                   BuildContext, FloorPlanExportChoice)?
               dialog}) async {
-    final c = FloorPlanController(json: finitePlanJson());
+    final c = FloorPlanController(json: embeddingPlanJson());
     addTearDown(c.dispose);
     final caps = ValueNotifier(host.FloorPlanEditorCapabilities.full);
     addTearDown(caps.dispose);

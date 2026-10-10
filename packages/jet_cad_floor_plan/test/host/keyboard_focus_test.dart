@@ -494,7 +494,7 @@ void main() {
     testWidgets('shortcuts: false: undo() and exportPlan act in each mode',
         (tester) async {
       final h = await mountKeys(tester,
-          json: pf.finitePlanJson(), camera: embeddingCamera());
+          json: embeddingPlanJson(), camera: embeddingCamera());
       final c = h.c;
       for (final mode in FloorPlanMode.values) {
         c.setMode(mode);
