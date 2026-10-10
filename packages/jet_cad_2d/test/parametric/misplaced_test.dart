@@ -245,8 +245,11 @@ void main() {
 
     doc.commands.execute(RemoveNodeCommand(s.nested));
     expect(doc.commands.undoDepth, ++depth);
-    expect(doc.components.get<Hinge>(s.nested), const Hinge(true),
-        reason: 'Ruling 06-3: a misplaced component survives a delete');
+    expect(doc.components.get<Hinge>(s.nested), isNull,
+        reason: 'the node takes its component (node-components spec D-4)');
+    doc.commands.undo();
+    expect(doc.components.get<Hinge>(s.nested), const Hinge(true));
+    doc.commands.redo();
 
     final before = enc(doc);
     expect(

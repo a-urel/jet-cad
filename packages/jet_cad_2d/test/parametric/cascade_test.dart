@@ -418,7 +418,8 @@ void main() {
     doc.commands.execute(CompoundCommand([
       RemoveNodeCommand(hA),
       AddNodeCommand(
-          GroupNode(handle: hA, parent: g, transform: atA, children: const [])),
+          GroupNode(handle: hA, parent: g, transform: atA, children: const []),
+          components: doc.components.snapshotOf(hA)),
     ], label: 'Re-parent'));
     expect(doc.tree[hA]!.parent, g);
     expect(doc.components.get<Post>(hA), postA, reason: 'misplaced, kept');
@@ -788,7 +789,8 @@ void main() {
     doc.commands.execute(CompoundCommand([
       RemoveNodeCommand(hA),
       AddNodeCommand(
-          GroupNode(handle: hA, parent: g, transform: atA, children: const [])),
+          GroupNode(handle: hA, parent: g, transform: atA, children: const []),
+          components: doc.components.snapshotOf(hA)),
     ], label: 'Re-parent'));
     // The Post keeps its component on a nested group: misplaced, not live.
     expect(doc.components.get<Post>(hA), postA);

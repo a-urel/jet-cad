@@ -480,15 +480,6 @@ void _stampLayer(
   }
 }
 
-/// [h]'s `ObjectLayer` detach (spec 12b D2, R-4), when [h] carries one:
-/// planned beside the registered component's detach by 06 D8's cleanup and
-/// 10 D15's dissolve, so no dead handle keeps a layer alive and undo
-/// replays it.
-Iterable<DraftCommand> _detachLayer(CommandTarget t, Handle h) => [
-      if (t.components.get<ObjectLayer>(h) != null)
-        SetComponentCommand<ObjectLayer>(h, null),
-    ];
-
 /// The boundary a fill child names: its payload's one scalar (spec 07 D8).
 Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
     .peek(t.entities.geomIndexAt(t.entities.slotOf(fill)!))
@@ -540,14 +531,11 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 ///
 /// Each object is first asked whether it dissolves (spec 10 D15), with the
 /// same [view], before its `generate`. A dissolving object is not
-/// generated: its plan is [_subtreeRemoval] (the select tool's order), then
-/// the detach of its own component and of its `ObjectLayer`, when it
-/// carries one (spec 12b D2). The detach is planned here because
-/// nothing else would plan it: 06 D8's cleanup detaches only `lost`
-/// objects, and `lost` is computed from the after-survey, where a
-/// dissolving object is still live. For the same reason it is never
-/// detached twice. The removals are planned commands, never in the edit's
-/// `touched`, so 06 D6's guard does not see them.
+/// generated: its plan is [_subtreeRemoval] (the select tool's order),
+/// whose last removal is the object's own node, and that removal takes the
+/// object's component and its `ObjectLayer` with it (node-components spec
+/// D-4), so nothing else is planned. The removals are planned commands,
+/// never in the edit's `touched`, so 06 D6's guard does not see them.
 List<DraftCommand> _plan(
     CommandTarget t, List<Handle> closure, _Survey s, ParametricView view) {
   var reserved = t.handleSeed.current.value;
@@ -555,10 +543,7 @@ List<DraftCommand> _plan(
   for (final h in closure) {
     final registration = s.objects[h]!;
     if (registration.dissolves(view, h)) {
-      out
-        ..addAll(_subtreeRemoval(t, s, h))
-        ..add(registration.detach(h))
-        ..addAll(_detachLayer(t, h));
+      out.addAll(_subtreeRemoval(t, s, h));
       continue;
     }
     final layer = objectLayer(t, h);
@@ -690,13 +675,12 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
 /// the edit left the component as it was or removed it:
 ///
 /// - a detach (`SetComponentCommand<T>(h, null)`) on any handle, dead or
-///   nested: 06 D8's cleanup plans exactly that, and a file's misplaced
-///   component must stay removable;
-/// - a delete: the removed object keeps its component until the cleanup
-///   detaches it in the same edit; undo and redo replay a
-///   `ParametricReplay` and never come here, so its re-attach before the
-///   node is restored is untouched (a guard in `SetComponentCommand` would
-///   break exactly that);
+///   nested: a file's misplaced component must stay removable;
+/// - a delete: the removal takes the object's component with its node
+///   (node-components spec D-4); undo and redo replay a
+///   `ParametricReplay` and never come here, so the restore that rides in
+///   the node's snapshot is untouched (a guard in `SetComponentCommand`
+///   would break exactly that);
 /// - a re-parent under another group (spec 08 D4, `CS7`): the object stops
 ///   being one and keeps its component, as specified;
 /// - any edit that touches a holder of a component a file brought in
@@ -910,7 +894,7 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///    fix/post-11): either refusal undoes `r0`;
 /// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
 ///    by the removals, its inverse included;
-/// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
+/// 5. inside one `try`: the after-survey, `lost`, the
 ///    seeds, the dangling-reference check ([_checkDangling]), the page
 ///    seeds ([_pageSeeds], spec 10 D14: a changed page adds the live
 ///    objects of every type whose page key changed, unchecked for dangling
@@ -919,7 +903,7 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///    box touches a before or after place box of a contributor of the
 ///    spatial core whose place changed, and nothing when no reader is live;
 ///    the before-view is built there), the closure and the plan (a dissolving
-///    object's removal and detach included, spec 10 D15), which receives
+///    object's removal included, spec 10 D15), which receives
 ///    the trigger's after-view (Ruling 10-5). Any failure applies
 ///    `r.inverse`, the cascade's included, so a refused edit leaves the
 ///    document byte for byte as it was;
@@ -927,8 +911,8 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 ///
 /// The after-survey never sees a doomed referrer, so the plan never
 /// generates it; `lost` picks each one up by itself (its node is gone), so
-/// the cleanup detaches its component and it seeds the closure like any
-/// deleted object.
+/// it seeds the closure like any deleted object. Its component went with its
+/// node, in the removal (node-components spec D-4): there is no cleanup.
 CommandResult _run(ParametricEdit edit, CommandTarget t) {
   final types = edit._system._types;
   final before = _survey(t, types);
@@ -959,12 +943,11 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
   // The after-survey calls every registered type's `reach` again, with
   // whatever `inner` just wrote — a client's `reach` can throw on the new
   // parameters (a negative width, say). `inner` has already applied at
-  // this point, so that throw, `lost`/`cleanup`'s own computation, the
+  // this point, so that throw, `lost`'s own computation, the
   // dangling-reference check and `_plan`'s call into `generate` all share
   // one try: any of them failing must still undo `inner` and the cascade
   // and leave nothing in history (spec D4 step 8).
   final _Survey after;
-  final List<DraftCommand> cleanup;
   final List<DraftCommand> plan;
   try {
     after = _survey(t, types);
@@ -972,14 +955,6 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     final lost = [
       for (final h in before.objects.keys)
         if (!after.objects.containsKey(h) && t.tree[h] == null) h,
-    ];
-    // Spec 12b D2 (R-4): the `ObjectLayer` goes with the registered
-    // component, so a dead handle keeps no layer alive.
-    cleanup = [
-      for (final h in lost) ...[
-        before.objects[h]!.detach(h),
-        ..._detachLayer(t, h),
-      ],
     ];
     final seeds = <Handle>{
       for (final h in r.touched) ...[
@@ -1003,7 +978,7 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
     // No neighbour has been computed up to here (spec 07 D10): an edit that
     // touches no object, a plain line drawn among them, pays for the two
     // surveys only and returns here.
-    if (seeds.isEmpty && cleanup.isEmpty) return r;
+    if (seeds.isEmpty) return r;
     // Ruling 10-5: one after-view, for the trigger and the plan alike.
     final view = ParametricView._(t, after);
     plan = _plan(
@@ -1031,7 +1006,7 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
   // reported. Applying the commands one by one keeps the two apart.
   final inverses = <DraftCommand>[];
   final touched = <Handle>{...r.touched};
-  for (final c in [...cleanup, ...plan]) {
+  for (final c in plan) {
     final CommandResult applied;
     try {
       applied = c.apply(t);

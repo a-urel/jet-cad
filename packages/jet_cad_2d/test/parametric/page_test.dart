@@ -76,6 +76,14 @@ Iterable<DraftCommand> flatten(DraftCommand c) sync* {
   }
 }
 
+/// The [T] values the [AddNodeCommand]s on [h] inside [c] restore.
+List<T> restoredBy<T extends Component>(DraftCommand c, Handle h) => [
+      for (final k in flatten(c))
+        if (k is AddNodeCommand && k.node.handle == h)
+          for (final (_, v) in k.components.components)
+            if (v is T) v,
+    ];
+
 /// The capability of each `CommandApplied` that [run] causes.
 Future<List<Capability>> appliedCapabilities(
     DraftDocument doc, void Function() run) async {
@@ -205,7 +213,8 @@ void main() {
 
     // A compound that changes the page and deletes one Gauge: the live
     // Gauge regenerates, the deleted one is not regenerated, and its
-    // component is detached once (06 D8). Planned on a copy through the
+    // component is taken by the removal (node-components D-4). Planned on a
+    // copy through the
     // expander, so the edit's inverse can be read.
     final copy = reloadWithPage(enc(doc));
     final m25 = copy.components
@@ -221,11 +230,12 @@ void main() {
     expect(calls(hG2), 0, reason: 'a deleted object is not regenerated');
     expect(calls(hG), 1);
     expect(lineLength(copy, hG), closeTo(250, 1e-6), reason: '10 x 25');
-    final restores = [
+    final restores = restoredBy<Gauge>(result.inverse, hG2);
+    expect(restores, [gauge2], reason: 'taken by the removal');
+    expect([
       for (final c in flatten(result.inverse))
-        if (c is SetComponentCommand<Gauge> && c.handle == hG2) c.value,
-    ];
-    expect(restores, [gauge2], reason: 'detached once');
+        if (c is SetComponentCommand<Gauge> && c.handle == hG2) c,
+    ], isEmpty, reason: 'no separate component restore');
     // The same compound through the dispatcher: one undo step, exact undo.
     final beforeCompound = canon(doc);
     final depth3 = doc.commands.undoDepth;

@@ -176,28 +176,37 @@ class ComponentRegistry {
     _unknown.remove(handle);
   }
 
+  /// Throws [StateError] when a registered type id of [snapshot] maps to
+  /// no store in this registry, and writes nothing: the check [restore]
+  /// makes before its first write, for a caller that must make it before
+  /// any other mutation (`AddNodeCommand`, spec D-1). Only a snapshot from
+  /// another document can fail it.
+  void checkRestorable(Handle handle, ComponentSnapshot snapshot) {
+    for (final (typeId, _) in snapshot.components) {
+      if (_stores[_typeOf[typeId]] == null) {
+        throw StateError('cannot restore $typeId on ${handle.toHex()}: '
+            'the type is not registered');
+      }
+    }
+  }
+
   /// Re-attaches each component of [snapshot] to [handle], exactly: each
   /// registered value into its type's store (replacing one of that type
   /// already there, as [attach] does), each unknown payload appended in the
   /// snapshot's order (as [attachUnknown] does). Meant for a handle that
-  /// carries nothing, which is how `RemoveDefinitionCommand`'s inverse uses
-  /// it; nothing outside the snapshot is added, so a type registered after
-  /// the snapshot was taken gets no component.
+  /// carries nothing, which is how `RemoveDefinitionCommand`'s and
+  /// `RemoveNodeCommand`'s inverses use it: on a handle that already
+  /// carries unknown payloads, the snapshot's are appended after them, and
+  /// the encoding keeps only the last payload per type id and handle.
+  /// Nothing outside the snapshot is added, so a type registered after the
+  /// snapshot was taken gets no component.
   ///
-  /// All-or-nothing: a registered type id this registry no longer maps to a
-  /// store throws [StateError] before anything is written.
+  /// All-or-nothing: [checkRestorable] runs first, before anything is
+  /// written.
   void restore(Handle handle, ComponentSnapshot snapshot) {
-    final stores = <ComponentStore<Component>>[];
-    for (final (typeId, _) in snapshot.components) {
-      final store = _stores[_typeOf[typeId]];
-      if (store == null) {
-        throw StateError('cannot restore $typeId on ${handle.toHex()}: '
-            'the type is not registered');
-      }
-      stores.add(store);
-    }
-    for (var i = 0; i < stores.length; i++) {
-      stores[i].set(handle, snapshot.components[i].$2);
+    checkRestorable(handle, snapshot);
+    for (final (typeId, component) in snapshot.components) {
+      _stores[_typeOf[typeId]]!.set(handle, component);
     }
     for (final payload in snapshot.unknown) {
       attachUnknown(handle, payload);

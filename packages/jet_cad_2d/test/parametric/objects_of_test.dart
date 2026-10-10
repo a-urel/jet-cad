@@ -120,8 +120,10 @@ void main() {
       for (final k in kids(doc, h5200)) RemoveEntityCommand(k),
       RemoveNodeCommand(h5200),
       RemoveNodeCommand(h5300),
-      AddNodeCommand(GroupNode(
-          handle: h5300, parent: hG, transform: at5300, children: const [])),
+      AddNodeCommand(
+          GroupNode(
+              handle: h5300, parent: hG, transform: at5300, children: const []),
+          components: doc.components.snapshotOf(h5300)),
       SetComponentCommand<Census>(hC, const Census(2)),
     ], label: 'Delete B, re-parent C'));
     final g = census.fromGenerate.single;

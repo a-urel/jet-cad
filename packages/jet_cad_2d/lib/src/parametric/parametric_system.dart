@@ -11,7 +11,6 @@ import '../document/draft_document.dart';
 import '../document/drafting.dart';
 import '../document/layer_commands.dart';
 import '../document/node.dart';
-import '../document/object_layer.dart';
 import '../document/page_component.dart';
 import '../document/style.dart';
 import '../geometry/aabb2.dart';
@@ -83,10 +82,11 @@ abstract class ParametricType<T extends Component> {
   /// after-view, **before** its [generate], and by `drift()` of every live
   /// object. When it answers true, [generate] is not called: the planner
   /// removes [self]'s children and node, as the select tool deletes a
-  /// group, and then detaches its component, all inside the same edit, one
-  /// undo step. Never asked of an object the edit deleted: that one is
-  /// 06 D8's cleanup's. Like [generate], it must not mutate, and whatever it
-  /// throws rolls the edit back. Default: never.
+  /// group (the removal of its node takes its component with it,
+  /// node-components spec D-4), all inside the same edit, one undo step.
+  /// Never asked of an object the edit deleted: the edit's own removal took
+  /// that one's component. Like [generate], it must not mutate, and
+  /// whatever it throws rolls the edit back. Default: never.
   bool dissolves(ParametricView view, Handle self) => false;
 
   /// Spec 10 D16: this type's geometry is an input to place readers.
@@ -385,10 +385,11 @@ final class ParametricView {
   /// [h]'s component of type [U], or null, and null for any handle that is
   /// not a live object of the survey this view was built over (inside an
   /// edit, `drift()` and `diagnostics()` alike). An object an edit lost
-  /// keeps its component until 06 D8's cleanup, after the plan, and a
-  /// re-parented one keeps it for good; either way an orphan must see its
-  /// host gone (spec 08 D4), not a host whose transform has fallen back to
-  /// the identity or that no longer regenerates.
+  /// no longer has its component (its node's removal took it, node-components
+  /// spec D-4), and a re-parented one keeps it only when the re-add carries
+  /// the snapshot; either way an orphan must see its host gone (spec 08 D4),
+  /// not a host whose transform has fallen back to the identity or that no
+  /// longer regenerates.
   ///
   /// The component is the survey's snapshot of [h]'s registered component
   /// (spec 10 D16.1), answered when it is a [U].
@@ -598,8 +599,9 @@ class ParametricSystem {
   /// root-level group: it is not regenerated (spec D5). An edit can no
   /// longer write one (`_written`, fix/post-11), but a document can still
   /// carry one: a file brings it in (loading does not go through
-  /// [ParametricEdit]), and a re-parented object keeps its component (spec
-  /// 08 D4), so this report stays. Then, for every live
+  /// [ParametricEdit]), and a re-parented object keeps its component when the
+  /// re-add carries the snapshot (spec 08 D4, node-components D-3), so this
+  /// report stays. Then, for every live
   /// object in ascending handle order and every handle its `references`
   /// declared that is not a live object, in declared order and once each,
   /// `parametric.dangling` (severity error) for a `cascade` type or
