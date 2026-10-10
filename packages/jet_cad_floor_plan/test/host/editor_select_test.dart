@@ -22,6 +22,7 @@ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'editor_fixture.dart';
 import 'editor_tools_test.dart' as t;
 
 typedef Caps = FloorPlanEditorCapabilities;
@@ -491,6 +492,204 @@ void main() {
       expect(grips.hot, -1);
       expect(told, greaterThan(0));
       await g.removePointer();
+    });
+  });
+
+  group("the review's killers (Task 5 review R-1, R-3, R-4, R-5)", () {
+    // The north wall, beyond its inner face; a click there selects it.
+    final northWall = Vector2(25500, 16850);
+
+    testWidgets(
+        'R-1 a body drag of the north wall started under full, the host '
+        'switching to tablesOnly before its up: the drag is cancelled, the '
+        'design byte-identical; kept under full the same drag moves the '
+        'wall', (tester) async {
+      final h = await t.mountEditor(tester);
+      final c = h.c;
+      final d = c.activeDocument;
+      Offset at(Vector2 w) => t.screenOf(tester, c, w);
+      await t.click(tester, at(northWall));
+      final wall = selected(c).single.target;
+      expect(liveObjectsOf<WallParams>(d), contains(wall),
+          reason: 'premise: the wall selected');
+      final before = encoded(c);
+      final ends = wallEnds(d, wall);
+      await drag(tester, at(northWall), at(northWall) + const Offset(0, -60),
+          before: () => setCaps(tester, h, Caps.tablesOnly));
+      expect(encoded(c), before);
+      expect(c.canUndo.value, isFalse);
+      expect(selected(c), isEmpty, reason: 'pruned (S-9 g)');
+      // The control: the same drag under full moves the wall.
+      await setCaps(tester, h, Caps.full);
+      await t.click(tester, at(northWall));
+      expect(selected(c).single.target, wall);
+      await drag(tester, at(northWall), at(northWall) + const Offset(0, -60));
+      expect(wallEnds(d, wall).$1, isNot(ends.$1));
+      expect(c.canUndo.value, isTrue);
+    });
+
+    testWidgets(
+        "R-1 the chair turned by its rotation grip, started under full, the "
+        'host switching to tablesOnly before its up: cancelled, the design '
+        'byte-identical; kept under full the same drag turns it',
+        (tester) async {
+      final h = await t.mountEditor(tester);
+      final c = h.c;
+      final d = c.activeDocument;
+      Offset at(Vector2 w) => t.screenOf(tester, c, w);
+      // The chair's outline at local (50, 275).
+      final onChair = editorChairPlacement.transformPoint(Vector2(50, 275));
+      await t.click(tester, at(onChair));
+      final chair = selected(c).single.target;
+      final node = d.tree[chair];
+      expect(node, isA<InstanceNode>(), reason: 'premise: the chair');
+      Offset grip() {
+        // Its drawing's screen box, (50, 50)..(500, 500): the grip is 24
+        // px above its top edge's middle.
+        final corners = [
+          for (final (x, y) in const [
+            (50, 50),
+            (500, 50),
+            (500, 500),
+            (50, 500)
+          ])
+            at(editorChairPlacement
+                .transformPoint(Vector2(x.toDouble(), y.toDouble()))),
+        ];
+        final minX = corners.map((p) => p.dx).reduce(math.min);
+        final maxX = corners.map((p) => p.dx).reduce(math.max);
+        final minY = corners.map((p) => p.dy).reduce(math.min);
+        return Offset((minX + maxX) / 2, minY - 24);
+      }
+
+      final m = c.cameraController.value.worldToScreenMatrix;
+      expect(
+          gripsOf(tester).hitsRotationGrip(grip() - t.canvasOrigin(tester), m),
+          isTrue,
+          reason: 'premise: the rotation grip');
+      double turn() => degreesOf((d.tree[chair]! as InstanceNode).transform);
+      final turnBefore = turn();
+      final before = encoded(c);
+      await drag(tester, grip(), grip() + const Offset(120, 60),
+          before: () => setCaps(tester, h, Caps.tablesOnly));
+      expect(encoded(c), before);
+      expect(c.canUndo.value, isFalse);
+      // The control.
+      await setCaps(tester, h, Caps.full);
+      await t.click(tester, at(onChair));
+      expect(selected(c).single.target, chair);
+      await drag(tester, grip(), grip() + const Offset(120, 60));
+      expect(turn(), isNot(closeTo(turnBefore, 1)));
+    });
+
+    testWidgets(
+        'R-1 a gate closed mid-drag cancels the drag at once: reopened before '
+        'the up, a body drag, a rotation-grip drag and an end-grip drag each '
+        'execute nothing; never closed, each executes', (tester) async {
+      final h = await t.mountEditor(tester);
+      final c = h.c;
+      final d = c.activeDocument;
+      Offset at(Vector2 w) => t.screenOf(tester, c, w);
+      // The column: a 400 mm wall whose start lies at (23,500, 14,000).
+      final column = liveObjectsOf<WallParams>(d).singleWhere(
+          (w) => wallEnds(d, w).$1.distanceTo(Vector2(23500, 14000)) < 1);
+      final cases = <(String, Caps, Future<Offset> Function())>[
+        (
+          'move',
+          Caps.full.copyWith(move: false),
+          () async {
+            c.activeSelection.replace([keyOf(c, '1')]);
+            await tester.pump();
+            return at(edgeOf(c, '1'));
+          }
+        ),
+        (
+          'rotate',
+          Caps.full.copyWith(rotate: false),
+          () async {
+            c.activeSelection.replace([keyOf(c, '1')]);
+            await tester.pump();
+            return rotationGripOf(tester, c, '1');
+          }
+        ),
+        (
+          'reshape',
+          Caps.full.copyWith(reshape: false),
+          () async {
+            c.activeSelection.replace([SelectionKey.root(column)]);
+            await tester.pump();
+            return at(wallEnds(d, column).$1);
+          }
+        ),
+      ];
+      for (final (name, closed, press) in cases) {
+        final before = encoded(c);
+        final depth = d.commands.undoDepth;
+        final from = await press();
+        await drag(tester, from, from + const Offset(60, -30),
+            before: () async {
+          await setCaps(tester, h, closed);
+          await setCaps(tester, h, Caps.full);
+        });
+        expect(encoded(c), before, reason: '$name: closed, then reopened');
+        expect(d.commands.undoDepth, depth, reason: name);
+        // The control: the same drag, its gate never closed.
+        final again = await press();
+        await drag(tester, again, again + const Offset(60, -30));
+        expect(d.commands.undoDepth, depth + 1, reason: '$name: the control');
+      }
+    });
+
+    testWidgets(
+        'R-3 tablesOnly.copyWith(delete: false), 1 selected: Delete and '
+        'Backspace remove nothing, while a body drag still moves 1',
+        (tester) async {
+      final h = await t.mountEditor(tester,
+          caps: Caps.tablesOnly.copyWith(delete: false));
+      final c = h.c;
+      await t.click(tester, t.screenOf(tester, c, topOf(c, '1')));
+      expect(selected(c), {keyOf(c, '1')});
+      final before = encoded(c);
+      await t.press(tester, LogicalKeyboardKey.delete);
+      await t.press(tester, LogicalKeyboardKey.backspace);
+      expect(encoded(c), before);
+      expect(TableSurvey.of(c.activeDocument).withNumber('1'), hasLength(1));
+      final centre = t.centreOf(c, '1');
+      final from = t.screenOf(tester, c, topOf(c, '1'));
+      await drag(tester, from, from + const Offset(80, -40));
+      expect(t.centreOf(c, '1').distanceTo(centre), greaterThan(100));
+    });
+
+    testWidgets(
+        'R-5 tablesOnly: a mouse click 3 px outside 1\'s box selects 1 (the '
+        'index pick\'s 6 px tolerance), one 15 px outside it nothing',
+        (tester) async {
+      final h = await t.mountEditor(tester, caps: Caps.tablesOnly);
+      final c = h.c;
+      final scale = c.cameraController.value.scale;
+      // Beyond the box's right edge (x 1,100) on its local x axis.
+      Offset outside(double px) =>
+          t.screenOf(tester, c, onTable(c, '1', 1100 + px / scale, 100));
+      await t.click(tester, outside(15));
+      expect(selected(c), isEmpty, reason: '15 px');
+      await t.click(tester, outside(3));
+      expect(selected(c), {keyOf(c, '1')}, reason: '3 px');
+    });
+
+    testWidgets(
+        'R-4 tablesOnly: a finger within its reach of the locked L, outside '
+        'L\'s box, selects nothing; at the same offset from 1 it selects 1',
+        (tester) async {
+      final h = await t.mountEditor(tester, caps: Caps.tablesOnly);
+      final c = h.c;
+      // 40 mm (about 15 px) beyond each box on its local x axis: within a
+      // finger's 24 px, beyond a mouse's 6; every other table is farther.
+      await fingerTap(
+          tester, t.screenOf(tester, c, onTable(c, 'L', 1140, 100)));
+      expect(selected(c), isEmpty, reason: 'L, locked: never by reach');
+      await fingerTap(
+          tester, t.screenOf(tester, c, onTable(c, '1', 1140, 100)));
+      expect(selected(c), {keyOf(c, '1')}, reason: 'the control');
     });
   });
 }

@@ -165,8 +165,11 @@ class LayerPanelState extends State<LayerPanel> {
   /// commits and `LayerPicker` catch one: the dispatcher has rolled it back,
   /// so nothing changed, and no gesture surfaces an exception (a control
   /// enabled from a state the panel has not rebuilt for yet, final review
-  /// finding 1).
+  /// finding 1). Nothing while the panel may not edit: a menu opened
+  /// before the host refused `editLayers` still answers after it (Slice 4
+  /// Task 5 review R-2).
   void _execute(DraftCommand command) {
+    if (!_allowed) return;
     try {
       _doc.commands.execute(command);
     } on ArgumentError {

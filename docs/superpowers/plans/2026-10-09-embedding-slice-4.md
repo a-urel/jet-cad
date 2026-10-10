@@ -679,8 +679,9 @@ format), demo, floor planner.
 **Builds:**
 - `PlannerShell`: an internal `SelectGates` subclass reading
   `widget.capabilities` live: `restrictsPick` = `selectTablesOnly`, its
-  `pick` a `TablePicker` over the shell's document (a finger's reach for
-  touch; a locked table skipped, as `QueryFilter.picking` skips a locked
+  `pick` a `TablePicker` over the shell's document (the index pick's 6 px
+  for a mouse and a finger's reach for touch, as amended after Task 5's
+  review; a locked table skipped, as `QueryFilter.picking` skips a locked
   layer), `bandAccepts` a table key under `selectTablesOnly`; `move`,
   `rotate`, `reshape`, `delete` the flags; `idleKeys` true (Task 6 reads
   `shortcuts` into it). The select tool and the grip cache are built with
@@ -704,6 +705,11 @@ format), demo, floor planner.
   offstage** (`Visibility(maintainState: true)`, focus excluded) so its
   state is kept (C-5); the column itself not built when all three are
   hidden.
+- `service/table_picker.dart`: an optional constructor parameter
+  `skipLocked` (false), so the tables-only pick passes over a table on a
+  locked layer in each of its passes; the selection mode keeps the
+  default. A constructor parameter, since a test's `TablePicker` subclass
+  overrides `pick`. *(Added after Task 5's review.)*
 - C-8: nothing to build; the test below pins it.
 
 **Tests** (`test/host/editor_select_test.dart`, `test/host/editor_panels_test.dart`,
@@ -1091,9 +1097,13 @@ Each mutant and its killer:
   `full`.
 - **M-H43c:** reshape grips active (the shell's gate `reshape` reading
   true). Killer: under `full.copyWith(reshape: false)`: the free line
-  selected → no stretch point drawn and a drag from its end grip leaves
-  the document unchanged; a wall selected → its end grip's drag changes
-  nothing; under `full` both reshape.
+  selected → no stretch point drawn, and a drag from its end never
+  reshapes it: the end grip is hidden, so the press falls to the line's
+  body, which `move` lets move whole (its length kept); a wall selected →
+  a drag from its end the same (its length kept); with `move: false` as
+  well, both drags leave the document byte-identical; under `full` both
+  reshape. *(Amended after Task 5's review: a hidden end grip makes the
+  press a body move, as Task 3's review ruled for T3-e.)*
 - **T5-a:** `move` not wired. Killer: `readOnly`, a body drag of `1` → no
   command; `tablesOnly` → it moves.
 - **T5-b:** `rotate` not wired. Killer: `readOnly`, `1` selected → no

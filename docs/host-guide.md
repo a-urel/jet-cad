@@ -1475,19 +1475,21 @@ Field by field:
   refused, the Layer and Page panels' controls are disabled and their
   values shown.
 - `selectTablesOnly`: a click and a rubber band select tables only. A
-  click picks a table by its top, else its box (a finger within its
-  reach), never one on a hidden or locked layer; a table inside a group
-  is no table here. Turned on at run time, it keeps only the tables of
-  the selection.
+  click picks a table by its top, else its box (a mouse within a few
+  pixels of it, a finger within its reach), never one on a hidden or
+  locked layer; a table inside a group is no table here. Turned on at
+  run time, it keeps only the tables of the selection; turned on or off,
+  it cancels a click, drag or band the user has under way.
 - `move`, `rotate`, `mirror`, `reshape`, `delete`, `renumber`,
   `changeLayer`: the selection's edits. A refused button or menu
   (Mirror, ±90, a door's flips, the Size menu, the layer picker) is not
   shown; a refused value field is shown read only. `reshape` covers an
   object's own grips and fields (a box's, a wall's thickness and
   justification, an opening's, a room's name, a dimension's kind) and
-  Change size. A drag whose flag is refused before the pointer lifts
-  executes nothing. `rotate` and `mirror` also bound the symbol tool: its
-  R and M, and the turn and mirror of the next placement.
+  Change size. A drag whose flag is refused before the pointer lifts is
+  cancelled at once: it executes nothing, even if the flag is allowed
+  again by then. `rotate` and `mirror` also bound the symbol tool: its R
+  and M, and the turn and mirror of the next placement.
 - `undo`, `export`, `print`: the bar's buttons **and** their chords.
 - `rulers`, `grid`, `snapping`: the drafting aids. `snapping: false`
   turns object snap off for the editor's tools and drags and removes F3
@@ -1599,7 +1601,12 @@ are Material widgets and follow the ambient Material `Theme`
 and Page panels), so under it the Selection panel shows fields and
 buttons only.
 
-**Limits.** While a symbol is armed, a refused R (under `rotate: false`)
+**Limits.** Undo is the plan's history, not the profile's: after a
+switch from `full` to `tablesOnly`, Undo (when `undo` allows it) still
+undoes the edits made before the switch, a wall's move included; `load`
+the plan to start the history afresh. Hiding all three panels at once
+removes the right column, and with it their state (the Layers section's
+open state, for one), while hiding one or two keeps it. While a symbol is armed, a refused R (under `rotate: false`)
 or M (under `mirror: false`) is any other key and reaches the next
 binding: under a value that also allows the Rectangle tool (R) or the
 Room tool (M), it switches to that tool, as W switches to Wall. None of

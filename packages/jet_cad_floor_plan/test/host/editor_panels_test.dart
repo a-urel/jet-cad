@@ -549,4 +549,157 @@ void main() {
       expect(menusUnder(), findsNothing);
     });
   });
+
+  group("the review's killers (Task 5 review R-2, R-3, R-4)", () {
+    /// The locked layer's hex: visible and not current, so each of its
+    /// controls is enabled under full.
+    String lockedLayer(FloorPlanController c) =>
+        c.activeDocument.tables.layers.records
+            .firstWhere((r) => r.name == kEmbeddingLocked)
+            .handle
+            .toHex();
+
+    for (final (name, target) in [
+      ('readOnly', Caps.readOnly),
+      ('tablesOnly', Caps.tablesOnly),
+      ('no switch (the control)', null),
+    ]) {
+      testWidgets(
+          'R-2 a layer\'s colour menu opened under full, then $name, a '
+          'colour chosen: ${target == null ? 'it recolours' : 'nothing'}',
+          (tester) async {
+        final h = await t.mountEditor(tester);
+        final c = h.c;
+        final locked = lockedLayer(c);
+        await tester.tap(t.byKey('layer-colour-$locked'));
+        await tester.pumpAndSettle();
+        final before = s.encoded(c);
+        if (target != null) await s.setCaps(tester, h, target);
+        await tester.pump();
+        final item = t.byKey('layer-colour-item-1');
+        expect(item, findsWidgets, reason: 'the menu is still open');
+        await tester.tap(item.last);
+        await tester.pumpAndSettle();
+        if (target == null) {
+          expect(s.encoded(c), isNot(before));
+        } else {
+          expect(s.encoded(c), before);
+          expect(c.canUndo.value, isFalse);
+        }
+      });
+    }
+
+    testWidgets(
+        'R-3 tablesOnly.copyWith(renumber: false), 1 selected: the number '
+        'read-only and a typed 12 not committed, while ±90 turns 1 and the '
+        'Rotation field commits', (tester) async {
+      final h = await t.mountEditor(tester,
+          caps: Caps.tablesOnly.copyWith(renumber: false));
+      final c = h.c;
+      await select(tester, c, s.tableOf(c, '1'));
+      expect(fieldOf(tester, 'table-number').readOnly, isTrue);
+      final before = s.encoded(c);
+      await typeIntoReadOnly(tester, 'table-number', '12');
+      expect(s.encoded(c), before);
+      expect(TableSurvey.of(c.activeDocument).withNumber('12'), isEmpty);
+      final turn = s.degreesOf(s.transformOf(c, '1'));
+      expect(t.byKey('table-rotate-left'), findsOneWidget);
+      await tester.tap(t.byKey('table-rotate-left'));
+      await tester.pump();
+      expect(s.degreesOf(s.transformOf(c, '1')), closeTo(turn + 90, 1e-6));
+      expect(fieldOf(tester, 'symbol-rotation').readOnly, isFalse);
+      await typeAndSubmit(tester, 'symbol-rotation', '45');
+      expect(s.degreesOf(s.transformOf(c, '1')), closeTo(45, 1e-6));
+    });
+
+    testWidgets(
+        'R-3 tablesOnly.copyWith(rotate: false), 1 selected: the number '
+        'commits, while ±90 is absent and the Rotation field read-only (a '
+        'typed value not committed)', (tester) async {
+      final h = await t.mountEditor(tester,
+          caps: Caps.tablesOnly.copyWith(rotate: false));
+      final c = h.c;
+      await select(tester, c, s.tableOf(c, '1'));
+      expect(t.byKey('table-rotate-left'), findsNothing);
+      expect(t.byKey('table-rotate-right'), findsNothing);
+      expect(fieldOf(tester, 'symbol-rotation').readOnly, isTrue);
+      final turn = s.degreesOf(s.transformOf(c, '1'));
+      await typeIntoReadOnly(tester, 'symbol-rotation', '75');
+      expect(s.degreesOf(s.transformOf(c, '1')), closeTo(turn, 1e-6));
+      expect(fieldOf(tester, 'table-number').readOnly, isFalse);
+      await typeAndSubmit(tester, 'table-number', '12');
+      expect(TableSurvey.of(c.activeDocument).withNumber('12'), hasLength(1));
+    });
+
+    testWidgets(
+        'R-3 full.copyWith(changeLayer: false): no layer picker for 1, while '
+        'the wall\'s thickness edits; full.copyWith(reshape: false): the '
+        'picker for 1, while the thickness is read-only', (tester) async {
+      final h = await t.mountEditor(tester,
+          caps: Caps.full.copyWith(changeLayer: false));
+      final c = h.c;
+      final d = c.activeDocument;
+      await select(tester, c, s.tableOf(c, '1'));
+      expect(t.byKey('layer-picker'), findsNothing);
+      final wall = firstOf<WallParams>(d);
+      await select(tester, c, wall);
+      expect(fieldOf(tester, 'wall-thickness').readOnly, isFalse);
+      await typeAndSubmit(tester, 'wall-thickness', '300');
+      expect(d.components.get<WallParams>(wall)!.thickness, 300);
+      await s.setCaps(tester, h, Caps.full.copyWith(reshape: false));
+      await select(tester, c, s.tableOf(c, '1'));
+      expect(t.byKey('layer-picker'), findsOneWidget);
+      await select(tester, c, wall);
+      expect(fieldOf(tester, 'wall-thickness').readOnly, isTrue);
+    });
+
+    testWidgets(
+        'R-3 editLayers false alone: the Layer panel disabled, the Page '
+        'panel enabled; editPage false alone: the reverse', (tester) async {
+      final h = await t.mountEditor(tester,
+          caps: Caps.full.copyWith(editLayers: false));
+      final c = h.c;
+      final locked = lockedLayer(c);
+      bool pageEnabled() =>
+          tester
+              .widget<DropdownButton<SheetSize?>>(t.byKey('page-preset'))
+              .onChanged !=
+          null;
+      bool layersEnabled() =>
+          iconEnabled(tester, t.byKey('layers-add')) &&
+          iconEnabled(tester, t.byKey('layer-eye-$locked'));
+      expect(layersEnabled(), isFalse);
+      expect(pageEnabled(), isTrue);
+      await s.setCaps(tester, h, Caps.full.copyWith(editPage: false));
+      expect(layersEnabled(), isTrue);
+      expect(pageEnabled(), isFalse);
+    });
+
+    testWidgets(
+        'R-4 a tool\'s settings are no edit: with the Door tool active under '
+        'full.copyWith(reshape: false), its width edits the tool, not the '
+        'design', (tester) async {
+      final h =
+          await t.mountEditor(tester, caps: Caps.full.copyWith(reshape: false));
+      final c = h.c;
+      await t.press(tester, LogicalKeyboardKey.keyD);
+      expect(c.activeTool.value, FloorPlanTool.door);
+      expect(fieldOf(tester, 'opening-width').readOnly, isFalse);
+      final before = s.encoded(c);
+      await typeAndSubmit(tester, 'opening-width', '1000');
+      expect(fieldOf(tester, 'opening-width').controller!.text, '1000');
+      expect(s.encoded(c), before);
+    });
+
+    testWidgets(
+        'R-4 the Page panel alone: with selectionPanel and layerPanel false, '
+        'the right column holds the page controls', (tester) async {
+      await t.mountEditor(tester,
+          caps: Caps.full.copyWith(selectionPanel: false, layerPanel: false));
+      expect(t.byKey('chrome-right'), findsOneWidget);
+      expect(t.byKey('page-preset'), findsOneWidget);
+      expect(t.byKey('selection-panel'), findsNothing);
+      expect(t.byKey('layers-panel'), findsNothing);
+    });
+  });
 }

@@ -1020,6 +1020,21 @@ class _PlannerShellState extends State<PlannerShell> {
     super.didUpdateWidget(oldWidget);
     final old = oldWidget.capabilities, caps = widget.capabilities;
     if (old != caps) {
+      // Spec S-9 h (Task 5 review R-1): a gesture under way across a change
+      // of what a click and a band may select, or across the closing of
+      // the gate its drag needs, is cancelled now, as Escape would: its
+      // press, its drag and its selection were read under the old value.
+      // A drag whose gate closes would be cancelled at its up anyway; one
+      // whose gate stays open (`move` and `rotate` under tables only) would
+      // otherwise commit a non-table's move or turn.
+      final stale = old.selectTablesOnly != caps.selectTablesOnly ||
+          switch (_select.dragKind) {
+            DragKind.move => old.move && !caps.move,
+            DragKind.rotate => old.rotate && !caps.rotate,
+            DragKind.reshape => old.reshape && !caps.reshape,
+            DragKind.band || null => false,
+          };
+      if (stale) _select.cancel(_context);
       // Spec S-9 g: a change to tables only keeps the tables of the
       // selection. No table leaves it, so the host's `selectedTables` does
       // not move.
@@ -1711,8 +1726,9 @@ bool _isTableKey(DraftDocument doc, SelectionKey key) {
 /// runtime change reaches the next press, hover, key, frame and drag's up.
 ///
 /// - Under `selectTablesOnly` the pick is the table picker's (a table's
-///   top, else its box; a finger's reach for a touch; a locked table
-///   passed over), and a band keeps tables only.
+///   top, else its box; the index pick's tolerance for a mouse, a
+///   finger's reach for a touch; a locked table passed over), and a band
+///   keeps tables only.
 /// - `move` (a body drag and a centre grip), `rotate` (the rotation grip),
 ///   `reshape` (every other grip) and `delete` (Delete and Backspace) are
 ///   the flags.
@@ -1733,8 +1749,11 @@ class _CapabilityGates extends SelectGates {
 
   @override
   SelectionKey? pick(ToolPointerEvent e, ToolContext ctx) {
-    final hit =
-        _picker().pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
+    // A finger's reach for a touch; for a mouse the index pick's own 6 px
+    // tolerance (Task 5 review R-5), so a click just outside a table's box
+    // selects it as it does under `full`.
+    final hit = _picker().pick(e.world,
+        reach: e.isTouch ? e.reachRadiusWorld : e.pickRadiusWorld);
     return hit == null ? null : SelectionKey.root(hit.table.instance);
   }
 
