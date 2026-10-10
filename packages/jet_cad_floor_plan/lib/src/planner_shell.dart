@@ -68,6 +68,18 @@ typedef ShellIdleRegistrar = VoidCallback Function(bool Function() idle);
 typedef ShellToolRegistrar = VoidCallback Function(
     bool Function(FloorPlanTool tool) select);
 
+/// Registers the shell's delete with its host (host embedding API spec
+/// C-3, as Slice 4's S-16 ruled): [delete] deletes the selection as the
+/// select tool's idle Delete does and answers whether it did. Returns the
+/// withdrawal, which the shell calls on dispose, as
+/// [ShellSettleRegistrar]'s.
+typedef ShellDeleteRegistrar = VoidCallback Function(bool Function() delete);
+
+/// The host's widget for the table [instance] the editor's selection is
+/// exactly (host embedding API spec C-6, S-18), or null for none.
+typedef ShellTableInspector = Widget? Function(
+    BuildContext context, Handle instance);
+
 /// Owns the index, the camera and -- since 03 -- the outline cache and the
 /// grip cache for the document's lifetime; since 05, the tools and the Fill
 /// toggle. It lays out the chrome slots.
@@ -120,6 +132,10 @@ class PlannerShell extends StatefulWidget {
     this.capabilities = FloorPlanEditorCapabilities.full,
     this.onTools,
     this.onToolChanged,
+    this.shortcuts = true,
+    this.autofocus = true,
+    this.tableInspector,
+    this.onDelete,
   });
 
   final DraftDocument? document;
@@ -223,6 +239,29 @@ class PlannerShell extends StatefulWidget {
   /// Told the active tool after each change (spec C-3, S-6), and select
   /// once when the shell is created.
   final void Function(FloorPlanTool tool)? onToolChanged;
+
+  /// Whether the shell binds its keys (host embedding API spec C-7, S-16),
+  /// read at each build and key: false binds none of the keys it binds
+  /// while no gesture runs (the command chords, F3, the tool letters, F,
+  /// Escape) and closes the select tool's idle keys (Delete, Backspace,
+  /// Escape), so they reach the host. A gesture's own keys stay (a drag's
+  /// Escape and Shift, a drawing tool's Escape and Enter, the symbol
+  /// tool's R and M). The commands stay callable.
+  final bool shortcuts;
+
+  /// Whether the canvas takes the focus when it is mounted (spec C-7),
+  /// forwarded to the view; a press on it takes the focus either way.
+  final bool autofocus;
+
+  /// The host's table inspector (spec C-6, S-18): built under the
+  /// Selection panel, and hidden with it, while the selection is exactly
+  /// one key and that key is a root-level table; rebuilt when that table
+  /// changes, at each document change and at each build of the shell,
+  /// never by the camera. Null builds no slot.
+  final ShellTableInspector? tableInspector;
+
+  /// Where the shell registers its delete (spec C-3, S-16).
+  final ShellDeleteRegistrar? onDelete;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -356,6 +395,9 @@ class _PlannerShellState extends State<PlannerShell> {
   /// Withdraws the tool selector's registration with the host (spec S-6).
   VoidCallback? _releaseTools;
 
+  /// Withdraws the delete's registration with the host (spec S-16).
+  VoidCallback? _releaseDelete;
+
   /// Object snap as the tools and drags read it (spec S-14): the user's
   /// setting, [_snap], while the capabilities allow snapping.
   late final _CapabilitySnap _toolSnap =
@@ -390,7 +432,8 @@ class _PlannerShellState extends State<PlannerShell> {
   /// frame.
   late final _CapabilityGates _gates = _CapabilityGates(
       () => widget.capabilities,
-      () => _tablePicker ??= TablePicker(_document, skipLocked: true));
+      () => _tablePicker ??= TablePicker(_document, skipLocked: true),
+      () => widget.shortcuts);
 
   /// The tables-only pick's picker (spec S-15): made at its first pick,
   /// cached by the document's state and its tables' revision.
@@ -671,6 +714,12 @@ class _PlannerShellState extends State<PlannerShell> {
   /// `canUndo` and `canRedo` on each (spec 12a D5).
   StreamSubscription<DocChange>? _history;
 
+  /// One notification per change of the document (every command, undo
+  /// and redo), from [_history]: the table inspector rebuilds on it (spec
+  /// C-6). The dispatcher's stream is asynchronous, so it never notifies
+  /// while a frame builds.
+  final _Changed _documentChanged = _Changed();
+
   /// The file commands, each enabled only while the host's own condition
   /// holds and the shell is idle; Export and Print also only while the
   /// document has a page (spec 13 D8, [kPageCommandIds]).
@@ -857,6 +906,20 @@ class _PlannerShellState extends State<PlannerShell> {
     return _activate(_entries[tool.index].tool);
   }
 
+  /// The host's `FloorPlanController.deleteSelection` (spec C-3, S-16):
+  /// the select tool's own delete, whichever tool is active (one undo
+  /// step, the table-data expander; `delete` gated, `idleKeys` not). The
+  /// controller asks only while no shape is part-way, after a settle.
+  bool _deleteByHost() => _select.deleteSelection(_context);
+
+  /// The table the host's inspector shows (spec C-6, S-18): the
+  /// selection's one key when it is a root-level table; null otherwise.
+  Handle? _inspected() {
+    if (_selection.length != 1) return null;
+    final key = _selection.keys.single;
+    return _isTableKey(_document, key) ? key.target : null;
+  }
+
   /// The tool last told to the host.
   FloorPlanTool _reportedTool = FloorPlanTool.select;
 
@@ -939,9 +1002,11 @@ class _PlannerShellState extends State<PlannerShell> {
       }
       return _entries.length == FloorPlanTool.values.length - 1;
     }(), 'the palette must list the tools in FloorPlanTool order');
+    _releaseDelete = widget.onDelete?.call(_deleteByHost);
     _history = _document.commands.changes.listen((_) {
       _undoEnabled.update();
       _redoEnabled.update();
+      _documentChanged.changed();
     });
   }
 
@@ -1034,6 +1099,8 @@ class _PlannerShellState extends State<PlannerShell> {
     _releaseSettle?.call();
     _releaseIdle?.call();
     _releaseTools?.call();
+    _releaseDelete?.call();
+    _documentChanged.dispose();
     _toolSnap.dispose();
     _ownMeasurer?.clear();
     super.dispose();
@@ -1307,30 +1374,35 @@ class _PlannerShellState extends State<PlannerShell> {
     final editCommands = caps.undo
         ? _editCommands(FloorPlanStrings.of(context))
         : const <ShellCommand>[];
+    // Host embedding API spec C-7, S-16: without the shortcuts the shell
+    // binds nothing, so every key reaches the host.
+    final keys = widget.shortcuts;
     return Scaffold(
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
           // Spec 12a D6: the command table's chords. A disabled command's
           // binding stays and does nothing (S-26), so the key is consumed.
-          for (final c in [...fileCommands, ...editCommands])
-            for (final chord in c.shortcuts) chord: c.invoke,
+          if (keys)
+            for (final c in [...fileCommands, ...editCommands])
+              for (final chord in c.shortcuts) chord: c.invoke,
           // Spec 03 D10: one toggle per press, never per key repeat. Spec
           // S-14: only while snapping is allowed.
-          if (caps.snapping)
+          if (keys && caps.snapping)
             const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
                 _snap.toggleObjectSnap,
           // Spec 05 D5: the tool letters, then Fill, then Escape. Spec
           // C-5: only the allowed letters are bound; a refused one bubbles.
-          for (final e in _entries)
-            if (_allows(e.tool))
-              SingleActivator(e.logicalKey, includeRepeats: false): () =>
-                  _activate(e.tool),
-          if (_fillOffered)
+          if (keys)
+            for (final e in _entries)
+              if (_allows(e.tool))
+                SingleActivator(e.logicalKey, includeRepeats: false): () =>
+                    _activate(e.tool),
+          if (keys && _fillOffered)
             const SingleActivator(LogicalKeyboardKey.keyF,
                 includeRepeats: false): () {
               if (_geometryAllowed) _fill.value = !_fill.value;
             },
-          const SingleActivator(LogicalKeyboardKey.escape): _escape,
+          if (keys) const SingleActivator(LogicalKeyboardKey.escape): _escape,
         },
         child: Column(
           children: [
@@ -1384,6 +1456,7 @@ class _PlannerShellState extends State<PlannerShell> {
                         tableOverlays: widget.tableOverlays,
                         rulers: caps.rulers,
                         grid: caps.grid,
+                        autofocus: widget.autofocus,
                       ),
                     ),
                   ),
@@ -1420,6 +1493,18 @@ class _PlannerShellState extends State<PlannerShell> {
                                       openingSettings: _openingSettings,
                                       symbols: widget.symbols,
                                       capabilities: caps)),
+                              // Spec C-6, S-18: the host's inspector under
+                              // jet-cad's fields, with the Selection panel.
+                              // Keyed, so adding or removing it keeps the
+                              // panels below.
+                              if (widget.tableInspector case final inspect?
+                                  when caps.selectionPanel)
+                                _TableInspector(
+                                    key: const Key('table-inspector'),
+                                    selectionChanges: _selectionRelay,
+                                    documentChanges: _documentChanged,
+                                    inspected: _inspected,
+                                    builder: inspect),
                               // Spec 12b D9: the Layers section, placed only.
                               _keptPanel(
                                   caps.layerPanel,
@@ -1451,6 +1536,87 @@ class _PlannerShellState extends State<PlannerShell> {
 
 /// The left panel's tabs (spec 09b D8).
 enum _LeftTab { tools, symbols }
+
+/// A notifier whose every [changed] is one notification.
+final class _Changed extends ChangeNotifier {
+  void changed() => notifyListeners();
+}
+
+/// The host's table inspector (host embedding API spec C-6, S-18): built
+/// for the table [inspected] names, again when that changes (a selection
+/// change, frame-safe through [selectionChanges]), at each document change
+/// while it names one ([documentChanges]: the table's data, number or
+/// place may have moved), and at each new widget (the shell's build, so a
+/// host rebuild). A hover, the camera and a selection change that keeps
+/// the table build nothing.
+class _TableInspector extends StatefulWidget {
+  const _TableInspector(
+      {super.key,
+      required this.selectionChanges,
+      required this.documentChanges,
+      required this.inspected,
+      required this.builder});
+
+  final Listenable selectionChanges;
+  final Listenable documentChanges;
+  final Handle? Function() inspected;
+  final ShellTableInspector builder;
+
+  @override
+  State<_TableInspector> createState() => _TableInspectorState();
+}
+
+class _TableInspectorState extends State<_TableInspector> {
+  /// The table shown; null for none.
+  late Handle? _shown = widget.inspected();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selectionChanges.addListener(_onSelection);
+    widget.documentChanges.addListener(_onDocument);
+  }
+
+  @override
+  void didUpdateWidget(_TableInspector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.selectionChanges, widget.selectionChanges)) {
+      oldWidget.selectionChanges.removeListener(_onSelection);
+      widget.selectionChanges.addListener(_onSelection);
+    }
+    if (!identical(oldWidget.documentChanges, widget.documentChanges)) {
+      oldWidget.documentChanges.removeListener(_onDocument);
+      widget.documentChanges.addListener(_onDocument);
+    }
+    _shown = widget.inspected();
+  }
+
+  @override
+  void dispose() {
+    widget.selectionChanges.removeListener(_onSelection);
+    widget.documentChanges.removeListener(_onDocument);
+    super.dispose();
+  }
+
+  void _onSelection() {
+    final next = widget.inspected();
+    if (next == _shown) return;
+    setState(() => _shown = next);
+  }
+
+  void _onDocument() {
+    final next = widget.inspected();
+    if (next == null && _shown == null) return;
+    setState(() => _shown = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _shown;
+    if (shown == null) return const SizedBox.shrink();
+    return widget.builder(context, shown) ?? const SizedBox.shrink();
+  }
+}
 
 /// [_source]'s notifications, forwarded at once, except while a frame
 /// builds ([SchedulerPhase.persistentCallbacks]): then one is held and
@@ -1550,12 +1716,17 @@ bool _isTableKey(DraftDocument doc, SelectionKey key) {
 /// - `move` (a body drag and a centre grip), `rotate` (the rotation grip),
 ///   `reshape` (every other grip) and `delete` (Delete and Backspace) are
 ///   the flags.
-/// - The idle keys stay: `FloorPlanView.shortcuts` is Slice 4 Task 6's.
+/// - The idle keys (Escape, Delete, Backspace while no gesture runs) are
+///   the shell's `shortcuts` (spec C-7, S-16).
 class _CapabilityGates extends SelectGates {
-  _CapabilityGates(this._caps, this._picker);
+  _CapabilityGates(this._caps, this._picker, this._shortcuts);
 
   final FloorPlanEditorCapabilities Function() _caps;
   final TablePicker Function() _picker;
+  final bool Function() _shortcuts;
+
+  @override
+  bool get idleKeys => _shortcuts();
 
   @override
   bool get restrictsPick => _caps().selectTablesOnly;

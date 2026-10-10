@@ -479,6 +479,11 @@ class FloorPlanController extends ChangeNotifier {
   /// when the editor's capabilities allow it; null with no editor mounted.
   bool Function(FloorPlanTool tool)? _toolSelector;
 
+  /// The active editor's delete (spec C-3 as Slice 4's S-16 ruled): it
+  /// deletes the editor's selection as the select tool's idle Delete does
+  /// and answers whether it did; null with no editor mounted.
+  bool Function()? _deleter;
+
   /// The tool an editor reported during a frame's build, applied after it
   /// ([_toolChanged]); whether that application is scheduled.
   FloorPlanTool? _pendingTool;
@@ -491,6 +496,8 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<bool> _canUndo = ValueNotifier(false);
   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
   final ValueNotifier<Set<String>> _selectedTables =
+      ValueNotifier(const <String>{});
+  final ValueNotifier<Set<String>> _editorSelected =
       ValueNotifier(const <String>{});
   final ValueNotifier<int> _revision = ValueNotifier(0);
   final ValueNotifier<Map<String, TableStatus>> _statuses =
@@ -630,6 +637,38 @@ class FloorPlanController extends ChangeNotifier {
     return _toolSelector?.call(tool) ?? false;
   }
 
+  /// Deletes the editor's selection (host embedding API spec C-3, as Slice
+  /// 4's S-16 ruled), exactly as the select tool's idle Delete key does:
+  /// one undo step (a compound), the table data of a deleted table
+  /// dropped with it and restored by its undo. Pending input is settled
+  /// first, as for [undo]. For a host that owns the keyboard
+  /// (`FloorPlanView.shortcuts: false`, under which the Delete key deletes
+  /// nothing).
+  ///
+  /// Answers whether anything was deleted: false in the selection mode,
+  /// with no editor mounted, with nothing selected, when the view's
+  /// `editorCapabilities` refuse `delete` (`readOnly`), when the plan's
+  /// permissions refuse every selected object, and while a gesture or a
+  /// shape is part-way (a drag, a pending wall).
+  bool deleteSelection() {
+    if (_mode.value != FloorPlanMode.design) return false;
+    final delete = _deleter;
+    if (delete == null || _editorMidShape) return false;
+    _settle?.call();
+    return delete();
+  }
+
+  /// Where the active editor registers its delete ([deleteSelection]).
+  /// Returns the withdrawal, which withdraws only [delete] itself, as
+  /// [registerSettle]'s.
+  @internal
+  VoidCallback registerDelete(bool Function() delete) {
+    _deleter = delete;
+    return () {
+      if (identical(_deleter, delete)) _deleter = null;
+    };
+  }
+
   /// Where the active editor registers its tool selector (spec C-3, S-6).
   /// Returns the withdrawal, which withdraws only [select] itself, as
   /// [registerSettle]'s; a withdrawn editor's tool is no longer active.
@@ -698,6 +737,12 @@ class FloorPlanController extends ChangeNotifier {
   /// The numbers of the tables selected in the active view (H3): a
   /// selected object that is not a numbered table is not in it.
   ValueListenable<Set<String>> get selectedTables => _selectedTables;
+
+  /// The numbers of the tables selected in the design mode's editor (host
+  /// embedding API spec C-6, S-17), for a host's own side panel beside the
+  /// editor: [selectedTables]' value in the design mode, empty in the
+  /// selection mode. Unmodifiable; it notifies only when the set changes.
+  ValueListenable<Set<String>> get editorSelectedTables => _editorSelected;
 
   /// The active plan: the design's, or the service copy's in the
   /// selection mode. For [FloorPlanView].
@@ -1738,6 +1783,13 @@ class FloorPlanController extends ChangeNotifier {
     if (!setEquals(numbers, _selectedTables.value)) {
       _selectedTables.value = Set.unmodifiable(numbers);
     }
+    // Spec C-6, S-17: the editor's numbers, none in the selection mode.
+    final editor = _mode.value == FloorPlanMode.design
+        ? _selectedTables.value
+        : const <String>{};
+    if (!setEquals(editor, _editorSelected.value)) {
+      _editorSelected.value = editor;
+    }
     _refreshSelectedGroup();
   }
 
@@ -1960,6 +2012,7 @@ class FloorPlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _selectedTables.dispose();
+    _editorSelected.dispose();
     _revision.dispose();
     _statuses.dispose();
     _groups.dispose();

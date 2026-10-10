@@ -57,6 +57,9 @@ class FloorPlanView extends StatefulWidget {
     this.serviceBar = const FloorPlanServiceBar(),
     this.editorBar = const FloorPlanEditorBar(),
     this.editorCapabilities = FloorPlanEditorCapabilities.full,
+    this.tableInspectorBuilder,
+    this.shortcuts = true,
+    this.autofocus = true,
   });
 
   final FloorPlanController controller;
@@ -246,6 +249,51 @@ class FloorPlanView extends StatefulWidget {
   /// [ArgumentError] naming `tools` when they lack
   /// [FloorPlanTool.select].
   final FloorPlanEditorCapabilities editorCapabilities;
+
+  /// The host's table inspector (host embedding API spec C-6): shown in the
+  /// editor's Selection panel, under jet-cad's own fields, when **exactly
+  /// one numbered table** is selected -- the selection is one object, and
+  /// it is a numbered table at the plan's root (S-18): two tables sharing a
+  /// number, a table with a wall, a table inside a group or an unnumbered
+  /// one show none. Called with that table's detail as
+  /// [FloorPlanController.tableDetails] reads it (its data included); null
+  /// from it shows nothing. A host links a drawn table to its own record
+  /// here, with [FloorPlanController.setTableData].
+  ///
+  /// Built when the selection becomes such a table, at each change of the
+  /// plan (an edit, an undo, a redo: the detail is read fresh) and each
+  /// time the host rebuilds this view; never on pan or zoom (P-4). Hidden
+  /// with the Selection panel (`editorCapabilities.selectionPanel`); the
+  /// design mode only. A field in it takes its keystrokes: the editor's
+  /// letters do not reach the plan from it. A host that builds its own
+  /// side panel instead listens to
+  /// [FloorPlanController.editorSelectedTables]. Read at each build.
+  final Widget? Function(BuildContext context, FloorPlanTableDetail table)?
+      tableInspectorBuilder;
+
+  /// Whether the view binds jet-cad's keys (host embedding API spec C-7,
+  /// S-16). False unbinds, in **both** modes, every key jet-cad binds while
+  /// no gesture runs, so a host's own shortcuts (a point-of-sale shortcut
+  /// host) own the keyboard: the selection mode's Undo, Redo, Export and
+  /// Print chords and its Escape (which clears the selection); the
+  /// editor's command chords, tool letters, F3, F, Escape, and the select
+  /// tool's Delete, Backspace and Escape. A gesture's own keys stay: a
+  /// drag's Escape and Shift, a drawing tool's Escape and Enter while it
+  /// draws, the symbol tool's R and M while a symbol is armed. The
+  /// commands stay callable: [FloorPlanController.undo], `redo`,
+  /// `exportPlan`, `printPlan`, `selectTool` and `deleteSelection`. Read
+  /// at each build and key.
+  final bool shortcuts;
+
+  /// Whether the view takes the focus when it is mounted (host embedding
+  /// API spec C-7), in both modes and at each mount (a mode switch, a
+  /// `resetLayout`, a `load`): false leaves it where it is, so a search
+  /// field beside the plan keeps it. A press on the canvas takes the
+  /// focus either way. Flutter's autofocus acts only while the focus
+  /// scope has no focused node: with true, the view takes the focus from
+  /// none, or from a host field that asks for it after the view in the
+  /// same frame. Read at each mount.
+  final bool autofocus;
 
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
@@ -492,6 +540,21 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             run: () => _flows.print(context)),
       ];
 
+  /// The host's inspector for the editor's one selected table [instance]
+  /// (spec C-6, S-18): its detail from the controller's fresh
+  /// [FloorPlanController.tableDetails]; nothing for an unnumbered table,
+  /// or when the builder is gone. Read at each build of the inspector.
+  Widget? _inspect(BuildContext context, Handle instance) {
+    final builder = widget.tableInspectorBuilder;
+    final c = widget.controller;
+    if (builder == null || c.mode.value != FloorPlanMode.design) return null;
+    final details = c.tableDetails;
+    final i = c.tableDetailInstances.indexOf(instance);
+    if (i < 0) return null;
+    final detail = details[i];
+    return detail.table.number == null ? null : builder(context, detail);
+  }
+
   /// The overlay layer for [mode], or null when the host shows none there
   /// (spec G-5).
   Widget? _tableOverlays(FloorPlanController c, FloorPlanMode mode) {
@@ -561,7 +624,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
               tableOverlays: serviceOverlays,
               events: _serviceEvents,
               onCanvasMoved: _canvasMoved,
-              bar: widget.serviceBar);
+              bar: widget.serviceBar,
+              shortcuts: widget.shortcuts,
+              autofocus: widget.autofocus);
         }
         c.startSymbols();
         return PlannerShell(
@@ -587,6 +652,11 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           capabilities: _editorCapabilities,
           onTools: c.registerTools,
           onToolChanged: c.toolChanged,
+          shortcuts: widget.shortcuts,
+          autofocus: widget.autofocus,
+          tableInspector:
+              widget.tableInspectorBuilder == null ? null : _inspect,
+          onDelete: c.registerDelete,
         );
       },
     );

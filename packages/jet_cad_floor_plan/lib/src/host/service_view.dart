@@ -49,7 +49,9 @@ class ServiceView extends StatefulWidget {
       this.tableOverlays,
       this.events = _noEvents,
       this.onCanvasMoved,
-      this.bar = const FloorPlanServiceBar()});
+      this.bar = const FloorPlanServiceBar(),
+      this.shortcuts = true,
+      this.autofocus = true});
 
   final FloorPlanController controller;
   final PageFlows flows;
@@ -97,6 +99,17 @@ class ServiceView extends StatefulWidget {
   /// default is today's bar.
   final FloorPlanServiceBar bar;
 
+  /// Whether the view binds its keys (host embedding API spec C-7, S-16),
+  /// read at each build and key: false binds no chord (Undo, Redo, Export,
+  /// Print) and leaves the table tool's idle Escape to the host. A drag's
+  /// keys stay; the controller's commands stay callable.
+  final bool shortcuts;
+
+  /// Whether the view takes the focus when it is mounted (spec C-7, S-21):
+  /// its own `Focus` and its canvas's. A press on the canvas takes the
+  /// focus either way.
+  final bool autofocus;
+
   @override
   State<ServiceView> createState() => _ServiceViewState();
 }
@@ -124,7 +137,8 @@ class _ServiceViewState extends State<ServiceView> {
       options: widget.options,
       userCamera: widget.userCamera,
       toGlobal: _toGlobal,
-      events: _toolEvents);
+      events: _toolEvents,
+      idleKeys: () => widget.shortcuts);
 
   /// The host's events as the tool reports them (spec E-1 to E-4): the
   /// same record, but for the moves, which the tool reports by instance.
@@ -477,16 +491,22 @@ class _ServiceViewState extends State<ServiceView> {
     // added or dropped shows or hides its button (G5); a press reads them
     // again (14c R-5).
     final callbacks = widget.callbacks();
+    // Host embedding API spec C-7, S-16: without the shortcuts no chord is
+    // bound, so every key reaches the host.
+    final keys = widget.shortcuts;
     return CallbackShortcuts(
       bindings: <ShortcutActivator, VoidCallback>{
-        for (final chord in kUndoChords) chord: _c.undo,
-        for (final chord in kRedoChords) chord: _c.redo,
-        if (flows.canExport)
+        if (keys)
+          for (final chord in kUndoChords) chord: _c.undo,
+        if (keys)
+          for (final chord in kRedoChords) chord: _c.redo,
+        if (keys && flows.canExport)
           for (final chord in kExportChords) chord: () => flows.export(context),
-        for (final chord in kPrintChords) chord: () => flows.print(context),
+        if (keys)
+          for (final chord in kPrintChords) chord: () => flows.print(context),
       },
       child: Focus(
-        autofocus: true,
+        autofocus: widget.autofocus,
         child: Column(
           children: [
             // Host embedding API spec C-1: with `visible: false` no bar, and
@@ -531,6 +551,7 @@ class _ServiceViewState extends State<ServiceView> {
                     // The service shows the plan, not the drafting aids.
                     rulers: false,
                     grid: false,
+                    autofocus: widget.autofocus,
                     // Table-groups spec G3: the frames under the status fills.
                     underlay: Stack(
                       fit: StackFit.expand,
