@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-09. **`main` carries release 0.3.0** (tag
+**Last updated:** 2026-10-10. **`main` carries release 0.3.0** (tag
 `v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -194,7 +194,10 @@ capabilities), started on the human's word; a release carrying Slices
 together) is the human's call. Found and recorded, each its own task:
 O-10 (an undone delete re-appends the node at its parent's end), O-11
 (non-finite corners trip a debug assertion in the selection grips, and
-the PDF export asserts NaN on such a table), and removing a design view
+the PDF export asserts NaN on such a table; **fixed on
+`fix/non-finite-corners`**, unmerged: once Slice 4 is on `main`, its
+`page_flows_test.dart` can drop `finitePlanJson()` for
+`embeddingPlanJson()`), and removing a design view
 while a pointer hovers a line throws (Slice 3's results). Monépro owes
 Q-H3 and its real shadcn tokens, and can name `controller.camera`,
 `tableOverlayBuilder` (Q-Z1), `FloorPlanTableDetail.data` (Q-Z4) and

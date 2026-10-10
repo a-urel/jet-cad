@@ -172,6 +172,14 @@ analyses the 0.3.0 host probe against every commit.
   `selectionOnLight`, `selectionOnDark`, `selectionWidth` and
   `canvasBackground`, and throws an `ArgumentError` naming the field for
   an ambient look out of range.
+- **A table whose corners are not finite** (an instance scaled past the
+  doubles, as only a hand-edited file holds; O-11) no longer trips a
+  debug assertion when selected in the design view, nor a NaN assertion
+  in a PDF (Export and Print): the selection's box and grips skip what
+  is not finite in the world, a grip whose screen distance is NaN is
+  never hit, the rotation grip and a point's cross are not drawn where
+  the screen position is not finite, and `PdfDrawSink` draws nothing
+  under a residual with an entry that is not finite.
 
 **Known limits.** The badges' look and the smoothness of pan and zoom
 with them have not been checked on a tablet or a terminal, nor have the

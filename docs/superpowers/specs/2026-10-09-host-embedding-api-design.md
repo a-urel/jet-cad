@@ -944,6 +944,18 @@ sharing a number, an unnumbered table, a camera not at identity.
   (`jet_cad_2d_flutter/lib/src/selection_overlay.dart`). Unreachable from
   the UI: the editor has no free scale for an instance. Found by Slice
   2's Task 2 (its review's R-4). Its own task (skip non-finite grips).
+  A PDF of a plan holding such a table (Export and Print) trips the pdf
+  package's `!value.isNaN` through the label's residual in
+  `PdfDrawSink`; its PNG is written. **Closed on `fix/non-finite-corners`
+  (2026-10-10):** `GripCache` keeps no non-finite bounds in its box and
+  no non-finite grip, and a grip whose screen distance is NaN is out of
+  every hit test's reach; `SelectionOverlayPainter` draws no rotation
+  grip and no point cross at a non-finite screen position; `PdfDrawSink`
+  draws nothing under a residual with an entry that is not finite.
+  Named mutants M-O11a to M-O11i, each killed
+  (`jet_cad_2d_flutter/test/non_finite_selection_test.dart`, the
+  sink's O-11 tests; the planner's `test/host/non_finite_table_test.dart`
+  on the whole fixture).
 
 ## Files (expected)
 
