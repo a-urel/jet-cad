@@ -335,7 +335,9 @@ class GripCache extends ChangeNotifier {
       final dx = m.a * grip.x + m.c * grip.y + m.e - screen.dx;
       final dy = m.b * grip.x + m.d * grip.y + m.f - screen.dy;
       final d = math.sqrt(dx * dx + dy * dy);
-      if (d > radius) continue;
+      // Negated, so a NaN distance (a grip past the doubles on the screen,
+      // O-11) is out of reach rather than within it.
+      if (!(d <= radius)) continue;
       final h = ref.key.target.value;
       final better = best < 0 ||
           d < bestDistance ||
@@ -394,7 +396,11 @@ class GripCache extends ChangeNotifier {
       final slot = document.entities.slotOf(key.target);
       final bounds = outlines.worldBoundsOf(key);
       if (bounds != null) {
-        box = box.union(bounds);
+        // A box that is not finite in the world (an instance scaled past
+        // the doubles, O-11) widens the selection's box to infinity, and
+        // every corner projects to NaN on the screen: it is left out, as a
+        // key with no outline is.
+        if (_finite(bounds)) box = box.union(bounds);
         // Every key is asked, not only until the first movable one: the
         // preview needs each key's answer (spec 10 D24). A fill leaf is
         // outlined when its boundary is hidden, but `GripDrag` never
@@ -415,6 +421,7 @@ class GripCache extends ChangeNotifier {
         }
         final list = provider.gripsOf(document, key.target);
         for (var i = 0; i < list.length; i++) {
+          if (!_finiteGrip(list[i])) continue;
           _grips.add(GripRef(key, list[i], i, object: true));
           if (list[i].role == GripRole.move) _moveCount++;
         }
@@ -424,6 +431,7 @@ class GripCache extends ChangeNotifier {
       final list = leafGrips(document.entities.kindAt(slot),
           document.geometry.peek(document.entities.geomIndexAt(slot)));
       for (var i = 0; i < list.length; i++) {
+        if (!_finiteGrip(list[i])) continue;
         _grips.add(GripRef(key, list[i], i));
         if (list[i].role == GripRole.move) _moveCount++;
       }
@@ -456,6 +464,14 @@ class GripCache extends ChangeNotifier {
     _built = built;
     notifyListeners();
   }
+
+  static bool _finite(Aabb2 b) =>
+      b.minX.isFinite && b.minY.isFinite && b.maxX.isFinite && b.maxY.isFinite;
+
+  /// A grip that is not finite in the world is not kept (O-11): it has no
+  /// place to be drawn or hit. Its ordinal stays its position in the list
+  /// it came from.
+  static bool _finiteGrip(Grip g) => g.x.isFinite && g.y.isFinite;
 
   @override
   void dispose() {

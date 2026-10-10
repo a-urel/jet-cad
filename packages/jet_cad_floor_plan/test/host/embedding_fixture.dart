@@ -118,8 +118,11 @@ final List<EmbeddingTable> embeddingTables = [
       sx: 1e306, sy: 1e-306, finite: false),
 ];
 
-/// The fixture plan, as a file: [embeddingTables] on a page around them.
-String embeddingPlanJson() {
+/// The fixture plan, as a file: [tables] ([embeddingTables] by default) on
+/// a page around them. `tables: embeddingTables.where((t) => t.finite)` is
+/// the plan without table 9, the reference a differential test compares the
+/// whole fixture against.
+String embeddingPlanJson({Iterable<EmbeddingTable>? tables}) {
   final doc = plan();
   // A page around the tables (A4 landscape at 1:50, 14,850 x 10,500 mm, from
   // its lower left): (37,000..51,850, -36,200..-25,700) holds every finite
@@ -130,7 +133,7 @@ String embeddingPlanJson() {
   final hidden = addZoneLayer(doc, kEmbeddingHidden, visible: false);
   final locked = addZoneLayer(doc, kEmbeddingLocked, locked: true);
   final entry = entryOf(embeddingTable);
-  for (final t in embeddingTables) {
+  for (final t in tables ?? embeddingTables) {
     doc.commands.execute(placeSymbol(doc, entry,
         at: Vector2(t.transform.e, t.transform.f),
         transform: t.transform,

@@ -423,6 +423,8 @@ opening's node, component and children, **with the same child handles**
 and after undo then `purge()`). The root's child order is compared
 normalised, 06's convention (`RemoveNodeCommand`'s inverse re-links at the
 end).
+  *(Superseded 2026-10-10 by the host embedding spec's O-10: an undone
+  removal restores the node's index, so the bytes compare exactly.)*
 
 **Permissions.** The cascade is derived geometry and inherits the
 triggering edit's authority (06 D7). A delete needs `structure` and

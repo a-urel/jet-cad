@@ -307,14 +307,18 @@ class SelectionOverlayPainter extends CustomPainter {
       // During a move or rotate the grip follows the preview's `T`
       // (spec D6, amended after the look).
       final g = rotationGripOf(box, m, grips.frame, preview);
-      canvas.drawLine(g.anchor, g.stem, _stem);
-      canvas.drawCircle(g.centre, kRotationGripPixels / 2, _gripPaint);
+      // A finite box can still project past the doubles: corners at -inf
+      // and +inf have a NaN middle, which `drawLine` asserts on (O-11).
+      if (g.anchor.isFinite && g.centre.isFinite && g.stem.isFinite) {
+        canvas.drawLine(g.anchor, g.stem, _stem);
+        canvas.drawCircle(g.centre, kRotationGripPixels / 2, _gripPaint);
+      }
     }
   }
 
   /// A cross of half-length [half] **screen pixels** centred on [key]'s world
   /// position — or, with [moved], on `moved(position)` — or nothing at all
-  /// when [key] is not a lone point.
+  /// when [key] is not a lone point or its screen position is not finite.
   ///
   /// [worldToScreen] is the camera's own matrix, not [_matrix]: the position
   /// [OutlineCache.worldPointOf] hands back is absolute world, and this pass
@@ -334,6 +338,9 @@ class SelectionOverlayPainter extends CustomPainter {
     }
     final x = worldToScreen.a * px + worldToScreen.c * py + worldToScreen.e;
     final y = worldToScreen.b * px + worldToScreen.d * py + worldToScreen.f;
+    // Off the doubles on the screen: no cross, rather than a NaN offset
+    // `drawLine` asserts on (O-11).
+    if (!x.isFinite || !y.isFinite) return;
     canvas.drawLine(Offset(x - half, y), Offset(x + half, y), paint);
     canvas.drawLine(Offset(x, y - half), Offset(x, y + half), paint);
   }

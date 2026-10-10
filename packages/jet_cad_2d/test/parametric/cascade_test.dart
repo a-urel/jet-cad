@@ -91,12 +91,12 @@ List<double> storedCoords(DraftDocument doc, Handle h) => doc.geometry
 bool hasFill(DraftDocument doc, Handle group) => kids(doc, group).any(
     (k) => doc.entities.kindAt(doc.entities.slotOf(k)!) == EntityKind.fill);
 
-/// `canon(sortNodes: true)` without the handle seed, which undo never
+/// `canon` without the handle seed, which undo never
 /// lowers (it only rises, so no handle is reused): the delete's
 /// regeneration of C adds a child, and undo removes it (06's
 /// `canonForUndo`, `guards_test.dart`).
 String state(DraftDocument doc) {
-  final j = jsonDecode(canon(doc, sortNodes: true)) as Map<String, Object?>;
+  final j = jsonDecode(canon(doc)) as Map<String, Object?>;
   expect(j.remove('handleSeed'), isNotNull);
   return jsonEncode(j);
 }
@@ -358,9 +358,9 @@ void main() {
     final doc = scene(trip: true);
     expect(drift(doc), isEmpty);
     final handles = childHandles(doc, [hA, hC, hP1, hP2]);
-    // The root's child order is normalised (06's convention); the seed is
-    // compared too: nothing was added.
-    final before = canon(doc, sortNodes: true);
+    // The bytes as they are, the root's child order included (spec O-10);
+    // the seed is compared too: nothing was added.
+    final before = canon(doc);
     final depth = doc.commands.undoDepth;
     await pumpEventQueue();
     final changes = ChangeCount(doc);
@@ -371,7 +371,7 @@ void main() {
         throwsA(
             isA<StateError>().having((e) => e.message, 'message', 'tripwire')));
     await pumpEventQueue();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(childHandles(doc, [hA, hC, hP1, hP2]), handles);
     expect(doc.components.get<Pin>(hP1), const Pin(hA, 450));
     expect(doc.commands.undoDepth, depth);
@@ -572,7 +572,7 @@ void main() {
     expect(doc.validate().map((d) => d.code),
         contains('fill.boundary_foreign_owner'));
     expect(kids(doc, hP1), isNotEmpty);
-    final before = canon(doc, sortNodes: true);
+    final before = canon(doc);
     final depth = doc.commands.undoDepth;
     await pumpEventQueue();
     final changes = ChangeCount(doc);
@@ -582,7 +582,7 @@ void main() {
         throwsA(isA<StateError>().having((e) => e.message, 'message',
             startsWith('cannot remove boundary'))));
     await pumpEventQueue();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(doc.commands.undoDepth, depth);
     expect(changes.count, 0);
   });

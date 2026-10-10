@@ -350,6 +350,61 @@ void main() {
           closeTo(0.5 * u, pdfWidthTolerance(0.5 * u, residual)));
     });
 
+    // O-11: an instance scaled past the doubles (the embedding fixture's
+    // table 9) composes a residual with a NaN or an infinite entry, which
+    // the pdf package asserts on (`!value.isNaN`) and could not write as a
+    // PDF number anyway. Whatever is drawn under it is skipped: no path, no
+    // text, `q` and `Q` balanced, and the next residual draws as before.
+    // M-O11e: a primitive under `cm` is not guarded. M-O11f: `point`, which
+    // carries the residual by hand, is not guarded. M-O11g: a residual is
+    // always taken as writable. M-O11h: `endResidual` leaves an unwritable
+    // residual's skip in force for the screen-space primitive after it.
+    final unwritable = <String, Transform2>{
+      'a NaN entry': const Transform2(double.nan, 0, 0, 1, 0, 0),
+      'an infinite entry': const Transform2(1, 0, 0, 1, double.infinity, 0),
+    };
+    final primitives = <String, void Function(PdfDrawSink)>{
+      'polyline': (sink) => sink.polyline(square, 4, red, closed: true),
+      'circle': (sink) => sink.circle(50, 50, 10, red),
+      'arc': (sink) => sink.arc(50, 50, 10, 0.3, 1.2, red),
+      'fillPolygon': (sink) =>
+          sink.fillPolygon(square, 4, Int32List(0), translucent),
+      'fillCircle': (sink) => sink.fillCircle(50, 50, 10, red),
+      'point': (sink) => sink.point(50, 50, red),
+      'text': (sink) => sink.text('Ab', ReservedHandles.standardTextStyle, red),
+    };
+    for (final MapEntry(key: what, value: bad) in unwritable.entries) {
+      for (final MapEntry(key: name, value: primitive) in primitives.entries) {
+        test(
+            'O-11 under a residual with $what, $name draws nothing (M-O11e to '
+            'M-O11h)', () async {
+          final c = await draw((sink) {
+            sink.beginResidual(bad);
+            primitive(sink);
+            sink.endResidual();
+            sink.polyline(square, 4, red, closed: false);
+            sink.beginResidual(residual);
+            sink.polyline(square, 4, red, closed: true);
+            sink.endResidual();
+          });
+          expect(c.paths, hasLength(2),
+              reason: 'the screen-space polyline after it, and the next '
+                  'residual\'s');
+          expect(c.textRuns, isEmpty);
+          final names = c.operatorNames;
+          expect(names.where((n) => n == 'q').length,
+              names.where((n) => n == 'Q').length);
+          for (final op in c.operators) {
+            for (final v in op.operands) {
+              if (v is num) {
+                expect(v.isFinite, isTrue, reason: '${op.name} $v');
+              }
+            }
+          }
+        });
+      }
+    }
+
     test(
         'a polyline and the -110 degree arc under a rotated and mirrored '
         'residual land where the residual and the page set-up put them',

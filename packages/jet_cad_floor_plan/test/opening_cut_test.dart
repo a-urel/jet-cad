@@ -543,7 +543,7 @@ void main() {
     final doc = doorWall();
     final f = oracleFrameOf(doc, hA);
     final twin = uncutTwin(doc);
-    final before = canon(doc, sortNodes: true);
+    final before = canon(doc);
     final kidsBefore = kids(doc, hA);
     expect(kidsBefore, hasLength(6), reason: 'two pieces: 2 × 3 children');
     final fills = fillsOf(doc, hA);
@@ -591,7 +591,7 @@ void main() {
     expect(payloadOf(doc, firstLine).coords, [p.sx, p.sy, p.ex, p.ey]);
 
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(kids(doc, hA), kidsBefore);
     expect(driftOf(doc), isEmpty);
   });

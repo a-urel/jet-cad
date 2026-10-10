@@ -721,7 +721,10 @@ test uses **two or more objects that clip each other**, and asserts the
 clipped child counts (5 and 3 in the spike's pair), so the fixture cannot
 silently stop overlapping. The spike's first fixture did exactly that.
 
-**Amended at execution (Plan 06):** `G3` and `G6` compare state with the
+**Amended at execution (Plan 06):** *(the child-order half superseded
+2026-10-10 by the host embedding spec's O-10: an undone removal restores
+the node's index, and `G3` and `G6` compare the bytes; `G3` still drops
+`handleSeed`.)* `G3` and `G6` compare state with the
 root's child order **normalised**, and `G3` without `handleSeed` (Task 4's
 ruling). This is pre-existing engine behaviour, not a Plan 06 defect:
 `RemoveNodeCommand`'s inverse re-links a removed node at the **end** of its

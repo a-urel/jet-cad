@@ -89,47 +89,15 @@ final class DriftThenExecuteType extends ParametricType<ReentrantProbe> {
   }
 }
 
-/// A `GroupNode`'s `children` is draw order, but draw order *is* ascending
-/// handle value (D12; `tree.dart:586`'s own append-only `_link`), never the
-/// list position. `RemoveNodeCommand`'s inverse (`AddNodeCommand`) re-links a
-/// restored node at the *end* of its parent's `children` rather than back at
-/// its old index (`tree.dart:557`) -- that is documented, pre-existing engine
-/// behaviour, not something the parametric wrapper does. A delete-then-undo
-/// round trip through the root therefore reorders the root's `children`
-/// without changing anything observable. `enc`/`canon` (support/fixture.dart)
-/// compare raw bytes and do not account for it, so it is normalised here,
-/// once, for the two guards that undo a `RemoveNodeCommand`.
-Object? _sortNodeChildren(Object? j) {
-  if (j is Map<String, Object?>) {
-    final nodes = j['nodes'];
-    if (nodes is List) {
-      for (final n in nodes) {
-        final node = n as Map<String, Object?>;
-        final children = node['children'];
-        if (children is List) {
-          children.sort((a, b) => (a as int).compareTo(b as int));
-        }
-      }
-    }
-  }
-  return j;
-}
-
-/// [enc], with the root's child-node order normalised (see
-/// [_sortNodeChildren]).
-String encNodesSorted(DraftDocument d) =>
-    jsonEncode(_sortNodeChildren(DraftDocumentCodec.encode(d)));
-
-/// [canon], with the root's child-node order normalised (see
-/// [_sortNodeChildren]) and, further, without `handleSeed`:
-/// `HandleSeed.raiseTo` never moves backward (`handle.dart:75`), so once a
-/// delete's regeneration lands a genuinely new entity (here, B's swallowed
-/// edge reappearing), undoing that edit cannot lower the seed back to its
-/// pre-edit value even though every node, entity and component is restored.
-/// Used only for a before/after-undo comparison that crosses such a
-/// regeneration.
+/// [canon] without `handleSeed`: `HandleSeed.raiseTo` never moves backward
+/// (`handle.dart:75`), so once a delete's regeneration lands a genuinely new
+/// entity (here, B's swallowed edge reappearing), undoing that edit cannot
+/// lower the seed back to its pre-edit value even though every node, entity
+/// and component is restored -- and every node at its index among its
+/// parent's children (spec O-10). Used only for a before/after-undo
+/// comparison that crosses such a regeneration.
 String canonForUndo(DraftDocument d) {
-  final j = _sortNodeChildren(jsonDecode(canon(d))) as Map<String, Object?>;
+  final j = jsonDecode(canon(d)) as Map<String, Object?>;
   j.remove('handleSeed');
   return jsonEncode(j);
 }
@@ -228,14 +196,14 @@ void main() {
     final doc = paramDoc();
     doc.commands.execute(create(doc, hA, atA, const ClipRect(2000, 1000)));
     doc.commands.execute(create(doc, hB, atB, const Trip(400, 900)));
-    final before = encNodesSorted(doc);
+    final before = enc(doc);
     Trip.mode = TripMode.throwing;
     expect(
         () => doc.commands.execute(deleteObject(doc, hA)),
         throwsA(
             isA<StateError>().having((e) => e.message, 'message', 'tripwire')));
     expect(doc.components.get<ClipRect>(hA), const ClipRect(2000, 1000));
-    expect(encNodesSorted(doc), before);
+    expect(enc(doc), before);
   });
 
   test('G7 a failed plan reserves no handle: handleSeed unchanged (M-06t)', () {

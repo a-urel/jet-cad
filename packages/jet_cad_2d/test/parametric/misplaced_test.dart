@@ -98,7 +98,7 @@ DraftDocument fileWithMisplaced(Scene s) {
 /// [canon] without `handleSeed`, which never moves backward: an undo of
 /// an edit whose regeneration added children restores everything else.
 String noSeed(DraftDocument d) {
-  final j = jsonDecode(canon(d, sortNodes: true)) as Map<String, Object?>;
+  final j = jsonDecode(canon(d)) as Map<String, Object?>;
   j.remove('handleSeed');
   return jsonEncode(j);
 }
@@ -205,18 +205,18 @@ void main() {
       SetComponentCommand<Hinge>(g, const Hinge(true)),
     ], label: 'Add hinge'));
     expect(kids(doc, g), hasLength(2));
-    final live = canon(doc, sortNodes: true);
+    final live = canon(doc);
     doc.commands.execute(deleteObject(doc, g));
     expect(doc.tree[g], isNull);
     expect(doc.components.get<Hinge>(g), isNull, reason: '06 D8 cleanup');
-    final deleted = canon(doc, sortNodes: true);
+    final deleted = canon(doc);
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), live);
+    expect(canon(doc), live);
     expect(doc.components.get<Hinge>(g), const Hinge(true));
     doc.commands.redo();
-    expect(canon(doc, sortNodes: true), deleted);
+    expect(canon(doc), deleted);
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), live);
+    expect(canon(doc), live);
     expect(kids(doc, g), hasLength(2));
   });
 
@@ -277,10 +277,9 @@ void main() {
       'deletes B: refused, B still live with its ClipRect', () {
     final s = scene();
     final doc = s.doc;
-    // The refused delete's undo re-links B at the root's end (a
-    // `RemoveNodeCommand` inverse): draw order is the handle, so the
-    // child lists are compared sorted.
-    final before = canon(doc, sortNodes: true);
+    // The refused delete's rollback puts B back at its index among the
+    // root's children (spec O-10), so the encodings compare exactly.
+    final before = canon(doc);
     final depth = doc.commands.undoDepth;
     expect(
         () => doc.commands.execute(CompoundCommand([
@@ -291,7 +290,7 @@ void main() {
     expect(doc.tree[hB], isA<GroupNode>());
     expect(doc.components.get<ClipRect>(hB), const ClipRect(400, 900));
     expect(doc.components.get<Hinge>(hB), isNull);
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(doc.commands.undoDepth, depth);
   });
 
