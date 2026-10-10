@@ -207,44 +207,31 @@ one's spec, plan and results.
   The guide names `8367010`. The human pushed `main` and the tag
   `v0.4.0` → `8367010` (2026-10-10).
 
+- **A removed node takes its components** (the host embedding API
+  spec's O-8; the human, 2026-10-09), merged into `main` at `8b0f6b0` on
+  the human's word (2026-10-10). Deleting a node now removes every
+  component on its handle (registered and preserve-unknown) and undo
+  restores them, the node at its index: `RemoveNodeCommand` snapshots and
+  detaches them, `AddNodeCommand(node, {index, components})` checks the
+  snapshot (`ComponentRegistry.checkRestorable`: an unmapped type id or a
+  value of another class) before any write and restores it after
+  `addNode`; both declare `{structure, components}` (the add only when it
+  carries any). The parametric planner's detaches (06 D8's cleanup, the
+  dissolve's) and 0.4.0's table-data expander detach are gone. Schema
+  stays 9. Spec
+  [2026-10-09-node-components-on-delete-design.md](docs/superpowers/specs/2026-10-09-node-components-on-delete-design.md)
+  (revision 3, reviewed, approved), plan
+  [2026-10-10-node-components-on-delete.md](docs/superpowers/plans/2026-10-10-node-components-on-delete.md)
+  (subagent-driven, three tasks, each reviewed; whole-branch review and
+  its fix wave), results
+  [2026-10-10-node-components-results.md](docs/superpowers/notes/2026-10-10-node-components-results.md)
+  (M-1 to M-18, the rulings), ledger
+  [docs/superpowers/ledgers/2026-10-09-node-components-on-delete/](docs/superpowers/ledgers/2026-10-09-node-components-on-delete/).
+  Not pushed.
+
 ## In flight
 
-- **A removed node takes its components** (the host embedding API
-  spec's O-8): spec
-  [2026-10-09-node-components-on-delete-design.md](docs/superpowers/specs/2026-10-09-node-components-on-delete-design.md),
-  **revision 3, approved**; plan
-  [2026-10-10-node-components-on-delete.md](docs/superpowers/plans/2026-10-10-node-components-on-delete.md),
-  **executed on `fix/node-components-on-delete`, not merged** (execution
-  chosen by the human, 2026-10-10: subagent-driven). `RemoveNodeCommand`
-  left a deleted node's components on its dead handle in the saved plan;
-  now the delete takes them and undo restores them, as
-  `RemoveDefinitionCommand` does: `AddNodeCommand` gains `components`
-  (checked before `addNode`, nothing written on a refusal),
-  `RemoveNodeCommand` declares `{structure, components}`, the parametric
-  planner stops planning detaches (D-4) and 0.4.0's table-data expander
-  goes (D-7). Schema stays 9. The spec's history: revision 1 was written
-  at `85905bd` (0.3.0) and merged into `main` as docs only through
-  [PR #10](https://github.com/a-urel/jet-cad/pull/10) at `b5bef3a`;
-  revision 2 re-read every fact at 0.4.0 (`e281372`); an independent
-  review returned *Approve with fixes* (V-1 to V-11, one Major: TD10
-  rewritten); revision 3 folds in every fix and the human approved it.
-  Tasks 1 (the engine, `90044db`, with its fix `d082640`) and 2 (the
-  floor plan, `391d967`) were each reviewed independently and approved;
-  Task 3 is the CHANGELOG (Unreleased), the spec's status line and the
-  results note
-  [2026-10-10-node-components-results.md](docs/superpowers/notes/2026-10-10-node-components-results.md)
-  (all 17 mutants with their red lines; the rulings that changed the
-  spec's claims: M-5's killers, P-1 to P-3 compare `canon`, P-2 not a
-  killer of M-12). The whole-branch review returned *Ready to merge with
-  fixes* (no Critical or Important; every gate at `a39a290` green but the
-  standing failures); its fix wave `f1a9989` (titles, the results note,
-  N-2 off index 0, and `checkRestorable` refusing a value of another
-  class, M-18) was re-reviewed: all addressed, four minors parked with
-  rulings. The ledger, the task reports and reviews and the spec review
-  are archived in
-  [docs/superpowers/ledgers/2026-10-09-node-components-on-delete/](docs/superpowers/ledgers/2026-10-09-node-components-on-delete/).
-  **Next:** the human's look, then the merge into `main` **on the
-  human's word**. Nothing is pushed.
+Nothing.
 
 ## Owed to the human
 
