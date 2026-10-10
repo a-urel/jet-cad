@@ -738,6 +738,8 @@ consequence in the shell.
   pre-existing undo behaviour (the Task 18 review; the same at
   `10894c6`; the final review's probe D). Draw order follows handles and
   is unaffected (D18); save→load→save is byte-identical in every state.
+  *(The root's child order superseded 2026-10-10 by the host embedding
+  spec's O-10: an undone removal restores the node's index.)*
 
 ### D9 — The room's children: the tint and the two labels
 
@@ -1227,6 +1229,8 @@ plans nothing either way); M-10page, M-10pagekey.
   child with its handle. State-equal, compared with the root's child order
   normalised (06's convention); **draw order is unaffected**, since it
   follows handles, not tree order (D18).
+  *(Superseded 2026-10-10 by the host embedding spec's O-10: an undone
+  removal restores the node's index, so the bytes compare exactly.)*
 - **`drift()`** names a room that would dissolve (its plan is non-empty),
   so a loaded broken room shows; `diagnose` reports `room.broken` (D22).
 - **Permissions:** the removals inherit the triggering edit's authority
@@ -1586,6 +1590,8 @@ One row per change; "—" means the change does not touch that guarantee.
   children (D15). Draw order follows handles, so it is stable; the saved
   bytes are state-equal (root order normalised), 06's and 08's accepted
   convention.
+  *(Superseded 2026-10-10 by the host embedding spec's O-10: an undone
+  removal restores the node's index, so the bytes compare exactly.)*
 - **Save → load → save is byte-identical**; `RoomParams` and
   `SeparatorParams` come back equal; labels keep their strings; the DASHED
   record persists with the tables; `drift()` is empty after load.
