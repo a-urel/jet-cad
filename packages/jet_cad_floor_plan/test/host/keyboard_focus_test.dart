@@ -4,6 +4,7 @@
 // fixture under `embeddingCamera()`; the editor's keys and the delete on
 // the editor fixture under `editorCamera()`. A host `CallbackShortcuts`
 // above the view counts every key that reaches it.
+import 'dart:convert' show jsonEncode;
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -172,6 +173,18 @@ Future<void> focusCanvas(WidgetTester tester) async {
 /// The active plan's encoding: equal means no edit.
 String encoded(FloorPlanController c) =>
     DraftDocumentCodec.encodeToString(c.activeDocument);
+
+/// [encoded] with the entities by handle: slot order is history, not state
+/// (06 D11), and a wall's delete regenerates its neighbours, so its undo
+/// lands their entities in other slots. Everything else, the children's
+/// order included, compares as written.
+String entitiesByHandle(FloorPlanController c) {
+  final j = DraftDocumentCodec.encode(c.activeDocument);
+  j['entities'] = List<Map<String, Object?>>.from(j['entities']! as List)
+    ..sort((a, b) => ((a['record']! as Map)['handle']! as int)
+        .compareTo((b['record']! as Map)['handle']! as int));
+  return jsonEncode(j);
+}
 
 /// Moves table [n] of the active plan by (dx, dy), one step.
 void move(FloorPlanController c, String n, double dx, double dy) {
@@ -518,6 +531,14 @@ void main() {
       final before = encoded(c);
       final details = c.tableDetails;
       final depth = c.activeDocument.commands.undoDepth;
+      final root =
+          (c.activeDocument.tree[c.activeDocument.rootHandle]! as GroupNode)
+              .children;
+      expect(
+          root.indexOf(
+              TableSurvey.of(c.activeDocument).withNumber('1').single.instance),
+          lessThan(root.length - 1),
+          reason: 'premise: table 1 is not the root\'s last child');
       await t.press(tester, LogicalKeyboardKey.delete);
       expect(encoded(c), before, reason: 'the key deletes nothing');
       expect(h.reached['delete'], 1);
@@ -531,10 +552,10 @@ void main() {
       expect(c.deleteSelection(), isFalse, reason: 'nothing selected');
       c.undo();
       await tester.pump();
-      // The engine re-inserts an undone node last among the root's
-      // children (Task 3's finding), so the encoding is compared through
-      // the key's own undo (DS2); here every table's detail, data included.
-      expect(c.tableDetails, details, reason: 'one step, undone whole');
+      // The plan as it was, byte for byte: an undone removal restores the
+      // node's index among the root's children (spec O-10).
+      expect(encoded(c), before, reason: 'one step, undone whole');
+      expect(c.tableDetails, details);
       expect(dataOf1(c), const {'pos': 'a1'});
       expect(c.activeDocument.commands.undoDepth, depth);
       c.redo();
@@ -563,6 +584,7 @@ void main() {
         ]);
         await tester.pump();
         expect(c.activeSelection.length, 3);
+        final before = entitiesByHandle(c);
         final depth = d.commands.undoDepth;
         if (viaCall) {
           expect(c.deleteSelection(), isTrue);
@@ -576,6 +598,9 @@ void main() {
         await tester.pump();
         expect(d.commands.undoDepth, depth);
         final undone = encoded(c);
+        expect(entitiesByHandle(c), before,
+            reason: 'the plan as it was (spec O-10: the children in their '
+                'order), by ${viaCall ? 'call' : 'key'}');
         await tester.pumpWidget(const SizedBox());
         await tester.pump();
         return [json, undone];
