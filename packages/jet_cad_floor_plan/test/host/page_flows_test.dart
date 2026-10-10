@@ -3,10 +3,10 @@
 // `printPlan` without their dialogs under one guard per controller, the
 // view's `onExportDialog` at every Export entry point of both modes, and
 // `onPageFlowError`. On the embedding fixture (turned, mirrored, scaled
-// tables 40 m off the origin) under `embeddingCamera()`; a print or a PDF
-// on it without table 9, whose corners are not finite (the PDF writer
-// asserts on its NaN coordinates, on the base too). Expected pixel sizes
-// are computed here from the page, never read from the code under test.
+// tables 40 m off the origin, table 9's corners not finite) under
+// `embeddingCamera()`, every print and PDF on the whole fixture (O-11).
+// Expected pixel sizes are computed here from the page, never read from
+// the code under test.
 import 'dart:async';
 import 'dart:convert' show latin1;
 import 'dart:typed_data';
@@ -24,48 +24,13 @@ import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
 import 'package:jet_cad_floor_plan/src/host/page_flows.dart';
-import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
-import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
-import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/fake_page_printer.dart';
 import '../tables/table_fixture.dart';
 import 'embedding_fixture.dart';
-import 'zone_fixture.dart' show addZoneLayer;
 
 Finder byKey(String k) => find.byKey(Key(k));
-
-/// [embeddingPlanJson] without table 9: every other table, layer and the
-/// page as the fixture makes them, so a PDF of it can be written.
-String finitePlanJson() {
-  final doc = plan();
-  doc.commands.execute(SetComponentCommand<PageComponent>(
-      doc.rootHandle, PageComponent(originX: 37000, originY: -36200)));
-  final hidden = addZoneLayer(doc, kEmbeddingHidden, visible: false);
-  final locked = addZoneLayer(doc, kEmbeddingLocked, locked: true);
-  final entry = entryOf(embeddingTable);
-  for (final t in embeddingTables.where((t) => t.finite)) {
-    doc.commands.execute(placeSymbol(doc, entry,
-        at: Vector2(t.transform.e, t.transform.f),
-        transform: t.transform,
-        numbered: t.label != null));
-    final info = TableSurvey.of(doc).tables.last;
-    if (t.label case final label?) {
-      doc.commands
-          .execute(SetEntityTextCommand(info.label!, label, kTableLabelTag));
-    }
-    switch (t.layer) {
-      case kEmbeddingHidden:
-        doc.commands.execute(SetInstanceLayerCommand(info.instance, hidden));
-      case kEmbeddingLocked:
-        doc.commands.execute(SetInstanceLayerCommand(info.instance, locked));
-    }
-  }
-  final json = DraftDocumentCodec.encodeToString(doc);
-  doc.dispose();
-  return json;
-}
 
 /// A PNG's width and height, from its IHDR chunk.
 ({int w, int h}) pngSize(Uint8List b) {
@@ -276,7 +241,7 @@ void main() {
     expect(none.calls, isEmpty);
 
     final printer = FakePagePrinter();
-    final c = await pumpFlows(tester, json: finitePlanJson());
+    final c = await pumpFlows(tester, json: embeddingPlanJson());
     for (final mode in FloorPlanMode.values) {
       await toMode(tester, c, mode);
       expect(
@@ -299,7 +264,7 @@ void main() {
   testWidgets(
       'PF4 exportPlan and printPlan act with no view mounted, and answer '
       'null and false after dispose()', (tester) async {
-    final c = FloorPlanController(json: finitePlanJson());
+    final c = FloorPlanController(json: embeddingPlanJson());
     c.cameraController.value = embeddingCamera();
     final png = (await tester.runAsync(() => c.exportPlan(png96)))!;
     expect(pngSize(png.bytes), pagePixels(c, 96));
@@ -378,7 +343,7 @@ void main() {
       'its printer answers false, and true after it ends', (tester) async {
     final barPrinter = FakePagePrinter()..hold = true;
     final c = await pumpFlows(tester,
-        json: finitePlanJson(), printer: barPrinter, onExport: (_) {});
+        json: embeddingPlanJson(), printer: barPrinter, onExport: (_) {});
     final both = await tester.runAsync(() {
       final first = c.exportPlan(png96);
       final second = c.exportPlan(png96);
@@ -433,7 +398,7 @@ void main() {
   testWidgets(
       'PF8 (T1-b) exportPlan of a plan replaced before its bytes: a mode '
       'switch, then a load, each answers null', (tester) async {
-    final c = await pumpFlows(tester, json: finitePlanJson());
+    final c = await pumpFlows(tester, json: embeddingPlanJson());
     final switched = await tester.runAsync(() {
       final f = c.exportPlan(png96);
       c.setMode(FloorPlanMode.selection);
@@ -447,7 +412,7 @@ void main() {
     await tester.pump();
     final loaded = await tester.runAsync(() {
       final f = c.exportPlan(png96);
-      c.load(finitePlanJson());
+      c.load(embeddingPlanJson());
       return f;
     });
     expect(loaded, isNull);
@@ -489,7 +454,7 @@ void main() {
     final hook = RecordingHook(png96);
     final got = <FloorPlanExport>[];
     final c = await pumpFlows(tester,
-        json: finitePlanJson(),
+        json: embeddingPlanJson(),
         printer: printer,
         onExport: got.add,
         hook: hook,
@@ -528,7 +493,8 @@ void main() {
       'an uncaught asynchronous error, as on the base, and Print is enabled '
       'again', (tester) async {
     final printer = FakePagePrinter();
-    final c = await pumpFlows(tester, json: finitePlanJson(), printer: printer);
+    final c =
+        await pumpFlows(tester, json: embeddingPlanJson(), printer: printer);
     for (final mode in FloorPlanMode.values) {
       await toMode(tester, c, mode);
       final print =
@@ -554,7 +520,7 @@ void main() {
       'nothing; the guard is free again', (tester) async {
     final errors = <Object>[];
     final c = await pumpFlows(tester,
-        json: finitePlanJson(), onError: errors.add, onExport: (_) {});
+        json: embeddingPlanJson(), onError: errors.add, onExport: (_) {});
     final printer = FakePagePrinter()..failNext = StateError('jam');
     Object? thrown;
     await tester.runAsync(() async {
@@ -606,7 +572,7 @@ void main() {
       "PF13 (T1-e) each of the six choices through exportPlan gives what the "
       "same choice gives through the dialog's bytes: a PNG's pixel size per "
       "dpi, a PDF's magic and page size", (tester) async {
-    final c = await pumpFlows(tester, json: finitePlanJson());
+    final c = await pumpFlows(tester, json: embeddingPlanJson());
     final document = c.activeDocument;
     final page = exportPageOf(document)!;
     const internalDpi = {
@@ -676,7 +642,8 @@ void main() {
       "PF15 a view removed while its Print runs releases the controller's "
       'guard when the printer is done: exportPlan acts again', (tester) async {
     final printer = FakePagePrinter()..hold = true;
-    final c = await pumpFlows(tester, json: finitePlanJson(), printer: printer);
+    final c =
+        await pumpFlows(tester, json: embeddingPlanJson(), printer: printer);
     await tester.tap(byKey('toolbar-print'));
     await tester.pump();
     await letRun(tester, () => printer.held.isNotEmpty);
@@ -698,7 +665,7 @@ void main() {
       'after the flows exist are the ones used at the next Export and the '
       'next error: read at each call, never captured', (tester) async {
     final got = <FloorPlanExport>[];
-    final c = FloorPlanController(json: finitePlanJson());
+    final c = FloorPlanController(json: embeddingPlanJson());
     addTearDown(c.dispose);
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -750,7 +717,7 @@ void main() {
   testWidgets(
       'PF17 (R-2) exportPlan settles pending input first: a table number '
       'typed and not committed is in the bytes', (tester) async {
-    final c = await pumpFlows(tester, json: finitePlanJson());
+    final c = await pumpFlows(tester, json: embeddingPlanJson());
     c.select({'1'});
     await tester.pump();
     final before = (await tester.runAsync(() => c.exportPlan(png96)))!;
@@ -770,7 +737,7 @@ void main() {
   testWidgets(
       'PF18 (R-3) dispose() while printPlan awaits its printer: it answers '
       'false', (tester) async {
-    final c = FloorPlanController(json: finitePlanJson());
+    final c = FloorPlanController(json: embeddingPlanJson());
     final printer = FakePagePrinter()..hold = true;
     late Future<bool> printing;
     await tester.runAsync(() async {
@@ -788,7 +755,8 @@ void main() {
       'PF19 (R-4) flows disposed while Print makes its bytes: nothing is '
       'printed', (tester) async {
     final printer = FakePagePrinter();
-    final c = await pumpFlows(tester, json: finitePlanJson(), printer: printer);
+    final c =
+        await pumpFlows(tester, json: embeddingPlanJson(), printer: printer);
     await tester.runAsync(() => c.exportFont.bytes);
     final flows = PageFlows(
         controller: c,
