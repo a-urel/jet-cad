@@ -8,7 +8,7 @@
 // Expected pixel sizes are computed here from the page, never read from
 // the code under test.
 import 'dart:async';
-import 'dart:convert' show latin1;
+import 'dart:convert' show latin1, utf8;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -19,6 +19,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show ExportDpi;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart' as host;
 import 'package:jet_cad_floor_plan/src/export/export_bytes.dart';
 import 'package:jet_cad_floor_plan/src/export/export_dialog.dart';
+import 'package:jet_cad_floor_plan/src/export/export_font.dart'
+    show kExportFontAsset;
 import 'package:jet_cad_floor_plan/src/export/page_printer.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
@@ -816,5 +818,160 @@ void main() {
     expect(got, isEmpty);
     expect(c.exportChoice,
         const ExportChoice(format: ExportFormat.png, dpi: ExportDpi.d300));
+  });
+
+  /// [finitePlanJson] in the design mode under a view whose capabilities
+  /// the returned notifier sets, with `onExport`, a fake printer and, when
+  /// given, a host's export dialog.
+  Future<(FloorPlanController, ValueNotifier<host.FloorPlanEditorCapabilities>)>
+      pumpCaps(WidgetTester tester,
+          {required void Function(FloorPlanExport) onExport,
+          required PagePrinter printer,
+          Future<FloorPlanExportChoice?> Function(
+                  BuildContext, FloorPlanExportChoice)?
+              dialog}) async {
+    final c = FloorPlanController(json: finitePlanJson());
+    addTearDown(c.dispose);
+    final caps = ValueNotifier(host.FloorPlanEditorCapabilities.full);
+    addTearDown(caps.dispose);
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: ValueListenableBuilder<host.FloorPlanEditorCapabilities>(
+                valueListenable: caps,
+                builder: (_, v, __) => FloorPlanView(
+                    controller: c,
+                    editorCapabilities: v,
+                    onExport: onExport,
+                    printer: printer,
+                    onExportDialog: dialog)))));
+    await tester.pump();
+    await tester.pump();
+    c.cameraController.value = embeddingCamera();
+    await tester.pump();
+    return (c, caps);
+  }
+
+  testWidgets(
+      'PF22 (final review F-4) the Material export dialog open when the '
+      'host refuses export: OK exports nothing and the answer is not '
+      'remembered; allowed again, the same steps export', (tester) async {
+    final got = <FloorPlanExport>[];
+    final (c, caps) =
+        await pumpCaps(tester, onExport: got.add, printer: FakePagePrinter());
+    Future<void> exportPng() async {
+      await tester.tap(byKey('toolbar-export'));
+      await tester.pump();
+      await tester.pump();
+      expect(byKey('export-dialog'), findsOneWidget, reason: 'premise');
+      await tester.tap(byKey('export-format-png'));
+      await tester.pump();
+    }
+
+    await exportPng();
+    caps.value = host.FloorPlanEditorCapabilities.full.copyWith(export: false);
+    await tester.pump();
+    expect(byKey('toolbar-export'), findsNothing, reason: 'premise: refused');
+    await tester.tap(byKey('export-ok'));
+    await tester.pump();
+    await letRun(tester, () => got.isNotEmpty);
+    await letRun(tester, () => c.pageFlowReady.value);
+    expect(got, isEmpty);
+    expect(c.exportChoice, ExportChoice.initial);
+
+    caps.value = host.FloorPlanEditorCapabilities.full;
+    await tester.pump();
+    await exportPng();
+    await tester.tap(byKey('export-ok'));
+    await tester.pump();
+    await letRun(tester, () => got.isNotEmpty);
+    expect(got.single.fileName, 'plan.png', reason: 'the control');
+  });
+
+  testWidgets(
+      "PF23 (final review F-4) a host's export dialog answering after the "
+      'host refused export, and a refusal while the bytes are made: '
+      'nothing is exported; the selection mode is never refused (S-22)',
+      (tester) async {
+    final got = <FloorPlanExport>[];
+    var answer = Completer<FloorPlanExportChoice?>();
+    final (c, caps) = await pumpCaps(tester,
+        onExport: got.add,
+        printer: FakePagePrinter(),
+        dialog: (_, __) => answer.future);
+    final refused =
+        host.FloorPlanEditorCapabilities.full.copyWith(export: false);
+
+    // Refused while the hook's dialog is open.
+    await tester.tap(byKey('toolbar-export'));
+    await tester.pump();
+    caps.value = refused;
+    await tester.pump();
+    answer.complete(png96);
+    await letRun(tester, () => c.pageFlowReady.value);
+    expect(got, isEmpty, reason: 'refused while the dialog was open');
+
+    // Refused after the dialog answered, while the bytes are made.
+    caps.value = host.FloorPlanEditorCapabilities.full;
+    await tester.pump();
+    answer = Completer();
+    await tester.tap(byKey('toolbar-export'));
+    await tester.pump();
+    answer.complete(png96);
+    await tester.pump();
+    caps.value = refused;
+    await tester.pump();
+    await letRun(tester, () => c.pageFlowReady.value);
+    expect(got, isEmpty, reason: 'refused while the bytes were made');
+
+    // The selection mode exports under the same refusal.
+    await toMode(tester, c, FloorPlanMode.selection);
+    answer = Completer();
+    await tester.tap(byKey('service-export'));
+    await tester.pump();
+    answer.complete(png96);
+    await letRun(tester, () => got.isNotEmpty);
+    expect(got.single.fileName, 'plan.png');
+  });
+
+  testWidgets(
+      'PF24 (final review F-4) Print refused while its bytes wait on the '
+      'font: nothing is printed; allowed, it prints', (tester) async {
+    // The export font's asset held until the test lets it go, as a first
+    // print's load can take a while.
+    final gate = Completer<void>();
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.allMessagesHandler = (channel, handler, message) {
+      final send = handler ?? (m) => messenger.delegate.send(channel, m);
+      if (channel == 'flutter/assets' &&
+          utf8.decode(message!.buffer
+                  .asUint8List(message.offsetInBytes, message.lengthInBytes)) ==
+              kExportFontAsset) {
+        return gate.future.then((_) => send(message));
+      }
+      return send(message);
+    };
+    addTearDown(() => messenger.allMessagesHandler = null);
+    final printer = FakePagePrinter();
+    final (c, caps) =
+        await pumpCaps(tester, onExport: (_) {}, printer: printer);
+    await tester.tap(byKey('toolbar-print'));
+    await tester.pump();
+    expect(c.pageFlowReady.value, isFalse, reason: 'premise: under way');
+    caps.value = host.FloorPlanEditorCapabilities.full.copyWith(print: false);
+    await tester.pump();
+    expect(byKey('toolbar-print'), findsNothing, reason: 'premise: refused');
+    gate.complete();
+    await letRun(tester, () => c.pageFlowReady.value);
+    expect(c.pageFlowReady.value, isTrue, reason: 'premise: the flow ended');
+    expect(printer.calls, isEmpty);
+
+    caps.value = host.FloorPlanEditorCapabilities.full;
+    await tester.pump();
+    await tester.tap(byKey('toolbar-print'));
+    await tester.pump();
+    await letRun(tester, () => printer.calls.isNotEmpty);
+    expect(printer.calls.single.name, 'plan', reason: 'the control');
   });
 }

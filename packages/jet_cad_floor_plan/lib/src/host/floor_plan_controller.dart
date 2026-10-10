@@ -151,6 +151,54 @@ final class _CameraValue implements ValueListenable<FloorPlanCamera> {
       _camera.removeListener(listener);
 }
 
+/// The controller's camera controller (final review F-3): a pan made while
+/// a view builds ([panUnheard]) is applied at once and heard after that
+/// frame.
+final class _ViewCamera extends CameraController {
+  _ViewCamera(super.initial, {super.minScale, super.maxScale});
+
+  /// A [panUnheard] is assigning the value: its notification waits.
+  bool _quiet = false;
+
+  /// A notification is due after the frame.
+  bool _owed = false;
+  bool _disposed = false;
+
+  /// Pans by [canvasDelta] now, as [panBy] does, while a view builds: the
+  /// frame being built lays out and paints at the new value (the canvas
+  /// that moved is laid out and painted again whatever the camera does),
+  /// and the listeners -- a host's among them, which may not be marked
+  /// dirty in another widget's build -- hear it once, after the frame.
+  void panUnheard(Offset canvasDelta) {
+    _quiet = true;
+    try {
+      panBy(canvasDelta);
+    } finally {
+      _quiet = false;
+    }
+    if (_owed) return;
+    _owed = true;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        _owed = false;
+        if (!_disposed) notifyListeners();
+      })
+      ..ensureVisualUpdate();
+  }
+
+  @override
+  void notifyListeners() {
+    if (_quiet) return;
+    super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+}
+
 /// The table focus (zone spec Z10): each [replace] notifies, an equal set
 /// or a second null included.
 final class _Focus extends ChangeNotifier
@@ -346,7 +394,9 @@ class FloorPlanController extends ChangeNotifier {
   /// `minScale` and `maxScale`. Named `camera` before the host embedding
   /// API (spec G-2), which gave that name to the public [camera].
   @internal
-  late final CameraController cameraController = CameraController(
+  CameraController get cameraController => _viewCamera;
+
+  late final _ViewCamera _viewCamera = _ViewCamera(
       ViewportTransform(worldToScreenMatrix: Transform2(1, 0, 0, -1, 0, 0)),
       minScale: _minScale,
       maxScale: _maxScale);
@@ -354,7 +404,9 @@ class FloorPlanController extends ChangeNotifier {
   late final _CameraValue _camera = _CameraValue(cameraController);
 
   /// Where the plan is on the canvas (spec G-2): a new [FloorPlanCamera] at
-  /// every pan, zoom and fit, by the user or by the host; one per position,
+  /// every pan, zoom and fit, by the user or by the host, and at a view's
+  /// chrome change in the mode shown, which keeps the plan in place on the
+  /// screen (heard after that frame, [chromeMoved]); one per position,
   /// so two reads with no camera change in between are the identical
   /// object. One camera for both modes: a mode switch keeps the plan where
   /// it is on the screen (R-13), moving the camera by the difference of the
@@ -915,6 +967,21 @@ class FloorPlanController extends ChangeNotifier {
     if (assumed == null || assumed == origin) return;
     cameraController
         .panBy(shown == _mode.value ? assumed - origin : origin - assumed);
+  }
+
+  /// A view's chrome in the mode it shows moved that mode's canvas from
+  /// [from] to [to] in the view (final review F-3): a bar, the editor's
+  /// left column or rulers shown or hidden. The
+  /// camera pans by the difference, so the plan stays where it is on the
+  /// screen, as a mode switch keeps it (R-13), from the frame that lays
+  /// the new chrome out: called while the view builds, the pan is applied
+  /// at once and the camera's listeners hear it after that frame. It is no
+  /// camera command: a fit requested and not yet performed still runs.
+  /// The canvas is measured after the frame ([canvasMeasured]).
+  @internal
+  void chromeMoved(Offset from, Offset to) {
+    if (_disposed || from == to) return;
+    _viewCamera.panUnheard(from - to);
   }
 
   // Spec Q0 N1 (R-4): an empty plan the controller makes is unsettled

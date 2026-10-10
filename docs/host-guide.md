@@ -581,11 +581,14 @@ often as you like, and again when `controller.revision` moves.
 `FloorPlanCamera`, a new value at every pan, zoom and fit, by the user
 or by you: `scale` in logical pixels per millimetre, `worldToCanvas`,
 `canvasToWorld`, and `visibleWorld(size)`, the world a canvas of that
-size shows. The **canvas** is the view's drawing area, in logical
+size shows. The view pans it too when its own bars, or the editor's
+left column or rulers, are shown or hidden, so the plan stays where it
+is on the screen; you hear that pan after the frame that lays the new
+chrome out. The **canvas** is the view's drawing area, in logical
 pixels, origin at its top left, y down: below the service bar in the
-selection mode, inside the rulers in the design mode. The camera
-notifies on every frame of a pan, so a widget that listens to it is
-rebuilt at that rate; keep such a widget small, like this read-out:
+selection mode, inside the rulers in the design mode. The camera notifies on every frame of a pan, so a widget that
+listens to it is rebuilt at that rate; keep such a widget small, like
+this read-out:
 
 ```dart
           ValueListenableBuilder<FloorPlanCamera>(
@@ -1525,10 +1528,13 @@ that build:
 
 A tool the new value refuses falls back to Select, cancelling a shape
 it had begun; a hidden panel, the left tab and the symbol search keep
-their state. When the left column would hold the Select row alone
-(`readOnly`), it goes, and the canvas starts at the rulers; the plan
-stays where it is on the screen. Turning the rulers off or on at run
-time cancels a shape part-way drawn (its tool stays active).
+their state. An Export or a Print under way when the new value refuses
+it hands nothing over: the dialog's answer, or the bytes, are dropped,
+and the answer is not remembered. When the left column would hold the
+Select row alone (`readOnly`), it goes, and the canvas starts at the
+rulers; the plan stays where it is on the screen. Turning the rulers
+off or on at run time cancels a shape part-way drawn (its tool stays
+active).
 
 **A tool strip of your own.** `activeTool`, a
 `ValueListenable<FloorPlanTool>`, moves with a palette tap, a letter,

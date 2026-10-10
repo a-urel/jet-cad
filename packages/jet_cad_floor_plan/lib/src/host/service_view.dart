@@ -456,7 +456,9 @@ class _ServiceViewState extends State<ServiceView> {
     super.initState();
     _parametric;
     _tableLabels;
-    // Built now, so dispose never builds one over a controller in teardown.
+    // Built now, so dispose never builds one over a controller in teardown
+    // (final review F-2: the page flag too, which only a shown bar reads).
+    _pageReady;
     _canMerge;
     _canSplit;
     _page.addListener(_onPage);

@@ -666,7 +666,14 @@ class _PlannerShellState extends State<PlannerShell> {
   // 11 D12 (R-24): so does the Dimension tool's value. Through a
   // [_FrameSafeRelay], as every listener of the shell's outside
   // [PlannerView] (Task 4 review R-2).
-  late final _FrameSafeRelay _status = _FrameSafeRelay(
+  //
+  // Made at its first use, by the top bar (final review F-2): a shell with
+  // the bar hidden never makes it, and [dispose] disposes it only when
+  // made, so it never subscribes to a host's selection a host disposed
+  // before this shell (a floor swapped and the old controller disposed in
+  // one step). The same holds for every lazily made relay and flag below.
+  _FrameSafeRelay? _madeStatus;
+  _FrameSafeRelay get _status => _madeStatus ??= _FrameSafeRelay(
       Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]));
 
   /// The tools' and the selection's notifications for the shell's widgets
@@ -678,8 +685,12 @@ class _PlannerShellState extends State<PlannerShell> {
   /// re-parents its canvas during its build, and the [InteractionLayer]'s
   /// deactivation cancels the active tool and clears the hover. Both
   /// notify; a widget outside [PlannerView] marked dirty then asserts.
-  late final _FrameSafeRelay _toolsRelay = _FrameSafeRelay(_tools);
-  late final _FrameSafeRelay _selectionRelay = _FrameSafeRelay(_selection);
+  _FrameSafeRelay get _toolsRelay =>
+      _madeToolsRelay ??= _FrameSafeRelay(_tools);
+  _FrameSafeRelay get _selectionRelay =>
+      _madeSelectionRelay ??= _FrameSafeRelay(_selection);
+  _FrameSafeRelay? _madeToolsRelay;
+  _FrameSafeRelay? _madeSelectionRelay;
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -707,10 +718,12 @@ class _PlannerShellState extends State<PlannerShell> {
     if (_busy != null) _busy
   ];
 
-  late final DerivedFlag _undoEnabled =
+  DerivedFlag get _undoEnabled => _madeUndoEnabled ??=
       DerivedFlag(_idleSources, () => _idle && _document.commands.canUndo);
-  late final DerivedFlag _redoEnabled =
+  DerivedFlag get _redoEnabled => _madeRedoEnabled ??=
       DerivedFlag(_idleSources, () => _idle && _document.commands.canRedo);
+  DerivedFlag? _madeUndoEnabled;
+  DerivedFlag? _madeRedoEnabled;
 
   /// The history moves on the dispatcher's changes; Undo and Redo re-read
   /// `canUndo` and `canRedo` on each (spec 12a D5).
@@ -725,14 +738,15 @@ class _PlannerShellState extends State<PlannerShell> {
   /// The file commands, each enabled only while the host's own condition
   /// holds and the shell is idle; Export and Print also only while the
   /// document has a page (spec 13 D8, [kPageCommandIds]).
-  late final List<DerivedFlag> _fileEnabled = [
-    for (final c in _firstFileCommands)
-      kPageCommandIds.contains(c.id)
-          ? DerivedFlag([c.enabled, ..._idleSources, _page],
-              () => c.enabled.value && _idle && _page.value != null)
-          : DerivedFlag(
-              [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
-  ];
+  List<DerivedFlag> get _fileEnabled => _madeFileEnabled ??= [
+        for (final c in _firstFileCommands)
+          kPageCommandIds.contains(c.id)
+              ? DerivedFlag([c.enabled, ..._idleSources, _page],
+                  () => c.enabled.value && _idle && _page.value != null)
+              : DerivedFlag(
+                  [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
+      ];
+  List<DerivedFlag>? _madeFileEnabled;
 
   /// The file commands the shell was built with: the set, and the
   /// conditions [_fileEnabled] watches, are fixed for its life.
@@ -1006,8 +1020,8 @@ class _PlannerShellState extends State<PlannerShell> {
     }(), 'the palette must list the tools in FloorPlanTool order');
     _releaseDelete = widget.onDelete?.call(_deleteByHost);
     _history = _document.commands.changes.listen((_) {
-      _undoEnabled.update();
-      _redoEnabled.update();
+      _madeUndoEnabled?.update();
+      _madeRedoEnabled?.update();
       _documentChanged.changed();
     });
   }
@@ -1061,9 +1075,9 @@ class _PlannerShellState extends State<PlannerShell> {
     }
     // The shell's own update: every listener of the relays is in its
     // subtree, rebuilt now, so what they hold is delivered now.
-    _status.deliver();
-    _toolsRelay.deliver();
-    _selectionRelay.deliver();
+    _madeStatus?.deliver();
+    _madeToolsRelay?.deliver();
+    _madeSelectionRelay?.deliver();
   }
 
   @override
@@ -1071,15 +1085,17 @@ class _PlannerShellState extends State<PlannerShell> {
     // The command flags listen to the tools and the host's busy flag: they
     // go first.
     _history?.cancel();
-    _undoEnabled.dispose();
-    _redoEnabled.dispose();
-    for (final f in _fileEnabled) {
+    // Final review F-2: each relay and flag only when it was made; none is
+    // made here, over notifiers a host may have disposed already.
+    _madeUndoEnabled?.dispose();
+    _madeRedoEnabled?.dispose();
+    for (final f in _madeFileEnabled ?? const <DerivedFlag>[]) {
       f.dispose();
     }
     // The relays listen to the tools and the selection: before them.
-    _status.dispose();
-    _toolsRelay.dispose();
-    _selectionRelay.dispose();
+    _madeStatus?.dispose();
+    _madeToolsRelay?.dispose();
+    _madeSelectionRelay?.dispose();
     _tools.dispose();
     for (final e in _entries) {
       e.tool.dispose();
@@ -1438,7 +1454,14 @@ class _PlannerShellState extends State<PlannerShell> {
                       color: scheme.surfaceContainerLow,
                       child: _leftPanel(),
                     ),
+                  // Keyed (final review F-1): when a capabilities change
+                  // adds or removes the columns on both sides at once, the
+                  // row still matches the canvas, so it keeps its element,
+                  // and the camera, the user's zoom and pan and a host's
+                  // `centerOn` stay; unkeyed, it would be made again and
+                  // the plan fitted to the page.
                   Expanded(
+                    key: const Key('chrome-canvas'),
                     child: ColoredBox(
                       color: _canvasColour(scheme),
                       child: PlannerView(

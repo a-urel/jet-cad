@@ -244,7 +244,8 @@ the fix below); CI analyses the 0.3.0 host probe against every commit.
   picker, the Layer and Page panels, the bar and its chords, F3 and
   object snap. A run-time change applies at the next build: a refused
   tool falls back to select, a hidden panel keeps its state, a drag
-  whose flag closes before its up executes nothing, a change to
+  whose flag closes before its up executes nothing, an Export or a
+  Print under way when its flag closes hands nothing over, a change to
   `selectTablesOnly` keeps only the selection's tables. The selection
   mode is not governed by it. `FloorPlanController.activeTool`
   (`ValueListenable<FloorPlanTool>`) and `selectTool(tool)` for a host's

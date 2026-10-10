@@ -37,6 +37,8 @@ PageFlowHooks _noHooks() => const (exportDialog: null, onError: null);
 
 bool _never() => false;
 
+bool _always() => true;
+
 /// [choice] as the dialog and the bytes read it. Exhaustive, never by
 /// index: a reordered enum cannot swap two resolutions.
 ExportChoice toExportChoice(FloorPlanExportChoice choice) => ExportChoice(
@@ -116,6 +118,8 @@ class PageFlows {
     required this.controller,
     required this.settings,
     this.hooks = _noHooks,
+    this.exportAllowed = _always,
+    this.printAllowed = _always,
     ValueNotifier<bool>? ready,
   })  : _ready = ready ?? ValueNotifier(true),
         _ownsReady = ready == null;
@@ -127,6 +131,15 @@ class PageFlows {
 
   /// The view's current hooks, read at each call.
   final PageFlowHooks Function() hooks;
+
+  /// Whether Export, and Print, are still allowed (host embedding API spec
+  /// C-5's `export` and `print`; final review F-4): read again once the
+  /// dialog has answered and once the bytes are made, so a flow started
+  /// before the host refused it does not run to its end. A refusal is a
+  /// cancel: nothing is handed over, and the dialog's answer is not
+  /// remembered.
+  final bool Function() exportAllowed;
+  final bool Function() printAllowed;
 
   final ValueNotifier<bool> _ready;
   final bool _ownsReady;
@@ -155,18 +168,19 @@ class PageFlows {
         } else {
           choice = await showExportDialog(context, controller.exportChoice);
         }
-        if (choice == null) return;
+        // A view gone meanwhile is the bytes' cancel, below, as before.
+        if (choice == null || (!_disposed && !exportAllowed())) return;
         controller.exportChoice = choice;
         final export = await exportOnce(
             controller, choice, settings().exportName,
-            document: document, cancelled: () => _disposed);
+            document: document, cancelled: () => _disposed || !exportAllowed());
         if (export != null) sink(export);
       });
 
   Future<void> print(BuildContext context) => _run(context, () async {
         final s = settings();
         await printOnce(controller, s.printer, s.exportName,
-            cancelled: () => _disposed);
+            cancelled: () => _disposed || !printAllowed());
       });
 
   Future<void> _run(BuildContext context, Future<void> Function() flow) async {

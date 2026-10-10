@@ -225,7 +225,9 @@ class FloorPlanView extends StatefulWidget {
   /// them. The default is today's bar. Hidden, the canvas takes its height;
   /// the view tells the controller where each mode's canvas starts before a
   /// switch can use it and measures it after, so a mode switch keeps the
-  /// plan in place from its first frame (R-13). Its actions shape the bar
+  /// plan in place from its first frame (R-13); shown or hidden in the mode
+  /// shown, the camera pans by the canvas's move, so the plan stays in
+  /// place from that frame too (final review F-3). Its actions shape the bar
   /// only: the chords stay bound (S-20). Read at each build; an
   /// [ArgumentError] naming `actions` for an action listed twice.
   final FloorPlanServiceBar serviceBar;
@@ -245,7 +247,8 @@ class FloorPlanView extends StatefulWidget {
   /// and letter are gone (the letter reaches the host's own bindings).
   /// Read at each build; a change falls back to select from a tool no
   /// longer allowed, and the view measures where the canvas now starts
-  /// when the rulers or the left column come or go (R-13). It governs the
+  /// when the rulers or the left column come or go (R-13), the plan kept
+  /// in place on the screen (final review F-3). It governs the
   /// editor alone: the selection mode is as it was (spec S-22). An
   /// [ArgumentError] naming `tools` when they lack
   /// [FloorPlanTool.select].
@@ -363,6 +366,39 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     for (final mode in FloorPlanMode.values) {
       if (mode != c.mode.value) c.canvasAssumed(mode, _chromeOrigin(mode));
     }
+    _keepPlanInPlace();
+  }
+
+  /// The mode this view last laid out and where its chrome alone put that
+  /// mode's canvas; null before the first build and after a controller
+  /// swap.
+  FloorPlanMode? _laidOutMode;
+  Offset _laidOutChrome = Offset.zero;
+
+  /// Final review F-3: when the chrome of the mode shown changes (a bar,
+  /// the editor's left column or rulers shown or hidden), the camera pans
+  /// by the canvas origin's move, so every world point keeps its global
+  /// position from the frame that lays the new chrome out, as a mode
+  /// switch keeps it (R-13). The theme's bar height is not compensated:
+  /// changed while the selection mode is shown, the canvas moves and the
+  /// plan with it (Slice 3's S-10, as the guide's section 9 has it). At
+  /// each build of this view, each change of its theme and each mode
+  /// change; a mode changed since the last is the switch's own reframing
+  /// (the controller's), and is only recorded.
+  void _keepPlanInPlace() {
+    final c = widget.controller;
+    final mode = c.mode.value;
+    final chrome = _chromeOrigin(mode);
+    final lastMode = _laidOutMode;
+    var last = _laidOutChrome;
+    // A bar shown at the last build is measured at today's height.
+    if (mode == FloorPlanMode.selection && last.dy != 0) {
+      last = Offset(0, _serviceBarHeight);
+    }
+    _laidOutMode = mode;
+    _laidOutChrome = chrome;
+    if (lastMode != mode || last == chrome) return;
+    c.chromeMoved(last, chrome);
   }
 
   /// [FloorPlanView.editorCapabilities] as last handed in, and the view's
@@ -473,6 +509,13 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           exportDialog: widget.onExportDialog,
           onError: widget.onPageFlowError,
         ),
+        // Final review F-4: the editor's `export` and `print` as the view
+        // now has them, read again after the dialog and the bytes; always
+        // allowed in the selection mode (S-22).
+        exportAllowed: () =>
+            c.mode.value != FloorPlanMode.design || _editorCapabilities.export,
+        printAllowed: () =>
+            c.mode.value != FloorPlanMode.design || _editorCapabilities.print,
         ready: c.pageFlowReady,
       );
 
@@ -489,6 +532,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   void didUpdateWidget(FloorPlanView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
+      // Final review F-3: the new controller's camera is its own.
+      _laidOutMode = null;
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
       widget.controller.reportLanguage(FloorPlanStrings.of(context));
@@ -620,6 +665,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
         final document = c.activeDocument;
         _shown = c.mode.value;
         _measureAfterFrame(c.mode.value, document);
+        _keepPlanInPlace();
         if (c.mode.value == FloorPlanMode.selection) {
           return ServiceView(
               key: ObjectKey(document),
