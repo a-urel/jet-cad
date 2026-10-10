@@ -212,7 +212,7 @@ one's spec, plan and results.
 - **A removed node takes its components** (the host embedding API
   spec's O-8): spec
   [2026-10-09-node-components-on-delete-design.md](docs/superpowers/specs/2026-10-09-node-components-on-delete-design.md),
-  **revision 2, not yet reviewed or approved**; no plan. `RemoveNodeCommand`
+  **revision 3, reviewed, not yet approved**; no plan. `RemoveNodeCommand`
   leaves a deleted node's components on its dead handle in the saved
   plan; the spec makes the delete take them and undo restore them,
   as `RemoveDefinitionCommand` does. Revision 1 was written at `85905bd`
@@ -223,8 +223,11 @@ one's spec, plan and results.
   spike there: `AddNodeCommand` checks the snapshot before `addNode`
   instead of rolling back (the O-10 index made the rollback inexact),
   and 0.4.0's table-data expander (`_detachFor`, E-6) goes, since it never
-  fires after the fix; TD7 and HD12 stay and kill M-1. **Next:** an
-  independent review of revision 2, then the human's approval, then a
+  fires after the fix; TD7 and HD12 stay and kill M-1. An independent
+  review of revision 2 returned *Approve with fixes* (V-1 to V-11, one
+  Major: TD10 must be rewritten, since without `_detachFor` nothing pins
+  `TableLabelEdit`'s rollback); revision 3 folds in every fix. Copilot
+  could not review (quota). **Next:** the human's approval, then a
   plan.
 
 ## Owed to the human
