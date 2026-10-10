@@ -15,7 +15,12 @@
 // changes (spec E-1 to E-8); a Standard / POS look switch, the POS's look
 // a `FloorPlanTheme` in the app's themes, a local `Theme` with a hand-built
 // `ColorScheme` around the view and one field of the view's own (spec T-1,
-// T-2, F-4; lib/demo_theme.dart); and a log of the API's state, in English,
+// T-2, F-4; lib/demo_theme.dart); the host's own chrome and keys (spec
+// C-1 to C-8): the editor's three profiles, a table inspector linking a
+// table to the POS's id, a service bar of the demo's own built from the
+// controller's commands, its own export dialog at every Export, an error
+// of an export or a print logged, a table search in the app bar, and the
+// keys taken from the plan; and a log of the API's state, in English,
 // German or Turkish. An example and an integration surface, not a product.
 import 'dart:async' show StreamSubscription, Timer, unawaited;
 import 'dart:math' as math;
@@ -23,7 +28,12 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show AssetBundle, BrowserContextMenu, rootBundle;
+    show
+        AssetBundle,
+        BrowserContextMenu,
+        HardwareKeyboard,
+        LogicalKeyboardKey,
+        rootBundle;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
 
@@ -74,9 +84,17 @@ const Color _seed = Colors.teal;
 /// without one starts empty.
 class RestaurantDemo extends StatefulWidget {
   const RestaurantDemo(
-      {super.key, this.plans = const {}, this.random, this.locale});
+      {super.key,
+      this.plans = const {},
+      this.random,
+      this.locale,
+      this.printer});
 
   final Map<String, String> plans;
+
+  /// Where Print sends the page; the platform's print dialog when null
+  /// (tests give their own).
+  final PagePrinter? printer;
 
   /// The source of "Random statuses" (tests seed it, 14c R-13).
   final math.Random? random;
@@ -119,6 +137,7 @@ class _RestaurantDemoState extends State<RestaurantDemo> {
         home: DemoHome(
             plans: widget.plans,
             random: widget.random,
+            printer: widget.printer,
             onLocale: (l) => setState(() => _locale = l),
             look: _look,
             onLook: (look) => setState(() => _look = look)),
@@ -168,6 +187,124 @@ final Map<String, Set<String>> kDemoTableIds = {
 /// millimetres, y up).
 typedef PointerLine = ({String? table, Offset? floor});
 
+/// The editor's profiles the side panel offers (host embedding API spec
+/// C-5): today's editor, a floor whose staff place and arrange tables only,
+/// and a plan only looked at.
+enum DemoEditor {
+  full(FloorPlanEditorCapabilities.full),
+  tables(FloorPlanEditorCapabilities.tablesOnly),
+  readOnly(FloorPlanEditorCapabilities.readOnly);
+
+  const DemoEditor(this.capabilities);
+
+  final FloorPlanEditorCapabilities capabilities;
+}
+
+/// The editor's top bar under [DemoEditor.readOnly] (spec C-2): Print and
+/// Export, then the zoom; no object snap's read-out, since nothing is
+/// drawn. The other profiles keep today's bar.
+const FloorPlanEditorBar kReadOnlyEditorBar = FloorPlanEditorBar(actions: [
+  FloorPlanEditorAction.print,
+  FloorPlanEditorAction.export,
+  FloorPlanEditorAction.zoom,
+]);
+
+/// The demo's own export dialog (host embedding API spec C-4): one list of
+/// the four choices, the one last made marked, a tap on one exports it.
+/// [initial] is the planner's remembered choice (or the demo's own, for its
+/// own bar); null cancels.
+Future<FloorPlanExportChoice?> showDemoExportDialog(
+    BuildContext context, FloorPlanExportChoice initial) {
+  final words = FloorPlanStrings.of(context);
+  final choices = [
+    (
+      FloorPlanExportChoice(
+          format: FloorPlanExportFormat.pdf, dpi: initial.dpi),
+      'PDF',
+      'demo-export-pdf'
+    ),
+    for (final dpi in FloorPlanExportDpi.values)
+      (
+        FloorPlanExportChoice(format: FloorPlanExportFormat.png, dpi: dpi),
+        'PNG, ${dpi.value} dpi',
+        'demo-export-png-${dpi.value}'
+      ),
+  ];
+  return showDialog<FloorPlanExportChoice>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      key: const Key('demo-export-dialog'),
+      title: Text(words.exportTitle),
+      children: [
+        for (final (choice, label, key) in choices)
+          SimpleDialogOption(
+            key: Key(key),
+            onPressed: () => Navigator.of(context).pop(choice),
+            child: Row(children: [
+              SizedBox(
+                  width: 28,
+                  child: choice == initial
+                      ? const Icon(Icons.check, size: 18)
+                      : null),
+              Text(label),
+            ]),
+          ),
+        SimpleDialogOption(
+          key: const Key('demo-export-cancel'),
+          onPressed: () => Navigator.of(context).pop(),
+          child: Padding(
+              padding: const EdgeInsets.only(left: 28),
+              child: Text(words.cancel)),
+        ),
+      ],
+    ),
+  );
+}
+
+/// The demo's table inspector (host embedding API spec C-6): the POS's id
+/// of the one table selected in the editor, written by
+/// `FloorPlanController.setTableData` on Enter (an empty field unlinks).
+class PosIdField extends StatefulWidget {
+  const PosIdField({super.key, required this.id, required this.onSubmitted});
+
+  /// The table's `data['id']`, null when it has none.
+  final String? id;
+  final void Function(String id) onSubmitted;
+
+  @override
+  State<PosIdField> createState() => _PosIdFieldState();
+}
+
+class _PosIdFieldState extends State<PosIdField> {
+  late final TextEditingController _text =
+      TextEditingController(text: widget.id ?? '');
+
+  @override
+  void didUpdateWidget(PosIdField old) {
+    super.didUpdateWidget(old);
+    // Linked elsewhere ("Link tables", an undo): shown at once.
+    if (widget.id != old.id) _text.text = widget.id ?? '';
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+        child: TextField(
+          key: const Key('pos-id'),
+          controller: _text,
+          decoration: InputDecoration(
+              labelText: DemoStrings.of(context).posId, isDense: true),
+          onSubmitted: widget.onSubmitted,
+        ),
+      );
+}
+
 /// One dining area: its controller, the plan last saved and the service
 /// layout last seen, in memory.
 final class Area {
@@ -216,12 +353,14 @@ class DemoHome extends StatefulWidget {
       {super.key,
       required this.plans,
       this.random,
+      this.printer,
       this.onLocale,
       this.look = DemoLook.standard,
       this.onLook});
 
   final Map<String, String> plans;
   final math.Random? random;
+  final PagePrinter? printer;
 
   /// Switches the app's language (spec 14d L17).
   final void Function(Locale locale)? onLocale;
@@ -285,6 +424,28 @@ class DemoHomeState extends State<DemoHome> {
   /// How many times the badge builder ran (tests: pan and zoom build none).
   int badgeBuilds = 0;
 
+  /// The editor's profile, for both areas (spec C-5): today's by default.
+  DemoEditor editor = DemoEditor.full;
+
+  /// Whether the service shows the demo's own bar in place of the planner's
+  /// (spec C-1, C-3).
+  bool ownBar = false;
+
+  /// Whether every Export asks the demo's own dialog (spec C-4).
+  bool ownExportDialog = false;
+
+  /// Whether the plan binds its own keys and takes the focus when shown
+  /// (spec C-7); false gives the keyboard to the demo.
+  bool planKeys = true;
+
+  /// The own bar's last export choice, as the planner remembers its own.
+  FloorPlanExportChoice ownChoice = FloorPlanExportChoice.initial;
+
+  /// The last export made (tests read its bytes).
+  FloorPlanExport? lastExport;
+
+  final TextEditingController _search = TextEditingController();
+
   Area get area => areas[_area];
 
   @override
@@ -334,6 +495,7 @@ class DemoHomeState extends State<DemoHome> {
     _thumbnails.dispose();
     _symbols.dispose();
     _number.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -827,6 +989,257 @@ class DemoHomeState extends State<DemoHome> {
     }
   }
 
+  /// An export made by the planner's Export or the demo's own bar: logged
+  /// with its file name and size.
+  void _exported(Area a, FloorPlanExport export) {
+    lastExport = export;
+    _log(_words.logExported(a.name, export.fileName, export.bytes.length));
+  }
+
+  /// The own bar's Export (spec C-3): the demo's dialog, then the
+  /// controller's `exportPlan`, which shows no dialog; null from it (another
+  /// export or a print running, no page, the plan replaced) exports nothing.
+  Future<void> _ownExport(Area a) async {
+    final choice = await showDemoExportDialog(context, ownChoice);
+    if (choice == null || !mounted) return;
+    ownChoice = choice;
+    try {
+      final export =
+          await a.controller.exportPlan(choice, name: a.name.toLowerCase());
+      if (export != null) _exported(a, export);
+    } catch (error) {
+      _log(_words.logPageFlowError(a.name, error));
+    }
+  }
+
+  /// The own bar's Print (spec C-3): the controller's `printPlan`.
+  Future<void> _ownPrint(Area a) async {
+    try {
+      await a.controller
+          .printPlan(printer: widget.printer, name: a.name.toLowerCase());
+    } catch (error) {
+      _log(_words.logPageFlowError(a.name, error));
+    }
+  }
+
+  /// The service bar of the demo's own (spec C-1, C-3), in place of the
+  /// planner's: the area's name, then Undo, Redo, Merge, Split, Export and
+  /// Print in the planner's words, each enabled by the controller's own
+  /// state as the planner's buttons are.
+  Widget _ownServiceBar(Area a) {
+    final c = a.controller;
+    final words = FloorPlanStrings.of(context);
+    Widget button(String key, String label, VoidCallback? onPressed) =>
+        TextButton(key: Key(key), onPressed: onPressed, child: Text(label));
+    return Material(
+      key: const Key('own-bar-row'),
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      child: SizedBox(
+        height: 44,
+        child: Row(children: [
+          const SizedBox(width: 12),
+          Text(a.name),
+          const SizedBox(width: 12),
+          ValueListenableBuilder<bool>(
+              valueListenable: c.canUndo,
+              builder: (_, can, __) =>
+                  button('own-undo', words.undo, can ? c.undo : null)),
+          ValueListenableBuilder<bool>(
+              valueListenable: c.canRedo,
+              builder: (_, can, __) =>
+                  button('own-redo', words.redo, can ? c.redo : null)),
+          // What the planner's Merge would send, null when it would be
+          // disabled; Split's is the selected group.
+          ValueListenableBuilder<Set<String>?>(
+              valueListenable: c.mergeCandidate,
+              builder: (_, numbers, __) => button('own-merge', words.merge,
+                  numbers == null ? null : () => _merge(a, numbers))),
+          ValueListenableBuilder<String?>(
+              valueListenable: c.selectedGroup,
+              builder: (_, id, __) => button('own-split', words.split,
+                  id == null ? null : () => _split(a, id))),
+          button('own-export', words.exportEllipsis, () => _ownExport(a)),
+          button('own-print', words.printEllipsis, () => _ownPrint(a)),
+        ]),
+      ),
+    );
+  }
+
+  /// The service bar's look (spec C-1): the planner's own, with the area's
+  /// name before its buttons; hidden under [ownBar].
+  FloorPlanServiceBar _serviceBar(Area a) => ownBar
+      ? const FloorPlanServiceBar(visible: false)
+      : FloorPlanServiceBar(leading: [
+          Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Center(child: Text(a.name, key: const Key('bar-area')))),
+        ]);
+
+  /// The demo's table inspector (spec C-6), under [DemoEditor.tables]: the
+  /// one numbered table selected in the editor, linked to the POS's id.
+  Widget? _inspector(BuildContext context, FloorPlanTableDetail table) {
+    final number = table.table.number!;
+    return PosIdField(
+        key: ValueKey(number),
+        id: table.data['id'],
+        onSubmitted: (id) => _linkTable(area, number, id));
+  }
+
+  /// Links table [number] of [a] to [id], its other data kept; an empty
+  /// [id] unlinks it (spec E-6, E-7).
+  void _linkTable(Area a, String number, String id) {
+    final c = a.controller;
+    final tables = [
+      for (final d in c.tableDetails)
+        if (d.table.number == number) d,
+    ];
+    if (tables.length != 1) return;
+    final data = {...tables.single.data};
+    final trimmed = id.trim();
+    if (trimmed.isEmpty) {
+      data.remove('id');
+    } else {
+      data['id'] = trimmed;
+    }
+    if (c.setTableData(number, data)) {
+      _log(_words.logLinkedTable(a.name, number, data['id']));
+    }
+  }
+
+  /// The app bar's search (spec C-7's host field): selects the table and
+  /// brings it to the middle of the view, its zoom kept.
+  void _find(String text) {
+    final a = area;
+    final c = a.controller;
+    final number = text.trim();
+    if (number.isEmpty) return;
+    for (final detail in c.tableDetails) {
+      final center = detail.center;
+      if (detail.table.number == number && center != null) {
+        c.select({number});
+        c.centerOn(center);
+        _log(_words.logFound(a.name, number));
+        return;
+      }
+    }
+    _log(_words.logNotFound(a.name, number));
+  }
+
+  /// The demo's own keys (spec C-7), while [planKeys] is off: Undo, Redo,
+  /// Delete and Escape call the controller's commands. A key typed into
+  /// a text field inside the view (the inspector, the editor's panels)
+  /// stays the field's.
+  KeyEventResult _demoKey(Area a, KeyEvent event) {
+    if (planKeys) return KeyEventResult.ignored;
+    final typing = FocusManager.instance.primaryFocus?.context
+            ?.findAncestorWidgetOfExactType<EditableText>() !=
+        null;
+    if (typing) return KeyEventResult.ignored;
+    final c = a.controller;
+    final design = c.mode.value == FloorPlanMode.design;
+    for (final (activator, name, command)
+        in <(SingleActivator, String, void Function())>[
+      (
+        const SingleActivator(LogicalKeyboardKey.keyZ, control: true),
+        'Ctrl+Z',
+        c.undo
+      ),
+      (
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
+        'Cmd+Z',
+        c.undo
+      ),
+      (
+        const SingleActivator(LogicalKeyboardKey.keyY, control: true),
+        'Ctrl+Y',
+        c.redo
+      ),
+      (
+        const SingleActivator(LogicalKeyboardKey.keyZ,
+            control: true, shift: true),
+        'Ctrl+Shift+Z',
+        c.redo
+      ),
+      (
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true),
+        'Cmd+Shift+Z',
+        c.redo
+      ),
+      // The planner's Delete has no other path: the command deletes the
+      // editor's selection, as the key would.
+      (
+        const SingleActivator(LogicalKeyboardKey.delete),
+        'Delete',
+        c.deleteSelection
+      ),
+      (
+        const SingleActivator(LogicalKeyboardKey.backspace),
+        'Backspace',
+        c.deleteSelection
+      ),
+      // Escape: back to the Select tool, then no selection.
+      (
+        const SingleActivator(LogicalKeyboardKey.escape),
+        'Escape',
+        () {
+          if (design && c.activeTool.value != FloorPlanTool.select) {
+            c.selectTool(FloorPlanTool.select);
+          } else {
+            c.select(const {});
+          }
+        }
+      ),
+    ]) {
+      if (activator.accepts(event, HardwareKeyboard.instance)) {
+        command();
+        _log(_words.logKey(a.name, name));
+        return KeyEventResult.handled;
+      }
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// [a]'s view, with the host's options.
+  Widget _view(Area a) {
+    final c = a.controller;
+    return FloorPlanView(
+      key: ObjectKey(c),
+      controller: c,
+      exportName: a.name.toLowerCase(),
+      printer: widget.printer,
+      onExport: (e) => _exported(a, e),
+      onTableTap: (n) => _log(_words.logTapped(a.name, n)),
+      onLayoutChanged: () => _log(_words.logLayoutChanged(a.name)),
+      serviceMoves: moves,
+      longPress: longPressMenu
+          ? FloorPlanLongPress.contextMenu
+          : FloorPlanLongPress.toggleSelection,
+      onTableContextMenu: _tableMenu,
+      onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
+      onMergeRequested: (numbers) => _merge(a, numbers),
+      onSplitRequested: (id) => _split(a, id),
+      tableOverlayBuilder: a.badges ? tableBadge : null,
+      tableOverlayLayout: kBadgeLayout,
+      onTableDoubleTap: (n) => _opened(a, n),
+      onTablesMoved: (moved) => _log(_words.logMoved(
+          a.name, _sorted([for (final d in moved) d.table.number ?? '—']))),
+      onTableHover: (n) => pointer.value = (table: n, floor: null),
+      onFloorTap: (w) => pointer.value = (table: null, floor: w),
+      theme: widget.look == DemoLook.pos ? kPosViewOverride : null,
+      // Spec C-1 to C-7: the host's own chrome and keys.
+      serviceBar: _serviceBar(a),
+      editorBar: editor == DemoEditor.readOnly
+          ? kReadOnlyEditorBar
+          : const FloorPlanEditorBar(),
+      editorCapabilities: editor.capabilities,
+      tableInspectorBuilder: editor == DemoEditor.tables ? _inspector : null,
+      onExportDialog: ownExportDialog ? showDemoExportDialog : null,
+      onPageFlowError: (error) => _log(_words.logPageFlowError(a.name, error)),
+      shortcuts: planKeys,
+      autofocus: planKeys,
+    );
+  }
+
   /// The ambient theme [posViewTheme] last built from, and what it built:
   /// built again only when the ambient one changes, not at every build.
   ThemeData? _posAmbient;
@@ -873,6 +1286,24 @@ class DemoHomeState extends State<DemoHome> {
       appBar: AppBar(
         title: Text(words.title),
         actions: [
+          // Spec C-7: a field of the host's beside the plan. It keeps the
+          // focus when a button of the app is pressed (a press on the plan
+          // still takes it), and Enter leaves it there for the next search.
+          SizedBox(
+            width: 160,
+            child: TextField(
+              key: const Key('find-table'),
+              controller: _search,
+              decoration: InputDecoration(
+                  hintText: words.findTable,
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search, size: 18)),
+              onTapOutside: (_) {},
+              onEditingComplete: () {},
+              onSubmitted: _find,
+            ),
+          ),
+          const SizedBox(width: 16),
           // Spec 14d L17: the app's language.
           SegmentedButton<String>(
             key: const Key('language-toggle'),
@@ -947,32 +1378,19 @@ class DemoHomeState extends State<DemoHome> {
           Expanded(
             child: Theme(
               data: _viewTheme(Theme.of(context)),
-              child: FloorPlanView(
-                key: ObjectKey(c),
-                controller: c,
-                exportName: area.name.toLowerCase(),
-                onExport: (e) => _log(
-                    _words.logExported(area.name, e.fileName, e.bytes.length)),
-                onTableTap: (n) => _log(_words.logTapped(area.name, n)),
-                onLayoutChanged: () => _log(_words.logLayoutChanged(area.name)),
-                serviceMoves: moves,
-                longPress: longPressMenu
-                    ? FloorPlanLongPress.contextMenu
-                    : FloorPlanLongPress.toggleSelection,
-                onTableContextMenu: _tableMenu,
-                onGroupTap: (id, n) =>
-                    _log(_words.logGroupTapped(a.name, id, n)),
-                onMergeRequested: (numbers) => _merge(a, numbers),
-                onSplitRequested: (id) => _split(a, id),
-                tableOverlayBuilder: a.badges ? tableBadge : null,
-                tableOverlayLayout: kBadgeLayout,
-                onTableDoubleTap: (n) => _opened(a, n),
-                onTablesMoved: (moved) => _log(_words.logMoved(a.name,
-                    _sorted([for (final d in moved) d.table.number ?? '—']))),
-                onTableHover: (n) => pointer.value = (table: n, floor: null),
-                onFloorTap: (w) => pointer.value = (table: null, floor: w),
-                theme: widget.look == DemoLook.pos ? kPosViewOverride : null,
-              ),
+              child: Column(children: [
+                if (ownBar && c.mode.value == FloorPlanMode.selection)
+                  _ownServiceBar(a),
+                Expanded(
+                  // The demo's keys, while the plan's are off (spec C-7).
+                  child: Focus(
+                    canRequestFocus: false,
+                    skipTraversal: true,
+                    onKeyEvent: (_, event) => _demoKey(a, event),
+                    child: _view(a),
+                  ),
+                ),
+              ]),
             ),
           ),
           SizedBox(
@@ -1143,6 +1561,55 @@ class DemoHomeState extends State<DemoHome> {
                       onPressed: () => centerOnSeven(a),
                       child: Text(words.centerOnTable('7'))),
                 ],
+                // Spec C-1 to C-7: the host's own chrome and keys; below the
+                // badges, above the log.
+                const SizedBox(height: 16),
+                Text(words.hostChoices, style: title),
+                if (c.mode.value == FloorPlanMode.design) ...[
+                  const SizedBox(height: 4),
+                  Text(words.editor),
+                  const SizedBox(height: 4),
+                  SegmentedButton<DemoEditor>(
+                    key: const Key('editor-profile'),
+                    showSelectedIcon: false,
+                    segments: [
+                      ButtonSegment(
+                          value: DemoEditor.full,
+                          label: Text(words.editorFull,
+                              key: const Key('editor-full'))),
+                      ButtonSegment(
+                          value: DemoEditor.tables,
+                          label: Text(words.editorTables,
+                              key: const Key('editor-tables'))),
+                      ButtonSegment(
+                          value: DemoEditor.readOnly,
+                          label: Text(words.editorReadOnly,
+                              key: const Key('editor-read-only'))),
+                    ],
+                    selected: {editor},
+                    onSelectionChanged: (s) =>
+                        setState(() => editor = s.single),
+                  ),
+                ],
+                if (c.mode.value == FloorPlanMode.selection)
+                  SwitchListTile(
+                      key: const Key('own-bar'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(words.ownBar),
+                      value: ownBar,
+                      onChanged: (v) => setState(() => ownBar = v)),
+                SwitchListTile(
+                    key: const Key('own-export-dialog'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(words.ownExportDialog),
+                    value: ownExportDialog,
+                    onChanged: (v) => setState(() => ownExportDialog = v)),
+                SwitchListTile(
+                    key: const Key('plan-keys'),
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(words.planKeys),
+                    value: planKeys,
+                    onChanged: (v) => setState(() => planKeys = v)),
                 const SizedBox(height: 16),
                 Text(words.log, style: title),
                 for (final (i, line) in log.indexed)
