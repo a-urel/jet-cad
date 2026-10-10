@@ -355,7 +355,11 @@ class GripCache extends ChangeNotifier {
       final slot = document.entities.slotOf(key.target);
       final bounds = outlines.worldBoundsOf(key);
       if (bounds != null) {
-        box = box.union(bounds);
+        // A box that is not finite in the world (an instance scaled past
+        // the doubles, O-11) widens the selection's box to infinity, and
+        // every corner projects to NaN on the screen: it is left out, as a
+        // key with no outline is.
+        if (_finite(bounds)) box = box.union(bounds);
         // Every key is asked, not only until the first movable one: the
         // preview needs each key's answer (spec 10 D24). A fill leaf is
         // outlined when its boundary is hidden, but `GripDrag` never
@@ -376,6 +380,7 @@ class GripCache extends ChangeNotifier {
         }
         final list = provider.gripsOf(document, key.target);
         for (var i = 0; i < list.length; i++) {
+          if (!_finiteGrip(list[i])) continue;
           _grips.add(GripRef(key, list[i], i, object: true));
           if (list[i].role == GripRole.move) _moveCount++;
         }
@@ -385,6 +390,7 @@ class GripCache extends ChangeNotifier {
       final list = leafGrips(document.entities.kindAt(slot),
           document.geometry.peek(document.entities.geomIndexAt(slot)));
       for (var i = 0; i < list.length; i++) {
+        if (!_finiteGrip(list[i])) continue;
         _grips.add(GripRef(key, list[i], i));
         if (list[i].role == GripRole.move) _moveCount++;
       }
@@ -417,6 +423,14 @@ class GripCache extends ChangeNotifier {
     _built = built;
     notifyListeners();
   }
+
+  static bool _finite(Aabb2 b) =>
+      b.minX.isFinite && b.minY.isFinite && b.maxX.isFinite && b.maxY.isFinite;
+
+  /// A grip that is not finite in the world is neither drawn nor hit (O-11):
+  /// its screen distance is NaN, which no `d > radius` test rejects. Its
+  /// ordinal stays its position in the list it came from.
+  static bool _finiteGrip(Grip g) => g.x.isFinite && g.y.isFinite;
 
   @override
   void dispose() {
