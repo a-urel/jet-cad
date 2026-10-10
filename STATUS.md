@@ -21,7 +21,10 @@ one's spec, plan and results.
   (`.github/workflows/ci.yml`) runs every gate on pushes to `main` and
   `claude/**` and on pull requests, compares the standing failures and
   skips exactly (`tool/ci/standing_*.txt`), and builds the host probe by
-  git at the commit under test.
+  git at the commit under test. In that probe it then analyses each
+  released host's `main.dart`, read from its tag: `v0.3.0` (the host
+  embedding API spec's invariant 1) and `v0.4.0` (since 2026-10-10, the
+  0.4.0 review's R-7), by `tool/ci/old_host_probe.sh <tag>`.
 - **14d** (POS readiness: three languages, the service layout and
   options, the release) and its independent review: results
   [14d-2](docs/superpowers/notes/2026-10-06-plan-14d2-results.md),
@@ -511,7 +514,8 @@ More gates: `packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`
 `apps/floor_planner`, `apps/restaurant_demo` — each `flutter test`,
 `flutter analyze`, the format check; `tool/ci` — `dart test`,
 `dart run tool/ci/check_guide.dart`; the host probe —
-`tool/ci/host_probe.sh <git url> <sha>`.
+`tool/ci/host_probe.sh <git url> <sha>`, then
+`tool/ci/old_host_probe.sh v0.3.0` and `tool/ci/old_host_probe.sh v0.4.0`.
 
 ---
 
