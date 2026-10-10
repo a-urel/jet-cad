@@ -244,7 +244,7 @@ void main() {
       // boxes reach both rooms (M-10e, one reader per box, leaves Room 2
       // stale).
       final bandBefore = placeBoxNow(doc, plan.walls[4]);
-      final before = canon(doc, sortNodes: true);
+      final before = canon(doc);
       final depth = doc.commands.undoDepth;
 
       doc.commands
@@ -279,16 +279,16 @@ void main() {
           16530000,
           'right moved at $place');
       expect(driftOf(doc), isEmpty, reason: 'moved at $place');
-      final after = canon(doc, sortNodes: true);
+      final after = canon(doc);
 
       doc.commands.undo();
-      expect(canon(doc, sortNodes: true), before, reason: 'undo at $place');
+      expect(canon(doc), before, reason: 'undo at $place');
       expect(labelStrings(doc, left), ['Room 1', '10.83 m²'], reason: '$place');
       expect(labelStrings(doc, right), ['Room 2', '18.43 m²'],
           reason: '$place');
       expect(driftOf(doc), isEmpty, reason: 'undone at $place');
       doc.commands.redo();
-      expect(canon(doc, sortNodes: true), after, reason: 'redo at $place');
+      expect(canon(doc), after, reason: 'redo at $place');
       expect({
         for (final r in [left, right]) r: kids(doc, r),
       }, handles, reason: 'redone at $place');

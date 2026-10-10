@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-09. **`main` carries release 0.3.0** (tag
+**Last updated:** 2026-10-10. **`main` carries release 0.3.0** (tag
 `v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -145,6 +145,17 @@ one's spec, plan and results.
 **The host embedding API's Slice 4** (the bars, keyboard, editor
 capabilities), on the human's *"tamam, Dilim 4 ile devam et"*
 (2026-10-09): its plan is being committed after Slice 3's merge.
+
+**O-10, an undone node removal restores the node's index** (the human,
+2026-10-10), on `fix/undo-node-index` from `main` at `4e3ed91`: plan
+[2026-10-10-undo-node-index.md](docs/superpowers/plans/2026-10-10-undo-node-index.md),
+results [2026-10-10-undo-node-index-results.md](docs/superpowers/notes/2026-10-10-undo-node-index-results.md).
+`RemoveNodeCommand`'s inverse carries the index, so Delete then Undo
+writes a plan back byte for byte; every test that compared child lists
+sorted (`canon(sortNodes:)`, `childrenSorted`, `encNodesSorted`) now
+compares the bytes. Not merged. **Owed after both are on `main`:**
+Slice 4's DS1 and DS2 (`keyboard_focus_test.dart`) compare the undone
+encoding with the one before the delete, not around it.
 
 ## Owed to the human
 

@@ -118,8 +118,8 @@ class _Scene {
 
 /// [doc]'s state for an undo comparison: [canon] without the handle seed,
 /// which only rises (an undone add leaves it where the add put it).
-String state(DraftDocument doc, {bool sortNodes = false}) {
-  final j = jsonDecode(canon(doc, sortNodes: sortNodes)) as Map<String, Object?>
+String state(DraftDocument doc) {
+  final j = jsonDecode(canon(doc)) as Map<String, Object?>
     ..remove('handleSeed');
   return jsonEncode(j);
 }
@@ -445,7 +445,7 @@ void main() {
     s.add(hA, atA, const ClipRect(2000, 1000), layer: s.a);
     s.add(hB, parked, regions, layer: s.b);
     s.doc.commands.clearHistory();
-    final before = state(s.doc, sortNodes: true);
+    final before = state(s.doc);
 
     s.doc.commands.execute(deleteObject(s.doc, hA));
     expect(s.doc.tree[hA], isNull);
@@ -459,7 +459,7 @@ void main() {
     s.doc.commands.undo();
     expect(s.doc.components.get<ObjectLayer>(hA), ObjectLayer(s.a));
     s.expectOn(hA, s.a);
-    expect(state(s.doc, sortNodes: true), before);
+    expect(state(s.doc), before);
     s.doc.commands.redo();
     expect(s.doc.components.get<ObjectLayer>(hA), isNull);
   });
@@ -472,22 +472,22 @@ void main() {
     s.add(hP, onA(1400.5, 2200.25, 1.1), const Pin(hA, 450), layer: s.a);
     s.expectOn(hP, s.a);
     s.doc.commands.clearHistory();
-    final before = state(s.doc, sortNodes: true);
+    final before = state(s.doc);
 
     s.doc.commands.execute(deleteObject(s.doc, hA));
     expect(s.doc.tree[hP], isNull, reason: 'the cascade removed the pin');
     expect(s.doc.components.get<Pin>(hP), isNull);
     expect(s.doc.components.get<ObjectLayer>(hP), isNull);
     expect(s.doc.components.get<ObjectLayer>(hA), isNull);
-    final after = state(s.doc, sortNodes: true);
+    final after = state(s.doc);
 
     s.doc.commands.undo();
     expect(s.doc.components.get<ObjectLayer>(hP), ObjectLayer(s.a));
     s.expectOn(hP, s.a);
-    expect(state(s.doc, sortNodes: true), before);
+    expect(state(s.doc), before);
     s.doc.commands.redo();
     expect(s.doc.components.get<ObjectLayer>(hP), isNull);
-    expect(state(s.doc, sortNodes: true), after);
+    expect(state(s.doc), after);
   });
 
   test(
@@ -498,7 +498,7 @@ void main() {
     s.doc.commands.clearHistory();
     s.expectRegionsOn(hF, s.a, 1);
     s.expectOn(hF, s.a);
-    final before = state(s.doc, sortNodes: true);
+    final before = state(s.doc);
 
     s.doc.commands.execute(SetComponentCommand<Fuse>(
         hF, const Fuse(150.5, -80.25, 900.5, 600.75, burnt: true)));
@@ -511,7 +511,7 @@ void main() {
     s.doc.commands.undo();
     s.doc.commands.undo();
     expect(s.doc.components.get<ObjectLayer>(hF), ObjectLayer(s.a));
-    expect(state(s.doc, sortNodes: true), before);
+    expect(state(s.doc), before);
   });
 
   test('OL11 the stamp survives a save and load: the moved layer is stored',
