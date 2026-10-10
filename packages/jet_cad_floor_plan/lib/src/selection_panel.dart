@@ -6,6 +6,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'symbols/symbol_names.dart';
+import 'host/editor_capabilities.dart';
 import 'host/floor_plan_types.dart';
 import 'l10n/strings_en.dart';
 import 'l10n/number_text.dart';
@@ -56,6 +57,15 @@ import 'tables/table_rotate.dart';
 ///   settings show, a [LayerPicker] after the sections above (alone when
 ///   none shows).
 ///
+/// **The host's capabilities** (host embedding API spec C-5, S-10, S-11),
+/// ANDed with the permissions: the number needs `renumber`; the Rotation
+/// field and the ±90 buttons `rotate`; Mirror `mirror`; the Size menu and
+/// an object's own fields (box, wall, opening, room, dimension, a door's
+/// flips) `reshape`; the layer picker `changeLayer`. A button or a menu
+/// they refuse is not shown (Mirror, ±90, the flips, the Size menu, the
+/// layer picker); a value field or a segmented value is shown read-only.
+/// A tool's settings are no edit of the document and stay editable.
+///
 /// Each commit to an object is one `SetComponentCommand`, which the
 /// parametric system turns into one undo step with its regeneration. 12
 /// builds the real inspector.
@@ -82,7 +92,8 @@ class SelectionPanel extends StatefulWidget {
       this.wallSettings,
       this.openingTools,
       this.openingSettings,
-      this.symbols});
+      this.symbols,
+      this.capabilities = FloorPlanEditorCapabilities.full});
 
   final DraftDocument document;
   final SelectionController selection;
@@ -112,6 +123,10 @@ class SelectionPanel extends StatefulWidget {
   /// The shell's symbol library (spec 09c D7, V-3), for the Symbol
   /// section's Size menu; hidden while it is null or not ready.
   final SymbolLibraryLoader? symbols;
+
+  /// What the host lets the user edit here (spec C-5), read at each build
+  /// and commit; the default is today's panel.
+  final FloorPlanEditorCapabilities capabilities;
 
   @override
   State<SelectionPanel> createState() => _SelectionPanelState();
@@ -330,7 +345,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// D11, 08 D16, 10 D21): a commit is a `SetComponentCommand`, which needs
   /// `Capability.components`, and its regeneration needs the type's
   /// `editCapability` (final review m4).
+  ///
+  /// The host's capabilities come first ([_capable]).
   bool _editable(_Kind kind, [Handle? target]) {
+    if (!_capable(kind, target)) return false;
     final permissions = widget.document.commands.permissions;
     // A table's number is entity text, not a component (14a T14).
     if (kind == _Kind.number) return permissions.allows(Capability.geometry);
@@ -346,6 +364,18 @@ class _SelectionPanelState extends State<SelectionPanel> {
           _Kind.name => const RoomType().editCapability,
           _Kind.number || _Kind.rotation => throw StateError('answered above'),
         });
+  }
+
+  /// Whether the host's capabilities let [kind] edit (spec C-5, S-10): the
+  /// number by `renumber`, the rotation by `rotate`, an object's own field
+  /// by `reshape`; a tool's settings ([target] one of them) always.
+  bool _capable(_Kind kind, Handle? target) {
+    final caps = widget.capabilities;
+    return switch (kind) {
+      _Kind.number => caps.renumber,
+      _Kind.rotation => caps.rotate,
+      _ => _isToolTarget(target) || caps.reshape,
+    };
   }
 
   /// [f]'s text as the value to commit at [target], or null when the field
@@ -644,7 +674,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// its centre, one step. A refused edit is caught: nothing changed.
   void _rotateTable(int quarterTurns) {
     final table = _table;
-    if (table == null || !_rotatable) return;
+    if (table == null || !_rotatable || !widget.capabilities.rotate) return;
     final command =
         rotateTableCommand(widget.document, table.instance, quarterTurns);
     if (command == null) return;
@@ -661,7 +691,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// caught: nothing changed.
   void _mirrorSymbol() {
     final symbol = _symbol;
-    if (symbol == null || !_turnable) return;
+    if (symbol == null || !_turnable || !widget.capabilities.mirror) return;
     final command = mirrorSymbolCommand(widget.document, symbol);
     if (command == null) return;
     try {
@@ -679,6 +709,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     final symbol = _symbol;
     if (symbol == null ||
         !_resizable ||
+        !widget.capabilities.reshape ||
         isServableInstance(widget.document, symbol)) {
       return;
     }
@@ -823,9 +854,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// Whether the Dimension section edits (11 D14, 07 WS8): a kind switch is
   /// a `SetComponentCommand`, which needs `components`, and its
   /// regeneration the type's `editCapability`, `geometry`.
+  /// The host's `reshape` too (spec S-10).
   bool get _dimensionEditable {
     final permissions = widget.document.commands.permissions;
-    return permissions.allows(Capability.components) &&
+    return widget.capabilities.reshape &&
+        permissions.allows(Capability.components) &&
         permissions.allows(const DimensionType().editCapability);
   }
 
@@ -968,7 +1001,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// review): nothing changed, so the toggle keeps showing the model.
   void _setJustification(Justification j) {
     final target = _wall;
-    if (target == null || !_editable(_Kind.thickness)) return;
+    if (target == null || !_editable(_Kind.thickness, target)) return;
     if (target == _toolSettings) {
       final s = widget.wallSettings!;
       s.value = s.value.copyWith(justification: j);
@@ -992,7 +1025,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
   /// shown now, and a refused edit is caught: nothing changed.
   void _flip({required bool hinge}) {
     final target = _openingToolMode == null ? _selected<OpeningParams>() : null;
-    if (target == null || !_editable(_Kind.openingWidth)) return;
+    if (target == null || !_editable(_Kind.openingWidth, target)) return;
     final p = widget.document.components.get<OpeningParams>(target)!;
     if (p.kind != OpeningKind.door) return;
     final next = hinge
@@ -1091,6 +1124,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
     String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
         '${formatPanelNumber(b.depth, _strings)}';
     final turnable = _turnable;
+    final caps = widget.capabilities;
     return [
       Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),
       InputDecorator(
@@ -1111,15 +1145,19 @@ class _SelectionPanelState extends State<SelectionPanel> {
         child:
             Text(box == null ? '—' : size(box), key: const Key('symbol-size')),
       ),
-      _field('symbol-rotation', _strings.rotation, _rotation, turnable),
-      const SizedBox(height: 8),
-      OutlinedButton.icon(
-        key: const Key('symbol-mirror'),
-        onPressed: turnable ? _mirrorSymbol : null,
-        icon: const Icon(Icons.flip),
-        label: Text(_strings.mirror),
-      ),
-      if (members.isNotEmpty) ...[
+      _field('symbol-rotation', _strings.rotation, _rotation,
+          turnable && caps.rotate),
+      // Spec S-11: a button the capabilities refuse is not shown.
+      if (caps.mirror) ...[
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          key: const Key('symbol-mirror'),
+          onPressed: turnable ? _mirrorSymbol : null,
+          icon: const Icon(Icons.flip),
+          label: Text(_strings.mirror),
+        ),
+      ],
+      if (members.isNotEmpty && caps.reshape) ...[
         const SizedBox(height: 8),
         DropdownButton<SymbolEntry>(
           key: const Key('symbol-size-menu'),
@@ -1172,7 +1210,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
             labelText: _strings.seats, border: InputBorder.none),
         child: Text('${table.seats}', key: const Key('table-seats')),
       ),
-      if (_rotatable)
+      if (_rotatable && widget.capabilities.rotate)
         Row(
           children: [
             Expanded(
@@ -1206,9 +1244,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
     // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
     // whenever no tool-settings section does, including a selection that
     // has no type section (a line, a text, a symbol, several things).
+    // Spec C-5: only with `changeLayer`.
     final picker = widget.selection.keys.isNotEmpty &&
         !_toolMode &&
-        _openingToolMode == null;
+        _openingToolMode == null &&
+        widget.capabilities.changeLayer;
     final sections = box != null ||
         wall != null ||
         opening != null ||
@@ -1219,8 +1259,8 @@ class _SelectionPanelState extends State<SelectionPanel> {
     if (!sections && !picker) return const SizedBox.shrink();
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
-    final wallEditable = _editable(_Kind.thickness);
-    final openingEditable = _editable(_Kind.openingWidth);
+    final wallEditable = _editable(_Kind.thickness, wall);
+    final openingEditable = _editable(_Kind.openingWidth, opening);
     final roomEditable = _editable(_Kind.name);
     final OpeningParams? openingParams = opening == null
         ? null
@@ -1287,7 +1327,10 @@ class _SelectionPanelState extends State<SelectionPanel> {
               if (openingParams != null)
                 _field('opening-position', _strings.position, _position,
                     openingEditable),
-              if (openingParams?.kind == OpeningKind.door) ...[
+              // Spec S-10, S-11: the flips are buttons; without `reshape`
+              // they are not shown.
+              if (openingParams?.kind == OpeningKind.door &&
+                  widget.capabilities.reshape) ...[
                 const SizedBox(height: 8),
                 Row(
                   children: [

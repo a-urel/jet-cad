@@ -102,15 +102,22 @@ final class FloorPlanSymbol {
 ///   capabilities (cheaply); a static function or a method tear-off is
 ///   equal to itself.
 /// - [selectionPanel], [layerPanel], [pagePanel]: the right column's
-///   panels; [editLayers], [editPage]: whether the Layer and Page panels
-///   edit.
-/// - [selectTablesOnly]: a click and a rubber band select tables only.
+///   panels (a hidden one keeps its state; with none, no column);
+///   [editLayers], [editPage]: whether the Layer and Page panels edit
+///   (refused, their controls are disabled and their values shown).
+/// - [selectTablesOnly]: a click (inside a table's top, else its box; a
+///   finger within its reach) and a rubber band select tables only, never
+///   one on a hidden or locked layer; a change to it keeps only the tables
+///   of the selection.
 /// - [move], [rotate], [mirror], [reshape], [delete], [renumber],
 ///   [changeLayer]: which of the selection's edits the user may make;
 ///   [reshape] names an object's own fields too (a box's, a wall's, an
-///   opening's, a room's, a dimension's) and Change size. [rotate] and
-///   [mirror] also bound the symbol tool: its `R` and `M`, and the turn and
-///   mirror of a placement, which are not used while refused.
+///   opening's, a room's, a dimension's) and Change size. A refused button
+///   or menu (Mirror, ±90, a door's flips, the Size menu, the layer
+///   picker) is not shown; a refused value field is shown read-only. A
+///   drag whose flag is refused before it ends executes nothing. [rotate]
+///   and [mirror] also bound the symbol tool: its `R` and `M`, and the turn
+///   and mirror of a placement, which are not used while refused.
 /// - [undo] (Undo and Redo), [export], [print]: the top bar's buttons and
 ///   their chords.
 /// - [rulers], [grid]: the drafting aids; [snapping]: object snap for the

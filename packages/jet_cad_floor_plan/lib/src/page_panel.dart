@@ -10,11 +10,22 @@ import 'panel_focus.dart';
 /// The smallest panel that lets a human change the page (spec D12). Every
 /// control executes one `SetComponentCommand`; the panel rebuilds from the
 /// notifier, so undo moves the controls back. 12 replaces this.
+///
+/// [editable] false (host embedding API spec C-5's `editPage`, S-9 e)
+/// disables every control; the values are still shown.
 class PagePanel extends StatefulWidget {
-  const PagePanel({super.key, required this.document, required this.page});
+  const PagePanel(
+      {super.key,
+      required this.document,
+      required this.page,
+      this.editable = true});
 
   final DraftDocument document;
   final PageNotifier page;
+
+  /// Whether the host lets the user edit the page (spec C-5); true is
+  /// today's panel.
+  final bool editable;
 
   @override
   State<PagePanel> createState() => PagePanelState();
@@ -132,6 +143,8 @@ class PagePanelState extends State<PagePanel> {
         valueListenable: widget.page,
         builder: (context, page, _) {
           if (page == null) return const SizedBox.shrink();
+          // Spec C-5: with `editPage` false, every control is disabled.
+          final editable = widget.editable;
           // Dark theme spec D6a: the swatch border is the scheme's, read at
           // build so a theme switch follows.
           final scheme = Theme.of(context).colorScheme;
@@ -171,12 +184,14 @@ class PagePanelState extends State<PagePanel> {
                           enabled: false,
                           child: Text(_strings.customSize)),
                   ],
-                  onChanged: (s) {
-                    if (s != null) {
-                      _set(page.copyWith(
-                          widthMm: s.widthMm, heightMm: s.heightMm));
-                    }
-                  },
+                  onChanged: !editable
+                      ? null
+                      : (s) {
+                          if (s != null) {
+                            _set(page.copyWith(
+                                widthMm: s.widthMm, heightMm: s.heightMm));
+                          }
+                        },
                 ),
                 const SizedBox(height: 8),
                 SegmentedButton<PageOrientation>(
@@ -191,14 +206,16 @@ class PagePanelState extends State<PagePanel> {
                             key: const Key('page-orientation-landscape'))),
                   ],
                   selected: {page.orientation},
-                  onSelectionChanged: (s) =>
-                      _set(page.copyWith(orientation: s.single)),
+                  onSelectionChanged: !editable
+                      ? null
+                      : (s) => _set(page.copyWith(orientation: s.single)),
                 ),
                 const SizedBox(height: 8),
                 TextField(
                   key: const Key('page-scale'),
                   controller: _scale,
                   focusNode: _scaleFocus,
+                  enabled: editable,
                   decoration: InputDecoration(
                       prefixText: '1:', labelText: _strings.scale),
                   keyboardType:
@@ -231,9 +248,11 @@ class PagePanelState extends State<PagePanel> {
                     DropdownMenuItem(
                         value: DisplayUnit.feetInches, child: Text('ft-in')),
                   ],
-                  onChanged: (u) {
-                    if (u != null) _set(page.copyWith(displayUnit: u));
-                  },
+                  onChanged: !editable
+                      ? null
+                      : (u) {
+                          if (u != null) _set(page.copyWith(displayUnit: u));
+                        },
                 ),
                 // Spec Q0 P1: the page's own separator, the one its text
                 // prints with. It shows the page's value, never the UI's
@@ -255,26 +274,33 @@ class PagePanelState extends State<PagePanel> {
                             key: Key('page-decimal-separator-comma'))),
                   ],
                   selected: {page.decimalSeparator},
-                  onSelectionChanged: (s) =>
-                      _set(page.copyWith(decimalSeparator: s.single)),
+                  onSelectionChanged: !editable
+                      ? null
+                      : (s) => _set(page.copyWith(decimalSeparator: s.single)),
                 ),
                 CheckboxListTile(
                   key: const Key('page-grid'),
                   title: Text(_strings.grid),
                   value: page.gridVisible,
-                  onChanged: (v) => _set(page.copyWith(gridVisible: v)),
+                  onChanged: !editable
+                      ? null
+                      : (v) => _set(page.copyWith(gridVisible: v)),
                 ),
                 CheckboxListTile(
                   key: const Key('page-snap'),
                   title: Text(_strings.snapToGrid),
                   value: page.snapToGrid,
-                  onChanged: (v) => _set(page.copyWith(snapToGrid: v)),
+                  onChanged: !editable
+                      ? null
+                      : (v) => _set(page.copyWith(snapToGrid: v)),
                 ),
                 CheckboxListTile(
                   key: const Key('page-breaks'),
                   title: Text(_strings.pageBreaks),
                   value: page.pageBreaks,
-                  onChanged: (v) => _set(page.copyWith(pageBreaks: v)),
+                  onChanged: !editable
+                      ? null
+                      : (v) => _set(page.copyWith(pageBreaks: v)),
                 ),
                 const SizedBox(height: 8),
                 Text(_strings.paper),
@@ -285,8 +311,10 @@ class PagePanelState extends State<PagePanel> {
                         padding: const EdgeInsets.only(right: 8),
                         child: InkWell(
                           key: Key('page-swatch-$i'),
-                          onTap: () =>
-                              _set(page.copyWith(background: _swatches[i].$2)),
+                          onTap: !editable
+                              ? null
+                              : () => _set(
+                                  page.copyWith(background: _swatches[i].$2)),
                           child: Container(
                             width: 28,
                             height: 28,

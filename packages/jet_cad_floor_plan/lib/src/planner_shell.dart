@@ -33,6 +33,7 @@ import 'parametric/wall_bands.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
+import 'service/table_picker.dart';
 import 'shell_commands.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
@@ -41,6 +42,7 @@ import 'symbols/symbol_library_loader.dart';
 import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
 import 'symbols/symbol_library_state.dart';
+import 'symbols/seating_component.dart';
 import 'symbols/symbol_move.dart';
 import 'symbols/wall_attach.dart';
 import 'tables/table_label_system.dart';
@@ -370,13 +372,29 @@ class _PlannerShellState extends State<PlannerShell> {
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
   // Spec 09c D8: one tagged symbol dragged near a wall face attaches, over
   // the faces the symbol tool shares; the library is read at each drag.
+  //
+  // Host embedding API spec C-5 (Slice 4 Task 5): the select tool and the
+  // grip cache share one gates object, [_gates], which reads the
+  // capabilities live.
   late final SelectTool _select = SelectTool(
       moveResolver: SymbolMoveResolver(
           faces: _faces,
           library: () => switch (widget.symbols?.state) {
                 SymbolLibraryReady(:final library) => library,
                 _ => null,
-              }));
+              }),
+      gates: _gates);
+
+  /// The select tool's and the grip cache's gates (spec C-5, S-9, S-15):
+  /// the current widget's capabilities, read at each press, hover, key and
+  /// frame.
+  late final _CapabilityGates _gates = _CapabilityGates(
+      () => widget.capabilities,
+      () => _tablePicker ??= TablePicker(_document, skipLocked: true));
+
+  /// The tables-only pick's picker (spec S-15): made at its first pick,
+  /// cached by the document's state and its tables' revision.
+  TablePicker? _tablePicker;
   final LineTool _line = LineTool();
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
@@ -583,7 +601,8 @@ class _PlannerShellState extends State<PlannerShell> {
           labelAperture: () => kSnapAperturePixels / _camera.value.scale,
           roomInputs: _roomInputs,
           index: _index,
-          objectSnap: () => _toolSnap.objectSnap));
+          objectSnap: () => _toolSnap.objectSnap),
+      gates: _gates);
 
   late final ToolContext _context = ToolContext(
       document: _document,
@@ -936,6 +955,19 @@ class _PlannerShellState extends State<PlannerShell> {
     super.didUpdateWidget(oldWidget);
     final old = oldWidget.capabilities, caps = widget.capabilities;
     if (old != caps) {
+      // Spec S-9 g: a change to tables only keeps the tables of the
+      // selection. No table leaves it, so the host's `selectedTables` does
+      // not move.
+      if (caps.selectTablesOnly && !old.selectTablesOnly) {
+        final drop = [
+          for (final k in _selection.keys)
+            if (!_isTableKey(_document, k)) k
+        ];
+        if (drop.isNotEmpty) _selection.remove(drop);
+      }
+      // The overlay and the hit test read the gates; this repaints now
+      // (the tool's cursor follows at the next pointer move).
+      _grips.gatesChanged();
       if (!_allows(_tools.active)) {
         _activate(_select);
       } else if (identical(_tools.active, _symbolTool) &&
@@ -1249,6 +1281,12 @@ class _PlannerShellState extends State<PlannerShell> {
     return DocumentToolbar.groups(groups: groups);
   }
 
+  /// A right-column panel (spec C-5, S-11): shown while [shown]; otherwise
+  /// kept offstage, its state kept, and out of the focus order (a
+  /// [Visibility] that does not maintain its focusability excludes it).
+  static Widget _keptPanel(bool shown, Widget panel) =>
+      Visibility(visible: shown, maintainState: true, child: panel);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1349,43 +1387,58 @@ class _PlannerShellState extends State<PlannerShell> {
                       ),
                     ),
                   ),
-                  Container(
-                    key: const Key('chrome-right'),
-                    width: 280,
-                    color: scheme.surfaceContainerLow,
-                    child: ShellShortcutGuard(
-                      // One scroll for the whole column (review 14d-1 F-2):
-                      // a selection's sections, the layers and the page
-                      // outgrow a short window, longer in German.
-                      child: SingleChildScrollView(
-                        key: const Key('chrome-right-scroll'),
-                        child: Column(
-                          children: [
-                            // Spec 07 D11, 08 D16: while the Wall tool or
-                            // an opening tool is active, the panel edits its
-                            // settings.
-                            SelectionPanel(
-                                document: _document,
-                                selection: _selection,
-                                selectionChanges: _selectionRelay,
-                                tools: _tools,
-                                wallTool: _wall,
-                                wallSettings: _wallSettings,
-                                openingTools: _openingTools,
-                                openingSettings: _openingSettings,
-                                symbols: widget.symbols),
-                            // Spec 12b D9: the Layers section, placed only.
-                            LayerPanel(
-                                document: _document, foreground: _foreground),
-                            PagePanel(
-                                key: _pagePanel,
-                                document: _document,
-                                page: _page),
-                          ],
+                  // Spec C-5: the column only while it shows a panel.
+                  if (caps.selectionPanel || caps.layerPanel || caps.pagePanel)
+                    Container(
+                      key: const Key('chrome-right'),
+                      width: 280,
+                      color: scheme.surfaceContainerLow,
+                      child: ShellShortcutGuard(
+                        // One scroll for the whole column (review 14d-1 F-2):
+                        // a selection's sections, the layers and the page
+                        // outgrow a short window, longer in German.
+                        child: SingleChildScrollView(
+                          key: const Key('chrome-right-scroll'),
+                          child: Column(
+                            children: [
+                              // Spec 07 D11, 08 D16: while the Wall tool or
+                              // an opening tool is active, the panel edits its
+                              // settings.
+                              //
+                              // Spec C-5, S-11: each panel shown by its flag;
+                              // a hidden one is kept offstage, its state kept.
+                              _keptPanel(
+                                  caps.selectionPanel,
+                                  SelectionPanel(
+                                      document: _document,
+                                      selection: _selection,
+                                      selectionChanges: _selectionRelay,
+                                      tools: _tools,
+                                      wallTool: _wall,
+                                      wallSettings: _wallSettings,
+                                      openingTools: _openingTools,
+                                      openingSettings: _openingSettings,
+                                      symbols: widget.symbols,
+                                      capabilities: caps)),
+                              // Spec 12b D9: the Layers section, placed only.
+                              _keptPanel(
+                                  caps.layerPanel,
+                                  LayerPanel(
+                                      document: _document,
+                                      foreground: _foreground,
+                                      editable: caps.editLayers)),
+                              _keptPanel(
+                                  caps.pagePanel,
+                                  PagePanel(
+                                      key: _pagePanel,
+                                      document: _document,
+                                      page: _page,
+                                      editable: caps.editPage)),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1473,4 +1526,60 @@ class _CapabilitySnap extends SnapSettings {
 
   @override
   void removeListener(VoidCallback listener) => _user.removeListener(listener);
+}
+
+/// Whether [key] is a table of [doc] (spec 14a T1): a root-level instance
+/// of a live definition that seats, `TableSurvey`'s rule. A servable
+/// instance inside a group is no table.
+bool _isTableKey(DraftDocument doc, SelectionKey key) {
+  if (key.chain.isNotEmpty) return false;
+  final node = doc.tree[key.target];
+  return node is InstanceNode &&
+      node.parent == doc.rootHandle &&
+      doc.tree.definition(node.definition) != null &&
+      doc.components.get<SeatingComponent>(node.definition) != null;
+}
+
+/// The editor's capabilities as the select tool and the grip cache read
+/// them (host embedding API spec C-5, S-9, S-15), each asked live: a
+/// runtime change reaches the next press, hover, key, frame and drag's up.
+///
+/// - Under `selectTablesOnly` the pick is the table picker's (a table's
+///   top, else its box; a finger's reach for a touch; a locked table
+///   passed over), and a band keeps tables only.
+/// - `move` (a body drag and a centre grip), `rotate` (the rotation grip),
+///   `reshape` (every other grip) and `delete` (Delete and Backspace) are
+///   the flags.
+/// - The idle keys stay: `FloorPlanView.shortcuts` is Slice 4 Task 6's.
+class _CapabilityGates extends SelectGates {
+  _CapabilityGates(this._caps, this._picker);
+
+  final FloorPlanEditorCapabilities Function() _caps;
+  final TablePicker Function() _picker;
+
+  @override
+  bool get restrictsPick => _caps().selectTablesOnly;
+
+  @override
+  SelectionKey? pick(ToolPointerEvent e, ToolContext ctx) {
+    final hit =
+        _picker().pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
+    return hit == null ? null : SelectionKey.root(hit.table.instance);
+  }
+
+  @override
+  bool bandAccepts(DraftDocument d, SelectionKey key) =>
+      !_caps().selectTablesOnly || _isTableKey(d, key);
+
+  @override
+  bool get move => _caps().move;
+
+  @override
+  bool get rotate => _caps().rotate;
+
+  @override
+  bool get reshape => _caps().reshape;
+
+  @override
+  bool get delete => _caps().delete;
 }

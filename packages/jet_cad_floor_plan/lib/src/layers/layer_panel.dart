@@ -73,14 +73,25 @@ String nextLayerName(CommandTarget target,
 /// ([layerIsEmpty], D5) — computed for that one row only — with a tooltip
 /// giving the reason otherwise.
 ///
+/// [editable] (host embedding API spec C-5's `editLayers`, S-9 e) is ANDed
+/// with the permission: false disables every control as a refused
+/// [Capability.structure] does.
+///
 /// [foreground] is the paper's foreground, `0xRRGGBB`: ACI 7's swatch is
 /// drawn in it, as the style resolver draws the layer.
 class LayerPanel extends StatefulWidget {
   const LayerPanel(
-      {super.key, required this.document, this.foreground = 0x000000});
+      {super.key,
+      required this.document,
+      this.foreground = 0x000000,
+      this.editable = true});
 
   final DraftDocument document;
   final int foreground;
+
+  /// Whether the host lets the user edit the layers (spec C-5); true is
+  /// today's panel.
+  final bool editable;
 
   @override
   State<LayerPanel> createState() => LayerPanelState();
@@ -147,7 +158,8 @@ class LayerPanelState extends State<LayerPanel> {
 
   DraftDocument get _doc => widget.document;
 
-  bool get _allowed => _doc.commands.permissions.allows(Capability.structure);
+  bool get _allowed =>
+      widget.editable && _doc.commands.permissions.allows(Capability.structure);
 
   /// Executes [command]. A refusal is caught as the Selection section's
   /// commits and `LayerPicker` catch one: the dispatcher has rolled it back,

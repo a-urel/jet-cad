@@ -189,12 +189,19 @@ final class PickCandidate {
 /// allocation profiler in `test/invariants/pick_allocation_test.dart`.
 class TablePicker {
   TablePicker(this.document,
-      {@visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner,
+      {this.skipLocked = false,
+      @visibleForTesting Map<Handle, List<int>> Function()? leavesByOwner,
       @visibleForTesting Transform2 Function(Transform2 transform)? invert})
       : _leavesByOwner = leavesByOwner ?? document.leavesByOwner,
         _invert = invert ?? _inverseOf;
 
   final DraftDocument document;
+
+  /// Whether [pick] passes over a table on a locked layer, as if it were
+  /// not there (the editor's tables-only pick, host embedding API spec
+  /// S-15, as `QueryFilter.picking` skips a locked layer); false in the
+  /// selection mode, which picks a locked table and does not move it (S9).
+  final bool skipLocked;
 
   /// [DraftDocument.leavesByOwner], the one entity-store scan of a build;
   /// a test hands in its own to count the scans and to see that every
@@ -301,7 +308,8 @@ class TablePicker {
   /// among several (a top is never lost under a neighbour's chairs); else
   /// null. On a miss, with a [reach] (a finger's, spec 14t R-11), the
   /// table whose box is nearest within [reach] world units, the higher
-  /// handle on a tie.
+  /// handle on a tie. With [skipLocked], a table on a locked layer is
+  /// passed over as if it were not there: the one under it may answer.
   ///
   /// Allocates nothing per table: each candidate's local point is written
   /// out from its inverse's coefficients, as [Transform2.transformPoint]
@@ -319,6 +327,7 @@ class TablePicker {
     final wx = storage[0], wy = storage[1];
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
+      if (skipLocked && c.locked) continue;
       final m = c.inverse;
       final top = c.top;
       if (top == null) continue;
@@ -329,6 +338,7 @@ class TablePicker {
     }
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
+      if (skipLocked && c.locked) continue;
       final m = c.inverse;
       final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
       if (_boxDistance(c.box, x, y) <= tolerance.linear) return c;
@@ -338,6 +348,7 @@ class TablePicker {
     var bestDistance = reach;
     for (var i = list.length - 1; i >= 0; i--) {
       final c = list[i];
+      if (skipLocked && c.locked) continue;
       final m = c.inverse;
       final x = m.a * wx + m.c * wy + m.e, y = m.b * wx + m.d * wy + m.f;
       // Local units to world: the instance's scale (placements turn and
