@@ -222,11 +222,14 @@ Nothing.
   *Ana uygulama / Düzenleyici / Tam / Masalar / Salt okunur / Kendi
   çubuğu / Kendi dışa aktarma penceresi / Planın tuşları / Masa bul / Kasa
   kimliği*).
-- **macOS, a ruling** (reported by the local session): the render
-  package's text lod ladder rungs 1 and 2 pass there, so its standing set
-  differs from Linux's; Slice 3's T-1 in the planner's
-  `test/service/table_theme_painter_test.dart` fails there, with `main`'s
-  engine too. Fix it as its own task, or leave it recorded?
+- **macOS:** the render package's text lod ladder rungs 1 and 2 pass
+  there, so its standing set differs from Linux's (recorded, not ruled).
+  Slice 3's T-1 failure there (the human: *"T-1'i ayrı görev olarak
+  düzelt"*) is fixed: its "bold inks more" check held on Linux only (the
+  engine's synthetic bold spreads the ink differently on macOS: 176,420
+  regular against 175,568 bold); it now asserts that bold renders unlike
+  regular, which still kills Slice 3's X18 (the weight forced to w400).
+  A macOS run to confirm is owed.
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
