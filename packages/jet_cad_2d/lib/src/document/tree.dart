@@ -152,14 +152,47 @@ class DocumentTree {
   /// double-counts and serialization emits as a dangling child. The previous
   /// parent must be read before the overwrite — it is the only record of
   /// which container currently lists this handle.
-  void addNode(Node node) {
+  ///
+  /// [index], when given, is where the handle goes in the parent's raw
+  /// `children` list (leaf and dangling entries counted, the list as it is
+  /// held): `RemoveNodeCommand` reads it with [indexInParent] and its inverse
+  /// hands it back here, so an undone removal restores the node where it was
+  /// rather than at the end (spec O-10). Without it the handle is appended.
+  /// An index outside `0..children.length` is a [RangeError], and an index
+  /// for a parent that is neither a group nor a definition — nothing to
+  /// insert into — an [ArgumentError]; both throw before anything is
+  /// mutated, like the cycle guard.
+  void addNode(Node node, {int? index}) {
     _guardCycle(node);
+    if (index != null) {
+      final siblings = _childListOf(node.parent);
+      if (siblings == null) {
+        throw ArgumentError.value(index, 'index',
+            '${node.parent.toHex()} is neither a group nor a definition');
+      }
+      RangeError.checkValueInInterval(index, 0, siblings.length, 'index');
+    }
     final previousParent = _nodes[node.handle]?.parent;
     _nodes[node.handle] = node;
     if (previousParent != null && previousParent != node.parent) {
       _unlink(node.handle, previousParent);
     }
-    _link(node.handle, node.parent);
+    _link(node.handle, node.parent, index);
+  }
+
+  /// Where [handle] sits in its parent's raw `children` list — its first
+  /// occurrence, when a malformed list names it twice — or null when it is
+  /// not a node here, its parent holds no `children`, or the list does not
+  /// name it.
+  ///
+  /// The raw list, not [childNodesOf]'s filtered one: an undo restores the
+  /// list as it was held, leaf and dangling entries included, so only a raw
+  /// index puts the node back between the same neighbours.
+  int? indexInParent(Handle handle) {
+    final node = _nodes[handle];
+    if (node == null) return null;
+    final index = _childListOf(node.parent)?.indexOf(handle) ?? -1;
+    return index < 0 ? null : index;
   }
 
   /// Adds without the cycle check. Only an importer should use this, and only
@@ -539,9 +572,16 @@ class DocumentTree {
   /// the two writers coexist without either having to know about the other.
   ///
   /// For the same reason a handle already listed keeps its position rather than
-  /// being moved to the end: for a [GroupNode], `children` order *is* draw
-  /// order, and it is the file's order that is authoritative, not the order the
-  /// loader happened to visit the nodes in.
+  /// being moved to the end, whatever [index] says: `children` is written back
+  /// in the order it is held, and it is the file's order that is
+  /// authoritative, not the order the loader happened to visit the nodes in.
+  /// (Draw order is ascending handle value, not `children` order; the order
+  /// matters to the encoding, which a save, an undo and a reload must agree
+  /// on byte for byte.)
+  ///
+  /// A handle not yet listed goes in at [index] when one is given — the
+  /// position an undone removal restores, already range-checked by [addNode]
+  /// — and at the end otherwise.
   ///
   /// A [parent] that is neither a container node nor a definition is a no-op.
   /// That covers [Handle.none] at the root, and it covers a node added before
@@ -554,20 +594,37 @@ class DocumentTree {
   /// children, and that is the right outcome: the graph is already malformed,
   /// and this keeps both representations saying so. [ancestorsOf] and the
   /// reachability walks each raise [NodeCycleError] on it either way.
-  void _link(Handle handle, Handle parent) {
+  void _link(Handle handle, Handle parent, [int? index]) {
     final node = _nodes[parent];
     if (node is GroupNode) {
       if (node.children.contains(handle)) return;
-      _nodes[parent] = node.copyWith(children: [...node.children, handle]);
+      _nodes[parent] =
+          node.copyWith(children: _withAt(node.children, handle, index));
       return;
     }
     final definition = _definitions[parent];
     if (definition != null) {
       if (definition.children.contains(handle)) return;
-      _definitions[parent] =
-          definition.copyWith(children: [...definition.children, handle]);
+      _definitions[parent] = definition.copyWith(
+          children: _withAt(definition.children, handle, index));
     }
   }
+
+  /// The `children` list of [container] — a group's or a definition's — or
+  /// null when [container] holds none. [_link] and [_unlink] read the same
+  /// two cases in the same order.
+  List<Handle>? _childListOf(Handle container) => switch (_nodes[container]) {
+        GroupNode(:final children) => children,
+        _ => _definitions[container]?.children,
+      };
+
+  /// [children] with [handle] inserted at [index], or appended when [index]
+  /// is null.
+  static List<Handle> _withAt(
+          List<Handle> children, Handle handle, int? index) =>
+      index == null
+          ? [...children, handle]
+          : [...children.take(index), handle, ...children.skip(index)];
 
   /// Appends every node already in the tree whose `parent` names
   /// [definitionHandle] but whose handle the definition's own `children` list

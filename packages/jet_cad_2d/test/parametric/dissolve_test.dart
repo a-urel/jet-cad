@@ -194,14 +194,13 @@ void main() {
     expect(drift(doc), isEmpty);
     final after = canon(doc, sortNodes: true);
 
-    // Undo restores the state and every child handle; F's node is linked
-    // last among the root's children (D15), so the states are compared with
-    // the root's order normalised. Draw order follows the handles.
+    // Undo restores the state and every child handle; F's node goes back
+    // first among the root's children, where it was (spec O-10).
     doc.commands.undo();
     expect(canon(doc, sortNodes: true), before);
     expect(kids(doc, hF), handles);
     expect(doc.components.get<Fuse>(hF), fuse);
-    expect(rootChildren(doc), [hC, hF]);
+    expect(rootChildren(doc), [hF, hC]);
     expect(drift(doc), isEmpty);
     doc.commands.redo();
     expect(canon(doc, sortNodes: true), after);
