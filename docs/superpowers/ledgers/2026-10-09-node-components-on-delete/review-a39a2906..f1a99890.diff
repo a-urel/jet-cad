@@ -1,0 +1,703 @@
+# Review package: a39a2906..HEAD
+
+## Commits
+f1a99890 fix(engine): checkRestorable refuses a value of another class; N-2 removes a middle child; titles and results note
+
+## Files changed
+ .../notes/2026-10-10-node-components-results.md    | 158 ++++++++++++++++-----
+ .../jet_cad_2d/lib/src/document/component.dart     |  27 +++-
+ .../test/document/node_components_test.dart        |  62 +++++++-
+ .../jet_cad_2d/test/parametric/dissolve_test.dart  |   9 +-
+ packages/jet_cad_2d/test/parametric/page_test.dart |   3 +-
+ .../test/delete_components_test.dart               |   2 +-
+ .../test/tables/table_data_test.dart               |   4 +-
+ 7 files changed, 208 insertions(+), 57 deletions(-)
+
+## Diff
+diff --git a/docs/superpowers/notes/2026-10-10-node-components-results.md b/docs/superpowers/notes/2026-10-10-node-components-results.md
+index 594e4e80..ea73f4ed 100644
+--- a/docs/superpowers/notes/2026-10-10-node-components-results.md
++++ b/docs/superpowers/notes/2026-10-10-node-components-results.md
+@@ -18,21 +18,24 @@ was re-run for this note.
+ ## What changed
+ 
+ - **D-1, `commands.dart`.** `AddNodeCommand(node, {index, components})`
+   carries a `ComponentSnapshot` (default empty). Apply order: duplicate
+   check, `ComponentRegistry.checkRestorable`, `tree.addNode`, `restore`,
+   seed. Every refusal comes before the first write, so no rollback is
+   needed. `RemoveNodeCommand` reads `snapshotOf(handle)` before the
+   removal, `detachAll`s after it, and its inverse is
+   `AddNodeCommand(node, index:, components:)`.
+ - **D-1, `component.dart`.** `ComponentRegistry.checkRestorable` (new);
+-  `restore` calls it first.
++  `restore` calls it first. After the final review it also refuses a
++  registered entry whose value is not of the class this registry
++  registered under that type id (`_accepts`, the `is T` test taken at
++  `register`).
+ - **D-2.** `RemoveNodeCommand.capabilities` is static `{structure,
+   components}`; `AddNodeCommand.capabilities` is `{structure}` for an
+   empty snapshot and `{structure, components}` otherwise. `capability`
+   stays `structure` on both.
+ - **D-4, `regeneration.dart`.** The parametric planner stops planning
+   detaches: `_detachLayer`, the dissolve's planned detach and 06 D8's
+   `cleanup` list are gone. The `ObjectLayer` and parameter components of
+   a lost or dissolved object go with its node.
+ - **D-7, `table_label_system.dart`.** The 0.4.0 table-data expander
+   (`_detachFor` and its branch) goes: the delete itself takes a table's
+@@ -56,26 +59,29 @@ Task 1's review (Opus): spec one gap (`objectsOf`'s doc, fixed in
+ `d082640e`), quality *Approved*, no Critical or Important. Task 2's
+ review (Opus): spec compliant, quality *Approved*, no Critical or
+ Important.
+ 
+ ## Tests
+ 
+ - **New, engine:** `jet_cad_2d/test/document/node_components_test.dart`,
+   N-1 to N-7.
+   - N-1 a removal takes every component of its handle and no other's.
+   - N-2 undo restores the snapshot and the index byte for byte; redo
+-    removes them again.
++    removes them again. The node is the middle child of three (final fix
++    round), so an inverse that forces the index fails here.
+   - N-3 capabilities, and a profile without `components`.
+-  - N-4 a refused add leaves everything as it was, four cases: an
+-    unmapped type id with the mapped one sorting first; a dangling entry
+-    in the parent's raw `children`; a definition cycle with a mapped
+-    snapshot; an index out of range with a mapped snapshot.
++  - N-4 a refused add leaves everything as it was, five cases: an
++    unmapped type id with the mapped one sorting first; a type id this
++    document maps to a different Dart class (final fix round, M-18); a
++    dangling entry in the parent's raw `children`; a definition cycle
++    with a mapped snapshot; an index out of range with a mapped
++    snapshot.
+   - N-5 a compound delete whose second removal fails rolls the first
+     back with its components.
+   - N-6 a re-parent: bare remove-then-add drops the components, the
+     snapshot-carrying one keeps them.
+   - N-7 a plan carrying orphans loads and saves byte for byte.
+ - **New, render:** S-1 in `jet_cad_2d_flutter/test/select_tool_test.dart`
+   ('keys and delete'): the select tool's Delete of an instance and of a
+   group holding a nested group, all three carrying data.
+ - **New, floor plan:** `jet_cad_floor_plan/test/delete_components_test.dart`,
+   P-1 (a table with table data and an unknown payload, and a wall,
+@@ -142,58 +148,69 @@ unchanged). Both lists are the global constraint's named exceptions.
+   reviewer, not run). PG1 is M-12's killer, from Task 1's run.
+ - **Stamp order in TD10 is A before B** (the touched order is the
+   compound's), so the plan's arguments stand without the swap fallback.
+ 
+ ## Mutations
+ 
+ Each applied alone, run, the red line captured and the file restored from
+ a saved copy (`cp`, never `git checkout`). Lines are copied from the
+ reports. M-1 to M-16 are Task 1's, run in `jet_cad_2d` (and S-1 in
+ `jet_cad_2d_flutter`); M-17 is Task 2's, and Task 2 re-applied M-1, M-2
+-and M-15 to `commands.dart` against the floor plan's suites.
++and M-15 to `commands.dart` against the floor plan's suites. M-18 and the
++`index: 0` probe (X-0) are the final fix round's own runs, in
++`jet_cad_2d`; the final review's re-runs of M-17, M-3, M-12, M-5 and M-14
++and its own X-0 probe are listed under Gates.
+ 
+ | Mutant | Killed by | Red line (report) |
+ |---|---|---|
+ | M-1 no `detachAll` in `RemoveNodeCommand` | N-1, N-2, N-5, N-6, S-1; floor plan: TD7, TD7b, TD7c, TD8, P-1, P-2, P-3, HD12 | `+0 -1: N-1 a removal takes every component of its handle, no other [E]`; S-1: `keeps nothing` with `Expected: true Actual: <false>`; floor plan: `+6 -1: ... TD7 M-H27: a Delete takes the data in the same step...` and `+19 -8: ... HD12 M-H27 (E-9 gate 3): the editor's Delete of table 1 drops its data...` (8 red) |
+ | M-2 the inverse built without the snapshot | N-2, N-5, N-6, S-1; floor plan: TD7, TD7b, TD7c, TD8, P-1, P-2, P-3, HD12 | `+1 -1: N-2 undo restores the snapshot and the index byte for byte; redo removes them again [E]`; S-1: `Actual: ...components":{},"rawData"`; floor plan: `+19 -8 ... HD12 ...` |
+-| M-3 the snapshot taken after `detachAll` | N-2, N-5, N-6 | `+1 -1: N-2 undo restores ... [E]` |
++| M-3 the snapshot taken after `detachAll` | N-2 (Task 1's run); TD7, TD7b, TD7c (the final review's run at `a39a2906`) | `+1 -1: N-2 undo restores ... [E]`; floor plan: `00:00 +0 -3: Some tests failed.` |
+ | M-4 `detachAll` drops registered only | N-1, N-2, N-5, N-6 | `+0 -1: N-1 a removal takes every component of its handle, no other [E]` |
+ | M-5 `restore` appends unknown payloads reversed | **N-2, N-5** (not N-6) | `+1 -1: N-2 undo restores ... [E]` |
+ | M-6 `detachAll(handle)` replaced by `clear()` | N-1, N-2, N-5 | `+0 -1: N-1 a removal takes every component of its handle, no other [E]` |
+ | M-7 `RemoveNodeCommand.capabilities` deleted | N-3 | `+2 -1: N-3 capabilities, and a profile without components [E]` |
+ | M-8 `AddNodeCommand.capabilities` deleted | N-3 | `+2 -1: N-3 capabilities, and a profile without components [E]` |
+ | M-9 `restore` before `addNode`, no check | N-4 (cycle), N-4 (index) | `+5 -1: N-4 a refused add leaves everything as it was a definition cycle, with a mapped snapshot [E]` |
+ | M-10 `checkRestorable` line deleted in `AddNodeCommand` | N-4 (unmapped), N-4 (dangling) | `+3 -1: N-4 ... an unmapped type id, the mapped one sorting first [E]` |
+ | M-11 the dissolve's planned detach put back | DV1 | `DV1 ... [E]` `Expected: empty Actual: [null]` (`dissolve_test.dart` 231:5, `fuseSets(redoReplay)`) |
+ | M-12 the cleanup list put back | **PG1** (P-2 not claimed) | `PG1 ... [E]` `Expected: empty Actual: [Instance of 'SetComponentCommand<Gauge>']` `no separate component restore` (`page_test.dart` 235:5) |
+ | M-13 decode sweeps components of handles that name nothing | N-7 | `+9 -1: N-7 a plan carrying orphans loads and saves byte for byte [E]` |
+ | M-14 revision 1's rollback instead of the check | N-4 (dangling) | `+4 -1: N-4 ... the same under a parent that already lists the handle, the raw list compared ... [E]` |
+ | M-15 the inverse built without the index | N-2, N-5; floor plan: TD7b, TD7c, P-1, P-3, HD12 | `+1 -1: N-2 undo restores ... [E]`; floor plan: `+7 -1: ... TD7b the first table deleted and undone...` and `+22 -5` for HD12. TD7 (B last) correctly stays green |
+ | M-16 `checkRestorable` `break`s after the first entry | N-4 (unmapped), N-4 (dangling) | `+3 -1: N-4 ... an unmapped type id, the mapped one sorting first [E]` |
+ | M-17 `TableLabelEdit`'s catch skips the derived inverses | TD10 | `00:00 +0 -1: a deleted table takes its data (E-9 gate 3) TD10 all or nothing: a stamp that throws after another stamp puts that one back with the edit [E]`; `Expected: ... ":[200.0,-1.57079632 ...` / `Actual: ... ":[200.0,-2.21656815 ...` (A's label left stamped) |
++| M-18 `checkRestorable` checks the type id only (the `_accepts` test removed) | N-4 (different class) | `00:00 +10 -1: Some tests failed.`; `+4 -1: N-4 a refused add leaves everything as it was a type id this document maps to a different class [E]`; `Which: returned <null>` (`node_components_test.dart` 291:7, the add did not throw) |
++| X-0 probe: the inverse built with `index: 0` in `RemoveNodeCommand` | N-2, N-5 | `00:00 +1 -1: N-2 undo restores the snapshot and the index byte for byte; redo removes them again [E]`; `00:00 +7 -2: N-5 a compound delete whose second removal fails rolls the first back with its components [E]`; `00:00 +9 -2: Some tests failed.` |
+ 
+ Notes from the reports:
+ 
+ - M-12 was reconstructed as `cleanup = [for (final h in lost)
+   before.objects[h]!.detach(h)]` prepended to the plan (the layer detach
+   omitted); the `SetComponentCommand<Gauge>` in the inverse is what PG1
+   pins. M-11 and M-12 re-use `_Registration.detach`.
+ - M-13 is mutated at the `doc.rawData.loadJson` call in
+   `json_codec.dart` (the codec's `decode`).
+ - M-1 and M-2 run through S-1 in `jet_cad_2d_flutter`, both red.
+ - The recorded M-1, M-2, M-15 floor plan kills confirm the spec's
+   expectation (TD7 and HD12 for M-1, TD7 and P-1 for M-2, TD7b for M-15)
+   with the expander's detach gone: M-1 and M-2 are no longer masked by
+   it.
+-- M-3's spec table adds TD7 as a "review run" killer; Task 1's run
+-  recorded N-2, N-5 and N-6, and the floor plan re-check of M-3 was not
+-  part of Task 2's plan. Recorded as run.
++- M-3's spec table adds TD7 as a "review run" killer. Task 1's run
++  pasted one red line, N-2's (its report's table also lists N-5 and N-6,
++  with no line for them; the row above names N-2 only). The floor plan
++  re-check of M-3 was not part of Task 2's plan. The final review ran it
++  at `a39a2906`: TD7, TD7b and TD7c red, which settles the claim.
++- X-0 (the inverse's index forced to 0) survived all of
++  `node_components_test.dart` while N-2's node sat at index 0, and was
++  killed only by `node_index_undo_test.dart` (host spec O-10). N-2 now
++  removes the middle child, and X-0 turns N-2 and N-5 red.
+ 
+ ## Gates
+ 
+ The `Some tests failed` lines are the standing failures on this machine
+ (macOS), measured at `e281372`: `jet_cad_2d`'s two `generate_document_test`
+ fingerprints and `jet_cad_2d_flutter`'s five text-ladder goldens. CI on Linux compares its own lists exactly
+ (`tool/ci/standing_failures.txt`) and is the check of record for them.
+ 
+ **Task 1** (at `90044db4`; `task-1-report.md`):
+ 
+@@ -234,20 +251,87 @@ All tests passed!`.
+   issues found!`; format `Formatted 47 files (0 changed)`.
+ - `apps/restaurant_demo`: `00:19 +68: All tests passed!`; analyze `No
+   issues found!`; format `Formatted 9 files (0 changed)`.
+ - P-1 to P-3 with the expander still installed (plan Step 2): `00:00 +3:
+   All tests passed!` (after the `canon` change).
+ - TD10 on the code: `00:00 +12: All tests passed!`.
+ - `jet_cad_2d`, `jet_cad_2d_flutter` and `jet_cad_2d_gpu` were not
+   touched by Task 2 (Task 1's `commands.dart` was mutated and restored,
+   `cmp` clean, `git status` clean).
+ 
++**Final review** (fresh, whole branch, a scratch worktree at `a39a2906`;
++`final-review.md`, archived with the ledger). Flutter 3.47.6, this machine.
++Lines copied from it:
++
++- `packages/jet_cad_2d`: `dart test` -> `00:06 +1280 -2: Some tests
++  failed.` (the two standing `generate_document_test` fingerprints);
++  `dart analyze --fatal-infos` -> `No issues found!`; format -> `Formatted
++  172 files (0 changed) in 0.38 seconds.`
++- `packages/jet_cad_2d_flutter`: `flutter test` -> `00:26 +1432 ~1 -5:
++  Some tests failed.` (the five text-ladder rungs); analyze `No issues
++  found! (ran in 3.9s)`; format `Formatted 228 files (0 changed) in 0.44
++  seconds.`
++- `packages/jet_cad_2d_gpu`: `00:02 +20: All tests passed!`; analyze `No
++  issues found! (ran in 2.6s)`; format `Formatted 10 files (0 changed) in
++  0.01 seconds.`
++- `packages/jet_cad_restaurant_symbols`: `00:01 +97: All tests passed!`;
++  analyze `No issues found! (ran in 3.0s)`; format `Formatted 15 files (0
++  changed) in 0.03 seconds.`
++- `apps/floor_planner`: `00:32 +212: All tests passed!`; analyze `No
++  issues found! (ran in 3.6s)`; format `Formatted 47 files (0 changed) in
++  0.12 seconds.`
++- `apps/restaurant_demo`: `00:18 +68: All tests passed!`; analyze `No
++  issues found! (ran in 3.4s)`; format `Formatted 9 files (0 changed) in
++  0.06 seconds.`
++- `packages/jet_cad_floor_plan`: `flutter test --enable-vmservice` ->
++  `01:52 +1915: All tests passed!`; analyze `No issues found! (ran in
++  6.6s)`; format `Formatted 281 files (0 changed) in 1.06 seconds.`
++
++The final review's mutant re-runs (each applied alone, restored from a
++`cp` copy, `cmp` clean, `git status --short` empty at the end):
++
++- **M-17**, TD10: `00:00 +0 -1: ... TD10 all or nothing: a stamp that
++  throws after another stamp puts that one back with the edit [E]`.
++  Killed.
++- **M-3**, floor plan TD7 to TD7c: TD7, TD7b and TD7c red, `00:00 +0 -3:
++  Some tests failed.`
++- **M-12**: PG1 `+0 -1: PG1 ... [E]`, killed; `delete_components_test.dart`
++  `00:00 +3: All tests passed!` (P-2 does not kill M-12, as ruled).
++- **M-5**, `node_components_test.dart`: N-2 `[E]` and N-5 `[E]`, ending
++  `+8 -2: Some tests failed.`; N-6 stayed green, as ruled.
++- **M-14**: `+4 -1: N-4 ... the same under a parent that already lists the
++  handle, the raw list compared ... [E]`. Killed.
++- **X-0** (the inverse's index forced to 0): `node_components_test.dart`
++  stayed green (N-2's node sat at index 0); `node_index_undo_test.dart`
++  killed it, N2, N3b, N4, N6 and N7 red, `+17 -7`.
++
++**Final fix round** (the working tree after `a39a2906`; the engine's
++`component.dart` changed, so every consumer was re-run). Standing failures
++as above, nothing else red:
++
++- `packages/jet_cad_2d`: `dart test` -> `00:06 +1281 -2: Some tests
++  failed.` (the two standing); `dart analyze --fatal-infos` -> `No issues
++  found!`; format -> `Formatted 172 files (0 changed) in 0.41 seconds.`
++- `packages/jet_cad_2d_flutter`: `00:23 +1432 ~1 -5: Some tests failed.`
++  (the five text-ladder rungs); analyze `No issues found! (ran in 3.2s)`;
++  format `Formatted 228 files (0 changed) in 0.46 seconds.`
++- `packages/jet_cad_2d_gpu`: `00:00 +20: All tests passed!`; analyze `No
++  issues found! (ran in 2.5s)`; format `Formatted 10 files (0 changed)`.
++- `apps/floor_planner`: `00:33 +212: All tests passed!`; analyze `No
++  issues found! (ran in 3.7s)`; format `Formatted 47 files (0 changed)`.
++- `apps/restaurant_demo`: `00:17 +68: All tests passed!`; analyze `No
++  issues found! (ran in 3.0s)`; format `Formatted 9 files (0 changed)`.
++- `packages/jet_cad_floor_plan`: `flutter test --enable-vmservice` ->
++  `01:56 +1915: All tests passed!`; analyze `No issues found! (ran in
++  3.4s)`; format `Formatted 281 files (0 changed) in 0.96 seconds.`
++- `node_components_test.dart` alone: `00:00 +11: All tests passed!`.
++
+ The two allocation invariants (`query_allocation_test`,
+ `paint_allocation_test`) and every image golden are untouched. The
+ branch's CI run is the check of record for the Linux standing lists.
+ 
+ ## What this discharges
+ 
+ - **The host embedding spec's F-14** (*"A component is attached per
+   handle"*; `RemoveNodeCommand` keeps components): settled. A removed
+   node takes its components, undo restores them in the same order, and
+   the spike at `e281372` that spec F-14 describes held.
+@@ -272,36 +356,36 @@ branch's CI run is the check of record for the Linux standing lists.
+ O-1 to O-7 stand as the spec records them: `RemoveEntityCommand` and its
+ inverses leave components on a removed leaf handle (O-1); no
+ `validate()` diagnostic for components on dead handles (O-2); no
+ purge-time sweep of registered types on dead handles (O-3); `loadJson`
+ does not raise the handle seed past component handles (O-4); the shipped
+ host spec's text is not edited (O-5); `rawData` is not on
+ `CommandTarget`, so a deleted node's raw data stays (O-6); after D-7 a
+ hand-built `SetComponentCommand<FloorPlanTableData>` onto a dead handle
+ persists (O-7).
+ 
+-## Left for the final review
+-
+-Minor findings of the two task reviews, deferred (none changes
+-behaviour; no named mutant survives any of them):
+-
+-- **DV1's title and comment** (`dissolve_test.dart:146-148`) still name
+-  the cleanup and the detach ("the detach components").
+-- **`_Registration.detach`** (`parametric_system.dart:791`) is dead in
+-  `lib`, kept only as M-11's and M-12's template.
+-- **A cross-document snapshot** whose type id maps to a different Dart
+-  class passes `checkRestorable`; `ComponentStore.set` would then throw a
+-  `TypeError` inside `restore` after `addNode` wrote, breaking I-3. A
+-  spec-level edge (two registries binding one id to different classes;
+-  `RemoveDefinitionCommand` had the same gap); read, not run.
+-- **Fixture breadth** (plan-mandated): the sibling and S-1's three
+-  handles share one `ObjectLayer` value and the `a.earlier` payload; P-1
+-  to P-3 have no surviving sibling with the same types, and P-1's table
+-  carries one unknown payload where the constraint asks for two.
+-- **PG1's comment reflow** is broken (`page_test.dart:216-218`).
+-- **P-2's title** claims the restore travels "through the node's
+-  snapshot"; the test checks the outcome only
+-  (`delete_components_test.dart:79-80`, `:96-101`).
+-- **TD9's title** contradicts itself ("removes nothing" beside "a delete
+-  of another table", `table_data_test.dart:380-381`).
+-- **A leftover `derived` / `else continue`** in `TableLabelEdit`'s loop
+-  (`table_label_system.dart:93-99`), brief-permitted.
++## The final review, and what became of its findings
++
++Final review of the whole branch (`final-review.md`): no Critical, no
++Important; ready to merge with fixes. Nothing below changes behaviour the
++tests pin, apart from the cross-document snapshot, which is now closed.
++
++- **Fixed, text only.** DV1's title and comment
++  (`dissolve_test.dart`), P-2's title (`delete_components_test.dart`),
++  TD9's title (`table_data_test.dart`), PG1's comment reflow
++  (`page_test.dart`).
++- **Fixed, N-2's fixture.** The removed node is the middle of three
++  children, so the new file stands on its own for the index (X-0 above).
++- **Fixed, the cross-document snapshot (was out of scope).** A snapshot
++  whose type id maps here to a different Dart class used to pass
++  `checkRestorable` and then fail after `addNode` wrote, breaking I-3
++  (`RemoveDefinitionCommand` had the same gap before this branch).
++  `checkRestorable` now refuses it with a `StateError` before any write;
++  N-4's fifth case pins it and M-18 turns it red.
++- **Left.** `_Registration.detach` (`parametric_system.dart:793`) is dead
++  in `lib`, kept only as M-11's and M-12's template. Fixture breadth
++  (plan-mandated): the sibling and S-1's three handles share one
++  `ObjectLayer` value and the `a.earlier` payload; P-1 to P-3 have no
++  surviving sibling with the same types, and P-1's table carries one
++  unknown payload where the constraint asks for two. A leftover `derived`
++  / `else continue` in `TableLabelEdit`'s loop (`table_label_system.dart:93-99`),
++  brief-permitted.
+diff --git a/packages/jet_cad_2d/lib/src/document/component.dart b/packages/jet_cad_2d/lib/src/document/component.dart
+index f61db7ec..34d92f6c 100644
+--- a/packages/jet_cad_2d/lib/src/document/component.dart
++++ b/packages/jet_cad_2d/lib/src/document/component.dart
+@@ -91,31 +91,36 @@ class ComponentSnapshot {
+ /// All component stores for one document, plus the type-id mapping.
+ ///
+ /// Stores are sparse and keyed by `Type` rather than living on each entity:
+ /// entity records stay lean at scale, and "every handle carrying component X"
+ /// costs the component count rather than the entity count.
+ class ComponentRegistry {
+   final Map<Type, ComponentStore<Component>> _stores = {};
+   final Map<Type, String> _typeIdOf = {};
+   final Map<String, ComponentFactory<Component>> _factories = {};
+   final Map<String, Type> _typeOf = {};
++
++  /// Per registered type: whether a value is of the class registered under
++  /// that type (`T`'s `is` test, which the untyped stores cannot make).
++  final Map<Type, bool Function(Component)> _accepts = {};
+   final Set<String> _internal = {};
+ 
+   /// Preserved verbatim: types this build has never heard of.
+   final Map<Handle, List<Map<String, Object?>>> _unknown = {};
+ 
+   void register<T extends Component>(
+     String typeId,
+     ComponentFactory<T> factory, {
+     bool internal = false,
+   }) {
+     _stores[T] = ComponentStore<Component>();
++    _accepts[T] = (component) => component is T;
+     _typeIdOf[T] = typeId;
+     _typeOf[typeId] = T;
+     _factories[typeId] = factory;
+     if (internal) _internal.add(typeId);
+   }
+ 
+   /// Whether `T` already has a store. `register` replaces the store
+   /// unconditionally, wiping every component of `T` in the process, so a
+   /// caller that must not clobber an already-loaded document — a second
+   /// `ParametricSystem` over the same document, for instance (Ruling
+@@ -169,31 +174,39 @@ class ComponentRegistry {
+ 
+   /// Detaches every component on [handle], registered and unknown. Other
+   /// handles are untouched.
+   void detachAll(Handle handle) {
+     for (final store in _stores.values) {
+       store.remove(handle);
+     }
+     _unknown.remove(handle);
+   }
+ 
+-  /// Throws [StateError] when a registered type id of [snapshot] maps to
+-  /// no store in this registry, and writes nothing: the check [restore]
+-  /// makes before its first write, for a caller that must make it before
+-  /// any other mutation (`AddNodeCommand`, spec D-1). Only a snapshot from
+-  /// another document can fail it.
++  /// Throws [StateError] when a registered entry of [snapshot] cannot be
++  /// restored here, and writes nothing: the check [restore] makes before its
++  /// first write, for a caller that must make it before any other mutation
++  /// (`AddNodeCommand`, spec D-1, I-3). An entry fails when its type id maps
++  /// to no store in this registry, or when its value is not of the class this
++  /// registry registered under that type id. Only a snapshot from another
++  /// document can fail either.
+   void checkRestorable(Handle handle, ComponentSnapshot snapshot) {
+-    for (final (typeId, _) in snapshot.components) {
+-      if (_stores[_typeOf[typeId]] == null) {
++    for (final (typeId, component) in snapshot.components) {
++      final type = _typeOf[typeId];
++      if (_stores[type] == null) {
+         throw StateError('cannot restore $typeId on ${handle.toHex()}: '
+             'the type is not registered');
+       }
++      if (!_accepts[type]!(component)) {
++        throw StateError('cannot restore $typeId on ${handle.toHex()}: '
++            'the value is a ${component.runtimeType}, not the registered '
++            '$type');
++      }
+     }
+   }
+ 
+   /// Re-attaches each component of [snapshot] to [handle], exactly: each
+   /// registered value into its type's store (replacing one of that type
+   /// already there, as [attach] does), each unknown payload appended in the
+   /// snapshot's order (as [attachUnknown] does). Meant for a handle that
+   /// carries nothing, which is how `RemoveDefinitionCommand`'s and
+   /// `RemoveNodeCommand`'s inverses use it: on a handle that already
+   /// carries unknown payloads, the snapshot's are appended after them, and
+diff --git a/packages/jet_cad_2d/test/document/node_components_test.dart b/packages/jet_cad_2d/test/document/node_components_test.dart
+index 332bb52e..f3a8e23e 100644
+--- a/packages/jet_cad_2d/test/document/node_components_test.dart
++++ b/packages/jet_cad_2d/test/document/node_components_test.dart
+@@ -36,20 +36,36 @@ final class Foreign implements Component {
+   String get typeId => id;
+   @override
+   Map<String, Object?> toJson() => const {'f': 1};
+   static Foreign fromJson(Map<String, Object?> j) => const Foreign();
+   @override
+   bool operator ==(Object other) => other is Foreign;
+   @override
+   int get hashCode => 1;
+ }
+ 
++/// Registered only in a second document, under [Mark]'s id: a different
++/// Dart class bound to a type id this document maps to [Mark].
++final class Impostor implements Component {
++  static const String id = Mark.id;
++  const Impostor();
++  @override
++  String get typeId => id;
++  @override
++  Map<String, Object?> toJson() => const {'i': 1};
++  static Impostor fromJson(Map<String, Object?> j) => const Impostor();
++  @override
++  bool operator ==(Object other) => other is Impostor;
++  @override
++  int get hashCode => 2;
++}
++
+ /// Not layer 0, which is what an absent ObjectLayer reads as.
+ const Handle kLayer = Handle(0x2A1);
+ 
+ /// Unknown payloads, attached `later` first: not in type-id order.
+ Map<String, Object?> later() => {
+       'typeId': 'z.later',
+       'nested': {
+         'k': [1, 2.5]
+       },
+       'note': 'kept verbatim',
+@@ -57,42 +73,42 @@ Map<String, Object?> later() => {
+ Map<String, Object?> earlier() => {'typeId': 'a.earlier', 'v': -3};
+ 
+ typedef Scene = ({
+   DraftDocument doc,
+   Handle parent,
+   Handle node,
+   Handle sibling,
+   Handle last,
+ });
+ 
+-/// A group [parent] 40 m off the origin, turned, holding [node], [sibling]
+-/// and [last] in that order (not ascending: [sibling] < [node]). [node]
++/// A group [parent] 40 m off the origin, turned, holding [sibling], [node]
++/// and [last] in that order, so [node] is neither first nor last. [node]
+ /// carries Mark, ObjectLayer and two unknown payloads; [sibling] Mark,
+ /// ObjectLayer and one unknown payload, with other values. History cleared.
+ Scene scene() {
+   final doc = DraftDocument.empty();
+   doc.components.register<Mark>(Mark.id, Mark.fromJson);
+   final parent = doc.handleSeed.next();
+   final sibling = doc.handleSeed.next();
+   final node = doc.handleSeed.next();
+   final last = doc.handleSeed.next();
+   GroupNode group(Handle h, Handle p, Transform2 t) =>
+       GroupNode(handle: h, parent: p, transform: t, children: const []);
+   doc.commands.execute(CompoundCommand([
+     AddNodeCommand(group(
+         parent,
+         doc.rootHandle,
+         Transform2.translation(4e4, -2.7e4)
+             .multiply(Transform2.rotation(0.6)))),
++    AddNodeCommand(group(sibling, parent, Transform2.translation(-75, 40))),
+     AddNodeCommand(group(node, parent,
+         Transform2.translation(310, -925).multiply(Transform2.rotation(-1.1)))),
+-    AddNodeCommand(group(sibling, parent, Transform2.translation(-75, 40))),
+     AddNodeCommand(group(last, parent, Transform2.translation(12, 13))),
+     SetComponentCommand<Mark>(node, const Mark(7, 'north')),
+     SetComponentCommand<ObjectLayer>(node, const ObjectLayer(kLayer)),
+     SetComponentCommand<Mark>(sibling, const Mark(3, 'south')),
+     SetComponentCommand<ObjectLayer>(sibling, const ObjectLayer(kLayer)),
+   ], label: 'Fixture'));
+   doc.components
+     ..attachUnknown(node, later())
+     ..attachUnknown(node, earlier())
+     ..attachUnknown(sibling, earlier());
+@@ -142,21 +158,22 @@ void main() {
+   });
+ 
+   test(
+       'N-2 undo restores the snapshot and the index byte for byte; redo '
+       'removes them again', () {
+     final s = scene();
+     final doc = s.doc;
+     final before = enc(doc);
+     final snapshot = doc.components.snapshotOf(s.node);
+     final order = childrenOf(doc, s.parent);
+-    expect(order.indexOf(s.node), 0, reason: 'premise: not the append');
++    expect(order.indexOf(s.node), 1, reason: 'premise: neither first nor last');
++    expect(order, hasLength(3), reason: 'premise');
+ 
+     doc.commands.execute(RemoveNodeCommand(s.node));
+     final removed = enc(doc);
+     doc.commands.undo();
+     expectSameSnapshot(doc.components.snapshotOf(s.node), snapshot);
+     expect(childrenOf(doc, s.parent), order);
+     expect(enc(doc), before);
+     doc.commands.redo();
+     expect(enc(doc), removed);
+     expect(doc.components.snapshotOf(s.node).isEmpty, isTrue);
+@@ -242,20 +259,57 @@ void main() {
+                   transform: Transform2.translation(5, 6),
+                   children: const []),
+               components: foreignSnapshot())),
+           throwsA(isA<StateError>()));
+       expectNothingOn(doc, h);
+       expect(childrenOf(doc, s.parent), order);
+       expect(enc(doc), before);
+       expect(doc.commands.undoDepth, 0);
+     });
+ 
++    test('a type id this document maps to a different class', () {
++      final other = DraftDocument.empty();
++      other.components.register<Impostor>(Impostor.id, Impostor.fromJson);
++      final oh = other.handleSeed.next();
++      other.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: oh,
++            parent: other.rootHandle,
++            transform: Transform2.identity(),
++            children: const [])),
++        SetComponentCommand<Impostor>(oh, const Impostor()),
++      ], label: 'Other'));
++      final snap = other.components.snapshotOf(oh);
++      expect([for (final (id, _) in snap.components) id], [Mark.id],
++          reason: 'premise: the snapshot carries the id this document maps');
++      expect(snap.isNotEmpty, isTrue, reason: 'premise');
++
++      final s = scene();
++      final doc = s.doc;
++      final h = doc.handleSeed.next(); // before `before`: the seed is encoded
++      final before = enc(doc);
++      final order = childrenOf(doc, s.parent);
++      expect(
++          () => doc.commands.execute(AddNodeCommand(
++              GroupNode(
++                  handle: h,
++                  parent: s.parent,
++                  transform: Transform2.translation(5, 6),
++                  children: const []),
++              components: snap)),
++          throwsA(isA<StateError>()));
++      expectNothingOn(doc, h);
++      expect(childrenOf(doc, s.parent), order);
++      expect(enc(doc), before);
++      expect(doc.commands.undoDepth, 0);
++    });
++
+     test(
+         'the same under a parent that already lists the handle, the raw '
+         'list compared (the encoder filters a dangling entry)', () {
+       final s = scene();
+       final doc = s.doc;
+       final g = doc.handleSeed.next();
+       final x = doc.handleSeed.next();
+       doc.commands.execute(AddNodeCommand(GroupNode(
+           handle: g,
+           parent: doc.rootHandle,
+diff --git a/packages/jet_cad_2d/test/parametric/dissolve_test.dart b/packages/jet_cad_2d/test/parametric/dissolve_test.dart
+index 5dc546f5..a9adc2be 100644
+--- a/packages/jet_cad_2d/test/parametric/dissolve_test.dart
++++ b/packages/jet_cad_2d/test/parametric/dissolve_test.dart
+@@ -137,23 +137,24 @@ Future<List<Capability>> appliedCapabilities(
+ void main() {
+   setUp(() {
+     generateCalls.clear();
+     Fuse.dissolvesCalls.clear();
+   });
+   tearDown(() {
+     Fuse.fault = false;
+   });
+ 
+   test(
+-      'DV1 a dissolving object is removed and its component detached in the '
+-      'edit, one undo step; undo restores every handle; the guard and the '
+-      'cleanup are untouched; drift() names a loaded one', () async {
++      'DV1 a dissolving object is removed with its component in the edit, '
++      'one undo step; the replay restores it through the node\'s snapshot; '
++      'undo restores every handle; the guard is untouched; drift() names a '
++      'loaded one', () async {
+     // Premises: C starts beside F; the corner placement overlaps F's reach
+     // but not its centre; the covering one holds the centre. F is off the
+     // origin and turned.
+     expect(neighbours(fuseReach(), clipReach(atC)), isFalse);
+     expect(neighbours(fuseReach(), clipReach(corner())), isTrue);
+     expect(inClip(corner(), fuseCentre()), isFalse);
+     expect(inClip(covering(), fuseCentre()), isTrue);
+     expect(fuseCentre().length, greaterThan(1000));
+ 
+     final doc = scene();
+@@ -302,21 +303,21 @@ void main() {
+         copy2.commands.expander!(deleteObject(copy2, hF)) as ParametricEdit;
+     final deleteReplay = delete.apply(copy2).inverse;
+     expectDissolved(copy2);
+     expect(asked(hF), 0, reason: 'a lost object is not asked');
+     expect(fuseSets(deleteReplay), isEmpty);
+     expect(restoredBy<Fuse>(deleteReplay, hF), [fuse],
+         reason: 'taken by the removal');
+ 
+     // 06 D7: the dissolve inherits the triggering move's authority. Only
+     // what the move itself needs is allowed, transform; the removals need
+-    // geometry and structure, the detach components.
++    // geometry, structure and components.
+     final ruled = scene();
+     final ruledBefore = canon(ruled);
+     ruled.commands.permissions = const DraftPermissions(
+         transform: true, components: false, geometry: false, structure: false);
+     ruled.commands.execute(TransformNodeCommand(hC, covering()));
+     expectDissolved(ruled);
+     ruled.commands.undo();
+     expect(canon(ruled), ruledBefore);
+     expect(kids(ruled, hF), handles);
+     ruled.commands.redo();
+diff --git a/packages/jet_cad_2d/test/parametric/page_test.dart b/packages/jet_cad_2d/test/parametric/page_test.dart
+index ea5b0ee1..d8239340 100644
+--- a/packages/jet_cad_2d/test/parametric/page_test.dart
++++ b/packages/jet_cad_2d/test/parametric/page_test.dart
+@@ -207,22 +207,21 @@ void main() {
+ 
+     // A page read at creation: a Gauge created on the 1:100 page draws
+     // 1,000 from the start.
+     doc.commands.execute(create(doc, hG2, atG2, gauge2));
+     expect(lineLength(doc, hG2), closeTo(1000, 1e-6));
+     expect(drift(doc), isEmpty);
+ 
+     // A compound that changes the page and deletes one Gauge: the live
+     // Gauge regenerates, the deleted one is not regenerated, and its
+     // component is taken by the removal (node-components D-4). Planned on a
+-    // copy through the
+-    // expander, so the edit's inverse can be read.
++    // copy through the expander, so the edit's inverse can be read.
+     final copy = reloadWithPage(enc(doc));
+     final m25 = copy.components
+         .get<PageComponent>(copy.rootHandle)!
+         .copyWith(scaleDenominator: 25);
+     generateCalls.clear();
+     final edit = copy.commands.expander!(CompoundCommand(
+         [setPage(copy, m25), deleteObject(copy, hG2)],
+         label: 'Page and delete')) as ParametricEdit;
+     final result = edit.apply(copy);
+     expect(copy.tree[hG2], isNull);
+diff --git a/packages/jet_cad_floor_plan/test/delete_components_test.dart b/packages/jet_cad_floor_plan/test/delete_components_test.dart
+index 0364c932..a24e8005 100644
+--- a/packages/jet_cad_floor_plan/test/delete_components_test.dart
++++ b/packages/jet_cad_floor_plan/test/delete_components_test.dart
+@@ -70,21 +70,21 @@ void main() {
+       expect(namesHandle(doc, h), isFalse, reason: h.toHex());
+       expect(doc.components.unknownOf(h), isEmpty);
+     }
+     doc.commands.undo();
+     expect(canon(doc), before);
+     expect(dataOf(doc, t.instance), isNotNull);
+   });
+ 
+   test(
+       'P-2 a wall deleted alone: WallParams and ObjectLayer gone, the undo '
+-      'replay restores them through the node\'s snapshot', () {
++      'restores them; the plan as before', () {
+     final doc = rig();
+     final layer = addLayer(doc);
+     final w = doc.handleSeed.next();
+     const p = WallParams(-300, 75, 4100, 75, 150, Justification.centre);
+     doc.commands.execute(addWallLocal(
+         doc,
+         w,
+         p,
+         Transform2.translation(-12000, 8000)
+             .multiply(Transform2.rotation(-0.8))));
+diff --git a/packages/jet_cad_floor_plan/test/tables/table_data_test.dart b/packages/jet_cad_floor_plan/test/tables/table_data_test.dart
+index 9f2a281b..3ee3c547 100644
+--- a/packages/jet_cad_floor_plan/test/tables/table_data_test.dart
++++ b/packages/jet_cad_floor_plan/test/tables/table_data_test.dart
+@@ -384,22 +384,22 @@ void main() {
+       doc.commands.execute(CompoundCommand(
+           [RemoveNodeCommand(nested), RemoveNodeCommand(group)],
+           label: 'Delete'));
+       expect(dataOf(doc, nested), isNull);
+       doc.commands.undo();
+       expect(dataOf(doc, nested), same(kept));
+       expect(DraftDocumentCodec.encodeToString(doc), before);
+     });
+ 
+     test(
+-        'TD9 an edit that removes nothing keeps the data: a turn, and a '
+-        'delete of another table', () {
++        'TD9 an edit that does not remove the table keeps its data: a turn, '
++        'and a delete of another table', () {
+       final doc = rig();
+       final a = placeTable(doc, Vector2(41200, -27300), mirrored: true);
+       final b = placeTable(doc, Vector2(44700, -23100), quarterTurns: 1);
+       final mine = FloorPlanTableData(hostData());
+       doc.commands
+           .execute(SetComponentCommand<FloorPlanTableData>(a.instance, mine));
+       final node = doc.tree[a.instance]! as InstanceNode;
+       doc.commands.execute(CompoundCommand([
+         TransformNodeCommand(
+             a.instance,

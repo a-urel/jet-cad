@@ -1,0 +1,496 @@
+# Review package: d082640e..HEAD
+
+## Commits
+391d9671 feat(floor-plan): the delete takes table data; the expander's detach goes (node-components D-7)
+
+## Files changed
+ .../jet_cad_floor_plan/lib/src/planner_shell.dart  |   5 +-
+ .../lib/src/tables/table_label_system.dart         |  44 ++-----
+ .../test/delete_components_test.dart               | 136 +++++++++++++++++++++
+ .../test/tables/table_data_test.dart               |  74 ++++++-----
+ 4 files changed, 192 insertions(+), 67 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_floor_plan/lib/src/planner_shell.dart b/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
+index 965b5a16..7fa44649 100644
+--- a/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
++++ b/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
+@@ -917,22 +917,23 @@ class _PlannerShellState extends State<PlannerShell> {
+   /// is refused with none armed.
+   bool _selectByHost(FloorPlanTool tool) {
+     if (tool == FloorPlanTool.symbol) {
+       return _armed.value != null && _activate(_symbolTool);
+     }
+     return _activate(_entries[tool.index].tool);
+   }
+ 
+   /// The host's `FloorPlanController.deleteSelection` (spec C-3, S-16):
+   /// the select tool's own delete, whichever tool is active (one undo
+-  /// step, the table-data expander; `delete` gated, `idleKeys` not). The
+-  /// controller asks only while no shape is part-way, after a settle.
++  /// step, the delete takes each table's data with it; `delete` gated,
++  /// `idleKeys` not). The controller asks only while no shape is part-way,
++  /// after a settle.
+   bool _deleteByHost() => _select.deleteSelection(_context);
+ 
+   /// The table the host's inspector shows (spec C-6, S-18): the
+   /// selection's one key when it is a root-level table; null otherwise.
+   Handle? _inspected() {
+     if (_selection.length != 1) return null;
+     final key = _selection.keys.single;
+     return _isTableKey(_document, key) ? key.target : null;
+   }
+ 
+diff --git a/packages/jet_cad_floor_plan/lib/src/tables/table_label_system.dart b/packages/jet_cad_floor_plan/lib/src/tables/table_label_system.dart
+index 7a441572..1f8b70ee 100644
+--- a/packages/jet_cad_floor_plan/lib/src/tables/table_label_system.dart
++++ b/packages/jet_cad_floor_plan/lib/src/tables/table_label_system.dart
+@@ -1,20 +1,20 @@
+ // The table system (spec 14a T12): keeps every table's number upright,
+-// inside the edit that turns or mirrors the table, as one undo step; and
+-// drops a deleted table's host data inside the edit that deletes it (host
+-// embedding API spec E-6, E-9 gate 3).
++// inside the edit that turns or mirrors the table, as one undo step. A
++// deleted table's host data (host embedding API spec E-6, E-9 gate 3) is
++// not this file's: the delete itself takes it (`RemoveNodeCommand`,
++// node-components D-1), so the edit only stamps labels.
+ //
+ // No Flutter import: this file is Dart over `package:jet_cad_2d` only.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import '../symbols/seating_component.dart';
+-import 'table_data_component.dart';
+ import 'table_label.dart';
+ 
+ /// Stacks on the dispatcher's one expander slot (spec 06 D2, 14a F-1):
+ /// [install] keeps the expander it found (the parametric system's, or none)
+ /// and wraps what that one returns; [dispose] puts it back.
+ ///
+ /// **Last in, first out.** The shell installs this after the parametric
+ /// system and disposes it before; out of order, this would put a disposed
+ /// system's tear-off back in the slot, so [dispose] asserts that the slot
+ /// still holds its own.
+@@ -47,28 +47,26 @@ class TableLabelSystem {
+     final inner = _previous?.call(command) ?? command;
+     // The cheap path: a plan with no servable definition has no table.
+     if (document.components.withComponent<SeatingComponent>().isEmpty) {
+       return inner;
+     }
+     return TableLabelEdit._(inner);
+   }
+ }
+ 
+ /// An edit and the derived commands it makes necessary: [inner] applies,
+-/// then, per touched handle in `touched`'s order, a handle that no longer
+-/// names anything live and still carries [FloorPlanTableData] has it
+-/// detached (E-6: `RemoveNodeCommand` keeps components, F-14, so a deleted
+-/// table would leave its host data orphaned in the plan), and a table whose
+-/// label no longer matches [tableLabelStamp] for its transform is
+-/// re-stamped (T12), by exact `==` on the stored values. All or nothing;
+-/// undo restores both. Created only by [TableLabelSystem], once per
+-/// `execute`.
++/// then, per touched handle in `touched`'s order, a table whose label no
++/// longer matches [tableLabelStamp] for its transform is re-stamped (T12),
++/// by exact `==` on the stored values. A deleted table's host data is not
++/// among them: `RemoveNodeCommand` takes it (node-components D-1). All or
++/// nothing; undo restores the stamps and the edit. Created only by
++/// [TableLabelSystem], once per `execute`.
+ final class TableLabelEdit extends DraftCommand {
+   TableLabelEdit._(this.inner);
+ 
+   final DraftCommand inner;
+   bool _stamped = false;
+ 
+   @override
+   String get label => inner.label;
+ 
+   /// [inner]'s own: a stamp is derived data inside the edit that causes it
+@@ -86,68 +84,50 @@ final class TableLabelEdit extends DraftCommand {
+ 
+   @override
+   CommandResult apply(CommandTarget target) {
+     final r = inner.apply(target);
+     final inverses = <DraftCommand>[];
+     final written = <Handle>{};
+     var stamps = 0;
+     try {
+       for (final h in r.touched) {
+         final DraftCommand derived;
+-        if (_detachFor(target, h) case final detach?) {
+-          derived = detach;
+-        } else if (_stampFor(target, h) case final stamp?) {
++        if (_stampFor(target, h) case final stamp?) {
+           derived = stamp;
+           stamps++;
+         } else {
+           continue;
+         }
+         final result = derived.apply(target);
+         inverses.add(result.inverse);
+         written.addAll(result.touched);
+       }
+     } catch (_) {
+-      // All or nothing: the derived commands applied so far (the data
+-      // detached and the stamps written), then the edit itself.
++      // All or nothing: the stamps written so far, then the edit itself.
+       for (final inverse in inverses.reversed) {
+         inverse.apply(target);
+       }
+       r.inverse.apply(target);
+       rethrow;
+     }
+-    // A detach alone writes no label: the capability is not raised for it.
+     _stamped = stamps > 0;
+     if (inverses.isEmpty) return r;
+     // A replay with the edit's own authority: undo and redo need exactly
+     // what the edit needed, not the stamps' `geometry` (review R-5).
+     return CommandResult(
+       inverse: ParametricReplay(
+           CompoundCommand([...inverses.reversed, r.inverse], label: label),
+           inner.capabilities),
+       touched: {...r.touched, ...written},
+     );
+   }
+ 
+-  /// The detach [h] needs, or null: [h] names no live node, entity or
+-  /// definition (the edit removed it; a nested instance of a deleted group
+-  /// is touched by its own `RemoveNodeCommand`) and still carries host data
+-  /// (E-6). Its inverse puts the same value back, so undo restores it.
+-  static DraftCommand? _detachFor(CommandTarget target, Handle h) {
+-    if (target.components.get<FloorPlanTableData>(h) == null) return null;
+-    if (target.tree[h] != null ||
+-        target.tree.definition(h) != null ||
+-        target.entities.slotOf(h) != null) {
+-      return null;
+-    }
+-    return SetComponentCommand<FloorPlanTableData>(h, null);
+-  }
+-
+   /// The stamp [h] needs, or null: [h] is a table (a live, root-level
+   /// instance of a servable definition) with a `TABLE` label whose rotation
+   /// or width factor differs from its transform's stamp.
+   static DraftCommand? _stampFor(CommandTarget target, Handle h) {
+     final node = target.tree[h];
+     if (node is! InstanceNode || node.parent != target.tree.root) return null;
+     if (target.components.get<SeatingComponent>(node.definition) == null) {
+       return null;
+     }
+     final label = _labelOf(target, h);
+diff --git a/packages/jet_cad_floor_plan/test/delete_components_test.dart b/packages/jet_cad_floor_plan/test/delete_components_test.dart
+new file mode 100644
+index 00000000..0364c932
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/delete_components_test.dart
+@@ -0,0 +1,136 @@
++// Spec "A removed node takes its components" (revision 3), P-1 to P-3:
++// in the shell's rig (the parametric system, then the table system), a
++// delete takes every component of every removed node, a door with its
++// wall, and undo writes the plan back byte for byte (entities in handle
++// order: slot order is history, 06 D11).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_floor_plan/src/parametric/opening.dart';
++import 'package:jet_cad_floor_plan/src/parametric/wall.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_data_component.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/opening_fixture.dart' show addOpening, deleteLikeSelectTool;
++import 'support/wall_fixture.dart' show addWallLocal, canon;
++import 'tables/table_data_test.dart'
++    show rig, placeTable, deleteTable, hostData, dataOf;
++
++bool namesHandle(DraftDocument doc, Handle h) => doc.components
++    .toJson()
++    .values
++    .any((perType) => (perType! as Map).containsKey('${h.value}'));
++
++/// A layer that is not layer 0, added to [doc].
++Handle addLayer(DraftDocument doc) {
++  final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++  final h = doc.handleSeed.next();
++  doc.commands.execute(AddLayerCommand(LayerRecord(
++      handle: h,
++      name: 'Walls',
++      color: const IndexedColor(5),
++      linetype: zero.linetype,
++      lineweight: zero.lineweight,
++      transparency: zero.transparency,
++      visible: true,
++      locked: false)));
++  return h;
++}
++
++void main() {
++  test(
++      'P-1 a table with data and a newer release\'s payload, and a wall, '
++      'deleted together: no entry for either; undo byte for byte', () {
++    final doc = rig();
++    final layer = addLayer(doc);
++    final t = placeTable(doc, Vector2(41200, -27300),
++        quarterTurns: 1, mirrored: true);
++    doc.commands.execute(SetComponentCommand<FloorPlanTableData>(
++        t.instance, FloorPlanTableData(hostData())));
++    doc.components.attachUnknown(t.instance, {'typeId': 'z.next', 'v': 2});
++    final w = doc.handleSeed.next();
++    doc.commands.execute(addWallLocal(
++        doc,
++        w,
++        const WallParams(120, -40, 5120, 310, 200, Justification.left),
++        Transform2.translation(38000, -25000)
++            .multiply(Transform2.rotation(0.3))));
++    doc.commands
++        .execute(SetComponentCommand<ObjectLayer>(w, ObjectLayer(layer)));
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++
++    doc.commands.execute(CompoundCommand([
++      ...(deleteTable(t) as CompoundCommand).children,
++      ...(deleteLikeSelectTool(doc, w) as CompoundCommand).children,
++    ], label: 'Delete'));
++
++    expect(doc.commands.undoDepth, depth + 1);
++    for (final h in [t.instance, w]) {
++      expect(doc.tree[h], isNull);
++      expect(namesHandle(doc, h), isFalse, reason: h.toHex());
++      expect(doc.components.unknownOf(h), isEmpty);
++    }
++    doc.commands.undo();
++    expect(canon(doc), before);
++    expect(dataOf(doc, t.instance), isNotNull);
++  });
++
++  test(
++      'P-2 a wall deleted alone: WallParams and ObjectLayer gone, the undo '
++      'replay restores them through the node\'s snapshot', () {
++    final doc = rig();
++    final layer = addLayer(doc);
++    final w = doc.handleSeed.next();
++    const p = WallParams(-300, 75, 4100, 75, 150, Justification.centre);
++    doc.commands.execute(addWallLocal(
++        doc,
++        w,
++        p,
++        Transform2.translation(-12000, 8000)
++            .multiply(Transform2.rotation(-0.8))));
++    doc.commands
++        .execute(SetComponentCommand<ObjectLayer>(w, ObjectLayer(layer)));
++    final before = canon(doc);
++
++    doc.commands.execute(deleteLikeSelectTool(doc, w));
++    expect(doc.components.get<WallParams>(w), isNull);
++    expect(doc.components.get<ObjectLayer>(w), isNull);
++    doc.commands.undo();
++    expect(doc.components.get<WallParams>(w), p);
++    expect(doc.components.get<ObjectLayer>(w), ObjectLayer(layer));
++    expect(canon(doc), before);
++  });
++
++  test(
++      'P-3 a wall hosting a door: the door goes with it (08 D4\'s '
++      'cascade), both components and layers gone; undo restores both', () {
++    final doc = rig();
++    final layer = addLayer(doc);
++    final w = doc.handleSeed.next();
++    doc.commands.execute(addWallLocal(
++        doc,
++        w,
++        const WallParams(0, 0, 6000, 0, 200, Justification.centre),
++        Transform2.translation(25000, 14000)
++            .multiply(Transform2.rotation(1.2))));
++    final door = doc.handleSeed.next();
++    doc.commands.execute(
++        addOpening(doc, door, OpeningParams(w, 2400, 900, OpeningKind.door)));
++    doc.commands.execute(CompoundCommand([
++      SetComponentCommand<ObjectLayer>(w, ObjectLayer(layer)),
++      SetComponentCommand<ObjectLayer>(door, ObjectLayer(layer)),
++    ], label: 'Layers'));
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++
++    doc.commands.execute(deleteLikeSelectTool(doc, w));
++
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(doc.tree[door], isNull, reason: 'premise: the cascade ran');
++    for (final h in [w, door]) {
++      expect(namesHandle(doc, h), isFalse, reason: h.toHex());
++    }
++    doc.commands.undo();
++    expect(canon(doc), before);
++  });
++}
+diff --git a/packages/jet_cad_floor_plan/test/tables/table_data_test.dart b/packages/jet_cad_floor_plan/test/tables/table_data_test.dart
+index d1d86b57..9f2a281b 100644
+--- a/packages/jet_cad_floor_plan/test/tables/table_data_test.dart
++++ b/packages/jet_cad_floor_plan/test/tables/table_data_test.dart
+@@ -1,14 +1,15 @@
+ // Host embedding API spec E-6, E-9 gate 3 (Slice 2 plan, Task 2): the
+ // host's data on a table -- the component, its limits, its lenient read
+-// (spec point S-2), its diagnostic (S-3) and the table system's expander
+-// that drops it inside the edit that deletes the table, undoably. Tables
++// (spec point S-2), its diagnostic (S-3) and the delete that takes it with
++// the table (`RemoveNodeCommand`, node-components D-1), undoably, and the
++// table system's all-or-nothing rollback of its stamps. Tables
+ // are placed off the origin, turned and mirrored; data is written with its
+ // keys out of order, a 64-character key, a 1024-unit value and non-ASCII
+ // text.
+ import 'dart:convert';
+ 
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
+ import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
+ import 'package:jet_cad_floor_plan/src/tables/table_data_component.dart';
+@@ -239,23 +240,23 @@ void main() {
+           reason: 'byte for byte');
+       final invalid = tableDiagnostics(back)
+           .where((d) => d.code == TableDiagnosticCodes.invalidData)
+           .toList();
+       expect(invalid.single.handles, [b.instance]);
+       expect(invalid.single.severity, DiagnosticSeverity.warning);
+       expect(TableDiagnosticCodes.invalidData, 'table.invalid_data');
+     });
+   });
+ 
+-  group('the expander drops a deleted table\'s data (E-9 gate 3)', () {
++  group('a deleted table takes its data (E-9 gate 3)', () {
+     test(
+-        'TD7 M-H27: a Delete detaches the data in the same step; undo puts '
++        'TD7 M-H27: a Delete takes the data in the same step; undo puts '
+         'it back byte for byte, redo drops it again; the other table keeps '
+         'its', () {
+       final doc = rig();
+       final a = placeTable(doc, Vector2(41200, -27300),
+           quarterTurns: 1, mirrored: true);
+       final b = placeTable(doc, Vector2(44700, -27300), quarterTurns: 3);
+       final other = FloorPlanTableData({key64: value1024});
+       final mine = FloorPlanTableData(hostData());
+       doc.commands
+           .execute(SetComponentCommand<FloorPlanTableData>(a.instance, other));
+@@ -384,21 +385,21 @@ void main() {
+           [RemoveNodeCommand(nested), RemoveNodeCommand(group)],
+           label: 'Delete'));
+       expect(dataOf(doc, nested), isNull);
+       doc.commands.undo();
+       expect(dataOf(doc, nested), same(kept));
+       expect(DraftDocumentCodec.encodeToString(doc), before);
+     });
+ 
+     test(
+         'TD9 an edit that removes nothing keeps the data: a turn, and a '
+-        'delete of a table carrying none adds no detach', () {
++        'delete of another table', () {
+       final doc = rig();
+       final a = placeTable(doc, Vector2(41200, -27300), mirrored: true);
+       final b = placeTable(doc, Vector2(44700, -23100), quarterTurns: 1);
+       final mine = FloorPlanTableData(hostData());
+       doc.commands
+           .execute(SetComponentCommand<FloorPlanTableData>(a.instance, mine));
+       final node = doc.tree[a.instance]! as InstanceNode;
+       doc.commands.execute(CompoundCommand([
+         TransformNodeCommand(
+             a.instance,
+@@ -406,69 +407,76 @@ void main() {
+                 .multiply(Transform2.rotation(kDeg37))
+                 .multiply(Transform2.translation(1750, -3300))
+                 .multiply(node.transform)),
+       ], label: 'Rotate'));
+       expect(dataOf(doc, a.instance), same(mine));
+       doc.commands.execute(deleteTable(b));
+       expect(dataOf(doc, a.instance), same(mine));
+     });
+ 
+     test(
+-        'TD10 all or nothing: a stamp that throws after the detach puts the '
+-        'data back with the edit', () {
++        'TD10 all or nothing: a stamp that throws after another stamp '
++        'puts that one back with the edit', () {
+       final doc = rig();
+       final a = placeTable(doc, Vector2(41200, -27300), quarterTurns: 1);
+       final b = placeTable(doc, Vector2(44700, -27300), mirrored: true);
+-      final mine = FloorPlanTableData(hostData());
+-      doc.commands
+-          .execute(SetComponentCommand<FloorPlanTableData>(a.instance, mine));
+       final before = DraftDocumentCodec.encodeToString(doc);
+-      final bNode = doc.tree[b.instance]! as InstanceNode;
+-      // A's delete, then a turn of B, whose stamp is refused once A's data
+-      // is gone: the throw lands after the detach.
++      Transform2 turned(TableInfo t, double x, double y) =>
++          Transform2.translation(x, y)
++              .multiply(Transform2.rotation(kDeg37))
++              .multiply(Transform2.translation(-x, -y))
++              .multiply((doc.tree[t.instance]! as InstanceNode).transform);
+       final edit = doc.commands.expander!(CompoundCommand([
+-        RemoveEntityCommand(a.label!),
+-        RemoveNodeCommand(a.instance),
+-        TransformNodeCommand(
+-            b.instance,
+-            Transform2.translation(44700, -27300)
+-                .multiply(Transform2.rotation(kDeg37))
+-                .multiply(Transform2.translation(-44700, 27300))
+-                .multiply(bNode.transform)),
+-      ], label: 'Delete and turn'));
++        TransformNodeCommand(a.instance, turned(a, 41200, -27300)),
++        TransformNodeCommand(b.instance, turned(b, 44700, -27300)),
++      ], label: 'Turn both'));
+       expect(edit, isA<TableLabelEdit>());
+-      final target = _RefusingTarget(doc, a.instance);
++      final target =
++          _RefusingTarget(doc, a.label!, labelPayload(doc, a.label!));
+       expect(() => edit.apply(target), throwsA(isA<_Refused>()));
+-      expect(target.refused, isTrue, reason: 'the detach ran first');
+-      expect(dataOf(doc, a.instance), same(mine));
+-      expect(doc.tree[a.instance], isNotNull);
++      expect(target.refused, isTrue,
++          reason: 'premise: A\'s stamp wrote before B\'s read was refused');
+       expect(DraftDocumentCodec.encodeToString(doc), before,
+-          reason: 'B unturned, its label as it was; A back at its index');
++          reason: 'both tables unturned, A\'s label as it was');
+     });
+   });
+ }
+ 
+ final class _Refused implements Exception {}
+ 
+-/// [doc] as a command target whose geometry -- read by a label stamp, not
+-/// by a detach or a node removal -- is refused once [watched]'s data is
+-/// gone.
++GeometryPayload labelPayload(DraftDocument doc, Handle label) =>
++    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(label)!));
++
++bool samePayload(GeometryPayload x, GeometryPayload y) =>
++    x.coords.length == y.coords.length &&
++    x.scalars.length == y.scalars.length &&
++    [for (var i = 0; i < x.coords.length; i++) x.coords[i] == y.coords[i]]
++        .every((e) => e) &&
++    [for (var i = 0; i < x.scalars.length; i++) x.scalars[i] == y.scalars[i]]
++        .every((e) => e);
++
++/// [doc] as a command target whose geometry -- read by a label stamp --
++/// is refused once, the first time it is asked for after [stamped]'s
++/// payload has changed from [unstamped]: so the edit throws with that
++/// stamp applied, and the rollback (which reads geometry again) is let
++/// through.
+ final class _RefusingTarget implements CommandTarget {
+-  _RefusingTarget(this.doc, this.watched);
++  _RefusingTarget(this.doc, this.stamped, this.unstamped);
+ 
+   final DraftDocument doc;
+-  final Handle watched;
++  final Handle stamped;
++  final GeometryPayload unstamped;
+   bool refused = false;
+ 
+   @override
+   GeometryStore get geometry {
+-    if (doc.components.get<FloorPlanTableData>(watched) == null) {
++    if (!refused && !samePayload(labelPayload(doc, stamped), unstamped)) {
+       refused = true;
+       throw _Refused();
+     }
+     return doc.geometry;
+   }
+ 
+   @override
+   EntityStore get entities => doc.entities;
+   @override
+   DocumentTree get tree => doc.tree;

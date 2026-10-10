@@ -235,14 +235,16 @@ one's spec, plan and results.
   [2026-10-10-node-components-results.md](docs/superpowers/notes/2026-10-10-node-components-results.md)
   (all 17 mutants with their red lines; the rulings that changed the
   spec's claims: M-5's killers, P-1 to P-3 compare `canon`, P-2 not a
-  killer of M-12). The task reports and the ledger are in
-  `.superpowers/sdd/2026-10-10-node-components-on-delete/` (git-ignored).
-  **Next:** the whole-branch review by a fresh reviewer and its fixes
-  (the results note lists the minor findings left for it); then the
-  human's look, then the merge into `main` **on the human's word**, the
-  ledger archived onto the branch to
-  `docs/superpowers/ledgers/2026-10-09-node-components-on-delete/` as its
-  last commit before the merge. Nothing is pushed.
+  killer of M-12). The whole-branch review returned *Ready to merge with
+  fixes* (no Critical or Important; every gate at `a39a290` green but the
+  standing failures); its fix wave `f1a9989` (titles, the results note,
+  N-2 off index 0, and `checkRestorable` refusing a value of another
+  class, M-18) was re-reviewed: all addressed, four minors parked with
+  rulings. The ledger, the task reports and reviews and the spec review
+  are archived in
+  [docs/superpowers/ledgers/2026-10-09-node-components-on-delete/](docs/superpowers/ledgers/2026-10-09-node-components-on-delete/).
+  **Next:** the human's look, then the merge into `main` **on the
+  human's word**. Nothing is pushed.
 
 ## Owed to the human
 
