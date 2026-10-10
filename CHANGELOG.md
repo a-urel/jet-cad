@@ -8,18 +8,23 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released: the host embedding API's Slices 1 to 4, a
-host's own widgets on the tables, then the selection mode's events and a
-host's own data on a table, then the floor plan's look in a host's
-theme, then the host's own chrome and keys (the bars, the editor's
-capabilities, the keyboard and the focus). **Move every terminal that
-shares stored plans together**: 0.3.0 and earlier refuse a plan this
-version saves (schema 9), with or without table data. Service layouts
-are the same as 0.3.0's; the look, the bars, the capabilities and the
-keys are never stored, so Slices 3 and 4 change no stored format.
-Nothing a 0.3.0 host calls changes its signature, and with no theme,
-bar, capability or key argument every pixel and key is 0.3.0's (but for
-the fix below); CI analyses the 0.3.0 host probe against every commit.
+Nothing yet.
+
+## 0.4.0
+
+The host embedding API: a host's own widgets on the tables, the
+selection mode's events and a host's own data on a table, the floor
+plan's look in a host's theme, and the host's own chrome and keys (the
+bars, the editor's capabilities, the keyboard and the focus). **Move
+every terminal that shares stored plans together**: 0.3.0 and earlier
+refuse a plan 0.4.0 saves (schema 9), with or without table data.
+Service layouts are the same as 0.3.0's; the look, the bars, the
+capabilities and the keys are never stored, so they change no stored
+format. Nothing a 0.3.0 host calls changes its signature, and with no
+theme, bar, capability or key argument every pixel and key is 0.3.0's
+(but for the changes below); CI analyses the 0.3.0 host probe against every
+commit. The packages need Flutter 3.44 or later, as 0.3.0 did; 0.4.0 was
+built and tested with Flutter 3.47.6.
 
 - **A table's place.** `FloorPlanTableDetail` (`table`, `center`,
   `size`, `rotation`, `mirrored`, `corners`, `layer`, `locked`, and
@@ -243,8 +248,9 @@ the fix below); CI analyses the 0.3.0 host probe against every commit.
   grips and keys, every Selection panel field and button, the layer
   picker, the Layer and Page panels, the bar and its chords, F3 and
   object snap. A run-time change applies at the next build: a refused
-  tool falls back to select, a hidden panel keeps its state, a drag
-  whose flag closes before its up executes nothing, an Export or a
+  tool falls back to select, a hidden panel keeps its state (unless all
+  three are hidden), a drag whose flag closes before its up executes
+  nothing, an Export or a
   Print under way when its flag closes hands nothing over, a change to
   `selectTablesOnly` keeps only the selection's tables. The selection
   mode is not governed by it. `FloorPlanController.activeTool`
@@ -303,6 +309,12 @@ the fix below); CI analyses the 0.3.0 host probe against every commit.
   `SelectionPanel.capabilities` and `selectionChanges`;
   `LayerPanel.editable`; `PagePanel.editable`. Every one optional, its
   default today's behaviour.
+- `jet_cad_floor_plan`'s `editor.dart`: `PlannerShell` and `PlannerView`
+  take `tableOverlays`, `userCamera`, `cameraEpoch`, `onCanvasPlaced` and
+  `startFitIsRequest` (the view's per-table widgets and camera, forwarded
+  by `FloorPlanView`); `PlannerTextKeys`, the wrapper that keeps a
+  field's keys from a host's bindings above it. Every one optional, its
+  default today's behaviour.
 
 **Known limits.** The badges' look and the smoothness of pan and zoom
 with them have not been checked on a tablet or a terminal, nor have the
@@ -325,7 +337,13 @@ host guide's `onTapOutside`). Capabilities are not a security boundary:
 a host's own calls stay allowed under every value. `canvasRect`
 ignores an ancestor that scales or turns the view. The planner checks a
 table's data for shape, never for meaning: a plan saved at one location
-and loaded at another carries the first location's ids.
+and loaded at another carries the first location's ids. On Flutter web
+with the semantics tree on (a screen reader), a click on a button's
+semantics node takes the focus from a focused text field, a planner's or
+a bar's; mouse users without the semantics tree are unaffected. A new plan's
+separator still follows the UI language by assumption (Q2, as in 0.2.0).
+`jet_cad_2d_gpu` (the harness's GPU renderer), `packages/jet_cad` (the
+dormant OCCT 3D line) and the apps are not part of the release.
 
 ## 0.3.0
 
