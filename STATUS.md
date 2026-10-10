@@ -229,7 +229,8 @@ Nothing.
   engine's synthetic bold spreads the ink differently on macOS: 176,420
   regular against 175,568 bold); it now asserts that bold renders unlike
   regular, which still kills Slice 3's X18 (the weight forced to w400).
-  A macOS run to confirm is owed.
+  Merged into `main` at `7d7d8a4` on the human's *"evet, main'e merge
+  et"*. A macOS run to confirm is owed.
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
