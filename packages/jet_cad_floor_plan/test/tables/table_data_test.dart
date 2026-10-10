@@ -1,7 +1,8 @@
 // Host embedding API spec E-6, E-9 gate 3 (Slice 2 plan, Task 2): the
 // host's data on a table -- the component, its limits, its lenient read
-// (spec point S-2), its diagnostic (S-3) and the table system's expander
-// that drops it inside the edit that deletes the table, undoably. Tables
+// (spec point S-2), its diagnostic (S-3) and the delete that takes it with
+// the table (`RemoveNodeCommand`, node-components D-1), undoably, and the
+// table system's all-or-nothing rollback of its stamps. Tables
 // are placed off the origin, turned and mirrored; data is written with its
 // keys out of order, a 64-character key, a 1024-unit value and non-ASCII
 // text.
@@ -246,9 +247,9 @@ void main() {
     });
   });
 
-  group('the expander drops a deleted table\'s data (E-9 gate 3)', () {
+  group('a deleted table takes its data (E-9 gate 3)', () {
     test(
-        'TD7 M-H27: a Delete detaches the data in the same step; undo puts '
+        'TD7 M-H27: a Delete takes the data in the same step; undo puts '
         'it back byte for byte, redo drops it again; the other table keeps '
         'its', () {
       final doc = rig();
@@ -391,7 +392,7 @@ void main() {
 
     test(
         'TD9 an edit that removes nothing keeps the data: a turn, and a '
-        'delete of a table carrying none adds no detach', () {
+        'delete of another table', () {
       final doc = rig();
       final a = placeTable(doc, Vector2(41200, -27300), mirrored: true);
       final b = placeTable(doc, Vector2(44700, -23100), quarterTurns: 1);
@@ -413,55 +414,62 @@ void main() {
     });
 
     test(
-        'TD10 all or nothing: a stamp that throws after the detach puts the '
-        'data back with the edit', () {
+        'TD10 all or nothing: a stamp that throws after another stamp '
+        'puts that one back with the edit', () {
       final doc = rig();
       final a = placeTable(doc, Vector2(41200, -27300), quarterTurns: 1);
       final b = placeTable(doc, Vector2(44700, -27300), mirrored: true);
-      final mine = FloorPlanTableData(hostData());
-      doc.commands
-          .execute(SetComponentCommand<FloorPlanTableData>(a.instance, mine));
       final before = DraftDocumentCodec.encodeToString(doc);
-      final bNode = doc.tree[b.instance]! as InstanceNode;
-      // A's delete, then a turn of B, whose stamp is refused once A's data
-      // is gone: the throw lands after the detach.
+      Transform2 turned(TableInfo t, double x, double y) =>
+          Transform2.translation(x, y)
+              .multiply(Transform2.rotation(kDeg37))
+              .multiply(Transform2.translation(-x, -y))
+              .multiply((doc.tree[t.instance]! as InstanceNode).transform);
       final edit = doc.commands.expander!(CompoundCommand([
-        RemoveEntityCommand(a.label!),
-        RemoveNodeCommand(a.instance),
-        TransformNodeCommand(
-            b.instance,
-            Transform2.translation(44700, -27300)
-                .multiply(Transform2.rotation(kDeg37))
-                .multiply(Transform2.translation(-44700, 27300))
-                .multiply(bNode.transform)),
-      ], label: 'Delete and turn'));
+        TransformNodeCommand(a.instance, turned(a, 41200, -27300)),
+        TransformNodeCommand(b.instance, turned(b, 44700, -27300)),
+      ], label: 'Turn both'));
       expect(edit, isA<TableLabelEdit>());
-      final target = _RefusingTarget(doc, a.instance);
+      final target =
+          _RefusingTarget(doc, a.label!, labelPayload(doc, a.label!));
       expect(() => edit.apply(target), throwsA(isA<_Refused>()));
-      expect(target.refused, isTrue, reason: 'the detach ran first');
-      expect(dataOf(doc, a.instance), same(mine));
-      expect(doc.tree[a.instance], isNotNull);
+      expect(target.refused, isTrue,
+          reason: 'premise: A\'s stamp wrote before B\'s read was refused');
       expect(DraftDocumentCodec.encodeToString(doc), before,
-          reason: 'B unturned, its label as it was; A back at its index');
+          reason: 'both tables unturned, A\'s label as it was');
     });
   });
 }
 
 final class _Refused implements Exception {}
 
-/// [doc] as a command target whose geometry -- read by a label stamp, not
-/// by a detach or a node removal -- is refused once [watched]'s data is
-/// gone.
+GeometryPayload labelPayload(DraftDocument doc, Handle label) =>
+    doc.geometry.read(doc.entities.geomIndexAt(doc.entities.slotOf(label)!));
+
+bool samePayload(GeometryPayload x, GeometryPayload y) =>
+    x.coords.length == y.coords.length &&
+    x.scalars.length == y.scalars.length &&
+    [for (var i = 0; i < x.coords.length; i++) x.coords[i] == y.coords[i]]
+        .every((e) => e) &&
+    [for (var i = 0; i < x.scalars.length; i++) x.scalars[i] == y.scalars[i]]
+        .every((e) => e);
+
+/// [doc] as a command target whose geometry -- read by a label stamp --
+/// is refused once, the first time it is asked for after [stamped]'s
+/// payload has changed from [unstamped]: so the edit throws with that
+/// stamp applied, and the rollback (which reads geometry again) is let
+/// through.
 final class _RefusingTarget implements CommandTarget {
-  _RefusingTarget(this.doc, this.watched);
+  _RefusingTarget(this.doc, this.stamped, this.unstamped);
 
   final DraftDocument doc;
-  final Handle watched;
+  final Handle stamped;
+  final GeometryPayload unstamped;
   bool refused = false;
 
   @override
   GeometryStore get geometry {
-    if (doc.components.get<FloorPlanTableData>(watched) == null) {
+    if (!refused && !samePayload(labelPayload(doc, stamped), unstamped)) {
       refused = true;
       throw _Refused();
     }

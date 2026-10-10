@@ -1,13 +1,13 @@
 // The table system (spec 14a T12): keeps every table's number upright,
-// inside the edit that turns or mirrors the table, as one undo step; and
-// drops a deleted table's host data inside the edit that deletes it (host
-// embedding API spec E-6, E-9 gate 3).
+// inside the edit that turns or mirrors the table, as one undo step. A
+// deleted table's host data (host embedding API spec E-6, E-9 gate 3) is
+// not this file's: the delete itself takes it (`RemoveNodeCommand`,
+// node-components D-1), so the edit only stamps labels.
 //
 // No Flutter import: this file is Dart over `package:jet_cad_2d` only.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../symbols/seating_component.dart';
-import 'table_data_component.dart';
 import 'table_label.dart';
 
 /// Stacks on the dispatcher's one expander slot (spec 06 D2, 14a F-1):
@@ -54,14 +54,12 @@ class TableLabelSystem {
 }
 
 /// An edit and the derived commands it makes necessary: [inner] applies,
-/// then, per touched handle in `touched`'s order, a handle that no longer
-/// names anything live and still carries [FloorPlanTableData] has it
-/// detached (E-6: `RemoveNodeCommand` keeps components, F-14, so a deleted
-/// table would leave its host data orphaned in the plan), and a table whose
-/// label no longer matches [tableLabelStamp] for its transform is
-/// re-stamped (T12), by exact `==` on the stored values. All or nothing;
-/// undo restores both. Created only by [TableLabelSystem], once per
-/// `execute`.
+/// then, per touched handle in `touched`'s order, a table whose label no
+/// longer matches [tableLabelStamp] for its transform is re-stamped (T12),
+/// by exact `==` on the stored values. A deleted table's host data is not
+/// among them: `RemoveNodeCommand` takes it (node-components D-1). All or
+/// nothing; undo restores the stamps and the edit. Created only by
+/// [TableLabelSystem], once per `execute`.
 final class TableLabelEdit extends DraftCommand {
   TableLabelEdit._(this.inner);
 
@@ -93,9 +91,7 @@ final class TableLabelEdit extends DraftCommand {
     try {
       for (final h in r.touched) {
         final DraftCommand derived;
-        if (_detachFor(target, h) case final detach?) {
-          derived = detach;
-        } else if (_stampFor(target, h) case final stamp?) {
+        if (_stampFor(target, h) case final stamp?) {
           derived = stamp;
           stamps++;
         } else {
@@ -106,15 +102,13 @@ final class TableLabelEdit extends DraftCommand {
         written.addAll(result.touched);
       }
     } catch (_) {
-      // All or nothing: the derived commands applied so far (the data
-      // detached and the stamps written), then the edit itself.
+      // All or nothing: the stamps written so far, then the edit itself.
       for (final inverse in inverses.reversed) {
         inverse.apply(target);
       }
       r.inverse.apply(target);
       rethrow;
     }
-    // A detach alone writes no label: the capability is not raised for it.
     _stamped = stamps > 0;
     if (inverses.isEmpty) return r;
     // A replay with the edit's own authority: undo and redo need exactly
@@ -125,20 +119,6 @@ final class TableLabelEdit extends DraftCommand {
           inner.capabilities),
       touched: {...r.touched, ...written},
     );
-  }
-
-  /// The detach [h] needs, or null: [h] names no live node, entity or
-  /// definition (the edit removed it; a nested instance of a deleted group
-  /// is touched by its own `RemoveNodeCommand`) and still carries host data
-  /// (E-6). Its inverse puts the same value back, so undo restores it.
-  static DraftCommand? _detachFor(CommandTarget target, Handle h) {
-    if (target.components.get<FloorPlanTableData>(h) == null) return null;
-    if (target.tree[h] != null ||
-        target.tree.definition(h) != null ||
-        target.entities.slotOf(h) != null) {
-      return null;
-    }
-    return SetComponentCommand<FloorPlanTableData>(h, null);
   }
 
   /// The stamp [h] needs, or null: [h] is a table (a live, root-level
