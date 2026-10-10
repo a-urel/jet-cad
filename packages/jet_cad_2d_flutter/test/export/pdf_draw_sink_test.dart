@@ -356,7 +356,9 @@ void main() {
     // PDF number anyway. Whatever is drawn under it is skipped: no path, no
     // text, `q` and `Q` balanced, and the next residual draws as before.
     // M-O11e: a primitive under `cm` is not guarded. M-O11f: `point`, which
-    // carries the residual by hand, is not guarded.
+    // carries the residual by hand, is not guarded. M-O11g: a residual is
+    // always taken as writable. M-O11h: `endResidual` leaves an unwritable
+    // residual's skip in force for the screen-space primitive after it.
     final unwritable = <String, Transform2>{
       'a NaN entry': const Transform2(double.nan, 0, 0, 1, 0, 0),
       'an infinite entry': const Transform2(1, 0, 0, 1, double.infinity, 0),
@@ -374,8 +376,8 @@ void main() {
     for (final MapEntry(key: what, value: bad) in unwritable.entries) {
       for (final MapEntry(key: name, value: primitive) in primitives.entries) {
         test(
-            'O-11 under a residual with $what, $name draws nothing (M-O11e, '
-            'M-O11f)', () async {
+            'O-11 under a residual with $what, $name draws nothing (M-O11e to '
+            'M-O11h)', () async {
           final c = await draw((sink) {
             sink.beginResidual(bad);
             primitive(sink);

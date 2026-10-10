@@ -296,7 +296,9 @@ class GripCache extends ChangeNotifier {
       final dx = m.a * g.x + m.c * g.y + m.e - screen.dx;
       final dy = m.b * g.x + m.d * g.y + m.f - screen.dy;
       final d = math.sqrt(dx * dx + dy * dy);
-      if (d > radius) continue;
+      // Negated, so a NaN distance (a grip past the doubles on the screen,
+      // O-11) is out of reach rather than within it.
+      if (!(d <= radius)) continue;
       final h = ref.key.target.value;
       final better = best < 0 ||
           d < bestDistance ||
@@ -427,9 +429,9 @@ class GripCache extends ChangeNotifier {
   static bool _finite(Aabb2 b) =>
       b.minX.isFinite && b.minY.isFinite && b.maxX.isFinite && b.maxY.isFinite;
 
-  /// A grip that is not finite in the world is neither drawn nor hit (O-11):
-  /// its screen distance is NaN, which no `d > radius` test rejects. Its
-  /// ordinal stays its position in the list it came from.
+  /// A grip that is not finite in the world is not kept (O-11): it has no
+  /// place to be drawn or hit. Its ordinal stays its position in the list
+  /// it came from.
   static bool _finiteGrip(Grip g) => g.x.isFinite && g.y.isFinite;
 
   @override

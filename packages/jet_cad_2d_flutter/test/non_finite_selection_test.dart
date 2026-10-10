@@ -11,7 +11,7 @@
 // Named mutants: M-O11a (the box takes non-finite bounds), M-O11b (the
 // cache keeps a non-finite grip), M-O11c (the rotation grip is drawn at a
 // non-finite position), M-O11d (a point cross is drawn at a non-finite
-// position).
+// position), M-O11i (a grip whose screen distance is NaN is within reach).
 import 'dart:math' as math;
 import 'dart:ui' show Canvas, Offset, PictureRecorder, Size;
 
@@ -250,5 +250,31 @@ void main() {
     expect(crosses, isEmpty);
     expect(paintSpy(rig).named('drawLine'), isNotEmpty,
         reason: 'premise: the finite point\'s cross is drawn');
+  });
+
+  test(
+      'NF6 a grip finite in the world whose screen distance is NaN is out of '
+      'every reach (M-O11i)', () {
+    // NF5's camera: the line's ends project to inf - inf on x. The world
+    // grips are finite, so the cache keeps them; the hit test must not.
+    final doc = DraftDocument.empty();
+    final line = addEntity(doc, doc.rootHandle, EntityKind.line,
+        [1.5e308, 1.5e308, 1.4e308, 1.4e308], []);
+    final rig = gripRig(doc,
+        camera: gripCamera(
+            centre: Vector2(10, 20),
+            scale: 4,
+            rotation: math.pi / 4,
+            flipY: false));
+    rig.selection.replace([k(line)]);
+    final m = rig.camera.value.worldToScreenMatrix;
+    expect(rig.grips.grips, hasLength(2), reason: 'premise: finite grips');
+    expect(rig.grips.gripDistance(0, const Offset(400, 300), m).isNaN, isTrue,
+        reason: 'premise: NaN on the screen');
+    for (final at in const [Offset(400, 300), Offset(-9999, -9999)]) {
+      expect(rig.grips.hitTest(at, m), -1, reason: '$at');
+      expect(rig.grips.hitTest(at, m, radius: kTouchGripHitPixels), -1,
+          reason: '$at, by touch');
+    }
   });
 }
