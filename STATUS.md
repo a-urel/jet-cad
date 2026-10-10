@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-09. **`main` carries release 0.3.0** (tag
+**Last updated:** 2026-10-10. **`main` carries release 0.3.0** (tag
 `v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -151,6 +151,18 @@ capabilities), started on the human's *"tamam, Dilim 4 ile devam et"*
 `.superpowers/sdd/2026-10-09-host-embedding-api/` (`s4-…`). **Resume
 point:** Task 1 (page flows without their dialogs).
 
+**Fixed on this branch: removing a design view while a pointer hovers**
+(Slice 3's results, "Found, not fixed"). The interaction layer's
+deactivation clears the hover during the build that removes the view,
+and the selection panel, outside the canvas and still active, was marked
+dirty then. The shell's frame-safe selection relay (`c65a3a0`, Task 4
+review R-2) holds that notification. `hover_removal_test.dart` (HR1, a
+bare shell over a hovered line; HR2, the host's design view over a
+hovered table) pins it, in `f0c77cf`: red at `main` and at `c65a3a0~1`,
+red with the panel on the selection directly or the relay's phase check
+removed, green from `c65a3a0`; CI green on Linux. No code change beyond
+the relay.
+
 ## Owed to the human
 
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
@@ -199,8 +211,9 @@ capabilities), started on the human's word; a release carrying Slices
 together) is the human's call. Found and recorded, each its own task:
 O-10 (an undone delete re-appends the node at its parent's end), O-11
 (non-finite corners trip a debug assertion in the selection grips, and
-the PDF export asserts NaN on such a table), and removing a design view
-while a pointer hovers a line throws (Slice 3's results). Monépro owes
+the PDF export asserts NaN on such a table). Removing a design view
+while a pointer hovers a line no longer throws: fixed by Slice 4's
+selection relay and pinned (see In flight). Monépro owes
 Q-H3 and its real shadcn tokens, and can name `controller.camera`,
 `tableOverlayBuilder` (Q-Z1), `FloorPlanTableDetail.data` (Q-Z4) and
 `FloorPlanTheme` in its spec 103.
