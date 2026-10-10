@@ -139,23 +139,25 @@ one's spec, plan and results.
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-3/](docs/superpowers/ledgers/2026-10-09-embedding-slice-3/).
   Unreleased (CHANGELOG). Slice 4 (bars, keyboard, editor capabilities)
   to come.
+- **O-10, an undone node removal restores the node's index** (the human,
+  2026-10-10), merged into `main` at `a803f86` on the human's *"evet,
+  main'e merge et"*: `RemoveNodeCommand`'s inverse carries the node's
+  index in its parent's raw `children`, so Delete then Undo writes a plan
+  back byte for byte, for one node and a compound delete; every test that
+  compared child lists sorted now compares the bytes. Plan
+  [2026-10-10-undo-node-index.md](docs/superpowers/plans/2026-10-10-undo-node-index.md),
+  results [2026-10-10-undo-node-index-results.md](docs/superpowers/notes/2026-10-10-undo-node-index-results.md)
+  (independent review *Approve with fixes*, F-1 to F-5 applied). Run
+  natively in one session: no SDD ledger. Unreleased (CHANGELOG).
+  **Owed once Slice 4 is on `main`:** its DS1 and DS2
+  (`keyboard_focus_test.dart`) compare the undone encoding with the one
+  before the delete, not around it.
 
 ## In flight
 
 **The host embedding API's Slice 4** (the bars, keyboard, editor
 capabilities), on the human's *"tamam, Dilim 4 ile devam et"*
 (2026-10-09): its plan is being committed after Slice 3's merge.
-
-**O-10, an undone node removal restores the node's index** (the human,
-2026-10-10), on `fix/undo-node-index` from `main` at `4e3ed91`: plan
-[2026-10-10-undo-node-index.md](docs/superpowers/plans/2026-10-10-undo-node-index.md),
-results [2026-10-10-undo-node-index-results.md](docs/superpowers/notes/2026-10-10-undo-node-index-results.md).
-`RemoveNodeCommand`'s inverse carries the index, so Delete then Undo
-writes a plan back byte for byte; every test that compared child lists
-sorted (`canon(sortNodes:)`, `childrenSorted`, `encNodesSorted`) now
-compares the bytes. Not merged. **Owed after both are on `main`:**
-Slice 4's DS1 and DS2 (`keyboard_focus_test.dart`) compare the undone
-encoding with the one before the delete, not around it.
 
 ## Owed to the human
 
