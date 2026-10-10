@@ -46,6 +46,7 @@ class PlannerView extends StatefulWidget {
     this.cameraEpoch,
     this.userCamera = true,
     this.onCanvasPlaced,
+    this.autofocus = true,
   });
 
   final DraftDocument document;
@@ -160,6 +161,13 @@ class PlannerView extends StatefulWidget {
   /// R-3), so a reporter that moves the camera on it acts on the fitted
   /// camera. Null reports nothing.
   final void Function(Object view, Rect? global)? onCanvasPlaced;
+
+  /// Whether the canvas takes the focus when it is mounted (host embedding
+  /// API spec C-7, S-21), handed to its [InteractionLayer]. A press on the
+  /// canvas asks for the focus either way; a focused Material text field
+  /// keeps it from the canvas on that press unless its `onTapOutside` lets
+  /// go (`FloorPlanView.autofocus`).
+  final bool autofocus;
 
   @override
   State<PlannerView> createState() => _PlannerViewState();
@@ -390,6 +398,7 @@ class _PlannerViewState extends State<PlannerView> {
                 key: _area,
                 child: InteractionLayer(
                   tools: widget.tools,
+                  autofocus: widget.autofocus,
                   child: Stack(
                     children: [
                       Positioned.fill(

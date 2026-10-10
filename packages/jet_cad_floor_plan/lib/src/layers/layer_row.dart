@@ -241,7 +241,9 @@ class _LayerRowState extends State<LayerRow> {
                   enabled: enabled,
                   tooltip: strings.layerColour,
                   padding: EdgeInsets.zero,
-                  onSelected: widget.onColour,
+                  // A menu open across a change to disabled picks nothing:
+                  // `PopupMenuButton` calls the current `onSelected`.
+                  onSelected: enabled ? widget.onColour : null,
                   itemBuilder: (context) => [
                     for (final aci in kLayerColours)
                       PopupMenuItem<int>(

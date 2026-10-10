@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -12,6 +13,8 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
 import 'document_toolbar.dart';
+import 'host/bars.dart';
+import 'host/editor_capabilities.dart';
 import 'host/floor_plan_theme.dart';
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
@@ -30,6 +33,7 @@ import 'parametric/wall_bands.dart';
 import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
+import 'service/table_picker.dart';
 import 'shell_commands.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
@@ -38,6 +42,7 @@ import 'symbols/symbol_library_loader.dart';
 import 'symbols/symbol_panel.dart';
 import 'symbols/symbol_place_tool.dart';
 import 'symbols/symbol_library_state.dart';
+import 'symbols/seating_component.dart';
 import 'symbols/symbol_move.dart';
 import 'symbols/wall_attach.dart';
 import 'tables/table_label_system.dart';
@@ -49,6 +54,31 @@ import 'tool_palette.dart';
 /// shell calls it on dispose, and it withdraws only [settle] itself, since
 /// a swap builds the next shell before the old one is disposed.
 typedef ShellSettleRegistrar = VoidCallback Function(VoidCallback settle);
+
+/// Registers the shell's idle probe with its host (host embedding API spec
+/// S-4): true while no tool is part-way through a shape, so the host's own
+/// Undo and Redo wait as the shell's do. Returns the withdrawal, which the
+/// shell calls on dispose, as [ShellSettleRegistrar]'s.
+typedef ShellIdleRegistrar = VoidCallback Function(bool Function() idle);
+
+/// Registers the shell's tool selector with its host (host embedding API
+/// spec C-3, S-6): [select] activates a tool when the shell's capabilities
+/// allow it and answers whether it did. Returns the withdrawal, which the
+/// shell calls on dispose, as [ShellSettleRegistrar]'s.
+typedef ShellToolRegistrar = VoidCallback Function(
+    bool Function(FloorPlanTool tool) select);
+
+/// Registers the shell's delete with its host (host embedding API spec
+/// C-3, as Slice 4's S-16 ruled): [delete] deletes the selection as the
+/// select tool's idle Delete does and answers whether it did. Returns the
+/// withdrawal, which the shell calls on dispose, as
+/// [ShellSettleRegistrar]'s.
+typedef ShellDeleteRegistrar = VoidCallback Function(bool Function() delete);
+
+/// The host's widget for the table [instance] the editor's selection is
+/// exactly (host embedding API spec C-6, S-18), or null for none.
+typedef ShellTableInspector = Widget? Function(
+    BuildContext context, Handle instance);
 
 /// Owns the index, the camera and -- since 03 -- the outline cache and the
 /// grip cache for the document's lifetime; since 05, the tools and the Fill
@@ -97,6 +127,15 @@ class PlannerShell extends StatefulWidget {
     this.userCamera = true,
     this.onCanvasPlaced,
     this.tableOverlays,
+    this.editorBar = const FloorPlanEditorBar(),
+    this.onIdle,
+    this.capabilities = FloorPlanEditorCapabilities.full,
+    this.onTools,
+    this.onToolChanged,
+    this.shortcuts = true,
+    this.autofocus = true,
+    this.tableInspector,
+    this.onDelete,
   });
 
   final DraftDocument? document;
@@ -178,6 +217,53 @@ class PlannerShell extends StatefulWidget {
   /// The host's widgets on the tables when the host shows them in the
   /// design mode (host embedding API spec G-5); null for none.
   final Widget? tableOverlays;
+
+  /// The top bar as the host shapes it (host embedding API spec C-2, S-2),
+  /// read at each build; the default is today's bar. It shapes the bar
+  /// only: every command stays bound to its chords (S-20).
+  final FloorPlanEditorBar editorBar;
+
+  /// Where the shell registers its idle probe (spec S-4).
+  final ShellIdleRegistrar? onIdle;
+
+  /// What the editor lets its user do (host embedding API spec C-5), read
+  /// at each build, key and arming; the default is today's editor. A
+  /// change that refuses the active tool falls back to select. Its
+  /// `tools` are expected to hold select (the view validates it); the
+  /// shell allows select whatever they say.
+  final FloorPlanEditorCapabilities capabilities;
+
+  /// Where the shell registers its tool selector (spec C-3, S-6).
+  final ShellToolRegistrar? onTools;
+
+  /// Told the active tool after each change (spec C-3, S-6), and select
+  /// once when the shell is created.
+  final void Function(FloorPlanTool tool)? onToolChanged;
+
+  /// Whether the shell binds its keys (host embedding API spec C-7, S-16),
+  /// read at each build and key: false binds none of the keys it binds
+  /// while no gesture runs (the command chords, F3, the tool letters, F,
+  /// Escape) and closes the select tool's idle keys (Delete, Backspace,
+  /// Escape), so they reach the host. A gesture's own keys stay (a drag's
+  /// Escape and Shift, a drawing tool's Escape and Enter, the symbol
+  /// tool's R and M). The commands stay callable.
+  final bool shortcuts;
+
+  /// Whether the canvas takes the focus when it is mounted (spec C-7),
+  /// forwarded to the view. A press on it asks for the focus either way;
+  /// a focused Material text field keeps it from the canvas on that press
+  /// unless its `onTapOutside` lets go (`FloorPlanView.autofocus`).
+  final bool autofocus;
+
+  /// The host's table inspector (spec C-6, S-18): built under the
+  /// Selection panel, and hidden with it, while the selection is exactly
+  /// one key and that key is a root-level table; rebuilt when that table
+  /// changes, at each document change and at each build of the shell,
+  /// never by the camera. Null builds no slot.
+  final ShellTableInspector? tableInspector;
+
+  /// Where the shell registers its delete (spec C-3, S-16).
+  final ShellDeleteRegistrar? onDelete;
 
   @override
   State<PlannerShell> createState() => _PlannerShellState();
@@ -305,6 +391,20 @@ class _PlannerShellState extends State<PlannerShell> {
   /// Withdraws [_settlePendingInput]'s registration with the host.
   VoidCallback? _releaseSettle;
 
+  /// Withdraws the idle probe's registration with the host (spec S-4).
+  VoidCallback? _releaseIdle;
+
+  /// Withdraws the tool selector's registration with the host (spec S-6).
+  VoidCallback? _releaseTools;
+
+  /// Withdraws the delete's registration with the host (spec S-16).
+  VoidCallback? _releaseDelete;
+
+  /// Object snap as the tools and drags read it (spec S-14): the user's
+  /// setting, [_snap], while the capabilities allow snapping.
+  late final _CapabilitySnap _toolSnap =
+      _CapabilitySnap(_snap, () => widget.capabilities.snapping);
+
   // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
   late final ParametricSystem _parametric;
 
@@ -316,13 +416,30 @@ class _PlannerShellState extends State<PlannerShell> {
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
   // Spec 09c D8: one tagged symbol dragged near a wall face attaches, over
   // the faces the symbol tool shares; the library is read at each drag.
+  //
+  // Host embedding API spec C-5 (Slice 4 Task 5): the select tool and the
+  // grip cache share one gates object, [_gates], which reads the
+  // capabilities live.
   late final SelectTool _select = SelectTool(
       moveResolver: SymbolMoveResolver(
           faces: _faces,
           library: () => switch (widget.symbols?.state) {
                 SymbolLibraryReady(:final library) => library,
                 _ => null,
-              }));
+              }),
+      gates: _gates);
+
+  /// The select tool's and the grip cache's gates (spec C-5, S-9, S-15):
+  /// the current widget's capabilities, read at each press, hover, key and
+  /// frame.
+  late final _CapabilityGates _gates = _CapabilityGates(
+      () => widget.capabilities,
+      () => _tablePicker ??= TablePicker(_document, skipLocked: true),
+      () => widget.shortcuts);
+
+  /// The tables-only pick's picker (spec S-15): made at its first pick,
+  /// cached by the document's state and its tables' revision.
+  TablePicker? _tablePicker;
   final LineTool _line = LineTool();
   late final PolylineTool _polyline = PolylineTool(fill: _fill);
   late final RectangleTool _rectangle = RectangleTool(fill: _fill);
@@ -366,8 +483,11 @@ class _PlannerShellState extends State<PlannerShell> {
   // its document) and holds no subscription of its own: [_bands] is
   // disposed below.
   late final WallFaces _faces = WallFaces(_bands, accept: isUsableHost);
-  late final SymbolPlaceTool _symbolTool =
-      SymbolPlaceTool(_armed, faces: _faces);
+  late final SymbolPlaceTool _symbolTool = SymbolPlaceTool(_armed,
+      faces: _faces,
+      // Spec S-9 b: R and Shift+R need `rotate`, M needs `mirror`.
+      canRotate: () => widget.capabilities.rotate,
+      canMirror: () => widget.capabilities.mirror);
 
   /// The Symbols tab's search field (spec 09b D7, F-4): a panel field, so
   /// [_settlePendingInput] hands it back.
@@ -520,13 +640,14 @@ class _PlannerShellState extends State<PlannerShell> {
   late final OutlineCache _outlines = OutlineCache(_document, _selection);
   late final GripCache _grips = GripCache(_document, _selection, _outlines,
       objects: ObjectGrips(
-          edgeAperture: () => _snap.objectSnap
+          edgeAperture: () => _toolSnap.objectSnap
               ? kSnapAperturePixels / _camera.value.scale
               : null,
           labelAperture: () => kSnapAperturePixels / _camera.value.scale,
           roomInputs: _roomInputs,
           index: _index,
-          objectSnap: () => _snap.objectSnap));
+          objectSnap: () => _toolSnap.objectSnap),
+      gates: _gates);
 
   late final ToolContext _context = ToolContext(
       document: _document,
@@ -534,14 +655,42 @@ class _PlannerShellState extends State<PlannerShell> {
       camera: _camera,
       selection: _selection,
       page: _page,
-      snap: _snap,
+      snap: _toolSnap,
       grips: _grips);
+  // Spec C-3: every tool change reaches the host ([_onTools]); attached
+  // where the controller is made, so nothing is made earlier than today.
   late final ToolController _tools =
-      ToolController(initial: _select, context: _context);
+      ToolController(initial: _select, context: _context)
+        ..addListener(_onTools);
   // Spec 10 D19, R-29: the Room tool's notice joins the status line; spec
-  // 11 D12 (R-24): so does the Dimension tool's value.
-  late final Listenable _status =
-      Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]);
+  // 11 D12 (R-24): so does the Dimension tool's value. Through a
+  // [_FrameSafeRelay], as every listener of the shell's outside
+  // [PlannerView] (Task 4 review R-2).
+  //
+  // Made at its first use, by the top bar (final review F-2): a shell with
+  // the bar hidden never makes it, and [dispose] disposes it only when
+  // made, so it never subscribes to a host's selection a host disposed
+  // before this shell (a floor swapped and the old controller disposed in
+  // one step). The same holds for every lazily made relay and flag below.
+  _FrameSafeRelay? _madeStatus;
+  _FrameSafeRelay get _status => _madeStatus ??= _FrameSafeRelay(
+      Listenable.merge([_selection, _tools, _room.notice, _dimension.notice]));
+
+  /// The tools' and the selection's notifications for the shell's widgets
+  /// outside [PlannerView]: the palette, the Symbols tab, the command flags
+  /// and the selection panel. [PlannerView]'s own descendants listen to
+  /// [_tools] and [_selection] directly.
+  ///
+  /// Why (Task 4 review R-2): when the rulers come or go, [PlannerView]
+  /// re-parents its canvas during its build, and the [InteractionLayer]'s
+  /// deactivation cancels the active tool and clears the hover. Both
+  /// notify; a widget outside [PlannerView] marked dirty then asserts.
+  _FrameSafeRelay get _toolsRelay =>
+      _madeToolsRelay ??= _FrameSafeRelay(_tools);
+  _FrameSafeRelay get _selectionRelay =>
+      _madeSelectionRelay ??= _FrameSafeRelay(_selection);
+  _FrameSafeRelay? _madeToolsRelay;
+  _FrameSafeRelay? _madeSelectionRelay;
 
   /// Fitted to the nominal window; PlannerView re-fits once at the real
   /// size. A document without a page fits its extents.
@@ -562,29 +711,42 @@ class _PlannerShellState extends State<PlannerShell> {
   bool get _idle => !(_busy?.value ?? false) && !_tools.active.isMidShape;
 
   /// Everything [_idle] reads that notifies: the tools (a tool's own
-  /// notifications arrive through the controller) and busy.
-  late final List<Listenable> _idleSources = [_tools, if (_busy != null) _busy];
+  /// notifications arrive through the controller, then [_toolsRelay]) and
+  /// busy.
+  late final List<Listenable> _idleSources = [
+    _toolsRelay,
+    if (_busy != null) _busy
+  ];
 
-  late final DerivedFlag _undoEnabled =
+  DerivedFlag get _undoEnabled => _madeUndoEnabled ??=
       DerivedFlag(_idleSources, () => _idle && _document.commands.canUndo);
-  late final DerivedFlag _redoEnabled =
+  DerivedFlag get _redoEnabled => _madeRedoEnabled ??=
       DerivedFlag(_idleSources, () => _idle && _document.commands.canRedo);
+  DerivedFlag? _madeUndoEnabled;
+  DerivedFlag? _madeRedoEnabled;
 
   /// The history moves on the dispatcher's changes; Undo and Redo re-read
   /// `canUndo` and `canRedo` on each (spec 12a D5).
   StreamSubscription<DocChange>? _history;
 
+  /// One notification per change of the document (every command, undo
+  /// and redo), from [_history]: the table inspector rebuilds on it (spec
+  /// C-6). The dispatcher's stream is asynchronous, so it never notifies
+  /// while a frame builds.
+  final _Changed _documentChanged = _Changed();
+
   /// The file commands, each enabled only while the host's own condition
   /// holds and the shell is idle; Export and Print also only while the
   /// document has a page (spec 13 D8, [kPageCommandIds]).
-  late final List<DerivedFlag> _fileEnabled = [
-    for (final c in _firstFileCommands)
-      kPageCommandIds.contains(c.id)
-          ? DerivedFlag([c.enabled, ..._idleSources, _page],
-              () => c.enabled.value && _idle && _page.value != null)
-          : DerivedFlag(
-              [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
-  ];
+  List<DerivedFlag> get _fileEnabled => _madeFileEnabled ??= [
+        for (final c in _firstFileCommands)
+          kPageCommandIds.contains(c.id)
+              ? DerivedFlag([c.enabled, ..._idleSources, _page],
+                  () => c.enabled.value && _idle && _page.value != null)
+              : DerivedFlag(
+                  [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
+      ];
+  List<DerivedFlag>? _madeFileEnabled;
 
   /// The file commands the shell was built with: the set, and the
   /// conditions [_fileEnabled] watches, are fixed for its life.
@@ -675,23 +837,116 @@ class _PlannerShellState extends State<PlannerShell> {
   bool get _geometryAllowed =>
       _document.commands.permissions.allows(Capability.geometry);
 
+  /// The host's tool for [tool]: a palette row's by its place (the
+  /// palette's order is [FloorPlanTool]'s), the placement tool's `symbol`.
+  /// Allocates nothing: a tool's every notification passes here
+  /// ([_onTools]).
+  FloorPlanTool _floorTool(Tool tool) {
+    if (identical(tool, _symbolTool)) return FloorPlanTool.symbol;
+    for (var i = 0; i < _entries.length; i++) {
+      if (identical(_entries[i].tool, tool)) return FloorPlanTool.values[i];
+    }
+    return FloorPlanTool.select;
+  }
+
+  /// [entry] as the host's filter sees it, made once per entry.
+  final Expando<FloorPlanSymbol> _hostSymbols = Expando<FloorPlanSymbol>();
+  FloorPlanSymbol _hostSymbol(SymbolEntry entry) =>
+      _hostSymbols[entry] ??= FloorPlanSymbol.of(entry);
+
+  /// Whether the capabilities offer placing [entry] (spec C-5): the symbol
+  /// tool, the Symbols tab, and the filter.
+  bool _offers(SymbolEntry entry) {
+    final caps = widget.capabilities;
+    if (!caps.tools.contains(FloorPlanTool.symbol) || !caps.symbolPalette) {
+      return false;
+    }
+    final filter = caps.symbolFilter;
+    return filter == null || filter(_hostSymbol(entry));
+  }
+
+  /// Whether the capabilities allow [tool] (spec C-5): select always; a
+  /// palette tool by `tools`; the placement tool when it offers the armed
+  /// entry.
+  bool _allows(Tool tool) {
+    if (identical(tool, _symbolTool)) {
+      final entry = _armed.value;
+      return entry == null
+          ? widget.capabilities.tools.contains(FloorPlanTool.symbol) &&
+              widget.capabilities.symbolPalette
+          : _offers(entry);
+    }
+    final t = _floorTool(tool);
+    return t == FloorPlanTool.select || widget.capabilities.tools.contains(t);
+  }
+
+  /// Whether a fill-capable tool is offered (spec S-9 f): the Fill row and
+  /// F only then.
+  bool get _fillOffered => widget.capabilities.tools.any((t) =>
+      t == FloorPlanTool.polyline ||
+      t == FloorPlanTool.rectangle ||
+      t == FloorPlanTool.circle);
+
   /// Spec 05 D5: the one way a tool becomes active. A drawing tool clears
   /// the selection first, because the overlay paints the selection's
   /// outlines and grips under any active tool. It is refused while geometry
-  /// is denied. Focus never leaves the canvas (Ruling 05-6).
-  void _activate(Tool tool) {
+  /// is denied, and (host embedding API spec C-5) when the capabilities do
+  /// not allow it. Focus never leaves the canvas (Ruling 05-6). Answers
+  /// whether [tool] is now active.
+  bool _activate(Tool tool) {
+    if (!_allows(tool)) return false;
     final drawing = !identical(tool, _select);
-    if (drawing && !_geometryAllowed) return;
+    if (drawing && !_geometryAllowed) return false;
     if (drawing) _selection.clear();
     _tools.activate(tool);
+    return true;
   }
 
   /// Spec 09b D8: a gallery cell arms [entry] and activates the placement
   /// tool through [_activate], which refuses it while geometry is denied
-  /// and clears the selection.
+  /// and clears the selection. The panel offers no cell the capabilities
+  /// refuse (spec C-5: its filter, and no placement without the symbol
+  /// tool), and [_activate] refuses the tool for an entry they refuse.
   void _armSymbol(SymbolEntry entry) {
     _armed.value = entry;
     _activate(_symbolTool);
+  }
+
+  /// The host's [FloorPlanController.selectTool] (spec C-3, S-6): a palette
+  /// tool through [_activate]; `symbol` re-activates the armed entry, and
+  /// is refused with none armed.
+  bool _selectByHost(FloorPlanTool tool) {
+    if (tool == FloorPlanTool.symbol) {
+      return _armed.value != null && _activate(_symbolTool);
+    }
+    return _activate(_entries[tool.index].tool);
+  }
+
+  /// The host's `FloorPlanController.deleteSelection` (spec C-3, S-16):
+  /// the select tool's own delete, whichever tool is active (one undo
+  /// step, the table-data expander; `delete` gated, `idleKeys` not). The
+  /// controller asks only while no shape is part-way, after a settle.
+  bool _deleteByHost() => _select.deleteSelection(_context);
+
+  /// The table the host's inspector shows (spec C-6, S-18): the
+  /// selection's one key when it is a root-level table; null otherwise.
+  Handle? _inspected() {
+    if (_selection.length != 1) return null;
+    final key = _selection.keys.single;
+    return _isTableKey(_document, key) ? key.target : null;
+  }
+
+  /// The tool last told to the host.
+  FloorPlanTool _reportedTool = FloorPlanTool.select;
+
+  /// Tells the host the active tool when it changed (spec C-3): a palette
+  /// tap, a letter, Escape, an arming, the host's own call and a fallback
+  /// all pass through the tool controller.
+  void _onTools() {
+    final tool = _floorTool(_tools.active);
+    if (tool == _reportedTool) return;
+    _reportedTool = tool;
+    widget.onToolChanged?.call(tool);
   }
 
   /// An idle drawing tool leaves Escape unhandled; it arrives here.
@@ -754,10 +1009,75 @@ class _PlannerShellState extends State<PlannerShell> {
     _tableLabels = TableLabelSystem(_document)..install();
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
+    _releaseIdle = widget.onIdle?.call(() => _idle);
+    _releaseTools = widget.onTools?.call(_selectByHost);
+    widget.onToolChanged?.call(FloorPlanTool.select);
+    assert(() {
+      for (final (i, e) in _entries.indexed) {
+        if (e.keyName != 'tool-${FloorPlanTool.values[i].name}') return false;
+      }
+      return _entries.length == FloorPlanTool.values.length - 1;
+    }(), 'the palette must list the tools in FloorPlanTool order');
+    _releaseDelete = widget.onDelete?.call(_deleteByHost);
     _history = _document.commands.changes.listen((_) {
-      _undoEnabled.update();
-      _redoEnabled.update();
+      _madeUndoEnabled?.update();
+      _madeRedoEnabled?.update();
+      _documentChanged.changed();
     });
+  }
+
+  /// Host embedding API spec C-5: a change of the capabilities takes
+  /// effect at this build; a tool they no longer allow (the placement tool
+  /// included, when the palette or the filter now refuses its armed entry)
+  /// falls back to select, which cancels a pending shape. The left tab and
+  /// the search text are the shell's and are kept.
+  @override
+  void didUpdateWidget(PlannerShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final old = oldWidget.capabilities, caps = widget.capabilities;
+    if (old != caps) {
+      // Spec S-9 h (Task 5 review R-1): a gesture under way across a change
+      // of what a click and a band may select, or across the closing of
+      // the gate its drag needs, is cancelled now, as Escape would: its
+      // press, its drag and its selection were read under the old value.
+      // A drag whose gate closes would be cancelled at its up anyway; one
+      // whose gate stays open (`move` and `rotate` under tables only) would
+      // otherwise commit a non-table's move or turn.
+      final stale = old.selectTablesOnly != caps.selectTablesOnly ||
+          switch (_select.dragKind) {
+            DragKind.move => old.move && !caps.move,
+            DragKind.rotate => old.rotate && !caps.rotate,
+            DragKind.reshape => old.reshape && !caps.reshape,
+            DragKind.band || null => false,
+          };
+      if (stale) _select.cancel(_context);
+      // Spec S-9 g: a change to tables only keeps the tables of the
+      // selection. No table leaves it, so the host's `selectedTables` does
+      // not move.
+      if (caps.selectTablesOnly && !old.selectTablesOnly) {
+        final drop = [
+          for (final k in _selection.keys)
+            if (!_isTableKey(_document, k)) k
+        ];
+        if (drop.isNotEmpty) _selection.remove(drop);
+      }
+      // The overlay and the hit test read the gates; this repaints now
+      // (the tool's cursor follows at the next pointer move).
+      _grips.gatesChanged();
+      if (!_allows(_tools.active)) {
+        _activate(_select);
+      } else if (identical(_tools.active, _symbolTool) &&
+          (old.rotate != caps.rotate || old.mirror != caps.mirror)) {
+        // Spec S-9 b (Task 4 review R-1): the ghost shows the orientation
+        // now allowed.
+        _symbolTool.gatesChanged();
+      }
+    }
+    // The shell's own update: every listener of the relays is in its
+    // subtree, rebuilt now, so what they hold is delivered now.
+    _madeStatus?.deliver();
+    _madeToolsRelay?.deliver();
+    _madeSelectionRelay?.deliver();
   }
 
   @override
@@ -765,11 +1085,17 @@ class _PlannerShellState extends State<PlannerShell> {
     // The command flags listen to the tools and the host's busy flag: they
     // go first.
     _history?.cancel();
-    _undoEnabled.dispose();
-    _redoEnabled.dispose();
-    for (final f in _fileEnabled) {
+    // Final review F-2: each relay and flag only when it was made; none is
+    // made here, over notifiers a host may have disposed already.
+    _madeUndoEnabled?.dispose();
+    _madeRedoEnabled?.dispose();
+    for (final f in _madeFileEnabled ?? const <DerivedFlag>[]) {
       f.dispose();
     }
+    // The relays listen to the tools and the selection: before them.
+    _madeStatus?.dispose();
+    _madeToolsRelay?.dispose();
+    _madeSelectionRelay?.dispose();
     _tools.dispose();
     for (final e in _entries) {
       e.tool.dispose();
@@ -804,6 +1130,11 @@ class _PlannerShellState extends State<PlannerShell> {
         'the expander slot was not released: dispose order');
     _index.dispose();
     _releaseSettle?.call();
+    _releaseIdle?.call();
+    _releaseTools?.call();
+    _releaseDelete?.call();
+    _documentChanged.dispose();
+    _toolSnap.dispose();
     _ownMeasurer?.clear();
     super.dispose();
   }
@@ -827,21 +1158,45 @@ class _PlannerShellState extends State<PlannerShell> {
     );
   }
 
-  Widget _toolPalette() => ToolPalette(
-        entries: _entries,
-        tools: _tools,
-        fill: _fill,
-        geometryAllowed: _geometryAllowed,
-        onSelect: _activate,
-      );
+  /// The palette: the rows the capabilities allow (spec C-5), in order;
+  /// the Fill row while a fill-capable tool is among them (S-9 f).
+  Widget _toolPalette() {
+    final allowed = _entries.every((e) => _allows(e.tool))
+        ? _entries
+        : [
+            for (final e in _entries)
+              if (_allows(e.tool)) e
+          ];
+    return ToolPalette(
+      entries: allowed,
+      tools: _tools,
+      toolChanges: _toolsRelay,
+      fill: _fill,
+      geometryAllowed: _geometryAllowed,
+      onSelect: _activate,
+      showFill: _fillOffered,
+    );
+  }
+
+  /// The Symbols tab's filter (spec C-5): the host's, over each entry as a
+  /// [FloorPlanSymbol]; null without one.
+  bool Function(SymbolEntry entry)? _symbolFilter() {
+    final filter = widget.capabilities.symbolFilter;
+    if (filter == null) return null;
+    return (entry) => filter(_hostSymbol(entry));
+  }
 
   /// Spec 09b D8: today's palette in a bare shell; with a loader, a tab
   /// strip (Tools, the default, and Symbols) over the chosen tab. The
   /// strip never takes focus (Ruling 05-6, R-5): the canvas keeps it.
-  /// Switching tabs changes no tool.
+  /// Switching tabs changes no tool. Without the capabilities'
+  /// `symbolPalette` (spec C-5) the palette alone, as a bare shell's; the
+  /// chosen tab is kept for when it returns.
   Widget _leftPanel() {
     final symbols = widget.symbols;
-    if (symbols == null) return _toolPalette();
+    if (symbols == null || !widget.capabilities.symbolPalette) {
+      return _toolPalette();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -874,12 +1229,16 @@ class _PlannerShellState extends State<PlannerShell> {
                 thumbnails: widget.thumbnails ??
                     (_ownThumbnails ??= SymbolThumbnails()),
                 tools: _tools,
+                toolChanges: _toolsRelay,
                 tool: _symbolTool,
                 armed: _armed,
                 permissions: _document.commands.permissions,
                 searchFocus: _symbolSearch,
                 query: _symbolQuery,
                 onSelect: _armSymbol,
+                filter: _symbolFilter(),
+                placeable:
+                    widget.capabilities.tools.contains(FloorPlanTool.symbol),
               ),
           },
         ),
@@ -887,115 +1246,222 @@ class _PlannerShellState extends State<PlannerShell> {
     );
   }
 
+  /// The top bar (spec 12a D7; host embedding API spec C-2, S-2): the
+  /// host's [FloorPlanEditorBar.leading]; the toolbar's buttons; 16 px;
+  /// the document's name and the status line, flexible; the read-outs; the
+  /// host's [FloorPlanEditorBar.trailing]. The default bar is today's. The
+  /// host's widgets sit under a [ShellShortcutGuard], never inside the
+  /// toolbar's `ExcludeFocus` (S-19): a host field there takes the focus
+  /// and its keystrokes.
+  Widget _topBar(ColorScheme scheme, List<ShellCommand> fileCommands,
+      List<ShellCommand> editCommands) {
+    final bar = widget.editorBar;
+    final toolbar = listEquals(bar.actions, FloorPlanEditorAction.values)
+        ? (fileCommands.isEmpty && editCommands.isEmpty
+            ? null
+            : DocumentToolbar(
+                fileCommands: fileCommands, editCommands: editCommands))
+        : _toolbarFor(bar.actions, fileCommands, editCommands);
+    final readOuts = <Widget>[];
+    for (final action in bar.actions) {
+      final readOut = switch (action) {
+        // Spec C-5, S-14: the read-out only while snapping is allowed.
+        FloorPlanEditorAction.snap when !widget.capabilities.snapping => null,
+        FloorPlanEditorAction.snap => ListenableBuilder(
+            listenable: _snap,
+            builder: (_, __) => Text(
+                _snap.objectSnap
+                    ? FloorPlanStrings.of(context).objectSnapOn
+                    : FloorPlanStrings.of(context).objectSnapOff,
+                key: const Key('osnap-text')),
+          ),
+        FloorPlanEditorAction.zoom => ListenableBuilder(
+            listenable: Listenable.merge([_camera, _page]),
+            builder: (_, __) => Text(_zoomLine(), key: const Key('zoom-text')),
+          ),
+        _ => null,
+      };
+      if (readOut == null) continue;
+      if (readOuts.isNotEmpty) readOuts.add(const SizedBox(width: 16));
+      readOuts.add(readOut);
+    }
+    final row = Row(
+      children: [
+        ...bar.leading,
+        // Spec 12a D7: the toolbar, the document's name, then the status
+        // line; the name and the status give way (ellipsis) before the row
+        // would overflow. The status takes all the width the name leaves:
+        // the name is capped at half of their shared width and takes only
+        // what it needs below that.
+        if (toolbar != null) ...[toolbar, const SizedBox(width: 16)],
+        Expanded(
+          child: LayoutBuilder(builder: (_, constraints) {
+            // In a narrow window the two 16 px gaps (after the name, before
+            // OSNAP) shrink with the free width, down to 0, so they never
+            // overflow the bar; the half cap gives way to them below 32 px.
+            final free = constraints.maxWidth;
+            final tail = math.min(16.0, free);
+            final shared = free - tail;
+            final gap = math.min(16.0, shared);
+            return Row(
+              children: [
+                if (widget.documentName != null) ...[
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: math.min(shared / 2, shared - gap)),
+                    child: _documentName(widget.documentName!),
+                  ),
+                  SizedBox(width: gap),
+                ],
+                Expanded(
+                  child: ListenableBuilder(
+                    listenable: _status,
+                    builder: (_, __) => Text(_statusLine(),
+                        key: const Key('status-text'),
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                SizedBox(width: tail),
+              ],
+            );
+          }),
+        ),
+        ...readOuts,
+        ...bar.trailing,
+      ],
+    );
+    return Container(
+      key: const Key('chrome-top'),
+      height: 44,
+      color: scheme.surfaceContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: bar.leading.isEmpty && bar.trailing.isEmpty
+            ? row
+            : ShellShortcutGuard(child: row),
+      ),
+    );
+  }
+
+  /// The toolbar for a host's [actions] (spec S-2): a bare shell's other
+  /// file commands first (New to Save As, as today), then the buttons in
+  /// the host's order, a run of file buttons (Export, Print) and a run of
+  /// edit buttons (Undo, Redo) [DocumentToolbar.groupGap] apart. Export
+  /// shows only when the shell was given it. Null with no button at all.
+  DocumentToolbar? _toolbarFor(List<FloorPlanEditorAction> actions,
+      List<ShellCommand> fileCommands, List<ShellCommand> editCommands) {
+    ShellCommand? byId(List<ShellCommand> commands, String id) =>
+        commands.where((c) => c.id == id).firstOrNull;
+    final groups = <List<ShellCommand>>[
+      [
+        for (final c in fileCommands)
+          if (!kPageCommandIds.contains(c.id)) c
+      ],
+    ];
+    // A bare shell's other file commands (New to Save As) are file
+    // buttons: Export or Print right after them joins their group, with no
+    // gap between two file buttons (S-2; Task 2 review R-2).
+    bool? lastFile = groups.first.isEmpty ? null : true;
+    for (final action in actions) {
+      final (command, file) = switch (action) {
+        FloorPlanEditorAction.export => (byId(fileCommands, 'export'), true),
+        FloorPlanEditorAction.print => (byId(fileCommands, 'print'), true),
+        FloorPlanEditorAction.undo => (byId(editCommands, 'undo'), false),
+        FloorPlanEditorAction.redo => (byId(editCommands, 'redo'), false),
+        _ => (null, false),
+      };
+      if (command == null) continue;
+      if (file != lastFile) groups.add([]);
+      lastFile = file;
+      groups.last.add(command);
+    }
+    if (groups.every((g) => g.isEmpty)) return null;
+    return DocumentToolbar.groups(groups: groups);
+  }
+
+  /// A right-column panel (spec C-5, S-11): shown while [shown]; otherwise
+  /// kept offstage, its state kept, and out of the focus order (a
+  /// [Visibility] that does not maintain its focusability excludes it).
+  static Widget _keptPanel(bool shown, Widget panel) =>
+      Visibility(visible: shown, maintainState: true, child: panel);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final fileCommands = _fileCommands;
-    final editCommands = _editCommands(FloorPlanStrings.of(context));
+    final caps = widget.capabilities;
+    // Host embedding API spec C-5: a command the capabilities refuse is
+    // neither shown nor bound, decided here from the commands the shell
+    // was created with (so a runtime change brings it back).
+    final fileCommands = [
+      for (final c in _fileCommands)
+        if (switch (c.id) {
+          'export' => caps.export,
+          'print' => caps.print,
+          _ => true,
+        })
+          c
+    ];
+    final editCommands = caps.undo
+        ? _editCommands(FloorPlanStrings.of(context))
+        : const <ShellCommand>[];
+    // Host embedding API spec C-7, S-16: without the shortcuts the shell
+    // binds nothing, so every key reaches the host.
+    final keys = widget.shortcuts;
     return Scaffold(
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
           // Spec 12a D6: the command table's chords. A disabled command's
           // binding stays and does nothing (S-26), so the key is consumed.
-          for (final c in [...fileCommands, ...editCommands])
-            for (final chord in c.shortcuts) chord: c.invoke,
-          // Spec 03 D10: one toggle per press, never per key repeat.
-          const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
-              _snap.toggleObjectSnap,
-          // Spec 05 D5: the tool letters, then Fill, then Escape.
-          for (final e in _entries)
-            SingleActivator(e.logicalKey, includeRepeats: false): () =>
-                _activate(e.tool),
-          const SingleActivator(LogicalKeyboardKey.keyF, includeRepeats: false):
-              () {
-            if (_geometryAllowed) _fill.value = !_fill.value;
-          },
-          const SingleActivator(LogicalKeyboardKey.escape): _escape,
+          if (keys)
+            for (final c in [...fileCommands, ...editCommands])
+              for (final chord in c.shortcuts) chord: c.invoke,
+          // Spec 03 D10: one toggle per press, never per key repeat. Spec
+          // S-14: only while snapping is allowed.
+          if (keys && caps.snapping)
+            const SingleActivator(LogicalKeyboardKey.f3, includeRepeats: false):
+                _snap.toggleObjectSnap,
+          // Spec 05 D5: the tool letters, then Fill, then Escape. Spec
+          // C-5: only the allowed letters are bound; a refused one bubbles.
+          if (keys)
+            for (final e in _entries)
+              if (_allows(e.tool))
+                SingleActivator(e.logicalKey, includeRepeats: false): () =>
+                    _activate(e.tool),
+          if (keys && _fillOffered)
+            const SingleActivator(LogicalKeyboardKey.keyF,
+                includeRepeats: false): () {
+              if (_geometryAllowed) _fill.value = !_fill.value;
+            },
+          if (keys) const SingleActivator(LogicalKeyboardKey.escape): _escape,
         },
         child: Column(
           children: [
-            Container(
-              key: const Key('chrome-top'),
-              height: 44,
-              color: scheme.surfaceContainer,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Row(
-                  children: [
-                    // Spec 12a D7: the toolbar, the document's name, then
-                    // the status line; the name and the status give way
-                    // (ellipsis) before the row would overflow. The status
-                    // takes all the width the name leaves: the name is
-                    // capped at half of their shared width and takes only
-                    // what it needs below that.
-                    DocumentToolbar(
-                        fileCommands: fileCommands, editCommands: editCommands),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: LayoutBuilder(builder: (_, constraints) {
-                        // In a narrow window the two 16 px gaps (after the
-                        // name, before OSNAP) shrink with the free width,
-                        // down to 0, so they never overflow the bar; the
-                        // half cap gives way to them below 32 px.
-                        final free = constraints.maxWidth;
-                        final tail = math.min(16.0, free);
-                        final shared = free - tail;
-                        final gap = math.min(16.0, shared);
-                        return Row(
-                          children: [
-                            if (widget.documentName != null) ...[
-                              ConstrainedBox(
-                                constraints: BoxConstraints(
-                                    maxWidth:
-                                        math.min(shared / 2, shared - gap)),
-                                child: _documentName(widget.documentName!),
-                              ),
-                              SizedBox(width: gap),
-                            ],
-                            Expanded(
-                              child: ListenableBuilder(
-                                listenable: _status,
-                                builder: (_, __) => Text(_statusLine(),
-                                    key: const Key('status-text'),
-                                    maxLines: 1,
-                                    softWrap: false,
-                                    overflow: TextOverflow.ellipsis),
-                              ),
-                            ),
-                            SizedBox(width: tail),
-                          ],
-                        );
-                      }),
-                    ),
-                    ListenableBuilder(
-                      listenable: _snap,
-                      builder: (_, __) => Text(
-                          _snap.objectSnap
-                              ? FloorPlanStrings.of(context).objectSnapOn
-                              : FloorPlanStrings.of(context).objectSnapOff,
-                          key: const Key('osnap-text')),
-                    ),
-                    const SizedBox(width: 16),
-                    ListenableBuilder(
-                      listenable: Listenable.merge([_camera, _page]),
-                      builder: (_, __) =>
-                          Text(_zoomLine(), key: const Key('zoom-text')),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            // Host embedding API spec C-2: with `visible: false` no top
+            // bar, and the canvas takes its height.
+            if (widget.editorBar.visible)
+              _topBar(scheme, fileCommands, editCommands),
             Expanded(
               child: Row(
                 children: [
-                  Container(
-                    key: const Key('chrome-left'),
-                    width: 240,
-                    color: scheme.surfaceContainerLow,
-                    child: _leftPanel(),
-                  ),
+                  // Spec S-13: no column holding the Select row alone.
+                  if (leftColumnShown(caps, symbols: widget.symbols != null))
+                    Container(
+                      key: const Key('chrome-left'),
+                      width: 240,
+                      color: scheme.surfaceContainerLow,
+                      child: _leftPanel(),
+                    ),
+                  // Keyed (final review F-1): when a capabilities change
+                  // adds or removes the columns on both sides at once, the
+                  // row still matches the canvas, so it keeps its element,
+                  // and the camera, the user's zoom and pan and a host's
+                  // `centerOn` stay; unkeyed, it would be made again and
+                  // the plan fitted to the page.
                   Expanded(
+                    key: const Key('chrome-canvas'),
                     child: ColoredBox(
                       color: _canvasColour(scheme),
                       child: PlannerView(
@@ -1028,45 +1494,76 @@ class _PlannerShellState extends State<PlannerShell> {
                         userCamera: widget.userCamera,
                         onCanvasPlaced: widget.onCanvasPlaced,
                         tableOverlays: widget.tableOverlays,
+                        rulers: caps.rulers,
+                        grid: caps.grid,
+                        autofocus: widget.autofocus,
                       ),
                     ),
                   ),
-                  Container(
-                    key: const Key('chrome-right'),
-                    width: 280,
-                    color: scheme.surfaceContainerLow,
-                    child: ShellShortcutGuard(
-                      // One scroll for the whole column (review 14d-1 F-2):
-                      // a selection's sections, the layers and the page
-                      // outgrow a short window, longer in German.
-                      child: SingleChildScrollView(
-                        key: const Key('chrome-right-scroll'),
-                        child: Column(
-                          children: [
-                            // Spec 07 D11, 08 D16: while the Wall tool or
-                            // an opening tool is active, the panel edits its
-                            // settings.
-                            SelectionPanel(
-                                document: _document,
-                                selection: _selection,
-                                tools: _tools,
-                                wallTool: _wall,
-                                wallSettings: _wallSettings,
-                                openingTools: _openingTools,
-                                openingSettings: _openingSettings,
-                                symbols: widget.symbols),
-                            // Spec 12b D9: the Layers section, placed only.
-                            LayerPanel(
-                                document: _document, foreground: _foreground),
-                            PagePanel(
-                                key: _pagePanel,
-                                document: _document,
-                                page: _page),
-                          ],
+                  // Spec C-5: the column only while it shows a panel.
+                  if (caps.selectionPanel || caps.layerPanel || caps.pagePanel)
+                    Container(
+                      key: const Key('chrome-right'),
+                      width: 280,
+                      color: scheme.surfaceContainerLow,
+                      child: ShellShortcutGuard(
+                        // One scroll for the whole column (review 14d-1 F-2):
+                        // a selection's sections, the layers and the page
+                        // outgrow a short window, longer in German.
+                        child: SingleChildScrollView(
+                          key: const Key('chrome-right-scroll'),
+                          child: Column(
+                            children: [
+                              // Spec 07 D11, 08 D16: while the Wall tool or
+                              // an opening tool is active, the panel edits its
+                              // settings.
+                              //
+                              // Spec C-5, S-11: each panel shown by its flag;
+                              // a hidden one is kept offstage, its state kept.
+                              _keptPanel(
+                                  caps.selectionPanel,
+                                  SelectionPanel(
+                                      document: _document,
+                                      selection: _selection,
+                                      selectionChanges: _selectionRelay,
+                                      tools: _tools,
+                                      wallTool: _wall,
+                                      wallSettings: _wallSettings,
+                                      openingTools: _openingTools,
+                                      openingSettings: _openingSettings,
+                                      symbols: widget.symbols,
+                                      capabilities: caps)),
+                              // Spec C-6, S-18: the host's inspector under
+                              // jet-cad's fields, with the Selection panel.
+                              // Keyed, so adding or removing it keeps the
+                              // panels below.
+                              if (widget.tableInspector case final inspect?
+                                  when caps.selectionPanel)
+                                _TableInspector(
+                                    key: const Key('table-inspector'),
+                                    selectionChanges: _selectionRelay,
+                                    documentChanges: _documentChanged,
+                                    inspected: _inspected,
+                                    builder: inspect),
+                              // Spec 12b D9: the Layers section, placed only.
+                              _keptPanel(
+                                  caps.layerPanel,
+                                  LayerPanel(
+                                      document: _document,
+                                      foreground: _foreground,
+                                      editable: caps.editLayers)),
+                              _keptPanel(
+                                  caps.pagePanel,
+                                  PagePanel(
+                                      key: _pagePanel,
+                                      document: _document,
+                                      page: _page,
+                                      editable: caps.editPage)),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -1079,3 +1576,225 @@ class _PlannerShellState extends State<PlannerShell> {
 
 /// The left panel's tabs (spec 09b D8).
 enum _LeftTab { tools, symbols }
+
+/// A notifier whose every [changed] is one notification.
+final class _Changed extends ChangeNotifier {
+  void changed() => notifyListeners();
+}
+
+/// The host's table inspector (host embedding API spec C-6, S-18): built
+/// for the table [inspected] names, again when that changes (a selection
+/// change, frame-safe through [selectionChanges]), at each document change
+/// while it names one ([documentChanges]: the table's data, number or
+/// place may have moved), and at each new widget (the shell's build, so a
+/// host rebuild). A hover, the camera and a selection change that keeps
+/// the table build nothing.
+class _TableInspector extends StatefulWidget {
+  const _TableInspector(
+      {super.key,
+      required this.selectionChanges,
+      required this.documentChanges,
+      required this.inspected,
+      required this.builder});
+
+  final Listenable selectionChanges;
+  final Listenable documentChanges;
+  final Handle? Function() inspected;
+  final ShellTableInspector builder;
+
+  @override
+  State<_TableInspector> createState() => _TableInspectorState();
+}
+
+class _TableInspectorState extends State<_TableInspector> {
+  /// The table shown; null for none.
+  late Handle? _shown = widget.inspected();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selectionChanges.addListener(_onSelection);
+    widget.documentChanges.addListener(_onDocument);
+  }
+
+  @override
+  void didUpdateWidget(_TableInspector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.selectionChanges, widget.selectionChanges)) {
+      oldWidget.selectionChanges.removeListener(_onSelection);
+      widget.selectionChanges.addListener(_onSelection);
+    }
+    if (!identical(oldWidget.documentChanges, widget.documentChanges)) {
+      oldWidget.documentChanges.removeListener(_onDocument);
+      widget.documentChanges.addListener(_onDocument);
+    }
+    _shown = widget.inspected();
+  }
+
+  @override
+  void dispose() {
+    widget.selectionChanges.removeListener(_onSelection);
+    widget.documentChanges.removeListener(_onDocument);
+    super.dispose();
+  }
+
+  void _onSelection() {
+    final next = widget.inspected();
+    if (next == _shown) return;
+    setState(() => _shown = next);
+  }
+
+  void _onDocument() {
+    final next = widget.inspected();
+    if (next == null && _shown == null) return;
+    setState(() => _shown = next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = _shown;
+    if (shown == null) return const SizedBox.shrink();
+    return widget.builder(context, shown) ?? const SizedBox.shrink();
+  }
+}
+
+/// [_source]'s notifications, forwarded at once, except while a frame
+/// builds ([SchedulerPhase.persistentCallbacks]): then one is held and
+/// delivered after that frame, the pattern of
+/// `FloorPlanController.toolChanged` (Task 4 review R-2). A pointer event,
+/// a key and a host call arrive between frames, so they are forwarded at
+/// once; [deliver] hands a held one on earlier, from the shell's own update.
+class _FrameSafeRelay extends ChangeNotifier {
+  _FrameSafeRelay(this._source) {
+    _source.addListener(_onSource);
+  }
+
+  final Listenable _source;
+
+  /// A notification is held for after the frame.
+  bool _held = false;
+
+  /// The post-frame delivery is scheduled.
+  bool _due = false;
+  bool _disposed = false;
+
+  void _onSource() {
+    final binding = SchedulerBinding.instance;
+    if (binding.schedulerPhase != SchedulerPhase.persistentCallbacks) {
+      _held = false;
+      notifyListeners();
+      return;
+    }
+    _held = true;
+    if (_due) return;
+    _due = true;
+    binding.addPostFrameCallback((_) {
+      _due = false;
+      deliver();
+    });
+  }
+
+  /// Delivers the held notification now, if any; only where every listener
+  /// may be marked dirty (between frames, or in the shell's own update).
+  void deliver() {
+    if (_disposed || !_held) return;
+    _held = false;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _source.removeListener(_onSource);
+    super.dispose();
+  }
+}
+
+/// Object snap as the editor's tools and drags read it (host embedding API
+/// spec S-14): the user's setting, [_user], while [_allowed] says the
+/// host's capabilities allow snapping, else off. The user's setting is
+/// never changed here, so it returns with the flag; a toggle and the
+/// listeners are the user's.
+class _CapabilitySnap extends SnapSettings {
+  _CapabilitySnap(this._user, this._allowed);
+
+  final SnapSettings _user;
+  final bool Function() _allowed;
+
+  @override
+  bool get objectSnap => _allowed() && _user.objectSnap;
+
+  @override
+  void toggleObjectSnap() => _user.toggleObjectSnap();
+
+  @override
+  void addListener(VoidCallback listener) => _user.addListener(listener);
+
+  @override
+  void removeListener(VoidCallback listener) => _user.removeListener(listener);
+}
+
+/// Whether [key] is a table of [doc] (spec 14a T1): a root-level instance
+/// of a live definition that seats, `TableSurvey`'s rule. A servable
+/// instance inside a group is no table.
+bool _isTableKey(DraftDocument doc, SelectionKey key) {
+  if (key.chain.isNotEmpty) return false;
+  final node = doc.tree[key.target];
+  return node is InstanceNode &&
+      node.parent == doc.rootHandle &&
+      doc.tree.definition(node.definition) != null &&
+      doc.components.get<SeatingComponent>(node.definition) != null;
+}
+
+/// The editor's capabilities as the select tool and the grip cache read
+/// them (host embedding API spec C-5, S-9, S-15), each asked live: a
+/// runtime change reaches the next press, hover, key, frame and drag's up.
+///
+/// - Under `selectTablesOnly` the pick is the table picker's (a table's
+///   top, else its box; the index pick's tolerance for a mouse, a
+///   finger's reach for a touch; a locked table passed over), and a band
+///   keeps tables only.
+/// - `move` (a body drag and a centre grip), `rotate` (the rotation grip),
+///   `reshape` (every other grip) and `delete` (Delete and Backspace) are
+///   the flags.
+/// - The idle keys (Escape, Delete, Backspace while no gesture runs) are
+///   the shell's `shortcuts` (spec C-7, S-16).
+class _CapabilityGates extends SelectGates {
+  _CapabilityGates(this._caps, this._picker, this._shortcuts);
+
+  final FloorPlanEditorCapabilities Function() _caps;
+  final TablePicker Function() _picker;
+  final bool Function() _shortcuts;
+
+  @override
+  bool get idleKeys => _shortcuts();
+
+  @override
+  bool get restrictsPick => _caps().selectTablesOnly;
+
+  @override
+  SelectionKey? pick(ToolPointerEvent e, ToolContext ctx) {
+    // A finger's reach for a touch; for a mouse the index pick's own 6 px
+    // tolerance (Task 5 review R-5), so a click just outside a table's box
+    // selects it as it does under `full`.
+    final hit = _picker().pick(e.world,
+        reach: e.isTouch ? e.reachRadiusWorld : e.pickRadiusWorld);
+    return hit == null ? null : SelectionKey.root(hit.table.instance);
+  }
+
+  @override
+  bool bandAccepts(DraftDocument d, SelectionKey key) =>
+      !_caps().selectTablesOnly || _isTableKey(d, key);
+
+  @override
+  bool get move => _caps().move;
+
+  @override
+  bool get rotate => _caps().rotate;
+
+  @override
+  bool get reshape => _caps().reshape;
+
+  @override
+  bool get delete => _caps().delete;
+}

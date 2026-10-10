@@ -101,7 +101,8 @@ class TableSelectTool extends Tool {
       this.options = _defaultOptions,
       this.userCamera = _always,
       this.toGlobal = _sameOffset,
-      this.events = _noEvents});
+      this.events = _noEvents,
+      this.idleKeys = _always});
 
   final TablePicker picker;
 
@@ -125,6 +126,11 @@ class TableSelectTool extends Tool {
   /// reads it at each button-less move, so the view hands in a record it
   /// keeps, not one built per call.
   final ServiceEvents<Handle> Function() events;
+
+  /// Whether the tool's idle key acts (host embedding API spec C-7, S-16),
+  /// read at each key: false leaves Escape, which clears the selection
+  /// while no gesture runs, to the host.
+  final bool Function() idleKeys;
 
   /// [userCamera] as the press read it.
   bool _pans = true;
@@ -529,7 +535,8 @@ class TableSelectTool extends Tool {
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.escape &&
-        _gesture == _Gesture.none) {
+        _gesture == _Gesture.none &&
+        idleKeys()) {
       ctx.selection.clear();
       return KeyEventResult.handled;
     }

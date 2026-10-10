@@ -9,6 +9,12 @@ library;
 export 'src/export/export_font.dart' show registerFontLicences;
 export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/fonts.dart' show ensureFloorPlanFonts;
+export 'src/host/bars.dart'
+    show
+        FloorPlanEditorAction,
+        FloorPlanEditorBar,
+        FloorPlanServiceAction,
+        FloorPlanServiceBar;
 export 'src/host/design_changes.dart'
     show
         FloorPlanDesignChange,
@@ -16,12 +22,17 @@ export 'src/host/design_changes.dart'
         FloorPlanTableAdded,
         FloorPlanTableChanged,
         FloorPlanTableRemoved;
+export 'src/host/editor_capabilities.dart'
+    show FloorPlanEditorCapabilities, FloorPlanSymbol, FloorPlanTool;
 export 'src/host/floor_plan_camera.dart' show FloorPlanCamera;
 export 'src/host/floor_plan_controller.dart' show FloorPlanController;
 export 'src/host/floor_plan_types.dart'
     show
         DuplicateNumber,
         FloorPlanExport,
+        FloorPlanExportChoice,
+        FloorPlanExportDpi,
+        FloorPlanExportFormat,
         FloorPlanLongPress,
         FloorPlanMode,
         FloorPlanTable,

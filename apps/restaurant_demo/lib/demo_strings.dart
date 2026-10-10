@@ -130,6 +130,42 @@ abstract class DemoStrings {
 
   String get lookPos;
 
+  /// Host embedding API spec C-1 to C-7 (Slice 4): the side panel's
+  /// section of the host's own choices, the editor's three profiles, the
+  /// host's own bar, its own export dialog, who owns the keys, the app
+  /// bar's table search, the table inspector's field, and the log's lines
+  /// for a failed export or print, a key of the demo's, a table linked
+  /// from the inspector and a search.
+  String get hostChoices;
+
+  String get editor;
+
+  String get editorFull;
+
+  String get editorTables;
+
+  String get editorReadOnly;
+
+  String get ownBar;
+
+  String get ownExportDialog;
+
+  String get planKeys;
+
+  String get findTable;
+
+  String get posId;
+
+  String logPageFlowError(String area, Object error);
+
+  String logKey(String area, String key);
+
+  String logLinkedTable(String area, String number, String? id);
+
+  String logFound(String area, String number);
+
+  String logNotFound(String area, String number);
+
   /// [mm] in metres, one decimal, with [separator] and a real minus sign.
   static String metres(double mm, String separator) {
     var text = (mm / 1000).toStringAsFixed(1);
@@ -323,6 +359,54 @@ final class _En extends DemoStrings {
 
   @override
   String get lookPos => 'POS';
+
+  @override
+  String get hostChoices => 'Host';
+
+  @override
+  String get editor => 'Editor';
+
+  @override
+  String get editorFull => 'Full';
+
+  @override
+  String get editorTables => 'Tables';
+
+  @override
+  String get editorReadOnly => 'Read only';
+
+  @override
+  String get ownBar => 'Own bar';
+
+  @override
+  String get ownExportDialog => 'Own export dialog';
+
+  @override
+  String get planKeys => "The plan's keys";
+
+  @override
+  String get findTable => 'Find a table';
+
+  @override
+  String get posId => 'POS id';
+
+  @override
+  String logPageFlowError(String area, Object error) =>
+      '$area: export or print failed ($error)';
+
+  @override
+  String logKey(String area, String key) => "$area: $key, the demo's key";
+
+  @override
+  String logLinkedTable(String area, String number, String? id) => id == null
+      ? '$area: table $number unlinked'
+      : '$area: table $number is $id';
+
+  @override
+  String logFound(String area, String number) => '$area: table $number found';
+
+  @override
+  String logNotFound(String area, String number) => '$area: no table $number';
 }
 
 final class _De extends DemoStrings {
@@ -517,6 +601,55 @@ final class _De extends DemoStrings {
 
   @override
   String get lookPos => 'Kasse';
+
+  @override
+  String get hostChoices => 'Host';
+
+  @override
+  String get editor => 'Editor';
+
+  @override
+  String get editorFull => 'Voll';
+
+  @override
+  String get editorTables => 'Tische';
+
+  @override
+  String get editorReadOnly => 'Nur lesen';
+
+  @override
+  String get ownBar => 'Eigene Leiste';
+
+  @override
+  String get ownExportDialog => 'Eigener Exportdialog';
+
+  @override
+  String get planKeys => 'Tasten des Plans';
+
+  @override
+  String get findTable => 'Tisch suchen';
+
+  @override
+  String get posId => 'Kassen-ID';
+
+  @override
+  String logPageFlowError(String area, Object error) =>
+      '$area: Export oder Druck fehlgeschlagen ($error)';
+
+  @override
+  String logKey(String area, String key) => '$area: $key, Taste der Demo';
+
+  @override
+  String logLinkedTable(String area, String number, String? id) => id == null
+      ? '$area: Tisch $number nicht mehr verknüpft'
+      : '$area: Tisch $number ist $id';
+
+  @override
+  String logFound(String area, String number) =>
+      '$area: Tisch $number gefunden';
+
+  @override
+  String logNotFound(String area, String number) => '$area: kein Tisch $number';
 }
 
 final class _Tr extends DemoStrings {
@@ -710,4 +843,52 @@ final class _Tr extends DemoStrings {
 
   @override
   String get lookPos => 'Kasa';
+
+  @override
+  String get hostChoices => 'Ana uygulama';
+
+  @override
+  String get editor => 'Düzenleyici';
+
+  @override
+  String get editorFull => 'Tam';
+
+  @override
+  String get editorTables => 'Masalar';
+
+  @override
+  String get editorReadOnly => 'Salt okunur';
+
+  @override
+  String get ownBar => 'Kendi çubuğu';
+
+  @override
+  String get ownExportDialog => 'Kendi dışa aktarma penceresi';
+
+  @override
+  String get planKeys => 'Planın tuşları';
+
+  @override
+  String get findTable => 'Masa bul';
+
+  @override
+  String get posId => 'Kasa kimliği';
+
+  @override
+  String logPageFlowError(String area, Object error) =>
+      '$area: dışa aktarma veya yazdırma başarısız ($error)';
+
+  @override
+  String logKey(String area, String key) => '$area: $key, demonun tuşu';
+
+  @override
+  String logLinkedTable(String area, String number, String? id) => id == null
+      ? '$area: masa $number bağlantısı kaldırıldı'
+      : '$area: masa $number, $id';
+
+  @override
+  String logFound(String area, String number) => '$area: masa $number bulundu';
+
+  @override
+  String logNotFound(String area, String number) => '$area: masa $number yok';
 }

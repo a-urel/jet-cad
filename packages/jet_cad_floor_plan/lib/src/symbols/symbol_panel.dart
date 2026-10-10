@@ -58,7 +58,8 @@ DraftDocument symbolThumbnailDocument(
 ///   symbols", a clear button keyed `symbol-search-clear` while it is not
 ///   empty), then the [SymbolGallery] over [searchSymbols]. An empty result
 ///   shows `No symbols match "<query>"` (key `symbol-search-empty`) and a
-///   Clear button (key `symbol-search-clear-empty`).
+///   Clear button (key `symbol-search-clear-empty`); with no query (a
+///   [filter] offering nothing), an empty area.
 ///
 /// **The field's focus follows the page panel's pattern** (F-4, F-13):
 /// `ShellShortcutGuard › CallbackShortcuts(Escape → handBack) › TextField(
@@ -91,11 +92,19 @@ class SymbolPanel extends StatefulWidget {
     required this.query,
     required this.onSelect,
     this.measurer = const InsertionPointMeasurer(),
+    this.filter,
+    this.placeable = true,
+    this.toolChanges,
   });
 
   final SymbolLibraryLoader loader;
   final SymbolThumbnails thumbnails;
   final ToolController tools;
+
+  /// What the panel rebuilds on for the active tool: [tools] when null. The
+  /// shell passes a relay of it that holds a notification sent during a
+  /// build until after the frame (Task 4 review R-2).
+  final Listenable? toolChanges;
   final SymbolPlaceTool tool;
   final ValueNotifier<SymbolEntry?> armed;
   final DraftPermissions permissions;
@@ -111,6 +120,16 @@ class SymbolPanel extends StatefulWidget {
   /// The thumbnail documents' measurer. A symbol holds no text, so the
   /// default (no font stack) paints the same thumbnail as any other.
   final TextMeasurer measurer;
+
+  /// The symbols offered (host embedding API spec C-5's `symbolFilter`):
+  /// applied before the search, and to a tapped cell's entry; null offers
+  /// every symbol. Read at each build.
+  final bool Function(SymbolEntry entry)? filter;
+
+  /// Whether a placement is offered at all (spec C-5: the symbol tool is
+  /// among the host's tools): false disables the gallery, as a denied
+  /// permission does.
+  final bool placeable;
 
   @override
   State<SymbolPanel> createState() => _SymbolPanelState();
@@ -189,12 +208,14 @@ class _SymbolPanelState extends State<SymbolPanel> {
     return symbolIdOf(entry);
   }
 
-  bool get _enabled => kSymbolPlacementNeeds.every(widget.permissions.allows);
+  bool get _enabled =>
+      widget.placeable &&
+      kSymbolPlacementNeeds.every(widget.permissions.allows);
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable:
-            Listenable.merge([widget.loader, widget.tools, widget.armed]),
+        listenable: Listenable.merge(
+            [widget.loader, widget.toolChanges ?? widget.tools, widget.armed]),
         builder: (context, _) => switch (widget.loader.state) {
           SymbolLibraryLoading() => const _Loading(),
           SymbolLibraryFailed(:final error) =>
@@ -214,7 +235,13 @@ class _SymbolPanelState extends State<SymbolPanel> {
     }
     final scheme = Theme.of(context).colorScheme;
     final cellColor = scheme.surfaceContainerLowest;
-    final groups = searchSymbols(library.entries, _query.text, words);
+    final filter = widget.filter;
+    final groups = searchSymbols(
+        filter == null
+            ? library.entries
+            : library.entries.where(filter).toList(),
+        _query.text,
+        words);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -224,7 +251,12 @@ class _SymbolPanelState extends State<SymbolPanel> {
         ),
         Expanded(
           child: groups.isEmpty
-              ? _NoMatch(query: _query.text, onClear: _clear)
+              // The no-match line names a query; with none, the host's
+              // filter offers nothing, and the area stays empty (Task 4
+              // review R-4).
+              ? (_query.text.trim().isEmpty
+                  ? const SizedBox.shrink()
+                  : _NoMatch(query: _query.text, onClear: _clear))
               : SymbolGallery(
                   categories: [
                     for (final g in groups)
@@ -238,7 +270,9 @@ class _SymbolPanelState extends State<SymbolPanel> {
                   enabled: _enabled,
                   onSelect: (id) {
                     final entry = _byId[id];
-                    if (entry != null) widget.onSelect(entry);
+                    if (entry == null) return;
+                    if (widget.filter case final f? when !f(entry)) return;
+                    widget.onSelect(entry);
                   },
                   thumbnails: widget.thumbnails,
                   foreground: foregroundFor(cellColor.toARGB32() & 0xFFFFFF),

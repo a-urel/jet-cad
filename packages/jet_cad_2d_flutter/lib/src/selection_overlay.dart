@@ -254,6 +254,11 @@ class SelectionOverlayPainter extends CustomPainter {
   /// (Ruling 03-10).
   ///
   /// [preview] is the move's or rotate's `T` while one is dragging.
+  ///
+  /// A role whose gate is closed (`GripCache.moveGripsLive`,
+  /// `stretchGripsLive`; host embedding API Slice 4) is skipped: its points
+  /// are neither projected nor drawn, and its buffer is still sized by the
+  /// role's count, so a gate toggled across frames reallocates nothing.
   void _paintGrips(
       Canvas canvas, GripCache grips, Transform2 m, Transform2? preview) {
     if (grips.leafGripsLive) {
@@ -264,12 +269,16 @@ class SelectionOverlayPainter extends CustomPainter {
       if (_movePoints.length != 2 * grips.moveCount) {
         _movePoints = Float32List(2 * grips.moveCount);
       }
+      final moveLive = grips.moveGripsLive;
+      final stretchLive = grips.stretchGripsLive;
       var s = 0, mv = 0;
       for (var i = 0; i < list.length; i++) {
         final g = list[i].grip;
+        final move = g.role == GripRole.move;
+        if (!(move ? moveLive : stretchLive)) continue;
         final x = m.a * g.x + m.c * g.y + m.e;
         final y = m.b * g.x + m.d * g.y + m.f;
-        if (g.role == GripRole.move) {
+        if (move) {
           _movePoints[mv++] = x;
           _movePoints[mv++] = y;
         } else {
@@ -284,7 +293,9 @@ class SelectionOverlayPainter extends CustomPainter {
         canvas.drawRawPoints(PointMode.points, _movePoints, _gripMovePaint);
       }
       final hot = grips.hot;
-      if (hot >= 0 && hot < list.length) {
+      if (hot >= 0 &&
+          hot < list.length &&
+          (list[hot].grip.role == GripRole.move ? moveLive : stretchLive)) {
         final g = list[hot].grip;
         _hotPoint[0] = m.a * g.x + m.c * g.y + m.e;
         _hotPoint[1] = m.b * g.x + m.d * g.y + m.f;
@@ -296,14 +307,18 @@ class SelectionOverlayPainter extends CustomPainter {
       // During a move or rotate the grip follows the preview's `T`
       // (spec D6, amended after the look).
       final g = rotationGripOf(box, m, grips.frame, preview);
-      canvas.drawLine(g.anchor, g.stem, _stem);
-      canvas.drawCircle(g.centre, kRotationGripPixels / 2, _gripPaint);
+      // A finite box can still project past the doubles: corners at -inf
+      // and +inf have a NaN middle, which `drawLine` asserts on (O-11).
+      if (g.anchor.isFinite && g.centre.isFinite && g.stem.isFinite) {
+        canvas.drawLine(g.anchor, g.stem, _stem);
+        canvas.drawCircle(g.centre, kRotationGripPixels / 2, _gripPaint);
+      }
     }
   }
 
   /// A cross of half-length [half] **screen pixels** centred on [key]'s world
   /// position — or, with [moved], on `moved(position)` — or nothing at all
-  /// when [key] is not a lone point.
+  /// when [key] is not a lone point or its screen position is not finite.
   ///
   /// [worldToScreen] is the camera's own matrix, not [_matrix]: the position
   /// [OutlineCache.worldPointOf] hands back is absolute world, and this pass
@@ -323,6 +338,9 @@ class SelectionOverlayPainter extends CustomPainter {
     }
     final x = worldToScreen.a * px + worldToScreen.c * py + worldToScreen.e;
     final y = worldToScreen.b * px + worldToScreen.d * py + worldToScreen.f;
+    // Off the doubles on the screen: no cross, rather than a NaN offset
+    // `drawLine` asserts on (O-11).
+    if (!x.isFinite || !y.isFinite) return;
     canvas.drawLine(Offset(x - half, y), Offset(x + half, y), paint);
     canvas.drawLine(Offset(x, y - half), Offset(x, y + half), paint);
   }

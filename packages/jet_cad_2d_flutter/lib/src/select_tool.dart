@@ -18,6 +18,7 @@ import 'grip_cache.dart'
     show GripCache, GripRef, kTouchGripHitPixels, movableKey;
 import 'canvas_palette.dart';
 import 'grip_drag.dart';
+import 'select_gates.dart';
 import 'selection.dart';
 import 'selection_style.dart';
 import 'snap_marker.dart';
@@ -47,11 +48,26 @@ enum PressClass { rotationGrip, grip, selectedBody, unselectedBody, empty }
 /// - press classes;
 /// - move, rotate and reshape drags with object and grid snap;
 /// - one command on release (spec 03 D2, D4, D5).
+///
+/// With [gates] (host embedding API Slice 4), an application restricts the
+/// pick, the band, each drag kind, Delete and the idle keys; without, every
+/// gate is open.
 class SelectTool extends Tool {
-  SelectTool({this.moveResolver});
+  SelectTool({this.moveResolver, this.gates});
 
   /// Spec 09c D8: asked during a single-node body drag; null: today's move.
   final MoveResolver? moveResolver;
+
+  /// What this tool may do, asked live (never captured): the pick at each
+  /// press and hover, a drag's gate at the slop and again at the up, the
+  /// band at its release, the keys at each key. Null: every gate open, as
+  /// [SelectGates.all].
+  ///
+  /// The grip cache has its own `GripCache.gates`: a host passes the same
+  /// object to both. With only this one gated, the cache still draws and
+  /// hits a closed role's grips (and shows their cursor and hot grip), and
+  /// only the drag is refused.
+  final SelectGates? gates;
 
   /// The drag began from a body with exactly one key selected (09c D8).
   bool _resolvable = false;
@@ -136,7 +152,12 @@ class SelectTool extends Tool {
   /// The topmost pick within the precise radius; for a finger that
   /// misses, within its reach (spec 14t R-3): a wide first pick would
   /// return a later-drawn neighbour over the line under the finger.
+  ///
+  /// With [gates] that restrict the pick, their pick instead, for presses
+  /// and hovers alike (S-15).
   SelectionKey? _pick(ToolPointerEvent e, ToolContext ctx) {
+    final g = gates;
+    if (g != null && g.restrictsPick) return g.pick(e, ctx);
     if (!ctx.index.pickInto(
             e.world, e.pickRadiusWorld, const QueryFilter.picking(), _hit) &&
         (e.reachRadiusWorld <= e.pickRadiusWorld ||
@@ -242,10 +263,11 @@ class SelectTool extends Tool {
       }
     }
     // A body the select tool will not move shows no move cursor (spec 08
-    // D16).
+    // D16), nor one under a closed `move` gate.
     if (cursor == MouseCursor.defer &&
         key != null &&
         ctx.selection.contains(key) &&
+        (gates?.move ?? true) &&
         movableKey(ctx.document, key, grips?.objects)) {
       cursor = SystemMouseCursors.move;
     }
@@ -257,9 +279,25 @@ class SelectTool extends Tool {
   }
 
   /// Spec D2, past the slop. A drag whose capability is refused never
-  /// starts; the press stays a click (Ruling 03-6).
+  /// starts; the press stays a click (Ruling 03-6). So does one whose gate
+  /// is closed: a body or centre grip drag needs `move`, another grip
+  /// `reshape`, the rotation grip `rotate`.
   void _beginDrag(ToolPointerEvent e, ToolContext ctx) {
     _resolvable = false;
+    final gate = switch (_class) {
+      PressClass.empty => true,
+      PressClass.selectedBody ||
+      PressClass.unselectedBody =>
+        _gateOpen(DragKind.move),
+      PressClass.grip => _gateOpen(_pressRef!.grip.role == GripRole.move
+          ? DragKind.move
+          : DragKind.reshape),
+      PressClass.rotationGrip => _gateOpen(DragKind.rotate),
+    };
+    if (!gate) {
+      _clickOnly = true;
+      return;
+    }
     switch (_class) {
       case PressClass.empty:
         _phase = ToolPhase.dragging;
@@ -359,6 +397,19 @@ class SelectTool extends Tool {
       }
     }
     return -1;
+  }
+
+  /// Whether [kind]'s gate is open now: `move`, `rotate` or `reshape`; a
+  /// band has none.
+  bool _gateOpen(DragKind kind) {
+    final g = gates;
+    if (g == null) return true;
+    return switch (kind) {
+      DragKind.move => g.move,
+      DragKind.rotate => g.rotate,
+      DragKind.reshape => g.reshape,
+      DragKind.band => true,
+    };
   }
 
   /// Spec D2: a drag needs its capability before it starts.
@@ -472,6 +523,12 @@ class SelectTool extends Tool {
           final keys = _bandKeys(ctx, e);
           e.shift ? ctx.selection.toggle(keys) : ctx.selection.replace(keys);
         } else {
+          // S-9h: a gate closed during the drag cancels it at the up; no
+          // command, as an Escape would.
+          if (!_gateOpen(_dragKind!)) {
+            cancel(ctx);
+            return;
+          }
           // Ruling 03-13: the up carries the final position.
           _follow(e, ctx);
           final command = _drag!.command(ctx.document.commands.permissions);
@@ -501,7 +558,7 @@ class SelectTool extends Tool {
 
   /// Every root-level key the band selects: root entities, groups (spec D8,
   /// Ruling 02-2 — decided here from the passing-slot set, once per band)
-  /// and instances.
+  /// and instances; with [gates], only those `bandAccepts` accepts.
   ///
   /// **Both corners are converted here, at release** (spec D8): the camera
   /// may have moved between the press and the up — a trackpad zoom during a
@@ -538,7 +595,14 @@ class SelectTool extends Tool {
     }
     ctx.index.forEachInstanceInBand(band, mode, const QueryFilter.picking(),
         (h) => keys.add(SelectionKey.root(h)));
-    return keys;
+    // With gates, only the keys they accept, asked once per band at its
+    // release.
+    final g = gates;
+    if (g == null) return keys;
+    return [
+      for (final key in keys)
+        if (g.bandAccepts(doc, key)) key,
+    ];
   }
 
   /// Ledger Ruling P-1: every leaf owned by [group] or a group nested in it
@@ -652,25 +716,48 @@ class SelectTool extends Tool {
     }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    // With gates, the idle keys need `idleKeys` (S-16), and Delete and
+    // Backspace `delete` too; an ignored key goes on to the host.
+    final g = gates;
     if (key == LogicalKeyboardKey.escape) {
-      if (_phase == ToolPhase.idle) ctx.selection.clear();
+      if (_phase == ToolPhase.idle) {
+        if (g != null && !g.idleKeys) return KeyEventResult.ignored;
+        ctx.selection.clear();
+      }
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.delete ||
         key == LogicalKeyboardKey.backspace) {
       if (_phase != ToolPhase.idle) return KeyEventResult.ignored;
-      _deleteSelection(ctx);
+      if (g != null && !(g.idleKeys && g.delete)) {
+        return KeyEventResult.ignored;
+      }
+      deleteSelection(ctx);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  /// Deletes the selection as the idle Delete key does: one command (one
+  /// undo step, executed through [ToolContext.execute]), or none. It acts
+  /// only while no gesture runs (idle), is gated by [gates]' `delete` but
+  /// not by `idleKeys` (a command is not a key), and answers whether a
+  /// command was executed: false mid-gesture, under a closed `delete`, with
+  /// nothing selected, or when every selected object is refused.
+  bool deleteSelection(ToolContext ctx) {
+    if (_phase != ToolPhase.idle) return false;
+    final g = gates;
+    if (g != null && !g.delete) return false;
+    return _deleteSelection(ctx);
   }
 
   /// Per selected key, in ascending `target` order: builds the object's full
   /// command list, checks every command against [DraftPermissions] before
   /// executing any of them, and only removes the selection entry once the
   /// whole list has run. A refused object is skipped whole — it stays
-  /// selected and untouched — never partially deleted.
-  void _deleteSelection(ToolContext ctx) {
+  /// selected and untouched — never partially deleted. Answers whether a
+  /// command was executed.
+  bool _deleteSelection(ToolContext ctx) {
     final doc = ctx.document;
     final permissions = doc.commands.permissions;
     final keys = ctx.selection.keys.toList()
@@ -729,9 +816,10 @@ class SelectTool extends Tool {
       named.addAll(names);
       removed.add(key);
     }
-    if (commands.isEmpty) return;
+    if (commands.isEmpty) return false;
     ctx.execute(CompoundCommand(commands, label: 'Delete'));
     ctx.selection.remove(removed);
+    return true;
   }
 
   /// Leaves first (fills whose boundary is here skipped), child instances,

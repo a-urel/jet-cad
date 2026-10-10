@@ -674,7 +674,9 @@ final class FloorPlanEditorBar {
 ```
 
 `visible: false` removes the top bar; the tools stay in the left panel
-(or are hidden by C-4).
+(or are hidden by C-5). The actions are declared in today's order
+(export, print, undo, redo, snap, zoom) so the default bar is today's
+(S-2).
 
 ### C-3. What a host-built bar needs
 
@@ -696,6 +698,12 @@ final class FloorPlanEditorBar {
   `FloorPlanExportFormat` and `FloorPlanExportDpi`.
 - `FloorPlanView.onPageFlowError: void Function(Object error)?`: an export
   or print that fails reports here (today it is lost).
+- `bool deleteSelection()` (added by Slice 4's plan, S-16): in the design
+  mode, with an editor mounted and `delete` allowed, deletes the editor's
+  selection exactly as the select tool's idle Delete does (one undo step,
+  the table-data expander), whichever tool is active, while it is idle,
+  and answers true; false otherwise (a shape part-way included). A host that
+  owns the keyboard (`shortcuts: false`, C-7) deletes through it.
 
 ### C-4. The dialog hook
 
@@ -745,13 +753,21 @@ final class FloorPlanEditorCapabilities {
   allowed under every profile.
 - **Changing it at runtime** takes effect at the next build; a tool that
   is no longer allowed falls back to select; a hidden panel's state is
-  kept.
+  kept, but for all three panels hidden at once: the right column is then
+  not built and their state (the Layers section's open state, the
+  Selection panel's typed text) is not kept (Slice 4, Task 5). A gesture,
+  menu, field or dialog opened before the change is read against the
+  capabilities when it commits. Showing or hiding a side column or the
+  rulers keeps the canvas and the plan's place on the screen (Slice 4's
+  final review, F-1 and F-3).
 
 ### C-6. The table inspector slot
 
 `FloorPlanView.tableInspectorBuilder: Widget? Function(BuildContext,
 FloorPlanTableDetail table)?`: shown in the editor's Selection panel under
-jet-cad's own fields when **exactly one numbered table** is selected.
+jet-cad's own fields when **exactly one numbered table** is selected, and
+none for a number another table shares (Slice 4, Task 6 R-1 (a), as F-3
+of Slice 2 reads no id for it).
 Monépro links a drawn table to a `pos_tables` row here, with Slice 2's
 `setTableData`. With it, `ValueListenable<Set<String>>
 editorSelectedTables` (numbers selected in the design mode) lets a host
@@ -875,8 +891,8 @@ sharing a number, an unnumbered table, a camera not at identity.
   M-H43c: reshape grips active.
 - M-H44: `mergeCandidate` non-null for one table.
 - M-H45: the inspector shows for two selected tables.
-- M-H46: Ctrl+Shift+E opens the Material dialog when `onExportDialog` is
-  given.
+- M-H46: Cmd/Ctrl+E opens the Material dialog when `onExportDialog` is
+  given (S-1: no Ctrl+Shift+E exists).
 - M-H47: a capability change at runtime leaves a forbidden tool active;
   `symbolFilter` not applied to search results; `serviceBar.visible:
   false` leaves the 44 px seed in the R-13 measurement.
@@ -938,12 +954,30 @@ sharing a number, an unnumbered table, a camera not at identity.
   (draw order is by handle). Pre-existing, independent of table data;
   found by Slice 2's Task 2 (M-H27's amended killer). Its own task
   (`AddNodeCommand` restoring the child's index), beside O-8.
+  **Settled** (2026-10-10, plan
+  [2026-10-10-undo-node-index.md](../plans/2026-10-10-undo-node-index.md)):
+  `RemoveNodeCommand`'s inverse carries the node's index and
+  `DocumentTree.addNode` inserts there, so Delete then Undo is byte-exact,
+  for one node and for a compound; HD12, TD7b and TD10 compare the
+  encoding whole.
 - **O-11.** Selecting a table whose corners are not finite (the
   fixture's `9`, a hand-edited file) trips a NaN-offset debug assertion
   in `SelectionOverlayPainter._paintGrips`
   (`jet_cad_2d_flutter/lib/src/selection_overlay.dart`). Unreachable from
   the UI: the editor has no free scale for an instance. Found by Slice
   2's Task 2 (its review's R-4). Its own task (skip non-finite grips).
+  A PDF of a plan holding such a table (Export and Print) trips the pdf
+  package's `!value.isNaN` through the label's residual in
+  `PdfDrawSink`; its PNG is written. **Closed on `fix/non-finite-corners`
+  (2026-10-10), merged into `main` at `aed5c4d`:** `GripCache` keeps no non-finite bounds in its box and
+  no non-finite grip, and a grip whose screen distance is NaN is out of
+  every hit test's reach; `SelectionOverlayPainter` draws no rotation
+  grip and no point cross at a non-finite screen position; `PdfDrawSink`
+  draws nothing under a residual with an entry that is not finite.
+  Named mutants M-O11a to M-O11i, each killed
+  (`jet_cad_2d_flutter/test/non_finite_selection_test.dart`, the
+  sink's O-11 tests; the planner's `test/host/non_finite_table_test.dart`
+  on the whole fixture).
 
 ## Files (expected)
 
@@ -1047,3 +1081,44 @@ alpha × 0.6; S-9 a host veil colour's alpha is multiplied by the opacity;
 S-10 the view re-measures the selection canvas after a bar-height change;
 S-11 the theme is resolved in a scope just below `FloorPlanView`; S-12 the
 readings the plan pins.
+
+**Settled by Slice 4's plan** (`docs/superpowers/plans/2026-10-09-embedding-slice-4.md`,
+its *Spec points to settle*; the controller's rulings, each the plan's
+recommendation but S-16): S-1 M-H46's chord is Cmd/Ctrl+E (no Ctrl+Shift+E
+exists); S-2 the editor's actions in today's order, so the default bar is
+today's; S-3 C-2 reads C-5; S-4 in the design mode `undo()` and `redo()`
+wait for an idle tool (a fix for a 0.3.0 host, named in the CHANGELOG);
+S-5 `mergeCandidate` null in the design mode; S-6 `FloorPlanTool`'s
+values and `selectTool` where there is no editor; S-7 one export/print
+guard per controller; S-8 `onPageFlowError` absent is today's behaviour;
+S-9 the edit paths F-15 misses (the centre grip, the symbol tool's R and
+M, an armed symbol, the door, wall and dimension fields, the panels'
+edits, the Fill row, a selection or a drag across a change) each with its
+flag; S-10 `reshape` governs object fields and Change size; S-11 hidden
+versus read-only controls, hidden panels kept offstage; S-12 the profiles'
+every field, `tools` must hold `select`; S-13 no left column under
+`readOnly`; S-14 what `snapping` turns off; S-15 `selectTablesOnly`
+picks through the table picker; **S-16 ruled otherwise: `shortcuts:
+false` unbinds every idle key, and the controller gains
+`deleteSelection()` (C-3) so a host that owns the keyboard can still
+delete**; S-17 `editorSelectedTables` empty in the selection mode; S-18
+"exactly one numbered table"; S-19 host widgets in the bars; S-20 a
+bar's `actions` shape the bar, not the chords; S-21 F-9's `autofocus`
+is new on both modes; S-22 capabilities are the editor's alone; S-23
+`FloorPlanSymbol.name` is the stored name; S-24 F-12 amended (the
+dispatcher's permissions are mutable; V-5 stands on its other grounds).
+Ruled during the slice: Task 2 R-3 the first frame after a mode switch is
+exact (`canvasAssumed`), not recorded as an offset; Task 6 R-1 (a) C-6's
+shared number shows no inspector; Task 7 finding 1 the planner's own text
+fields keep their keys from a host's `Shortcuts` (a change a 0.3.0 host
+with bindings above the view can notice, in the CHANGELOG). The final
+review's F-1 to F-4: a change of both side columns keeps the canvas; a
+controller swapped and disposed at once no longer asserts; **showing or
+hiding a bar, the editor's left column or its rulers keeps the plan in
+place from the first frame** (the camera pans; its listeners hear it after
+that frame), while a runtime change of the theme's `serviceBarHeight`
+still moves the plan with the canvas, as Slice 3's S-10 rules; an Export
+or Print refused while under way (`export` or `print` turned off) hands
+nothing over. F-7 is a recorded limit: a table symbol tagged
+`against-wall` still turns to its wall on a move or placement under
+`rotate: false` (none bundled is; `snapping: false` turns it off).

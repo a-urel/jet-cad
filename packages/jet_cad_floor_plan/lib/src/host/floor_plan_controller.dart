@@ -15,6 +15,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../camera_bounds.dart';
 import '../export/export_dialog.dart';
 import '../export/export_font.dart';
+import '../export/page_printer.dart';
 import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../new_document.dart';
@@ -26,8 +27,10 @@ import '../symbols/symbol_library_loader.dart';
 import '../tables/table_data_component.dart';
 import '../tables/table_index.dart';
 import 'design_changes.dart';
+import 'editor_capabilities.dart' show FloorPlanTool;
 import 'floor_plan_camera.dart';
 import 'floor_plan_types.dart';
+import 'page_flows.dart' show exportOnce, printOnce, toExportChoice;
 import 'service_layout.dart';
 import 'service_view.dart' show kServiceBarHeight;
 import 'table_detail.dart';
@@ -37,16 +40,24 @@ import 'table_fit.dart';
 /// 14b-2 R-11), above the 96 symbols of both libraries.
 const int kFloorPlanThumbnailCapacity = 128;
 
+/// Where each mode's canvas starts in a `FloorPlanView` whose chrome is
+/// the default (R-13 as amended): the editor's top bar (44), left panel
+/// (240) and rulers; the service bar ([kServiceBarHeight]). A view whose
+/// chrome differs tells the controller where its canvases start by their
+/// chrome (`FloorPlanController.canvasAssumed`), and the origins move by
+/// the difference.
+const Map<FloorPlanMode, Offset> _defaultChromeOrigins = {
+  FloorPlanMode.design: Offset(240 + kRulerThickness, 44 + kRulerThickness),
+  FloorPlanMode.selection: Offset(0, kServiceBarHeight),
+};
+
 /// Where each mode's canvas starts in a `FloorPlanView`, until a view has
 /// measured it (R-13 as amended): the editor's top bar (44), left panel
 /// (240) and rulers; the service bar ([kServiceBarHeight]). Read when a
 /// controller is made; a test seam.
 @visibleForTesting
-final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds = {
-  FloorPlanMode.design:
-      const Offset(240 + kRulerThickness, 44 + kRulerThickness),
-  FloorPlanMode.selection: const Offset(0, kServiceBarHeight),
-};
+final Map<FloorPlanMode, Offset> floorPlanCanvasSeeds =
+    Map.of(_defaultChromeOrigins);
 
 /// One plan the controller holds: the document, the measurer it was built
 /// with, the selection over it, and the controller's subscription to it.
@@ -138,6 +149,54 @@ final class _CameraValue implements ValueListenable<FloorPlanCamera> {
   @override
   void removeListener(VoidCallback listener) =>
       _camera.removeListener(listener);
+}
+
+/// The controller's camera controller (final review F-3): a pan made while
+/// a view builds ([panUnheard]) is applied at once and heard after that
+/// frame.
+final class _ViewCamera extends CameraController {
+  _ViewCamera(super.initial, {super.minScale, super.maxScale});
+
+  /// A [panUnheard] is assigning the value: its notification waits.
+  bool _quiet = false;
+
+  /// A notification is due after the frame.
+  bool _owed = false;
+  bool _disposed = false;
+
+  /// Pans by [canvasDelta] now, as [panBy] does, while a view builds: the
+  /// frame being built lays out and paints at the new value (the canvas
+  /// that moved is laid out and painted again whatever the camera does),
+  /// and the listeners -- a host's among them, which may not be marked
+  /// dirty in another widget's build -- hear it once, after the frame.
+  void panUnheard(Offset canvasDelta) {
+    _quiet = true;
+    try {
+      panBy(canvasDelta);
+    } finally {
+      _quiet = false;
+    }
+    if (_owed) return;
+    _owed = true;
+    SchedulerBinding.instance
+      ..addPostFrameCallback((_) {
+        _owed = false;
+        if (!_disposed) notifyListeners();
+      })
+      ..ensureVisualUpdate();
+  }
+
+  @override
+  void notifyListeners() {
+    if (_quiet) return;
+    super.notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 }
 
 /// The table focus (zone spec Z10): each [replace] notifies, an equal set
@@ -312,6 +371,17 @@ class FloorPlanController extends ChangeNotifier {
   @internal
   ExportChoice exportChoice = ExportChoice.initial;
 
+  /// One export or print at a time, for this controller (host embedding
+  /// API spec S-7): its views' flows and [exportPlan] and [printPlan] share
+  /// it. False while one runs.
+  @internal
+  final ValueNotifier<bool> pageFlowReady = ValueNotifier(true);
+
+  /// Whether [dispose] has run: a flow that outlives its view releases
+  /// [pageFlowReady] unless the controller went too.
+  @internal
+  bool get isDisposed => _disposed;
+
   /// The zoom bounds (spec G-3), as the constructor was given them.
   final double _minScale, _maxScale;
 
@@ -324,7 +394,9 @@ class FloorPlanController extends ChangeNotifier {
   /// `minScale` and `maxScale`. Named `camera` before the host embedding
   /// API (spec G-2), which gave that name to the public [camera].
   @internal
-  late final CameraController cameraController = CameraController(
+  CameraController get cameraController => _viewCamera;
+
+  late final _ViewCamera _viewCamera = _ViewCamera(
       ViewportTransform(worldToScreenMatrix: Transform2(1, 0, 0, -1, 0, 0)),
       minScale: _minScale,
       maxScale: _maxScale);
@@ -332,7 +404,9 @@ class FloorPlanController extends ChangeNotifier {
   late final _CameraValue _camera = _CameraValue(cameraController);
 
   /// Where the plan is on the canvas (spec G-2): a new [FloorPlanCamera] at
-  /// every pan, zoom and fit, by the user or by the host; one per position,
+  /// every pan, zoom and fit, by the user or by the host, and at a view's
+  /// chrome change in the mode shown, which keeps the plan in place on the
+  /// screen (heard after that frame, [chromeMoved]); one per position,
   /// so two reads with no camera change in between are the identical
   /// object. One camera for both modes: a mode switch keeps the plan where
   /// it is on the screen (R-13), moving the camera by the difference of the
@@ -362,9 +436,11 @@ class FloorPlanController extends ChangeNotifier {
   /// view that has no size yet reports nothing.
   ///
   /// [setMode] sets it at once to where the new mode's canvas was when a
-  /// view last showed that mode (review R-4), so [zoomBy]'s default focus
-  /// and [worldToGlobal] are right from the switch; a mode no view has shown
-  /// yet keeps the old mode's rect until the end of the next frame.
+  /// view last showed that mode (review R-4), moved by what the view's
+  /// chrome for it changed since (a bar shown or hidden, the theme's bar
+  /// height), so [zoomBy]'s default focus and [worldToGlobal] are right
+  /// from the switch; a mode no view has shown yet keeps the old mode's
+  /// rect until the end of the next frame.
   ValueListenable<Rect?> get canvasRect => _canvasRect;
 
   /// The global point that shows [world] (millimetres, y up), or null with
@@ -446,6 +522,24 @@ class FloorPlanController extends ChangeNotifier {
   /// point of the last [centerOn] (spec G-3). The last request wins.
   _FitTarget? _fitTarget;
   VoidCallback? _settle;
+
+  /// The active editor's idle probe (spec S-4): true while no tool is
+  /// part-way through a shape; null with no editor mounted.
+  bool Function()? _idle;
+
+  /// The active editor's tool selector (spec C-3, S-6): it activates a tool
+  /// when the editor's capabilities allow it; null with no editor mounted.
+  bool Function(FloorPlanTool tool)? _toolSelector;
+
+  /// The active editor's delete (spec C-3 as Slice 4's S-16 ruled): it
+  /// deletes the editor's selection as the select tool's idle Delete does
+  /// and answers whether it did; null with no editor mounted.
+  bool Function()? _deleter;
+
+  /// The tool an editor reported during a frame's build, applied after it
+  /// ([_toolChanged]); whether that application is scheduled.
+  FloorPlanTool? _pendingTool;
+  bool _toolDue = false;
   bool _disposed = false;
 
   final ValueNotifier<FloorPlanMode> _mode =
@@ -455,6 +549,8 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<bool> _canRedo = ValueNotifier(false);
   final ValueNotifier<Set<String>> _selectedTables =
       ValueNotifier(const <String>{});
+  final ValueNotifier<Set<String>> _editorSelected =
+      ValueNotifier(const <String>{});
   final ValueNotifier<int> _revision = ValueNotifier(0);
   final ValueNotifier<Map<String, TableStatus>> _statuses =
       ValueNotifier(const <String, TableStatus>{});
@@ -463,6 +559,9 @@ class FloorPlanController extends ChangeNotifier {
   final ValueNotifier<Map<String, TableStatus>> _groupStatuses =
       ValueNotifier(const <String, TableStatus>{});
   final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
+  final ValueNotifier<Set<String>?> _mergeCandidate = ValueNotifier(null);
+  final ValueNotifier<FloorPlanTool> _activeTool =
+      ValueNotifier(FloorPlanTool.select);
   final _Focus _focus = _Focus();
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo
@@ -557,6 +656,109 @@ class FloorPlanController extends ChangeNotifier {
   /// `Listenable.merge` of all three).
   ValueListenable<String?> get selectedGroup => _selectedGroup;
 
+  /// The numbers the service bar's Merge would send (host embedding API
+  /// spec C-3, S-5), for a host's own bar: in the selection mode
+  /// [selectedTables], unmodifiable, when they span two or more units
+  /// (table-groups spec G5: a unit is a group or a number in no group), so
+  /// one table, two tables sharing a number and exactly one group give
+  /// null; null otherwise, and always in the design mode. It does not
+  /// depend on whether the view was given `onMergeRequested`.
+  ///
+  /// It notifies only when the set changes, and, like [selectedGroup],
+  /// after [selectedTables] and [tableGroups] have notified.
+  ValueListenable<Set<String>?> get mergeCandidate => _mergeCandidate;
+
+  /// The editor's active tool (host embedding API spec C-3, S-6), for a
+  /// host's own tool strip: moved by a palette tap, a tool letter, Escape,
+  /// [selectTool], a tool falling back to select when the view's
+  /// `editorCapabilities` no longer allow it, and a mode switch. It reads
+  /// [FloorPlanTool.select] in the selection mode and while no editor is
+  /// mounted. A change the editor makes while the view builds (a fallback,
+  /// a new plan's editor) is announced after that frame.
+  ValueListenable<FloorPlanTool> get activeTool => _activeTool;
+
+  /// Activates [tool] in the mounted editor (spec C-3, S-6), as a palette
+  /// tap would, and answers whether it is now active. False in the
+  /// selection mode, with no editor mounted, and for a tool the view's
+  /// `editorCapabilities` refuse. [FloorPlanTool.symbol] re-activates the
+  /// symbol last armed from the Symbols tab, while its capabilities still
+  /// offer it; with none armed it answers false: a host does not choose a
+  /// symbol through this call.
+  bool selectTool(FloorPlanTool tool) {
+    if (_mode.value != FloorPlanMode.design) return false;
+    return _toolSelector?.call(tool) ?? false;
+  }
+
+  /// Deletes the editor's selection (host embedding API spec C-3, as Slice
+  /// 4's S-16 ruled) as the select tool's idle Delete key does, whichever
+  /// tool is active, while it is idle: one undo step (a compound), the
+  /// table data of a deleted table dropped with it and restored by its
+  /// undo. Pending input is settled first, as for [undo]. For a host that
+  /// owns the keyboard (`FloorPlanView.shortcuts: false`, under which the
+  /// Delete key deletes nothing).
+  ///
+  /// Answers whether anything was deleted: false in the selection mode,
+  /// with no editor mounted, with nothing selected, when the view's
+  /// `editorCapabilities` refuse `delete` (`readOnly`), when the plan's
+  /// permissions refuse every selected object, and while a gesture or a
+  /// shape is part-way (a drag, a pending wall).
+  bool deleteSelection() {
+    if (_mode.value != FloorPlanMode.design) return false;
+    final delete = _deleter;
+    if (delete == null || _editorMidShape) return false;
+    _settle?.call();
+    return delete();
+  }
+
+  /// Where the active editor registers its delete ([deleteSelection]).
+  /// Returns the withdrawal, which withdraws only [delete] itself, as
+  /// [registerSettle]'s.
+  @internal
+  VoidCallback registerDelete(bool Function() delete) {
+    _deleter = delete;
+    return () {
+      if (identical(_deleter, delete)) _deleter = null;
+    };
+  }
+
+  /// Where the active editor registers its tool selector (spec C-3, S-6).
+  /// Returns the withdrawal, which withdraws only [select] itself, as
+  /// [registerSettle]'s; a withdrawn editor's tool is no longer active.
+  @internal
+  VoidCallback registerTools(bool Function(FloorPlanTool tool) select) {
+    _toolSelector = select;
+    return () {
+      if (!identical(_toolSelector, select)) return;
+      _toolSelector = null;
+      toolChanged(FloorPlanTool.select);
+    };
+  }
+
+  /// The active editor's tool is now [tool] (spec C-3): called by the
+  /// editor on every tool change. A change made while a frame builds or
+  /// lays out (a `didUpdateWidget`, a mount, a dispose) is applied after
+  /// the frame, so a host's listener never rebuilds mid-build; any other
+  /// is applied now.
+  @internal
+  void toolChanged(FloorPlanTool tool) {
+    if (_disposed) return;
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      _pendingTool = tool;
+      if (_toolDue) return;
+      _toolDue = true;
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        _toolDue = false;
+        final next = _pendingTool;
+        _pendingTool = null;
+        if (!_disposed && next != null) _activeTool.value = next;
+      });
+      return;
+    }
+    _pendingTool = null;
+    _activeTool.value = tool;
+  }
+
   /// The numbers of the selectable members of group [groupId] (trimmed) in
   /// the active plan: its live members on a visible, unlocked layer, by the
   /// rule Merge and Split use (table-groups fixes spec X1, closing the
@@ -587,6 +789,12 @@ class FloorPlanController extends ChangeNotifier {
   /// The numbers of the tables selected in the active view (H3): a
   /// selected object that is not a numbered table is not in it.
   ValueListenable<Set<String>> get selectedTables => _selectedTables;
+
+  /// The numbers of the tables selected in the design mode's editor (host
+  /// embedding API spec C-6, S-17), for a host's own side panel beside the
+  /// editor: [selectedTables]' value in the design mode, empty in the
+  /// selection mode. Unmodifiable; it notifies only when the set changes.
+  ValueListenable<Set<String>> get editorSelectedTables => _editorSelected;
 
   /// The active plan: the design's, or the service copy's in the
   /// selection mode. For [FloorPlanView].
@@ -708,6 +916,36 @@ class FloorPlanController extends ChangeNotifier {
   /// The origins a reframing used and no measurement has confirmed yet.
   final Map<FloorPlanMode, Offset> _assumed = {};
 
+  /// Where each mode's chrome alone put its canvas when [_canvasAt]'s
+  /// origin for it was seeded or measured: the basis [canvasAssumed] moves
+  /// that origin from.
+  final Map<FloorPlanMode, Offset> _chromeAt = Map.of(_defaultChromeOrigins);
+
+  /// A view lays out mode [mode]'s chrome so that, by the chrome alone, its
+  /// canvas starts at [chrome] (a bar shown or hidden, the theme's bar
+  /// height, the editor's rulers and left column; Task 2 review R-3). For
+  /// a mode not shown, the origin a switch into it reframes by moves by
+  /// what the chrome moved since that origin was seeded or measured, and
+  /// so do a reframing's assumption still awaiting its measurement and the
+  /// rect [canvasRect] takes at the switch (the canvas's far corner stays):
+  /// the first frame after the switch is exact. The shown mode is left to
+  /// its measurement after the frame.
+  @internal
+  void canvasAssumed(FloorPlanMode mode, Offset chrome) {
+    if (mode == _mode.value) return;
+    final delta = chrome - _chromeAt[mode]!;
+    _chromeAt[mode] = chrome;
+    if (delta == Offset.zero) return;
+    _canvasAt[mode] = _canvasAt[mode]! + delta;
+    final assumed = _assumed[mode];
+    if (assumed != null) _assumed[mode] = assumed + delta;
+    final rect = _canvasIn[mode];
+    if (rect != null) {
+      _canvasIn[mode] = Rect.fromLTRB(
+          rect.left + delta.dx, rect.top + delta.dy, rect.right, rect.bottom);
+    }
+  }
+
   void _reframe(FloorPlanMode from, FloorPlanMode to) {
     final a = _canvasAt[from]!, b = _canvasAt[to]!;
     _assumed.putIfAbsent(from, () => a);
@@ -719,14 +957,31 @@ class FloorPlanController extends ChangeNotifier {
   /// frame that first showed a plan in that mode. When a reframing assumed
   /// another origin, the camera is corrected: into the shown mode, by what
   /// the assumption missed; out of a mode no longer shown, by the same the
-  /// other way.
+  /// other way. [chrome], where the view's chrome alone puts that canvas,
+  /// is the basis a later [canvasAssumed] moves the origin from.
   @internal
-  void canvasMeasured(FloorPlanMode shown, Offset origin) {
+  void canvasMeasured(FloorPlanMode shown, Offset origin, {Offset? chrome}) {
     _canvasAt[shown] = origin;
+    if (chrome != null) _chromeAt[shown] = chrome;
     final assumed = _assumed.remove(shown);
     if (assumed == null || assumed == origin) return;
     cameraController
         .panBy(shown == _mode.value ? assumed - origin : origin - assumed);
+  }
+
+  /// A view's chrome in the mode it shows moved that mode's canvas from
+  /// [from] to [to] in the view (final review F-3): a bar, the editor's
+  /// left column or rulers shown or hidden. The
+  /// camera pans by the difference, so the plan stays where it is on the
+  /// screen, as a mode switch keeps it (R-13), from the frame that lays
+  /// the new chrome out: called while the view builds, the pan is applied
+  /// at once and the camera's listeners hear it after that frame. It is no
+  /// camera command: a fit requested and not yet performed still runs.
+  /// The canvas is measured after the frame ([canvasMeasured]).
+  @internal
+  void chromeMoved(Offset from, Offset to) {
+    if (_disposed || from == to) return;
+    _viewCamera.panUnheard(from - to);
   }
 
   // Spec Q0 N1 (R-4): an empty plan the controller makes is unsettled
@@ -807,6 +1062,22 @@ class FloorPlanController extends ChangeNotifier {
       if (identical(_settle, settle)) _settle = null;
     };
   }
+
+  /// Where the active editor registers its idle probe (spec S-4): true
+  /// while no tool is part-way through a shape. Returns the withdrawal,
+  /// which withdraws only [idle] itself, as [registerSettle]'s.
+  @internal
+  VoidCallback registerIdle(bool Function() idle) {
+    _idle = idle;
+    return () {
+      if (identical(_idle, idle)) _idle = null;
+    };
+  }
+
+  /// Whether the design mode's editor has a tool part-way through a shape
+  /// (spec S-4): [undo] and [redo] then wait, as the shell's buttons do.
+  bool get _editorMidShape =>
+      _mode.value == FloorPlanMode.design && !(_idle?.call() ?? true);
 
   /// Settles the active view's pending input (H11): for the view's own
   /// flows (Export, Print) before they read the plan.
@@ -1002,6 +1273,9 @@ class FloorPlanController extends ChangeNotifier {
       _canvasRect.value = shownIn;
     }
     _mode.value = next;
+    // Spec S-6: no editor in the selection mode, and a new one starts with
+    // select.
+    toolChanged(FloorPlanTool.select);
     _select(numbers);
     _refreshFlags();
     _revision.value++;
@@ -1042,16 +1316,75 @@ class FloorPlanController extends ChangeNotifier {
           diagnostics: <Diagnostic>[]);
 
   // ---------------------------------------------------------------------
+  // Export and Print without their dialogs (host embedding API spec C-3).
+
+  /// The active plan -- the design, or the service copy on screen -- as
+  /// [choice] says, named `<name>.pdf` or `<name>.png`: what the view's
+  /// Export hands `onExport`, without the dialog (spec C-3). It needs no
+  /// view mounted.
+  ///
+  /// Null when an export or a print already runs for this controller (the
+  /// view's bar or chords included: one at a time, S-7), when the plan has
+  /// no page, when the plan shown is replaced before the bytes are made (a
+  /// mode switch, a `resetLayout`, a `load`), or after [dispose]. Pending
+  /// input is settled first. An error completes the returned `Future` with
+  /// it; `FloorPlanView.onPageFlowError` reports only the flows the view
+  /// starts. The dialog's remembered choice is left as it is. Allowed
+  /// whatever the editor's capabilities.
+  Future<FloorPlanExport?> exportPlan(FloorPlanExportChoice choice,
+          {String name = 'plan'}) =>
+      _pageFlow<FloorPlanExport?>(
+          null,
+          () => exportOnce(this, toExportChoice(choice), name,
+              cancelled: () => _disposed));
+
+  /// The active plan's page as a PDF to [printer] (the platform's print
+  /// dialog when null), named [name]: what the view's Print does (spec
+  /// C-3). It needs no view mounted. True once the printer is done with
+  /// it; false when an export or a print already runs for this controller,
+  /// when the plan has no page, when the plan shown is replaced before the
+  /// bytes are made, or after [dispose]. An error completes the returned
+  /// `Future` with it. Allowed whatever the editor's capabilities.
+  Future<bool> printPlan({PagePrinter? printer, String name = 'plan'}) =>
+      _pageFlow<bool>(
+          false,
+          () => printOnce(this, printer ?? const PrintingPagePrinter(), name,
+              cancelled: () => _disposed));
+
+  /// [flow] under [pageFlowReady], after a settle; [busy] when another
+  /// runs or the controller is disposed, before or after it.
+  Future<T> _pageFlow<T>(T busy, Future<T> Function() flow) async {
+    if (_disposed || !pageFlowReady.value) return busy;
+    pageFlowReady.value = false;
+    try {
+      _settle?.call();
+      final result = await flow();
+      return _disposed ? busy : result;
+    } finally {
+      if (!_disposed) pageFlowReady.value = true;
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Undo and redo, of the active plan.
 
+  /// Undoes the active plan's last step, after settling the view's pending
+  /// input. In the design mode it does nothing while the editor's tool is
+  /// part-way through a shape (spec C-3, S-4), as the editor's Undo button
+  /// and key: [canUndo] keeps its meaning (the history), so a host's own
+  /// button enabled by it may press then and nothing happens.
   void undo() {
+    if (_editorMidShape) return;
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canUndo) commands.undo();
     _announceLayout();
   }
 
+  /// Redoes the active plan's next step, as [undo]: in the design mode
+  /// not while the editor's tool is part-way through a shape (S-4).
   void redo() {
+    if (_editorMidShape) return;
     _settle?.call();
     final commands = _active.document.commands;
     if (commands.canRedo) commands.redo();
@@ -1517,6 +1850,13 @@ class FloorPlanController extends ChangeNotifier {
     if (!setEquals(numbers, _selectedTables.value)) {
       _selectedTables.value = Set.unmodifiable(numbers);
     }
+    // Spec C-6, S-17: the editor's numbers, none in the selection mode.
+    final editor = _mode.value == FloorPlanMode.design
+        ? _selectedTables.value
+        : const <String>{};
+    if (!setEquals(editor, _editorSelected.value)) {
+      _editorSelected.value = editor;
+    }
     _refreshSelectedGroup();
   }
 
@@ -1531,6 +1871,17 @@ class FloorPlanController extends ChangeNotifier {
           unnumberedSelected: unnumbered);
     }
     _selectedGroup.value = id;
+    // Spec C-3, S-5: what Merge would send, by G5's rule; the design mode
+    // has no Merge.
+    final selected = _selectedTables.value;
+    final candidate = _mode.value == FloorPlanMode.selection &&
+            mergeQualifies(selected, _groups.value)
+        ? selected
+        : null;
+    final last = _mergeCandidate.value;
+    if (candidate == null ? last != null : !setEquals(candidate, last)) {
+      _mergeCandidate.value = candidate;
+    }
   }
 
   /// The active view frames the plan as on its first frame (H3, F-7). It
@@ -1719,6 +2070,7 @@ class FloorPlanController extends ChangeNotifier {
     if (_ownsSymbols) symbols.dispose();
     if (_ownsThumbnails) thumbnails.dispose();
     cameraController.dispose();
+    pageFlowReady.dispose();
     _canvasRect.dispose();
     _fits.dispose();
     _layoutChanges.dispose();
@@ -1727,11 +2079,14 @@ class FloorPlanController extends ChangeNotifier {
     _canUndo.dispose();
     _canRedo.dispose();
     _selectedTables.dispose();
+    _editorSelected.dispose();
     _revision.dispose();
     _statuses.dispose();
     _groups.dispose();
     _groupStatuses.dispose();
     _selectedGroup.dispose();
+    _mergeCandidate.dispose();
+    _activeTool.dispose();
     _focus.dispose();
     _baseline = null;
     unawaited(_designChanges.close());

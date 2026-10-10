@@ -227,7 +227,7 @@ void main() {
     ];
     expect(restores, [gauge2], reason: 'detached once');
     // The same compound through the dispatcher: one undo step, exact undo.
-    final beforeCompound = canon(doc, sortNodes: true);
+    final beforeCompound = canon(doc);
     final depth3 = doc.commands.undoDepth;
     doc.commands.execute(CompoundCommand(
         [setPage(doc, m25), deleteObject(doc, hG2)],
@@ -237,7 +237,7 @@ void main() {
     expect(doc.commands.undoDepth, depth3 + 1);
     expect(drift(doc), isEmpty);
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), beforeCompound);
+    expect(canon(doc), beforeCompound);
     expect(doc.components.get<Gauge>(hG2), gauge2);
     expect(drift(doc), isEmpty);
 

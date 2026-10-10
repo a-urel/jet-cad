@@ -4,13 +4,16 @@
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show InteractionLayer;
+    show InteractionLayer, kRulerThickness;
 
 import '../l10n/strings.dart';
 import '../export/page_printer.dart';
 import '../planner_shell.dart';
 import '../service/table_select_tool.dart' show ServiceEvents;
 import '../shell_commands.dart';
+import '../shortcut_guard.dart' show PlannerTextKeys;
+import 'bars.dart';
+import 'editor_capabilities.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_theme.dart';
 import 'floor_plan_types.dart';
@@ -50,6 +53,14 @@ class FloorPlanView extends StatefulWidget {
     this.onFloorTap,
     this.onTableHover,
     this.theme,
+    this.onExportDialog,
+    this.onPageFlowError,
+    this.serviceBar = const FloorPlanServiceBar(),
+    this.editorBar = const FloorPlanEditorBar(),
+    this.editorCapabilities = FloorPlanEditorCapabilities.full,
+    this.tableInspectorBuilder,
+    this.shortcuts = true,
+    this.autofocus = true,
   });
 
   final FloorPlanController controller;
@@ -189,6 +200,112 @@ class FloorPlanView extends StatefulWidget {
   /// them themed wraps the view in a local `Theme`.
   final FloorPlanTheme? theme;
 
+  /// The host's export dialog (host embedding API spec C-4): when given,
+  /// **every** Export entry point (the service bar's button, the editor's
+  /// bar, the chords Cmd+E and Ctrl+E, in both modes) calls it instead of
+  /// the Material dialog, with the choice last made in this controller's
+  /// life as [initial] (PDF at 150 dpi at first); the answer is remembered
+  /// as the next [initial], and null from it cancels (nothing is
+  /// exported). Print has no dialog of jet-cad's (the platform's). Read at
+  /// each Export.
+  final Future<FloorPlanExportChoice?> Function(
+      BuildContext context, FloorPlanExportChoice initial)? onExportDialog;
+
+  /// An export or a print this view started failed (spec C-3): the error,
+  /// once, after which the flow ends and Export and Print are enabled
+  /// again. The hook's own error ([onExportDialog]'s) is reported here too.
+  /// Without it the error propagates as it always did, out of a `Future`
+  /// the press drops: an uncaught asynchronous error (spec S-8).
+  /// `FloorPlanController.exportPlan` and `printPlan` do not report here:
+  /// their `Future` completes with the error. Read at each error.
+  final void Function(Object error)? onPageFlowError;
+
+  /// The selection mode's bar (host embedding API spec C-1): hidden, its
+  /// buttons cut down or reordered, the host's widgets before and after
+  /// them. The default is today's bar. Hidden, the canvas takes its height;
+  /// the view tells the controller where each mode's canvas starts before a
+  /// switch can use it and measures it after, so a mode switch keeps the
+  /// plan in place from its first frame (R-13); shown or hidden in the mode
+  /// shown, the camera pans by the canvas's move, so the plan stays in
+  /// place from that frame too (final review F-3). Its actions shape the bar
+  /// only: the chords stay bound (S-20). Read at each build; an
+  /// [ArgumentError] naming `actions` for an action listed twice.
+  final FloorPlanServiceBar serviceBar;
+
+  /// The design mode's top bar (spec C-2, S-2), as [serviceBar]: hidden
+  /// (the tools stay in the left panel), its buttons and read-outs cut
+  /// down or reordered, the host's widgets at its two ends. The default is
+  /// today's bar. Read at each build; an [ArgumentError] naming `actions`
+  /// for an action listed twice.
+  final FloorPlanEditorBar editorBar;
+
+  /// What the design mode's editor lets its user do (host embedding API
+  /// spec C-5): its tools, the Symbols tab and its filter, the panels, the
+  /// selection's edits, the bar's commands, the drafting aids. The default,
+  /// [FloorPlanEditorCapabilities.full], is today's editor. A refused
+  /// command is neither shown nor bound to its key; a refused tool's row
+  /// and letter are gone (the letter reaches the host's own bindings).
+  /// Read at each build; a change falls back to select from a tool no
+  /// longer allowed, and the view measures where the canvas now starts
+  /// when the rulers or the left column come or go (R-13), the plan kept
+  /// in place on the screen (final review F-3). It governs the
+  /// editor alone: the selection mode is as it was (spec S-22). An
+  /// [ArgumentError] naming `tools` when they lack
+  /// [FloorPlanTool.select].
+  final FloorPlanEditorCapabilities editorCapabilities;
+
+  /// The host's table inspector (host embedding API spec C-6): shown in the
+  /// editor's Selection panel, under jet-cad's own fields, when **exactly
+  /// one numbered table** is selected -- the selection is one object, and
+  /// it is a table at the plan's root whose number no other table has
+  /// (S-18): a table whose number another table shares (alone or with
+  /// it), a table with a wall, a table inside a group or an unnumbered
+  /// one show none. Called with that table's detail as
+  /// [FloorPlanController.tableDetails] reads it (its data included); null
+  /// from it shows nothing. A host links a drawn table to its own record
+  /// here, with [FloorPlanController.setTableData].
+  ///
+  /// Built when the selection becomes such a table, at each change of the
+  /// plan (an edit, an undo, a redo: the detail is read fresh) and each
+  /// time the host rebuilds this view; never on pan or zoom (P-4). Hidden
+  /// with the Selection panel (`editorCapabilities.selectionPanel`); the
+  /// design mode only. A field in it takes its keystrokes: the editor's
+  /// letters do not reach the plan from it. A host that builds its own
+  /// side panel instead listens to
+  /// [FloorPlanController.editorSelectedTables]. Read at each build.
+  final Widget? Function(BuildContext context, FloorPlanTableDetail table)?
+      tableInspectorBuilder;
+
+  /// Whether the view binds jet-cad's keys (host embedding API spec C-7,
+  /// S-16). False unbinds, in **both** modes, every key jet-cad binds while
+  /// no gesture runs, so a host's own shortcuts (a point-of-sale shortcut
+  /// host) own the keyboard: the selection mode's Undo, Redo, Export and
+  /// Print chords and its Escape (which clears the selection); the
+  /// editor's command chords, tool letters, F3, F, Escape, and the select
+  /// tool's Delete, Backspace and Escape. A gesture's own keys stay: a
+  /// drag's Escape and Shift, a drawing tool's Escape and Enter while it
+  /// draws, the symbol tool's R and M while a symbol is armed. The
+  /// commands stay callable: [FloorPlanController.undo], `redo`,
+  /// `exportPlan`, `printPlan`, `selectTool` and `deleteSelection`. Read
+  /// at each build and key.
+  final bool shortcuts;
+
+  /// Whether the view takes the focus when it is mounted (host embedding
+  /// API spec C-7), in both modes and at each mount (a mode switch, a
+  /// `resetLayout`, a `load`): false leaves it where it is, so a search
+  /// field beside the plan keeps it. Flutter's autofocus acts only while
+  /// the focus scope has no focused node: with true, the view takes the
+  /// focus from none, or from a host field that asks for it after the view
+  /// in the same frame. Read at each mount.
+  ///
+  /// A press on the canvas asks for the focus, true or false. A focused
+  /// Material `TextField` keeps the canvas from it on that first press
+  /// unless its `onTapOutside` lets go: its default unfocuses the field
+  /// after the canvas asked, so the focus lands on neither and the next
+  /// press takes it. A field whose `onTapOutside` does nothing (`(_) {}`)
+  /// gives the focus to the canvas on the first press.
+  final bool autofocus;
+
   @override
   State<FloorPlanView> createState() => _FloorPlanViewState();
 }
@@ -209,19 +326,146 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !identical(c, widget.controller)) return;
       final origin = _canvasOrigin();
-      if (origin != null) c.canvasMeasured(shown, origin);
+      if (origin != null) {
+        c.canvasMeasured(shown, origin, chrome: _chromeOrigin(shown));
+      }
     });
   }
 
-  /// The selection mode's canvas moved in this view with the plan
-  /// unchanged (host embedding API spec S-10: the theme's
-  /// `serviceBarHeight` changed): measured again now, after the frame, so
-  /// the next mode switch reframes from where it is (R-13).
-  void _serviceCanvasMoved() {
+  /// The selection mode's bar height under this view's resolved theme, as
+  /// [_ChromeOrigins] last read it (spec T-2's `serviceBarHeight`).
+  double _serviceBarHeight = kServiceBarHeight;
+
+  /// Where [mode]'s canvas starts in this view by its chrome alone, as the
+  /// modes lay it out (Task 2 review R-3): the selection mode's bar, when
+  /// shown, at the theme's height; the editor's top bar (44), left column
+  /// (240) and rulers, each when shown.
+  Offset _chromeOrigin(FloorPlanMode mode) {
+    switch (mode) {
+      case FloorPlanMode.selection:
+        return Offset(0, widget.serviceBar.visible ? _serviceBarHeight : 0);
+      case FloorPlanMode.design:
+        final caps = _editorCapabilities;
+        final ruler = caps.rulers ? kRulerThickness : 0.0;
+        // A view always gives the editor a symbol library.
+        final left = leftColumnShown(caps, symbols: true) ? 240.0 : 0.0;
+        final top = widget.editorBar.visible ? 44.0 : 0.0;
+        return Offset(left + ruler, top + ruler);
+    }
+  }
+
+  /// At each build of this view and each change of its theme, before any
+  /// switch can reframe from them: the controller is told where the mode
+  /// not shown starts by its chrome (a bar hidden, the theme's bar height,
+  /// the editor's rulers or left column), so the first frame after a
+  /// switch into it is exact (Task 2 review R-3). The shown mode is
+  /// measured after the frame ([_measureChrome]).
+  void _assumeCanvases(FloorPlanTheme? theme) {
+    _serviceBarHeight = theme?.serviceBarHeight ?? kServiceBarHeight;
     final c = widget.controller;
-    if (!mounted || c.mode.value != FloorPlanMode.selection) return;
+    for (final mode in FloorPlanMode.values) {
+      if (mode != c.mode.value) c.canvasAssumed(mode, _chromeOrigin(mode));
+    }
+    _keepPlanInPlace();
+  }
+
+  /// The mode this view last laid out and where its chrome alone put that
+  /// mode's canvas; null before the first build and after a controller
+  /// swap.
+  FloorPlanMode? _laidOutMode;
+  Offset _laidOutChrome = Offset.zero;
+
+  /// Final review F-3: when the chrome of the mode shown changes (a bar,
+  /// the editor's left column or rulers shown or hidden), the camera pans
+  /// by the canvas origin's move, so every world point keeps its global
+  /// position from the frame that lays the new chrome out, as a mode
+  /// switch keeps it (R-13). The theme's bar height is not compensated:
+  /// changed while the selection mode is shown, the canvas moves and the
+  /// plan with it (Slice 3's S-10, as the guide's section 9 has it). At
+  /// each build of this view, each change of its theme and each mode
+  /// change; a mode changed since the last is the switch's own reframing
+  /// (the controller's), and is only recorded.
+  void _keepPlanInPlace() {
+    final c = widget.controller;
+    final mode = c.mode.value;
+    final chrome = _chromeOrigin(mode);
+    final lastMode = _laidOutMode;
+    var last = _laidOutChrome;
+    // A bar shown at the last build is measured at today's height.
+    if (mode == FloorPlanMode.selection && last.dy != 0) {
+      last = Offset(0, _serviceBarHeight);
+    }
+    _laidOutMode = mode;
+    _laidOutChrome = chrome;
+    if (lastMode != mode || last == chrome) return;
+    c.chromeMoved(last, chrome);
+  }
+
+  /// [FloorPlanView.editorCapabilities] as last handed in, and the view's
+  /// own copy of it (Task 4 review R-4): the `const` constructor keeps a
+  /// host's set as given, so the editor reads a copy, taken once per value
+  /// handed in. A host changing its set afterwards changes nothing here; a
+  /// new value is compared with the copy of the last, so a tool it no
+  /// longer allows falls back.
+  FloorPlanEditorCapabilities? _givenCapabilities;
+  late FloorPlanEditorCapabilities _capabilitiesCopy;
+
+  FloorPlanEditorCapabilities get _editorCapabilities {
+    final given = widget.editorCapabilities;
+    if (!identical(given, _givenCapabilities)) {
+      _givenCapabilities = given;
+      _capabilitiesCopy = given.copyWith(tools: given.tools);
+    }
+    return _capabilitiesCopy;
+  }
+
+  /// The mode the last build showed; null before the first.
+  FloorPlanMode? _shown;
+
+  /// The chrome the last build laid out (spec C-1, C-2, C-5): whether each
+  /// bar is shown, and the editor's rulers and left column. Null before the
+  /// first build.
+  (bool, bool, bool, bool)? _chrome;
+
+  /// Whether a [_canvasMoved] is due after this frame.
+  bool _canvasMoveDue = false;
+
+  /// After the frame that lays out chrome other than the last frame's
+  /// (a bar, the editor's rulers or its left column shown or hidden, spec
+  /// C-1, C-2, C-5), the shown canvas is measured again: the plan is
+  /// unchanged, so [_measureAfterFrame] would not.
+  void _measureChrome() {
+    final caps = _editorCapabilities;
+    final chrome = (
+      widget.serviceBar.visible,
+      widget.editorBar.visible,
+      caps.rulers,
+      // A view always gives the editor a symbol library.
+      leftColumnShown(caps, symbols: true),
+    );
+    final last = _chrome;
+    _chrome = chrome;
+    if (last == null || last == chrome || _canvasMoveDue) return;
+    _canvasMoveDue = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _canvasMoveDue = false;
+      _canvasMoved();
+    });
+  }
+
+  /// The shown mode's canvas moved in this view with the plan unchanged
+  /// (host embedding API spec S-10, generalised: the theme's
+  /// `serviceBarHeight` changed, or a bar was shown or hidden): measured
+  /// again now, after the frame, so the next mode switch reframes from
+  /// where it is (R-13).
+  void _canvasMoved() {
+    final c = widget.controller;
+    final shown = _shown;
+    if (!mounted || shown == null || c.mode.value != shown) return;
     final origin = _canvasOrigin();
-    if (origin != null) c.canvasMeasured(FloorPlanMode.selection, origin);
+    if (origin != null) {
+      c.canvasMeasured(shown, origin, chrome: _chromeOrigin(shown));
+    }
   }
 
   /// The top left of the shown canvas (its interaction layer's, whose
@@ -251,8 +495,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   bool _fit = true;
   bool _fitIsRequest = false;
 
-  /// One per controller: the settings are read from the current widget
-  /// at each call (review F-1).
+  /// One per controller: the settings and the hooks are read from the
+  /// current widget at each call (review F-1, R-5); the guard is the
+  /// controller's, which its `exportPlan` and `printPlan` share (S-7).
   PageFlows _flowsFor(FloorPlanController c) => PageFlows(
         controller: c,
         settings: () => (
@@ -260,6 +505,18 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           printer: widget.printer ?? const PrintingPagePrinter(),
           exportName: widget.exportName,
         ),
+        hooks: () => (
+          exportDialog: widget.onExportDialog,
+          onError: widget.onPageFlowError,
+        ),
+        // Final review F-4: the editor's `export` and `print` as the view
+        // now has them, read again after the dialog and the bytes; always
+        // allowed in the selection mode (S-22).
+        exportAllowed: () =>
+            c.mode.value != FloorPlanMode.design || _editorCapabilities.export,
+        printAllowed: () =>
+            c.mode.value != FloorPlanMode.design || _editorCapabilities.print,
+        ready: c.pageFlowReady,
       );
 
   /// Reports this view's language to the controller (spec Q0 N1): it
@@ -275,6 +532,8 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   void didUpdateWidget(FloorPlanView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
+      // Final review F-3: the new controller's camera is its own.
+      _laidOutMode = null;
       _flows.dispose();
       _flows = _flowsFor(widget.controller);
       widget.controller.reportLanguage(FloorPlanStrings.of(context));
@@ -334,6 +593,28 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             run: () => _flows.print(context)),
       ];
 
+  /// The host's inspector for the editor's one selected table [instance]
+  /// (spec C-6, S-18): its detail from the controller's fresh
+  /// [FloorPlanController.tableDetails]; nothing for an unnumbered table,
+  /// for one whose number another table shares (Task 6 review R-1 (a): the
+  /// number names no one table, and `setTableData` refuses it), or when
+  /// the builder is gone. Read at each build of the inspector.
+  Widget? _inspect(BuildContext context, Handle instance) {
+    final builder = widget.tableInspectorBuilder;
+    final c = widget.controller;
+    if (builder == null || c.mode.value != FloorPlanMode.design) return null;
+    final details = c.tableDetails;
+    final i = c.tableDetailInstances.indexOf(instance);
+    if (i < 0) return null;
+    final detail = details[i];
+    final number = detail.table.number;
+    if (number == null) return null;
+    for (var j = 0; j < details.length; j++) {
+      if (j != i && details[j].table.number == number) return null;
+    }
+    return builder(context, detail);
+  }
+
   /// The overlay layer for [mode], or null when the host shows none there
   /// (spec G-5).
   Widget? _tableOverlays(FloorPlanController c, FloorPlanMode mode) {
@@ -350,6 +631,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     if (widget.tableOverlayBuilder != null) {
       validateOverlayLayout(widget.tableOverlayLayout);
     }
+    validateBars(widget.serviceBar, widget.editorBar);
+    validateEditorCapabilities(widget.editorCapabilities);
+    _measureChrome();
     // Made here, once per build of this view (the host's), not in the
     // listener's builder: a layer gets a new widget, and builds every
     // overlay again (G-5), only when the host rebuilds the view.
@@ -360,9 +644,16 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     // Always the scope, with a theme or without, so giving one remounts
     // neither mode. It alone reads the ambient theme: a theme switch
     // rebuilds it, not this view, so no host overlay is built again (G-5).
-    return FloorPlanThemeScope(
-      view: widget.theme,
-      child: _modes(serviceOverlays, designOverlays),
+    // Outside it, always too, the text fields inside the view keep their
+    // keys from a host's bindings above it (Slice 4, Task 7 finding 1).
+    return PlannerTextKeys(
+      child: FloorPlanThemeScope(
+        view: widget.theme,
+        child: _ChromeOrigins(
+          onTheme: _assumeCanvases,
+          child: _modes(serviceOverlays, designOverlays),
+        ),
+      ),
     );
   }
 
@@ -372,7 +663,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
       builder: (context, _) {
         final c = widget.controller;
         final document = c.activeDocument;
+        _shown = c.mode.value;
         _measureAfterFrame(c.mode.value, document);
+        _keepPlanInPlace();
         if (c.mode.value == FloorPlanMode.selection) {
           return ServiceView(
               key: ObjectKey(document),
@@ -395,7 +688,10 @@ class _FloorPlanViewState extends State<FloorPlanView> {
               userCamera: () => widget.userCamera,
               tableOverlays: serviceOverlays,
               events: _serviceEvents,
-              onCanvasMoved: _serviceCanvasMoved);
+              onCanvasMoved: _canvasMoved,
+              bar: widget.serviceBar,
+              shortcuts: widget.shortcuts,
+              autofocus: widget.autofocus);
         }
         c.startSymbols();
         return PlannerShell(
@@ -413,11 +709,38 @@ class _FloorPlanViewState extends State<FloorPlanView> {
           userCamera: widget.userCamera,
           onCanvasPlaced: c.canvasPlaced,
           onSettle: c.registerSettle,
+          onIdle: c.registerIdle,
           symbols: c.symbols,
           thumbnails: c.thumbnails,
           tableOverlays: designOverlays,
+          editorBar: widget.editorBar,
+          capabilities: _editorCapabilities,
+          onTools: c.registerTools,
+          onToolChanged: c.toolChanged,
+          shortcuts: widget.shortcuts,
+          autofocus: widget.autofocus,
+          tableInspector:
+              widget.tableInspectorBuilder == null ? null : _inspect,
+          onDelete: c.registerDelete,
         );
       },
     );
+  }
+}
+
+/// Reads the resolved theme under the view's scope for [onTheme], at each
+/// build of the view and at each change of the theme, and builds [child]
+/// as it was given: a theme change rebuilds this alone, so no host overlay
+/// is built again (G-5).
+class _ChromeOrigins extends StatelessWidget {
+  const _ChromeOrigins({required this.onTheme, required this.child});
+
+  final void Function(FloorPlanTheme? theme) onTheme;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    onTheme(FloorPlanThemeScope.of(context));
+    return child;
   }
 }

@@ -39,13 +39,24 @@ class ToolPalette extends StatelessWidget {
     required this.fill,
     required this.geometryAllowed,
     required this.onSelect,
+    this.showFill = true,
+    this.toolChanges,
   });
 
   final List<PaletteEntry> entries;
   final ToolController tools;
+
+  /// What the rows rebuild on for the active tool: [tools] when null. The
+  /// shell passes a relay of it that holds a notification sent during a
+  /// build until after the frame (Task 4 review R-2).
+  final Listenable? toolChanges;
   final ValueNotifier<bool> fill;
   final bool geometryAllowed;
   final void Function(Tool tool) onSelect;
+
+  /// Whether the Fill row shows (host embedding API spec S-9 f): false
+  /// while no fill-capable tool is offered. Its divider goes with it.
+  final bool showFill;
 
   @override
   Widget build(BuildContext context) => ExcludeFocus(
@@ -55,7 +66,7 @@ class ToolPalette extends StatelessWidget {
         child: Material(
           color: Colors.transparent,
           child: ListenableBuilder(
-            listenable: Listenable.merge([tools, fill]),
+            listenable: Listenable.merge([toolChanges ?? tools, fill]),
             builder: (context, _) {
               final strings = FloorPlanStrings.of(context);
               return ListView(
@@ -71,16 +82,19 @@ class ToolPalette extends StatelessWidget {
                       trailing: Text(e.shortcut),
                       onTap: () => onSelect(e.tool),
                     ),
-                  const Divider(),
-                  CheckboxListTile(
-                    key: const Key('tool-fill'),
-                    dense: true,
-                    title: Text(strings.fill),
-                    secondary: const Text('F'),
-                    value: fill.value,
-                    onChanged:
-                        geometryAllowed ? (v) => fill.value = v ?? false : null,
-                  ),
+                  if (showFill) ...[
+                    const Divider(),
+                    CheckboxListTile(
+                      key: const Key('tool-fill'),
+                      dense: true,
+                      title: Text(strings.fill),
+                      secondary: const Text('F'),
+                      value: fill.value,
+                      onChanged: geometryAllowed
+                          ? (v) => fill.value = v ?? false
+                          : null,
+                    ),
+                  ],
                 ],
               );
             },
