@@ -442,11 +442,13 @@ final class ParametricView {
 
   /// Ascending live objects of this view's survey whose registered component
   /// is a [U] (spec 10 D16, S-3: a room's `diagnose` finds the other rooms
-  /// with it). Read from the survey's snapshot, so an object an edit lost,
-  /// re-parented or deleted is not listed although its component may still
-  /// be attached, and a component on a group that is not root-level never
-  /// is. The first call per view and type is one pass over the survey;
-  /// later calls return the same list. Unmodifiable.
+  /// with it). Read from the survey's snapshot, so an object an edit lost or
+  /// deleted is not listed (its node's removal took its component,
+  /// node-components spec D-4), a re-parented one is not listed although its
+  /// component stays attached when the re-add carries the snapshot (D-3), and
+  /// a component on a group that is not root-level never is. The first call
+  /// per view and type is one pass over the survey; later calls return the
+  /// same list. Unmodifiable.
   List<Handle> objectsOf<U extends Component>() =>
       _objectsOf[U] ??= List.unmodifiable([
         for (final MapEntry(key: h, value: c) in _survey.params.entries)
