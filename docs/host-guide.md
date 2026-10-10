@@ -4,7 +4,7 @@ This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the floor planner: staff design the restaurant's floors in the
 **design** mode, and during service they see the tables, colour them by
 status and pick them in the **selection** mode. It covers release
-**0.3.0** ([CHANGELOG](../CHANGELOG.md)).
+**0.4.0** ([CHANGELOG](../CHANGELOG.md)).
 
 Every Dart snippet below is taken from
 [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
@@ -15,9 +15,8 @@ that file, so the code in this guide compiles against the release.
 ## 1. The dependency
 
 The packages are not on pub.dev. Depend on them by git, **both pinned to
-the same commit SHA** — the SHA the release tag `v0.3.0` points at,
-`1b0c37a82c288744b21da9e6edd99b2cc6d8ff97` (the merge of release 0.3.0 into
-`main`):
+the same commit SHA** — the SHA the release tag `v0.4.0` points at
+(`git rev-parse 'v0.4.0^{commit}'`; the guide on `main` names it):
 
 ```yaml
 dependencies:
@@ -27,19 +26,19 @@ dependencies:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_floor_plan
-      ref: 1b0c37a82c288744b21da9e6edd99b2cc6d8ff97
+      ref: <the commit SHA of v0.4.0>
   jet_cad_restaurant_symbols:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_restaurant_symbols
-      ref: 1b0c37a82c288744b21da9e6edd99b2cc6d8ff97
+      ref: <the commit SHA of v0.4.0>
 ```
 
 Why a SHA and not the tag: the restaurant package depends on the planner
 by a path inside the repository, which pub resolves at the commit's SHA.
 If your `ref` is a tag or a branch, pub sees two different refs for the
 planner and refuses. The other form that resolves is the restaurant
-package **alone** at the tag (`ref: v0.3.0`), the planner arriving
+package **alone** at the tag (`ref: v0.4.0`), the planner arriving
 through it; you then import the planner without listing it, which
 `depend_on_referenced_packages` will flag.
 
@@ -50,7 +49,7 @@ with the planner. Import only the two barrels:
 Anything under `src/` is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.3.0 was built and tested with Flutter 3.47.6. They bring no build hook
+0.4.0 was built and tested with Flutter 3.47.6. They bring no build hook
 and no GPU renderer: nothing runs at build time beyond Flutter's own.
 (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
 hook compiles shaders.)
@@ -211,12 +210,12 @@ The view, with the host's options:
 `serviceLayoutChanges` in [§ 6](#6-the-service-layout) replaces it. The
 two arguments after `longPress` draw your own widget on each table, and
 the four after them report a drag's moved tables, a double tap, a tap on
-the floor and the table under the mouse, all *unreleased on `main`*: [Your
+the floor and the table under the mouse, all *since 0.4.0*: [Your
 own widgets on the tables](#your-own-widgets-on-the-tables), [Events and
 host data](#events-and-host-data). `theme`, this view's own look over
-your app theme's, is also *unreleased on `main`*: [§ 9](#9-themes). In
+your app theme's, is also *since 0.4.0*: [§ 9](#9-themes). In
 the probe the view sits in a local `Theme`, § 9's recipe. The last
-eight, *unreleased on `main`* too, are the host's own chrome and keys:
+eight, *since 0.4.0* too, are the host's own chrome and keys:
 `serviceBar`, `editorBar`, `onExportDialog` and `onPageFlowError` in
 [The bars](#the-bars); `editorCapabilities` and `tableInspectorBuilder`
 in [The editor's capabilities](#the-editors-capabilities); `shortcuts`
@@ -233,7 +232,7 @@ keeps the plan where it is on the screen, zoom included (*since 0.2.0*;
 panels); `fitToView()`, `load` and `newPlan()` fit it again, and
 `fitToTables` frames a set of tables (*since 0.3.0*, see
 [Zones](#zones-framing-and-focus)). The camera itself is public
-(*unreleased on `main`*): `controller.camera` says where the plan is on
+(*since 0.4.0*): `controller.camera` says where the plan is on
 the screen, and `panBy`, `zoomBy` and `centerOn` move it, within the
 zoom bounds the constructor's `minScale` and `maxScale` set (see [Your
 own widgets on the tables](#your-own-widgets-on-the-tables)). The
@@ -526,7 +525,7 @@ case-sensitively. The planner lets staff type a number of 1 to 8
 characters (UTF-16 units) with no control character, so keep your codes
 within those rules: a longer code matches only a plan edited by hand.
 
-*Unreleased on `main`:* a POS that links its tables by an id it stores in
+*Since 0.4.0:* a POS that links its tables by an id it stores in
 each table's data ([Events and host data](#events-and-host-data))
 compares ids, which no renumbering changes:
 
@@ -545,7 +544,7 @@ compares ids, which no renumbering changes:
 
 ### Your own widgets on the tables
 
-*Unreleased on `main`.* A POS shows its own things on a table: the
+*Since 0.4.0.* A POS shows its own things on a table: the
 guests, the minutes since they sat down, the waiter, a bill to print.
 The planner tells you where each table is and where the plan is on the
 screen, and draws a widget of yours on each table, pinned to it while
@@ -939,7 +938,7 @@ class _KioskFloorState extends State<KioskFloor> {
 
 ### Events and host data
 
-*Unreleased on `main`.* Four more gestures of the selection mode reach
+*Since 0.4.0.* Four more gestures of the selection mode reach
 you, a table can carry data of yours that is saved with the plan, and
 the controller reports what changes among the designed tables.
 
@@ -1187,12 +1186,12 @@ the designed tables added, removed and changed since the last report.
 - `onExport(FloorPlanExport)`: Export's bytes, file name and MIME type,
   for you to store or share. `printer` prints; without one, Print uses
   the platform's dialog.
-- *Unreleased on `main`:* `onTablesMoved(moved)` after a drag of tables,
+- *Since 0.4.0:* `onTablesMoved(moved)` after a drag of tables,
   `onTableDoubleTap(number)` after a double tap's second `onTableTap`,
   `onFloorTap(world)` for a tap that misses every table, and
   `onTableHover(number)` for the mouse or a stylus over a table: [Events
   and host data](#events-and-host-data).
-- *Unreleased on `main`:* the host's own chrome and keys.
+- *Since 0.4.0:* the host's own chrome and keys.
   `serviceBar` and `editorBar` cut down, reorder, extend or hide the two
   bars; `onExportDialog` is your export dialog at every Export;
   `onPageFlowError` hears a failed export or print: [The
@@ -1209,7 +1208,7 @@ BrowserContextMenu.disableContextMenu();`.
 
 ### The bars
 
-*Unreleased on `main`.* The selection mode's bar and the editor's top
+*Since 0.4.0.* The selection mode's bar and the editor's top
 bar are yours to cut down, reorder, extend or hide, and everything their
 buttons read and do is on the controller, for a bar of your own. With
 neither argument both bars are today's.
@@ -1431,7 +1430,7 @@ there: their `Future` carries the error.
 
 ### The editor's capabilities
 
-*Unreleased on `main`.* `editorCapabilities`, a
+*Since 0.4.0.* `editorCapabilities`, a
 `FloorPlanEditorCapabilities`, says what the design mode's editor lets
 its user do. The default, `FloorPlanEditorCapabilities.full`, is today's
 editor; two profiles cut it down, `tablesOnly` for a user who places and
@@ -1628,7 +1627,7 @@ attachment off.
 
 ### Keyboard and focus
 
-*Unreleased on `main`.* For a host whose own shortcuts own the keyboard:
+*Since 0.4.0.* For a host whose own shortcuts own the keyboard:
 
 - `shortcuts: false` unbinds, in **both** modes, every key the planner
   binds while no gesture runs, so those keys reach your own bindings:
@@ -1713,7 +1712,7 @@ The planner follows your `MaterialApp`'s theme. In a dark theme a light
 page is shown on a dark canvas with its drawing re-toned to keep its
 contrast; exports and prints are never re-toned.
 
-*Unreleased on `main`:* the floor plan's own look, `FloorPlanTheme`.
+*Since 0.4.0:* the floor plan's own look, `FloorPlanTheme`.
 
 **What it sets.** A `ThemeExtension` with sixteen optional fields; a
 field you leave null is what the planner draws without a theme, so
@@ -1970,14 +1969,13 @@ a desktop.
 
 - **Handles.** A table's identity is its number. The plan's internal
   handles are not API.
-- **Capabilities are not a security boundary** *(unreleased on
-  `main`)*. `editorCapabilities` decides what the editor offers its
+- **Capabilities are not a security boundary** *(since 0.4.0)*. `editorCapabilities` decides what the editor offers its
   user, nothing more: your own calls (`setTableData`, `undo()`, `load`,
   `exportPlan`, `printPlan`) stay allowed under every value, and the
   value is never stored with the plan. Decide who may change a floor in
   your own application, and check it where the plan is stored.
-- **With `shortcuts: false` nothing deletes in the editor** *(unreleased
-  on `main`)* but your own call: the Delete and Backspace keys are
+- **With `shortcuts: false` nothing deletes in the editor** *(since
+  0.4.0)* but your own call: the Delete and Backspace keys are
   unbound and the planner has no Delete button, so bind a key or a
   button of yours to `deleteSelection()`.
 - **The service layout's text.** It names tables by internal handles
@@ -2001,7 +1999,7 @@ a desktop.
   that says why); a 0.1.0 plan opens here unchanged. Terminals that
   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
   plans and service layouts, so they can share them.
-- **Schema 9** *(unreleased on `main`)*. **A plan saved by this release
+- **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0 or later
   is at schema 9, with or without table data, and 0.3.0 and every
   earlier release refuse it** (`load` throws a `FormatException` that
   says why). **Every terminal that shares stored plans moves to it
