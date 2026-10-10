@@ -153,8 +153,8 @@ one's spec, plan and results.
   (`keyboard_focus_test.dart`) compare the undone encoding with the one
   before the delete, not around it.
 - **O-11, a table whose corners are not finite** (the human, 2026-10-10),
-  merged into `main` on the human's *"evet, main'e merge et"*, from
-  `fix/non-finite-corners`: selecting such a table (the embedding
+  merged into `main` at `aed5c4d` on the human's *"evet, main'e merge
+  et"*, from `fix/non-finite-corners`: selecting such a table (the embedding
   fixture's `9`) no longer trips `drawLine`'s NaN assertion, and its PDF
   (Export and Print) no longer trips the pdf package's `!value.isNaN`.
   `GripCache` keeps no non-finite bounds in its box and no non-finite

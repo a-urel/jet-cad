@@ -953,7 +953,7 @@ sharing a number, an unnumbered table, a camera not at identity.
   A PDF of a plan holding such a table (Export and Print) trips the pdf
   package's `!value.isNaN` through the label's residual in
   `PdfDrawSink`; its PNG is written. **Closed on `fix/non-finite-corners`
-  (2026-10-10):** `GripCache` keeps no non-finite bounds in its box and
+  (2026-10-10), merged into `main` at `aed5c4d`:** `GripCache` keeps no non-finite bounds in its box and
   no non-finite grip, and a grip whose screen distance is NaN is out of
   every hit test's reach; `SelectionOverlayPainter` draws no rotation
   grip and no point cross at a non-finite screen position; `PdfDrawSink`
