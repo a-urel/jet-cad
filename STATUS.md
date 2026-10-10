@@ -155,7 +155,7 @@ one's spec, plan and results.
   (*Approve with fixes*, F-1 to F-8, applied in `44b6775`, `492c70c`,
   `fdf3309`). Removing a design view while a pointer hovers no longer
   throws (Slice 3's finding; the frame-safe relay `c65a3a0`, pinned by
-  `f0c77cf`). **Merged into `main`** on the human's *"evet, main'e merge
+  `f0c77cf`). **Merged into `main` at `4331c74`** on the human's *"evet, main'e merge
   et"* (confirmed: *"Yine de sen merge et"*); ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-4/](docs/superpowers/ledgers/2026-10-09-embedding-slice-4/).
   Unreleased (CHANGELOG). The umbrella's four slices are all merged.

@@ -16,7 +16,8 @@ Review section lists the rest.
 **Plan:** [2026-10-09-embedding-slice-4.md](../plans/2026-10-09-embedding-slice-4.md).
 
 **Branch:** `claude/exciting-pasteur-9m22jv`, from `main` at `4e3ed91`
-(Slice 3 merged). `main`'s O-10 and O-11 fixes, made by other sessions on
+(Slice 3 merged). **Merged** into `main` at `4331c74` on the human's
+*"evet, main'e merge et"*. `main`'s O-10 and O-11 fixes, made by other sessions on
 their own branches, came in through `263e2ca`, with their owed tests
 (`a5b1ead`, `503c504`) and the hover-removal test (`f0c77cf`).
 
