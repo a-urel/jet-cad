@@ -303,8 +303,14 @@ void main() {
       RemoveEntityCommand(const Handle(51)),
       RemoveNodeCommand(const Handle(52)),
     ], label: 'Delete');
-    expect(compound.capabilities,
-        {Capability.transform, Capability.geometry, Capability.structure});
+    // RemoveNodeCommand declares `components` too, statically (node-components
+    // spec D-2), so the union gains it.
+    expect(compound.capabilities, {
+      Capability.transform,
+      Capability.geometry,
+      Capability.structure,
+      Capability.components,
+    });
     // "Highest-ranked" is the declaration order of enum Capability; the
     // spatial index and the tile cache read it to skip components-only
     // compounds (spec 04 D13).

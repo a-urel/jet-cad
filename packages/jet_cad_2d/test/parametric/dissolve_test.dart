@@ -106,6 +106,14 @@ Iterable<DraftCommand> flatten(DraftCommand c) sync* {
   }
 }
 
+/// The [T] values the [AddNodeCommand]s on [h] inside [c] restore.
+List<T> restoredBy<T extends Component>(DraftCommand c, Handle h) => [
+      for (final k in flatten(c))
+        if (k is AddNodeCommand && k.node.handle == h)
+          for (final (_, v) in k.components.components)
+            if (v is T) v,
+    ];
+
 /// The values of every `SetComponentCommand<Fuse>` on F inside [c].
 List<Fuse?> fuseSets(DraftCommand c) => [
       for (final k in flatten(c))
@@ -136,9 +144,10 @@ void main() {
   });
 
   test(
-      'DV1 a dissolving object is removed and its component detached in the '
-      'edit, one undo step; undo restores every handle; the guard and the '
-      'cleanup are untouched; drift() names a loaded one', () async {
+      'DV1 a dissolving object is removed with its component in the edit, '
+      'one undo step; the replay restores it through the node\'s snapshot; '
+      'undo restores every handle; the guard is untouched; drift() names a '
+      'loaded one', () async {
     // Premises: C starts beside F; the corner placement overlaps F's reach
     // but not its centre; the covering one holds the centre. F is off the
     // origin and turned.
@@ -211,22 +220,22 @@ void main() {
     expect(kids(doc, hF), handles);
     expect(drift(doc), isEmpty);
 
-    // Exactly one detach, planned by the dissolve: the move's replay
-    // restores F's component once, and its redo detaches it once. Planned
-    // on a copy through the expander, so the inverse can be read.
+    // No detach is planned by the dissolve: the removal of F's node takes
+    // its component (node-components D-4), and the move's replay restores
+    // it in that node's snapshot. Planned on a copy through the expander,
+    // so the inverse can be read.
     final copy = reload(enc(doc));
     final edit = copy.commands.expander!(TransformNodeCommand(hC, covering()))
         as ParametricEdit;
     final undoReplay = edit.apply(copy).inverse;
     expectDissolved(copy);
-    expect(fuseSets(undoReplay), [fuse]);
+    expect(fuseSets(undoReplay), isEmpty);
+    expect(restoredBy<Fuse>(undoReplay, hF), [fuse]);
     final redoReplay = undoReplay.apply(copy).inverse;
     expect(copy.components.get<Fuse>(hF), fuse);
-    expect(fuseSets(redoReplay), [null]);
+    expect(fuseSets(redoReplay), isEmpty);
     // D15's order: F's leaves, fills first (the select tool's order), then
-    // its node, then the detach. The state cannot tell where the detach
-    // sits (the component store is independent of the tree and the
-    // entities: X4-order is state-equal), so the replay is read.
+    // its node, which carries the component. The replay is read.
     expect([
       for (final k in flatten(redoReplay))
         if (k is RemoveEntityCommand)
@@ -238,7 +247,6 @@ void main() {
     ], [
       for (final k in handles) 'entity ${k.value}',
       'node ${hF.value}',
-      'detach ${hF.value}',
     ]);
 
     // The parameter edit: `burnt` dissolves F the same way, one undo step.
@@ -286,7 +294,8 @@ void main() {
     expect(drift(two), isEmpty);
 
     // 06 D8: the select tool's delete of F is a loss, not a dissolve. F is
-    // not asked, and its component is detached once, by the cleanup.
+    // not asked, and its component is taken by the removal
+    // (node-components D-4).
     // Planned on a copy through the expander, so the inverse can be read.
     final copy2 = reload(enc(doc));
     Fuse.dissolvesCalls.clear();
@@ -295,11 +304,13 @@ void main() {
     final deleteReplay = delete.apply(copy2).inverse;
     expectDissolved(copy2);
     expect(asked(hF), 0, reason: 'a lost object is not asked');
-    expect(fuseSets(deleteReplay), [fuse], reason: 'detached once');
+    expect(fuseSets(deleteReplay), isEmpty);
+    expect(restoredBy<Fuse>(deleteReplay, hF), [fuse],
+        reason: 'taken by the removal');
 
     // 06 D7: the dissolve inherits the triggering move's authority. Only
     // what the move itself needs is allowed, transform; the removals need
-    // geometry and structure, the detach components.
+    // geometry, structure and components.
     final ruled = scene();
     final ruledBefore = canon(ruled);
     ruled.commands.permissions = const DraftPermissions(

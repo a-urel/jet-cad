@@ -539,6 +539,54 @@ void main() {
   });
 
   group('keys and delete', () {
+    test(
+        'S-1 Delete takes the components of an instance and of a group '
+        'holding a nested group; one undo step restores all three', () {
+      final doc = DraftDocument.empty();
+      final def = addDefinition(doc, 'Chair');
+      final instance = addInstance(doc, def,
+          Transform2.translation(700, -350).multiply(Transform2.rotation(0.4)));
+      final outer =
+          addGroup(doc, doc.rootHandle, Transform2.translation(-900, 260));
+      final nested = addGroup(doc, outer, Transform2.rotation(-0.7));
+      const layer = Handle(0x2B3);
+      doc.commands.execute(CompoundCommand([
+        SetComponentCommand<ObjectLayer>(instance, const ObjectLayer(layer)),
+        SetComponentCommand<ObjectLayer>(outer, const ObjectLayer(layer)),
+        SetComponentCommand<ObjectLayer>(nested, const ObjectLayer(layer)),
+      ], label: 'Fixture'));
+      for (final h in [instance, outer, nested]) {
+        doc.components
+          ..attachUnknown(h, {'typeId': 'z.later', 'h': h.value})
+          ..attachUnknown(h, {'typeId': 'a.earlier'});
+      }
+      final before = DraftDocumentCodec.encodeToString(doc);
+      final index = SpatialIndex(doc);
+      addTearDown(index.dispose);
+      final selection = SelectionController(doc);
+      addTearDown(selection.dispose);
+      final camera = cameraAt(2.0, const Offset(-1600, 1300));
+      final ctx = ToolContext(
+          document: doc, index: index, camera: camera, selection: selection);
+      final depth = doc.commands.undoDepth;
+      selection
+          .replace([SelectionKey.root(instance), SelectionKey.root(outer)]);
+
+      expect(SelectTool().onKey(_deleteDown(), ctx), KeyEventResult.handled);
+
+      expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
+      for (final h in [instance, outer, nested]) {
+        expect(doc.tree[h], isNull);
+        expect(doc.components.snapshotOf(h).isEmpty, isTrue,
+            reason: '${h.toHex()} keeps nothing');
+      }
+      final deleted = DraftDocumentCodec.encodeToString(doc);
+      doc.commands.undo();
+      expect(DraftDocumentCodec.encodeToString(doc), before);
+      doc.commands.redo();
+      expect(DraftDocumentCodec.encodeToString(doc), deleted);
+    });
+
     test('Escape when idle clears', () {
       final doc = DraftDocument.empty();
       final lineA = addEntity(

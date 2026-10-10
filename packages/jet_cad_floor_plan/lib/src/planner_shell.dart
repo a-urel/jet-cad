@@ -924,8 +924,9 @@ class _PlannerShellState extends State<PlannerShell> {
 
   /// The host's `FloorPlanController.deleteSelection` (spec C-3, S-16):
   /// the select tool's own delete, whichever tool is active (one undo
-  /// step, the table-data expander; `delete` gated, `idleKeys` not). The
-  /// controller asks only while no shape is part-way, after a settle.
+  /// step, the delete takes each table's data with it; `delete` gated,
+  /// `idleKeys` not). The controller asks only while no shape is part-way,
+  /// after a settle.
   bool _deleteByHost() => _select.deleteSelection(_context);
 
   /// The table the host's inspector shows (spec C-6, S-18): the

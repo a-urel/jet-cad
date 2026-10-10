@@ -381,14 +381,33 @@ class SetInstanceDefinitionCommand extends DraftCommand {
 /// removal puts the node back between the same neighbours and the encoding
 /// back byte for byte (spec O-10). [DocumentTree.addNode] range-checks it
 /// before mutating.
+///
+/// **Order of refusals** (spec "A removed node takes its components", D-1):
+/// the duplicate handle, then the snapshot's types
+/// ([ComponentRegistry.checkRestorable]), then the tree's own (cycle, index),
+/// and only then the writes, so any refusal leaves the document as it was.
 class AddNodeCommand extends DraftCommand {
   final Node node;
   final int? index;
 
-  AddNodeCommand(this.node, {this.index});
+  /// What `RemoveNodeCommand`'s inverse puts back on the handle with the
+  /// node (spec "A removed node takes its components", D-1); empty for an
+  /// ordinary add. A re-parent built by hand carries
+  /// `components.snapshotOf(handle)`, read when the compound is built
+  /// (D-3); without it the re-added node starts empty.
+  final ComponentSnapshot components;
+
+  AddNodeCommand(this.node, {this.index, ComponentSnapshot? components})
+      : components = components ?? ComponentSnapshot.empty;
 
   @override
   Capability get capability => Capability.structure;
+
+  /// `{structure}`, plus `components` when [components] is not empty (D-2).
+  @override
+  Set<Capability> get capabilities => components.isEmpty
+      ? const {Capability.structure}
+      : const {Capability.structure, Capability.components};
 
   @override
   String get label => 'Add node';
@@ -399,7 +418,11 @@ class AddNodeCommand extends DraftCommand {
         target.entities.containsHandle(node.handle)) {
       throw DuplicateHandleError(node.handle);
     }
+    // Every refusal before the first write (D-1): the snapshot's types,
+    // then the tree's own (cycle, index), then the writes.
+    target.components.checkRestorable(node.handle, components);
     target.tree.addNode(node, index: index);
+    target.components.restore(node.handle, components);
     target.handleSeed.raiseTo(node.handle);
     target.invalidateDerived();
     return CommandResult(
@@ -409,7 +432,9 @@ class AddNodeCommand extends DraftCommand {
   }
 }
 
-/// Removes a node from the scene tree.
+/// Removes a node from the scene tree, and every component on its handle
+/// with it, registered and unknown (spec "A removed node takes its
+/// components", D-1).
 ///
 /// The inverse carries the node value itself, so undo re-adds through
 /// [AddNodeCommand] — including its cycle guard — rather than re-inserting
@@ -421,6 +446,17 @@ class AddNodeCommand extends DraftCommand {
 /// saved file while nothing had been edited (spec O-10). A compound delete
 /// needs nothing more: its inverse runs the children's inverses in reverse
 /// order, so each re-insert meets exactly the list its own removal left.
+///
+/// And it carries the [ComponentSnapshot] of the handle, taken before the
+/// components are detached, so undo puts them back exactly. A re-parent
+/// built as remove-then-add keeps the components only when the add carries
+/// the snapshot (D-3).
+///
+/// **[capabilities] are static**, as `RemoveDefinitionCommand`'s (spec 09c
+/// W-1): the dispatcher checks them before [apply], when what the handle
+/// carries is not known, so the command always declares
+/// `{structure, components}`. [capability], what `SpatialIndex` reads, stays
+/// `structure` (D-2).
 class RemoveNodeCommand extends DraftCommand {
   final Handle handle;
 
@@ -428,6 +464,10 @@ class RemoveNodeCommand extends DraftCommand {
 
   @override
   Capability get capability => Capability.structure;
+
+  @override
+  Set<Capability> get capabilities =>
+      const {Capability.structure, Capability.components};
 
   @override
   String get label => 'Remove node';
@@ -439,10 +479,12 @@ class RemoveNodeCommand extends DraftCommand {
       throw StateError('no node with handle ${handle.toHex()}');
     }
     final index = target.tree.indexInParent(handle);
+    final components = target.components.snapshotOf(handle);
     target.tree.removeNode(handle);
+    target.components.detachAll(handle);
     target.invalidateDerived();
     return CommandResult(
-      inverse: AddNodeCommand(node, index: index),
+      inverse: AddNodeCommand(node, index: index, components: components),
       touched: {handle},
     );
   }

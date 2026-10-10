@@ -1,0 +1,1401 @@
+# Review package: 5a0af46..HEAD
+
+## Commits
+90044db4 feat(engine): a removed node takes its components (node-components D-1 to D-4)
+
+## Files changed
+ packages/jet_cad_2d/lib/src/document/commands.dart |  48 ++-
+ .../jet_cad_2d/lib/src/document/component.dart     |  41 ++-
+ .../lib/src/parametric/parametric_system.dart      |  24 +-
+ .../lib/src/parametric/regeneration.dart           |  63 ++--
+ .../test/document/compound_command_test.dart       |  10 +-
+ .../test/document/node_components_test.dart        | 379 +++++++++++++++++++++
+ .../jet_cad_2d/test/parametric/cascade_test.dart   |   6 +-
+ .../jet_cad_2d/test/parametric/dissolve_test.dart  |  32 +-
+ .../jet_cad_2d/test/parametric/misplaced_test.dart |   7 +-
+ .../test/parametric/objects_of_test.dart           |   6 +-
+ packages/jet_cad_2d/test/parametric/page_test.dart |  20 +-
+ .../jet_cad_2d_flutter/test/select_tool_test.dart  |  48 +++
+ 12 files changed, 586 insertions(+), 98 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/document/commands.dart b/packages/jet_cad_2d/lib/src/document/commands.dart
+index 25d8f597..ddc7fe70 100644
+--- a/packages/jet_cad_2d/lib/src/document/commands.dart
++++ b/packages/jet_cad_2d/lib/src/document/commands.dart
+@@ -374,82 +374,124 @@ class SetInstanceDefinitionCommand extends DraftCommand {
+ /// close a definition cycle *before* mutating: a second check here would be
+ /// redundant, and duplicating the guard is exactly how the two copies drift
+ /// apart later. Both this check and that one throw before the command returns
+ /// its inverse, so the dispatcher never pushes history for a rejected command.
+ ///
+ /// [index] is where the node goes among its parent's `children`; null
+ /// appends. It is what [RemoveNodeCommand]'s inverse carries, so an undone
+ /// removal puts the node back between the same neighbours and the encoding
+ /// back byte for byte (spec O-10). [DocumentTree.addNode] range-checks it
+ /// before mutating.
++///
++/// **Order of refusals** (spec "A removed node takes its components", D-1):
++/// the duplicate handle, then the snapshot's types
++/// ([ComponentRegistry.checkRestorable]), then the tree's own (cycle, index),
++/// and only then the writes, so any refusal leaves the document as it was.
+ class AddNodeCommand extends DraftCommand {
+   final Node node;
+   final int? index;
+ 
+-  AddNodeCommand(this.node, {this.index});
++  /// What `RemoveNodeCommand`'s inverse puts back on the handle with the
++  /// node (spec "A removed node takes its components", D-1); empty for an
++  /// ordinary add. A re-parent built by hand carries
++  /// `components.snapshotOf(handle)`, read when the compound is built
++  /// (D-3); without it the re-added node starts empty.
++  final ComponentSnapshot components;
++
++  AddNodeCommand(this.node, {this.index, ComponentSnapshot? components})
++      : components = components ?? ComponentSnapshot.empty;
+ 
+   @override
+   Capability get capability => Capability.structure;
+ 
++  /// `{structure}`, plus `components` when [components] is not empty (D-2).
++  @override
++  Set<Capability> get capabilities => components.isEmpty
++      ? const {Capability.structure}
++      : const {Capability.structure, Capability.components};
++
+   @override
+   String get label => 'Add node';
+ 
+   @override
+   CommandResult apply(CommandTarget target) {
+     if (target.tree[node.handle] != null ||
+         target.entities.containsHandle(node.handle)) {
+       throw DuplicateHandleError(node.handle);
+     }
++    // Every refusal before the first write (D-1): the snapshot's types,
++    // then the tree's own (cycle, index), then the writes.
++    target.components.checkRestorable(node.handle, components);
+     target.tree.addNode(node, index: index);
++    target.components.restore(node.handle, components);
+     target.handleSeed.raiseTo(node.handle);
+     target.invalidateDerived();
+     return CommandResult(
+       inverse: RemoveNodeCommand(node.handle),
+       touched: {node.handle},
+     );
+   }
+ }
+ 
+-/// Removes a node from the scene tree.
++/// Removes a node from the scene tree, and every component on its handle
++/// with it, registered and unknown (spec "A removed node takes its
++/// components", D-1).
+ ///
+ /// The inverse carries the node value itself, so undo re-adds through
+ /// [AddNodeCommand] — including its cycle guard — rather than re-inserting
+ /// unchecked.
+ ///
+ /// It also carries the node's index among its parent's `children`, read
+ /// before the removal: without it the re-add appended, so Delete then Undo
+ /// reordered the parent's `children` and the encoding differed from the
+ /// saved file while nothing had been edited (spec O-10). A compound delete
+ /// needs nothing more: its inverse runs the children's inverses in reverse
+ /// order, so each re-insert meets exactly the list its own removal left.
++///
++/// And it carries the [ComponentSnapshot] of the handle, taken before the
++/// components are detached, so undo puts them back exactly. A re-parent
++/// built as remove-then-add keeps the components only when the add carries
++/// the snapshot (D-3).
++///
++/// **[capabilities] are static**, as `RemoveDefinitionCommand`'s (spec 09c
++/// W-1): the dispatcher checks them before [apply], when what the handle
++/// carries is not known, so the command always declares
++/// `{structure, components}`. [capability], what `SpatialIndex` reads, stays
++/// `structure` (D-2).
+ class RemoveNodeCommand extends DraftCommand {
+   final Handle handle;
+ 
+   RemoveNodeCommand(this.handle);
+ 
+   @override
+   Capability get capability => Capability.structure;
+ 
++  @override
++  Set<Capability> get capabilities =>
++      const {Capability.structure, Capability.components};
++
+   @override
+   String get label => 'Remove node';
+ 
+   @override
+   CommandResult apply(CommandTarget target) {
+     final node = target.tree[handle];
+     if (node == null) {
+       throw StateError('no node with handle ${handle.toHex()}');
+     }
+     final index = target.tree.indexInParent(handle);
++    final components = target.components.snapshotOf(handle);
+     target.tree.removeNode(handle);
++    target.components.detachAll(handle);
+     target.invalidateDerived();
+     return CommandResult(
+-      inverse: AddNodeCommand(node, index: index),
++      inverse: AddNodeCommand(node, index: index, components: components),
+       touched: {handle},
+     );
+   }
+ }
+ 
+ /// Adds one [Definition] to the tree.
+ ///
+ /// Refuses, before any mutation, a handle that already names a definition, a
+ /// node or an entity ([DuplicateHandleError]: a handle names one thing in the
+ /// document), and a definition whose `children` is not empty
+diff --git a/packages/jet_cad_2d/lib/src/document/component.dart b/packages/jet_cad_2d/lib/src/document/component.dart
+index 126b9fe8..f61db7ec 100644
+--- a/packages/jet_cad_2d/lib/src/document/component.dart
++++ b/packages/jet_cad_2d/lib/src/document/component.dart
+@@ -169,42 +169,51 @@ class ComponentRegistry {
+ 
+   /// Detaches every component on [handle], registered and unknown. Other
+   /// handles are untouched.
+   void detachAll(Handle handle) {
+     for (final store in _stores.values) {
+       store.remove(handle);
+     }
+     _unknown.remove(handle);
+   }
+ 
++  /// Throws [StateError] when a registered type id of [snapshot] maps to
++  /// no store in this registry, and writes nothing: the check [restore]
++  /// makes before its first write, for a caller that must make it before
++  /// any other mutation (`AddNodeCommand`, spec D-1). Only a snapshot from
++  /// another document can fail it.
++  void checkRestorable(Handle handle, ComponentSnapshot snapshot) {
++    for (final (typeId, _) in snapshot.components) {
++      if (_stores[_typeOf[typeId]] == null) {
++        throw StateError('cannot restore $typeId on ${handle.toHex()}: '
++            'the type is not registered');
++      }
++    }
++  }
++
+   /// Re-attaches each component of [snapshot] to [handle], exactly: each
+   /// registered value into its type's store (replacing one of that type
+   /// already there, as [attach] does), each unknown payload appended in the
+   /// snapshot's order (as [attachUnknown] does). Meant for a handle that
+-  /// carries nothing, which is how `RemoveDefinitionCommand`'s inverse uses
+-  /// it; nothing outside the snapshot is added, so a type registered after
+-  /// the snapshot was taken gets no component.
++  /// carries nothing, which is how `RemoveDefinitionCommand`'s and
++  /// `RemoveNodeCommand`'s inverses use it: on a handle that already
++  /// carries unknown payloads, the snapshot's are appended after them, and
++  /// the encoding keeps only the last payload per type id and handle.
++  /// Nothing outside the snapshot is added, so a type registered after the
++  /// snapshot was taken gets no component.
+   ///
+-  /// All-or-nothing: a registered type id this registry no longer maps to a
+-  /// store throws [StateError] before anything is written.
++  /// All-or-nothing: [checkRestorable] runs first, before anything is
++  /// written.
+   void restore(Handle handle, ComponentSnapshot snapshot) {
+-    final stores = <ComponentStore<Component>>[];
+-    for (final (typeId, _) in snapshot.components) {
+-      final store = _stores[_typeOf[typeId]];
+-      if (store == null) {
+-        throw StateError('cannot restore $typeId on ${handle.toHex()}: '
+-            'the type is not registered');
+-      }
+-      stores.add(store);
+-    }
+-    for (var i = 0; i < stores.length; i++) {
+-      stores[i].set(handle, snapshot.components[i].$2);
++    checkRestorable(handle, snapshot);
++    for (final (typeId, component) in snapshot.components) {
++      _stores[_typeOf[typeId]]!.set(handle, component);
+     }
+     for (final payload in snapshot.unknown) {
+       attachUnknown(handle, payload);
+     }
+   }
+ 
+   /// Records a component whose `typeId` this build does not know. The payload
+   /// is stored exactly as read and written back unchanged.
+   void attachUnknown(Handle handle, Map<String, Object?> json) =>
+       _unknown.putIfAbsent(handle, () => []).add(json);
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index 8977ae1a..9a7f08fe 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -4,21 +4,20 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ import '../core/diagnostic.dart';
+ import '../core/handle.dart';
+ import '../core/tolerance.dart';
+ import '../document/command.dart';
+ import '../document/commands.dart';
+ import '../document/component.dart';
+ import '../document/draft_document.dart';
+ import '../document/drafting.dart';
+ import '../document/layer_commands.dart';
+ import '../document/node.dart';
+-import '../document/object_layer.dart';
+ import '../document/page_component.dart';
+ import '../document/style.dart';
+ import '../geometry/aabb2.dart';
+ import '../geometry/transform2.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ 
+ part 'regeneration.dart';
+ 
+ /// What one parametric type contributes (spec 06 D3). Behaviour lives here,
+@@ -76,24 +75,25 @@ abstract class ParametricType<T extends Component> {
+   /// any other edit: keep it a field read.
+   Object? pageKey(PageComponent? page) => null;
+ 
+   /// Whether [self] is deleted instead of regenerated (spec 10 D15): a room
+   /// whose seed ended up in a wall or in an unbounded face.
+   ///
+   /// Asked in the edit, of every live object the edit regenerates, with the
+   /// after-view, **before** its [generate], and by `drift()` of every live
+   /// object. When it answers true, [generate] is not called: the planner
+   /// removes [self]'s children and node, as the select tool deletes a
+-  /// group, and then detaches its component, all inside the same edit, one
+-  /// undo step. Never asked of an object the edit deleted: that one is
+-  /// 06 D8's cleanup's. Like [generate], it must not mutate, and whatever it
+-  /// throws rolls the edit back. Default: never.
++  /// group (the removal of its node takes its component with it,
++  /// node-components spec D-4), all inside the same edit, one undo step.
++  /// Never asked of an object the edit deleted: the edit's own removal took
++  /// that one's component. Like [generate], it must not mutate, and
++  /// whatever it throws rolls the edit back. Default: never.
+   bool dissolves(ParametricView view, Handle self) => false;
+ 
+   /// Spec 10 D16: this type's geometry is an input to place readers.
+   /// Default false.
+   ///
+   /// A type is a contributor or a reader, never both:
+   /// [ParametricCatalog.register] refuses a type that is both, because the
+   /// trigger reaches readers one hop from what an edit changed.
+   bool get contributesPlace => false;
+ 
+@@ -378,24 +378,25 @@ final class ParametricView {
+   /// Every live contributor with a place box, ascending, filled by the first
+   /// [placedIn].
+   List<(Handle, Aabb2)>? _placed;
+ 
+   /// [objectsOf]'s lists, by the component type asked for.
+   final Map<Type, List<Handle>> _objectsOf = {};
+ 
+   /// [h]'s component of type [U], or null, and null for any handle that is
+   /// not a live object of the survey this view was built over (inside an
+   /// edit, `drift()` and `diagnostics()` alike). An object an edit lost
+-  /// keeps its component until 06 D8's cleanup, after the plan, and a
+-  /// re-parented one keeps it for good; either way an orphan must see its
+-  /// host gone (spec 08 D4), not a host whose transform has fallen back to
+-  /// the identity or that no longer regenerates.
++  /// no longer has its component (its node's removal took it, node-components
++  /// spec D-4), and a re-parented one keeps it only when the re-add carries
++  /// the snapshot; either way an orphan must see its host gone (spec 08 D4),
++  /// not a host whose transform has fallen back to the identity or that no
++  /// longer regenerates.
+   ///
+   /// The component is the survey's snapshot of [h]'s registered component
+   /// (spec 10 D16.1), answered when it is a [U].
+   U? paramsOf<U extends Component>(Handle h) {
+     final c = _survey.params[h];
+     return c is U ? c : null;
+   }
+ 
+   /// The accumulated transform, group-local to world: the survey's snapshot
+   /// for a live object of it (spec 10 D16.1), the live tree for any other
+@@ -591,22 +592,23 @@ class ParametricSystem {
+       ];
+     } finally {
+       _applying = was;
+     }
+   }
+ 
+   /// One diagnostic per parametric component on a holder that is not a
+   /// root-level group: it is not regenerated (spec D5). An edit can no
+   /// longer write one (`_written`, fix/post-11), but a document can still
+   /// carry one: a file brings it in (loading does not go through
+-  /// [ParametricEdit]), and a re-parented object keeps its component (spec
+-  /// 08 D4), so this report stays. Then, for every live
++  /// [ParametricEdit]), and a re-parented object keeps its component when the
++  /// re-add carries the snapshot (spec 08 D4, node-components D-3), so this
++  /// report stays. Then, for every live
+   /// object in ascending handle order and every handle its `references`
+   /// declared that is not a live object, in declared order and once each,
+   /// `parametric.dangling` (severity error) for a `cascade` type or
+   /// `parametric.orphan` (warning) for an `orphan` one, naming the object
+   /// then the handle (spec 08 D5, D17): read from the survey's one
+   /// `references` call per object. Then every live
+   /// object's [ParametricType.diagnose], in ascending handle order whatever
+   /// the types' registration order (spec 07 D12), over one full survey;
+   /// neighbours are computed only for the objects a client asks about.
+   ///
+diff --git a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+index 10b74000..60742b1f 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+@@ -473,29 +473,20 @@ bool _samePayload(GeometryPayload a, GeometryPayload b) {
+ /// differs (exact `==`, a stored value), nothing otherwise. The guard is
+ /// load-bearing (R-15): without it every regeneration plans a command and
+ /// every `ParametricEdit` reports `geometry`.
+ void _stampLayer(
+     CommandTarget t, List<DraftCommand> out, Handle c, Handle layer) {
+   if (t.entities.layerAt(t.entities.slotOf(c)!) != layer) {
+     out.add(SetEntityLayerCommand.restore(c, layer));
+   }
+ }
+ 
+-/// [h]'s `ObjectLayer` detach (spec 12b D2, R-4), when [h] carries one:
+-/// planned beside the registered component's detach by 06 D8's cleanup and
+-/// 10 D15's dissolve, so no dead handle keeps a layer alive and undo
+-/// replays it.
+-Iterable<DraftCommand> _detachLayer(CommandTarget t, Handle h) => [
+-      if (t.components.get<ObjectLayer>(h) != null)
+-        SetComponentCommand<ObjectLayer>(h, null),
+-    ];
+-
+ /// The boundary a fill child names: its payload's one scalar (spec 07 D8).
+ Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
+     .peek(t.entities.geomIndexAt(t.entities.slotOf(fill)!))
+     .scalars[0]
+     .toInt());
+ 
+ /// The boundary [fill] names, which must be a live child of [owner], the
+ /// object [fill] belongs to: a loaded file can name any handle (spec 07
+ /// D8). Anything else throws `StateError` from the plan, before anything
+ /// applies, so `_run` rolls the edit back. Every use of a fill's boundary
+@@ -533,39 +524,33 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
+ /// the fill; the boundary is never matched as a plain POLYLINE.
+ ///
+ /// A matched child's payload is rewritten when it differs; a matched
+ /// TEXT's string too (spec 10 D12); then its layer, when it differs from
+ /// the object's ([_stampLayer], spec 12b D2), a matched region's fill and
+ /// boundary each. Every added record comes from [_recordOf], on the
+ /// object's layer.
+ ///
+ /// Each object is first asked whether it dissolves (spec 10 D15), with the
+ /// same [view], before its `generate`. A dissolving object is not
+-/// generated: its plan is [_subtreeRemoval] (the select tool's order), then
+-/// the detach of its own component and of its `ObjectLayer`, when it
+-/// carries one (spec 12b D2). The detach is planned here because
+-/// nothing else would plan it: 06 D8's cleanup detaches only `lost`
+-/// objects, and `lost` is computed from the after-survey, where a
+-/// dissolving object is still live. For the same reason it is never
+-/// detached twice. The removals are planned commands, never in the edit's
+-/// `touched`, so 06 D6's guard does not see them.
++/// generated: its plan is [_subtreeRemoval] (the select tool's order),
++/// whose last removal is the object's own node, and that removal takes the
++/// object's component and its `ObjectLayer` with it (node-components spec
++/// D-4), so nothing else is planned. The removals are planned commands,
++/// never in the edit's `touched`, so 06 D6's guard does not see them.
+ List<DraftCommand> _plan(
+     CommandTarget t, List<Handle> closure, _Survey s, ParametricView view) {
+   var reserved = t.handleSeed.current.value;
+   final out = <DraftCommand>[];
+   for (final h in closure) {
+     final registration = s.objects[h]!;
+     if (registration.dissolves(view, h)) {
+-      out
+-        ..addAll(_subtreeRemoval(t, s, h))
+-        ..add(registration.detach(h))
+-        ..addAll(_detachLayer(t, h));
++      out.addAll(_subtreeRemoval(t, s, h));
+       continue;
+     }
+     final layer = objectLayer(t, h);
+     final generated = registration.generate(view, h);
+     final children = s.children[h] ?? const <Handle>[];
+     final boundaries = <Handle>{
+       for (final c in children)
+         if (t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill)
+           _boundaryOf(t, c),
+     };
+@@ -683,27 +668,26 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
+ /// root-level group after the edit (spec D5, as amended by fix/post-11,
+ /// post-11 found item (d)), with the registration it wrote; null when
+ /// there is none. `_run` then undoes `inner` and throws `StateError`.
+ ///
+ /// "Wrote" means: the component is non-null now and not `==` to what the
+ /// before-survey held for the same type on the same handle ([_heldBefore];
+ /// a stored value, compared exactly). So these are never refused, because
+ /// the edit left the component as it was or removed it:
+ ///
+ /// - a detach (`SetComponentCommand<T>(h, null)`) on any handle, dead or
+-///   nested: 06 D8's cleanup plans exactly that, and a file's misplaced
+-///   component must stay removable;
+-/// - a delete: the removed object keeps its component until the cleanup
+-///   detaches it in the same edit; undo and redo replay a
+-///   `ParametricReplay` and never come here, so its re-attach before the
+-///   node is restored is untouched (a guard in `SetComponentCommand` would
+-///   break exactly that);
++///   nested: a file's misplaced component must stay removable;
++/// - a delete: the removal takes the object's component with its node
++///   (node-components spec D-4); undo and redo replay a
++///   `ParametricReplay` and never come here, so the restore that rides in
++///   the node's snapshot is untouched (a guard in `SetComponentCommand`
++///   would break exactly that);
+ /// - a re-parent under another group (spec 08 D4, `CS7`): the object stops
+ ///   being one and keeps its component, as specified;
+ /// - any edit that touches a holder of a component a file brought in
+ ///   misplaced (a move of its line, removing its nested group) without
+ ///   writing a new value.
+ ///
+ /// Only [touched] (`inner`'s own) is read, so a file carrying a misplaced
+ /// component elsewhere never refuses an unrelated edit, and the cost is
+ /// O(|touched| log |touched| + |touched| · types), nothing per object.
+ /// Only registered types are read: any other component lands as before.
+@@ -903,39 +887,39 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
+ }
+ 
+ /// Spec 06 D4 steps 1-9, in spec 08 D4's order:
+ ///
+ /// 1. `before`, the survey, with references and referrers;
+ /// 2. `r0`, the edit;
+ /// 3. 06 D6's guard on `r0.touched`, then [_written] (06 D5, amended by
+ ///    fix/post-11): either refusal undoes `r0`;
+ /// 4. the reference cascade ([_cascade]), which returns `r`: `r0` extended
+ ///    by the removals, its inverse included;
+-/// 5. inside one `try`: the after-survey, `lost`, 06 D8's cleanup, the
++/// 5. inside one `try`: the after-survey, `lost`, the
+ ///    seeds, the dangling-reference check ([_checkDangling]), the page
+ ///    seeds ([_pageSeeds], spec 10 D14: a changed page adds the live
+ ///    objects of every type whose page key changed, unchecked for dangling
+ ///    references, Ruling 10-4), the early return, the after-view, the
+ ///    spatial trigger ([_triggered], spec 10 D16.2: the readers whose read
+ ///    box touches a before or after place box of a contributor of the
+ ///    spatial core whose place changed, and nothing when no reader is live;
+ ///    the before-view is built there), the closure and the plan (a dissolving
+-///    object's removal and detach included, spec 10 D15), which receives
++///    object's removal included, spec 10 D15), which receives
+ ///    the trigger's after-view (Ruling 10-5). Any failure applies
+ ///    `r.inverse`, the cascade's included, so a refused edit leaves the
+ ///    document byte for byte as it was;
+ /// 6. the apply loop, whose inverse wraps `r.inverse`.
+ ///
+ /// The after-survey never sees a doomed referrer, so the plan never
+ /// generates it; `lost` picks each one up by itself (its node is gone), so
+-/// the cleanup detaches its component and it seeds the closure like any
+-/// deleted object.
++/// it seeds the closure like any deleted object. Its component went with its
++/// node, in the removal (node-components spec D-4): there is no cleanup.
+ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+   final types = edit._system._types;
+   final before = _survey(t, types);
+   final r0 = edit.inner.apply(t);
+ 
+   final refused = _refused(t, types, before, r0.touched);
+   if (refused != null) {
+     _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
+     throw GeneratedGeometryError(refused);
+   }
+@@ -952,42 +936,33 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+         'would never be regenerated (spec 06 D5); the edit is refused');
+     _undoInner(t, edit.label, r0, error);
+     throw error;
+   }
+ 
+   final r = _cascade(t, types, before, r0, edit.label);
+ 
+   // The after-survey calls every registered type's `reach` again, with
+   // whatever `inner` just wrote — a client's `reach` can throw on the new
+   // parameters (a negative width, say). `inner` has already applied at
+-  // this point, so that throw, `lost`/`cleanup`'s own computation, the
++  // this point, so that throw, `lost`'s own computation, the
+   // dangling-reference check and `_plan`'s call into `generate` all share
+   // one try: any of them failing must still undo `inner` and the cascade
+   // and leave nothing in history (spec D4 step 8).
+   final _Survey after;
+-  final List<DraftCommand> cleanup;
+   final List<DraftCommand> plan;
+   try {
+     after = _survey(t, types);
+     // Ruling 06-3: only objects that were live before the edit.
+     final lost = [
+       for (final h in before.objects.keys)
+         if (!after.objects.containsKey(h) && t.tree[h] == null) h,
+     ];
+-    // Spec 12b D2 (R-4): the `ObjectLayer` goes with the registered
+-    // component, so a dead handle keeps no layer alive.
+-    cleanup = [
+-      for (final h in lost) ...[
+-        before.objects[h]!.detach(h),
+-        ..._detachLayer(t, h),
+-      ],
+-    ];
+     final seeds = <Handle>{
+       for (final h in r.touched) ...[
+         // Ruling 06-4: a handle that was an object seeds too.
+         if (after.objects.containsKey(h) || before.objects.containsKey(h)) h,
+         if (before.owned[h] case final owner?) owner,
+       ],
+       ...lost,
+     };
+     _checkDangling(seeds, after);
+     // Spec 10 D14, Ruling 10-4: after the dangling-reference check, which
+@@ -996,21 +971,21 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+     // change), and before the early return (a page-only edit touches the
+     // root, which is not an object, so its seeds are otherwise empty).
+     // Guarded here, so no other edit builds the iterable or calls a
+     // `pageKey`.
+     if (before.page != after.page) {
+       seeds.addAll(_pageSeeds(t, types, before, after));
+     }
+     // No neighbour has been computed up to here (spec 07 D10): an edit that
+     // touches no object, a plain line drawn among them, pays for the two
+     // surveys only and returns here.
+-    if (seeds.isEmpty && cleanup.isEmpty) return r;
++    if (seeds.isEmpty) return r;
+     // Ruling 10-5: one after-view, for the trigger and the plan alike.
+     final view = ParametricView._(t, after);
+     plan = _plan(
+         t,
+         _closure(
+             seeds, before, after, _triggered(t, seeds, before, after, view)),
+         after,
+         view);
+   } catch (error) {
+     _undoInner(t, edit.label, r, error);
+@@ -1024,21 +999,21 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+   // compound reports its own rollback failure as a `StateError`, which is
+   // also what a child command throws when it refuses (a missing handle,
+   // say); behind one `CompoundCommand.apply` the two would reach this
+   // function as the same exception type. They need opposite handling: after
+   // a child's error the regeneration is fully undone, so `inner` is undone
+   // too and the error rethrown; after a failed rollback the target is in an
+   // unknown state, so `inner` is left alone and the partial mutation is
+   // reported. Applying the commands one by one keeps the two apart.
+   final inverses = <DraftCommand>[];
+   final touched = <Handle>{...r.touched};
+-  for (final c in [...cleanup, ...plan]) {
++  for (final c in plan) {
+     final CommandResult applied;
+     try {
+       applied = c.apply(t);
+     } catch (error) {
+       try {
+         for (final i in inverses.reversed) {
+           i.apply(t);
+         }
+       } catch (rollbackError) {
+         throw StateError('"${edit.label}": regeneration threw ($error) and '
+diff --git a/packages/jet_cad_2d/test/document/compound_command_test.dart b/packages/jet_cad_2d/test/document/compound_command_test.dart
+index d9d02029..daa0386f 100644
+--- a/packages/jet_cad_2d/test/document/compound_command_test.dart
++++ b/packages/jet_cad_2d/test/document/compound_command_test.dart
+@@ -296,22 +296,28 @@ void main() {
+     expect(doc.entities.slotOf(leaf), isNotNull);
+     expect(doc.commands.undoDepth, depthBefore);
+   });
+ 
+   test("capabilities is the union of the children's", () {
+     final compound = CompoundCommand([
+       TransformNodeCommand(const Handle(50), Transform2.identity()),
+       RemoveEntityCommand(const Handle(51)),
+       RemoveNodeCommand(const Handle(52)),
+     ], label: 'Delete');
+-    expect(compound.capabilities,
+-        {Capability.transform, Capability.geometry, Capability.structure});
++    // RemoveNodeCommand declares `components` too, statically (node-components
++    // spec D-2), so the union gains it.
++    expect(compound.capabilities, {
++      Capability.transform,
++      Capability.geometry,
++      Capability.structure,
++      Capability.components,
++    });
+     // "Highest-ranked" is the declaration order of enum Capability; the
+     // spatial index and the tile cache read it to skip components-only
+     // compounds (spec 04 D13).
+     expect(compound.capability, Capability.structure,
+         reason: 'the summary capability is the highest-ranked child');
+   });
+ 
+   test('the spatial index sees every handle a compound removes', () {
+     // Belt to the `touched` assertion above: a stale entry for the second
+     // leaf would answer this pick from a slot that no longer holds it.
+diff --git a/packages/jet_cad_2d/test/document/node_components_test.dart b/packages/jet_cad_2d/test/document/node_components_test.dart
+new file mode 100644
+index 00000000..332bb52e
+--- /dev/null
++++ b/packages/jet_cad_2d/test/document/node_components_test.dart
+@@ -0,0 +1,379 @@
++// Spec "A removed node takes its components" (revision 3), N-1 to N-7:
++// RemoveNodeCommand takes every component of its handle, registered and
++// unknown, and its inverse puts them back exactly, the node at its index.
++import 'dart:convert';
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' hide Aabb2;
++
++/// A registered test type with two non-default fields.
++final class Mark implements Component {
++  static const String id = 'test.mark';
++  const Mark(this.count, this.label);
++  final int count;
++  final String label;
++  @override
++  String get typeId => id;
++  @override
++  Map<String, Object?> toJson() => {'count': count, 'label': label};
++  static Mark fromJson(Map<String, Object?> j) =>
++      Mark(j['count']! as int, j['label']! as String);
++  @override
++  bool operator ==(Object other) =>
++      other is Mark && other.count == count && other.label == label;
++  @override
++  int get hashCode => Object.hash(count, label);
++}
++
++/// Registered only in a second document: a type this one does not map.
++/// Its id sorts after `jet_cad.object_layer` (spec N-4, M-16).
++final class Foreign implements Component {
++  static const String id = 'test.foreign';
++  const Foreign();
++  @override
++  String get typeId => id;
++  @override
++  Map<String, Object?> toJson() => const {'f': 1};
++  static Foreign fromJson(Map<String, Object?> j) => const Foreign();
++  @override
++  bool operator ==(Object other) => other is Foreign;
++  @override
++  int get hashCode => 1;
++}
++
++/// Not layer 0, which is what an absent ObjectLayer reads as.
++const Handle kLayer = Handle(0x2A1);
++
++/// Unknown payloads, attached `later` first: not in type-id order.
++Map<String, Object?> later() => {
++      'typeId': 'z.later',
++      'nested': {
++        'k': [1, 2.5]
++      },
++      'note': 'kept verbatim',
++    };
++Map<String, Object?> earlier() => {'typeId': 'a.earlier', 'v': -3};
++
++typedef Scene = ({
++  DraftDocument doc,
++  Handle parent,
++  Handle node,
++  Handle sibling,
++  Handle last,
++});
++
++/// A group [parent] 40 m off the origin, turned, holding [node], [sibling]
++/// and [last] in that order (not ascending: [sibling] < [node]). [node]
++/// carries Mark, ObjectLayer and two unknown payloads; [sibling] Mark,
++/// ObjectLayer and one unknown payload, with other values. History cleared.
++Scene scene() {
++  final doc = DraftDocument.empty();
++  doc.components.register<Mark>(Mark.id, Mark.fromJson);
++  final parent = doc.handleSeed.next();
++  final sibling = doc.handleSeed.next();
++  final node = doc.handleSeed.next();
++  final last = doc.handleSeed.next();
++  GroupNode group(Handle h, Handle p, Transform2 t) =>
++      GroupNode(handle: h, parent: p, transform: t, children: const []);
++  doc.commands.execute(CompoundCommand([
++    AddNodeCommand(group(
++        parent,
++        doc.rootHandle,
++        Transform2.translation(4e4, -2.7e4)
++            .multiply(Transform2.rotation(0.6)))),
++    AddNodeCommand(group(node, parent,
++        Transform2.translation(310, -925).multiply(Transform2.rotation(-1.1)))),
++    AddNodeCommand(group(sibling, parent, Transform2.translation(-75, 40))),
++    AddNodeCommand(group(last, parent, Transform2.translation(12, 13))),
++    SetComponentCommand<Mark>(node, const Mark(7, 'north')),
++    SetComponentCommand<ObjectLayer>(node, const ObjectLayer(kLayer)),
++    SetComponentCommand<Mark>(sibling, const Mark(3, 'south')),
++    SetComponentCommand<ObjectLayer>(sibling, const ObjectLayer(kLayer)),
++  ], label: 'Fixture'));
++  doc.components
++    ..attachUnknown(node, later())
++    ..attachUnknown(node, earlier())
++    ..attachUnknown(sibling, earlier());
++  doc.commands.clearHistory();
++  return (doc: doc, parent: parent, node: node, sibling: sibling, last: last);
++}
++
++String enc(DraftDocument doc) => DraftDocumentCodec.encodeToString(doc);
++
++List<Handle> childrenOf(DraftDocument doc, Handle g) =>
++    (doc.tree[g]! as GroupNode).children;
++
++/// Snapshots compared field by field: registered `==` in order, unknown
++/// payloads by their JSON in order.
++void expectSameSnapshot(ComponentSnapshot actual, ComponentSnapshot expected) {
++  expect([for (final (id, _) in actual.components) id],
++      [for (final (id, _) in expected.components) id]);
++  expect([for (final (_, c) in actual.components) c],
++      [for (final (_, c) in expected.components) c]);
++  expect(jsonEncode(actual.unknown), jsonEncode(expected.unknown));
++}
++
++bool namesHandle(DraftDocument doc, Handle h) => doc.components
++    .toJson()
++    .values
++    .any((perType) => (perType! as Map).containsKey('${h.value}'));
++
++const DraftPermissions kNoComponents = DraftPermissions(
++    transform: true, components: false, geometry: true, structure: true);
++
++void main() {
++  test('N-1 a removal takes every component of its handle, no other', () {
++    final s = scene();
++    final doc = s.doc;
++    final siblingBefore = doc.components.snapshotOf(s.sibling);
++    expect(doc.components.unknownOf(s.node), hasLength(2), reason: 'premise');
++
++    doc.commands.execute(RemoveNodeCommand(s.node));
++
++    expect(doc.tree[s.node], isNull);
++    expect(doc.components.get<Mark>(s.node), isNull);
++    expect(doc.components.get<ObjectLayer>(s.node), isNull);
++    expect(doc.components.unknownOf(s.node), isEmpty);
++    expect(doc.components.snapshotOf(s.node).isEmpty, isTrue);
++    expect(namesHandle(doc, s.node), isFalse);
++    expectSameSnapshot(doc.components.snapshotOf(s.sibling), siblingBefore);
++  });
++
++  test(
++      'N-2 undo restores the snapshot and the index byte for byte; redo '
++      'removes them again', () {
++    final s = scene();
++    final doc = s.doc;
++    final before = enc(doc);
++    final snapshot = doc.components.snapshotOf(s.node);
++    final order = childrenOf(doc, s.parent);
++    expect(order.indexOf(s.node), 0, reason: 'premise: not the append');
++
++    doc.commands.execute(RemoveNodeCommand(s.node));
++    final removed = enc(doc);
++    doc.commands.undo();
++    expectSameSnapshot(doc.components.snapshotOf(s.node), snapshot);
++    expect(childrenOf(doc, s.parent), order);
++    expect(enc(doc), before);
++    doc.commands.redo();
++    expect(enc(doc), removed);
++    expect(doc.components.snapshotOf(s.node).isEmpty, isTrue);
++    doc.commands.undo();
++    expect(enc(doc), before);
++  });
++
++  test('N-3 capabilities, and a profile without components', () {
++    final s = scene();
++    final doc = s.doc;
++    final remove = RemoveNodeCommand(s.node);
++    expect(remove.capabilities, {Capability.structure, Capability.components});
++    expect(remove.capability, Capability.structure);
++    final bare = AddNodeCommand(GroupNode(
++        handle: const Handle(0x9000),
++        parent: s.parent,
++        transform: Transform2.identity(),
++        children: const []));
++    expect(bare.capabilities, {Capability.structure});
++    final carrying = AddNodeCommand(bare.node,
++        components: doc.components.snapshotOf(s.sibling));
++    expect(
++        carrying.capabilities, {Capability.structure, Capability.components});
++    expect(carrying.capability, Capability.structure);
++
++    doc.commands.permissions = kNoComponents;
++    final before = enc(doc);
++    expect(() => doc.commands.execute(RemoveNodeCommand(s.node)),
++        throwsA(isA<PermissionDeniedError>()));
++    expect(enc(doc), before);
++
++    // D-2: an add is allowed, its undo (a removal) is not, and stays.
++    doc.commands.execute(bare);
++    final depth = doc.commands.undoDepth;
++    expect(() => doc.commands.undo(), throwsA(isA<PermissionDeniedError>()));
++    expect(doc.commands.undoDepth, depth);
++    expect(doc.tree[bare.node.handle], isNotNull);
++  });
++
++  group('N-4 a refused add leaves everything as it was', () {
++    /// A snapshot from a second document: ObjectLayer (mapped here) and
++    /// Foreign (not mapped here), plus an unknown payload.
++    ComponentSnapshot foreignSnapshot() {
++      final other = DraftDocument.empty();
++      other.components.register<Foreign>(Foreign.id, Foreign.fromJson);
++      final h = other.handleSeed.next();
++      other.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: h,
++            parent: other.rootHandle,
++            transform: Transform2.identity(),
++            children: const [])),
++        SetComponentCommand<ObjectLayer>(h, const ObjectLayer(kLayer)),
++        SetComponentCommand<Foreign>(h, const Foreign()),
++      ], label: 'Other'));
++      other.components.attachUnknown(h, later());
++      final snap = other.components.snapshotOf(h);
++      expect([
++        for (final (id, _) in snap.components) id
++      ], [
++        'jet_cad.object_layer',
++        'test.foreign'
++      ], reason: 'premise: the mapped type sorts first');
++      return snap;
++    }
++
++    void expectNothingOn(DraftDocument doc, Handle h) {
++      expect(doc.tree[h], isNull);
++      expect(doc.components.snapshotOf(h).isEmpty, isTrue);
++    }
++
++    test('an unmapped type id, the mapped one sorting first', () {
++      final s = scene();
++      final doc = s.doc;
++      final h = doc.handleSeed.next(); // before `before`: the seed is encoded
++      final before = enc(doc);
++      final order = childrenOf(doc, s.parent);
++      expect(
++          () => doc.commands.execute(AddNodeCommand(
++              GroupNode(
++                  handle: h,
++                  parent: s.parent,
++                  transform: Transform2.translation(5, 6),
++                  children: const []),
++              components: foreignSnapshot())),
++          throwsA(isA<StateError>()));
++      expectNothingOn(doc, h);
++      expect(childrenOf(doc, s.parent), order);
++      expect(enc(doc), before);
++      expect(doc.commands.undoDepth, 0);
++    });
++
++    test(
++        'the same under a parent that already lists the handle, the raw '
++        'list compared (the encoder filters a dangling entry)', () {
++      final s = scene();
++      final doc = s.doc;
++      final g = doc.handleSeed.next();
++      final x = doc.handleSeed.next();
++      doc.commands.execute(AddNodeCommand(GroupNode(
++          handle: g,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(-3e3, 2e3),
++          children: [x])));
++      expect(childrenOf(doc, g), [x], reason: 'premise: dangling entry');
++      expect(doc.tree[x], isNull, reason: 'premise');
++      expect(
++          () => doc.commands.execute(AddNodeCommand(
++              GroupNode(
++                  handle: x,
++                  parent: g,
++                  transform: Transform2.identity(),
++                  children: const []),
++              components: foreignSnapshot())),
++          throwsA(isA<StateError>()));
++      expect(childrenOf(doc, g), [x], reason: 'M-14: the raw list kept');
++      expectNothingOn(doc, x);
++    });
++
++    test('a definition cycle, with a mapped snapshot', () {
++      final s = scene();
++      final doc = s.doc;
++      final d = doc.handleSeed.next();
++      doc.commands.execute(AddDefinitionCommand(Definition(
++          handle: d,
++          name: 'D',
++          basePoint: Vector2(40, 30),
++          children: const [])));
++      final i = doc.handleSeed.next();
++      expect(
++          () => doc.commands.execute(AddNodeCommand(
++              InstanceNode(
++                  handle: i,
++                  parent: d,
++                  transform: Transform2.rotation(math.pi / 2),
++                  definition: d,
++                  layer: ReservedHandles.layerZero),
++              components: doc.components.snapshotOf(s.sibling))),
++          throwsA(isA<CycleDetectedError>()));
++      expectNothingOn(doc, i);
++    });
++
++    test('an index out of range, with a mapped snapshot', () {
++      final s = scene();
++      final doc = s.doc;
++      final h = doc.handleSeed.next(); // before `before`: the seed is encoded
++      final before = enc(doc);
++      expect(
++          () => doc.commands.execute(AddNodeCommand(
++              GroupNode(
++                  handle: h,
++                  parent: s.parent,
++                  transform: Transform2.identity(),
++                  children: const []),
++              index: 99,
++              components: doc.components.snapshotOf(s.sibling))),
++          throwsA(isA<RangeError>()));
++      expectNothingOn(doc, h);
++      expect(enc(doc), before);
++    });
++  });
++
++  test(
++      'N-5 a compound delete whose second removal fails rolls the first '
++      'back with its components', () {
++    final s = scene();
++    final doc = s.doc;
++    final before = enc(doc);
++    final snapshot = doc.components.snapshotOf(s.node);
++    expect(
++        () => doc.commands.execute(CompoundCommand([
++              RemoveNodeCommand(s.node),
++              RemoveNodeCommand(const Handle(0xDEAD))
++            ], label: 'Delete')),
++        throwsA(isA<StateError>()));
++    expectSameSnapshot(doc.components.snapshotOf(s.node), snapshot);
++    expect(enc(doc), before);
++  });
++
++  test(
++      'N-6 re-parent: bare drops the components, carrying keeps them, '
++      'unknown order included', () {
++    final s = scene();
++    final doc = s.doc;
++    final snapshot = doc.components.snapshotOf(s.node);
++    final moved = GroupNode(
++        handle: s.node,
++        parent: s.last,
++        transform: Transform2.translation(1, 2),
++        children: const []);
++
++    doc.commands.execute(CompoundCommand(
++        [RemoveNodeCommand(s.node), AddNodeCommand(moved)],
++        label: 'Re-parent, bare'));
++    expect(doc.tree[s.node]!.parent, s.last);
++    expect(doc.components.snapshotOf(s.node).isEmpty, isTrue);
++    doc.commands.undo();
++
++    doc.commands.execute(CompoundCommand([
++      RemoveNodeCommand(s.node),
++      AddNodeCommand(moved, components: doc.components.snapshotOf(s.node)),
++    ], label: 'Re-parent'));
++    expect(doc.tree[s.node]!.parent, s.last);
++    expectSameSnapshot(doc.components.snapshotOf(s.node), snapshot);
++  });
++
++  test('N-7 a plan carrying orphans loads and saves byte for byte', () {
++    final s = scene();
++    final doc = s.doc;
++    const dead = Handle(0x7777);
++    doc.components.attach<Mark>(dead, const Mark(9, 'orphan'));
++    doc.components.attachUnknown(dead, later());
++    expect(doc.tree[dead], isNull, reason: 'premise: names nothing');
++    final json = enc(doc);
++    final loaded = DraftDocumentCodec.decodeString(json,
++        registerComponents: (r) => r.register<Mark>(Mark.id, Mark.fromJson));
++    expect(loaded.components.get<Mark>(dead), const Mark(9, 'orphan'));
++    expect(enc(loaded), json);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/parametric/cascade_test.dart b/packages/jet_cad_2d/test/parametric/cascade_test.dart
+index a531b947..94224f3c 100644
+--- a/packages/jet_cad_2d/test/parametric/cascade_test.dart
++++ b/packages/jet_cad_2d/test/parametric/cascade_test.dart
+@@ -411,21 +411,22 @@ void main() {
+         handle: g,
+         parent: doc.rootHandle,
+         transform: parked,
+         children: const [])));
+     final before = state(doc);
+     final depth = doc.commands.undoDepth;
+ 
+     doc.commands.execute(CompoundCommand([
+       RemoveNodeCommand(hA),
+       AddNodeCommand(
+-          GroupNode(handle: hA, parent: g, transform: atA, children: const [])),
++          GroupNode(handle: hA, parent: g, transform: atA, children: const []),
++          components: doc.components.snapshotOf(hA)),
+     ], label: 'Re-parent'));
+     expect(doc.tree[hA]!.parent, g);
+     expect(doc.components.get<Post>(hA), postA, reason: 'misplaced, kept');
+     expectGone(doc, hP1);
+     expectGone(doc, hP2);
+     expect(drift(doc), isEmpty);
+     expect(doc.commands.undoDepth, depth + 1);
+     doc.commands.undo();
+     expect(state(doc), before);
+   });
+@@ -781,21 +782,22 @@ void main() {
+     doc.commands.execute(AddNodeCommand(GroupNode(
+         handle: g,
+         parent: doc.rootHandle,
+         transform: parked,
+         children: const [])));
+     expect(hasSegment(worldSegments(doc, hT), worldMarker(tAt)), isFalse);
+ 
+     doc.commands.execute(CompoundCommand([
+       RemoveNodeCommand(hA),
+       AddNodeCommand(
+-          GroupNode(handle: hA, parent: g, transform: atA, children: const [])),
++          GroupNode(handle: hA, parent: g, transform: atA, children: const []),
++          components: doc.components.snapshotOf(hA)),
+     ], label: 'Re-parent'));
+     // The Post keeps its component on a nested group: misplaced, not live.
+     expect(doc.components.get<Post>(hA), postA);
+     expect(hasSegment(worldSegments(doc, hT), worldMarker(tAt)), isTrue);
+     expect(drift(doc), isEmpty);
+     final report = references(doc);
+     expect(report.single.code, 'parametric.orphan');
+     expect(report.single.handles, [hT, hA]);
+   });
+ }
+diff --git a/packages/jet_cad_2d/test/parametric/dissolve_test.dart b/packages/jet_cad_2d/test/parametric/dissolve_test.dart
+index 7ed77374..5dc546f5 100644
+--- a/packages/jet_cad_2d/test/parametric/dissolve_test.dart
++++ b/packages/jet_cad_2d/test/parametric/dissolve_test.dart
+@@ -99,20 +99,28 @@ Iterable<DraftCommand> flatten(DraftCommand c) sync* {
+   yield c;
+   if (c is CompoundCommand) {
+     for (final k in c.children) {
+       yield* flatten(k);
+     }
+   } else if (c is ParametricReplay) {
+     yield* flatten(c.replay);
+   }
+ }
+ 
++/// The [T] values the [AddNodeCommand]s on [h] inside [c] restore.
++List<T> restoredBy<T extends Component>(DraftCommand c, Handle h) => [
++      for (final k in flatten(c))
++        if (k is AddNodeCommand && k.node.handle == h)
++          for (final (_, v) in k.components.components)
++            if (v is T) v,
++    ];
++
+ /// The values of every `SetComponentCommand<Fuse>` on F inside [c].
+ List<Fuse?> fuseSets(DraftCommand c) => [
+       for (final k in flatten(c))
+         if (k is SetComponentCommand<Fuse> && k.handle == hF) k.value,
+     ];
+ 
+ /// The capability of each `CommandApplied` that [run] causes.
+ Future<List<Capability>> appliedCapabilities(
+     DraftDocument doc, void Function() run) async {
+   await pumpEventQueue();
+@@ -204,48 +212,47 @@ void main() {
+     expect(drift(doc), isEmpty);
+     doc.commands.redo();
+     expect(canon(doc), after);
+     expectDissolved(doc);
+     doc.commands.undo();
+     doc.purge();
+     expect(canon(doc), before);
+     expect(kids(doc, hF), handles);
+     expect(drift(doc), isEmpty);
+ 
+-    // Exactly one detach, planned by the dissolve: the move's replay
+-    // restores F's component once, and its redo detaches it once. Planned
+-    // on a copy through the expander, so the inverse can be read.
++    // No detach is planned by the dissolve: the removal of F's node takes
++    // its component (node-components D-4), and the move's replay restores
++    // it in that node's snapshot. Planned on a copy through the expander,
++    // so the inverse can be read.
+     final copy = reload(enc(doc));
+     final edit = copy.commands.expander!(TransformNodeCommand(hC, covering()))
+         as ParametricEdit;
+     final undoReplay = edit.apply(copy).inverse;
+     expectDissolved(copy);
+-    expect(fuseSets(undoReplay), [fuse]);
++    expect(fuseSets(undoReplay), isEmpty);
++    expect(restoredBy<Fuse>(undoReplay, hF), [fuse]);
+     final redoReplay = undoReplay.apply(copy).inverse;
+     expect(copy.components.get<Fuse>(hF), fuse);
+-    expect(fuseSets(redoReplay), [null]);
++    expect(fuseSets(redoReplay), isEmpty);
+     // D15's order: F's leaves, fills first (the select tool's order), then
+-    // its node, then the detach. The state cannot tell where the detach
+-    // sits (the component store is independent of the tree and the
+-    // entities: X4-order is state-equal), so the replay is read.
++    // its node, which carries the component. The replay is read.
+     expect([
+       for (final k in flatten(redoReplay))
+         if (k is RemoveEntityCommand)
+           'entity ${k.handle.value}'
+         else if (k is RemoveNodeCommand)
+           'node ${k.handle.value}'
+         else if (k is SetComponentCommand<Fuse>)
+           'detach ${k.handle.value}',
+     ], [
+       for (final k in handles) 'entity ${k.value}',
+       'node ${hF.value}',
+-      'detach ${hF.value}',
+     ]);
+ 
+     // The parameter edit: `burnt` dissolves F the same way, one undo step.
+     final depth2 = doc.commands.undoDepth;
+     final a2 = asked(hF), g2 = calls(hF);
+     doc.commands.execute(SetComponentCommand<Fuse>(
+         hF, const Fuse(150.5, -80.25, 900.5, 600.75, burnt: true)));
+     expectDissolved(doc);
+     expect(asked(hF), a2 + 1);
+     expect(calls(hF), g2);
+@@ -279,30 +286,33 @@ void main() {
+     final gc = fuseGWider.corners;
+     expect(
+         two.geometry
+             .read(two.entities.geomIndexAt(two.entities.slotOf(gHandles[2])!))
+             .coords,
+         [gc[0].x, gc[0].y, gc[2].x, gc[2].y],
+         reason: "G's diagonal follows its new width");
+     expect(drift(two), isEmpty);
+ 
+     // 06 D8: the select tool's delete of F is a loss, not a dissolve. F is
+-    // not asked, and its component is detached once, by the cleanup.
++    // not asked, and its component is taken by the removal
++    // (node-components D-4).
+     // Planned on a copy through the expander, so the inverse can be read.
+     final copy2 = reload(enc(doc));
+     Fuse.dissolvesCalls.clear();
+     final delete =
+         copy2.commands.expander!(deleteObject(copy2, hF)) as ParametricEdit;
+     final deleteReplay = delete.apply(copy2).inverse;
+     expectDissolved(copy2);
+     expect(asked(hF), 0, reason: 'a lost object is not asked');
+-    expect(fuseSets(deleteReplay), [fuse], reason: 'detached once');
++    expect(fuseSets(deleteReplay), isEmpty);
++    expect(restoredBy<Fuse>(deleteReplay, hF), [fuse],
++        reason: 'taken by the removal');
+ 
+     // 06 D7: the dissolve inherits the triggering move's authority. Only
+     // what the move itself needs is allowed, transform; the removals need
+     // geometry and structure, the detach components.
+     final ruled = scene();
+     final ruledBefore = canon(ruled);
+     ruled.commands.permissions = const DraftPermissions(
+         transform: true, components: false, geometry: false, structure: false);
+     ruled.commands.execute(TransformNodeCommand(hC, covering()));
+     expectDissolved(ruled);
+diff --git a/packages/jet_cad_2d/test/parametric/misplaced_test.dart b/packages/jet_cad_2d/test/parametric/misplaced_test.dart
+index 95f748cc..0fb2bc4e 100644
+--- a/packages/jet_cad_2d/test/parametric/misplaced_test.dart
++++ b/packages/jet_cad_2d/test/parametric/misplaced_test.dart
+@@ -238,22 +238,25 @@ void main() {
+     expect(doc.components.get<Hinge>(s.line), const Hinge(true));
+ 
+     // A loaded Hinge is not the const instance: the comparison is `==`.
+     expect(identical(doc.components.get<Hinge>(s.line), const Hinge(true)),
+         isFalse);
+     doc.commands.execute(SetComponentCommand<Hinge>(s.line, const Hinge(true)));
+     expect(doc.commands.undoDepth, ++depth);
+ 
+     doc.commands.execute(RemoveNodeCommand(s.nested));
+     expect(doc.commands.undoDepth, ++depth);
+-    expect(doc.components.get<Hinge>(s.nested), const Hinge(true),
+-        reason: 'Ruling 06-3: a misplaced component survives a delete');
++    expect(doc.components.get<Hinge>(s.nested), isNull,
++        reason: 'the node takes its component (node-components spec D-4)');
++    doc.commands.undo();
++    expect(doc.components.get<Hinge>(s.nested), const Hinge(true));
++    doc.commands.redo();
+ 
+     final before = enc(doc);
+     expect(
+         () => doc.commands
+             .execute(SetComponentCommand<Hinge>(s.line, const Hinge(false))),
+         refusedAt(s.line));
+     expect(enc(doc), before);
+     expect(doc.commands.undoDepth, depth);
+   });
+ 
+diff --git a/packages/jet_cad_2d/test/parametric/objects_of_test.dart b/packages/jet_cad_2d/test/parametric/objects_of_test.dart
+index 24bf0658..b7cf71da 100644
+--- a/packages/jet_cad_2d/test/parametric/objects_of_test.dart
++++ b/packages/jet_cad_2d/test/parametric/objects_of_test.dart
+@@ -113,22 +113,24 @@ void main() {
+     expect(d.censuses, [hC]);
+     expect(() => d.captions.add(hN), throwsUnsupportedError);
+ 
+     // From a client's generate, in an edit that deletes 5200, re-parents
+     // 5300 under the plain root group and seeds the census.
+     census.fromGenerate.clear();
+     doc.commands.execute(CompoundCommand([
+       for (final k in kids(doc, h5200)) RemoveEntityCommand(k),
+       RemoveNodeCommand(h5200),
+       RemoveNodeCommand(h5300),
+-      AddNodeCommand(GroupNode(
+-          handle: h5300, parent: hG, transform: at5300, children: const [])),
++      AddNodeCommand(
++          GroupNode(
++              handle: h5300, parent: hG, transform: at5300, children: const []),
++          components: doc.components.snapshotOf(h5300)),
+       SetComponentCommand<Census>(hC, const Census(2)),
+     ], label: 'Delete B, re-parent C'));
+     final g = census.fromGenerate.single;
+     expect(g.captions, [h5100]);
+     expect(identical(g.again, g.captions), isTrue);
+     expect(g.censuses, [hC]);
+     expect(() => g.captions.add(h5200), throwsUnsupportedError);
+     // Premises after the edit: 5200 is gone, 5300 and the nested group
+     // still carry their Captions.
+     expect(doc.tree[h5200], isNull);
+diff --git a/packages/jet_cad_2d/test/parametric/page_test.dart b/packages/jet_cad_2d/test/parametric/page_test.dart
+index f55625f6..ea5b0ee1 100644
+--- a/packages/jet_cad_2d/test/parametric/page_test.dart
++++ b/packages/jet_cad_2d/test/parametric/page_test.dart
+@@ -69,20 +69,28 @@ Iterable<DraftCommand> flatten(DraftCommand c) sync* {
+   yield c;
+   if (c is CompoundCommand) {
+     for (final k in c.children) {
+       yield* flatten(k);
+     }
+   } else if (c is ParametricReplay) {
+     yield* flatten(c.replay);
+   }
+ }
+ 
++/// The [T] values the [AddNodeCommand]s on [h] inside [c] restore.
++List<T> restoredBy<T extends Component>(DraftCommand c, Handle h) => [
++      for (final k in flatten(c))
++        if (k is AddNodeCommand && k.node.handle == h)
++          for (final (_, v) in k.components.components)
++            if (v is T) v,
++    ];
++
+ /// The capability of each `CommandApplied` that [run] causes.
+ Future<List<Capability>> appliedCapabilities(
+     DraftDocument doc, void Function() run) async {
+   await pumpEventQueue();
+   final out = <Capability>[];
+   final sub = doc.changes.listen((c) {
+     if (c is CommandApplied) out.add(c.capability);
+   });
+   run();
+   await pumpEventQueue();
+@@ -198,41 +206,43 @@ void main() {
+     expect(drift(doc), isEmpty);
+ 
+     // A page read at creation: a Gauge created on the 1:100 page draws
+     // 1,000 from the start.
+     doc.commands.execute(create(doc, hG2, atG2, gauge2));
+     expect(lineLength(doc, hG2), closeTo(1000, 1e-6));
+     expect(drift(doc), isEmpty);
+ 
+     // A compound that changes the page and deletes one Gauge: the live
+     // Gauge regenerates, the deleted one is not regenerated, and its
+-    // component is detached once (06 D8). Planned on a copy through the
++    // component is taken by the removal (node-components D-4). Planned on a
++    // copy through the
+     // expander, so the edit's inverse can be read.
+     final copy = reloadWithPage(enc(doc));
+     final m25 = copy.components
+         .get<PageComponent>(copy.rootHandle)!
+         .copyWith(scaleDenominator: 25);
+     generateCalls.clear();
+     final edit = copy.commands.expander!(CompoundCommand(
+         [setPage(copy, m25), deleteObject(copy, hG2)],
+         label: 'Page and delete')) as ParametricEdit;
+     final result = edit.apply(copy);
+     expect(copy.tree[hG2], isNull);
+     expect(copy.components.get<Gauge>(hG2), isNull);
+     expect(calls(hG2), 0, reason: 'a deleted object is not regenerated');
+     expect(calls(hG), 1);
+     expect(lineLength(copy, hG), closeTo(250, 1e-6), reason: '10 x 25');
+-    final restores = [
++    final restores = restoredBy<Gauge>(result.inverse, hG2);
++    expect(restores, [gauge2], reason: 'taken by the removal');
++    expect([
+       for (final c in flatten(result.inverse))
+-        if (c is SetComponentCommand<Gauge> && c.handle == hG2) c.value,
+-    ];
+-    expect(restores, [gauge2], reason: 'detached once');
++        if (c is SetComponentCommand<Gauge> && c.handle == hG2) c,
++    ], isEmpty, reason: 'no separate component restore');
+     // The same compound through the dispatcher: one undo step, exact undo.
+     final beforeCompound = canon(doc);
+     final depth3 = doc.commands.undoDepth;
+     doc.commands.execute(CompoundCommand(
+         [setPage(doc, m25), deleteObject(doc, hG2)],
+         label: 'Page and delete'));
+     expect(doc.components.get<Gauge>(hG2), isNull);
+     expect(lineLength(doc, hG), closeTo(250, 1e-6));
+     expect(doc.commands.undoDepth, depth3 + 1);
+     expect(drift(doc), isEmpty);
+diff --git a/packages/jet_cad_2d_flutter/test/select_tool_test.dart b/packages/jet_cad_2d_flutter/test/select_tool_test.dart
+index 59fb9610..7df47420 100644
+--- a/packages/jet_cad_2d_flutter/test/select_tool_test.dart
++++ b/packages/jet_cad_2d_flutter/test/select_tool_test.dart
+@@ -532,20 +532,68 @@ void main() {
+ 
+     tool.cancel(ctx);
+     expect(tool.phase, ToolPhase.idle);
+     expect(tool.bandMode, isNull);
+     expect(tool.bandScreen, isNull);
+     expect(selection.length, 1);
+     expect(selection.contains(SelectionKey.root(lineA)), isTrue);
+   });
+ 
+   group('keys and delete', () {
++    test(
++        'S-1 Delete takes the components of an instance and of a group '
++        'holding a nested group; one undo step restores all three', () {
++      final doc = DraftDocument.empty();
++      final def = addDefinition(doc, 'Chair');
++      final instance = addInstance(doc, def,
++          Transform2.translation(700, -350).multiply(Transform2.rotation(0.4)));
++      final outer =
++          addGroup(doc, doc.rootHandle, Transform2.translation(-900, 260));
++      final nested = addGroup(doc, outer, Transform2.rotation(-0.7));
++      const layer = Handle(0x2B3);
++      doc.commands.execute(CompoundCommand([
++        SetComponentCommand<ObjectLayer>(instance, const ObjectLayer(layer)),
++        SetComponentCommand<ObjectLayer>(outer, const ObjectLayer(layer)),
++        SetComponentCommand<ObjectLayer>(nested, const ObjectLayer(layer)),
++      ], label: 'Fixture'));
++      for (final h in [instance, outer, nested]) {
++        doc.components
++          ..attachUnknown(h, {'typeId': 'z.later', 'h': h.value})
++          ..attachUnknown(h, {'typeId': 'a.earlier'});
++      }
++      final before = DraftDocumentCodec.encodeToString(doc);
++      final index = SpatialIndex(doc);
++      addTearDown(index.dispose);
++      final selection = SelectionController(doc);
++      addTearDown(selection.dispose);
++      final camera = cameraAt(2.0, const Offset(-1600, 1300));
++      final ctx = ToolContext(
++          document: doc, index: index, camera: camera, selection: selection);
++      final depth = doc.commands.undoDepth;
++      selection
++          .replace([SelectionKey.root(instance), SelectionKey.root(outer)]);
++
++      expect(SelectTool().onKey(_deleteDown(), ctx), KeyEventResult.handled);
++
++      expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
++      for (final h in [instance, outer, nested]) {
++        expect(doc.tree[h], isNull);
++        expect(doc.components.snapshotOf(h).isEmpty, isTrue,
++            reason: '${h.toHex()} keeps nothing');
++      }
++      final deleted = DraftDocumentCodec.encodeToString(doc);
++      doc.commands.undo();
++      expect(DraftDocumentCodec.encodeToString(doc), before);
++      doc.commands.redo();
++      expect(DraftDocumentCodec.encodeToString(doc), deleted);
++    });
++
+     test('Escape when idle clears', () {
+       final doc = DraftDocument.empty();
+       final lineA = addEntity(
+           doc, doc.rootHandle, EntityKind.line, [990, 500, 1010, 500], []);
+       final index = SpatialIndex(doc);
+       addTearDown(index.dispose);
+       final selection = SelectionController(doc);
+       addTearDown(selection.dispose);
+       final camera = cameraAt(2.0, const Offset(-1600, 1300));
+       final ctx = ToolContext(
