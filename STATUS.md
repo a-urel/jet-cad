@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-10. **`main` carries release 0.3.0** (tag
-`v0.3.0` → `1b0c37a`, after `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+**Last updated:** 2026-10-10. **`main` carries release 0.4.0** (tag
+`v0.4.0` → `8367010`, after `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -124,7 +124,7 @@ one's spec, plan and results.
   in `8f813b2` … `e6a1d06`). **Merged into `main` at `fe93d23`** on the human's
   *"evet, main'e merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-2/](docs/superpowers/ledgers/2026-10-09-embedding-slice-2/).
-  Unreleased (CHANGELOG). **Slice 3** (the human: *"tamam, Dilim 3 ile
+  Released in 0.4.0. **Slice 3** (the human: *"tamam, Dilim 3 ile
   devam et"*): `FloorPlanTheme`, a `ThemeExtension` merged field by field
   with `FloorPlanView(theme:)`: status captions and fills, group frames
   and chips, the selection per paper and its width (both modes), the
@@ -137,7 +137,7 @@ one's spec, plan and results.
   `9eb8434`). **Merged into `main` at `d26c9fe`** on the human's *"evet, main'e
   merge et"*; ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-3/](docs/superpowers/ledgers/2026-10-09-embedding-slice-3/).
-  Unreleased (CHANGELOG). **Slice 4** (the human: *"tamam, Dilim 4 ile
+  Released in 0.4.0. **Slice 4** (the human: *"tamam, Dilim 4 ile
   devam et"*): the bars (`FloorPlanServiceBar`, `FloorPlanEditorBar`:
   shown or not, their actions in order, host widgets at either end), a bar
   of the host's own (`mergeCandidate`, `activeTool` / `selectTool`,
@@ -158,7 +158,7 @@ one's spec, plan and results.
   `f0c77cf`). **Merged into `main` at `4331c74`** on the human's *"evet, main'e merge
   et"* (confirmed: *"Yine de sen merge et"*); ledger
   [docs/superpowers/ledgers/2026-10-09-embedding-slice-4/](docs/superpowers/ledgers/2026-10-09-embedding-slice-4/).
-  Unreleased (CHANGELOG). The umbrella's four slices are all merged.
+  Released in 0.4.0. The umbrella's four slices are all merged.
 - **O-10, an undone node removal restores the node's index** (the human,
   2026-10-10), merged into `main` at `a803f86` on the human's *"evet,
   main'e merge et"*: `RemoveNodeCommand`'s inverse carries the node's
@@ -168,7 +168,7 @@ one's spec, plan and results.
   [2026-10-10-undo-node-index.md](docs/superpowers/plans/2026-10-10-undo-node-index.md),
   results [2026-10-10-undo-node-index-results.md](docs/superpowers/notes/2026-10-10-undo-node-index-results.md)
   (independent review *Approve with fixes*, F-1 to F-5 applied). Run
-  natively in one session: no SDD ledger. Unreleased (CHANGELOG).
+  natively in one session: no SDD ledger. Released in 0.4.0.
   Its merge commit was never pushed to `main` on its own; it reached
   `origin/main` through Slice 4's branch (`263e2ca`). Slice 4's DS1 and DS2 (`keyboard_focus_test.dart`) now compare the
   undone encoding with the one before the delete, on Slice 4's branch
@@ -186,29 +186,31 @@ one's spec, plan and results.
   M-O11i, each killed; an independent review (*Approve with fixes*: the
   NaN hit test, the mutant names, the CHANGELOG's wording), applied in
   `efbb4ef`. Run natively in one session: no SDD ledger; the record is
-  the spec's O-11. Unreleased (CHANGELOG). As O-10's, its merge commit
+  the spec's O-11. Released in 0.4.0. As O-10's, its merge commit
   reached `origin/main` through Slice 4's branch (`263e2ca`). Slice 4's
   `page_flows_test.dart` dropped `finitePlanJson()` for
   `embeddingPlanJson()` on Slice 4's branch (`503c504`). Left as found: `CanvasDrawSink.point` carries a
   non-finite residual by hand into `drawRect` (unreachable for table 9,
   whose box is culled).
+- **Release 0.4.0** (the human, 2026-10-10: *"0.4.0 sürümünü hazırla"*),
+  merged into `main` at `8367010` on the human's *"evet, main'e merge
+  et"*: the four host packages (and `jet_cad_2d_gpu`) at 0.4.0; the
+  CHANGELOG's 0.4.0 carries the host embedding API's four slices, O-10
+  and O-11, with known limits. **Schema 9**: 0.3.0 refuses a 0.4.0 plan,
+  so every terminal that shares stored plans moves together; service
+  layouts are unchanged. An independent review (*Approved with fixes*:
+  CHANGELOG and guide wording only) is applied; ledger
+  [docs/superpowers/ledgers/2026-10-10-release-0.4.0/](docs/superpowers/ledgers/2026-10-10-release-0.4.0/).
+  The guide names `8367010`. **The tag `v0.4.0` → `8367010` and the push
+  of `main` are owed to the human.**
 
 ## In flight
 
-- **Release 0.4.0** (the human, 2026-10-10: *"0.4.0 sürümünü
-  hazırla"*), on `release/0.4.0`: the four host packages (and
-  `jet_cad_2d_gpu`) at 0.4.0; the CHANGELOG's Unreleased section becomes
-  0.4.0 (the host embedding API's four slices, O-10 and O-11; **schema
-  9**: every terminal that shares stored plans moves together); the host
-  guide's "unreleased" markers read "since 0.4.0", and §1 carries a
-  placeholder ref that the commit after the merge fills in. An
-  independent review (*Approved with fixes*: CHANGELOG and guide wording
-  only, R-1 to R-3, R-8, R-9) is applied; ledger
-  [docs/superpowers/ledgers/2026-10-10-release-0.4.0/](docs/superpowers/ledgers/2026-10-10-release-0.4.0/).
-  Next: the merge on the human's word, then the tag pushed by the human.
+Nothing. Release 0.4.0, above, is merged; its tag is the human's.
 
 ## Owed to the human
 
+- **The push and the tag `v0.4.0`** on `8367010` (`git push origin main && git tag v0.4.0 8367010 && git push origin v0.4.0`).
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -240,7 +242,8 @@ one's spec, plan and results.
   regular against 175,568 bold); it now asserts that bold renders unlike
   regular, which still kills Slice 3's X18 (the weight forced to w400).
   Merged into `main` at `7d7d8a4` on the human's *"evet, main'e merge
-  et"*. A macOS run to confirm is owed.
+  et"*. Confirmed on macOS (Flutter 3.47.6, 2026-10-10, at `8367010`):
+  `table_theme_painter_test.dart` +25, all passed.
 - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
   a tablet and a terminal, light and dark; the demo's three zone strings
   in German and Turkish.
@@ -265,9 +268,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.4.0**, above: reviewed and fixed; the merge question.
-It carries the host embedding API's four slices (**schema 9**, every
-terminal that shares stored plans moves together). Monépro owes Q-H3 and its real shadcn tokens, and can name
+**Next: the human's choice**, once `main` and the tag `v0.4.0` are
+pushed. 0.4.0 (`8367010`) carries the host embedding API's four slices
+(**schema 9**, every terminal that shares stored plans moves together).
+Monépro owes Q-H3 and its real shadcn tokens, and can name
 `controller.camera`, `tableOverlayBuilder` (Q-Z1),
 `FloorPlanTableDetail.data` (Q-Z4), `FloorPlanTheme`, and from Slice 4
 `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
