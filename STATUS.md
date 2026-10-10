@@ -201,9 +201,11 @@ one's spec, plan and results.
   0.4.0 (the host embedding API's four slices, O-10 and O-11; **schema
   9**: every terminal that shares stored plans moves together); the host
   guide's "unreleased" markers read "since 0.4.0", and §1 carries a
-  placeholder ref that the commit after the merge fills in. Then an
-  independent review, the merge on the human's word, the tag pushed by
-  the human.
+  placeholder ref that the commit after the merge fills in. An
+  independent review (*Approved with fixes*: CHANGELOG and guide wording
+  only, R-1 to R-3, R-8, R-9) is applied; ledger
+  [docs/superpowers/ledgers/2026-10-10-release-0.4.0/](docs/superpowers/ledgers/2026-10-10-release-0.4.0/).
+  Next: the merge on the human's word, then the tag pushed by the human.
 
 ## Owed to the human
 
@@ -259,7 +261,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.4.0**, above: its review, then the merge question.
+**Next: release 0.4.0**, above: reviewed and fixed; the merge question.
 It carries the host embedding API's four slices (**schema 9**, every
 terminal that shares stored plans moves together). Monépro owes Q-H3 and its real shadcn tokens, and can name
 `controller.camera`, `tableOverlayBuilder` (Q-Z1),
