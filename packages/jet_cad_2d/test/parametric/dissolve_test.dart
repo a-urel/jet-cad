@@ -144,9 +144,10 @@ void main() {
   });
 
   test(
-      'DV1 a dissolving object is removed and its component detached in the '
-      'edit, one undo step; undo restores every handle; the guard and the '
-      'cleanup are untouched; drift() names a loaded one', () async {
+      'DV1 a dissolving object is removed with its component in the edit, '
+      'one undo step; the replay restores it through the node\'s snapshot; '
+      'undo restores every handle; the guard is untouched; drift() names a '
+      'loaded one', () async {
     // Premises: C starts beside F; the corner placement overlaps F's reach
     // but not its centre; the covering one holds the centre. F is off the
     // origin and turned.
@@ -309,7 +310,7 @@ void main() {
 
     // 06 D7: the dissolve inherits the triggering move's authority. Only
     // what the move itself needs is allowed, transform; the removals need
-    // geometry and structure, the detach components.
+    // geometry, structure and components.
     final ruled = scene();
     final ruledBefore = canon(ruled);
     ruled.commands.permissions = const DraftPermissions(

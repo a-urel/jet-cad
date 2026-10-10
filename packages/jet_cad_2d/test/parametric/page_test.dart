@@ -214,8 +214,7 @@ void main() {
     // A compound that changes the page and deletes one Gauge: the live
     // Gauge regenerates, the deleted one is not regenerated, and its
     // component is taken by the removal (node-components D-4). Planned on a
-    // copy through the
-    // expander, so the edit's inverse can be read.
+    // copy through the expander, so the edit's inverse can be read.
     final copy = reloadWithPage(enc(doc));
     final m25 = copy.components
         .get<PageComponent>(copy.rootHandle)!

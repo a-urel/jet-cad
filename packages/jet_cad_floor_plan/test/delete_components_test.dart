@@ -77,7 +77,7 @@ void main() {
 
   test(
       'P-2 a wall deleted alone: WallParams and ObjectLayer gone, the undo '
-      'replay restores them through the node\'s snapshot', () {
+      'restores them; the plan as before', () {
     final doc = rig();
     final layer = addLayer(doc);
     final w = doc.handleSeed.next();

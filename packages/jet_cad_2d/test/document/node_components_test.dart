@@ -43,6 +43,22 @@ final class Foreign implements Component {
   int get hashCode => 1;
 }
 
+/// Registered only in a second document, under [Mark]'s id: a different
+/// Dart class bound to a type id this document maps to [Mark].
+final class Impostor implements Component {
+  static const String id = Mark.id;
+  const Impostor();
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => const {'i': 1};
+  static Impostor fromJson(Map<String, Object?> j) => const Impostor();
+  @override
+  bool operator ==(Object other) => other is Impostor;
+  @override
+  int get hashCode => 2;
+}
+
 /// Not layer 0, which is what an absent ObjectLayer reads as.
 const Handle kLayer = Handle(0x2A1);
 
@@ -64,8 +80,8 @@ typedef Scene = ({
   Handle last,
 });
 
-/// A group [parent] 40 m off the origin, turned, holding [node], [sibling]
-/// and [last] in that order (not ascending: [sibling] < [node]). [node]
+/// A group [parent] 40 m off the origin, turned, holding [sibling], [node]
+/// and [last] in that order, so [node] is neither first nor last. [node]
 /// carries Mark, ObjectLayer and two unknown payloads; [sibling] Mark,
 /// ObjectLayer and one unknown payload, with other values. History cleared.
 Scene scene() {
@@ -83,9 +99,9 @@ Scene scene() {
         doc.rootHandle,
         Transform2.translation(4e4, -2.7e4)
             .multiply(Transform2.rotation(0.6)))),
+    AddNodeCommand(group(sibling, parent, Transform2.translation(-75, 40))),
     AddNodeCommand(group(node, parent,
         Transform2.translation(310, -925).multiply(Transform2.rotation(-1.1)))),
-    AddNodeCommand(group(sibling, parent, Transform2.translation(-75, 40))),
     AddNodeCommand(group(last, parent, Transform2.translation(12, 13))),
     SetComponentCommand<Mark>(node, const Mark(7, 'north')),
     SetComponentCommand<ObjectLayer>(node, const ObjectLayer(kLayer)),
@@ -149,7 +165,8 @@ void main() {
     final before = enc(doc);
     final snapshot = doc.components.snapshotOf(s.node);
     final order = childrenOf(doc, s.parent);
-    expect(order.indexOf(s.node), 0, reason: 'premise: not the append');
+    expect(order.indexOf(s.node), 1, reason: 'premise: neither first nor last');
+    expect(order, hasLength(3), reason: 'premise');
 
     doc.commands.execute(RemoveNodeCommand(s.node));
     final removed = enc(doc);
@@ -242,6 +259,43 @@ void main() {
                   transform: Transform2.translation(5, 6),
                   children: const []),
               components: foreignSnapshot())),
+          throwsA(isA<StateError>()));
+      expectNothingOn(doc, h);
+      expect(childrenOf(doc, s.parent), order);
+      expect(enc(doc), before);
+      expect(doc.commands.undoDepth, 0);
+    });
+
+    test('a type id this document maps to a different class', () {
+      final other = DraftDocument.empty();
+      other.components.register<Impostor>(Impostor.id, Impostor.fromJson);
+      final oh = other.handleSeed.next();
+      other.commands.execute(CompoundCommand([
+        AddNodeCommand(GroupNode(
+            handle: oh,
+            parent: other.rootHandle,
+            transform: Transform2.identity(),
+            children: const [])),
+        SetComponentCommand<Impostor>(oh, const Impostor()),
+      ], label: 'Other'));
+      final snap = other.components.snapshotOf(oh);
+      expect([for (final (id, _) in snap.components) id], [Mark.id],
+          reason: 'premise: the snapshot carries the id this document maps');
+      expect(snap.isNotEmpty, isTrue, reason: 'premise');
+
+      final s = scene();
+      final doc = s.doc;
+      final h = doc.handleSeed.next(); // before `before`: the seed is encoded
+      final before = enc(doc);
+      final order = childrenOf(doc, s.parent);
+      expect(
+          () => doc.commands.execute(AddNodeCommand(
+              GroupNode(
+                  handle: h,
+                  parent: s.parent,
+                  transform: Transform2.translation(5, 6),
+                  children: const []),
+              components: snap)),
           throwsA(isA<StateError>()));
       expectNothingOn(doc, h);
       expect(childrenOf(doc, s.parent), order);

@@ -391,8 +391,8 @@ void main() {
     });
 
     test(
-        'TD9 an edit that removes nothing keeps the data: a turn, and a '
-        'delete of another table', () {
+        'TD9 an edit that does not remove the table keeps its data: a turn, '
+        'and a delete of another table', () {
       final doc = rig();
       final a = placeTable(doc, Vector2(41200, -27300), mirrored: true);
       final b = placeTable(doc, Vector2(44700, -23100), quarterTurns: 1);
