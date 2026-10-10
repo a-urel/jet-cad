@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
@@ -237,6 +238,45 @@ void main() {
     f.doc.commands
         .execute(AddNodeCommand(Fixture.group(h, f.top[2], Fixture.placed(3))));
     expect(f.childrenOf(f.top[2]), [f.nested[2], f.nested[0], f.nested[1], h]);
+  });
+
+  test(
+      'N7 a raw list naming a leaf and a dangling handle before the node: '
+      'the raw index is restored, and the encoding byte for byte', () {
+    final f = Fixture();
+    final leaf = f.doc.handleSeed.next();
+    const dangling = Handle(90001);
+    f.doc.commands.execute(AddEntityCommand(
+      record: EntityRecord(
+        handle: leaf,
+        owner: f.top[2],
+        kind: EntityKind.line,
+        layer: ReservedHandles.layerZero,
+        linetype: ReservedHandles.byBlockLinetype,
+        linetypeScale: 1.0,
+        geomIndex: 0,
+        color: const ByBlockColor(),
+        lineweight: kByBlock,
+        transparency: kByBlock,
+        flags: 0,
+      ),
+      payload: GeometryPayload(
+        coords: Float64List.fromList([-120, 35, 410, -60]),
+        scalars: Float64List(0),
+      ),
+    ));
+    final g = f.doc.tree[f.top[2]]! as GroupNode;
+    // What an older file or a DXF BLOCK can hold: a leaf handle and a
+    // handle naming nothing, between the nodes.
+    final raw = [leaf, f.nested[2], dangling, f.nested[0], f.nested[1]];
+    f.doc.tree.replaceNode(g.copyWith(children: raw));
+    final before = f.encoded();
+    // nested[0] sits at raw index 3 and at index 1 among the nodes only:
+    // an index taken from the filtered list would put it back first.
+    f.doc.commands.execute(RemoveNodeCommand(f.nested[0]));
+    f.doc.commands.undo();
+    expect(f.childrenOf(f.top[2]), raw);
+    expect(f.encoded(), before);
   });
 
   test(

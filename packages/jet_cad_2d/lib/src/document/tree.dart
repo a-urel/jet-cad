@@ -640,9 +640,10 @@ class DocumentTree {
   /// destroy exactly the ordering the file described, in the same situation
   /// [_link] already treats as "not added yet", not "wrong". A recovered
   /// handle is appended after the incoming order for the same reason
-  /// [_link]'s append is order-preserving: `children` order is draw order,
-  /// and the incoming order — the file's own, when there is one — is
-  /// authoritative over the order this scan happens to visit `_nodes` in.
+  /// [_link]'s append is order-preserving: `children` is written back in the
+  /// order it is held, and the incoming order — the file's own, when there
+  /// is one — is authoritative over the order this scan happens to visit
+  /// `_nodes` in.
   void _relinkDefinition(Handle definitionHandle) {
     final definition = _definitions[definitionHandle];
     if (definition == null) return;

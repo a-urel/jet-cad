@@ -329,6 +329,9 @@ void main() {
           ],
           reason: 'premise: B between A and C, D after both');
       final depth = doc.commands.undoDepth;
+      // The tables sit in ascending handle order, so this cannot tell
+      // "restore the index" from "insert sorted by handle"; the engine's
+      // node_index_undo_test, whose children are out of order, does.
 
       doc.commands.execute(CompoundCommand([
         RemoveEntityCommand(a.label!),

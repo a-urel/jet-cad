@@ -27,13 +27,14 @@
 ## Tests
 
 - **New, engine:** `jet_cad_2d/test/document/node_index_undo_test.dart`,
-  N1–N6 (13 tests). Every container in the fixture lists its children out
+  N1–N7 (14 tests). Every container in the fixture lists its children out
   of handle order (pinned as a premise): the root `[t2, t0, t4, t1, t3]`,
   a nested group, a definition. N1 a middle child; N2 two non-adjacent
   root children in one step, in both removal orders; N3 a nested group's
   first child with a node inside a definition; N3b a group cascade,
   children first; N4 the index's range and container checks; N5 no index
-  appends; N6 a malformed list naming the handle twice.
+  appends; N6 a malformed list naming the handle twice; N7 a raw list
+  naming a leaf and a dangling handle before the node (review F-1).
 - **Tightened, engine:** DV1 (`dissolve_test`) pinned the defect
   (`[hC, hF]` after undo) and now reads `[hF, hC]`; `canon`'s
   `sortNodes` parameter is gone (`parametric/support/fixture.dart`) and
@@ -66,6 +67,7 @@ Each run on a copy of the source restored from the copy afterwards.
 | M5 insert sorted by handle | red: N1, N2 ×2, N3, N3b, N4 ×2, N6 — **not DV1**, whose root is ascending: only the out-of-order fixture sees it |
 | M6 no range check | red: N4 (−1 and 4) |
 | M7 no container check | red: N4 (the `Handle.none` parent) |
+| M8 the index taken from `childNodesOf`'s filtered list | red: N7 only (review F-1; it survived N1–N6) |
 
 **The planner's tightened tests against the old engine** (`tree.dart`
 and `commands.dart` from `main`, restored from a copy afterwards): HD12,
@@ -85,10 +87,10 @@ package's JSON compared with `tool/ci/expect_failures.dart`.
 
 | Package | Tests | Comparison | Analyze | Format |
 |---|---|---|---|---|
-| `jet_cad_2d` | 1271 | the standing failures and skips, exactly | No issues | 0 changed |
+| `jet_cad_2d` | 1272 (after the review's N7) | the standing failures and skips, exactly | No issues | 0 changed |
 | `jet_cad_2d_flutter` | 1390 (5 fail, 1 skip) | **differs**: text lod ladder rungs 1 and 2 pass here | No issues | 0 changed |
 | `jet_cad_2d_gpu` | 20 | exactly | No issues | 0 changed |
-| `jet_cad_floor_plan` (`--enable-vmservice`) | 1693 (1 fail) | **differs**: T-1 in `table_theme_painter_test` fails | No issues | 0 changed |
+| `jet_cad_floor_plan` (`--enable-vmservice`) | 1693 (1 fail) | **differs**: T-1 in `test/service/table_theme_painter_test.dart` fails | No issues | 0 changed |
 | `jet_cad_restaurant_symbols` | 97 | all passed | No issues | 0 changed |
 | `apps/floor_planner` | 212 | exactly | No issues | 0 changed |
 | `apps/restaurant_demo` | 60 | exactly | No issues | 0 changed |
@@ -102,3 +104,20 @@ recorded both as they are listed on 2026-10-09; this host is now on
 macOS 27.0.1. Neither reads a node's place in a `children` list. CI's
 Linux runner is the arbiter.
 
+
+## Independent review
+
+*Approve with fixes* (2026-10-10). The reviewer re-ran M1, M4 and M5 and
+the engine suite and confirmed T-1 fails the same on `main`'s engine.
+Findings, all applied:
+
+- **F-1** (test gap): no test held a leaf or a dangling handle in a raw
+  `children` list, so M8 survived. N7 added; M8 now red.
+- **F-2** (doc): `_relinkDefinition`'s doc still said `children` order is
+  draw order. Reworded like `_link`'s.
+- **F-3** (doc): spec sentences stating the old append left unmarked
+  (parametric layer's G3/G6 amendment, openings, rooms' table row and
+  DV1 line). Marked superseded.
+- **F-4** (test strength): TD7b, TD7c and HD12 add tables in ascending
+  handle order; TD7c's comment now says the engine test covers M5.
+- **F-5** (nit): T-1's path given.

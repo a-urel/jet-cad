@@ -1568,7 +1568,7 @@ One row per change; "—" means the change does not touch that guarantee.
 | (a) text | `Generated.text`; `_plan`'s TEXT match | unchanged: judges `r0.touched` only; a caller's text edit of a generated child is still refused | — | the rewrite is a planned command inside the one `ParametricEdit`; its inverse restores the old string | the string is in the record, persisted as any TEXT's | a matched TEXT keeps its handle | — (edit time only) |
 | (b) attributes | `Generated`, `Generated.region`; `_recordOf` | — | — | written by the add, removed by its inverse | persisted with the record | — | the resolver already maps transparency and linetype; nothing new per frame |
 | (c) page | `ParametricType.pageKey`, `ParametricView.page`; the survey's page; `_run`'s page seeds | — | — | the page edit and its regeneration are one step | the page is a component, as before | regenerated children keep their handles | — |
-| (d) dissolve | `ParametricType.dissolves`; `_plan` | never meets it (planned commands) | the dissolve detaches its own component; `lost` never holds it | one step; the node is re-linked last (state-equal, root order normalised) | — | handles restored, so unchanged | — |
+| (d) dissolve | `ParametricType.dissolves`; `_plan` | never meets it (planned commands) | the dissolve detaches its own component; `lost` never holds it | one step; the node is re-linked last (state-equal, root order normalised; *since O-10, 2026-10-10, at its index, byte-equal*) | — | handles restored, so unchanged | — |
 | (e) place | `contributesPlace`, `placeBox`, `placeInput`, `readsPlaces`, `readBox`, `placedIn`, `placeBoxOf`, `objectsOf`; the survey's snapshots and reader count; `_closure`'s trigger; the bulk pass | — | — | only decides the closure; replay never regenerates | — | — | — (edit time only) |
 | (f) handle | `ReservedHandles.dashedLinetype` | — | — | — | the default tables are unchanged; the app's record persists | — | — |
 | (g) ring outline and move preview (render layer, D24) | `OutlineCache._addLeaf`'s fill arm; `GripCache.isMovable`; `_paintPreview` | — | — | — (the outline follows the document) | — | — (overlay only) | outline built at selection, hover and `DocChange` rate, never per frame, and painted from the cached path; the preview filter is one set lookup per key per frame, no allocation |
@@ -2360,7 +2360,8 @@ here and not left to the plan:
     empty) still regenerates (S-12); `PG2` a paper-colour and a grid
     change: the client's `generate` call count is unchanged (S-8);
   - `DV1` a dissolving client: removed in the edit, component detached,
-    one undo step, undo restores handles (root order normalised);
+    one undo step, undo restores handles (root order normalised;
+    *superseded 2026-10-10 by O-10: the root order as it was*);
     `drift()` names a loaded one;
   - `SV1`–`SV3` the before-view: parameters, transforms and the page as
     they were, for a moved, re-parameterised and deleted object;
