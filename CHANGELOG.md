@@ -8,15 +8,18 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-On `main`, not yet released: the host embedding API's Slices 1 to 3, a
+On `main`, not yet released: the host embedding API's Slices 1 to 4, a
 host's own widgets on the tables, then the selection mode's events and a
 host's own data on a table, then the floor plan's look in a host's
-theme. **Move every terminal that shares stored plans together**: 0.3.0
-and earlier refuse a plan this version saves (schema 9), with or without
-table data. Service layouts are the same as 0.3.0's; the look is never
-stored, so Slice 3 changes no stored format. Nothing a 0.3.0 host calls
-changes its signature, and with no theme every pixel is 0.3.0's; CI
-analyses the 0.3.0 host probe against every commit.
+theme, then the host's own chrome and keys (the bars, the editor's
+capabilities, the keyboard and the focus). **Move every terminal that
+shares stored plans together**: 0.3.0 and earlier refuse a plan this
+version saves (schema 9), with or without table data. Service layouts
+are the same as 0.3.0's; the look, the bars, the capabilities and the
+keys are never stored, so Slices 3 and 4 change no stored format.
+Nothing a 0.3.0 host calls changes its signature, and with no theme,
+bar, capability or key argument every pixel and key is 0.3.0's (but for
+the fix below); CI analyses the 0.3.0 host probe against every commit.
 
 - **A table's place.** `FloorPlanTableDetail` (`table`, `center`,
   `size`, `rotation`, `mirrored`, `corners`, `layer`, `locked`, and
@@ -173,13 +176,127 @@ analyses the 0.3.0 host probe against every commit.
   `canvasBackground`, and throws an `ArgumentError` naming the field for
   an ambient look out of range.
 
+- **The bars.** `FloorPlanView.serviceBar` (`FloorPlanServiceBar`) and
+  `editorBar` (`FloorPlanEditorBar`), each with `visible`, `actions` (a
+  list of `FloorPlanServiceAction` `undo`, `redo`, `merge`, `split`,
+  `export`, `print`, or of `FloorPlanEditorAction` `export`, `print`,
+  `undo`, `redo`, `snap`, `zoom`: each enum in today's left-to-right
+  order, the default all of it, shown in the order given with today's
+  gaps and rules), `leading` and `trailing` (the host's widgets in the
+  bar's row); `==`, `hashCode`, `toString`; an `ArgumentError` naming
+  `actions` for an action listed twice. A hidden bar gives the canvas
+  its height, the plan kept in place from the first frame. `actions`
+  shapes the bar only: the chords stay bound. A host field in a bar
+  keeps Undo, Redo (and in the editor the tool letters and Escape); the
+  file chords (and F3) still reach the plan.
+- **A bar of the host's own.** `FloorPlanController.mergeCandidate`
+  (`ValueListenable<Set<String>?>`: what Merge would send, null when it
+  would be disabled and in the design mode), `exportPlan(choice,
+  {name})` and `printPlan({printer, name})` (Export and Print without a
+  dialog, no view needed; one export or print at a time per controller,
+  the view's own included, a busy, page-less, replaced or disposed case
+  answering null or false; an error completes the `Future`; allowed
+  under every capability), and `FloorPlanExportChoice` (`format`, `dpi`,
+  `initial` PDF at 150 dpi, `copyWith`, `==`, `hashCode`, `toString`)
+  with `FloorPlanExportFormat` (`pdf`, `png`) and `FloorPlanExportDpi`
+  (`d96`, `d150`, `d300`, `value`). `FloorPlanView.onExportDialog(context,
+  initial)`: the host's export dialog at every Export entry point of
+  both modes (the bars, the editor's file commands, Cmd+E and Ctrl+E),
+  its answer remembered as the next `initial`, null cancelling.
+  `FloorPlanView.onPageFlowError(error)`: an export or a print the view
+  started that failed, once; without it the error propagates as before.
+- **The editor's capabilities.** `FloorPlanView.editorCapabilities`
+  (`FloorPlanEditorCapabilities`, default `full`, today's editor):
+  `tools` (a set of `FloorPlanTool`, the palette's fifteen then
+  `symbol`; it must hold `select`, else an `ArgumentError` naming
+  `tools`), `symbolPalette`, `symbolFilter` (over `FloorPlanSymbol`:
+  `key`, `name`, `category`, `tags`, `seats`), `selectionPanel`,
+  `layerPanel`, `pagePanel`, `editLayers`, `editPage`,
+  `selectTablesOnly`, `move`, `rotate`, `mirror`, `reshape`, `delete`,
+  `renumber`, `changeLayer`, `undo`, `export`, `print`, `rulers`,
+  `grid`, `snapping`; the profiles `full`, `tablesOnly` (Select and the
+  tables of the Symbols tab, tables-only selection, move, rotate,
+  delete, renumber, undo; no Layer or Page panel, mirror, reshape or
+  layer change) and `readOnly` (select, pan and zoom, the panels read
+  only); `copyWith` (null keeps a field, the filter included), `==`
+  (the filter by `==`), `hashCode`, `toString`. Enforced on every edit
+  path of the editor: the palette and its letters, the Fill row, the
+  Symbols tab and its search, the symbol tool's R and M and its
+  placement's turn and mirror, the select tool's pick, band, drags,
+  grips and keys, every Selection panel field and button, the layer
+  picker, the Layer and Page panels, the bar and its chords, F3 and
+  object snap. A run-time change applies at the next build: a refused
+  tool falls back to select, a hidden panel keeps its state, a drag
+  whose flag closes before its up executes nothing, a change to
+  `selectTablesOnly` keeps only the selection's tables. The selection
+  mode is not governed by it. `FloorPlanController.activeTool`
+  (`ValueListenable<FloorPlanTool>`) and `selectTool(tool)` for a host's
+  own tool strip.
+- **The table inspector.** `FloorPlanView.tableInspectorBuilder(context,
+  table)`: the host's widget in the editor's Selection panel while
+  exactly one numbered root-level table is selected, called with its
+  `FloorPlanTableDetail`, at each selection or plan change and host
+  rebuild, never on pan or zoom. `FloorPlanController.editorSelectedTables`
+  (`ValueListenable<Set<String>>`), the numbers selected in the editor,
+  empty in the selection mode.
+- **Keyboard and focus.** `FloorPlanView.shortcuts` (default `true`):
+  `false` unbinds, in both modes, every key the planner binds while no
+  gesture runs (the chords, the tool letters, F3, F, Escape, the select
+  tool's Delete and Backspace, the selection mode's Escape); a gesture's
+  own keys stay. `FloorPlanController.deleteSelection()` deletes the
+  editor's selection as the Delete key does, in one undo step, and
+  answers whether it deleted (false in the selection mode, with no
+  editor, nothing selected, `delete` refused, or a gesture part-way).
+  `FloorPlanView.autofocus` (default `true`): `false` stops either mode
+  taking the focus when it is mounted; read at each mount.
+- **A fix a 0.3.0 host may notice.** In the design mode
+  `FloorPlanController.undo()` and `redo()` now do nothing while the
+  editor's tool is part-way through a shape, as the editor's own Undo
+  button and key already did; in 0.3.0 a host calling `undo()` then
+  undid a step beneath the pending shape. `canUndo` and `canRedo` keep
+  their meaning (the history), so a host button enabled by them may be
+  pressed then, to no effect. The view's Export and Print now share one
+  guard per controller with `exportPlan` and `printPlan`, and a flow
+  reads the view's `exportName` and `printer` when it starts rather than
+  after the bytes are made.
+- `jet_cad_2d_flutter`: `SelectGates` (`all`; `restrictsPick` and
+  `pick`, `bandAccepts`, `move`, `rotate`, `reshape`, `delete`,
+  `idleKeys`, every one allowing by default and read live, never
+  captured), `SelectTool.gates` and `SelectTool.deleteSelection(ctx)`
+  (the idle Delete as a call, gated by `delete`); `GripCache(gates:)`
+  with `moveGripsLive`, `stretchGripsLive` and `gatesChanged()` (give
+  the tool and the cache the same gates object); the selection overlay
+  draws a closed role's grips not at all; `InteractionLayer.autofocus`
+  (default `true`).
+- `jet_cad_floor_plan`'s `editor.dart`: `PlannerShell`'s `editorBar`,
+  `capabilities`, `shortcuts`, `autofocus`, `tableInspector`, `onIdle`,
+  `onTools`, `onToolChanged` and `onDelete` (with the typedefs
+  `ShellIdleRegistrar`, `ShellToolRegistrar`, `ShellTableInspector`,
+  `ShellDeleteRegistrar`); `PlannerView.autofocus`;
+  `DocumentToolbar.groups`; `ToolPalette.showFill` and `toolChanges`;
+  `SymbolPanel.filter`, `placeable` and `toolChanges`;
+  `SymbolPlaceTool.canRotate`, `canMirror` and `gatesChanged()`;
+  `SelectionPanel.capabilities` and `selectionChanges`;
+  `LayerPanel.editable`; `PagePanel.editable`. Every one optional, its
+  default today's behaviour.
+
 **Known limits.** The badges' look and the smoothness of pan and zoom
 with them have not been checked on a tablet or a terminal, nor have the
 demo's double tap, pointer line and Link tables; the demo's new German
 and Turkish strings have not been read by native speakers; nor has the
 demo's POS look (captions, frames, chips, veil, bar, selection) been
 seen on a tablet or a terminal, its colours being a proposal from
-shadcn's published tokens. `canvasRect`
+shadcn's published tokens; nor have the demo's three editor profiles and
+its own service bar. While a symbol is armed, a refused R or M reaches
+the next binding (under a value that allows the Rectangle or the Room
+tool, it switches to it; no profile does). `selectTool(FloorPlanTool.symbol)`
+only re-arms the symbol last armed from the Symbols tab: a host cannot
+choose a symbol. Turning the rulers on or off at run time cancels a
+shape part-way drawn. A Material `TextField` beside the plan loses the
+focus on a mouse press outside it, after the canvas asked for it, so one
+press on the plan right after typing leaves the focus with neither (the
+host guide's `onTapOutside`). Capabilities are not a security boundary:
+a host's own calls stay allowed under every value. `canvasRect`
 ignores an ancestor that scales or turns the view. The planner checks a
 table's data for shape, never for meaning: a plan saved at one location
 and loaded at another carries the first location's ids.
