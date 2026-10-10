@@ -1540,6 +1540,8 @@ M-11endlabel, M-11panelrw.
   (spike `Q2c`: `18 entities restored with their handles and owners; undo
   depth 6 -> 5`); the node is re-linked last among the root's children, as
   08's and 10's, and draw order, which follows handles, is unaffected.
+  *(Superseded 2026-10-10 by the host embedding spec's O-10: an undone
+  removal restores the node's index, so the bytes compare exactly.)*
 - **Save → load → save is byte-identical**, references intact, `drift()`
   empty after load (spike `Q2d`), a `-0.0` offset included (D2).
 - **The same state plus the same edit gives the same bytes** (06 D11).

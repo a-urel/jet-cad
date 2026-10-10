@@ -375,10 +375,17 @@ class SetInstanceDefinitionCommand extends DraftCommand {
 /// redundant, and duplicating the guard is exactly how the two copies drift
 /// apart later. Both this check and that one throw before the command returns
 /// its inverse, so the dispatcher never pushes history for a rejected command.
+///
+/// [index] is where the node goes among its parent's `children`; null
+/// appends. It is what [RemoveNodeCommand]'s inverse carries, so an undone
+/// removal puts the node back between the same neighbours and the encoding
+/// back byte for byte (spec O-10). [DocumentTree.addNode] range-checks it
+/// before mutating.
 class AddNodeCommand extends DraftCommand {
   final Node node;
+  final int? index;
 
-  AddNodeCommand(this.node);
+  AddNodeCommand(this.node, {this.index});
 
   @override
   Capability get capability => Capability.structure;
@@ -392,7 +399,7 @@ class AddNodeCommand extends DraftCommand {
         target.entities.containsHandle(node.handle)) {
       throw DuplicateHandleError(node.handle);
     }
-    target.tree.addNode(node);
+    target.tree.addNode(node, index: index);
     target.handleSeed.raiseTo(node.handle);
     target.invalidateDerived();
     return CommandResult(
@@ -407,6 +414,13 @@ class AddNodeCommand extends DraftCommand {
 /// The inverse carries the node value itself, so undo re-adds through
 /// [AddNodeCommand] — including its cycle guard — rather than re-inserting
 /// unchecked.
+///
+/// It also carries the node's index among its parent's `children`, read
+/// before the removal: without it the re-add appended, so Delete then Undo
+/// reordered the parent's `children` and the encoding differed from the
+/// saved file while nothing had been edited (spec O-10). A compound delete
+/// needs nothing more: its inverse runs the children's inverses in reverse
+/// order, so each re-insert meets exactly the list its own removal left.
 class RemoveNodeCommand extends DraftCommand {
   final Handle handle;
 
@@ -424,10 +438,11 @@ class RemoveNodeCommand extends DraftCommand {
     if (node == null) {
       throw StateError('no node with handle ${handle.toHex()}');
     }
+    final index = target.tree.indexInParent(handle);
     target.tree.removeNode(handle);
     target.invalidateDerived();
     return CommandResult(
-      inverse: AddNodeCommand(node),
+      inverse: AddNodeCommand(node, index: index),
       touched: {handle},
     );
   }

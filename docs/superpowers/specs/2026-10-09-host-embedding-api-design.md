@@ -938,6 +938,12 @@ sharing a number, an unnumbered table, a camera not at identity.
   (draw order is by handle). Pre-existing, independent of table data;
   found by Slice 2's Task 2 (M-H27's amended killer). Its own task
   (`AddNodeCommand` restoring the child's index), beside O-8.
+  **Settled** (2026-10-10, plan
+  [2026-10-10-undo-node-index.md](../plans/2026-10-10-undo-node-index.md)):
+  `RemoveNodeCommand`'s inverse carries the node's index and
+  `DocumentTree.addNode` inserts there, so Delete then Undo is byte-exact,
+  for one node and for a compound; HD12, TD7b and TD10 compare the
+  encoding whole.
 - **O-11.** Selecting a table whose corners are not finite (the
   fixture's `9`, a hand-edited file) trips a NaN-offset debug assertion
   in `SelectionOverlayPainter._paintGrips`

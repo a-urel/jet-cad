@@ -172,6 +172,15 @@ analyses the 0.3.0 host probe against every commit.
   `selectionOnLight`, `selectionOnDark`, `selectionWidth` and
   `canvasBackground`, and throws an `ArgumentError` naming the field for
   an ambient look out of range.
+- **Delete, then Undo, writes the plan back byte for byte.** An undone
+  removal of a node — a table, a wall, any object — puts it back at its
+  index among its parent's children; it used to go back last, so
+  `designJson()` differed from the saved file while `dirty` read false
+  (spec O-10). Nothing drawn changes: draw order is by handle. In the
+  engine, `AddNodeCommand(node, {index})` and `DocumentTree.addNode(node,
+  {index})` take the position (`null` appends, as before; out of range is
+  a `RangeError`, thrown before anything changes), and
+  `DocumentTree.indexInParent(handle)` reads it.
 - **A table whose corners are not finite** (an instance scaled past the
   doubles, as only a hand-edited file holds; O-11) no longer trips a
   debug assertion when selected in the design view, nor a NaN assertion

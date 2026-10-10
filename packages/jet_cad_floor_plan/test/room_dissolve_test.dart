@@ -521,7 +521,7 @@ void main() {
       final left = addRoom(doc, seedAt(plan, leftSeed), 'Room 1');
       final right = addRoom(doc, seedAt(plan, rightSeed), 'Room 2');
       final leftKids = kids(doc, left), rightKids = kids(doc, right);
-      final before = canon(doc, sortNodes: true);
+      final before = canon(doc);
       final depth = doc.commands.undoDepth;
 
       doc.commands
@@ -540,7 +540,7 @@ void main() {
       expect(driftOf(doc), isEmpty, reason: 'moved at $place');
 
       doc.commands.undo();
-      expect(canon(doc, sortNodes: true), before, reason: 'undo at $place');
+      expect(canon(doc), before, reason: 'undo at $place');
       expect(kids(doc, left), leftKids, reason: '$place');
       expect(kids(doc, right), rightKids, reason: '$place');
       expect(labelStrings(doc, left), ['Room 1', '10.83 m²'], reason: '$place');
@@ -589,7 +589,7 @@ void main() {
         for (final MapEntry(key: n, value: h) in rooms.entries)
           n: labelStrings(doc, h),
       };
-      final before = canon(doc, sortNodes: true);
+      final before = canon(doc);
       final depth = doc.commands.undoDepth;
 
       doc.commands.execute(deleteObject(doc, plan.walls[3]));
@@ -609,7 +609,7 @@ void main() {
       expect(driftOf(doc), isEmpty, reason: '$place');
 
       doc.commands.undo();
-      expect(canon(doc, sortNodes: true), before, reason: 'undo at $place');
+      expect(canon(doc), before, reason: 'undo at $place');
       for (final MapEntry(key: n, value: h) in rooms.entries) {
         expect(kids(doc, h), children[n], reason: '$n undone at $place');
       }
@@ -710,16 +710,16 @@ void main() {
       final params = doc.components.get<RoomParams>(left);
       final children = kids(doc, left);
       final strings = labelStrings(doc, left);
-      final before = canon(doc, sortNodes: true);
+      final before = canon(doc);
 
       doc.commands
           .execute(moveWall(plan, 4, const W(1500, 0, 1500, 4000, 100)));
       expectDissolved(doc, left, children, '$place');
-      final after = canon(doc, sortNodes: true);
+      final after = canon(doc);
       expect(driftOf(doc), isEmpty, reason: '$place');
 
       doc.commands.undo();
-      expect(canon(doc, sortNodes: true), before, reason: 'undo at $place');
+      expect(canon(doc), before, reason: 'undo at $place');
       expect(doc.components.get<RoomParams>(left), params, reason: '$place');
       expect(doc.tree[left]!.parent, doc.rootHandle, reason: '$place');
       expect(kids(doc, left), children, reason: '$place');
@@ -727,7 +727,7 @@ void main() {
       expect(driftOf(doc), isEmpty, reason: 'undone at $place');
 
       doc.commands.redo();
-      expect(canon(doc, sortNodes: true), after, reason: 'redo at $place');
+      expect(canon(doc), after, reason: 'redo at $place');
       expectDissolved(doc, left, children, 'redone at $place');
       expect(driftOf(doc), isEmpty, reason: 'redone at $place');
     }
