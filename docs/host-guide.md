@@ -1620,7 +1620,11 @@ binding: under a value that also allows the Rectangle tool (R) or the
 Room tool (M), it switches to that tool, as W switches to Wall. None of
 the three profiles allows that. `selectTool(FloorPlanTool.symbol)` only brings back the symbol
 last armed from the Symbols tab, while it is still offered: you cannot
-choose a symbol through it.
+choose a symbol through it. A table symbol of your own library tagged
+`against-wall` still turns to a wall it is moved or placed against
+under `rotate: false`, since the wall's attachment sets its turn; no
+bundled table carries the tag, and `snapping: false` turns the
+attachment off.
 
 ### Keyboard and focus
 

@@ -280,7 +280,9 @@ the fix below); CI analyses the 0.3.0 host probe against every commit.
   pressed then, to no effect. The view's Export and Print now share one
   guard per controller with `exportPlan` and `printPlan`, and a flow
   reads the view's `exportName` and `printer` when it starts rather than
-  after the bytes are made.
+  after the bytes are made. A host's own shortcuts above the view no
+  longer receive Backspace, Delete, typing keys or Ctrl+A from the
+  planner's text fields: the field keeps them.
 - `jet_cad_2d_flutter`: `SelectGates` (`all`; `restrictsPick` and
   `pick`, `bandAccepts`, `move`, `rotate`, `reshape`, `delete`,
   `idleKeys`, every one allowing by default and read live, never
@@ -313,7 +315,9 @@ its own service bar. While a symbol is armed, a refused R or M reaches
 the next binding (under a value that allows the Rectangle or the Room
 tool, it switches to it; no profile does). `selectTool(FloorPlanTool.symbol)`
 only re-arms the symbol last armed from the Symbols tab: a host cannot
-choose a symbol. Turning the rulers on or off at run time cancels a
+choose a symbol. A host's table symbol tagged `against-wall` still
+turns to its wall when moved or placed under `rotate: false` (no bundled
+table is). Turning the rulers on or off at run time cancels a
 shape part-way drawn. A Material `TextField` beside the plan loses the
 focus on a mouse press outside it, after the canvas asked for it, so one
 press on the plan right after typing leaves the focus with neither (the

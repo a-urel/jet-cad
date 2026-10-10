@@ -882,6 +882,29 @@ void main() {
       await expectKept(tester, c, 'rulers on');
     });
   });
+
+  testWidgets(
+      'K3 (final review F-6, mutant S26) after a load in the design mode, '
+      "selectTool and deleteSelection reach the new editor: the old one's "
+      'withdrawal leaves its registrations', (tester) async {
+    final h = await mountEditor(tester);
+    final c = h.c;
+    c.load(c.designJson());
+    await tester.pump();
+    await tester.pump();
+    expect(c.selectTool(FloorPlanTool.wall), isTrue);
+    await tester.pump();
+    expect(c.activeTool.value, FloorPlanTool.wall);
+    expect(c.selectTool(FloorPlanTool.select), isTrue);
+    await tester.pump();
+    c.select({'1'});
+    await tester.pump();
+    final n = c.tables.length;
+    expect(c.deleteSelection(), isTrue);
+    await tester.pump();
+    expect(c.tables.length, n - 1);
+    expect(c.tables.map((t) => t.number), isNot(contains('1')));
+  });
 }
 
 /// Table `1`'s screen place is kept across design -> selection -> design.

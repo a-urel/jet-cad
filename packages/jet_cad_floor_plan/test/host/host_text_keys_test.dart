@@ -272,4 +272,31 @@ void main() {
       expect(t.canvasFocused(), isTrue);
     });
   }
+
+  for (final mode in FloorPlanMode.values) {
+    testWidgets(
+        '${mode.name} (final review F-6, mutant S25): a held key typed in a '
+        "field, its repeats included, never fires the host's intent",
+        (tester) async {
+      final h = await mountPos(tester, mode: mode);
+      final c = h.c;
+      final String key;
+      if (mode == FloorPlanMode.design) {
+        c.select({'1'});
+        await tester.pump();
+        key = 'table-number';
+      } else {
+        key = 'host-bar-field';
+      }
+      await fill(tester, key, '123', 2);
+      expect(inField(), isTrue, reason: 'premise: the field focused');
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyK);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
+      await tester.pump();
+      expect(h.fired['k'], 0);
+      expect(inField(), isTrue, reason: 'the field keeps the focus');
+    });
+  }
 }

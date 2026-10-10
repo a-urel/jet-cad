@@ -30,6 +30,7 @@ import 'package:jet_cad_floor_plan/src/shell_commands.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import 'editor_fixture.dart' show editorCamera, editorPlanJson, kEditorSurface;
 import 'embedding_fixture.dart';
 
 Finder byKey(String k) => find.byKey(Key(k));
@@ -1418,5 +1419,55 @@ void main() {
         expect(canvasIn(tester), origin, reason: '$name: premise');
       }
     });
+  });
+
+  testWidgets(
+      'K1 (final review F-6, mutant S05) the service bar hidden, the '
+      'selection mode shown first: a round trip through the design mode, '
+      'the host rebuilding its view there, comes back exact from its first '
+      'frame', (tester) async {
+    final c = FloorPlanController(json: editorPlanJson());
+    addTearDown(c.dispose);
+    c.setMode(FloorPlanMode.selection);
+    await tester.binding.setSurfaceSize(kEditorSurface);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final rebuild = ValueNotifier(0);
+    addTearDown(rebuild.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: ValueListenableBuilder<int>(
+                valueListenable: rebuild,
+                builder: (_, n, __) => FloorPlanView(
+                    controller: c,
+                    exportName: 'plan$n',
+                    serviceBar: const FloorPlanServiceBar(visible: false))))));
+    await tester.pump();
+    await tester.pump();
+    c.cameraController.value = editorCamera();
+    await tester.pump();
+    Offset at(ViewportTransform camera) {
+      final p = canvasOf(camera, 22000, 16000);
+      return tester.getTopLeft(find.byType(InteractionLayer)) +
+          Offset(p.x, p.y);
+    }
+
+    final before = at(c.cameraController.value);
+    c.setMode(FloorPlanMode.design);
+    await tester.pump();
+    await tester.pump();
+    expectAt(at(c.cameraController.value), before, 'design');
+    // The host rebuilds its view while the design mode is shown: the view
+    // assumes the selection canvas from its chrome against the basis its
+    // first measurement recorded.
+    rebuild.value++;
+    await tester.pump();
+    await tester.pump();
+    c.setMode(FloorPlanMode.selection);
+    // The camera the switch made, read before the frame's measurement.
+    final m = c.cameraController.value;
+    await tester.pump();
+    expectAt(at(m), before, 'the first frame back in the selection mode');
+    await tester.pump();
+    expectAt(at(c.cameraController.value), before, 'settled');
   });
 }
