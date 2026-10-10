@@ -1,8 +1,10 @@
 # A removed node takes its components — design
 
-**Date:** 2026-10-09, revisions 2 and 3 2026-10-10. **Status:** design,
-**revision 3, approved by the human on 2026-10-10**; plan
-[2026-10-10-node-components-on-delete.md](../plans/2026-10-10-node-components-on-delete.md).
+**Date:** 2026-10-09, revisions 2 and 3 2026-10-10. **Status:**
+**implemented** on `fix/node-components-on-delete` (not yet merged; design
+**revision 3, approved by the human on 2026-10-10**); plan
+[2026-10-10-node-components-on-delete.md](../plans/2026-10-10-node-components-on-delete.md),
+results [2026-10-10-node-components-results.md](../notes/2026-10-10-node-components-results.md).
 Revision 1 (`c3c0c4b`, merged into `main` as docs only
 through PR #10 at `b5bef3a`) was written at `85905bd` (release 0.3.0).
 Revision 2 (`e8b48a9`) re-read every fact at `e281372` (release 0.4.0 and

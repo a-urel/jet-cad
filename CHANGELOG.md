@@ -8,7 +8,18 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-Nothing yet.
+- **Deleting a node removes everything attached to it.** A deleted
+  group's, nested group's or instance's components — including data a
+  newer release wrote — now go with it, as a table's host data already
+  did in 0.4.0; Undo brings them back exactly. Plans are unchanged
+  (schema 9): orphaned entries an older release left in a plan load and
+  save as they are.
+- **For code that builds commands by hand:** `RemoveNodeCommand` now
+  declares `{structure, components}`, so a permission profile that denies
+  components refuses a node delete (and the undo of a node add). A
+  re-parent built as `RemoveNodeCommand` then `AddNodeCommand` must pass
+  `components: doc.components.snapshotOf(handle)` to the re-add to keep
+  the node's components; without it the node comes back empty.
 
 ## 0.4.0
 

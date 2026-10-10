@@ -212,27 +212,37 @@ one's spec, plan and results.
 - **A removed node takes its components** (the host embedding API
   spec's O-8): spec
   [2026-10-09-node-components-on-delete-design.md](docs/superpowers/specs/2026-10-09-node-components-on-delete-design.md),
-  **revision 3, approved**; plan written, not started. `RemoveNodeCommand`
-  leaves a deleted node's components on its dead handle in the saved
-  plan; the spec makes the delete take them and undo restore them,
-  as `RemoveDefinitionCommand` does. Revision 1 was written at `85905bd`
-  (0.3.0) and merged into `main` as docs only by the human through
-  [PR #10](https://github.com/a-urel/jet-cad/pull/10) at `b5bef3a`
-  (2026-10-10). Revision 2 (branch `spec/node-components-on-delete`, cut
-  from `main` at `e281372`) re-reads every fact at 0.4.0 and re-runs the
-  spike there: `AddNodeCommand` checks the snapshot before `addNode`
-  instead of rolling back (the O-10 index made the rollback inexact),
-  and 0.4.0's table-data expander (`_detachFor`, E-6) goes, since it never
-  fires after the fix; TD7 and HD12 stay and kill M-1. An independent
-  review of revision 2 returned *Approve with fixes* (V-1 to V-11, one
-  Major: TD10 must be rewritten, since without `_detachFor` nothing pins
-  `TableLabelEdit`'s rollback); revision 3 folds in every fix. Copilot
-  could not review (quota). The human approved revision 3
-  (2026-10-10); plan
-  [2026-10-10-node-components-on-delete.md](docs/superpowers/plans/2026-10-10-node-components-on-delete.md):
-  three tasks (the engine with S-1; the floor plan's D-7, TD10 and P-1 to
-  P-3; docs and results). **Next:** the human's choice of execution, on
-  `fix/node-components-on-delete` cut from this branch.
+  **revision 3, approved**; plan
+  [2026-10-10-node-components-on-delete.md](docs/superpowers/plans/2026-10-10-node-components-on-delete.md),
+  **executed on `fix/node-components-on-delete`, not merged** (execution
+  chosen by the human, 2026-10-10: subagent-driven). `RemoveNodeCommand`
+  left a deleted node's components on its dead handle in the saved plan;
+  now the delete takes them and undo restores them, as
+  `RemoveDefinitionCommand` does: `AddNodeCommand` gains `components`
+  (checked before `addNode`, nothing written on a refusal),
+  `RemoveNodeCommand` declares `{structure, components}`, the parametric
+  planner stops planning detaches (D-4) and 0.4.0's table-data expander
+  goes (D-7). Schema stays 9. The spec's history: revision 1 was written
+  at `85905bd` (0.3.0) and merged into `main` as docs only through
+  [PR #10](https://github.com/a-urel/jet-cad/pull/10) at `b5bef3a`;
+  revision 2 re-read every fact at 0.4.0 (`e281372`); an independent
+  review returned *Approve with fixes* (V-1 to V-11, one Major: TD10
+  rewritten); revision 3 folds in every fix and the human approved it.
+  Tasks 1 (the engine, `90044db`, with its fix `d082640`) and 2 (the
+  floor plan, `391d967`) were each reviewed independently and approved;
+  Task 3 is the CHANGELOG (Unreleased), the spec's status line and the
+  results note
+  [2026-10-10-node-components-results.md](docs/superpowers/notes/2026-10-10-node-components-results.md)
+  (all 17 mutants with their red lines; the rulings that changed the
+  spec's claims: M-5's killers, P-1 to P-3 compare `canon`, P-2 not a
+  killer of M-12). The task reports and the ledger are in
+  `.superpowers/sdd/2026-10-10-node-components-on-delete/` (git-ignored).
+  **Next:** the whole-branch review by a fresh reviewer and its fixes
+  (the results note lists the minor findings left for it); then the
+  human's look, then the merge into `main` **on the human's word**, the
+  ledger archived onto the branch to
+  `docs/superpowers/ledgers/2026-10-09-node-components-on-delete/` as its
+  last commit before the merge. Nothing is pushed.
 
 ## Owed to the human
 
