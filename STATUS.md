@@ -152,6 +152,25 @@ one's spec, plan and results.
   **Owed once Slice 4 is on `main`:** its DS1 and DS2
   (`keyboard_focus_test.dart`) compare the undone encoding with the one
   before the delete, not around it.
+- **O-11, a table whose corners are not finite** (the human, 2026-10-10),
+  merged into `main` on the human's *"evet, main'e merge et"*, from
+  `fix/non-finite-corners`: selecting such a table (the embedding
+  fixture's `9`) no longer trips `drawLine`'s NaN assertion, and its PDF
+  (Export and Print) no longer trips the pdf package's `!value.isNaN`.
+  `GripCache` keeps no non-finite bounds in its box and no non-finite
+  grip, and a grip whose screen distance is NaN is never hit;
+  `SelectionOverlayPainter` draws no rotation grip and no point cross at
+  a non-finite screen position; `PdfDrawSink` draws nothing under a
+  residual with an entry that is not finite. Named mutants M-O11a to
+  M-O11i, each killed; an independent review (*Approve with fixes*: the
+  NaN hit test, the mutant names, the CHANGELOG's wording), applied in
+  `efbb4ef`. Run natively in one session: no SDD ledger; the record is
+  the spec's O-11. Unreleased (CHANGELOG). **Owed once Slice 4 is on
+  `main`:** its `page_flows_test.dart` drops `finitePlanJson()` for
+  `embeddingPlanJson()` (the fixture now takes `tables:`), a proposed
+  session's task. Left as found: `CanvasDrawSink.point` carries a
+  non-finite residual by hand into `drawRect` (unreachable for table 9,
+  whose box is culled).
 
 ## In flight
 
@@ -204,11 +223,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 **Next: Slice 4** of the host embedding API (the bars, keyboard, editor
 capabilities), started on the human's word; a release carrying Slices
 1–3 (0.4.0: **schema 9**, every terminal that shares stored plans moves
-together) is the human's call. Found and recorded, each its own task:
-O-10 (an undone delete re-appends the node at its parent's end), O-11
-(non-finite corners trip a debug assertion in the selection grips, and
-the PDF export asserts NaN on such a table), and removing a design view
-while a pointer hovers a line throws (Slice 3's results). Monépro owes
+together) is the human's call. O-10 and O-11 are merged; each leaves
+a test change owed to Slice 4 (above). Found and recorded, its own
+task: removing a design view while a pointer hovers a line throws
+(Slice 3's results). Monépro owes
 Q-H3 and its real shadcn tokens, and can name `controller.camera`,
 `tableOverlayBuilder` (Q-Z1), `FloorPlanTableDetail.data` (Q-Z4) and
 `FloorPlanTheme` in its spec 103.

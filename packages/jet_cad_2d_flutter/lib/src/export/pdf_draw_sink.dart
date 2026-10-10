@@ -26,6 +26,8 @@ import '../draw_sink.dart';
 /// - [point] is carried through the residual by hand, never under `cm`. It
 ///   is drawn as an axis-aligned square of side `lw / 100 · u`, and nothing
 ///   is drawn at lineweight 0.
+/// - Under a residual with an entry that is not finite, nothing is drawn
+///   (O-11): no `q`, no `cm`, no path, no text.
 /// - [text] is drawn under the residual, which maps glyph space (y up, origin
 ///   on the baseline, size `kNominalTextPixels`) to screen space. The page
 ///   set-up's flip cancels the camera's, so the glyphs stand upright in PDF
@@ -96,6 +98,13 @@ class PdfDrawSink implements DrawSink {
   bool _inResidual = false;
   bool _transformPushed = false;
 
+  /// False under a residual with an entry that is not finite: an instance
+  /// scaled past the doubles composes one (O-11). The package cannot write
+  /// it (it asserts `!value.isNaN`), and a PDF number cannot hold it, so
+  /// nothing is drawn under it, as nothing of such an instance is on the
+  /// paper anyway.
+  bool _writable = true;
+
   /// The cubic Bezier handle for a circle quadrant, `4/3 · tan(pi/8)`.
   static final double _quadrantHandle = 4 / 3 * math.tan(math.pi / 8);
 
@@ -121,6 +130,12 @@ class PdfDrawSink implements DrawSink {
     _residual = residual;
     _residualScale = residual.scaleMagnitude;
     _inResidual = true;
+    _writable = residual.a.isFinite &&
+        residual.b.isFinite &&
+        residual.c.isFinite &&
+        residual.d.isFinite &&
+        residual.e.isFinite &&
+        residual.f.isFinite;
   }
 
   @override
@@ -129,17 +144,23 @@ class PdfDrawSink implements DrawSink {
     _residual = Transform2.identity();
     _residualScale = 1.0;
     _inResidual = false;
+    _writable = true;
   }
 
   /// Outside a residual a primitive is in screen space and pushes nothing,
   /// so every `q` this sink writes has its `Q` at the residual's end.
-  void _pushTransform() {
-    if (_transformPushed || !_inResidual) return;
+  ///
+  /// False when the residual cannot be written ([_writable]): the caller
+  /// then draws nothing.
+  bool _pushTransform() {
+    if (!_writable) return false;
+    if (_transformPushed || !_inResidual) return true;
     final r = _residual;
     _g
       ..saveContext()
       ..setTransform(_set(r.a, r.b, r.c, r.d, r.e, r.f));
     _transformPushed = true;
+    return true;
   }
 
   void _popTransform() {
@@ -165,7 +186,7 @@ class PdfDrawSink implements DrawSink {
   @override
   void point(double x, double y, ResolvedStyle style) {
     final side = _widthFor(style.lineweightHundredths, 1.0);
-    if (side <= 0) return;
+    if (side <= 0 || !_writable) return;
     // Screen space: a `cm` left open by an earlier primitive under this
     // residual is closed first, and the next primitive pushes it again.
     _popTransform();
@@ -184,8 +205,7 @@ class PdfDrawSink implements DrawSink {
     ResolvedStyle style, {
     required bool closed,
   }) {
-    if (count <= 0) return;
-    _pushTransform();
+    if (count <= 0 || !_pushTransform()) return;
     _strokeState(style);
     _g.moveTo(points[0], points[1]);
     for (var i = 1; i < count; i++) {
@@ -197,7 +217,7 @@ class PdfDrawSink implements DrawSink {
 
   @override
   void circle(double cx, double cy, double r, ResolvedStyle style) {
-    _pushTransform();
+    if (!_pushTransform()) return;
     _strokeState(style);
     _circlePath(cx, cy, r);
     _g.strokePath();
@@ -212,8 +232,7 @@ class PdfDrawSink implements DrawSink {
     double sweep,
     ResolvedStyle style,
   ) {
-    if (sweep == 0 || !sweep.isFinite) return;
-    _pushTransform();
+    if (sweep == 0 || !sweep.isFinite || !_pushTransform()) return;
     _strokeState(style);
     // A sweep past a full turn draws the full circle, as `Canvas.drawArc`.
     final s = sweep.clamp(-2 * math.pi, 2 * math.pi);
@@ -240,8 +259,7 @@ class PdfDrawSink implements DrawSink {
     Int32List triangles,
     ResolvedStyle style,
   ) {
-    if (count < 3) return;
-    _pushTransform();
+    if (count < 3 || !_pushTransform()) return;
     _fillState(style);
     _g.moveTo(points[0], points[1]);
     for (var i = 1; i < count; i++) {
@@ -254,7 +272,7 @@ class PdfDrawSink implements DrawSink {
 
   @override
   void fillCircle(double cx, double cy, double r, ResolvedStyle style) {
-    _pushTransform();
+    if (!_pushTransform()) return;
     _fillState(style);
     _circlePath(cx, cy, r);
     _g.fillPath();
@@ -277,7 +295,8 @@ class PdfDrawSink implements DrawSink {
   /// part of the state is.
   @override
   void text(String text, Handle style, ResolvedStyle resolved) {
-    if (text.isEmpty) return;
+    // Before the font: a run that is not drawn embeds nothing (O-11).
+    if (text.isEmpty || !_writable) return;
     final font = _font;
     // `w_pdf` below reproduces the `/W` widths of the CID (`/Type0`) path. A
     // simple TrueType font (`simpleTrueTypeFonts`, or a font the package does
