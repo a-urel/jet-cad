@@ -269,7 +269,7 @@ void main() {
       for (final s in [leftSeed, rightSeed]) {
         expect(bandBefore.containsPoint(seedAt(plan, s)), isFalse);
       }
-      final before = canon(doc, sortNodes: true);
+      final before = canon(doc);
       final depth = doc.commands.undoDepth;
 
       doc.commands.execute(moveWall(plan, 4, movedPartition));
@@ -294,24 +294,24 @@ void main() {
           const [(100, 100), (3200.5, 100), (3200.5, 3900), (100, 3900)],
           'left moved at $place');
       expect(driftOf(doc), isEmpty, reason: 'moved at $place');
-      final after = canon(doc, sortNodes: true);
+      final after = canon(doc);
 
       doc.commands.undo();
-      expect(canon(doc, sortNodes: true), before, reason: 'undo at $place');
+      expect(canon(doc), before, reason: 'undo at $place');
       expect({
         for (final r in [left, right]) r: kids(doc, r)
       }, handles);
       expect(stringsOf(doc, left), ['Room 1', '10.83 m²'], reason: '$place');
       expect(driftOf(doc), isEmpty, reason: 'undone at $place');
       doc.commands.redo();
-      expect(canon(doc, sortNodes: true), after, reason: 'redo at $place');
+      expect(canon(doc), after, reason: 'redo at $place');
       expect({
         for (final r in [left, right]) r: kids(doc, r)
       }, handles);
       expect(driftOf(doc), isEmpty, reason: 'redone at $place');
       doc.commands.undo();
       doc.purge();
-      expect(canon(doc, sortNodes: true), before, reason: 'purge at $place');
+      expect(canon(doc), before, reason: 'purge at $place');
       expect({
         for (final r in [left, right]) r: kids(doc, r)
       }, handles);

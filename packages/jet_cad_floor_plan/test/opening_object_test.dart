@@ -278,7 +278,7 @@ void main() {
     for (final h in all) {
       expect(handles[h], isNotEmpty, reason: h.toHex());
     }
-    final before = canon(doc, sortNodes: true);
+    final before = canon(doc);
     final depth = doc.commands.undoDepth;
 
     doc.commands.execute(deleteLikeSelectTool(doc, hA));
@@ -295,19 +295,19 @@ void main() {
     expectSquare(doc, hC);
     expect(doc.commands.undoDepth, depth + 1);
     expect(driftOf(doc), isEmpty);
-    final after = canon(doc, sortNodes: true);
+    final after = canon(doc);
 
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(childrenOf(doc, all), handles);
     expect(driftOf(doc), isEmpty);
     expectOnOracles(doc, 'undone');
     doc.commands.redo();
-    expect(canon(doc, sortNodes: true), after);
+    expect(canon(doc), after);
     expect(driftOf(doc), isEmpty);
     doc.commands.undo();
     doc.purge();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(childrenOf(doc, all), handles);
     expect(driftOf(doc), isEmpty);
   });

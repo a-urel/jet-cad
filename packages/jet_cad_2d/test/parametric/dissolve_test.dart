@@ -179,7 +179,7 @@ void main() {
 
     // C over F's centre: F dissolves in the move, one undo step, and is not
     // generated.
-    final before = canon(doc, sortNodes: true);
+    final before = canon(doc);
     final depth = doc.commands.undoDepth;
     final a1 = asked(hF), g1 = calls(hF);
     final caps = await appliedCapabilities(
@@ -192,22 +192,22 @@ void main() {
     expect(caps, [Capability.geometry],
         reason: 'the plan removed entities: the index must hear it');
     expect(drift(doc), isEmpty);
-    final after = canon(doc, sortNodes: true);
+    final after = canon(doc);
 
     // Undo restores the state and every child handle; F's node goes back
     // first among the root's children, where it was (spec O-10).
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(kids(doc, hF), handles);
     expect(doc.components.get<Fuse>(hF), fuse);
     expect(rootChildren(doc), [hF, hC]);
     expect(drift(doc), isEmpty);
     doc.commands.redo();
-    expect(canon(doc, sortNodes: true), after);
+    expect(canon(doc), after);
     expectDissolved(doc);
     doc.commands.undo();
     doc.purge();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(kids(doc, hF), handles);
     expect(drift(doc), isEmpty);
 
@@ -252,7 +252,7 @@ void main() {
     expect(doc.commands.undoDepth, depth2 + 1);
     expect(drift(doc), isEmpty);
     doc.commands.undo();
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expect(kids(doc, hF), handles);
     expect(doc.components.get<Fuse>(hF), fuse);
 
@@ -301,13 +301,13 @@ void main() {
     // what the move itself needs is allowed, transform; the removals need
     // geometry and structure, the detach components.
     final ruled = scene();
-    final ruledBefore = canon(ruled, sortNodes: true);
+    final ruledBefore = canon(ruled);
     ruled.commands.permissions = const DraftPermissions(
         transform: true, components: false, geometry: false, structure: false);
     ruled.commands.execute(TransformNodeCommand(hC, covering()));
     expectDissolved(ruled);
     ruled.commands.undo();
-    expect(canon(ruled, sortNodes: true), ruledBefore);
+    expect(canon(ruled), ruledBefore);
     expect(kids(ruled, hF), handles);
     ruled.commands.redo();
     expectDissolved(ruled);

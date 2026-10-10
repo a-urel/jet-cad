@@ -80,22 +80,6 @@ List<Object?> rootChildren(String json) {
   return root['children']! as List;
 }
 
-/// The encoding [json]'s `components` section, as text.
-String componentsOf(String json) =>
-    jsonEncode((jsonDecode(json) as Map)['components']);
-
-/// [json] with every group's children sorted: the encoding but for the
-/// order `AddNodeCommand` re-adds a node in (it appends).
-String childrenSorted(String json) {
-  final map = jsonDecode(json) as Map<String, Object?>;
-  for (final n in (map['nodes']! as List).cast<Map<String, Object?>>()) {
-    if (n['children'] case final List<Object?> c) {
-      n['children'] = [...c.cast<int>()]..sort();
-    }
-  }
-  return jsonEncode(map);
-}
-
 void main() {
   group('the limits (E-6, S-6)', () {
     test(
@@ -280,8 +264,8 @@ void main() {
       final before = DraftDocumentCodec.encodeToString(doc);
       final depth = doc.commands.undoDepth;
 
-      // B is the root's last child: AddNodeCommand appends, so its undo
-      // writes the plan back byte for byte (TD7b: any other child).
+      // B is the root's last child (TD7b: the first table; TD7c: two
+      // non-adjacent ones in one step).
       doc.commands.execute(deleteTable(b));
       expect(doc.tree[b.instance], isNull);
       expect(dataOf(doc, b.instance), isNull, reason: 'no orphan');
@@ -303,8 +287,8 @@ void main() {
 
     test(
         'TD7b the first table deleted and undone: its data back, the plan '
-        'equal but for the root\'s children order (the engine appends a '
-        're-added node)', () {
+        'byte for byte, the table back before B among the root\'s children '
+        '(O-10)', () {
       final doc = rig();
       final a = placeTable(doc, Vector2(41200, -27300),
           quarterTurns: 1, mirrored: true);
@@ -313,14 +297,57 @@ void main() {
       doc.commands
           .execute(SetComponentCommand<FloorPlanTableData>(a.instance, mine));
       final before = DraftDocumentCodec.encodeToString(doc);
+      expect(rootChildren(before).sublist(rootChildren(before).length - 2),
+          [a.instance.value, b.instance.value],
+          reason: 'premise: A is not the last child');
       doc.commands.execute(deleteTable(a));
       expect(dataOf(doc, a.instance), isNull);
       doc.commands.undo();
       expect(dataOf(doc, a.instance), same(mine));
-      final after = DraftDocumentCodec.encodeToString(doc);
-      expect(rootChildren(after), [b.instance.value, a.instance.value]);
-      expect(componentsOf(after), componentsOf(before));
-      expect(childrenSorted(after), childrenSorted(before));
+      expect(DraftDocumentCodec.encodeToString(doc), before);
+    });
+
+    test(
+        'TD7c two non-adjacent tables, neither last, deleted in one step: '
+        'undo writes the plan back byte for byte, redo deletes both again', () {
+      final doc = rig();
+      final a = placeTable(doc, Vector2(41200, -27300),
+          quarterTurns: 1, mirrored: true);
+      final b = placeTable(doc, Vector2(44700, -27300), quarterTurns: 3);
+      final c = placeTable(doc, Vector2(41200, -23100), quarterTurns: 2);
+      final d = placeTable(doc, Vector2(44700, -23100), mirrored: true);
+      doc.commands.execute(SetComponentCommand<FloorPlanTableData>(
+          a.instance, FloorPlanTableData(hostData())));
+      doc.commands.execute(SetComponentCommand<FloorPlanTableData>(
+          c.instance, FloorPlanTableData({key64: value1024})));
+      final before = DraftDocumentCodec.encodeToString(doc);
+      final root = rootChildren(before);
+      expect(
+          root.sublist(root.length - 4),
+          [
+            for (final t in [a, b, c, d]) t.instance.value
+          ],
+          reason: 'premise: B between A and C, D after both');
+      final depth = doc.commands.undoDepth;
+
+      doc.commands.execute(CompoundCommand([
+        RemoveEntityCommand(a.label!),
+        RemoveNodeCommand(a.instance),
+        RemoveEntityCommand(c.label!),
+        RemoveNodeCommand(c.instance),
+      ], label: 'Delete'));
+      expect(doc.commands.undoDepth, depth + 1, reason: 'one step');
+      expect(doc.tree[a.instance], isNull);
+      expect(doc.tree[c.instance], isNull);
+      expect(dataOf(doc, c.instance), isNull);
+      final deleted = DraftDocumentCodec.encodeToString(doc);
+
+      doc.commands.undo();
+      expect(DraftDocumentCodec.encodeToString(doc), before);
+      doc.commands.redo();
+      expect(DraftDocumentCodec.encodeToString(doc), deleted);
+      doc.commands.undo();
+      expect(DraftDocumentCodec.encodeToString(doc), before);
     });
 
     test(
@@ -411,10 +438,8 @@ void main() {
       expect(target.refused, isTrue, reason: 'the detach ran first');
       expect(dataOf(doc, a.instance), same(mine));
       expect(doc.tree[a.instance], isNotNull);
-      final after = DraftDocumentCodec.encodeToString(doc);
-      expect(componentsOf(after), componentsOf(before));
-      expect(childrenSorted(after), childrenSorted(before),
-          reason: 'B unturned, its label as it was; A back (appended)');
+      expect(DraftDocumentCodec.encodeToString(doc), before,
+          reason: 'B unturned, its label as it was; A back at its index');
     });
   });
 }

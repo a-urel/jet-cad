@@ -215,7 +215,7 @@ void main() {
         expect(dimTextGeometry(doc, survivor), survivorText, reason: when);
       }
 
-      final before = canon(doc, sortNodes: true);
+      final before = canon(doc);
       final entities = handlesAndOwners(doc);
       final depth = doc.commands.undoDepth;
 
@@ -240,12 +240,12 @@ void main() {
       expect(kids(doc, other), otherKids);
       expectFollows(doc, 'A deleted');
 
-      // Undo, one step: the canonical bytes (nodes sorted: a restored node
-      // is re-linked last among the root's children, draw order following
-      // handles), and every entity's handle and owner.
+      // Undo, one step: the canonical bytes (a restored node back at its
+      // index among the root's children, spec O-10), and every entity's
+      // handle and owner.
       doc.commands.undo();
       expect(doc.commands.undoDepth, depth);
-      expect(canon(doc, sortNodes: true), before);
+      expect(canon(doc), before);
       expect(handlesAndOwners(doc), entities);
       expect(kids(doc, dim), dimKids);
       for (final (i, d) in onA.indexed) {

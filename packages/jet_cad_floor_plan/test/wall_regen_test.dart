@@ -426,7 +426,7 @@ void main() {
     final doc = wallDoc();
     addL(doc);
     final aKids = kids(doc, hA);
-    final before = canon(doc, sortNodes: true);
+    final before = canon(doc);
     run(doc, deleteLikeSelectTool(doc, hA));
     expect(doc.components.get<WallParams>(hA), isNull);
     expect(doc.tree[hA], isNull);
@@ -435,7 +435,7 @@ void main() {
     expect(isRectNear(worldOutline(doc, hB), rectOf(b, 115, 0)), isTrue);
     doc.commands.undo();
     expect(kids(doc, hA), aKids);
-    expect(canon(doc, sortNodes: true), before);
+    expect(canon(doc), before);
     expectMitre(doc, bThickness: 115);
     expect(driftOf(doc), isEmpty);
   });

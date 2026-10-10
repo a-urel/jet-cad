@@ -78,18 +78,6 @@ List<Object?> rootChildren(String json) {
   return root['children']! as List;
 }
 
-/// [json] with every group's children sorted: the encoding but for the
-/// order `AddNodeCommand` re-adds a node in (it appends).
-String childrenSorted(String json) {
-  final map = jsonDecode(json) as Map<String, Object?>;
-  for (final n in (map['nodes']! as List).cast<Map<String, Object?>>()) {
-    if (n['children'] case final List<Object?> c) {
-      n['children'] = [...c.cast<int>()]..sort();
-    }
-  }
-  return jsonEncode(map);
-}
-
 /// The embedding fixture with [payloads] (by number) written as raw
 /// `jetcad.table_data` payloads, through bytes, in the codec's own order
 /// (type ids sorted, handles ascending), so this build writes it back
@@ -469,8 +457,8 @@ void main() {
 
   testWidgets(
       'HD12 M-H27 (E-9 gate 3): the editor\'s Delete of table 1 drops its '
-      'data in the same step; Undo puts it back, the plan as it was but '
-      'for the root\'s children order', (tester) async {
+      'data in the same step; Undo puts it back, the plan as it was byte '
+      'for byte (O-10), not dirty', (tester) async {
     final c = controller(tester);
     await tester.binding.setSurfaceSize(const Size(1440, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -487,6 +475,10 @@ void main() {
     final doc = c.activeDocument;
     final one = instanceOf(doc, '1'), two = instanceOf(doc, '2');
     final before = c.designJson();
+    c.markSaved();
+    final root = rootChildren(before);
+    expect(root.indexOf(one.value), lessThan(root.length - 1),
+        reason: 'premise: table 1 is not the root\'s last child');
     final depth = doc.commands.undoDepth;
     c.select({'1'});
     await tester.pump();
@@ -508,11 +500,8 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
     await tester.pump();
-    final undone = c.designJson();
     expect(detailsOf(c, '1').single.data, hostData());
-    expect(jsonEncode(dataSection(undone)), jsonEncode(dataSection(before)));
-    // AddNodeCommand appends: the restored table is the root's last child.
-    expect(rootChildren(undone).last, one.value);
-    expect(childrenSorted(undone), childrenSorted(before));
+    expect(c.designJson(), before);
+    expect(c.dirty.value, isFalse, reason: 'back at the save point');
   });
 }

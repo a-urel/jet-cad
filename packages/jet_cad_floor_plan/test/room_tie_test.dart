@@ -150,10 +150,10 @@ double toRect(Plan plan, Vector2 p, List<(double, double)> corners) {
   return d;
 }
 
-/// [doc] as saved, nodes sorted, less its handle seed (an undo does not
+/// [doc] as saved (entities by handle), less its handle seed (an undo does not
 /// take back a handle it allocated).
 String stateOf(DraftDocument doc) =>
-    canon(doc, sortNodes: true).replaceFirst(RegExp(r'"handleSeed":\d+'), '');
+    canon(doc).replaceFirst(RegExp(r'"handleSeed":\d+'), '');
 
 /// The distance from [q] to [pts]' nearest point.
 double nearest(Vector2 q, Iterable<Vector2> pts) =>
