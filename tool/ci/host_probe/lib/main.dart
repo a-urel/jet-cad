@@ -572,14 +572,10 @@ class _FloorScreenState extends State<FloorScreen> {
       );
 
   /// The POS's own keys over the plan while it owns the keyboard: its
-  /// commands; never while a text field inside the view (a panel's, the
-  /// inspector's) has the focus, since its keys pass through here too.
+  /// commands. A key typed into a text field inside the view never gets
+  /// here: the view keeps it for the field.
   KeyEventResult posKey(FocusNode node, KeyEvent event) {
     if (!posOwnsKeys || event is! KeyDownEvent) return KeyEventResult.ignored;
-    final typing = FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<EditableText>() !=
-        null;
-    if (typing) return KeyEventResult.ignored;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.delete) {
       controller.deleteSelection();

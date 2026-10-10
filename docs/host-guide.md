@@ -1650,14 +1650,10 @@ choose a symbol through it.
 
 ```dart
   /// The POS's own keys over the plan while it owns the keyboard: its
-  /// commands; never while a text field inside the view (a panel's, the
-  /// inspector's) has the focus, since its keys pass through here too.
+  /// commands. A key typed into a text field inside the view never gets
+  /// here: the view keeps it for the field.
   KeyEventResult posKey(FocusNode node, KeyEvent event) {
     if (!posOwnsKeys || event is! KeyDownEvent) return KeyEventResult.ignored;
-    final typing = FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<EditableText>() !=
-        null;
-    if (typing) return KeyEventResult.ignored;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.delete) {
       controller.deleteSelection();
@@ -1677,11 +1673,21 @@ The probe puts `posKey` on a `Focus(canRequestFocus: false, skipTraversal:
 true, onKeyEvent: posKey, …)` around its screen's body, so the keys reach
 it from the plan and from the screen's own buttons.
 
-**Your keys above the view see the planner's fields too.** A key typed
-into a panel's field (a table number, a page scale) or into your
-inspector passes through your bindings on its way up, so skip them
-while a text field has the focus, as `posKey` does; otherwise your
-Backspace deletes tables while staff type.
+**A field inside the view keeps its keys.** A key typed into a text
+field inside the view is the field's, in both modes and whatever
+`shortcuts` says: a panel's field (a table number, a page scale), the
+Symbols search, a layer's rename, the TEXT entry, and a field of yours
+in a bar or in the inspector. Backspace, Delete, Enter, Space and every
+key that types a character never reach your bindings above the view,
+and the text-editing keys (the arrows, select all, copy, paste) work as
+Flutter's defaults do. With the focus anywhere else in the view, your
+bindings get the keys as before, so `posKey` needs no guard for the
+planner's fields.
+
+**A field of yours outside the view** under your own bindings is yours
+to guard: skip your keys while it has the focus (for one,
+`FocusManager.instance.primaryFocus?.context?.findAncestorWidgetOfExactType<EditableText>() != null`),
+or your Backspace deletes tables while staff type there.
 
 **A field of yours beside the plan.** A Material `TextField` loses the
 focus on a mouse press outside it (on a desktop and on the web), after

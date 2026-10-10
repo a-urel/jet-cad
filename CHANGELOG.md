@@ -249,7 +249,10 @@ the fix below); CI analyses the 0.3.0 host probe against every commit.
   answers whether it deleted (false in the selection mode, with no
   editor, nothing selected, `delete` refused, or a gesture part-way).
   `FloorPlanView.autofocus` (default `true`): `false` stops either mode
-  taking the focus when it is mounted; read at each mount.
+  taking the focus when it is mounted; read at each mount. A text field
+  inside the view (a panel's, the Symbols search, a layer's rename, a
+  host field in a bar or the inspector) keeps its keys from the host's
+  own bindings above the view, in both modes.
 - **A fix a 0.3.0 host may notice.** In the design mode
   `FloorPlanController.undo()` and `redo()` now do nothing while the
   editor's tool is part-way through a shape, as the editor's own Undo

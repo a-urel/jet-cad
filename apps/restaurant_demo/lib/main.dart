@@ -1128,13 +1128,9 @@ class DemoHomeState extends State<DemoHome> {
   /// The demo's own keys (spec C-7), while [planKeys] is off: Undo, Redo,
   /// Delete and Escape call the controller's commands. A key typed into
   /// a text field inside the view (the inspector, the editor's panels)
-  /// stays the field's.
+  /// never gets here: the view keeps it for the field.
   KeyEventResult _demoKey(Area a, KeyEvent event) {
     if (planKeys) return KeyEventResult.ignored;
-    final typing = FocusManager.instance.primaryFocus?.context
-            ?.findAncestorWidgetOfExactType<EditableText>() !=
-        null;
-    if (typing) return KeyEventResult.ignored;
     final c = a.controller;
     final design = c.mode.value == FloorPlanMode.design;
     for (final (activator, name, command)

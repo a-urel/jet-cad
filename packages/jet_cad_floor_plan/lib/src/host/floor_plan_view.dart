@@ -11,6 +11,7 @@ import '../export/page_printer.dart';
 import '../planner_shell.dart';
 import '../service/table_select_tool.dart' show ServiceEvents;
 import '../shell_commands.dart';
+import '../shortcut_guard.dart' show PlannerTextKeys;
 import 'bars.dart';
 import 'editor_capabilities.dart';
 import 'floor_plan_controller.dart';
@@ -598,11 +599,15 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     // Always the scope, with a theme or without, so giving one remounts
     // neither mode. It alone reads the ambient theme: a theme switch
     // rebuilds it, not this view, so no host overlay is built again (G-5).
-    return FloorPlanThemeScope(
-      view: widget.theme,
-      child: _ChromeOrigins(
-        onTheme: _assumeCanvases,
-        child: _modes(serviceOverlays, designOverlays),
+    // Outside it, always too, the text fields inside the view keep their
+    // keys from a host's bindings above it (Slice 4, Task 7 finding 1).
+    return PlannerTextKeys(
+      child: FloorPlanThemeScope(
+        view: widget.theme,
+        child: _ChromeOrigins(
+          onTheme: _assumeCanvases,
+          child: _modes(serviceOverlays, designOverlays),
+        ),
       ),
     );
   }
