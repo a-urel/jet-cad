@@ -1994,7 +1994,7 @@ a desktop.
   it is `.`. `newPlan()` takes the language a view of that controller
   last showed, which may be stale if the language changed while none was
   mounted. In 0.1.0 dimensions and areas always print with `.`.
-- **Schema 8** *(since 0.2.0)*. A plan saved by 0.2.0 or later is
+- **Schema 8** *(since 0.2.0)*. A plan saved by 0.2.0 or 0.3.0 is
   at schema 8, which 0.1.0 refuses (`load` throws a `FormatException`
   that says why); a 0.1.0 plan opens here unchanged. Terminals that
   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
