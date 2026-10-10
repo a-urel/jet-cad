@@ -197,6 +197,92 @@ void keepFocus(PointerDownEvent _) {}
 /// Whether the primary focus is [node].
 bool focused(FocusNode node) => FocusManager.instance.primaryFocus == node;
 
+/// An intent a host's own `Shortcuts` maps a key to (the point-of-sale
+/// shape: `Shortcuts` + `Actions` + a `Focus` above the view), by name.
+class HostIntent extends Intent {
+  const HostIntent(this.name);
+  final String name;
+}
+
+/// Every letter the shell binds under `full`, F3, Escape, Delete,
+/// Backspace and the design mode's chords (Task 6 review RP1).
+final Map<String, SingleActivator> kIntentKeys = {
+  for (final l in 'VLPRBWDNGMSICATF'.split(''))
+    l: SingleActivator(LogicalKeyboardKey(
+        LogicalKeyboardKey.keyA.keyId + l.codeUnitAt(0) - 'A'.codeUnitAt(0))),
+  'f3': const SingleActivator(LogicalKeyboardKey.f3),
+  'escape': const SingleActivator(LogicalKeyboardKey.escape),
+  'delete': const SingleActivator(LogicalKeyboardKey.delete),
+  'backspace': const SingleActivator(LogicalKeyboardKey.backspace),
+  'ctrl+z': const SingleActivator(LogicalKeyboardKey.keyZ, control: true),
+  'cmd+z': const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
+  'ctrl+shift+z': const SingleActivator(LogicalKeyboardKey.keyZ,
+      control: true, shift: true),
+  'ctrl+y': const SingleActivator(LogicalKeyboardKey.keyY, control: true),
+  'ctrl+e': const SingleActivator(LogicalKeyboardKey.keyE, control: true),
+  'cmd+e': const SingleActivator(LogicalKeyboardKey.keyE, meta: true),
+  'ctrl+p': const SingleActivator(LogicalKeyboardKey.keyP, control: true),
+  'cmd+p': const SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+};
+
+/// Presses [a] (its modifiers down around its key).
+Future<void> sendActivator(WidgetTester tester, SingleActivator a) async {
+  if (a.control) await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+  if (a.meta) await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  if (a.shift) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyEvent(a.trigger);
+  if (a.shift) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  if (a.meta) await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+  if (a.control) await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  await tester.pump();
+}
+
+/// The view under an intent-based host counting every [kIntentKeys]
+/// intent that reaches it; `shortcuts` changeable through the notifier.
+Future<(FloorPlanController, Map<String, int>, ValueNotifier<bool>)>
+    mountIntentHost(WidgetTester tester,
+        {required String json,
+        required ViewportTransform camera,
+        FloorPlanMode mode = FloorPlanMode.design,
+        Caps caps = Caps.full,
+        bool shortcuts = false}) async {
+  final c = FloorPlanController(json: json);
+  addTearDown(c.dispose);
+  c.setMode(mode);
+  final keys = ValueNotifier(shortcuts);
+  addTearDown(keys.dispose);
+  final reached = <String, int>{for (final n in kIntentKeys.keys) n: 0};
+  await tester.binding.setSurfaceSize(kEditorSurface);
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: Shortcuts(
+              shortcuts: {
+        for (final e in kIntentKeys.entries) e.value: HostIntent(e.key),
+      },
+              child: Actions(
+                  actions: {
+                    HostIntent: CallbackAction<HostIntent>(
+                        onInvoke: (x) =>
+                            reached[x.name] = reached[x.name]! + 1),
+                  },
+                  child: Focus(
+                      child: ValueListenableBuilder<bool>(
+                          valueListenable: keys,
+                          builder: (_, s, __) => FloorPlanView(
+                              controller: c,
+                              editorCapabilities: caps,
+                              onExport: (_) {},
+                              onExportDialog: (_, __) async => null,
+                              printer: CountingPrinter(),
+                              shortcuts: s))))))));
+  await tester.pump();
+  await tester.pump();
+  c.cameraController.value = camera;
+  await tester.pump();
+  return (c, reached, keys);
+}
+
 void main() {
   group('shortcuts: false in the selection mode', () {
     testWidgets(
@@ -283,9 +369,28 @@ void main() {
       await t.press(tester, LogicalKeyboardKey.keyF);
       await t.press(tester, LogicalKeyboardKey.escape);
       await pressChord(tester, chordNamed('ctrl+z'));
-      for (final k in ['w', 'f3', 'f', 'escape', 'ctrl+z']) {
+      // The file chords (Task 6 review R-2): the host gives an `onExport`,
+      // so the shell would bind Export's chords.
+      for (final k in ['ctrl+e', 'cmd+e', 'ctrl+p', 'cmd+p']) {
+        await pressChord(tester, chordNamed(k));
+      }
+      await tester.pump();
+      for (final k in [
+        'w',
+        'f3',
+        'f',
+        'escape',
+        'ctrl+z',
+        'ctrl+e',
+        'cmd+e',
+        'ctrl+p',
+        'cmd+p'
+      ]) {
         expect(h.reached[k], 1, reason: k);
       }
+      expect(h.dialogs, 0, reason: 'no export asked');
+      expect(h.exports, 0);
+      expect(h.printer.calls, 0, reason: 'nothing printed');
       expect(c.activeTool.value, FloorPlanTool.select);
       expect(tester.widget<Text>(byKey('osnap-text')).data, osnap);
       expect(tester.widget<CheckboxListTile>(byKey('tool-fill')).value, fill);
@@ -307,7 +412,10 @@ void main() {
           isNot(fill));
       await pressChord(tester, chordNamed('ctrl+z'));
       expect(dataOf1(c), isEmpty, reason: 'undone');
-      for (final k in ['w', 'f3', 'f', 'escape', 'ctrl+z']) {
+      await pressChord(tester, chordNamed('ctrl+e'));
+      await tester.pump();
+      expect(h.dialogs, 1, reason: "the shell's Export");
+      for (final k in ['w', 'f3', 'f', 'escape', 'ctrl+z', 'ctrl+e']) {
         expect(h.reached[k], 1, reason: '$k: the host heard nothing more');
       }
     });
@@ -713,6 +821,96 @@ void main() {
         expect(focused(field), isTrue, reason: name);
       }
       await focusCanvas(tester);
+    });
+  });
+
+  group("the review's killers (Task 6 review R-2, R-3)", () {
+    for (final caps in [Caps.full, Caps.tablesOnly]) {
+      testWidgets(
+          'RP1 design, ${caps == Caps.full ? 'full' : 'tablesOnly'}, '
+          'shortcuts: false: every letter, F3, Escape, Delete, Backspace and '
+          'every chord reach an intent-based host; nothing in the plan '
+          'changes. With shortcuts the plan takes the file chords',
+          (tester) async {
+        final (c, reached, keys) = await mountIntentHost(tester,
+            json: editorPlanJson(), camera: editorCamera(), caps: caps);
+        await focusCanvas(tester);
+        c.select({'1'});
+        await tester.pump();
+        final before = encoded(c);
+        for (final e in kIntentKeys.entries) {
+          await sendActivator(tester, e.value);
+          await tester.pump();
+          expect(reached[e.key], 1, reason: e.key);
+          expect(t.canvasFocused(), isTrue, reason: '${e.key}: focus kept');
+        }
+        await tester.pump(const Duration(seconds: 1));
+        expect(encoded(c), before);
+        expect(c.activeTool.value, FloorPlanTool.select);
+        expect(c.selectedTables.value, {'1'});
+        // The control: with the shortcuts the plan takes the chords.
+        keys.value = true;
+        await tester.pump();
+        await sendActivator(tester, kIntentKeys['ctrl+e']!);
+        await sendActivator(tester, kIntentKeys['ctrl+p']!);
+        expect(reached['ctrl+e'], 1, reason: 'the shell took Ctrl+E');
+        expect(reached['ctrl+p'], 1, reason: 'the shell took Ctrl+P');
+      });
+    }
+
+    testWidgets(
+        "RP12 shortcuts: false, tablesOnly, a table armed: R is the symbol "
+        "tool's, M (mirror refused) bubbles; W and Escape reach the host; "
+        'the tool stays symbol', (tester) async {
+      final (c, reached, _) = await mountIntentHost(tester,
+          json: editorPlanJson(),
+          camera: editorCamera(),
+          caps: Caps.tablesOnly);
+      await focusCanvas(tester);
+      await t.openSymbols(tester, c);
+      await t.arm(tester, 'dining.table.round');
+      expect(c.activeTool.value, FloorPlanTool.symbol);
+      expect(t.canvasFocused(), isTrue, reason: 'premise: the canvas focused');
+      await sendActivator(tester, kIntentKeys['R']!);
+      await sendActivator(tester, kIntentKeys['M']!);
+      expect(reached['R'], 0, reason: "R is the armed tool's");
+      expect(reached['M'], 1, reason: 'tablesOnly refuses mirror: M bubbles');
+      await sendActivator(tester, kIntentKeys['W']!);
+      await sendActivator(tester, kIntentKeys['escape']!);
+      expect(reached['W'], 1);
+      expect(reached['escape'], 1);
+      expect(c.activeTool.value, FloorPlanTool.symbol);
+    });
+
+    testWidgets(
+        'R-3 (RP5) shortcuts: true: delete: false refuses the call; the Wall '
+        "tool idle with the host's selection: the key deletes nothing, the "
+        'call deletes', (tester) async {
+      final h = await mountKeys(tester,
+          json: editorPlanJson(),
+          camera: editorCamera(),
+          shortcuts: true,
+          caps: Caps.full.copyWith(delete: false));
+      final c = h.c;
+      await focusCanvas(tester);
+      c.select({'1'});
+      await tester.pump();
+      expect(c.deleteSelection(), isFalse, reason: 'delete: false');
+      await tester.pumpWidget(const SizedBox());
+      final h2 = await mountKeys(tester,
+          json: editorPlanJson(), camera: editorCamera(), shortcuts: true);
+      final c2 = h2.c;
+      await focusCanvas(tester);
+      expect(c2.selectTool(FloorPlanTool.wall), isTrue);
+      await tester.pump();
+      c2.select({'1'});
+      await tester.pump();
+      final before = encoded(c2);
+      await t.press(tester, LogicalKeyboardKey.delete);
+      expect(encoded(c2), before, reason: 'the key: the Wall tool has none');
+      expect(c2.deleteSelection(), isTrue, reason: 'the call deletes');
+      expect(TableSurvey.of(c2.activeDocument).withNumber('1'), isEmpty);
+      expect(c2.activeTool.value, FloorPlanTool.wall);
     });
   });
 }

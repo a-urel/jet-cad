@@ -112,9 +112,10 @@ Future<void> selectKeys(
 void main() {
   group('the inspector (S-18)', () {
     testWidgets(
-        'M-H45 none for 1 and 2, for 7 and " 7 " (one number), for 1 and a '
-        'wall, for the unnumbered table alone; 1 alone shows the host\'s '
-        "widget with 1's detail under the Selection panel", (tester) async {
+        'M-H45 none for 1 and 2, for 7 and " 7 " (one number), for 7 or '
+        '" 7 " alone (a number two tables share), for 1 and a wall, for the '
+        "unnumbered table alone; 1 alone shows the host's widget with 1's "
+        'detail under the Selection panel, 2 alone with 2\'s', (tester) async {
       final h = await mountInspector(tester);
       final c = h.c;
       expect(c.setTableData('1', const {'pos': 'a1'}), isTrue);
@@ -124,6 +125,10 @@ void main() {
       final cases = <String, List<SelectionKey>>{
         '1 and 2': [keyOf(c, '1'), keyOf(c, '2')],
         '7 and " 7 "': [keyOf(c, '7'), keyOf(c, ' 7 ')],
+        // Task 6 review R-1 (a): a number another table shares names no
+        // one table; `setTableData` refuses it too.
+        '7 alone': [keyOf(c, '7')],
+        '" 7 " alone': [keyOf(c, ' 7 ')],
         '1 and a wall': [keyOf(c, '1'), wall],
         'the unnumbered table': [keyOf(c, null)],
         'a wall': [wall],
@@ -160,10 +165,16 @@ void main() {
               tester.getBottomLeft(byKey('selection-panel')).dy));
       expect(tester.getBottomLeft(byKey('host-inspector')).dy,
           lessThanOrEqualTo(tester.getTopLeft(byKey('layers-panel')).dy));
-      // ` 7 ` alone is one numbered table.
-      await selectKeys(tester, c, [keyOf(c, ' 7 ')]);
-      expect(inspectorText(tester), 'host 7 -');
+      // 2 alone: its own detail, not the first table's.
+      await selectKeys(tester, c, [keyOf(c, '2')]);
+      expect(inspectorText(tester), 'host 2 -');
+      expect(h.calls.last.table.number, '2');
       expect(h.calls.last.center, isNot(d.center));
+      // ` 7 ` alone: none (Task 6 review R-1 (a)).
+      await selectKeys(tester, c, [keyOf(c, ' 7 ')]);
+      expect(byKey('host-inspector'), findsNothing);
+      expect(c.setTableData('7', const {'pos': 'x'}), isFalse,
+          reason: 'the link the inspector would offer is refused');
     });
 
     testWidgets(

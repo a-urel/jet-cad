@@ -163,8 +163,10 @@ class PlannerView extends StatefulWidget {
   final void Function(Object view, Rect? global)? onCanvasPlaced;
 
   /// Whether the canvas takes the focus when it is mounted (host embedding
-  /// API spec C-7, S-21), handed to its [InteractionLayer]; a press on the
-  /// canvas takes the focus either way.
+  /// API spec C-7, S-21), handed to its [InteractionLayer]. A press on the
+  /// canvas asks for the focus either way; a focused Material text field
+  /// keeps it from the canvas on that press unless its `onTapOutside` lets
+  /// go (`FloorPlanView.autofocus`).
   final bool autofocus;
 
   @override

@@ -106,8 +106,10 @@ class ServiceView extends StatefulWidget {
   final bool shortcuts;
 
   /// Whether the view takes the focus when it is mounted (spec C-7, S-21):
-  /// its own `Focus` and its canvas's. A press on the canvas takes the
-  /// focus either way.
+  /// its own `Focus` and its canvas's. A press on the canvas asks for the
+  /// focus either way; a focused Material text field keeps it from the
+  /// canvas on that press unless its `onTapOutside` lets go
+  /// (`FloorPlanView.autofocus`).
   final bool autofocus;
 
   @override

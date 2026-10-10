@@ -250,7 +250,9 @@ class PlannerShell extends StatefulWidget {
   final bool shortcuts;
 
   /// Whether the canvas takes the focus when it is mounted (spec C-7),
-  /// forwarded to the view; a press on it takes the focus either way.
+  /// forwarded to the view. A press on it asks for the focus either way;
+  /// a focused Material text field keeps it from the canvas on that press
+  /// unless its `onTapOutside` lets go (`FloorPlanView.autofocus`).
   final bool autofocus;
 
   /// The host's table inspector (spec C-6, S-18): built under the

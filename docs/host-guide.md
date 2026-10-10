@@ -1557,9 +1557,11 @@ selection mode, with no editor shown, and for a refused tool.
 **The table inspector.** `tableInspectorBuilder(context, table)` puts
 your widget in the editor's Selection panel, below the planner's own
 fields, while **exactly one numbered table** is selected: the selection
-is one object, and it is a numbered table at the plan's root. Two tables
-sharing a number, a table with a wall, a table inside a group and an
-unnumbered table show none. `table` is the table's
+is one object, and it is a table at the plan's root whose number no other
+table has. A table whose number another table shares (selected alone or
+with it: `setTableData` refuses that number, so renumber it first), a
+table with a wall, a table inside a group and an unnumbered table show
+none. `table` is the table's
 `FloorPlanTableDetail`, its `data` included; null from the builder shows
 nothing. It is called when the selection becomes such a table, at each
 change of the plan (an edit, an undo: the detail is read afresh) and
@@ -1628,7 +1630,8 @@ choose a symbol through it.
   and M while a symbol is armed. Read at each build and each key.
 - The commands stay callable: `undo()`, `redo()`, `exportPlan`,
   `printPlan`, `selectTool`, and **`deleteSelection()`**, which deletes
-  the editor's selection exactly as the Delete key does: one undo step,
+  the editor's selection as the select tool's Delete key does, whichever
+  tool is active, while it is idle: one undo step,
   a deleted table's data gone with it and back with its undo. Pending
   input is settled first. It answers whether anything was deleted: false
   in the selection mode, with no editor shown, with nothing selected,
@@ -1641,7 +1644,9 @@ choose a symbol through it.
   the focus scope has the focus, so even with `true` the view never
   takes it from your field; `false` matters when nothing has it, at
   start and after the plan itself had it and was built afresh. A press
-  on the canvas takes the focus either way.
+  on the canvas asks for the focus either way; a focused Material
+  `TextField` keeps it from the canvas on that press unless its
+  `onTapOutside` lets go (below).
 
 ```dart
   /// The POS's own keys over the plan while it owns the keyboard: its

@@ -638,12 +638,12 @@ class FloorPlanController extends ChangeNotifier {
   }
 
   /// Deletes the editor's selection (host embedding API spec C-3, as Slice
-  /// 4's S-16 ruled), exactly as the select tool's idle Delete key does:
-  /// one undo step (a compound), the table data of a deleted table
-  /// dropped with it and restored by its undo. Pending input is settled
-  /// first, as for [undo]. For a host that owns the keyboard
-  /// (`FloorPlanView.shortcuts: false`, under which the Delete key deletes
-  /// nothing).
+  /// 4's S-16 ruled) as the select tool's idle Delete key does, whichever
+  /// tool is active, while it is idle: one undo step (a compound), the
+  /// table data of a deleted table dropped with it and restored by its
+  /// undo. Pending input is settled first, as for [undo]. For a host that
+  /// owns the keyboard (`FloorPlanView.shortcuts: false`, under which the
+  /// Delete key deletes nothing).
   ///
   /// Answers whether anything was deleted: false in the selection mode,
   /// with no editor mounted, with nothing selected, when the view's

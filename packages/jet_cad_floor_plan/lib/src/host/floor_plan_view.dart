@@ -253,8 +253,9 @@ class FloorPlanView extends StatefulWidget {
   /// The host's table inspector (host embedding API spec C-6): shown in the
   /// editor's Selection panel, under jet-cad's own fields, when **exactly
   /// one numbered table** is selected -- the selection is one object, and
-  /// it is a numbered table at the plan's root (S-18): two tables sharing a
-  /// number, a table with a wall, a table inside a group or an unnumbered
+  /// it is a table at the plan's root whose number no other table has
+  /// (S-18): a table whose number another table shares (alone or with
+  /// it), a table with a wall, a table inside a group or an unnumbered
   /// one show none. Called with that table's detail as
   /// [FloorPlanController.tableDetails] reads it (its data included); null
   /// from it shows nothing. A host links a drawn table to its own record
@@ -288,11 +289,17 @@ class FloorPlanView extends StatefulWidget {
   /// Whether the view takes the focus when it is mounted (host embedding
   /// API spec C-7), in both modes and at each mount (a mode switch, a
   /// `resetLayout`, a `load`): false leaves it where it is, so a search
-  /// field beside the plan keeps it. A press on the canvas takes the
-  /// focus either way. Flutter's autofocus acts only while the focus
-  /// scope has no focused node: with true, the view takes the focus from
-  /// none, or from a host field that asks for it after the view in the
-  /// same frame. Read at each mount.
+  /// field beside the plan keeps it. Flutter's autofocus acts only while
+  /// the focus scope has no focused node: with true, the view takes the
+  /// focus from none, or from a host field that asks for it after the view
+  /// in the same frame. Read at each mount.
+  ///
+  /// A press on the canvas asks for the focus, true or false. A focused
+  /// Material `TextField` keeps the canvas from it on that first press
+  /// unless its `onTapOutside` lets go: its default unfocuses the field
+  /// after the canvas asked, so the focus lands on neither and the next
+  /// press takes it. A field whose `onTapOutside` does nothing (`(_) {}`)
+  /// gives the focus to the canvas on the first press.
   final bool autofocus;
 
   @override
@@ -543,7 +550,9 @@ class _FloorPlanViewState extends State<FloorPlanView> {
   /// The host's inspector for the editor's one selected table [instance]
   /// (spec C-6, S-18): its detail from the controller's fresh
   /// [FloorPlanController.tableDetails]; nothing for an unnumbered table,
-  /// or when the builder is gone. Read at each build of the inspector.
+  /// for one whose number another table shares (Task 6 review R-1 (a): the
+  /// number names no one table, and `setTableData` refuses it), or when
+  /// the builder is gone. Read at each build of the inspector.
   Widget? _inspect(BuildContext context, Handle instance) {
     final builder = widget.tableInspectorBuilder;
     final c = widget.controller;
@@ -552,7 +561,12 @@ class _FloorPlanViewState extends State<FloorPlanView> {
     final i = c.tableDetailInstances.indexOf(instance);
     if (i < 0) return null;
     final detail = details[i];
-    return detail.table.number == null ? null : builder(context, detail);
+    final number = detail.table.number;
+    if (number == null) return null;
+    for (var j = 0; j < details.length; j++) {
+      if (j != i && details[j].table.number == number) return null;
+    }
+    return builder(context, detail);
   }
 
   /// The overlay layer for [mode], or null when the host shows none there

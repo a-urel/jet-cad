@@ -234,7 +234,8 @@ the fix below); CI analyses the 0.3.0 host probe against every commit.
   own tool strip.
 - **The table inspector.** `FloorPlanView.tableInspectorBuilder(context,
   table)`: the host's widget in the editor's Selection panel while
-  exactly one numbered root-level table is selected, called with its
+  exactly one root-level table is selected and no other table has its
+  number, called with its
   `FloorPlanTableDetail`, at each selection or plan change and host
   rebuild, never on pan or zoom. `FloorPlanController.editorSelectedTables`
   (`ValueListenable<Set<String>>`), the numbers selected in the editor,
