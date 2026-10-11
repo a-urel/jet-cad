@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-11. **`main` carries release 0.5.1** (merged
-at `3f8f7ad`; the human pushes the tag `v0.5.1`, after `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+**Last updated:** 2026-10-11. **`main` carries release 0.5.1** (tag
+`v0.5.1` → `3f8f7ad`, after `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -292,8 +292,8 @@ one's spec, plan and results.
   R-2 to R-5; the host barrels identical, 0.5.0's probe green, the same
   edits save the same bytes in 0.5.0 and 0.5.1) is applied; ledger
   [docs/superpowers/ledgers/2026-10-11-release-0.5.1/](docs/superpowers/ledgers/2026-10-11-release-0.5.1/).
-  The guide names `3f8f7ad`. The human pushes `main` and the tag
-  `v0.5.1` → `3f8f7ad`.
+  The guide names `3f8f7ad`. The human pushed `main` (at `cfb79cc`) and
+  the tag `v0.5.1` → `3f8f7ad` (2026-10-11).
 
 ## In flight
 
@@ -358,8 +358,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** 0.5.1 (merged at `3f8f7ad`; the tag
-`v0.5.1` is the human's) fixes F-7 and a replaced view; 0.5.0 (tag
+**Next: the human's choice.** 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
 Monépro owes Q-H3 and its real shadcn tokens, and can name
