@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-11. **`main` carries release 0.4.0** (tag
-`v0.4.0` → `8367010`, after `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+**Last updated:** 2026-10-11. **`main` carries release 0.5.0** (tag
+`v0.5.0` → `2fbb9c0`, after `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -228,25 +228,26 @@ one's spec, plan and results.
   (M-1 to M-18, the rulings), ledger
   [docs/superpowers/ledgers/2026-10-09-node-components-on-delete/](docs/superpowers/ledgers/2026-10-09-node-components-on-delete/).
   The human pushed `main` at `bd0e463` (2026-10-10).
+- **Release 0.5.0** (the human, 2026-10-11: *"0.5.0 sürümünü
+  hazırla"*), merged into `main` at `2fbb9c0`: the four host packages (and
+  `jet_cad_2d_gpu`) at 0.5.0; the CHANGELOG's Unreleased section becomes
+  0.5.0 (O-8: a deleted node takes its components; plans and service
+  layouts unchanged, schema 9, so 0.4.0 and 0.5.0 terminals share them).
+  An independent review (*Approved with fixes*: CHANGELOG wording, R-1
+  to R-3; 0.4.0 and 0.5.0 save the same bytes after every delete, undo
+  and redo the planner makes) is applied; ledger
+  [docs/superpowers/ledgers/2026-10-11-release-0.5.0/](docs/superpowers/ledgers/2026-10-11-release-0.5.0/).
+  Merged on the human's *"evet, main'e merge et"*; the guide names
+  `2fbb9c0`. **The push of `main` and the tag `v0.5.0` → `2fbb9c0` are
+  owed to the human.**
 
 ## In flight
 
-- **Release 0.5.0** (the human, 2026-10-11: *"0.5.0 sürümünü
-  hazırla"*), on `release/0.5.0`: the four host packages (and
-  `jet_cad_2d_gpu`) at 0.5.0; the CHANGELOG's Unreleased section becomes
-  0.5.0 (O-8: a deleted node takes its components; plans and service
-  layouts unchanged, schema 9, so 0.4.0 and 0.5.0 terminals share them);
-  the host guide's §1 carries a placeholder ref that the commit after the
-  merge fills in. An independent review (*Approved with fixes*:
-  CHANGELOG wording, R-1 to R-3; 0.4.0 and 0.5.0 save the same bytes
-  after every delete, undo and redo the planner makes) is applied;
-  ledger
-  [docs/superpowers/ledgers/2026-10-11-release-0.5.0/](docs/superpowers/ledgers/2026-10-11-release-0.5.0/).
-  Merged on the human's *"evet, main'e merge et"*; the push and the tag
-  are the human's.
+Nothing. Release 0.5.0, above, is merged; its push and tag are the human's.
 
 ## Owed to the human
 
+- **The push and the tag `v0.5.0`** on `2fbb9c0` (`git push origin main && git tag v0.5.0 2fbb9c0 && git push origin v0.5.0`).
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -304,8 +305,8 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.5.0**, above: its review, then the merge question.
-0.4.0 (tag `v0.4.0` → `8367010`) carries the host embedding API's four slices
+**Next: the human's choice**, once `main` and the tag `v0.5.0` are
+pushed. 0.5.0 (`2fbb9c0`) adds O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
 Monépro owes Q-H3 and its real shadcn tokens, and can name
 `controller.camera`, `tableOverlayBuilder` (Q-Z1),
