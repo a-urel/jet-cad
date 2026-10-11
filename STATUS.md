@@ -240,13 +240,10 @@ one's spec, plan and results.
   Merged on the human's *"evet, main'e merge et"*; the guide names
   `2fbb9c0`. The human pushed `main` (at `a9f7362`) and the tag
   `v0.5.0` → `2fbb9c0` (2026-10-11).
-
-## In flight
-
 - **F-7, an `against-wall` symbol turned under `rotate: false`** (Slice
-  4's results; the human, 2026-10-11: *"F-7 ile devam et"*), on
-  `fix/f7-against-wall-rotate` in the worktree `../jet-cad-f7`, cut from
-  `main` at `2bc839e`. While `rotate` refuses, `attachToWall` takes a
+  4's results; the human, 2026-10-11: *"F-7 ile devam et"*), merged into
+  `main` at `f279ce8` on the human's *"evet, main'e merge et"*, from
+  `fix/f7-against-wall-rotate` (cut from `main` at `2bc839e`). While `rotate` refuses, `attachToWall` takes a
   `keep` transform (the placement tool's unturned one with the allowed
   mirror; the move resolver's moved instance's): only a face whose `t`
   is `keep`'s rotation takes the symbol, and it keeps `keep`'s linear
@@ -258,7 +255,11 @@ one's spec, plan and results.
   and its tolerance untested, R-2; the ghost across a runtime `rotate`
   change, R-3; wording, R-4 and R-5) is applied. Run natively in
   one session: no SDD ledger; the record is the embedding spec's F-7
-  paragraph. Waits for the human's word to merge.
+  paragraph.
+
+## In flight
+
+Nothing.
 
 ## Owed to the human
 
@@ -329,7 +330,7 @@ Monépro owes Q-H3 and its real shadcn tokens, and can name
 for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
 4's results): a second view on one controller for one frame. F-7 (an
 `against-wall` table turned to its wall under `rotate: false`) is fixed
-on `fix/f7-against-wall-rotate` (In flight).
+on `main` at `f279ce8`, in the CHANGELOG's Unreleased.
 ---
 ## What this project is
 
