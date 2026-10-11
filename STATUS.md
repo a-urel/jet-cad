@@ -279,7 +279,16 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing.
+- **Release 0.5.1** (the human, 2026-10-11: *"0.5.1 sürümünü
+  hazırla"*), on `release/0.5.1` in the worktree `../jet-cad-0.5.1`, cut
+  from `main` at `7854b69`: the four host packages (and
+  `jet_cad_2d_gpu`) at 0.5.1; the CHANGELOG's Unreleased section becomes
+  0.5.1 (F-7: an `against-wall` symbol keeps its turn under `rotate:
+  false`; a view replaced by another of the same controller throws
+  nothing; plans and service layouts unchanged, schema 9); the host
+  guide's §1 carries a placeholder ref that the commit after the merge
+  fills in. Then an independent review, the merge on the human's word,
+  the push and the tag by the human.
 
 ## Owed to the human
 
@@ -340,7 +349,8 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** 0.5.0 (tag `v0.5.0` → `2fbb9c0`) adds O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
+**Next: release 0.5.1**, above: its review, then the merge question.
+0.5.0 (tag `v0.5.0` → `2fbb9c0`) adds O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
 Monépro owes Q-H3 and its real shadcn tokens, and can name
 `controller.camera`, `tableOverlayBuilder` (Q-Z1),
@@ -348,7 +358,7 @@ Monépro owes Q-H3 and its real shadcn tokens, and can name
 `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
 `PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
 for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
-4's results): both fixed on `main`, in the CHANGELOG's Unreleased:
+4's results): both fixed on `main`, in 0.5.1:
 F-7 (an `against-wall` table turned to its wall under `rotate: false`)
 at `f279ce8`, a view replaced by another of the same controller at
 `3f374dc`.
