@@ -8,6 +8,17 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.5.1
+
+Two fixes from the host embedding API's fourth slice. Nothing is stored
+differently: **plans and service layouts are the same as 0.4.0's and
+0.5.0's** (schema 9), so 0.4.0, 0.5.0 and 0.5.1 terminals can share
+them. Nothing a 0.5.0 host calls changes its signature. The packages
+need Flutter 3.44 or later, as 0.5.0 did; 0.5.1 was built and tested
+with Flutter 3.47.6.
+
 - **Under `rotate: false` a symbol tagged `against-wall` no longer
   turns to a wall** it is placed or moved against (Slice 4's F-7, a
   known limit of 0.4.0 and 0.5.0). It attaches only to a wall face its
@@ -18,14 +29,22 @@ pub.dev: a host depends on them by git (see
   `keep` transform and `SymbolMoveResolver` an optional `canRotate`;
   every existing call compiles and behaves as before.
 - **A `FloorPlanView` replaced by another of the same controller** (a
-  new key, a new parent) no longer throws "the dispatcher already has an
-  expander" (Slice 4's results). Flutter builds the new view before it
-  disposes the old one; both now share the plan's systems for that
-  frame. Two views of one controller side by side (an `AnimatedSwitcher`
-  or a route transition between two views of it included) still raise a
-  `StateError`, now reported through `FlutterError.onError` at the end
-  of the frame both are built in, with a message that says so; the
-  second view itself now builds, where 0.5.0's failed.
+  new key, a new parent) now builds. In 0.5.0 it threw "the dispatcher
+  already has an expander" and showed an error in its place until the
+  controller next changed (Slice 4's results): Flutter builds the new
+  view before it disposes the old one, and both now share the plan's
+  systems for that frame. Two views of one controller side by side (an
+  `AnimatedSwitcher` or a route transition between two views of it
+  included) still raise a `StateError` through `FlutterError.onError`,
+  now from the end of the frame both are built in rather than while the
+  second one builds, with a message that says so; the second view itself
+  now builds, where 0.5.0's failed.
+
+**Known limits.** 0.5.0's stand, but for F-7 (above). CI analyses the
+0.3.0 and 0.4.0 host probes against every commit; 0.5.0's probe is
+0.4.0's, byte for byte (0.5.1's too), so it adds nothing. `jet_cad_2d_gpu` (the harness's GPU
+renderer), `packages/jet_cad` (the dormant OCCT 3D line) and the apps
+are not part of the release.
 
 ## 0.5.0
 
