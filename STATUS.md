@@ -259,7 +259,25 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing.
+- **A view replaced by another of the same controller** (Slice 4's
+  results, found not fixed; the human, 2026-10-11: *"ikinci görünüm
+  sorunu ile devam et"*), on `fix/view-replace` in the worktree
+  `../jet-cad-view`, cut from `main` at `04ca4cf`. Flutter mounts the
+  new shell before it disposes the old, and each shell installed the
+  document's parametric and table systems, so the second install threw
+  "the dispatcher already has an expander". Now `DocumentSystems`
+  (`lib/src/document_systems.dart`) installs them per document for every
+  holder and releases them with the last; two holders alive at the end
+  of the frame (two views side by side, which the guide rules out) throw
+  a `StateError` from that frame's post-frame callback. Named mutants
+  M-V2a to M-V2g, each killed (`test/host/view_replace_test.dart`, both
+  modes: a single child's key changed, a keyed child of a `Stack`
+  swapped, two views stacked; a table turned after the replacement
+  re-stamps its label). An independent review (*Approve with fixes*: the
+  table system's effect untested, R-1; transitions that keep both views
+  mounted count as side by side, R-2, R-3; acquire last in `initState`,
+  R-4; a release called twice, R-5) is applied. Run natively in one
+  session: no SDD ledger. Waits for the human's word to merge.
 
 ## Owed to the human
 
@@ -328,7 +346,8 @@ Monépro owes Q-H3 and its real shadcn tokens, and can name
 `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
 `PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
 for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
-4's results): a second view on one controller for one frame. F-7 (an
+4's results): a second view on one controller for one frame, fixed on
+`fix/view-replace` (In flight). F-7 (an
 `against-wall` table turned to its wall under `rotate: false`) is fixed
 on `main` at `f279ce8`, in the CHANGELOG's Unreleased.
 ---

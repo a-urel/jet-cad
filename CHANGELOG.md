@@ -17,6 +17,15 @@ pub.dev: a host depends on them by git (see
   `editor.dart`, `attachToWall` and `WallFaces.attach` take an optional
   `keep` transform and `SymbolMoveResolver` an optional `canRotate`;
   every existing call compiles and behaves as before.
+- **A `FloorPlanView` replaced by another of the same controller** (a
+  new key, a new parent) no longer throws "the dispatcher already has an
+  expander" (Slice 4's results). Flutter builds the new view before it
+  disposes the old one; both now share the plan's systems for that
+  frame. Two views of one controller side by side (an `AnimatedSwitcher`
+  or a route transition between two views of it included) still raise a
+  `StateError`, now reported through `FlutterError.onError` at the end
+  of the frame both are built in, with a message that says so; the
+  second view itself now builds, where 0.5.0's failed.
 
 ## 0.5.0
 

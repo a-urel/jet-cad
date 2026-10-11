@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
+import 'document_systems.dart';
 import 'document_toolbar.dart';
 import 'host/bars.dart';
 import 'host/editor_capabilities.dart';
@@ -21,7 +22,6 @@ import 'new_document.dart';
 import 'page_panel.dart';
 import 'panel_focus.dart';
 import 'parametric/box_tool.dart';
-import 'parametric/catalog.dart';
 import 'parametric/dimension_tool.dart';
 import 'parametric/object_grips.dart';
 import 'parametric/opening.dart';
@@ -45,7 +45,6 @@ import 'symbols/symbol_library_state.dart';
 import 'symbols/seating_component.dart';
 import 'symbols/symbol_move.dart';
 import 'symbols/wall_attach.dart';
-import 'tables/table_label_system.dart';
 import 'tool_palette.dart';
 
 /// Registers the shell's synchronous settle with its host (spec 12a D2,
@@ -405,12 +404,11 @@ class _PlannerShellState extends State<PlannerShell> {
   late final _CapabilitySnap _toolSnap =
       _CapabilitySnap(_snap, () => widget.capabilities.snapping);
 
-  // Spec 06 D13, Ruling 06-12: installed in initState, disposed in dispose.
-  late final ParametricSystem _parametric;
-
-  // Spec 14a T12: stacked on the parametric system's expander, installed
-  // after it and disposed before it (last in, first out).
-  late final TableLabelSystem _tableLabels;
+  // Spec 06 D13, Ruling 06-12, spec 14a T12: the document's parametric and
+  // table systems, acquired in initState, released in dispose; shared with
+  // a shell that replaces this one over the same document
+  // ([DocumentSystems]).
+  late final VoidCallback _releaseSystems;
 
   // Spec 05 D5, D13: the shell owns the tools and the Fill toggle.
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
@@ -1002,14 +1000,6 @@ class _PlannerShellState extends State<PlannerShell> {
     _symbolQuery =
         widget.symbolSearch ?? (_ownSymbolQuery = TextEditingController());
     _busy = widget.busy;
-    // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
-    // arrives built. The sample (startupPlan) builds its walls, openings,
-    // separator and rooms through a parametric system of its own and
-    // disposes it before returning, and an opened file was decoded, so this
-    // one installs over a finished document and trusts its geometry (06
-    // D10).
-    _parametric = installParametric(_document);
-    _tableLabels = TableLabelSystem(_document)..install();
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
     _releaseIdle = widget.onIdle?.call(() => _idle);
@@ -1027,6 +1017,14 @@ class _PlannerShellState extends State<PlannerShell> {
       _madeRedoEnabled?.update();
       _documentChanged.changed();
     });
+    // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
+    // arrives built. The sample (startupPlan) builds its walls, openings,
+    // separator and rooms through a parametric system of its own and
+    // disposes it before returning, and an opened file was decoded, so this
+    // one installs over a finished document and trusts its geometry (06
+    // D10). Last, so nothing above that throws leaves a holder behind (no
+    // dispose follows a throwing initState; view replacement review R-4).
+    _releaseSystems = DocumentSystems.acquire(_document);
   }
 
   /// Host embedding API spec C-5: a change of the capabilities takes
@@ -1126,11 +1124,7 @@ class _PlannerShellState extends State<PlannerShell> {
       ..removeListener(_onPage)
       ..dispose();
     if (widget.camera == null) _camera.dispose();
-    _tableLabels.dispose();
-    _parametric.dispose();
-    // Last in, first out (spec 14a T12): both released, the slot is empty.
-    assert(_document.commands.expander == null,
-        'the expander slot was not released: dispose order');
+    _releaseSystems();
     _index.dispose();
     _releaseSettle?.call();
     _releaseIdle?.call();

@@ -16,8 +16,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../document_systems.dart';
 import '../l10n/strings.dart';
-import '../parametric/catalog.dart';
 import '../planner_view.dart';
 import '../service/table_focus_painter.dart';
 import '../service/table_group_painter.dart';
@@ -26,7 +26,6 @@ import '../service/table_select_tool.dart';
 import '../service/table_status_painter.dart';
 import '../shell_commands.dart';
 import '../shortcut_guard.dart';
-import '../tables/table_label_system.dart';
 import 'bars.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_theme.dart';
@@ -240,12 +239,10 @@ class _ServiceViewState extends State<ServiceView> {
           selection: _selection));
   final GesturePolicy _policy = GesturePolicy.forPlatform();
 
-  // The copy's own systems, as the shell installs the design's (R-4): a
-  // 14c move regenerates and re-stamps as in the design mode. Last in,
-  // first out.
-  late final ParametricSystem _parametric = installParametric(_document);
-  late final TableLabelSystem _tableLabels = TableLabelSystem(_document)
-    ..install();
+  // The copy's own systems, as the shell acquires the design's (R-4): a
+  // 14c move regenerates and re-stamps as in the design mode. Shared with
+  // a view that replaces this one over the same copy ([DocumentSystems]).
+  late final VoidCallback _releaseSystems = DocumentSystems.acquire(_document);
 
   /// ACI 7's foreground follows the paper, as in the shell (fix/post-07,
   /// dark theme spec D4), and on a dark canvas every colour is re-toned
@@ -454,8 +451,6 @@ class _ServiceViewState extends State<ServiceView> {
   @override
   void initState() {
     super.initState();
-    _parametric;
-    _tableLabels;
     // Built now, so dispose never builds one over a controller in teardown
     // (final review F-2: the page flag too, which only a shown bar reads).
     _pageReady;
@@ -463,6 +458,9 @@ class _ServiceViewState extends State<ServiceView> {
     _canSplit;
     _page.addListener(_onPage);
     _changes = _document.changes.listen((_) => _changed.bump());
+    // Last, so nothing above that throws leaves a holder behind (review
+    // R-4).
+    _releaseSystems;
   }
 
   @override
@@ -478,8 +476,7 @@ class _ServiceViewState extends State<ServiceView> {
     _tools.dispose();
     _tool.dispose();
     _outlines.dispose();
-    _tableLabels.dispose();
-    _parametric.dispose();
+    _releaseSystems();
     _index.dispose();
     _page.dispose();
     super.dispose();

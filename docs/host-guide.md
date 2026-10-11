@@ -223,7 +223,15 @@ in [The editor's capabilities](#the-editors-capabilities); `shortcuts`
 and `autofocus` in [Keyboard and focus](#keyboard-and-focus).)
 
 Show a controller in **one `FloorPlanView` at a time**: a second view of
-the same controller mounted beside the first throws a `StateError`. Two
+the same controller mounted beside the first throws a `StateError` at
+the end of the frame it is built in, reported through
+`FlutterError.onError` (up to 0.5.0, the second view itself failed to
+build). Replacing the view with another of the same controller (a new
+key, a new parent) is one view at a time as long as the old one leaves
+in the same frame; up to 0.5.0 it threw for that frame. A transition
+that keeps both mounted for a while counts as side by side: an
+`AnimatedSwitcher` between two views, a route pushed over or replacing
+one that shows the view, an `IndexedStack` or kept-alive tabs. Two
 floors side by side are two controllers.
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
