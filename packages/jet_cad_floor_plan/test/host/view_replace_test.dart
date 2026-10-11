@@ -10,7 +10,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_floor_plan/src/document_systems.dart';
+import 'package:jet_cad_floor_plan/src/tables/table_index.dart' show tablesOf;
 
 import 'editor_fixture.dart';
 
@@ -24,6 +26,31 @@ FloorPlanController controllerIn(FloorPlanMode mode) {
   addTearDown(c.dispose);
   c.setMode(mode);
   return c;
+}
+
+/// The table system still acts on [doc] (review R-1): turning table `1`
+/// about a point off the origin re-stamps its label, which only the table
+/// system does (spec 14a T12); a slot holding the parametric system alone
+/// leaves the label as it was. Undone after.
+void expectRestamps(DraftDocument doc) {
+  final t = tablesOf(doc).firstWhere((t) => t.number == '1');
+  final node = doc.tree[t.instance]! as InstanceNode;
+  List<double> label() => doc.geometry
+      .read(doc.entities.geomIndexAt(doc.entities.slotOf(t.label!)!))
+      .scalars
+      .toList();
+  final before = label();
+  doc.commands.execute(CompoundCommand([
+    TransformNodeCommand(
+        node.handle,
+        Transform2.translation(21900, 16100)
+            .multiply(Transform2.rotation(0.6457718232379019))
+            .multiply(Transform2.translation(-21900, -16100))
+            .multiply(node.transform)),
+  ], label: 'Rotate'));
+  expect(label(), isNot(equals(before)), reason: 'the label was re-stamped');
+  doc.commands.undo();
+  expect(label(), before, reason: 'undone');
 }
 
 void main() {
@@ -54,6 +81,7 @@ void main() {
         expect(DocumentSystems.holdersOf(doc), 1);
         expect(doc.commands.expander, installed,
             reason: 'the same systems, still installed');
+        expectRestamps(doc);
 
         await tester.pumpWidget(app(const SizedBox()));
         expect(DocumentSystems.holdersOf(doc), 0);
@@ -88,4 +116,23 @@ void main() {
       expect(doc.commands.expander, isNotNull);
     });
   }
+
+  testWidgets(
+      'VR3 a holder\'s release called twice releases once: the other '
+      'holder keeps the systems (review R-5)', (tester) async {
+    final c = controllerIn(FloorPlanMode.design);
+    final doc = c.activeDocument;
+    expect(DocumentSystems.holdersOf(doc), 0, reason: 'premise: no view');
+    final a = DocumentSystems.acquire(doc);
+    final b = DocumentSystems.acquire(doc);
+    a();
+    a();
+    expect(DocumentSystems.holdersOf(doc), 1);
+    expect(doc.commands.expander, isNotNull);
+    b();
+    expect(DocumentSystems.holdersOf(doc), 0);
+    expect(doc.commands.expander, isNull);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
 import 'l10n/number_text.dart';
 import 'l10n/strings.dart';
+import 'document_systems.dart';
 import 'document_toolbar.dart';
 import 'host/bars.dart';
 import 'host/editor_capabilities.dart';
@@ -35,7 +36,6 @@ import 'selection_panel.dart';
 import 'service/table_picker.dart';
 import 'shell_commands.dart';
 import 'shortcut_guard.dart';
-import 'document_systems.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
 import 'symbols/symbol_library.dart';
 import 'symbols/symbol_library_loader.dart';
@@ -1000,13 +1000,6 @@ class _PlannerShellState extends State<PlannerShell> {
     _symbolQuery =
         widget.symbolSearch ?? (_ownSymbolQuery = TextEditingController());
     _busy = widget.busy;
-    // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
-    // arrives built. The sample (startupPlan) builds its walls, openings,
-    // separator and rooms through a parametric system of its own and
-    // disposes it before returning, and an opened file was decoded, so this
-    // one installs over a finished document and trusts its geometry (06
-    // D10).
-    _releaseSystems = DocumentSystems.acquire(_document);
     _page.addListener(_onPage);
     _releaseSettle = widget.onSettle?.call(_settlePendingInput);
     _releaseIdle = widget.onIdle?.call(() => _idle);
@@ -1024,6 +1017,14 @@ class _PlannerShellState extends State<PlannerShell> {
       _madeRedoEnabled?.update();
       _documentChanged.changed();
     });
+    // Spec 06 D13, Ruling 06-12, spec 08 D18, spec 10 D23: the document
+    // arrives built. The sample (startupPlan) builds its walls, openings,
+    // separator and rooms through a parametric system of its own and
+    // disposes it before returning, and an opened file was decoded, so this
+    // one installs over a finished document and trusts its geometry (06
+    // D10). Last, so nothing above that throws leaves a holder behind (no
+    // dispose follows a throwing initState; view replacement review R-4).
+    _releaseSystems = DocumentSystems.acquire(_document);
   }
 
   /// Host embedding API spec C-5: a change of the capabilities takes

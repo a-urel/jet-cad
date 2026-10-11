@@ -270,10 +270,14 @@ one's spec, plan and results.
   holder and releases them with the last; two holders alive at the end
   of the frame (two views side by side, which the guide rules out) throw
   a `StateError` from that frame's post-frame callback. Named mutants
-  M-V2a to M-V2e, each killed (`test/host/view_replace_test.dart`, both
+  M-V2a to M-V2g, each killed (`test/host/view_replace_test.dart`, both
   modes: a single child's key changed, a keyed child of a `Stack`
-  swapped, two views stacked). Run natively in one session: no SDD
-  ledger. Waits for the review and the human's word to merge.
+  swapped, two views stacked; a table turned after the replacement
+  re-stamps its label). An independent review (*Approve with fixes*: the
+  table system's effect untested, R-1; transitions that keep both views
+  mounted count as side by side, R-2, R-3; acquire last in `initState`,
+  R-4; a release called twice, R-5) is applied. Run natively in one
+  session: no SDD ledger. Waits for the human's word to merge.
 
 ## Owed to the human
 

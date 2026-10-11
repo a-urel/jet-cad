@@ -5,7 +5,7 @@
 // Flutter disposes the old one, so for that frame two shells hold the same
 // document; each installing its own systems would trip the dispatcher's
 // one expander slot (Slice 4's results, "a second view on one controller").
-import 'package:flutter/foundation.dart' show VoidCallback;
+import 'package:flutter/foundation.dart' show VoidCallback, visibleForTesting;
 import 'package:flutter/scheduler.dart' show SchedulerBinding;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
@@ -36,11 +36,13 @@ final class DocumentSystems {
 
   /// The number of holders of [document]'s systems; 0 when none are
   /// installed.
+  @visibleForTesting
   static int holdersOf(DraftDocument document) => _of[document]?._holders ?? 0;
 
   /// Installs [document]'s systems unless a holder already did, and returns
-  /// this holder's release, to be called once: the last one releases the
-  /// slot (the table system first, then the parametric system).
+  /// this holder's release: a second call does nothing, and the last
+  /// holder's releases the slot (the table system first, then the
+  /// parametric system).
   static VoidCallback acquire(DraftDocument document) {
     final systems = _of[document] ??= DocumentSystems._(document);
     systems._holders++;
@@ -53,7 +55,10 @@ final class DocumentSystems {
         }
       });
     }
+    var released = false;
     return () {
+      if (released) return;
+      released = true;
       if (--systems._holders > 0) return;
       systems._tableLabels.dispose();
       systems._parametric.dispose();

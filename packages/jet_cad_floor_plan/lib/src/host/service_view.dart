@@ -16,6 +16,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../document_systems.dart';
 import '../l10n/strings.dart';
 import '../planner_view.dart';
 import '../service/table_focus_painter.dart';
@@ -25,7 +26,6 @@ import '../service/table_select_tool.dart';
 import '../service/table_status_painter.dart';
 import '../shell_commands.dart';
 import '../shortcut_guard.dart';
-import '../document_systems.dart';
 import 'bars.dart';
 import 'floor_plan_controller.dart';
 import 'floor_plan_theme.dart';
@@ -451,7 +451,6 @@ class _ServiceViewState extends State<ServiceView> {
   @override
   void initState() {
     super.initState();
-    _releaseSystems;
     // Built now, so dispose never builds one over a controller in teardown
     // (final review F-2: the page flag too, which only a shown bar reads).
     _pageReady;
@@ -459,6 +458,9 @@ class _ServiceViewState extends State<ServiceView> {
     _canSplit;
     _page.addListener(_onPage);
     _changes = _document.changes.listen((_) => _changed.bump());
+    // Last, so nothing above that throws leaves a holder behind (review
+    // R-4).
+    _releaseSystems;
   }
 
   @override
