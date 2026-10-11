@@ -29,18 +29,20 @@ with Flutter 3.47.6.
   `keep` transform and `SymbolMoveResolver` an optional `canRotate`;
   every existing call compiles and behaves as before.
 - **A `FloorPlanView` replaced by another of the same controller** (a
-  new key, a new parent) no longer throws "the dispatcher already has an
-  expander" (Slice 4's results). Flutter builds the new view before it
-  disposes the old one; both now share the plan's systems for that
-  frame. Two views of one controller side by side (an `AnimatedSwitcher`
-  or a route transition between two views of it included) still raise a
-  `StateError`, now reported through `FlutterError.onError` at the end
-  of the frame both are built in, with a message that says so; the
-  second view itself now builds, where 0.5.0's failed.
+  new key, a new parent) now builds. In 0.5.0 it threw "the dispatcher
+  already has an expander" and showed an error in its place until the
+  controller next changed (Slice 4's results): Flutter builds the new
+  view before it disposes the old one, and both now share the plan's
+  systems for that frame. Two views of one controller side by side (an
+  `AnimatedSwitcher` or a route transition between two views of it
+  included) still raise a `StateError` through `FlutterError.onError`,
+  now from the end of the frame both are built in rather than while the
+  second one builds, with a message that says so; the second view itself
+  now builds, where 0.5.0's failed.
 
-**Known limits.** 0.5.0's stand, but for the two above. CI analyses the
-0.3.0 and 0.4.0 host probes against every commit; 0.5.0's host API is
-0.4.0's, so its probe adds nothing. `jet_cad_2d_gpu` (the harness's GPU
+**Known limits.** 0.5.0's stand, but for F-7 (above). CI analyses the
+0.3.0 and 0.4.0 host probes against every commit; 0.5.0's probe is
+0.4.0's, byte for byte (0.5.1's too), so it adds nothing. `jet_cad_2d_gpu` (the harness's GPU
 renderer), `packages/jet_cad` (the dormant OCCT 3D line) and the apps
 are not part of the release.
 

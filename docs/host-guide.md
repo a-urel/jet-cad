@@ -227,11 +227,13 @@ the end of the frame it is built in, reported through
 `FlutterError.onError` (up to 0.5.0, the second view itself failed to
 build). Replacing the view with another of the same controller (a new
 key, a new parent) is one view at a time as long as the old one leaves
-in the same frame; up to 0.5.0 it threw for that frame. A transition
-that keeps both mounted for a while counts as side by side: an
-`AnimatedSwitcher` between two views, a route pushed over or replacing
-one that shows the view, an `IndexedStack` or kept-alive tabs. Two
-floors side by side are two controllers.
+in the same frame; up to 0.5.0 the new view failed to build, an error
+in its place until the controller next changed. Anything that keeps two
+views of one controller mounted at once counts as side by side, for a
+moment or for good: an `AnimatedSwitcher` between them, a route showing
+one pushed over or replacing a route showing the other, an
+`IndexedStack` or kept-alive tabs holding both. Two floors side by side
+are two controllers.
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
 or `FloorPlanMode.selection`, read back from `controller.mode`. A switch

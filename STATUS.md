@@ -287,8 +287,15 @@ one's spec, plan and results.
   false`; a view replaced by another of the same controller throws
   nothing; plans and service layouts unchanged, schema 9); the host
   guide's §1 carries a placeholder ref that the commit after the merge
-  fills in. Then an independent review, the merge on the human's word,
-  the push and the tag by the human.
+  fills in. Every gate green at `eee57d4` (the host probe by git, the
+  0.3.0 and 0.4.0 probes). An independent review (*Approved with fixes*:
+  the guide and CHANGELOG understated what a replaced view did in 0.5.0,
+  an error in its place until the controller next changed, R-1; wording,
+  R-2 to R-5; the host barrels identical, 0.5.0's probe green, the same
+  edits save the same bytes in 0.5.0 and 0.5.1) is applied; ledger
+  [docs/superpowers/ledgers/2026-10-11-release-0.5.1/](docs/superpowers/ledgers/2026-10-11-release-0.5.1/).
+  Waits for the human's word to merge; then the push and the tag by the
+  human.
 
 ## Owed to the human
 
@@ -349,7 +356,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.5.1**, above: its review, then the merge question.
+**Next: release 0.5.1**, above: the merge question.
 0.5.0 (tag `v0.5.0` → `2fbb9c0`) adds O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
 Monépro owes Q-H3 and its real shadcn tokens, and can name
