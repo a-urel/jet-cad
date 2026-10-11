@@ -238,16 +238,15 @@ one's spec, plan and results.
   and redo the planner makes) is applied; ledger
   [docs/superpowers/ledgers/2026-10-11-release-0.5.0/](docs/superpowers/ledgers/2026-10-11-release-0.5.0/).
   Merged on the human's *"evet, main'e merge et"*; the guide names
-  `2fbb9c0`. **The push of `main` and the tag `v0.5.0` → `2fbb9c0` are
-  owed to the human.**
+  `2fbb9c0`. The human pushed `main` (at `a9f7362`) and the tag
+  `v0.5.0` → `2fbb9c0` (2026-10-11).
 
 ## In flight
 
-Nothing. Release 0.5.0, above, is merged; its push and tag are the human's.
+Nothing.
 
 ## Owed to the human
 
-- **The push and the tag `v0.5.0`** on `2fbb9c0` (`git push origin main && git tag v0.5.0 2fbb9c0 && git push origin v0.5.0`).
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -305,8 +304,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice**, once `main` and the tag `v0.5.0` are
-pushed. 0.5.0 (`2fbb9c0`) adds O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
+**Next: the human's choice.** 0.5.0 (tag `v0.5.0` → `2fbb9c0`) adds O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
 Monépro owes Q-H3 and its real shadcn tokens, and can name
 `controller.camera`, `tableOverlayBuilder` (Q-Z1),
