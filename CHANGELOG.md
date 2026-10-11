@@ -8,18 +8,49 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.5.0
+
+Deleting a node takes everything attached to it, and Undo brings it
+back. Nothing is stored differently: **plans and service layouts are
+the same as 0.4.0's** (schema 9), so 0.4.0 and 0.5.0 terminals can share
+them, and a restaurant may move its terminals one at a time. Nothing a
+0.4.0 host calls changes its signature. The packages need Flutter 3.44
+or later, as 0.4.0 did; 0.5.0 was built and tested with Flutter 3.47.6.
+
 - **Deleting a node removes everything attached to it.** A deleted
   group's, nested group's or instance's components — including data a
   newer release wrote — now go with it, as a table's host data already
   did in 0.4.0; Undo brings them back exactly. Plans are unchanged
   (schema 9): orphaned entries an older release left in a plan load and
-  save as they are.
+  save as they are. In the floor planner a wall's, room's or door's
+  parameters already went with it too, so for every type 0.4.0 and 0.5.0
+  write, a plan after a delete is the same bytes in both; what changes is
+  data a newer release wrote, and every component in a bare `jet_cad_2d`
+  document.
 - **For code that builds commands by hand:** `RemoveNodeCommand` now
   declares `{structure, components}`, so a permission profile that denies
   components refuses a node delete (and the undo of a node add). A
   re-parent built as `RemoveNodeCommand` then `AddNodeCommand` must pass
   `components: doc.components.snapshotOf(handle)` to the re-add to keep
   the node's components; without it the node comes back empty.
+  `AddNodeCommand` takes the snapshot as `components` (optional, empty by
+  default) and exposes it as a getter. `ComponentRegistry.checkRestorable`
+  is public: it is the check `restore` makes before its first write, and
+  it now also refuses a value that is not of the class registered under
+  its type id (`StateError`, nothing written). Delete a node through
+  `RemoveNodeCommand`: the parametric layer's and the table system's
+  after-the-edit detaches are gone, so a command that unlinks a node
+  itself leaves its components behind.
+- CI analyses the 0.4.0 host probe against every commit, beside
+  0.3.0's.
+
+**Known limits.** 0.4.0's stand. A plan an older release edited may
+still hold entries of nodes it deleted; they load and save as they are,
+and nothing removes them. `jet_cad_2d_gpu` (the harness's GPU renderer),
+`packages/jet_cad` (the dormant OCCT 3D line) and the apps are not part
+of the release.
 
 ## 0.4.0
 

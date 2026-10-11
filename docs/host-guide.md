@@ -4,7 +4,7 @@ This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the floor planner: staff design the restaurant's floors in the
 **design** mode, and during service they see the tables, colour them by
 status and pick them in the **selection** mode. It covers release
-**0.4.0** ([CHANGELOG](../CHANGELOG.md)).
+**0.5.0** ([CHANGELOG](../CHANGELOG.md)).
 
 Every Dart snippet below is taken from
 [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
@@ -15,9 +15,8 @@ that file, so the code in this guide compiles against the release.
 ## 1. The dependency
 
 The packages are not on pub.dev. Depend on them by git, **both pinned to
-the same commit SHA** — the SHA the release tag `v0.4.0` points at,
-`836701048f9828be0aaedfedba186cb007497e60` (the merge of release 0.4.0 into
-`main`):
+the same commit SHA** — the SHA the release tag `v0.5.0` points at
+(`git rev-parse 'v0.5.0^{commit}'`; the guide on `main` names it):
 
 ```yaml
 dependencies:
@@ -27,19 +26,19 @@ dependencies:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_floor_plan
-      ref: 836701048f9828be0aaedfedba186cb007497e60
+      ref: <the commit SHA of v0.5.0>
   jet_cad_restaurant_symbols:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_restaurant_symbols
-      ref: 836701048f9828be0aaedfedba186cb007497e60
+      ref: <the commit SHA of v0.5.0>
 ```
 
 Why a SHA and not the tag: the restaurant package depends on the planner
 by a path inside the repository, which pub resolves at the commit's SHA.
 If your `ref` is a tag or a branch, pub sees two different refs for the
 planner and refuses. The other form that resolves is the restaurant
-package **alone** at the tag (`ref: v0.4.0`), the planner arriving
+package **alone** at the tag (`ref: v0.5.0`), the planner arriving
 through it; you then import the planner without listing it, which
 `depend_on_referenced_packages` will flag.
 
@@ -50,7 +49,7 @@ with the planner. Import only the two barrels:
 Anything under `src/` is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.4.0 was built and tested with Flutter 3.47.6. They bring no build hook
+0.5.0 was built and tested with Flutter 3.47.6. They bring no build hook
 and no GPU renderer: nothing runs at build time beyond Flutter's own.
 (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
 hook compiles shaders.)
@@ -2005,4 +2004,5 @@ a desktop.
   earlier release refuse it** (`load` throws a `FormatException` that
   says why). **Every terminal that shares stored plans moves to it
   together.** A schema 8 or 7 plan opens here unchanged; the service
-  layout's format is unchanged.
+  layout's format is unchanged. 0.4.0 and 0.5.0 save the same plans and
+  service layouts, so they can share them.
