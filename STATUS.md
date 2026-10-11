@@ -237,8 +237,13 @@ one's spec, plan and results.
   0.5.0 (O-8: a deleted node takes its components; plans and service
   layouts unchanged, schema 9, so 0.4.0 and 0.5.0 terminals share them);
   the host guide's §1 carries a placeholder ref that the commit after the
-  merge fills in. Then an independent review, the merge on the human's
-  word, the push and the tag by the human.
+  merge fills in. An independent review (*Approved with fixes*:
+  CHANGELOG wording, R-1 to R-3; 0.4.0 and 0.5.0 save the same bytes
+  after every delete, undo and redo the planner makes) is applied;
+  ledger
+  [docs/superpowers/ledgers/2026-10-11-release-0.5.0/](docs/superpowers/ledgers/2026-10-11-release-0.5.0/).
+  Merged on the human's *"evet, main'e merge et"*; the push and the tag
+  are the human's.
 
 ## Owed to the human
 

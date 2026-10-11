@@ -24,13 +24,25 @@ or later, as 0.4.0 did; 0.5.0 was built and tested with Flutter 3.47.6.
   newer release wrote — now go with it, as a table's host data already
   did in 0.4.0; Undo brings them back exactly. Plans are unchanged
   (schema 9): orphaned entries an older release left in a plan load and
-  save as they are.
+  save as they are. In the floor planner a wall's, room's or door's
+  parameters already went with it too, so for every type 0.4.0 and 0.5.0
+  write, a plan after a delete is the same bytes in both; what changes is
+  data a newer release wrote, and every component in a bare `jet_cad_2d`
+  document.
 - **For code that builds commands by hand:** `RemoveNodeCommand` now
   declares `{structure, components}`, so a permission profile that denies
   components refuses a node delete (and the undo of a node add). A
   re-parent built as `RemoveNodeCommand` then `AddNodeCommand` must pass
   `components: doc.components.snapshotOf(handle)` to the re-add to keep
   the node's components; without it the node comes back empty.
+  `AddNodeCommand` takes the snapshot as `components` (optional, empty by
+  default) and exposes it as a getter. `ComponentRegistry.checkRestorable`
+  is public: it is the check `restore` makes before its first write, and
+  it now also refuses a value that is not of the class registered under
+  its type id (`StateError`, nothing written). Delete a node through
+  `RemoveNodeCommand`: the parametric layer's and the table system's
+  after-the-edit detaches are gone, so a command that unlinks a node
+  itself leaves its components behind.
 - CI analyses the 0.4.0 host probe against every commit, beside
   0.3.0's.
 
