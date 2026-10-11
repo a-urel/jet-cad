@@ -256,13 +256,11 @@ one's spec, plan and results.
   change, R-3; wording, R-4 and R-5) is applied. Run natively in
   one session: no SDD ledger; the record is the embedding spec's F-7
   paragraph.
-
-## In flight
-
 - **A view replaced by another of the same controller** (Slice 4's
   results, found not fixed; the human, 2026-10-11: *"ikinci görünüm
-  sorunu ile devam et"*), on `fix/view-replace` in the worktree
-  `../jet-cad-view`, cut from `main` at `04ca4cf`. Flutter mounts the
+  sorunu ile devam et"*), merged into `main` at `3f374dc` on
+  the human's *"evet, main'e merge et"*, from `fix/view-replace` (cut
+  from `main` at `04ca4cf`). Flutter mounts the
   new shell before it disposes the old, and each shell installed the
   document's parametric and table systems, so the second install threw
   "the dispatcher already has an expander". Now `DocumentSystems`
@@ -277,7 +275,11 @@ one's spec, plan and results.
   table system's effect untested, R-1; transitions that keep both views
   mounted count as side by side, R-2, R-3; acquire last in `initState`,
   R-4; a release called twice, R-5) is applied. Run natively in one
-  session: no SDD ledger. Waits for the human's word to merge.
+  session: no SDD ledger.
+
+## In flight
+
+Nothing.
 
 ## Owed to the human
 
@@ -346,10 +348,10 @@ Monépro owes Q-H3 and its real shadcn tokens, and can name
 `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
 `PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
 for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
-4's results): a second view on one controller for one frame, fixed on
-`fix/view-replace` (In flight). F-7 (an
-`against-wall` table turned to its wall under `rotate: false`) is fixed
-on `main` at `f279ce8`, in the CHANGELOG's Unreleased.
+4's results): both fixed on `main`, in the CHANGELOG's Unreleased:
+F-7 (an `against-wall` table turned to its wall under `rotate: false`)
+at `f279ce8`, a view replaced by another of the same controller at
+`3f374dc`.
 ---
 ## What this project is
 
