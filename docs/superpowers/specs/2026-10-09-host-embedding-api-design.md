@@ -1129,5 +1129,8 @@ allows it): a face is a candidate only when its `t` is `keep`'s
 rotation, `(keep.d, −keep.c)` within `Tolerance.standard.angular`, and
 the attachment is `keep`'s linear part bit for bit, translated so the
 box's back-centre lands on the face point. Named mutants M-F7a to
-M-F7g, each killed (`wall_attach_test.dart`'s WK0 to WK2; the planner's
-`test/host/against_wall_rotate_test.dart` through `FloorPlanView`).
+M-F7k, each killed (`wall_attach_test.dart`'s WK0 to WK4; the planner's
+`test/host/against_wall_rotate_test.dart` through `FloorPlanView`: a
+turned and mirrored unit dragged under `rotate: false`, and the ghost
+across a runtime change of `rotate`). An independent review (*Approve
+with fixes*: R-1 to R-3 tests, R-4 and R-5 wording) is applied.

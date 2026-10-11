@@ -989,6 +989,41 @@ void keepTests() {
           reason: '$deg°: a quarter turn off A');
     }
   });
+
+  test(
+      'WK3 a keep sharing one component of A\'s t is no candidate: turned '
+      'to (t.x, −t.y) or (−t.x, t.y) (review R-2: || not &&)', () {
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      final t = l.a.t;
+      for (final (x, y) in [(t.x, -t.y), (-t.x, t.y)]) {
+        final k = Transform2.rotation(math.atan2(y, x));
+        expect((k.d - x).abs() + (-k.c - y).abs(), lessThan(1e-12),
+            reason: 'premise');
+        expect(attachKeep(l.runs, l.nearA, k), isNull,
+            reason: '$deg°: keep turned to ($x, $y)');
+      }
+    }
+  });
+
+  test(
+      'WK4 the tolerance is Tolerance.standard.angular: A\'s keep turned '
+      '1e-12 rad on attaches, keeping its own linear part; 1e-6 rad on, '
+      'nothing (review R-2)', () {
+    expect(Tolerance.standard.angular, 1e-9);
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      final near = keepFor(l.a).multiply(Transform2.rotation(1e-12));
+      final att = attachKeep(l.runs, l.nearA, near);
+      expect(att?.run, same(l.a), reason: '$deg°: 1e-12 rad attaches');
+      expect(
+          [att!.transform.a, att.transform.b, att.transform.c, att.transform.d],
+          [near.a, near.b, near.c, near.d]);
+      final off = keepFor(l.a).multiply(Transform2.rotation(1e-6));
+      expect(attachKeep(l.runs, l.nearA, off), isNull,
+          reason: '$deg°: 1e-6 rad does not');
+    }
+  });
 }
 
 /// A layer added to [doc], visible or [locked] as asked.

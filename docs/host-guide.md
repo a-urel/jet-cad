@@ -1623,8 +1623,8 @@ last armed from the Symbols tab, while it is still offered: you cannot
 choose a symbol through it. Up to 0.5.0, a table symbol of your own
 library tagged `against-wall` turned to a wall it was moved or placed
 against under `rotate: false`; after 0.5.0 it attaches, under
-`rotate: false`, only to a wall face it already stands square to, and
-keeps its turn. `snapping: false` turns the attachment off.
+`rotate: false`, only to a wall face its back already faces, and keeps
+its turn. `snapping: false` turns the attachment off.
 
 ### Keyboard and focus
 

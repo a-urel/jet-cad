@@ -243,7 +243,22 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing.
+- **F-7, an `against-wall` symbol turned under `rotate: false`** (Slice
+  4's results; the human, 2026-10-11: *"F-7 ile devam et"*), on
+  `fix/f7-against-wall-rotate` in the worktree `../jet-cad-f7`, cut from
+  `main` at `2bc839e`. While `rotate` refuses, `attachToWall` takes a
+  `keep` transform (the placement tool's unturned one with the allowed
+  mirror; the move resolver's moved instance's): only a face whose `t`
+  is `keep`'s rotation takes the symbol, and it keeps `keep`'s linear
+  part bit for bit. Named mutants M-F7a to M-F7k, each killed
+  (`wall_attach_test.dart` WK0–WK4;
+  `test/host/against_wall_rotate_test.dart` through `FloorPlanView`).
+  An independent review (*Approve with fixes*: a degenerate identity
+  fixture let the move's keep be the identity, R-1; the filter's `||`
+  and its tolerance untested, R-2; the ghost across a runtime `rotate`
+  change, R-3; wording, R-4 and R-5) is applied. Run natively in
+  one session: no SDD ledger; the record is the embedding spec's F-7
+  paragraph. Waits for the human's word to merge.
 
 ## Owed to the human
 
@@ -312,8 +327,9 @@ Monépro owes Q-H3 and its real shadcn tokens, and can name
 `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
 `PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
 for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
-4's results): F-7 (an `against-wall` table turns to its wall under
-`rotate: false`), a second view on one controller for one frame.
+4's results): a second view on one controller for one frame. F-7 (an
+`against-wall` table turned to its wall under `rotate: false`) is fixed
+on `fix/f7-against-wall-rotate` (In flight).
 ---
 ## What this project is
 

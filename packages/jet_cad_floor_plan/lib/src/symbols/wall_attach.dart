@@ -248,6 +248,9 @@ typedef WallAttachment = ({Transform2 transform, Vector2 q, FaceRun run});
 /// `Tolerance.standard.angular` (a mirror negates `a` and `b` only), and
 /// step 5's transform is [keep]'s linear part, bit for bit, translated so
 /// the box's back-centre lands on `q`; [mirrored] is then [keep]'s own.
+/// A keep within that tolerance of `t` but not on it leaves the back edge
+/// off the face line by up to `W/2` times it; the keeps the planner passes
+/// (an earlier attachment's, a quarter turn's) are exact.
 ///
 /// O(runs + neighbours of the winner), allocating only the result (no
 /// per-run allocation).

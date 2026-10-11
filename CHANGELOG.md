@@ -10,8 +10,8 @@ pub.dev: a host depends on them by git (see
 
 - **Under `rotate: false` a symbol tagged `against-wall` no longer
   turns to a wall** it is placed or moved against (Slice 4's F-7, a
-  known limit of 0.4.0 and 0.5.0). It attaches only to a wall face it
-  already stands square to, keeping its turn and its mirror exactly,
+  known limit of 0.4.0 and 0.5.0). It attaches only to a wall face its
+  back already faces, keeping its turn and its mirror exactly,
   and it slides along that face as before; near any other face it is
   placed or moved freely. Under `rotate: true` nothing changes. In
   `editor.dart`, `attachToWall` and `WallFaces.attach` take an optional
