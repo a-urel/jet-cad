@@ -119,7 +119,9 @@ final class FloorPlanSymbol {
 ///   drag whose flag is refused before it ends is cancelled: it executes
 ///   nothing. [rotate] and [mirror] also bound the symbol tool: its `R`
 ///   and `M`, and the turn and mirror of a placement, which are not used
-///   while refused.
+///   while refused. While [rotate] is refused, a symbol tagged
+///   `against-wall`, placed or moved, attaches only to a wall face its
+///   back already faces, and keeps its turn.
 /// - [undo] (Undo and Redo), [export], [print]: the top bar's buttons and
 ///   their chords.
 /// - [rulers], [grid]: the drafting aids; [snapping]: object snap for the

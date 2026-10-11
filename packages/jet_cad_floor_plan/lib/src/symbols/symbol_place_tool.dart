@@ -270,11 +270,16 @@ class SymbolPlaceTool extends Tool {
                 mirrored: _mirror);
   }
 
+  /// The linear part of an unturned, mirrored placement
+  /// ([placementTransform]'s `scale(−1, 1)`).
+  static const Transform2 _mirroredLinear = Transform2(-1, 0, 0, 1, 0, 0);
+
   /// Spec 09c D6: [_attached] for the last query's raw point, object snap
   /// and scale ([_raw], [_rawObjectSnap], [_rawScale]) and the current
   /// entry and mirror. Null without [faces], before any query, for an
   /// entry not tagged [againstWallTag] or with no box (Ruling R-C2-2), with
-  /// object snap off, or when no face takes the point.
+  /// object snap off, or when no face takes the point. While [canRotate]
+  /// refuses, only a face whose turn is none takes it (Slice 4's F-7).
   void _syncAttachment(ToolContext ctx) {
     _attached = null;
     final faces = this.faces;
@@ -285,9 +290,16 @@ class SymbolPlaceTool extends Tool {
     if (!entry.tags.contains(againstWallTag)) return;
     final box = boxOfEntry(entry);
     if (box == null) return;
+    // F-7: while [canRotate] refuses, only a face that keeps the unturned
+    // placement's linear part takes it, and it stays unturned.
+    final keep = (canRotate?.call() ?? true)
+        ? null
+        : (_mirror ? _mirroredLinear : Transform2.identity());
     _attached = faces.attach(
         ctx.document, box, _raw, kWallAttachPixels / _rawScale,
-        mirrored: _mirror, edgeCaptureWorld: kSnapAperturePixels / _rawScale);
+        mirrored: _mirror,
+        edgeCaptureWorld: kSnapAperturePixels / _rawScale,
+        keep: keep);
   }
 
   /// F-5: object snap at `kSnapAperturePixels / scale`, else the grid, else

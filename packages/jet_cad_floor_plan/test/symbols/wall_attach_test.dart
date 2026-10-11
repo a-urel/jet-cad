@@ -873,6 +873,157 @@ void main() {
     expect(isOrthonormal(Transform2(1.5 * c, 1.5 * s, -s, c, 0, 0)), isFalse);
     expect(isOrthonormal(Transform2(c, s, -1.5 * s, 1.5 * c, 0, 0)), isFalse);
   });
+
+  keepTests();
+}
+
+/// Slice 4's F-7: `keep`, the host's `rotate` refused. An L at 30° and
+/// −112.5° turning 75°: its two inside faces, A's and B's. Each keep is
+/// built by `Transform2.rotation` from the face's angle, so its `(d, −c)`
+/// is that face's `t` within rounding, not bit for bit (WK0's premise):
+/// a result taken from `t` (M-F7b) differs from one taken from the keep.
+void keepTests() {
+  /// The L's two inside faces, its runs and a pointer 20 mm off each face
+  /// at its middle (far from the other face).
+  ({List<FaceRun> runs, FaceRun a, FaceRun b, Vector2 nearA, Vector2 nearB})
+      lOf(double deg) {
+    final sc = lScene(deg, 75, ja: Justification.left);
+    final runs = [
+      ...faceRunsOf(sc.doc, sc.walls[0]),
+      ...faceRunsOf(sc.doc, sc.walls[1]),
+    ];
+    FaceRun inside(int w) => runs
+        .singleWhere((r) => r.wall == sc.walls[w] && r.side == FaceSide.left);
+    final a = inside(0), b = inside(1);
+    return (
+      runs: runs,
+      a: a,
+      b: b,
+      nearA: at(a, a.length / 2, 20),
+      nearB: at(b, b.length / 2, 20),
+    );
+  }
+
+  /// A keep turned to [r]'s `t` (local `+y` along `−m`), mirrored when
+  /// [mirrored], off the origin.
+  Transform2 keepFor(FaceRun r, {bool mirrored = false}) =>
+      Transform2.translation(-321.5, 77.25)
+          .multiply(Transform2.rotation(math.atan2(r.t.y, r.t.x)))
+          .multiply(Transform2.scale(mirrored ? -1 : 1, 1));
+
+  WallAttachment? attachKeep(List<FaceRun> runs, Vector2 p, Transform2 keep,
+          {bool mirrored = false}) =>
+      attachToWall(runs, offBox, p, cap,
+          mirrored: mirrored,
+          neighbours: none(runs),
+          edgeCaptureWorld: edge,
+          keep: keep);
+
+  test(
+      'WK0 the fixtures are not degenerate: no face is axis-aligned, and '
+      'some keep\'s (d, −c) is not its face\'s t bit for bit', () {
+    var differs = false;
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      for (final r in [l.a, l.b]) {
+        expect(r.t.x.abs(), greaterThan(0.1), reason: '$deg°');
+        expect(r.t.y.abs(), greaterThan(0.1), reason: '$deg°');
+        final k = keepFor(r);
+        expect(k.d, closeTo(r.t.x, 1e-12));
+        expect(-k.c, closeTo(r.t.y, 1e-12));
+        if (k.d != r.t.x || -k.c != r.t.y) differs = true;
+      }
+      expect(attach(l.runs, offBox, l.nearA)!.run, same(l.a),
+          reason: '$deg°: premise, unkept, A takes nearA');
+      expect(attach(l.runs, offBox, l.nearB)!.run, same(l.b),
+          reason: '$deg°: premise, unkept, B takes nearB');
+    }
+    expect(differs, isTrue);
+  });
+
+  test(
+      'WK1 a keep turned to the face takes it: the back flush, the '
+      'back-centre on q, the keep\'s linear part bit for bit, mirrored or '
+      'not (M-F7b, M-F7f)', () {
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      for (final (r, p) in [(l.a, l.nearA), (l.b, l.nearB)]) {
+        for (final mirrored in const [false, true]) {
+          final why = '$deg° ${r == l.a ? 'A' : 'B'}'
+              '${mirrored ? ' mirrored' : ''}';
+          final k = keepFor(r, mirrored: mirrored);
+          final att = attachKeep(l.runs, p, k, mirrored: mirrored);
+          expect(att, isNotNull, reason: why);
+          expect(att!.run, same(r), reason: why);
+          final g = att.transform;
+          expect([g.a, g.b, g.c, g.d], [k.a, k.b, k.c, k.d],
+              reason: '$why: the keep\'s linear part');
+          final cx = (offBox.left + offBox.right) / 2;
+          expect((g.transformPoint(Vector2(cx, offBox.back)) - att.q).length,
+              lessThan(1e-9),
+              reason: '$why: the back-centre on q');
+          expect(sOf(r, att.q).abs(), lessThanOrEqualTo(1e-9), reason: why);
+          for (final x in [offBox.left, offBox.right]) {
+            expect(sOf(r, g.transformPoint(Vector2(x, offBox.back))).abs(),
+                lessThan(1e-6),
+                reason: '$why: back end $x on the face');
+          }
+          expect(uOf(r, att.q), closeTo(r.length / 2, 1e-6), reason: why);
+        }
+      }
+    }
+  });
+
+  test(
+      'WK2 a face the keep is not turned to is no candidate: the pointer '
+      'near A with B\'s keep, or with A\'s a quarter turn on, attaches to '
+      'nothing (M-F7a)', () {
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      expect(attachKeep(l.runs, l.nearA, keepFor(l.b)), isNull,
+          reason: '$deg°: B\'s keep near A');
+      expect(attachKeep(l.runs, l.nearB, keepFor(l.a)), isNull,
+          reason: '$deg°: A\'s keep near B');
+      final quarter = keepFor(l.a).multiply(Transform2.rotation(math.pi / 2));
+      expect(attachKeep(l.runs, l.nearA, quarter), isNull,
+          reason: '$deg°: a quarter turn off A');
+    }
+  });
+
+  test(
+      'WK3 a keep sharing one component of A\'s t is no candidate: turned '
+      'to (t.x, −t.y) or (−t.x, t.y) (review R-2: || not &&)', () {
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      final t = l.a.t;
+      for (final (x, y) in [(t.x, -t.y), (-t.x, t.y)]) {
+        final k = Transform2.rotation(math.atan2(y, x));
+        expect((k.d - x).abs() + (-k.c - y).abs(), lessThan(1e-12),
+            reason: 'premise');
+        expect(attachKeep(l.runs, l.nearA, k), isNull,
+            reason: '$deg°: keep turned to ($x, $y)');
+      }
+    }
+  });
+
+  test(
+      'WK4 the tolerance is Tolerance.standard.angular: A\'s keep turned '
+      '1e-12 rad on attaches, keeping its own linear part; 1e-6 rad on, '
+      'nothing (review R-2)', () {
+    expect(Tolerance.standard.angular, 1e-9);
+    for (final deg in attachAngles) {
+      final l = lOf(deg);
+      final near = keepFor(l.a).multiply(Transform2.rotation(1e-12));
+      final att = attachKeep(l.runs, l.nearA, near);
+      expect(att?.run, same(l.a), reason: '$deg°: 1e-12 rad attaches');
+      expect(
+          [att!.transform.a, att.transform.b, att.transform.c, att.transform.d],
+          [near.a, near.b, near.c, near.d]);
+      final off = keepFor(l.a).multiply(Transform2.rotation(1e-6));
+      expect(attachKeep(l.runs, l.nearA, off), isNull,
+          reason: '$deg°: 1e-6 rad does not');
+    }
+  });
 }
 
 /// A layer added to [doc], visible or [locked] as asked.

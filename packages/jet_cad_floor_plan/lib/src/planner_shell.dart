@@ -426,7 +426,9 @@ class _PlannerShellState extends State<PlannerShell> {
           library: () => switch (widget.symbols?.state) {
                 SymbolLibraryReady(:final library) => library,
                 _ => null,
-              }),
+              },
+          // Slice 4's F-7: under `rotate: false` a move never turns it.
+          canRotate: () => widget.capabilities.rotate),
       gates: _gates);
 
   /// The select tool's and the grip cache's gates (spec C-5, S-9, S-15):

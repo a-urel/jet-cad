@@ -242,6 +242,16 @@ typedef WallAttachment = ({Transform2 transform, Vector2 q, FaceRun run});
 ///    on the face line, the front in the room, a mirror pivoting about the
 ///    box's centre `x`.
 ///
+/// With [keep] (the host's `rotate` refused, Slice 4's F-7), the symbol
+/// keeps [keep]'s linear part: a run is a candidate in step 1 only when
+/// its `t` is the rotation [keep] already has, `(keep.d, −keep.c)` within
+/// `Tolerance.standard.angular` (a mirror negates `a` and `b` only), and
+/// step 5's transform is [keep]'s linear part, bit for bit, translated so
+/// the box's back-centre lands on `q`; [mirrored] is then [keep]'s own.
+/// A keep within that tolerance of `t` but not on it leaves the back edge
+/// off the face line by up to `W/2` times it; the keeps the planner passes
+/// (an earlier attachment's, a quarter turn's) are exact.
+///
 /// O(runs + neighbours of the winner), allocating only the result (no
 /// per-run allocation).
 WallAttachment? attachToWall(
@@ -253,16 +263,23 @@ WallAttachment? attachToWall(
   required List<List<FaceNeighbour>> neighbours,
   required double edgeCaptureWorld,
   Handle? exclude,
+  Transform2? keep,
 }) {
   if (neighbours.length != runs.length) {
     throw ArgumentError.value(neighbours.length, 'neighbours',
         'must be parallel to runs (${runs.length})');
   }
   final tol = wallJoin.linear;
+  final turnTol = Tolerance.standard.angular;
   var best = -1;
   var bestS = 0.0, bestGap = 0.0, bestU = 0.0;
   for (var i = 0; i < runs.length; i++) {
     final r = runs[i];
+    if (keep != null &&
+        ((r.t.x - keep.d).abs() > turnTol ||
+            (r.t.y + keep.c).abs() > turnTol)) {
+      continue;
+    }
     final dx = p.x - r.a.x, dy = p.y - r.a.y;
     final s = dx * r.m.x + dy * r.m.y;
     if (s < -r.thickness / 2 || s > captureWorld) continue;
@@ -328,6 +345,18 @@ WallAttachment? attachToWall(
   }
 
   final q = Vector2(run.a.x + run.t.x * u, run.a.y + run.t.y * u);
+  if (keep != null) {
+    final cx = (box.left + box.right) / 2, cy = box.back;
+    // D5: no `-0.0` stored, as `placementTransform` cleans its own.
+    final e = q.x - (keep.a * cx + keep.c * cy);
+    final f = q.y - (keep.b * cx + keep.d * cy);
+    return (
+      transform: Transform2(
+          keep.a, keep.b, keep.c, keep.d, e == 0 ? 0.0 : e, f == 0 ? 0.0 : f),
+      q: q,
+      run: run,
+    );
+  }
   return (
     transform: placementTransform(
       at: q,
@@ -430,7 +459,8 @@ final class WallFaces {
   }
 
   /// [attachToWall] over [doc]'s cached runs and neighbours, [exclude]
-  /// (the instance a move carries, D8) not a neighbour.
+  /// (the instance a move carries, D8) not a neighbour, keeping [keep]'s
+  /// linear part when given (F-7).
   WallAttachment? attach(
     DraftDocument doc,
     SymbolBox box,
@@ -439,13 +469,15 @@ final class WallFaces {
     required bool mirrored,
     required double edgeCaptureWorld,
     Handle? exclude,
+    Transform2? keep,
   }) {
     _refresh(doc);
     return attachToWall(_runs, box, p, captureWorld,
         mirrored: mirrored,
         neighbours: _neighbours,
         edgeCaptureWorld: edgeCaptureWorld,
-        exclude: exclude);
+        exclude: exclude,
+        keep: keep);
   }
 
   SymbolBox? _box(DraftDocument doc, Handle definition) {

@@ -13,7 +13,8 @@ import 'wall_attach.dart';
 
 /// The shell's [MoveResolver] (D8) over its [faces] and its library.
 final class SymbolMoveResolver implements MoveResolver {
-  SymbolMoveResolver({required this.faces, required this.library});
+  SymbolMoveResolver(
+      {required this.faces, required this.library, this.canRotate});
 
   /// The shell's face cache, shared with the placement tool (D3).
   final WallFaces faces;
@@ -21,12 +22,18 @@ final class SymbolMoveResolver implements MoveResolver {
   /// The library when it is ready, read at each call; null: never attach.
   final SymbolLibrary? Function() library;
 
+  /// Whether a move may turn the symbol (the host's `rotate`), read at each
+  /// call; null allows. While it refuses, the symbol attaches only to a
+  /// face that keeps its turn, and keeps its linear part (Slice 4's F-7).
+  final bool Function()? canRotate;
+
   /// For a root-level instance whose library entry carries
   /// [againstWallTag], with object snap on, the library ready and an
   /// orthonormal transform (W-8: a file's scaled instance never attaches,
   /// so its scale is never dropped): [attachToWall] for the plain-moved
   /// back-centre `delta · T · c` (S-1), its own instance excluded from the
-  /// neighbours, its mirror kept; the marker is the face point. Else null.
+  /// neighbours, its mirror kept, and, while [canRotate] refuses, its
+  /// linear part kept; the marker is the face point. Else null.
   @override
   ({Transform2 transform, Vector2 marker})? resolveMove(
       ToolContext ctx, Handle node, Transform2 delta) {
@@ -41,12 +48,14 @@ final class SymbolMoveResolver implements MoveResolver {
     if (!isOrthonormal(t)) return null;
     final box = faces.boxOf(doc, instance.definition);
     if (box == null) return null;
-    final p = delta.multiply(t).transformPoint(box.backCentre);
+    final moved = delta.multiply(t);
+    final p = moved.transformPoint(box.backCentre);
     final scale = ctx.camera.value.scale;
     final attached = faces.attach(doc, box, p, kWallAttachPixels / scale,
         mirrored: t.a * t.d - t.b * t.c < 0,
         edgeCaptureWorld: kSnapAperturePixels / scale,
-        exclude: node);
+        exclude: node,
+        keep: (canRotate?.call() ?? true) ? null : moved);
     if (attached == null) return null;
     return (transform: attached.transform, marker: attached.q);
   }
