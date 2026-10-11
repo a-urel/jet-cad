@@ -8,6 +8,17 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.5.0
+
+Deleting a node takes everything attached to it, and Undo brings it
+back. Nothing is stored differently: **plans and service layouts are
+the same as 0.4.0's** (schema 9), so 0.4.0 and 0.5.0 terminals can share
+them, and a restaurant may move its terminals one at a time. Nothing a
+0.4.0 host calls changes its signature. The packages need Flutter 3.44
+or later, as 0.4.0 did; 0.5.0 was built and tested with Flutter 3.47.6.
+
 - **Deleting a node removes everything attached to it.** A deleted
   group's, nested group's or instance's components — including data a
   newer release wrote — now go with it, as a table's host data already
@@ -20,6 +31,14 @@ pub.dev: a host depends on them by git (see
   re-parent built as `RemoveNodeCommand` then `AddNodeCommand` must pass
   `components: doc.components.snapshotOf(handle)` to the re-add to keep
   the node's components; without it the node comes back empty.
+- CI analyses the 0.4.0 host probe against every commit, beside
+  0.3.0's.
+
+**Known limits.** 0.4.0's stand. A plan an older release edited may
+still hold entries of nodes it deleted; they load and save as they are,
+and nothing removes them. `jet_cad_2d_gpu` (the harness's GPU renderer),
+`packages/jet_cad` (the dormant OCCT 3D line) and the apps are not part
+of the release.
 
 ## 0.4.0
 
