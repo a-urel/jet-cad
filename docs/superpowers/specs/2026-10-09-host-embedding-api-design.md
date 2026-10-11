@@ -1122,3 +1122,12 @@ or Print refused while under way (`export` or `print` turned off) hands
 nothing over. F-7 is a recorded limit: a table symbol tagged
 `against-wall` still turns to its wall on a move or placement under
 `rotate: false` (none bundled is; `snapping: false` turns it off).
+**Closed on `fix/f7-against-wall-rotate` (2026-10-11):** while `rotate`
+refuses, `attachToWall` takes a `keep` transform (the moved instance's,
+or the unturned placement's with the stored mirror while `mirror`
+allows it): a face is a candidate only when its `t` is `keep`'s
+rotation, `(keep.d, −keep.c)` within `Tolerance.standard.angular`, and
+the attachment is `keep`'s linear part bit for bit, translated so the
+box's back-centre lands on the face point. Named mutants M-F7a to
+M-F7g, each killed (`wall_attach_test.dart`'s WK0 to WK2; the planner's
+`test/host/against_wall_rotate_test.dart` through `FloorPlanView`).
