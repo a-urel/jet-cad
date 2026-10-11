@@ -223,8 +223,11 @@ in [The editor's capabilities](#the-editors-capabilities); `shortcuts`
 and `autofocus` in [Keyboard and focus](#keyboard-and-focus).)
 
 Show a controller in **one `FloorPlanView` at a time**: a second view of
-the same controller mounted beside the first throws a `StateError`. Two
-floors side by side are two controllers.
+the same controller mounted beside the first throws a `StateError` at
+the end of the frame it is built in. Replacing the view with another of
+the same controller (a new key, a new parent) is one view at a time;
+up to 0.5.0 it threw for the frame both existed. Two floors side by
+side are two controllers.
 
 The mode is the controller's: `controller.setMode(FloorPlanMode.design)`
 or `FloorPlanMode.selection`, read back from `controller.mode`. A switch
