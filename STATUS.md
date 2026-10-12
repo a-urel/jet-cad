@@ -297,7 +297,11 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing.
+- **Plan colours** (the host spec's O-6, and rooms): a colour per table and
+  per room from a fixed palette, saved at schema 10.
+  Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
+  revision 1, on `spec/plan-colors`; awaiting the human's review, then
+  the independent review and Slice 1's plan.
 
 ## Owed to the human
 

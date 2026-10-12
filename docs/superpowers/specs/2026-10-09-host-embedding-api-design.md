@@ -940,6 +940,9 @@ sharing a number, an unnumbered table, a camera not at identity.
 - **O-5.** Animation of camera commands.
 - **O-6.** A per-table colour on the plan itself (status is not plan
   data).
+  **Taken up** (2026-10-12) by the plan colours spec
+  [2026-10-12-plan-colors-design.md](2026-10-12-plan-colors-design.md),
+  rooms included.
 - **O-7.** String overrides beyond subclassing a built-in language
   (today's way); a fourth built-in language.
 - **O-8.** Components orphaned by node deletion in general (F-14): its own
