@@ -300,8 +300,8 @@ one's spec, plan and results.
 - **Plan colours** (the host spec's O-6, and rooms): a colour per table and
   per room from a fixed palette, saved at schema 10.
   Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
-  revision 1, on `spec/plan-colors`; awaiting the human's review, then
-  the independent review and Slice 1's plan.
+  revision 2 on `spec/plan-colors` (the independent review's V-1 to V-12
+  folded in); awaiting the human's review, then Slice 1's plan.
 
 ## Owed to the human
 
