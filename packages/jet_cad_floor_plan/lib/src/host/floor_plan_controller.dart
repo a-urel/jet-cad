@@ -31,6 +31,7 @@ import '../tables/table_index.dart';
 import 'design_changes.dart';
 import 'editor_capabilities.dart' show FloorPlanTool;
 import 'floor_plan_camera.dart';
+import 'floor_plan_theme.dart' show kTableColorOpacity;
 import 'floor_plan_types.dart';
 import 'page_flows.dart' show exportOnce, printOnce, toExportChoice;
 import 'service_layout.dart';
@@ -1333,12 +1334,21 @@ class FloorPlanController extends ChangeNotifier {
   /// it; `FloorPlanView.onPageFlowError` reports only the flows the view
   /// starts. The dialog's remembered choice is left as it is. Allowed
   /// whatever the editor's capabilities.
+  ///
+  /// The coloured tables are filled under the drawing (plan colours spec
+  /// PC-7) at [tableColorOpacity] when given, else at 0.35: with no view
+  /// mounted there is no theme to read, and this call never reads the
+  /// mounted view's (the view's own Export does). A given opacity that is
+  /// not finite or outside `[0, 1]` throws an [ArgumentError] at once,
+  /// before any flow runs.
   Future<FloorPlanExport?> exportPlan(FloorPlanExportChoice choice,
-          {String name = 'plan'}) =>
-      _pageFlow<FloorPlanExport?>(
-          null,
-          () => exportOnce(this, toExportChoice(choice), name,
-              cancelled: () => _disposed));
+      {String name = 'plan', double? tableColorOpacity}) {
+    final opacity = _checkedOpacity(tableColorOpacity);
+    return _pageFlow<FloorPlanExport?>(
+        null,
+        () => exportOnce(this, toExportChoice(choice), name,
+            cancelled: () => _disposed, tableColorOpacity: opacity));
+  }
 
   /// The active plan's page as a PDF to [printer] (the platform's print
   /// dialog when null), named [name]: what the view's Print does (spec
@@ -1347,11 +1357,30 @@ class FloorPlanController extends ChangeNotifier {
   /// when the plan has no page, when the plan shown is replaced before the
   /// bytes are made, or after [dispose]. An error completes the returned
   /// `Future` with it. Allowed whatever the editor's capabilities.
-  Future<bool> printPlan({PagePrinter? printer, String name = 'plan'}) =>
-      _pageFlow<bool>(
-          false,
-          () => printOnce(this, printer ?? const PrintingPagePrinter(), name,
-              cancelled: () => _disposed));
+  ///
+  /// The coloured tables are filled under the drawing at
+  /// [tableColorOpacity] when given, else at 0.35, as [exportPlan]'s are;
+  /// a given opacity that is not finite or outside `[0, 1]` throws an
+  /// [ArgumentError] at once, before any flow runs.
+  Future<bool> printPlan(
+      {PagePrinter? printer, String name = 'plan', double? tableColorOpacity}) {
+    final opacity = _checkedOpacity(tableColorOpacity);
+    return _pageFlow<bool>(
+        false,
+        () => printOnce(this, printer ?? const PrintingPagePrinter(), name,
+            cancelled: () => _disposed, tableColorOpacity: opacity));
+  }
+
+  /// [given], or 0.35 when null; an [ArgumentError] when it is not finite
+  /// or lies outside `[0, 1]`.
+  static double _checkedOpacity(double? given) {
+    if (given == null) return kTableColorOpacity;
+    if (!given.isFinite || given < 0 || given > 1) {
+      throw ArgumentError.value(
+          given, 'tableColorOpacity', 'must be in [0, 1]');
+    }
+    return given;
+  }
 
   /// [flow] under [pageFlowReady], after a settle; [busy] when another
   /// runs or the controller is disposed, before or after it.
