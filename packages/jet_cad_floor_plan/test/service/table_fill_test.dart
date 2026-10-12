@@ -21,6 +21,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -732,9 +733,8 @@ void main() {
   });
 
   testWidgets(
-      'TF8 M-C24 M-C15 Review Focus 2 (on screen): setTableColor, undo and '
-      'redo each show at the next frame in the design mode, nothing else '
-      'moving', (tester) async {
+      'TF8 M-C24 M-C15 setTableColor, undo and redo each show at the next '
+      'frame in the design mode, nothing else moving', (tester) async {
     final c = controllerOver();
     await pumpPlan(tester, c);
     final n = insideTop(spec('N'));
@@ -752,6 +752,36 @@ void main() {
     c.redo();
     await nextFrame(tester);
     expectAt(tester, await shoot(tester), n, tealFill, 'redone');
+  });
+
+  testWidgets(
+      'TF8b Review Focus 2 (on screen): a coloured table deleted in the '
+      'editor leaves the paper; Undo brings its fill back at the next frame, '
+      'at the same pixel, and in tableDetails', (tester) async {
+    final c = controllerOver();
+    await pumpPlan(tester, c);
+    final doc = c.activeDocument;
+    final instance = TableSurvey.of(doc).withNumber('C').single.instance;
+    final at = insideTop(spec('C'));
+    final tealFill = composite(teal, alphaDefault, whitePaper);
+    expectAt(tester, await shoot(tester), at, tealFill, 'premise: teal');
+
+    c.select({'C'});
+    await tester.pump();
+    expect(c.selectedTables.value, {'C'}, reason: 'premise: selected');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.delete);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.delete);
+    await nextFrame(tester);
+    expect(doc.tree[instance], isNull, reason: 'premise: deleted');
+    expect(c.tableDetails.where((d) => d.table.number == 'C'), isEmpty);
+    expectAt(tester, await shoot(tester), at, whitePaper, 'deleted');
+
+    c.undo();
+    await nextFrame(tester);
+    expect(doc.tree[instance], isA<InstanceNode>(), reason: 'premise: back');
+    expect(c.tableDetails.singleWhere((d) => d.table.number == 'C').color,
+        FloorPlanColor.teal);
+    expectAt(tester, await shoot(tester), at, tealFill, 'undone: teal');
   });
 
   testWidgets(
