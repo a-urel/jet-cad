@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-11. **`main` carries release 0.5.1** (tag
+**Last updated:** 2026-10-12. **`main` carries release 0.5.1** (tag
 `v0.5.1` → `3f8f7ad`, after `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -328,8 +328,22 @@ one's spec, plan and results.
   `FloorPlanTableDetail.color`), drawn under the drafting in both modes,
   exported and printed, the Selection panel's Colour row, the page
   export's underlay, the guide's "Colours on the plan", the CHANGELOG.
-  Reviewed per task; awaiting the human's word to merge into `main`
-  (its ledger is then archived), then release 0.6.0.
+  Reviewed per task and as a whole (the final review's fixes applied);
+  its ledger archived in
+  `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-2/`.
+- **Release 0.6.0** (prepared while the human slept, 2026-10-12, *"otomatik
+  devam et"*): on `release/0.6.0`, cut from `feat/plan-colors-slice-2` at
+  `752eace`. The five packages at 0.6.0, the CHANGELOG's Unreleased
+  section become 0.6.0, the guide covering 0.6.0 with §1's placeholder
+  ref. Every gate green at `d65369d` (the host probe, the 0.3.0, 0.4.0
+  and 0.5.1 probes); an independent review (*Approved with fixes*: a
+  `FloorPlanController` test double breaks, R-1; `jet_cad_2d`'s
+  `SetEntityStyleCommand` and restamp unlisted, R-2; smaller CHANGELOG
+  gaps, R-3 to R-6; STATUS, R-7) is applied; its record is
+  `docs/superpowers/ledgers/2026-10-12-release-0.6.0/review.md`. Next:
+  the human's word to merge `release/0.6.0` into `main` (it brings Slice
+  2), the commit naming the merge's SHA in the guide's §1, the push and
+  the tag `v0.6.0`, the human's.
 
 ## Owed to the human
 
@@ -398,8 +412,9 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's word to merge Slice 2 of plan colours (tables), then
-release 0.6.0.** Slice 1 (the palette, schema 10, rooms, the `recolor`
+**Next: the human's word to merge `release/0.6.0` into `main`** (it brings
+Slice 2 of plan colours, tables, with it), then the commit naming the
+merge's SHA in the guide's §1, the push and the tag `v0.6.0`. Slice 1 (the palette, schema 10, rooms, the `recolor`
 capability and the Selection panel's Colour row) is **merged into `main`
 at `ce0a4f9`** (2026-10-12), unreleased. Slice 2 is implemented and
 reviewed on `feat/plan-colors-slice-2` (plan

@@ -17,33 +17,42 @@ editor's Colour row (and, for tables, by the host), saved with the plan,
 drawn on screen, exported and printed. **Plans are stored differently:
 schema 10**, which 0.5.1 and every older release refuse, so every
 terminal that shares stored plans moves to 0.6.0 together; a 0.5.1 (or
-older) plan opens here unchanged. Service layouts are unchanged. Two
+older) plan opens here unchanged. Service layouts are unchanged. Three
 changes can break a host's own code: a class that implements or
-directly extends `FloorPlanStrings` gains four members (below), and a
-`tablesOnly` or `readOnly` editor now shows the Colour row for a
-selected table. The packages need Flutter 3.44 or later, as 0.5.1 did;
+directly extends `FloorPlanStrings` gains four members, a class that
+implements `FloorPlanController` gains two methods and a parameter
+(both below), and a `tablesOnly` or `readOnly` editor now shows the
+Colour row for a selected table. The packages need Flutter 3.44 or later, as 0.5.1 did;
 0.6.0 was built and tested with Flutter 3.47.6.
 
 - **Plans are now saved at schema 10.** A 0.5.1 (or older) build refuses
   a plan this release saves (`load` throws a `FormatException` naming
   `unsupported schemaVersion 10`); this release opens a 0.5.1 plan
-  unchanged. Terminals that share plans must move together.
+  unchanged. Terminals that share plans must move together. The bundled
+  symbol libraries (`furniture.jetlib`, `restaurant.jetlib`) are
+  re-encoded at schema 10, their content unchanged.
 - **A room can take a colour**, one of eight hues
   (`FloorPlanColor`: red, orange, yellow, green, teal, blue, purple,
   grey), chosen in the Selection panel's new **Colour** row; its tint
   is drawn in that hue at 20 %, on screen, in the export and in the
-  print. An uncoloured room is drawn exactly as before.
+  print. An uncoloured room is drawn exactly as before. In
+  `editor.dart`, `RoomParams` gains `color`, `colorValue` and
+  `copyWith(color:)`.
 - **`FloorPlanEditorCapabilities.recolor`** (default true; false in
   `readOnly`) allows the Colour row; refused, it shows read only.
   `tablesOnly` leaves it true. After this release a `tablesOnly` (or
   `readOnly`) embed shows the Selection panel's Colour row for a
-  selected table: a `tablesOnly` host will see the picker, and under
+  selected table (and, under `readOnly`, a room): a `tablesOnly` host will see the picker, and under
   `recolor: false` the row is read only, never hidden.
 - **Breaking for a host's own strings:** `FloorPlanStrings` gains the
   abstract `color`, `colorNone`, `colorRefused` and
   `colorName(FloorPlanColor)`; a class that implements or directly
   extends `FloorPlanStrings` must add them (a subclass of a built-in
   language inherits them).
+- **Breaking for a host's own controller double:** a class that
+  `implements FloorPlanController` (a hand-written test double, not a
+  mock) must add `setTableColor`, `setTablesColor` and the
+  `tableColorOpacity` parameter of `exportPlan` and `printPlan`.
 - **A table can take a colour**, one of the eight `FloorPlanColor` hues:
   in the Selection panel's Colour row (beside rooms), or by
   `controller.setTableColor` / `setTablesColor`; read back as
@@ -51,7 +60,11 @@ selected table. The packages need Flutter 3.44 or later, as 0.5.1 did;
   drafting in both modes, exported and printed; in the selection mode a
   status covers it. `FloorPlanTheme.tableColorOpacity` (default 0.35)
   sets its strength; `exportPlan` and `printPlan` take an optional
-  `tableColorOpacity`.
+  `tableColorOpacity`, and one that is not finite or lies outside
+  [0, 1] throws an `ArgumentError` before anything runs. A recolour,
+  from the host or the Colour row, is reported on `designChanges` as a
+  `FloorPlanTableChanged` (`FloorPlanTableDetail`'s `==` now includes
+  `color`).
 - **A new table diagnostic,** `table.invalid_color`
   (`TableDiagnosticCodes.invalidColor`, on `editor.dart`): a table whose
   stored colour is of another shape, or names a hue this release does
@@ -60,9 +73,20 @@ selected table. The packages need Flutter 3.44 or later, as 0.5.1 did;
 - **`editor.dart`'s `exportBytes` and `exportPdfBytes`** gain an
   optional `tableColorOpacity` (default 0.35). A bare-shell host with
   its own `FloorPlanTheme` passes its value, or its export differs from
-  its canvas.
+  its canvas. An opacity that is not finite or lies outside [0, 1]
+  throws an `ArgumentError`.
 - **`jet_cad_2d_flutter`:** `exportPagePdf` and `exportPagePng` take an
-  optional `underlay` of `PageUnderlayFill`s drawn under the drawing.
+  optional `underlay` of `PageUnderlayFill`s (`PageUnderlayPolygon`,
+  whose constructor throws `ArgumentError` for an empty triangulation
+  or a short loop, and `PageUnderlayCircle`) drawn under the drawing;
+  `drawPageUnderlay` draws such a list through any `DrawSink`.
+- **`jet_cad_2d`:** `SetEntityStyleCommand` (its `.restore` form). The
+  parametric planner now restamps a matched generated child's colour
+  and transparency from its `Generated` when they differ (previously
+  written when the child was added, only), as it does its layer: a
+  client whose generated colour changes over an object's life sees the
+  change, and a colour set on a generated child by other means is
+  restored at the next regeneration.
 - **`jet_cad_floor_plan`'s `editor.dart`** (not the host barrel) exports
   `isTable(doc, handle)`.
 
