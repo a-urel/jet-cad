@@ -262,8 +262,9 @@ final class Generated {
   /// [flags] is the fill's; [boundaryFlags] is the boundary's and defaults
   /// to [flags] (spec 10 D13), so an invisible boundary around a drawn fill
   /// is `boundaryFlags: EntityFlags.invisible`. A region takes no linetype
-  /// or lineweight: its boundary is the fill's outline. All written on add
-  /// only.
+  /// or lineweight: its boundary is the fill's outline. [color] and
+  /// [transparency] are written on add and restamped on a match (plan
+  /// colours spec PC-3a); the rest is written on add only.
   Generated.region(this.payload,
       {this.color = const ByLayerColor(),
       this.transparency = kByLayer,
@@ -280,8 +281,9 @@ final class Generated {
   /// A TEXT whose string the planner owns (spec 10 D12): [payload] is a
   /// `textPayload`, [text] is written into the record on add and rewritten
   /// on a match (`SetEntityTextCommand`) whenever it differs. [textAttrs]
-  /// (`packTextAttrs`) is fixed at creation, like [color] and [flags]: a
-  /// type that must change a label's justification needs a new child.
+  /// (`packTextAttrs`) is fixed at creation, like [flags]: a type that must
+  /// change a label's justification needs a new child. [color] is written
+  /// on add and restamped on a match (plan colours spec PC-3a).
   Generated.text(this.payload, this.text,
       {this.color = const ByLayerColor(), this.textAttrs = 0, this.flags = 0})
       : kind = EntityKind.text,
@@ -298,7 +300,9 @@ final class Generated {
   /// True for a region: [payload] is the boundary of a generated fill.
   final bool filled;
 
-  /// The colour an added child's record gets (both records of a region).
+  /// The colour an added child's record gets (both records of a region),
+  /// and the one a matched child is restamped to when its stored colour
+  /// differs (plan colours spec PC-3a).
   final DraftColor color;
 
   /// A TEXT's string (spec 10 D12); `''` for every other form.
@@ -316,8 +320,9 @@ final class Generated {
   /// every other form, where it is not read.
   final int boundaryFlags;
 
-  /// The record's transparency, written on add only (both records of a
-  /// region); ByLayer for a TEXT.
+  /// The record's transparency (both records of a region); ByLayer for a
+  /// TEXT. Written on add and restamped on a match when the stored value
+  /// differs (plan colours spec PC-3a).
   final int transparency;
 
   /// The record's linetype handle, written on add only; ByLayer for a
