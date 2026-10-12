@@ -120,7 +120,10 @@ delegates in your `MaterialApp`:
   `Localizations.override` around the view alone is **not supported**:
   the Export dialog opens on the root navigator and would not see it.
 - Your own words: `FloorPlanStrings.of(context)` gives the planner's
-  language, and its `languageCode`.
+  language, and its `languageCode`. *Since 0.6.0*, a class that
+  implements or directly extends `FloorPlanStrings` must add `color`,
+  `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
+  subclass of a built-in language gets them.
 - `theme` and `darkTheme` carry the floor plan's look:
   [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
@@ -2022,5 +2025,8 @@ a desktop.
   together.** A schema 8 or 7 plan opens here unchanged; the service
   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
   plans and service layouts, so they can share them.
-  A plan saved by 0.6.0 is at **schema 10**, which 0.5.1 and every
-  older release refuse; a schema 9, 8 or 7 plan opens here unchanged.
+- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 is at
+  **schema 10**, which 0.5.1 and every older release refuse (`load`
+  throws a `FormatException` that says why); a schema 9, 8 or 7 plan
+  opens here unchanged. Every terminal that shares stored plans moves
+  together.

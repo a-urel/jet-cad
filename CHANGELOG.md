@@ -22,6 +22,11 @@ Plan colours, Slice 1 (of two; released together as 0.6.0).
 - **`FloorPlanEditorCapabilities.recolor`** (default true; false in
   `readOnly`) allows the Colour row; refused, it shows read only.
   `tablesOnly` keeps it on.
+- **Breaking for a host's own strings:** `FloorPlanStrings` gains the
+  abstract `color`, `colorNone`, `colorRefused` and
+  `colorName(FloorPlanColor)`; a class that implements or directly
+  extends `FloorPlanStrings` must add them (a subclass of a built-in
+  language inherits them).
 
 ## 0.5.1
 
