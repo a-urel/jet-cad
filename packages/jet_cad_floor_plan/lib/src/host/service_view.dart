@@ -295,6 +295,8 @@ class _ServiceViewState extends State<ServiceView> {
     groupStatuses: _c.groupStatuses,
     paper: _paper,
     theme: _theme,
+    // Plan colours spec PC-5: a table colour tones as a room's tint does.
+    darkCanvas: () => _darkCanvas,
     repaint: Listenable.merge([
       _c.cameraController,
       _c.tableStatuses,

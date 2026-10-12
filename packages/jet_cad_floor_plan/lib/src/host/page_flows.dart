@@ -14,6 +14,7 @@ import '../export/export_bytes.dart';
 import '../export/export_dialog.dart';
 import '../export/page_printer.dart';
 import 'floor_plan_controller.dart';
+import 'floor_plan_theme.dart' show kTableColorOpacity;
 import 'floor_plan_types.dart';
 
 /// What the flows read from the view at call time (review F-1): a host
@@ -38,6 +39,8 @@ PageFlowHooks _noHooks() => const (exportDialog: null, onError: null);
 bool _never() => false;
 
 bool _always() => true;
+
+double _defaultOpacity() => kTableColorOpacity;
 
 /// [choice] as the dialog and the bytes read it. Exhaustive, never by
 /// index: a reordered enum cannot swap two resolutions.
@@ -70,16 +73,20 @@ FloorPlanExportChoice fromExportChoice(ExportChoice choice) =>
 /// Export's one body: [document] (the controller's active plan when null)
 /// as [choice] says, named [name]; null when it has no page, when the plan
 /// shown is no longer it, before or after the bytes, or when [cancelled]
-/// says so after them.
+/// says so after them. The coloured tables are filled under the drawing at
+/// [tableColorOpacity] (plan colours spec PC-7).
 Future<FloorPlanExport?> exportOnce(
     FloorPlanController controller, ExportChoice choice, String name,
-    {DraftDocument? document, bool Function() cancelled = _never}) async {
+    {DraftDocument? document,
+    bool Function() cancelled = _never,
+    double tableColorOpacity = kTableColorOpacity}) async {
   final d = document ?? controller.activeDocument;
   if (!identical(d, controller.activeDocument)) return null;
   final page = exportPageOf(d);
   if (page == null) return null;
   final bytes = await exportBytes(d, page, choice,
-      fontBytes: () => controller.exportFont.bytes);
+      fontBytes: () => controller.exportFont.bytes,
+      tableColorOpacity: tableColorOpacity);
   if (cancelled() || !identical(d, controller.activeDocument)) return null;
   final pdf = choice.format == ExportFormat.pdf;
   return FloorPlanExport(
@@ -92,16 +99,19 @@ Future<FloorPlanExport?> exportOnce(
 /// Print's one body: the active plan's page as a PDF to [printer], named
 /// [name]. False when it has no page, when the plan shown changed while
 /// the bytes were made, or when [cancelled] says so after them; true once
-/// the printer is done with it.
+/// the printer is done with it. The coloured tables are filled under the
+/// drawing at [tableColorOpacity] (plan colours spec PC-7).
 Future<bool> printOnce(
     FloorPlanController controller, PagePrinter printer, String name,
-    {bool Function() cancelled = _never}) async {
+    {bool Function() cancelled = _never,
+    double tableColorOpacity = kTableColorOpacity}) async {
   final document = controller.activeDocument;
   final page = exportPageOf(document);
   if (page == null) return false;
   final font = await controller.exportFont.bytes;
   if (!identical(document, controller.activeDocument)) return false;
-  final bytes = await exportPdfBytes(document, page, fontBytes: font);
+  final bytes = await exportPdfBytes(document, page,
+      fontBytes: font, tableColorOpacity: tableColorOpacity);
   if (cancelled() || !identical(document, controller.activeDocument)) {
     return false;
   }
@@ -120,6 +130,7 @@ class PageFlows {
     this.hooks = _noHooks,
     this.exportAllowed = _always,
     this.printAllowed = _always,
+    this.tableColorOpacity = _defaultOpacity,
     ValueNotifier<bool>? ready,
   })  : _ready = ready ?? ValueNotifier(true),
         _ownsReady = ready == null;
@@ -140,6 +151,11 @@ class PageFlows {
   /// remembered.
   final bool Function() exportAllowed;
   final bool Function() printAllowed;
+
+  /// The opacity the coloured tables are filled at in what the flows make
+  /// (plan colours spec PC-6, PC-7): the view's theme as it is at the call,
+  /// else the default.
+  final double Function() tableColorOpacity;
 
   final ValueNotifier<bool> _ready;
   final bool _ownsReady;
@@ -173,14 +189,17 @@ class PageFlows {
         controller.exportChoice = choice;
         final export = await exportOnce(
             controller, choice, settings().exportName,
-            document: document, cancelled: () => _disposed || !exportAllowed());
+            document: document,
+            cancelled: () => _disposed || !exportAllowed(),
+            tableColorOpacity: tableColorOpacity());
         if (export != null) sink(export);
       });
 
   Future<void> print(BuildContext context) => _run(context, () async {
         final s = settings();
         await printOnce(controller, s.printer, s.exportName,
-            cancelled: () => _disposed || !printAllowed());
+            cancelled: () => _disposed || !printAllowed(),
+            tableColorOpacity: tableColorOpacity());
       });
 
   Future<void> _run(BuildContext context, Future<void> Function() flow) async {

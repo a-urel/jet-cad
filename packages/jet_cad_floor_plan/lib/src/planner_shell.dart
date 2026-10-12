@@ -17,6 +17,7 @@ import 'document_toolbar.dart';
 import 'host/bars.dart';
 import 'host/editor_capabilities.dart';
 import 'host/floor_plan_theme.dart';
+import 'host/floor_plan_types.dart' show TableGroup, TableStatus;
 import 'layers/layer_panel.dart';
 import 'new_document.dart';
 import 'page_panel.dart';
@@ -34,6 +35,7 @@ import 'parametric/wall_tool.dart';
 import 'planner_view.dart';
 import 'selection_panel.dart';
 import 'service/table_picker.dart';
+import 'service/table_status_painter.dart';
 import 'shell_commands.dart';
 import 'shortcut_guard.dart';
 import 'startup_plan.dart' show kMaxScale, kMinScale;
@@ -352,6 +354,9 @@ class _PlannerShellState extends State<PlannerShell> {
   /// keeps the palette, and one that changes it (White to Blueprint) flips
   /// both.
   void _onPage() {
+    // The fills' paper on every page change: one that keeps the resolver's
+    // key still changes the paper (PC-5).
+    _fillPaper.value = _paperArgb();
     final next = _nextResolver();
     if (next == null) return;
     setState(() => _resolver = next);
@@ -372,6 +377,8 @@ class _PlannerShellState extends State<PlannerShell> {
     // A `build` follows, so no setState: a theme switch can change the
     // key, and only a change builds a new resolver.
     if (_nextResolver() case final next?) _resolver = next;
+    _fillTheme.value = _floorTheme;
+    _fillPaper.value = _paperArgb();
   }
 
   late final CameraController _camera = widget.camera ??
@@ -734,6 +741,29 @@ class _PlannerShellState extends State<PlannerShell> {
   /// C-6). The dispatcher's stream is asynchronous, so it never notifies
   /// while a frame builds.
   final _Changed _documentChanged = _Changed();
+
+  // Plan colours spec PC-5: the table colour fills, under the drafting, in
+  // the design mode: no statuses and no groups; they repaint on the camera,
+  // every document change, the paper and the theme.
+  final ValueNotifier<int> _fillPaper = ValueNotifier<int>(0xFFFFFFFF);
+  final ValueNotifier<FloorPlanTheme?> _fillTheme =
+      ValueNotifier<FloorPlanTheme?>(null);
+  static final ValueNotifier<Map<String, TableStatus>> _noStatuses =
+      ValueNotifier(const <String, TableStatus>{});
+  static final ValueNotifier<Map<String, TableGroup>> _noGroups =
+      ValueNotifier(const <String, TableGroup>{});
+  late final TableStatusPainter _fillPainter = TableStatusPainter(
+    document: _document,
+    camera: _camera,
+    statuses: _noStatuses,
+    tableGroups: _noGroups,
+    groupStatuses: _noStatuses,
+    paper: _fillPaper,
+    theme: _fillTheme,
+    darkCanvas: () => _darkCanvas,
+    repaint:
+        Listenable.merge([_camera, _documentChanged, _fillPaper, _fillTheme]),
+  );
 
   /// The file commands, each enabled only while the host's own condition
   /// holds and the shell is idle; Export and Print also only while the
@@ -1131,6 +1161,9 @@ class _PlannerShellState extends State<PlannerShell> {
     _releaseTools?.call();
     _releaseDelete?.call();
     _documentChanged.dispose();
+    // The static empty maps never change and are never disposed.
+    _fillPaper.dispose();
+    _fillTheme.dispose();
     _toolSnap.dispose();
     _ownMeasurer?.clear();
     super.dispose();
@@ -1480,6 +1513,15 @@ class _PlannerShellState extends State<PlannerShell> {
                         selectionStrokePixels: _floorTheme?.selectionWidth ??
                             kSelectionStrokePixels,
                         sheetArgb: _darkCanvas ? _paperArgb() : null,
+                        // Plan colours spec PC-5: the table colours, under
+                        // the drafting and the selection.
+                        underlay: RepaintBoundary(
+                          child: CustomPaint(
+                            key: const Key('table-colour-layer'),
+                            painter: _fillPainter,
+                            size: Size.infinite,
+                          ),
+                        ),
                         grips: _grips,
                         textTool: _text,
                         fitRequests: widget.fitRequests,

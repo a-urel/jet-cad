@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show Offset, Size;
 import 'package:jet_cad_2d/jet_cad_2d.dart' show Aabb2, Transform2;
 
+import '../colors/plan_color.dart';
 import 'floor_plan_types.dart';
 
 /// One table of the active plan with its geometry (spec G-1), as
@@ -32,6 +33,7 @@ final class FloorPlanTableDetail {
     required this.layer,
     required this.locked,
     this.data = const <String, String>{},
+    this.color,
   });
 
   /// The table as [FloorPlanTable] carries it: number, seats, symbol,
@@ -80,6 +82,12 @@ final class FloorPlanTableDetail {
   /// outside the limits (a hand-edited file: kept as read, never refused).
   final Map<String, String> data;
 
+  /// The table's colour (plan colours spec PC-4), as `setTableColor` stored
+  /// it with the plan. Null for a table with none, and for one whose stored
+  /// colour this release cannot read (a hand-edited file or a later
+  /// release's hue: kept as read, never refused).
+  final FloorPlanColor? color;
+
   @override
   bool operator ==(Object other) =>
       other is FloorPlanTableDetail &&
@@ -91,7 +99,8 @@ final class FloorPlanTableDetail {
       listEquals(other.corners, corners) &&
       other.layer == layer &&
       other.locked == locked &&
-      mapEquals(other.data, data);
+      mapEquals(other.data, data) &&
+      other.color == color;
 
   @override
   int get hashCode => Object.hash(
@@ -104,12 +113,14 @@ final class FloorPlanTableDetail {
       layer,
       locked,
       Object.hashAllUnordered(
-          [for (final e in data.entries) Object.hash(e.key, e.value)]));
+          [for (final e in data.entries) Object.hash(e.key, e.value)]),
+      color);
 
   @override
   String toString() => 'FloorPlanTableDetail($table, center: $center, '
       'size: $size, rotation: $rotation, mirrored: $mirrored, '
-      'corners: $corners, layer: $layer, locked: $locked, data: $data)';
+      'corners: $corners, layer: $layer, locked: $locked, data: $data'
+      '${color == null ? '' : ', color: $color'})';
 }
 
 /// The detail of [table], placed by [transform] (definition space to world)
@@ -117,7 +128,7 @@ final class FloorPlanTableDetail {
 /// [corners] (`x0, y0, ..., x3, y3`: the box's (min, min), (max, min),
 /// (max, max) and (min, max) through [transform], every one finite), as
 /// `TableCandidate` carries them (spec F-8), carrying the host's [data]
-/// (spec E-6).
+/// (spec E-6) and its [color] (plan colours spec PC-4).
 FloorPlanTableDetail tableDetailOf(
     {required FloorPlanTable table,
     required Transform2 transform,
@@ -125,7 +136,8 @@ FloorPlanTableDetail tableDetailOf(
     required Float64List corners,
     required String layer,
     required bool locked,
-    Map<String, String> data = const <String, String>{}}) {
+    Map<String, String> data = const <String, String>{},
+    FloorPlanColor? color}) {
   final m = transform;
   var rotation = math.atan2(m.b, m.a);
   if (rotation <= -math.pi) rotation += 2 * math.pi;
@@ -150,17 +162,19 @@ FloorPlanTableDetail tableDetailOf(
     layer: layer,
     locked: locked,
     data: data,
+    color: color,
   );
 }
 
 /// The detail of a table that reports no geometry (spec G-1): on a hidden
-/// layer, or no candidate of the picker. It carries the host's [data]
-/// all the same (spec E-6).
+/// layer, or no candidate of the picker. It carries the host's [data] and
+/// its [color] all the same (spec E-6, PC-4).
 FloorPlanTableDetail tableDetailWithoutGeometry(
         {required FloorPlanTable table,
         required String layer,
         required bool locked,
-        Map<String, String> data = const <String, String>{}}) =>
+        Map<String, String> data = const <String, String>{},
+        FloorPlanColor? color}) =>
     FloorPlanTableDetail(
         table: table,
         center: null,
@@ -170,4 +184,5 @@ FloorPlanTableDetail tableDetailWithoutGeometry(
         corners: const <Offset>[],
         layer: layer,
         locked: locked,
-        data: data);
+        data: data,
+        color: color);

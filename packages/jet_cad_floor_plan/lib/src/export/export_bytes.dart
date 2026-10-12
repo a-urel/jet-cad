@@ -9,6 +9,8 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 
+import '../colors/table_color_underlay.dart';
+import '../host/floor_plan_theme.dart' show kTableColorOpacity;
 import '../parametric/live_objects.dart';
 import '../parametric/separator.dart';
 import 'export_dialog.dart';
@@ -28,34 +30,40 @@ Set<Handle> exportOmitOwners(DraftDocument document) =>
 
 /// [page] of [document] as [choice] says: a vector PDF with [fontBytes]'
 /// font embedded (read only for a PDF), or a PNG at the chosen dpi; the
-/// separators omitted either way.
+/// separators omitted either way, and the coloured tables filled under the
+/// drawing at [tableColorOpacity] (plan colours spec PC-7).
 Future<Uint8List> exportBytes(
   DraftDocument document,
   PageComponent page,
   ExportChoice choice, {
   required Future<Uint8List> Function() fontBytes,
+  double tableColorOpacity = kTableColorOpacity,
 }) async {
   return switch (choice.format) {
-    ExportFormat.pdf =>
-      exportPdfBytes(document, page, fontBytes: await fontBytes()),
+    ExportFormat.pdf => exportPdfBytes(document, page,
+        fontBytes: await fontBytes(), tableColorOpacity: tableColorOpacity),
     ExportFormat.png => exportPagePng(
         document: document,
         page: page,
         dpi: choice.dpi,
-        omitOwners: exportOmitOwners(document)),
+        omitOwners: exportOmitOwners(document),
+        underlay: tableColorUnderlay(document, tableColorOpacity)),
   };
 }
 
 /// [page] of [document] as a vector PDF with [fontBytes]' font embedded,
-/// the separators omitted: what Export → PDF writes and what Print hands
-/// to the printer (spec 13 D8, D9).
+/// the separators omitted, the coloured tables filled under the drawing at
+/// [tableColorOpacity] (plan colours spec PC-7): what Export → PDF writes
+/// and what Print hands to the printer (spec 13 D8, D9).
 Future<Uint8List> exportPdfBytes(DraftDocument document, PageComponent page,
-        {required Uint8List fontBytes}) =>
+        {required Uint8List fontBytes,
+        double tableColorOpacity = kTableColorOpacity}) =>
     exportPagePdf(
         document: document,
         page: page,
         fontBytes: fontBytes,
-        omitOwners: exportOmitOwners(document));
+        omitOwners: exportOmitOwners(document),
+        underlay: tableColorUnderlay(document, tableColorOpacity));
 
 /// [page]'s paper in pt, as laid out (orientation applied): the size the
 /// print dialog opens on (spec 13 D9; without it the dialog opens on

@@ -1,8 +1,10 @@
 // The status layer (spec 14c S6, S7, R-3, R-4, R-14): each statused table's
 // top filled in its status colour, under the drafting, with an optional
 // caption. A group's status (table-groups spec G3) fills every visible
-// member over its own status, with one caption, under the lead. Not
-// document state.
+// member over its own status, with one caption, under the lead. A table
+// with neither is filled in its colour, when the plan gives it one (plan
+// colours spec PC-5), with no caption. The statuses are not document state;
+// the colours are.
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -11,13 +13,14 @@ import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
-import '../host/floor_plan_theme.dart' show FloorPlanTheme;
+import '../host/floor_plan_theme.dart' show FloorPlanTheme, kTableColorOpacity;
 import '../host/floor_plan_types.dart';
+import '../tables/table_color_component.dart';
 import '../tables/table_index.dart';
 import 'table_groups.dart';
 import 'table_picker.dart';
 
-/// One statused table, prebuilt at status-change or plan-change rate (R-3):
+/// One filled table, prebuilt at status-change or plan-change rate (R-3):
 /// the frame reads it and creates nothing.
 final class _Fill {
   _Fill(this.instance, this.path, this.paint, this.caption, this.lx, this.ly,
@@ -78,16 +81,30 @@ Color statusCaptionInk(Color colour, int paper) =>
 TextStyle paintedTextStyle(TextStyle style, Color ink) => style.copyWith(
     color: style.color ?? ink, fontSize: style.fontSize ?? kStatusCaptionSize);
 
-/// Paints the statuses of [document]'s tables through [camera] (S7).
+/// Paints the statuses and colours of [document]'s tables through [camera]
+/// (S7; plan colours spec PC-5).
 ///
-/// Each visible table's effective status is its group's (table-groups spec
-/// G3: [groupStatuses], through [tableGroups]) when the group has one, else
-/// its own [statuses] entry. A group status's caption is drawn once, under
+/// Each visible table's fill is the first of a chain: its group's status
+/// (table-groups spec G3: [groupStatuses], through [tableGroups]) when the
+/// group has one, else its own [statuses] entry, else its colour (the
+/// plan's `jetcad.table_color`, PC-4), so a status covers a colour. The
+/// status rungs key by the table's number; the colour rung needs none, so
+/// an unnumbered table is filled in its colour. A table on a locked layer is
+/// filled; one on a hidden layer is not; a colour name this release does
+/// not know fills nothing. A group status's caption is drawn once, under
 /// the lead: the visible member with a top that [inLeadOrder] puts first
-/// (a file duplicate ties to the lower handle).
+/// (a file duplicate ties to the lower handle). A colour has no caption.
 ///
-/// The fills are rebuilt when the statuses, the groups or the plan's state
-/// move; each
+/// A colour's fill is its hue — re-toned through `darkCanvasTone` when
+/// [darkCanvas] says the canvas re-tones, as a room's tint is — at alpha
+/// `round(255 * o)`, `o` the theme's `tableColorOpacity`, else
+/// [kTableColorOpacity] (PC-6), applied once at rebuild.
+///
+/// The design mode mounts this painter too, with no statuses and no groups
+/// (PC-5): only the colours draw there.
+///
+/// The fills are rebuilt when the statuses, the groups, the plan's state,
+/// the paper or the theme move; each
 /// frame is an indexed loop over them that passes the same [Path], [Paint]
 /// and [ui.Paragraph] objects and one reused matrix buffer to the canvas
 /// (the allocation bar, measured structurally by its test). The matrix is
@@ -112,6 +129,7 @@ class TableStatusPainter extends CustomPainter {
     required this.groupStatuses,
     required this.paper,
     this.theme,
+    this.darkCanvas,
     required Listenable repaint,
   }) : super(repaint: repaint);
 
@@ -133,6 +151,12 @@ class TableStatusPainter extends CustomPainter {
   /// change repaints, and the rebuild then builds what it changed.
   final ValueListenable<FloorPlanTheme?>? theme;
 
+  /// Whether the canvas re-tones its colours (dark canvas K3): a table
+  /// colour's hue is drawn through `darkCanvasTone` then, as a room's tint
+  /// is; null: never. Read at rebuild. The canvas re-tones only on its dark
+  /// paper, so a flip of it always moves [paper] too, which rebuilds.
+  final bool Function()? darkCanvas;
+
   List<_Fill> _fills = const [];
   int? _state;
   int? _tablesRevision;
@@ -149,7 +173,8 @@ class TableStatusPainter extends CustomPainter {
   final Map<Handle, Path?> _paths = {};
 
   /// Keyed by the drawn colour's ARGB (the status colour, its alpha
-  /// multiplied by the theme's `statusFillOpacity`).
+  /// multiplied by the theme's `statusFillOpacity`; or the table colour at
+  /// the theme's `tableColorOpacity`).
   final Map<int, Paint> _paints = {};
 
   /// Keyed by (caption, drawn colour, ink, the theme's caption style): a
@@ -181,78 +206,91 @@ class TableStatusPainter extends CustomPainter {
     final style = look?.statusCaptionStyle;
     _captionSize = style?.fontSize ?? kStatusCaptionSize;
     final fills = <_Fill>[];
-    // With neither map set nothing can fill: no survey.
-    if (map.isNotEmpty || groupMap.isNotEmpty) {
-      final survey = TableSurvey.of(document);
-      final groupOf = groupMap.isEmpty
-          ? const <String, String>{}
-          : groupIdsByNumber(tableGroups.value);
-      // Each visible table with a top and an effective status, in draw
-      // order (the survey is ascending by handle), and per statused group
-      // its members that may lead.
-      final statused = <(TableInfo, Path, TableStatus, String?)>[];
-      final candidates = <String, List<GroupTable>>{};
-      for (final t in survey.tables) {
-        final number = t.number;
-        if (number == null) continue;
-        final id = groupOf[number];
-        final groupStatus = id == null ? null : groupMap[id];
-        final status = groupStatus ?? map[number];
-        if (status == null) continue;
-        final node = document.tree[t.instance];
-        if (node is! InstanceNode) continue;
-        final layer = document.tables.layers[node.layer];
-        if (layer != null && !layer.visible) continue;
-        final path = _paths.putIfAbsent(t.definition, () => _pathOf(t));
-        if (path == null) continue;
-        statused.add((t, path, status, groupStatus == null ? null : id));
-        if (groupStatus != null) {
-          (candidates[id!] ??= []).add(GroupTable(
-              handle: t.instance,
-              number: number,
-              visible: true,
-              locked: false));
-        }
-      }
-      // The lead of each statused group: its caption's one place.
-      final leads = <Handle>{
-        for (final list in candidates.values) inLeadOrder(list).first.handle,
-      };
-      for (final (t, path, status, id) in statused) {
-        final bounds = path.getBounds();
+    // The survey always runs: the colours live in the document (PC-5).
+    final survey = TableSurvey.of(document);
+    final groupOf = groupMap.isEmpty
+        ? const <String, String>{}
+        : groupIdsByNumber(tableGroups.value);
+    final tone = darkCanvas?.call() ?? false;
+    final colourAlpha =
+        (255 * (look?.tableColorOpacity ?? kTableColorOpacity)).round();
+    // Each visible table with a top and a fill, in draw order (the survey
+    // is ascending by handle): its drawn colour, and its status when the
+    // fill is one (a status's group id when it is the group's); per
+    // statused group its members that may lead.
+    final filled = <(TableInfo, Path, Color, TableStatus?, String?)>[];
+    final candidates = <String, List<GroupTable>>{};
+    for (final t in survey.tables) {
+      // The status rungs key by number; the colour rung needs none.
+      final number = t.number;
+      final id = number == null ? null : groupOf[number];
+      final groupStatus = id == null ? null : groupMap[id];
+      final status = number == null ? null : (groupStatus ?? map[number]);
+      final colour = status == null
+          ? document.components.get<FloorPlanTableColor>(t.instance)?.colorValue
+          : null;
+      if (status == null && colour == null) continue;
+      final node = document.tree[t.instance];
+      if (node is! InstanceNode) continue;
+      final layer = document.tables.layers[node.layer];
+      if (layer != null && !layer.visible) continue;
+      final path = _paths.putIfAbsent(t.definition, () => _pathOf(t));
+      if (path == null) continue;
+      final Color drawn;
+      if (status != null) {
         // The theme's opacity multiplies the host colour's alpha, once.
-        final drawn = opacity == null
+        drawn = opacity == null
             ? status.color
             : status.color.withValues(alpha: status.color.a * opacity);
-        final colour = drawn.toARGB32();
-        final paint = _paints.putIfAbsent(colour, () {
-          debugAllocations++;
-          return Paint()
-            ..style = PaintingStyle.fill
-            ..color = drawn;
-        });
-        final caption = status.caption;
-        final captioned = caption != null &&
-            caption.isNotEmpty &&
-            (id == null || leads.contains(t.instance));
-        final label = _labelOf(t.label);
-        fills.add(_Fill(
-          t.instance,
-          path,
-          paint,
-          captioned
-              ? _captionOf(caption, colour,
-                  style?.color ?? statusCaptionInk(drawn, paperArgb), style)
-              : null,
-          label?.x ?? bounds.center.dx,
-          label?.y ?? bounds.center.dy,
-          label?.half ?? 0,
-          math.min(bounds.width, bounds.height),
-        ));
+      } else {
+        // A colour: its hue, toned on the dark canvas as a room's tint is,
+        // at the theme's opacity, once (PC-5, PC-6).
+        final rgb = tone
+            ? darkCanvasTone(colour!.rgb, paperArgb & 0xFFFFFF)
+            : colour!.rgb;
+        drawn = Color((colourAlpha << 24) | rgb);
       }
-      // Draw order (ascending handle), whatever the map's order.
-      fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
+      filled.add((t, path, drawn, status, groupStatus == null ? null : id));
+      if (groupStatus != null) {
+        (candidates[id!] ??= []).add(GroupTable(
+            handle: t.instance, number: number!, visible: true, locked: false));
+      }
     }
+    // The lead of each statused group: its caption's one place.
+    final leads = <Handle>{
+      for (final list in candidates.values) inLeadOrder(list).first.handle,
+    };
+    for (final (t, path, drawn, status, id) in filled) {
+      final bounds = path.getBounds();
+      final argb = drawn.toARGB32();
+      final paint = _paints.putIfAbsent(argb, () {
+        debugAllocations++;
+        return Paint()
+          ..style = PaintingStyle.fill
+          ..color = drawn;
+      });
+      // Captions for a status only; a colour carries none.
+      final caption = status?.caption;
+      final captioned = caption != null &&
+          caption.isNotEmpty &&
+          (id == null || leads.contains(t.instance));
+      final label = _labelOf(t.label);
+      fills.add(_Fill(
+        t.instance,
+        path,
+        paint,
+        captioned
+            ? _captionOf(caption, argb,
+                style?.color ?? statusCaptionInk(drawn, paperArgb), style)
+            : null,
+        label?.x ?? bounds.center.dx,
+        label?.y ?? bounds.center.dy,
+        label?.half ?? 0,
+        math.min(bounds.width, bounds.height),
+      ));
+    }
+    // Draw order (ascending handle), whatever the map's order.
+    fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
     _fills = fills;
     // Paints and captions no fill holds are dropped (review F-8): a host
     // whose captions change ("12 min", "13 min") does not grow the caches.

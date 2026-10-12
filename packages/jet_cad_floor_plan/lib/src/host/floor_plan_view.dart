@@ -516,8 +516,23 @@ class _FloorPlanViewState extends State<FloorPlanView> {
             c.mode.value != FloorPlanMode.design || _editorCapabilities.export,
         printAllowed: () =>
             c.mode.value != FloorPlanMode.design || _editorCapabilities.print,
+        // Plan colours spec PC-6, PC-7: the theme as the scope resolves it
+        // (`FloorPlanThemeScope.build`), read at the call; a view gone
+        // meanwhile has no context to read, and reads its own theme.
+        tableColorOpacity: _tableColorOpacity,
         ready: c.pageFlowReady,
       );
+
+  /// The opacity an export or a print fills the coloured tables at: the
+  /// ambient theme's extension with the view's `theme` over it, else the
+  /// view's, else the default (the scope's own resolution).
+  double _tableColorOpacity() {
+    final theme = mounted
+        ? (Theme.of(context).extension<FloorPlanTheme>()?.merge(widget.theme) ??
+            widget.theme)
+        : widget.theme;
+    return theme?.tableColorOpacity ?? kTableColorOpacity;
+  }
 
   /// Reports this view's language to the controller (spec Q0 N1): it
   /// settles an empty plan nothing has touched, and a new plan takes it.

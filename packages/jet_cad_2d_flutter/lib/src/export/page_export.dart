@@ -9,6 +9,7 @@ import '../canvas_draw_sink.dart';
 import '../draft_painter.dart';
 import '../flutter_text_measurer.dart';
 import 'page_camera.dart';
+import 'page_underlay.dart';
 import 'pdf_draw_sink.dart';
 
 /// Points per paper millimetre: a PDF's user unit is 1/72 inch.
@@ -24,6 +25,8 @@ const double _pointsPerMm = 72 / 25.4;
 /// - Level of detail is off (`minTextCapPixels: 0`): a small label is part
 ///   of the deliverable.
 /// - A leaf whose direct owner is in [omitOwners] is not drawn (spec D6).
+/// - [underlay] is drawn after the ground and before the document (plan
+///   colours spec PC-7); empty, the bytes are today's.
 /// - Every text is drawn in [fontBytes], one embedded TrueType font, its run
 ///   stretched to the advance `document.textMeasurer` laid its box out with.
 ///
@@ -36,6 +39,7 @@ Future<Uint8List> exportPagePdf({
   required PageComponent page,
   required Uint8List fontBytes,
   Set<Handle> omitOwners = const {},
+  List<PageUnderlayFill> underlay = const [],
   @visibleForTesting bool compress = true,
 }) async {
   final camera = pageCamera(page, _pointsPerMm);
@@ -55,6 +59,9 @@ Future<Uint8List> exportPagePdf({
       measurer: document.textMeasurer,
       textStyleOf: document.textStyleOf,
     );
+    if (underlay.isNotEmpty) {
+      drawPageUnderlay(sink, camera.camera, underlay);
+    }
     DraftPainter(
       document: document,
       index: index,
@@ -94,6 +101,8 @@ enum ExportDpi {
 ///   paragraphs, cleared before this returns. The painter lays every text
 ///   box out with `document.textMeasurer`, as on the screen.
 /// - A leaf whose direct owner is in [omitOwners] is not drawn (spec D6).
+/// - [underlay] is drawn after the ground and before the document (plan
+///   colours spec PC-7); empty, the bytes are today's.
 /// - The PNG carries exactly one `pHYs` chunk, right after `IHDR`: pixels
 ///   per metre `round(dpi / 0.0254)` on both axes, unit metre.
 ///
@@ -106,6 +115,7 @@ Future<Uint8List> exportPagePng({
   required PageComponent page,
   ExportDpi dpi = ExportDpi.d150,
   Set<Handle> omitOwners = const {},
+  List<PageUnderlayFill> underlay = const [],
 }) async {
   final dotsPerInch = dpi.value;
   final camera = pageCamera(page, dotsPerInch / 25.4);
@@ -126,6 +136,9 @@ Future<Uint8List> exportPagePng({
           measurer: measurer,
           textStyleOf: document.textStyleOf,
         );
+        if (underlay.isNotEmpty) {
+          drawPageUnderlay(sink, camera.camera, underlay);
+        }
         DraftPainter(
           document: document,
           index: index,

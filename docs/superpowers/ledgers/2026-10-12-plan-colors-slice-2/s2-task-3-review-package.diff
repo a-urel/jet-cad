@@ -1,0 +1,1857 @@
+9cb886bf feat(floor-plan): a table's colour drawn under its drafting in both modes
+ .../lib/src/host/floor_plan_theme.dart             |  18 +
+ .../lib/src/host/service_view.dart                 |   2 +
+ .../jet_cad_floor_plan/lib/src/planner_shell.dart  |  42 ++
+ .../lib/src/service/table_status_painter.dart      | 196 +++--
+ .../test/host/floor_plan_theme_test.dart           |  25 +-
+ .../test/service/table_fill_test.dart              | 795 +++++++++++++++++++++
+ 6 files changed, 993 insertions(+), 85 deletions(-)
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
+index 4663adaa..11dc736f 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
+@@ -2,36 +2,41 @@
+ // T-2): a `ThemeExtension` a host puts in its `ThemeData`, overridden field
+ // by field by `FloorPlanView.theme`, resolved once below the view and read
+ // by both modes when their painters rebuild (T-3), never per frame.
+ import 'dart:math' as math;
+ import 'dart:ui' show lerpDouble;
+ 
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PaperPalette;
+ 
++/// A table colour fill's alpha when the theme leaves
++/// [FloorPlanTheme.tableColorOpacity] null (plan colours spec PC-6).
++const double kTableColorOpacity = 0.35;
++
+ /// The planner's look (host embedding API spec T-1): the colours, widths
+ /// and styles a host may set. Every field is optional, and null is
+ /// today's value, so `const FloorPlanTheme()` draws exactly what a view
+ /// with no theme draws.
+ ///
+ /// A host puts one in each of its `ThemeData`s, a light and a dark
+ /// (`ThemeData(extensions: [FloorPlanTheme(...)])`), and may override it
+ /// for one view with `FloorPlanView(theme: ...)`, field by field ([merge]).
+ /// The constructor never throws; the view refuses a resolved theme out of
+ /// range when it builds (an [ArgumentError] naming the field). The theme is
+ /// never saved, exported or printed.
+ @immutable
+ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   const FloorPlanTheme({
+     this.statusCaptionStyle,
+     this.statusFillOpacity,
++    this.tableColorOpacity,
+     this.groupFrameColor,
+     this.groupFrameWidth,
+     this.groupFrameMargin,
+     this.groupChipColor,
+     this.groupChipTextStyle,
+     this.groupChipRadius,
+     this.groupChipPadding,
+     this.selectionOnLight,
+     this.selectionOnDark,
+     this.selectionWidth,
+@@ -45,20 +50,24 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   /// null `color` the automatic black or white ink over the drawn fill, a
+   /// null `fontSize` 11 logical pixels, a null `fontFamily` the platform's
+   /// default font. A family is drawn only when the host has loaded it.
+   /// `fontSize`, when set, is finite and above 0. Null: today's caption.
+   final TextStyle? statusCaptionStyle;
+ 
+   /// The selection mode's status fills: multiplies the host colour's alpha,
+   /// once, in [0, 1]. Null: the colour as the host gave it.
+   final double? statusFillOpacity;
+ 
++  /// Both modes' table colour fills (plan colours spec PC-6): the hue's
++  /// alpha, in [0, 1]. Null: 0.35.
++  final double? tableColorOpacity;
++
+   /// The selection mode's group frames. Null: the paper's grip colour.
+   final Color? groupFrameColor;
+ 
+   /// The group frames' stroke, in screen logical pixels, finite and above 0.
+   /// Null: 2.
+   final double? groupFrameWidth;
+ 
+   /// How far a group frame stands off its members, in world millimetres,
+   /// finite and not negative. Null: 150.
+   final double? groupFrameMargin;
+@@ -110,38 +119,40 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   /// 44.
+   final double? serviceBarHeight;
+ 
+   /// A copy with the given fields replaced; a null argument keeps the
+   /// field (Flutter's convention: [merge] a theme to set fields, there is
+   /// no way back to null here).
+   @override
+   FloorPlanTheme copyWith({
+     TextStyle? statusCaptionStyle,
+     double? statusFillOpacity,
++    double? tableColorOpacity,
+     Color? groupFrameColor,
+     double? groupFrameWidth,
+     double? groupFrameMargin,
+     Color? groupChipColor,
+     TextStyle? groupChipTextStyle,
+     double? groupChipRadius,
+     EdgeInsets? groupChipPadding,
+     Color? selectionOnLight,
+     Color? selectionOnDark,
+     double? selectionWidth,
+     Color? focusVeilColor,
+     double? focusVeilOpacity,
+     Color? canvasBackground,
+     double? serviceBarHeight,
+   }) =>
+       FloorPlanTheme(
+         statusCaptionStyle: statusCaptionStyle ?? this.statusCaptionStyle,
+         statusFillOpacity: statusFillOpacity ?? this.statusFillOpacity,
++        tableColorOpacity: tableColorOpacity ?? this.tableColorOpacity,
+         groupFrameColor: groupFrameColor ?? this.groupFrameColor,
+         groupFrameWidth: groupFrameWidth ?? this.groupFrameWidth,
+         groupFrameMargin: groupFrameMargin ?? this.groupFrameMargin,
+         groupChipColor: groupChipColor ?? this.groupChipColor,
+         groupChipTextStyle: groupChipTextStyle ?? this.groupChipTextStyle,
+         groupChipRadius: groupChipRadius ?? this.groupChipRadius,
+         groupChipPadding: groupChipPadding ?? this.groupChipPadding,
+         selectionOnLight: selectionOnLight ?? this.selectionOnLight,
+         selectionOnDark: selectionOnDark ?? this.selectionOnDark,
+         selectionWidth: selectionWidth ?? this.selectionWidth,
+@@ -155,20 +166,21 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   /// T-2): a field [other] leaves null keeps this theme's. The two text
+   /// styles merge property by property ([TextStyle.merge]), so an
+   /// [other] that sets only a weight keeps this theme's size. A null
+   /// [other] returns this theme itself.
+   FloorPlanTheme merge(FloorPlanTheme? other) {
+     if (other == null) return this;
+     return FloorPlanTheme(
+       statusCaptionStyle:
+           _mergeStyle(statusCaptionStyle, other.statusCaptionStyle),
+       statusFillOpacity: other.statusFillOpacity ?? statusFillOpacity,
++      tableColorOpacity: other.tableColorOpacity ?? tableColorOpacity,
+       groupFrameColor: other.groupFrameColor ?? groupFrameColor,
+       groupFrameWidth: other.groupFrameWidth ?? groupFrameWidth,
+       groupFrameMargin: other.groupFrameMargin ?? groupFrameMargin,
+       groupChipColor: other.groupChipColor ?? groupChipColor,
+       groupChipTextStyle:
+           _mergeStyle(groupChipTextStyle, other.groupChipTextStyle),
+       groupChipRadius: other.groupChipRadius ?? groupChipRadius,
+       groupChipPadding: other.groupChipPadding ?? groupChipPadding,
+       selectionOnLight: other.selectionOnLight ?? selectionOnLight,
+       selectionOnDark: other.selectionOnDark ?? selectionOnDark,
+@@ -203,20 +215,22 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   /// theme itself.
+   @override
+   FloorPlanTheme lerp(
+       covariant ThemeExtension<FloorPlanTheme>? other, double t) {
+     if (other is! FloorPlanTheme || this == other) return this;
+     return FloorPlanTheme(
+       statusCaptionStyle:
+           _lerp(statusCaptionStyle, other.statusCaptionStyle, t, _lerpStyle),
+       statusFillOpacity:
+           _lerp(statusFillOpacity, other.statusFillOpacity, t, _lerpBetween),
++      tableColorOpacity:
++          _lerp(tableColorOpacity, other.tableColorOpacity, t, _lerpBetween),
+       groupFrameColor:
+           _lerp(groupFrameColor, other.groupFrameColor, t, Color.lerp),
+       groupFrameWidth:
+           _lerp(groupFrameWidth, other.groupFrameWidth, t, _lerpBetween),
+       groupFrameMargin:
+           _lerp(groupFrameMargin, other.groupFrameMargin, t, _lerpBetween),
+       groupChipColor:
+           _lerp(groupChipColor, other.groupChipColor, t, Color.lerp),
+       groupChipTextStyle:
+           _lerp(groupChipTextStyle, other.groupChipTextStyle, t, _lerpStyle),
+@@ -272,59 +286,62 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+     if (size == null || from == null || to == null) return lerped;
+     final clamped = clampDouble(size, math.min(from, to), math.max(from, to));
+     return clamped == size ? lerped : lerped.copyWith(fontSize: clamped);
+   }
+ 
+   @override
+   bool operator ==(Object other) =>
+       other is FloorPlanTheme &&
+       other.statusCaptionStyle == statusCaptionStyle &&
+       other.statusFillOpacity == statusFillOpacity &&
++      other.tableColorOpacity == tableColorOpacity &&
+       other.groupFrameColor == groupFrameColor &&
+       other.groupFrameWidth == groupFrameWidth &&
+       other.groupFrameMargin == groupFrameMargin &&
+       other.groupChipColor == groupChipColor &&
+       other.groupChipTextStyle == groupChipTextStyle &&
+       other.groupChipRadius == groupChipRadius &&
+       other.groupChipPadding == groupChipPadding &&
+       other.selectionOnLight == selectionOnLight &&
+       other.selectionOnDark == selectionOnDark &&
+       other.selectionWidth == selectionWidth &&
+       other.focusVeilColor == focusVeilColor &&
+       other.focusVeilOpacity == focusVeilOpacity &&
+       other.canvasBackground == canvasBackground &&
+       other.serviceBarHeight == serviceBarHeight;
+ 
+   @override
+   int get hashCode => Object.hash(
+         statusCaptionStyle,
+         statusFillOpacity,
++        tableColorOpacity,
+         groupFrameColor,
+         groupFrameWidth,
+         groupFrameMargin,
+         groupChipColor,
+         groupChipTextStyle,
+         groupChipRadius,
+         groupChipPadding,
+         selectionOnLight,
+         selectionOnDark,
+         selectionWidth,
+         focusVeilColor,
+         focusVeilOpacity,
+         canvasBackground,
+         serviceBarHeight,
+       );
+ 
+   /// Every field by name, in declaration order (for [toString]).
+   Map<String, Object?> get _fields => {
+         'statusCaptionStyle': statusCaptionStyle,
+         'statusFillOpacity': statusFillOpacity,
++        'tableColorOpacity': tableColorOpacity,
+         'groupFrameColor': groupFrameColor,
+         'groupFrameWidth': groupFrameWidth,
+         'groupFrameMargin': groupFrameMargin,
+         'groupChipColor': groupChipColor,
+         'groupChipTextStyle': groupChipTextStyle,
+         'groupChipRadius': groupChipRadius,
+         'groupChipPadding': groupChipPadding,
+         'selectionOnLight': selectionOnLight,
+         'selectionOnDark': selectionOnDark,
+         'selectionWidth': selectionWidth,
+@@ -371,20 +388,21 @@ void validateFloorPlanTheme(FloorPlanTheme theme) {
+   void style(TextStyle? s, String name) {
+     final size = s?.fontSize;
+     if (size != null && !(size.isFinite && size > 0)) {
+       throw ArgumentError.value(
+           s, name, 'its fontSize must be finite and above 0; $size is not');
+     }
+   }
+ 
+   style(theme.statusCaptionStyle, 'statusCaptionStyle');
+   opacity(theme.statusFillOpacity, 'statusFillOpacity');
++  opacity(theme.tableColorOpacity, 'tableColorOpacity');
+   positive(theme.groupFrameWidth, 'groupFrameWidth');
+   notNegative(theme.groupFrameMargin, 'groupFrameMargin');
+   style(theme.groupChipTextStyle, 'groupChipTextStyle');
+   notNegative(theme.groupChipRadius, 'groupChipRadius');
+   final padding = theme.groupChipPadding;
+   if (padding != null) {
+     for (final side in [
+       padding.left,
+       padding.top,
+       padding.right,
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/service_view.dart b/packages/jet_cad_floor_plan/lib/src/host/service_view.dart
+index 010b4499..7f3e6ff7 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/service_view.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/service_view.dart
+@@ -288,20 +288,22 @@ class _ServiceViewState extends State<ServiceView> {
+   final _Bump _changed = _Bump();
+   StreamSubscription<DocChange>? _changes;
+   late final TableStatusPainter _statusPainter = TableStatusPainter(
+     document: _document,
+     camera: _c.cameraController,
+     statuses: _c.tableStatuses,
+     tableGroups: _c.tableGroups,
+     groupStatuses: _c.groupStatuses,
+     paper: _paper,
+     theme: _theme,
++    // Plan colours spec PC-5: a table colour tones as a room's tint does.
++    darkCanvas: () => _darkCanvas,
+     repaint: Listenable.merge([
+       _c.cameraController,
+       _c.tableStatuses,
+       _c.tableGroups,
+       _c.groupStatuses,
+       _changed,
+       _paper,
+       _theme
+     ]),
+   );
+diff --git a/packages/jet_cad_floor_plan/lib/src/planner_shell.dart b/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
+index 72f415ed..360f00a8 100644
+--- a/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
++++ b/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
+@@ -10,37 +10,39 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import 'l10n/number_text.dart';
+ import 'l10n/strings.dart';
+ import 'document_systems.dart';
+ import 'document_toolbar.dart';
+ import 'host/bars.dart';
+ import 'host/editor_capabilities.dart';
+ import 'host/floor_plan_theme.dart';
++import 'host/floor_plan_types.dart' show TableGroup, TableStatus;
+ import 'layers/layer_panel.dart';
+ import 'new_document.dart';
+ import 'page_panel.dart';
+ import 'panel_focus.dart';
+ import 'parametric/box_tool.dart';
+ import 'parametric/dimension_tool.dart';
+ import 'parametric/object_grips.dart';
+ import 'parametric/opening.dart';
+ import 'parametric/opening_tool.dart';
+ import 'parametric/room_inputs.dart';
+ import 'parametric/room_tool.dart';
+ import 'parametric/separator_tool.dart';
+ import 'parametric/wall_bands.dart';
+ import 'parametric/wall_tool.dart';
+ import 'planner_view.dart';
+ import 'selection_panel.dart';
+ import 'service/table_picker.dart';
++import 'service/table_status_painter.dart';
+ import 'shell_commands.dart';
+ import 'shortcut_guard.dart';
+ import 'startup_plan.dart' show kMaxScale, kMinScale;
+ import 'symbols/symbol_library.dart';
+ import 'symbols/symbol_library_loader.dart';
+ import 'symbols/symbol_panel.dart';
+ import 'symbols/symbol_place_tool.dart';
+ import 'symbols/symbol_library_state.dart';
+ import 'symbols/seating_component.dart';
+ import 'symbols/symbol_move.dart';
+@@ -345,40 +347,45 @@ class _PlannerShellState extends State<PlannerShell> {
+   /// root, its undo and redo, a load and a purge, and notifies only when
+   /// the page is a different value; a swatch, an undo of one and a loaded
+   /// document all arrive here.
+   ///
+   /// The rebuild on a key change also hands [PlannerView] the new paper
+   /// palette and sheet fill: [PaperPalette.forPaper] keys on the same
+   /// [foregroundFor], so a page change that keeps the key (White to Ivory)
+   /// keeps the palette, and one that changes it (White to Blueprint) flips
+   /// both.
+   void _onPage() {
++    // The fills' paper on every page change: one that keeps the resolver's
++    // key still changes the paper (PC-5).
++    _fillPaper.value = _paperArgb();
+     final next = _nextResolver();
+     if (next == null) return;
+     setState(() => _resolver = next);
+   }
+ 
+   /// The canvas around the page and a page-less plan's paper: the host's
+   /// `canvasBackground`, else the theme's surface (spec T-1).
+   Color _canvasColour(ColorScheme scheme) =>
+       _floorTheme?.canvasBackground ?? scheme.surface;
+ 
+   @override
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+     final theme = Theme.of(context);
+     _floorTheme = FloorPlanThemeScope.of(context);
+     _surfaceArgb = _canvasColour(theme.colorScheme).toARGB32();
+     _brightness = theme.brightness;
+     // A `build` follows, so no setState: a theme switch can change the
+     // key, and only a change builds a new resolver.
+     if (_nextResolver() case final next?) _resolver = next;
++    _fillTheme.value = _floorTheme;
++    _fillPaper.value = _paperArgb();
+   }
+ 
+   late final CameraController _camera = widget.camera ??
+       CameraController(
+         widget.initialCamera ?? _nominalFit(),
+         minScale: kMinScale,
+         maxScale: kMaxScale,
+       );
+   final GesturePolicy _policy = GesturePolicy.forPlatform();
+ 
+@@ -728,20 +735,43 @@ class _PlannerShellState extends State<PlannerShell> {
+   /// The history moves on the dispatcher's changes; Undo and Redo re-read
+   /// `canUndo` and `canRedo` on each (spec 12a D5).
+   StreamSubscription<DocChange>? _history;
+ 
+   /// One notification per change of the document (every command, undo
+   /// and redo), from [_history]: the table inspector rebuilds on it (spec
+   /// C-6). The dispatcher's stream is asynchronous, so it never notifies
+   /// while a frame builds.
+   final _Changed _documentChanged = _Changed();
+ 
++  // Plan colours spec PC-5: the table colour fills, under the drafting, in
++  // the design mode: no statuses and no groups; they repaint on the camera,
++  // every document change, the paper and the theme.
++  final ValueNotifier<int> _fillPaper = ValueNotifier<int>(0xFFFFFFFF);
++  final ValueNotifier<FloorPlanTheme?> _fillTheme =
++      ValueNotifier<FloorPlanTheme?>(null);
++  static final ValueNotifier<Map<String, TableStatus>> _noStatuses =
++      ValueNotifier(const <String, TableStatus>{});
++  static final ValueNotifier<Map<String, TableGroup>> _noGroups =
++      ValueNotifier(const <String, TableGroup>{});
++  late final TableStatusPainter _fillPainter = TableStatusPainter(
++    document: _document,
++    camera: _camera,
++    statuses: _noStatuses,
++    tableGroups: _noGroups,
++    groupStatuses: _noStatuses,
++    paper: _fillPaper,
++    theme: _fillTheme,
++    darkCanvas: () => _darkCanvas,
++    repaint:
++        Listenable.merge([_camera, _documentChanged, _fillPaper, _fillTheme]),
++  );
++
+   /// The file commands, each enabled only while the host's own condition
+   /// holds and the shell is idle; Export and Print also only while the
+   /// document has a page (spec 13 D8, [kPageCommandIds]).
+   List<DerivedFlag> get _fileEnabled => _madeFileEnabled ??= [
+         for (final c in _firstFileCommands)
+           kPageCommandIds.contains(c.id)
+               ? DerivedFlag([c.enabled, ..._idleSources, _page],
+                   () => c.enabled.value && _idle && _page.value != null)
+               : DerivedFlag(
+                   [c.enabled, ..._idleSources], () => c.enabled.value && _idle),
+@@ -1124,20 +1154,23 @@ class _PlannerShellState extends State<PlannerShell> {
+       ..removeListener(_onPage)
+       ..dispose();
+     if (widget.camera == null) _camera.dispose();
+     _releaseSystems();
+     _index.dispose();
+     _releaseSettle?.call();
+     _releaseIdle?.call();
+     _releaseTools?.call();
+     _releaseDelete?.call();
+     _documentChanged.dispose();
++    // The static empty maps never change and are never disposed.
++    _fillPaper.dispose();
++    _fillTheme.dispose();
+     _toolSnap.dispose();
+     _ownMeasurer?.clear();
+     super.dispose();
+   }
+ 
+   /// The document's name, with `• ` in front and an `Edited` tooltip while
+   /// it is dirty (spec 12a D5, D7).
+   Widget _documentName(String name) {
+     final dirty = widget.dirty;
+     Widget text(bool isDirty) => Text(isDirty ? '• $name' : name,
+@@ -1473,20 +1506,29 @@ class _PlannerShellState extends State<PlannerShell> {
+                         outlines: _outlines,
+                         // Dark theme spec D5: the chrome follows the theme,
+                         // the overlays the paper, both computed here.
+                         chrome: ChromePalette.of(theme.brightness),
+                         // Host embedding API spec T-1: the host's
+                         // selection colour for the paper's set, its width.
+                         paper: paperPaletteFor(_paperArgb(), _floorTheme),
+                         selectionStrokePixels: _floorTheme?.selectionWidth ??
+                             kSelectionStrokePixels,
+                         sheetArgb: _darkCanvas ? _paperArgb() : null,
++                        // Plan colours spec PC-5: the table colours, under
++                        // the drafting and the selection.
++                        underlay: RepaintBoundary(
++                          child: CustomPaint(
++                            key: const Key('table-colour-layer'),
++                            painter: _fillPainter,
++                            size: Size.infinite,
++                          ),
++                        ),
+                         grips: _grips,
+                         textTool: _text,
+                         fitRequests: widget.fitRequests,
+                         fitOnStart: widget.fitOnStart,
+                         startFitIsRequest: widget.startFitIsRequest,
+                         onFitted: widget.onFitted,
+                         framing: widget.framing,
+                         cameraEpoch: widget.cameraEpoch,
+                         userCamera: widget.userCamera,
+                         onCanvasPlaced: widget.onCanvasPlaced,
+diff --git a/packages/jet_cad_floor_plan/lib/src/service/table_status_painter.dart b/packages/jet_cad_floor_plan/lib/src/service/table_status_painter.dart
+index dce58bb2..65646a67 100644
+--- a/packages/jet_cad_floor_plan/lib/src/service/table_status_painter.dart
++++ b/packages/jet_cad_floor_plan/lib/src/service/table_status_painter.dart
+@@ -1,30 +1,33 @@
+ // The status layer (spec 14c S6, S7, R-3, R-4, R-14): each statused table's
+ // top filled in its status colour, under the drafting, with an optional
+ // caption. A group's status (table-groups spec G3) fills every visible
+-// member over its own status, with one caption, under the lead. Not
+-// document state.
++// member over its own status, with one caption, under the lead. A table
++// with neither is filled in its colour, when the plan gives it one (plan
++// colours spec PC-5), with no caption. The statuses are not document state;
++// the colours are.
+ import 'dart:math' as math;
+ import 'dart:ui' as ui;
+ 
+ import 'package:flutter/foundation.dart';
+ import 'package:flutter/widgets.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+-import '../host/floor_plan_theme.dart' show FloorPlanTheme;
++import '../host/floor_plan_theme.dart' show FloorPlanTheme, kTableColorOpacity;
+ import '../host/floor_plan_types.dart';
++import '../tables/table_color_component.dart';
+ import '../tables/table_index.dart';
+ import 'table_groups.dart';
+ import 'table_picker.dart';
+ 
+-/// One statused table, prebuilt at status-change or plan-change rate (R-3):
++/// One filled table, prebuilt at status-change or plan-change rate (R-3):
+ /// the frame reads it and creates nothing.
+ final class _Fill {
+   _Fill(this.instance, this.path, this.paint, this.caption, this.lx, this.ly,
+       this.half, this.size);
+ 
+   final Handle instance;
+   final Path path;
+   final Paint paint;
+   final ui.Paragraph? caption;
+ 
+@@ -71,30 +74,44 @@ Color statusCaptionInk(Color colour, int paper) =>
+         : kStatusCaptionOnLight;
+ 
+ /// A host's text [style] for painted text (host embedding API spec T-1,
+ /// T-4, S-3) with today's values where it leaves them null: [ink] as its
+ /// colour when it has none (a style with a foreground paint keeps it), and
+ /// [kStatusCaptionSize] as its size. Its family, weight and the rest as
+ /// given. Built when a painter rebuilds, never per frame.
+ TextStyle paintedTextStyle(TextStyle style, Color ink) => style.copyWith(
+     color: style.color ?? ink, fontSize: style.fontSize ?? kStatusCaptionSize);
+ 
+-/// Paints the statuses of [document]'s tables through [camera] (S7).
++/// Paints the statuses and colours of [document]'s tables through [camera]
++/// (S7; plan colours spec PC-5).
+ ///
+-/// Each visible table's effective status is its group's (table-groups spec
+-/// G3: [groupStatuses], through [tableGroups]) when the group has one, else
+-/// its own [statuses] entry. A group status's caption is drawn once, under
++/// Each visible table's fill is the first of a chain: its group's status
++/// (table-groups spec G3: [groupStatuses], through [tableGroups]) when the
++/// group has one, else its own [statuses] entry, else its colour (the
++/// plan's `jetcad.table_color`, PC-4), so a status covers a colour. The
++/// status rungs key by the table's number; the colour rung needs none, so
++/// an unnumbered table is filled in its colour. A table on a locked layer is
++/// filled; one on a hidden layer is not; a colour name this release does
++/// not know fills nothing. A group status's caption is drawn once, under
+ /// the lead: the visible member with a top that [inLeadOrder] puts first
+-/// (a file duplicate ties to the lower handle).
++/// (a file duplicate ties to the lower handle). A colour has no caption.
+ ///
+-/// The fills are rebuilt when the statuses, the groups or the plan's state
+-/// move; each
++/// A colour's fill is its hue — re-toned through `darkCanvasTone` when
++/// [darkCanvas] says the canvas re-tones, as a room's tint is — at alpha
++/// `round(255 * o)`, `o` the theme's `tableColorOpacity`, else
++/// [kTableColorOpacity] (PC-6), applied once at rebuild.
++///
++/// The design mode mounts this painter too, with no statuses and no groups
++/// (PC-5): only the colours draw there.
++///
++/// The fills are rebuilt when the statuses, the groups, the plan's state,
++/// the paper or the theme move; each
+ /// frame is an indexed loop over them that passes the same [Path], [Paint]
+ /// and [ui.Paragraph] objects and one reused matrix buffer to the canvas
+ /// (the allocation bar, measured structurally by its test). The matrix is
+ /// `camera . instance`, composed in doubles before it reaches the canvas.
+ ///
+ /// A caption's ink follows what it sits on (dark theme spec D6c): the
+ /// status colour over [paper], through [statusCaptionInk]. The host puts
+ /// [paper] in [repaint] too (F-16), so a paper change repaints, and the
+ /// rebuild then builds each flipped caption once.
+ ///
+@@ -105,20 +122,21 @@ TextStyle paintedTextStyle(TextStyle style, Color ink) => style.copyWith(
+ /// properties today's ([paintedTextStyle]).
+ class TableStatusPainter extends CustomPainter {
+   TableStatusPainter({
+     required this.document,
+     required this.camera,
+     required this.statuses,
+     required this.tableGroups,
+     required this.groupStatuses,
+     required this.paper,
+     this.theme,
++    this.darkCanvas,
+     required Listenable repaint,
+   }) : super(repaint: repaint);
+ 
+   final DraftDocument document;
+   final ValueListenable<ViewportTransform> camera;
+   final ValueListenable<Map<String, TableStatus>> statuses;
+ 
+   /// The host's groups and their statuses, as `FloorPlanController`'s
+   /// `tableGroups` and `groupStatuses` hold them (ids trimmed).
+   final ValueListenable<Map<String, TableGroup>> tableGroups;
+@@ -126,37 +144,44 @@ class TableStatusPainter extends CustomPainter {
+ 
+   /// The paper under the statuses, ARGB: the page's background, or the
+   /// theme's surface with no page (D4, D6c).
+   final ValueListenable<int> paper;
+ 
+   /// The resolved look (host embedding API spec T-3); null, or a null
+   /// value, is today's. The host puts it in [repaint] too, so a theme
+   /// change repaints, and the rebuild then builds what it changed.
+   final ValueListenable<FloorPlanTheme?>? theme;
+ 
++  /// Whether the canvas re-tones its colours (dark canvas K3): a table
++  /// colour's hue is drawn through `darkCanvasTone` then, as a room's tint
++  /// is; null: never. Read at rebuild. The canvas re-tones only on its dark
++  /// paper, so a flip of it always moves [paper] too, which rebuilds.
++  final bool Function()? darkCanvas;
++
+   List<_Fill> _fills = const [];
+   int? _state;
+   int? _tablesRevision;
+   Map<String, TableStatus>? _builtFor;
+   Map<String, TableGroup>? _groupsBuilt;
+   Map<String, TableStatus>? _groupStatusesBuilt;
+   int? _paperBuilt;
+   FloorPlanTheme? _themeBuilt;
+ 
+   /// The caption's least distance below the number's anchor, in logical
+   /// pixels: its size, set at rebuild (S7; T-1's `statusCaptionStyle`).
+   double _captionSize = kStatusCaptionSize;
+ 
+   final Map<Handle, Path?> _paths = {};
+ 
+   /// Keyed by the drawn colour's ARGB (the status colour, its alpha
+-  /// multiplied by the theme's `statusFillOpacity`).
++  /// multiplied by the theme's `statusFillOpacity`; or the table colour at
++  /// the theme's `tableColorOpacity`).
+   final Map<int, Paint> _paints = {};
+ 
+   /// Keyed by (caption, drawn colour, ink, the theme's caption style): a
+   /// paper flip that flips the ink builds the new paragraph once; steady
+   /// frames build none (D6c).
+   final Map<(String, int, Color, TextStyle?), ui.Paragraph> _captions = {};
+   final Float64List _matrix = Float64List(16);
+ 
+   /// Every `Path`, `Paint`, `Paragraph` and matrix this painter created: a
+   /// second check of the allocation bar (S7).
+@@ -174,92 +199,105 @@ class TableStatusPainter extends CustomPainter {
+ 
+   void _rebuild(FloorPlanTheme? look) {
+     debugRebuilds++;
+     final map = statuses.value;
+     final groupMap = groupStatuses.value;
+     final paperArgb = paper.value;
+     final opacity = look?.statusFillOpacity;
+     final style = look?.statusCaptionStyle;
+     _captionSize = style?.fontSize ?? kStatusCaptionSize;
+     final fills = <_Fill>[];
+-    // With neither map set nothing can fill: no survey.
+-    if (map.isNotEmpty || groupMap.isNotEmpty) {
+-      final survey = TableSurvey.of(document);
+-      final groupOf = groupMap.isEmpty
+-          ? const <String, String>{}
+-          : groupIdsByNumber(tableGroups.value);
+-      // Each visible table with a top and an effective status, in draw
+-      // order (the survey is ascending by handle), and per statused group
+-      // its members that may lead.
+-      final statused = <(TableInfo, Path, TableStatus, String?)>[];
+-      final candidates = <String, List<GroupTable>>{};
+-      for (final t in survey.tables) {
+-        final number = t.number;
+-        if (number == null) continue;
+-        final id = groupOf[number];
+-        final groupStatus = id == null ? null : groupMap[id];
+-        final status = groupStatus ?? map[number];
+-        if (status == null) continue;
+-        final node = document.tree[t.instance];
+-        if (node is! InstanceNode) continue;
+-        final layer = document.tables.layers[node.layer];
+-        if (layer != null && !layer.visible) continue;
+-        final path = _paths.putIfAbsent(t.definition, () => _pathOf(t));
+-        if (path == null) continue;
+-        statused.add((t, path, status, groupStatus == null ? null : id));
+-        if (groupStatus != null) {
+-          (candidates[id!] ??= []).add(GroupTable(
+-              handle: t.instance,
+-              number: number,
+-              visible: true,
+-              locked: false));
+-        }
+-      }
+-      // The lead of each statused group: its caption's one place.
+-      final leads = <Handle>{
+-        for (final list in candidates.values) inLeadOrder(list).first.handle,
+-      };
+-      for (final (t, path, status, id) in statused) {
+-        final bounds = path.getBounds();
++    // The survey always runs: the colours live in the document (PC-5).
++    final survey = TableSurvey.of(document);
++    final groupOf = groupMap.isEmpty
++        ? const <String, String>{}
++        : groupIdsByNumber(tableGroups.value);
++    final tone = darkCanvas?.call() ?? false;
++    final colourAlpha =
++        (255 * (look?.tableColorOpacity ?? kTableColorOpacity)).round();
++    // Each visible table with a top and a fill, in draw order (the survey
++    // is ascending by handle): its drawn colour, and its status when the
++    // fill is one (a status's group id when it is the group's); per
++    // statused group its members that may lead.
++    final filled = <(TableInfo, Path, Color, TableStatus?, String?)>[];
++    final candidates = <String, List<GroupTable>>{};
++    for (final t in survey.tables) {
++      // The status rungs key by number; the colour rung needs none.
++      final number = t.number;
++      final id = number == null ? null : groupOf[number];
++      final groupStatus = id == null ? null : groupMap[id];
++      final status = number == null ? null : (groupStatus ?? map[number]);
++      final colour = status == null
++          ? document.components.get<FloorPlanTableColor>(t.instance)?.colorValue
++          : null;
++      if (status == null && colour == null) continue;
++      final node = document.tree[t.instance];
++      if (node is! InstanceNode) continue;
++      final layer = document.tables.layers[node.layer];
++      if (layer != null && !layer.visible) continue;
++      final path = _paths.putIfAbsent(t.definition, () => _pathOf(t));
++      if (path == null) continue;
++      final Color drawn;
++      if (status != null) {
+         // The theme's opacity multiplies the host colour's alpha, once.
+-        final drawn = opacity == null
++        drawn = opacity == null
+             ? status.color
+             : status.color.withValues(alpha: status.color.a * opacity);
+-        final colour = drawn.toARGB32();
+-        final paint = _paints.putIfAbsent(colour, () {
+-          debugAllocations++;
+-          return Paint()
+-            ..style = PaintingStyle.fill
+-            ..color = drawn;
+-        });
+-        final caption = status.caption;
+-        final captioned = caption != null &&
+-            caption.isNotEmpty &&
+-            (id == null || leads.contains(t.instance));
+-        final label = _labelOf(t.label);
+-        fills.add(_Fill(
+-          t.instance,
+-          path,
+-          paint,
+-          captioned
+-              ? _captionOf(caption, colour,
+-                  style?.color ?? statusCaptionInk(drawn, paperArgb), style)
+-              : null,
+-          label?.x ?? bounds.center.dx,
+-          label?.y ?? bounds.center.dy,
+-          label?.half ?? 0,
+-          math.min(bounds.width, bounds.height),
+-        ));
++      } else {
++        // A colour: its hue, toned on the dark canvas as a room's tint is,
++        // at the theme's opacity, once (PC-5, PC-6).
++        final rgb = tone
++            ? darkCanvasTone(colour!.rgb, paperArgb & 0xFFFFFF)
++            : colour!.rgb;
++        drawn = Color((colourAlpha << 24) | rgb);
+       }
+-      // Draw order (ascending handle), whatever the map's order.
+-      fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
++      filled.add((t, path, drawn, status, groupStatus == null ? null : id));
++      if (groupStatus != null) {
++        (candidates[id!] ??= []).add(GroupTable(
++            handle: t.instance, number: number!, visible: true, locked: false));
++      }
++    }
++    // The lead of each statused group: its caption's one place.
++    final leads = <Handle>{
++      for (final list in candidates.values) inLeadOrder(list).first.handle,
++    };
++    for (final (t, path, drawn, status, id) in filled) {
++      final bounds = path.getBounds();
++      final argb = drawn.toARGB32();
++      final paint = _paints.putIfAbsent(argb, () {
++        debugAllocations++;
++        return Paint()
++          ..style = PaintingStyle.fill
++          ..color = drawn;
++      });
++      // Captions for a status only; a colour carries none.
++      final caption = status?.caption;
++      final captioned = caption != null &&
++          caption.isNotEmpty &&
++          (id == null || leads.contains(t.instance));
++      final label = _labelOf(t.label);
++      fills.add(_Fill(
++        t.instance,
++        path,
++        paint,
++        captioned
++            ? _captionOf(caption, argb,
++                style?.color ?? statusCaptionInk(drawn, paperArgb), style)
++            : null,
++        label?.x ?? bounds.center.dx,
++        label?.y ?? bounds.center.dy,
++        label?.half ?? 0,
++        math.min(bounds.width, bounds.height),
++      ));
+     }
++    // Draw order (ascending handle), whatever the map's order.
++    fills.sort((a, b) => a.instance.value.compareTo(b.instance.value));
+     _fills = fills;
+     // Paints and captions no fill holds are dropped (review F-8): a host
+     // whose captions change ("12 min", "13 min") does not grow the caches.
+     final paints = {for (final f in fills) f.paint};
+     final captions = {for (final f in fills) f.caption};
+     _paints.removeWhere((_, p) => !paints.contains(p));
+     _captions.removeWhere((_, p) => !captions.contains(p));
+   }
+ 
+   /// The anchor and half height of the number label [label], in the
+diff --git a/packages/jet_cad_floor_plan/test/host/floor_plan_theme_test.dart b/packages/jet_cad_floor_plan/test/host/floor_plan_theme_test.dart
+index dcc1e273..2c579960 100644
+--- a/packages/jet_cad_floor_plan/test/host/floor_plan_theme_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/floor_plan_theme_test.dart
+@@ -23,20 +23,21 @@ import 'package:jet_cad_floor_plan/src/host/service_view.dart';
+ import 'package:jet_cad_floor_plan/src/host/table_overlay.dart';
+ import 'package:jet_cad_floor_plan/src/planner_shell.dart';
+ 
+ import '../support/palette_fixture.dart' show darkTheme, lightTheme;
+ import 'embedding_fixture.dart';
+ 
+ /// A full theme, every field off today's value.
+ const FloorPlanTheme fullA = FloorPlanTheme(
+   statusCaptionStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+   statusFillOpacity: 0.5,
++  tableColorOpacity: 0.25,
+   groupFrameColor: Color(0xFF00897B),
+   groupFrameWidth: 3,
+   groupFrameMargin: 300,
+   groupChipColor: Color(0xFF3949AB),
+   groupChipTextStyle: TextStyle(fontSize: 13),
+   groupChipRadius: 8,
+   groupChipPadding: EdgeInsets.fromLTRB(7, 3, 9, 4),
+   selectionOnLight: Color(0xFFD81B60),
+   selectionOnDark: Color(0xFFFFD54F),
+   selectionWidth: 4,
+@@ -44,20 +45,21 @@ const FloorPlanTheme fullA = FloorPlanTheme(
+   focusVeilOpacity: 0.35,
+   canvasBackground: Color(0xFF263238),
+   serviceBarHeight: 60,
+ );
+ 
+ /// A second full theme, every field different from [fullA]'s and today's.
+ const FloorPlanTheme fullB = FloorPlanTheme(
+   statusCaptionStyle: TextStyle(
+       fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF7CB342)),
+   statusFillOpacity: 0.8,
++  tableColorOpacity: 0.6,
+   groupFrameColor: Color(0xFF8E24AA),
+   groupFrameWidth: 1.5,
+   groupFrameMargin: 220,
+   groupChipColor: Color(0xFFF4511E),
+   groupChipTextStyle: TextStyle(
+       fontSize: 10, fontWeight: FontWeight.w300, color: Color(0xFF00ACC1)),
+   groupChipRadius: 2.5,
+   groupChipPadding: EdgeInsets.fromLTRB(1, 6, 2, 5),
+   selectionOnLight: Color(0xFF5E35B1),
+   selectionOnDark: Color(0xFFC0CA33),
+@@ -89,34 +91,40 @@ Object? _double(Object a, Object b, double t) =>
+ Object? _style(Object a, Object b, double t) {
+   final (x, y) = (a as TextStyle, b as TextStyle);
+   if (x == y) return x;
+   if ((x.color == null) != (y.color == null)) return t < 0.5 ? x : y;
+   return TextStyle.lerp(x, y, t);
+ }
+ 
+ Object? _insets(Object a, Object b, double t) =>
+     EdgeInsets.lerp(a as EdgeInsets, b as EdgeInsets, t);
+ 
+-/// The sixteen fields, in declaration order.
++/// The seventeen fields, in declaration order.
+ final List<Field> fields = [
+   (
+     name: 'statusCaptionStyle',
+     get: (t) => t.statusCaptionStyle,
+     set: (t, v) => t.copyWith(statusCaptionStyle: v as TextStyle),
+     lerp: _style,
+   ),
+   (
+     name: 'statusFillOpacity',
+     get: (t) => t.statusFillOpacity,
+     set: (t, v) => t.copyWith(statusFillOpacity: v as double),
+     lerp: _double,
+   ),
++  (
++    name: 'tableColorOpacity',
++    get: (t) => t.tableColorOpacity,
++    set: (t, v) => t.copyWith(tableColorOpacity: v as double),
++    lerp: _double,
++  ),
+   (
+     name: 'groupFrameColor',
+     get: (t) => t.groupFrameColor,
+     set: (t, v) => t.copyWith(groupFrameColor: v as Color),
+     lerp: _color,
+   ),
+   (
+     name: 'groupFrameWidth',
+     get: (t) => t.groupFrameWidth,
+     set: (t, v) => t.copyWith(groupFrameWidth: v as double),
+@@ -242,34 +250,36 @@ Future<void> pumpUnder(WidgetTester tester, Widget view,
+ 
+ ThemeData lightWith(FloorPlanTheme t) => lightTheme.copyWith(extensions: [t]);
+ ThemeData darkWith(FloorPlanTheme t) => darkTheme.copyWith(extensions: [t]);
+ 
+ /// A valid theme with its doubles at or near the edges of their ranges
+ /// (S-5), the styles' colours set: an overshoot past [edgeB] or back past
+ /// it leaves the range unless `lerp` clamps (R-1).
+ const FloorPlanTheme edgeA = FloorPlanTheme(
+   statusCaptionStyle: TextStyle(fontSize: 1, color: Color(0xFF7CB342)),
+   statusFillOpacity: 0.8,
++  tableColorOpacity: 0,
+   groupFrameWidth: 0.5,
+   groupFrameMargin: 0,
+   groupChipTextStyle: TextStyle(fontSize: 16, color: Color(0xFF00ACC1)),
+   groupChipRadius: 0,
+   groupChipPadding: EdgeInsets.zero,
+   selectionWidth: 3,
+   focusVeilOpacity: 0,
+   serviceBarHeight: 1,
+ );
+ 
+ /// [edgeA]'s partner: every double and each padding side different.
+ const FloorPlanTheme edgeB = FloorPlanTheme(
+   statusCaptionStyle: TextStyle(fontSize: 14, color: Color(0xFFD81B60)),
+   statusFillOpacity: 1,
++  tableColorOpacity: 0.6,
+   groupFrameWidth: 3,
+   groupFrameMargin: 150,
+   groupChipTextStyle: TextStyle(fontSize: 0.5, color: Color(0xFF3949AB)),
+   groupChipRadius: 4,
+   groupChipPadding: EdgeInsets.fromLTRB(7, 3, 9, 4),
+   selectionWidth: 0.5,
+   focusVeilOpacity: 0.3,
+   serviceBarHeight: 60,
+ );
+ 
+@@ -315,35 +325,35 @@ class _ThemeReaderState extends State<ThemeReader> {
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+     widget.log.add(FloorPlanThemeScope.of(context));
+   }
+ 
+   @override
+   Widget build(BuildContext context) => const SizedBox(width: 10, height: 10);
+ }
+ 
+ void main() {
+-  test('the field table names the sixteen fields of a full theme', () {
+-    expect(fields, hasLength(16));
++  test('the field table names the seventeen fields of a full theme', () {
++    expect(fields, hasLength(17));
+     for (final f in fields) {
+       expect(f.get(fullA), isNotNull, reason: f.name);
+       expect(f.get(fullB), isNotNull, reason: f.name);
+       expect(f.get(fullA) == f.get(fullB), isFalse, reason: f.name);
+       expect(f.get(const FloorPlanTheme()), isNull, reason: f.name);
+       expect(fullA.toString(), contains('${f.name}: '), reason: f.name);
+     }
+   });
+ 
+   group('merge (T-2, S-3)', () {
+     test(
+-        'a view setting one field over an ambient setting all sixteen: that '
+-        'field the view\'s, the fifteen others the ambient\'s', () {
++        'a view setting one field over an ambient setting all seventeen: '
++        'that field the view\'s, the sixteen others the ambient\'s', () {
+       for (final f in fields) {
+         final merged = fullB.merge(only(f, fullA));
+         for (final g in fields) {
+           final Object? want;
+           if (!identical(g, f)) {
+             want = g.get(fullB);
+           } else if (g.get(fullA) case final TextStyle style) {
+             // S-3: the view's style over the ambient's, property by
+             // property.
+             want = (g.get(fullB)! as TextStyle).merge(style);
+@@ -414,20 +424,21 @@ void main() {
+         for (final (a, b) in [(edgeA, edgeB), (edgeB, edgeA)]) {
+           final l = a.lerp(b, t);
+           final reason = '${a == edgeA ? 'A to B' : 'B to A'} at $t';
+           expectWithinEnds(l, a, b, reason);
+           expect(() => validateFloorPlanTheme(l), returnsNormally,
+               reason: reason);
+         }
+       }
+       // An overshoot stops at the end it passes.
+       expect(edgeA.lerp(edgeB, 1.2).statusFillOpacity, 1.0);
++      expect(edgeB.lerp(edgeA, 1.2).tableColorOpacity, 0.0);
+       expect(edgeB.lerp(edgeA, 1.2).groupChipPadding, EdgeInsets.zero);
+       expect(edgeA.lerp(edgeB, -0.2).statusCaptionStyle!.fontSize, 1.0);
+     });
+ 
+     test(
+         'R-2: a theme lerped with an equal one is that theme at every t '
+         '(itself when equal); a field equal on both sides stays exactly '
+         'equal', () {
+       for (var i = 1; i < 100; i++) {
+         final t = i / 100;
+@@ -568,20 +579,21 @@ void main() {
+       Future<Object?> pumpWith(
+           {FloorPlanTheme? view, FloorPlanTheme? ambient}) async {
+         await pumpUnder(tester, FloorPlanView(controller: c, theme: view),
+             theme: ambient == null ? lightTheme : lightWith(ambient));
+         return tester.takeException();
+       }
+ 
+       final accepted = <(String, FloorPlanTheme)>[
+         for (final v in [0.0, 1.0, 0.35]) ...[
+           ('statusFillOpacity', FloorPlanTheme(statusFillOpacity: v)),
++          ('tableColorOpacity', FloorPlanTheme(tableColorOpacity: v)),
+           ('focusVeilOpacity', FloorPlanTheme(focusVeilOpacity: v)),
+         ],
+         ('selectionWidth', const FloorPlanTheme(selectionWidth: 0.5)),
+         ('groupFrameWidth', const FloorPlanTheme(groupFrameWidth: 0.5)),
+         ('serviceBarHeight', const FloorPlanTheme(serviceBarHeight: 0.5)),
+         ('groupFrameMargin', const FloorPlanTheme(groupFrameMargin: 0)),
+         ('groupChipRadius', const FloorPlanTheme(groupChipRadius: 0)),
+         (
+           'groupChipPadding',
+           const FloorPlanTheme(groupChipPadding: EdgeInsets.zero)
+@@ -592,20 +604,21 @@ void main() {
+         ),
+         (
+           'groupChipTextStyle',
+           const FloorPlanTheme(groupChipTextStyle: TextStyle(fontSize: 0.5))
+         ),
+         ('all', fullA),
+       ];
+       final refused = <(String, FloorPlanTheme)>[
+         for (final v in [-0.01, 1.01, double.nan, double.infinity]) ...[
+           ('statusFillOpacity', FloorPlanTheme(statusFillOpacity: v)),
++          ('tableColorOpacity', FloorPlanTheme(tableColorOpacity: v)),
+           ('focusVeilOpacity', FloorPlanTheme(focusVeilOpacity: v)),
+         ],
+         for (final v in [0.0, -1.0, double.infinity, double.nan]) ...[
+           ('selectionWidth', FloorPlanTheme(selectionWidth: v)),
+           ('groupFrameWidth', FloorPlanTheme(groupFrameWidth: v)),
+           ('serviceBarHeight', FloorPlanTheme(serviceBarHeight: v)),
+           (
+             'statusCaptionStyle',
+             FloorPlanTheme(statusCaptionStyle: TextStyle(fontSize: v))
+           ),
+@@ -646,21 +659,21 @@ void main() {
+       for (final (name, theme) in refused) {
+         for (final ambient in [false, true]) {
+           final e = ambient
+               ? await pumpWith(ambient: theme)
+               : await pumpWith(view: theme);
+           expect(e, isA<ArgumentError>().having((e) => e.name, 'name', name),
+               reason: '${ambient ? 'ambient ' : ''}$name: $theme');
+         }
+       }
+       // The constructor itself never throws: each refused theme was built.
+-      expect(refused, hasLength(4 * 2 + 4 * 5 + 3 * 6));
++      expect(refused, hasLength(4 * 3 + 4 * 5 + 3 * 6));
+     });
+   });
+ 
+   group('resolution (T-2, S-11), in both modes', () {
+     for (final mode in FloorPlanMode.values) {
+       testWidgets(
+           'P-6 (${mode.name}): no theme anywhere resolves to null; ambient '
+           'only is the ambient itself; view only the view itself',
+           (tester) async {
+         final c = controllerIn(mode);
+diff --git a/packages/jet_cad_floor_plan/test/service/table_fill_test.dart b/packages/jet_cad_floor_plan/test/service/table_fill_test.dart
+new file mode 100644
+index 00000000..51940584
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/service/table_fill_test.dart
+@@ -0,0 +1,795 @@
++// Plan colours spec PC-5 and PC-6 (Slice 2 plan, Task 3): a table's colour
++// drawn as a fill under its drafting, the lowest rung of the fill chain
++// (group status, own status, colour), in the selection mode and in the
++// design mode, toned on a dark canvas as a room's tint is, at the theme's
++// `tableColorOpacity` (null: 0.35).
++//
++// The fixture: one plan, every table turned and mirrored, 38 m and more off
++// the origin. Most tables are the embedding fixture's hand-made top (an
++// asymmetric quadrilateral, its box off the definition's origin, which is
++// the base point and where the number label sits, outside the top); B and K
++// are a round top whose circle is off the definition's origin too. A carries
++// a status, B a group status, C a colour alone; U is coloured and
++// unnumbered, K coloured on a locked layer, H coloured on a hidden layer, M
++// carries the unknown name "magenta", N has no colour, and R is coloured
++// inside a teal room. Hues teal and purple.
++//
++// Expected colours are literals and arithmetic here (`composite`), never
++// read from the code under test; the dark canvas's tone is the engine's
++// `darkCanvasTone`, the function a room's tint goes through.
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_floor_plan/src/colors/plan_color.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_theme.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
++import 'package:jet_cad_floor_plan/src/new_document.dart' show prepareDocument;
++import 'package:jet_cad_floor_plan/src/parametric/catalog.dart'
++    show installParametric;
++import 'package:jet_cad_floor_plan/src/parametric/room.dart' show RoomParams;
++import 'package:jet_cad_floor_plan/src/parametric/wall.dart'
++    show Justification, WallParams;
++import 'package:jet_cad_floor_plan/src/service/table_status_painter.dart';
++import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_color_component.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
++import 'package:jet_cad_floor_plan/symbols.dart'
++    show CircleShape, FurnitureSymbol;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../host/embedding_fixture.dart' show embeddingPlacement, embeddingTable;
++import '../host/zone_fixture.dart' show addZoneLayer;
++import '../support/palette_fixture.dart'
++    show
++        Shot,
++        channelDistance,
++        darkTheme,
++        hex,
++        lightTheme,
++        pixelOf,
++        shoot,
++        shotKey,
++        windowAt;
++import '../tables/table_fixture.dart' show entryOf;
++
++/// A servable round top, its circle off the definition's origin (the base
++/// point, where the number sits, 670 mm from the centre).
++const FurnitureSymbol roundTable = FurnitureSymbol(
++  key: 'test.round.off',
++  name: 'Off-centre round table',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  seats: 4,
++  baseX: 0,
++  baseY: 0,
++  shapes: [CircleShape(600, 300, 400)],
++);
++
++const int teal = 0x00897B, purple = 0x8E24AA;
++const int whitePaper = 0xFFFFFF;
++
++/// A status colour, opaque, and a group status colour: neither a hue of
++/// the palette at 0.35.
++const Color red = Color(0xFFE53935);
++const Color indigo = Color(0xFF3949AB);
++
++/// `round(255 * 0.35)`, `round(255 * 0.6)`, and a room tint's alpha
++/// (transparency 204 of 255).
++const int alphaDefault = 89, alphaThemed = 153, tintAlpha = 51;
++
++/// One table of the fixture: its label (null: unnumbered), its top, its base
++/// point, its turn (always mirrored), its layer and its stored colour name.
++typedef Spec = ({
++  String key,
++  String? label,
++  bool round,
++  double x,
++  double y,
++  double deg,
++  String? layer,
++  String? color,
++});
++
++const String hiddenLayer = 'Hidden', lockedLayer = 'Locked';
++
++const List<Spec> specs = [
++  (
++    key: 'A',
++    label: 'A',
++    round: false,
++    x: 46000,
++    y: -27500,
++    deg: 120,
++    layer: null,
++    color: 'teal'
++  ),
++  (
++    key: 'B',
++    label: 'B',
++    round: true,
++    x: 49000,
++    y: -27500,
++    deg: 25,
++    layer: null,
++    color: 'purple'
++  ),
++  (
++    key: 'C',
++    label: 'C',
++    round: false,
++    x: 46000,
++    y: -30500,
++    deg: 30,
++    layer: null,
++    color: 'teal'
++  ),
++  (
++    key: 'N',
++    label: 'N',
++    round: false,
++    x: 49000,
++    y: -30500,
++    deg: -40,
++    layer: null,
++    color: null
++  ),
++  (
++    key: 'U',
++    label: null,
++    round: false,
++    x: 46000,
++    y: -33500,
++    deg: 15,
++    layer: null,
++    color: 'teal'
++  ),
++  (
++    key: 'K',
++    label: 'K',
++    round: true,
++    x: 49000,
++    y: -33500,
++    deg: 60,
++    layer: lockedLayer,
++    color: 'purple'
++  ),
++  (
++    key: 'H',
++    label: 'H',
++    round: false,
++    x: 39500,
++    y: -27500,
++    deg: 45,
++    layer: hiddenLayer,
++    color: 'teal'
++  ),
++  (
++    key: 'M',
++    label: 'M',
++    round: false,
++    x: 42500,
++    y: -27500,
++    deg: -20,
++    layer: null,
++    color: 'magenta'
++  ),
++  (
++    key: 'R',
++    label: 'R',
++    round: false,
++    x: 39000,
++    y: -33300,
++    deg: 10,
++    layer: null,
++    color: 'purple'
++  ),
++];
++
++Spec spec(String key) => specs.singleWhere((s) => s.key == key);
++
++/// The table's placement: turned [Spec.deg] and mirrored, its base point on
++/// ([Spec.x], [Spec.y]).
++Transform2 placementOf(Spec s) => embeddingPlacement(s.x, s.y, s.deg, sy: -1);
++
++/// A world point inside [s]'s top, well clear of its edges and of its
++/// number (at the base point, outside the top): the quadrilateral's (650,
++/// 50), 250 mm and more from every edge; the circle's centre.
++Vector2 insideTop(Spec s) => placementOf(s)
++    .transformPoint(s.round ? Vector2(600, 300) : Vector2(650, 50));
++
++/// The teal room's tint, clear of every table and of the room's labels.
++final Vector2 tintSample = Vector2(43000, -34300);
++
++/// The fixture: a 1:50 page, a teal room (four 200 mm walls, 38-44 m by
++/// -35 to -31 m), then [specs] in order, their colours stored as the plan
++/// stores them. History cleared, the parametric system disposed.
++DraftDocument fillDoc(TextMeasurer measurer, {List<Spec>? only}) {
++  final doc = prepareDocument(measurer);
++  final system = installParametric(doc);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      PageComponent(
++          originX: 37000,
++          originY: -36200,
++          background: 0xFFFFFFFF,
++          gridVisible: false,
++          snapToGrid: false)));
++  if (only == null) {
++    void wall(double sx, double sy, double ex, double ey) {
++      final h = doc.handleSeed.next();
++      doc.commands.execute(CompoundCommand([
++        AddNodeCommand(GroupNode(
++            handle: h,
++            parent: doc.rootHandle,
++            transform: Transform2.identity(),
++            children: const [])),
++        SetComponentCommand<WallParams>(
++            h, WallParams(sx, sy, ex, ey, 200, Justification.centre)),
++      ], label: 'Add wall'));
++    }
++
++    wall(38000, -35000, 44000, -35000);
++    wall(44000, -35000, 44000, -31000);
++    wall(44000, -31000, 38000, -31000);
++    wall(38000, -31000, 38000, -35000);
++    final room = doc.handleSeed.next();
++    doc.commands.execute(CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: room,
++          parent: doc.rootHandle,
++          transform: Transform2.identity(),
++          children: const [])),
++      SetComponentCommand<RoomParams>(
++          room, const RoomParams(41500, -32000, 'Dining', color: 'teal')),
++    ], label: 'Add room'));
++  }
++  final layers = {
++    hiddenLayer: addZoneLayer(doc, hiddenLayer, visible: false),
++    lockedLayer: addZoneLayer(doc, lockedLayer, locked: true),
++  };
++  for (final s in only ?? specs) {
++    doc.commands.execute(placeSymbol(
++        doc, entryOf(s.round ? roundTable : embeddingTable),
++        at: Vector2(s.x, s.y),
++        transform: placementOf(s),
++        numbered: s.label != null));
++    final info = TableSurvey.of(doc).tables.last;
++    if (s.label case final label?) {
++      doc.commands
++          .execute(SetEntityTextCommand(info.label!, label, kTableLabelTag));
++    }
++    if (s.layer case final layer?) {
++      doc.commands
++          .execute(SetInstanceLayerCommand(info.instance, layers[layer]!));
++    }
++    if (s.color case final name?) {
++      final known = floorPlanColorNamed(name);
++      doc.commands.execute(SetComponentCommand<FloorPlanTableColor>(
++          info.instance,
++          known == null
++              ? FloorPlanTableColor.fromJson({'color': name})
++              : FloorPlanTableColor(known)));
++    }
++  }
++  system.dispose();
++  doc.commands.clearHistory();
++  return doc;
++}
++
++/// The fixture as a file.
++String fillJson() {
++  final m = FlutterTextMeasurer();
++  final doc = fillDoc(m);
++  final json = DraftDocumentCodec.encodeToString(doc);
++  doc.dispose();
++  m.clear();
++  return json;
++}
++
++/// [rgb] at [alpha] over the opaque [paper], straight alpha, per channel
++/// `round(a * s + (1 - a) * p)`.
++int composite(int rgb, int alpha, int paper) {
++  final a = alpha / 255;
++  var out = 0;
++  for (final shift in const [16, 8, 0]) {
++    final s = (rgb >> shift) & 0xFF;
++    final p = (paper >> shift) & 0xFF;
++    out |= (a * s + (1 - a) * p).round() << shift;
++  }
++  return out;
++}
++
++// ---------------------------------------------------------------------------
++// The painter alone.
++
++/// The painter's camera: 0.1 px/mm, y up, the plan in a 1400 x 1000 image.
++const Transform2 painterCamera = Transform2(0.1, 0, 0, -0.1, -3780, -2560);
++const int imageW = 1400, imageH = 1000;
++
++/// Screen of world [w] under [painterCamera], as a pixel.
++(int, int) painterPixel(Vector2 w) => (
++      (painterCamera.a * w.x + painterCamera.c * w.y + painterCamera.e).floor(),
++      (painterCamera.b * w.x + painterCamera.d * w.y + painterCamera.f).floor(),
++    );
++
++/// Screen of [s]'s base point under [painterCamera]: where its fill's
++/// matrix translates to, and its caption's centre.
++({double x, double y}) originOf(Spec s) => (
++      x: painterCamera.a * s.x + painterCamera.c * s.y + painterCamera.e,
++      y: painterCamera.b * s.x + painterCamera.d * s.y + painterCamera.f,
++    );
++
++/// Records each fill (its matrix's translation and its paint's ARGB) and
++/// each caption's centre x.
++final class FillSpy implements ui.Canvas {
++  final List<({double x, double y, int argb})> fills = [];
++  final List<({double x, double y})> captions = [];
++  double _x = double.nan, _y = double.nan;
++  ui.Offset _t = ui.Offset.zero;
++
++  @override
++  void save() {}
++  @override
++  void restore() {}
++  @override
++  void transform(Float64List matrix4) {
++    _x = matrix4[12];
++    _y = matrix4[13];
++  }
++
++  @override
++  void drawPath(ui.Path path, ui.Paint paint) =>
++      fills.add((x: _x, y: _y, argb: paint.color.toARGB32()));
++  @override
++  void translate(double dx, double dy) => _t = ui.Offset(dx, dy);
++  @override
++  void drawParagraph(ui.Paragraph paragraph, ui.Offset offset) =>
++      captions.add((x: _t.dx + paragraph.width / 2, y: _t.dy));
++
++  @override
++  dynamic noSuchMethod(Invocation invocation) =>
++      throw UnsupportedError('${invocation.memberName}');
++
++  /// The ARGB of [s]'s fill, null when it has none.
++  int? fillOf(Spec s) {
++    final o = originOf(s);
++    final at = [
++      for (final f in fills)
++        if ((f.x - o.x).abs() < 1e-6 && (f.y - o.y).abs() < 1e-6) f.argb
++    ];
++    expect(at.length, lessThanOrEqualTo(1), reason: '${s.key}: one fill');
++    return at.isEmpty ? null : at.single;
++  }
++
++  /// Whether a caption is centred below [s]'s number: on its x, its top
++  /// within 40 px below it.
++  bool captioned(Spec s) {
++    final o = originOf(s);
++    return captions
++        .any((c) => (c.x - o.x).abs() < 1 && c.y - o.y >= 0 && c.y - o.y < 40);
++  }
++}
++
++typedef Notifiers = ({
++  ValueNotifier<Map<String, TableStatus>> statuses,
++  ValueNotifier<Map<String, TableGroup>> groups,
++  ValueNotifier<Map<String, TableStatus>> groupStatuses,
++  ValueNotifier<FloorPlanTheme?> theme,
++  ValueNotifier<int> paper,
++});
++
++/// The painter over [doc] under [painterCamera], with its notifiers.
++(TableStatusPainter, Notifiers) painterOver(DraftDocument doc,
++    {Map<String, TableStatus> statuses = const {},
++    Map<String, TableGroup> groups = const {},
++    Map<String, TableStatus> groupStatuses = const {},
++    FloorPlanTheme? theme}) {
++  final camera =
++      ValueNotifier(ViewportTransform(worldToScreenMatrix: painterCamera));
++  final n = (
++    statuses: ValueNotifier(statuses),
++    groups: ValueNotifier(groups),
++    groupStatuses: ValueNotifier(groupStatuses),
++    theme: ValueNotifier<FloorPlanTheme?>(theme),
++    paper: ValueNotifier<int>(0xFFFFFFFF),
++  );
++  final painter = TableStatusPainter(
++    document: doc,
++    camera: camera,
++    statuses: n.statuses,
++    tableGroups: n.groups,
++    groupStatuses: n.groupStatuses,
++    paper: n.paper,
++    theme: n.theme,
++    repaint: Listenable.merge(
++        [camera, n.statuses, n.groups, n.groupStatuses, n.theme, n.paper]),
++  );
++  return (painter, n);
++}
++
++FillSpy record(TableStatusPainter p) {
++  final spy = FillSpy();
++  p.paint(spy, const ui.Size(1400, 1000));
++  return spy;
++}
++
++/// The painter drawn over white, read back.
++Future<Shot> render(WidgetTester tester, TableStatusPainter p) async =>
++    (await tester.runAsync(() async {
++      final recorder = ui.PictureRecorder();
++      final canvas = ui.Canvas(recorder)
++        ..drawColor(const Color(0xFFFFFFFF), ui.BlendMode.src);
++      p.paint(canvas, const ui.Size(1400, 1000));
++      final image = await recorder.endRecording().toImage(imageW, imageH);
++      final data = await image.toByteData();
++      image.dispose();
++      return Shot(data!, imageW, imageH);
++    }))!;
++
++/// [shot]'s pixel at [p] is [want] within 2 per channel.
++void expectPixel(Shot shot, (int, int) p, int want, String reason) {
++  final got = shot.rgbAt(p.$1, p.$2);
++  expect(channelDistance(got, want), lessThanOrEqualTo(2),
++      reason: '$reason: ${hex(got)}, want ${hex(want)}');
++}
++
++int argb(int alpha, int rgb) => (alpha << 24) | rgb;
++
++// ---------------------------------------------------------------------------
++// Through the view.
++
++/// The view's camera: 0.06 px/mm, y up, every table in the drawing area of
++/// either mode at 1440 x 900.
++final ViewportTransform viewCamera = ViewportTransform(
++    worldToScreenMatrix: const Transform2(0.06, 0, 0, -0.06, -2260, -1528));
++
++FloorPlanController controllerOver() {
++  final c = FloorPlanController(json: fillJson());
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// [c]'s view under the seed's themes in [mode], inside the capture
++/// boundary; the tree keeps its shape, so a re-pump keeps every state.
++Future<void> pumpApp(WidgetTester tester, FloorPlanController c,
++        {ThemeMode mode = ThemeMode.light, FloorPlanTheme? theme}) =>
++    tester.pumpWidget(MaterialApp(
++      theme: lightTheme,
++      darkTheme: darkTheme,
++      themeMode: mode,
++      themeAnimationDuration: Duration.zero,
++      home: RepaintBoundary(
++          key: shotKey,
++          child: Scaffold(body: FloorPlanView(controller: c, theme: theme))),
++    ));
++
++/// The first pump of [c]'s view, then [viewCamera].
++Future<void> pumpPlan(WidgetTester tester, FloorPlanController c,
++    {ThemeMode mode = ThemeMode.light, FloorPlanTheme? theme}) async {
++  windowAt(tester, const Size(1440, 900));
++  await pumpApp(tester, c, mode: mode, theme: theme);
++  await tester.pump();
++  await tester.pump();
++  c.cameraController.value = viewCamera;
++  await tester.pump();
++}
++
++/// [shot]'s pixel at world [w] in the view is [want] within 2 per channel.
++void expectAt(
++        WidgetTester tester, Shot shot, Vector2 w, int want, String reason) =>
++    expectPixel(shot, pixelOf(tester, w), want, reason);
++
++/// The frame after a document change: the planner hears its document's
++/// changes on the dispatcher's stream, which is asynchronous, so the first
++/// pump delivers the change (it asks for a frame) and the second draws
++/// that frame. Nothing else moves.
++Future<void> nextFrame(WidgetTester tester) async {
++  await tester.pump();
++  expect(tester.binding.hasScheduledFrame, isTrue,
++      reason: 'the change asks for a frame');
++  await tester.pump();
++}
++
++/// The design mode's fill painter.
++TableStatusPainter designPainter(WidgetTester tester) => tester
++    .widget<CustomPaint>(find.byKey(const Key('table-colour-layer')))
++    .painter! as TableStatusPainter;
++
++void main() {
++  test('the fixture: every table turned and mirrored, off the origin', () {
++    final doc = fillDoc(const InsertionPointMeasurer());
++    addTearDown(doc.dispose);
++    final survey = TableSurvey.of(doc);
++    expect(survey.tables, hasLength(specs.length));
++    for (final s in specs) {
++      final t = placementOf(s);
++      expect(t.a * t.d - t.b * t.c, closeTo(-1, 1e-12), reason: s.key);
++      expect(t.b.abs(), greaterThan(0.1), reason: '${s.key} turned');
++    }
++    expect(survey.tables.where((t) => t.number == null), hasLength(1));
++    expect(floorPlanColorNamed('magenta'), isNull, reason: 'unknown name');
++  });
++
++  testWidgets(
++      'TF1 M-C18 design mode, default theme: a teal top composites teal at '
++      'alpha 89 over the paper, a purple one purple; an uncoloured, a hidden '
++      'and an unknown-coloured one show the paper; a purple table in a teal '
++      'room lies under the room\'s tint', (tester) async {
++    final c = controllerOver();
++    await pumpPlan(tester, c);
++    expect(find.byKey(const Key('table-colour-layer')), findsOneWidget);
++    final shot = await shoot(tester);
++    final tealFill = composite(teal, alphaDefault, whitePaper);
++    final purpleFill = composite(purple, alphaDefault, whitePaper);
++    expect(hex(tealFill), hex(0xA6D6D1), reason: 'premise: the arithmetic');
++    for (final k in ['A', 'C', 'U']) {
++      expectAt(tester, shot, insideTop(spec(k)), tealFill, k);
++    }
++    for (final k in ['B', 'K']) {
++      expectAt(tester, shot, insideTop(spec(k)), purpleFill, k);
++    }
++    for (final k in ['N', 'H', 'M']) {
++      expectAt(tester, shot, insideTop(spec(k)), whitePaper, k);
++    }
++    expectAt(tester, shot, tintSample, composite(teal, tintAlpha, whitePaper),
++        'the room\'s tint alone');
++    expectAt(tester, shot, insideTop(spec('R')),
++        composite(teal, tintAlpha, purpleFill), 'R under the room\'s tint');
++  });
++
++  testWidgets(
++      'TF2 M-C5 the chain, selection mode\'s painter: A (teal, statused '
++      'red) shows the status; B (purple, its group statused) the group\'s; '
++      'C (teal, no status) teal, with no caption', (tester) async {
++    final doc = fillDoc(const InsertionPointMeasurer());
++    addTearDown(doc.dispose);
++    final (painter, _) = painterOver(doc, statuses: {
++      'A': TableStatus(color: red, caption: 'Bill')
++    }, groups: {
++      'g': TableGroup(members: {'B'})
++    }, groupStatuses: {
++      'g': TableStatus(color: indigo, caption: 'Gr')
++    });
++    final spy = record(painter);
++    expect(spy.fillOf(spec('A')), 0xFFE53935);
++    expect(spy.fillOf(spec('B')), 0xFF3949AB);
++    expect(spy.fillOf(spec('C')), argb(alphaDefault, teal));
++    expect(spy.captions, hasLength(2));
++    expect(spy.captioned(spec('A')), isTrue, reason: 'A\'s status caption');
++    expect(spy.captioned(spec('B')), isTrue, reason: 'the group\'s caption');
++    expect(spy.captioned(spec('C')), isFalse, reason: 'a colour has none');
++
++    final shot = await render(tester, painter);
++    expectPixel(shot, painterPixel(insideTop(spec('A'))), 0xE53935, 'A');
++    expectPixel(shot, painterPixel(insideTop(spec('B'))), 0x3949AB, 'B');
++    expectPixel(shot, painterPixel(insideTop(spec('C'))),
++        composite(teal, alphaDefault, whitePaper), 'C');
++  });
++
++  testWidgets(
++      'TF3 M-C6 M-C21 a coloured table on the hidden layer and one '
++      'carrying "magenta" draw nothing', (tester) async {
++    final doc = fillDoc(const InsertionPointMeasurer());
++    addTearDown(doc.dispose);
++    final (painter, _) = painterOver(doc);
++    final spy = record(painter);
++    expect(spy.fillOf(spec('H')), isNull, reason: 'hidden');
++    expect(spy.fillOf(spec('M')), isNull, reason: 'unknown name');
++    expect(spy.fillOf(spec('N')), isNull, reason: 'no colour');
++    expect(spy.fills, hasLength(6), reason: 'A, B, C, U, K and R');
++    final shot = await render(tester, painter);
++    for (final k in ['H', 'M', 'N']) {
++      expectPixel(shot, painterPixel(insideTop(spec(k))), whitePaper, k);
++    }
++  });
++
++  testWidgets(
++      'TF4 M-C19 M-C20 the unnumbered table and the one on the locked layer '
++      'are filled', (tester) async {
++    final doc = fillDoc(const InsertionPointMeasurer());
++    addTearDown(doc.dispose);
++    final (painter, _) = painterOver(doc);
++    final spy = record(painter);
++    expect(spy.fillOf(spec('U')), argb(alphaDefault, teal), reason: 'U');
++    expect(spy.fillOf(spec('K')), argb(alphaDefault, purple), reason: 'K');
++    final shot = await render(tester, painter);
++    expectPixel(shot, painterPixel(insideTop(spec('U'))),
++        composite(teal, alphaDefault, whitePaper), 'unnumbered');
++    expectPixel(shot, painterPixel(insideTop(spec('K'))),
++        composite(purple, alphaDefault, whitePaper), 'locked');
++  });
++
++  testWidgets(
++      'TF5 M-C8 tableColorOpacity 0.6 beside statusFillOpacity 0.8: a '
++      'colour\'s alpha is 153, a status\'s its own alpha times 0.8, each '
++      'applied once; in the design mode too', (tester) async {
++    final doc = fillDoc(const InsertionPointMeasurer());
++    addTearDown(doc.dispose);
++    final (painter, n) = painterOver(doc,
++        statuses: {'A': TableStatus(color: const Color(0xCCE53935))},
++        theme: const FloorPlanTheme(
++            tableColorOpacity: 0.6, statusFillOpacity: 0.8));
++    var spy = record(painter);
++    // 0xCC = 204; 204 x 0.8 = 163.2.
++    expect(spy.fillOf(spec('A')), argb(163, 0xE53935));
++    expect(spy.fillOf(spec('C')), argb(alphaThemed, teal));
++    expect(spy.fillOf(spec('K')), argb(alphaThemed, purple));
++    final shot = await render(tester, painter);
++    expectPixel(shot, painterPixel(insideTop(spec('C'))),
++        composite(teal, alphaThemed, whitePaper), 'C at 0.6');
++
++    // statusFillOpacity alone leaves a colour at 0.35; no theme is 0.35.
++    n.theme.value = const FloorPlanTheme(statusFillOpacity: 0.8);
++    spy = record(painter);
++    expect(spy.fillOf(spec('C')), argb(alphaDefault, teal));
++    n.theme.value = null;
++    spy = record(painter);
++    expect(spy.fillOf(spec('C')), argb(alphaDefault, teal));
++    expect(spy.fillOf(spec('A')), 0xCCE53935);
++
++    // The design mode's mount reads the view's theme.
++    final c = controllerOver();
++    await pumpPlan(tester, c,
++        theme: const FloorPlanTheme(
++            tableColorOpacity: 0.6, statusFillOpacity: 0.8));
++    final view = await shoot(tester);
++    expectAt(tester, view, insideTop(spec('C')),
++        composite(teal, alphaThemed, whitePaper), 'design mode, C at 0.6');
++    expectAt(tester, view, insideTop(spec('B')),
++        composite(purple, alphaThemed, whitePaper), 'design mode, B at 0.6');
++  });
++
++  testWidgets(
++      'TF6 Review Focus 1: in the selection mode a status arriving on a teal '
++      'table covers its colour, and leaving shows it again, with no '
++      'document change', (tester) async {
++    final c = controllerOver();
++    c.setMode(FloorPlanMode.selection);
++    await pumpPlan(tester, c);
++    expect(find.byKey(const Key('table-colour-layer')), findsNothing,
++        reason: 'the design mount is not in the selection mode');
++    final state = c.activeDocument.commands.stateId;
++    final c0 = insideTop(spec('C'));
++    final tealFill = composite(teal, alphaDefault, whitePaper);
++    expectAt(tester, await shoot(tester), c0, tealFill, 'teal before');
++
++    c.setTableStatus({'C': TableStatus(color: red)});
++    await tester.pump();
++    expectAt(tester, await shoot(tester), c0, 0xE53935, 'the status');
++
++    c.setTableStatus(const {});
++    await tester.pump();
++    expectAt(tester, await shoot(tester), c0, tealFill, 'teal again');
++    expect(c.activeDocument.commands.stateId, state,
++        reason: 'no document change');
++  });
++
++  testWidgets(
++      'TF7 M-C25 Review Focus 5: on the dark canvas a teal table is '
++      'darkCanvasTone(teal) at alpha 89 over the dark paper, matching the '
++      'teal room\'s tint; a switch to light with no document change: plain '
++      'teal over white; the selection mode tones too', (tester) async {
++    expect(darkCanvasFor(page: 0xFFFFFFFF, brightness: Brightness.dark), isTrue,
++        reason: 'premise: a dark theme over a white page');
++    const paper = kDarkCanvasPaper & 0xFFFFFF;
++    final tone = darkCanvasTone(teal, paper);
++    expect(tone, isNot(teal), reason: 'premise: the tone moves teal');
++    final c = controllerOver();
++    await pumpPlan(tester, c, mode: ThemeMode.dark);
++    final state = c.activeDocument.commands.stateId;
++    var shot = await shoot(tester);
++    final (cx, cy) = pixelOf(tester, insideTop(spec('C')));
++    final (rx, ry) = pixelOf(tester, tintSample);
++    final fill = shot.rgbAt(cx, cy), tint = shot.rgbAt(rx, ry);
++    expect(channelDistance(fill, composite(tone, alphaDefault, paper)),
++        lessThanOrEqualTo(2),
++        reason: 'fill ${hex(fill)}, want '
++            '${hex(composite(tone, alphaDefault, paper))}');
++    expect(channelDistance(tint, composite(tone, tintAlpha, paper)),
++        lessThanOrEqualTo(2),
++        reason: 'tint ${hex(tint)}, want '
++            '${hex(composite(tone, tintAlpha, paper))}');
++    // The room's tint, taken back to its colour and recomposited at 89.
++    var again = 0;
++    for (final shift in const [16, 8, 0]) {
++      final t = (tint >> shift) & 0xFF, p = (paper >> shift) & 0xFF;
++      final hue = (t - (1 - tintAlpha / 255) * p) / (tintAlpha / 255);
++      again |= (alphaDefault / 255 * hue + (1 - alphaDefault / 255) * p)
++              .round()
++              .clamp(0, 255) <<
++          shift;
++    }
++    expect(channelDistance(fill, again), lessThanOrEqualTo(2),
++        reason: 'fill ${hex(fill)}, the tint at 89 ${hex(again)}');
++
++    await pumpApp(tester, c);
++    await tester.pump();
++    shot = await shoot(tester);
++    expectAt(tester, shot, insideTop(spec('C')),
++        composite(teal, alphaDefault, whitePaper), 'light: plain teal');
++    expectAt(tester, shot, tintSample, composite(teal, tintAlpha, whitePaper),
++        'light: the tint');
++    expect(c.activeDocument.commands.stateId, state,
++        reason: 'no document change');
++
++    await pumpApp(tester, c, mode: ThemeMode.dark);
++    await tester.pump();
++    c.setMode(FloorPlanMode.selection);
++    await tester.pump();
++    await tester.pump();
++    c.cameraController.value = viewCamera;
++    await tester.pump();
++    expect(find.byKey(const Key('table-status-layer')), findsOneWidget);
++    expectAt(tester, await shoot(tester), insideTop(spec('C')),
++        composite(tone, alphaDefault, paper), 'selection mode, dark');
++  });
++
++  testWidgets(
++      'TF8 M-C24 M-C15 Review Focus 2 (on screen): setTableColor, undo and '
++      'redo each show at the next frame in the design mode, nothing else '
++      'moving', (tester) async {
++    final c = controllerOver();
++    await pumpPlan(tester, c);
++    final n = insideTop(spec('N'));
++    expectAt(tester, await shoot(tester), n, whitePaper, 'premise');
++
++    expect(c.setTableColor('N', FloorPlanColor.teal), isTrue);
++    await nextFrame(tester);
++    final tealFill = composite(teal, alphaDefault, whitePaper);
++    expectAt(tester, await shoot(tester), n, tealFill, 'set');
++
++    c.undo();
++    await nextFrame(tester);
++    expectAt(tester, await shoot(tester), n, whitePaper, 'undone');
++
++    c.redo();
++    await nextFrame(tester);
++    expectAt(tester, await shoot(tester), n, tealFill, 'redone');
++  });
++
++  testWidgets(
++      'TF9 the allocation bar on the design mount: ten camera frames '
++      'allocate and rebuild nothing; a colour change rebuilds once',
++      (tester) async {
++    final c = controllerOver();
++    await pumpPlan(tester, c);
++    final painter = designPainter(tester);
++    final made = painter.debugAllocations;
++    final rebuilds = painter.debugRebuilds;
++    expect(made, greaterThan(0), reason: 'premise: the fills are built');
++    for (var i = 1; i <= 10; i++) {
++      c.cameraController.value = ViewportTransform(
++          worldToScreenMatrix: Transform2(0.06 + 0.002 * i, 0, 0,
++              -0.06 - 0.002 * i, -2260 - 7.5 * i, -1528 + 3.25 * i));
++      await tester.pump();
++    }
++    expect(identical(designPainter(tester), painter), isTrue);
++    expect(painter.debugAllocations, made, reason: 'nothing per frame');
++    expect(painter.debugRebuilds, rebuilds, reason: 'no rebuild per frame');
++
++    expect(c.setTableColor('N', FloorPlanColor.purple), isTrue);
++    await nextFrame(tester);
++    expect(painter.debugRebuilds, rebuilds + 1);
++    await tester.pump();
++    expect(painter.debugRebuilds, rebuilds + 1);
++  });
++
++  test(
++      'TF10 M-C18 with no statuses and no groups (the design mount), one '
++      'coloured table is one fill after the first paint', () {
++    final doc = fillDoc(const InsertionPointMeasurer(), only: [spec('C')]);
++    addTearDown(doc.dispose);
++    final (painter, _) = painterOver(doc);
++    final spy = record(painter);
++    expect(spy.fills, hasLength(1));
++    expect(spy.fillOf(spec('C')), argb(alphaDefault, teal));
++    expect(painter.debugRebuilds, 1);
++  });
++}

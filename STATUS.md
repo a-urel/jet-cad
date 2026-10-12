@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-11. **`main` carries release 0.5.1** (tag
+**Last updated:** 2026-10-12. **`main` carries release 0.5.1** (tag
 `v0.5.1` → `3f8f7ad`, after `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -321,10 +321,35 @@ one's spec, plan and results.
   on `spec/plan-colors` and **merged into `main` at `ce0a4f9`** on the
   human's word (2026-10-12); its ledger is archived in
   `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-1/`. Next: Slice
-  2 (tables), plan not yet written. Unreleased: 0.6.0 follows Slice 2.
+  2 (tables): plan
+  [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md)
+  (six tasks) is **implemented on `feat/plan-colors-slice-2`**: a table's
+  colour (`jetcad.table_color`, `setTableColor` / `setTablesColor`,
+  `FloorPlanTableDetail.color`), drawn under the drafting in both modes,
+  exported and printed, the Selection panel's Colour row, the page
+  export's underlay, the guide's "Colours on the plan", the CHANGELOG.
+  Reviewed per task and as a whole (the final review's fixes applied);
+  its ledger archived in
+  `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-2/`.
+- **Release 0.6.0** (prepared while the human slept, 2026-10-12, *"otomatik
+  devam et"*): on `release/0.6.0`, cut from `feat/plan-colors-slice-2` at
+  `752eace`. The five packages at 0.6.0, the CHANGELOG's Unreleased
+  section become 0.6.0, the guide covering 0.6.0 with §1's placeholder
+  ref. Every gate green at `d65369d` (the host probe, the 0.3.0, 0.4.0
+  and 0.5.1 probes); an independent review (*Approved with fixes*: a
+  `FloorPlanController` test double breaks, R-1; `jet_cad_2d`'s
+  `SetEntityStyleCommand` and restamp unlisted, R-2; smaller CHANGELOG
+  gaps, R-3 to R-6; STATUS, R-7) is applied; its record is
+  `docs/superpowers/ledgers/2026-10-12-release-0.6.0/review.md`. Next:
+  the human's word to merge `release/0.6.0` into `main` (it brings Slice
+  2), the commit naming the merge's SHA in the guide's §1, the push and
+  the tag `v0.6.0`, the human's.
 
 ## Owed to the human
 
+- **Plan colours, Slice 2, a look:** coloured tables in both modes, light
+  and dark (a status over a colour, a coloured table in a coloured room),
+  and in a PNG and a PDF export.
 - **Plan colours, Slice 1:** a native German and Turkish read of the
   Colour row's words (the spec's PC-10 table, and `colorRefused`, which
   that table lacks: "Farben sind hier nicht änderbar" / "Renkler burada
@@ -387,18 +412,24 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Slice 2 of plan colours (tables).** Slice 1 (the palette, schema
-10, rooms, the `recolor` capability and the Selection panel's Colour row)
-is **merged into `main` at `ce0a4f9`** (2026-10-12), unreleased: it ships
-with Slice 2 as 0.6.0, and `main` now saves schema 10. Slice 2 (a table's
-colour, `jetcad.table_color`, the Tables flows) has no plan written yet:
-start from the spec
-[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md).
-For Slice 2, pin the Colour row's tool-mode visibility with a selection
-made by `controller.select` **while the Wall tool is active**: a mutant
-that drops `!_toolMode && _openingToolMode == null` from
-`selection_panel.dart`'s `colors` flag survives Slice 1, because a
-drawing tool clears the selection.
+**Next: the human's word to merge `release/0.6.0` into `main`** (it brings
+Slice 2 of plan colours, tables, with it), then the commit naming the
+merge's SHA in the guide's §1, the push and the tag `v0.6.0`. Slice 1 (the palette, schema 10, rooms, the `recolor`
+capability and the Selection panel's Colour row) is **merged into `main`
+at `ce0a4f9`** (2026-10-12), unreleased. Slice 2 is implemented and
+reviewed on `feat/plan-colors-slice-2` (plan
+[2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
+spec
+[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md));
+its ledger is archived onto the branch
+(`docs/superpowers/ledgers/2026-10-12-plan-colors-slice-2/`). **Release
+0.6.0 is prepared on `release/0.6.0`** (worktree
+`.claude/worktrees/release-0.6.0`), cut from `feat/plan-colors-slice-2` at
+`752eace` while the human slept (2026-10-12, *"otomatik devam et"*): the
+five packages at 0.6.0, the CHANGELOG's Unreleased section become 0.6.0,
+the guide covering 0.6.0 with §1's placeholder ref (filled by the commit
+after the merge). Merging `release/0.6.0` into `main` brings Slice 2 with
+it; on the human's word, then the human tags `v0.6.0` at the merge.
 
 The released line: 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices

@@ -91,6 +91,10 @@ final ThemeData posDarkTheme = ThemeData(
   extensions: const [floorLookDark],
 );
 
+/// Strong table colours: 60 % of the hue, where the planner's own is 35 %.
+const FloorPlanTheme strongTableColours =
+    FloorPlanTheme(tableColorOpacity: 0.6);
+
 /// The POS's own colour tokens as a Material colour scheme, by hand: a
 /// seeded scheme cannot reproduce another design system's colours.
 ColorScheme posColorScheme(Brightness brightness) =>
@@ -367,6 +371,47 @@ class _FloorScreenState extends State<FloorScreen> {
         for (final MapEntry(key: number, value: id) in idByNumber.entries)
           number: {'id': id},
       });
+
+  /// The colour of table [number]: null when it has none, or when two
+  /// tables carry the number (it names neither).
+  FloorPlanColor? colourOf(String number) {
+    final tables = [
+      for (final detail in controller.tableDetails)
+        if (detail.table.number == number) detail,
+    ];
+    return tables.length == 1 ? tables.single.color : null;
+  }
+
+  /// Marks table [number] as the VIP table; false, changing nothing, when
+  /// this floor has no table [number] or two of them.
+  bool markVip(String number) =>
+      controller.setTableColor(number, FloorPlanColor.purple);
+
+  /// Takes the colour off table [number].
+  bool clearColour(String number) => controller.setTableColor(number, null);
+
+  /// Colours a section of the floor in one undo step; false, changing
+  /// nothing, if a number is not on the floor or is on two tables.
+  bool colourSection(Set<String> numbers) => controller.setTablesColor({
+        for (final number in numbers) number: FloorPlanColor.teal,
+      });
+
+  /// The PNG of the floor with strong table colours.
+  Future<FloorPlanExport?> exportStrong() => controller.exportPlan(
+        const FloorPlanExportChoice(
+            format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
+        name: 'floor-1',
+        tableColorOpacity: 0.6,
+      );
+
+  /// A table's colour changed: say so.
+  void colourChanged(FloorPlanDesignChange change) {
+    if (change case FloorPlanTableChanged(:final before, :final after)
+        when before.color != after.color) {
+      debugPrint('${after.table.number} is now '
+          '${after.color?.name ?? 'uncoloured'}');
+    }
+  }
 
   /// The designed floor changed: keep the POS's list of tables in step.
   void designChanged(FloorPlanDesignChange change) {

@@ -1262,7 +1262,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
         _openingToolMode == null &&
         widget.capabilities.changeLayer;
     // Plan colours spec PC-9: the Colour row, for a selection holding a
-    // room (Slice 2: or a table), whenever no tool-settings section shows.
+    // room or a table, whenever no tool-settings section shows.
     final colors = !_toolMode &&
         _openingToolMode == null &&
         pickedColors(widget.document, widget.selection.keys).isNotEmpty;
