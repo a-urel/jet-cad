@@ -12,13 +12,19 @@
 // test are `teal` and `purple`, never the first of the palette, and
 // `magenta`, a name no release knows.
 import 'dart:convert' show jsonDecode, jsonEncode;
+import 'dart:typed_data' show Uint8List;
+import 'dart:ui' as ui;
 
 import 'package:jet_cad_floor_plan/src/colors/plan_color.dart';
+import 'package:jet_cad_floor_plan/src/export/export_bytes.dart'
+    show exportBytes;
+import 'package:jet_cad_floor_plan/src/export/export_dialog.dart'
+    show ExportChoice, ExportFormat;
 import 'package:jet_cad_floor_plan/src/parametric/room.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show FlutterTextMeasurer;
+    show ExportDpi, FlutterTextMeasurer;
 
 import 'support/room_fixture.dart';
 
@@ -392,5 +398,95 @@ void main() {
     expect(after.flags & EntityFlags.invisible, isNot(0));
     expect(after.transparency, transparency0);
     expect(driftOf(doc), isEmpty);
+  });
+
+  testWidgets(
+      'RC8 the export draws a coloured room\'s tint in its hue at 20 %, and '
+      'an uncoloured one\'s as before: PNG pixels inside two rooms',
+      (tester) async {
+    final f = fixture();
+    final doc = f.doc;
+    // A page that holds the plan at the corpus far origin, turned 23 deg:
+    // its lower-left corner 3 m west and 2 m south of the plan's origin; no
+    // grid line to fall on a sampled pixel.
+    final base = f.plan.at(0, 0);
+    final page = PageComponent(
+        originX: base.x - 3000, originY: base.y - 2000, gridVisible: false);
+    attachPage(doc, page);
+
+    const dpi = 96;
+    const png96 = ExportChoice(format: ExportFormat.png, dpi: ExportDpi.d96);
+    Future<({int w, int h, Uint8List rgba})> export() async =>
+        (await tester.runAsync(() async {
+          final bytes = await exportBytes(doc, page, png96,
+              fontBytes: () async => throw StateError('a PNG reads no font'));
+          final codec = await ui.instantiateImageCodec(bytes);
+          final image = (await codec.getNextFrame()).image;
+          codec.dispose();
+          try {
+            final data =
+                (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
+            return (
+              w: image.width,
+              h: image.height,
+              rgba: data.buffer.asUint8List(),
+            );
+          } finally {
+            image.dispose();
+          }
+        }))!;
+
+    // Plan point (x, y) -> image pixel: `((x - ox) / den * u,
+    // (oy + effH * den - y) / den * u)`, u = dpi / 25.4, computed from the
+    // page's numbers, not through `pageCamera`.
+    List<int> pixelAt(
+        ({int w, int h, Uint8List rgba}) img, double px, double py) {
+      final world = f.plan.at(px, py);
+      final u = dpi / 25.4, den = page.scaleDenominator;
+      final x = ((world.x - page.originX) / den * u).floor();
+      final y =
+          ((page.originY + page.effectiveHeightMm * den - world.y) / den * u)
+              .floor();
+      expect(x, inInclusiveRange(0, img.w - 1));
+      expect(y, inInclusiveRange(0, img.h - 1));
+      final i = (y * img.w + x) * 4;
+      return [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2], img.rgba[i + 3]];
+    }
+
+    // Away from walls and from both labels (seeds at (1500, 2000) and
+    // (4700, 1900)): 0.4 m inside A's east wall, 0.9 m inside B's.
+    const inA = (2400.0, 3300.0);
+    const inB = (7000.0, 3000.0);
+
+    // `rgb` composited at `alpha` over the white sheet, per channel.
+    List<int> over(int rgb, int alpha) => [
+          for (final s in [(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF])
+            (alpha / 255 * s + (1 - alpha / 255) * 255).round(),
+        ];
+    void expectNear(List<int> got, List<int> want, String reason) {
+      expect(got[3], 255, reason: reason);
+      for (var c = 0; c < 3; c++) {
+        expect(got[c], closeTo(want[c], 2), reason: '$reason, channel $c');
+      }
+    }
+
+    // Teal 0x00897B at alpha 51 (transparency 204); ACI 7, drawn black on
+    // white, at alpha 26 (transparency 229). Literals, not the constants:
+    // the pixels are what is under test.
+    final teal = over(0x00897B, 51);
+    final grey = over(0x000000, 26);
+    expect(teal, [204, 231, 229]);
+    expect(grey, [229, 229, 229]);
+
+    // The control: nothing coloured, both rooms the grey tint.
+    final plain = await export();
+    expectNear(pixelAt(plain, inA.$1, inA.$2), grey, 'A uncoloured');
+    expectNear(pixelAt(plain, inB.$1, inB.$2), grey, 'B uncoloured');
+
+    // Room A teal: A's pixel takes the hue, B's stays the grey tint.
+    doc.commands.execute(recolor(doc, f.a, 'teal'));
+    final coloured = await export();
+    expectNear(pixelAt(coloured, inA.$1, inA.$2), teal, 'A teal');
+    expectNear(pixelAt(coloured, inB.$1, inB.$2), grey, 'B uncoloured');
   });
 }

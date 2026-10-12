@@ -48,7 +48,7 @@
 ///
 /// 10: no new field the engine reads, and nothing to default; the v9->v10
 /// migration is empty, so a v9 (or older) document is read unchanged. The
-/// bump exists for the reader, as 6's to 8's did: the floor planner's room
+/// bump exists for the reader, as 6's to 9's did: the floor planner's room
 /// gains a `color` key (plan colours spec PC-3) and its tables a
 /// `jetcad.table_color` component (PC-4). A v9 build would read a room's
 /// colour as nothing and drop it on its next save, and keep a table's

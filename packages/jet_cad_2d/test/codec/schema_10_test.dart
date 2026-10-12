@@ -25,6 +25,7 @@ void main() {
     final ten =
         DraftDocumentCodec.encodeToString(fixture(MetricModelMeasurer()));
     final nine = withVersion(ten, 9);
+    expect(nine, isNot(ten));
     final loaded = DraftDocumentCodec.decodeString(nine,
         measurer: MetricModelMeasurer(),
         registerComponents: PageComponent.register);
