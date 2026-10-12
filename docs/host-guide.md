@@ -1119,7 +1119,8 @@ plan with the table, and read back as `FloorPlanTableDetail.data`:
   meaning: a plan saved at one location and loaded at another carries the
   first location's ids. Check an id against your own records before you
   act on it.
-- A plan saved by this release is at **schema 9**, data or not
+- A plan saved by this release is at **schema 10** (0.4.0 to 0.5.1
+  saved 9), data or not
   ([§ 11](#11-what-a-host-must-never-assume)).
 
 **The design's changes.** `controller.designChanges` is a broadcast
