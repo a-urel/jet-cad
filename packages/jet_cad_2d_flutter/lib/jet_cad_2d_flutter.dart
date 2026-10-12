@@ -13,6 +13,7 @@ export 'src/draft_painter.dart';
 export 'src/draw_sink.dart';
 export 'src/export/page_camera.dart';
 export 'src/export/page_export.dart';
+export 'src/export/page_underlay.dart';
 export 'src/export/pdf_draw_sink.dart';
 export 'src/draw/arc_tool.dart';
 export 'src/draw/circle_tool.dart';
