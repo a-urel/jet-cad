@@ -480,6 +480,21 @@ void _stampLayer(
   }
 }
 
+/// Plan colours spec PC-3a: the stamp on one **matched** child [c] of its
+/// generated colour and transparency, [g]'s: one
+/// `SetEntityStyleCommand.restore` when the stored colour or transparency
+/// differs (exact `==` on the stored encodings), nothing otherwise. The
+/// guard is load-bearing, as [_stampLayer]'s (12b R-15): an object whose
+/// style did not change plans no command.
+void _stampStyle(
+    CommandTarget t, List<DraftCommand> out, Handle c, Generated g) {
+  final slot = t.entities.slotOf(c)!;
+  if (t.entities.colorAt(slot) != encodeColor(g.color) ||
+      t.entities.transparencyAt(slot) != g.transparency) {
+    out.add(SetEntityStyleCommand.restore(c, g.color, g.transparency));
+  }
+}
+
 /// The boundary a fill child names: its payload's one scalar (spec 07 D8).
 Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
     .peek(t.entities.geomIndexAt(t.entities.slotOf(fill)!))
@@ -525,8 +540,10 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 ///
 /// A matched child's payload is rewritten when it differs; a matched
 /// TEXT's string too (spec 10 D12); then its layer, when it differs from
-/// the object's ([_stampLayer], spec 12b D2), a matched region's fill and
-/// boundary each. Every added record comes from [_recordOf], on the
+/// the object's ([_stampLayer], spec 12b D2) and its colour and
+/// transparency when they differ from the generated ones ([_stampStyle],
+/// plan colours spec PC-3a), a matched region's fill and boundary each.
+/// Every added record comes from [_recordOf], on the
 /// object's layer.
 ///
 /// Each object is first asked whether it dissolves (spec 10 D15), with the
@@ -577,6 +594,8 @@ List<DraftCommand> _plan(
         }
         _stampLayer(t, out, fills[i], layer);
         _stampLayer(t, out, boundary, layer);
+        _stampStyle(t, out, fills[i], g);
+        _stampStyle(t, out, boundary, g);
       } else {
         // Fill first: `AddRegionCommand` requires the lower handle on it.
         out.add(AddRegionCommand(
@@ -602,12 +621,13 @@ List<DraftCommand> _plan(
         // Spec 10 D12: a matched TEXT's string is a stored value, compared
         // by exact `==` after the payload and rewritten in place when it
         // differs. Nothing else of the record is read or rewritten: every
-        // other attribute is fixed at creation, like the colour (06 D11,
-        // 10 D13).
+        // other attribute but the colour and the transparency (PC-3a) is
+        // fixed at creation (06 D11, 10 D13); the layer is stamped below.
         if (g.kind == EntityKind.text && t.entities.textAt(slot) != g.text) {
           out.add(SetEntityTextCommand(existing[i], g.text, ''));
         }
         _stampLayer(t, out, existing[i], layer);
+        _stampStyle(t, out, existing[i], g);
       } else {
         out.add(AddEntityCommand(
             record: _recordOf(Handle.checked(++reserved), h, g.kind, g, layer),
