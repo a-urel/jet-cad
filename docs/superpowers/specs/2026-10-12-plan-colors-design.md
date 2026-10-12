@@ -1,7 +1,10 @@
 # Plan colours: a colour per table and per room — design
 
 **Date:** 2026-10-12. **Status:** revision 2, **approved by the human on
-2026-10-12**.
+2026-10-12**. **Slice 1 merged into `main` at `ce0a4f9`** (2026-10-12;
+plan [2026-10-12-plan-colors-slice-1.md](../plans/2026-10-12-plan-colors-slice-1.md),
+ledger `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-1/`); Slice 2
+not started.
 Revision 1 (`abc06cb`) was reviewed independently: **Approve with
 fixes**, V-1 to V-12, one blocker (V-1); revision 2 folds in every fix
 (see [Review](#review)).

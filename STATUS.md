@@ -302,9 +302,11 @@ one's spec, plan and results.
   Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
   revision 2, approved 2026-10-12, on `spec/plan-colors`. Slice 1's plan
   [2026-10-12-plan-colors-slice-1.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-1.md)
-  (the palette, schema 10, rooms; five tasks) is implemented on
-  `spec/plan-colors`, each task and the whole branch reviewed. Next: the
-  human's merge word, then Slice 2 (tables).
+  (the palette, schema 10, rooms; five tasks) was implemented and reviewed
+  on `spec/plan-colors` and **merged into `main` at `ce0a4f9`** on the
+  human's word (2026-10-12); its ledger is archived in
+  `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-1/`. Next: Slice
+  2 (tables), plan not yet written. Unreleased: 0.6.0 follows Slice 2.
 
 ## Owed to the human
 
@@ -370,12 +372,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's merge word for Slice 1 of plan colours, then Slice 2
-(tables).** Slice 1 (the palette, schema 10, rooms, the `recolor`
-capability and the Selection panel's Colour row) is implemented and
-reviewed on `spec/plan-colors` (worktree `.claude/worktrees/plan-colors`),
-its whole-branch review's fixes applied; it merges to `main` on the
-human's word and is released with Slice 2 as 0.6.0. Slice 2 (a table's
+**Next: Slice 2 of plan colours (tables).** Slice 1 (the palette, schema
+10, rooms, the `recolor` capability and the Selection panel's Colour row)
+is **merged into `main` at `ce0a4f9`** (2026-10-12), unreleased: it ships
+with Slice 2 as 0.6.0, and `main` now saves schema 10. Slice 2 (a table's
 colour, `jetcad.table_color`, the Tables flows) has no plan written yet:
 start from the spec
 [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md).
