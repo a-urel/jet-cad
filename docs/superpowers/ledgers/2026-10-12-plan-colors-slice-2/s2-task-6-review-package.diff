@@ -1,0 +1,529 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7fb751cf..62d6942c 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,39 +1,51 @@
+ # Changelog
+ 
+ The four packages a host depends on — `jet_cad_2d`, `jet_cad_2d_flutter`,
+ `jet_cad_floor_plan`, `jet_cad_restaurant_symbols` — are released
+ together, under one version and one git tag. None is published to
+ pub.dev: a host depends on them by git (see
+ [docs/host-guide.md](docs/host-guide.md)).
+ 
+ ## Unreleased
+ 
+-Plan colours, Slice 1 (of two; released together as 0.6.0).
++Plan colours (two slices, released together as 0.6.0).
+ 
+ - **Plans are now saved at schema 10.** A 0.5.1 (or older) build refuses
+   a plan this release saves (`load` throws a `FormatException` naming
+   `unsupported schemaVersion 10`); this release opens a 0.5.1 plan
+   unchanged. Terminals that share plans must move together.
+ - **A room can take a colour**, one of eight hues
+   (`FloorPlanColor`: red, orange, yellow, green, teal, blue, purple,
+   grey), chosen in the Selection panel's new **Colour** row; its tint
+   is drawn in that hue at 20 %, on screen, in the export and in the
+   print. An uncoloured room is drawn exactly as before.
+ - **`FloorPlanEditorCapabilities.recolor`** (default true; false in
+   `readOnly`) allows the Colour row; refused, it shows read only.
+   `tablesOnly` keeps it on.
+ - **Breaking for a host's own strings:** `FloorPlanStrings` gains the
+   abstract `color`, `colorNone`, `colorRefused` and
+   `colorName(FloorPlanColor)`; a class that implements or directly
+   extends `FloorPlanStrings` must add them (a subclass of a built-in
+   language inherits them).
++- **A table can take a colour**, one of the eight `FloorPlanColor` hues:
++  in the Selection panel's Colour row (beside rooms), or by
++  `controller.setTableColor` / `setTablesColor`; read back as
++  `FloorPlanTableDetail.color`. It is drawn as a fill under the table's
++  drafting in both modes, exported and printed; in the selection mode a
++  status covers it. `FloorPlanTheme.tableColorOpacity` (default 0.35)
++  sets its strength; `exportPlan` and `printPlan` take an optional
++  `tableColorOpacity`.
++- **`jet_cad_2d_flutter`:** `exportPagePdf` and `exportPagePng` take an
++  optional `underlay` of `PageUnderlayFill`s drawn under the drawing.
++- **`jet_cad_floor_plan`'s `editor.dart`** (not the host barrel) exports
++  `isTable(doc, handle)`.
+ 
+ ## 0.5.1
+ 
+ Two fixes from the host embedding API's fourth slice. Nothing is stored
+ differently: **plans and service layouts are the same as 0.4.0's and
+ 0.5.0's** (schema 9), so 0.4.0, 0.5.0 and 0.5.1 terminals can share
+ them. Nothing a 0.5.0 host calls changes its signature. The packages
+ need Flutter 3.44 or later, as 0.5.0 did; 0.5.1 was built and tested
+ with Flutter 3.47.6.
+ 
+diff --git a/STATUS.md b/STATUS.md
+index 8d905332..843f9bc4 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -316,25 +316,33 @@ one's spec, plan and results.
+   per room from a fixed palette, saved at schema 10.
+   Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
+   revision 2, approved 2026-10-12, on `spec/plan-colors`. Slice 1's plan
+   [2026-10-12-plan-colors-slice-1.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-1.md)
+   (the palette, schema 10, rooms; five tasks) was implemented and reviewed
+   on `spec/plan-colors` and **merged into `main` at `ce0a4f9`** on the
+   human's word (2026-10-12); its ledger is archived in
+   `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-1/`. Next: Slice
+   2 (tables): plan
+   [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md)
+-  (six tasks) on `feat/plan-colors-slice-2`, awaiting the human's review
+-  and choice of execution. Unreleased: 0.6.0 follows Slice 2.
++  (six tasks) is **implemented on `feat/plan-colors-slice-2`**: a table's
++  colour (`jetcad.table_color`, `setTableColor` / `setTablesColor`,
++  `FloorPlanTableDetail.color`), drawn under the drafting in both modes,
++  exported and printed, the Selection panel's Colour row, the page
++  export's underlay, the guide's "Colours on the plan", the CHANGELOG.
++  Reviewed per task; awaiting the human's word to merge into `main`
++  (its ledger is then archived), then release 0.6.0.
+ 
+ ## Owed to the human
+ 
++- **Plan colours, Slice 2, a look:** coloured tables in both modes, light
++  and dark (a status over a colour, a coloured table in a coloured room),
++  and in a PNG and a PDF export.
+ - **Plan colours, Slice 1:** a native German and Turkish read of the
+   Colour row's words (the spec's PC-10 table, and `colorRefused`, which
+   that table lacks: "Farben sind hier nicht änderbar" / "Renkler burada
+   değiştirilemez"); a look at a coloured room
+   on the light and dark canvas.
+ - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
+   the floor planner in three languages; the service mode's menu, groups
+   and layout; the dark theme).
+ - **A native German read** of the German text (*Am Raster fangen*,
+   *Zufällige Status* among others); the Turkish read.
+@@ -383,32 +391,31 @@ one's spec, plan and results.
+ 
+ ## Standing failures and skips
+ 
+ On Linux, compared exactly by CI: the engine's two `generate_document_test`
+ fingerprints and the render package's seven text-ladder goldens (macOS
+ values), and the render package's paint micro-benchmark rig (skipped,
+ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ 
+ ## Resume here
+ 
+-**Next: Slice 2 of plan colours (tables).** Slice 1 (the palette, schema
+-10, rooms, the `recolor` capability and the Selection panel's Colour row)
+-is **merged into `main` at `ce0a4f9`** (2026-10-12), unreleased: it ships
+-with Slice 2 as 0.6.0, and `main` now saves schema 10. Slice 2 (a table's
+-colour, `jetcad.table_color`, the Tables flows) has no plan written yet:
+-start from the spec
+-[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md).
+-For Slice 2, pin the Colour row's tool-mode visibility with a selection
+-made by `controller.select` **while the Wall tool is active**: a mutant
+-that drops `!_toolMode && _openingToolMode == null` from
+-`selection_panel.dart`'s `colors` flag survives Slice 1, because a
+-drawing tool clears the selection.
++**Next: the human's word to merge Slice 2 of plan colours (tables), then
++release 0.6.0.** Slice 1 (the palette, schema 10, rooms, the `recolor`
++capability and the Selection panel's Colour row) is **merged into `main`
++at `ce0a4f9`** (2026-10-12), unreleased. Slice 2 is implemented and
++reviewed on `feat/plan-colors-slice-2` (plan
++[2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
++spec
++[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md));
++its ledger lives in `.superpowers/sdd/2026-10-12-plan-colors-slice-2/` and
++is archived onto the branch before the merge. After the merge: release
++0.6.0.
+ 
+ The released line: 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
+ `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
+ (**schema 9**, every terminal that shares stored plans moves together).
+ Monépro owes Q-H3 and its real shadcn tokens, and can name
+ `controller.camera`, `tableOverlayBuilder` (Q-Z1),
+ `FloorPlanTableDetail.data` (Q-Z4), `FloorPlanTheme`, and from Slice 4
+ `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
+ `PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
+ for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 5adf380d..fb8f61ca 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -399,20 +399,140 @@ word them in its language:
+                 strings.numberingWarning(warning),
+             ];
+             return Text(problems.isEmpty ? 'Floor 1' : problems.first);
+           },
+         ),
+ ```
+ 
+ Word them where you build, not when they change: a sentence kept in
+ state stays in the old language after a language switch.
+ 
++### Colours on the plan
++
++*Since 0.6.0.* A table, like a room, takes one colour from a fixed
++palette: `FloorPlanColor`, eight hues (`red`, `orange`, `yellow`,
++`green`, `teal`, `blue`, `purple`, `grey`). A hue is stored by its
++**name**, never its position, so a palette reordered or extended breaks no
++file. A name a later release adds reads as no colour here: the table
++shows none, and the name is kept as read and saved back until you give
++the table a colour.
++
++A table's colour is the design's, like its data: saved with the plan,
++undone, exported and printed. Read it as `FloorPlanTableDetail.color`
++(null for a table with none, and for one whose stored colour this release
++cannot read), write it with `setTableColor`:
++
++```dart
++  /// The colour of table [number]: null when it has none, or when two
++  /// tables carry the number (it names neither).
++  FloorPlanColor? colourOf(String number) {
++    final tables = [
++      for (final detail in controller.tableDetails)
++        if (detail.table.number == number) detail,
++    ];
++    return tables.length == 1 ? tables.single.color : null;
++  }
++
++  /// Marks table [number] as the VIP table; false, changing nothing, when
++  /// this floor has no table [number] or two of them.
++  bool markVip(String number) =>
++      controller.setTableColor(number, FloorPlanColor.purple);
++
++  /// Takes the colour off table [number].
++  bool clearColour(String number) => controller.setTableColor(number, null);
++```
++
++- `setTableColor(number, color)` follows `setTableData`'s rules. It is a
++  design edit, so **the selection mode refuses it** with a `StateError`.
++  It is undoable as one step, labelled "Table colour", makes the plan
++  `dirty`, moves `revision` and is reported on `designChanges`. A colour
++  equal to the table's own returns true with no edit; **null removes
++  the colour**.
++- It returns **false**, changing nothing, when the number (trimmed) names
++  no table **or more than one**. Read it the same way (`colourOf` above).
++- A table on a hidden or locked layer takes a colour: a colour is not a
++  drawing edit.
++- `setTablesColor({number: color, …})` writes several tables as **one**
++  undo step, all or nothing; a number unknown or shared, or two keys that
++  trim to the same number, return false with nothing changed:
++
++```dart
++  /// Colours a section of the floor in one undo step; false, changing
++  /// nothing, if a number is not on the floor or is on two tables.
++  bool colourSection(Set<String> numbers) => controller.setTablesColor({
++        for (final number in numbers) number: FloorPlanColor.teal,
++      });
++```
++
++- The editor's Selection panel has a **Colour** row for tables as for
++  rooms, under `tablesOnly` too; the `recolor` capability allows it
++  ([The editor's capabilities](#the-editors-capabilities)). Your own
++  `setTableColor` stays allowed under every value.
++- **In the plan** the colour is a component of the table's placement,
++  `"jetcad.table_color"`, as `{"color": name}`. You never read or write it
++  there; `color` and `setTableColor` are the API. **Delete drops it, Undo
++  brings it back**, and a renumbering keeps it.
++- **A stored colour this release cannot read** (a plan edited by hand, or
++  saved by a later release with another hue) does not stop the plan from
++  opening. That table reads a null `color`; its stored colour is kept as
++  read and saved back until you `setTableColor` that table. Editor code
++  sees it as the table diagnostic `table.invalid_color`.
++
++**How it is drawn.** The colour fills the table's outline **under** its
++drafting, in the design mode and in the selection mode alike, at
++`FloorPlanTheme.tableColorOpacity` (null: 0.35). The selection mode's
++status colours are drawn over it: **a status covers a colour**, the table
++shows the status and none of its colour, and clearing the status
++(`setTableStatus`) shows the colour again, with no change to the plan.
++A group's status covers its members' colours the same way. On the dark
++canvas a hue is toned as a room's tint is, to keep its contrast; the
++plan never stores the toned colour.
++
++```dart
++/// Strong table colours: 60 % of the hue, where the planner's own is 35 %.
++const FloorPlanTheme strongTableColours =
++    FloorPlanTheme(tableColorOpacity: 0.6);
++```
++
++**Export and print carry the colours**, unlike statuses and groups. The
++view's own Export and Print draw them at the opacity of the theme the view
++resolves. `controller.exportPlan` and `printPlan` need no view and read no
++theme: they draw the colours at 0.35, or at the `tableColorOpacity` you
++give (in `[0, 1]`; an `ArgumentError` before anything runs otherwise).
++Exports and prints are never re-toned, as before.
++
++```dart
++  /// The PNG of the floor with strong table colours.
++  Future<FloorPlanExport?> exportStrong() => controller.exportPlan(
++        const FloorPlanExportChoice(
++            format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
++        name: 'floor-1',
++        tableColorOpacity: 0.6,
++      );
++```
++
++**A recolour is a change.** `designChanges` reports it as a
++`FloorPlanTableChanged` whose `before.color` and `after.color` differ; a
++deleted coloured table is a `FloorPlanTableRemoved` that carries its
++colour, and the undo a `FloorPlanTableAdded` equal to it:
++
++```dart
++  /// A table's colour changed: say so.
++  void colourChanged(FloorPlanDesignChange change) {
++    if (change case FloorPlanTableChanged(:final before, :final after)
++        when before.color != after.color) {
++      debugPrint('${after.table.number} is now '
++          '${after.color?.name ?? 'uncoloured'}');
++    }
++  }
++```
++
+ ### Table groups
+ 
+ A host can merge tables into a **group** — a party seated across tables.
+ In the selection mode a group's members are framed and labelled, a tap on
+ a member selects the whole group (Shift or Ctrl adds or removes it
+ whole), and a drag moves it as one. Groups, like statuses, are the
+ host's: never saved, exported, printed or undone, kept across mode
+ switches and loads.
+ 
+ - `controller.setTableGroups({id: TableGroup(members: {...}, label: ...)})`
+@@ -1152,21 +1272,21 @@ the designed tables added, removed and changed since the last report.
+         debugPrint('another plan: read controller.tableDetails again');
+     }
+   }
+ ```
+ 
+ - A table is followed as itself, never by its number: a renumbering is
+   one `FloorPlanTableChanged` whose `before` and `after` differ in the
+   number; an undone delete is one `FloorPlanTableAdded` equal to the
+   `FloorPlanTableRemoved` the delete reported. `before` and `after` can
+   differ in the number, the geometry, the layer, the lock, the
+-  visibility or the data. One edit can report several tables, in the
++  visibility, the data or the colour. One edit can report several tables, in the
+   order of `controller.tables`: locking a layer reports each table on it.
+ - `load` and `newPlan()`, in either mode, report what was still owed for
+   the plan they replace, then `FloorPlanPlanReplaced` alone, with no
+   change per table: read `tableDetails` again. A `load` that throws
+   reports nothing.
+ - Nothing done in the selection mode is reported: a service move changes
+   the copy, never the design (`onTablesMoved` and `serviceLayoutChanges`
+   report it).
+ - **Delivery is asynchronous**, never from inside your call to `load`,
+   `setTableData` or an undo: the edits made in one synchronous step
+@@ -1502,22 +1622,22 @@ Field by field:
+   `changeLayer`: the selection's edits. A refused button or menu
+   (Mirror, ±90, a door's flips, the Size menu, the layer picker) is not
+   shown; a refused value field is shown read only. `reshape` covers an
+   object's own grips and fields (a box's, a wall's thickness and
+   justification, an opening's, a room's name, a dimension's kind) and
+   Change size. A drag whose flag is refused before the pointer lifts is
+   cancelled at once: it executes nothing, even if the flag is allowed
+   again by then. `rotate` and `mirror` also bound the symbol tool: its R
+   and M, and the turn and mirror of the next placement.
+ - `recolor` (*since 0.6.0*): the Selection panel's Colour row, which
+-  gives the selected rooms one of the eight `FloorPlanColor` hues or
+-  none. Refused, the row shows the colour, read only.
++  gives the selected rooms and tables one of the eight `FloorPlanColor`
++  hues or none. Refused, the row shows the colour, read only.
+ - `undo`, `export`, `print`: the bar's buttons **and** their chords.
+ - `rulers`, `grid`, `snapping`: the drafting aids. `snapping: false`
+   turns object snap off for the editor's tools and drags and removes F3
+   and the OSNAP read-out; the user's own setting comes back with it.
+   Grid snap stays the page's setting.
+ 
+ `copyWith` changes some fields of a profile. Its null keeps a field, the
+ filter included: `copyWith(symbolFilter: null)` keeps the filter, so
+ start from `full` for none.
+ 
+@@ -1726,30 +1846,31 @@ too. Give the field `onTapOutside: (_) {}` to keep the focus there until
+ the plan or another field takes it.
+ 
+ ## 9. Themes
+ 
+ The planner follows your `MaterialApp`'s theme. In a dark theme a light
+ page is shown on a dark canvas with its drawing re-toned to keep its
+ contrast; exports and prints are never re-toned.
+ 
+ *Since 0.4.0:* the floor plan's own look, `FloorPlanTheme`.
+ 
+-**What it sets.** A `ThemeExtension` with sixteen optional fields; a
++**What it sets.** A `ThemeExtension` with seventeen optional fields; a
+ field you leave null is what the planner draws without a theme, so
+ `const FloorPlanTheme()` changes nothing. Widths, sizes, radii and
+ padding are logical pixels on the screen; the margin is millimetres of
+ the plan.
+ 
+ | Fields | What they reach | Null is |
+ |---|---|---|
+ | `statusCaptionStyle` | the status captions, selection mode | 11 px, the platform's default font, black or white ink |
+ | `statusFillOpacity` | multiplies a status colour's alpha, once, selection mode | the colour as you gave it |
++| `tableColorOpacity` *(since 0.6.0)* | the alpha of a table's colour fill, **both modes**, and of the view's own Export and Print | 0.35 |
+ | `groupFrameColor`, `groupFrameWidth`, `groupFrameMargin` | the group frames, selection mode | the paper's grip colour (a violet), 2 px, 150 mm |
+ | `groupChipColor`, `groupChipTextStyle`, `groupChipRadius`, `groupChipPadding` | the group label chips, selection mode | the frame's colour, the caption's defaults, 4 px, 5 px left and right and 2 px top and bottom |
+ | `selectionOnLight`, `selectionOnDark`, `selectionWidth` | the selection, **both modes** | the planner's blue for that paper, 2 px |
+ | `focusVeilColor`, `focusVeilOpacity` | the veil over the tables outside the focus, selection mode | the paper's colour, 0.6 |
+ | `canvasBackground` | the canvas around the page **and** a page-less plan's paper, **both modes** | your `ColorScheme.surface` |
+ | `serviceBarHeight` | the selection mode's bar | 44 px |
+ 
+ **Where it goes.** One `FloorPlanTheme` in each of your `ThemeData`s, a
+ light and a dark one, so the system's mode picks the right one:
+ 
+@@ -1921,20 +2042,28 @@ in it is drawn on your light colour, with dark ink.
+   caption wider than its table on the screen, or a chip wider than its
+   frame, is not drawn, as before.
+ - **Fonts.** Without a theme the captions and chips are drawn in the
+   platform's default font, not in the plans' Roboto: that is today's
+   look, and a theme leaves it so. For the same captions on every
+   terminal, set `fontFamily: 'Roboto'` in both styles, as above:
+   `ensureFloorPlanFonts` ([§ 2](#2-fonts)) registers it, and on the web
+   your pubspec's `fonts` entry declares it. Only the regular face ships;
+   a bold style is drawn emboldened from it. A family you have not loaded
+   falls back to the platform's font.
++- **Table colours** *(since 0.6.0)*. `tableColorOpacity` is the alpha of
++  the fill a table's colour draws, in both modes, on the light page and
++  on the dark canvas (where the hue is toned first, as a room's tint is).
++  It reaches the view's own Export and Print too, since they draw the
++  colours; `controller.exportPlan` and `printPlan` read no theme and take
++  their own `tableColorOpacity` ([Colours on the
++  plan](#colours-on-the-plan)). It does not touch a room's tint, a status
++  fill (`statusFillOpacity`) or a veil.
+ - **Defaults that follow another field.** A null `groupChipColor` is the
+   frame's colour as resolved: set only `groupFrameColor` and the chips
+   match it. With the focus on, a group none of whose tables is in it is
+   faded: its frame in the frame's colour at its alpha × (1 − the veil's
+   opacity), its chip under the veil's colour and opacity, one veil for
+   tables and groups.
+ - **The veil.** `focusVeilColor`'s own alpha is **multiplied** by
+   `focusVeilOpacity` (as `statusFillOpacity` multiplies a status
+   colour's); with no colour the veil is the paper's colour at that
+   opacity. Over the paper itself a paper-coloured veil does not show:
+@@ -1948,37 +2077,39 @@ in it is drawn on your light colour, with dark ink.
+ - **The bar.** `serviceBarHeight` sets the bar; the plan's canvas starts
+   under it. Changed while a plan is shown, the canvas moves and the plan
+   with it, as on any change of your layout; a mode switch afterwards
+   keeps the plan where it is on the screen, as always.
+ - **The canvas.** `canvasBackground` is the colour around the page and
+   the paper of a plan with no page: the drawing's ink, the selection's
+   colour set and the veil follow it as they follow a page. A translucent
+   colour is used as given; the ink is chosen on its RGB.
+ - **Out of range.** The constructor is `const` and never throws. The
+   view checks the resolved look when it builds and throws an
+-  `ArgumentError` naming the field: the two opacities must be in
++  `ArgumentError` naming the field: the three opacities must be in
+   [0, 1]; `selectionWidth`, `groupFrameWidth` and `serviceBarHeight`
+   finite and above 0; `groupFrameMargin`, `groupChipRadius` and each
+   side of `groupChipPadding` finite and not negative; a style's
+   `fontSize`, when set, finite and above 0.
+ - **An animated switch.** `MaterialApp` animates a theme change (200 ms
+   by default), and the look follows frame by frame: colours, numbers,
+   padding and text styles interpolate, each number kept between its two
+   ends whatever the curve; a field set on one side only, or a style
+   whose `color` is set on one side only, switches at the halfway point.
+   An extension only the new theme has applies one frame later, from the
+   switch's second frame (its first frame is t = 0, still the old theme);
+   one only the old theme has stays until the switch ends. While the look
+   changes, the selection mode's painters rebuild at most once per frame
+   of the switch, and never for a pan or a zoom.
+ - **Never stored.** The look is never saved with the plan or the service
+-  layout, never exported and never printed.
++  layout, never exported and never printed (an export of the view's own
++  draws a table colour at the look's `tableColorOpacity`, and nothing
++  else of it).
+ 
+ ## 10. Touch
+ 
+ Both modes work on a touch screen. Two fingers pinch about their
+ midpoint and pan together; once two fingers are down nothing reaches a
+ tool until every finger lifts, and a second finger during a table drag
+ cancels the drag. A finger's picks and grips are finger-sized. In the
+ selection mode a tap selects, a drag from a table moves it (or pans,
+ under `serviceMoves: false`), and a long press does what `longPress`
+ says, about 500 ms from contact. Mouse, trackpad and stylus behave as on
+diff --git a/tool/ci/host_probe/lib/main.dart b/tool/ci/host_probe/lib/main.dart
+index ba8c9e55..8bbe5949 100644
+--- a/tool/ci/host_probe/lib/main.dart
++++ b/tool/ci/host_probe/lib/main.dart
+@@ -84,20 +84,24 @@ final ThemeData posLightTheme = ThemeData(
+   colorSchemeSeed: Colors.teal,
+   extensions: const [floorLookLight],
+ );
+ 
+ final ThemeData posDarkTheme = ThemeData(
+   colorSchemeSeed: Colors.teal,
+   brightness: Brightness.dark,
+   extensions: const [floorLookDark],
+ );
+ 
++/// Strong table colours: 60 % of the hue, where the planner's own is 35 %.
++const FloorPlanTheme strongTableColours =
++    FloorPlanTheme(tableColorOpacity: 0.6);
++
+ /// The POS's own colour tokens as a Material colour scheme, by hand: a
+ /// seeded scheme cannot reproduce another design system's colours.
+ ColorScheme posColorScheme(Brightness brightness) =>
+     brightness == Brightness.light
+         ? const ColorScheme(
+             brightness: Brightness.light,
+             primary: Color(0xFF18181B),
+             onPrimary: Color(0xFFFAFAFA),
+             secondary: Color(0xFFF4F4F5),
+             onSecondary: Color(0xFF18181B),
+@@ -361,20 +365,61 @@ class _FloorScreenState extends State<FloorScreen> {
+   }
+ 
+   /// Links every table the POS knows on this floor, in one undo step;
+   /// false, changing nothing, if a number is not on the floor or is on two
+   /// tables.
+   bool linkAll(Map<String, String> idByNumber) => controller.setTablesData({
+         for (final MapEntry(key: number, value: id) in idByNumber.entries)
+           number: {'id': id},
+       });
+ 
++  /// The colour of table [number]: null when it has none, or when two
++  /// tables carry the number (it names neither).
++  FloorPlanColor? colourOf(String number) {
++    final tables = [
++      for (final detail in controller.tableDetails)
++        if (detail.table.number == number) detail,
++    ];
++    return tables.length == 1 ? tables.single.color : null;
++  }
++
++  /// Marks table [number] as the VIP table; false, changing nothing, when
++  /// this floor has no table [number] or two of them.
++  bool markVip(String number) =>
++      controller.setTableColor(number, FloorPlanColor.purple);
++
++  /// Takes the colour off table [number].
++  bool clearColour(String number) => controller.setTableColor(number, null);
++
++  /// Colours a section of the floor in one undo step; false, changing
++  /// nothing, if a number is not on the floor or is on two tables.
++  bool colourSection(Set<String> numbers) => controller.setTablesColor({
++        for (final number in numbers) number: FloorPlanColor.teal,
++      });
++
++  /// The PNG of the floor with strong table colours.
++  Future<FloorPlanExport?> exportStrong() => controller.exportPlan(
++        const FloorPlanExportChoice(
++            format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
++        name: 'floor-1',
++        tableColorOpacity: 0.6,
++      );
++
++  /// A table's colour changed: say so.
++  void colourChanged(FloorPlanDesignChange change) {
++    if (change case FloorPlanTableChanged(:final before, :final after)
++        when before.color != after.color) {
++      debugPrint('${after.table.number} is now '
++          '${after.color?.name ?? 'uncoloured'}');
++    }
++  }
++
+   /// The designed floor changed: keep the POS's list of tables in step.
+   void designChanged(FloorPlanDesignChange change) {
+     switch (change) {
+       case FloorPlanTableAdded(:final table):
+         debugPrint('placed: ${table.table.number}');
+       case FloorPlanTableRemoved(:final table):
+         debugPrint('removed: ${table.table.number} (${table.data['id']})');
+       case FloorPlanTableChanged(:final before, :final after):
+         if (before.table.number != after.table.number) {
+           debugPrint('${before.table.number} is now ${after.table.number}');

@@ -1,0 +1,329 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 62d6942c..c682df93 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -14,34 +14,46 @@ Plan colours (two slices, released together as 0.6.0).
+   a plan this release saves (`load` throws a `FormatException` naming
+   `unsupported schemaVersion 10`); this release opens a 0.5.1 plan
+   unchanged. Terminals that share plans must move together.
+ - **A room can take a colour**, one of eight hues
+   (`FloorPlanColor`: red, orange, yellow, green, teal, blue, purple,
+   grey), chosen in the Selection panel's new **Colour** row; its tint
+   is drawn in that hue at 20 %, on screen, in the export and in the
+   print. An uncoloured room is drawn exactly as before.
+ - **`FloorPlanEditorCapabilities.recolor`** (default true; false in
+   `readOnly`) allows the Colour row; refused, it shows read only.
+-  `tablesOnly` keeps it on.
++  `tablesOnly` leaves it true. After this release a `tablesOnly` (or
++  `readOnly`) embed shows the Selection panel's Colour row for a
++  selected table: a `tablesOnly` host will see the picker, and under
++  `recolor: false` the row is read only, never hidden.
+ - **Breaking for a host's own strings:** `FloorPlanStrings` gains the
+   abstract `color`, `colorNone`, `colorRefused` and
+   `colorName(FloorPlanColor)`; a class that implements or directly
+   extends `FloorPlanStrings` must add them (a subclass of a built-in
+   language inherits them).
+ - **A table can take a colour**, one of the eight `FloorPlanColor` hues:
+   in the Selection panel's Colour row (beside rooms), or by
+   `controller.setTableColor` / `setTablesColor`; read back as
+   `FloorPlanTableDetail.color`. It is drawn as a fill under the table's
+   drafting in both modes, exported and printed; in the selection mode a
+   status covers it. `FloorPlanTheme.tableColorOpacity` (default 0.35)
+   sets its strength; `exportPlan` and `printPlan` take an optional
+   `tableColorOpacity`.
++- **A new table diagnostic,** `table.invalid_color`
++  (`TableDiagnosticCodes.invalidColor`, on `editor.dart`): a table whose
++  stored colour is of another shape, or names a hue this release does
++  not know, is kept as read, drawn as none and reported by
++  `TableSurvey.diagnostics`, as `table.invalid_data` is for host data.
++- **`editor.dart`'s `exportBytes` and `exportPdfBytes`** gain an
++  optional `tableColorOpacity` (default 0.35). A bare-shell host with
++  its own `FloorPlanTheme` passes its value, or its export differs from
++  its canvas.
+ - **`jet_cad_2d_flutter`:** `exportPagePdf` and `exportPagePng` take an
+   optional `underlay` of `PageUnderlayFill`s drawn under the drawing.
+ - **`jet_cad_floor_plan`'s `editor.dart`** (not the host barrel) exports
+   `isTable(doc, handle)`.
+ 
+ ## 0.5.1
+ 
+ Two fixes from the host embedding API's fourth slice. Nothing is stored
+ differently: **plans and service layouts are the same as 0.4.0's and
+ 0.5.0's** (schema 9), so 0.4.0, 0.5.0 and 0.5.1 terminals can share
+diff --git a/packages/jet_cad_2d_flutter/test/export/page_underlay_test.dart b/packages/jet_cad_2d_flutter/test/export/page_underlay_test.dart
+index 1d3c225f..cab54293 100644
+--- a/packages/jet_cad_2d_flutter/test/export/page_underlay_test.dart
++++ b/packages/jet_cad_2d_flutter/test/export/page_underlay_test.dart
+@@ -292,21 +292,22 @@ void main() {
+           pdfTolerance(circle.cx, circle.cy, pdfResidual, pageHeight: sheetH) *
+               2;
+       expect(meanX, closeTo(cx, centreTol));
+       expect(meanY, closeTo(cy, centreTol));
+       expect(d.state.fillRgb[0], closeTo(0x8E / 255, 1e-4));
+     });
+   });
+ 
+   /// [pdf] with the trailer's `/ID` (a fresh random 20-byte value per write,
+   /// the `pdf` package's) blanked: the one part of two writes of one document
+-  /// that differs. Same length, so every offset is unchanged.
++  /// that differs. Blanking shortens it, but the same way on both sides of a
++  /// comparison, and the rest of the file is compared byte for byte.
+   String withoutId(Uint8List pdf) => latin1
+       .decode(pdf)
+       .replaceAllMapped(RegExp(r'/ID\[<[0-9a-f]+><[0-9a-f]+>\]'), (m) => '/ID');
+ 
+   group('PU3: an empty underlay changes nothing', () {
+     test('the PDF bytes are those of the export without the parameter',
+         () async {
+       final f = fixture();
+       final fontBytes = exportFontBytes();
+       final without = await exportPagePdf(
+diff --git a/packages/jet_cad_floor_plan/lib/src/colors/table_color_underlay.dart b/packages/jet_cad_floor_plan/lib/src/colors/table_color_underlay.dart
+index 2201cd69..bda15561 100644
+--- a/packages/jet_cad_floor_plan/lib/src/colors/table_color_underlay.dart
++++ b/packages/jet_cad_floor_plan/lib/src/colors/table_color_underlay.dart
+@@ -19,22 +19,32 @@ import '../tables/table_index.dart';
+ /// The underlay of [document]'s coloured tables (plan colours spec PC-7):
+ /// every live table on a visible layer whose colour this release knows, its
+ /// top in its definition's space (a polygon closed and triangulated,
+ /// skipped when it does not triangulate; or a circle), its instance's
+ /// transform, its hue at alpha `round(255 * opacity)`. Ascending by
+ /// instance handle. White paper: no tone.
+ ///
+ /// A table with no top (R-8), a colour of an unknown name and a table on a
+ /// hidden layer have no fill, as on the canvas. Tables are root-level
+ /// (`TableSurvey`'s rule), so the instance's transform is its world one.
++///
++/// A known difference for a pathological top: the export skips a polygon
++/// top that does not triangulate (a self-intersecting, hand-made one),
++/// while the canvas fills its `Path` as it is.
++///
++/// Throws an [ArgumentError] when [opacity] is not finite or lies outside
++/// `[0, 1]`.
+ List<PageUnderlayFill> tableColorUnderlay(
+     DraftDocument document, double opacity) {
++  if (!opacity.isFinite || opacity < 0 || opacity > 1) {
++    throw ArgumentError.value(opacity, 'opacity', 'must be in [0, 1]');
++  }
+   final alpha = (255 * opacity).round();
+   final layers = document.tables.layers;
+   final out = <PageUnderlayFill>[];
+   for (final t in TableSurvey.of(document).tables) {
+     final colour =
+         document.components.get<FloorPlanTableColor>(t.instance)?.colorValue;
+     if (colour == null) continue;
+     final node = document.tree[t.instance];
+     if (node is! InstanceNode) continue;
+     if (layers[node.layer] case final l? when !l.visible) continue;
+diff --git a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+index cec1e9c0..c3f55d54 100644
+--- a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
++++ b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+@@ -1,29 +1,25 @@
+ // Plan colours spec PC-8, PC-9 and PC-10: the Selection panel's Colour row.
+ // Nine swatches, None and the palette's eight hues, set the colour of every
+-// selected room in one undo step labelled Colour; read-only while the host
+-// refuses `recolor` or the permissions refuse the edit; its words in
+-// Turkish; its swatches as the canvas shows the hues.
++// selected room and table in one undo step labelled Colour; read-only while
++// the host refuses `recolor` or the permissions refuse the edit; its words
++// in Turkish; its swatches as the canvas shows the hues.
+ //
+ // The plan is the two-room rectangle at the corpus far origin, turned 23°,
+ // every wall and the separator in its own rotated, translated group; room A
+ // sits in a group of its own turned 0.61 rad, room B at the identity. The
+ // hues under test are `teal` and `purple`, never the first of the palette,
+ // and `magenta`, a name no release knows.
+ //
+ // CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
+ // fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
+ // `2` mirrored at 90, `7` and ` 7 ` sharing a number, `L` on a locked layer.
+-//
+-// CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
+-// fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
+-// `2` mirrored at 90, `7` and ` 7 ` sharing a number, `L` on a locked layer.
+ import 'dart:convert' show jsonEncode;
+ import 'dart:ui' as ui;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/rendering.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_floor_plan/editor.dart' show liveObjectsOf;
+@@ -632,20 +628,21 @@ void main() {
+   });
+ 
+   test('CP6 the swatch is the canvas\'s hue, re-toned on a dark canvas', () {
+     expect(swatchColor(0x00897B, null).toARGB32(), 0xFF00897B);
+     expect(swatchColor(0x8E24AA, null).toARGB32(), 0xFF8E24AA);
+     expect(swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(),
+         0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
+     expect(
+         swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
+   });
++
+   testWidgets(
+       'CP7 a tap on teal with two tables and a room selected: one undo step '
+       'labelled Colour, the tables\' details read teal, the room is teal, '
+       'the others untouched; one Ctrl+Z takes all three back (M-C12 tables)',
+       (tester) async {
+     final e = await mountEditor(tester);
+     final c = e.c;
+     final doc = c.activeDocument;
+     final room = firstRoom(c);
+     final labels = labelsOf(doc);
+diff --git a/packages/jet_cad_floor_plan/test/colors/table_color_export_test.dart b/packages/jet_cad_floor_plan/test/colors/table_color_export_test.dart
+index 12d1259b..dc59230b 100644
+--- a/packages/jet_cad_floor_plan/test/colors/table_color_export_test.dart
++++ b/packages/jet_cad_floor_plan/test/colors/table_color_export_test.dart
+@@ -83,22 +83,23 @@ Future<Img> decode(WidgetTester tester, Uint8List png) async =>
+           w: image.width,
+           h: image.height,
+           rgba: data.buffer.asUint8List(),
+         );
+       } finally {
+         image.dispose();
+       }
+     }))!;
+ 
+ /// [pdf] as text, the trailer's `/ID` blanked: it is random per write, the
+-/// one part of two writes of one document that differs (same length, so
+-/// every offset is unchanged).
++/// one part of two writes of one document that differs. Blanking shortens
++/// it, but the same way on both sides of a comparison, and the rest of the
++/// file is compared byte for byte.
+ String text(Uint8List pdf) => latin1
+     .decode(pdf)
+     .replaceAllMapped(RegExp(r'/ID\[<[0-9a-f]+><[0-9a-f]+>\]'), (m) => '/ID');
+ 
+ /// The fill alphas the page's graphics states carry (`ca`), as written.
+ Set<String> alphas(String pdf) =>
+     {for (final m in RegExp(r'/ca ([0-9.]+)').allMatches(pdf)) m.group(1)!};
+ 
+ /// The fixture's page: the fill tests set its origin; 1:50, A4 landscape.
+ PageComponent pageOf(DraftDocument doc) => exportPageOf(doc)!;
+@@ -191,20 +192,25 @@ void main() {
+     final placements = [for (final f in fills) f.placement.toJson()];
+     for (final k in ['H', 'M', 'N']) {
+       final p = placementOf(spec(k)).toJson();
+       expect(placements.where((q) {
+         for (var i = 0; i < 6; i++) {
+           if ((q[i] - p[i]).abs() > 1e-9) return false;
+         }
+         return true;
+       }), isEmpty, reason: '$k has no fill');
+     }
++    // An opacity that is not in [0, 1] or not finite is refused.
++    for (final bad in [1.5, -0.1, double.nan, double.infinity]) {
++      expect(() => tableColorUnderlay(doc, bad), throwsArgumentError,
++          reason: '$bad');
++    }
+     // The opacity is the alpha: round(255 * o).
+     expect({for (final f in tableColorUnderlay(doc, 0.6)) f.argb >> 24}, {153});
+     expect({for (final f in tableColorUnderlay(doc, 1)) f.argb >> 24}, {255});
+     expect({for (final f in tableColorUnderlay(doc, 0)) f.argb >> 24}, {0});
+   });
+ 
+   testWidgets(
+       'EX2 M-C7 M-C8 M-PC7-a the PNG through exportBytes at 96 dpi: a teal '
+       'top\'s off-centre arm is teal at alpha 89 over white, a purple round '
+       'top purple, the locked one coloured, the coloured table inside the '
+@@ -314,20 +320,46 @@ void main() {
+     expect(alphas(themed), isNot(contains('0.34902')));
+     expect(alphas(none), contains('0'));
+     expect(alphas(none), isNot(contains('0.34902')));
+     expect(explicit, byDefault, reason: 'the default is 0.35');
+     expect(themed, isNot(byDefault), reason: '0.6 is another alpha');
+     expect(none, isNot(byDefault));
+     expect(themed, isNot(none));
+     expect(text(await pdf(0.6)), themed, reason: 'the same bytes again');
+   });
+ 
++  testWidgets(
++      'EX3c M-PC7-c controller.exportPlan(pdf) carries the colours at the '
++      'given opacity: the PDF\'s fill alphas hold 0.6 (153 of 255) and not '
++      'the default\'s 0.34902, and the same call with no opacity holds '
++      '0.34902: the PDF branch of exportBytes passes the opacity on',
++      (tester) async {
++    final c = FloorPlanController(json: fillJson());
++    addTearDown(c.dispose);
++    const pdfChoice = FloorPlanExportChoice(
++        format: FloorPlanExportFormat.pdf, dpi: FloorPlanExportDpi.d96);
++    Future<Set<String>> pdfAlphas([double? opacity]) async {
++      final out = await tester
++          .runAsync(() => c.exportPlan(pdfChoice, tableColorOpacity: opacity));
++      expect(out, isNotNull);
++      expect(out!.fileName, 'plan.pdf');
++      return alphas(text(out.bytes));
++    }
++
++    final themed = await pdfAlphas(0.6);
++    expect(themed, contains('0.6'));
++    expect(themed, isNot(contains('0.34902')));
++    final byDefault = await pdfAlphas();
++    expect(byDefault, contains('0.34902'));
++    expect(byDefault, isNot(contains('0.6')));
++  });
++
+   testWidgets(
+       'EX4 M-C23 the view\'s Export and Print at a non-default theme: '
+       'tableColorOpacity 0.6 reaches the bytes (alpha 153), read at the call '
+       'and resolved as the scope resolves it (the ambient extension, the '
+       'view\'s theme over it, field by field)', (tester) async {
+     final got = <FloorPlanExport>[];
+     final printer = FakePagePrinter();
+     final c = FloorPlanController(json: fillJson());
+     addTearDown(c.dispose);
+     final page = pageOf(c.activeDocument);
+diff --git a/packages/jet_cad_floor_plan/test/host/theme_canvas_test.dart b/packages/jet_cad_floor_plan/test/host/theme_canvas_test.dart
+index 8516208e..be772238 100644
+--- a/packages/jet_cad_floor_plan/test/host/theme_canvas_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/theme_canvas_test.dart
+@@ -31,20 +31,21 @@ import '../support/palette_fixture.dart';
+ 
+ /// The theme's colours: none is a palette colour or another's.
+ const Color onLight = Color(0xFFD81B60);
+ const Color onDark = Color(0xFFFFD54F);
+ const Color canvas = Color(0xFF263238);
+ 
+ /// A theme with every field set to a value that is not today's.
+ const FloorPlanTheme fullTheme = FloorPlanTheme(
+   statusCaptionStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+   statusFillOpacity: 0.5,
++  tableColorOpacity: 0.6,
+   groupFrameColor: Color(0xFF00897B),
+   groupFrameWidth: 3,
+   groupFrameMargin: 300,
+   groupChipColor: Color(0xFF3949AB),
+   groupChipTextStyle: TextStyle(fontSize: 13),
+   groupChipRadius: 8,
+   groupChipPadding: EdgeInsets.fromLTRB(7, 3, 9, 4),
+   selectionOnLight: onLight,
+   selectionOnDark: onDark,
+   selectionWidth: 4,
+@@ -368,20 +369,23 @@ void main() {
+       expectSelection(seen, PaperPalette.light, 'White page');
+       expect(
+           identical(tester.widget<PlannerView>(find.byType(PlannerView)).paper,
+               PaperPalette.light),
+           isTrue);
+     });
+ 
+     testWidgets(
+         'invariant 4 ($m): designJson and the PNG export are the same with '
+         'and without a full theme', (tester) async {
++      // The plan has no coloured table, so `tableColorOpacity` of the full
++      // theme reaches only a table colour's fill (pinned by EX4 of
++      // `test/colors/table_color_export_test.dart`), not these bytes.
+       final got = <FloorPlanExport>[];
+       final v = controllerOn(white);
+       await pumpView(tester, v, ThemeMode.light, viewMode, onExport: got.add);
+       final button = viewMode == FloorPlanMode.design
+           ? 'toolbar-export'
+           : 'service-export';
+       final plainJson = v.c.designJson();
+       final plain = await exportPng(tester, button, got);
+       expect(plain.sublist(1, 4), 'PNG'.codeUnits);
+ 

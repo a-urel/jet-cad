@@ -1,0 +1,545 @@
+b31fc5c5 feat(floor-plan): the Colour row colours tables
+ .../lib/src/colors/color_picker.dart               |  42 ++-
+ .../lib/src/selection_panel.dart                   |   2 +-
+ .../test/colors/color_picker_test.dart             | 326 +++++++++++++++++++++
+ 3 files changed, 362 insertions(+), 8 deletions(-)
+diff --git a/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart b/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
+index 9407b432..c50a4525 100644
+--- a/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
++++ b/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
+@@ -1,47 +1,75 @@
+ // The Selection panel's Colour row (plan colours spec PC-9): nine
+ // swatches, None and the palette's eight hues, setting the colour of every
+-// selected room in one undo step (Slice 2 adds tables). It keeps no state:
+-// the panel rebuilds it on every selection and document change, as it does
+-// the Layer picker.
++// selected room and table in one undo step. It keeps no state: the panel
++// rebuilds it on every selection and document change, as it does the Layer
++// picker.
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
+ import '../host/editor_capabilities.dart';
+ import '../l10n/strings.dart';
+ import '../parametric/live_objects.dart';
+ import '../parametric/room.dart';
++import '../tables/table_color_component.dart';
++import '../tables/table_index.dart';
+ import 'plan_color.dart';
+ 
+ /// The rooms among [keys], in key order, each once.
+ List<Handle> _rooms(DraftDocument doc, Iterable<SelectionKey> keys) => [
+       for (final h in {for (final k in keys) k.target})
+         if (isLiveObject<RoomParams>(doc, h)) h,
+     ];
+ 
+-/// The colour of each key's object, as the picker reads it: a room's stored
+-/// name (null for none); keys that are no room are not listed.
++/// The tables among [keys], in key order, each once: a key whose target is
++/// a live table's instance (TableSurvey's tables: root-level).
++List<Handle> _tables(DraftDocument doc, Iterable<SelectionKey> keys) {
++  final tables = {for (final t in tablesOf(doc)) t.instance};
++  return [
++    for (final h in {for (final k in keys) k.target})
++      if (tables.contains(h)) h,
++  ];
++}
++
++/// What [pickedColors] lists for a table whose payload is kept: equal to no
++/// swatch's name, so it marks nothing and differs from every name.
++const String _keptMarker = '\u0001';
++
++/// The colour of each key's object, as the picker reads it: a room's or a
++/// table's stored name (null for none; a table whose payload is kept lists
++/// a marker that is no swatch's name); rooms first, then tables, each in
++/// key order. Keys that are neither are not listed.
+ List<String?> pickedColors(DraftDocument doc, Iterable<SelectionKey> keys) => [
+       for (final h in _rooms(doc, keys))
+         doc.components.get<RoomParams>(h)!.color,
++      for (final h in _tables(doc, keys))
++        switch (doc.components.get<FloorPlanTableColor>(h)) {
++          null => null,
++          final c when c.isKept => _keptMarker,
++          final c => c.name,
++        },
+     ];
+ 
+-/// The one command that sets [color] (null: none) on every room among
+-/// [keys], labelled 'Colour'; null when none would change.
++/// The one command that sets [color] (null: none) on every room and table
++/// among [keys], labelled 'Colour'; null when none would change.
+ DraftCommand? recolorCommand(
+     DraftDocument doc, Iterable<SelectionKey> keys, FloorPlanColor? color) {
+   final name = color?.name;
++  final wanted = color == null ? null : FloorPlanTableColor(color);
+   final edits = <DraftCommand>[
+     for (final h in _rooms(doc, keys))
+       if (doc.components.get<RoomParams>(h)! case final p when p.color != name)
+         SetComponentCommand<RoomParams>(h, p.copyWith(color: name)),
++    for (final h in _tables(doc, keys))
++      if (doc.components.get<FloorPlanTableColor>(h) != wanted)
++        SetComponentCommand<FloorPlanTableColor>(h, wanted),
+   ];
+   return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
+ }
+ 
+ /// Why the picker is read-only for [keys], or null when it acts:
+ /// `strings.readOnlyDocument` when the permissions refuse `components` or
+ /// `RoomType().editCapability` for a room among [keys]; the strings'
+ /// `colorRefused` when [capabilities].recolor is false.
+ String? colorPickerBlocked(DraftDocument doc, Iterable<SelectionKey> keys,
+     FloorPlanEditorCapabilities capabilities, FloorPlanStrings strings) {
+diff --git a/packages/jet_cad_floor_plan/lib/src/selection_panel.dart b/packages/jet_cad_floor_plan/lib/src/selection_panel.dart
+index 833eed75..bb96c11f 100644
+--- a/packages/jet_cad_floor_plan/lib/src/selection_panel.dart
++++ b/packages/jet_cad_floor_plan/lib/src/selection_panel.dart
+@@ -1255,21 +1255,21 @@ class _SelectionPanelState extends State<SelectionPanel> {
+     final symbol = _toolMode || _openingToolMode != null ? null : _symbol;
+     // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
+     // whenever no tool-settings section does, including a selection that
+     // has no type section (a line, a text, a symbol, several things).
+     // Spec C-5: only with `changeLayer`.
+     final picker = widget.selection.keys.isNotEmpty &&
+         !_toolMode &&
+         _openingToolMode == null &&
+         widget.capabilities.changeLayer;
+     // Plan colours spec PC-9: the Colour row, for a selection holding a
+-    // room (Slice 2: or a table), whenever no tool-settings section shows.
++    // room or a table, whenever no tool-settings section shows.
+     final colors = !_toolMode &&
+         _openingToolMode == null &&
+         pickedColors(widget.document, widget.selection.keys).isNotEmpty;
+     final sections = box != null ||
+         wall != null ||
+         opening != null ||
+         room != null ||
+         dimension != null ||
+         table != null ||
+         symbol != null;
+diff --git a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+index 10a8a26d..b891c15d 100644
+--- a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
++++ b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+@@ -2,41 +2,55 @@
+ // Nine swatches, None and the palette's eight hues, set the colour of every
+ // selected room in one undo step labelled Colour; read-only while the host
+ // refuses `recolor` or the permissions refuse the edit; its words in
+ // Turkish; its swatches as the canvas shows the hues.
+ //
+ // The plan is the two-room rectangle at the corpus far origin, turned 23°,
+ // every wall and the separator in its own rotated, translated group; room A
+ // sits in a group of its own turned 0.61 rad, room B at the identity. The
+ // hues under test are `teal` and `purple`, never the first of the palette,
+ // and `magenta`, a name no release knows.
++//
++// CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
++// fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
++// `2` mirrored at 90, `7` and ` 7 ` sharing a number, `L` on a locked layer.
++//
++// CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
++// fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
++// `2` mirrored at 90, `7` and ` 7 ` sharing a number, `L` on a locked layer.
+ import 'dart:convert' show jsonEncode;
+ import 'dart:ui' as ui;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:flutter/rendering.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_floor_plan/editor.dart' show liveObjectsOf;
+ import 'package:jet_cad_floor_plan/src/colors/color_picker.dart';
+ import 'package:jet_cad_floor_plan/src/colors/plan_color.dart';
+ import 'package:jet_cad_floor_plan/src/host/editor_capabilities.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
+ import 'package:jet_cad_floor_plan/src/l10n/localizations.dart';
+ import 'package:jet_cad_floor_plan/src/l10n/strings_en.dart';
+ import 'package:jet_cad_floor_plan/src/parametric/room.dart';
+ import 'package:jet_cad_floor_plan/src/parametric/separator.dart';
+ import 'package:jet_cad_floor_plan/src/parametric/wall.dart';
+ import 'package:jet_cad_floor_plan/src/planner_shell.dart';
+ import 'package:jet_cad_floor_plan/src/planner_view.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_color_component.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
++import '../host/editor_fixture.dart';
+ import '../support/room_fixture.dart';
+ 
+ Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
+ Finder get picker => find.byKey(const Key('color-picker'));
+ 
+ /// The Semantics node of swatch [name] (the nearest above its InkWell that
+ /// carries the label).
+ Semantics semanticsOf(WidgetTester tester, String name) =>
+     tester.widget<Semantics>(find
+         .ancestor(
+@@ -221,20 +235,92 @@ void paint(DraftDocument doc, Handle room, String? name) =>
+ 
+ /// A bare-floor point and one inside each room, off its label and every
+ /// stroke, in plan millimetres.
+ Vector2 bareAt(Rooms r) => r.plan.at(9800, 2000);
+ Vector2 insideA(Rooms r) => r.plan.at(800, 3300);
+ Vector2 insideB(Rooms r) => r.plan.at(3900, 3300);
+ 
+ /// A coloured room's tint alpha: transparency 204 is 51 of 255.
+ const int kColourAlpha = 255 - 204;
+ 
++typedef Caps = FloorPlanEditorCapabilities;
++
++/// A shown editor over the editor fixture's plan: the controller and the
++/// capabilities the view reads (set [caps] and pump to change them).
++typedef Editor = ({FloorPlanController c, ValueNotifier<Caps> caps});
++
++Future<Editor> mountEditor(WidgetTester tester,
++    {Caps capabilities = Caps.full}) async {
++  final c = FloorPlanController(json: editorPlanJson());
++  addTearDown(c.dispose);
++  final caps = ValueNotifier(capabilities);
++  addTearDown(caps.dispose);
++  await tester.binding.setSurfaceSize(kEditorSurface);
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(MaterialApp(
++      supportedLocales: floorPlanSupportedLocales,
++      localizationsDelegates: floorPlanLocalizationsDelegates,
++      home: Scaffold(
++          body: ValueListenableBuilder<Caps>(
++              valueListenable: caps,
++              builder: (_, caps, __) =>
++                  FloorPlanView(controller: c, editorCapabilities: caps)))));
++  await tester.pump();
++  await tester.pump();
++  c.cameraController.value = editorCamera();
++  await tester.pump();
++  return (c: c, caps: caps);
++}
++
++/// Table [n]'s instance in the active plan (` 7 ` is the second `7`).
++Handle tableOf(FloorPlanController c, String n) =>
++    TableSurvey.of(c.activeDocument).withNumber(n)[n == ' 7 ' ? 1 : 0].instance;
++
++/// The colour table [n]'s detail reads.
++FloorPlanColor? tableColorOf(FloorPlanController c, String n) => [
++      for (final d in c.tableDetails)
++        if (d.table.number == n.trim()) d
++    ].first.color;
++
++/// The stored `jetcad.table_color` payload of table [n], or null.
++FloorPlanTableColor? storedOf(FloorPlanController c, String n) =>
++    c.activeDocument.components.get<FloorPlanTableColor>(tableOf(c, n));
++
++/// Selects [hs] on the editor's canvas, replacing the selection.
++Future<void> selectOn(
++    WidgetTester tester, FloorPlanController c, List<Handle> hs) async {
++  c.activeSelection.replace([for (final h in hs) k(h)]);
++  await tester.pump();
++}
++
++/// Selects nothing and then [hs] again: the panel rebuilds on a selection
++/// or document change, not on a permission change.
++Future<void> reselect(
++    WidgetTester tester, FloorPlanController c, List<Handle> hs) async {
++  await selectOn(tester, c, const []);
++  await selectOn(tester, c, hs);
++}
++
++/// The labels of the commands [doc] applies from now on.
++List<String> labelsOf(DraftDocument doc) {
++  final labels = <String>[];
++  final sub = doc.commands.changes.listen((e) {
++    if (e is CommandApplied) labels.add(e.label);
++  });
++  addTearDown(sub.cancel);
++  return labels;
++}
++
++/// The startup flat's first room.
++Handle firstRoom(FloorPlanController c) =>
++    liveObjectsOf<RoomParams>(c.activeDocument).first;
++
+ void main() {
+   test('the fixture: room A is off the identity, the rooms are uncoloured', () {
+     final r = roomsPlan();
+     final g = r.doc.tree.accumulatedTransform(r.a);
+     expect(g.b, isNot(0));
+     expect(roomOf(r.doc, r.a).color, isNull);
+     expect(roomOf(r.doc, r.b).color, isNull);
+     expect(driftOf(r.doc), isEmpty);
+   });
+ 
+@@ -252,20 +338,28 @@ void main() {
+     await rig.select([r.sep]);
+     expect(picker, findsNothing, reason: 'a separator alone');
+ 
+     // While the Wall tool's settings show, even with a room selected.
+     await rig.select([r.a]);
+     expect(picker, findsOneWidget);
+     await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+     await tester.pump();
+     expect(find.byKey(const Key('wall-section')), findsOneWidget,
+         reason: 'the Wall tool is active');
++    // Activating a tool clears the selection (planner_shell.dart), so the
++    // room is selected again under the active tool: the row's absence is
++    // then the panel's own rule, not an empty selection's.
++    await rig.select([r.a]);
++    expect({...rig.view.selection.keys}, {k(r.a)},
++        reason: 'the room is selected under the Wall tool');
++    expect(find.byKey(const Key('wall-section')), findsOneWidget,
++        reason: 'the Wall tool is still active');
+     expect(picker, findsNothing, reason: 'the Wall tool\'s settings show');
+     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+     await tester.pump();
+     await rig.select([r.a]);
+ 
+     expect(picker, findsOneWidget, reason: 'room A');
+     expect(find.byKey(const Key('layer-picker')), findsOneWidget);
+     expect(swatch('none'), findsOneWidget);
+     for (final c in FloorPlanColor.values) {
+       expect(swatch(c.name), findsOneWidget, reason: c.name);
+@@ -538,11 +632,243 @@ void main() {
+   });
+ 
+   test('CP6 the swatch is the canvas\'s hue, re-toned on a dark canvas', () {
+     expect(swatchColor(0x00897B, null).toARGB32(), 0xFF00897B);
+     expect(swatchColor(0x8E24AA, null).toARGB32(), 0xFF8E24AA);
+     expect(swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(),
+         0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
+     expect(
+         swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
+   });
++  testWidgets(
++      'CP7 a tap on teal with two tables and a room selected: one undo step '
++      'labelled Colour, the tables\' details read teal, the room is teal, '
++      'the others untouched; one Ctrl+Z takes all three back (M-C12 tables)',
++      (tester) async {
++    final e = await mountEditor(tester);
++    final c = e.c;
++    final doc = c.activeDocument;
++    final room = firstRoom(c);
++    final labels = labelsOf(doc);
++    for (final n in ['1', '2', '7', ' 7 ', 'L']) {
++      expect(tableColorOf(c, n), isNull, reason: 'premise: table $n');
++    }
++    await selectOn(tester, c, [tableOf(c, '1'), tableOf(c, '2'), room]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'none', reason: 'two bare tables and a bare room');
++    final depth = doc.commands.undoDepth;
++
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
++    expect(labels, ['Colour']);
++    expect(tableColorOf(c, '1'), FloorPlanColor.teal);
++    expect(tableColorOf(c, '2'), FloorPlanColor.teal);
++    expect(storedOf(c, '1'), FloorPlanTableColor(FloorPlanColor.teal));
++    expect(doc.components.get<RoomParams>(room)!.color, 'teal');
++    expect(tableColorOf(c, '7'), isNull, reason: 'an unselected table');
++    expect(storedOf(c, '7'), isNull);
++    expect(tableColorOf(c, 'L'), isNull);
++    expect(marked(tester), 'teal');
++
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(labels, ['Colour', 'Colour']);
++    expect(tableColorOf(c, '1'), FloorPlanColor.purple);
++    expect(tableColorOf(c, '2'), FloorPlanColor.purple);
++    expect(doc.components.get<RoomParams>(room)!.color, 'purple');
++    expect(doc.commands.undoDepth, depth + 2);
++
++    c.undo();
++    await tester.pump();
++    expect(tableColorOf(c, '1'), FloorPlanColor.teal);
++    expect(doc.components.get<RoomParams>(room)!.color, 'teal');
++    c.undo();
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth);
++    expect(tableColorOf(c, '1'), isNull);
++    expect(tableColorOf(c, '2'), isNull);
++    expect(storedOf(c, '1'), isNull, reason: 'the component is gone');
++    expect(doc.components.get<RoomParams>(room)!.color, isNull);
++
++    // None clears the tables, and a table already bare is no edit.
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    final after = doc.commands.undoDepth;
++    await selectOn(tester, c, [tableOf(c, '1'), tableOf(c, '7')]);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(tableColorOf(c, '1'), isNull);
++    expect(doc.commands.undoDepth, after + 1);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, after + 1, reason: 'none, twice');
++    expect(recolorCommand(doc, [k(tableOf(c, '7'))], null), isNull,
++        reason: 'a bare table, none');
++    expect(recolorCommand(doc, [k(tableOf(c, '7'))], FloorPlanColor.teal),
++        isA<CompoundCommand>());
++  });
++
++  testWidgets(
++      'CP8 marking: two teal tables mark teal; a teal table and a purple '
++      'room mark nothing; a table with a kept payload marks nothing, alone '
++      'or beside a bare table (M-PC9-t)', (tester) async {
++    final e = await mountEditor(tester);
++    final c = e.c;
++    final doc = c.activeDocument;
++    final room = firstRoom(c);
++    final one = tableOf(c, '1'), two = tableOf(c, '2');
++    expect(
++        c.setTablesColor({'1': FloorPlanColor.teal, '2': FloorPlanColor.teal}),
++        isTrue);
++    await selectOn(tester, c, [one, two]);
++    expect(marked(tester), 'teal', reason: 'two teal tables');
++    await selectOn(tester, c, [one]);
++    expect(marked(tester), 'teal');
++
++    doc.commands.execute(SetComponentCommand<RoomParams>(
++        room, doc.components.get<RoomParams>(room)!.copyWith(color: 'purple')));
++    await selectOn(tester, c, [one, room]);
++    expect(marked(tester), isNull, reason: 'a teal table and a purple room');
++    await selectOn(tester, c, [one, tableOf(c, '7')]);
++    expect(marked(tester), isNull, reason: 'a teal table and a bare one');
++
++    // A payload of another shape is kept verbatim: it reads as no colour,
++    // and as no colour that a bare table has either.
++    doc.commands.execute(SetComponentCommand<FloorPlanTableColor>(
++        tableOf(c, '7'), FloorPlanTableColor.fromJson(const {'color': 7})));
++    expect(storedOf(c, '7')!.isKept, isTrue, reason: 'premise');
++    expect(tableColorOf(c, '7'), isNull);
++    await selectOn(tester, c, [tableOf(c, '7')]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), isNull, reason: 'a kept payload marks no swatch');
++    await selectOn(tester, c, [tableOf(c, '7'), tableOf(c, ' 7 ')]);
++    expect(marked(tester), isNull, reason: 'a kept payload and a bare table');
++    // An unknown name marks nothing either.
++    doc.commands.execute(SetComponentCommand<FloorPlanTableColor>(
++        two, FloorPlanTableColor.fromJson(const {'color': 'magenta'})));
++    await selectOn(tester, c, [two]);
++    expect(marked(tester), isNull, reason: 'magenta equals no swatch');
++    expect(storedOf(c, '2')!.name, 'magenta');
++
++    // A tap replaces the kept payload; None removes it.
++    await selectOn(tester, c, [tableOf(c, '7'), tableOf(c, ' 7 ')]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(storedOf(c, '7'), FloorPlanTableColor(FloorPlanColor.teal));
++    expect(storedOf(c, ' 7 '), FloorPlanTableColor(FloorPlanColor.teal));
++    expect(marked(tester), 'teal');
++    doc.commands.execute(SetComponentCommand<FloorPlanTableColor>(
++        tableOf(c, '7'), FloorPlanTableColor.fromJson(const {'hue': 'teal'})));
++    await selectOn(tester, c, [tableOf(c, '7')]);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(storedOf(c, '7'), isNull, reason: 'none drops a kept payload');
++  });
++
++  testWidgets(
++      'CP9 tablesOnly: the row shows for a selected table and acts; with '
++      'recolor false it shows read-only and says why', (tester) async {
++    final e = await mountEditor(tester, capabilities: Caps.tablesOnly);
++    final c = e.c;
++    final doc = c.activeDocument;
++    await selectOn(tester, c, [tableOf(c, '1'), tableOf(c, '2')]);
++    expect(picker, findsOneWidget);
++    expect(find.byKey(const Key('layer-picker')), findsNothing,
++        reason: 'premise: tablesOnly has no layer picker');
++    final labels = labelsOf(doc);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(labels, ['Colour']);
++    expect(tableColorOf(c, '1'), FloorPlanColor.purple);
++    expect(tableColorOf(c, '2'), FloorPlanColor.purple);
++    expect(marked(tester), 'purple');
++
++    e.caps.value = Caps.tablesOnly.copyWith(recolor: false);
++    await tester.pump();
++    expect(picker, findsOneWidget, reason: 'read-only, still shown');
++    expect(marked(tester), 'purple');
++    final before = DraftDocumentCodec.encodeToString(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(DraftDocumentCodec.encodeToString(doc), before);
++    expect(doc.commands.undoDepth, depth);
++    expect(tableColorOf(c, '1'), FloorPlanColor.purple);
++    expect(tooltipOf(tester, 'teal'), const FloorPlanStringsEn().colorRefused);
++    expect(semanticsOf(tester, 'teal').properties.enabled, isFalse);
++
++    e.caps.value = Caps.tablesOnly;
++    await tester.pump();
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(tableColorOf(c, '1'), FloorPlanColor.teal, reason: 'allowed again');
++  });
++
++  testWidgets(
++      'CP10 permissions: without components the row is read-only for a '
++      'table selection, with the readOnlyDocument tooltip; restored, it acts',
++      (tester) async {
++    final e = await mountEditor(tester);
++    final c = e.c;
++    final doc = c.activeDocument;
++    final one = tableOf(c, '1');
++    expect(c.setTableColor('1', FloorPlanColor.teal), isTrue);
++    await selectOn(tester, c, [one]);
++    expect(picker, findsOneWidget);
++    doc.commands.permissions = const DraftPermissions(
++        transform: true, components: false, geometry: true, structure: true);
++    await reselect(tester, c, [one]);
++    expect(picker, findsOneWidget, reason: 'read-only, still shown');
++    expect(marked(tester), 'teal');
++    final before = DraftDocumentCodec.encodeToString(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(DraftDocumentCodec.encodeToString(doc), before);
++    expect(doc.commands.undoDepth, depth);
++    expect(tooltipOf(tester, 'purple'),
++        const FloorPlanStringsEn().readOnlyDocument);
++    expect(semanticsOf(tester, 'purple').properties.enabled, isFalse);
++
++    doc.commands.permissions = DraftPermissions.all;
++    await reselect(tester, c, [one]);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(tableColorOf(c, '1'), FloorPlanColor.purple,
++        reason: 'allowed again');
++  });
++
++  testWidgets(
++      'CP11 a table selected under the active Wall tool: the tool is still '
++      'the wall, the selection holds the table, and the Colour row is '
++      'absent (M-PC9-tool)', (tester) async {
++    final e = await mountEditor(tester);
++    final c = e.c;
++    await selectOn(tester, c, [tableOf(c, '1')]);
++    expect(picker, findsOneWidget, reason: 'the select tool: the row shows');
++
++    expect(c.selectTool(FloorPlanTool.wall), isTrue);
++    await tester.pump();
++    expect(c.activeTool.value, FloorPlanTool.wall);
++    // Activating a tool clears the selection; select the table afterwards.
++    c.select({'1'});
++    await tester.pump();
++    expect({...c.activeSelection.keys}, {k(tableOf(c, '1'))},
++        reason: 'premise: the table is selected');
++    expect(c.activeTool.value, FloorPlanTool.wall,
++        reason: 'premise: selecting did not leave the Wall tool');
++    expect(find.byKey(const Key('wall-section')), findsOneWidget,
++        reason: 'the Wall tool\'s settings show');
++    expect(picker, findsNothing, reason: 'no Colour row under a tool');
++
++    expect(c.selectTool(FloorPlanTool.select), isTrue);
++    await tester.pump();
++    c.select({'1'});
++    await tester.pump();
++    expect(picker, findsOneWidget, reason: 'back on the select tool');
++  });
+ }

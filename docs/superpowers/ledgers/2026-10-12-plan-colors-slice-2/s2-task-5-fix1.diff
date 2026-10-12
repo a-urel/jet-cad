@@ -1,0 +1,198 @@
+diff --git a/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart b/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
+index c50a4525..9d5aed8d 100644
+--- a/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
++++ b/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
+@@ -15,26 +15,28 @@ import '../tables/table_color_component.dart';
+ import '../tables/table_index.dart';
+ import 'plan_color.dart';
+ 
+ /// The rooms among [keys], in key order, each once.
+ List<Handle> _rooms(DraftDocument doc, Iterable<SelectionKey> keys) => [
+       for (final h in {for (final k in keys) k.target})
+         if (isLiveObject<RoomParams>(doc, h)) h,
+     ];
+ 
+ /// The tables among [keys], in key order, each once: a key whose target is
+-/// a live table's instance (TableSurvey's tables: root-level).
++/// a live table's instance (`isTable`: root-level). Per key, with no survey
++/// of the document: the panel asks on every build, hover notifications
++/// included (14a review R-7).
+ List<Handle> _tables(DraftDocument doc, Iterable<SelectionKey> keys) {
+-  final tables = {for (final t in tablesOf(doc)) t.instance};
++  if (keys.isEmpty) return const [];
+   return [
+     for (final h in {for (final k in keys) k.target})
+-      if (tables.contains(h)) h,
++      if (isTable(doc, h)) h,
+   ];
+ }
+ 
+ /// What [pickedColors] lists for a table whose payload is kept: equal to no
+ /// swatch's name, so it marks nothing and differs from every name.
+ const String _keptMarker = '\u0001';
+ 
+ /// The colour of each key's object, as the picker reads it: a room's or a
+ /// table's stored name (null for none; a table whose payload is kept lists
+ /// a marker that is no swatch's name); rooms first, then tables, each in
+diff --git a/packages/jet_cad_floor_plan/lib/src/tables/table_index.dart b/packages/jet_cad_floor_plan/lib/src/tables/table_index.dart
+index d21cafa8..bf2a3728 100644
+--- a/packages/jet_cad_floor_plan/lib/src/tables/table_index.dart
++++ b/packages/jet_cad_floor_plan/lib/src/tables/table_index.dart
+@@ -1,16 +1,17 @@
+ // The tables of a plan (spec 14a T1, T2, T6, T15): every live, root-level
+ // instance of a servable symbol, its number read from its `TABLE` label,
+ // and the diagnostics a plan's numbering can raise.
+ //
+ // No Flutter import: this file is Dart over `package:jet_cad_2d` only.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:meta/meta.dart' show visibleForTesting;
+ 
+ import '../symbols/seating_component.dart';
+ import '../symbols/symbol_component.dart';
+ import 'table_color_component.dart';
+ import 'table_data_component.dart';
+ import 'table_label.dart';
+ 
+ /// One table (T1, T15).
+ final class TableInfo {
+   const TableInfo({
+@@ -36,20 +37,34 @@ final class TableInfo {
+   /// The definition's [SeatingComponent] (T3).
+   final int seats;
+ 
+   /// The definition's [SymbolComponent] key, null for a hand-made one.
+   final String? symbolKey;
+ 
+   @override
+   String toString() => 'TableInfo(${instance.toHex()}, $number, $seats)';
+ }
+ 
++/// Whether [node] is a servable instance: its definition is live and seats
++/// (T1). The survey's rule, shared with [isTable].
++bool _isServable(DraftDocument doc, InstanceNode node) =>
++    doc.tree.definition(node.definition) != null &&
++    doc.components.get<SeatingComponent>(node.definition) != null;
++
++/// Whether [handle] is a live table of [doc]: a root-level servable
++/// instance (T1), the rule [TableSurvey.of] applies. O(1): no survey.
++bool isTable(DraftDocument doc, Handle handle) => switch (doc.tree[handle]) {
++      final InstanceNode node =>
++        node.parent == doc.rootHandle && _isServable(doc, node),
++      _ => false,
++    };
++
+ /// The tables and the servable instances that are not tables, in one pass.
+ final class TableSurvey {
+   TableSurvey._(this.tables, this.nested, this.extraLabels, this._keptData,
+       this._invalidColor);
+ 
+   /// Live, root-level, servable instances, ascending by handle (T1).
+   final List<TableInfo> tables;
+ 
+   /// Servable instances not at the root: not tables in v1 (T1).
+   final List<Handle> nested;
+@@ -57,42 +72,46 @@ final class TableSurvey {
+   /// Per table with several `TABLE` labels, the ones after the first.
+   final Map<Handle, List<Handle>> extraLabels;
+ 
+   /// The tables whose host data payload is kept verbatim (E-6).
+   final Set<Handle> _keptData;
+ 
+   /// The tables whose colour payload is kept verbatim or names a hue this
+   /// release does not know (plan colours spec PC-4).
+   final Set<Handle> _invalidColor;
+ 
++  /// How many surveys have run in this isolate: a test hook, so a test can
++  /// pin that a path (a panel's hover rebuild) does not rescan the document.
++  @visibleForTesting
++  static int surveys = 0;
++
+   /// O(nodes + entities). At document-change rate, never per frame.
+   factory TableSurvey.of(DraftDocument doc) {
++    surveys++;
+     final labels = <Handle, List<(Handle, String)>>{};
+     final entities = doc.entities;
+     for (final slot in entities.liveSlots) {
+       if (entities.kindAt(slot) != EntityKind.attrib) continue;
+       if (entities.tagAt(slot) != kTableLabelTag) continue;
+       (labels[entities.ownerAt(slot)] ??= [])
+           .add((entities.handleAt(slot), entities.textAt(slot)));
+     }
+     final tables = <TableInfo>[];
+     final nested = <Handle>[];
+     final extra = <Handle, List<Handle>>{};
+     final kept = <Handle>{};
+     final invalidColor = <Handle>{};
+     // `tree.nodes` is ascending by handle (its contract), so both lists
+     // are too.
+     for (final node in doc.tree.nodes) {
+-      if (node is! InstanceNode) continue;
+-      if (doc.tree.definition(node.definition) == null) continue;
+-      final seating = doc.components.get<SeatingComponent>(node.definition);
+-      if (seating == null) continue;
++      if (node is! InstanceNode || !_isServable(doc, node)) continue;
++      final seating = doc.components.get<SeatingComponent>(node.definition)!;
+       if (node.parent != doc.rootHandle) {
+         nested.add(node.handle);
+         continue;
+       }
+       final own = labels[node.handle]
+         ?..sort((a, b) => a.$1.value.compareTo(b.$1.value));
+       if (own != null && own.length > 1) {
+         extra[node.handle] = [for (final l in own.skip(1)) l.$1];
+       }
+       tables.add(TableInfo(
+diff --git a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+index b891c15d..cec1e9c0 100644
+--- a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
++++ b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+@@ -864,11 +864,49 @@ void main() {
+     expect(find.byKey(const Key('wall-section')), findsOneWidget,
+         reason: 'the Wall tool\'s settings show');
+     expect(picker, findsNothing, reason: 'no Colour row under a tool');
+ 
+     expect(c.selectTool(FloorPlanTool.select), isTrue);
+     await tester.pump();
+     c.select({'1'});
+     await tester.pump();
+     expect(picker, findsOneWidget, reason: 'back on the select tool');
+   });
++
++  testWidgets(
++      'CP12 hover notifications over a selection of two tables and a room '
++      'rebuild the panel and the Colour row without surveying the document '
++      '(14a review R-7; the panel keeps its survey per document change)',
++      (tester) async {
++    final e = await mountEditor(tester);
++    final c = e.c;
++    final room = firstRoom(c);
++    await selectOn(tester, c, [tableOf(c, '1'), tableOf(c, '2'), room]);
++    expect(picker, findsOneWidget);
++    final doc = c.activeDocument;
++    final keys = [k(tableOf(c, '1')), k(tableOf(c, '7')), k(room)];
++    // Warm: one hover so any first-use work is behind us.
++    c.activeSelection.setHover(keys.first);
++    await tester.pump();
++    final before = TableSurvey.surveys;
++    for (final key in [...keys, null, ...keys.reversed, null]) {
++      c.activeSelection.setHover(key);
++      await tester.pump();
++      expect(picker, findsOneWidget);
++    }
++    expect(TableSurvey.surveys, before,
++        reason: 'a hover rebuild rescanned the document');
++    // The picker's own reads are survey-free, empty selection included.
++    pickedColors(doc, const []);
++    pickedColors(doc, keys);
++    recolorCommand(doc, keys, FloorPlanColor.teal);
++    expect(TableSurvey.surveys, before);
++    // And they agree with the survey: the table check is the survey's rule.
++    expect(pickedColors(doc, keys), hasLength(3));
++    for (final n in ['1', '2', '7', ' 7 ', 'L', '5']) {
++      expect(isTable(doc, tableOf(c, n)), isTrue, reason: n);
++    }
++    expect(isTable(doc, room), isFalse);
++    expect(isTable(doc, doc.rootHandle), isFalse);
++    expect(isTable(doc, const Handle(0x7FFFFFF)), isFalse, reason: 'no node');
++  });
+ }
