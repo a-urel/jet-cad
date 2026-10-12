@@ -8,7 +8,25 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-Nothing yet.
+Plan colours, Slice 1 (of two; released together as 0.6.0).
+
+- **Plans are now saved at schema 10.** A 0.5.1 (or older) build refuses
+  a plan this release saves (`load` throws a `FormatException` naming
+  `unsupported schemaVersion 10`); this release opens a 0.5.1 plan
+  unchanged. Terminals that share plans must move together.
+- **A room can take a colour**, one of eight hues
+  (`FloorPlanColor`: red, orange, yellow, green, teal, blue, purple,
+  grey), chosen in the Selection panel's new **Colour** row; its tint
+  is drawn in that hue at 20 %, on screen, in the export and in the
+  print. An uncoloured room is drawn exactly as before.
+- **`FloorPlanEditorCapabilities.recolor`** (default true; false in
+  `readOnly`) allows the Colour row; refused, it shows read only.
+  `tablesOnly` keeps it on.
+- **Breaking for a host's own strings:** `FloorPlanStrings` gains the
+  abstract `color`, `colorNone`, `colorRefused` and
+  `colorName(FloorPlanColor)`; a class that implements or directly
+  extends `FloorPlanStrings` must add them (a subclass of a built-in
+  language inherits them).
 
 ## 0.5.1
 

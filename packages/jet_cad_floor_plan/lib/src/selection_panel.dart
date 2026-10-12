@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 
+import 'colors/color_picker.dart';
 import 'symbols/symbol_names.dart';
 import 'host/editor_capabilities.dart';
 import 'host/floor_plan_types.dart';
@@ -53,6 +54,11 @@ import 'tables/table_rotate.dart';
 ///   (refused when invalid or used by another table, with an error line),
 ///   its seats, read-only, a duplicate-number warning, and two buttons that
 ///   turn it 90° about its centre.
+/// - **Colour** (plan colours spec PC-9): for a selection holding a room,
+///   while no tool's settings show, a [ColorPicker] before the layer
+///   picker: None and eight hues, set on every selected room in one undo
+///   step; read-only while the capabilities' `recolor` or the permissions
+///   refuse it.
 /// - **Layer** (12b D12): for any non-empty selection while no tool's
 ///   settings show, a [LayerPicker] after the sections above (alone when
 ///   none shows).
@@ -93,7 +99,8 @@ class SelectionPanel extends StatefulWidget {
       this.openingTools,
       this.openingSettings,
       this.symbols,
-      this.capabilities = FloorPlanEditorCapabilities.full});
+      this.capabilities = FloorPlanEditorCapabilities.full,
+      this.darkCanvasPaper});
 
   final DraftDocument document;
   final SelectionController selection;
@@ -127,6 +134,11 @@ class SelectionPanel extends StatefulWidget {
   /// What the host lets the user edit here (spec C-5), read at each build
   /// and commit; the default is today's panel.
   final FloorPlanEditorCapabilities capabilities;
+
+  /// The dark canvas's paper, ARGB, while the canvas re-tones; null on a
+  /// light one: the Colour picker's swatches show the hues as the canvas
+  /// does ([ColorPicker.darkCanvasPaper]).
+  final int? darkCanvasPaper;
 
   @override
   State<SelectionPanel> createState() => _SelectionPanelState();
@@ -1249,6 +1261,11 @@ class _SelectionPanelState extends State<SelectionPanel> {
         !_toolMode &&
         _openingToolMode == null &&
         widget.capabilities.changeLayer;
+    // Plan colours spec PC-9: the Colour row, for a selection holding a
+    // room (Slice 2: or a table), whenever no tool-settings section shows.
+    final colors = !_toolMode &&
+        _openingToolMode == null &&
+        pickedColors(widget.document, widget.selection.keys).isNotEmpty;
     final sections = box != null ||
         wall != null ||
         opening != null ||
@@ -1256,7 +1273,7 @@ class _SelectionPanelState extends State<SelectionPanel> {
         dimension != null ||
         table != null ||
         symbol != null;
-    if (!sections && !picker) return const SizedBox.shrink();
+    if (!sections && !picker && !colors) return const SizedBox.shrink();
     final title = Theme.of(context).textTheme.titleSmall;
     final boxEditable = _editable(_Kind.width);
     final wallEditable = _editable(_Kind.thickness, wall);
@@ -1395,8 +1412,16 @@ class _SelectionPanelState extends State<SelectionPanel> {
                 const SizedBox(height: 12),
               ..._tableSection(table, title),
             ],
-            if (picker) ...[
+            if (colors) ...[
               if (sections) const SizedBox(height: 12),
+              ColorPicker(
+                  document: widget.document,
+                  selection: widget.selection,
+                  capabilities: widget.capabilities,
+                  darkCanvasPaper: widget.darkCanvasPaper),
+            ],
+            if (picker) ...[
+              if (sections || colors) const SizedBox(height: 12),
               LayerPicker(
                   document: widget.document, selection: widget.selection),
             ],

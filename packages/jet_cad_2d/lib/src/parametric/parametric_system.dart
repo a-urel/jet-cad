@@ -195,26 +195,30 @@ enum ReferencePolicy {
 /// TEXT or an ATTRIB: a TEXT is generated with [Generated.text], which
 /// carries its string.
 ///
-/// Every record attribute here -- [color], [transparency], [flags],
-/// [boundaryFlags], [linetype], [lineweight], [textAttrs] and [text] -- is
-/// written into the record when the child is **added**, and only then
-/// (spec 10 D13): a regeneration rewrites a matched child's payload in
-/// place, and a matched TEXT's string (spec 10 D12), and never the rest of
-/// its record (06 D11). So a client must keep every attribute but a TEXT's
-/// string fixed for an object's life. Each defaults to what `draftRecord`
-/// writes: ByLayer, flags 0. `EntityFlags.unpickable` exists (spec 11 D19)
-/// for a drawn line that must not be picked or snapped to. A fill whose
-/// boundary is invisible needs neither it nor anything else to stay out of
-/// picks. Like every attribute, it is written on add only.
+/// Every record attribute here -- [flags], [boundaryFlags], [linetype],
+/// [lineweight], [textAttrs] and [text] -- is written into the record when
+/// the child is **added**, and only then (spec 10 D13): a regeneration
+/// rewrites a matched child's payload in place, and a matched TEXT's string
+/// (spec 10 D12), and never the rest of its record (06 D11). So a client
+/// must keep every attribute but a TEXT's string fixed for an object's
+/// life. Each defaults to what `draftRecord` writes: ByLayer, flags 0.
+/// `EntityFlags.unpickable` exists (spec 11 D19) for a drawn line that must
+/// not be picked or snapped to. A fill whose boundary is invisible needs
+/// neither it nor anything else to stay out of picks. Like every such
+/// attribute, it is written on add only.
 ///
-/// **One column is the planner's, not the client's: the layer** (spec 12b
-/// D2, amending 06 D11 and 10 D13 for that column only). Every child, added
-/// or matched, is on its object's layer (`objectLayer`: the group's
+/// **Three columns are the planner's, not the client's: the layer** (spec
+/// 12b D2, amending 06 D11 and 10 D13 for that column) **and the colour and
+/// transparency** (plan colours spec PC-3a, for those two). Every child,
+/// added or matched, is on its object's layer (`objectLayer`: the group's
 /// `ObjectLayer`, or layer 0). An added record is written on it; a matched
 /// child whose stored layer differs (exact `==`) is moved onto it by a
 /// `SetEntityLayerCommand.restore` in the plan, a matched region's fill and
-/// boundary each on its own. A child already on it plans nothing, so an
-/// edit that leaves layers alone plans no layer command.
+/// boundary each on its own. Likewise a matched child whose stored
+/// [color] or [transparency] differs from the `Generated`'s (exact `==`)
+/// is restamped by a `SetEntityStyleCommand.restore`, a region's fill and
+/// boundary each. A child already in its layer and its style plans nothing,
+/// so an edit that leaves them alone plans no such command.
 final class Generated {
   /// Throws `ArgumentError` for [EntityKind.fill] (see the class comment),
   /// and for [EntityKind.text] and [EntityKind.attrib] (spec 10 D12, R-15):
@@ -222,8 +226,8 @@ final class Generated {
   /// a label the planner would add empty; an ATTRIB needs a tag nobody
   /// generates.
   ///
-  /// [transparency], [flags], [linetype] and [lineweight] are written on
-  /// add only (spec 10 D13).
+  /// [flags], [linetype] and [lineweight] are written on add only (spec 10
+  /// D13).
   Generated(this.kind, this.payload,
       {this.color = const ByLayerColor(),
       this.transparency = kByLayer,
@@ -258,8 +262,9 @@ final class Generated {
   /// [flags] is the fill's; [boundaryFlags] is the boundary's and defaults
   /// to [flags] (spec 10 D13), so an invisible boundary around a drawn fill
   /// is `boundaryFlags: EntityFlags.invisible`. A region takes no linetype
-  /// or lineweight: its boundary is the fill's outline. All written on add
-  /// only.
+  /// or lineweight: its boundary is the fill's outline. [color] and
+  /// [transparency] are written on add and restamped on a match (plan
+  /// colours spec PC-3a); the rest is written on add only.
   Generated.region(this.payload,
       {this.color = const ByLayerColor(),
       this.transparency = kByLayer,
@@ -276,8 +281,9 @@ final class Generated {
   /// A TEXT whose string the planner owns (spec 10 D12): [payload] is a
   /// `textPayload`, [text] is written into the record on add and rewritten
   /// on a match (`SetEntityTextCommand`) whenever it differs. [textAttrs]
-  /// (`packTextAttrs`) is fixed at creation, like [color] and [flags]: a
-  /// type that must change a label's justification needs a new child.
+  /// (`packTextAttrs`) is fixed at creation, like [flags]: a type that must
+  /// change a label's justification needs a new child. [color] is written
+  /// on add and restamped on a match (plan colours spec PC-3a).
   Generated.text(this.payload, this.text,
       {this.color = const ByLayerColor(), this.textAttrs = 0, this.flags = 0})
       : kind = EntityKind.text,
@@ -294,7 +300,9 @@ final class Generated {
   /// True for a region: [payload] is the boundary of a generated fill.
   final bool filled;
 
-  /// The colour an added child's record gets (both records of a region).
+  /// The colour an added child's record gets (both records of a region),
+  /// and the one a matched child is restamped to when its stored colour
+  /// differs (plan colours spec PC-3a).
   final DraftColor color;
 
   /// A TEXT's string (spec 10 D12); `''` for every other form.
@@ -312,8 +320,9 @@ final class Generated {
   /// every other form, where it is not read.
   final int boundaryFlags;
 
-  /// The record's transparency, written on add only (both records of a
-  /// region); ByLayer for a TEXT.
+  /// The record's transparency (both records of a region); ByLayer for a
+  /// TEXT. Written on add and restamped on a match when the stored value
+  /// differs (plan colours spec PC-3a).
   final int transparency;
 
   /// The record's linetype handle, written on add only; ByLayer for a

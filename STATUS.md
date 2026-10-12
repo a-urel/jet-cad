@@ -23,8 +23,8 @@ one's spec, plan and results.
   skips exactly (`tool/ci/standing_*.txt`), and builds the host probe by
   git at the commit under test. In that probe it then analyses each
   released host's `main.dart`, read from its tag: `v0.3.0` (the host
-  embedding API spec's invariant 1) and `v0.4.0` (since 2026-10-10, the
-  0.4.0 review's R-7), by `tool/ci/old_host_probe.sh <tag>`.
+  embedding API spec's invariant 1), `v0.4.0` (since 2026-10-10, the
+  0.4.0 review's R-7) and `v0.5.1`, by `tool/ci/old_host_probe.sh <tag>`.
 - **14d** (POS readiness: three languages, the service layout and
   options, the release) and its independent review: results
   [14d-2](docs/superpowers/notes/2026-10-06-plan-14d2-results.md),
@@ -297,10 +297,22 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing.
+- **Plan colours** (the host spec's O-6, and rooms): a colour per table and
+  per room from a fixed palette, saved at schema 10.
+  Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
+  revision 2, approved 2026-10-12, on `spec/plan-colors`. Slice 1's plan
+  [2026-10-12-plan-colors-slice-1.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-1.md)
+  (the palette, schema 10, rooms; five tasks) is implemented on
+  `spec/plan-colors`, each task and the whole branch reviewed. Next: the
+  human's merge word, then Slice 2 (tables).
 
 ## Owed to the human
 
+- **Plan colours, Slice 1:** a native German and Turkish read of the
+  Colour row's words (the spec's PC-10 table, and `colorRefused`, which
+  that table lacks: "Farben sind hier nicht änderbar" / "Renkler burada
+  değiştirilemez"); a look at a coloured room
+  on the light and dark canvas.
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).
@@ -341,8 +353,8 @@ Nothing.
   language (Q0's N1, assumed yes)? If "`.` always", `documentSeparatorFor`
   becomes a constant and the settling goes.
 - **The macOS re-baseline** of the engine's two `generate_document_test`
-  fingerprints (moved by 12b's schema 7, Q0's schema 8 and Slice 2's
-  schema 9).
+  fingerprints (moved by 12b's schema 7, Q0's schema 8, Slice 2's
+  schema 9 and plan colours' schema 10).
 - **A look at Q0** in German and Turkish: the Page panel's control, the
   plan's text, the PDF.
 - **The GPU split's device run:** the dev harness's `BACKEND=residentGpu`
@@ -358,7 +370,22 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
+**Next: the human's merge word for Slice 1 of plan colours, then Slice 2
+(tables).** Slice 1 (the palette, schema 10, rooms, the `recolor`
+capability and the Selection panel's Colour row) is implemented and
+reviewed on `spec/plan-colors` (worktree `.claude/worktrees/plan-colors`),
+its whole-branch review's fixes applied; it merges to `main` on the
+human's word and is released with Slice 2 as 0.6.0. Slice 2 (a table's
+colour, `jetcad.table_color`, the Tables flows) has no plan written yet:
+start from the spec
+[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md).
+For Slice 2, pin the Colour row's tool-mode visibility with a selection
+made by `controller.select` **while the Wall tool is active**: a mutant
+that drops `!_toolMode && _openingToolMode == null` from
+`selection_panel.dart`'s `colors` flag survives Slice 1, because a
+drawing tool clears the selection.
+
+The released line: 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
 Monépro owes Q-H3 and its real shadcn tokens, and can name
@@ -606,7 +633,8 @@ More gates: `packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`
 `flutter analyze`, the format check; `tool/ci` — `dart test`,
 `dart run tool/ci/check_guide.dart`; the host probe —
 `tool/ci/host_probe.sh <git url> <sha>`, then
-`tool/ci/old_host_probe.sh v0.3.0` and `tool/ci/old_host_probe.sh v0.4.0`.
+`tool/ci/old_host_probe.sh v0.3.0`, `tool/ci/old_host_probe.sh v0.4.0` and
+`tool/ci/old_host_probe.sh v0.5.1`.
 
 ---
 

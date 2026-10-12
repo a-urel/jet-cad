@@ -70,6 +70,10 @@ void main() {
     // Slice 2 Task 1 (host embedding API): kSchemaVersion moved from 8 to 9
     // (no new field; the generated document carries no table data, so only
     // the version shifts both values). Not re-baselined either: owed on macOS.
+    //
+    // Plan colours Slice 1 Task 2: kSchemaVersion moved from 9 to 10 (PC-2; no
+    // new field the engine reads, so only the version shifts both values).
+    // Not re-baselined either: owed on macOS.
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
         1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
@@ -260,7 +264,7 @@ void main() {
     // (kSchemaVersion 7 to 8; owed on macOS).
     //
     // Slice 2 Task 1 (host embedding API): not re-baselined, in step with the
-    // sibling test above (kSchemaVersion 8 to 9; owed on macOS).
+    // sibling test above (kSchemaVersion 8 to 9 to 10; owed on macOS).
     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
         1593811103237081036);
     expect(fingerprint(generateDocument(20000, definitionCount: 20)),

@@ -1,0 +1,164 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 0f2ef6c9..f1b68ddc 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -161,10 +161,12 @@ jobs:
+         run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
+       # Host embedding API spec, invariant 1 (P-1): each released host's
+       # code, analysed in the probe just resolved at the commit under test,
+       # still compiles; the probe's own main.dart is put back after each.
+       # Every release a host may still pin stays: 0.3.0 is the spec's own,
+       # 0.4.0 (the embedding API, 8367010) followed its tag.
+       - name: The 0.3.0 host probe against this commit
+         run: tool/ci/old_host_probe.sh v0.3.0
+       - name: The 0.4.0 host probe against this commit
+         run: tool/ci/old_host_probe.sh v0.4.0
++      - name: The 0.5.1 host probe against this commit
++        run: tool/ci/old_host_probe.sh v0.5.1
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 7c11c4ed..829ba6e5 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,21 +1,34 @@
+ # Changelog
+ 
+ The four packages a host depends on — `jet_cad_2d`, `jet_cad_2d_flutter`,
+ `jet_cad_floor_plan`, `jet_cad_restaurant_symbols` — are released
+ together, under one version and one git tag. None is published to
+ pub.dev: a host depends on them by git (see
+ [docs/host-guide.md](docs/host-guide.md)).
+ 
+ ## Unreleased
+ 
+-Nothing yet.
++Plan colours, Slice 1 (of two; released together as 0.6.0).
++
++- **Plans are now saved at schema 10.** A 0.5.1 (or older) build refuses
++  a plan this release saves (`load` throws a `FormatException` naming
++  `unsupported schemaVersion 10`); this release opens a 0.5.1 plan
++  unchanged. Terminals that share plans must move together.
++- **A room can take a colour**, one of eight hues
++  (`FloorPlanColor`: red, orange, yellow, green, teal, blue, purple,
++  grey), chosen in the Selection panel's new **Colour** row; its tint
++  is drawn in that hue at 20 %, on screen, in the export and in the
++  print. An uncoloured room is drawn exactly as before.
++- **`FloorPlanEditorCapabilities.recolor`** (default true; false in
++  `readOnly`) allows the Colour row; refused, it shows read only.
++  `tablesOnly` keeps it on.
+ 
+ ## 0.5.1
+ 
+ Two fixes from the host embedding API's fourth slice. Nothing is stored
+ differently: **plans and service layouts are the same as 0.4.0's and
+ 0.5.0's** (schema 9), so 0.4.0, 0.5.0 and 0.5.1 terminals can share
+ them. Nothing a 0.5.0 host calls changes its signature. The packages
+ need Flutter 3.44 or later, as 0.5.0 did; 0.5.1 was built and tested
+ with Flutter 3.47.6.
+ 
+diff --git a/STATUS.md b/STATUS.md
+index 06bad8b4..d3a1b11f 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -295,25 +295,29 @@ one's spec, plan and results.
+   The guide names `3f8f7ad`. The human pushed `main` (at `cfb79cc`) and
+   the tag `v0.5.1` → `3f8f7ad` (2026-10-11).
+ 
+ ## In flight
+ 
+ - **Plan colours** (the host spec's O-6, and rooms): a colour per table and
+   per room from a fixed palette, saved at schema 10.
+   Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
+   revision 2, approved 2026-10-12, on `spec/plan-colors`. Slice 1's plan
+   [2026-10-12-plan-colors-slice-1.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-1.md)
+-  (the palette, schema 10, rooms; five tasks) awaits the human's review
+-  and choice of execution.
++  (the palette, schema 10, rooms; five tasks) is implemented on
++  `spec/plan-colors`, each task reviewed. Next: its whole-branch review,
++  then Slice 2 (tables).
+ 
+ ## Owed to the human
+ 
++- **Plan colours, Slice 1:** a native German and Turkish read of the
++  Colour row's words (the spec's PC-10 table); a look at a coloured room
++  on the light and dark canvas.
+ - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
+   the floor planner in three languages; the service mode's menu, groups
+   and layout; the dark theme).
+ - **A native German read** of the German text (*Am Raster fangen*,
+   *Zufällige Status* among others); the Turkish read.
+ - **A ruling:** a context click on a group member selects its whole group
+   (made at the 14d merge, documented in the host guide).
+ - **Slice 1, a look:** the demo's badges, pan and zoom smoothness and
+   interactive badges by touch, on a tablet and a terminal; the German
+   and Turkish read of the demo's new strings.
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 4a6807b1..2dc4e4b0 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -1450,20 +1450,21 @@ arranges tables, `readOnly` for one who only looks:
+ | Field | `full` | `tablesOnly` | `readOnly` |
+ |---|---|---|---|
+ | `tools` | all sixteen | `select`, `symbol` | `select` |
+ | `symbolPalette`, `symbolFilter` | yes, none | yes, the tables (`seats != null`) | no, none |
+ | `selectionPanel` | yes | yes | yes |
+ | `layerPanel`, `pagePanel` | yes | no | yes (read only) |
+ | `editLayers`, `editPage` | yes | no | no |
+ | `selectTablesOnly` | no | yes | no |
+ | `move`, `rotate`, `delete`, `renumber` | yes | yes | no |
+ | `mirror`, `reshape`, `changeLayer` | yes | no | no |
++| `recolor` | yes | yes | no |
+ | `undo` | yes | yes | no |
+ | `export`, `print`, `rulers`, `grid`, `snapping` | yes | yes | yes |
+ 
+ Field by field:
+ 
+ - `tools`, a `Set<FloorPlanTool>`: `select`, `line`, `polyline`,
+   `rectangle`, `box`, `wall`, `door`, `window`, `gap`, `room`,
+   `separator`, `dimension`, `circle`, `arc`, `text` (the palette's rows,
+   in its order) and `symbol` (the placement the Symbols tab arms). It
+   must hold `select`: an `ArgumentError` naming `tools` when the view
+@@ -1496,20 +1497,23 @@ Field by field:
+ - `move`, `rotate`, `mirror`, `reshape`, `delete`, `renumber`,
+   `changeLayer`: the selection's edits. A refused button or menu
+   (Mirror, ±90, a door's flips, the Size menu, the layer picker) is not
+   shown; a refused value field is shown read only. `reshape` covers an
+   object's own grips and fields (a box's, a wall's thickness and
+   justification, an opening's, a room's name, a dimension's kind) and
+   Change size. A drag whose flag is refused before the pointer lifts is
+   cancelled at once: it executes nothing, even if the flag is allowed
+   again by then. `rotate` and `mirror` also bound the symbol tool: its R
+   and M, and the turn and mirror of the next placement.
++- `recolor` (*since 0.6.0*): the Selection panel's Colour row, which
++  gives the selected rooms one of the eight `FloorPlanColor` hues or
++  none. Refused, the row shows the colour, read only.
+ - `undo`, `export`, `print`: the bar's buttons **and** their chords.
+ - `rulers`, `grid`, `snapping`: the drafting aids. `snapping: false`
+   turns object snap off for the editor's tools and drags and removes F3
+   and the OSNAP read-out; the user's own setting comes back with it.
+   Grid snap stays the page's setting.
+ 
+ `copyWith` changes some fields of a profile. Its null keeps a field, the
+ filter included: `copyWith(symbolFilter: null)` keeps the filter, so
+ start from `full` for none.
+ 
+@@ -2003,17 +2007,19 @@ a desktop.
+   the language. An empty plan a controller creates takes the language of
+   the first `FloorPlanView` that shows it; until then, and with no view,
+   it is `.`. `newPlan()` takes the language a view of that controller
+   last showed, which may be stale if the language changed while none was
+   mounted. In 0.1.0 dimensions and areas always print with `.`.
+ - **Schema 8** *(since 0.2.0)*. A plan saved by 0.2.0 or 0.3.0 is
+   at schema 8, which 0.1.0 refuses (`load` throws a `FormatException`
+   that says why); a 0.1.0 plan opens here unchanged. Terminals that
+   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
+   plans and service layouts, so they can share them.
+-- **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0 or later
++- **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0, 0.5.0 or 0.5.1
+   is at schema 9, with or without table data, and 0.3.0 and every
+   earlier release refuse it** (`load` throws a `FormatException` that
+   says why). **Every terminal that shares stored plans moves to it
+   together.** A schema 8 or 7 plan opens here unchanged; the service
+   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
+   plans and service layouts, so they can share them.
++  A plan saved by 0.6.0 is at **schema 10**, which 0.5.1 and every
++  older release refuse; a schema 9, 8 or 7 plan opens here unchanged.

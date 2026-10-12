@@ -1,5 +1,6 @@
 // The record attributes a client sets on add (spec 10 D13): written into
-// each record when the child is added, and never rewritten on a match.
+// each record when the child is added; on a match only the colour and the
+// transparency are rewritten (plan colours spec PC-3a), never the rest.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:test/test.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -65,8 +66,8 @@ void main() {
   setUp(generateCalls.clear);
 
   test(
-      'AT1 each record attribute is written on add and none is '
-      'rewritten on a match; a region\'s boundary flags stand apart from its '
+      'AT1 each record attribute is written on add and on a match only the '
+      'colour and transparency move; a region\'s boundary flags stand apart from its '
       'fill\'s', () async {
     // Premises on the literals used below: the reserved handles and the
     // flag bit are what `expected` spells out.
@@ -148,17 +149,30 @@ void main() {
     expect(drift(doc), isEmpty);
 
     // A match: moved, alpha 229 -> 100, weight 35 -> 50. Every payload is
-    // rewritten; every record stays exactly as added, field by field
-    // (geometry slots included: a rewrite replaces in place).
+    // rewritten; every record stays exactly as added but for the
+    // transparency (PC-3a), field by field (geometry slots included: a
+    // rewrite replaces in place).
     final records = {for (final k in created) k: recordOf(doc, k)};
     final beforeMatch = canon(doc);
     final depth = doc.commands.undoDepth;
     const s1 = Swatch(-210.75, 95.5, 100, 50);
     doc.commands.execute(SetComponentCommand<Swatch>(hA, s1));
     expect(kids(doc, hA), created, reason: 'every child matched in place');
+    // PC-3a: transparency is the planner's column now; the region's two
+    // records and the LINE take s1's alpha (what Swatch generates for
+    // them). The TEXTs carry none (ByLayer), so they stay as added.
+    final restyled = {
+      for (final k in created)
+        k: [fill, boundary, line].contains(k)
+            ? records[k]!.copyWith(transparency: s1.alpha)
+            : records[k]!,
+    };
     for (final k in created) {
-      expect(recordOf(doc, k), records[k], reason: '${k.toHex()} as added');
+      expect(recordOf(doc, k), restyled[k],
+          reason: '${k.toHex()}: only the transparency moves');
     }
+    expect(recordOf(doc, line).lineweight, 35,
+        reason: 'lineweight is still written on add only');
     expect(payloadOf(doc, boundary), swatchLoop(s1));
     expect(payloadOf(doc, line), swatchLine(s1));
     expect(payloadOf(doc, text1), swatchFirstText(s1));
@@ -173,10 +187,10 @@ void main() {
     const s2 = Swatch(-210.75, 95.5, 100, 50, second: 'Elm');
     doc.commands.execute(SetComponentCommand<Swatch>(hA, s2));
     expect(kids(doc, hA), created);
-    expect(recordOf(doc, text1), records[text1]);
-    expect(recordOf(doc, text2), records[text2]!.copyWith(text: 'Elm'));
+    expect(recordOf(doc, text1), restyled[text1]);
+    expect(recordOf(doc, text2), restyled[text2]!.copyWith(text: 'Elm'));
     for (final k in [fill, boundary, line]) {
-      expect(recordOf(doc, k), records[k]);
+      expect(recordOf(doc, k), restyled[k]);
     }
     expect(drift(doc), isEmpty);
 

@@ -122,6 +122,8 @@ final class FloorPlanSymbol {
 ///   while refused. While [rotate] is refused, a symbol tagged
 ///   `against-wall`, placed or moved, attaches only to a wall face its
 ///   back already faces, and keeps its turn.
+/// - [recolor]: the Selection panel's Colour picker (plan colours spec
+///   PC-8); refused, it shows read-only.
 /// - [undo] (Undo and Redo), [export], [print]: the top bar's buttons and
 ///   their chords.
 /// - [rulers], [grid]: the drafting aids; [snapping]: object snap for the
@@ -153,6 +155,7 @@ final class FloorPlanEditorCapabilities {
     this.delete = true,
     this.renumber = true,
     this.changeLayer = true,
+    this.recolor = true,
     this.undo = true,
     this.export = true,
     this.print = true,
@@ -199,6 +202,7 @@ final class FloorPlanEditorCapabilities {
     delete: false,
     renumber: false,
     changeLayer: false,
+    recolor: false,
     undo: false,
   );
 
@@ -232,6 +236,7 @@ final class FloorPlanEditorCapabilities {
   final bool editLayers, editPage;
   final bool selectTablesOnly;
   final bool move, rotate, mirror, reshape, delete, renumber, changeLayer;
+  final bool recolor;
   final bool undo, export, print;
   final bool rulers, grid, snapping;
 
@@ -255,6 +260,7 @@ final class FloorPlanEditorCapabilities {
     bool? delete,
     bool? renumber,
     bool? changeLayer,
+    bool? recolor,
     bool? undo,
     bool? export,
     bool? print,
@@ -279,6 +285,7 @@ final class FloorPlanEditorCapabilities {
         delete: delete ?? this.delete,
         renumber: renumber ?? this.renumber,
         changeLayer: changeLayer ?? this.changeLayer,
+        recolor: recolor ?? this.recolor,
         undo: undo ?? this.undo,
         export: export ?? this.export,
         print: print ?? this.print,
@@ -303,6 +310,7 @@ final class FloorPlanEditorCapabilities {
         ('delete', delete),
         ('renumber', renumber),
         ('changeLayer', changeLayer),
+        ('recolor', recolor),
         ('undo', undo),
         ('export', export),
         ('print', print),

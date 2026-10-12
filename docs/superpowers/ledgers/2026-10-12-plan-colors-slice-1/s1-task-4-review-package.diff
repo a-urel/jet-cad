@@ -1,0 +1,1481 @@
+dd35caf0 feat(floor-plan): the Colour picker and the recolor capability
+ .../lib/src/colors/color_picker.dart               | 157 ++++++
+ .../lib/src/host/editor_capabilities.dart          |   8 +
+ .../jet_cad_floor_plan/lib/src/l10n/strings.dart   |  13 +
+ .../lib/src/l10n/strings_de.dart                   |  22 +
+ .../lib/src/l10n/strings_en.dart                   |  22 +
+ .../lib/src/l10n/strings_tr.dart                   |  22 +
+ .../jet_cad_floor_plan/lib/src/planner_shell.dart  |   4 +-
+ .../lib/src/selection_panel.dart                   |  31 +-
+ .../test/colors/color_picker_test.dart             | 548 +++++++++++++++++++++
+ .../test/host/editor_capabilities_test.dart        |  16 +-
+ .../test/invariants/theme_colours_test.dart        |   2 +
+ .../test/l10n/recording_strings.dart               |  14 +
+ 12 files changed, 854 insertions(+), 5 deletions(-)
+diff --git a/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart b/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
+new file mode 100644
+index 00000000..9407b432
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/lib/src/colors/color_picker.dart
+@@ -0,0 +1,157 @@
++// The Selection panel's Colour row (plan colours spec PC-9): nine
++// swatches, None and the palette's eight hues, setting the colour of every
++// selected room in one undo step (Slice 2 adds tables). It keeps no state:
++// the panel rebuilds it on every selection and document change, as it does
++// the Layer picker.
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++import '../host/editor_capabilities.dart';
++import '../l10n/strings.dart';
++import '../parametric/live_objects.dart';
++import '../parametric/room.dart';
++import 'plan_color.dart';
++
++/// The rooms among [keys], in key order, each once.
++List<Handle> _rooms(DraftDocument doc, Iterable<SelectionKey> keys) => [
++      for (final h in {for (final k in keys) k.target})
++        if (isLiveObject<RoomParams>(doc, h)) h,
++    ];
++
++/// The colour of each key's object, as the picker reads it: a room's stored
++/// name (null for none); keys that are no room are not listed.
++List<String?> pickedColors(DraftDocument doc, Iterable<SelectionKey> keys) => [
++      for (final h in _rooms(doc, keys))
++        doc.components.get<RoomParams>(h)!.color,
++    ];
++
++/// The one command that sets [color] (null: none) on every room among
++/// [keys], labelled 'Colour'; null when none would change.
++DraftCommand? recolorCommand(
++    DraftDocument doc, Iterable<SelectionKey> keys, FloorPlanColor? color) {
++  final name = color?.name;
++  final edits = <DraftCommand>[
++    for (final h in _rooms(doc, keys))
++      if (doc.components.get<RoomParams>(h)! case final p when p.color != name)
++        SetComponentCommand<RoomParams>(h, p.copyWith(color: name)),
++  ];
++  return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
++}
++
++/// Why the picker is read-only for [keys], or null when it acts:
++/// `strings.readOnlyDocument` when the permissions refuse `components` or
++/// `RoomType().editCapability` for a room among [keys]; the strings'
++/// `colorRefused` when [capabilities].recolor is false.
++String? colorPickerBlocked(DraftDocument doc, Iterable<SelectionKey> keys,
++    FloorPlanEditorCapabilities capabilities, FloorPlanStrings strings) {
++  final permissions = doc.commands.permissions;
++  if (!permissions.allows(Capability.components) ||
++      (_rooms(doc, keys).isNotEmpty &&
++          !permissions.allows(const RoomType().editCapability))) {
++    return strings.readOnlyDocument;
++  }
++  if (!capabilities.recolor) return strings.colorRefused;
++  return null;
++}
++
++/// The swatch colour of [rgb] (PC-9): as the canvas shows it, re-toned on a
++/// dark canvas. The one place the planner turns a palette hue into a Color.
++Color swatchColor(int rgb, int? darkCanvasPaper) => Color(0xFF000000 |
++    (darkCanvasPaper == null
++        ? rgb
++        : darkCanvasTone(rgb, darkCanvasPaper & 0xFFFFFF)));
++
++class ColorPicker extends StatelessWidget {
++  const ColorPicker(
++      {super.key,
++      required this.document,
++      required this.selection,
++      required this.capabilities,
++      this.darkCanvasPaper});
++
++  final DraftDocument document;
++  final SelectionController selection;
++  final FloorPlanEditorCapabilities capabilities;
++
++  /// The dark canvas's paper, ARGB, while the canvas re-tones; null on a
++  /// light canvas.
++  final int? darkCanvasPaper;
++
++  void _choose(FloorPlanColor? color, FloorPlanStrings strings) {
++    final keys = selection.keys;
++    if (colorPickerBlocked(document, keys, capabilities, strings) != null) {
++      return;
++    }
++    final command = recolorCommand(document, keys, color);
++    if (command == null) return;
++    try {
++      document.commands.execute(command);
++    } on ArgumentError {
++      // Refused: the dispatcher rolled it back.
++    } on StateError {
++      // Refused: the dispatcher rolled it back.
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final strings = FloorPlanStrings.of(context);
++    final keys = selection.keys;
++    final blocked = colorPickerBlocked(document, keys, capabilities, strings);
++    final colors = pickedColors(document, keys);
++    // The sentinel stands for "mixed": it equals no swatch's name, so no
++    // swatch is marked. A stored unknown name equals none either.
++    final common = colors.toSet().length == 1 ? colors.first : '\u0000';
++    final scheme = Theme.of(context).colorScheme;
++    Widget swatch(String key, String label, Color? fill, bool marked,
++            VoidCallback onTap) =>
++        Tooltip(
++          message: blocked ?? label,
++          child: Semantics(
++            button: true,
++            selected: marked,
++            enabled: blocked == null,
++            label: label,
++            child: InkWell(
++              key: Key('color-swatch-$key'),
++              onTap: blocked == null ? onTap : null,
++              customBorder: const CircleBorder(),
++              child: Container(
++                width: 24,
++                height: 24,
++                decoration: BoxDecoration(
++                  color: fill,
++                  shape: BoxShape.circle,
++                  border: Border.all(
++                      color: marked ? scheme.primary : scheme.outline,
++                      width: marked ? 3 : 1),
++                ),
++                child: fill == null
++                    ? Icon(Icons.block, size: 14, color: scheme.outline)
++                    : null,
++              ),
++            ),
++          ),
++        );
++    return Column(
++      key: const Key('color-picker'),
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Text(strings.color),
++        const SizedBox(height: 6),
++        Wrap(spacing: 6, runSpacing: 6, children: [
++          swatch('none', strings.colorNone, null, common == null,
++              () => _choose(null, strings)),
++          for (final c in FloorPlanColor.values)
++            swatch(
++                c.name,
++                strings.colorName(c),
++                swatchColor(c.rgb, darkCanvasPaper),
++                common == c.name,
++                () => _choose(c, strings)),
++        ]),
++      ],
++    );
++  }
++}
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/editor_capabilities.dart b/packages/jet_cad_floor_plan/lib/src/host/editor_capabilities.dart
+index 9b8dde81..11429a56 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/editor_capabilities.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/editor_capabilities.dart
+@@ -115,20 +115,22 @@ final class FloorPlanSymbol {
+ ///   [reshape] names an object's own fields too (a box's, a wall's, an
+ ///   opening's, a room's, a dimension's) and Change size. A refused button
+ ///   or menu (Mirror, ±90, a door's flips, the Size menu, the layer
+ ///   picker) is not shown; a refused value field is shown read-only. A
+ ///   drag whose flag is refused before it ends is cancelled: it executes
+ ///   nothing. [rotate] and [mirror] also bound the symbol tool: its `R`
+ ///   and `M`, and the turn and mirror of a placement, which are not used
+ ///   while refused. While [rotate] is refused, a symbol tagged
+ ///   `against-wall`, placed or moved, attaches only to a wall face its
+ ///   back already faces, and keeps its turn.
++/// - [recolor]: the Selection panel's Colour picker (plan colours spec
++///   PC-8); refused, it shows read-only.
+ /// - [undo] (Undo and Redo), [export], [print]: the top bar's buttons and
+ ///   their chords.
+ /// - [rulers], [grid]: the drafting aids; [snapping]: object snap for the
+ ///   editor's tools and drags, its F3 key and its OSNAP read-out. The
+ ///   user's own setting is kept while it is false.
+ ///
+ /// It is the editor's alone: the selection mode is governed by the view's
+ /// own parameters (spec S-22). A host's own controller calls
+ /// (`setTableData`, `undo()`, `load`, `exportPlan`) stay allowed under
+ /// every value. Changing it at runtime takes effect at the next build: a
+@@ -146,20 +148,21 @@ final class FloorPlanEditorCapabilities {
+     this.editLayers = true,
+     this.editPage = true,
+     this.selectTablesOnly = false,
+     this.move = true,
+     this.rotate = true,
+     this.mirror = true,
+     this.reshape = true,
+     this.delete = true,
+     this.renumber = true,
+     this.changeLayer = true,
++    this.recolor = true,
+     this.undo = true,
+     this.export = true,
+     this.print = true,
+     this.rulers = true,
+     this.grid = true,
+     this.snapping = true,
+   });
+ 
+   /// Today's editor: every tool, every flag true, no filter.
+   static const FloorPlanEditorCapabilities full = FloorPlanEditorCapabilities();
+@@ -192,20 +195,21 @@ final class FloorPlanEditorCapabilities {
+     symbolPalette: false,
+     editLayers: false,
+     editPage: false,
+     move: false,
+     rotate: false,
+     mirror: false,
+     reshape: false,
+     delete: false,
+     renumber: false,
+     changeLayer: false,
++    recolor: false,
+     undo: false,
+   );
+ 
+   /// [tablesOnly]'s filter: a symbol that seats is a table. A static
+   /// function, so the profile is `const`.
+   static bool _isTable(FloorPlanSymbol symbol) => symbol.seats != null;
+ 
+   static const Set<FloorPlanTool> _everyTool = {
+     FloorPlanTool.select,
+     FloorPlanTool.line,
+@@ -225,20 +229,21 @@ final class FloorPlanEditorCapabilities {
+     FloorPlanTool.symbol,
+   };
+ 
+   final Set<FloorPlanTool> tools;
+   final bool symbolPalette;
+   final bool Function(FloorPlanSymbol symbol)? symbolFilter;
+   final bool selectionPanel, layerPanel, pagePanel;
+   final bool editLayers, editPage;
+   final bool selectTablesOnly;
+   final bool move, rotate, mirror, reshape, delete, renumber, changeLayer;
++  final bool recolor;
+   final bool undo, export, print;
+   final bool rulers, grid, snapping;
+ 
+   /// A copy with the given fields replaced; a null argument keeps the
+   /// field, so `copyWith(symbolFilter: null)` keeps the filter: start from
+   /// [full] to have none. A given [tools] is copied, unmodifiable.
+   FloorPlanEditorCapabilities copyWith({
+     Set<FloorPlanTool>? tools,
+     bool? symbolPalette,
+     bool Function(FloorPlanSymbol symbol)? symbolFilter,
+@@ -248,20 +253,21 @@ final class FloorPlanEditorCapabilities {
+     bool? editLayers,
+     bool? editPage,
+     bool? selectTablesOnly,
+     bool? move,
+     bool? rotate,
+     bool? mirror,
+     bool? reshape,
+     bool? delete,
+     bool? renumber,
+     bool? changeLayer,
++    bool? recolor,
+     bool? undo,
+     bool? export,
+     bool? print,
+     bool? rulers,
+     bool? grid,
+     bool? snapping,
+   }) =>
+       FloorPlanEditorCapabilities(
+         tools: tools == null ? this.tools : Set.unmodifiable(tools),
+         symbolPalette: symbolPalette ?? this.symbolPalette,
+@@ -272,20 +278,21 @@ final class FloorPlanEditorCapabilities {
+         editLayers: editLayers ?? this.editLayers,
+         editPage: editPage ?? this.editPage,
+         selectTablesOnly: selectTablesOnly ?? this.selectTablesOnly,
+         move: move ?? this.move,
+         rotate: rotate ?? this.rotate,
+         mirror: mirror ?? this.mirror,
+         reshape: reshape ?? this.reshape,
+         delete: delete ?? this.delete,
+         renumber: renumber ?? this.renumber,
+         changeLayer: changeLayer ?? this.changeLayer,
++        recolor: recolor ?? this.recolor,
+         undo: undo ?? this.undo,
+         export: export ?? this.export,
+         print: print ?? this.print,
+         rulers: rulers ?? this.rulers,
+         grid: grid ?? this.grid,
+         snapping: snapping ?? this.snapping,
+       );
+ 
+   /// The flags, in declaration order, by name.
+   List<(String, bool)> get _flags => [
+@@ -296,20 +303,21 @@ final class FloorPlanEditorCapabilities {
+         ('editLayers', editLayers),
+         ('editPage', editPage),
+         ('selectTablesOnly', selectTablesOnly),
+         ('move', move),
+         ('rotate', rotate),
+         ('mirror', mirror),
+         ('reshape', reshape),
+         ('delete', delete),
+         ('renumber', renumber),
+         ('changeLayer', changeLayer),
++        ('recolor', recolor),
+         ('undo', undo),
+         ('export', export),
+         ('print', print),
+         ('rulers', rulers),
+         ('grid', grid),
+         ('snapping', snapping),
+       ];
+ 
+   @override
+   bool operator ==(Object other) =>
+diff --git a/packages/jet_cad_floor_plan/lib/src/l10n/strings.dart b/packages/jet_cad_floor_plan/lib/src/l10n/strings.dart
+index 8cccd2a6..75f1c4fc 100644
+--- a/packages/jet_cad_floor_plan/lib/src/l10n/strings.dart
++++ b/packages/jet_cad_floor_plan/lib/src/l10n/strings.dart
+@@ -1,18 +1,19 @@
+ // The planner's words (spec 14d L1, L2, revision 2): one abstract class,
+ // a member per string -- a getter for a fixed one, a method for one with
+ // values or a count -- and one implementation per built-in language, so the
+ // compiler refuses a language that misses a word. A host may subclass a
+ // language and provide it through its own delegate.
+ import 'package:flutter/widgets.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
+ 
++import '../colors/plan_color.dart' show FloorPlanColor;
+ import '../host/floor_plan_types.dart' show NumberingWarning;
+ import '../tables/table_numbers.dart' show TableNumberProblem;
+ 
+ import 'strings_de.dart';
+ import 'strings_en.dart';
+ import 'strings_tr.dart';
+ 
+ /// The planner's words in one language.
+ abstract class FloorPlanStrings {
+   const FloorPlanStrings();
+@@ -337,20 +338,32 @@ abstract class FloorPlanStrings {
+ 
+   /// "Read-only document".
+   String get readOnlyDocument;
+ 
+   /// "A plain group has no layer: it cannot be moved".
+   String get plainGroupNoLayer;
+ 
+   /// "Layer".
+   String get layer;
+ 
++  /// The Colour picker's title (plan colours spec PC-9).
++  String get color;
++
++  /// The picker's swatch for no colour.
++  String get colorNone;
++
++  /// The picker's tooltip when the host refuses `recolor`.
++  String get colorRefused;
++
++  /// [color]'s name, for its swatch's tooltip and semantics label.
++  String colorName(FloorPlanColor color);
++
+   /// "Move the selection to a layer".
+   String get moveSelectionToLayer;
+ 
+   /// "A hidden layer cannot be current".
+   String get hiddenLayerNotCurrent;
+ 
+   /// "Current layer".
+   String get currentLayer;
+ 
+   /// "Make current".
+diff --git a/packages/jet_cad_floor_plan/lib/src/l10n/strings_de.dart b/packages/jet_cad_floor_plan/lib/src/l10n/strings_de.dart
+index 0c63198f..b1a88db7 100644
+--- a/packages/jet_cad_floor_plan/lib/src/l10n/strings_de.dart
++++ b/packages/jet_cad_floor_plan/lib/src/l10n/strings_de.dart
+@@ -1,20 +1,21 @@
+ // The planner's words in German (spec 14d L1).
+ import 'package:jet_cad_2d/jet_cad_2d.dart'
+     show
+         LayerNameBadCharacter,
+         LayerNameDuplicate,
+         LayerNameEdgeSpace,
+         LayerNameEmpty,
+         LayerNameProblem,
+         LayerNameTooLong;
+ 
++import '../colors/plan_color.dart' show FloorPlanColor;
+ import '../host/floor_plan_types.dart'
+     show DuplicateNumber, NumberingWarning, Unnumbered;
+ import '../tables/table_numbers.dart'
+     show TableNumberProblem, kTableNumberMaxLength;
+ import 'strings.dart';
+ 
+ /// The planner's words in German.
+ class FloorPlanStringsDe extends FloorPlanStrings {
+   const FloorPlanStringsDe();
+ 
+@@ -338,20 +339,41 @@ class FloorPlanStringsDe extends FloorPlanStrings {
+   @override
+   String get readOnlyDocument => 'Schreibgeschütztes Dokument';
+ 
+   @override
+   String get plainGroupNoLayer =>
+       'Eine einfache Gruppe hat keine Ebene: Sie kann nicht verschoben werden';
+ 
+   @override
+   String get layer => 'Ebene';
+ 
++  @override
++  String get color => 'Farbe';
++
++  @override
++  String get colorNone => 'Keine';
++
++  @override
++  String get colorRefused => 'Farben sind hier nicht änderbar';
++
++  @override
++  String colorName(FloorPlanColor color) => switch (color) {
++        FloorPlanColor.red => 'Rot',
++        FloorPlanColor.orange => 'Orange',
++        FloorPlanColor.yellow => 'Gelb',
++        FloorPlanColor.green => 'Grün',
++        FloorPlanColor.teal => 'Petrol',
++        FloorPlanColor.blue => 'Blau',
++        FloorPlanColor.purple => 'Lila',
++        FloorPlanColor.grey => 'Grau',
++      };
++
+   @override
+   String get moveSelectionToLayer => 'Auswahl auf eine Ebene verschieben';
+ 
+   @override
+   String get hiddenLayerNotCurrent =>
+       'Eine ausgeblendete Ebene kann nicht aktuell sein';
+ 
+   @override
+   String get currentLayer => 'Aktuelle Ebene';
+ 
+diff --git a/packages/jet_cad_floor_plan/lib/src/l10n/strings_en.dart b/packages/jet_cad_floor_plan/lib/src/l10n/strings_en.dart
+index d4748af8..b8221aa7 100644
+--- a/packages/jet_cad_floor_plan/lib/src/l10n/strings_en.dart
++++ b/packages/jet_cad_floor_plan/lib/src/l10n/strings_en.dart
+@@ -2,20 +2,21 @@
+ // byte, so English is unchanged on screen.
+ import 'package:jet_cad_2d/jet_cad_2d.dart'
+     show
+         LayerNameBadCharacter,
+         LayerNameDuplicate,
+         LayerNameEdgeSpace,
+         LayerNameEmpty,
+         LayerNameProblem,
+         LayerNameTooLong;
+ 
++import '../colors/plan_color.dart' show FloorPlanColor;
+ import '../host/floor_plan_types.dart'
+     show DuplicateNumber, NumberingWarning, Unnumbered;
+ import '../tables/table_numbers.dart'
+     show TableNumberProblem, kTableNumberMaxLength;
+ import 'strings.dart';
+ 
+ /// The planner's words in English.
+ class FloorPlanStringsEn extends FloorPlanStrings {
+   const FloorPlanStringsEn();
+ 
+@@ -336,20 +337,41 @@ class FloorPlanStringsEn extends FloorPlanStrings {
+   @override
+   String get readOnlyDocument => 'Read-only document';
+ 
+   @override
+   String get plainGroupNoLayer =>
+       'A plain group has no layer: it cannot be moved';
+ 
+   @override
+   String get layer => 'Layer';
+ 
++  @override
++  String get color => 'Colour';
++
++  @override
++  String get colorNone => 'None';
++
++  @override
++  String get colorRefused => 'Colours are not editable here';
++
++  @override
++  String colorName(FloorPlanColor color) => switch (color) {
++        FloorPlanColor.red => 'Red',
++        FloorPlanColor.orange => 'Orange',
++        FloorPlanColor.yellow => 'Yellow',
++        FloorPlanColor.green => 'Green',
++        FloorPlanColor.teal => 'Teal',
++        FloorPlanColor.blue => 'Blue',
++        FloorPlanColor.purple => 'Purple',
++        FloorPlanColor.grey => 'Grey',
++      };
++
+   @override
+   String get moveSelectionToLayer => 'Move the selection to a layer';
+ 
+   @override
+   String get hiddenLayerNotCurrent => 'A hidden layer cannot be current';
+ 
+   @override
+   String get currentLayer => 'Current layer';
+ 
+   @override
+diff --git a/packages/jet_cad_floor_plan/lib/src/l10n/strings_tr.dart b/packages/jet_cad_floor_plan/lib/src/l10n/strings_tr.dart
+index d3da0e12..0a112510 100644
+--- a/packages/jet_cad_floor_plan/lib/src/l10n/strings_tr.dart
++++ b/packages/jet_cad_floor_plan/lib/src/l10n/strings_tr.dart
+@@ -1,20 +1,21 @@
+ // The planner's words in Turkish (spec 14d L1).
+ import 'package:jet_cad_2d/jet_cad_2d.dart'
+     show
+         LayerNameBadCharacter,
+         LayerNameDuplicate,
+         LayerNameEdgeSpace,
+         LayerNameEmpty,
+         LayerNameProblem,
+         LayerNameTooLong;
+ 
++import '../colors/plan_color.dart' show FloorPlanColor;
+ import '../host/floor_plan_types.dart'
+     show DuplicateNumber, NumberingWarning, Unnumbered;
+ import '../tables/table_numbers.dart'
+     show TableNumberProblem, kTableNumberMaxLength;
+ import 'strings.dart';
+ 
+ /// The planner's words in Turkish.
+ class FloorPlanStringsTr extends FloorPlanStrings {
+   const FloorPlanStringsTr();
+ 
+@@ -334,20 +335,41 @@ class FloorPlanStringsTr extends FloorPlanStrings {
+ 
+   @override
+   String get readOnlyDocument => 'Salt okunur belge';
+ 
+   @override
+   String get plainGroupNoLayer => 'Düz bir grubun katmanı yok: taşınamaz';
+ 
+   @override
+   String get layer => 'Katman';
+ 
++  @override
++  String get color => 'Renk';
++
++  @override
++  String get colorNone => 'Yok';
++
++  @override
++  String get colorRefused => 'Renkler burada değiştirilemez';
++
++  @override
++  String colorName(FloorPlanColor color) => switch (color) {
++        FloorPlanColor.red => 'Kırmızı',
++        FloorPlanColor.orange => 'Turuncu',
++        FloorPlanColor.yellow => 'Sarı',
++        FloorPlanColor.green => 'Yeşil',
++        FloorPlanColor.teal => 'Turkuaz',
++        FloorPlanColor.blue => 'Mavi',
++        FloorPlanColor.purple => 'Mor',
++        FloorPlanColor.grey => 'Gri',
++      };
++
+   @override
+   String get moveSelectionToLayer => 'Seçimi bir katmana taşı';
+ 
+   @override
+   String get hiddenLayerNotCurrent => 'Gizli bir katman geçerli olamaz';
+ 
+   @override
+   String get currentLayer => 'Geçerli katman';
+ 
+   @override
+diff --git a/packages/jet_cad_floor_plan/lib/src/planner_shell.dart b/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
+index 7a88fba6..72f415ed 100644
+--- a/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
++++ b/packages/jet_cad_floor_plan/lib/src/planner_shell.dart
+@@ -1522,21 +1522,23 @@ class _PlannerShellState extends State<PlannerShell> {
+                                   SelectionPanel(
+                                       document: _document,
+                                       selection: _selection,
+                                       selectionChanges: _selectionRelay,
+                                       tools: _tools,
+                                       wallTool: _wall,
+                                       wallSettings: _wallSettings,
+                                       openingTools: _openingTools,
+                                       openingSettings: _openingSettings,
+                                       symbols: widget.symbols,
+-                                      capabilities: caps)),
++                                      capabilities: caps,
++                                      darkCanvasPaper:
++                                          _darkCanvas ? _paperArgb() : null)),
+                               // Spec C-6, S-18: the host's inspector under
+                               // jet-cad's fields, with the Selection panel.
+                               // Keyed, so adding or removing it keeps the
+                               // panels below.
+                               if (widget.tableInspector case final inspect?
+                                   when caps.selectionPanel)
+                                 _TableInspector(
+                                     key: const Key('table-inspector'),
+                                     selectionChanges: _selectionRelay,
+                                     documentChanges: _documentChanged,
+diff --git a/packages/jet_cad_floor_plan/lib/src/selection_panel.dart b/packages/jet_cad_floor_plan/lib/src/selection_panel.dart
+index 4d4d735d..833eed75 100644
+--- a/packages/jet_cad_floor_plan/lib/src/selection_panel.dart
++++ b/packages/jet_cad_floor_plan/lib/src/selection_panel.dart
+@@ -1,17 +1,18 @@
+ import 'dart:async';
+ import 'dart:math' as math;
+ 
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ 
++import 'colors/color_picker.dart';
+ import 'symbols/symbol_names.dart';
+ import 'host/editor_capabilities.dart';
+ import 'host/floor_plan_types.dart';
+ import 'l10n/strings_en.dart';
+ import 'l10n/number_text.dart';
+ import 'l10n/strings.dart';
+ import 'layers/layer_picker.dart';
+ import 'panel_focus.dart';
+ import 'parametric/box.dart';
+ import 'parametric/dimension.dart';
+@@ -46,20 +47,25 @@ import 'tables/table_rotate.dart';
+ ///   read-only: the area label's stored string (10 R-25).
+ /// - **Dimension** (11 D14): one selected dimension's value, read-only (its
+ ///   TEXT child's stored string), its kind (Aligned | Horizontal |
+ ///   Vertical), the axes line of a turned linear dimension (D11, R-18) and
+ ///   its two end lines (R-28). No tool mode: the Dimension tool has no
+ ///   settings.
+ /// - **Table** (14a T14, T16): one selected table's number, a text field
+ ///   (refused when invalid or used by another table, with an error line),
+ ///   its seats, read-only, a duplicate-number warning, and two buttons that
+ ///   turn it 90° about its centre.
++/// - **Colour** (plan colours spec PC-9): for a selection holding a room,
++///   while no tool's settings show, a [ColorPicker] before the layer
++///   picker: None and eight hues, set on every selected room in one undo
++///   step; read-only while the capabilities' `recolor` or the permissions
++///   refuse it.
+ /// - **Layer** (12b D12): for any non-empty selection while no tool's
+ ///   settings show, a [LayerPicker] after the sections above (alone when
+ ///   none shows).
+ ///
+ /// **The host's capabilities** (host embedding API spec C-5, S-10, S-11),
+ /// ANDed with the permissions: the number needs `renumber`; the Rotation
+ /// field and the ±90 buttons `rotate`; Mirror `mirror`; the Size menu and
+ /// an object's own fields (box, wall, opening, room, dimension, a door's
+ /// flips) `reshape`; the layer picker `changeLayer`. A button or a menu
+ /// they refuse is not shown (Mirror, ±90, the flips, the Size menu, the
+@@ -86,21 +92,22 @@ class SelectionPanel extends StatefulWidget {
+       {super.key,
+       required this.document,
+       required this.selection,
+       this.selectionChanges,
+       this.tools,
+       this.wallTool,
+       this.wallSettings,
+       this.openingTools,
+       this.openingSettings,
+       this.symbols,
+-      this.capabilities = FloorPlanEditorCapabilities.full});
++      this.capabilities = FloorPlanEditorCapabilities.full,
++      this.darkCanvasPaper});
+ 
+   final DraftDocument document;
+   final SelectionController selection;
+ 
+   /// What the panel re-reads [selection] on: [selection] when null. The
+   /// shell passes a relay of it that holds a notification sent during a
+   /// build until after the frame (Task 4 review R-2: a hover cleared as
+   /// the canvas is re-parented).
+   final Listenable? selectionChanges;
+ 
+@@ -121,20 +128,25 @@ class SelectionPanel extends StatefulWidget {
+   final Map<OpeningKind, ValueNotifier<OpeningSettings>>? openingSettings;
+ 
+   /// The shell's symbol library (spec 09c D7, V-3), for the Symbol
+   /// section's Size menu; hidden while it is null or not ready.
+   final SymbolLibraryLoader? symbols;
+ 
+   /// What the host lets the user edit here (spec C-5), read at each build
+   /// and commit; the default is today's panel.
+   final FloorPlanEditorCapabilities capabilities;
+ 
++  /// The dark canvas's paper, ARGB, while the canvas re-tones; null on a
++  /// light one: the Colour picker's swatches show the hues as the canvas
++  /// does ([ColorPicker.darkCanvasPaper]).
++  final int? darkCanvasPaper;
++
+   @override
+   State<SelectionPanel> createState() => _SelectionPanelState();
+ }
+ 
+ /// Which quantity a field edits: a number, or -- [name], the text kind (10
+ /// D21) -- a room's name.
+ enum _Kind {
+   width,
+   height,
+   thickness,
+@@ -1242,28 +1254,33 @@ class _SelectionPanelState extends State<SelectionPanel> {
+     final table = _toolMode || _openingToolMode != null ? null : _table;
+     final symbol = _toolMode || _openingToolMode != null ? null : _symbol;
+     // Spec 12b D12 (S-13): the layer picker shows for a non-empty selection
+     // whenever no tool-settings section does, including a selection that
+     // has no type section (a line, a text, a symbol, several things).
+     // Spec C-5: only with `changeLayer`.
+     final picker = widget.selection.keys.isNotEmpty &&
+         !_toolMode &&
+         _openingToolMode == null &&
+         widget.capabilities.changeLayer;
++    // Plan colours spec PC-9: the Colour row, for a selection holding a
++    // room (Slice 2: or a table), whenever no tool-settings section shows.
++    final colors = !_toolMode &&
++        _openingToolMode == null &&
++        pickedColors(widget.document, widget.selection.keys).isNotEmpty;
+     final sections = box != null ||
+         wall != null ||
+         opening != null ||
+         room != null ||
+         dimension != null ||
+         table != null ||
+         symbol != null;
+-    if (!sections && !picker) return const SizedBox.shrink();
++    if (!sections && !picker && !colors) return const SizedBox.shrink();
+     final title = Theme.of(context).textTheme.titleSmall;
+     final boxEditable = _editable(_Kind.width);
+     final wallEditable = _editable(_Kind.thickness, wall);
+     final openingEditable = _editable(_Kind.openingWidth, opening);
+     final roomEditable = _editable(_Kind.name);
+     final OpeningParams? openingParams = opening == null
+         ? null
+         : widget.document.components.get<OpeningParams>(opening);
+     final openingKind = switch (opening) {
+       null => null,
+@@ -1388,21 +1405,29 @@ class _SelectionPanelState extends State<SelectionPanel> {
+             if (table != null) ...[
+               if (box != null ||
+                   wall != null ||
+                   opening != null ||
+                   room != null ||
+                   dimension != null ||
+                   symbol != null)
+                 const SizedBox(height: 12),
+               ..._tableSection(table, title),
+             ],
+-            if (picker) ...[
++            if (colors) ...[
+               if (sections) const SizedBox(height: 12),
++              ColorPicker(
++                  document: widget.document,
++                  selection: widget.selection,
++                  capabilities: widget.capabilities,
++                  darkCanvasPaper: widget.darkCanvasPaper),
++            ],
++            if (picker) ...[
++              if (sections || colors) const SizedBox(height: 12),
+               LayerPicker(
+                   document: widget.document, selection: widget.selection),
+             ],
+           ],
+         ),
+       ),
+     );
+   }
+ }
+diff --git a/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+new file mode 100644
+index 00000000..10a8a26d
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/colors/color_picker_test.dart
+@@ -0,0 +1,548 @@
++// Plan colours spec PC-8, PC-9 and PC-10: the Selection panel's Colour row.
++// Nine swatches, None and the palette's eight hues, set the colour of every
++// selected room in one undo step labelled Colour; read-only while the host
++// refuses `recolor` or the permissions refuse the edit; its words in
++// Turkish; its swatches as the canvas shows the hues.
++//
++// The plan is the two-room rectangle at the corpus far origin, turned 23°,
++// every wall and the separator in its own rotated, translated group; room A
++// sits in a group of its own turned 0.61 rad, room B at the identity. The
++// hues under test are `teal` and `purple`, never the first of the palette,
++// and `magenta`, a name no release knows.
++import 'dart:convert' show jsonEncode;
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_floor_plan/src/colors/color_picker.dart';
++import 'package:jet_cad_floor_plan/src/colors/plan_color.dart';
++import 'package:jet_cad_floor_plan/src/host/editor_capabilities.dart';
++import 'package:jet_cad_floor_plan/src/l10n/localizations.dart';
++import 'package:jet_cad_floor_plan/src/l10n/strings_en.dart';
++import 'package:jet_cad_floor_plan/src/parametric/room.dart';
++import 'package:jet_cad_floor_plan/src/parametric/separator.dart';
++import 'package:jet_cad_floor_plan/src/parametric/wall.dart';
++import 'package:jet_cad_floor_plan/src/planner_shell.dart';
++import 'package:jet_cad_floor_plan/src/planner_view.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/room_fixture.dart';
++
++Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
++Finder get picker => find.byKey(const Key('color-picker'));
++
++/// The Semantics node of swatch [name] (the nearest above its InkWell that
++/// carries the label).
++Semantics semanticsOf(WidgetTester tester, String name) =>
++    tester.widget<Semantics>(find
++        .ancestor(
++            of: swatch(name),
++            matching: find.byWidgetPredicate(
++                (w) => w is Semantics && w.properties.label != null))
++        .first);
++
++/// The tooltip text of swatch [name].
++String tooltipOf(WidgetTester tester, String name) => tester
++    .widget<Tooltip>(
++        find.ancestor(of: swatch(name), matching: find.byType(Tooltip)).first)
++    .message!;
++
++/// The marked swatch's name, or null for none.
++String? marked(WidgetTester tester) {
++  final hits = <String>[
++    for (final n in ['none', for (final c in FloorPlanColor.values) c.name])
++      if (semanticsOf(tester, n).properties.selected ?? false) n,
++  ];
++  expect(hits.length, lessThanOrEqualTo(1), reason: 'at most one mark: $hits');
++  return hits.isEmpty ? null : hits.single;
++}
++
++SelectionKey k(Handle h) => SelectionKey.root(h);
++
++/// The panel's plan.
++typedef Rooms = ({
++  Plan plan,
++  DraftDocument doc,
++  Handle a,
++  Handle b,
++  Handle sep,
++  Handle w
++});
++
++/// The two-room rectangle at [corpusGroups], with a separator at x = 6,250.5
++/// and two rooms, `Kitchen` (A, in a group of its own turned 0.61 rad) and
++/// `Room 2` (B, at the identity). The page's grid is hidden, so a pixel of
++/// bare floor is the surround. Built through a system of its own, which is
++/// disposed, and the history cleared: the shell installs one over the
++/// finished document.
++Rooms roomsPlan() {
++  final plan = buildPlan(twoRoomWalls,
++      seps: const [(6250.5, 100, 6250.5, 3900)],
++      place: corpusGroups,
++      measurer: FlutterTextMeasurer());
++  attachPage(plan.doc, PageComponent(gridVisible: false));
++  final g = Transform2.translation(plan.at(1400, 1900).x, plan.at(1400, 1900).y)
++      .multiply(Transform2.rotation(0.61));
++  final a = addRoom(plan.doc, plan.at(1500.25, 2000.5), 'Kitchen', at: g);
++  final b = addRoom(plan.doc, plan.at(4700.75, 1900.25), 'Room 2');
++  plan.system.dispose();
++  plan.doc.commands.clearHistory();
++  return (
++    plan: plan,
++    doc: plan.doc,
++    a: a,
++    b: b,
++    sep: plan.seps.single,
++    w: plan.walls[4]
++  );
++}
++
++/// The shell over [doc], its pixels readable.
++final class Rig {
++  Rig._(this.tester, this.view, this.capture, this.topLeft);
++
++  final WidgetTester tester;
++  final PlannerView view;
++  final GlobalKey capture;
++  final Offset topLeft;
++
++  /// Pumps the shell over [r], the camera at 0.07 px/mm (y up) centred on
++  /// the plan's middle, with [capabilities] and, when given, [locale] (with
++  /// the planner's delegates).
++  static Future<Rig> pump(WidgetTester tester, Rooms r,
++      {FloorPlanEditorCapabilities capabilities =
++          FloorPlanEditorCapabilities.full,
++      Locale? locale,
++      ThemeData? theme}) async {
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final capture = GlobalKey();
++    await tester.pumpWidget(RepaintBoundary(
++        key: capture,
++        child: MaterialApp(
++            locale: locale,
++            theme: theme,
++            supportedLocales: floorPlanSupportedLocales,
++            localizationsDelegates: floorPlanLocalizationsDelegates,
++            home: PlannerShell(document: r.doc, capabilities: capabilities))));
++    await tester.pump();
++    final view = tester.widget<PlannerView>(find.byType(PlannerView));
++    final layer = find.byType(InteractionLayer);
++    final size = tester.getSize(layer);
++    final mid = r.plan.at(4800, 2000);
++    const px = 0.07;
++    view.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2(px, 0, 0, -px,
++            size.width / 2 - px * mid.x + 0.37, size.height / 2 + px * mid.y));
++    await tester.pump();
++    return Rig._(tester, view, capture, tester.getTopLeft(layer));
++  }
++
++  Future<void> select(List<Handle> hs) async {
++    view.selection.replace([for (final h in hs) k(h)]);
++    await tester.pump();
++  }
++
++  /// The RGB of the pixel that holds world point [p], as drawn now.
++  Future<List<int>> rgb(Vector2 p) async {
++    final boundary =
++        capture.currentContext!.findRenderObject()! as RenderRepaintBoundary;
++    final (bytes, width) = (await tester.runAsync(() async {
++      final image = await boundary.toImage();
++      final data = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
++      final w = image.width;
++      image.dispose();
++      return (data!, w);
++    }))!;
++    final s = view.camera.value.worldToScreen(p);
++    final o = topLeft + Offset(s.x, s.y);
++    final i = (o.dy.floor() * width + o.dx.floor()) * 4;
++    return [bytes.getUint8(i), bytes.getUint8(i + 1), bytes.getUint8(i + 2)];
++  }
++}
++
++/// [paper] under a tint of [ink] at [alpha] (of 255).
++List<double> over(List<int> paper, int ink, int alpha) => [
++      paper[0] + (((ink >> 16) & 0xFF) - paper[0]) * alpha / 255,
++      paper[1] + (((ink >> 8) & 0xFF) - paper[1]) * alpha / 255,
++      paper[2] + ((ink & 0xFF) - paper[2]) * alpha / 255,
++    ];
++
++void expectRgb(List<int> got, List<double> want, String why) {
++  for (var i = 0; i < 3; i++) {
++    expect(got[i], closeTo(want[i], 3), reason: '$why: channel $i of $got');
++  }
++}
++
++/// [room]'s tint records: its fill and the boundary the fill names, or its
++/// closed POLYLINE.
++List<EntityRecord> tintRecords(DraftDocument doc, Handle room) {
++  final all = kids(doc, room);
++  final fills = [
++    for (final c in all)
++      if (kindOf(doc, c) == EntityKind.fill) c
++  ];
++  if (fills.isNotEmpty) {
++    final boundary = Handle(payloadOf(doc, fills.single).scalars[0].toInt());
++    return [recordOf(doc, fills.single), recordOf(doc, boundary)];
++  }
++  return [
++    for (final c in all)
++      if (kindOf(doc, c) == EntityKind.polyline) recordOf(doc, c),
++  ];
++}
++
++/// Entity [h] whole: its record as saved and its payload's numbers.
++String snapOf(DraftDocument doc, Handle h) {
++  final p = payloadOf(doc, h);
++  return jsonEncode([
++    recordOf(doc, h).toJson(),
++    p.coords.toList(),
++    p.scalars.toList(),
++  ]);
++}
++
++/// Object [h] whole: its group's children, by handle.
++Map<Handle, String> childSnaps(DraftDocument doc, Handle h) =>
++    {for (final c in kids(doc, h)) c: snapOf(doc, c)};
++
++RoomParams roomOf(DraftDocument doc, Handle h) =>
++    doc.components.get<RoomParams>(h)!;
++
++/// Sets [room]'s colour to [name] by a plain component command (the shell's
++/// system must be installed: the tint follows).
++void paint(DraftDocument doc, Handle room, String? name) =>
++    doc.commands.execute(SetComponentCommand<RoomParams>(
++        room, roomOf(doc, room).copyWith(color: name)));
++
++/// A bare-floor point and one inside each room, off its label and every
++/// stroke, in plan millimetres.
++Vector2 bareAt(Rooms r) => r.plan.at(9800, 2000);
++Vector2 insideA(Rooms r) => r.plan.at(800, 3300);
++Vector2 insideB(Rooms r) => r.plan.at(3900, 3300);
++
++/// A coloured room's tint alpha: transparency 204 is 51 of 255.
++const int kColourAlpha = 255 - 204;
++
++void main() {
++  test('the fixture: room A is off the identity, the rooms are uncoloured', () {
++    final r = roomsPlan();
++    final g = r.doc.tree.accumulatedTransform(r.a);
++    expect(g.b, isNot(0));
++    expect(roomOf(r.doc, r.a).color, isNull);
++    expect(roomOf(r.doc, r.b).color, isNull);
++    expect(driftOf(r.doc), isEmpty);
++  });
++
++  testWidgets(
++      'CP1 the Colour row shows for a selection holding a room, marks the '
++      'common colour, and marks nothing for a mix or an unknown name',
++      (tester) async {
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++
++    expect(picker, findsNothing, reason: 'nothing selected');
++    await rig.select([r.w]);
++    expect(picker, findsNothing, reason: 'a wall alone');
++    await rig.select([r.sep]);
++    expect(picker, findsNothing, reason: 'a separator alone');
++
++    // While the Wall tool's settings show, even with a room selected.
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
++    await tester.pump();
++    expect(find.byKey(const Key('wall-section')), findsOneWidget,
++        reason: 'the Wall tool is active');
++    expect(picker, findsNothing, reason: 'the Wall tool\'s settings show');
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++    await rig.select([r.a]);
++
++    expect(picker, findsOneWidget, reason: 'room A');
++    expect(find.byKey(const Key('layer-picker')), findsOneWidget);
++    expect(swatch('none'), findsOneWidget);
++    for (final c in FloorPlanColor.values) {
++      expect(swatch(c.name), findsOneWidget, reason: c.name);
++    }
++    expect(marked(tester), 'none', reason: 'an uncoloured room');
++    await rig.select([r.a, r.b]);
++    expect(picker, findsOneWidget, reason: 'rooms A and B');
++    expect(marked(tester), 'none', reason: 'two uncoloured rooms');
++    await rig.select([r.a, r.w]);
++    expect(picker, findsOneWidget, reason: 'room A and a wall');
++    expect(marked(tester), 'none');
++
++    paint(doc, r.a, 'teal');
++    await tester.pump();
++    await rig.select([r.a]);
++    expect(marked(tester), 'teal', reason: 'A is teal');
++    await rig.select([r.a, r.b]);
++    expect(marked(tester), isNull, reason: 'teal and none: mixed');
++    paint(doc, r.b, 'teal');
++    await tester.pump();
++    expect(marked(tester), 'teal', reason: 'both teal');
++    paint(doc, r.b, 'purple');
++    await tester.pump();
++    expect(marked(tester), isNull, reason: 'teal and purple: mixed');
++
++    // A name this release does not know: no swatch is marked (Review Focus
++    // 5), and the stored name is untouched.
++    paint(doc, r.a, 'magenta');
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), isNull, reason: 'magenta equals no swatch');
++    expect(roomOf(doc, r.a).color, 'magenta');
++  });
++
++  testWidgets(
++      'CP2 a tap on teal with two rooms, a wall and a separator selected: '
++      'one undo step labelled Colour, both rooms teal, the wall and the '
++      'separator untouched; Ctrl+Z repaints the grey in the next frame '
++      '(M-C12, Review Focus 3 and 4)', (tester) async {
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++    final labels = <String>[];
++    final sub = doc.commands.changes.listen((c) {
++      if (c is CommandApplied) labels.add(c.label);
++    });
++    addTearDown(sub.cancel);
++
++    await rig.select([r.a, r.b, r.w, r.sep]);
++    expect(picker, findsOneWidget);
++    final wall0 = doc.components.get<WallParams>(r.w);
++    final sep0 = doc.components.get<SeparatorParams>(r.sep);
++    final wallKids0 = childSnaps(doc, r.w);
++    final sepKids0 = childSnaps(doc, r.sep);
++    final depth = doc.commands.undoDepth;
++    final bare = await rig.rgb(bareAt(r));
++    final greyA = await rig.rgb(insideA(r));
++    final greyB = await rig.rgb(insideB(r));
++    expect(greyA, isNot(bare), reason: 'the grey tint shows over the floor');
++    expect(greyB, isNot(bare));
++    final before = canon(doc);
++
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1, reason: 'one undo step');
++    expect(labels, ['Colour']);
++    expect(roomOf(doc, r.a).color, 'teal');
++    expect(roomOf(doc, r.b).color, 'teal');
++    expect(doc.components.get<WallParams>(r.w), wall0);
++    expect(doc.components.get<SeparatorParams>(r.sep), sep0);
++    expect(childSnaps(doc, r.w), wallKids0, reason: 'the wall, whole');
++    expect(childSnaps(doc, r.sep), sepKids0, reason: 'the separator, whole');
++    for (final room in [r.a, r.b]) {
++      for (final t in tintRecords(doc, room)) {
++        expect(t.color, const TrueColor(0x00897B));
++      }
++    }
++    expect(driftOf(doc), isEmpty);
++    expect(marked(tester), 'teal');
++    expectRgb(await rig.rgb(insideA(r)), over(bare, 0x00897B, kColourAlpha),
++        'A drawn teal');
++    expectRgb(await rig.rgb(insideB(r)), over(bare, 0x00897B, kColourAlpha),
++        'B drawn teal');
++
++    // Ctrl+Z, one pump: the tints are grey again, in the document and on
++    // the canvas (the change reaches the painter in the same frame).
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.control);
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyZ);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.control);
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth);
++    expect(canon(doc), before, reason: 'the document is as before');
++    for (final room in [r.a, r.b]) {
++      for (final t in tintRecords(doc, room)) {
++        expect(t.color, const IndexedColor(7));
++        expect(t.transparency, kRoomTintTransparency);
++      }
++    }
++    expect(await rig.rgb(insideA(r)), greyA, reason: 'A repainted grey');
++    expect(await rig.rgb(insideB(r)), greyB, reason: 'B repainted grey');
++    expect(marked(tester), 'none', reason: 'the picker follows the undo');
++  });
++
++  testWidgets(
++      'CP3 a colour chosen twice is no undo step; with A teal and B purple '
++      'a tap on teal changes B only (M-PC9-a, Review Focus 2)', (tester) async {
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++
++    await rig.select([r.a, r.b]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, 1);
++    final after = canon(doc);
++    final stateId = doc.commands.stateId;
++    // The same swatch again, and a selection already all teal.
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await rig.select([r.a]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, 1, reason: 'no new step');
++    expect(doc.commands.stateId, stateId);
++    expect(canon(doc), after);
++    // Undo takes it all the way back: it was one step.
++    doc.commands.undo();
++    await tester.pump();
++    expect(doc.commands.canUndo, isFalse);
++
++    // A teal, B purple: a tap on teal changes B only.
++    paint(doc, r.a, 'teal');
++    paint(doc, r.b, 'purple');
++    await tester.pump();
++    await rig.select([r.a, r.b]);
++    final keys = [k(r.a), k(r.b)];
++    final command = recolorCommand(doc, keys, FloorPlanColor.teal)!;
++    expect(command, isA<CompoundCommand>());
++    final sets = (command as CompoundCommand)
++        .children
++        .whereType<SetComponentCommand<RoomParams>>()
++        .toList();
++    expect(sets, hasLength(1), reason: 'one room changes');
++    expect(sets.single.handle, r.b);
++    expect(sets.single.value, roomOf(doc, r.b).copyWith(color: 'teal'));
++    expect(recolorCommand(doc, [k(r.a)], FloorPlanColor.teal), isNull);
++    expect(recolorCommand(doc, [k(r.w)], FloorPlanColor.teal), isNull,
++        reason: 'a wall is no room');
++
++    final a0 = roomOf(doc, r.a);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(identical(roomOf(doc, r.a), a0), isTrue, reason: 'A not rewritten');
++    expect(roomOf(doc, r.b).color, 'teal');
++
++    // None clears every selected room, and only when one is coloured.
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(roomOf(doc, r.a).color, isNull);
++    expect(roomOf(doc, r.b).color, isNull);
++    expect(doc.commands.undoDepth, depth + 2);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 2, reason: 'none, twice');
++  });
++
++  testWidgets(
++      'CP4 read-only: the picker shows, marks, changes nothing, and says '
++      'why (M-C13, M-PC9-b)', (tester) async {
++    // The host refuses recolor.
++    final r = roomsPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r,
++        capabilities:
++            FloorPlanEditorCapabilities.full.copyWith(recolor: false));
++    final strings = const FloorPlanStringsEn();
++    paint(doc, r.a, 'teal');
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'teal');
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(canon(doc), before, reason: 'a tap changes nothing');
++    expect(doc.commands.undoDepth, depth);
++    expect(tooltipOf(tester, 'teal'), strings.colorRefused);
++    expect(tooltipOf(tester, 'none'), strings.colorRefused);
++    expect(semanticsOf(tester, 'teal').properties.enabled, isFalse);
++
++    // The permissions refuse it (the host allows it).
++    final r2 = roomsPlan();
++    final rig2 = await Rig.pump(tester, r2);
++    paint(r2.doc, r2.a, 'teal');
++    r2.doc.commands.permissions = DraftPermissions.runtime;
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'teal');
++    final before2 = canon(r2.doc);
++    final depth2 = r2.doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(canon(r2.doc), before2);
++    expect(r2.doc.commands.undoDepth, depth2);
++    expect(tooltipOf(tester, 'purple'), strings.readOnlyDocument);
++    expect(semanticsOf(tester, 'purple').properties.enabled, isFalse);
++    r2.doc.commands.permissions = DraftPermissions.all;
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(roomOf(r2.doc, r2.a).color, 'purple', reason: 'allowed again');
++
++    // Components allowed, geometry refused: the room edit capability.
++    r2.doc.commands.permissions = const DraftPermissions(
++        transform: true, components: true, geometry: false, structure: true);
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(roomOf(r2.doc, r2.a).color, 'purple');
++    expect(tooltipOf(tester, 'teal'), strings.readOnlyDocument);
++  });
++
++  testWidgets(
++      'CP5 in Turkish the title, the swatches\' tooltips and labels and '
++      'None speak Turkish', (tester) async {
++    final r = roomsPlan();
++    final rig = await Rig.pump(tester, r, locale: const Locale('tr'));
++    await rig.select([r.a]);
++    expect(find.descendant(of: picker, matching: find.text('Renk')),
++        findsOneWidget);
++    expect(tooltipOf(tester, 'teal'), 'Turkuaz');
++    expect(semanticsOf(tester, 'teal').properties.label, 'Turkuaz');
++    expect(tooltipOf(tester, 'none'), 'Yok');
++    expect(semanticsOf(tester, 'none').properties.label, 'Yok');
++    expect(tooltipOf(tester, 'purple'), 'Mor');
++  });
++
++  testWidgets(
++      'CP6b the swatches are the canvas\'s hues: as the document has them on '
++      'a light canvas, re-toned on a dark one (M-PC9-c)', (tester) async {
++    Color fillOf(String name) => ((tester
++            .widget<Container>(find
++                .descendant(of: swatch(name), matching: find.byType(Container))
++                .first)
++            .decoration) as BoxDecoration)
++        .color!;
++    final r = roomsPlan();
++    var rig = await Rig.pump(tester, r, theme: ThemeData.light());
++    await rig.select([r.a]);
++    expect(fillOf('teal').toARGB32(), 0xFF00897B);
++    expect(fillOf('purple').toARGB32(), 0xFF8E24AA);
++
++    final r2 = roomsPlan();
++    rig = await Rig.pump(tester, r2, theme: ThemeData.dark());
++    await rig.select([r2.a]);
++    expect(fillOf('teal').toARGB32(),
++        0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
++    expect(fillOf('purple').toARGB32(),
++        0xFF000000 | darkCanvasTone(0x8E24AA, kDarkCanvasPaper));
++    expect(fillOf('teal').toARGB32(), isNot(0xFF00897B));
++  });
++
++  test('CP6 the swatch is the canvas\'s hue, re-toned on a dark canvas', () {
++    expect(swatchColor(0x00897B, null).toARGB32(), 0xFF00897B);
++    expect(swatchColor(0x8E24AA, null).toARGB32(), 0xFF8E24AA);
++    expect(swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(),
++        0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
++    expect(
++        swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
++  });
++}
+diff --git a/packages/jet_cad_floor_plan/test/host/editor_capabilities_test.dart b/packages/jet_cad_floor_plan/test/host/editor_capabilities_test.dart
+index 7b76f6cb..ad2eb71e 100644
+--- a/packages/jet_cad_floor_plan/test/host/editor_capabilities_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/editor_capabilities_test.dart
+@@ -267,21 +267,21 @@ void main() {
+         Caps.tablesOnly.toString(),
+         'FloorPlanEditorCapabilities(tools: {select, symbol}, '
+         'symbolFilter: given, layerPanel: false, pagePanel: false, '
+         'editLayers: false, editPage: false, selectTablesOnly: true, '
+         'mirror: false, reshape: false, changeLayer: false)');
+     expect(
+         Caps.readOnly.toString(),
+         'FloorPlanEditorCapabilities(tools: {select}, symbolPalette: false, '
+         'editLayers: false, editPage: false, move: false, rotate: false, '
+         'mirror: false, reshape: false, delete: false, renumber: false, '
+-        'changeLayer: false, undo: false)');
++        'changeLayer: false, recolor: false, undo: false)');
+   });
+ 
+   test(
+       'T4-i tools without select: an ArgumentError naming tools; with '
+       'select, none', () {
+     expect(
+         () => validateEditorCapabilities(const Caps(tools: {Tool.wall})),
+         throwsA(isA<ArgumentError>()
+             .having((e) => e.name, 'name', 'tools')
+             .having((e) => e.invalidValue, 'value', {Tool.wall})));
+@@ -439,11 +439,25 @@ void main() {
+   test('copyWith copies the tools it is given, unmodifiable', () {
+     final mine = {Tool.select, Tool.wall};
+     final caps = Caps.full.copyWith(tools: mine);
+     mine
+       ..remove(Tool.wall)
+       ..add(Tool.line);
+     expect(caps.tools, {Tool.select, Tool.wall});
+     expect(() => caps.tools.add(Tool.door), throwsUnsupportedError);
+     expect(caps, Caps.full.copyWith(tools: {Tool.wall, Tool.select}));
+   });
++
++  test(
++      'PC8 recolor: on in full and tablesOnly, off in readOnly; copyWith, '
++      '== and hashCode carry it', () {
++    expect(Caps.full.recolor, isTrue);
++    expect(Caps.tablesOnly.recolor, isTrue);
++    expect(Caps.readOnly.recolor, isFalse);
++    final off = Caps.full.copyWith(recolor: false);
++    expect(off.recolor, isFalse);
++    expect(off == Caps.full, isFalse);
++    expect(off.copyWith(recolor: true), Caps.full);
++    expect(off.copyWith(recolor: true).hashCode, Caps.full.hashCode);
++    expect(off.toString(), 'FloorPlanEditorCapabilities(recolor: false)');
++  });
+ }
+diff --git a/packages/jet_cad_floor_plan/test/invariants/theme_colours_test.dart b/packages/jet_cad_floor_plan/test/invariants/theme_colours_test.dart
+index 228b8aa3..3af0216f 100644
+--- a/packages/jet_cad_floor_plan/test/invariants/theme_colours_test.dart
++++ b/packages/jet_cad_floor_plan/test/invariants/theme_colours_test.dart
+@@ -41,20 +41,22 @@ const List<String> kAllowedFiles = [
+   '../../apps/restaurant_demo/lib/demo_theme.dart',
+ ];
+ 
+ /// Allowed (file, exact literal) pairs (spec D9a): a match is allowed when
+ /// the source at the match starts with the literal, and a literal ending in
+ /// a word character is not followed by another (`Colors.teal` does not
+ /// cover `Colors.tealAccent`).
+ const List<(String, String)> kAllowedLiterals = [
+   // The layer colour swatch shows the layer's colour (data).
+   ('lib/src/layers/layer_row.dart', 'Color(0xFF000000 |'),
++  // PC-9's swatch: a palette hue made a Color, in one function.
++  ('lib/src/colors/color_picker.dart', 'Color(0xFF000000 |'),
+   // The opaque carrier paint: the colour rides on the vertices.
+   (
+     '../jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart',
+     'Color(0xFFFFFFFF)'
+   ),
+   // Export's white page (D7); written `ui.Color(` there.
+   (
+     '../jet_cad_2d_flutter/lib/src/export/page_export.dart',
+     'Color(0xFFFFFFFF)'
+   ),
+diff --git a/packages/jet_cad_floor_plan/test/l10n/recording_strings.dart b/packages/jet_cad_floor_plan/test/l10n/recording_strings.dart
+index ff89376c..f60ce1fe 100644
+--- a/packages/jet_cad_floor_plan/test/l10n/recording_strings.dart
++++ b/packages/jet_cad_floor_plan/test/l10n/recording_strings.dart
+@@ -1,16 +1,18 @@
+ // Generated from lib/src/l10n/strings.dart (spec 14d L1 as amended,
+ // V-10): a language whose every word is recorded as it is handed out, so a
+ // test can tell a word the planner asked for from a literal it did not.
+ // Regenerate with the plan's script when a member is added.
+ import 'package:jet_cad_floor_plan/src/l10n/strings.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
++import 'package:jet_cad_floor_plan/src/colors/plan_color.dart'
++    show FloorPlanColor;
+ import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart'
+     show NumberingWarning;
+ import 'package:jet_cad_floor_plan/src/tables/table_numbers.dart'
+     show TableNumberProblem;
+ 
+ class RecordingFloorPlanStrings implements FloorPlanStrings {
+   RecordingFloorPlanStrings(this.inner);
+ 
+   final FloorPlanStrings inner;
+ 
+@@ -289,20 +291,32 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
+ 
+   @override
+   String get readOnlyDocument => record(inner.readOnlyDocument);
+ 
+   @override
+   String get plainGroupNoLayer => record(inner.plainGroupNoLayer);
+ 
+   @override
+   String get layer => record(inner.layer);
+ 
++  @override
++  String get color => record(inner.color);
++
++  @override
++  String get colorNone => record(inner.colorNone);
++
++  @override
++  String get colorRefused => record(inner.colorRefused);
++
++  @override
++  String colorName(FloorPlanColor color) => record(inner.colorName(color));
++
+   @override
+   String get moveSelectionToLayer => record(inner.moveSelectionToLayer);
+ 
+   @override
+   String get hiddenLayerNotCurrent => record(inner.hiddenLayerNotCurrent);
+ 
+   @override
+   String get currentLayer => record(inner.currentLayer);
+ 
+   @override

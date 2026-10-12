@@ -120,7 +120,10 @@ delegates in your `MaterialApp`:
   `Localizations.override` around the view alone is **not supported**:
   the Export dialog opens on the root navigator and would not see it.
 - Your own words: `FloorPlanStrings.of(context)` gives the planner's
-  language, and its `languageCode`.
+  language, and its `languageCode`. *Since 0.6.0*, a class that
+  implements or directly extends `FloorPlanStrings` must add `color`,
+  `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
+  subclass of a built-in language gets them.
 - `theme` and `darkTheme` carry the floor plan's look:
   [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
@@ -1119,7 +1122,8 @@ plan with the table, and read back as `FloorPlanTableDetail.data`:
   meaning: a plan saved at one location and loaded at another carries the
   first location's ids. Check an id against your own records before you
   act on it.
-- A plan saved by this release is at **schema 9**, data or not
+- A plan saved by this release is at **schema 10** (0.4.0 to 0.5.1
+  saved 9), data or not
   ([§ 11](#11-what-a-host-must-never-assume)).
 
 **The design's changes.** `controller.designChanges` is a broadcast
@@ -1457,6 +1461,7 @@ arranges tables, `readOnly` for one who only looks:
 | `selectTablesOnly` | no | yes | no |
 | `move`, `rotate`, `delete`, `renumber` | yes | yes | no |
 | `mirror`, `reshape`, `changeLayer` | yes | no | no |
+| `recolor` | yes | yes | no |
 | `undo` | yes | yes | no |
 | `export`, `print`, `rulers`, `grid`, `snapping` | yes | yes | yes |
 
@@ -1503,6 +1508,9 @@ Field by field:
   cancelled at once: it executes nothing, even if the flag is allowed
   again by then. `rotate` and `mirror` also bound the symbol tool: its R
   and M, and the turn and mirror of the next placement.
+- `recolor` (*since 0.6.0*): the Selection panel's Colour row, which
+  gives the selected rooms one of the eight `FloorPlanColor` hues or
+  none. Refused, the row shows the colour, read only.
 - `undo`, `export`, `print`: the bar's buttons **and** their chords.
 - `rulers`, `grid`, `snapping`: the drafting aids. `snapping: false`
   turns object snap off for the editor's tools and drags and removes F3
@@ -2010,10 +2018,15 @@ a desktop.
   that says why); a 0.1.0 plan opens here unchanged. Terminals that
   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
   plans and service layouts, so they can share them.
-- **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0 or later
+- **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0, 0.5.0 or 0.5.1
   is at schema 9, with or without table data, and 0.3.0 and every
   earlier release refuse it** (`load` throws a `FormatException` that
   says why). **Every terminal that shares stored plans moves to it
   together.** A schema 8 or 7 plan opens here unchanged; the service
   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
   plans and service layouts, so they can share them.
+- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 is at
+  **schema 10**, which 0.5.1 and every older release refuse (`load`
+  throws a `FormatException` that says why); a schema 9, 8 or 7 plan
+  opens here unchanged. Every terminal that shares stored plans moves
+  together.

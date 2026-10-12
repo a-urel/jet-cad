@@ -48,6 +48,8 @@ const List<String> kAllowedFiles = [
 const List<(String, String)> kAllowedLiterals = [
   // The layer colour swatch shows the layer's colour (data).
   ('lib/src/layers/layer_row.dart', 'Color(0xFF000000 |'),
+  // PC-9's swatch: a palette hue made a Color, in one function.
+  ('lib/src/colors/color_picker.dart', 'Color(0xFF000000 |'),
   // The opaque carrier paint: the colour rides on the vertices.
   (
     '../jet_cad_2d_flutter/lib/src/vertices_draw_sink.dart',

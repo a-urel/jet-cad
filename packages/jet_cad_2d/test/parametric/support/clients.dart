@@ -758,6 +758,70 @@ final class SwatchType extends ParametricType<Swatch> {
   }
 }
 
+/// A client whose colour and transparency are parameters (plan colours
+/// spec PC-3a): one region (its fill and boundary) and one LINE, both in
+/// [color] (an encoded `DraftColor`) at [alpha]. [x] moves both, so an
+/// edit can match every child without a style change.
+final class Dye implements Component {
+  const Dye(this.x, this.color, this.alpha);
+  static const String id = 'test.dye';
+  final double x;
+
+  /// `encodeColor` of the children's colour.
+  final int color;
+  final int alpha;
+  @override
+  String get typeId => id;
+  @override
+  Map<String, Object?> toJson() => {'x': x, 'color': color, 'alpha': alpha};
+  static Dye fromJson(Map<String, Object?> j) =>
+      Dye((j['x']! as num).toDouble(), j['color']! as int, j['alpha']! as int);
+  @override
+  bool operator ==(Object o) =>
+      o is Dye && o.x == x && o.color == color && o.alpha == alpha;
+  @override
+  int get hashCode => Object.hash(x, color, alpha);
+}
+
+GeometryPayload dyeLoop(Dye p) => polylinePayload([
+      Vector2(p.x, 10.5),
+      Vector2(p.x + 300.25, 10.5),
+      Vector2(p.x + 300.25, 210.75),
+      Vector2(p.x, 210.75),
+    ], closed: true);
+
+GeometryPayload dyeLine(Dye p) =>
+    linePayload(Vector2(p.x, 10.5), Vector2(p.x + 300.25, 210.75));
+
+final class DyeType extends ParametricType<Dye> {
+  const DyeType();
+  @override
+  Capability get editCapability => Capability.geometry;
+  @override
+  Aabb2 reach(Dye params, Transform2 toWorld) => Aabb2.fromPoints([
+        for (final (dx, dy) in const [
+          (0.0, 10.5),
+          (300.25, 10.5),
+          (300.25, 210.75),
+          (0.0, 210.75)
+        ])
+          toWorld.transformPoint(Vector2(params.x + dx, dy)),
+      ]);
+  @override
+  List<Generated> generate(ParametricView view, Handle self) {
+    _counted(self);
+    final p = view.paramsOf<Dye>(self)!;
+    final c = decodeColor(p.color);
+    return [
+      Generated.region(dyeLoop(p),
+          color: c,
+          transparency: p.alpha,
+          boundaryFlags: EntityFlags.invisible),
+      Generated(EntityKind.line, dyeLine(p), color: c, transparency: p.alpha),
+    ];
+  }
+}
+
 /// A 1 mm box centred on ([x], [y]) in an object's local space, in world:
 /// the reach of the page-key clients, which never reaches a neighbour's in
 /// the page tests.
@@ -1310,6 +1374,7 @@ ParametricCatalog testCatalog() => ParametricCatalog()
   ..register<Tag>(Tag.id, Tag.fromJson, const TagType())
   ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType())
   ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType())
+  ..register<Dye>(Dye.id, Dye.fromJson, const DyeType())
   ..register<Gauge>(Gauge.id, Gauge.fromJson, const GaugeType())
   ..register<Dial>(Dial.id, Dial.fromJson, const DialType())
   ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType())

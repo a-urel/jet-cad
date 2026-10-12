@@ -274,7 +274,7 @@ void main() {
         'FloorPlanEditorCapabilities(tools: {select}, symbolPalette: false, '
         'editLayers: false, editPage: false, move: false, rotate: false, '
         'mirror: false, reshape: false, delete: false, renumber: false, '
-        'changeLayer: false, undo: false)');
+        'changeLayer: false, recolor: false, undo: false)');
   });
 
   test(
@@ -445,5 +445,19 @@ void main() {
     expect(caps.tools, {Tool.select, Tool.wall});
     expect(() => caps.tools.add(Tool.door), throwsUnsupportedError);
     expect(caps, Caps.full.copyWith(tools: {Tool.wall, Tool.select}));
+  });
+
+  test(
+      'PC8 recolor: on in full and tablesOnly, off in readOnly; copyWith, '
+      '== and hashCode carry it', () {
+    expect(Caps.full.recolor, isTrue);
+    expect(Caps.tablesOnly.recolor, isTrue);
+    expect(Caps.readOnly.recolor, isFalse);
+    final off = Caps.full.copyWith(recolor: false);
+    expect(off.recolor, isFalse);
+    expect(off == Caps.full, isFalse);
+    expect(off.copyWith(recolor: true), Caps.full);
+    expect(off.copyWith(recolor: true).hashCode, Caps.full.hashCode);
+    expect(off.toString(), 'FloorPlanEditorCapabilities(recolor: false)');
   });
 }

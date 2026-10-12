@@ -6,6 +6,7 @@
 // printer depends on `package:pdf`.
 library;
 
+export 'src/colors/plan_color.dart' show FloorPlanColor;
 export 'src/export/export_font.dart' show registerFontLicences;
 export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
 export 'src/fonts.dart' show ensureFloorPlanFonts;

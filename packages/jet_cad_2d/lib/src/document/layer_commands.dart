@@ -467,6 +467,48 @@ class SetEntityLayerCommand extends DraftCommand {
   }
 }
 
+/// Sets one entity's colour and transparency (plan colours spec PC-3a):
+/// the parametric planner's stamp on a matched child whose stored style
+/// differs from what its object generates. Its inverse restores the old
+/// values exactly. The capability split is [SetEntityLayerCommand]'s: a
+/// property edit (`{components}`) that changes pixels (`geometry`).
+///
+/// Only the restore form exists: no user edit sets an entity's style
+/// through it.
+class SetEntityStyleCommand extends DraftCommand {
+  final Handle entity;
+  final DraftColor color;
+  final int transparency;
+
+  SetEntityStyleCommand.restore(this.entity, this.color, this.transparency);
+
+  @override
+  Capability get capability => Capability.geometry;
+
+  @override
+  Set<Capability> get capabilities => const {Capability.components};
+
+  @override
+  String get label => 'Style';
+
+  @override
+  CommandResult apply(CommandTarget target) {
+    final slot = target.entities.slotOf(entity);
+    if (slot == null) {
+      throw StateError('no entity with handle ${entity.toHex()}');
+    }
+    final record = target.entities.read(slot);
+    target.entities.replace(
+        slot, record.copyWith(color: color, transparency: transparency));
+    target.invalidateDerived();
+    return CommandResult(
+      inverse: SetEntityStyleCommand.restore(
+          entity, record.color, record.transparency),
+      touched: {entity},
+    );
+  }
+}
+
 /// Moves one [InstanceNode] to [layer] (spec 12b D1). Its inverse restores
 /// the old layer exactly. The capability split is [SetEntityLayerCommand]'s.
 class SetInstanceLayerCommand extends DraftCommand {

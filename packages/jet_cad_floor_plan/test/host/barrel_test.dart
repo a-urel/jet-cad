@@ -55,6 +55,7 @@ void main() {
       'FloorPlanEditorCapabilities',
       'FloorPlanSymbol',
       'FloorPlanTool',
+      'FloorPlanColor',
       'TableStatus',
       'ServiceLayoutRestore',
       'FloorPlanLongPress',

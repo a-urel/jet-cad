@@ -95,16 +95,17 @@ void main() {
       expect(loaded.tables.layers[f.a]!.name, 'A');
     });
 
-    test('this build writes schema 9, reads 7, and refuses the next one', () {
+    test('this build writes schema 10, reads 7, and refuses the next one', () {
       // Plan Q0 Task 1: writes 8 since the page gained decimalSeparator; the
       // literal-7 read below stays a v7 read.
       // Slice 2 Task 1: writes 9 (E-9); the literal-7 read is unchanged.
-      expect(kSchemaVersion, 9);
+      // Plan colours Slice 1 Task 2: writes 10 (PC-2).
+      expect(kSchemaVersion, 10);
       // B: a current layer that is neither layer 0 nor the first added.
       final f = _Fixture();
       f.doc.header.currentLayer = f.b;
       final json = DraftDocumentCodec.encode(f.doc);
-      expect(json['schemaVersion'], 9);
+      expect(json['schemaVersion'], 10);
       // A literal 7 file loads: a build that still writes 6 would refuse it.
       final v7 = _json(jsonEncode(json))..['schemaVersion'] = 7;
       expect(DraftDocumentCodec.decode(v7).header.currentLayer, f.b);

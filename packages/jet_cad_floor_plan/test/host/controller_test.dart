@@ -956,11 +956,12 @@ void main() {
     expect(y(), closeTo(designed.y, 1e-12 * designed.y.abs()));
   });
 
-  // Host embedding API spec E-9 (Slice 2 plan, Task 1): schema 9. The
-  // older and newer plans are derived from this build's own encoding of the
-  // embedding fixture (the version set, then through bytes).
+  // Host embedding API spec E-9 (Slice 2 plan, Task 1): schema 9; schema 10
+  // since plan colours (PC-2). The older and newer plans are derived from this
+  // build's own encoding of the embedding fixture (the version set, then
+  // through bytes).
 
-  group('schema 9 (E-9)', () {
+  group('schema 9 (E-9), 10 since plan colours', () {
     String withVersion(String encoding, int version) {
       final json = jsonDecode(encoding) as Map<String, Object?>;
       json['schemaVersion'] = version;
@@ -970,48 +971,48 @@ void main() {
     int versionOf(String encoding) =>
         (jsonDecode(encoding) as Map<String, Object?>)['schemaVersion']! as int;
 
-    testWidgets('CS1 M-H26a: designJson() of the fixture declares 9',
+    testWidgets('CS1 M-H26a: designJson() of the fixture declares 10',
         (tester) async {
       final c = controller(tester, embedding.embeddingPlanJson());
-      expect(versionOf(c.designJson()), 9);
+      expect(versionOf(c.designJson()), 10);
       drawLine(c);
-      expect(versionOf(c.designJson()), 9, reason: 'after an edit as well');
+      expect(versionOf(c.designJson()), 10, reason: 'after an edit as well');
     });
 
     testWidgets(
         'CS2 M-H26b: an 8 plan opens unchanged through the constructor and '
-        'load, and saves to the 9 bytes, tables and all', (tester) async {
-      final nine = embedding.embeddingPlanJson();
-      final eight = withVersion(nine, 8);
+        'load, and saves to the 10 bytes, tables and all', (tester) async {
+      final ten = embedding.embeddingPlanJson();
+      final eight = withVersion(ten, 8);
       expect(versionOf(eight), 8, reason: 'premise: the file declares 8');
-      expect(eight, isNot(nine), reason: 'premise');
-      final reference = controller(tester, nine);
+      expect(eight, isNot(ten), reason: 'premise');
+      final reference = controller(tester, ten);
       final details = reference.tableDetails;
       expect(details, hasLength(embedding.embeddingTables.length),
           reason: 'premise: the fixture\'s tables');
 
       final built = controller(tester, eight);
       expect(built.tableDetails, details);
-      expect(built.designJson(), nine);
+      expect(built.designJson(), ten);
 
       final loaded = controller(tester, planJson());
       loaded.load(eight);
       expect(loaded.tableDetails, details);
-      expect(loaded.designJson(), nine);
+      expect(loaded.designJson(), ten);
       expect(loaded.designJson(), reference.designJson());
     });
 
     testWidgets(
-        'CS3 a 10 plan is refused by load and the constructor, saying why, '
+        'CS3 an 11 plan is refused by load and the constructor, saying why, '
         'and the plan is left as it was', (tester) async {
-      final ten = withVersion(embedding.embeddingPlanJson(), 10);
+      final eleven = withVersion(embedding.embeddingPlanJson(), 11);
       final refusal = isA<FormatException>().having(
           (e) => e.message,
           'message',
           allOf(
               startsWith('Not a floor plan: '),
-              contains('unsupported schemaVersion 10'),
-              contains('this build writes 9')));
+              contains('unsupported schemaVersion 11'),
+              contains('this build writes 10')));
 
       final c = controller(tester, embedding.embeddingPlanJson());
       drawLine(c);
@@ -1020,14 +1021,14 @@ void main() {
       final document = c.activeDocument;
       final before = c.designJson();
       final details = c.tableDetails;
-      expect(() => c.load(ten), throwsA(refusal));
+      expect(() => c.load(eleven), throwsA(refusal));
       await tester.pump();
       expect(c.activeDocument, same(document));
       expect(c.designJson(), before);
       expect(c.tableDetails, details);
       expect(c.canUndo.value, isTrue, reason: 'the edit is still undoable');
 
-      expect(() => FloorPlanController(json: ten), throwsA(refusal));
+      expect(() => FloorPlanController(json: eleven), throwsA(refusal));
     });
 
     testWidgets(

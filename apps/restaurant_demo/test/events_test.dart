@@ -195,14 +195,14 @@ void main() {
   });
 
   testWidgets(
-      'DE3 a saved plan declares schema 9 and keeps its ids across Save and '
+      'DE3 a saved plan declares schema 10 and keeps its ids across Save and '
       'Revert', (tester) async {
     final demo = await pumpSamples(tester);
     final c = demo.area.controller;
     await press(tester, 'link-tables');
     await press(tester, 'save');
     final stored = demo.area.stored!;
-    expect((jsonDecode(stored) as Map<String, Object?>)['schemaVersion'], 9);
+    expect((jsonDecode(stored) as Map<String, Object?>)['schemaVersion'], 10);
     expect(stored, contains('"jetcad.table_data"'));
     final linked = dataByNumber(c);
     expect(linked, hasLength(11), reason: 'premise: every table linked');
