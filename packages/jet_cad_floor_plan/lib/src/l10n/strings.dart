@@ -6,6 +6,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
 
+import '../colors/plan_color.dart' show FloorPlanColor;
 import '../host/floor_plan_types.dart' show NumberingWarning;
 import '../tables/table_numbers.dart' show TableNumberProblem;
 
@@ -343,6 +344,18 @@ abstract class FloorPlanStrings {
 
   /// "Layer".
   String get layer;
+
+  /// The Colour picker's title (plan colours spec PC-9).
+  String get color;
+
+  /// The picker's swatch for no colour.
+  String get colorNone;
+
+  /// The picker's tooltip when the host refuses `recolor`.
+  String get colorRefused;
+
+  /// [color]'s name, for its swatch's tooltip and semantics label.
+  String colorName(FloorPlanColor color);
 
   /// "Move the selection to a layer".
   String get moveSelectionToLayer;

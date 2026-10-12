@@ -1529,7 +1529,9 @@ class _PlannerShellState extends State<PlannerShell> {
                                       openingTools: _openingTools,
                                       openingSettings: _openingSettings,
                                       symbols: widget.symbols,
-                                      capabilities: caps)),
+                                      capabilities: caps,
+                                      darkCanvasPaper:
+                                          _darkCanvas ? _paperArgb() : null)),
                               // Spec C-6, S-18: the host's inspector under
                               // jet-cad's fields, with the Selection panel.
                               // Keyed, so adding or removing it keeps the

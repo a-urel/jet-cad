@@ -4,6 +4,8 @@
 // Regenerate with the plan's script when a member is added.
 import 'package:jet_cad_floor_plan/src/l10n/strings.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart' show LayerNameProblem;
+import 'package:jet_cad_floor_plan/src/colors/plan_color.dart'
+    show FloorPlanColor;
 import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart'
     show NumberingWarning;
 import 'package:jet_cad_floor_plan/src/tables/table_numbers.dart'
@@ -295,6 +297,18 @@ class RecordingFloorPlanStrings implements FloorPlanStrings {
 
   @override
   String get layer => record(inner.layer);
+
+  @override
+  String get color => record(inner.color);
+
+  @override
+  String get colorNone => record(inner.colorNone);
+
+  @override
+  String get colorRefused => record(inner.colorRefused);
+
+  @override
+  String colorName(FloorPlanColor color) => record(inner.colorName(color));
 
   @override
   String get moveSelectionToLayer => record(inner.moveSelectionToLayer);

@@ -9,6 +9,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart'
         LayerNameProblem,
         LayerNameTooLong;
 
+import '../colors/plan_color.dart' show FloorPlanColor;
 import '../host/floor_plan_types.dart'
     show DuplicateNumber, NumberingWarning, Unnumbered;
 import '../tables/table_numbers.dart'
@@ -342,6 +343,27 @@ class FloorPlanStringsEn extends FloorPlanStrings {
 
   @override
   String get layer => 'Layer';
+
+  @override
+  String get color => 'Colour';
+
+  @override
+  String get colorNone => 'None';
+
+  @override
+  String get colorRefused => 'Colours are not editable here';
+
+  @override
+  String colorName(FloorPlanColor color) => switch (color) {
+        FloorPlanColor.red => 'Red',
+        FloorPlanColor.orange => 'Orange',
+        FloorPlanColor.yellow => 'Yellow',
+        FloorPlanColor.green => 'Green',
+        FloorPlanColor.teal => 'Teal',
+        FloorPlanColor.blue => 'Blue',
+        FloorPlanColor.purple => 'Purple',
+        FloorPlanColor.grey => 'Grey',
+      };
 
   @override
   String get moveSelectionToLayer => 'Move the selection to a layer';
