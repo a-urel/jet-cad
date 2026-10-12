@@ -97,17 +97,19 @@ Vector2 poleAt(DraftDocument doc, Vector2 seed) {
 
 void main() {
   test(
-      'RP1 RoomParams round-trips with key order seed, name, label; label '
-      'null is written; == differs on each field', () {
+      'RP1 RoomParams round-trips with key order seed, name, label, color; '
+      'label and color null are written; == differs on each field', () {
     const auto = RoomParams(1234.5, -987.25, 'Room 1');
     const offset = RoomParams(1234.5, -987.25, 'Room 1', label: (12.75, -3.5));
     expect(auto.typeId, 'floor_planner.room');
     expect(RoomParams.componentTypeId, 'floor_planner.room');
-    expect(auto.toJson().keys, ['seed', 'name', 'label']);
+    expect(auto.toJson().keys, ['seed', 'name', 'label', 'color']);
     expect(jsonEncode(auto.toJson()),
-        '{"seed":[1234.5,-987.25],"name":"Room 1","label":null}');
-    expect(jsonEncode(offset.toJson()),
-        '{"seed":[1234.5,-987.25],"name":"Room 1","label":[12.75,-3.5]}');
+        '{"seed":[1234.5,-987.25],"name":"Room 1","label":null,"color":null}');
+    expect(
+        jsonEncode(offset.toJson()),
+        '{"seed":[1234.5,-987.25],"name":"Room 1","label":[12.75,-3.5],'
+        '"color":null}');
     for (final p in [auto, offset]) {
       final back = RoomParams.fromJson(
           jsonDecode(jsonEncode(p.toJson())) as Map<String, Object?>);
@@ -126,6 +128,8 @@ void main() {
           label: (12.750000000000002, -3.5)),
       const RoomParams(1234.5, -987.25, 'Room 1',
           label: (12.75, -3.5000000000000004)),
+      const RoomParams(1234.5, -987.25, 'Room 1',
+          label: (12.75, -3.5), color: 'teal'),
       auto,
     ]) {
       expect(other == offset, isFalse, reason: '$other');

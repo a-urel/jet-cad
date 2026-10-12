@@ -12,6 +12,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
+import '../colors/plan_color.dart';
 import 'room_inputs.dart' show placeSourceInView;
 import 'room_label.dart';
 import 'room_trace.dart';
@@ -25,14 +26,15 @@ const Object _keep = Object();
 ///   re-seated;
 /// - [name]: the name label's string;
 /// - [label]: `null` (auto) or the label anchor's offset from the pole of
-///   inaccessibility (D10).
+///   inaccessibility (D10);
+/// - [color]: `null` (none) or a palette name (plan colours spec PC-3).
 ///
 /// Value-equal with exact `==` on every field: stored values. Stores no
 /// handle. `fromJson` accepts anything well-typed: a non-finite seed traces
 /// as `Unbounded` (D8), and a [label] with a non-finite component is
 /// treated as `null` by [RoomType.generate].
 final class RoomParams implements Component {
-  const RoomParams(this.seedX, this.seedY, this.name, {this.label});
+  const RoomParams(this.seedX, this.seedY, this.name, {this.label, this.color});
 
   static const String componentTypeId = 'floor_planner.room';
 
@@ -40,13 +42,22 @@ final class RoomParams implements Component {
   final String name;
   final (double, double)? label;
 
+  /// The room's colour (plan colours spec PC-3): a palette name, or null
+  /// for none. Kept as read, known or not; [colorValue] is the entry.
+  final String? color;
+
+  /// The palette entry [color] names, or null for none and for a name this
+  /// release does not know (drawn as no colour, PC-1).
+  FloorPlanColor? get colorValue => floorPlanColorNamed(color);
+
   Vector2 get seed => Vector2(seedX, seedY);
 
   @override
   String get typeId => componentTypeId;
 
-  /// The keys `seed`, `name`, `label`, in that order, **all three always
-  /// written** (08 D6's one-shape rule): `label` is `null` when auto.
+  /// The keys `seed`, `name`, `label`, `color`, in that order, **all four
+  /// always written** (08 D6's one-shape rule): `label` and `color` are
+  /// `null` when unset.
   @override
   Map<String, Object?> toJson() => {
         'seed': [seedX, seedY],
@@ -55,9 +66,11 @@ final class RoomParams implements Component {
           (final dx, final dy) => [dx, dy],
           null => null,
         },
+        'color': color,
       };
 
-  /// Throws on a missing seed or name, or a value of the wrong type.
+  /// Throws on a missing seed or name, or a value of the wrong type; a
+  /// missing `color` (a schema 9 room) reads as null.
   static RoomParams fromJson(Map<String, Object?> json) {
     final s = json['seed']! as List;
     final l = json['label'] as List?;
@@ -68,20 +81,22 @@ final class RoomParams implements Component {
       label: l == null
           ? null
           : ((l[0] as num).toDouble(), (l[1] as num).toDouble()),
+      color: json['color'] as String?,
     );
   }
 
-  /// [label] takes a `(double, double)` or `null` (auto); left out, it is
-  /// kept.
+  /// [label] takes a `(double, double)` or `null` (auto), [color] a name or
+  /// `null` (none); left out, each is kept.
   RoomParams copyWith(
           {double? seedX,
           double? seedY,
           String? name,
-          Object? label = _keep}) =>
+          Object? label = _keep,
+          Object? color = _keep}) =>
       RoomParams(seedX ?? this.seedX, seedY ?? this.seedY, name ?? this.name,
-          label: identical(label, _keep)
-              ? this.label
-              : label as (double, double)?);
+          label:
+              identical(label, _keep) ? this.label : label as (double, double)?,
+          color: identical(color, _keep) ? this.color : color as String?);
 
   @override
   bool operator ==(Object other) =>
@@ -89,13 +104,14 @@ final class RoomParams implements Component {
       other.seedX == seedX &&
       other.seedY == seedY &&
       other.name == name &&
-      other.label == label;
+      other.label == label &&
+      other.color == color;
 
   @override
-  int get hashCode => Object.hash(seedX, seedY, name, label);
+  int get hashCode => Object.hash(seedX, seedY, name, label, color);
 
   @override
-  String toString() => 'RoomParams(($seedX, $seedY), $name, $label)';
+  String toString() => 'RoomParams(($seedX, $seedY), $name, $label, $color)';
 }
 
 /// The tint's colour (spec 10 D9, R-8): ACI 7, the foreground, black on
@@ -107,6 +123,10 @@ const DraftColor kRoomTintColor = IndexedColor(7);
 /// The tint's transparency (spec 10 D9, decision 28): 229 of 255, alpha 26,
 /// about 10%.
 const int kRoomTintTransparency = 229;
+
+/// A coloured room's tint transparency (plan colours spec PC-3): 204 of
+/// 255, alpha 51, 20 %.
+const int kRoomColorTransparency = 204;
 
 /// The name label's height on paper, mm (spec 10 D11, decision 7).
 const double kRoomNamePaperMm = 2.5;
@@ -253,7 +273,10 @@ final class RoomType extends ParametricType<RoomParams> {
   ///    frame, taken to the room's local space. Steps 1 and 2 are a region,
   ///    [kRoomTintColor] on both records, [kRoomTintTransparency], its fill
   ///    drawn and its boundary invisible (R-10); step 3 an invisible closed
-  ///    POLYLINE of the outer ring, [kRoomTintColor];
+  ///    POLYLINE of the outer ring, [kRoomTintColor]. For a room with a
+  ///    colour ([RoomParams.colorValue]) the colour is `TrueColor` of its
+  ///    hue and the region's transparency [kRoomColorTransparency] (plan
+  ///    colours spec PC-3);
   /// 2. **the name**, a TEXT, [RoomParams.name];
   /// 3. **the area**, a TEXT, [formatArea] of the trace's net area in the
   ///    page's unit (D11), with the page's decimal separator (spec Q0 T2).
@@ -298,14 +321,20 @@ final class RoomType extends ParametricType<RoomParams> {
           scalars: Float64List.fromList([h / scale, rotation, 1, 0]));
     }
 
+    final hue = p.colorValue;
+    final DraftColor tintColor =
+        hue == null ? kRoomTintColor : TrueColor(hue.rgb);
+    final tintAlpha =
+        hue == null ? kRoomTintTransparency : kRoomColorTransparency;
+
     return [
       if (tint.step == 3)
         Generated(EntityKind.polyline, boundary,
-            color: kRoomTintColor, flags: EntityFlags.invisible)
+            color: tintColor, flags: EntityFlags.invisible)
       else
         Generated.region(boundary,
-            color: kRoomTintColor,
-            transparency: kRoomTintTransparency,
+            color: tintColor,
+            transparency: tintAlpha,
             boundaryFlags: EntityFlags.invisible),
       Generated.text(
           label(anchorW + Vector2(0, kRoomLineOffset * hName), hName), p.name,
