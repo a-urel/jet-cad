@@ -1,6 +1,7 @@
 # Plan colours: a colour per table and per room — design
 
-**Date:** 2026-10-12. **Status:** revision 2, for the human's review.
+**Date:** 2026-10-12. **Status:** revision 2, **approved by the human on
+2026-10-12**.
 Revision 1 (`abc06cb`) was reviewed independently: **Approve with
 fixes**, V-1 to V-12, one blocker (V-1); revision 2 folds in every fix
 (see [Review](#review)).
