@@ -1,0 +1,411 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 829ba6e5..7fb751cf 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -15,20 +15,25 @@ Plan colours, Slice 1 (of two; released together as 0.6.0).
+   `unsupported schemaVersion 10`); this release opens a 0.5.1 plan
+   unchanged. Terminals that share plans must move together.
+ - **A room can take a colour**, one of eight hues
+   (`FloorPlanColor`: red, orange, yellow, green, teal, blue, purple,
+   grey), chosen in the Selection panel's new **Colour** row; its tint
+   is drawn in that hue at 20 %, on screen, in the export and in the
+   print. An uncoloured room is drawn exactly as before.
+ - **`FloorPlanEditorCapabilities.recolor`** (default true; false in
+   `readOnly`) allows the Colour row; refused, it shows read only.
+   `tablesOnly` keeps it on.
++- **Breaking for a host's own strings:** `FloorPlanStrings` gains the
++  abstract `color`, `colorNone`, `colorRefused` and
++  `colorName(FloorPlanColor)`; a class that implements or directly
++  extends `FloorPlanStrings` must add them (a subclass of a built-in
++  language inherits them).
+ 
+ ## 0.5.1
+ 
+ Two fixes from the host embedding API's fourth slice. Nothing is stored
+ differently: **plans and service layouts are the same as 0.4.0's and
+ 0.5.0's** (schema 9), so 0.4.0, 0.5.0 and 0.5.1 terminals can share
+ them. Nothing a 0.5.0 host calls changes its signature. The packages
+ need Flutter 3.44 or later, as 0.5.0 did; 0.5.1 was built and tested
+ with Flutter 3.47.6.
+ 
+diff --git a/STATUS.md b/STATUS.md
+index d3a1b11f..89e36a80 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -16,22 +16,22 @@ and **14** (the restaurant embedding) are merged; see
+ one's spec, plan and results.
+ 
+ - **Release 0.1.0** ([CHANGELOG.md](CHANGELOG.md)): the four packages a
+   POS depends on by git, at one commit SHA
+   ([docs/host-guide.md](docs/host-guide.md)). CI on GitHub Actions
+   (`.github/workflows/ci.yml`) runs every gate on pushes to `main` and
+   `claude/**` and on pull requests, compares the standing failures and
+   skips exactly (`tool/ci/standing_*.txt`), and builds the host probe by
+   git at the commit under test. In that probe it then analyses each
+   released host's `main.dart`, read from its tag: `v0.3.0` (the host
+-  embedding API spec's invariant 1) and `v0.4.0` (since 2026-10-10, the
+-  0.4.0 review's R-7), by `tool/ci/old_host_probe.sh <tag>`.
++  embedding API spec's invariant 1), `v0.4.0` (since 2026-10-10, the
++  0.4.0 review's R-7) and `v0.5.1`, by `tool/ci/old_host_probe.sh <tag>`.
+ - **14d** (POS readiness: three languages, the service layout and
+   options, the release) and its independent review: results
+   [14d-2](docs/superpowers/notes/2026-10-06-plan-14d2-results.md),
+   [14d-1](docs/superpowers/notes/2026-10-06-plan-14d1-results.md),
+   [14d-3](docs/superpowers/notes/2026-10-06-plan-14d3-results.md),
+   [review](docs/superpowers/notes/2026-10-06-14d-review.md).
+ - **Main's own line before the 14d merge** (PRs 1–9, 2026-10-05): the dark
+   theme and dark canvas, table groups and their fixes; their records are
+   in STATUS-HISTORY.md's first entries.
+ - **The cleanup batch** (the human, 2026-10-07: *"2 ile devam et, R-13'te
+@@ -296,27 +296,29 @@ one's spec, plan and results.
+   the tag `v0.5.1` → `3f8f7ad` (2026-10-11).
+ 
+ ## In flight
+ 
+ - **Plan colours** (the host spec's O-6, and rooms): a colour per table and
+   per room from a fixed palette, saved at schema 10.
+   Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
+   revision 2, approved 2026-10-12, on `spec/plan-colors`. Slice 1's plan
+   [2026-10-12-plan-colors-slice-1.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-1.md)
+   (the palette, schema 10, rooms; five tasks) is implemented on
+-  `spec/plan-colors`, each task reviewed. Next: its whole-branch review,
+-  then Slice 2 (tables).
++  `spec/plan-colors`, each task and the whole branch reviewed. Next: the
++  human's merge word, then Slice 2 (tables).
+ 
+ ## Owed to the human
+ 
+ - **Plan colours, Slice 1:** a native German and Turkish read of the
+-  Colour row's words (the spec's PC-10 table); a look at a coloured room
++  Colour row's words (the spec's PC-10 table, and `colorRefused`, which
++  that table lacks: "Farben sind hier nicht änderbar" / "Renkler burada
++  değiştirilemez"); a look at a coloured room
+   on the light and dark canvas.
+ - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
+   the floor planner in three languages; the service mode's menu, groups
+   and layout; the dark theme).
+ - **A native German read** of the German text (*Am Raster fangen*,
+   *Zufällige Status* among others); the Turkish read.
+ - **A ruling:** a context click on a group member selects its whole group
+   (made at the 14d merge, documented in the host guide).
+ - **Slice 1, a look:** the demo's badges, pan and zoom smoothness and
+   interactive badges by touch, on a tablet and a terminal; the German
+@@ -344,38 +346,53 @@ one's spec, plan and results.
+   Merged into `main` at `7d7d8a4` on the human's *"evet, main'e merge
+   et"*. Confirmed on macOS (Flutter 3.47.6, 2026-10-10, at `8367010`):
+   `table_theme_painter_test.dart` +25, all passed.
+ - **Zone focus, a look** (Q-Z3): the margin, the 3 m span and the veil on
+   a tablet and a terminal, light and dark; the demo's three zone strings
+   in German and Turkish.
+ - **Q2's ruling:** does a new plan's decimal separator follow the UI
+   language (Q0's N1, assumed yes)? If "`.` always", `documentSeparatorFor`
+   becomes a constant and the settling goes.
+ - **The macOS re-baseline** of the engine's two `generate_document_test`
+-  fingerprints (moved by 12b's schema 7, Q0's schema 8 and Slice 2's
+-  schema 9).
++  fingerprints (moved by 12b's schema 7, Q0's schema 8, Slice 2's
++  schema 9 and plan colours' schema 10).
+ - **A look at Q0** in German and Turkish: the Page panel's control, the
+   plan's text, the PDF.
+ - **The GPU split's device run:** the dev harness's `BACKEND=residentGpu`
+   on macOS, which now loads the bundle from `jet_cad_2d_gpu`'s asset key
+   (every GPU run was the human's).
+ 
+ ## Standing failures and skips
+ 
+ On Linux, compared exactly by CI: the engine's two `generate_document_test`
+ fingerprints and the render package's seven text-ladder goldens (macOS
+ values), and the render package's paint micro-benchmark rig (skipped,
+ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ 
+ ## Resume here
+ 
+-**Next: the human's choice.** 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
++**Next: the human's merge word for Slice 1 of plan colours, then Slice 2
++(tables).** Slice 1 (the palette, schema 10, rooms, the `recolor`
++capability and the Selection panel's Colour row) is implemented and
++reviewed on `spec/plan-colors` (worktree `.claude/worktrees/plan-colors`),
++its whole-branch review's fixes applied; it merges to `main` on the
++human's word and is released with Slice 2 as 0.6.0. Slice 2 (a table's
++colour, `jetcad.table_color`, the Tables flows) has no plan written yet:
++start from the spec
++[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md).
++For Slice 2, pin the Colour row's tool-mode visibility with a selection
++made by `controller.select` **while the Wall tool is active**: a mutant
++that drops `!_toolMode && _openingToolMode == null` from
++`selection_panel.dart`'s `colors` flag survives Slice 1, because a
++drawing tool clears the selection.
++
++The released line: 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
+ `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
+ (**schema 9**, every terminal that shares stored plans moves together).
+ Monépro owes Q-H3 and its real shadcn tokens, and can name
+ `controller.camera`, `tableOverlayBuilder` (Q-Z1),
+ `FloorPlanTableDetail.data` (Q-Z4), `FloorPlanTheme`, and from Slice 4
+ `tablesOnly` for "edit floor drawing", `shortcuts: false` beside
+ `PosShortcutsHost`, `onExportDialog` for a `ShadDialog` and the inspector
+ for linking `pos_tables` rows, in its spec 103. Found, not fixed (Slice
+ 4's results): both fixed on `main`, in 0.5.1:
+ F-7 (an `against-wall` table turned to its wall under `rotate: false`)
+@@ -609,21 +626,22 @@ flutter drive --profile -d macos --driver=test_driver/integration_test.dart \
+   --dart-define=TEXT=true --dart-define=DRAW_TEXT=false
+ ```
+ 
+ ---
+ 
+ More gates: `packages/jet_cad_floor_plan`, `packages/jet_cad_restaurant_symbols`,
+ `apps/floor_planner`, `apps/restaurant_demo` — each `flutter test`,
+ `flutter analyze`, the format check; `tool/ci` — `dart test`,
+ `dart run tool/ci/check_guide.dart`; the host probe —
+ `tool/ci/host_probe.sh <git url> <sha>`, then
+-`tool/ci/old_host_probe.sh v0.3.0` and `tool/ci/old_host_probe.sh v0.4.0`.
++`tool/ci/old_host_probe.sh v0.3.0`, `tool/ci/old_host_probe.sh v0.4.0` and
++`tool/ci/old_host_probe.sh v0.5.1`.
+ 
+ ---
+ 
+ ## Traps
+ 
+ - **`flutter pub get` rewrites three `analysis_options.yaml` files** in this
+   workspace. They must **never** be committed. Check `git status` after any pub
+   operation.
+ - **The degenerate fixture is the dominant defect class here.** Plan 3c alone
+   shipped it three times: fixtures all at the identity transform, all at the
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index acaef79d..5adf380d 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -113,21 +113,24 @@ delegates in your `MaterialApp`:
+   otherwise the system's, matched against `supportedLocales`. A locale
+   you do not list resolves to one you do; one the planner does not know
+   gives English.
+ - `floorPlanLocalizationsDelegates` holds the planner's delegate and
+   Flutter's Material, Widgets and Cupertino ones. If you list `de` or
+   `tr` without Flutter's delegates, Material widgets throw.
+ - To switch language at run time, change `MaterialApp.locale`.
+   `Localizations.override` around the view alone is **not supported**:
+   the Export dialog opens on the root navigator and would not see it.
+ - Your own words: `FloorPlanStrings.of(context)` gives the planner's
+-  language, and its `languageCode`.
++  language, and its `languageCode`. *Since 0.6.0*, a class that
++  implements or directly extends `FloorPlanStrings` must add `color`,
++  `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
++  subclass of a built-in language gets them.
+ - `theme` and `darkTheme` carry the floor plan's look:
+   [§ 9](#9-themes).
+ - Panel numbers show and read with the language's decimal separator,
+   per language, not per region: `de_CH` gets German's `,`.
+   The plan's own text — dimensions and room areas, on screen and on the
+   PDF and PNG, and the rulers on screen — uses the separator **the plan**
+   carries (the Page panel's
+   *Decimal separator*), the same on every terminal; a new plan takes the
+   UI language's. *Since 0.2.0; in 0.1.0 it is always `.`.*
+ 
+@@ -2015,12 +2018,15 @@ a desktop.
+   that says why); a 0.1.0 plan opens here unchanged. Terminals that
+   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
+   plans and service layouts, so they can share them.
+ - **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0, 0.5.0 or 0.5.1
+   is at schema 9, with or without table data, and 0.3.0 and every
+   earlier release refuse it** (`load` throws a `FormatException` that
+   says why). **Every terminal that shares stored plans moves to it
+   together.** A schema 8 or 7 plan opens here unchanged; the service
+   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
+   plans and service layouts, so they can share them.
+-  A plan saved by 0.6.0 is at **schema 10**, which 0.5.1 and every
+-  older release refuse; a schema 9, 8 or 7 plan opens here unchanged.
++- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 is at
++  **schema 10**, which 0.5.1 and every older release refuse (`load`
++  throws a `FormatException` that says why); a schema 9, 8 or 7 plan
++  opens here unchanged. Every terminal that shares stored plans moves
++  together.
+diff --git a/packages/jet_cad_2d/lib/src/codec/schema_version.dart b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+index c29131d2..f9cf779c 100644
+--- a/packages/jet_cad_2d/lib/src/codec/schema_version.dart
++++ b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+@@ -41,21 +41,21 @@
+ /// reader's drawing, as 6's to 8's did, but so that no build silently carries
+ /// host links it can neither see nor keep consistent: the floor planner's
+ /// `jetcad.table_data` component (the host embedding API's Slice 2) holds the
+ /// host's data on a table. A v8 build would keep that payload as
+ /// preserve-unknown data, but deleting the table would leave its data
+ /// orphaned in the file. With the bump, that build refuses the file and says
+ /// why.
+ ///
+ /// 10: no new field the engine reads, and nothing to default; the v9->v10
+ /// migration is empty, so a v9 (or older) document is read unchanged. The
+-/// bump exists for the reader, as 6's to 8's did: the floor planner's room
++/// bump exists for the reader, as 6's to 9's did: the floor planner's room
+ /// gains a `color` key (plan colours spec PC-3) and its tables a
+ /// `jetcad.table_color` component (PC-4). A v9 build would read a room's
+ /// colour as nothing and drop it on its next save, and keep a table's
+ /// colour as preserve-unknown data that a delete orphans. With the bump,
+ /// that build refuses the file and says why.
+ const int kSchemaVersion = 10;
+ 
+ class SchemaVersionError implements Exception {
+   final Object? found;
+   const SchemaVersionError(this.found);
+diff --git a/packages/jet_cad_2d/test/codec/schema_10_test.dart b/packages/jet_cad_2d/test/codec/schema_10_test.dart
+index a7e46ae7..f2aeb380 100644
+--- a/packages/jet_cad_2d/test/codec/schema_10_test.dart
++++ b/packages/jet_cad_2d/test/codec/schema_10_test.dart
+@@ -18,16 +18,17 @@ void main() {
+     expect(json['schemaVersion'], 10);
+     expect(json.keys.first, 'schemaVersion');
+   });
+ 
+   test(
+       'S10-2 a 9 document reads unchanged and saves as this build\'s 10 '
+       'file, byte for byte', () {
+     final ten =
+         DraftDocumentCodec.encodeToString(fixture(MetricModelMeasurer()));
+     final nine = withVersion(ten, 9);
++    expect(nine, isNot(ten));
+     final loaded = DraftDocumentCodec.decodeString(nine,
+         measurer: MetricModelMeasurer(),
+         registerComponents: PageComponent.register);
+     expect(DraftDocumentCodec.encodeToString(loaded), ten);
+   });
+ }
+diff --git a/packages/jet_cad_floor_plan/test/room_color_test.dart b/packages/jet_cad_floor_plan/test/room_color_test.dart
+index fb772a42..9a52134e 100644
+--- a/packages/jet_cad_floor_plan/test/room_color_test.dart
++++ b/packages/jet_cad_floor_plan/test/room_color_test.dart
+@@ -5,27 +5,33 @@
+ // not know is kept and drawn as today's tint; a plan saved by 0.5.1 (schema
+ // 9, no `color` key) opens with its tints byte for byte.
+ //
+ // The plan is the two-room rectangle at the corpus far origin, turned 23°,
+ // every wall in its own rotated, translated group; room A sits in a group
+ // of its own turned 0.61 rad (as a file may hold one), room B at the
+ // identity (as the Room tool makes one). Fractional seeds. The hues under
+ // test are `teal` and `purple`, never the first of the palette, and
+ // `magenta`, a name no release knows.
+ import 'dart:convert' show jsonDecode, jsonEncode;
++import 'dart:typed_data' show Uint8List;
++import 'dart:ui' as ui;
+ 
+ import 'package:jet_cad_floor_plan/src/colors/plan_color.dart';
++import 'package:jet_cad_floor_plan/src/export/export_bytes.dart'
++    show exportBytes;
++import 'package:jet_cad_floor_plan/src/export/export_dialog.dart'
++    show ExportChoice, ExportFormat;
+ import 'package:jet_cad_floor_plan/src/parametric/room.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+-    show FlutterTextMeasurer;
++    show ExportDpi, FlutterTextMeasurer;
+ 
+ import 'support/room_fixture.dart';
+ 
+ /// [room]'s tint records: its fill and the boundary the fill names (D9
+ /// steps 1 and 2), or its closed POLYLINE (step 3).
+ List<EntityRecord> tintRecords(DraftDocument doc, Handle room) {
+   final all = kids(doc, room);
+   final fills = [
+     for (final k in all)
+       if (kindOf(doc, k) == EntityKind.fill) k
+@@ -386,11 +392,101 @@ void main() {
+     doc.commands.execute(recolor(doc, room, 'teal'));
+     expect(kids(doc, room), kids0, reason: 'the same children');
+     final after = tintRecords(doc, room).single;
+     expect(after.handle, outline.handle);
+     expect(after.color, tealTint);
+     expect(after.flags, outline.flags);
+     expect(after.flags & EntityFlags.invisible, isNot(0));
+     expect(after.transparency, transparency0);
+     expect(driftOf(doc), isEmpty);
+   });
++
++  testWidgets(
++      'RC8 the export draws a coloured room\'s tint in its hue at 20 %, and '
++      'an uncoloured one\'s as before: PNG pixels inside two rooms',
++      (tester) async {
++    final f = fixture();
++    final doc = f.doc;
++    // A page that holds the plan at the corpus far origin, turned 23 deg:
++    // its lower-left corner 3 m west and 2 m south of the plan's origin; no
++    // grid line to fall on a sampled pixel.
++    final base = f.plan.at(0, 0);
++    final page = PageComponent(
++        originX: base.x - 3000, originY: base.y - 2000, gridVisible: false);
++    attachPage(doc, page);
++
++    const dpi = 96;
++    const png96 = ExportChoice(format: ExportFormat.png, dpi: ExportDpi.d96);
++    Future<({int w, int h, Uint8List rgba})> export() async =>
++        (await tester.runAsync(() async {
++          final bytes = await exportBytes(doc, page, png96,
++              fontBytes: () async => throw StateError('a PNG reads no font'));
++          final codec = await ui.instantiateImageCodec(bytes);
++          final image = (await codec.getNextFrame()).image;
++          codec.dispose();
++          try {
++            final data =
++                (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
++            return (
++              w: image.width,
++              h: image.height,
++              rgba: data.buffer.asUint8List(),
++            );
++          } finally {
++            image.dispose();
++          }
++        }))!;
++
++    // Plan point (x, y) -> image pixel: `((x - ox) / den * u,
++    // (oy + effH * den - y) / den * u)`, u = dpi / 25.4, computed from the
++    // page's numbers, not through `pageCamera`.
++    List<int> pixelAt(
++        ({int w, int h, Uint8List rgba}) img, double px, double py) {
++      final world = f.plan.at(px, py);
++      final u = dpi / 25.4, den = page.scaleDenominator;
++      final x = ((world.x - page.originX) / den * u).floor();
++      final y =
++          ((page.originY + page.effectiveHeightMm * den - world.y) / den * u)
++              .floor();
++      expect(x, inInclusiveRange(0, img.w - 1));
++      expect(y, inInclusiveRange(0, img.h - 1));
++      final i = (y * img.w + x) * 4;
++      return [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2], img.rgba[i + 3]];
++    }
++
++    // Away from walls and from both labels (seeds at (1500, 2000) and
++    // (4700, 1900)): 0.4 m inside A's east wall, 0.9 m inside B's.
++    const inA = (2400.0, 3300.0);
++    const inB = (7000.0, 3000.0);
++
++    // `rgb` composited at `alpha` over the white sheet, per channel.
++    List<int> over(int rgb, int alpha) => [
++          for (final s in [(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF])
++            (alpha / 255 * s + (1 - alpha / 255) * 255).round(),
++        ];
++    void expectNear(List<int> got, List<int> want, String reason) {
++      expect(got[3], 255, reason: reason);
++      for (var c = 0; c < 3; c++) {
++        expect(got[c], closeTo(want[c], 2), reason: '$reason, channel $c');
++      }
++    }
++
++    // Teal 0x00897B at alpha 51 (transparency 204); ACI 7, drawn black on
++    // white, at alpha 26 (transparency 229). Literals, not the constants:
++    // the pixels are what is under test.
++    final teal = over(0x00897B, 51);
++    final grey = over(0x000000, 26);
++    expect(teal, [204, 231, 229]);
++    expect(grey, [229, 229, 229]);
++
++    // The control: nothing coloured, both rooms the grey tint.
++    final plain = await export();
++    expectNear(pixelAt(plain, inA.$1, inA.$2), grey, 'A uncoloured');
++    expectNear(pixelAt(plain, inB.$1, inB.$2), grey, 'B uncoloured');
++
++    // Room A teal: A's pixel takes the hue, B's stays the grey tint.
++    doc.commands.execute(recolor(doc, f.a, 'teal'));
++    final coloured = await export();
++    expectNear(pixelAt(coloured, inA.$1, inA.$2), teal, 'A teal');
++    expectNear(pixelAt(coloured, inB.$1, inB.$2), grey, 'B uncoloured');
++  });
+ }

@@ -1,0 +1,52 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index f1b68ddc..0b466d23 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -156,17 +156,18 @@ jobs:
+       # The repository checked out here, at the commit under test (merge
+       # commits included): no token, whatever the repository's visibility.
+       # GPU split spec S8: its lock and its web build hold no GPU renderer
+       # and no build hook.
+       - name: Resolve, check, analyze and build the probe
+         run: tool/ci/host_probe.sh "file://$GITHUB_WORKSPACE" "$(git rev-parse HEAD)"
+       # Host embedding API spec, invariant 1 (P-1): each released host's
+       # code, analysed in the probe just resolved at the commit under test,
+       # still compiles; the probe's own main.dart is put back after each.
+       # Every release a host may still pin stays: 0.3.0 is the spec's own,
+-      # 0.4.0 (the embedding API, 8367010) followed its tag.
++      # 0.4.0 (the embedding API, 8367010) followed its tag, and 0.5.1 is
++      # the last release that saves schema 9.
+       - name: The 0.3.0 host probe against this commit
+         run: tool/ci/old_host_probe.sh v0.3.0
+       - name: The 0.4.0 host probe against this commit
+         run: tool/ci/old_host_probe.sh v0.4.0
+       - name: The 0.5.1 host probe against this commit
+         run: tool/ci/old_host_probe.sh v0.5.1
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 2dc4e4b0..acaef79d 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -1112,21 +1112,22 @@ plan with the table, and read back as `FloorPlanTableDetail.data`:
+ - **A stored map outside the limits** (a plan edited by hand, or saved by
+   a later release that relaxed a limit) does not stop the plan from
+   opening. That table reads empty `data`; its stored map is kept as read
+   (re-encoded) and saved back until you `setTableData` that table.
+   Editor code sees it as the table diagnostic `table.invalid_data`; this
+   release gives a host no other channel for it.
+ - **The data is yours to validate.** The planner checks shapes, never
+   meaning: a plan saved at one location and loaded at another carries the
+   first location's ids. Check an id against your own records before you
+   act on it.
+-- A plan saved by this release is at **schema 9**, data or not
++- A plan saved by this release is at **schema 10** (0.4.0 to 0.5.1
++  saved 9), data or not
+   ([§ 11](#11-what-a-host-must-never-assume)).
+ 
+ **The design's changes.** `controller.designChanges` is a broadcast
+ stream of `FloorPlanDesignChange`: after every design edit, undo or redo
+ (in the editor, through `setTableData`, a layer locked, hidden or shown),
+ the designed tables added, removed and changed since the last report.
+ 
+ ```dart
+     controller.designChanges.listen(designChanged);
+ ```

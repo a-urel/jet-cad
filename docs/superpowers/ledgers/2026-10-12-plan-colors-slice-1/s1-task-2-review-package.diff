@@ -1,0 +1,745 @@
+9ab32974 feat(2d): schema 10 for plan colours
+ apps/restaurant_demo/assets/plans/salon.json       |   2 +-
+ apps/restaurant_demo/assets/plans/teras.json       |   2 +-
+ apps/restaurant_demo/test/events_test.dart         |   4 +-
+ .../jet_cad_2d/lib/src/codec/schema_version.dart   |  11 +-
+ .../test/codec/instance_style_codec_test.dart      |   5 +-
+ .../jet_cad_2d/test/codec/json_codec_test.dart     |  10 +-
+ .../test/codec/page_component_roundtrip_test.dart  |   6 +-
+ packages/jet_cad_2d/test/codec/schema_10_test.dart |  33 ++++++
+ packages/jet_cad_2d/test/codec/schema_9_test.dart  | 117 ++++-----------------
+ .../test/codec/support/schema_fixture.dart         |  82 +++++++++++++++
+ .../test/document/layer_header_test.dart           |   7 +-
+ .../test/testing/generate_document_test.dart       |   6 +-
+ .../assets/library/furniture.jetlib                |   2 +-
+ .../test/host/controller_test.dart                 |  41 ++++----
+ .../test/host/table_data_test.dart                 |   2 +-
+ .../assets/restaurant.jetlib                       |   2 +-
+ 16 files changed, 197 insertions(+), 135 deletions(-)
+diff --git a/apps/restaurant_demo/test/events_test.dart b/apps/restaurant_demo/test/events_test.dart
+index 03fec368..36f1fb10 100644
+--- a/apps/restaurant_demo/test/events_test.dart
++++ b/apps/restaurant_demo/test/events_test.dart
+@@ -188,28 +188,28 @@ void main() {
+       for (var n = 1; n <= 6; n++) '$n': {'id': 'teras-$n'},
+     });
+     expect(textOf(tester, 'unlinked'), 'Unlinked: 0');
+     await press(tester, 'mode-service');
+     expect(byKey('link-tables'), findsNothing);
+     expect(byKey('unlinked'), findsNothing);
+     expect(byKey('pointer-line'), findsOneWidget);
+   });
+ 
+   testWidgets(
+-      'DE3 a saved plan declares schema 9 and keeps its ids across Save and '
++      'DE3 a saved plan declares schema 10 and keeps its ids across Save and '
+       'Revert', (tester) async {
+     final demo = await pumpSamples(tester);
+     final c = demo.area.controller;
+     await press(tester, 'link-tables');
+     await press(tester, 'save');
+     final stored = demo.area.stored!;
+-    expect((jsonDecode(stored) as Map<String, Object?>)['schemaVersion'], 9);
++    expect((jsonDecode(stored) as Map<String, Object?>)['schemaVersion'], 10);
+     expect(stored, contains('"jetcad.table_data"'));
+     final linked = dataByNumber(c);
+     expect(linked, hasLength(11), reason: 'premise: every table linked');
+ 
+     expect(c.setTableData('7', {}), isTrue);
+     expect(c.setTableData('3', {'id': 'other'}), isTrue);
+     await settle(tester);
+     expect(dataByNumber(c), isNot(linked), reason: 'premise: edited');
+     await press(tester, 'revert');
+     expect(dataByNumber(c), linked);
+diff --git a/packages/jet_cad_2d/lib/src/codec/schema_version.dart b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+index d7f1786f..c29131d2 100644
+--- a/packages/jet_cad_2d/lib/src/codec/schema_version.dart
++++ b/packages/jet_cad_2d/lib/src/codec/schema_version.dart
+@@ -38,21 +38,30 @@
+ ///
+ /// 9: no new field and nothing to default; the v8->v9 migration is empty, so
+ /// a v8 (or v7) document is read unchanged. The bump exists not for the
+ /// reader's drawing, as 6's to 8's did, but so that no build silently carries
+ /// host links it can neither see nor keep consistent: the floor planner's
+ /// `jetcad.table_data` component (the host embedding API's Slice 2) holds the
+ /// host's data on a table. A v8 build would keep that payload as
+ /// preserve-unknown data, but deleting the table would leave its data
+ /// orphaned in the file. With the bump, that build refuses the file and says
+ /// why.
+-const int kSchemaVersion = 9;
++///
++/// 10: no new field the engine reads, and nothing to default; the v9->v10
++/// migration is empty, so a v9 (or older) document is read unchanged. The
++/// bump exists for the reader, as 6's to 8's did: the floor planner's room
++/// gains a `color` key (plan colours spec PC-3) and its tables a
++/// `jetcad.table_color` component (PC-4). A v9 build would read a room's
++/// colour as nothing and drop it on its next save, and keep a table's
++/// colour as preserve-unknown data that a delete orphans. With the bump,
++/// that build refuses the file and says why.
++const int kSchemaVersion = 10;
+ 
+ class SchemaVersionError implements Exception {
+   final Object? found;
+   const SchemaVersionError(this.found);
+ 
+   @override
+   String toString() => found == null
+       ? 'SchemaVersionError: document has no schemaVersion'
+       : 'SchemaVersionError: unsupported schemaVersion $found '
+           '(this build writes $kSchemaVersion)';
+diff --git a/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart b/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
+index 8e00c3ee..e1f94ecc 100644
+--- a/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
++++ b/packages/jet_cad_2d/test/codec/instance_style_codec_test.dart
+@@ -69,25 +69,26 @@ void main() {
+ 
+   test('two instances differing only in linetypeScale are not equal', () {
+     // `==` and `hashCode` are the picture cache key's foundation in Plan 3g.
+     // A field left out of either makes two different placements collide.
+     final a = styledInstance();
+     final b = a.copyWith(linetypeScale: 8.0);
+     expect(a == b, isFalse);
+     expect(a.hashCode == b.hashCode, isFalse);
+   });
+ 
+-  test('the schema this build writes is 9', () {
++  test('the schema this build writes is 10', () {
+     // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
+     // Plan Q0 Task 1: 8 since PageComponent gained decimalSeparator.
+     // Slice 2 Task 1: 9 so that no older build carries table data (E-9).
+-    expect(kSchemaVersion, 9);
++    // Plan colours Slice 1 Task 2: 10 for the room's colour (PC-2).
++    expect(kSchemaVersion, 10);
+   });
+ 
+   group('a v5 document resolves bit-identically under a v6 build', () {
+     /// A v5 document: a v6 encoding with the four new instance keys stripped
+     /// and the version declared back down.
+     ///
+     /// **Derived, not hand-written.** Hand-writing the whole document shape
+     /// would put a second, drifting copy of the codec's JSON contract in a
+     /// test file, and a fixture that silently fails to parse into anything
+     /// proves less than nothing about migration. Encoding a real document and
+diff --git a/packages/jet_cad_2d/test/codec/json_codec_test.dart b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+index 96b7110f..4e9745e1 100644
+--- a/packages/jet_cad_2d/test/codec/json_codec_test.dart
++++ b/packages/jet_cad_2d/test/codec/json_codec_test.dart
+@@ -503,26 +503,27 @@ void main() {
+     );
+     doc.commands.execute(cmd);
+     final reloaded = DraftDocumentCodec.decode(
+         jsonDecode(jsonEncode(DraftDocumentCodec.encode(doc)))
+             as Map<String, Object?>);
+     expect(reloaded.fills.fillsOf(cmd.boundary.handle), [cmd.fill.handle]);
+     expect(reloaded.fills.trianglesFor(cmd.boundary.handle), hasLength(6));
+   });
+ 
+   test(
+-      'the schema version is 9, and a future document is refused by '
++      'the schema version is 10, and a future document is refused by '
+       'version', () {
+     // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
+     // Plan Q0 Task 1: 8 since PageComponent gained decimalSeparator.
+     // Slice 2 Task 1: 9 so that no older build carries table data (E-9).
+-    expect(kSchemaVersion, 9);
++    // Plan colours Slice 1 Task 2: 10 for the room's colour (PC-2).
++    expect(kSchemaVersion, 10);
+     // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
+     // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
+     // the loose matcher passed whenever N was the *current* version rather
+     // than a future one. The point of this test is that the refusal comes from
+     // the version guard.
+     // Plan 12b Task 1: the refused version follows the build's, not a literal.
+     expect(
+         () => DraftDocumentCodec.decode({'schemaVersion': kSchemaVersion + 1}),
+         throwsA(isA<SchemaVersionError>()));
+   });
+@@ -580,14 +581,15 @@ void main() {
+     }, {
+       plain.value: 0,
+       unpickable.value: 2,
+       both.value: 3,
+     });
+ 
+     // No schema change: flags was already a free int (spec 11 D19, S-16).
+     // Plan 12b Task 1: the pin moved to 7 with header.currentLayer.
+     // Plan Q0 Task 1: to 8 with the page's decimalSeparator.
+     // Slice 2 Task 1: to 9 with the host's table data (E-9).
+-    expect(kSchemaVersion, 9);
+-    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 9);
++    // Plan colours Slice 1 Task 2: to 10 with the room's colour (PC-2).
++    expect(kSchemaVersion, 10);
++    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 10);
+   });
+ }
+diff --git a/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart b/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart
+index 4a5b1fa3..0d7c2357 100644
+--- a/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart
++++ b/packages/jet_cad_2d/test/codec/page_component_roundtrip_test.dart
+@@ -73,26 +73,26 @@ void main() {
+       return doc;
+     }
+ 
+     Map<String, Object?> pageJsonOf(Map<String, Object?> json) =>
+         ((json['components']
+                     as Map<String, Object?>)[PageComponent.componentTypeId]
+                 as Map<String, Object?>)
+             .values
+             .single as Map<String, Object?>;
+ 
+-    test('Q0-C1 this build writes schema 9', () {
+-      expect(kSchemaVersion, 9);
++    test('Q0-C1 this build writes schema 10', () {
++      expect(kSchemaVersion, 10);
+       final json =
+           jsonDecode(DraftDocumentCodec.encodeToString(withCommaPage()))
+               as Map<String, Object?>;
+-      expect(json['schemaVersion'], 9);
++      expect(json['schemaVersion'], 10);
+     });
+ 
+     test('Q0-C2 a comma page round-trips, and the bytes are stable', () {
+       final doc = withCommaPage();
+       final first = DraftDocumentCodec.encodeToString(doc);
+       expect(
+           pageJsonOf(
+               jsonDecode(first) as Map<String, Object?>)['decimalSeparator'],
+           'comma');
+       final back = DraftDocumentCodec.decodeString(first,
+diff --git a/packages/jet_cad_2d/test/codec/schema_10_test.dart b/packages/jet_cad_2d/test/codec/schema_10_test.dart
+new file mode 100644
+index 00000000..a7e46ae7
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/schema_10_test.dart
+@@ -0,0 +1,33 @@
++// Schema 10 (plan colours spec PC-2): this build writes 10 and reads a 9
++// document unchanged (the 9 -> 10 migration is empty). The 9 document is
++// derived from this build's own encoding of the schema fixture (the version
++// set, then through bytes), never hand-written.
++import 'dart:convert';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++import 'support/schema_fixture.dart';
++
++void main() {
++  test('S10-1 this build writes schema 10, first', () {
++    expect(kSchemaVersion, 10);
++    final json = jsonDecode(
++            DraftDocumentCodec.encodeToString(fixture(MetricModelMeasurer())))
++        as Map<String, Object?>;
++    expect(json['schemaVersion'], 10);
++    expect(json.keys.first, 'schemaVersion');
++  });
++
++  test(
++      'S10-2 a 9 document reads unchanged and saves as this build\'s 10 '
++      'file, byte for byte', () {
++    final ten =
++        DraftDocumentCodec.encodeToString(fixture(MetricModelMeasurer()));
++    final nine = withVersion(ten, 9);
++    final loaded = DraftDocumentCodec.decodeString(nine,
++        measurer: MetricModelMeasurer(),
++        registerComponents: PageComponent.register);
++    expect(DraftDocumentCodec.encodeToString(loaded), ten);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/codec/schema_9_test.dart b/packages/jet_cad_2d/test/codec/schema_9_test.dart
+index 08969ae2..e9c34255 100644
+--- a/packages/jet_cad_2d/test/codec/schema_9_test.dart
++++ b/packages/jet_cad_2d/test/codec/schema_9_test.dart
+@@ -1,114 +1,43 @@
+ // Schema 9 (host embedding API spec, E-9; Slice 2 plan, Task 1): this build
+-// writes 9, reads an 8 document unchanged (the 8 -> 9 migration is empty)
+-// and refuses a 10 by its version.
++// reads an 8 document unchanged (the 8 -> 9 migration is empty); since schema
++// 10 (plan colours spec PC-2) it writes 10, and refuses an 11 by its version.
+ //
+-// The fixture is not the default document: instances nested, mirrored and
+-// scaled non-uniformly, groups, three layers, dashed linetypes, room labels
+-// and attributes measured by a real model, the current layer off layer 0,
+-// and a comma page in centimetres at 1:20 with its origin off zero. Every
+-// stored field an 8 -> 9 read could drop sits off its default: the header's
+-// units, scale, linetype scale, imported extents and custom variables; a
+-// hidden layer and a locked one, both with a transparency; a raw-data
+-// entry; an unknown component (the planner's `jetcad.table_data`, which this
+-// engine does not register) on an instance; and an unknown top-level key.
+-// The older and newer documents are derived from this build's own encoding
+-// of it (the version set, then through bytes), never hand-written, so they
+-// cannot drift from the codec's JSON contract.
++// The fixture is `support/schema_fixture.dart`'s: every stored field an
++// 8 -> 9 read could drop sits off its default there. The older and newer
++// documents are derived from this build's own encoding of it (the version
++// set, then through bytes), never hand-written, so they cannot drift from the
++// codec's JSON contract.
+ import 'dart:convert';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+-import 'package:jet_cad_2d/testing.dart';
+ import 'package:test/test.dart';
+ 
+-/// The type id of the planner's table data, unknown to this engine.
+-const tableDataType = 'jetcad.table_data';
+-
+-/// The unknown top-level key the fixture carries.
+-const unknownKey = 'jetcad.hostNotes';
+-
+-DraftDocument fixture(TextMeasurer measurer) {
+-  final doc = generateDocument(400,
+-      definitionCount: 6,
+-      instanceCount: 12,
+-      nestingDepth: 2,
+-      mirroredFraction: 0.3,
+-      nonUniformFraction: 0.3,
+-      groupCount: 2,
+-      layerCount: 3,
+-      dashedFraction: 0.2,
+-      labelFraction: 0.05,
+-      attributedInstanceFraction: 0.5,
+-      measurer: measurer);
+-  PageComponent.register(doc.components);
+-  doc.commands.execute(SetComponentCommand<PageComponent>(
+-      doc.rootHandle,
+-      PageComponent(
+-          scaleDenominator: 20,
+-          originX: -4180.5,
+-          originY: 2645.25,
+-          displayUnit: DisplayUnit.centimeters,
+-          decimalSeparator: DecimalSeparator.comma)));
+-
+-  final layers = doc.tables.layers.records.toList();
+-  // layer_1 hidden, layer_2 (made current below) locked; both translucent.
+-  doc.commands.execute(SetLayerCommand.restore(
+-      layers[1].copyWith(transparency: 60, visible: false)));
+-  doc.commands.execute(SetLayerCommand.restore(
+-      layers[2].copyWith(transparency: 25, locked: true)));
+-  doc.header
+-    ..currentLayer = layers[2].handle
+-    ..units = DrawingUnits.millimeters
+-    ..scale = 0.05
+-    ..globalLinetypeScale = 2.5
+-    ..importedExtents = const Aabb2.raw(-1250.5, -730.25, 98000.75, 41000.5)
+-    // Out of order: the header writes them sorted.
+-    ..customVariables['\$ZETA'] = 7
+-    ..customVariables['\$ALPHA'] = 'kept';
+-
+-  final instance = doc.tree.nodes.whereType<InstanceNode>().first.handle;
+-  doc.rawData.set(instance, SourceKind.dxf, {
+-    'groupCodes': [1001, 'ACAD', 1070, 3],
+-  });
+-  doc.components.attachUnknown(instance, {
+-    'typeId': tableDataType,
+-    'data': {'id': 'T-12', 'seats': 4},
+-  });
+-  doc.unknownDocumentFields[unknownKey] = {'by': 'a newer build', 'n': 3};
+-  return doc;
+-}
+-
+-/// [encoding] (this build's) with `schemaVersion` set to [version], as the
+-/// bytes of a file.
+-String withVersion(String encoding, int version) {
+-  final json = jsonDecode(encoding) as Map<String, Object?>;
+-  json['schemaVersion'] = version;
+-  return jsonEncode(json);
+-}
++import 'support/schema_fixture.dart';
+ 
+ void main() {
+-  test('S9-1 this build writes schema 9, first, in every encoding', () {
+-    expect(kSchemaVersion, 9);
++  test('S9-1 this build writes schema 10, first, in every encoding', () {
++    expect(kSchemaVersion, 10);
+     final doc = fixture(MetricModelMeasurer());
+     final encoding = DraftDocumentCodec.encodeToString(doc);
+     final json = jsonDecode(encoding) as Map<String, Object?>;
+-    expect(json['schemaVersion'], 9);
++    expect(json['schemaVersion'], 10);
+     expect(json.keys.first, 'schemaVersion');
+     final empty = DraftDocumentCodec.encode(DraftDocument.empty());
+-    expect(empty['schemaVersion'], 9,
+-        reason: 'an empty document is written at 9 as well');
++    expect(empty['schemaVersion'], 10,
++        reason: 'an empty document is written at 10 as well');
+     expect(empty.keys.first, 'schemaVersion', reason: 'and first, as well');
+   });
+ 
+   test(
+       'S9-2 an 8 document loads unchanged, drawing and all, and saves to '
+-      'the 9 bytes this build wrote (the migration is empty)', () {
++      'the 10 bytes this build wrote (the migration is empty)', () {
+     final measurer = MetricModelMeasurer();
+     final doc = fixture(measurer);
+     final nine = DraftDocumentCodec.encodeToString(doc);
+     final eight = withVersion(nine, 8);
+     // Premise: what an 8 -> 9 read could drop is in the file, off its
+     // default, so dropping it changes a byte.
+     final json = jsonDecode(nine) as Map<String, Object?>;
+     final header = json['header']! as Map<String, Object?>;
+     expect(header['globalLinetypeScale'], 2.5, reason: 'premise');
+     expect(header['scale'], 0.05, reason: 'premise');
+@@ -159,31 +88,31 @@ void main() {
+       }
+     }
+     expect(loaded.extents.minX, doc.extents.minX);
+     expect(loaded.extents.minY, doc.extents.minY);
+     expect(loaded.extents.maxX, doc.extents.maxX);
+     expect(loaded.extents.maxY, doc.extents.maxY);
+     expect(loaded.components.get<PageComponent>(loaded.rootHandle),
+         doc.components.get<PageComponent>(doc.rootHandle));
+     expect(loaded.header.currentLayer, doc.header.currentLayer);
+ 
+-    // Saved again, it is the 9 file this build wrote, byte for byte.
++    // Saved again, it is the 10 file this build writes, byte for byte.
+     expect(DraftDocumentCodec.encodeToString(loaded), nine);
+   });
+ 
+   test(
+-      'S9-3 a 10 document is refused by its version, and the error names '
+-      '10 and 9', () {
+-    final ten = withVersion(
+-        DraftDocumentCodec.encodeToString(fixture(MetricModelMeasurer())), 10);
++      'S9-3 an 11 document is refused by its version, and the error names '
++      '11 and 10', () {
++    final eleven = withVersion(
++        DraftDocumentCodec.encodeToString(fixture(MetricModelMeasurer())), 11);
+     expect(
+-        () => DraftDocumentCodec.decodeString(ten,
++        () => DraftDocumentCodec.decodeString(eleven,
+             registerComponents: PageComponent.register),
+         throwsA(isA<SchemaVersionError>()
+-            .having((e) => e.found, 'found', 10)
++            .having((e) => e.found, 'found', 11)
+             .having(
+                 (e) => e.toString(),
+                 'toString',
+-                allOf(contains('unsupported schemaVersion 10'),
+-                    contains('this build writes 9')))));
++                allOf(contains('unsupported schemaVersion 11'),
++                    contains('this build writes 10')))));
+   });
+ }
+diff --git a/packages/jet_cad_2d/test/codec/support/schema_fixture.dart b/packages/jet_cad_2d/test/codec/support/schema_fixture.dart
+new file mode 100644
+index 00000000..6ab007af
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/support/schema_fixture.dart
+@@ -0,0 +1,82 @@
++// The schema tests' shared fixture (moved unchanged out of
++// `schema_9_test.dart`; `schema_10_test.dart` reads it too).
++//
++// The fixture is not the default document: instances nested, mirrored and
++// scaled non-uniformly, groups, three layers, dashed linetypes, room labels
++// and attributes measured by a real model, the current layer off layer 0,
++// and a comma page in centimetres at 1:20 with its origin off zero. Every
++// stored field a read of an older document could drop sits off its default:
++// the header's units, scale, linetype scale, imported extents and custom
++// variables; a hidden layer and a locked one, both with a transparency; a
++// raw-data entry; an unknown component (the planner's `jetcad.table_data`,
++// which this engine does not register) on an instance; and an unknown
++// top-level key.
++import 'dart:convert';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d/testing.dart';
++
++/// The type id of the planner's table data, unknown to this engine.
++const tableDataType = 'jetcad.table_data';
++
++/// The unknown top-level key the fixture carries.
++const unknownKey = 'jetcad.hostNotes';
++
++DraftDocument fixture(TextMeasurer measurer) {
++  final doc = generateDocument(400,
++      definitionCount: 6,
++      instanceCount: 12,
++      nestingDepth: 2,
++      mirroredFraction: 0.3,
++      nonUniformFraction: 0.3,
++      groupCount: 2,
++      layerCount: 3,
++      dashedFraction: 0.2,
++      labelFraction: 0.05,
++      attributedInstanceFraction: 0.5,
++      measurer: measurer);
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      PageComponent(
++          scaleDenominator: 20,
++          originX: -4180.5,
++          originY: 2645.25,
++          displayUnit: DisplayUnit.centimeters,
++          decimalSeparator: DecimalSeparator.comma)));
++
++  final layers = doc.tables.layers.records.toList();
++  // layer_1 hidden, layer_2 (made current below) locked; both translucent.
++  doc.commands.execute(SetLayerCommand.restore(
++      layers[1].copyWith(transparency: 60, visible: false)));
++  doc.commands.execute(SetLayerCommand.restore(
++      layers[2].copyWith(transparency: 25, locked: true)));
++  doc.header
++    ..currentLayer = layers[2].handle
++    ..units = DrawingUnits.millimeters
++    ..scale = 0.05
++    ..globalLinetypeScale = 2.5
++    ..importedExtents = const Aabb2.raw(-1250.5, -730.25, 98000.75, 41000.5)
++    // Out of order: the header writes them sorted.
++    ..customVariables['\$ZETA'] = 7
++    ..customVariables['\$ALPHA'] = 'kept';
++
++  final instance = doc.tree.nodes.whereType<InstanceNode>().first.handle;
++  doc.rawData.set(instance, SourceKind.dxf, {
++    'groupCodes': [1001, 'ACAD', 1070, 3],
++  });
++  doc.components.attachUnknown(instance, {
++    'typeId': tableDataType,
++    'data': {'id': 'T-12', 'seats': 4},
++  });
++  doc.unknownDocumentFields[unknownKey] = {'by': 'a newer build', 'n': 3};
++  return doc;
++}
++
++/// [encoding] (this build's) with `schemaVersion` set to [version], as the
++/// bytes of a file.
++String withVersion(String encoding, int version) {
++  final json = jsonDecode(encoding) as Map<String, Object?>;
++  json['schemaVersion'] = version;
++  return jsonEncode(json);
++}
+diff --git a/packages/jet_cad_2d/test/document/layer_header_test.dart b/packages/jet_cad_2d/test/document/layer_header_test.dart
+index dbe96353..8e67bdd5 100644
+--- a/packages/jet_cad_2d/test/document/layer_header_test.dart
++++ b/packages/jet_cad_2d/test/document/layer_header_test.dart
+@@ -88,30 +88,31 @@ void main() {
+       f.doc.header.currentLayer = f.a;
+       final json = DraftDocumentCodec.encode(f.doc);
+       _headerOf(json).remove('currentLayer');
+       json['schemaVersion'] = 6;
+       final loaded = DraftDocumentCodec.decode(
+           _json(jsonEncode(json))); // through bytes, as a file would be
+       expect(loaded.header.currentLayer, ReservedHandles.layerZero);
+       expect(loaded.tables.layers[f.a]!.name, 'A');
+     });
+ 
+-    test('this build writes schema 9, reads 7, and refuses the next one', () {
++    test('this build writes schema 10, reads 7, and refuses the next one', () {
+       // Plan Q0 Task 1: writes 8 since the page gained decimalSeparator; the
+       // literal-7 read below stays a v7 read.
+       // Slice 2 Task 1: writes 9 (E-9); the literal-7 read is unchanged.
+-      expect(kSchemaVersion, 9);
++      // Plan colours Slice 1 Task 2: writes 10 (PC-2).
++      expect(kSchemaVersion, 10);
+       // B: a current layer that is neither layer 0 nor the first added.
+       final f = _Fixture();
+       f.doc.header.currentLayer = f.b;
+       final json = DraftDocumentCodec.encode(f.doc);
+-      expect(json['schemaVersion'], 9);
++      expect(json['schemaVersion'], 10);
+       // A literal 7 file loads: a build that still writes 6 would refuse it.
+       final v7 = _json(jsonEncode(json))..['schemaVersion'] = 7;
+       expect(DraftDocumentCodec.decode(v7).header.currentLayer, f.b);
+       final future = _json(jsonEncode(json))
+         ..['schemaVersion'] = kSchemaVersion + 1;
+       expect(() => DraftDocumentCodec.decode(future),
+           throwsA(isA<SchemaVersionError>()));
+     });
+ 
+     test(
+diff --git a/packages/jet_cad_2d/test/testing/generate_document_test.dart b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+index 73a0417e..e3504bbe 100644
+--- a/packages/jet_cad_2d/test/testing/generate_document_test.dart
++++ b/packages/jet_cad_2d/test/testing/generate_document_test.dart
+@@ -63,20 +63,24 @@ void main() {
+     // were NOT re-baselined: Task 1 ran in a Linux container, which cannot
+     // compute them. Re-baseline owed on macOS.
+     //
+     // Plan Q0 Task 1: kSchemaVersion moved from 7 to 8 (PageComponent gained
+     // `decimalSeparator`; the generated document has no page, so only the
+     // version shifts both values). Not re-baselined either: owed on macOS.
+     //
+     // Slice 2 Task 1 (host embedding API): kSchemaVersion moved from 8 to 9
+     // (no new field; the generated document carries no table data, so only
+     // the version shifts both values). Not re-baselined either: owed on macOS.
++    //
++    // Plan colours Slice 1 Task 2: kSchemaVersion moved from 9 to 10 (PC-2; no
++    // new field the engine reads, so only the version shifts both values).
++    // Not re-baselined either: owed on macOS.
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+         1593811103237081036);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+         -4104570370941889723);
+   });
+ 
+   test('defaults reproduce the Plan 2 corpus structurally too', () {
+     // The fingerprint says "unchanged" but not "unchanged in what way". This
+     // names the properties the extensions must each leave alone, so a failure
+     // says which one moved.
+@@ -253,21 +257,21 @@ void main() {
+     // from 5 to 6.
+     //
+     // Plan 12b Task 1: not re-baselined, in step with the sibling test above
+     // (header key `currentLayer`, kSchemaVersion 6 to 7; macOS values, owed
+     // on macOS).
+     //
+     // Plan Q0 Task 1: not re-baselined, in step with the sibling test above
+     // (kSchemaVersion 7 to 8; owed on macOS).
+     //
+     // Slice 2 Task 1 (host embedding API): not re-baselined, in step with the
+-    // sibling test above (kSchemaVersion 8 to 9; owed on macOS).
++    // sibling test above (kSchemaVersion 8 to 9 to 10; owed on macOS).
+     expect(fingerprint(generateDocument(2000, definitionCount: 20)),
+         1593811103237081036);
+     expect(fingerprint(generateDocument(20000, definitionCount: 20)),
+         -4104570370941889723);
+   });
+ 
+   test('labelFraction produces repeating strings out of the root budget', () {
+     final doc =
+         generateDocument(2000, definitionCount: 20, labelFraction: 0.05);
+     final labels = <String>{};
+diff --git a/packages/jet_cad_floor_plan/test/host/controller_test.dart b/packages/jet_cad_floor_plan/test/host/controller_test.dart
+index f3d7ca72..41f4ad72 100644
+--- a/packages/jet_cad_floor_plan/test/host/controller_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/controller_test.dart
+@@ -949,92 +949,93 @@ void main() {
+     await tester.pump();
+     expect(x(), closeTo(designed.x + 750, 1e-12 * designed.x.abs()));
+     expect(y(), closeTo(designed.y - 250, 1e-12 * designed.y.abs()));
+ 
+     c.setMode(FloorPlanMode.design);
+     await tester.pump();
+     expect(x(), closeTo(designed.x, 1e-12 * designed.x.abs()));
+     expect(y(), closeTo(designed.y, 1e-12 * designed.y.abs()));
+   });
+ 
+-  // Host embedding API spec E-9 (Slice 2 plan, Task 1): schema 9. The
+-  // older and newer plans are derived from this build's own encoding of the
+-  // embedding fixture (the version set, then through bytes).
++  // Host embedding API spec E-9 (Slice 2 plan, Task 1): schema 9; schema 10
++  // since plan colours (PC-2). The older and newer plans are derived from this
++  // build's own encoding of the embedding fixture (the version set, then
++  // through bytes).
+ 
+-  group('schema 9 (E-9)', () {
++  group('schema 9 (E-9), 10 since plan colours', () {
+     String withVersion(String encoding, int version) {
+       final json = jsonDecode(encoding) as Map<String, Object?>;
+       json['schemaVersion'] = version;
+       return jsonEncode(json);
+     }
+ 
+     int versionOf(String encoding) =>
+         (jsonDecode(encoding) as Map<String, Object?>)['schemaVersion']! as int;
+ 
+-    testWidgets('CS1 M-H26a: designJson() of the fixture declares 9',
++    testWidgets('CS1 M-H26a: designJson() of the fixture declares 10',
+         (tester) async {
+       final c = controller(tester, embedding.embeddingPlanJson());
+-      expect(versionOf(c.designJson()), 9);
++      expect(versionOf(c.designJson()), 10);
+       drawLine(c);
+-      expect(versionOf(c.designJson()), 9, reason: 'after an edit as well');
++      expect(versionOf(c.designJson()), 10, reason: 'after an edit as well');
+     });
+ 
+     testWidgets(
+         'CS2 M-H26b: an 8 plan opens unchanged through the constructor and '
+-        'load, and saves to the 9 bytes, tables and all', (tester) async {
+-      final nine = embedding.embeddingPlanJson();
+-      final eight = withVersion(nine, 8);
++        'load, and saves to the 10 bytes, tables and all', (tester) async {
++      final ten = embedding.embeddingPlanJson();
++      final eight = withVersion(ten, 8);
+       expect(versionOf(eight), 8, reason: 'premise: the file declares 8');
+-      expect(eight, isNot(nine), reason: 'premise');
+-      final reference = controller(tester, nine);
++      expect(eight, isNot(ten), reason: 'premise');
++      final reference = controller(tester, ten);
+       final details = reference.tableDetails;
+       expect(details, hasLength(embedding.embeddingTables.length),
+           reason: 'premise: the fixture\'s tables');
+ 
+       final built = controller(tester, eight);
+       expect(built.tableDetails, details);
+-      expect(built.designJson(), nine);
++      expect(built.designJson(), ten);
+ 
+       final loaded = controller(tester, planJson());
+       loaded.load(eight);
+       expect(loaded.tableDetails, details);
+-      expect(loaded.designJson(), nine);
++      expect(loaded.designJson(), ten);
+       expect(loaded.designJson(), reference.designJson());
+     });
+ 
+     testWidgets(
+-        'CS3 a 10 plan is refused by load and the constructor, saying why, '
++        'CS3 an 11 plan is refused by load and the constructor, saying why, '
+         'and the plan is left as it was', (tester) async {
+-      final ten = withVersion(embedding.embeddingPlanJson(), 10);
++      final eleven = withVersion(embedding.embeddingPlanJson(), 11);
+       final refusal = isA<FormatException>().having(
+           (e) => e.message,
+           'message',
+           allOf(
+               startsWith('Not a floor plan: '),
+-              contains('unsupported schemaVersion 10'),
+-              contains('this build writes 9')));
++              contains('unsupported schemaVersion 11'),
++              contains('this build writes 10')));
+ 
+       final c = controller(tester, embedding.embeddingPlanJson());
+       drawLine(c);
+       await tester.pump();
+       expect(c.canUndo.value, isTrue, reason: 'premise: an edit');
+       final document = c.activeDocument;
+       final before = c.designJson();
+       final details = c.tableDetails;
+-      expect(() => c.load(ten), throwsA(refusal));
++      expect(() => c.load(eleven), throwsA(refusal));
+       await tester.pump();
+       expect(c.activeDocument, same(document));
+       expect(c.designJson(), before);
+       expect(c.tableDetails, details);
+       expect(c.canUndo.value, isTrue, reason: 'the edit is still undoable');
+ 
+-      expect(() => FloorPlanController(json: ten), throwsA(refusal));
++      expect(() => FloorPlanController(json: eleven), throwsA(refusal));
+     });
+ 
+     testWidgets(
+         'CS4 the service layout\'s format is its own: still version 1, '
+         'with no schemaVersion', (tester) async {
+       final c = controller(tester, embedding.embeddingPlanJson());
+       c.setMode(FloorPlanMode.selection);
+       move(c, '1', 750, -250);
+       await tester.pump();
+       final layout = jsonDecode(c.serviceLayoutJson()!) as Map<String, Object?>;
+diff --git a/packages/jet_cad_floor_plan/test/host/table_data_test.dart b/packages/jet_cad_floor_plan/test/host/table_data_test.dart
+index 3b7cb4ab..fb1cabe5 100644
+--- a/packages/jet_cad_floor_plan/test/host/table_data_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/table_data_test.dart
+@@ -108,21 +108,21 @@ void main() {
+     final c = controller(tester);
+     final third = {'z': 'Ω', key64: value1024, 'a.b-c_9': 'x y.z'};
+     expect(
+         c.setTablesData({
+           '1': hostData(),
+           ' 2 ': {'id': 'bbb'},
+           'L': third,
+         }),
+         isTrue);
+     final saved = c.designJson();
+-    expect(jsonDecode(saved)['schemaVersion'], 9);
++    expect(jsonDecode(saved)['schemaVersion'], 10);
+     expect(dataSection(saved), hasLength(3));
+ 
+     final back = controller(tester, saved);
+     expect(back.designJson(), saved, reason: 'byte for byte');
+     final other = controller(tester);
+     other.load(saved);
+     expect(other.designJson(), saved);
+     for (final r in [c, back, other]) {
+       expect(detailsOf(r, '1').single.data, hostData());
+       expect(detailsOf(r, '1').single.data.keys, ['alpha', 'id', 'zeta']);

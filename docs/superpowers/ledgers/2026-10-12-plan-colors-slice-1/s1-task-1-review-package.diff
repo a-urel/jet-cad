@@ -1,0 +1,654 @@
+78df3dbc feat(2d): the planner stamps colour and transparency on a matched child
+ .../lib/src/document/layer_commands.dart           |  42 ++++++
+ .../lib/src/parametric/parametric_system.dart      |  40 +++---
+ .../lib/src/parametric/regeneration.dart           |  28 +++-
+ .../test/parametric/attributes_test.dart           |  32 +++--
+ .../test/parametric/style_stamp_test.dart          | 156 +++++++++++++++++++++
+ .../test/parametric/support/clients.dart           |  65 +++++++++
+ 6 files changed, 332 insertions(+), 31 deletions(-)
+diff --git a/packages/jet_cad_2d/lib/src/document/layer_commands.dart b/packages/jet_cad_2d/lib/src/document/layer_commands.dart
+index 203df503..c5f7cb8c 100644
+--- a/packages/jet_cad_2d/lib/src/document/layer_commands.dart
++++ b/packages/jet_cad_2d/lib/src/document/layer_commands.dart
+@@ -460,20 +460,62 @@ class SetEntityLayerCommand extends DraftCommand {
+     final record = target.entities.read(slot);
+     target.entities.replace(slot, record.copyWith(layer: layer));
+     target.invalidateDerived();
+     return CommandResult(
+       inverse: SetEntityLayerCommand.restore(entity, record.layer),
+       touched: {entity},
+     );
+   }
+ }
+ 
++/// Sets one entity's colour and transparency (plan colours spec PC-3a):
++/// the parametric planner's stamp on a matched child whose stored style
++/// differs from what its object generates. Its inverse restores the old
++/// values exactly. The capability split is [SetEntityLayerCommand]'s: a
++/// property edit (`{components}`) that changes pixels (`geometry`).
++///
++/// Only the restore form exists: no user edit sets an entity's style
++/// through it.
++class SetEntityStyleCommand extends DraftCommand {
++  final Handle entity;
++  final DraftColor color;
++  final int transparency;
++
++  SetEntityStyleCommand.restore(this.entity, this.color, this.transparency);
++
++  @override
++  Capability get capability => Capability.geometry;
++
++  @override
++  Set<Capability> get capabilities => const {Capability.components};
++
++  @override
++  String get label => 'Style';
++
++  @override
++  CommandResult apply(CommandTarget target) {
++    final slot = target.entities.slotOf(entity);
++    if (slot == null) {
++      throw StateError('no entity with handle ${entity.toHex()}');
++    }
++    final record = target.entities.read(slot);
++    target.entities.replace(
++        slot, record.copyWith(color: color, transparency: transparency));
++    target.invalidateDerived();
++    return CommandResult(
++      inverse: SetEntityStyleCommand.restore(
++          entity, record.color, record.transparency),
++      touched: {entity},
++    );
++  }
++}
++
+ /// Moves one [InstanceNode] to [layer] (spec 12b D1). Its inverse restores
+ /// the old layer exactly. The capability split is [SetEntityLayerCommand]'s.
+ class SetInstanceLayerCommand extends DraftCommand {
+   final Handle node;
+   final Handle layer;
+   final bool _restore;
+ 
+   /// The user form: refuses a missing [layer].
+   SetInstanceLayerCommand(this.node, this.layer) : _restore = false;
+ 
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index a0455167..c782354f 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -188,49 +188,53 @@ enum ReferencePolicy {
+ 
+ /// One generated entity (spec D3), one generated region (spec 07 D8), or
+ /// one generated TEXT (spec 10 D12).
+ ///
+ /// The plain form is never a fill: a fill's payload is a reference to its
+ /// boundary, not geometry, and `SetEntityGeometryCommand` refuses it. A
+ /// filled area is generated with [Generated.region] instead. Nor is it a
+ /// TEXT or an ATTRIB: a TEXT is generated with [Generated.text], which
+ /// carries its string.
+ ///
+-/// Every record attribute here -- [color], [transparency], [flags],
+-/// [boundaryFlags], [linetype], [lineweight], [textAttrs] and [text] -- is
+-/// written into the record when the child is **added**, and only then
+-/// (spec 10 D13): a regeneration rewrites a matched child's payload in
+-/// place, and a matched TEXT's string (spec 10 D12), and never the rest of
+-/// its record (06 D11). So a client must keep every attribute but a TEXT's
+-/// string fixed for an object's life. Each defaults to what `draftRecord`
+-/// writes: ByLayer, flags 0. `EntityFlags.unpickable` exists (spec 11 D19)
+-/// for a drawn line that must not be picked or snapped to. A fill whose
+-/// boundary is invisible needs neither it nor anything else to stay out of
+-/// picks. Like every attribute, it is written on add only.
++/// Every record attribute here -- [flags], [boundaryFlags], [linetype],
++/// [lineweight], [textAttrs] and [text] -- is written into the record when
++/// the child is **added**, and only then (spec 10 D13): a regeneration
++/// rewrites a matched child's payload in place, and a matched TEXT's string
++/// (spec 10 D12), and never the rest of its record (06 D11). So a client
++/// must keep every attribute but a TEXT's string fixed for an object's
++/// life. Each defaults to what `draftRecord` writes: ByLayer, flags 0.
++/// `EntityFlags.unpickable` exists (spec 11 D19) for a drawn line that must
++/// not be picked or snapped to. A fill whose boundary is invisible needs
++/// neither it nor anything else to stay out of picks. Like every such
++/// attribute, it is written on add only.
+ ///
+-/// **One column is the planner's, not the client's: the layer** (spec 12b
+-/// D2, amending 06 D11 and 10 D13 for that column only). Every child, added
+-/// or matched, is on its object's layer (`objectLayer`: the group's
++/// **Three columns are the planner's, not the client's: the layer** (spec
++/// 12b D2, amending 06 D11 and 10 D13 for that column) **and the colour and
++/// transparency** (plan colours spec PC-3a, for those two). Every child,
++/// added or matched, is on its object's layer (`objectLayer`: the group's
+ /// `ObjectLayer`, or layer 0). An added record is written on it; a matched
+ /// child whose stored layer differs (exact `==`) is moved onto it by a
+ /// `SetEntityLayerCommand.restore` in the plan, a matched region's fill and
+-/// boundary each on its own. A child already on it plans nothing, so an
+-/// edit that leaves layers alone plans no layer command.
++/// boundary each on its own. Likewise a matched child whose stored
++/// [color] or [transparency] differs from the `Generated`'s (exact `==`)
++/// is restamped by a `SetEntityStyleCommand.restore`, a region's fill and
++/// boundary each. A child already in its layer and its style plans nothing,
++/// so an edit that leaves them alone plans no such command.
+ final class Generated {
+   /// Throws `ArgumentError` for [EntityKind.fill] (see the class comment),
+   /// and for [EntityKind.text] and [EntityKind.attrib] (spec 10 D12, R-15):
+   /// a TEXT without its string is exactly the defect 10's research found,
+   /// a label the planner would add empty; an ATTRIB needs a tag nobody
+   /// generates.
+   ///
+-  /// [transparency], [flags], [linetype] and [lineweight] are written on
+-  /// add only (spec 10 D13).
++  /// [flags], [linetype] and [lineweight] are written on add only (spec 10
++  /// D13).
+   Generated(this.kind, this.payload,
+       {this.color = const ByLayerColor(),
+       this.transparency = kByLayer,
+       this.flags = 0,
+       this.linetype = ReservedHandles.byLayerLinetype,
+       this.lineweight = kByLayer})
+       : filled = false,
+         text = '',
+         textAttrs = 0,
+         boundaryFlags = flags {
+diff --git a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+index 60742b1f..feeb491f 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+@@ -473,20 +473,35 @@ bool _samePayload(GeometryPayload a, GeometryPayload b) {
+ /// differs (exact `==`, a stored value), nothing otherwise. The guard is
+ /// load-bearing (R-15): without it every regeneration plans a command and
+ /// every `ParametricEdit` reports `geometry`.
+ void _stampLayer(
+     CommandTarget t, List<DraftCommand> out, Handle c, Handle layer) {
+   if (t.entities.layerAt(t.entities.slotOf(c)!) != layer) {
+     out.add(SetEntityLayerCommand.restore(c, layer));
+   }
+ }
+ 
++/// Plan colours spec PC-3a: the stamp on one **matched** child [c] of its
++/// generated colour and transparency, [g]'s: one
++/// `SetEntityStyleCommand.restore` when the stored colour or transparency
++/// differs (exact `==` on the stored encodings), nothing otherwise. The
++/// guard is load-bearing, as [_stampLayer]'s (12b R-15): an object whose
++/// style did not change plans no command.
++void _stampStyle(
++    CommandTarget t, List<DraftCommand> out, Handle c, Generated g) {
++  final slot = t.entities.slotOf(c)!;
++  if (t.entities.colorAt(slot) != encodeColor(g.color) ||
++      t.entities.transparencyAt(slot) != g.transparency) {
++    out.add(SetEntityStyleCommand.restore(c, g.color, g.transparency));
++  }
++}
++
+ /// The boundary a fill child names: its payload's one scalar (spec 07 D8).
+ Handle _boundaryOf(CommandTarget t, Handle fill) => Handle.checked(t.geometry
+     .peek(t.entities.geomIndexAt(t.entities.slotOf(fill)!))
+     .scalars[0]
+     .toInt());
+ 
+ /// The boundary [fill] names, which must be a live child of [owner], the
+ /// object [fill] belongs to: a loaded file can name any handle (spec 07
+ /// D8). Anything else throws `StateError` from the plan, before anything
+ /// applies, so `_run` rolls the edit back. Every use of a fill's boundary
+@@ -518,22 +533,24 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
+ /// which is not advanced: `AddEntityCommand.apply` raises it when the add
+ /// lands.
+ ///
+ /// Regions (spec 07 D8) are planned before plain children, in generation
+ /// order, so a new object's handles run fill < boundary < later children.
+ /// A fill child and the boundary it names are one region, matched through
+ /// the fill; the boundary is never matched as a plain POLYLINE.
+ ///
+ /// A matched child's payload is rewritten when it differs; a matched
+ /// TEXT's string too (spec 10 D12); then its layer, when it differs from
+-/// the object's ([_stampLayer], spec 12b D2), a matched region's fill and
+-/// boundary each. Every added record comes from [_recordOf], on the
++/// the object's ([_stampLayer], spec 12b D2) and its colour and
++/// transparency when they differ from the generated ones ([_stampStyle],
++/// plan colours spec PC-3a), a matched region's fill and boundary each.
++/// Every added record comes from [_recordOf], on the
+ /// object's layer.
+ ///
+ /// Each object is first asked whether it dissolves (spec 10 D15), with the
+ /// same [view], before its `generate`. A dissolving object is not
+ /// generated: its plan is [_subtreeRemoval] (the select tool's order),
+ /// whose last removal is the object's own node, and that removal takes the
+ /// object's component and its `ObjectLayer` with it (node-components spec
+ /// D-4), so nothing else is planned. The removals are planned commands,
+ /// never in the edit's `touched`, so 06 D6's guard does not see them.
+ List<DraftCommand> _plan(
+@@ -570,20 +587,22 @@ List<DraftCommand> _plan(
+         final boundary = _ownBoundaryOf(t, h, fills[i]);
+         final slot = t.entities.slotOf(boundary)!;
+         // The fill record is never rewritten: rewriting the boundary
+         // re-triangulates the fill (`SetEntityGeometryCommand`).
+         if (!_samePayload(
+             t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
+           out.add(SetEntityGeometryCommand(boundary, g.payload));
+         }
+         _stampLayer(t, out, fills[i], layer);
+         _stampLayer(t, out, boundary, layer);
++        _stampStyle(t, out, fills[i], g);
++        _stampStyle(t, out, boundary, g);
+       } else {
+         // Fill first: `AddRegionCommand` requires the lower handle on it.
+         out.add(AddRegionCommand(
+             fill: _recordOf(
+                 Handle.checked(++reserved), h, EntityKind.fill, g, layer),
+             boundary: _recordOf(
+                 Handle.checked(++reserved), h, EntityKind.polyline, g, layer,
+                 boundary: true),
+             boundaryPayload: g.payload));
+       }
+@@ -595,26 +614,27 @@ List<DraftCommand> _plan(
+       final existing = byKind[g.kind];
+       if (existing != null && i < existing.length) {
+         final slot = t.entities.slotOf(existing[i])!;
+         if (!_samePayload(
+             t.geometry.peek(t.entities.geomIndexAt(slot)), g.payload)) {
+           out.add(SetEntityGeometryCommand(existing[i], g.payload));
+         }
+         // Spec 10 D12: a matched TEXT's string is a stored value, compared
+         // by exact `==` after the payload and rewritten in place when it
+         // differs. Nothing else of the record is read or rewritten: every
+-        // other attribute is fixed at creation, like the colour (06 D11,
+-        // 10 D13).
++        // other attribute but the colour and the transparency (PC-3a) is
++        // fixed at creation (06 D11, 10 D13); the layer is stamped below.
+         if (g.kind == EntityKind.text && t.entities.textAt(slot) != g.text) {
+           out.add(SetEntityTextCommand(existing[i], g.text, ''));
+         }
+         _stampLayer(t, out, existing[i], layer);
++        _stampStyle(t, out, existing[i], g);
+       } else {
+         out.add(AddEntityCommand(
+             record: _recordOf(Handle.checked(++reserved), h, g.kind, g, layer),
+             payload: g.payload));
+       }
+     }
+     // A surplus region is removed through its boundary, whose removal takes
+     // the fill with it; removing the fill alone would orphan the boundary.
+     // The boundary is checked as a matched one is: a malformed load whose
+     // surplus fill names another object's boundary must not remove it.
+diff --git a/packages/jet_cad_2d/test/parametric/attributes_test.dart b/packages/jet_cad_2d/test/parametric/attributes_test.dart
+index 27090c3a..1988f74d 100644
+--- a/packages/jet_cad_2d/test/parametric/attributes_test.dart
++++ b/packages/jet_cad_2d/test/parametric/attributes_test.dart
+@@ -1,12 +1,13 @@
+ // The record attributes a client sets on add (spec 10 D13): written into
+-// each record when the child is added, and never rewritten on a match.
++// each record when the child is added; on a match only the colour and the
++// transparency are rewritten (plan colours spec PC-3a), never the rest.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'support/clients.dart';
+ import 'support/fixture.dart';
+ 
+ EntityRecord recordOf(DraftDocument doc, Handle h) =>
+     doc.entities.read(doc.entities.slotOf(h)!);
+ 
+@@ -58,22 +59,22 @@ Map<String, Object?> expected({
+       'text': text,
+       'tag': '',
+       'textStyle': const Handle(5),
+       'textAttrs': textAttrs,
+     };
+ 
+ void main() {
+   setUp(generateCalls.clear);
+ 
+   test(
+-      'AT1 each record attribute is written on add and none is '
+-      'rewritten on a match; a region\'s boundary flags stand apart from its '
++      'AT1 each record attribute is written on add and on a match only the '
++      'colour and transparency move; a region\'s boundary flags stand apart from its '
+       'fill\'s', () async {
+     // Premises on the literals used below: the reserved handles and the
+     // flag bit are what `expected` spells out.
+     expect(ReservedHandles.layerZero, const Handle(1));
+     expect(ReservedHandles.byLayerLinetype, const Handle(2));
+     expect(ReservedHandles.continuousLinetype, const Handle(4));
+     expect(ReservedHandles.standardTextStyle, const Handle(5));
+     expect(kByLayer, -1);
+     expect(EntityFlags.invisible, 1);
+ 
+@@ -141,49 +142,62 @@ void main() {
+     expect(recordOf(doc, fillB).kind, EntityKind.fill);
+     expect(recordOf(doc, boundaryB).kind, EntityKind.polyline);
+     expect(attrsOf(recordOf(doc, fillB)),
+         expected(transparency: 229, flags: EntityFlags.invisible));
+     expect(attrsOf(recordOf(doc, boundaryB)),
+         expected(transparency: 229, flags: EntityFlags.invisible),
+         reason: 'boundaryFlags defaults to flags');
+     expect(drift(doc), isEmpty);
+ 
+     // A match: moved, alpha 229 -> 100, weight 35 -> 50. Every payload is
+-    // rewritten; every record stays exactly as added, field by field
+-    // (geometry slots included: a rewrite replaces in place).
++    // rewritten; every record stays exactly as added but for the
++    // transparency (PC-3a), field by field (geometry slots included: a
++    // rewrite replaces in place).
+     final records = {for (final k in created) k: recordOf(doc, k)};
+     final beforeMatch = canon(doc);
+     final depth = doc.commands.undoDepth;
+     const s1 = Swatch(-210.75, 95.5, 100, 50);
+     doc.commands.execute(SetComponentCommand<Swatch>(hA, s1));
+     expect(kids(doc, hA), created, reason: 'every child matched in place');
++    // PC-3a: transparency is the planner's column now; the region's two
++    // records and the LINE take s1's alpha (what Swatch generates for
++    // them). The TEXTs carry none (ByLayer), so they stay as added.
++    final restyled = {
++      for (final k in created)
++        k: [fill, boundary, line].contains(k)
++            ? records[k]!.copyWith(transparency: s1.alpha)
++            : records[k]!,
++    };
+     for (final k in created) {
+-      expect(recordOf(doc, k), records[k], reason: '${k.toHex()} as added');
++      expect(recordOf(doc, k), restyled[k],
++          reason: '${k.toHex()}: only the transparency moves');
+     }
++    expect(recordOf(doc, line).lineweight, 35,
++        reason: 'lineweight is still written on add only');
+     expect(payloadOf(doc, boundary), swatchLoop(s1));
+     expect(payloadOf(doc, line), swatchLine(s1));
+     expect(payloadOf(doc, text1), swatchFirstText(s1));
+     expect(payloadOf(doc, text2), swatchSecondText(s1));
+     expect(payloadOf(doc, boundary), isNot(swatchLoop(s0)));
+     expect(doc.commands.undoDepth, depth + 1);
+     expect(drift(doc), isEmpty);
+ 
+     // Only the second TEXT's string changes: the second TEXT is rewritten,
+     // the first is untouched (the i-th generated TEXT matches the i-th
+     // existing one); nothing else of either record moves.
+     const s2 = Swatch(-210.75, 95.5, 100, 50, second: 'Elm');
+     doc.commands.execute(SetComponentCommand<Swatch>(hA, s2));
+     expect(kids(doc, hA), created);
+-    expect(recordOf(doc, text1), records[text1]);
+-    expect(recordOf(doc, text2), records[text2]!.copyWith(text: 'Elm'));
++    expect(recordOf(doc, text1), restyled[text1]);
++    expect(recordOf(doc, text2), restyled[text2]!.copyWith(text: 'Elm'));
+     for (final k in [fill, boundary, line]) {
+-      expect(recordOf(doc, k), records[k]);
++      expect(recordOf(doc, k), restyled[k]);
+     }
+     expect(drift(doc), isEmpty);
+ 
+     doc.commands.undo();
+     doc.commands.undo();
+     expect(canon(doc), beforeMatch);
+     expect(drift(doc), isEmpty);
+     doc.commands.redo();
+     doc.commands.redo();
+     expect(recordOf(doc, text2).text, 'Elm');
+diff --git a/packages/jet_cad_2d/test/parametric/style_stamp_test.dart b/packages/jet_cad_2d/test/parametric/style_stamp_test.dart
+new file mode 100644
+index 00000000..25042fe9
+--- /dev/null
++++ b/packages/jet_cad_2d/test/parametric/style_stamp_test.dart
+@@ -0,0 +1,156 @@
++// Plan colours spec PC-3a: colour and transparency are the planner's
++// columns, as the layer is (12b D2): a matched child whose stored colour or
++// transparency differs from what its object generates (exact ==) is
++// restamped in the same edit; one that does not plans nothing.
++//
++// Fixture: a Dye in a group turned 0.4 rad, 4,000.5 mm off the origin.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/clients.dart';
++import 'support/fixture.dart';
++
++final Transform2 at =
++    Transform2.translation(4000.5, -2500.25).multiply(Transform2.rotation(0.4));
++
++// Teal and purple, as the floor plan's palette has them; a hand literal.
++const int teal = 0x01000000 | 0x00897B; // encodeColor(TrueColor(0x00897B))
++const int purple = 0x01000000 | 0x8E24AA;
++
++EntityRecord rec(DraftDocument d, Handle h) =>
++    d.entities.read(d.entities.slotOf(h)!);
++
++/// Every style command inside [c], compounds and replays opened.
++Iterable<SetEntityStyleCommand> styleCommands(DraftCommand c) sync* {
++  if (c is SetEntityStyleCommand) yield c;
++  if (c is CompoundCommand) {
++    for (final k in c.children) {
++      yield* styleCommands(k);
++    }
++  } else if (c is ParametricReplay) {
++    yield* styleCommands(c.replay);
++  }
++}
++
++/// The style commands [command] plans on [doc]'s copy: a `ParametricEdit`
++/// builds its plan in `apply`, so it is applied on a reload outside the
++/// dispatcher and its inverse read (a `SetEntityStyleCommand`'s inverse is
++/// one too), as `object_layer_test.dart`'s `planOnCopy` does.
++List<SetEntityStyleCommand> plannedStyles(
++    DraftDocument doc, DraftCommand Function(DraftDocument copy) command) {
++  final copy = reload(enc(doc));
++  final edit = copy.commands.expander!(command(copy)) as ParametricEdit;
++  final inverse = edit.apply(copy).inverse as ParametricReplay;
++  return styleCommands(inverse.replay).toList();
++}
++
++void main() {
++  setUp(generateCalls.clear);
++
++  test('ST0 premise: the hand literals are encodeColor of the true colours',
++      () {
++    expect(encodeColor(const TrueColor(0x00897B)), teal);
++    expect(encodeColor(const TrueColor(0x8E24AA)), purple);
++  });
++
++  test(
++      'ST1 a recolour restamps the matched fill, boundary and LINE in place: '
++      'same handles, same payloads; undo and redo restore each record', () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, at, const Dye(-120.5, teal, 204)));
++    final children = kids(doc, hA);
++    expect(children, hasLength(3), reason: 'fill, boundary, LINE');
++    final before = {for (final k in children) k: rec(doc, k)};
++    final bytes = canon(doc);
++
++    doc.commands
++        .execute(SetComponentCommand<Dye>(hA, const Dye(-120.5, purple, 153)));
++    expect(kids(doc, hA), children, reason: 'every child matched');
++    for (final k in children) {
++      expect(
++          rec(doc, k),
++          before[k]!
++              .copyWith(color: const TrueColor(0x8E24AA), transparency: 153),
++          reason: '${k.toHex()}: colour and transparency only');
++    }
++
++    doc.commands.undo();
++    expect(canon(doc), bytes);
++    doc.commands.redo();
++    for (final k in children) {
++      expect(rec(doc, k).color, const TrueColor(0x8E24AA));
++      expect(rec(doc, k).transparency, 153);
++    }
++  });
++
++  test(
++      'ST2 the guard: an edit that leaves the style alone plans no style '
++      'command (a move of the Dye; an edit of another object)', () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, at, const Dye(-120.5, teal, 204)));
++    doc.commands.execute(create(doc, hB, atB, const ClipRect(400, 900)));
++    expect(
++        plannedStyles(doc,
++            (_) => SetComponentCommand<Dye>(hA, const Dye(75.25, teal, 204))),
++        isEmpty,
++        reason: 'a move plans none');
++    expect(
++        plannedStyles(
++            doc,
++            (_) =>
++                SetComponentCommand<ClipRect>(hB, const ClipRect(410.5, 900))),
++        isEmpty,
++        reason: 'another object plans none');
++    expect(
++        plannedStyles(
++            doc,
++            (_) =>
++                SetComponentCommand<Dye>(hA, const Dye(-120.5, purple, 204))),
++        hasLength(3),
++        reason: 'premise: a recolour plans one per child');
++    expect(ParametricSystem(doc, catalog).drift(), isEmpty);
++  });
++
++  test('ST3 a transparency change alone is stamped; so is a colour alone', () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, at, const Dye(-120.5, teal, 204)));
++    doc.commands
++        .execute(SetComponentCommand<Dye>(hA, const Dye(-120.5, teal, 51)));
++    for (final k in kids(doc, hA)) {
++      expect(rec(doc, k).transparency, 51);
++      expect(rec(doc, k).color, const TrueColor(0x00897B));
++    }
++    doc.commands
++        .execute(SetComponentCommand<Dye>(hA, const Dye(-120.5, purple, 51)));
++    for (final k in kids(doc, hA)) {
++      expect(rec(doc, k).transparency, 51);
++      expect(rec(doc, k).color, const TrueColor(0x8E24AA));
++    }
++  });
++
++  test(
++      'ST4 SetEntityStyleCommand: sets both, its inverse restores both, its '
++      'capabilities are a property edit, a missing entity throws', () {
++    final doc = DraftDocument.empty();
++    final h = doc.handleSeed.next();
++    doc.commands.execute(AddEntityCommand(
++        record: draftRecord(h, doc.rootHandle, EntityKind.line,
++            layer: ReservedHandles.layerZero),
++        payload: linePayload(Vector2(0.5, 0.5), Vector2(10.5, 3.25))));
++    final cmd =
++        SetEntityStyleCommand.restore(h, const TrueColor(0x00897B), 204);
++    expect(cmd.capability, Capability.geometry);
++    expect(cmd.capabilities, {Capability.components});
++    doc.commands.execute(cmd);
++    expect(rec(doc, h).color, const TrueColor(0x00897B));
++    expect(rec(doc, h).transparency, 204);
++    doc.commands.undo();
++    expect(rec(doc, h).color, const ByLayerColor());
++    expect(rec(doc, h).transparency, kByLayer);
++    expect(
++        () => doc.commands.execute(SetEntityStyleCommand.restore(
++            const Handle(0xFFFF), const ByLayerColor(), kByLayer)),
++        throwsStateError);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/parametric/support/clients.dart b/packages/jet_cad_2d/test/parametric/support/clients.dart
+index ab886a95..c4231714 100644
+--- a/packages/jet_cad_2d/test/parametric/support/clients.dart
++++ b/packages/jet_cad_2d/test/parametric/support/clients.dart
+@@ -751,20 +751,84 @@ final class SwatchType extends ParametricType<Swatch> {
+           linetype: ReservedHandles.continuousLinetype,
+           lineweight: p.weight),
+       Generated.text(swatchFirstText(p), p.first,
+           textAttrs: Swatch.firstAttrs, flags: EntityFlags.invisible),
+       Generated.text(swatchSecondText(p), p.second,
+           textAttrs: Swatch.secondAttrs),
+     ];
+   }
+ }
+ 
++/// A client whose colour and transparency are parameters (plan colours
++/// spec PC-3a): one region (its fill and boundary) and one LINE, both in
++/// [color] (an encoded `DraftColor`) at [alpha]. [x] moves both, so an
++/// edit can match every child without a style change.
++final class Dye implements Component {
++  const Dye(this.x, this.color, this.alpha);
++  static const String id = 'test.dye';
++  final double x;
++
++  /// `encodeColor` of the children's colour.
++  final int color;
++  final int alpha;
++  @override
++  String get typeId => id;
++  @override
++  Map<String, Object?> toJson() => {'x': x, 'color': color, 'alpha': alpha};
++  static Dye fromJson(Map<String, Object?> j) =>
++      Dye((j['x']! as num).toDouble(), j['color']! as int, j['alpha']! as int);
++  @override
++  bool operator ==(Object o) =>
++      o is Dye && o.x == x && o.color == color && o.alpha == alpha;
++  @override
++  int get hashCode => Object.hash(x, color, alpha);
++}
++
++GeometryPayload dyeLoop(Dye p) => polylinePayload([
++      Vector2(p.x, 10.5),
++      Vector2(p.x + 300.25, 10.5),
++      Vector2(p.x + 300.25, 210.75),
++      Vector2(p.x, 210.75),
++    ], closed: true);
++
++GeometryPayload dyeLine(Dye p) =>
++    linePayload(Vector2(p.x, 10.5), Vector2(p.x + 300.25, 210.75));
++
++final class DyeType extends ParametricType<Dye> {
++  const DyeType();
++  @override
++  Capability get editCapability => Capability.geometry;
++  @override
++  Aabb2 reach(Dye params, Transform2 toWorld) => Aabb2.fromPoints([
++        for (final (dx, dy) in const [
++          (0.0, 10.5),
++          (300.25, 10.5),
++          (300.25, 210.75),
++          (0.0, 210.75)
++        ])
++          toWorld.transformPoint(Vector2(params.x + dx, dy)),
++      ]);
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    _counted(self);
++    final p = view.paramsOf<Dye>(self)!;
++    final c = decodeColor(p.color);
++    return [
++      Generated.region(dyeLoop(p),
++          color: c,
++          transparency: p.alpha,
++          boundaryFlags: EntityFlags.invisible),
++      Generated(EntityKind.line, dyeLine(p), color: c, transparency: p.alpha),
++    ];
++  }
++}
++
+ /// A 1 mm box centred on ([x], [y]) in an object's local space, in world:
+ /// the reach of the page-key clients, which never reaches a neighbour's in
+ /// the page tests.
+ Aabb2 dotReach(double x, double y, Transform2 toWorld) => Aabb2.fromPoints([
+       for (final (dx, dy) in const [(-.5, -.5), (.5, -.5), (.5, .5), (-.5, .5)])
+         toWorld.transformPoint(Vector2(x + dx, y + dy)),
+     ]);
+ 
+ /// A page-key client keyed on the page's scale (spec 10 D14, Ruling 10-2):
+ /// one LINE from ([x], [y]) along its own local x axis, `10 x` the scale
+@@ -1303,17 +1367,18 @@ ParametricCatalog testCatalog() => ParametricCatalog()
+       const RectType<SoftRect>(Capability.components))
+   ..register<Trip>(Trip.id, Trip.fromJson, const TripType())
+   ..register<Hinge>(Hinge.id, Hinge.fromJson, const HingeType())
+   ..register<RegionRect>(
+       RegionRect.id, RegionRect.fromJson, const RegionRectType())
+   ..register<Post>(Post.id, Post.fromJson, const PostType())
+   ..register<Pin>(Pin.id, Pin.fromJson, const PinType())
+   ..register<Tag>(Tag.id, Tag.fromJson, const TagType())
+   ..register<Caption>(Caption.id, Caption.fromJson, const CaptionType())
+   ..register<Swatch>(Swatch.id, Swatch.fromJson, const SwatchType())
++  ..register<Dye>(Dye.id, Dye.fromJson, const DyeType())
+   ..register<Gauge>(Gauge.id, Gauge.fromJson, const GaugeType())
+   ..register<Dial>(Dial.id, Dial.fromJson, const DialType())
+   ..register<Fuse>(Fuse.id, Fuse.fromJson, const FuseType())
+   ..register<Slab>(Slab.id, Slab.fromJson, const SlabType())
+   ..register<Rod>(Rod.id, Rod.fromJson, const RodType())
+   ..register<Lens>(Lens.id, Lens.fromJson, const LensType())
+   ..register<Whisker>(Whisker.id, Whisker.fromJson, const WhiskerType());
