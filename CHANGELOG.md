@@ -8,7 +8,21 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-Plan colours (two slices, released together as 0.6.0).
+Nothing yet.
+
+## 0.6.0
+
+Plan colours: a room or a table takes one of eight hues, set in the
+editor's Colour row (and, for tables, by the host), saved with the plan,
+drawn on screen, exported and printed. **Plans are stored differently:
+schema 10**, which 0.5.1 and every older release refuse, so every
+terminal that shares stored plans moves to 0.6.0 together; a 0.5.1 (or
+older) plan opens here unchanged. Service layouts are unchanged. Two
+changes can break a host's own code: a class that implements or
+directly extends `FloorPlanStrings` gains four members (below), and a
+`tablesOnly` or `readOnly` editor now shows the Colour row for a
+selected table. The packages need Flutter 3.44 or later, as 0.5.1 did;
+0.6.0 was built and tested with Flutter 3.47.6.
 
 - **Plans are now saved at schema 10.** A 0.5.1 (or older) build refuses
   a plan this release saves (`load` throws a `FormatException` naming

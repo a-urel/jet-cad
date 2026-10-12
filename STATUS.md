@@ -406,9 +406,15 @@ reviewed on `feat/plan-colors-slice-2` (plan
 [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
 spec
 [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md));
-its ledger lives in `.superpowers/sdd/2026-10-12-plan-colors-slice-2/` and
-is archived onto the branch before the merge. After the merge: release
-0.6.0.
+its ledger is archived onto the branch
+(`docs/superpowers/ledgers/2026-10-12-plan-colors-slice-2/`). **Release
+0.6.0 is prepared on `release/0.6.0`** (worktree
+`.claude/worktrees/release-0.6.0`), cut from `feat/plan-colors-slice-2` at
+`752eace` while the human slept (2026-10-12, *"otomatik devam et"*): the
+five packages at 0.6.0, the CHANGELOG's Unreleased section become 0.6.0,
+the guide covering 0.6.0 with §1's placeholder ref (filled by the commit
+after the merge). Merging `release/0.6.0` into `main` brings Slice 2 with
+it; on the human's word, then the human tags `v0.6.0` at the merge.
 
 The released line: 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
