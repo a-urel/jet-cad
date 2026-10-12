@@ -9,6 +9,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show PaperPalette;
 
+/// A table colour fill's alpha when the theme leaves
+/// [FloorPlanTheme.tableColorOpacity] null (plan colours spec PC-6).
+const double kTableColorOpacity = 0.35;
+
 /// The planner's look (host embedding API spec T-1): the colours, widths
 /// and styles a host may set. Every field is optional, and null is
 /// today's value, so `const FloorPlanTheme()` draws exactly what a view
@@ -25,6 +29,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   const FloorPlanTheme({
     this.statusCaptionStyle,
     this.statusFillOpacity,
+    this.tableColorOpacity,
     this.groupFrameColor,
     this.groupFrameWidth,
     this.groupFrameMargin,
@@ -51,6 +56,10 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   /// The selection mode's status fills: multiplies the host colour's alpha,
   /// once, in [0, 1]. Null: the colour as the host gave it.
   final double? statusFillOpacity;
+
+  /// Both modes' table colour fills (plan colours spec PC-6): the hue's
+  /// alpha, in [0, 1]. Null: 0.35.
+  final double? tableColorOpacity;
 
   /// The selection mode's group frames. Null: the paper's grip colour.
   final Color? groupFrameColor;
@@ -117,6 +126,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   FloorPlanTheme copyWith({
     TextStyle? statusCaptionStyle,
     double? statusFillOpacity,
+    double? tableColorOpacity,
     Color? groupFrameColor,
     double? groupFrameWidth,
     double? groupFrameMargin,
@@ -135,6 +145,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
       FloorPlanTheme(
         statusCaptionStyle: statusCaptionStyle ?? this.statusCaptionStyle,
         statusFillOpacity: statusFillOpacity ?? this.statusFillOpacity,
+        tableColorOpacity: tableColorOpacity ?? this.tableColorOpacity,
         groupFrameColor: groupFrameColor ?? this.groupFrameColor,
         groupFrameWidth: groupFrameWidth ?? this.groupFrameWidth,
         groupFrameMargin: groupFrameMargin ?? this.groupFrameMargin,
@@ -162,6 +173,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
       statusCaptionStyle:
           _mergeStyle(statusCaptionStyle, other.statusCaptionStyle),
       statusFillOpacity: other.statusFillOpacity ?? statusFillOpacity,
+      tableColorOpacity: other.tableColorOpacity ?? tableColorOpacity,
       groupFrameColor: other.groupFrameColor ?? groupFrameColor,
       groupFrameWidth: other.groupFrameWidth ?? groupFrameWidth,
       groupFrameMargin: other.groupFrameMargin ?? groupFrameMargin,
@@ -210,6 +222,8 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
           _lerp(statusCaptionStyle, other.statusCaptionStyle, t, _lerpStyle),
       statusFillOpacity:
           _lerp(statusFillOpacity, other.statusFillOpacity, t, _lerpBetween),
+      tableColorOpacity:
+          _lerp(tableColorOpacity, other.tableColorOpacity, t, _lerpBetween),
       groupFrameColor:
           _lerp(groupFrameColor, other.groupFrameColor, t, Color.lerp),
       groupFrameWidth:
@@ -279,6 +293,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
       other is FloorPlanTheme &&
       other.statusCaptionStyle == statusCaptionStyle &&
       other.statusFillOpacity == statusFillOpacity &&
+      other.tableColorOpacity == tableColorOpacity &&
       other.groupFrameColor == groupFrameColor &&
       other.groupFrameWidth == groupFrameWidth &&
       other.groupFrameMargin == groupFrameMargin &&
@@ -298,6 +313,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   int get hashCode => Object.hash(
         statusCaptionStyle,
         statusFillOpacity,
+        tableColorOpacity,
         groupFrameColor,
         groupFrameWidth,
         groupFrameMargin,
@@ -318,6 +334,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   Map<String, Object?> get _fields => {
         'statusCaptionStyle': statusCaptionStyle,
         'statusFillOpacity': statusFillOpacity,
+        'tableColorOpacity': tableColorOpacity,
         'groupFrameColor': groupFrameColor,
         'groupFrameWidth': groupFrameWidth,
         'groupFrameMargin': groupFrameMargin,
@@ -378,6 +395,7 @@ void validateFloorPlanTheme(FloorPlanTheme theme) {
 
   style(theme.statusCaptionStyle, 'statusCaptionStyle');
   opacity(theme.statusFillOpacity, 'statusFillOpacity');
+  opacity(theme.tableColorOpacity, 'tableColorOpacity');
   positive(theme.groupFrameWidth, 'groupFrameWidth');
   notNegative(theme.groupFrameMargin, 'groupFrameMargin');
   style(theme.groupChipTextStyle, 'groupChipTextStyle');

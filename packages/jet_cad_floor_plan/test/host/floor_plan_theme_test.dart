@@ -30,6 +30,7 @@ import 'embedding_fixture.dart';
 const FloorPlanTheme fullA = FloorPlanTheme(
   statusCaptionStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
   statusFillOpacity: 0.5,
+  tableColorOpacity: 0.25,
   groupFrameColor: Color(0xFF00897B),
   groupFrameWidth: 3,
   groupFrameMargin: 300,
@@ -51,6 +52,7 @@ const FloorPlanTheme fullB = FloorPlanTheme(
   statusCaptionStyle: TextStyle(
       fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF7CB342)),
   statusFillOpacity: 0.8,
+  tableColorOpacity: 0.6,
   groupFrameColor: Color(0xFF8E24AA),
   groupFrameWidth: 1.5,
   groupFrameMargin: 220,
@@ -96,7 +98,7 @@ Object? _style(Object a, Object b, double t) {
 Object? _insets(Object a, Object b, double t) =>
     EdgeInsets.lerp(a as EdgeInsets, b as EdgeInsets, t);
 
-/// The sixteen fields, in declaration order.
+/// The seventeen fields, in declaration order.
 final List<Field> fields = [
   (
     name: 'statusCaptionStyle',
@@ -108,6 +110,12 @@ final List<Field> fields = [
     name: 'statusFillOpacity',
     get: (t) => t.statusFillOpacity,
     set: (t, v) => t.copyWith(statusFillOpacity: v as double),
+    lerp: _double,
+  ),
+  (
+    name: 'tableColorOpacity',
+    get: (t) => t.tableColorOpacity,
+    set: (t, v) => t.copyWith(tableColorOpacity: v as double),
     lerp: _double,
   ),
   (
@@ -249,6 +257,7 @@ ThemeData darkWith(FloorPlanTheme t) => darkTheme.copyWith(extensions: [t]);
 const FloorPlanTheme edgeA = FloorPlanTheme(
   statusCaptionStyle: TextStyle(fontSize: 1, color: Color(0xFF7CB342)),
   statusFillOpacity: 0.8,
+  tableColorOpacity: 0,
   groupFrameWidth: 0.5,
   groupFrameMargin: 0,
   groupChipTextStyle: TextStyle(fontSize: 16, color: Color(0xFF00ACC1)),
@@ -263,6 +272,7 @@ const FloorPlanTheme edgeA = FloorPlanTheme(
 const FloorPlanTheme edgeB = FloorPlanTheme(
   statusCaptionStyle: TextStyle(fontSize: 14, color: Color(0xFFD81B60)),
   statusFillOpacity: 1,
+  tableColorOpacity: 0.6,
   groupFrameWidth: 3,
   groupFrameMargin: 150,
   groupChipTextStyle: TextStyle(fontSize: 0.5, color: Color(0xFF3949AB)),
@@ -322,8 +332,8 @@ class _ThemeReaderState extends State<ThemeReader> {
 }
 
 void main() {
-  test('the field table names the sixteen fields of a full theme', () {
-    expect(fields, hasLength(16));
+  test('the field table names the seventeen fields of a full theme', () {
+    expect(fields, hasLength(17));
     for (final f in fields) {
       expect(f.get(fullA), isNotNull, reason: f.name);
       expect(f.get(fullB), isNotNull, reason: f.name);
@@ -335,8 +345,8 @@ void main() {
 
   group('merge (T-2, S-3)', () {
     test(
-        'a view setting one field over an ambient setting all sixteen: that '
-        'field the view\'s, the fifteen others the ambient\'s', () {
+        'a view setting one field over an ambient setting all seventeen: '
+        'that field the view\'s, the sixteen others the ambient\'s', () {
       for (final f in fields) {
         final merged = fullB.merge(only(f, fullA));
         for (final g in fields) {
@@ -421,6 +431,7 @@ void main() {
       }
       // An overshoot stops at the end it passes.
       expect(edgeA.lerp(edgeB, 1.2).statusFillOpacity, 1.0);
+      expect(edgeB.lerp(edgeA, 1.2).tableColorOpacity, 0.0);
       expect(edgeB.lerp(edgeA, 1.2).groupChipPadding, EdgeInsets.zero);
       expect(edgeA.lerp(edgeB, -0.2).statusCaptionStyle!.fontSize, 1.0);
     });
@@ -575,6 +586,7 @@ void main() {
       final accepted = <(String, FloorPlanTheme)>[
         for (final v in [0.0, 1.0, 0.35]) ...[
           ('statusFillOpacity', FloorPlanTheme(statusFillOpacity: v)),
+          ('tableColorOpacity', FloorPlanTheme(tableColorOpacity: v)),
           ('focusVeilOpacity', FloorPlanTheme(focusVeilOpacity: v)),
         ],
         ('selectionWidth', const FloorPlanTheme(selectionWidth: 0.5)),
@@ -599,6 +611,7 @@ void main() {
       final refused = <(String, FloorPlanTheme)>[
         for (final v in [-0.01, 1.01, double.nan, double.infinity]) ...[
           ('statusFillOpacity', FloorPlanTheme(statusFillOpacity: v)),
+          ('tableColorOpacity', FloorPlanTheme(tableColorOpacity: v)),
           ('focusVeilOpacity', FloorPlanTheme(focusVeilOpacity: v)),
         ],
         for (final v in [0.0, -1.0, double.infinity, double.nan]) ...[
@@ -653,7 +666,7 @@ void main() {
         }
       }
       // The constructor itself never throws: each refused theme was built.
-      expect(refused, hasLength(4 * 2 + 4 * 5 + 3 * 6));
+      expect(refused, hasLength(4 * 3 + 4 * 5 + 3 * 6));
     });
   });
 
