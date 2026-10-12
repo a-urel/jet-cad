@@ -4,6 +4,7 @@
 //
 // No Flutter import: this file is Dart over `package:jet_cad_2d` only.
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../symbols/seating_component.dart';
 import '../symbols/symbol_component.dart';
@@ -43,6 +44,20 @@ final class TableInfo {
   String toString() => 'TableInfo(${instance.toHex()}, $number, $seats)';
 }
 
+/// Whether [node] is a servable instance: its definition is live and seats
+/// (T1). The survey's rule, shared with [isTable].
+bool _isServable(DraftDocument doc, InstanceNode node) =>
+    doc.tree.definition(node.definition) != null &&
+    doc.components.get<SeatingComponent>(node.definition) != null;
+
+/// Whether [handle] is a live table of [doc]: a root-level servable
+/// instance (T1), the rule [TableSurvey.of] applies. O(1): no survey.
+bool isTable(DraftDocument doc, Handle handle) => switch (doc.tree[handle]) {
+      final InstanceNode node =>
+        node.parent == doc.rootHandle && _isServable(doc, node),
+      _ => false,
+    };
+
 /// The tables and the servable instances that are not tables, in one pass.
 final class TableSurvey {
   TableSurvey._(this.tables, this.nested, this.extraLabels, this._keptData,
@@ -64,8 +79,14 @@ final class TableSurvey {
   /// release does not know (plan colours spec PC-4).
   final Set<Handle> _invalidColor;
 
+  /// How many surveys have run in this isolate: a test hook, so a test can
+  /// pin that a path (a panel's hover rebuild) does not rescan the document.
+  @visibleForTesting
+  static int surveys = 0;
+
   /// O(nodes + entities). At document-change rate, never per frame.
   factory TableSurvey.of(DraftDocument doc) {
+    surveys++;
     final labels = <Handle, List<(Handle, String)>>{};
     final entities = doc.entities;
     for (final slot in entities.liveSlots) {
@@ -82,10 +103,8 @@ final class TableSurvey {
     // `tree.nodes` is ascending by handle (its contract), so both lists
     // are too.
     for (final node in doc.tree.nodes) {
-      if (node is! InstanceNode) continue;
-      if (doc.tree.definition(node.definition) == null) continue;
-      final seating = doc.components.get<SeatingComponent>(node.definition);
-      if (seating == null) continue;
+      if (node is! InstanceNode || !_isServable(doc, node)) continue;
+      final seating = doc.components.get<SeatingComponent>(node.definition)!;
       if (node.parent != doc.rootHandle) {
         nested.add(node.handle);
         continue;

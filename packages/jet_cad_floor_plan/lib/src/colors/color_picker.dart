@@ -22,12 +22,14 @@ List<Handle> _rooms(DraftDocument doc, Iterable<SelectionKey> keys) => [
     ];
 
 /// The tables among [keys], in key order, each once: a key whose target is
-/// a live table's instance (TableSurvey's tables: root-level).
+/// a live table's instance (`isTable`: root-level). Per key, with no survey
+/// of the document: the panel asks on every build, hover notifications
+/// included (14a review R-7).
 List<Handle> _tables(DraftDocument doc, Iterable<SelectionKey> keys) {
-  final tables = {for (final t in tablesOf(doc)) t.instance};
+  if (keys.isEmpty) return const [];
   return [
     for (final h in {for (final k in keys) k.target})
-      if (tables.contains(h)) h,
+      if (isTable(doc, h)) h,
   ];
 }
 

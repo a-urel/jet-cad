@@ -871,4 +871,42 @@ void main() {
     await tester.pump();
     expect(picker, findsOneWidget, reason: 'back on the select tool');
   });
+
+  testWidgets(
+      'CP12 hover notifications over a selection of two tables and a room '
+      'rebuild the panel and the Colour row without surveying the document '
+      '(14a review R-7; the panel keeps its survey per document change)',
+      (tester) async {
+    final e = await mountEditor(tester);
+    final c = e.c;
+    final room = firstRoom(c);
+    await selectOn(tester, c, [tableOf(c, '1'), tableOf(c, '2'), room]);
+    expect(picker, findsOneWidget);
+    final doc = c.activeDocument;
+    final keys = [k(tableOf(c, '1')), k(tableOf(c, '7')), k(room)];
+    // Warm: one hover so any first-use work is behind us.
+    c.activeSelection.setHover(keys.first);
+    await tester.pump();
+    final before = TableSurvey.surveys;
+    for (final key in [...keys, null, ...keys.reversed, null]) {
+      c.activeSelection.setHover(key);
+      await tester.pump();
+      expect(picker, findsOneWidget);
+    }
+    expect(TableSurvey.surveys, before,
+        reason: 'a hover rebuild rescanned the document');
+    // The picker's own reads are survey-free, empty selection included.
+    pickedColors(doc, const []);
+    pickedColors(doc, keys);
+    recolorCommand(doc, keys, FloorPlanColor.teal);
+    expect(TableSurvey.surveys, before);
+    // And they agree with the survey: the table check is the survey's rule.
+    expect(pickedColors(doc, keys), hasLength(3));
+    for (final n in ['1', '2', '7', ' 7 ', 'L', '5']) {
+      expect(isTable(doc, tableOf(c, n)), isTrue, reason: n);
+    }
+    expect(isTable(doc, room), isFalse);
+    expect(isTable(doc, doc.rootHandle), isFalse);
+    expect(isTable(doc, const Handle(0x7FFFFFF)), isFalse, reason: 'no node');
+  });
 }
