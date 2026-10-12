@@ -1,7 +1,7 @@
 # Rubber-band selection in the selection mode — design
 
-**Date:** 2026-10-13. **Status:** revision 2, awaiting the human's review
-of the written spec. Revision 1 (`fa1da0d`) was reviewed independently
+**Date:** 2026-10-13. **Status:** revision 2, **approved by the human on
+2026-10-13** ("evet, devam et"). Revision 1 (`fa1da0d`) was reviewed independently
 (an Opus reviewer, read-only): **Approve with fixes**, V-1 to V-16, one
 blocker (V-1); revision 2 folds in every fix, and the two the human was
 asked about (V-4, V-12) as the human answered (see [Review](#review)).
