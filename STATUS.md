@@ -323,11 +323,19 @@ one's spec, plan and results.
   `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-1/`. Next: Slice
   2 (tables): plan
   [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md)
-  (six tasks) on `feat/plan-colors-slice-2`, awaiting the human's review
-  and choice of execution. Unreleased: 0.6.0 follows Slice 2.
+  (six tasks) is **implemented on `feat/plan-colors-slice-2`**: a table's
+  colour (`jetcad.table_color`, `setTableColor` / `setTablesColor`,
+  `FloorPlanTableDetail.color`), drawn under the drafting in both modes,
+  exported and printed, the Selection panel's Colour row, the page
+  export's underlay, the guide's "Colours on the plan", the CHANGELOG.
+  Reviewed per task; awaiting the human's word to merge into `main`
+  (its ledger is then archived), then release 0.6.0.
 
 ## Owed to the human
 
+- **Plan colours, Slice 2, a look:** coloured tables in both modes, light
+  and dark (a status over a colour, a coloured table in a coloured room),
+  and in a PNG and a PDF export.
 - **Plan colours, Slice 1:** a native German and Turkish read of the
   Colour row's words (the spec's PC-10 table, and `colorRefused`, which
   that table lacks: "Farben sind hier nicht änderbar" / "Renkler burada
@@ -390,18 +398,17 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: Slice 2 of plan colours (tables).** Slice 1 (the palette, schema
-10, rooms, the `recolor` capability and the Selection panel's Colour row)
-is **merged into `main` at `ce0a4f9`** (2026-10-12), unreleased: it ships
-with Slice 2 as 0.6.0, and `main` now saves schema 10. Slice 2 (a table's
-colour, `jetcad.table_color`, the Tables flows) has no plan written yet:
-start from the spec
-[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md).
-For Slice 2, pin the Colour row's tool-mode visibility with a selection
-made by `controller.select` **while the Wall tool is active**: a mutant
-that drops `!_toolMode && _openingToolMode == null` from
-`selection_panel.dart`'s `colors` flag survives Slice 1, because a
-drawing tool clears the selection.
+**Next: the human's word to merge Slice 2 of plan colours (tables), then
+release 0.6.0.** Slice 1 (the palette, schema 10, rooms, the `recolor`
+capability and the Selection panel's Colour row) is **merged into `main`
+at `ce0a4f9`** (2026-10-12), unreleased. Slice 2 is implemented and
+reviewed on `feat/plan-colors-slice-2` (plan
+[2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
+spec
+[2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md));
+its ledger lives in `.superpowers/sdd/2026-10-12-plan-colors-slice-2/` and
+is archived onto the branch before the merge. After the merge: release
+0.6.0.
 
 The released line: 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices

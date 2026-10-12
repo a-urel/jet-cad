@@ -8,7 +8,7 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-Plan colours, Slice 1 (of two; released together as 0.6.0).
+Plan colours (two slices, released together as 0.6.0).
 
 - **Plans are now saved at schema 10.** A 0.5.1 (or older) build refuses
   a plan this release saves (`load` throws a `FormatException` naming
@@ -27,6 +27,18 @@ Plan colours, Slice 1 (of two; released together as 0.6.0).
   `colorName(FloorPlanColor)`; a class that implements or directly
   extends `FloorPlanStrings` must add them (a subclass of a built-in
   language inherits them).
+- **A table can take a colour**, one of the eight `FloorPlanColor` hues:
+  in the Selection panel's Colour row (beside rooms), or by
+  `controller.setTableColor` / `setTablesColor`; read back as
+  `FloorPlanTableDetail.color`. It is drawn as a fill under the table's
+  drafting in both modes, exported and printed; in the selection mode a
+  status covers it. `FloorPlanTheme.tableColorOpacity` (default 0.35)
+  sets its strength; `exportPlan` and `printPlan` take an optional
+  `tableColorOpacity`.
+- **`jet_cad_2d_flutter`:** `exportPagePdf` and `exportPagePng` take an
+  optional `underlay` of `PageUnderlayFill`s drawn under the drawing.
+- **`jet_cad_floor_plan`'s `editor.dart`** (not the host barrel) exports
+  `isTable(doc, handle)`.
 
 ## 0.5.1
 
