@@ -294,6 +294,21 @@ one's spec, plan and results.
   [docs/superpowers/ledgers/2026-10-11-release-0.5.1/](docs/superpowers/ledgers/2026-10-11-release-0.5.1/).
   The guide names `3f8f7ad`. The human pushed `main` (at `cfb79cc`) and
   the tag `v0.5.1` → `3f8f7ad` (2026-10-11).
+- **SC19's tearDown flake** (CI 38288283287 attempt 1 on `15d4b0b`
+  failed in `tool/ci/test/scripts_test.dart`'s SC19 with "Directory not
+  empty" deleting its scratch repository; attempt 2 green; the human,
+  2026-10-12: *"evet, ikisini de yap"*), merged into `main` at
+  `3a35435` on the human's *"evet, main'e merge et"*, from
+  `fix/sc19-teardown` (cut from `main` at `15d4b0b`). Since git 2.47 a
+  commit starts `git maintenance run --auto --detach`, whose detached
+  child is still working inside `.git` after the commit returns (traced
+  with `strace` in a Linux container); the race itself was not
+  reproduced (0/300 on macOS, 0/500 on Linux). The group's `git` helper
+  now runs with `maintenance.auto=false`; a test traces a commit and
+  asserts no `maintenance run` (mutant M-SC19a, the flag dropped, red).
+  An independent review (*Approve with fixes*: the test named for the
+  helper, the comment held to the evidence) is applied. Run natively in
+  one session: no SDD ledger.
 
 ## In flight
 
