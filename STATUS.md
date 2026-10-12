@@ -302,11 +302,15 @@ one's spec, plan and results.
   Spec [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md),
   revision 2, approved 2026-10-12, on `spec/plan-colors`. Slice 1's plan
   [2026-10-12-plan-colors-slice-1.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-1.md)
-  (the palette, schema 10, rooms; five tasks) awaits the human's review
-  and choice of execution.
+  (the palette, schema 10, rooms; five tasks) is implemented on
+  `spec/plan-colors`, each task reviewed. Next: its whole-branch review,
+  then Slice 2 (tables).
 
 ## Owed to the human
 
+- **Plan colours, Slice 1:** a native German and Turkish read of the
+  Colour row's words (the spec's PC-10 table); a look at a coloured room
+  on the light and dark canvas.
 - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
   the floor planner in three languages; the service mode's menu, groups
   and layout; the dark theme).

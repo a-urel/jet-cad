@@ -168,3 +168,5 @@ jobs:
         run: tool/ci/old_host_probe.sh v0.3.0
       - name: The 0.4.0 host probe against this commit
         run: tool/ci/old_host_probe.sh v0.4.0
+      - name: The 0.5.1 host probe against this commit
+        run: tool/ci/old_host_probe.sh v0.5.1
