@@ -47,8 +47,8 @@ final class SelectionBandPainter {
     canvas.drawPath(_dashes, _stroke);
   }
 
-  /// One edge's dashes, from (x0, y0) to (x1, y1): what `SelectTool`'s
-  /// `_drawDashedRect` drew, on doubles.
+  /// Adds one edge's dashes to the path, walking from (x0, y0) to (x1, y1):
+  /// 6 px on, 4 px off, starting on, the last dash cut at the corner.
   void _edge(double x0, double y0, double x1, double y1) {
     const on = 6.0, off = 4.0;
     final dx = x1 - x0, dy = y1 - y0;

@@ -99,13 +99,42 @@ void main() {
     // The crossing in between was the crossing's: its dashes, its colour.
     expect(b.named('drawPath'), hasLength(1));
     expect(_argb(b.named('drawPath').single), 0xFF2E9E5B);
-    // A second crossing draws the same dashes, not the first's plus its own.
-    final d = SpyCanvas();
-    painter.paint(d, _rect, BandMode.crossing, PaperPalette.light);
-    int contours(SpyCanvas s) =>
-        (s.named('drawPath').single.args.first! as Path)
-            .computeMetrics()
-            .length;
-    expect(contours(d), contours(b));
   });
+
+  test('BP4: a second crossing draws its own dashes, not the first\'s too', () {
+    final painter = SelectionBandPainter();
+    final small = Rect.fromLTRB(20.5, 30.25, 120.5, 70.25);
+    final large = Rect.fromLTRB(300.5, 200.25, 560.5, 380.25);
+    // The painter reuses one Path, so what it drew must be read at the call.
+    final first = _PathSnapshot(), second = _PathSnapshot();
+    painter.paint(first, small, BandMode.crossing, PaperPalette.light);
+    painter.paint(second, large, BandMode.crossing, PaperPalette.light);
+    expect(first.bounds!.left, closeTo(small.left, 1e-9));
+    expect(first.bounds!.bottom, closeTo(small.bottom, 1e-9));
+    expect(second.bounds!.left, closeTo(large.left, 1e-9));
+    expect(second.bounds!.top, closeTo(large.top, 1e-9));
+    expect(second.bounds!.right, closeTo(large.right, 1e-9));
+    expect(second.bounds!.bottom, closeTo(large.bottom, 1e-9));
+    // A fresh painter's one crossing over the same rect has as many dashes.
+    final fresh = _PathSnapshot();
+    SelectionBandPainter()
+        .paint(fresh, large, BandMode.crossing, PaperPalette.light);
+    expect(second.contours, fresh.contours);
+    expect(second.contours, greaterThan(first.contours));
+  });
+}
+
+/// Reads the dash path at the moment it is drawn.
+class _PathSnapshot implements Canvas {
+  Rect? bounds;
+  int contours = 0;
+
+  @override
+  void drawPath(Path path, Paint paint) {
+    bounds = path.getBounds();
+    contours = path.computeMetrics().length;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
