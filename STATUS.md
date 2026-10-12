@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-13. **`main` carries release 0.6.0** (merged
-at `3bf64a7`; the human pushes the tag `v0.6.0`, after `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+**Last updated:** 2026-10-13. **`main` carries release 0.6.0** (tag
+`v0.6.0` → `3bf64a7`, after `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -340,8 +340,8 @@ one's spec, plan and results.
   `SetEntityStyleCommand` and restamp unlisted, R-2; smaller CHANGELOG
   gaps, R-3 to R-6; STATUS, R-7) is applied; its record is
   `docs/superpowers/ledgers/2026-10-12-release-0.6.0/review.md`. The
-  guide names `3bf64a7`. The human pushes `main` and the tag `v0.6.0` →
-  `3bf64a7`.
+  guide names `3bf64a7`. The human pushed `main` and the tag `v0.6.0` →
+  `3bf64a7` (2026-10-13).
 
 ## In flight
 
@@ -415,8 +415,7 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 ## Resume here
 
 **Next: the human's choice.** Release 0.6.0 is **merged into `main` at
-`3bf64a7`** (2026-10-13); the human pushes `main` and the tag `v0.6.0` →
-`3bf64a7`. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
+`3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
 capability and the Selection panel's Colour row) merged at `ce0a4f9`;
 Slice 2 (tables) came with the release merge (plan
 [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
@@ -429,7 +428,7 @@ was cut from `feat/plan-colors-slice-2` at `752eace` while the human slept
 CHANGELOG's 0.6.0 section, the guide covering 0.6.0 and naming
 `3bf64a7` in §1.
 
-The released line: 0.6.0 (merged at `3bf64a7`) adds plan colours
+The released line: 0.6.0 (tag `v0.6.0` → `3bf64a7`) adds plan colours
 (**schema 10**: a 0.6.0 plan is refused by 0.5.1); 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
 (**schema 9**, every terminal that shares stored plans moves together).
