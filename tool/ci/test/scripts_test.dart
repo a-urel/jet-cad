@@ -321,7 +321,7 @@ void main() {
 
     /// Runs git in the scratch repository with automatic maintenance off,
     /// so no detached git process is still inside `.git` when tearDown
-    /// deletes it (CI 38288283287, attempt 1).
+    /// deletes it. Every git call in this group goes through here.
     Future<ProcessResult> git(List<String> args,
         {Map<String, String>? environment}) async {
       final r = await Process.run(
@@ -378,14 +378,14 @@ void main() {
     tearDown(() => repo.deleteSync(recursive: true));
 
     // CI 38288283287 (attempt 1): tearDown's delete failed with "Directory
-    // not empty". Since git 2.47 a commit starts `git maintenance run
-    // --auto --detach`, whose detached child still opens objects and
-    // removes `objects/maintenance.lock` after the commit returns, so the
-    // delete raced a second process inside `.git`. The scratch repository's
-    // commits must start no maintenance.
-    test("setUp's commits start no background maintenance", () async {
-      File('${repo.path}/tool/ci/host_probe/lib/main.dart')
-          .writeAsStringSync('void main() {} // traced\n');
+    // not empty" (an entry created behind the walk). Since git 2.47 a
+    // commit starts `git maintenance run --auto --detach`, whose detached
+    // child is still working inside `.git` after the commit returns (traced
+    // locally: it takes and removes `objects/maintenance.lock`); nothing
+    // else the test starts outlives it. The helper's commits must start no
+    // maintenance.
+    test("the helper's commits start no background maintenance", () async {
+      main.writeAsStringSync('void main() {} // traced\n');
       final r = await git([
         '-c', 'user.name=t', '-c', 'user.email=t@t', //
         'commit', '-q', '-am', 'traced',
