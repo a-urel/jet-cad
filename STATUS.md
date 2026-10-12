@@ -321,7 +321,10 @@ one's spec, plan and results.
   on `spec/plan-colors` and **merged into `main` at `ce0a4f9`** on the
   human's word (2026-10-12); its ledger is archived in
   `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-1/`. Next: Slice
-  2 (tables), plan not yet written. Unreleased: 0.6.0 follows Slice 2.
+  2 (tables): plan
+  [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md)
+  (six tasks) on `feat/plan-colors-slice-2`, awaiting the human's review
+  and choice of execution. Unreleased: 0.6.0 follows Slice 2.
 
 ## Owed to the human
 
