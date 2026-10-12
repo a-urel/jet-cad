@@ -1,8 +1,8 @@
 // The Selection panel's Colour row (plan colours spec PC-9): nine
 // swatches, None and the palette's eight hues, setting the colour of every
-// selected room in one undo step (Slice 2 adds tables). It keeps no state:
-// the panel rebuilds it on every selection and document change, as it does
-// the Layer picker.
+// selected room and table in one undo step. It keeps no state: the panel
+// rebuilds it on every selection and document change, as it does the Layer
+// picker.
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -11,6 +11,8 @@ import '../host/editor_capabilities.dart';
 import '../l10n/strings.dart';
 import '../parametric/live_objects.dart';
 import '../parametric/room.dart';
+import '../tables/table_color_component.dart';
+import '../tables/table_index.dart';
 import 'plan_color.dart';
 
 /// The rooms among [keys], in key order, each once.
@@ -19,22 +21,48 @@ List<Handle> _rooms(DraftDocument doc, Iterable<SelectionKey> keys) => [
         if (isLiveObject<RoomParams>(doc, h)) h,
     ];
 
-/// The colour of each key's object, as the picker reads it: a room's stored
-/// name (null for none); keys that are no room are not listed.
+/// The tables among [keys], in key order, each once: a key whose target is
+/// a live table's instance (TableSurvey's tables: root-level).
+List<Handle> _tables(DraftDocument doc, Iterable<SelectionKey> keys) {
+  final tables = {for (final t in tablesOf(doc)) t.instance};
+  return [
+    for (final h in {for (final k in keys) k.target})
+      if (tables.contains(h)) h,
+  ];
+}
+
+/// What [pickedColors] lists for a table whose payload is kept: equal to no
+/// swatch's name, so it marks nothing and differs from every name.
+const String _keptMarker = '\u0001';
+
+/// The colour of each key's object, as the picker reads it: a room's or a
+/// table's stored name (null for none; a table whose payload is kept lists
+/// a marker that is no swatch's name); rooms first, then tables, each in
+/// key order. Keys that are neither are not listed.
 List<String?> pickedColors(DraftDocument doc, Iterable<SelectionKey> keys) => [
       for (final h in _rooms(doc, keys))
         doc.components.get<RoomParams>(h)!.color,
+      for (final h in _tables(doc, keys))
+        switch (doc.components.get<FloorPlanTableColor>(h)) {
+          null => null,
+          final c when c.isKept => _keptMarker,
+          final c => c.name,
+        },
     ];
 
-/// The one command that sets [color] (null: none) on every room among
-/// [keys], labelled 'Colour'; null when none would change.
+/// The one command that sets [color] (null: none) on every room and table
+/// among [keys], labelled 'Colour'; null when none would change.
 DraftCommand? recolorCommand(
     DraftDocument doc, Iterable<SelectionKey> keys, FloorPlanColor? color) {
   final name = color?.name;
+  final wanted = color == null ? null : FloorPlanTableColor(color);
   final edits = <DraftCommand>[
     for (final h in _rooms(doc, keys))
       if (doc.components.get<RoomParams>(h)! case final p when p.color != name)
         SetComponentCommand<RoomParams>(h, p.copyWith(color: name)),
+    for (final h in _tables(doc, keys))
+      if (doc.components.get<FloorPlanTableColor>(h) != wanted)
+        SetComponentCommand<FloorPlanTableColor>(h, wanted),
   ];
   return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
 }
