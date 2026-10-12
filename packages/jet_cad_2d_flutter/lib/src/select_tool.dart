@@ -20,6 +20,7 @@ import 'canvas_palette.dart';
 import 'grip_drag.dart';
 import 'select_gates.dart';
 import 'selection.dart';
+import 'selection_band.dart';
 import 'selection_style.dart';
 import 'snap_marker.dart';
 import 'tool.dart';
@@ -121,6 +122,7 @@ class SelectTool extends Tool {
     ..style = PaintingStyle.stroke
     ..strokeWidth = kSnapMarkerStrokePixels;
   final Paint _previewPaint = Paint()..style = PaintingStyle.stroke;
+  final SelectionBandPainter _bandPainter = SelectionBandPainter();
 
   /// What the press landed on; null while idle.
   PressClass? get pressClass => _phase == ToolPhase.idle ? null : _class;
@@ -236,8 +238,7 @@ class SelectTool extends Tool {
         if (e.pointer != _pointer) return;
         if (_dragKind == DragKind.band) {
           _end = e.screen;
-          _bandMode =
-              _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
+          _bandMode = bandModeFor(_start, _end);
         } else {
           _follow(e, ctx);
         }
@@ -304,7 +305,7 @@ class SelectTool extends Tool {
         _dragKind = DragKind.band;
         ctx.selection.setHover(null);
         _end = e.screen;
-        _bandMode = _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
+        _bandMode = bandModeFor(_start, _end);
         notifyListeners();
       case PressClass.selectedBody:
         final drag = GripDrag.move(ctx.document, ctx.selection.keys,
@@ -884,54 +885,7 @@ class SelectTool extends Tool {
     }
     final rect = bandScreen;
     if (rect == null) return;
-    final crossing = _bandMode == BandMode.crossing;
-    final color = crossing ? paper.crossingBand : paper.windowBand;
-    canvas.drawRect(rect, Paint()..color = color.withAlpha(kBandFillAlpha));
-    final stroke = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
-    if (!crossing) {
-      canvas.drawRect(rect, stroke);
-      return;
-    }
-    _drawDashedRect(canvas, rect, stroke);
-  }
-
-  /// 6-on/4-off dashes, screen pixels, walking the four edges clockwise from
-  /// the top-left corner.
-  void _drawDashedRect(Canvas canvas, Rect rect, Paint stroke) {
-    const on = 6.0, off = 4.0;
-    final corners = [
-      rect.topLeft,
-      rect.topRight,
-      rect.bottomRight,
-      rect.bottomLeft,
-      rect.topLeft,
-    ];
-    final path = Path();
-    for (var i = 0; i < corners.length - 1; i++) {
-      final start = corners[i];
-      final end = corners[i + 1];
-      final delta = end - start;
-      final length = delta.distance;
-      if (length == 0) continue;
-      final direction = Offset(delta.dx / length, delta.dy / length);
-      var travelled = 0.0;
-      var drawing = true;
-      while (travelled < length) {
-        final step = math.min(drawing ? on : off, length - travelled);
-        final segmentStart = start + direction * travelled;
-        final segmentEnd = start + direction * (travelled + step);
-        if (drawing) {
-          path.moveTo(segmentStart.dx, segmentStart.dy);
-          path.lineTo(segmentEnd.dx, segmentEnd.dy);
-        }
-        travelled += step;
-        drawing = !drawing;
-      }
-    }
-    canvas.drawPath(path, stroke);
+    _bandPainter.paint(canvas, rect, _bandMode!, paper);
   }
 
   /// Spec D7: a 1 px line from the base (a rotate's pivot) to the target,
