@@ -510,12 +510,13 @@ void main() {
   });
 
   test(
-      'the schema version is 9, and a future document is refused by '
+      'the schema version is 10, and a future document is refused by '
       'version', () {
     // Plan 12b Task 1: 7 since DocumentHeader gained currentLayer.
     // Plan Q0 Task 1: 8 since PageComponent gained decimalSeparator.
     // Slice 2 Task 1: 9 so that no older build carries table data (E-9).
-    expect(kSchemaVersion, 9);
+    // Plan colours Slice 1 Task 2: 10 for the room's colour (PC-2).
+    expect(kSchemaVersion, 10);
     // `isA<SchemaVersionError>()`, not `throwsA(anything)`: a bare
     // `{'schemaVersion': N}` map fails on the missing `'header'` key too, so
     // the loose matcher passed whenever N was the *current* version rather
@@ -587,7 +588,8 @@ void main() {
     // Plan 12b Task 1: the pin moved to 7 with header.currentLayer.
     // Plan Q0 Task 1: to 8 with the page's decimalSeparator.
     // Slice 2 Task 1: to 9 with the host's table data (E-9).
-    expect(kSchemaVersion, 9);
-    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 9);
+    // Plan colours Slice 1 Task 2: to 10 with the room's colour (PC-2).
+    expect(kSchemaVersion, 10);
+    expect((jsonDecode(first) as Map<String, Object?>)['schemaVersion'], 10);
   });
 }

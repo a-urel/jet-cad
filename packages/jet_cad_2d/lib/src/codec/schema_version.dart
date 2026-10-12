@@ -45,7 +45,16 @@
 /// preserve-unknown data, but deleting the table would leave its data
 /// orphaned in the file. With the bump, that build refuses the file and says
 /// why.
-const int kSchemaVersion = 9;
+///
+/// 10: no new field the engine reads, and nothing to default; the v9->v10
+/// migration is empty, so a v9 (or older) document is read unchanged. The
+/// bump exists for the reader, as 6's to 8's did: the floor planner's room
+/// gains a `color` key (plan colours spec PC-3) and its tables a
+/// `jetcad.table_color` component (PC-4). A v9 build would read a room's
+/// colour as nothing and drop it on its next save, and keep a table's
+/// colour as preserve-unknown data that a delete orphans. With the bump,
+/// that build refuses the file and says why.
+const int kSchemaVersion = 10;
 
 class SchemaVersionError implements Exception {
   final Object? found;

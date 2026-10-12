@@ -115,7 +115,7 @@ void main() {
         }),
         isTrue);
     final saved = c.designJson();
-    expect(jsonDecode(saved)['schemaVersion'], 9);
+    expect(jsonDecode(saved)['schemaVersion'], 10);
     expect(dataSection(saved), hasLength(3));
 
     final back = controller(tester, saved);
