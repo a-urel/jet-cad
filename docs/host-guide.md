@@ -15,8 +15,9 @@ that file, so the code in this guide compiles against the release.
 ## 1. The dependency
 
 The packages are not on pub.dev. Depend on them by git, **both pinned to
-the same commit SHA** — the SHA the release tag `v0.6.0` points at
-(`git rev-parse 'v0.6.0^{commit}'`; the guide on `main` names it):
+the same commit SHA** — the SHA the release tag `v0.6.0` points at,
+`3bf64a78d0043d8abb217a7ebf6f5bc4eb4acd4a` (the merge of release 0.6.0 into
+`main`):
 
 ```yaml
 dependencies:
@@ -26,12 +27,12 @@ dependencies:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_floor_plan
-      ref: <the commit SHA of v0.6.0>
+      ref: 3bf64a78d0043d8abb217a7ebf6f5bc4eb4acd4a
   jet_cad_restaurant_symbols:
     git:
       url: https://github.com/a-urel/jet-cad.git
       path: packages/jet_cad_restaurant_symbols
-      ref: <the commit SHA of v0.6.0>
+      ref: 3bf64a78d0043d8abb217a7ebf6f5bc4eb4acd4a
 ```
 
 Why a SHA and not the tag: the restaurant package depends on the planner
