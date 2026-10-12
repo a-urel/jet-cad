@@ -38,6 +38,7 @@ const Color canvas = Color(0xFF263238);
 const FloorPlanTheme fullTheme = FloorPlanTheme(
   statusCaptionStyle: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
   statusFillOpacity: 0.5,
+  tableColorOpacity: 0.6,
   groupFrameColor: Color(0xFF00897B),
   groupFrameWidth: 3,
   groupFrameMargin: 300,
@@ -375,6 +376,9 @@ void main() {
     testWidgets(
         'invariant 4 ($m): designJson and the PNG export are the same with '
         'and without a full theme', (tester) async {
+      // The plan has no coloured table, so `tableColorOpacity` of the full
+      // theme reaches only a table colour's fill (pinned by EX4 of
+      // `test/colors/table_color_export_test.dart`), not these bytes.
       final got = <FloorPlanExport>[];
       final v = controllerOn(white);
       await pumpView(tester, v, ThemeMode.light, viewMode, onExport: got.add);

@@ -299,7 +299,8 @@ void main() {
 
   /// [pdf] with the trailer's `/ID` (a fresh random 20-byte value per write,
   /// the `pdf` package's) blanked: the one part of two writes of one document
-  /// that differs. Same length, so every offset is unchanged.
+  /// that differs. Blanking shortens it, but the same way on both sides of a
+  /// comparison, and the rest of the file is compared byte for byte.
   String withoutId(Uint8List pdf) => latin1
       .decode(pdf)
       .replaceAllMapped(RegExp(r'/ID\[<[0-9a-f]+><[0-9a-f]+>\]'), (m) => '/ID');

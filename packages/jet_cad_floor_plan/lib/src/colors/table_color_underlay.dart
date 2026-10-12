@@ -26,8 +26,18 @@ import '../tables/table_index.dart';
 /// A table with no top (R-8), a colour of an unknown name and a table on a
 /// hidden layer have no fill, as on the canvas. Tables are root-level
 /// (`TableSurvey`'s rule), so the instance's transform is its world one.
+///
+/// A known difference for a pathological top: the export skips a polygon
+/// top that does not triangulate (a self-intersecting, hand-made one),
+/// while the canvas fills its `Path` as it is.
+///
+/// Throws an [ArgumentError] when [opacity] is not finite or lies outside
+/// `[0, 1]`.
 List<PageUnderlayFill> tableColorUnderlay(
     DraftDocument document, double opacity) {
+  if (!opacity.isFinite || opacity < 0 || opacity > 1) {
+    throw ArgumentError.value(opacity, 'opacity', 'must be in [0, 1]');
+  }
   final alpha = (255 * opacity).round();
   final layers = document.tables.layers;
   final out = <PageUnderlayFill>[];

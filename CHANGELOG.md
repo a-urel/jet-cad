@@ -21,7 +21,10 @@ Plan colours (two slices, released together as 0.6.0).
   print. An uncoloured room is drawn exactly as before.
 - **`FloorPlanEditorCapabilities.recolor`** (default true; false in
   `readOnly`) allows the Colour row; refused, it shows read only.
-  `tablesOnly` keeps it on.
+  `tablesOnly` leaves it true. After this release a `tablesOnly` (or
+  `readOnly`) embed shows the Selection panel's Colour row for a
+  selected table: a `tablesOnly` host will see the picker, and under
+  `recolor: false` the row is read only, never hidden.
 - **Breaking for a host's own strings:** `FloorPlanStrings` gains the
   abstract `color`, `colorNone`, `colorRefused` and
   `colorName(FloorPlanColor)`; a class that implements or directly
@@ -35,6 +38,15 @@ Plan colours (two slices, released together as 0.6.0).
   status covers it. `FloorPlanTheme.tableColorOpacity` (default 0.35)
   sets its strength; `exportPlan` and `printPlan` take an optional
   `tableColorOpacity`.
+- **A new table diagnostic,** `table.invalid_color`
+  (`TableDiagnosticCodes.invalidColor`, on `editor.dart`): a table whose
+  stored colour is of another shape, or names a hue this release does
+  not know, is kept as read, drawn as none and reported by
+  `TableSurvey.diagnostics`, as `table.invalid_data` is for host data.
+- **`editor.dart`'s `exportBytes` and `exportPdfBytes`** gain an
+  optional `tableColorOpacity` (default 0.35). A bare-shell host with
+  its own `FloorPlanTheme` passes its value, or its export differs from
+  its canvas.
 - **`jet_cad_2d_flutter`:** `exportPagePdf` and `exportPagePng` take an
   optional `underlay` of `PageUnderlayFill`s drawn under the drawing.
 - **`jet_cad_floor_plan`'s `editor.dart`** (not the host barrel) exports

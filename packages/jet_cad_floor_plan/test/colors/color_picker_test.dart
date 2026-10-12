@@ -1,18 +1,14 @@
 // Plan colours spec PC-8, PC-9 and PC-10: the Selection panel's Colour row.
 // Nine swatches, None and the palette's eight hues, set the colour of every
-// selected room in one undo step labelled Colour; read-only while the host
-// refuses `recolor` or the permissions refuse the edit; its words in
-// Turkish; its swatches as the canvas shows the hues.
+// selected room and table in one undo step labelled Colour; read-only while
+// the host refuses `recolor` or the permissions refuse the edit; its words
+// in Turkish; its swatches as the canvas shows the hues.
 //
 // The plan is the two-room rectangle at the corpus far origin, turned 23°,
 // every wall and the separator in its own rotated, translated group; room A
 // sits in a group of its own turned 0.61 rad, room B at the identity. The
 // hues under test are `teal` and `purple`, never the first of the palette,
 // and `magenta`, a name no release knows.
-//
-// CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
-// fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
-// `2` mirrored at 90, `7` and ` 7 ` sharing a number, `L` on a locked layer.
 //
 // CP7 to CP11 (Slice 2, tables) run through `FloorPlanView` on the editor
 // fixture: the startup flat's rooms beside its tables, `1` turned 30 degrees,
@@ -639,6 +635,7 @@ void main() {
     expect(
         swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
   });
+
   testWidgets(
       'CP7 a tap on teal with two tables and a room selected: one undo step '
       'labelled Colour, the tables\' details read teal, the room is teal, '

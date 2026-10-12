@@ -90,8 +90,9 @@ Future<Img> decode(WidgetTester tester, Uint8List png) async =>
     }))!;
 
 /// [pdf] as text, the trailer's `/ID` blanked: it is random per write, the
-/// one part of two writes of one document that differs (same length, so
-/// every offset is unchanged).
+/// one part of two writes of one document that differs. Blanking shortens
+/// it, but the same way on both sides of a comparison, and the rest of the
+/// file is compared byte for byte.
 String text(Uint8List pdf) => latin1
     .decode(pdf)
     .replaceAllMapped(RegExp(r'/ID\[<[0-9a-f]+><[0-9a-f]+>\]'), (m) => '/ID');
@@ -197,6 +198,11 @@ void main() {
         }
         return true;
       }), isEmpty, reason: '$k has no fill');
+    }
+    // An opacity that is not in [0, 1] or not finite is refused.
+    for (final bad in [1.5, -0.1, double.nan, double.infinity]) {
+      expect(() => tableColorUnderlay(doc, bad), throwsArgumentError,
+          reason: '$bad');
     }
     // The opacity is the alpha: round(255 * o).
     expect({for (final f in tableColorUnderlay(doc, 0.6)) f.argb >> 24}, {153});
@@ -319,6 +325,32 @@ void main() {
     expect(none, isNot(byDefault));
     expect(themed, isNot(none));
     expect(text(await pdf(0.6)), themed, reason: 'the same bytes again');
+  });
+
+  testWidgets(
+      'EX3c M-PC7-c controller.exportPlan(pdf) carries the colours at the '
+      'given opacity: the PDF\'s fill alphas hold 0.6 (153 of 255) and not '
+      'the default\'s 0.34902, and the same call with no opacity holds '
+      '0.34902: the PDF branch of exportBytes passes the opacity on',
+      (tester) async {
+    final c = FloorPlanController(json: fillJson());
+    addTearDown(c.dispose);
+    const pdfChoice = FloorPlanExportChoice(
+        format: FloorPlanExportFormat.pdf, dpi: FloorPlanExportDpi.d96);
+    Future<Set<String>> pdfAlphas([double? opacity]) async {
+      final out = await tester
+          .runAsync(() => c.exportPlan(pdfChoice, tableColorOpacity: opacity));
+      expect(out, isNotNull);
+      expect(out!.fileName, 'plan.pdf');
+      return alphas(text(out.bytes));
+    }
+
+    final themed = await pdfAlphas(0.6);
+    expect(themed, contains('0.6'));
+    expect(themed, isNot(contains('0.34902')));
+    final byDefault = await pdfAlphas();
+    expect(byDefault, contains('0.34902'));
+    expect(byDefault, isNot(contains('0.6')));
   });
 
   testWidgets(
