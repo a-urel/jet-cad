@@ -13,6 +13,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../camera_bounds.dart';
+import '../colors/plan_color.dart';
 import '../export/export_dialog.dart';
 import '../export/export_font.dart';
 import '../export/page_printer.dart';
@@ -24,6 +25,7 @@ import '../service/table_groups.dart';
 import '../service/table_picker.dart';
 import '../startup_plan.dart' show kMaxScale, kMinScale;
 import '../symbols/symbol_library_loader.dart';
+import '../tables/table_color_component.dart';
 import '../tables/table_data_component.dart';
 import '../tables/table_index.dart';
 import 'design_changes.dart';
@@ -1515,19 +1517,21 @@ class FloorPlanController extends ChangeNotifier {
             layers[node.layer],
             // Spec E-6: unmodifiable already; empty when absent or kept.
             d.components.get<FloorPlanTableData>(t.instance)?.data ??
-                const <String, String>{}));
+                const <String, String>{},
+            // Plan colours spec PC-4: null when absent, kept or unknown.
+            d.components.get<FloorPlanTableColor>(t.instance)?.colorValue));
       }
     }
     return List.unmodifiable(details);
   }
 
   static FloorPlanTableDetail _detailOf(FloorPlanTable table, TableCandidate? c,
-      LayerRecord? layer, Map<String, String> data) {
+      LayerRecord? layer, Map<String, String> data, FloorPlanColor? color) {
     final name = layer?.name ?? '';
     final locked = layer?.locked ?? false;
     if (c == null) {
       return tableDetailWithoutGeometry(
-          table: table, layer: name, locked: locked, data: data);
+          table: table, layer: name, locked: locked, data: data, color: color);
     }
     return tableDetailOf(
         table: table,
@@ -1536,7 +1540,8 @@ class FloorPlanController extends ChangeNotifier {
         corners: c.corners,
         layer: name,
         locked: locked,
-        data: data);
+        data: data,
+        color: color);
   }
 
   /// Stores the host's [data] on the table numbered [number] (spec E-6):
@@ -1567,9 +1572,7 @@ class FloorPlanController extends ChangeNotifier {
   /// nothing left to change is true with no edit. A [StateError] in the
   /// selection mode.
   bool setTablesData(Map<String, Map<String, String>> byNumber) {
-    if (_service != null) {
-      throw StateError('setTableData needs the design mode (P-5)');
-    }
+    _requireDesign('setTableData');
     final wanted = <String, FloorPlanTableData?>{};
     for (final MapEntry(key: number, value: data) in byNumber.entries) {
       if (tableDataProblem(data) case final problem?) {
@@ -1577,6 +1580,54 @@ class FloorPlanController extends ChangeNotifier {
       }
       wanted[number] = data.isEmpty ? null : FloorPlanTableData(data);
     }
+    return _setTableComponents<FloorPlanTableData>(
+        wanted, 'Table data', 'setTableData');
+  }
+
+  /// Gives the table numbered [number] the colour [color] (plan colours
+  /// spec PC-4): one design edit, labelled "Table colour", undoable, saved
+  /// with the plan and read back as [FloorPlanTableDetail.color]. Null
+  /// removes the table's colour, and replaces a colour this release cannot
+  /// read (kept as read until then): that replacement makes the plan dirty
+  /// but reports no [FloorPlanTableChanged], the table's colour being null
+  /// before and after. Returns true when the table's colour is
+  /// now [color] (with no edit when it already was), false -- changing
+  /// nothing -- when the trimmed [number] names no table or more than one.
+  /// A table on a hidden or locked layer takes a colour: a colour is not a
+  /// drawing edit.
+  ///
+  /// Throws a [StateError] in the selection mode (P-5: nothing done there
+  /// reaches the design). [dirty] and [canUndo] read the edit on return;
+  /// [revision] moves as for any edit.
+  bool setTableColor(String number, FloorPlanColor? color) =>
+      setTablesColor({number: color});
+
+  /// [setTableColor] for several tables at once, **all or nothing**, as one
+  /// undo step labelled "Table colour": false, changing nothing, when any
+  /// number names no table or more than one, or when two keys trim to the
+  /// same number. Entries already equal to the table's colour are skipped;
+  /// nothing left to change is true with no edit. A [StateError] in the
+  /// selection mode.
+  bool setTablesColor(Map<String, FloorPlanColor?> byNumber) =>
+      _setTableComponents<FloorPlanTableColor>({
+        for (final MapEntry(key: n, value: c) in byNumber.entries)
+          n: c == null ? null : FloorPlanTableColor(c),
+      }, 'Table colour', 'setTableColor');
+
+  void _requireDesign(String who) {
+    if (_service != null) {
+      throw StateError('$who needs the design mode (P-5)');
+    }
+  }
+
+  /// The one path of the table-data and table-colour setters (plan colours
+  /// spec PC-11): the numbers trimmed and resolved to one table each, an
+  /// unknown, shared or repeated number refusing all, entries equal to the
+  /// stored component skipped, the rest one [CompoundCommand] labelled
+  /// [label]. A [StateError] naming [who] in the selection mode.
+  bool _setTableComponents<T extends Component>(
+      Map<String, T?> wanted, String label, String who) {
+    _requireDesign(who);
     _settle?.call();
     final survey = _tables;
     final components = _design.document.components;
@@ -1587,12 +1638,11 @@ class FloorPlanController extends ChangeNotifier {
       final found = survey.withNumber(raw);
       if (found.length != 1) return false;
       final instance = found.single.instance;
-      if (components.get<FloorPlanTableData>(instance) == next) continue;
-      edits.add(SetComponentCommand<FloorPlanTableData>(instance, next));
+      if (components.get<T>(instance) == next) continue;
+      edits.add(SetComponentCommand<T>(instance, next));
     }
     if (edits.isEmpty) return true;
-    _design.document.commands
-        .execute(CompoundCommand(edits, label: 'Table data'));
+    _design.document.commands.execute(CompoundCommand(edits, label: label));
     _refreshFlags();
     return true;
   }

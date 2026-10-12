@@ -7,6 +7,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 
 import '../symbols/seating_component.dart';
 import '../symbols/symbol_component.dart';
+import 'table_color_component.dart';
 import 'table_data_component.dart';
 import 'table_label.dart';
 
@@ -44,7 +45,8 @@ final class TableInfo {
 
 /// The tables and the servable instances that are not tables, in one pass.
 final class TableSurvey {
-  TableSurvey._(this.tables, this.nested, this.extraLabels, this._keptData);
+  TableSurvey._(this.tables, this.nested, this.extraLabels, this._keptData,
+      this._invalidColor);
 
   /// Live, root-level, servable instances, ascending by handle (T1).
   final List<TableInfo> tables;
@@ -57,6 +59,10 @@ final class TableSurvey {
 
   /// The tables whose host data payload is kept verbatim (E-6).
   final Set<Handle> _keptData;
+
+  /// The tables whose colour payload is kept verbatim or names a hue this
+  /// release does not know (plan colours spec PC-4).
+  final Set<Handle> _invalidColor;
 
   /// O(nodes + entities). At document-change rate, never per frame.
   factory TableSurvey.of(DraftDocument doc) {
@@ -72,6 +78,7 @@ final class TableSurvey {
     final nested = <Handle>[];
     final extra = <Handle, List<Handle>>{};
     final kept = <Handle>{};
+    final invalidColor = <Handle>{};
     // `tree.nodes` is ascending by handle (its contract), so both lists
     // are too.
     for (final node in doc.tree.nodes) {
@@ -104,9 +111,13 @@ final class TableSurvey {
           false) {
         kept.add(node.handle);
       }
+      final color = doc.components.get<FloorPlanTableColor>(node.handle);
+      if (color != null && color.colorValue == null) {
+        invalidColor.add(node.handle);
+      }
     }
     return TableSurvey._(List.unmodifiable(tables), List.unmodifiable(nested),
-        Map.unmodifiable(extra), kept);
+        Map.unmodifiable(extra), kept, invalidColor);
   }
 
   /// The numbered tables carrying [number] (trimmed, exact `==`, T4).
@@ -171,6 +182,17 @@ final class TableSurvey {
           handles: [t.instance],
         ));
       }
+      // Plan colours spec PC-4: a payload of another shape, or a hue this
+      // release does not know, is kept as read and drawn as none.
+      if (_invalidColor.contains(t.instance)) {
+        out.add(Diagnostic(
+          severity: DiagnosticSeverity.warning,
+          code: TableDiagnosticCodes.invalidColor,
+          message: 'Table ${t.instance.toHex()} carries a colour this '
+              'release cannot read; it is kept as read and drawn as none',
+          handles: [t.instance],
+        ));
+      }
     }
     for (final h in nested) {
       out.add(Diagnostic(
@@ -194,6 +216,11 @@ abstract final class TableDiagnosticCodes {
   /// A table whose host data payload is outside the limits (host embedding
   /// API spec E-6, S-3): kept as read, reads as no data.
   static const String invalidData = 'table.invalid_data';
+
+  /// A table whose colour payload is of another shape, or names a hue this
+  /// release does not know (plan colours spec PC-4): kept as read, drawn
+  /// as none.
+  static const String invalidColor = 'table.invalid_color';
 }
 
 /// The live tables of [doc] (T15).
