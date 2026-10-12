@@ -322,9 +322,11 @@ void main() {
     }
     expect(driftOf(doc), isEmpty, reason: 'nothing to plan on open');
     final a0 = tintSnaps(doc, f.a), b0 = tintSnaps(doc, f.b);
-    final flags0 = {
+    // The records as saved (the geometry is the payload's, not the record's):
+    // a regeneration that moves the tint must leave every record field alone.
+    final records0 = {
       for (final r in [f.a, f.b])
-        r: [for (final t in tintRecords(doc, r)) t.flags],
+        r: [for (final t in tintRecords(doc, r)) jsonEncode(t.toJson())],
     };
 
     // A rename regenerates room A.
@@ -346,10 +348,12 @@ void main() {
         expect(t.color, const IndexedColor(7));
         expect(t.transparency, 229);
       }
-      expect([for (final t in tintRecords(doc, r)) t.flags], flags0[r],
-          reason: 'the fill drawn, the boundary invisible, as before');
+      expect([for (final t in tintRecords(doc, r)) jsonEncode(t.toJson())],
+          records0[r],
+          reason: 'room $r: every tint record whole, as before the edit');
     }
-    expect(tintSnaps(doc, f.a), isNot(a0), reason: 'the tint did move');
+    expect(tintSnaps(doc, f.a), isNot(a0), reason: 'A\'s tint did move');
+    expect(tintSnaps(doc, f.b), isNot(b0), reason: 'B\'s tint did move');
     expect(driftOf(doc), isEmpty);
 
     // Saved again, a room carries `"color":null` (schema 10).
