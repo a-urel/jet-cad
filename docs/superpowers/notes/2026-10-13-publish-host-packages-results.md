@@ -235,6 +235,16 @@ probe passes only through its overrides: the hosted 0.7.1 packages are not
 on pub.dev yet; D7 (Owed) is the check without them. `check_guide.dart`:
 *"all 56 code blocks are in the host probe"* (54 before this branch).
 
+The final wave (F5: the names file is copied with `cp`, no `sed`) re-ran
+the probe at `ce69050` after clearing the pub git cache: exit 0, lock
+check *"40 packages, none of flutter_scene, …"*, *"No issues found!"*,
+*"✓ Built build/web"*, *"host probe: no GPU renderer, no build hook;
+build/web is 42M"*; `git status --short` clean afterwards. **M-CP1** (the
+new `cp … restaurant_names.dart` line deleted): `flutter analyze` fails,
+exit 1: *"Target of URI doesn't exist: 'restaurant_names.dart'"*
+(`lib/main.dart:21:8`), *"Undefined name 'restaurantSymbolNames'"*, *"3
+issues found."*; restored and `cmp`-identical to the committed file.
+
 ## D4: the barrels, audited
 
 The barrels are published as they stand. **Method (a rough grep, not a
