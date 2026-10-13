@@ -498,7 +498,8 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 runs `dart pub publish` without `--dry-run`; merge, push, tag and publish
 are the human's alone). `jet_cad_2d` 0.7.1 is merged into `main` at
 `1dc167d`; `feat/publish-host-packages` (In flight) awaits its review
-result, then the human's word to merge. The checklist (spec D10), per
+result; its own CI run (Linux) on the pushed branch must be green, and
+the merge waits for the human's word. The checklist (spec D10), per
 package, in this order:
 
 1. **`jet_cad_2d` 0.7.1:** push `main` and watch CI (job `publishable`
@@ -533,7 +534,6 @@ Before this: Release 0.7.0 is **merged into `main` at
 `release/0.7.0` (cut from `main` at `7d3ce8d`); it releases rubber-band
 selection, merged at `232d905` (plan
 [2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md)).
-The guide names `0fa649e` in §1.
 Release 0.6.0 is **merged into `main` at
 `3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
 capability and the Selection panel's Colour row) merged at `ce0a4f9`;

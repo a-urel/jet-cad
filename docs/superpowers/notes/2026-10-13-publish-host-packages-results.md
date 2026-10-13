@@ -7,7 +7,7 @@
 (revision 2). Plan:
 [2026-10-13-publish-host-packages.md](../plans/2026-10-13-publish-host-packages.md),
 executed task by task with an implementer and an independent reviewer per
-task (the SDD ledger is archived with the branch). This note is the record.
+task (the SDD ledger is archived on the branch as its last commit). This note is the record.
 The shape follows
 [2026-10-13-publish-jet-cad-2d.md](2026-10-13-publish-jet-cad-2d.md).
 
@@ -235,15 +235,25 @@ alias, or at deeper indent). Each hit was then read by hand.
   `SymbolWords`, `FloorPlanTableData` in a controller body; `ExportChoice` is
   `@internal`). **Two are real:**
   - `SymbolLibraryLoader.state` (a public getter on a barrel export)
-    returns `SymbolLibraryState`, and none of `SymbolLibraryState`,
-    `SymbolLibraryLoading`, `SymbolLibraryReady` or `SymbolLibraryFailed`
-    is exported by any public library. A host can read `state` but cannot
-    name or pattern-match its result; the planner's own example test
-    imports `src/symbols/symbol_library_state.dart` for that reason.
+    returns `SymbolLibraryState`. It and `SymbolLibraryLoading`,
+    `SymbolLibraryReady` and `SymbolLibraryFailed` are not exported by the
+    host-facing barrels (`jet_cad_floor_plan.dart`, `symbols.dart`,
+    `symbol_sources.dart`); only `editor.dart` exports them, and it is
+    internal and outside semver. A host can read `state` but cannot name
+    or pattern-match its result without importing `editor.dart` or `src/`;
+    the planner's own example test imports
+    `src/symbols/symbol_library_state.dart` for that reason.
   - `FloorPlanStrings.tableNumberProblem(TableNumberProblem)` (an abstract
     method of an exported class) takes the enum `TableNumberProblem`
-    (`src/tables/table_numbers.dart`), not exported. A host subclassing
-    `FloorPlanStrings` cannot name the parameter's type.
+    (`src/tables/table_numbers.dart`), likewise not exported by the
+    host-facing barrels and exported only by `editor.dart`. The host guide
+    (docs/host-guide.md, section on language) lets a host implement or
+    directly extend `FloorPlanStrings`; such a class must write
+    `tableNumberProblem(TableNumberProblem)` (the method is abstract) and
+    cannot name the type from the public barrel without importing
+    `editor.dart` or `src/`. A subclass of a built-in language
+    (`FloorPlanStringsEn`, `De`, `Tr`) inherits the method and needs
+    nothing.
 
   They are 0.x candidates for exporting (a minor release of the planner),
   not changes made here: narrowing or widening a barrel is a spec of its
