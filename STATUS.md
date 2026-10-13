@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
+**Last updated:** 2026-10-14. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -398,12 +398,21 @@ with 0.7.0 (below).
   plan [2026-10-13-kit-contract.md](docs/superpowers/plans/2026-10-13-kit-contract.md),
   results [2026-10-13-kit-contract-results.md](docs/superpowers/notes/2026-10-13-kit-contract-results.md),
   ledger [docs/superpowers/ledgers/2026-10-13-kit-contract/](docs/superpowers/ledgers/2026-10-13-kit-contract/).
-  Complete on `feat/kit-architecture` (worktree
-  `.claude/worktrees/kit-architecture`), reviewed (whole-branch Opus review,
-  one fix wave, re-review clean); **not merged, not pushed**: CI has never
-  run on it (it triggers only on `main`, `claude/**` and pull requests), so
-  the merge waits for the human's word on pushing for CI. Sub-project 2's
-  inputs, R1-R7, are in the contract spec. The human asked to be told when
+  Reviewed (whole-branch Opus review, one fix wave, re-review clean), then
+  **merged through two pull requests** on the human's word: PR #11 at
+  `bc705be` (2026-10-13, head `344a417`, CI 18/18), and PR #12 at
+  `27244bf` (2026-10-14, head `33d0fb0`, CI 17/17), which carries the
+  review fixes pushed after #11 had already merged. Those fixes, from
+  Copilot and CodeRabbit on #11 and #12: rule 15's zero-length polyline is
+  an O(n) bounding box; `check_kit_deps` reads directives with
+  `package:analyzer`, reports an unreadable pubspec or Dart file with its
+  package (D17, D21) and names files under either path separator
+  (`packageRelative`, D22); `CatalogArc`'s sweep is signed (spec K6 and an
+  amendment); `tool/ci`'s SDK floor is `^3.11.0` for analyzer 13.3.0, so
+  `tool/ci` is in the tall format and CI formats the host probe at its own
+  `--language-version=3.6`. The archived ledger stops at #11's review
+  round; #12's rounds are recorded here and in the spec's amendments only.
+  Sub-project 2's inputs, R1-R7, are in the contract spec. The human asked to be told when
   `apps/architecture_demo` runs on the new packages (the end of
   sub-project 3) and to have everything tested after sub-project 4.
 
@@ -535,11 +544,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**In flight: the kit architecture, sub-project 1 complete on
-`feat/kit-architecture` (not merged, not pushed); next, sub-project 2's spec
+**In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
+merged (PR #11 `bc705be`, PR #12 `27244bf`); next, sub-project 2's spec
 (`jet_cad_2d_plan` and the contract's code side), whose inputs R1-R7 are in
-the contract spec.** The merge of sub-project 1 waits for the human's word
-on pushing for CI (In flight).
+the contract spec** (In flight). Its worktree is cut by hand from `main`.
 
 **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
 order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
