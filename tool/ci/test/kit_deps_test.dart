@@ -203,6 +203,20 @@ void main() {
       }
     });
 
+    test('D22 packageRelative: either separator, `/` out, null outside', () {
+      // M-D22a: only `/` ends the prefix, so the Windows path is null.
+      // M-D22b: the result keeps `\`. M-D22c: a bare prefix match, so a
+      // sibling directory sharing the name's start counts as inside.
+      expect(packageRelative('/r/kit', '/r/kit/lib/a.dart'), 'lib/a.dart');
+      expect(
+        packageRelative(r'C:\r\kit', r'C:\r\kit\lib\a.dart'),
+        'lib/a.dart',
+      );
+      expect(packageRelative('/r/kit', '/r/kit_b/lib/a.dart'), isNull);
+      expect(packageRelative('/r/kit', '/r/kit'), isNull);
+      expect(packageRelative('/r/kit', null), isNull);
+    });
+
     test('D14 packageName reads the pubspec, null when it cannot', () {
       expect(
         packageName(pubspec('jet_cad_2d_kit_cinema')),

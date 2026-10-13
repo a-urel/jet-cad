@@ -31,10 +31,7 @@ void main(List<String> args) {
       final p = _package(d);
       if (p != null) packages.add(p);
     } on FileSystemException catch (e) {
-      final path = e.path;
-      final what = path != null && path.startsWith('${d.path}/')
-          ? path.substring(d.path.length + 1)
-          : 'a file';
+      final what = packageRelative(d.path, e.path) ?? 'a file';
       unreadable.add('${d.path}: $what is not readable: ${e.message}');
     }
   }
@@ -63,7 +60,7 @@ PackageSource? _package(Directory d) {
   }
   final files = <String, String>{};
   for (final entry in d.listSync()) {
-    final top = entry.path.substring(d.path.length + 1);
+    final top = packageRelative(d.path, entry.path)!;
     if (entry is Directory && generatedDirectories.contains(top)) continue;
     final found = switch (entry) {
       Directory() => entry.listSync(recursive: true).whereType<File>(),
@@ -71,7 +68,7 @@ PackageSource? _package(Directory d) {
       _ => const <File>[],
     };
     for (final f in found) {
-      final path = f.path.substring(d.path.length + 1);
+      final path = packageRelative(d.path, f.path)!;
       if (isPackageDartFile(path)) files[path] = f.readAsStringSync();
     }
   }

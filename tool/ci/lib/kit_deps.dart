@@ -42,6 +42,16 @@ bool isPackageDartFile(String path) =>
     path.endsWith('.dart') &&
     !generatedDirectories.contains(path.split('/').first);
 
+/// [path] relative to the package directory [dir], `/`-separated whatever
+/// the platform's separator, or null when [path] is not inside [dir].
+String? packageRelative(String dir, String? path) {
+  if (path == null || path.length <= dir.length + 1) return null;
+  if (!path.startsWith(dir)) return null;
+  final separator = path[dir.length];
+  if (separator != '/' && separator != r'\') return null;
+  return path.substring(dir.length + 1).replaceAll(r'\', '/');
+}
+
 /// The `name` of [pubspec], or null when it is not YAML, not a map or has
 /// no string name. The script picks the packages it checks by this name,
 /// not by their directory's.
