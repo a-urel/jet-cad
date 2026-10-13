@@ -2,3 +2,5 @@
 /// builder, the shared shape helpers, the geometry snapshot and the
 /// conformance test. A kit's generator runs it under plain `dart run`.
 library;
+
+export 'src/model/model.dart';

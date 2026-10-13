@@ -5,3 +5,5 @@
 /// A Flutter library: it reads bundled assets. The model it exports is pure
 /// Dart and is shared with `package:jet_cad_2d_kit/authoring.dart`.
 library;
+
+export 'src/model/model.dart';
