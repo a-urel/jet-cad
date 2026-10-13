@@ -435,24 +435,39 @@ makes the loader's failure state matter to a host, and
 they stand (D4, R-10, R-11); adding the exports is non-breaking and one
 small commit, but widening the published API is the human's call.
 
+## The publication (2026-10-13, the human)
+
+The human ran every `dart pub publish`; Claude ran only dry runs, pana
+and D7. Each upload answered "Successfully uploaded … version 0.7.1".
+
+| Package | Published from | Dry run | pana before the upload | Tag |
+|---|---|---|---|---|
+| `jet_cad_2d` 0.7.1 | a worktree at `1dc167d` (not `main`: R-5's README) | 229 KB, 0 warnings | not run (pub.dev scores it 160/160 after the upload) | `jet_cad_2d-v0.7.1` → `1dc167d`, pushed |
+| `jet_cad_2d_flutter` 0.7.1 | `main` at `8a86504` (CI green) | 0 warnings (upload 227 KB) | 160/160; lower bounds 20/20, `pub downgrade` clean | `jet_cad_2d_flutter-v0.7.1` → `8a86504`, pushed |
+| `jet_cad_floor_plan` 0.7.1 | `main` at `8a86504` | 462 KB, 0 warnings, the three run-time assets present | 160/160; lower bounds 20/20 | `jet_cad_floor_plan-v0.7.1` → `8a86504` (the human's) |
+
+The `^0.7.1` lower bounds stand (D1): pana's downgrade found nothing.
+R-10 stands: the planner went out without the two exports (the human
+published it as it stood).
+
+**D7, from pub.dev alone** (Claude, on `main` at `8a86504`, the steps in
+STATUS): `restaurant.jetlib` and `names.dart` copied, the overrides
+block removed (`grep -c '@URL@\|@REF@'` → 0), `flutter pub get` →
+"Changed 39 dependencies!"; the lock names `jet_cad_2d`,
+`jet_cad_2d_flutter` and `jet_cad_floor_plan` 0.7.1, each
+`source: hosted`, `url: "https://pub.dev"`, and no
+`jet_cad_restaurant_symbols`; `check_host_lock.dart` → "pubspec.lock:
+39 packages, none of flutter_scene, flutter_gpu, flutter_gpu_shaders,
+scene, jet_cad_2d_gpu"; `flutter analyze` → "No issues found!";
+`flutter build web` → "✓ Built build/web". The written files were
+removed afterwards.
+
 ## Owed
 
-- **The human, in order (STATUS, Resume here):** `jet_cad_2d` 0.7.1 —
-  push `main`, CI green, dry run, publish, tag `jet_cad_2d-v0.7.1` on
-  `1dc167d`; then `jet_cad_2d_flutter` 0.7.1 — merge of this branch,
-  lower bounds, pana's lower-bounds section green, dry run, publish, tag
-  `jet_cad_2d_flutter-v0.7.1` on the merge commit; then
-  `jet_cad_floor_plan` 0.7.1 the same, tag `jet_cad_floor_plan-v0.7.1`.
-  The version visible on pub.dev after each.
-- **pana** on the two dependents after each dependency is on pub.dev (R-4).
-  The engine's 160/160 is likewise expected, not measured.
-- **D7:** after the planner, resolve a scratch copy of
-  `tool/ci/host_probe/pubspec.yaml.in` with its `dependency_overrides`
-  block removed, `flutter analyze`, and record the result here.
-- **CI on the pushed branch** (Linux): the whole workflow, `publishable`
-  for three packages, the probe and the four old probes; the push is the
-  human's word.
 - **D11**, in the restaurant software (above).
+- **R-10's exports**, a 0.x candidate for the planner's next release:
+  `SymbolLibraryState` (and `Loading`/`Ready`/`Failed`) and
+  `TableNumberProblem` from `jet_cad_floor_plan.dart` (non-breaking).
 - **The human's ruling** on the dormant `packages/jet_cad` (no
   `publish_to`), carried from the engine's review.
 - **The engine README (R-5):** its "Where it comes from" paragraph is

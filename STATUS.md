@@ -390,8 +390,8 @@ with 0.7.0 (below).
 - **Publishing `jet_cad_2d_flutter` and `jet_cad_floor_plan` on pub.dev**
   (the human, 2026-10-13: *"bence tümünü sırayla yayınlayalım"*), on
   `feat/publish-host-packages`, cut by hand from `main` at `d41e5f6`;
-  **merged into `main` at `d2ad729`** on the human's word (*"1"*);
-  **not pushed**. Spec
+  **merged into `main` at `d2ad729`** on the human's word (*"1"*) and
+  pushed; **published 2026-10-13** with the engine (Resume here). Spec
   [2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
   (revision 2, approved), plan
   [2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md),
@@ -406,15 +406,15 @@ with 0.7.0 (below).
   the commit under test through overrides, its lock check proving it;
   the host guide on pub.dev, with the restaurant symbols as files a host
   copies. Dry runs: 0 warnings for all three. pana for the two dependents
-  is 40/160 today (R-4: pana resolves outside the workspace and their
-  dependencies are not on pub.dev yet). The engine step (0.7.1, below) is
-  still the human's.
+  was 40/160 before their dependencies were on pub.dev (R-4) and 160/160
+  after.
 
 - **Publishing `jet_cad_2d` on pub.dev** (the human, 2026-10-13; bounded
   design in chat, approved: *"evet"*), on `feat/publish-jet-cad-2d`, cut
   by hand from `main` at `133cf03`. **Merged into `main` at `1dc167d`** on
-  the human's *"evet önce motoru publish edeceğiz"*; **awaits the human's
-  push and publish** (Resume here). The engine leaves the shared release line (the human:
+  the human's *"evet önce motoru publish edeceğiz"*; **published
+  2026-10-13** from a worktree at `1dc167d`, tag `jet_cad_2d-v0.7.1`
+  (Resume here). The engine leaves the shared release line (the human:
   *"Bağımsız, 0.7.1"*): 0.7.1 is 0.7.0's code with a LICENSE, a README, an
   example and its test, `.pubignore`, `sdk: ^3.6.0`, the real repository
   URL, and doc references that resolve. CI's new job `publishable` runs
@@ -495,41 +495,27 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human publishes the three packages, in order** (Claude never
-runs `dart pub publish` without `--dry-run`; merge, push, tag and publish
-are the human's alone). `jet_cad_2d` 0.7.1 is merged into `main` at
-`1dc167d`; `feat/publish-host-packages` (In flight) is merged at
-`d2ad729`, not pushed: `main`'s CI run (Linux) after the push must be
-green before any publish. The checklist (spec D10), per
-package, in this order:
+**Done 2026-10-13: the three host packages are on pub.dev at 0.7.1**,
+published by the human in order (spec D10): `jet_cad_2d` from a worktree
+at `1dc167d` (not `main`, R-5's README), `jet_cad_2d_flutter` and
+`jet_cad_floor_plan` from `main` at `8a86504` (CI green). Tags
+`jet_cad_2d-v0.7.1` → `1dc167d`, `jet_cad_2d_flutter-v0.7.1` →
+`8a86504`, `jet_cad_floor_plan-v0.7.1` → `8a86504`. pana 160/160 for the
+two dependents before their upload, lower bounds 20/20 (`pub downgrade`
+clean), so the `^0.7.1` lines stand; pub.dev scores the engine and the
+renderer 160/160. D7 green from pub.dev alone. R-10 stands: the planner
+went out without the two exports. The record: the results note's
+"The publication".
 
-1. **`jet_cad_2d` 0.7.1:** publish it from a checkout of `1dc167d`,
-   not from `main`: `main` now carries the rewritten engine README (R-5),
-   which would upload under the tag `jet_cad_2d-v0.7.1` → `1dc167d` and
-   not match it. Push `main` and watch CI (job `publishable` included);
-   then `git worktree add ../jet-cad-engine-0.7.1 1dc167d`, and in it
-   `flutter pub get` at the root, then from `packages/jet_cad_2d`
-   `dart pub publish --dry-run`, `dart pub publish`;
-   `git worktree remove ../jet-cad-engine-0.7.1` (measured 2026-10-13:
-   the dry run there gives 0 warnings and leaves the checkout clean); the
-   tag `jet_cad_2d-v0.7.1` → `1dc167d`; the version visible on pub.dev. pub.dev scores it after the upload:
-   160/160 is expected once GitHub's `main` carries the pubspec (150/160
-   measured before the push).
-2. **`jet_cad_2d_flutter` 0.7.1:** `main` carries the merge and CI is
-   green; its lower bound on the engine is `^0.7.1` (D1: raise it to the
-   engine's current version if the render package uses newer API) and
-   pana's *"Compatible with dependency constraint lower bounds"* section
-   is green, run on the archive now that the engine is on pub.dev (it was
-   40/160 before, R-4); `dart pub publish --dry-run`; `dart pub publish`;
-   the tag `jet_cad_2d_flutter-v0.7.1` on the commit `main` points at
-   after the merge (a fast-forward has no merge commit); the version
-   visible on pub.dev.
-3. **`jet_cad_floor_plan` 0.7.1:** the same, with its lower bounds on the
-   engine and the render package and pana's lower-bounds section green;
-   the tag `jet_cad_floor_plan-v0.7.1` on the commit `main` points at
-   after the merge; the version visible on pub.dev.
-4. **After the planner (D7):** from the repository root on `main`, with
-   the three packages on pub.dev. The probe's `lib/main.dart` imports
+**Next:** D11 in the restaurant software (below); R-10's exports as a
+0.x candidate for the planner's next release. A later release of any
+package follows the same order: its own version, CHANGELOG and tag
+`<package>-vX.Y.Z`; a dependent's lower bounds per D1, checked by
+pana's lower-bounds section once its dependencies are on pub.dev;
+`dart pub publish --dry-run`, then the human's `dart pub publish`.
+
+**The pub-only check (D7)**, run after the planner's 0.7.1 and again
+   after any planner release, from the repository root on `main`. The probe's `lib/main.dart` imports
    `restaurant_names.dart` and its pubspec declares
    `assets/restaurant.jetlib`; both are git-ignored files that only
    `host_probe.sh` creates, from the overridden package, so put them in
@@ -565,9 +551,9 @@ package, in this order:
    the copies (all git-ignored), or let the next `host_probe.sh` run
    clean them.
 
-Then the restaurant software moves (D11, in the planner's CHANGELOG and
-the results note): replace its two git dependencies with
-`jet_cad_floor_plan: ^0.7.1` and copy the symbols as the guide says.
+D11 (in the planner's CHANGELOG and the results note): the restaurant
+software replaces its two git dependencies with
+`jet_cad_floor_plan: ^0.7.1` and copies the symbols as the guide says.
 
 Before this: Release 0.7.0 is **merged into `main` at
 `0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
