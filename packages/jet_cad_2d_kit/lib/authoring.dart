@@ -5,5 +5,7 @@ library;
 
 export 'src/authoring/builder.dart';
 export 'src/authoring/catalog.dart';
+export 'src/authoring/conformance.dart';
 export 'src/authoring/shapes.dart';
+export 'src/authoring/snapshot.dart';
 export 'src/model/model.dart';
