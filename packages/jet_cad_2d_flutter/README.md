@@ -26,7 +26,8 @@ of `dart:ui`; everything that needs Flutter is here.
 
 `DraftCanvas` borrows its document, its spatial index and its camera: the
 application creates them and disposes of them. The document must carry a
-`FlutterTextMeasurer`, which is how its text is measured.
+`FlutterTextMeasurer`, which is how its text is measured. The snippet uses
+both packages, so add both: `dart pub add jet_cad_2d jet_cad_2d_flutter`.
 
 ```dart
 final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
@@ -34,7 +35,7 @@ final index = SpatialIndex(document);
 final camera = CameraController(
     ViewportTransform.fit(document.extents.expandedBy(20), size));
 
-DraftCanvas(document: document, index: index, camera: camera)
+final canvas = DraftCanvas(document: document, index: index, camera: camera);
 ```
 
 A complete app, which draws a line and a circle and frames them, is

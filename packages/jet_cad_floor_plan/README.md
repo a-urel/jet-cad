@@ -18,11 +18,11 @@ of it.
 final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
 final controller = FloorPlanController(symbols: symbols);
 
-MaterialApp(
+final app = MaterialApp(
   supportedLocales: floorPlanSupportedLocales,
   localizationsDelegates: floorPlanLocalizationsDelegates,
   home: Scaffold(body: FloorPlanView(controller: controller)),
-)
+);
 ```
 
 Before `runApp`, load the planner's font and register its licence:
@@ -69,7 +69,9 @@ library's bytes, and its `SymbolNames` in other languages) and gives the
 loader every source it should read:
 
 ```dart
-SymbolLibraryLoader(sources: [furnitureSymbolSource, mySymbolSource])
+final loader = SymbolLibraryLoader(
+  sources: [furnitureSymbolSource, mySymbolSource],
+);
 ```
 
 Two sources must not hold the same key. `package:jet_cad_floor_plan/symbols.dart`

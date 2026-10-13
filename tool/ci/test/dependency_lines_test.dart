@@ -19,6 +19,7 @@ const pubspecs = [
   '../../apps/restaurant_demo/pubspec.yaml',
   '../../apps/dev_harness_2d/pubspec.yaml',
   '../../tool/screenshots/pubspec.yaml',
+  '../../tool/readme_probe/pubspec.yaml',
 ];
 
 /// The dependency lines of [pubspec] that name one of [published] by a
@@ -60,10 +61,10 @@ void main() {
         expect(c, '^0.7.1', reason: path);
       }
     }
-    expect(seen, 18,
-        reason: 'premise: the dependents are read; the pubspecs hold 18 '
-            'dependency lines on a published package (15, and the three of '
-            'tool/screenshots)');
+    expect(seen, 21,
+        reason: 'premise: the dependents are read; the pubspecs hold 21 '
+            'dependency lines on a published package (15, and the three each of '
+            'tool/screenshots and tool/readme_probe)');
   });
 
   test('DL3 the reader sees a path dependency', () {
