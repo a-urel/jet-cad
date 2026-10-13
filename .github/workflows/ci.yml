@@ -53,6 +53,8 @@ jobs:
             tool: flutter
           - package: apps/restaurant_demo
             tool: flutter
+          - package: tool/screenshots
+            tool: flutter
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
