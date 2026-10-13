@@ -1,7 +1,7 @@
 # Publishing the host packages on pub.dev — design
 
-**Date:** 2026-10-13. **Status:** revision 2, awaiting the human's review
-of this file. Revision 1 (`3874c2f`) was written after the human approved
+**Date:** 2026-10-13. **Status:** revision 2, **approved by the human on 2026-10-13**
+(*"onaylıyorum"*). Revision 1 (`3874c2f`) was written after the human approved
 its three sections in chat and was reviewed independently: **Approve with
 fixes**, V-1 to V-14, no blocker; revision 2 folds in every fix (see
 [Review](#review)).
