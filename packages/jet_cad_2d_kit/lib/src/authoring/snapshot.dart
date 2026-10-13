@@ -58,8 +58,11 @@ List<double> _point(CatalogPoint p) => [_number(p.$1), _number(p.$2)];
 /// -0.0 is the same geometry as 0.0, and is written so.
 double _number(double v) => v == 0 ? 0.0 : v;
 
-/// A committed snapshot's text, each entry re-encoded canonically. Throws
-/// [FormatException] when [text] is not a JSON object of objects.
+/// A committed snapshot's text, each entry re-encoded compactly. Only white
+/// space is normalised: key order and number spelling are kept, so an entry
+/// written by hand with `1` where [geometrySnapshot] writes `1.0` reads as
+/// changed (the comparison fails closed). Throws [FormatException] when
+/// [text] is not a JSON object of objects.
 SplayTreeMap<String, String> parseSnapshot(String text) {
   final Object? json = jsonDecode(text);
   if (json is! Map<String, Object?>) {

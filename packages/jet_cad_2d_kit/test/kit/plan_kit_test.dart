@@ -51,6 +51,8 @@ void main() {
       'type:other.wall',
       'property:other.wall.height',
       'tool:wall', // no kit segment at all
+      // The kit's own id with no name. M-K4c: drop `!rest.contains('.')`.
+      'tool:sample',
       'category:other/Tables', // M-K4b: categories exempt from the check
       'category:Tables', // no kit at all
     ]) {

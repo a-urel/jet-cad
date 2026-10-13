@@ -229,6 +229,15 @@ void main() {
           {'format': 1, 'kit': 'sample'};
       expectRefused(bytesOfJson(j), 2, [hex(sofaDef.value), 'not the root']);
     });
+
+    test('V2f a library component with a mistyped field', () {
+      // fromJson's FormatException, not a constructor's ArgumentError.
+      // M-V2f: map every FormatException to rule 1.
+      final j = validLibraryJson();
+      componentJson(j, LibraryComponent.componentTypeId, j['root']! as int)[
+          'format'] = '1';
+      expectRefused(bytesOfJson(j), 2, ['jetcad.library', '"format"']);
+    });
   });
 
   group('rule 3: nodes', () {
@@ -483,6 +492,14 @@ void main() {
     test('V12a a non-finite base point (ported R05)', () {
       final j = validLibraryJson();
       definitionJson(j, tableDef.value)['basePoint'] = [kSentinel, 860.0];
+      expectRefused(bytesOfJson(j, text: kInfinity), 12,
+          ['sample.table.high-top@2', 'non-finite base point']);
+    });
+
+    test('V12b a base point whose y is non-finite', () {
+      // M-V12b: check `base.x` only.
+      final j = validLibraryJson();
+      definitionJson(j, tableDef.value)['basePoint'] = [1250.0, kSentinel];
       expectRefused(bytesOfJson(j, text: kInfinity), 12,
           ['sample.table.high-top@2', 'non-finite base point']);
     });
