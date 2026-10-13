@@ -6,7 +6,7 @@ The first release on pub.dev. The code is jet-cad 0.7.0's planner (git
 tag `v0.7.0`); what changed is how it is packaged: its own LICENSE (Apache
 2.0), a README and a runnable example, `sdk: ^3.6.0`, and its dependencies
 on `jet_cad_2d` and `jet_cad_2d_flutter` from pub.dev (`^0.7.1`). Plans
-are stored as in 0.7.0 (schema 10): a plan either saves opens in the other.
+are stored as in 0.7.0 (schema 10): a plan saved by either release opens in the other.
 
 **Moving a host from git to pub.dev:**
 
