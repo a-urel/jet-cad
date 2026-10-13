@@ -83,6 +83,33 @@ final class SymbolLibrary {
     ];
   }
 
+  /// [libraries] as one: their entries concatenated in order, so categories
+  /// keep their first appearance across them, and their kits joined. A
+  /// `key@version` in two libraries is a [SymbolLibraryError] of rule 6
+  /// naming both, by position and kit.
+  static SymbolLibrary merge(List<SymbolLibrary> libraries) {
+    final from = <String, int>{};
+    final kits = <String>[];
+    final entries = <SymbolEntry>[];
+    String named(int i) =>
+        'library ${i + 1} (kit ${libraries[i].kits.join('+')})';
+    for (var i = 0; i < libraries.length; i++) {
+      for (final kit in libraries[i].kits) {
+        if (!kits.contains(kit)) kits.add(kit);
+      }
+      for (final e in libraries[i].entries) {
+        final earlier = from[e.id];
+        if (earlier != null) {
+          throw SymbolLibraryError(
+              6, '${e.id} is in ${named(earlier)} and in ${named(i)}');
+        }
+        from[e.id] = i;
+        entries.add(e);
+      }
+    }
+    return SymbolLibrary._(kits, entries);
+  }
+
   /// Decodes [bytes] (UTF-8 of the codec's JSON), registering only the kit
   /// components, and validates the result. Throws [SymbolLibraryError] on
   /// every fault of spec K3; nothing else escapes.
