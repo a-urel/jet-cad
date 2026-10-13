@@ -1,7 +1,7 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (merged
-at `0fa649e`; its tag `v0.7.0` is the human's, after `v0.6.0` →
+**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
+`v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
@@ -378,8 +378,8 @@ with 0.7.0 (below).
   reports and the keys it takes, R-2; smaller CHANGELOG, STATUS and guide
   gaps, R-3 to R-5) is applied; its record is
   `docs/superpowers/ledgers/2026-10-13-release-0.7.0/review.md`. The
-  guide names `0fa649e`. The push of `main` and the tag `v0.7.0` →
-  `0fa649e` are the human's.
+  guide names `0fa649e`. The human pushed `main` and the tag `v0.7.0` →
+  `0fa649e` (2026-10-13).
 
 ## In flight
 
@@ -456,12 +456,12 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human pushes `main` and tags `v0.7.0` at `0fa649e`.**
-Release 0.7.0 is **merged into `main` at `0fa649e`** (2026-10-13), from
+**Next: the human's choice.** Release 0.7.0 is **merged into `main` at
+`0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
 `release/0.7.0` (cut from `main` at `7d3ce8d`); it releases rubber-band
 selection, merged at `232d905` (plan
 [2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md)).
-The guide names `0fa649e` in §1. After the tag, **the human's choice**.
+The guide names `0fa649e` in §1.
 Release 0.6.0 is **merged into `main` at
 `3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
 capability and the Selection panel's Colour row) merged at `ce0a4f9`;
@@ -476,7 +476,7 @@ was cut from `feat/plan-colors-slice-2` at `752eace` while the human slept
 CHANGELOG's 0.6.0 section, the guide covering 0.6.0 and naming
 `3bf64a7` in §1.
 
-The released line: 0.7.0 (merged at `0fa649e`, its tag the human's)
+The released line: 0.7.0 (tag `v0.7.0` → `0fa649e`)
 adds rubber-band table selection (schema 10, as 0.6.0); 0.6.0 (tag `v0.6.0` → `3bf64a7`) adds plan colours
 (**schema 10**: a 0.6.0 plan is refused by 0.5.1); 0.5.1 (tag `v0.5.1` → `3f8f7ad`) fixes F-7 and a replaced view; 0.5.0 (tag
 `v0.5.0` → `2fbb9c0`) added O-8 to 0.4.0 (tag `v0.4.0` → `8367010`), which carries the host embedding API's four slices
