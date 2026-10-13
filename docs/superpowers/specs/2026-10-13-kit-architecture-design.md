@@ -508,3 +508,12 @@ by this wave; these rules make sure nothing in it blocks it.
 - STATUS's D11 (the restaurant software moves to `jet_cad_floor_plan`
   ^0.7.1) stands for the 0.7.x line; that software moves again with the
   wave.
+
+## Amendments
+
+- **2026-10-14, sub-project 2 split** (the human: *"İkiye böl"*): A13's
+  sub-project 2 is carried by two specs, 2a (the contract's code side and
+  the plan library in design mode,
+  [2026-10-14-plan-library-design-mode-design.md](2026-10-14-plan-library-design-mode-design.md))
+  and 2b (the service mode). A6's "sub-project 3's spec fixes the names"
+  reads "2b's spec".
