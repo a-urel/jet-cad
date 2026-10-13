@@ -252,7 +252,8 @@ const CatalogSymbol(
   `tags`, `attachTo` (default empty), `family`, `unit` (a `CatalogUnit`,
   `labelling` defaulting to `numbered`), `base`, `shapes`.
 - `CatalogShape`, sealed: `CatalogLine`, `CatalogPolyline`, `CatalogCircle`,
-  `CatalogArc` (counter-clockwise from `start`, `sweep` in radians).
+  `CatalogArc` (from `start` through a signed `sweep`, both in radians: a
+  positive sweep turns counter-clockwise, a negative one clockwise).
 - `Catalog(kit: 'restaurant', symbols: [...])`.
 
 **The builder:** `Uint8List encodeLibrary(Catalog)` and, for tests,
@@ -403,6 +404,10 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
   sweep is signed (positive counter-clockwise, negative clockwise); PR4 the
   purity test and K9 read directives with `package:analyzer`, a
   dev_dependency of the contract and a dependency of `tool/ci`.
+- PR #12: PR5 `analyzer` ^13.3.0 needs Dart 3.11, so `tool/ci`'s SDK floor
+  is `^3.11.0`; the contract keeps `^3.6.0`, since a dev_dependency binds
+  only whoever runs its tests, never a host; PR6 K6's `CatalogArc` bullet
+  states the signed sweep that PR3 introduced.
 
 ## Inputs for sub-project 2
 
