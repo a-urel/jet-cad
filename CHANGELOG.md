@@ -8,16 +8,45 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
-- **A band selects tables in the selection mode.**
-  `FloorPlanView(floorDrag: FloorPlanFloorDrag.band)` makes a one-finger
-  or mouse drag on the floor draw a band — left to right the tables
-  wholly inside, right to left every table touched; a group whole; a
-  locked table never; a plain band replaces the selection, one with
-  Shift, Ctrl or Cmd adds — and the camera then pans with two fingers,
-  a trackpad's scroll and the middle button (the mouse wheel zooms).
-  **Changed under the default `pan`:** a mouse or stylus drag on the
-  floor with Shift, Ctrl or Cmd held now draws a band that adds to the
-  selection; it panned before. See the host guide's "Selecting with a band".
+Nothing yet.
+
+## 0.7.0
+
+Rubber-band selection: in the selection mode a drag draws a band that
+selects tables. Plans are stored as in 0.6.0 (schema 10): a plan either
+release saves opens in the other, and service layouts are unchanged.
+Nothing a host compiles against is removed or changed; the one change a
+host can notice without opting in is under the default
+`floorDrag: FloorPlanFloorDrag.pan`, where a mouse or stylus drag on the
+floor with Shift, Ctrl or Cmd held now draws a band instead of panning
+(below). The packages need Flutter 3.44 or later, as 0.6.0 did; 0.7.0
+was built and tested with Flutter 3.47.6.
+
+- **A band selects tables in the selection mode.** New on the host
+  barrel: the enum `FloorPlanFloorDrag` (`pan`, `band`) and
+  `FloorPlanView.floorDrag` (named, default `pan`, read at each press).
+  `FloorPlanView(floorDrag: FloorPlanFloorDrag.band)` makes a one-finger,
+  mouse or stylus drag on the floor draw a band — left to right the
+  tables wholly inside, right to left every table touched; a group
+  whole; a locked table never; a plain band replaces the selection, one
+  with Shift, Ctrl or Cmd adds — and the camera then pans with two
+  fingers, a trackpad's scroll and the middle button (the mouse wheel
+  zooms). Under `band`, a finger that reached a table only by its 24 px
+  reach draws a band when it drags (it moved that table before); a
+  finger on the table itself still moves it. **Changed under the default
+  `pan`:** a mouse or stylus drag on the floor with Shift, Ctrl or Cmd
+  held now draws a band that adds to the selection; it panned before.
+  See the host guide's "Selecting with a band".
+- **What a band reports.** The selection changes once, at the release:
+  `selectedTables` notifies at most once per band, and a band fires no
+  `onTableTap`, `onFloorTap`, double tap or hover. Escape cancels a band,
+  also under `shortcuts: false`, and while a band is live the view takes
+  every key, so no shortcut above it (a host's own included) sees a key
+  pressed in a band's middle.
+- **`FloorPlanLongPress.contextMenu`'s documentation** now says that a
+  touch screen's multiple selection is then a band
+  (`floorDrag: FloorPlanFloorDrag.band`); it said a touch screen then had
+  none. Its behaviour is unchanged.
 - **`jet_cad_2d_flutter`:** `bandModeFor` and `SelectionBandPainter`: the
   selection band's direction rule and look, shared by the editor and the
   selection mode.
