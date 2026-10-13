@@ -334,3 +334,16 @@ probe) again.
   (D6, D11).
 - **Archive growth** of up to 4 MB per package, for every download; D6's
   budget and the recorded sizes bound it.
+
+## Amendments while planning (2026-10-13)
+
+- **A1, P6.** `salon.json` holds no room, and the host API colours tables
+  only (`setTablesColor`; a room's colour is the editor's Selection panel).
+  P6 shows **tables** in plan colours; its file stays `service_colors.png`.
+- **A2, where the scenes live.** A scene needs `flutter_test` to drive
+  gestures (R4, P5) and to wait for asynchronous loads, so the scenes live
+  under `tool/screenshots/test/` beside the harness, not in `lib/`.
+- **A3, R5's size.** The gallery is a side panel; R5 is captured at 480×800
+  logical pixels, every other scene at 1280×800.
+- **A4, order.** R-10's exports (D9) land first, so the generator waits on
+  `SymbolLibraryReady` through the planner's barrel, as a host would.
