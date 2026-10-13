@@ -402,6 +402,9 @@ class DemoHomeState extends State<DemoHome> {
   bool moves = true;
   bool longPressMenu = false;
 
+  /// Rubber-band spec RB-7: a drag on the floor draws a band.
+  bool floorBand = false;
+
   /// The newest line first.
   final List<String> log = [];
 
@@ -1210,6 +1213,7 @@ class DemoHomeState extends State<DemoHome> {
       longPress: longPressMenu
           ? FloorPlanLongPress.contextMenu
           : FloorPlanLongPress.toggleSelection,
+      floorDrag: floorBand ? FloorPlanFloorDrag.band : FloorPlanFloorDrag.pan,
       onTableContextMenu: _tableMenu,
       onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
       onMergeRequested: (numbers) => _merge(a, numbers),
@@ -1464,6 +1468,12 @@ class DemoHomeState extends State<DemoHome> {
                       title: Text(words.longPressMenu),
                       value: longPressMenu,
                       onChanged: (v) => setState(() => longPressMenu = v)),
+                  SwitchListTile(
+                      key: const Key('floor-band'),
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(words.floorBand),
+                      value: floorBand,
+                      onChanged: (v) => setState(() => floorBand = v)),
                 ],
                 const SizedBox(height: 16),
                 TextField(

@@ -61,6 +61,7 @@ export 'src/ruler_painter.dart';
 export 'src/select_gates.dart';
 export 'src/select_tool.dart';
 export 'src/selection.dart';
+export 'src/selection_band.dart';
 export 'src/selection_overlay.dart';
 export 'src/selection_style.dart';
 export 'src/snap_marker.dart';

@@ -404,6 +404,11 @@ class _FloorScreenState extends State<FloorScreen> {
         tableColorOpacity: 0.6,
       );
 
+  Widget bandView() => FloorPlanView(
+        controller: controller,
+        floorDrag: FloorPlanFloorDrag.band,
+      );
+
   /// A table's colour changed: say so.
   void colourChanged(FloorPlanDesignChange change) {
     if (change case FloorPlanTableChanged(:final before, :final after)

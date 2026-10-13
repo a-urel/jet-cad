@@ -526,6 +526,69 @@ colour, and the undo a `FloorPlanTableAdded` equal to it:
   }
 ```
 
+### Selecting with a band
+
+*Since 0.7.0.* In the selection mode a **band** selects tables by
+dragging across the floor. It is a view option, read at each press:
+
+```dart
+  Widget bandView() => FloorPlanView(
+        controller: controller,
+        floorDrag: FloorPlanFloorDrag.band,
+      );
+```
+
+A band starts in one of two ways, once the pointer has moved past the
+touch slop (18 px) from where it went down:
+
+- **`floorDrag: FloorPlanFloorDrag.band`:** a one-finger, mouse or stylus
+  drag that starts on the floor draws a band; one finger on the floor no
+  longer pans. The camera then pans with two fingers, a trackpad's
+  scroll and the middle button (the mouse wheel zooms). A drag that starts
+  on a table still moves it (or pans, under `serviceMoves: false`).
+- **`floorDrag: FloorPlanFloorDrag.pan`** (the default): a mouse or
+  stylus drag on the floor with Shift, Ctrl or Cmd held at the press
+  draws a band that adds to the selection. A plain drag on the floor
+  still pans, and a finger never bands.
+
+**Which tables a band takes** follows its direction, re-read at every
+move: dragged left to right it is a **window** (solid outline) and takes
+the tables wholly inside it; dragged right to left it is a **crossing**
+(dashed outline) and takes every table it touches. A window tests each
+piece of a table's drawing, so it must hold a table's chairs too.
+
+- A **group** is taken whole: by a crossing when any unlocked member is
+  touched, by a window when every visible member is inside.
+- A **locked** table is never selected.
+- A table with **no number** is selected, and is absent from
+  `selectedTables`, as for a tap.
+- Only tables are taken: a planter or a wall is not.
+
+**What it does to the selection.** A plain band replaces the selection
+with what it holds (over nothing, it clears); a band with Shift, Ctrl or
+Cmd adds to it, and a table already selected stays selected. The
+selection changes once, at the release, and `selectedTables` notifies at
+most once per band. A band reports no `onTableTap`, `onFloorTap`, double
+tap or hover: listen to `selectedTables`.
+
+**A finger near a table.** Under `band` a finger that touched a table
+only by its 24 px reach still selects that table when it taps, and draws
+a band when it drags, so an aisle between crowded tables can be banded
+from. A finger on the table itself moves it.
+
+**Cancelling.** Escape cancels a band at any moment, also under
+`shortcuts: false`; a second finger cancels it too. Nothing changes, and
+the next press acts normally.
+
+**The modifier is read at the press.** Shift, Ctrl or Cmd is read once,
+when the pointer goes down, for the start and for the combining. The
+editor's band reads Shift at the release instead.
+
+**A change under the default.** Before 0.7.0 a mouse or stylus drag on
+the floor with Shift, Ctrl or Cmd held panned the plan; under `pan` it
+now draws a band that adds to the selection. Plain drags, a finger and
+the middle button are as they were.
+
 ### Table groups
 
 A host can merge tables into a **group** — a party seated across tables.
@@ -1313,11 +1376,16 @@ the designed tables added, removed and changed since the last report.
   change; an unnumbered one is not reported.
 - `longPress`: `toggleSelection` (the default: a long press adds or
   removes a table, for multiple selection on a touch screen) or
-  `contextMenu` (a long press opens your menu; a touch screen then has no
-  multiple selection).
+  `contextMenu` (a long press opens your menu; a touch screen's multiple
+  selection is then a band, `floorDrag: FloorPlanFloorDrag.band`).
 - `serviceMoves: false` forbids moving tables during service (a host
   stand, a kitchen screen): a drag from a table pans the plan. It is read
   at each press, so you can change it while the view is shown.
+- *Since 0.7.0:* `floorDrag`: `pan` (the default) or `band`. Under `band`
+  a one-finger or mouse drag on the floor draws a band that selects
+  tables, and the camera pans with two fingers, a trackpad's scroll and
+  the middle button (the mouse wheel zooms); read at each press:
+  [Selecting with a band](#selecting-with-a-band).
 - `onExport(FloorPlanExport)`: Export's bytes, file name and MIME type,
   for you to store or share. `printer` prints; without one, Print uses
   the platform's dialog.
@@ -2112,8 +2180,10 @@ tool until every finger lifts, and a second finger during a table drag
 cancels the drag. A finger's picks and grips are finger-sized. In the
 selection mode a tap selects, a drag from a table moves it (or pans,
 under `serviceMoves: false`), and a long press does what `longPress`
-says, about 500 ms from contact. Mouse, trackpad and stylus behave as on
-a desktop.
+says, about 500 ms from contact. With `floorDrag: FloorPlanFloorDrag.band`
+a one-finger drag on the floor draws a band that selects tables and no
+longer pans; the camera pans with two fingers. Mouse, trackpad and
+stylus behave as on a desktop.
 
 ## 11. What a host must never assume
 

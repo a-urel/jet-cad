@@ -59,6 +59,7 @@ void main() {
       'TableStatus',
       'ServiceLayoutRestore',
       'FloorPlanLongPress',
+      'FloorPlanFloorDrag',
       'NumberingWarning',
       'DuplicateNumber',
       'Unnumbered',

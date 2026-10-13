@@ -381,6 +381,7 @@ the catalog (the existing test's rule).
   shortcuts but Undo/Redo; no affordance needing `geometry` or
   `structure` exists (M-12a: the UI never relies on the dispatcher
   refusing; asserted with a dispatcher spy).
+  (2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
 - **D12. The barrier and service moves** (decisions 7, 11; R-10). Entering
   selection mode records the design (`designJson()` snapshot, the undo
   depth as a floor) and **clears redo**; selection-mode Undo stops at the
@@ -402,6 +403,7 @@ the catalog (the existing test's rule).
   (500 ms, within the slop) for decision 9. Pick radius in logical pixels,
   about 24 dp (a 48 dp target) for touch, today's 6 px for a mouse, by
   pointer kind. `fitToView()` frames the live tables' extents.
+  (2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
 
 ### 14c — Selection-mode behaviour
 

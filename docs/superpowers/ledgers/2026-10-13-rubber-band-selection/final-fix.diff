@@ -1,0 +1,489 @@
+3bc32d9a docs: under band the mouse wheel zooms; rewrap the guide's band bullets
+4852e151 test(floor-plan): pin the band's notifications, the modifier at the down, the crossing's lock, the tap chain
+ CHANGELOG.md                                       |  8 +--
+ docs/host-guide.md                                 | 17 +++--
+ .../2026-10-13-rubber-band-selection-design.md     | 11 ++-
+ .../lib/src/host/floor_plan_types.dart             |  3 +-
+ .../lib/src/host/floor_plan_view.dart              |  3 +-
+ .../test/host/band_view_test.dart                  |  4 +-
+ .../test/service/table_band_test.dart              | 81 +++++++++++++++++++++-
+ 7 files changed, 105 insertions(+), 22 deletions(-)
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 51aec26b..73edcf2f 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -7,24 +7,24 @@ pub.dev: a host depends on them by git (see
+ [docs/host-guide.md](docs/host-guide.md)).
+ 
+ ## Unreleased
+ 
+ - **A band selects tables in the selection mode.**
+   `FloorPlanView(floorDrag: FloorPlanFloorDrag.band)` makes a one-finger
+   or mouse drag on the floor draw a band — left to right the tables
+   wholly inside, right to left every table touched; a group whole; a
+   locked table never; a plain band replaces the selection, one with
+   Shift, Ctrl or Cmd adds — and the camera then pans with two fingers,
+-  the wheel or trackpad and the middle button. **Changed under the
+-  default `pan`:** a mouse or stylus drag on the floor with Shift, Ctrl
+-  or Cmd held now draws a band that adds to the selection; it panned
+-  before. See the host guide's "Selecting with a band".
++  a trackpad's scroll and the middle button (the mouse wheel zooms).
++  **Changed under the default `pan`:** a mouse or stylus drag on the
++  floor with Shift, Ctrl or Cmd held now draws a band that adds to the
++  selection; it panned before. See the host guide's "Selecting with a band".
+ - **`jet_cad_2d_flutter`:** `bandModeFor` and `SelectionBandPainter`: the
+   selection band's direction rule and look, shared by the editor and the
+   selection mode.
+ 
+ ## 0.6.0
+ 
+ Plan colours: a room or a table takes one of eight hues, set in the
+ editor's Colour row (and, for tables, by the host), saved with the plan,
+ drawn on screen, exported and printed. **Plans are stored differently:
+ schema 10**, which 0.5.1 and every older release refuse, so every
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 2f29a201..3fa6f5fe 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -536,24 +536,23 @@ dragging across the floor. It is a view option, read at each press:
+         controller: controller,
+         floorDrag: FloorPlanFloorDrag.band,
+       );
+ ```
+ 
+ A band starts in one of two ways, once the pointer has moved past the
+ touch slop (18 px) from where it went down:
+ 
+ - **`floorDrag: FloorPlanFloorDrag.band`:** a one-finger, mouse or stylus
+   drag that starts on the floor draws a band; one finger on the floor no
+-  longer pans. The camera then pans with two fingers, the wheel or
+-  trackpad and the middle button. A drag that
+-  starts on a table still moves it (or pans, under `serviceMoves:
+-  false`).
++  longer pans. The camera then pans with two fingers, a trackpad's
++  scroll and the middle button (the mouse wheel zooms). A drag that starts
++  on a table still moves it (or pans, under `serviceMoves: false`).
+ - **`floorDrag: FloorPlanFloorDrag.pan`** (the default): a mouse or
+   stylus drag on the floor with Shift, Ctrl or Cmd held at the press
+   draws a band that adds to the selection. A plain drag on the floor
+   still pans, and a finger never bands.
+ 
+ **Which tables a band takes** follows its direction, re-read at every
+ move: dragged left to right it is a **window** (solid outline) and takes
+ the tables wholly inside it; dragged right to left it is a **crossing**
+ (dashed outline) and takes every table it touches. A window tests each
+ piece of a table's drawing, so it must hold a table's chairs too.
+@@ -1377,23 +1376,23 @@ the designed tables added, removed and changed since the last report.
+   change; an unnumbered one is not reported.
+ - `longPress`: `toggleSelection` (the default: a long press adds or
+   removes a table, for multiple selection on a touch screen) or
+   `contextMenu` (a long press opens your menu; a touch screen's multiple
+   selection is then a band, `floorDrag: FloorPlanFloorDrag.band`).
+ - `serviceMoves: false` forbids moving tables during service (a host
+   stand, a kitchen screen): a drag from a table pans the plan. It is read
+   at each press, so you can change it while the view is shown.
+ - *Since 0.7.0:* `floorDrag`: `pan` (the default) or `band`. Under `band`
+   a one-finger or mouse drag on the floor draws a band that selects
+-  tables, and the camera pans with two fingers, the wheel and the middle
+-  button; read at each press: [Selecting with a
+-  band](#selecting-with-a-band).
++  tables, and the camera pans with two fingers, a trackpad's scroll and
++  the middle button (the mouse wheel zooms); read at each press:
++  [Selecting with a band](#selecting-with-a-band).
+ - `onExport(FloorPlanExport)`: Export's bytes, file name and MIME type,
+   for you to store or share. `printer` prints; without one, Print uses
+   the platform's dialog.
+ - *Since 0.4.0:* `onTablesMoved(moved)` after a drag of tables,
+   `onTableDoubleTap(number)` after a double tap's second `onTableTap`,
+   `onFloorTap(world)` for a tap that misses every table, and
+   `onTableHover(number)` for the mouse or a stylus over a table: [Events
+   and host data](#events-and-host-data).
+ - *Since 0.4.0:* the host's own chrome and keys.
+   `serviceBar` and `editorBar` cut down, reorder, extend or hide the two
+@@ -2176,22 +2175,22 @@ in it is drawn on your light colour, with dark ink.
+ ## 10. Touch
+ 
+ Both modes work on a touch screen. Two fingers pinch about their
+ midpoint and pan together; once two fingers are down nothing reaches a
+ tool until every finger lifts, and a second finger during a table drag
+ cancels the drag. A finger's picks and grips are finger-sized. In the
+ selection mode a tap selects, a drag from a table moves it (or pans,
+ under `serviceMoves: false`), and a long press does what `longPress`
+ says, about 500 ms from contact. With `floorDrag: FloorPlanFloorDrag.band`
+ a one-finger drag on the floor draws a band that selects tables and no
+-longer pans; the camera pans with two fingers. Mouse, trackpad and stylus behave as
+-on a desktop.
++longer pans; the camera pans with two fingers. Mouse, trackpad and
++stylus behave as on a desktop.
+ 
+ ## 11. What a host must never assume
+ 
+ - **Handles.** A table's identity is its number. The plan's internal
+   handles are not API.
+ - **Capabilities are not a security boundary** *(since 0.4.0)*. `editorCapabilities` decides what the editor offers its
+   user, nothing more: your own calls (`setTableData`, `undo()`, `load`,
+   `exportPlan`, `printPlan`) stay allowed under every value, and the
+   value is never stored with the plan. Decide who may change a floor in
+   your own application, and check it where the plan is stored.
+diff --git a/docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md b/docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md
+index 633110f3..5df7cb99 100644
+--- a/docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md
++++ b/docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md
+@@ -1,17 +1,21 @@
+ # Rubber-band selection in the selection mode — design
+ 
+ **Date:** 2026-10-13. **Status:** revision 2, **approved by the human on
+ 2026-10-13** ("evet, devam et"). Revision 1 (`fa1da0d`) was reviewed independently
+ (an Opus reviewer, read-only): **Approve with fixes**, V-1 to V-16, one
+ blocker (V-1); revision 2 folds in every fix, and the two the human was
+ asked about (V-4, V-12) as the human answered (see [Review](#review)).
++**2026-10-13 errata:** the wheel zooms on desktop (`GesturePolicy.wheelZooms`;
++Ctrl/Cmd+wheel always zooms); RB-1's pan list is corrected in the
++`FloorPlanFloorDrag.band` doc and the Risks entry: two fingers, a trackpad's
++scroll and the middle button pan.
+ 
+ **Asked for by the human, 2026-10-13:** "O-4 ile devam et" — the host
+ embedding API spec's out-of-scope item O-4, "multi-select of tables by
+ rubber band in the selection mode".
+ 
+ **Branch:** `feat/rubber-band`, from `main` at `1e53de1` (release 0.6.0,
+ tag `v0.6.0` → `3bf64a7`). **Size:** S–M, one slice. **Touched:**
+ `jet_cad_2d_flutter` (the band's painting, shared), `jet_cad_floor_plan`
+ (the selection tool, the view's option, the host barrel), the restaurant
+ demo, the host guide, the CHANGELOG, four specs' notes. **Release:**
+@@ -136,21 +140,22 @@ has, selects a region in one gesture.
+ ```dart
+ /// What a one-pointer drag on the empty floor does in the selection
+ /// mode. The design mode is unaffected.
+ enum FloorPlanFloorDrag {
+   /// Pans the camera (today's). With Shift, Ctrl or Cmd held at the
+   /// press, a mouse or stylus drag draws a band that adds to the
+   /// selection.
+   pan,
+ 
+   /// Draws a band that selects tables; the camera pans with two
+-  /// fingers, the wheel or trackpad, and the middle button.
++  /// fingers, a trackpad's scroll and the middle button (the mouse wheel
++  /// zooms).
+   band,
+ }
+ ```
+ 
+ In `floor_plan_types.dart`, added to the host barrel's `show` list
+ (`jet_cad_floor_plan.dart:30-40`).
+ `FloorPlanView({FloorPlanFloorDrag floorDrag = FloorPlanFloorDrag.pan})`,
+ named and optional: no host's code changes (P-1). `ServiceOptions` gains
+ a `floorDrag` field and `kDefaultServiceOptions` sets `pan`; the view
+ fills it from `widget.floorDrag`, read at each press as the other
+@@ -359,22 +364,22 @@ unnumbered table, a table on a hidden layer and a non-table symbol.
+ ## Out of scope, recorded
+ 
+ - Auto-scroll when a band reaches the canvas edge.
+ - A live highlight of the tables a band would take.
+ - A band in the selection mode under `pan` by touch (no modifier exists).
+ - A lasso (free-form) selection.
+ 
+ ## Risks
+ 
+ - **A host that turns on `band` loses one-finger pan.** Stated in the
+-  option's doc and the guide; two fingers, the wheel and the middle
+-  button still pan.
++  option's doc and the guide; two fingers, a trackpad's scroll and the
++  middle button still pan (the mouse wheel zooms).
+ - **Window on a table with chairs.** Where a table's symbol draws its
+   chairs, they are its leaves, so a window must hold the chairs too;
+   this is the design mode's rule and the brainstorm chose it.
+ - **The reach-only press moves no table under `band`.** To move a
+   table by touch, a finger starts on the table itself.
+ 
+ ## Review
+ 
+ Revision 1 (`fa1da0d`), an independent Opus reviewer: **Approve with
+ fixes**.
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart
+index 7d814d3c..9e0638bb 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart
+@@ -183,21 +183,22 @@ enum FloorPlanLongPress {
+ /// What a one-pointer drag on the empty floor does in the selection mode
+ /// (rubber-band spec RB-1). The design mode is unaffected.
+ enum FloorPlanFloorDrag {
+   /// Pans the camera (the default). With Shift, Ctrl or Cmd held at the
+   /// press, a mouse or stylus drag draws a band that adds to the
+   /// selection.
+   pan,
+ 
+   /// Draws a band that selects tables: left to right takes the tables
+   /// wholly inside, right to left every table it touches. The camera
+-  /// pans with two fingers, the wheel or trackpad, and the middle button.
++  /// pans with two fingers, a trackpad's scroll and the middle button
++  /// (the mouse wheel zooms).
+   band,
+ }
+ 
+ /// A problem with the plan's table numbers (spec 14a T15), as a value the
+ /// host words, or asks `FloorPlanStrings.numberingWarning` to (spec 14d
+ /// L6). Never a handle (D18).
+ sealed class NumberingWarning {
+   const NumberingWarning();
+ }
+ 
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+index 9e941923..ca40c491 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+@@ -94,21 +94,22 @@ class FloorPlanView extends StatefulWidget {
+   /// What a long press on a table does in the selection mode (spec 14d
+   /// S7).
+   final FloorPlanLongPress longPress;
+ 
+   /// What a one-pointer drag on the empty floor does in the selection
+   /// mode (rubber-band spec RB-1): `pan` (the default) pans, and a Shift,
+   /// Ctrl or Cmd mouse or stylus drag draws a band that adds to the
+   /// selection; `band` draws a band that selects -- left to right the
+   /// tables wholly inside, right to left every table touched, a group
+   /// whole, a locked table never -- and the camera pans with two fingers,
+-  /// the wheel or trackpad, and the middle button. Read at each press.
++  /// a trackpad's scroll and the middle button (the mouse wheel zooms).
++  /// Read at each press.
+   final FloorPlanFloorDrag floorDrag;
+ 
+   /// A member of a group was tapped in the selection mode (table-groups
+   /// spec G4): the group's id and the tapped number, after [onTableTap]. A
+   /// locked member reports its tap too.
+   final void Function(String groupId, String number)? onGroupTap;
+ 
+   /// The service bar's Merge was pressed (G5): the selected numbers. The
+   /// planner only asks; the host decides and calls
+   /// [FloorPlanController.setTableGroups].
+diff --git a/packages/jet_cad_floor_plan/test/host/band_view_test.dart b/packages/jet_cad_floor_plan/test/host/band_view_test.dart
+index aac0400d..604a8e1c 100644
+--- a/packages/jet_cad_floor_plan/test/host/band_view_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/band_view_test.dart
+@@ -298,22 +298,22 @@ void main() {
+     await g.up();
+     await tester.pump();
+     expect(c.selectedTables.value, {'1', '2'});
+     expect(notified, 1);
+     expect(h.taps, isEmpty);
+     expect(h.floorTaps, isEmpty);
+   });
+ 
+   testWidgets(
+       'RBV4 under shortcuts false Escape mid-band ends it, a secondary click '
+-      'mid-band opens no menu, and a mode switch mid-band leaves nothing '
+-      'selected (RB14; M-RB17)', (tester) async {
++      'mid-band opens no menu, and a mode switch mid-band leaves the '
++      'selection as it was (RB14; M-RB17)', (tester) async {
+     final h = await pumpBand(tester, shortcuts: false);
+     final c = h.c;
+     c.select({'5'});
+     await tester.pump();
+     final (from, to) = over12(tester, c);
+ 
+     // Premise: with shortcuts off an idle Escape does not clear.
+     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+     await tester.pump();
+     expect(c.selectedTables.value, {'5'}, reason: 'premise: idle Escape');
+diff --git a/packages/jet_cad_floor_plan/test/service/table_band_test.dart b/packages/jet_cad_floor_plan/test/service/table_band_test.dart
+index 1827c784..c7c9da4f 100644
+--- a/packages/jet_cad_floor_plan/test/service/table_band_test.dart
++++ b/packages/jet_cad_floor_plan/test/service/table_band_test.dart
+@@ -435,20 +435,53 @@ void main() {
+     r.selection.replace([r.key('9')]);
+     final before = r.camera.value.worldToScreenMatrix;
+     expect(r.picker.pick(Vector2(box.minX, box.maxY), reach: 240), isNull,
+         reason: 'premise: out of a finger\'s reach');
+     r.band(box, shift: true, touch: true);
+     final after = r.camera.value.worldToScreenMatrix;
+     expect(after.e, isNot(closeTo(before.e, 1)), reason: 'a finger pans');
+     expect(r.selection.keys, {r.key('9')});
+   });
+ 
++  testWidgets(
++      'RB2b the modifier is read at the down (R-1): under pan Shift at the '
++      'down only still bands and adds; under band Shift on the moves and the '
++      'up only still replaces (M-RB24, M-RB25)', (tester) async {
++    final r = rig(tester);
++    final box = padded(r.leafBox(['1', '2']), 600);
++    final s = r.screen(Vector2(box.minX, box.maxY));
++    final e = r.screen(Vector2(box.maxX, box.minY));
++    expect(r.picker.pick(r.toWorld(s)), isNull, reason: 'premise: the floor');
++    expect(r.options.floorDrag, FloorPlanFloorDrag.pan, reason: 'premise');
++
++    // Under pan: Shift at the down only. Read at the first move (M-RB25) the
++    // drag would pan; read at the up (M-RB24) it would replace.
++    r.selection.replace([r.key('9')]);
++    final before = parts(r.camera.value.worldToScreenMatrix);
++    r.down(s, shift: true);
++    r.move(Offset.lerp(s, e, 0.5)!);
++    r.move(e);
++    r.up(e);
++    expect(r.selection.keys, r.keys(['1', '2', '9']), reason: 'a band adds');
++    expect(parts(r.camera.value.worldToScreenMatrix), before, reason: 'no pan');
++
++    // Under band: a plain down, Shift on the moves and the up. Read at the
++    // up (M-RB24) it would add 9 to the band's keys.
++    r.drag(FloorPlanFloorDrag.band);
++    r.selection.replace([r.key('9')]);
++    r.down(s);
++    r.move(Offset.lerp(s, e, 0.5)!, shift: true);
++    r.move(e, shift: true);
++    r.up(e, shift: true);
++    expect(r.selection.keys, r.keys(['1', '2']), reason: 'a band replaces');
++  });
++
+   testWidgets(
+       'RB5 under band a drag from a table moves it, from a locked one is '
+       'spent; with serviceMoves false it pans (M-RB5)', (tester) async {
+     final r = rig(tester);
+     r.drag(FloorPlanFloorDrag.band);
+     final before = parts(r.node('2').transform);
+     final p = r.at('2', 900, 650);
+     r.down(p);
+     r.move(p + const Offset(40, 0));
+     expect(r.paint().calls, isEmpty);
+@@ -632,21 +665,21 @@ void main() {
+     r.band(all);
+     expect(r.selection.keys, r.keys(['1', '2', '4', '5', '6', '7', '9', '10']));
+     expect(r.selection.keys, isNot(contains(r.key('11'))));
+     expect(r.selection.keys, isNot(contains(r.key('planter'))));
+   });
+ 
+   testWidgets(
+       'RB10 locks and groups: a lone locked table is not taken; a window '
+       'round a group with a locked member takes its unlocked one; crossing '
+       'one member takes its group; a window with one member out takes none '
+-      '(M-RB10, M-RB10b, M-RB11, M-RB12)', (tester) async {
++      '(M-RB10, M-RB10b, M-RB11, M-RB12, M-RB26)', (tester) async {
+     final r = rig(tester);
+     r.drag(FloorPlanFloorDrag.band);
+     r.selection.replace([r.key('1')]);
+     r.band(padded(r.leafBox(['3']), 100));
+     expect(r.selection.isEmpty, isTrue, reason: 'locked: nothing');
+ 
+     r.band(padded(r.leafBox(['7', '8']), 100));
+     expect(r.selection.keys, {r.key('7')});
+ 
+     // Over 5's upper chair only (local y 1000 to 1450).
+@@ -656,20 +689,35 @@ void main() {
+           reason: 'premise: $n untouched');
+     }
+     r.band(chair, crossing: true);
+     expect(r.selection.keys, r.keys(['4', '5', '6']));
+ 
+     final two = padded(r.leafBox(['4', '5']), 100);
+     expect(two.maxX, lessThan(r.leafBox(['6']).minX),
+         reason: 'premise: 6 outside');
+     r.band(two);
+     expect(r.selection.isEmpty, isTrue);
++
++    // A crossing takes a group only through an unlocked member (RB-3): over
++    // the right edge of 8 (h's locked member) alone, off 7, it takes nothing
++    // and a plain band replaces the selection with that empty set.
++    r.selection.replace([r.key('1')]);
++    final eight = r.leafBox(['8']);
++    final edge = Aabb2.raw(
++        eight.maxX - 200, eight.minY - 100, eight.maxX + 300, eight.maxY + 100);
++    expect(overlaps(edge, eight), isTrue, reason: 'premise: touches 8');
++    expect(overlaps(edge, r.leafBox(['7'])), isFalse,
++        reason: 'premise: off 7\'s leaves');
++    expect(r.node('8').layer, isNot(r.node('7').layer),
++        reason: 'premise: 8 is on the locked layer, 7 not');
++    r.band(edge, crossing: true);
++    expect(r.selection.isEmpty, isTrue, reason: 'locked member alone: none');
+   });
+ 
+   testWidgets(
+       'RB11 a plain band replaces; a Ctrl band adds and keeps a selected '
+       'table inside (M-RB13)', (tester) async {
+     final r = rig(tester);
+     r.drag(FloorPlanFloorDrag.band);
+     r.selection.replace([r.key('1')]);
+     r.band(padded(r.leafBox(['2']), 100));
+     expect(r.selection.keys, {r.key('2')});
+@@ -687,21 +735,21 @@ void main() {
+     r.selection.replace([r.key('1')]);
+     r.band(empty, shift: true);
+     expect(r.selection.keys, {r.key('1')});
+     r.band(empty);
+     expect(r.selection.isEmpty, isTrue);
+   });
+ 
+   testWidgets(
+       'RB13 one notification for a band that changes the selection, none '
+       'for one that does not; a band reports no tap, double tap, floor tap '
+-      'or hover (M-RB15, M-RB16)', (tester) async {
++      'or hover (M-RB15, M-RB16, M-RB27)', (tester) async {
+     final r = rig(tester);
+     r.drag(FloorPlanFloorDrag.band);
+     var notified = 0;
+     r.selection.addListener(() => notified++);
+     final both = padded(r.leafBox(['1', '2']), 600);
+     r.band(both);
+     expect(notified, 1);
+     expect(r.selection.keys, r.keys(['1', '2']));
+     r.band(both);
+     expect(notified, 1, reason: 'the same keys: silent');
+@@ -713,20 +761,25 @@ void main() {
+     expect(r.taps, ['2']);
+     final start = top + const Offset(0, -200);
+     expect(r.picker.pick(r.toWorld(start)), isNull, reason: 'premise');
+     r.down(start);
+     r.move(top);
+     r.up(top);
+     expect(r.taps, ['2'], reason: 'no tap');
+     expect(r.doubleTaps, isEmpty);
+     expect(r.floors, isEmpty);
+     expect(r.hovers, isEmpty);
++    // The rig's events are all stamped zero: were the first tap still
++    // remembered, this one would complete a double tap (M-RB27).
++    r.tap(top);
++    expect(r.taps, ['2', '2']);
++    expect(r.doubleTaps, isEmpty, reason: 'the band broke the tap chain');
+   });
+ 
+   testWidgets('RB13b a band, then at once a tap on a table: the tap acts',
+       (tester) async {
+     final r = rig(tester);
+     r.drag(FloorPlanFloorDrag.band);
+     r.band(padded(r.leafBox(['2']), 100));
+     expect(r.selection.keys, {r.key('2')});
+     r.tap(r.at('1', 900, 700));
+     expect(r.selection.keys, {r.key('1')});
+@@ -789,11 +842,35 @@ void main() {
+     expect(
+         (stroke.positionalArguments[1] as Paint).style, PaintingStyle.stroke);
+     r.move(c);
+     final crossing = r.paint();
+     expect(
+         [for (final i in crossing.calls) i.memberName], [#drawRect, #drawPath]);
+     expect(crossing.calls.first.positionalArguments[0], Rect.fromPoints(a, c));
+     r.up(c);
+     expect(r.paint().calls, isEmpty, reason: 'idle again');
+   });
++
++  testWidgets(
++      'RB15b the tool notifies as a band grows and when Escape ends it, so '
++      'the overlay repaints (M-RB22, M-RB23)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    var n = 0;
++    r.tool.addListener(() => n++);
++    const a = Offset(900, 120), b = Offset(1100, 300), c = Offset(1150, 320);
++    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise');
++    r.down(a);
++    r.move(b);
++    expect(r.tool.phase, ToolPhase.dragging, reason: 'premise: banding');
++    final started = n;
++    expect(started, greaterThan(0), reason: 'the band starting repaints');
++    r.move(c);
++    expect(n, greaterThan(started), reason: 'a further move repaints');
++    final grown = n;
++    expect(r.paint().calls, isNotEmpty, reason: 'premise: a band is painted');
++    expect(r.tool.onKey(_escape, r.ctx), KeyEventResult.handled);
++    expect(r.tool.phase, ToolPhase.idle);
++    expect(n, greaterThan(grown), reason: 'Escape repaints');
++    expect(r.paint().calls, isEmpty);
++  });
+ }

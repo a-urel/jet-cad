@@ -111,6 +111,7 @@ taps and layout changes by table number. Touch gestures beyond one finger
   - **keys:** Escape clears the selection. No other key (D11).
   - No band, no grips, no rotation (decision 10), no keyboard shortcuts
     but the view's Undo/Redo (14b-2).
+  - (2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
 - **S4. An unnumbered table** is picked, selected and moved like any
   other; it is absent from `selectedTables` (14b-2 H3) and its tap
   reports no number (S8).
