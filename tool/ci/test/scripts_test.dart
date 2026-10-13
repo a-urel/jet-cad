@@ -150,7 +150,7 @@ void main() {
     Directory('${dir.path}/.dart_tool').createSync();
     File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
         '{"configVersion":2,"packages":[{"name":"a","rootUri":"../x/a",'
-        '"packageUri":"lib/"},{"name":"b","rootUri":"file:///abs/b",'
+        '"packageUri":"lib/"},{"name":"b","rootUri":"file:///abs/b/",'
         '"packageUri":"lib/"}]}');
     final a = await dartRun('package_root.dart', [dir.path, 'a']);
     expect(a.exitCode, 0, reason: '${a.stdout}${a.stderr}');

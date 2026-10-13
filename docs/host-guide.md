@@ -3,8 +3,8 @@
 This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the floor planner: staff design the restaurant's floors in the
 **design** mode, and during service they see the tables, colour them by
-status and pick them in the **selection** mode. It covers release
-**0.7.0** ([CHANGELOG](../CHANGELOG.md)).
+status and pick them in the **selection** mode. It covers `jet_cad_floor_plan`
+**0.7.1** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
 
 Every Dart snippet below is taken from
 [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
@@ -30,7 +30,7 @@ it, from pub.dev. Import only the planner's barrel,
 is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.7.0 was built and tested with Flutter 3.47.6. They bring no build hook
+0.7.1 is built and tested with Flutter 3.47.6. They bring no build hook
 and no GPU renderer: nothing runs at build time beyond Flutter's own.
 (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
 hook compiles shaders.)
@@ -74,9 +74,15 @@ Give the loader both sources (section 4):
 `SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
 
 Two rules. Never load the copy with the package's own
-`restaurantSymbolSource`: it reads the package's asset key, which your app
-does not have. And a saved plan does not depend on the library: you can
-change which library you ship without migrating saved plans.
+`restaurantSymbolSource`: the loader fails when one key and version is in
+two sources, whatever their names, and the package's source and your copy
+carry the same keys. And a saved plan does not depend on the library:
+placing a symbol copies its definition into the plan, so you can change
+which library you ship without migrating saved plans.
+
+A change to the symbols reaches hosts with a planner release, and that
+release's tag carries the files: copy them again from the tag of the
+release you move to.
 
 ## 2. Fonts
 
