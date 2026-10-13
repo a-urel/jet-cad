@@ -5,6 +5,10 @@
 (an Opus reviewer, read-only): **Approve with fixes**, V-1 to V-16, one
 blocker (V-1); revision 2 folds in every fix, and the two the human was
 asked about (V-4, V-12) as the human answered (see [Review](#review)).
+**2026-10-13 errata:** the wheel zooms on desktop (`GesturePolicy.wheelZooms`;
+Ctrl/Cmd+wheel always zooms); RB-1's pan list is corrected in the
+`FloorPlanFloorDrag.band` doc and the Risks entry: two fingers, a trackpad's
+scroll and the middle button pan.
 
 **Asked for by the human, 2026-10-13:** "O-4 ile devam et" — the host
 embedding API spec's out-of-scope item O-4, "multi-select of tables by
@@ -143,7 +147,8 @@ enum FloorPlanFloorDrag {
   pan,
 
   /// Draws a band that selects tables; the camera pans with two
-  /// fingers, the wheel or trackpad, and the middle button.
+  /// fingers, a trackpad's scroll and the middle button (the mouse wheel
+  /// zooms).
   band,
 }
 ```
@@ -366,8 +371,8 @@ unnumbered table, a table on a hidden layer and a non-table symbol.
 ## Risks
 
 - **A host that turns on `band` loses one-finger pan.** Stated in the
-  option's doc and the guide; two fingers, the wheel and the middle
-  button still pan.
+  option's doc and the guide; two fingers, a trackpad's scroll and the
+  middle button still pan (the mouse wheel zooms).
 - **Window on a table with chairs.** Where a table's symbol draws its
   chairs, they are its leaves, so a window must hold the chairs too;
   this is the design mode's rule and the brainstorm chose it.

@@ -101,7 +101,8 @@ class FloorPlanView extends StatefulWidget {
   /// selection; `band` draws a band that selects -- left to right the
   /// tables wholly inside, right to left every table touched, a group
   /// whole, a locked table never -- and the camera pans with two fingers,
-  /// the wheel or trackpad, and the middle button. Read at each press.
+  /// a trackpad's scroll and the middle button (the mouse wheel zooms).
+  /// Read at each press.
   final FloorPlanFloorDrag floorDrag;
 
   /// A member of a group was tapped in the selection mode (table-groups

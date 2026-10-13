@@ -543,10 +543,9 @@ touch slop (18 px) from where it went down:
 
 - **`floorDrag: FloorPlanFloorDrag.band`:** a one-finger, mouse or stylus
   drag that starts on the floor draws a band; one finger on the floor no
-  longer pans. The camera then pans with two fingers, the wheel or
-  trackpad and the middle button. A drag that
-  starts on a table still moves it (or pans, under `serviceMoves:
-  false`).
+  longer pans. The camera then pans with two fingers, a trackpad's
+  scroll and the middle button (the mouse wheel zooms). A drag that starts
+  on a table still moves it (or pans, under `serviceMoves: false`).
 - **`floorDrag: FloorPlanFloorDrag.pan`** (the default): a mouse or
   stylus drag on the floor with Shift, Ctrl or Cmd held at the press
   draws a band that adds to the selection. A plain drag on the floor
@@ -1384,9 +1383,9 @@ the designed tables added, removed and changed since the last report.
   at each press, so you can change it while the view is shown.
 - *Since 0.7.0:* `floorDrag`: `pan` (the default) or `band`. Under `band`
   a one-finger or mouse drag on the floor draws a band that selects
-  tables, and the camera pans with two fingers, the wheel and the middle
-  button; read at each press: [Selecting with a
-  band](#selecting-with-a-band).
+  tables, and the camera pans with two fingers, a trackpad's scroll and
+  the middle button (the mouse wheel zooms); read at each press:
+  [Selecting with a band](#selecting-with-a-band).
 - `onExport(FloorPlanExport)`: Export's bytes, file name and MIME type,
   for you to store or share. `printer` prints; without one, Print uses
   the platform's dialog.
@@ -2183,8 +2182,8 @@ selection mode a tap selects, a drag from a table moves it (or pans,
 under `serviceMoves: false`), and a long press does what `longPress`
 says, about 500 ms from contact. With `floorDrag: FloorPlanFloorDrag.band`
 a one-finger drag on the floor draws a band that selects tables and no
-longer pans; the camera pans with two fingers. Mouse, trackpad and stylus behave as
-on a desktop.
+longer pans; the camera pans with two fingers. Mouse, trackpad and
+stylus behave as on a desktop.
 
 ## 11. What a host must never assume
 

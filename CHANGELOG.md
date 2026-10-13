@@ -14,10 +14,10 @@ pub.dev: a host depends on them by git (see
   wholly inside, right to left every table touched; a group whole; a
   locked table never; a plain band replaces the selection, one with
   Shift, Ctrl or Cmd adds — and the camera then pans with two fingers,
-  the wheel or trackpad and the middle button. **Changed under the
-  default `pan`:** a mouse or stylus drag on the floor with Shift, Ctrl
-  or Cmd held now draws a band that adds to the selection; it panned
-  before. See the host guide's "Selecting with a band".
+  a trackpad's scroll and the middle button (the mouse wheel zooms).
+  **Changed under the default `pan`:** a mouse or stylus drag on the
+  floor with Shift, Ctrl or Cmd held now draws a band that adds to the
+  selection; it panned before. See the host guide's "Selecting with a band".
 - **`jet_cad_2d_flutter`:** `bandModeFor` and `SelectionBandPainter`: the
   selection band's direction rule and look, shared by the editor and the
   selection mode.

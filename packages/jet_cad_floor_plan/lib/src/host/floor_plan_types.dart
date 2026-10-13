@@ -190,7 +190,8 @@ enum FloorPlanFloorDrag {
 
   /// Draws a band that selects tables: left to right takes the tables
   /// wholly inside, right to left every table it touches. The camera
-  /// pans with two fingers, the wheel or trackpad, and the middle button.
+  /// pans with two fingers, a trackpad's scroll and the middle button
+  /// (the mouse wheel zooms).
   band,
 }
 
