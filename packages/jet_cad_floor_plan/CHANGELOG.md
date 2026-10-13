@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.2
+
+Two exports, screenshots and documentation. Plans are stored as in 0.7.1
+(schema 10).
+
+- The barrel exports `SymbolLibraryState` (`SymbolLibraryLoading`,
+  `SymbolLibraryReady`, `SymbolLibraryFailed`) and `TableNumberProblem`:
+  a host that implements `FloorPlanStrings` no longer imports
+  `editor.dart` for them (R-10).
+- The editor's rulers use the app's font, through the renderer's
+  `RulerFrame` change in `jet_cad_2d_flutter` 0.7.2.
+- Screenshots, in the pub.dev gallery and in the README: the editor in
+  light and dark, and the service view (statuses and a group, a POS theme
+  with a zone in focus, a rubber band, table colours).
+- The README has a package table.
+- Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+- Depends on `jet_cad_2d: ^0.7.2` and `jet_cad_2d_flutter: ^0.7.2`.
+
 ## 0.7.1
 
 The first release on pub.dev. The code is jet-cad 0.7.0's planner (git

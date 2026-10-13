@@ -2,7 +2,7 @@ name: jet_cad_floor_plan
 description: >-
   An embeddable parametric floor planner for Flutter: walls, openings,
   rooms, dimensions and furniture symbols, with a host API for tables.
-version: 0.7.1
+version: 0.7.2
 repository: https://github.com/a-urel/jet-cad
 issue_tracker: https://github.com/a-urel/jet-cad/issues
 topics:
@@ -27,8 +27,8 @@ dependencies:
   # tr, listed with the planner's own delegate.
   flutter_localizations:
     sdk: flutter
-  jet_cad_2d: ^0.7.1
-  jet_cad_2d_flutter: ^0.7.1
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_flutter: ^0.7.2
   meta: ^1.18.0
   pdf: ^3.13.1
   printing: ^5.15.1

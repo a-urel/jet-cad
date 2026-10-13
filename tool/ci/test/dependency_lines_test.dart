@@ -58,7 +58,7 @@ void main() {
       final constraints = hosted(File(path).readAsStringSync());
       seen += constraints.length;
       for (final c in constraints.values) {
-        expect(c, '^0.7.1', reason: path);
+        expect(c, '^0.7.2', reason: path);
       }
     }
     expect(seen, 21,
@@ -70,6 +70,6 @@ void main() {
   test('DL3 the reader sees a path dependency', () {
     expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
         ['jet_cad_2d: path: ../x']);
-    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.1\n'), isEmpty);
+    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.2\n'), isEmpty);
   });
 }

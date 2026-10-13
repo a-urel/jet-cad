@@ -17,7 +17,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_floor_plan: ^0.7.1
+  jet_cad_floor_plan: ^0.7.2
   jet_cad_restaurant_symbols:
     path: ../../packages/jet_cad_restaurant_symbols
 
@@ -26,8 +26,8 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   # The tests build seeded plans with the editor's own placement.
-  jet_cad_2d: ^0.7.1
-  jet_cad_2d_flutter: ^0.7.1
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_flutter: ^0.7.2
   vector_math: ^2.2.0
 
 flutter:

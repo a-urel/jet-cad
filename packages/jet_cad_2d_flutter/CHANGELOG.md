@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.2
+
+Screenshots and documentation, and one small change in the rulers. Plans
+are stored as in 0.7.1.
+
+- `RulerFrame` passes the ambient `DefaultTextStyle`'s font family to the
+  rulers' labels and to the corner's unit symbol, so the rulers follow the
+  host's text font. With no ambient family the labels are drawn exactly as
+  in 0.7.1.
+- Screenshots, in the pub.dev gallery and in the README: the canvas in
+  light and dark, the selection's grips, the crossing band and the symbol
+  gallery.
+- The README has a package table and links the host guide.
+- Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+- Depends on `jet_cad_2d: ^0.7.2`.
+
 ## 0.7.1
 
 The first release on pub.dev. The code is jet-cad 0.7.0's render package
