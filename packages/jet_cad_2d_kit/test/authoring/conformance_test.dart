@@ -320,19 +320,30 @@ void main() {
   });
 
   test("F19 a word is compared with the key's newest English", () {
-    // Review Focus 5. M-F19: compare with the first version's name.
+    // Review Focus 5. M-F19: compare with the first version's name (red
+    // with v2 last). M-F19b: let every version overwrite, the last in
+    // catalog order wins (red with v2 first).
     final stool = symbolOf('sample.stool.bar@1');
-    final catalog = Catalog(kit: 'sample', symbols: [
-      ...sampleSymbols,
-      copyOf(stool, version: 2, name: 'High bar stool'),
-    ]);
-    final g = generated(catalog);
-    List<KitProblemCode> withTurkish(String word) => codes(problems(
-        catalog: catalog,
-        library: g.library,
-        snapshot: g.snapshot,
-        names: editing(sampleNames, 'tr', {'symbol:sample.stool.bar': word})));
-    expect(withTurkish('High bar stool'), [KitProblemCode.wordUntranslated]);
-    expect(withTurkish('Bar stool'), isEmpty);
+    final high = copyOf(stool, version: 2, name: 'High bar stool');
+    for (final (order, catalog) in [
+      ('v2 last', Catalog(kit: 'sample', symbols: [...sampleSymbols, high])),
+      (
+        'v2 first',
+        Catalog(kit: 'sample', symbols: [
+          for (final s in sampleSymbols) ...[if (s.id == stool.id) high, s],
+        ])
+      ),
+    ]) {
+      final g = generated(catalog);
+      List<KitProblemCode> withTurkish(String word) => codes(problems(
+          catalog: catalog,
+          library: g.library,
+          snapshot: g.snapshot,
+          names:
+              editing(sampleNames, 'tr', {'symbol:sample.stool.bar': word})));
+      expect(withTurkish('High bar stool'), [KitProblemCode.wordUntranslated],
+          reason: order);
+      expect(withTurkish('Bar stool'), isEmpty, reason: order);
+    }
   });
 }
