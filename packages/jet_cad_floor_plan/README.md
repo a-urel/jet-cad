@@ -74,8 +74,9 @@ SymbolLibraryLoader(sources: [furnitureSymbolSource, mySymbolSource])
 
 Two sources must not hold the same key. `package:jet_cad_floor_plan/symbols.dart`
 holds the catalog types and the library builder a catalog's generator is
-written in; `symbol_sources.dart` holds the sources and their loader's
-Flutter side.
+written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
+`furnitureSymbolSource`, `readBundledLibrary` and `SymbolNames`. The loader,
+`SymbolLibraryLoader`, is on the main barrel.
 
 ## The API
 

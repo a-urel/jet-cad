@@ -9,8 +9,8 @@
 #
 # CI passes file://$GITHUB_WORKSPACE and `git rev-parse HEAD`, so no token
 # is needed for a private repository. Writes only inside the probe. The
-# sha must be the full one: the restaurant package reaches the planner at
-# the full sha, and a short one makes pub see two refs and refuse.
+# sha must be the full one: check_host_lock.dart --ref compares it exactly
+# with each package's resolved-ref in the lock.
 #
 # GPU split spec S8: the host's graph holds no GPU renderer and runs no
 # build hook. The probe starts clean, because stale output survives a
@@ -29,13 +29,12 @@ cd "$probe"
 flutter pub get
 dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"
 # Publishing spec D9: the probe carries the restaurant library as a host
-# does, copied from the package pub resolved at this commit, its names'
-# import pointed at the planner's barrel.
+# does, copied verbatim from the package pub resolved at this commit (the
+# names file imports the planner's public symbol_sources.dart).
 symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)
 mkdir -p "$probe/assets"
 cp "$symbols/assets/restaurant.jetlib" "$probe/assets/restaurant.jetlib"
-sed 's#package:jet_cad_floor_plan/symbol_sources.dart#package:jet_cad_floor_plan/jet_cad_floor_plan.dart#' \
-  "$symbols/lib/src/names.dart" > "$probe/lib/restaurant_names.dart"
+cp "$symbols/lib/src/names.dart" "$probe/lib/restaurant_names.dart"
 flutter analyze
 flutter build web
 fail=0

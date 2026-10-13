@@ -171,7 +171,7 @@ jobs:
         run: dart pub publish --dry-run
 
   host-probe:
-    name: an external host, by git
+    name: a host from pub.dev, repo packages overridden
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

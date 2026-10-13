@@ -502,8 +502,13 @@ result; its own CI run (Linux) on the pushed branch must be green, and
 the merge waits for the human's word. The checklist (spec D10), per
 package, in this order:
 
-1. **`jet_cad_2d` 0.7.1:** push `main` and watch CI (job `publishable`
-   included); from `packages/jet_cad_2d`, `dart pub publish --dry-run`,
+1. **`jet_cad_2d` 0.7.1:** publish it from `main` as it stands now
+   (`d41e5f6`, whose `packages/jet_cad_2d` equals `1dc167d`'s) **before**
+   this branch is merged: the branch rewrites the engine README (R-5), so
+   publishing after the merge would upload the new README under the tag
+   `jet_cad_2d-v0.7.1` → `1dc167d`, and the archive would not match the
+   tag. Push `main` and watch CI (job `publishable` included); from
+   `packages/jet_cad_2d`, `dart pub publish --dry-run`,
    `dart pub publish`; the tag `jet_cad_2d-v0.7.1` → `1dc167d`; the
    version visible on pub.dev. pub.dev scores it after the upload:
    160/160 is expected once GitHub's `main` carries the pubspec (150/160
@@ -514,16 +519,47 @@ package, in this order:
    pana's *"Compatible with dependency constraint lower bounds"* section
    is green, run on the archive now that the engine is on pub.dev (it was
    40/160 before, R-4); `dart pub publish --dry-run`; `dart pub publish`;
-   the tag `jet_cad_2d_flutter-v0.7.1` on the merge commit; the version
+   the tag `jet_cad_2d_flutter-v0.7.1` on the commit `main` points at
+   after the merge (a fast-forward has no merge commit); the version
    visible on pub.dev.
 3. **`jet_cad_floor_plan` 0.7.1:** the same, with its lower bounds on the
    engine and the render package and pana's lower-bounds section green;
-   the tag `jet_cad_floor_plan-v0.7.1` on the merge commit; the version
-   visible on pub.dev.
-4. **After the planner (D7):** in a scratch copy of
-   `tool/ci/host_probe/pubspec.yaml.in` remove the `dependency_overrides`
-   block, resolve it from pub.dev alone, `flutter analyze`, and record
-   the result in the results note.
+   the tag `jet_cad_floor_plan-v0.7.1` on the commit `main` points at
+   after the merge; the version visible on pub.dev.
+4. **After the planner (D7):** from the repository root on `main`, with
+   the three packages on pub.dev. The probe's `lib/main.dart` imports
+   `restaurant_names.dart` and its pubspec declares
+   `assets/restaurant.jetlib`; both are git-ignored files that only
+   `host_probe.sh` creates, from the overridden package, so put them in
+   by hand first (all paths below exist on `main`):
+
+   ```bash
+   cp packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib tool/ci/host_probe/assets/restaurant.jetlib
+   cp packages/jet_cad_restaurant_symbols/lib/src/names.dart tool/ci/host_probe/lib/restaurant_names.dart
+   ```
+
+   Write `tool/ci/host_probe/pubspec.yaml` from `pubspec.yaml.in` with
+   the whole `dependency_overrides:` block removed (it is the file's last
+   block, so everything from that line on goes), and check that no
+   `@URL@` or `@REF@` is left:
+
+   ```bash
+   sed '/^dependency_overrides:/,$d' tool/ci/host_probe/pubspec.yaml.in > tool/ci/host_probe/pubspec.yaml
+   grep -c '@URL@\|@REF@' tool/ci/host_probe/pubspec.yaml   # expect 0
+   ```
+
+   Then resolve from pub.dev alone and check:
+
+   ```bash
+   cd tool/ci/host_probe && flutter pub get
+   dart run ../check_host_lock.dart pubspec.lock   # no --ref: the no-GPU check only
+   flutter analyze                                 # expect "No issues found!"
+   flutter build web                               # optional
+   ```
+
+   Record the result in the results note. Delete the written pubspec and
+   the copies (all git-ignored), or let the next `host_probe.sh` run
+   clean them.
 
 Then the restaurant software moves (D11, in the planner's CHANGELOG and
 the results note): replace its two git dependencies with

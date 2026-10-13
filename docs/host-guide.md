@@ -45,8 +45,8 @@ steps.
    release you depend on: `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib`
    and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`. Put the
    library at `assets/restaurant.jetlib` and the names beside your code as
-   `restaurant_names.dart`, with its import changed to the planner's
-   barrel, `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
+   `restaurant_names.dart`, as it is: it imports `symbol_sources.dart`, a
+   public library of the planner, which your pubspec already has.
 2. Declare the asset in your pubspec:
 
 ```yaml
@@ -69,6 +69,10 @@ const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
     read: readRestaurantLibrary,
     names: restaurantSymbolNames);
 ```
+
+The reader needs `import 'dart:typed_data';` and `rootBundle` from
+`package:flutter/services.dart`; the source needs your copy, `import
+'restaurant_names.dart';`.
 
 Give the loader both sources (section 4):
 `SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
@@ -152,7 +156,12 @@ delegates in your `MaterialApp`:
   language, and its `languageCode`. *Since 0.6.0*, a class that
   implements or directly extends `FloorPlanStrings` must add `color`,
   `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
-  subclass of a built-in language gets them.
+  subclass of a built-in language gets them. To change only some words,
+  subclass `FloorPlanStringsEn`, `FloorPlanStringsDe` or
+  `FloorPlanStringsTr`. A class that implements or directly extends
+  `FloorPlanStrings` must also write the abstract
+  `tableNumberProblem(TableNumberProblem)`; in 0.7.1 the planner's barrel
+  does not export the type `TableNumberProblem`.
 - `theme` and `darkTheme` carry the floor plan's look:
   [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
@@ -2259,9 +2268,9 @@ stylus behave as on a desktop.
   together.** A schema 8 or 7 plan opens here unchanged; the service
   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
   plans and service layouts, so they can share them.
-- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 or 0.7.0 is at
+- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0 or 0.7.1 is at
   **schema 10**, which 0.5.1 and every older release refuse (`load`
   throws a `FormatException` that says why); a schema 9, 8 or 7 plan
   opens here unchanged. Every terminal that shares stored plans moves
-  together. 0.6.0 and 0.7.0 save the same plans and service layouts, so
+  together. 0.6.0, 0.7.0 and 0.7.1 save the same plans and service layouts, so
   they can share them.
