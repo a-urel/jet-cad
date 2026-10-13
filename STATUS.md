@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
-`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.1, and 0.7.2 is in flight (below). The history of every plan
+`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.2 (published 2026-10-13); the kit architecture is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -387,6 +387,26 @@ with 0.7.0 (below).
 
 ## In flight
 
+- **The kit architecture** (umbrella spec
+  [2026-10-13-kit-architecture-design.md](docs/superpowers/specs/2026-10-13-kit-architecture-design.md),
+  approved by the human): a ground-up rewrite with no backward
+  compatibility, decisions 1-11 (including "2d" in every package name, and
+  A17, AutoCAD interchange, kept open); four sub-projects shipped as one
+  wave, after which `jet_cad_floor_plan` is discontinued. **Sub-project 1,
+  `jet_cad_2d_kit`** (the contract's symbol side): spec
+  [2026-10-13-kit-contract-design.md](docs/superpowers/specs/2026-10-13-kit-contract-design.md),
+  plan [2026-10-13-kit-contract.md](docs/superpowers/plans/2026-10-13-kit-contract.md),
+  results [2026-10-13-kit-contract-results.md](docs/superpowers/notes/2026-10-13-kit-contract-results.md),
+  ledger [docs/superpowers/ledgers/2026-10-13-kit-contract/](docs/superpowers/ledgers/2026-10-13-kit-contract/).
+  Complete on `feat/kit-architecture` (worktree
+  `.claude/worktrees/kit-architecture`), reviewed (whole-branch Opus review,
+  one fix wave, re-review clean); **not merged, not pushed**: CI has never
+  run on it (it triggers only on `main`, `claude/**` and pull requests), so
+  the merge waits for the human's word on pushing for CI. Sub-project 2's
+  inputs, R1-R7, are in the contract spec. The human asked to be told when
+  `apps/architecture_demo` runs on the new packages (the end of
+  sub-project 3) and to have everything tested after sub-project 4.
+
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
   `51125b6`; **merged into `main` at `5c244b1`** on the human's *"merge
@@ -515,89 +535,27 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**In flight 2026-10-13: 0.7.2 of the three packages, merged into `main`
-at `5c244b1` (not yet pushed); next, the human's push and publication.**
-The checklist below is the spec's D11, in order; `5c244b1` is
-`5c244b1`.
+**In flight: the kit architecture, sub-project 1 complete on
+`feat/kit-architecture` (not merged, not pushed); next, sub-project 2's spec
+(`jet_cad_2d_plan` and the contract's code side), whose inputs R1-R7 are in
+the contract spec.** The merge of sub-project 1 waits for the human's word
+on pushing for CI (In flight).
 
-Run each `dart pub publish` from the package directory, never the
-repository root (it fails with a "private package" error). If `main` has
-moved past the merge commit, publish from a worktree at that commit
-instead: `git worktree add /tmp/jet-cad-0.7.2 5c244b1` (and run the
-commands there). `dart pub publish --dry-run` must say 0 warnings before
-the real publish.
+**Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
+order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
+all from `5c244b1`; tags `<package>-v0.7.2` → `5c244b1` pushed. pana 160/160
+for the renderer and the planner copies before upload (lower bounds 20/20);
+dry runs 0 warnings; D7's pub-only probe green from pub.dev alone (all three
+hosted 0.7.2; `check_host_lock`: 39 packages, none of the GPU set;
+`flutter analyze` no issues; `flutter build web` built). The checklist that
+steps 0-4 followed is in the results note
+[2026-10-13-package-readmes-results.md](docs/superpowers/notes/2026-10-13-package-readmes-results.md)
+and in the 0.7.1 record's shape below: the engine from a worktree or `main`
+at the merge commit, `pana`'s lower bounds on an archive copy of each
+dependent, `dart pub publish --dry-run` (0 warnings), then the human's
+`dart pub publish`, then the tag.
 
-0. Push first: `feat/package-readmes` is merged into `main` at
-   `5c244b1`; the human runs `git push origin main` and waits for CI on
-   that merge commit to be green (all jobs) before any publish.
-
-1. Engine:
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d"
-   dart pub publish --dry-run
-   dart pub publish
-   git tag jet_cad_2d-v0.7.2 5c244b1
-   git push origin jet_cad_2d-v0.7.2
-   ```
-
-2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
-   lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
-   resolve at their lowest). Run, from the repository root (if pana is not
-   activated, `dart pub global activate pana` first):
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)"
-   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
-   git archive 5c244b1 packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
-   rm -rf /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/test /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/build /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/shaders
-   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_2d_flutter
-   ```
-
-   Read the "Support up-to-date dependencies" section's lower-bounds line
-   (pana runs `pub downgrade` itself); it must pass before
-   `dart pub publish`. The copy is not a git checkout, so pana's
-   repository-URL check fails there (as in 0.7.1's record); that line is
-   not the gate. Then:
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
-   dart pub publish --dry-run
-   dart pub publish
-   git tag jet_cad_2d_flutter-v0.7.2 5c244b1
-   git push origin jet_cad_2d_flutter-v0.7.2
-   ```
-
-3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
-   first, the same recipe on its own directory, removing `test/`, `build/`
-   and `tool/` from the copy, and reading the same line:
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)"
-   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
-   git archive 5c244b1 packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
-   rm -rf /tmp/jet-cad-pana/packages/jet_cad_floor_plan/test /tmp/jet-cad-pana/packages/jet_cad_floor_plan/build /tmp/jet-cad-pana/packages/jet_cad_floor_plan/tool
-   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_floor_plan
-   ```
-
-   Then:
-
-   ```bash
-   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
-   dart pub publish --dry-run
-   dart pub publish
-   git tag jet_cad_floor_plan-v0.7.2 5c244b1
-   git push origin jet_cad_floor_plan-v0.7.2
-   ```
-
-   Pushing each tag is also when that package's README images start to
-   resolve on GitHub (their URLs are pinned to `<package>-v0.7.2`).
-
-4. After the planner: D7's pub-only probe (the recipe below), and a look
-   at the three pages on pub.dev: the images, the gallery (screenshots
-   tab) and the Funding block.
-
-**Previously done 2026-10-13: the three host packages are on pub.dev at 0.7.1**,
+**Done earlier 2026-10-13: the three host packages were on pub.dev at 0.7.1**,
 published by the human in order (spec D10): `jet_cad_2d` from a worktree
 at `1dc167d` (not `main`, R-5's README), `jet_cad_2d_flutter` and
 `jet_cad_floor_plan` from `main` at `8a86504` (CI green). Tags
@@ -774,7 +732,7 @@ repository, pub.dev only for hosts). Order: `jet_cad_2d` → `jet_cad_2d_flutter
 `feat/publish-host-packages`**, merged at `d2ad729` (In flight), published by the human
 (Resume here). Still binding:
 
-- **The restaurant symbols: the fourth step, deferred** (a SWOT in chat;
+- **The restaurant symbols: the fourth step, deferred** (**superseded by the kit architecture's decision 1**, umbrella spec above; kept as the record of why; a SWOT in chat;
   the human: *"tamam yaz"*). `jet_cad_restaurant_symbols` is published only
   after the planner has been on pub.dev for a few releases and the schema
   and versioning policy are settled, because a pub.dev release cannot be
