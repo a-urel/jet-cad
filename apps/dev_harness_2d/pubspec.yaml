@@ -14,10 +14,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_2d:
-    path: ../../packages/jet_cad_2d
-  jet_cad_2d_flutter:
-    path: ../../packages/jet_cad_2d_flutter
+  jet_cad_2d: ^0.7.1
+  jet_cad_2d_flutter: ^0.7.1
   # The resident GPU backend, installed first thing in `main`
   # (`installResidentGpu()`): `BACKEND=residentGpu` and the GPU arm need it.
   # The harness is the only app that depends on it.
