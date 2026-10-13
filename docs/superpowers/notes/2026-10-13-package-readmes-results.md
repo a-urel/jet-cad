@@ -273,12 +273,12 @@ commit) did every finding and nothing else:
 1. (I1, R8) The CI gates no task had run were run locally; see the table
    below. No CI run has happened on the branch; a PR to main would run it
    (the human's word).
-2. (I2) STATUS.md's release checklist: a step 0 (the human merges, pushes
-   `main`, CI green on the merge commit, before any publish); the pana
-   lower-bounds recipe pointed at (the 0.7.1 results note's "pana (0.23.19),
-   on each archive's file set"); each `cd` written from
+2. (I2) STATUS.md's release checklist: each `cd` written from
    `git rev-parse --show-toplevel`; line 3 says what is on pub.dev; "R-10's
-   exports as a 0.x candidate" dropped.
+   exports as a 0.x candidate" dropped. The step 0 (the human merges, pushes
+   `main`, CI green on the merge commit, before any publish) and the runnable
+   pana lower-bounds commands were not in this wave: the re-review found them
+   missing and they were added in the residual commit (see Residuals).
 3. The planner README names `statusCaptionStyle`, `groupChipTextStyle` and
    the host guide's Themes section, wrapped at 80 columns.
 4. The planner CHANGELOG drops "(R-10)" and says what a host no longer
@@ -325,6 +325,12 @@ After the fixes: `cd tool/ci && dart test` `00:04 +94: All tests passed!`;
 lines as in the full gate; `tool/readme_probe` `flutter analyze` `No issues
 found! (ran in 2.8s)`; the three `dart pub publish --dry-run` runs: 229 KB,
 814 KB and 782 KB, each `Package has 0 warnings.`
+
+**Residuals.** The re-review's verdict: the checklist still lacked a step 0
+and a runnable pana lower-bounds command, and item 2 above wrongly said both
+were added (Ruling R11). The human: "1. evet". Fixed in the residual commit
+that follows this wave: step 0, the `git archive` and pana commands for the
+renderer and the planner, and this correction.
 
 ## Owed to the human
 

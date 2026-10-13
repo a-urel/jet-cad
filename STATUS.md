@@ -1,8 +1,8 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** and its tag history; the three packages are on pub.dev at 0.7.1; 0.7.2 is in flight (below) (tag
+**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
-`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.1, and 0.7.2 is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -526,10 +526,15 @@ instead: `git worktree add /tmp/jet-cad-0.7.2 <merge commit>` (and run the
 commands there). `dart pub publish --dry-run` must say 0 warnings before
 the real publish.
 
+0. Merge and push first: the human merges `feat/package-readmes` into
+   `main`, runs `git push origin main`, and waits for CI on that merge
+   commit to be green (all jobs) before any publish. That commit is
+   `<merge commit>` in the steps below.
+
 1. Engine:
 
    ```bash
-   cd packages/jet_cad_2d
+   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d"
    dart pub publish --dry-run
    dart pub publish
    git tag jet_cad_2d-v0.7.2 <merge commit>
@@ -538,11 +543,21 @@ the real publish.
 
 2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
    lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
-   resolve at their lowest). The recipe (a `git archive` copy with `test/`,
-   `build/` and `tool/` removed, as `.pubignore` does, then pana and
-   `pub downgrade`) is in
-   `docs/superpowers/notes/2026-10-13-publish-host-packages-results.md`,
-   section "pana (0.23.19), on each archive's file set"; then:
+   resolve at their lowest). Run, from the repository root (if pana is not
+   activated, `dart pub global activate pana` first):
+
+   ```bash
+   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
+   git archive <merge commit> packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
+   rm -rf /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/test /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/build /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/shaders
+   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_2d_flutter
+   ```
+
+   Read the "Support up-to-date dependencies" section's lower-bounds line
+   (pana runs `pub downgrade` itself); it must pass before
+   `dart pub publish`. The copy is not a git checkout, so pana's
+   repository-URL check fails there (as in 0.7.1's record); that line is
+   not the gate. Then:
 
    ```bash
    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
@@ -553,8 +568,17 @@ the real publish.
    ```
 
 3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
-   first, by the same recipe (the results note's "pana (0.23.19), on each
-   archive's file set"):
+   first, the same recipe on its own directory, removing `test/`, `build/`
+   and `tool/` from the copy, and reading the same line:
+
+   ```bash
+   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
+   git archive <merge commit> packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
+   rm -rf /tmp/jet-cad-pana/packages/jet_cad_floor_plan/test /tmp/jet-cad-pana/packages/jet_cad_floor_plan/build /tmp/jet-cad-pana/packages/jet_cad_floor_plan/tool
+   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_floor_plan
+   ```
+
+   Then:
 
    ```bash
    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
