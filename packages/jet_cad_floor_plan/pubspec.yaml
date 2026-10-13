@@ -5,6 +5,22 @@ description: >-
 version: 0.7.2
 repository: https://github.com/a-urel/jet-cad
 issue_tracker: https://github.com/a-urel/jet-cad/issues
+funding:
+  - https://github.com/sponsors/a-urel
+  - https://buymeacoffee.com/yazemo
+screenshots:
+  - description: 'FloorPlanView in design mode: tools, symbols, layers and the page, light theme.'
+    path: doc/screenshots/design_light.png
+  - description: 'Table statuses with captions and a group of tables in the service view.'
+    path: doc/screenshots/service_status.png
+  - description: 'The editor in a dark theme.'
+    path: doc/screenshots/design_dark.png
+  - description: 'The service view in a dark POS theme, one zone of tables in focus.'
+    path: doc/screenshots/service_dark_focus.png
+  - description: 'Rubber-band selection of tables (floorDrag: band).'
+    path: doc/screenshots/service_band.png
+  - description: 'Tables in plan colours.'
+    path: doc/screenshots/service_colors.png
 topics:
   - cad
   - floor-plan

@@ -5,6 +5,20 @@ description: >-
 version: 0.7.2
 repository: https://github.com/a-urel/jet-cad
 issue_tracker: https://github.com/a-urel/jet-cad/issues
+funding:
+  - https://github.com/sponsors/a-urel
+  - https://buymeacoffee.com/yazemo
+screenshots:
+  - description: 'A drawing on its sheet, with rulers, drawn by DraftCanvas on a light canvas.'
+    path: doc/screenshots/canvas_light.png
+  - description: 'The same drawing on the dark canvas, its colours re-toned for a dark theme.'
+    path: doc/screenshots/canvas_dark.png
+  - description: 'A selection with its grips, and an entity under the mouse highlighted.'
+    path: doc/screenshots/selection_grips.png
+  - description: 'A crossing selection band, dragged right to left.'
+    path: doc/screenshots/selection_band.png
+  - description: 'SymbolGallery: a furniture library in collapsible categories of thumbnails.'
+    path: doc/screenshots/symbol_gallery.png
 topics:
   - cad
   - drawing

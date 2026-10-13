@@ -8,11 +8,16 @@ numbers and status, a service view over the same plan, and PDF and PNG
 export. The planner never stores anything itself; the host keeps the plan's
 text wherever it likes.
 
+![FloorPlanView in design mode: tool palette, symbols, layers and the page, light theme](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/design_light.png)
+
+
 ## Embedding it
 
 A `FloorPlanController` holds the plan and what is done to it; a
 `FloorPlanView` shows it. The application owns the controller and disposes
 of it.
+
+![The service view: tables with status colours and captions, and a group of two tables](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_status.png)
 
 ```dart
 final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
@@ -61,6 +66,26 @@ capabilities, saving and loading, printing: the host guide walks through
 them all, in code that CI compiles:
 <https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md>
 
+## Screenshots
+
+![The editor in a dark theme](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/design_dark.png)
+
+The editor under a dark ambient `Theme`.
+
+![The service view in a dark POS theme with one zone of tables in focus](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_dark_focus.png)
+
+The service view in a dark POS-like `FloorPlanTheme`, with one zone of tables in focus (`setTableFocus`) and the rest dimmed.
+
+![A rubber band across the front row of tables](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_band.png)
+
+A rubber band (`floorDrag: FloorPlanFloorDrag.band`) mid-drag across the front row of tables.
+
+![Tables in plan colours](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_colors.png)
+
+Tables in plan colours (`setTablesColor`).
+
+The restaurant tables in the service pictures come from the repository's restaurant symbols, which a host copies as the host guide's "The restaurant symbols" describes; the furniture library ships with the package. The captions in the pictures are set in Roboto by the pictures' own app theme; a host asks for them in its theme.
+
 ## A symbol library of your own
 
 The package ships a furniture library, `furnitureSymbolSource`. A host adds
@@ -93,12 +118,23 @@ written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
 While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
 patch release (`0.7.2`) does not.
 
-## Where it comes from
+## The jet-cad packages
 
-This package is part of [jet-cad](https://github.com/a-urel/jet-cad). It
-builds on [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d), the engine,
-and [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter), its
-rendering.
+| Package | What it is | Depends on |
+|---|---|---|
+| [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
+| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+
+A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
+come with it, and a host should not also depend on them directly unless it
+uses their API itself.
+
+## Support
+
+If jet-cad is useful to you, you can support its development through
+[GitHub Sponsors](https://github.com/sponsors/a-urel) or
+[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
 
 ## License
 
