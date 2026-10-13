@@ -1,7 +1,7 @@
 // The editor surface (plan 14b-1, spec 14 V-8): what `apps/floor_planner`
 // builds its application frame from. Explicitly internal: a host embeds
 // the planner through `jet_cad_floor_plan.dart` (14b-2), not through this
-// library.
+// library. Not host API and outside semver: it may change in any release.
 library;
 
 export 'src/document_toolbar.dart';
@@ -59,7 +59,8 @@ export 'src/symbols/symbol_box.dart';
 export 'src/symbols/symbol_component.dart';
 export 'src/symbols/symbol_ghost.dart';
 export 'src/symbols/symbol_library.dart';
-export 'src/symbols/symbol_library_loader.dart';
+// `readBundledLibrary` is symbol_sources.dart's: one library, one home.
+export 'src/symbols/symbol_library_loader.dart' hide readBundledLibrary;
 export 'src/symbols/symbol_library_state.dart';
 export 'src/symbols/symbol_move.dart';
 export 'src/symbols/symbol_panel.dart';

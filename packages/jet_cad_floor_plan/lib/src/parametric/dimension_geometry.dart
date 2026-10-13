@@ -286,13 +286,13 @@ const double kDimMaxValueMm = 1e15;
 /// One dimension's geometry in **world** (spec 11 D6-D8), from
 /// [layoutDimension]:
 ///
-/// - [value]: what it measures, never negative; [text], its format in the
+/// - `value`: what it measures, never negative; `text`, its format in the
 ///   page's unit with the page's decimal separator;
-/// - [u], [n]: the measuring direction and its left normal;
-/// - [q0], [q1]: the dimension line's ends;
-/// - [ext0], [ext1]: the extension lines at `a` and `b`, (start, end);
-/// - [slash0], [slash1]: the slashes about [q0] and [q1];
-/// - [textAt], [textAngle] (radians), [textHeight]: the value's insertion
+/// - `u`, `n`: the measuring direction and its left normal;
+/// - `q0`, `q1`: the dimension line's ends;
+/// - `ext0`, `ext1`: the extension lines at `a` and `b`, (start, end);
+/// - `slash0`, `slash1`: the slashes about `q0` and `q1`;
+/// - `textAt`, `textAngle` (radians), `textHeight`: the value's insertion
 ///   point, world angle and cap height.
 typedef DimLayout = ({
   double value,

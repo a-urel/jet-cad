@@ -29,7 +29,7 @@ const Size kTextEntrySize = Size(240, 32);
 /// follows finds nothing to cancel either.
 ///
 /// **Where the focus goes.** Back to the canvas, however the entry ends
-/// ([_onPending], [_onTapOutside]).
+/// (`_onPending`, `_onTapOutside`).
 class TextEntryOverlay extends StatefulWidget {
   const TextEntryOverlay({
     super.key,

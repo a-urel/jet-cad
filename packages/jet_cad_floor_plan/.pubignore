@@ -1,0 +1,6 @@
+# Left out of the pub.dev archive, at the package root only: the suites,
+# the test runner's build output, and the furniture library's generator.
+# assets/ and lib/fonts/ stay in: the planner loads them at run time.
+/test/
+/build/
+/tool/

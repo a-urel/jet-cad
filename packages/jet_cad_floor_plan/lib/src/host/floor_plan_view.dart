@@ -215,8 +215,8 @@ class FloorPlanView extends StatefulWidget {
   /// **every** Export entry point (the service bar's button, the editor's
   /// bar, the chords Cmd+E and Ctrl+E, in both modes) calls it instead of
   /// the Material dialog, with the choice last made in this controller's
-  /// life as [initial] (PDF at 150 dpi at first); the answer is remembered
-  /// as the next [initial], and null from it cancels (nothing is
+  /// life as `initial` (PDF at 150 dpi at first); the answer is remembered
+  /// as the next `initial`, and null from it cancels (nothing is
   /// exported). Print has no dialog of jet-cad's (the platform's). Read at
   /// each Export.
   final Future<FloorPlanExportChoice?> Function(
