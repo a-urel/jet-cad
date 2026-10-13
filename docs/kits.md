@@ -175,8 +175,9 @@ Catalog buildCafeCatalog() => Catalog(kit: 'cafe', symbols: [
 ```
 
 - Shapes: `CatalogLine`, `CatalogPolyline` (`closed:`), `CatalogCircle`,
-  `CatalogArc` (counter-clockwise from `start`, `sweep` in radians), in
-  millimetres in the symbol's frame. A unit draws its outline first.
+  `CatalogArc` (from `start` through a signed `sweep`, in radians: positive
+  counter-clockwise, negative clockwise), in millimetres in the symbol's
+  frame. A unit draws its outline first.
 - Helpers: `rect`, `inset`, `poly`, `chairAt`, `chairsAround`, `stoolAt`,
   `stoolsAround`, with `chairSize` 450, `chairTuck` 100, `stoolRadius` 190,
   `stoolTuck` 40; every coordinate cleaned to 1e-6 (`cleanCoordinate`). A

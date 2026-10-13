@@ -36,7 +36,9 @@ final class CatalogCircle extends CatalogShape {
   final double radius;
 }
 
-/// A counter-clockwise arc from [start] through [sweep], both in radians.
+/// An arc from the angle [start] through the signed [sweep], both in
+/// radians: a positive sweep turns counter-clockwise from [start], a negative
+/// one clockwise.
 final class CatalogArc extends CatalogShape {
   const CatalogArc(this.center, this.radius, this.start, this.sweep);
 
