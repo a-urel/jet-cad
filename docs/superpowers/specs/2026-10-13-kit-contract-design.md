@@ -370,6 +370,8 @@ category's word id carries its kit id; K7.5 compares with the newest
 version's English. The umbrella's A2 now matches K5 (words on the kit, a
 `final` sketch).
 
+`SymbolLibrary` holds `kits` (a list), since a merged library spans kits.
+
 ## Risks
 
 - **The model fixed before its first real user.** Sub-project 2 may need a

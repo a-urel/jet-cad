@@ -27,8 +27,8 @@
 - **Mutations run on committed files only, and are reverted with `git checkout -- <file>`,** then `git diff --quiet -- <file>` must exit 0. **In every task, run the Commit step before the Mutation check step** (they are listed the other way round below; commit first, then mutate the committed files). Never restore from a `/tmp` copy (a stale backup once destroyed a file here), and never `git checkout --` a file with uncommitted work (that once destroyed more).
 - **Code, comments and commit messages in English.** Every commit message ends with the line `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **`cd packages/jet_cad_2d_kit && dart pub publish --dry-run` exits 0 with 0 warnings** at the exit gate. **Never run `dart pub publish` without `--dry-run`**: the wave publishes (umbrella A10), the human publishes. Never push, tag or merge.
-- **Every task ends green:** `cd packages/jet_cad_2d_kit && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` (Task 11 adds the `tool/ci` gate; Tasks 1 and 12 run all three CLAUDE.md gates). The package's language version is 3.6, so `dart format` uses the short style: run `dart format .` in the package before the format gate; the code blocks below are not guaranteed to be formatted.
-- **Testing bar (CLAUDE.md):** every test names the mutation that turns it red. Each task has a mutation step: apply each named mutation, run the named test, see it red, revert with `git checkout --`. Fixtures are off the origin, at non-zero rotations where geometry matters, with non-default attributes.
+- **Every task ends green:** `cd packages/jet_cad_2d_kit && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` (Tasks 1 and 11 add the `tool/ci` gate; Tasks 1 and 12 run all three CLAUDE.md gates). The package's language version is 3.6, so `dart format` uses the short style: run `dart format .` in the package before the format gate; the code blocks below are not guaranteed to be formatted.
+- **Testing bar (CLAUDE.md):** every behaviour or refusal test names the mutation that turns it red; positive controls, premise checks and fixture-sanity tests are exempt (they pin the fixtures, not a behaviour). Each task has a mutation step: apply each named mutation, run the named test, see it red, revert with `git checkout --`. Fixtures are off the origin, at non-zero rotations where geometry matters, with non-default attributes.
 - Worktree-guarded sessions refuse bash loops and `$VAR` pipelines: run commands one by one.
 
 ## Review Focus
@@ -93,7 +93,7 @@ pubspec.yaml (root)                        the workspace entry
 - Create: `packages/jet_cad_2d_kit/pubspec.yaml`, `packages/jet_cad_2d_kit/analysis_options.yaml`, `packages/jet_cad_2d_kit/LICENSE`, `packages/jet_cad_2d_kit/README.md`, `packages/jet_cad_2d_kit/CHANGELOG.md`
 - Create: `packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart`, `packages/jet_cad_2d_kit/lib/authoring.dart`
 - Create: `packages/jet_cad_2d_kit/test/support/import_walker.dart`, `packages/jet_cad_2d_kit/test/invariants/purity_test.dart`
-- Modify: `pubspec.yaml` (root, the `workspace:` list)
+- Modify: `pubspec.yaml` (root, the `workspace:` list), `.github/workflows/ci.yml` (the `package` matrix entry the existing `tool/ci` test SC16 requires)
 
 **Interfaces:**
 - Consumes: nothing.
@@ -382,7 +382,17 @@ void main() {
   - M-P5: in `walkImports`, take only the first URI of a directive (`final match = _uri.firstMatch(directive.group(1)!)!;` in place of the loop) → P5 red.
   - M-P3: add `'io'` to `allowedDartLibraries` → P3 red.
 
+- [ ] **Step 8a: The CI matrix entry.** `tool/ci/test/scripts_test.dart` SC16 requires every `packages/*` with a pubspec to be in the `package` matrix of `.github/workflows/ci.yml`, so the entry goes in with the package, not ten commits later. In `jobs.package.strategy.matrix.include`, after the `packages/jet_cad_2d_gpu` entry (`- package: packages/jet_cad_2d_gpu` / `tool: flutter`), add:
+
+```yaml
+          - package: packages/jet_cad_2d_kit
+            tool: flutter
+```
+
+  (same indentation as its neighbours). Check the workflow parses: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"` (no output).
+
 - [ ] **Step 9: The gates.** Run each, expect exit 0:
+  - `cd tool/ci && dart test` (SC16 is green only with Step 8a).
   - `cd packages/jet_cad_2d_kit && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` (run `dart format .` first if the check reports files).
   - `cd packages/jet_cad_2d && dart test && dart analyze && dart format --output=none --set-exit-if-changed .`
   - `cd packages/jet_cad_2d_flutter && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .`
@@ -391,7 +401,7 @@ void main() {
 - [ ] **Step 10: Commit.** `git status --short` first; stage by explicit path only:
 
 ```bash
-git add pubspec.yaml packages/jet_cad_2d_kit/pubspec.yaml packages/jet_cad_2d_kit/analysis_options.yaml packages/jet_cad_2d_kit/LICENSE packages/jet_cad_2d_kit/README.md packages/jet_cad_2d_kit/CHANGELOG.md packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/lib/authoring.dart packages/jet_cad_2d_kit/test/support/import_walker.dart packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+git add pubspec.yaml .github/workflows/ci.yml packages/jet_cad_2d_kit/pubspec.yaml packages/jet_cad_2d_kit/analysis_options.yaml packages/jet_cad_2d_kit/LICENSE packages/jet_cad_2d_kit/README.md packages/jet_cad_2d_kit/CHANGELOG.md packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/lib/authoring.dart packages/jet_cad_2d_kit/test/support/import_walker.dart packages/jet_cad_2d_kit/test/invariants/purity_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): the jet_cad_2d_kit package and its purity test (K1)
 
@@ -1155,7 +1165,7 @@ export 'src/model/model.dart';
 - [ ] **Step 11: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib packages/jet_cad_2d_kit/test/model
+git add packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/lib/authoring.dart packages/jet_cad_2d_kit/lib/src/model/kit_ids.dart packages/jet_cad_2d_kit/lib/src/model/json_fields.dart packages/jet_cad_2d_kit/lib/src/model/symbol_component.dart packages/jet_cad_2d_kit/lib/src/model/unit_component.dart packages/jet_cad_2d_kit/lib/src/model/model.dart packages/jet_cad_2d_kit/test/model/kit_ids_test.dart packages/jet_cad_2d_kit/test/model/symbol_component_test.dart packages/jet_cad_2d_kit/test/model/unit_component_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): the identifier patterns, SymbolComponent and UnitComponent (K2)
 
@@ -1674,7 +1684,7 @@ export 'unit_component.dart';
 - [ ] **Step 9: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib/src/model packages/jet_cad_2d_kit/test/model
+git add packages/jet_cad_2d_kit/lib/src/model/library_component.dart packages/jet_cad_2d_kit/lib/src/model/manifest_component.dart packages/jet_cad_2d_kit/lib/src/model/register.dart packages/jet_cad_2d_kit/lib/src/model/model.dart packages/jet_cad_2d_kit/test/model/library_component_test.dart packages/jet_cad_2d_kit/test/model/manifest_component_test.dart packages/jet_cad_2d_kit/test/model/register_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): LibraryComponent, ManifestComponent, registerKitComponents (K2)
 
@@ -1978,7 +1988,9 @@ void main() {
     test('V0a every entry equals what was built, in definition order', () {
       final lib = SymbolLibrary.decode(bytesOf(buildValidLibrary()));
       expect(lib.kits, ['sample']);
-      // M-V0a: entries in component order instead of definition order.
+      // M-V0a: sort the entries by key instead of definition order. (Entries
+      // in component order would survive: withComponent ascends by handle,
+      // the same order as the definitions.)
       expect([for (final e in lib.entries) e.id], [
         'sample.sofa.three@3',
         'sample.table.high-top@2',
@@ -2907,6 +2919,7 @@ Add `export 'symbol_library.dart';` to `lib/src/model/model.dart` (keep the list
 
 - [ ] **Step 6: Mutation check** (on committed files; revert each with `git checkout -- <file>` and check `git diff --quiet`; quote each red line):
   - M-V0a: sort `drafts` by the symbol key before building entries → V0a red.
+  - M-V0a2: build each entry without its unit (`unit: null`) → V0a red.
   - M-V0b: drop the `..sort(...)` of `leaves` → V0b red.
   - M-V1b: delete the `diagnostics.isNotEmpty` check → V1b red.
   - M-V1g: change `catch (e)` to `on FormatException catch (e)` → V1g red.
@@ -2928,7 +2941,7 @@ Add `export 'symbol_library.dart';` to `lib/src/model/model.dart` (keep the list
 - [ ] **Step 8: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib/src/model packages/jet_cad_2d_kit/test/support/library_fixtures.dart packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
+git add packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart packages/jet_cad_2d_kit/lib/src/model/model.dart packages/jet_cad_2d_kit/test/support/library_fixtures.dart packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): the .jetlib validator, K3's fifteen rules (K3)
 
@@ -3311,7 +3324,7 @@ export 'unit_component.dart';
 - [ ] **Step 9: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib/src/model packages/jet_cad_2d_kit/test/model
+git add packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart packages/jet_cad_2d_kit/lib/src/model/kit_names.dart packages/jet_cad_2d_kit/lib/src/model/kit_problem.dart packages/jet_cad_2d_kit/lib/src/model/model.dart packages/jet_cad_2d_kit/test/model/merge_test.dart packages/jet_cad_2d_kit/test/model/kit_names_test.dart packages/jet_cad_2d_kit/test/model/kit_problem_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): SymbolLibrary.merge, KitNames and KitProblem (K3, K4)
 
@@ -3350,6 +3363,7 @@ Plan decision: `PlanKit.validate` also reports a word id in an unknown namespace
 // Spec K5: a symbol source is a label and a reader; bundledLibrary reads an
 // asset bundle (rootBundle when none is given), at read time.
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show FlutterError;
 import 'package:flutter/services.dart';
@@ -3642,24 +3656,24 @@ final class PlanKit {
         final colon = wordId.indexOf(':');
         final namespace = colon < 0 ? '' : wordId.substring(0, colon);
         final rest = wordId.substring(colon + 1);
+        var foreign = false;
         switch (namespace) {
           case 'category':
             final slash = rest.indexOf('/');
-            if (slash < 0 || rest.substring(0, slash) != id) {
-              problems.add(KitProblem(KitProblemCode.foreignWordId,
-                  '$locale: "$wordId" is not under the kit "$id"'));
-            }
+            foreign = slash < 0 || rest.substring(0, slash) != id;
           case 'symbol' || 'tool' || 'type' || 'property':
-            if (!rest.contains('.') || kitOfKey(rest) != id) {
-              problems.add(KitProblem(KitProblemCode.foreignWordId,
-                  '$locale: "$wordId" is not under the kit "$id"'));
-            } else if (namespace != 'symbol' && !english.containsKey(wordId)) {
+            foreign = !rest.contains('.') || kitOfKey(rest) != id;
+            if (!foreign && namespace != 'symbol' && !english.containsKey(wordId)) {
               problems.add(KitProblem(KitProblemCode.missingEnglish,
                   '$locale: "$wordId" has no English word'));
             }
           default:
             problems.add(KitProblem(KitProblemCode.unknownWordId,
                 '$locale: "$wordId" is in no known namespace'));
+        }
+        if (foreign) {
+          problems.add(KitProblem(KitProblemCode.foreignWordId,
+              '$locale: "$wordId" is not under the kit "$id"'));
         }
       }
     }
@@ -3686,7 +3700,7 @@ export 'src/model/model.dart';
 - [ ] **Step 9: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/lib/src/kit packages/jet_cad_2d_kit/test/kit
+git add packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/lib/src/kit/symbol_library_source.dart packages/jet_cad_2d_kit/lib/src/kit/bundled_library.dart packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart packages/jet_cad_2d_kit/test/kit/sources_test.dart packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): SymbolLibrarySource, bundledLibrary and PlanKit (K5)
 
@@ -4069,14 +4083,39 @@ import 'catalog.dart';
 ///
 /// Throws a component's [ArgumentError] for a value spec K2 refuses.
 DraftDocument buildLibraryDocument(Catalog catalog) {
+  // Every component is constructed, and so validated, before the document
+  // exists: a value K2 refuses throws here and leaves nothing to dispose.
+  final library = LibraryComponent(kit: catalog.kit);
+  final symbols = [
+    for (final s in catalog.symbols)
+      SymbolComponent(
+        key: s.key,
+        version: s.version,
+        name: s.name,
+        category: s.category,
+        tags: s.tags,
+        attachTo: s.attachTo,
+        family: s.family,
+      ),
+  ];
+  final units = [
+    for (final s in catalog.symbols)
+      if (s.unit case final unit?)
+        UnitComponent(
+            kind: unit.kind,
+            capacity: unit.capacity,
+            labelling: unit.labelling)
+      else
+        null,
+  ];
   final doc = DraftDocument.empty();
   registerKitComponents(doc.components);
   doc.header.units = DrawingUnits.millimeters;
   final commands = <DraftCommand>[
-    SetComponentCommand<LibraryComponent>(
-        doc.rootHandle, LibraryComponent(kit: catalog.kit)),
+    SetComponentCommand<LibraryComponent>(doc.rootHandle, library),
   ];
-  for (final s in catalog.symbols) {
+  for (var i = 0; i < catalog.symbols.length; i++) {
+    final s = catalog.symbols[i];
     final def = doc.handleSeed.next();
     commands
       ..add(AddDefinitionCommand(Definition(
@@ -4085,27 +4124,10 @@ DraftDocument buildLibraryDocument(Catalog catalog) {
         basePoint: Vector2(s.base.$1, s.base.$2),
         children: const [],
       )))
-      ..add(SetComponentCommand<SymbolComponent>(
-        def,
-        SymbolComponent(
-          key: s.key,
-          version: s.version,
-          name: s.name,
-          category: s.category,
-          tags: s.tags,
-          attachTo: s.attachTo,
-          family: s.family,
-        ),
-      ));
-    final unit = s.unit;
+      ..add(SetComponentCommand<SymbolComponent>(def, symbols[i]));
+    final unit = units[i];
     if (unit != null) {
-      commands.add(SetComponentCommand<UnitComponent>(
-        def,
-        UnitComponent(
-            kind: unit.kind,
-            capacity: unit.capacity,
-            labelling: unit.labelling),
-      ));
+      commands.add(SetComponentCommand<UnitComponent>(def, unit));
     }
     for (final shape in s.shapes) {
       commands.add(AddEntityCommand(
@@ -4178,14 +4200,14 @@ export 'src/model/model.dart';
 
 - [ ] **Step 5: Run the tests.** Run: `cd packages/jet_cad_2d_kit && flutter test test/authoring test/invariants`. Expected: `All tests passed!` (P1 now walks `builder.dart` and `catalog.dart` and finds them pure).
 
-- [ ] **Step 6: Mutation check** (on committed files; revert each with `git checkout -- <file>` and check `git diff --quiet`): M-B2 (build every `AddDefinitionCommand` in a first loop, the leaves in a second) → B2 red; M-B3a (omit `attachTo: s.attachTo,`) → B3 red; M-B3b (omit `labelling: unit.labelling`) → B3 red; M-B3c (`arcPayload(_v(center), radius, sweep, start)`) → B3 red; M-B5 (delete `SymbolLibrary.decode(bytes);`) → B5 red; M-P1 (add `import 'package:flutter/foundation.dart';` to `builder.dart`) → P1 red.
+- [ ] **Step 6: Mutation check** (on committed files; revert each with `git checkout -- <file>` and check `git diff --quiet`): M-B1 (allocate handles from a random start) → B1 red; M-B2 (build every `AddDefinitionCommand` in a first loop, the leaves in a second) → B2 red; M-B3a (omit `attachTo: s.attachTo,`) → B3 red; M-B3b (omit `labelling: unit.labelling`) → B3 red; M-B3c (`arcPayload(_v(center), radius, sweep, start)`) → B3 red; M-B5 (delete `SymbolLibrary.decode(bytes);`) → B5 red; M-P1 (add `import 'package:flutter/foundation.dart';` to `builder.dart`) → P1 red.
 
 - [ ] **Step 7: The gate.** `cd packages/jet_cad_2d_kit && dart format . && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` — all exit 0.
 
 - [ ] **Step 8: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib/authoring.dart packages/jet_cad_2d_kit/lib/src/authoring packages/jet_cad_2d_kit/test/authoring
+git add packages/jet_cad_2d_kit/lib/authoring.dart packages/jet_cad_2d_kit/lib/src/authoring/catalog.dart packages/jet_cad_2d_kit/lib/src/authoring/builder.dart packages/jet_cad_2d_kit/test/authoring/builder_test.dart
 git commit -m "$(cat <<'EOF'
 feat(kit): the catalog language and the library builder (K6)
 
@@ -5235,6 +5257,8 @@ Note F15's `copyOf(round, key: 'sample.Table.round-four')` has an id other than 
 // Pure Dart: no Flutter, no dart:io.
 import 'dart:typed_data';
 
+import 'package:jet_cad_2d/jet_cad_2d.dart' show listEquals;
+
 import '../model/kit_ids.dart';
 import '../model/kit_names.dart';
 import '../model/kit_problem.dart';
@@ -5272,7 +5296,7 @@ List<KitProblem> conformance({
       KitProblem(KitProblemCode.catalogInvalid, 'the catalog does not build: $e'),
     ];
   }
-  if (!_sameBytes(built, committedLibrary)) {
+  if (!listEquals(built, committedLibrary)) {
     problems.add(const KitProblem(KitProblemCode.builtDiffers,
         "the committed library is not the catalog's: run the kit's generator"));
   }
@@ -5322,14 +5346,6 @@ List<KitProblem> _catalogProblems(Catalog catalog) {
     }
   }
   return problems;
-}
-
-bool _sameBytes(Uint8List a, Uint8List b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
 }
 
 /// Check 4: every committed entry is in the current snapshot and equal to
@@ -5434,14 +5450,14 @@ export 'src/authoring/snapshot.dart';
 export 'src/model/model.dart';
 ```
 
-- [ ] **Step 8: Generate the sample kit's committed files.** Run: `cd packages/jet_cad_2d_kit && dart run test/fixtures/sample_kit/generate.dart`. Expected output: `sample kit: 4 symbols written`. Then `head -c 300 test/fixtures/sample_kit/sample_snapshot.json` (expect `{` and the line of `"sample.bed.double@1": {"base":[900.0,1050.0],...`). Copy both files aside (`cp test/fixtures/sample_kit/sample.jetlib /tmp/sample.jetlib.1` and the same for `sample_snapshot.json`), run the generator a second time, and `cmp` each file against its copy: silent (the generator is idempotent).
+- [ ] **Step 8: Generate the sample kit's committed files.** Run: `cd packages/jet_cad_2d_kit && dart run test/fixtures/sample_kit/generate.dart`. Expected output: `sample kit: 4 symbols written`. Then `head -c 300 test/fixtures/sample_kit/sample_snapshot.json` (expect `{` and the line of `"sample.bed.double@1": {"base":[900.0,1050.0],...`). Stage the two generated files by explicit path (`git add packages/jet_cad_2d_kit/test/fixtures/sample_kit/sample.jetlib packages/jet_cad_2d_kit/test/fixtures/sample_kit/sample_snapshot.json`, from the root), run the generator a second time, and `git diff --quiet -- test/fixtures/sample_kit/sample.jetlib test/fixtures/sample_kit/sample_snapshot.json` must exit 0 (the generator is idempotent). No copy aside.
 
 - [ ] **Step 9: Run the tests.** Run: `cd packages/jet_cad_2d_kit && flutter test test/authoring test/invariants`. Expected: `All tests passed!`.
 
 - [ ] **Step 10: Mutation check** (on committed files; revert each with `git checkout -- <file>` and check `git diff --quiet`; the generated files are never edited by hand):
   - M-N7 (the spec's own): `SplayTreeMap.of({...committed, ...current})` → N7 red.
   - M-N1a: drop `'closed': closed,` → N1 red. M-N2: `_number` returns `v` → N2 red.
-  - M-F1: delete the `_sameBytes` check → F1 red (and F2, F3).
+  - M-F1: delete the `listEquals` byte comparison → F1 red (and F2, F3).
   - M-F3: delete the kit comparison → F3 red.
   - M-F4: delete the `kitOfKey` check → F4 red (the catalog then fails to build: `catalogInvalid`).
   - M-F5: `else if (false)` in place of `else if (now != was)` → F5, F6 red.
@@ -5449,7 +5465,7 @@ export 'src/model/model.dart';
   - M-F11: `final word = names.word(locale, id);` (falls back to English) → F11 red.
   - M-F12a: delete the `else if (word == en ...)` branch → F12 red; M-F12b: `final allowed = const <String>{};` → F0 and F12 red.
   - M-F13: loop over `locales` instead of `names.words` in the orphan check → F13 red (the `en` case).
-  - M-F15: delete the `lower(s, 'family', family)` call → F15 red (the family case: it then builds and passes the other checks).
+  - M-F15: delete the `lower(s, 'family', family)` call → F15 red (the family case: without the check the catalog still builds, but not as a case of `notLowerCase`: K2's constructors refuse an upper-case family, so the result is `catalogInvalid`, and the expected code is missing). Conformance check 6 (lower case) is shadowed by K2's constructors, which refuse upper case when the catalog builds; the check is kept as defence in depth.
   - M-F19: `if (!newest.containsKey(s.key))` in place of the version comparison → F19 red.
 
 - [ ] **Step 11: The gate.** `cd packages/jet_cad_2d_kit && dart format . && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` — all exit 0. P1 now reaches `conformance.dart` and `snapshot.dart` and finds them pure.
@@ -5813,13 +5829,13 @@ snapshot entries of new `key@N`s; it never rewrites an existing entry:
 
 ```dart
 void main() {
-  File('assets/cafe.jetlib').writeAsBytesSync(encodeLibrary(cafeCatalog));
+  File('assets/cafe.jetlib').writeAsBytesSync(encodeLibrary(buildCafeCatalog()));
   final file = File('test/cafe_snapshot.json');
   final committed = file.existsSync()
       ? parseSnapshot(file.readAsStringSync())
       : <String, String>{};
   file.writeAsStringSync(encodeSnapshot(
-      updateSnapshot(committed, geometrySnapshot(cafeCatalog))));
+      updateSnapshot(committed, geometrySnapshot(buildCafeCatalog()))));
 }
 ```
 
@@ -5842,12 +5858,11 @@ A kit's test:
 test('the kit conforms', () {
   expect(
     conformance(
-      catalog: cafeCatalog,
+      catalog: buildCafeCatalog(),
       committedLibrary: File('assets/cafe.jetlib').readAsBytesSync(),
       committedSnapshot: File('test/cafe_snapshot.json').readAsStringSync(),
       names: cafeNames,
       locales: const ['tr'],
-      sameAsEnglish: const {'tr': {'category:cafe/Bar'}},
     ),
     isEmpty,
   );
@@ -5878,7 +5893,7 @@ the catalog lacks; a locale with words that is not declared.
    sub-projects describe these).
 ````
 
-- [ ] **Step 5: The gate.** `cd packages/jet_cad_2d_kit && dart format . && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` — all exit 0. Then check by eye that every Dart name in `docs/kits.md` exists in the package (`grep -n` each of `buildCafeCatalog`, `cafeNames`, `bundledLibrary`, `parseSnapshot`, `encodeSnapshot`, `updateSnapshot`, `geometrySnapshot`, `conformance`, `sameAsEnglish`, `cleanCoordinate` under `packages/jet_cad_2d_kit/lib` or `example/`) and that the two catalog blocks are character-for-character the example's `buildCafeCatalog`.
+- [ ] **Step 5: The gate.** `cd packages/jet_cad_2d_kit && dart format . && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .` — all exit 0. Then check by eye that every Dart name in `docs/kits.md` exists in the package (`grep -n` each of `buildCafeCatalog`, `cafeNames`, `bundledLibrary`, `parseSnapshot`, `encodeSnapshot`, `updateSnapshot`, `geometrySnapshot`, `conformance`, `sameAsEnglish`, `cleanCoordinate` under `packages/jet_cad_2d_kit/lib` or `example/`) and that the two catalog blocks are character-for-character the example's `buildCafeCatalog`. Also `grep -n "cafeCatalog" docs/kits.md packages/jet_cad_2d_kit/README.md` finds only `buildCafeCatalog` (no bare `cafeCatalog`), and every word id and category in a `docs/kits.md` or README snippet (`symbol:cafe.table.round-two`, `category:cafe/Tables`) is one the example's catalog or `cafeNames` has: no `Bar`. `grep -n "Bar" docs/kits.md` shows only the §4 prose about two kits both having a `Bar`.
 
 - [ ] **Step 6: Mutation check.** M-E1: in `example/example.dart`, `chairsAround(600, 600, 350, 3)` → E1 red. Revert with `git checkout -- example/example.dart`; `git diff --quiet` exits 0.
 
@@ -5906,7 +5921,7 @@ EOF
 **Files:**
 - Create: `tool/ci/lib/kit_deps.dart`, `tool/ci/check_kit_deps.dart`
 - Test: `tool/ci/test/kit_deps_test.dart`
-- Modify: `.github/workflows/ci.yml` (the `package` matrix, the `ci-tools` job, the `publishable` matrix)
+- Modify: `.github/workflows/ci.yml` (the `ci-tools` job, the `publishable` matrix; the `package` matrix entry came with Task 1)
 
 **Interfaces:**
 - Consumes: `package:yaml` (`loadYaml`), already a dependency of `tool/ci`.
@@ -6034,7 +6049,9 @@ void main() {
               'test/b_test.dart':
                   "import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';\n",
               // M-D5: read only the first URI of a directive.
-              'tool/c.dart': "import 'a.dart'\n"
+              // The first URI is allowed, the second is not: firstMatch finds
+              // only the allowed one.
+              'tool/c.dart': "import 'package:jet_cad_2d_kit/a.dart'\n"
                   "    if (dart.library.io) "
                   "'package:jet_cad_2d_kit_architecture/x.dart';\n",
             }),
@@ -6273,13 +6290,7 @@ void main(List<String> args) {
 - [ ] **Step 6: Mutation check** (on committed files; revert each with `git checkout -- <file>` and check `git diff --quiet`): M-D1a (`forbidden` returns `dep.startsWith('jet_cad_2d_')`) → D1 red; M-D1b (drop `&& dep != name`) → D1 red; M-D3 (`for (final section in const ['dependencies'])`) → D3, D4 red; M-D5 (`_package.firstMatch` in place of `allMatches`, one URI per directive) → D5 red; M-D6 (`importedPackages` scans `_package.allMatches(dart)` over the whole text) → D6 red; M-D10 (add `'build'` to the script's sub-directories) → D10 red.
 
 - [ ] **Step 7: CI.** In `.github/workflows/ci.yml`:
-  - In `jobs.package.strategy.matrix.include`, after the `packages/jet_cad_2d_gpu` entry, add:
-
-```yaml
-          - package: packages/jet_cad_2d_kit
-            tool: flutter
-```
-
+  - (The `package` matrix entry for `packages/jet_cad_2d_kit` is already in, from Task 1 Step 8a.)
   - In `jobs.ci-tools`, the `Analyze` step's `run` gains `check_kit_deps.dart` after `check_readmes.dart`; the `Format` step's `run` gains `check_kit_deps.dart` after `check_readmes.dart`; after the step `The package READMEs' code is the probe's`, add:
 
 ```yaml
@@ -6288,7 +6299,7 @@ void main(List<String> args) {
 ```
 
   - In `jobs.publishable.strategy.matrix.package`, add `- packages/jet_cad_2d_kit` after `- packages/jet_cad_2d_flutter`.
-  - Check the workflow parses: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"` (no output) and `git diff .github/workflows/ci.yml` shows only the four additions.
+  - Check the workflow parses: `python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"` (no output) and `git diff .github/workflows/ci.yml` shows only the four additions of this step (the `Analyze` and `Format` lines, the new step, the `publishable` entry).
 
 - [ ] **Step 8: The gate.** Run each, expect exit 0:
   - `cd tool/ci && dart test && dart analyze --fatal-infos lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart check_screenshots.dart check_readmes.dart check_kit_deps.dart && dart format --output=none --set-exit-if-changed lib test check_kit_deps.dart`
@@ -6304,8 +6315,8 @@ ci(kit): the kit dependency rule and the jet_cad_2d_kit jobs (K9)
 check_kit_deps.dart fails when jet_cad_2d_kit names jet_cad_2d_plan or a
 kit, or a jet_cad_2d_kit_* names the plan library or another kit, in its
 pubspec sections or in a directive under lib/, test/ or tool/; it passes
-vacuously for kits not written yet. CI tests, analyses and formats the
-new package, runs the check in the tools job, and dry-runs its publish.
+vacuously for kits not written yet. CI runs the check in the tools job and
+dry-runs the package's publish.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -6341,7 +6352,7 @@ EOF
   - No `dart:io` under `lib/`: `grep -rn "dart:io" packages/jet_cad_2d_kit/lib` prints nothing.
   - No Flutter in the model or the authoring toolkit: `grep -rln "package:flutter\|dart:ui" packages/jet_cad_2d_kit/lib/src/model packages/jet_cad_2d_kit/lib/src/authoring packages/jet_cad_2d_kit/lib/authoring.dart` prints nothing (P1 holds the graph; this is the reviewer's quick look).
   - No plan library, no kit: `grep -rn "jet_cad_2d_plan\|jet_cad_2d_kit_" packages/jet_cad_2d_kit/pubspec.yaml packages/jet_cad_2d_kit/lib` prints only the example line in `bundled_library.dart`'s doc comment (`packages/jet_cad_2d_kit_restaurant/assets/...`): a comment, which `check_kit_deps.dart` rightly ignores.
-  - The sample kit regenerates to the committed bytes: copy `test/fixtures/sample_kit/sample.jetlib` and `sample_snapshot.json` aside, run `cd packages/jet_cad_2d_kit && dart run test/fixtures/sample_kit/generate.dart`, `cmp` both: silent.
+  - The sample kit regenerates to the committed bytes: run `cd packages/jet_cad_2d_kit && dart run test/fixtures/sample_kit/generate.dart`, then `git diff --quiet -- test/fixtures/sample_kit/sample.jetlib test/fixtures/sample_kit/sample_snapshot.json` must exit 0 (the files are committed, so any difference shows).
 
 - [ ] **Step 7: The results of record.** Create `docs/superpowers/notes/2026-10-13-kit-contract-results.md` with: the branch head SHA; each gate command of Steps 2-5 with its **quoted** last lines (copied from the terminal, never retyped or summarised into numbers that were not printed); the test count of `packages/jet_cad_2d_kit` as `flutter test` printed it; a table of every mutation of Tasks 1-11 (ID, file, the change, the test that went red, as recorded in each task's report); the plan decisions of this plan, one line each; the spec gaps found (Appendix below). Commit:
 
