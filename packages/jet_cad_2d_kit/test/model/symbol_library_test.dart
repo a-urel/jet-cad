@@ -579,5 +579,57 @@ void main() {
         expect(arc.payload.scalars[2], sweep);
       });
     }
+
+    // The radius decision is Tolerance.standard.linear (1e-9), "at or
+    // under". M-V15t: `radius <= 0` turns V15t and V15u red; M-V15u:
+    // `radius < Tolerance.standard.linear` turns V15v and V15w red.
+    final linear = Tolerance.standard.linear;
+    geometry('V15t a circle of radius linear/2', sofaCircle,
+        (g) => g['scalars'] = [linear / 2], ['radius ${linear / 2}']);
+    geometry(
+        'V15u an arc of radius linear/2',
+        sofaArc,
+        (g) => g['scalars'] = [linear / 2, 0.5, 1.75],
+        ['radius ${linear / 2}']);
+    geometry('V15v a circle of radius exactly linear', sofaCircle,
+        (g) => g['scalars'] = [linear], ['radius $linear']);
+    geometry('V15w an arc of radius exactly linear', sofaArc,
+        (g) => g['scalars'] = [linear, 0.5, 1.75], ['radius $linear']);
+    test('V15x a radius just above linear loads, circle and arc', () {
+      // Positive control: the radius rule is not over-strict.
+      final j = validLibraryJson();
+      geometryJson(j, sofaCircle)['scalars'] = [2 * linear];
+      geometryJson(j, sofaArc)['scalars'] = [2 * linear, 0.5, 1.75];
+      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
+      double radiusOf(EntityKind kind) => sofa.leaves
+          .firstWhere((l) => l.record.kind == kind)
+          .payload
+          .scalars[0];
+      expect(radiusOf(EntityKind.circle), 2 * linear);
+      expect(radiusOf(EntityKind.arc), 2 * linear);
+    });
+
+    // The zero-length decision is isDegenerateSegment (distance at or under
+    // Tolerance.standard.linear), off the origin. M-V15y: `from == to`
+    // (exact equality) turns V15y red.
+    geometry(
+        'V15y a line linear/2 long',
+        sofaLine,
+        (g) => g['coords'] = [120.0, 340.0, 120.0 + linear / 2, 340.0],
+        ['zero-length']);
+    test('V15z a line 2 * linear long loads', () {
+      // Positive control: the line rule is not over-strict.
+      final j = validLibraryJson();
+      geometryJson(j, sofaLine)['coords'] = [
+        120.0,
+        340.0,
+        120.0,
+        340.0 + 2 * linear
+      ];
+      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
+      final line =
+          sofa.leaves.firstWhere((l) => l.record.kind == EntityKind.line);
+      expect(line.payload.coords[3], 340.0 + 2 * linear);
+    });
   });
 }
