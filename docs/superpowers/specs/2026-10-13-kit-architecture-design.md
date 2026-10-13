@@ -39,13 +39,13 @@ Each was put as a question with options; the quote is the human's answer.
    kits sit on a shared contract** (the human's own design, refined in two
    steps): *"canvas (design + preview), property panel ve sembol galerisi
    widget'larını içerir; bunlar controller aracılığıyla beraber çalışır;
-   plan kütüphanesi budur"*, then *"hem plan hem de kitler jet_cad_kit'e
+   plan kütüphanesi budur"*, then *"hem plan hem de kitler jet_cad_2d_kit'e
    bağlansa, base type vs orada olsa nasıl olur?"*: the plan and the kits
-   both depend on `jet_cad_kit`; no kit depends on the plan.
-7. **Names:** the plan library is `jet_cad_plan` (the human proposed it,
-   *"o zaman jet_cad_plan olsa?"*, after `jet_cad_planner` and
-   `jet_cad_designer` were weighed); the contract is `jet_cad_kit`; kits are
-   `jet_cad_kit_<domain>`. The second mode keeps its name, `service`
+   both depend on `jet_cad_2d_kit`; no kit depends on the plan.
+7. **Names:** the plan library is `jet_cad_2d_plan` (the human proposed
+   `jet_cad_plan`, *"o zaman jet_cad_plan olsa?"*, after `jet_cad_planner` and
+   `jet_cad_designer` were weighed); the contract is `jet_cad_2d_kit`; kits are
+   `jet_cad_2d_kit_<domain>`. The second mode keeps its name, `service`
    (*"service uygun bence"*).
 8. **Behaviour leaves free-text tags** (*"against-wall yerine daha jenerik
    bir ad olabilir"*, then *"uygun"*): attachment becomes a structured field
@@ -58,7 +58,16 @@ Each was put as a question with options; the quote is the human's answer.
    (*"Yok, sorun değil"*).
 10. **Full host-API parity before the release wave** (*"Evet, tam
     eşdeğerlik"*): every capability in today's host guide §4–§11 has its
-    counterpart in `jet_cad_plan` before anything is published (A14).
+    counterpart in `jet_cad_2d_plan` before anything is published (A14).
+11. **Every package of this ecosystem carries `2d`** (*"3d tamamen kendi
+    ekosistemine sahip olacak ve aralarında bir ilişki öngörmüyorum
+    şimdilik. 2d kullanımını tekrar değerlendirelim"*, then *"harika olur!
+    adları güncelleyelim"*). The 2D ecosystem is `jet_cad_2d`,
+    `jet_cad_2d_flutter`, `jet_cad_2d_kit`, `jet_cad_2d_plan` and
+    `jet_cad_2d_kit_<domain>`; a future 3D ecosystem names its own
+    `jet_cad_3d_*` and shares nothing with it. Dart type names carry no
+    `2d` (`PlanController`, `PlanKit`): the package names the family, the
+    type the concept.
 
 ## Facts (at `1b4670b`, read from the code, not assumed)
 
@@ -128,32 +137,32 @@ the plan library names a wall, a table or a seat.
 ```
 jet_cad_2d                    engine (unchanged in role)
 └─ jet_cad_2d_flutter         Flutter layer: canvas painting, camera, selection, Tool
-   └─ jet_cad_kit             the contract: base types and interfaces
-      ├─ jet_cad_plan         the plan library: controller and widgets
-      ├─ jet_cad_kit_architecture
-      ├─ jet_cad_kit_restaurant
-      └─ jet_cad_kit_<domain> (later: cinema, aircraft, ...)
+   └─ jet_cad_2d_kit             the contract: base types and interfaces
+      ├─ jet_cad_2d_plan         the plan library: controller and widgets
+      ├─ jet_cad_2d_kit_architecture
+      ├─ jet_cad_2d_kit_restaurant
+      └─ jet_cad_2d_kit_<domain> (later: cinema, aircraft, ...)
 ```
 
-- **The plan and every kit depend on `jet_cad_kit`; no kit depends on
-  `jet_cad_plan`, and no kit depends on another kit.** This is Flutter's
+- **The plan and every kit depend on `jet_cad_2d_kit`; no kit depends on
+  `jet_cad_2d_plan`, and no kit depends on another kit.** This is Flutter's
   federated-plugin shape (`url_launcher` and its implementations over
   `url_launcher_platform_interface`). Kits cooperate only through the
   contract (A5).
-- A host depends on `jet_cad_plan` and on the kits it loads. The engine and
+- A host depends on `jet_cad_2d_plan` and on the kits it loads. The engine and
   the Flutter layer come transitively.
 - A CI check (A15) fails when a kit's pubspec or any of its Dart files names
-  `jet_cad_plan` or another kit.
-- `jet_cad_kit` stays narrow: a type belongs there only when a kit needs to
+  `jet_cad_2d_plan` or another kit.
+- `jet_cad_2d_kit` stays narrow: a type belongs there only when a kit needs to
   name it. Anything only the plan library uses stays in the plan library.
 
-## A2. `jet_cad_kit`: the contract
+## A2. `jet_cad_2d_kit`: the contract
 
 Two public libraries:
 
-- `package:jet_cad_kit/jet_cad_kit.dart`, the contract (Flutter: it names the
+- `package:jet_cad_2d_kit/jet_cad_2d_kit.dart`, the contract (Flutter: it names the
   Flutter layer's `Tool`).
-- `package:jet_cad_kit/authoring.dart`, the authoring toolkit, **pure
+- `package:jet_cad_2d_kit/authoring.dart`, the authoring toolkit, **pure
   Dart**: a kit's library generator runs under plain `dart run`, and a kit's
   conformance test runs under `dart test` or `flutter test`.
 
@@ -203,7 +212,7 @@ final PlanKit architectureKit = PlanKit(
 );
 ```
 
-## A3. `jet_cad_plan`: the plan library
+## A3. `jet_cad_2d_plan`: the plan library
 
 Composable widgets bound to one controller, in the manner of
 `QuillEditor` and `QuillToolbar` over a `QuillController`:
@@ -283,7 +292,7 @@ rule.
 | What | Rule |
 |---|---|
 | A kit's id | Its domain, lower case: `architecture`, `restaurant`. |
-| A kit's package | `jet_cad_kit_<id>`. |
+| A kit's package | `jet_cad_2d_kit_<id>`. |
 | A type id | `<kit id>.<type>`: `architecture.wall`, `architecture.opening`. |
 | A symbol key | `<kit id>.<kind>.<variant>`, a version `@N`: `restaurant.table.rect.four@1`. |
 | A contract component | `jetcad.<name>`: `jetcad.symbol`, `jetcad.unit`, `jetcad.manifest`. |
@@ -319,19 +328,19 @@ its own id. A key's version follows the rules of A16.
 
 ## A10. Versions and the release wave
 
-- `jet_cad_kit` and every kit start at **0.1.0** and follow semver on their
-  own. `jet_cad_plan` starts at **0.8.0**, the same product line as
+- `jet_cad_2d_kit` and every kit start at **0.1.0** and follow semver on their
+  own. `jet_cad_2d_plan` starts at **0.8.0**, the same product line as
   `jet_cad_floor_plan` 0.7.x.
 - The engine and the Flutter layer are released only if a sub-project
   changes them (A12); their README package tables gain the new packages at
   their next release.
 - **The order of the wave:** the engine and the Flutter layer if changed,
-  then `jet_cad_kit`, then `jet_cad_plan`, `jet_cad_kit_architecture` and
-  `jet_cad_kit_restaurant` (any order among the last three; each is checked
+  then `jet_cad_2d_kit`, then `jet_cad_2d_plan`, `jet_cad_2d_kit_architecture` and
+  `jet_cad_2d_kit_restaurant` (any order among the last three; each is checked
   with pana's lower bounds once its dependencies are on pub.dev). The human
   publishes; never from a session.
 - **After the wave** the human marks `jet_cad_floor_plan` discontinued on
-  pub.dev, replaced by `jet_cad_plan`. No bridge release (decision 9).
+  pub.dev, replaced by `jet_cad_2d_plan`. No bridge release (decision 9).
 - Until the wave, 0.7.x stays the line hosts use; a fix there goes to a
   branch from its tag.
 
@@ -341,12 +350,12 @@ its own id. A key's version follows the rules of A16.
   key and version rules (A16), the semver steps, the conformance test, and a
   checklist for a new kit (catalog, generator, names, source, types and tools,
   tests, demo, README pictures, CI line).
-- **The host guide is rewritten** for `jet_cad_plan` and the kits, with a
+- **The host guide is rewritten** for `jet_cad_2d_plan` and the kits, with a
   short "From `jet_cad_floor_plan`" section mapping the old names to the new.
 - **Demos, one per domain:** `apps/floor_planner` becomes
   `apps/architecture_demo` (the architecture kit only); `apps/restaurant_demo`
   loads the architecture and restaurant kits. A later kit adds its own demo.
-- **README pictures show what the package itself gives.** `jet_cad_plan`'s
+- **README pictures show what the package itself gives.** `jet_cad_2d_plan`'s
   are of its widgets with the architecture kit (a plan with walls, rooms,
   doors, windows and furniture); the architecture kit's are of its types; the
   restaurant kit's are of the Salon and the Symbols gallery with its
@@ -354,9 +363,9 @@ its own id. A key's version follows the rules of A16.
 
 ## A12. The rewrite
 
-- **New packages, written against the contract,** in `packages/jet_cad_kit`,
-  `packages/jet_cad_plan`, `packages/jet_cad_kit_architecture` and
-  `packages/jet_cad_kit_restaurant`.
+- **New packages, written against the contract,** in `packages/jet_cad_2d_kit`,
+  `packages/jet_cad_2d_plan`, `packages/jet_cad_2d_kit_architecture` and
+  `packages/jet_cad_2d_kit_restaurant`.
 - **What is rewritten is the architecture and the API, not the proven
   algorithms.** The wall geometry, opening cuts, room tracing, dimension
   attachment, table labels and numbering, the band, the groups and the
@@ -381,18 +390,18 @@ its own id. A key's version follows the rules of A16.
 Each has its own spec, plan, branch and review; they ship together (A10).
 
 1. **The contract, its symbol side.** This umbrella's acceptance;
-   `jet_cad_kit` with the plan components, the library format, the sources
+   `jet_cad_2d_kit` with the plan components, the library format, the sources
    and names, the authoring toolkit and the conformance test; the attachment
    and family fields; the unit component; `docs/kits.md` begun.
-2. **The plan library.** `jet_cad_plan`: `PlanController`, the widgets, the
+2. **The plan library.** `jet_cad_2d_plan`: `PlanController`, the widgets, the
    two modes, `PlanEditor`, the manifest, the kit-set validation, the failure
    boundary, the generic tools; the contract's code side (`PlanType`,
    `PlanTool`, the property specs, the attachment registry) settled against
    a test kit.
-3. **The architecture kit.** `jet_cad_kit_architecture`: the six types,
+3. **The architecture kit.** `jet_cad_2d_kit_architecture`: the six types,
    their tools, grips and properties, the furniture library, the wall-face
    provider; parity with today's design mode.
-4. **The restaurant kit and the wave.** `jet_cad_kit_restaurant`; the demos;
+4. **The restaurant kit and the wave.** `jet_cad_2d_kit_restaurant`; the demos;
    the pictures; the host guide; parity (A14) closed; the old packages
    removed; the release checklist in STATUS.
 

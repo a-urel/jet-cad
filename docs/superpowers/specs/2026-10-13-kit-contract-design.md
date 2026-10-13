@@ -1,4 +1,4 @@
-# Sub-project 1: `jet_cad_kit`, the contract's symbol side — design
+# Sub-project 1: `jet_cad_2d_kit`, the contract's symbol side — design
 
 **Date:** 2026-10-13. **Status:** revision 1; awaiting the human's review of
 this file.
@@ -10,11 +10,11 @@ the umbrella wins and this file is wrong.
 
 **Branch:** `feat/kit-architecture` (the umbrella's), worktree
 `.claude/worktrees/kit-architecture`. **Size:** L, one plan. **Release:**
-none on its own; `jet_cad_kit` 0.1.0 goes out in the wave (umbrella A10).
+none on its own; `jet_cad_2d_kit` 0.1.0 goes out in the wave (umbrella A10).
 
 ## Purpose
 
-Create `packages/jet_cad_kit` with everything a kit needs to ship symbols:
+Create `packages/jet_cad_2d_kit` with everything a kit needs to ship symbols:
 the components a plan stores, the library format with its validator, the
 sources and the words, the `PlanKit` descriptor's symbol part, the authoring
 toolkit and the conformance test. Sub-project 2 adds the code side
@@ -52,9 +52,9 @@ Read from `packages/jet_cad_floor_plan/lib/src/symbols/` and
 ## K1. The package
 
 ```
-packages/jet_cad_kit/
-  pubspec.yaml            name: jet_cad_kit, version: 0.1.0
-  lib/jet_cad_kit.dart    the contract (Flutter)
+packages/jet_cad_2d_kit/
+  pubspec.yaml            name: jet_cad_2d_kit, version: 0.1.0
+  lib/jet_cad_2d_kit.dart    the contract (Flutter)
   lib/authoring.dart      the authoring toolkit (pure Dart)
   lib/src/model/          pure Dart, exported by both libraries
   lib/src/kit/            PlanKit, sources, the bundled reader (Flutter)
@@ -65,7 +65,7 @@ packages/jet_cad_kit/
 
 - **Dependencies:** the Flutter SDK, `jet_cad_2d ^0.7.2`, `vector_math`,
   `meta`. Not `jet_cad_2d_flutter` yet: sub-project 2 adds it with
-  `PlanTool`. Never `jet_cad_plan` or a kit (umbrella A1).
+  `PlanTool`. Never `jet_cad_2d_plan` or a kit (umbrella A1).
 - **Purity is tested.** A test walks the import graph of
   `lib/authoring.dart` and of every file under `lib/src/model/` and fails on
   any `package:flutter`, `dart:ui` or `dart:io` import (M: add
@@ -197,7 +197,7 @@ kit's id (a refusal otherwise, when the plan library loads it).
 **`bundledLibrary(String assetKey, {AssetBundle? bundle})`** returns a
 reader of an asset bundle (`rootBundle` when null). A kit's source is one
 line: `SymbolLibrarySource(label: 'restaurant', read:
-bundledLibrary('packages/jet_cad_kit_restaurant/assets/restaurant.jetlib'))`.
+bundledLibrary('packages/jet_cad_2d_kit_restaurant/assets/restaurant.jetlib'))`.
 
 **`PlanKit`**, the descriptor's symbol part:
 
@@ -222,7 +222,7 @@ version, a word id under another kit's id. Sub-project 2 adds `types`,
 
 ## K6. The authoring toolkit
 
-`package:jet_cad_kit/authoring.dart`, pure Dart.
+`package:jet_cad_2d_kit/authoring.dart`, pure Dart.
 
 **The catalog language:**
 
@@ -302,12 +302,12 @@ side.
 
 ## K9. CI
 
-- A job for `packages/jet_cad_kit`: `flutter test`, `flutter analyze`,
+- A job for `packages/jet_cad_2d_kit`: `flutter test`, `flutter analyze`,
   `dart format --output=none --set-exit-if-changed .`.
 - **The dependency rule** (umbrella A1) as `tool/ci/check_kit_deps.dart`
-  with tests: `jet_cad_kit` depends on neither `jet_cad_plan` nor any
-  `jet_cad_kit_*`; a `jet_cad_kit_*` depends on no `jet_cad_plan` and no other
-  `jet_cad_kit_*`, in its pubspec or in any import under `lib/`, `test/` or
+  with tests: `jet_cad_2d_kit` depends on neither `jet_cad_2d_plan` nor any
+  `jet_cad_2d_kit_*`; a `jet_cad_2d_kit_*` depends on no `jet_cad_2d_plan` and no other
+  `jet_cad_2d_kit_*`, in its pubspec or in any import under `lib/`, `test/` or
   `tool/`. It passes vacuously for packages that do not exist yet and runs in
   the CI tools job.
 
@@ -337,10 +337,10 @@ Every test is worth landing only if a named mutation makes it go red
 
 ## Exit gate
 
-- `cd packages/jet_cad_kit && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .`
+- `cd packages/jet_cad_2d_kit && flutter test && flutter analyze && dart format --output=none --set-exit-if-changed .`
 - `cd tool/ci && dart test`, and `dart run tool/ci/check_kit_deps.dart`
 - The three CLAUDE.md gates still green (no old package changes, but run).
-- `cd packages/jet_cad_kit && dart pub publish --dry-run` with 0 warnings
+- `cd packages/jet_cad_2d_kit && dart pub publish --dry-run` with 0 warnings
   (not published: the wave publishes).
 - An independent review of the whole branch.
 
