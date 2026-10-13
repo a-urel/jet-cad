@@ -115,7 +115,16 @@ that declares one declares it complete.
 
 ## 6. The descriptor
 
+The snippets in sections 6 to 8 are files under the package's `example/`
+(`cafe_kit.dart`, `generate_cafe.dart`, `cafe_conformance_test.dart`),
+analysed with the package; `example.dart` is the file with
+`buildCafeCatalog` and `cafeNames`.
+
 ```dart
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+
+import 'example.dart';
+
 final PlanKit cafeKit = PlanKit(
   id: 'cafe',
   version: '0.1.0',
@@ -172,8 +181,17 @@ A kit's generator (`tool/generate.dart`) writes the library and **adds** the
 snapshot entries of new `key@N`s; it never rewrites an existing entry:
 
 ```dart
+import 'dart:io';
+
+import 'package:jet_cad_2d_kit/authoring.dart';
+
+import 'example.dart';
+
 void main() {
-  File('assets/cafe.jetlib').writeAsBytesSync(encodeLibrary(buildCafeCatalog()));
+  Directory('assets').createSync(recursive: true);
+  Directory('test').createSync(recursive: true);
+  File('assets/cafe.jetlib')
+      .writeAsBytesSync(encodeLibrary(buildCafeCatalog()));
   final file = File('test/cafe_snapshot.json');
   final committed = file.existsSync()
       ? parseSnapshot(file.readAsStringSync())
@@ -199,18 +217,27 @@ void main() {
 A kit's test:
 
 ```dart
-test('the kit conforms', () {
-  expect(
-    conformance(
-      catalog: buildCafeCatalog(),
-      committedLibrary: File('assets/cafe.jetlib').readAsBytesSync(),
-      committedSnapshot: File('test/cafe_snapshot.json').readAsStringSync(),
-      names: cafeNames,
-      locales: const ['tr'],
-    ),
-    isEmpty,
-  );
-});
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d_kit/authoring.dart';
+
+import 'example.dart';
+
+void main() {
+  test('the kit conforms', () {
+    expect(
+      conformance(
+        catalog: buildCafeCatalog(),
+        committedLibrary: File('assets/cafe.jetlib').readAsBytesSync(),
+        committedSnapshot: File('test/cafe_snapshot.json').readAsStringSync(),
+        names: cafeNames,
+        locales: const ['tr'],
+      ),
+      isEmpty,
+    );
+  });
+}
 ```
 
 It reports: a catalog that does not build; keys, tags, kinds and families
