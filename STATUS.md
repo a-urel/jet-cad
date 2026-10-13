@@ -383,7 +383,18 @@ with 0.7.0 (below).
 
 ## In flight
 
-Nothing.
+- **Publishing `jet_cad_2d` on pub.dev** (the human, 2026-10-13; bounded
+  design in chat, approved: *"evet"*), on `feat/publish-jet-cad-2d`, cut
+  by hand from `main` at `133cf03`. **Awaits the human's word to push and
+  merge.** The engine leaves the shared release line (the human:
+  *"Bağımsız, 0.7.1"*): 0.7.1 is 0.7.0's code with a LICENSE, a README, an
+  example and its test, `.pubignore`, `sdk: ^3.6.0`, the real repository
+  URL, and doc references that resolve. CI's new job `publishable` runs
+  `dart pub publish --dry-run` (exit 65 on any warning). The dry run: 0
+  warnings, 228 KB. pana: 145/160 before, 150/160 after; the missing 10
+  are `main` on GitHub still carrying the old repository URL. Record:
+  [2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md).
+  Run natively in one session: no SDD ledger.
 
 ## Owed to the human
 
@@ -456,7 +467,15 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** Release 0.7.0 is **merged into `main` at
+**Next: the human's word on `feat/publish-jet-cad-2d`** (In flight). After
+the merge, the publish is the human's, in this order: push `main`; from
+`packages/jet_cad_2d`, re-run pana (`dart pub global run pana --no-warning
+.`; 160/160 expected once GitHub's `main` carries the new pubspec) and
+`dart pub publish --dry-run`; then `dart pub publish`; then the tag
+`jet_cad_2d-v0.7.1` on the merge commit. Claude never runs `dart pub
+publish` without `--dry-run`.
+
+Before this: Release 0.7.0 is **merged into `main` at
 `0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
 `release/0.7.0` (cut from `main` at `7d3ce8d`); it releases rubber-band
 selection, merged at `232d905` (plan
@@ -536,6 +555,20 @@ docs/superpowers/
 ---
 
 ## Rulings that still bind future work
+
+**The engine's own version (the human, 2026-10-13: *"Bağımsız,
+0.7.1"*).** `jet_cad_2d` is published on pub.dev and versioned on its own:
+it moves only when its own code or pubspec changes, gets an entry in
+`packages/jet_cad_2d/CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z` (pushed
+by the human), and is published by the human. The host packages
+(`jet_cad_2d_flutter`, `jet_cad_floor_plan`, `jet_cad_restaurant_symbols`,
+and `jet_cad_2d_gpu`) keep one version and one `vX.Y.Z` tag; a host
+release's root CHANGELOG entry names the engine version it carries. Every
+other package stays `publish_to: none` and keeps its `path:` dependency on
+the engine. Under 0.x, a minor bump of the engine may break its API. The
+barrel is published whole; the narrowing candidates are in
+[2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md),
+and narrowing is a spec of its own.
 
 Plan 3c's ledger carries 56 numbered rulings, archived in full at
 [docs/superpowers/ledgers/](docs/superpowers/ledgers/). These are the ones that
@@ -701,6 +734,7 @@ dart test
 dart test test/invariants/query_allocation_test.dart
 dart run benchmark/query_throughput.dart
 dart analyze && dart format --output=none --set-exit-if-changed .
+dart pub publish --dry-run              # 0 warnings; never without --dry-run
 
 # render layer (Flutter)
 cd packages/jet_cad_2d_flutter
