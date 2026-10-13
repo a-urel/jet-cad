@@ -19,8 +19,11 @@ bool isKitPackage(String name) => _kit.hasMatch(name);
 /// Dart file of the package (package-relative path → text; see
 /// [isPackageDartFile]).
 final class PackageSource {
-  const PackageSource(
-      {required this.dir, required this.pubspec, required this.dartFiles});
+  const PackageSource({
+    required this.dir,
+    required this.pubspec,
+    required this.dartFiles,
+  });
 
   final String dir;
   final String pubspec;
@@ -61,26 +64,25 @@ final RegExp _package = RegExp(r'^package:([a-z0-9_]+)/');
 /// reads them: a comment between a keyword and its URI hides nothing, and a
 /// commented-out directive or a directive-shaped string is not a directive.
 List<String> directiveUris(String dart) => [
-      for (final directive
-          in parseString(content: dart, throwIfDiagnostics: false)
-              .unit
-              .directives)
-        ...switch (directive) {
-          NamespaceDirective() => [
-              directive.uri.stringValue,
-              for (final c in directive.configurations) c.uri.stringValue,
-            ],
-          PartDirective() => [directive.uri.stringValue],
-          _ => const <String?>[],
-        }
-            .nonNulls,
-    ];
+  for (final directive in parseString(
+    content: dart,
+    throwIfDiagnostics: false,
+  ).unit.directives)
+    ...switch (directive) {
+      NamespaceDirective() => [
+        directive.uri.stringValue,
+        for (final c in directive.configurations) c.uri.stringValue,
+      ],
+      PartDirective() => [directive.uri.stringValue],
+      _ => const <String?>[],
+    }.nonNulls,
+];
 
 /// The packages [dart]'s import, export and part directives name.
 Set<String> importedPackages(String dart) => {
-      for (final uri in directiveUris(dart))
-        if (_package.firstMatch(uri) case final match?) match.group(1)!,
-    };
+  for (final uri in directiveUris(dart))
+    if (_package.firstMatch(uri) case final match?) match.group(1)!,
+};
 
 /// Every break of the rule among [packages], as `<package>: <what>`.
 /// Packages that are neither the contract nor a kit are not checked.

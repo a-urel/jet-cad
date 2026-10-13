@@ -5,10 +5,14 @@ import 'guide.dart';
 
 /// [readme]'s blocks missing from [dart] and [yaml], each prefixed with
 /// [name]; a README with no Dart block is a problem of its own.
-List<String> readmeProblems(String name, String readme,
-    {required String dart, required String yaml}) {
+List<String> readmeProblems(
+  String name,
+  String readme, {
+  required String dart,
+  required String yaml,
+}) {
   if (fencedBlocks(readme, 'dart').isEmpty) return ['$name: no dart block'];
   return [
-    for (final m in missingBlocks(readme, dart: dart, yaml: yaml)) '$name: $m'
+    for (final m in missingBlocks(readme, dart: dart, yaml: yaml)) '$name: $m',
   ];
 }

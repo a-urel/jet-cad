@@ -14,30 +14,42 @@ const engineRoot = '/home/user/jet-cad/packages/jet_cad_2d';
 void main() {
   group('expect_failures.dart', () {
     test('SC1 exactly the standing set: exit 0', () async {
-      final r = await dartRun('expect_failures.dart',
-          [...engine, engineRoot, 'test/fixtures/engine_run.json']);
+      final r = await dartRun('expect_failures.dart', [
+        ...engine,
+        engineRoot,
+        'test/fixtures/engine_run.json',
+      ]);
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
       expect(r.stdout, contains('the standing failures and skips, exactly'));
     });
 
     test('SC2 a difference: exit 1, every difference printed', () async {
-      final r = await dartRun('expect_failures.dart',
-          [...engine, engineRoot, 'test/fixtures/vm_skip_run.json']);
+      final r = await dartRun('expect_failures.dart', [
+        ...engine,
+        engineRoot,
+        'test/fixtures/vm_skip_run.json',
+      ]);
       expect(r.exitCode, 1);
       expect(r.stdout, contains('skipped for want of the VM service'));
       expect(r.stdout, contains('standing failure passed or did not run'));
     });
 
     test('SC3 a test that failed after it completed: exit 1', () async {
-      final r = await dartRun('expect_failures.dart',
-          [...engine, engineRoot, 'test/fixtures/late_failure_run.json']);
+      final r = await dartRun('expect_failures.dart', [
+        ...engine,
+        engineRoot,
+        'test/fixtures/late_failure_run.json',
+      ]);
       expect(r.exitCode, 1);
       expect(r.stdout, contains('new failure: '));
     });
 
     test('SC4 no run to read: a non-zero exit', () async {
-      final r = await dartRun('expect_failures.dart',
-          [...engine, engineRoot, 'test/fixtures/no_such_run.json']);
+      final r = await dartRun('expect_failures.dart', [
+        ...engine,
+        engineRoot,
+        'test/fixtures/no_such_run.json',
+      ]);
       expect(r.exitCode, isNot(0));
     });
 
@@ -57,14 +69,16 @@ void main() {
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
     });
 
-    test('SC7 a guide block the probe lacks: exit 1, the block named',
-        () async {
-      final guide = File('${tmp.path}/guide.md')
-        ..writeAsStringSync('```dart\nvoid nowhere() {}\n```\n');
-      final r = await dartRun('check_guide.dart', ['--guide', guide.path]);
-      expect(r.exitCode, 1);
-      expect(r.stdout, contains('not in the host probe: dart: void nowhere'));
-    });
+    test(
+      'SC7 a guide block the probe lacks: exit 1, the block named',
+      () async {
+        final guide = File('${tmp.path}/guide.md')
+          ..writeAsStringSync('```dart\nvoid nowhere() {}\n```\n');
+        final r = await dartRun('check_guide.dart', ['--guide', guide.path]);
+        expect(r.exitCode, 1);
+        expect(r.stdout, contains('not in the host probe: dart: void nowhere'));
+      },
+    );
 
     test('SC8 a guide with no code block: exit 1', () async {
       final guide = File('${tmp.path}/guide.md')..writeAsStringSync('# Text\n');
@@ -79,42 +93,52 @@ void main() {
     tearDown(() => tmp.deleteSync(recursive: true));
 
     test('SC9 the lock after the split, look-alikes and all: exit 0', () async {
-      final r = await dartRun(
-          'check_host_lock.dart', ['test/fixtures/host_post_split.lock.txt']);
+      final r = await dartRun('check_host_lock.dart', [
+        'test/fixtures/host_post_split.lock.txt',
+      ]);
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
       expect(r.stdout, contains('43 packages, none of flutter_scene, '));
     });
 
-    test('SC10 the lock before the split: exit 1, each package named',
-        () async {
-      final r = await dartRun(
-          'check_host_lock.dart', ['test/fixtures/host_pre_split.lock.txt']);
-      expect(r.exitCode, 1);
-      for (final name in const [
-        'flutter_gpu',
-        'flutter_gpu_shaders',
-        'flutter_scene',
-        'scene',
-      ]) {
-        expect(r.stdout, contains('a host must not resolve $name\n'));
-      }
-    });
+    test(
+      'SC10 the lock before the split: exit 1, each package named',
+      () async {
+        final r = await dartRun('check_host_lock.dart', [
+          'test/fixtures/host_pre_split.lock.txt',
+        ]);
+        expect(r.exitCode, 1);
+        for (final name in const [
+          'flutter_gpu',
+          'flutter_gpu_shaders',
+          'flutter_scene',
+          'scene',
+        ]) {
+          expect(r.stdout, contains('a host must not resolve $name\n'));
+        }
+      },
+    );
 
     test('SC11 the GPU package alone: exit 1', () async {
-      final green =
-          File('test/fixtures/host_post_split.lock.txt').readAsStringSync();
+      final green = File(
+        'test/fixtures/host_post_split.lock.txt',
+      ).readAsStringSync();
       expect(green, contains('\n  jet_cad_2d_flutter:\n'), reason: 'premise');
       final lock = File('${tmp.path}/pubspec.lock')
-        ..writeAsStringSync(green.replaceFirst('\n  jet_cad_2d_flutter:\n',
-            '\n  jet_cad_2d_gpu:\n    source: git\n  jet_cad_2d_flutter:\n'));
+        ..writeAsStringSync(
+          green.replaceFirst(
+            '\n  jet_cad_2d_flutter:\n',
+            '\n  jet_cad_2d_gpu:\n    source: git\n  jet_cad_2d_flutter:\n',
+          ),
+        );
       final r = await dartRun('check_host_lock.dart', [lock.path]);
       expect(r.exitCode, 1);
       expect(r.stdout, contains('a host must not resolve jet_cad_2d_gpu'));
     });
 
     test('SC12 no lock to read, or not a lock: exit 2', () async {
-      final missing =
-          await dartRun('check_host_lock.dart', ['${tmp.path}/no_such.lock']);
+      final missing = await dartRun('check_host_lock.dart', [
+        '${tmp.path}/no_such.lock',
+      ]);
       expect(missing.exitCode, 2);
       final text = File('${tmp.path}/pubspec.lock')
         ..writeAsStringSync('name: host_probe\n');
@@ -127,51 +151,60 @@ void main() {
       expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
     });
 
-    test('SC21 --ref: the green lock at its ref exits 0, at another exits 1',
-        () async {
-      const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
-      final ok = await dartRun('check_host_lock.dart',
-          ['test/fixtures/host_post_split.lock.txt', '--ref', ref]);
-      expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
-      final bad = await dartRun('check_host_lock.dart', [
-        'test/fixtures/host_post_split.lock.txt',
-        '--ref',
-        '0000000000000000000000000000000000000000',
-      ]);
-      expect(bad.exitCode, 1);
-      expect(bad.stdout, contains('jet_cad_floor_plan'));
-    });
+    test(
+      'SC21 --ref: the green lock at its ref exits 0, at another exits 1',
+      () async {
+        const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
+        final ok = await dartRun('check_host_lock.dart', [
+          'test/fixtures/host_post_split.lock.txt',
+          '--ref',
+          ref,
+        ]);
+        expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
+        final bad = await dartRun('check_host_lock.dart', [
+          'test/fixtures/host_post_split.lock.txt',
+          '--ref',
+          '0000000000000000000000000000000000000000',
+        ]);
+        expect(bad.exitCode, 1);
+        expect(bad.stdout, contains('jet_cad_floor_plan'));
+      },
+    );
   });
 
-  test('SC22 package_root.dart prints a package\'s root from a config',
-      () async {
-    final dir = Directory.systemTemp.createTempSync('package_root');
-    addTearDown(() => dir.deleteSync(recursive: true));
-    Directory('${dir.path}/.dart_tool').createSync();
-    File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
+  test(
+    'SC22 package_root.dart prints a package\'s root from a config',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('package_root');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      Directory('${dir.path}/.dart_tool').createSync();
+      File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
         '{"configVersion":2,"packages":[{"name":"a","rootUri":"../x/a",'
         '"packageUri":"lib/"},{"name":"b","rootUri":"file:///abs/b/",'
-        '"packageUri":"lib/"}]}');
-    final a = await dartRun('package_root.dart', [dir.path, 'a']);
-    expect(a.exitCode, 0, reason: '${a.stdout}${a.stderr}');
-    // `../x/a` resolves against `.dart_tool/`, so the root is `<dir>/x/a`.
-    expect((a.stdout as String).trim(), endsWith('/x/a'));
-    // macOS reaches the temp directory through a symlink (/var, /private/var).
-    expect(
-        Directory(Directory((a.stdout as String).trim()).parent.parent.path)
-            .resolveSymbolicLinksSync(),
-        Directory(dir.path).resolveSymbolicLinksSync());
-    final b = await dartRun('package_root.dart', [dir.path, 'b']);
-    expect((b.stdout as String).trim(), '/abs/b');
-    final none = await dartRun('package_root.dart', [dir.path, 'c']);
-    expect(none.exitCode, 2);
-  });
+        '"packageUri":"lib/"}]}',
+      );
+      final a = await dartRun('package_root.dart', [dir.path, 'a']);
+      expect(a.exitCode, 0, reason: '${a.stdout}${a.stderr}');
+      // `../x/a` resolves against `.dart_tool/`, so the root is `<dir>/x/a`.
+      expect((a.stdout as String).trim(), endsWith('/x/a'));
+      // macOS reaches the temp directory through a symlink (/var, /private/var).
+      expect(
+        Directory(
+          Directory((a.stdout as String).trim()).parent.parent.path,
+        ).resolveSymbolicLinksSync(),
+        Directory(dir.path).resolveSymbolicLinksSync(),
+      );
+      final b = await dartRun('package_root.dart', [dir.path, 'b']);
+      expect((b.stdout as String).trim(), '/abs/b');
+      final none = await dartRun('package_root.dart', [dir.path, 'c']);
+      expect(none.exitCode, 2);
+    },
+  );
 
   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
   // probe that stopped running the check would pass unseen. Its commands,
   // comments aside, in their order.
-  test('SC14 host_probe.sh checks the lock after pub get, before the build',
-      () {
+  test('SC14 host_probe.sh checks the lock after pub get, before the build', () {
     final commands = [
       for (final line in File('host_probe.sh').readAsLinesSync())
         if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))
@@ -189,25 +222,38 @@ void main() {
     // Review Focus 4: a copy left by an earlier run must not mask a copy
     // step that no longer runs.
     final clean = at(
-        r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \');
+      r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \',
+    );
     expect(
-        at(r'"$probe/assets/restaurant.jetlib" '
-            r'"$probe/lib/restaurant_names.dart"'),
-        clean + 1,
-        reason: 'the clean line goes on to the copies');
+      at(
+        r'"$probe/assets/restaurant.jetlib" '
+        r'"$probe/lib/restaurant_names.dart"',
+      ),
+      clean + 1,
+      reason: 'the clean line goes on to the copies',
+    );
     final get = at('flutter pub get');
     expect(clean, lessThan(get), reason: 'cleaned before pub get');
     final check = at(
-        r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"');
+      r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"',
+    );
     final copy = at(
-        r'symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)');
+      r'symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)',
+    );
     final analyze = at('flutter analyze');
     final build = at('flutter build web');
-    expect(check < copy && copy < analyze, isTrue,
-        reason: 'the symbols are copied after the check, before analyze');
-    expect(get < check && check < analyze && analyze < build, isTrue,
-        reason: 'pub get, the check, analyze, build: $get, $check, '
-            '$analyze, $build');
+    expect(
+      check < copy && copy < analyze,
+      isTrue,
+      reason: 'the symbols are copied after the check, before analyze',
+    );
+    expect(
+      get < check && check < analyze && analyze < build,
+      isTrue,
+      reason:
+          'pub get, the check, analyze, build: $get, $check, '
+          '$analyze, $build',
+    );
   });
 
   // The final review's F-3 (MU7): the probe's checks after the build, run
@@ -220,16 +266,19 @@ void main() {
     late Directory probe;
     setUp(() {
       probe = Directory.systemTemp.createTempSync('host_probe_tail');
-      Directory('${probe.path}/build/web/assets/packages/jet_cad_floor_plan')
-          .createSync(recursive: true);
-      File('${probe.path}/build/web/main.dart.js')
-          .writeAsStringSync('main();\n');
+      Directory(
+        '${probe.path}/build/web/assets/packages/jet_cad_floor_plan',
+      ).createSync(recursive: true);
+      File(
+        '${probe.path}/build/web/main.dart.js',
+      ).writeAsStringSync('main();\n');
     });
     tearDown(() => probe.deleteSync(recursive: true));
 
-    Future<ProcessResult> runTail() =>
-        Process.run('bash', ['-c', 'set -euo pipefail\n$tail'],
-            workingDirectory: probe.path);
+    Future<ProcessResult> runTail() => Process.run('bash', [
+      '-c',
+      'set -euo pipefail\n$tail',
+    ], workingDirectory: probe.path);
 
     test('premise: the block is the script\'s last', () {
       expect(from, isNot(-1));
@@ -244,16 +293,18 @@ void main() {
     });
 
     test('a build hook ran: exit 1', () async {
-      Directory('${probe.path}/.dart_tool/hooks_runner')
-          .createSync(recursive: true);
+      Directory(
+        '${probe.path}/.dart_tool/hooks_runner',
+      ).createSync(recursive: true);
       final r = await runTail();
       expect(r.exitCode, 1);
       expect(r.stderr, contains('a build hook ran'));
     });
 
     test("flutter_scene's assets: exit 1", () async {
-      Directory('${probe.path}/build/web/assets/packages/flutter_scene')
-          .createSync();
+      Directory(
+        '${probe.path}/build/web/assets/packages/flutter_scene',
+      ).createSync();
       final r = await runTail();
       expect(r.exitCode, 1);
       expect(r.stderr, contains("ships flutter_scene's assets"));
@@ -261,7 +312,8 @@ void main() {
 
     test('main.dart.js names cad.shaderbundle: exit 1', () async {
       File('${probe.path}/build/web/main.dart.js').writeAsStringSync(
-          'load("packages/jet_cad_2d_gpu/assets/shaders/cad.shaderbundle");\n');
+        'load("packages/jet_cad_2d_gpu/assets/shaders/cad.shaderbundle");\n',
+      );
       final r = await runTail();
       expect(r.exitCode, 1);
       expect(r.stderr, contains('loads cad.shaderbundle'));
@@ -279,10 +331,10 @@ void main() {
   final workflow = File('../../.github/workflows/ci.yml').readAsStringSync();
 
   test('SC16 every live package is in the CI matrix', () {
-    final listed = RegExp(r'^\s+- package: (\S+)$', multiLine: true)
-        .allMatches(workflow)
-        .map((m) => m[1])
-        .toSet();
+    final listed = RegExp(
+      r'^\s+- package: (\S+)$',
+      multiLine: true,
+    ).allMatches(workflow).map((m) => m[1]).toSet();
     final live = [
       for (final dir in Directory('../../packages').listSync())
         if (dir is Directory &&
@@ -295,50 +347,61 @@ void main() {
   });
 
   test("SC17 each app's web build asserts no flutter_scene assets", () {
-    final builds = RegExp(r'^\s+flutter build web$', multiLine: true)
-        .allMatches(workflow)
-        .length;
+    final builds = RegExp(
+      r'^\s+flutter build web$',
+      multiLine: true,
+    ).allMatches(workflow).length;
     final asserts = RegExp(
-            r'^\s+flutter build web\n\s+test ! -e '
-            r'build/web/assets/packages/flutter_scene$',
-            multiLine: true)
-        .allMatches(workflow)
-        .length;
+      r'^\s+flutter build web\n\s+test ! -e '
+      r'build/web/assets/packages/flutter_scene$',
+      multiLine: true,
+    ).allMatches(workflow).length;
     expect(builds, 2, reason: 'premise: the demo and the floor planner');
     expect(asserts, builds);
     expect(
-        workflow,
-        contains('run: tool/ci/host_probe.sh "file://\$GITHUB_WORKSPACE" '
-            '"\$(git rev-parse HEAD)"'));
+      workflow,
+      contains(
+        'run: tool/ci/host_probe.sh "file://\$GITHUB_WORKSPACE" '
+        '"\$(git rev-parse HEAD)"',
+      ),
+    );
   });
 
   // Host embedding API spec, invariant 1 (P-1): the host-probe job also
   // analyses each released probe (0.3.0, 0.4.0) against the commit under
   // test, after the probe is resolved there, from a checkout that has the
   // tags.
-  test('SC18 the host-probe job analyses the released probes, with the tags',
-      () {
-    final from = workflow.indexOf('\n  host-probe:\n');
-    expect(from, isNot(-1), reason: 'premise: the job');
-    final next = RegExp(r'^  \S', multiLine: true)
-        .allMatches(workflow, from + 2)
-        .where((m) => m.start > from + 2)
-        .firstOrNull;
-    final job = workflow.substring(from, next?.start ?? workflow.length);
-    expect(
+  test(
+    'SC18 the host-probe job analyses the released probes, with the tags',
+    () {
+      final from = workflow.indexOf('\n  host-probe:\n');
+      expect(from, isNot(-1), reason: 'premise: the job');
+      final next = RegExp(r'^  \S', multiLine: true)
+          .allMatches(workflow, from + 2)
+          .where((m) => m.start > from + 2)
+          .firstOrNull;
+      final job = workflow.substring(from, next?.start ?? workflow.length);
+      expect(
         job,
-        contains('      - uses: actions/checkout@v5\n'
-            '        with:\n'
-            '          fetch-depth: 0\n'),
-        reason: 'the whole history: the tag is in the clone');
-    final probe = job.indexOf('run: tool/ci/host_probe.sh ');
-    expect(probe, isNot(-1));
-    for (final tag in ['v0.3.0', 'v0.4.0']) {
-      final old = job.indexOf('run: tool/ci/old_host_probe.sh $tag\n');
-      expect(old, greaterThan(probe),
-          reason: '$tag, after the probe is resolved');
-    }
-  });
+        contains(
+          '      - uses: actions/checkout@v5\n'
+          '        with:\n'
+          '          fetch-depth: 0\n',
+        ),
+        reason: 'the whole history: the tag is in the clone',
+      );
+      final probe = job.indexOf('run: tool/ci/host_probe.sh ');
+      expect(probe, isNot(-1));
+      for (final tag in ['v0.3.0', 'v0.4.0']) {
+        final old = job.indexOf('run: tool/ci/old_host_probe.sh $tag\n');
+        expect(
+          old,
+          greaterThan(probe),
+          reason: '$tag, after the probe is resolved',
+        );
+      }
+    },
+  );
 
   // Slice 2's final review F-2: the planner's pick allocation test reads
   // the VM's allocation profiler, which `flutter test` serves only with
@@ -347,17 +410,25 @@ void main() {
   // one test step every package runs.
   test('SC20 the planner\'s tests run with --enable-vmservice', () {
     expect(
-        workflow,
-        contains('          - package: packages/jet_cad_floor_plan\n'
-            '            tool: flutter\n'));
+      workflow,
+      contains(
+        '          - package: packages/jet_cad_floor_plan\n'
+        '            tool: flutter\n',
+      ),
+    );
     final entry = workflow.indexOf('- package: packages/jet_cad_floor_plan');
     final next = workflow.indexOf('- package: ', entry + 1);
-    expect(workflow.substring(entry, next),
-        contains('\n            test_flags: --enable-vmservice\n'));
     expect(
-        workflow,
-        contains('run: \${{ matrix.tool }} test \${{ matrix.test_flags }} '
-            '--file-reporter "json:\$RUNNER_TEMP/tests.json" || true\n'));
+      workflow.substring(entry, next),
+      contains('\n            test_flags: --enable-vmservice\n'),
+    );
+    expect(
+      workflow,
+      contains(
+        'run: \${{ matrix.tool }} test \${{ matrix.test_flags }} '
+        '--file-reporter "json:\$RUNNER_TEMP/tests.json" || true\n',
+      ),
+    );
   });
 
   // The script itself, run by bash in a scratch repository with the tag
@@ -372,16 +443,19 @@ void main() {
     /// Runs git in the scratch repository with automatic maintenance off,
     /// so no detached git process is still inside `.git` when tearDown
     /// deletes it. Every git call in this group goes through here.
-    Future<ProcessResult> git(List<String> args,
-        {Map<String, String>? environment}) async {
+    Future<ProcessResult> git(
+      List<String> args, {
+      Map<String, String>? environment,
+    }) async {
       final r = await Process.run(
-          'git',
-          [
-            '-c', 'maintenance.auto=false', //
-            ...args,
-          ],
-          workingDirectory: repo.path,
-          environment: environment);
+        'git',
+        [
+          '-c', 'maintenance.auto=false', //
+          ...args,
+        ],
+        workingDirectory: repo.path,
+        environment: environment,
+      );
       expect(r.exitCode, 0, reason: 'git $args: ${r.stderr}');
       return r;
     }
@@ -389,26 +463,32 @@ void main() {
     Future<ProcessResult> runScript({required int flutterExit}) {
       final bin = Directory('${repo.path}/bin')..createSync();
       File('${bin.path}/flutter')
-        ..writeAsStringSync('#!/usr/bin/env bash\n'
-            'cp lib/main.dart "${seen.path}"\n'
-            'echo "flutter \$*"\n'
-            'exit $flutterExit\n')
+        ..writeAsStringSync(
+          '#!/usr/bin/env bash\n'
+          'cp lib/main.dart "${seen.path}"\n'
+          'echo "flutter \$*"\n'
+          'exit $flutterExit\n',
+        )
         ..createSync();
       Process.runSync('chmod', ['+x', '${bin.path}/flutter']);
-      return Process.run('bash', ['tool/ci/old_host_probe.sh', 'v0.3.0'],
-          workingDirectory: repo.path,
-          environment: {
-            'PATH': '${bin.path}:${Platform.environment['PATH']}',
-          });
+      return Process.run(
+        'bash',
+        ['tool/ci/old_host_probe.sh', 'v0.3.0'],
+        workingDirectory: repo.path,
+        environment: {'PATH': '${bin.path}:${Platform.environment['PATH']}'},
+      );
     }
 
     setUp(() async {
       repo = Directory.systemTemp.createTempSync('old_host_probe');
       seen = File('${repo.path}/seen.dart');
-      Directory('${repo.path}/tool/ci/host_probe/lib')
-          .createSync(recursive: true);
-      File('old_host_probe.sh').copySync('${repo.path}/tool/ci/'
-          'old_host_probe.sh');
+      Directory(
+        '${repo.path}/tool/ci/host_probe/lib',
+      ).createSync(recursive: true);
+      File('old_host_probe.sh').copySync(
+        '${repo.path}/tool/ci/'
+        'old_host_probe.sh',
+      );
       main = File('${repo.path}/tool/ci/host_probe/lib/main.dart')
         ..writeAsStringSync(tagged);
       await git(['init', '-q']);
@@ -436,14 +516,18 @@ void main() {
     // maintenance.
     test("the helper's commits start no background maintenance", () async {
       main.writeAsStringSync('void main() {} // traced\n');
-      final r = await git([
-        '-c', 'user.name=t', '-c', 'user.email=t@t', //
-        'commit', '-q', '-am', 'traced',
-      ], environment: {
-        'GIT_TRACE': '1'
-      });
-      expect(r.stderr, contains('built-in: git commit'),
-          reason: 'premise: the trace is on');
+      final r = await git(
+        [
+          '-c', 'user.name=t', '-c', 'user.email=t@t', //
+          'commit', '-q', '-am', 'traced',
+        ],
+        environment: {'GIT_TRACE': '1'},
+      );
+      expect(
+        r.stderr,
+        contains('built-in: git commit'),
+        reason: 'premise: the trace is on',
+      );
       expect(r.stderr, isNot(contains('maintenance run')));
     });
 
@@ -456,8 +540,9 @@ void main() {
     });
 
     test("the tag's main.dart analysed; this commit's put back", () async {
-      File('${repo.path}/tool/ci/host_probe/pubspec.lock')
-          .writeAsStringSync('packages: {}\n');
+      File(
+        '${repo.path}/tool/ci/host_probe/pubspec.lock',
+      ).writeAsStringSync('packages: {}\n');
       final r = await runScript(flutterExit: 0);
       expect(r.exitCode, 0, reason: '${r.stdout}${r.stderr}');
       expect(r.stdout, contains('flutter analyze'));
@@ -467,8 +552,9 @@ void main() {
     });
 
     test('analysis fails: exit non-zero, main.dart put back', () async {
-      File('${repo.path}/tool/ci/host_probe/pubspec.lock')
-          .writeAsStringSync('packages: {}\n');
+      File(
+        '${repo.path}/tool/ci/host_probe/pubspec.lock',
+      ).writeAsStringSync('packages: {}\n');
       final r = await runScript(flutterExit: 1);
       expect(r.exitCode, 1);
       expect(seen.readAsStringSync(), tagged);

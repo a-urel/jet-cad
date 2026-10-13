@@ -16,15 +16,14 @@ final RegExp _htmlImage = RegExp(r'<img\s[^>]*src="([^"]+)"');
 
 /// Every image URL of [markdown], Markdown and HTML.
 List<String> imageUrls(String markdown) => [
-      for (final m in _markdownImage.allMatches(markdown)) m[1]!,
-      for (final m in _htmlImage.allMatches(markdown)) m[1]!,
-    ];
+  for (final m in _markdownImage.allMatches(markdown)) m[1]!,
+  for (final m in _htmlImage.allMatches(markdown)) m[1]!,
+];
 
 /// The engine's README must stay without images (spec Decision 6).
 List<String> imagelessProblems(String readme) => [
-      for (final url in imageUrls(readme))
-        'an image in an imageless README: $url'
-    ];
+  for (final url in imageUrls(readme)) 'an image in an imageless README: $url',
+];
 
 /// The directories a package's `.pubignore` leaves out: only root-anchored
 /// directory patterns (`/test/`) are read; any other line is a problem, so
@@ -63,7 +62,7 @@ List<String> screenshotProblems({
   final version = yaml['version'] as String;
   final entries =
       (yaml['screenshots'] as YamlList?)?.cast<YamlMap>().toList() ??
-          const <YamlMap>[];
+      const <YamlMap>[];
   final problems = <String>[];
   if (entries.isEmpty) problems.add('no screenshots: entry');
   if (entries.length > maxEntries) {
@@ -79,8 +78,10 @@ List<String> screenshotProblems({
     if (paths.contains(path)) problems.add('$path: listed twice');
     paths.add(path);
     if (description.length < 10 || description.length > 160) {
-      problems.add('$path: description of ${description.length} characters '
-          '(10 to 160)');
+      problems.add(
+        '$path: description of ${description.length} characters '
+        '(10 to 160)',
+      );
     }
     if (!_normalised(path)) {
       problems.add('$path: not a normalised relative path');
@@ -106,7 +107,8 @@ List<String> screenshotProblems({
   }
   if (total > maxTotalBytes) problems.add('$total bytes in all, over 4 MB');
 
-  final base = 'https://raw.githubusercontent.com/a-urel/jet-cad/'
+  final base =
+      'https://raw.githubusercontent.com/a-urel/jet-cad/'
       '$package-v$version/packages/$package/';
   final shown = <String>{};
   for (final url in imageUrls(readme)) {

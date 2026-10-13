@@ -27,8 +27,10 @@ void main(List<String> args) {
     }
   }
   if (package == null || root == null || rest.length != 1) {
-    stderr.writeln('usage: expect_failures.dart --package <name> '
-        '--root <dir> <json>');
+    stderr.writeln(
+      'usage: expect_failures.dart --package <name> '
+      '--root <dir> <json>',
+    );
     exit(2);
   }
   final here = File.fromUri(Platform.script).parent.path;
@@ -40,8 +42,10 @@ void main(List<String> args) {
     skips: standingFor(list('standing_skips.txt'), package),
   );
   if (outcome.ok) {
-    stdout.writeln('$package: ${outcome.tests} tests; the standing '
-        'failures and skips, exactly');
+    stdout.writeln(
+      '$package: ${outcome.tests} tests; the standing '
+      'failures and skips, exactly',
+    );
     return;
   }
   for (final line in outcome.report()) {

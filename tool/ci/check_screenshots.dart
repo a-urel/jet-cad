@@ -13,19 +13,24 @@ void main() {
   final problems = <String>[];
   for (final package in ['jet_cad_2d_flutter', 'jet_cad_floor_plan']) {
     final dir = 'packages/$package';
-    problems.addAll(screenshotProblems(
-      package: package,
-      pubspec: read('$dir/pubspec.yaml'),
-      readme: read('$dir/README.md'),
-      pubignore: read('$dir/.pubignore'),
-      sizeOf: (path) {
-        final f = File('$repo/$dir/$path');
-        return f.existsSync() ? f.lengthSync() : null;
-      },
-    ).map((p) => '$package: $p'));
+    problems.addAll(
+      screenshotProblems(
+        package: package,
+        pubspec: read('$dir/pubspec.yaml'),
+        readme: read('$dir/README.md'),
+        pubignore: read('$dir/.pubignore'),
+        sizeOf: (path) {
+          final f = File('$repo/$dir/$path');
+          return f.existsSync() ? f.lengthSync() : null;
+        },
+      ).map((p) => '$package: $p'),
+    );
   }
-  problems.addAll(imagelessProblems(read('packages/jet_cad_2d/README.md'))
-      .map((p) => 'jet_cad_2d: $p'));
+  problems.addAll(
+    imagelessProblems(
+      read('packages/jet_cad_2d/README.md'),
+    ).map((p) => 'jet_cad_2d: $p'),
+  );
   if (problems.isEmpty) {
     stdout.writeln('screenshots: every rule holds');
     return;

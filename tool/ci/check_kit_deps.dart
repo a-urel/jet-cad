@@ -20,7 +20,7 @@ void main(List<String> args) {
   final dir = Directory(root);
   final candidates = dir.existsSync()
       ? (dir.listSync().whereType<Directory>().toList()
-        ..sort((a, b) => a.path.compareTo(b.path)))
+          ..sort((a, b) => a.path.compareTo(b.path)))
       : <Directory>[];
   final packages = <PackageSource>[];
   for (final d in candidates) {
@@ -50,8 +50,10 @@ void main(List<String> args) {
   }
   final problems = kitDepsProblems(packages);
   if (problems.isEmpty) {
-    stdout.writeln('kit dependencies: ${packages.length} package(s) checked, '
-        'none names the plan library or another kit');
+    stdout.writeln(
+      'kit dependencies: ${packages.length} package(s) checked, '
+      'none names the plan library or another kit',
+    );
     return;
   }
   problems.forEach(stderr.writeln);
