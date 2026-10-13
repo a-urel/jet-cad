@@ -1,0 +1,1058 @@
+# Review package: 4d74b5b..HEAD
+
+## Commits
+09153e8b feat(jet_cad_2d_flutter): package 0.7.1 for pub.dev (D2)
+
+## Files changed
+ packages/jet_cad_2d_flutter/.pubignore             |   7 +
+ packages/jet_cad_2d_flutter/CHANGELOG.md           |  14 ++
+ packages/jet_cad_2d_flutter/LICENSE                | 201 +++++++++++++++++++++
+ packages/jet_cad_2d_flutter/README.md              | 120 ++++++------
+ packages/jet_cad_2d_flutter/example/lib/main.dart  |  57 ++++++
+ .../jet_cad_2d_flutter/lib/export_testing.dart     |   2 +
+ .../jet_cad_2d_flutter/lib/src/draft_canvas.dart   |   2 +-
+ .../lib/src/export/testing/pdf_content.dart        |   2 +-
+ .../lib/src/gpu/geometry_collector.dart            |   6 +-
+ .../jet_cad_2d_flutter/lib/src/grip_cache.dart     |   4 +-
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     |  32 ++--
+ packages/jet_cad_2d_flutter/pubspec.yaml           |  21 ++-
+ packages/jet_cad_2d_flutter/test/README.md         |  80 ++++++++
+ packages/jet_cad_2d_flutter/test/example_test.dart |  41 +++++
+ 14 files changed, 490 insertions(+), 99 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/.pubignore b/packages/jet_cad_2d_flutter/.pubignore
+new file mode 100644
+index 00000000..5f4f04a3
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/.pubignore
+@@ -0,0 +1,7 @@
++# Left out of the pub.dev archive, at the package root only: the suites,
++# the test runner's build output, and the shaders, which the package's GPU
++# tests read and jet_cad_2d_gpu compiles from the repository. The example
++# stays in.
++/test/
++/build/
++/shaders/
+diff --git a/packages/jet_cad_2d_flutter/CHANGELOG.md b/packages/jet_cad_2d_flutter/CHANGELOG.md
+new file mode 100644
+index 00000000..1d0c3f87
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/CHANGELOG.md
+@@ -0,0 +1,14 @@
++# Changelog
++
++## 0.7.1
++
++The first release on pub.dev. The code is jet-cad 0.7.0's render package
++(git tag `v0.7.0`); what changed is how it is packaged: its own LICENSE
++(Apache 2.0), a README written for pub.dev, a runnable example, `sdk:
++^3.6.0`, and its dependency on `jet_cad_2d` from pub.dev (`^0.7.1`).
++
++From this release on, `jet_cad_2d_flutter` has its own version on pub.dev
++and its own git tags (`jet_cad_2d_flutter-vX.Y.Z`). Before it, the package
++was released with the other jet-cad packages under one version; that
++history is in the repository's
++[CHANGELOG.md](https://github.com/a-urel/jet-cad/blob/main/CHANGELOG.md).
+diff --git a/packages/jet_cad_2d_flutter/LICENSE b/packages/jet_cad_2d_flutter/LICENSE
+new file mode 100644
+index 00000000..261eeb9e
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/LICENSE
+@@ -0,0 +1,201 @@
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/packages/jet_cad_2d_flutter/README.md b/packages/jet_cad_2d_flutter/README.md
+index 00d212f1..1acb89f8 100644
+--- a/packages/jet_cad_2d_flutter/README.md
++++ b/packages/jet_cad_2d_flutter/README.md
+@@ -1,80 +1,62 @@
+ # jet_cad_2d_flutter
+ 
+-The Flutter rendering layer for the pure-Dart `jet_cad_2d` engine. It owns the
+-camera, coordinate rebasing, the paint seam and the viewport widget. The engine
+-package stays free of `dart:ui`.
+-
+-## What is here
+-
+-| Piece | Job |
+-|---|---|
+-| `ViewportTransform` | world → screen, and the visible world rectangle |
+-| `CameraController` | pan and zoom, and the frame's rebase origin |
+-| `DrawSink` | the paint seam: `RecordingDrawSink` for tests, `NullDrawSink` for query-only measurement, `CanvasDrawSink` for `dart:ui` |
+-| `DraftPainter` | walks the document and writes to a sink. **No cache of any kind** |
+-| `LeafOwnerMap` | owner → leaf slots, so a small container can be drawn whole |
+-| `DraftCanvas` | the widget, repainting on camera and document changes and nothing else |
+-| `referenceWalk` | an index-free second implementation, used as the differential oracle |
+-
+-`DraftPainter` is not scaffolding for the cached painter Plan 3b adds — it is
+-the oracle that one will be tested against, in the same role brute-force
+-queries played for the spatial index.
+-
+-## Tests
+-
+-```bash
+-flutter test                          # the suite, including goldens
+-flutter test --exclude-tags golden    # anywhere that is not macOS
++Flutter rendering and interaction for the pure-Dart
++[`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) engine. It draws a
++`DraftDocument` on a canvas, with a camera, rulers, selection and snapping,
++and writes a page of it out as a vector PDF or a PNG. The engine stays free
++of `dart:ui`; everything that needs Flutter is here.
++
++## What it holds
++
++- **`DraftCanvas`**: the widget that paints a document and repaints on camera
++  and document changes and on nothing else.
++- **`CameraController` and `ViewportTransform`**: pan, zoom and the
++  world-to-screen transform, with zoom-to-fit.
++- **`RulerFrame`**: rulers around a canvas.
++- **`InteractionLayer` and `ToolController`**: the pointer layer over a
++  canvas, which routes mouse, touch and keyboard input to the active `Tool`:
++  `SelectTool` (selection and grips) or one of the drawing tools
++  (`LineTool`, `PolylineTool`, `RectangleTool`, `CircleTool`, `ArcTool`,
++  `TextTool`). Object snapping is configured with `SnapSettings` and drawn
++  by `drawSnapMarker`.
++- **PDF and PNG export**: `exportPagePdf` and `exportPagePng` write a page of
++  a document to bytes.
++
++## Example
++
++`DraftCanvas` borrows its document, its spatial index and its camera: the
++application creates them and disposes of them. The document must carry a
++`FlutterTextMeasurer`, which is how its text is measured.
++
++```dart
++final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
++final index = SpatialIndex(document);
++final camera = CameraController(
++    ViewportTransform.fit(document.extents.expandedBy(20), size));
++
++DraftCanvas(document: document, index: index, camera: camera)
+ ```
+ 
+-Golden files are bytes produced by one Skia build on one platform. They were
+-generated and reviewed on macOS; another platform will differ by antialiasing
+-alone.
+-
+-## Rigs
++A complete app, which draws a line and a circle and frames them, is
++[`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_2d_flutter/example/lib/main.dart).
++Run it from the package directory with `flutter run -t example/lib/main.dart`.
+ 
+-Rigs **measure**; they do not assert. They are excluded from the default suite
+-so its result does not depend on machine load, which is why every command below
+-carries `--run-skipped`.
++## The API
+ 
+-```bash
+-# R1 — paint microbench, and R3 — query-only, both from the same file.
+-cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
++`package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart` is the API. Nothing under
++`src/` is. `package:jet_cad_2d_flutter/export_testing.dart` is a test
++instrument for this repository's own suites; it is not API and may change in
++any release.
+ 
+-# R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
+-# `flutter test --profile` does not exist; profile-mode frame timings only come
+-# out of a real run on a device, which is what `flutter drive` gives.
+-cd apps/dev_harness_2d && flutter drive \
+-  --driver=test_driver/integration_test.dart \
+-  --target=integration_test/frame_timing_test.dart --profile -d macos
++While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
++patch release (`0.7.2`) does not.
+ 
+-# One rig at a time, and at the large corpus. RIG is pan | leaf | instance.
+-cd apps/dev_harness_2d && flutter drive \
+-  --driver=test_driver/integration_test.dart \
+-  --target=integration_test/frame_timing_test.dart --profile -d macos \
+-  --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
+-  --dart-define=STEPS=60
+-
+-# The engine's own query throughput, for comparison against Plan 2's gate note.
+-cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
+-```
++## Where it comes from
+ 
+-**Run `flutter drive` in the foreground.** Backgrounded, the app blocks on its
+-first `pumpWidget` at 0% CPU, waiting for a frame the windowing system never
+-asks it for; it does not time out, it simply never finishes. Both foreground
+-runs completed and both background runs hung, which is why `RIG` and `STEPS`
+-exist — they keep a single rig inside one foreground run.
++This package is the rendering layer of
++[jet-cad](https://github.com/a-urel/jet-cad), a parametric floor planner;
++`jet_cad_floor_plan` builds on it.
+ 
+-R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
+-rasterising. **It is a relative regression signal only.** It is not comparable
+-to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
+-a results note.
++## License
+ 
+-Alongside R1 and R3's timings, each row also prints `canvasCalls` — real
+-`Canvas` draw calls from a `CanvasDrawSink` run over the same frame — and the
+-painter's `dashSpanCount` and `collapsedDashCount`, so a dash-path regression
+-shows up next to the timing it costs. `canvasCalls` is deliberately a separate
+-number from `NullDrawSink.opCount`: `opCount` counts painter calls and keeps
+-Plan 3a's R1 and R3 rows comparable line for line, while `canvasCalls` counts
+-what those calls become once dashing can split one polyline into several
+-strokes.
++Apache License 2.0. See [LICENSE](LICENSE).
+diff --git a/packages/jet_cad_2d_flutter/example/lib/main.dart b/packages/jet_cad_2d_flutter/example/lib/main.dart
+new file mode 100644
+index 00000000..2e64f7ed
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/example/lib/main.dart
+@@ -0,0 +1,57 @@
++// A document shown in a DraftCanvas: a line and a circle, framed whole.
++//
++// Run from the package directory with `flutter run -t example/lib/main.dart`.
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++void main() => runApp(const DraftExampleApp());
++
++/// A line and a circle, measured by the Flutter text measurer that
++/// [DraftCanvas] requires.
++DraftDocument buildExampleDocument() {
++  final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
++  doc.commands
++    ..execute(addDrafted(
++        doc, EntityKind.line, linePayload(Vector2(100, 100), Vector2(500, 100)),
++        layer: ReservedHandles.layerZero))
++    ..execute(addDrafted(
++        doc, EntityKind.circle, circlePayload(Vector2(300, 250), 50),
++        layer: ReservedHandles.layerZero));
++  return doc;
++}
++
++class DraftExampleApp extends StatefulWidget {
++  const DraftExampleApp({super.key});
++
++  @override
++  State<DraftExampleApp> createState() => _DraftExampleAppState();
++}
++
++class _DraftExampleAppState extends State<DraftExampleApp> {
++  final DraftDocument document = buildExampleDocument();
++  late final SpatialIndex index = SpatialIndex(document);
++  CameraController? camera;
++
++  @override
++  void dispose() {
++    camera?.dispose();
++    index.dispose();
++    document.dispose();
++    (document.textMeasurer as FlutterTextMeasurer).clear();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => Directionality(
++        textDirection: TextDirection.ltr,
++        child: LayoutBuilder(builder: (context, constraints) {
++          // Framed once, at the first layout: the drawing's extents with a
++          // margin, fitted to the space the canvas gets.
++          camera ??= CameraController(ViewportTransform.fit(
++              document.extents.expandedBy(20), constraints.biggest));
++          return DraftCanvas(document: document, index: index, camera: camera!);
++        }),
++      );
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/export_testing.dart b/packages/jet_cad_2d_flutter/lib/export_testing.dart
+index 11c8c1c7..e3ba1d33 100644
+--- a/packages/jet_cad_2d_flutter/lib/export_testing.dart
++++ b/packages/jet_cad_2d_flutter/lib/export_testing.dart
+@@ -1,8 +1,10 @@
+ /// Test instruments for the export (plan 13, P-2): a reader of the PDF
+ /// `PdfDrawSink` writes, shared by the render package's tests and the app's.
+ ///
+ /// A separate library: nothing in `lib/` imports it, so it never reaches the
+ /// app's build.
++///
++/// Not API: a test instrument, outside semver; it may change in any release.
+ library;
+ 
+ export 'src/export/testing/pdf_content.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+index 1e866ae2..546f5f12 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+@@ -118,21 +118,21 @@ class DraftCanvas extends StatefulWidget {
+   final double pixelsPerPaperMm;
+ 
+   /// Forwarded to [CanvasDrawSink.lineweightScale]. Measurement-only, for
+   /// Task 4c's fill-rate experiment; inert at its default of 1.0.
+   final double lineweightScale;
+ 
+   /// Forwarded to [DraftPainter.drawText]. Measurement-only, for Task 12's
+   /// text rows; inert at its default of `true`.
+   ///
+   /// It is a widget property rather than something the rig reaches through
+-  /// [DraftCanvasState] because the painter is built in [_attach] and its
++  /// [DraftCanvasState] because the painter is built in `_attach` and its
+   /// `drawText` is final: a rig that wanted to flip it after the fact would
+   /// have to rebuild the painter, and a rebuilt painter is a different frame.
+   final bool drawText;
+ 
+   /// Forwarded to [DraftPainter.minTextCapPixels]. `0.0` disables level of
+   /// detail, which is what the exit gate's control arm needs.
+   final double minTextCapPixels;
+ 
+   /// Which sink draws the frame, or `null` for [defaultRenderBackend].
+   ///
+diff --git a/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart b/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart
+index fc460aa0..a4e65948 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart
+@@ -91,21 +91,21 @@ final class PdfContent {
+ }
+ 
+ /// A PDF matrix `[a b c d e f]`, row-vector convention (see [PdfContent]).
+ final class PdfContentMatrix {
+   const PdfContentMatrix(this.a, this.b, this.c, this.d, this.e, this.f);
+ 
+   static const identity = PdfContentMatrix(1, 0, 0, 1, 0, 0);
+ 
+   final double a, b, c, d, e, f;
+ 
+-  /// `this × other`: [this] applies first, then [other]. `M cm` sets the CTM
++  /// `this × other`: `this` applies first, then [o]. `M cm` sets the CTM
+   /// to `M.times(ctm)`.
+   PdfContentMatrix times(PdfContentMatrix o) => PdfContentMatrix(
+         a * o.a + b * o.c,
+         a * o.b + b * o.d,
+         c * o.a + d * o.c,
+         c * o.b + d * o.d,
+         e * o.a + f * o.c + o.e,
+         e * o.b + f * o.d + o.f,
+       );
+ 
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 43957a44..dc041d52 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -128,24 +128,26 @@ class GeometryCollector implements DrawSink {
+   /// arms — the same predicate the shader's own degenerate branch uses
+   /// (`cad_stroke.vert`'s `cross_z == 0.0 || in_len == 0.0 || out_len ==
+   /// 0.0`, transcribed at `test/support/instance_expander.dart`) — so Task
+   /// 11 can report the buffer's collinear cost against the 8 MB budget
+   /// without moving the decision itself. `debug`-prefixed for exactly that
+   /// reason: nothing downstream reads it.
+   int get debugCollinearJoins => _debugCollinearJoins;
+   int _debugCollinearJoins = 0;
+ 
+   /// Half the stroke's width, **in device pixels** — the space the vertex
+-  /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
++  /// shader consumes `half_width` in (`cad_stroke.vert` documents
+   /// the attribute `// device pixels` and applies it directly against
+   /// `frame_info.half_viewport`, which `buildFrameInfo` also builds in
+-  /// device pixels; `frame_info.dart`).
++  /// device pixels; `frame_info.dart`). The shader sources are in the
++  /// repository (`packages/jet_cad_2d_flutter/shaders/`), not in the
++  /// published package.
+   ///
+   /// **This method's first version computed the *logical* half-width
+   /// instead, and every stroke drew at half weight under any
+   /// `devicePixelRatio` other than 1.** `VerticesDrawSink._halfWidthFor`
+   /// (`vertices_draw_sink.dart:544-552`) is correct for itself — Skia
+   /// strokes in logical space, and its own local variable is even named
+   /// `floorLogical` — and this method's original body copied that formula
+   /// verbatim into a shader that does not share Skia's space. The fix is not
+   /// a division relocated: the *logical* width is converted into device
+   /// pixels (`* devicePixelRatio`) before it is compared against the floor
+diff --git a/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart b/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
+index 5cd2177b..6bfdd249 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
+@@ -94,22 +94,22 @@ final class GripRef {
+ /// - Otherwise the grip rides the frame: it hangs from the middle of the
+ ///   frame's top edge, [kRotationGripOffset] pixels along the frame's up
+ ///   direction on screen. "Top" is the local `maxY` edge under a
+ ///   reflecting (y-flipped) camera and `minY` otherwise, so an unrotated
+ ///   frame under an unrotated camera lands where D6 puts it.
+ ///
+ /// [after], when given, is applied after [frame] — a move's or rotate's
+ /// preview `T` — and is composed inline, so a drag's frames allocate no
+ /// `Transform2` (spec D7).
+ ///
+-/// [anchor] is the point the grip hangs from, [centre] the disc's centre
+-/// and [stem] the end of the 1 px line from [anchor], on the disc's rim.
++/// `anchor` is the point the grip hangs from, `centre` the disc's centre
++/// and `stem` the end of the 1 px line from `anchor`, on the disc's rim.
+ ({Offset anchor, Offset centre, Offset stem}) rotationGripOf(
+     Aabb2 box, Transform2 worldToScreen,
+     [Transform2? frame, Transform2? after]) {
+   final m = worldToScreen;
+   final f0 = frame ?? const Transform2(1, 0, 0, 1, 0, 0);
+   // after ∘ frame, then worldToScreen ∘ that, inline: this runs per frame.
+   var fa = f0.a, fb = f0.b, fc = f0.c, fd = f0.d, fe = f0.e, ff = f0.f;
+   if (after != null) {
+     final t = after;
+     fa = t.a * f0.a + t.c * f0.b;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index ab8aaf4e..a9ba0ef8 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -58,21 +58,21 @@ const int kTileDevicePixels = 512;
+ ///
+ /// **One constant, because they are one question asked from two sides.** A
+ /// stroke is wider than its geometry: an entity whose centreline sits just
+ /// outside a tile still inks pixels inside it. [DraftPainter] already knows
+ /// this and inflates its *screen clip* by [kScreenClipInflate] — "half the
+ /// widest stroke the frame can draw" in that constant's own words — but its
+ /// index query carries no slack at all, and on a full frame that costs
+ /// nothing because the missed entity is off-screen. A tile's edge is interior
+ /// to the drawing, and there the two halves diverge:
+ ///
+-/// * **Arrival.** [_bake] passes the tile as the viewport, so an unpadded
++/// * **Arrival.** `_bake` passes the tile as the viewport, so an unpadded
+ ///   query hands the painter nothing for a stroke whose centreline is 0.2
+ ///   device pixels the wrong side of the seam. A clip only *keeps*; it cannot
+ ///   return what the query never yielded, so the half of the stroke reaching
+ ///   back into the tile was drawn by nobody. That was defect F1: six of
+ ///   forty-one swept zoom factors lost a whole stroke column.
+ /// * **Invalidation.** Direction two condemned the tiles whose *exact* world
+ ///   rect met a touched entity's *geometric* box, so the same stroke arriving
+ ///   from just outside left a tile inked and unconditioned. That was accepted
+ ///   gap G6.
+ ///
+@@ -462,33 +462,33 @@ class TileCache {
+   /// **And the painter alone does not supply the node half.**
+   /// `DraftPainter.debugOnVisit` fires for leaves and for `InstanceNode`s, and
+   /// both node call sites return early on `node is! InstanceNode`
+   /// (`draft_painter.dart:401`, `:485`), so **a group handle never reaches it**
+   /// — groups are flattened into their container's leaf list with a composed
+   /// transform, and the group itself is never "descended into" as far as the
+   /// callback is concerned. `TransformNodeCommand` takes a `GroupNode` as
+   /// readily as an `InstanceNode` (`commands.dart:297-300`), so a record built
+   /// from the callback alone loses every dragged group: direction one finds
+   /// nothing, direction two drops the arrival tiles, and the departure tiles
+-  /// keep their pixels. That is why [_bake] walks each visited handle's owner
++  /// keep their pixels. That is why `_bake` walks each visited handle's owner
+   /// chain and records it here rather than trusting the callback to be
+   /// complete.
+   ///
+   /// Duplicates are left in. A handle drawn twice — the tree/overlay pair, or
+   /// one definition placed twice inside one tile — costs one extra slot, and
+   /// the binary search does not care. Deduplicating would be a sweep over a
+   /// list that is already the right answer. The owner chain is the one
+   /// exception, and only because the walk needs a visited set anyway to stay
+   /// linear: an ancestor already recorded stops the climb.
+   ///
+   /// Keyed identically to [_tiles] at every point where either is observable:
+-  /// [_bake] writes here and its caller writes there, and nothing removes from
++  /// `_bake` writes here and its caller writes there, and nothing removes from
+   /// one without removing from the other.
+   final Map<TileKey, Uint32List> _baked = <TileKey, Uint32List>{};
+ 
+   /// The frame ordinal each live tile was last blitted on. The LRU order.
+   ///
+   /// Keyed identically to [_tiles], like [_baked]: [paintFrame] writes here
+   /// where it writes there, [_evict] and [_invalidateTouched] remove from both,
+   /// and [_disposeTiles] clears both. A tile missing from here would be
+   /// invisible to [_makeRoomForOneTile] and could never be reclaimed.
+   ///
+@@ -753,21 +753,21 @@ class TileCache {
+   /// viewport, 29.3 MiB on the reference one, whatever the tile size — so it
+   /// is worth more than a hundred tiles on its own. [kTileCacheBytes] is 96
+   /// MiB rather than 64 precisely because it has to hold a generation *and* a
+   /// composite, and a `liveBytes` that summed only [_tiles] would report the
+   /// cache using a third of what it really holds. Measured from the image's
+   /// own `width` and `height` rather than from `viewport`, because the
+   /// composite's device size is a `ceil` of the viewport and it outlives the
+   /// camera it was recorded against.
+   ///
+   /// A tile is `tileDevicePixels` square, RGBA, one byte a channel: exactly
+-  /// what `Picture.toImageSync` allocates in [_bake].
++  /// what `Picture.toImageSync` allocates in `_bake`.
+   int get liveBytes {
+     final carryOver = _carryOver;
+     final band = _band;
+     return _tiles.length * _tileBytes +
+         (carryOver == null ? 0 : carryOver.width * carryOver.height * 4) +
+         (band == null ? 0 : band.width * band.height * 4);
+   }
+ 
+   /// Tiles the ceiling reclaimed over this cache's whole life.
+   ///
+@@ -1482,21 +1482,21 @@ class TileCache {
+       _band = image;
+       // **The band is released on every exit from here, including a throw.**
+       // `_band` is not a local: [liveBytes] counts it, so an image stranded in
+       // that field overstates the cache by a whole band for the rest of its
+       // life and `_makeRoomForBytes` over-evicts forever after -- a leaked
+       // image plus a permanently wrong meter, from one exception in
+       // [_recordOwners] or [_sliceTile]. No non-throwing path reaches it
+       // today; the `finally` is what keeps that true of paths added later.
+       try {
+         // [_bakeBand]'s `onVisit` records only what the painter visited
+-        // directly; [_bake]'s climbs owners so that a *container's* transform
++        // directly; `_bake`'s climbs owners so that a *container's* transform
+         // reaches the tile through invalidation's direction one. This is where
+         // the band makes up the difference -- once per band rather than once
+         // per tile, which is the whole reason the band callback is the simpler
+         // one.
+         _recordOwners(visited, painter.document);
+         visited.sort();
+         // **One record per band, shared by reference.** `_invalidateTouched`
+         // condemns tiles by iterating `_baked`, and a sliced tile with no
+         // record is invisible to it: edit an entity after a settle and the
+         // stale tile keeps blitting over the corrected drawing. Sharing makes
+@@ -1525,36 +1525,36 @@ class TileCache {
+           _lastUsedFrame[key] = _frameSerial;
+         }
+       } finally {
+         _band = null;
+         _disposeImage(image);
+       }
+       _bakes++;
+     }
+   }
+ 
+-  /// [_bake]'s owner climb, applied once to a whole band's visit list.
++  /// `_bake`'s owner climb, applied once to a whole band's visit list.
+   ///
+   /// **Direction one of the invalidation rule, which the band walk cannot
+   /// record for itself.** A tile's `_baked` record has to name not only the
+   /// entities drawn on it but every container they hang under, or a transform
+   /// applied to a group never condemns the tiles its children inked and the
+-  /// drawing goes stale after an edit. [_bake] does this inside its own
++  /// drawing goes stale after an edit. `_bake` does this inside its own
+   /// `onVisit`; a band's `onVisit` records the direct visit alone and this
+   /// closes the gap over the accumulated list.
+   ///
+   /// Only the prefix that was there on entry is read, so the owners appended
+   /// below are not themselves re-climbed -- they cannot add anything, because
+   /// [climb] already walks each chain to its root.
+   void _recordOwners(List<int> visited, DraftDocument document) {
+     // Container nodes already recorded. Both a memo and the termination
+-    // guard, exactly as in [_bake]: once a node is in, every ancestor of it is
++    // guard, exactly as in `_bake`: once a node is in, every ancestor of it is
+     // in too, so the climb stops there -- which keeps the pass linear in
+     // visits rather than O(visits x depth), and makes a malformed cyclic
+     // parent chain terminate instead of hanging the bake.
+     final containers = <int>{};
+ 
+     void climb(Handle from) {
+       var current = from;
+       while (true) {
+         final node = document.tree[current];
+         // A definition handle lives outside the node map, and a definition is
+@@ -1596,21 +1596,21 @@ class TileCache {
+       band.deviceRect.width.round() * band.deviceRect.height.round() * 4;
+ 
+   /// Every tile is the same square, so this is built once rather than per
+   /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
+   /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
+   /// break, but the wrong side of the criterion this task lands.
+   late final Rect _tileSourceRect = Rect.fromLTWH(
+       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
+ 
+   /// Bytes one tile's image occupies: RGBA, one byte a channel, exactly what
+-  /// `Picture.toImageSync` allocates in [_bake].
++  /// `Picture.toImageSync` allocates in `_bake`.
+   int get _tileBytes => tileDevicePixels * tileDevicePixels * 4;
+ 
+   /// One tile's footprint, in device pixels: its side squared. What
+   /// [bakeBudgetDevicePixels] is measured against, in [paintFrame].
+   int get _tileDevicePixelArea => tileDevicePixels * tileDevicePixels;
+ 
+   /// Reclaims least-recently-blitted tiles until one more will fit under
+   /// [cacheBytes], and reports whether it succeeded.
+   ///
+   /// **Never a tile this frame already blitted, and that guard is the whole
+@@ -2065,21 +2065,21 @@ class TileCache {
+   /// Only ever called for handles [_isDefinitionOwned] has already rejected,
+   /// so the enclosing space is the document root and the accumulated transform
+   /// of the owner is the whole of the placement.
+   ///
+   /// **The bound is geometric, not rasterised, and that is why the *tile* box
+   /// is the padded one.** A stroke puts ink up to half its width beyond this
+   /// box, so a handle arriving at a position that misses a tile geometrically
+   /// can still clip into it — accepted gap G6, until Task 9a. The remedy is
+   /// not here: inflating this box by a resolved lineweight would need the
+   /// style resolution the caller does not have, and would be a *different*
+-  /// number from the one [_bake] queries with. [_worldRectOf] grows the tile
++  /// number from the one `_bake` queries with. [_worldRectOf] grows the tile
+   /// instead, by [kTileSlack], which is the same slack the bake uses — so the
+   /// record of what a tile holds and the geometry that condemns it are one
+   /// rectangle rather than two that nearly agree.
+   Aabb2? _worldBoxOf(DraftDocument document, Handle handle,
+       Map<Handle, List<int>>? leavesByOwner) {
+     final tree = document.tree;
+     final node = tree[handle];
+     if (node != null) {
+       // `definitionBounds` is the public spelling of "union of everything a
+       // container holds, in its own space", and it takes a group handle as
+@@ -2123,21 +2123,21 @@ class TileCache {
+       boundaryPayload: boundaryPayload,
+     );
+     if (box.isEmpty) return null;
+     return box.transformedBy(
+         tree.accumulatedTransform(document.entities.ownerAt(slot)));
+   }
+ 
+   /// The world-space box tile [key] can hold ink from, under [grid]'s anchor
+   /// camera: its own rectangle grown by [kTileSlack] on every side.
+   ///
+-  /// **The slack is the same one [_bake] queries with, and that is the point.**
++  /// **The slack is the same one `_bake` queries with, and that is the point.**
+   /// A tile's `_baked` record lists what the padded query yielded; this is the
+   /// geometry that condemns the tile. Inflate one and not the other and the
+   /// two halves of invalidation disagree by a ring — direction one drops tiles
+   /// whose record names a handle that direction two's box does not reach, and
+   /// a stroke arriving from just outside a tile leaves it stale. [kTileSlack]
+   /// carries the whole argument.
+   ///
+   /// **Grown in screen space, not in world units.** The pad is a fact about
+   /// stroke widths, which are a screen-space quantity, so it is applied to the
+   /// tile rectangle before the inversion. Adding a world-space margin
+@@ -2272,23 +2272,23 @@ class TileCache {
+     final picture = recorder.endRecording();
+     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+     _imagesAlive++;
+     picture.dispose();
+     _bakes++;
+     return image;
+   }
+ 
+   /// Walks one band into one image.
+   ///
+-  /// Modelled on [_bake] and sharing all three of its rules, at band scale.
++  /// Modelled on `_bake` and sharing all three of its rules, at band scale.
+   ///
+-  /// **The `onVisit` callback is deliberately simpler than [_bake]'s.**
++  /// **The `onVisit` callback is deliberately simpler than `_bake`'s.**
+   /// `_bake` climbs owners so a container transform reaches the tile through
+   /// direction one. A band records the same information for a wider region,
+   /// and its caller shares one record across the band's tiles, so the owner
+   /// climb happens once there rather than once per tile.
+   Image _bakeBand(
+     TileBand band,
+     TileGrid grid,
+     ViewportTransform quantised,
+     DraftPainter painter,
+     CanvasDrawSink sink,
+@@ -2296,42 +2296,42 @@ class TileCache {
+     Vector2 origin,
+     List<int> visitedInto,
+   ) {
+     // **The scale is the frame camera's; the translation is the anchor's.**
+     // [TileBand.deviceRect] lives in the grid's device space, whose origin is
+     // [TileGrid.anchor] and not this frame's camera -- exactly as a tile key
+     // does, and [TileGrid.bakeCameraFor] rebases a single tile off the anchor
+     // for the same reason. A generation outlives many pans, so at a rest bake
+     // the frame camera sits a whole number of device pixels away from the
+     // anchor; taking the translation from it would slide the band by that pan
+-    // and the tiles cut out of it would not hold what [_bake] puts in the
++    // and the tiles cut out of it would not hold what `_bake` puts in the
+     // same keys. The frame camera is still required to belong to this
+     // generation, which is what the assert below states.
+     assert(
+         grid.matchesScale(quantised),
+         'a band belongs to one generation, so the frame camera and the grid '
+         'anchor must agree on scale');
+     final dpr = grid.devicePixelRatio;
+     final width = band.deviceRect.width / dpr;
+     final height = band.deviceRect.height / dpr;
+     final recorder = PictureRecorder();
+     final into = Canvas(recorder);
+     into.scale(dpr);
+-    // **Hard, and for [_bake]'s reason.** An antialiased clip edge would make
++    // **Hard, and for `_bake`'s reason.** An antialiased clip edge would make
+     // two adjacent bands' `source-over` fall short of full coverage along the
+     // row they share: a seam, in the one place this design exists to remove
+     // one.
+     into.clipRect(Rect.fromLTWH(0, 0, width, height), doAntiAlias: false);
+ 
+     // **The query is padded; the clip is not.** A stroke whose centreline lies
+     // just outside the band still inks inside it. [kTileSlack] is the same
+-    // slack [_bake] queries with and the same slack the invalidation rule
++    // slack `_bake` queries with and the same slack the invalidation rule
+     // uses -- padding one alone makes them disagree. The canvas is pulled back
+     // by the same amount, so the padded viewport's origin lands where the
+     // band's own origin was.
+     const pad = kTileSlack;
+     into.save();
+     into.translate(-pad, -pad);
+ 
+     final m = grid.anchor.worldToScreenMatrix;
+     final bandCamera = ViewportTransform(
+       worldToScreenMatrix: Transform2(
+diff --git a/packages/jet_cad_2d_flutter/pubspec.yaml b/packages/jet_cad_2d_flutter/pubspec.yaml
+index 7c7707b1..7890219e 100644
+--- a/packages/jet_cad_2d_flutter/pubspec.yaml
++++ b/packages/jet_cad_2d_flutter/pubspec.yaml
+@@ -1,24 +1,29 @@
+ name: jet_cad_2d_flutter
+ description: >-
+-  Flutter rendering layer for the pure-Dart jet_cad_2d engine. Owns the camera,
+-  coordinate rebasing, the paint seam and the viewport widget. The engine
+-  package stays free of dart:ui.
++  Flutter rendering and interaction for the jet_cad_2d engine: a CAD canvas
++  with camera, rulers, selection and snapping, and PDF and PNG export.
+ version: 0.7.1
+-repository: https://github.com/ahmeturel/jet-cad
+-publish_to: none
++repository: https://github.com/a-urel/jet-cad
++issue_tracker: https://github.com/a-urel/jet-cad/issues
++topics:
++  - cad
++  - drawing
++  - canvas
++  - pdf
+ resolution: workspace
+ 
+ environment:
+-  sdk: ^3.5.0
+-  # pdf 3.13.x requires Dart >= 3.12.0, which Flutter first ships in 3.44.0.
+-  # Only this bound moves; `sdk:` sets the language version (spec 13 R-4).
++  # The floor pub workspaces document for their members; it sets language
++  # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x requires Dart
++  # >= 3.12.0, which Flutter first ships in 3.44.0: that bound binds.
++  sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+   jet_cad_2d: ^0.7.1
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+   # The vector PDF export's writer (spec 13 D3). Pure Dart, Apache 2.0.
+   pdf: ^3.13.1
+diff --git a/packages/jet_cad_2d_flutter/test/README.md b/packages/jet_cad_2d_flutter/test/README.md
+new file mode 100644
+index 00000000..00d212f1
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/README.md
+@@ -0,0 +1,80 @@
++# jet_cad_2d_flutter
++
++The Flutter rendering layer for the pure-Dart `jet_cad_2d` engine. It owns the
++camera, coordinate rebasing, the paint seam and the viewport widget. The engine
++package stays free of `dart:ui`.
++
++## What is here
++
++| Piece | Job |
++|---|---|
++| `ViewportTransform` | world → screen, and the visible world rectangle |
++| `CameraController` | pan and zoom, and the frame's rebase origin |
++| `DrawSink` | the paint seam: `RecordingDrawSink` for tests, `NullDrawSink` for query-only measurement, `CanvasDrawSink` for `dart:ui` |
++| `DraftPainter` | walks the document and writes to a sink. **No cache of any kind** |
++| `LeafOwnerMap` | owner → leaf slots, so a small container can be drawn whole |
++| `DraftCanvas` | the widget, repainting on camera and document changes and nothing else |
++| `referenceWalk` | an index-free second implementation, used as the differential oracle |
++
++`DraftPainter` is not scaffolding for the cached painter Plan 3b adds — it is
++the oracle that one will be tested against, in the same role brute-force
++queries played for the spatial index.
++
++## Tests
++
++```bash
++flutter test                          # the suite, including goldens
++flutter test --exclude-tags golden    # anywhere that is not macOS
++```
++
++Golden files are bytes produced by one Skia build on one platform. They were
++generated and reviewed on macOS; another platform will differ by antialiasing
++alone.
++
++## Rigs
++
++Rigs **measure**; they do not assert. They are excluded from the default suite
++so its result does not depend on machine load, which is why every command below
++carries `--run-skipped`.
++
++```bash
++# R1 — paint microbench, and R3 — query-only, both from the same file.
++cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
++
++# R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
++# `flutter test --profile` does not exist; profile-mode frame timings only come
++# out of a real run on a device, which is what `flutter drive` gives.
++cd apps/dev_harness_2d && flutter drive \
++  --driver=test_driver/integration_test.dart \
++  --target=integration_test/frame_timing_test.dart --profile -d macos
++
++# One rig at a time, and at the large corpus. RIG is pan | leaf | instance.
++cd apps/dev_harness_2d && flutter drive \
++  --driver=test_driver/integration_test.dart \
++  --target=integration_test/frame_timing_test.dart --profile -d macos \
++  --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
++  --dart-define=STEPS=60
++
++# The engine's own query throughput, for comparison against Plan 2's gate note.
++cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
++```
++
++**Run `flutter drive` in the foreground.** Backgrounded, the app blocks on its
++first `pumpWidget` at 0% CPU, waiting for a frame the windowing system never
++asks it for; it does not time out, it simply never finishes. Both foreground
++runs completed and both background runs hung, which is why `RIG` and `STEPS`
++exist — they keep a single rig inside one foreground run.
++
++R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
++rasterising. **It is a relative regression signal only.** It is not comparable
++to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
++a results note.
++
++Alongside R1 and R3's timings, each row also prints `canvasCalls` — real
++`Canvas` draw calls from a `CanvasDrawSink` run over the same frame — and the
++painter's `dashSpanCount` and `collapsedDashCount`, so a dash-path regression
++shows up next to the timing it costs. `canvasCalls` is deliberately a separate
++number from `NullDrawSink.opCount`: `opCount` counts painter calls and keeps
++Plan 3a's R1 and R3 rows comparable line for line, while `canvasCalls` counts
++what those calls become once dashing can split one polyline into several
++strokes.
+diff --git a/packages/jet_cad_2d_flutter/test/example_test.dart b/packages/jet_cad_2d_flutter/test/example_test.dart
+new file mode 100644
+index 00000000..8ff9f166
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/example_test.dart
+@@ -0,0 +1,41 @@
++// The published example (spec D2): it builds, shows its document, and
++// frames all of it.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++// The example is not under lib/, so a relative path is the only way to it.
++// ignore: avoid_relative_lib_imports
++import '../example/lib/main.dart';
++
++void main() {
++  testWidgets('the example shows a line and a circle, framed whole',
++      (tester) async {
++    await tester.pumpWidget(const DraftExampleApp());
++    final canvas = tester.widget<DraftCanvas>(find.byType(DraftCanvas));
++    final doc = canvas.document;
++    expect(doc.entities.liveCount, 2);
++
++    // The circle is where the example says: a pick 1 unit outside its top
++    // edge finds it, as an edge (a pick inside a closed circle would hit
++    // its fill at any radius and test nothing).
++    final hit = HitPath();
++    expect(
++        canvas.index
++            .pickInto(Vector2(300, 301), 2, const QueryFilter.picking(), hit),
++        isTrue);
++    expect(doc.entities.kindAt(doc.entities.slotOf(hit.entity)!),
++        EntityKind.circle);
++    expect(hit.kind, HitKind.edge);
++
++    // The camera frames the whole drawing.
++    final size = tester.getSize(find.byType(DraftCanvas));
++    final visible = canvas.camera.value.visibleWorld(size);
++    final extents = doc.extents;
++    expect(visible.minX, lessThanOrEqualTo(extents.minX));
++    expect(visible.minY, lessThanOrEqualTo(extents.minY));
++    expect(visible.maxX, greaterThanOrEqualTo(extents.maxX));
++    expect(visible.maxY, greaterThanOrEqualTo(extents.maxY));
++  });
++}

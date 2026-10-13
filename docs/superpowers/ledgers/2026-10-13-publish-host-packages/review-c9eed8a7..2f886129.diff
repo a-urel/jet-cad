@@ -1,0 +1,254 @@
+# Review package: c9eed8a..HEAD
+
+## Commits
+2f886129 ci: the lock check proves the probe took the commit under test (D6)
+
+## Files changed
+ tool/ci/check_host_lock.dart     | 26 +++++++++++------
+ tool/ci/lib/host_lock.dart       | 45 ++++++++++++++++++++++++++++++
+ tool/ci/test/host_lock_test.dart | 60 ++++++++++++++++++++++++++++++++++++++++
+ tool/ci/test/scripts_test.dart   | 15 ++++++++++
+ 4 files changed, 138 insertions(+), 8 deletions(-)
+
+## Diff
+diff --git a/tool/ci/check_host_lock.dart b/tool/ci/check_host_lock.dart
+index ecd912e4..9d0ad219 100644
+--- a/tool/ci/check_host_lock.dart
++++ b/tool/ci/check_host_lock.dart
+@@ -1,42 +1,52 @@
+ // GPU split spec S8: fails when a host's pubspec.lock resolves the GPU
+-// renderer or what brings its build hook (lib/host_lock.dart).
++// renderer or what brings its build hook (lib/host_lock.dart) and, with
++// --ref, that the four repository packages came from git at that commit
++// (publishing spec D6).
+ //
+-//   dart run tool/ci/check_host_lock.dart <pubspec.lock>
++//   dart run tool/ci/check_host_lock.dart <pubspec.lock> [--ref <sha>]
+ //
+ // tool/ci/host_probe.sh runs it on the probe's lock after `pub get`. Exit 0
+-// when none of the names is a key under `packages:`; 1 when one is, each
+-// named; 2 on bad arguments, a missing file, or a file that is not a lock.
++// when none of the names is a key under `packages:` (and, with --ref, the
++// four are git at that commit); 1 when one is, or one is not, each named;
++// 2 on bad arguments, a missing file, or a file that is not a lock.
+ import 'dart:io';
+ 
+ import 'lib/host_lock.dart';
+ 
+ void main(List<String> args) {
+-  if (args.length != 1) {
+-    stderr.writeln('usage: check_host_lock.dart <pubspec.lock>');
++  final withRef = args.length == 3 && args[1] == '--ref';
++  if (args.length != 1 && !withRef) {
++    stderr.writeln('usage: check_host_lock.dart <pubspec.lock> [--ref <sha>]');
+     exit(2);
+   }
+-  final file = File(args.single);
++  final ref = withRef ? args[2] : null;
++  final file = File(args.first);
+   if (!file.existsSync()) {
+     stderr.writeln('${file.path}: no such file');
+     exit(2);
+   }
+   final List<String> packages;
+   final List<String> found;
++  final List<String> notCommit;
+   try {
+     final lock = file.readAsStringSync();
+     packages = lockPackages(lock);
+     found = forbiddenInLock(lock);
++    notCommit = ref == null ? const [] : notFromCommit(lock, ref);
+   } on FormatException catch (e) {
+     stderr.writeln('${file.path}: not a pubspec.lock: ${e.message}');
+     exit(2);
+   }
+-  if (found.isEmpty) {
++  if (found.isEmpty && notCommit.isEmpty) {
+     stdout.writeln('${file.path}: ${packages.length} packages, none of '
+         '${forbiddenHostPackages.join(', ')}');
+     return;
+   }
+   for (final name in found) {
+     stdout.writeln('${file.path}: a host must not resolve $name');
+   }
++  for (final message in notCommit) {
++    stdout.writeln('${file.path}: $message');
++  }
+   exit(1);
+ }
+diff --git a/tool/ci/lib/host_lock.dart b/tool/ci/lib/host_lock.dart
+index 5e202451..a9721217 100644
+--- a/tool/ci/lib/host_lock.dart
++++ b/tool/ci/lib/host_lock.dart
+@@ -54,10 +54,55 @@ List<String> lockPackages(String lock) {
+   }
+   return keys;
+ }
+ 
+ /// The [forbiddenHostPackages] that are keys under [lock]'s `packages:`,
+ /// in the lock's order.
+ List<String> forbiddenInLock(String lock) => [
+       for (final name in lockPackages(lock))
+         if (forbiddenHostPackages.contains(name)) name,
+     ];
++
++/// The packages the host probe must take from the commit under test, by
++/// its `dependency_overrides` (publishing spec D6): once they are on
++/// pub.dev, a dropped override would resolve silently from there.
++const List<String> probedFromCommit = [
++  'jet_cad_2d',
++  'jet_cad_2d_flutter',
++  'jet_cad_floor_plan',
++  'jet_cad_restaurant_symbols',
++];
++
++/// The `source` and the description's `resolved-ref` of the package
++/// [name]'s entry in [lock] (keys `source` and `resolved-ref`, each only
++/// when present); empty when [lock] has no such package. Throws a
++/// [FormatException] as [lockPackages] does.
++Map<String, String> lockEntryFields(String lock, String name) {
++  if (!lockPackages(lock).contains(name)) return const {};
++  final lines = lock.split('\n');
++  final start = lines.indexWhere((l) => RegExp('^ +$name:\\s*\$').hasMatch(l));
++  final indent = lines[start].length - lines[start].trimLeft().length;
++  final fields = <String, String>{};
++  for (final line in lines.skip(start + 1)) {
++    final content = line.trimLeft();
++    if (content.isEmpty) continue;
++    final depth = line.length - content.length;
++    if (depth <= indent) break; // The next package: the entry has ended.
++    final m =
++        RegExp(r'^(source|resolved-ref):\s*"?([^"\s]+)"?').firstMatch(content);
++    if (m != null) fields[m[1]!] = m[2]!;
++  }
++  return fields;
++}
++
++/// One message per package of [probedFromCommit] that [lock] does not
++/// resolve from git at [ref]: missing, another source, or another
++/// resolved ref.
++List<String> notFromCommit(String lock, String ref) => [
++      for (final name in probedFromCommit)
++        if (lockEntryFields(lock, name) case final f
++            when f['source'] != 'git' || f['resolved-ref'] != ref)
++          f.isEmpty
++              ? '$name: not in the lock'
++              : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
++                  'not git at $ref',
++    ];
+diff --git a/tool/ci/test/host_lock_test.dart b/tool/ci/test/host_lock_test.dart
+index 6a93153b..f23b7661 100644
+--- a/tool/ci/test/host_lock_test.dart
++++ b/tool/ci/test/host_lock_test.dart
+@@ -160,11 +160,71 @@ void main() {
+     // A key indented less than the first: read as a field, it would hide
+     // flutter_scene.
+     final shallow = withEntry(
+         green,
+         'flutter_scene',
+         entries['flutter_scene']!
+             .replaceFirst('  flutter_scene:', ' flutter_scene:'));
+     expect(shallow, contains('\n flutter_scene:\n'), reason: 'premise');
+     expect(() => lockPackages(shallow), throwsFormatException);
+   });
++
++  group('HL-C the four packages come from the commit under test', () {
++    const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
++
++    test('HL-C1 the green lock: all four from git at the ref', () {
++      expect(notFromCommit(green, ref), isEmpty);
++      expect(lockEntryFields(green, 'jet_cad_2d'),
++          {'source': 'git', 'resolved-ref': ref});
++    });
++
++    test('HL-C2 another ref: each of the four named', () {
++      const other = '0000000000000000000000000000000000000000';
++      expect(notFromCommit(green, other), hasLength(4));
++      expect(notFromCommit(green, other).first, contains('jet_cad_2d'));
++    });
++
++    // The named mutant of spec D6: one override dropped, so pub took the
++    // package from pub.dev.
++    for (final name in [
++      'jet_cad_2d',
++      'jet_cad_2d_flutter',
++      'jet_cad_floor_plan',
++      'jet_cad_restaurant_symbols',
++    ]) {
++      test('HL-C3 $name hosted: named', () {
++        final entry = entryOf(green, name);
++        final hostedEntry = [
++          '  $name:',
++          '    dependency: transitive',
++          '    description:',
++          '      name: $name',
++          '      sha256: "0000"',
++          '      url: "https://pub.dev"',
++          '    source: hosted',
++          '    version: "0.7.1"',
++        ].join('\n');
++        final lock = green.replaceFirst(entry, hostedEntry);
++        expect(lock, isNot(green), reason: 'premise');
++        expect(notFromCommit(lock, ref), [contains(name)]);
++      });
++    }
++
++    // A hosted entry carries no resolved-ref, so HL-C3 alone cannot tell the
++    // source test from the ref test: this one keeps the ref and changes only
++    // the source.
++    test('HL-C3b the right ref under another source: named', () {
++      final entry = entryOf(green, 'jet_cad_floor_plan');
++      final lock = green.replaceFirst(
++          entry, entry.replaceFirst('source: git', 'source: path'));
++      expect(lock, isNot(green), reason: 'premise');
++      expect(notFromCommit(lock, ref), [contains('jet_cad_floor_plan')]);
++    });
++
++    test('HL-C4 a package missing from the lock: named', () {
++      final lock = green.replaceFirst(
++          '${entryOf(green, 'jet_cad_restaurant_symbols')}\n', '');
++      expect(
++          notFromCommit(lock, ref), [contains('jet_cad_restaurant_symbols')]);
++    });
++  });
+ }
+diff --git a/tool/ci/test/scripts_test.dart b/tool/ci/test/scripts_test.dart
+index 4b34bb33..9291c002 100644
+--- a/tool/ci/test/scripts_test.dart
++++ b/tool/ci/test/scripts_test.dart
+@@ -119,20 +119,35 @@ void main() {
+       final text = File('${tmp.path}/pubspec.lock')
+         ..writeAsStringSync('name: host_probe\n');
+       final notLock = await dartRun('check_host_lock.dart', [text.path]);
+       expect(notLock.exitCode, 2);
+     });
+ 
+     test('SC13 bad arguments: exit 2', () async {
+       expect((await dartRun('check_host_lock.dart', const [])).exitCode, 2);
+       expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
+     });
++
++    test('SC21 --ref: the green lock at its ref exits 0, at another exits 1',
++        () async {
++      const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
++      final ok = await dartRun('check_host_lock.dart',
++          ['test/fixtures/host_post_split.lock.txt', '--ref', ref]);
++      expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
++      final bad = await dartRun('check_host_lock.dart', [
++        'test/fixtures/host_post_split.lock.txt',
++        '--ref',
++        '0000000000000000000000000000000000000000',
++      ]);
++      expect(bad.exitCode, 1);
++      expect(bad.stdout, contains('jet_cad_floor_plan'));
++    });
+   });
+ 
+   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
+   // probe that stopped running the check would pass unseen. Its commands,
+   // comments aside, in their order.
+   test('SC14 host_probe.sh checks the lock after pub get, before the build',
+       () {
+     final commands = [
+       for (final line in File('host_probe.sh').readAsLinesSync())
+         if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))

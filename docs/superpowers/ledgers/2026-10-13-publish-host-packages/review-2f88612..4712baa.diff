@@ -1,0 +1,586 @@
+4712baab ci,docs: the host probe and the guide on pub.dev (D6, D8, D9)
+ .github/workflows/ci.yml           |  4 +-
+ docs/host-guide.md                 | 84 +++++++++++++++++++++++---------------
+ tool/ci/host_probe.sh              | 18 ++++++--
+ tool/ci/host_probe/.gitignore      |  3 ++
+ tool/ci/host_probe/lib/main.dart   | 37 +++++++++++++----
+ tool/ci/host_probe/pubspec.yaml.in | 37 ++++++++++++-----
+ tool/ci/package_root.dart          | 24 +++++++++++
+ tool/ci/test/guide_test.dart       | 22 ++++------
+ tool/ci/test/scripts_test.dart     | 43 +++++++++++++++++--
+ 9 files changed, 198 insertions(+), 74 deletions(-)
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index eb9b9026..d00ac7e0 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -121,26 +121,26 @@ jobs:
+           cache: true
+       - name: Resolve the workspace
+         run: flutter pub get
+       - name: Tests
+         working-directory: tool/ci
+         run: dart test
+       - name: Analyze
+         working-directory: tool/ci
+         run: >-
+           dart analyze --fatal-infos lib test expect_failures.dart
+-          check_guide.dart check_host_lock.dart
++          check_guide.dart check_host_lock.dart package_root.dart
+       - name: Format
+         working-directory: tool/ci
+         run: >-
+           dart format --output=none --set-exit-if-changed
+-          lib test expect_failures.dart check_guide.dart check_host_lock.dart
++          lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
+           host_probe/lib
+       - name: The host guide's code is the probe's
+         run: dart run tool/ci/check_guide.dart
+ 
+   publishable:
+     name: ${{ matrix.package }}, publishable to pub.dev
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
+     strategy:
+       fail-fast: false
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 1ad1ee74..dddbbe7f 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -7,66 +7,84 @@ status and pick them in the **selection** mode. It covers release
+ **0.7.0** ([CHANGELOG](../CHANGELOG.md)).
+ 
+ Every Dart snippet below is taken from
+ [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
+ a small host that CI builds from outside the repository on every push.
+ `tool/ci/check_guide.dart` fails CI when a snippet here is no longer in
+ that file, so the code in this guide compiles against the release.
+ 
+ ## 1. The dependency
+ 
+-The planner's packages are not on pub.dev. Depend on them by git, **both
+-pinned to the same commit SHA** — the SHA the release tag `v0.7.0` points at,
+-`0fa649e2c6f09f34f2b7564071837cc1b15ffd11` (the merge of release 0.7.0 into
+-`main`):
++Add the planner from pub.dev, with `dart pub add jet_cad_floor_plan` or in
++your pubspec:
+ 
+ ```yaml
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_floor_plan:
+-    git:
+-      url: https://github.com/a-urel/jet-cad.git
+-      path: packages/jet_cad_floor_plan
+-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
+-  jet_cad_restaurant_symbols:
+-    git:
+-      url: https://github.com/a-urel/jet-cad.git
+-      path: packages/jet_cad_restaurant_symbols
+-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
++  jet_cad_floor_plan: ^0.7.1
+ ```
+ 
+-Why a SHA and not the tag: the restaurant package depends on the planner
+-by a path inside the repository, which pub resolves at the commit's SHA.
+-If your `ref` is a tag or a branch, pub sees two different refs for the
+-planner and refuses. The other form that resolves is the restaurant
+-package **alone** at the tag (`ref: v0.7.0`), the planner arriving
+-through it; you then import the planner without listing it, which
+-`depend_on_referenced_packages` will flag.
+-
+-The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come
+-with the planner. Import only the two barrels:
+-`package:jet_cad_floor_plan/jet_cad_floor_plan.dart` and
+-`package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
+-Anything under `src/` is not API.
+-
+-The engine is also on pub.dev, as `jet_cad_2d` (since 0.7.1, under its own
+-versions). Do not add it from there next to the dependencies above: the
+-planner already brings it by git, and pub takes a package from one source
+-only, so it refuses the pair.
++The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come with
++it, from pub.dev. Import only the planner's barrel,
++`package:jet_cad_floor_plan/jet_cad_floor_plan.dart`. Anything under `src/`
++is not API.
+ 
+ The packages need Flutter 3.44 or later (the Dart that comes with it);
+ 0.7.0 was built and tested with Flutter 3.47.6. They bring no build hook
+ and no GPU renderer: nothing runs at build time beyond Flutter's own.
+ (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
+ hook compiles shaders.)
+ 
++### The restaurant symbols
++
++The restaurant library (tables, chairs, bar and kitchen symbols) is not a
++dependency of the planner: you copy its two files into your app, in three
++steps.
++
++1. Take the files from the tag `jet_cad_floor_plan-vX.Y.Z` of the planner
++   release you depend on: `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib`
++   and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`. Put the
++   library at `assets/restaurant.jetlib` and the names beside your code as
++   `restaurant_names.dart`, with its import changed to the planner's
++   barrel, `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
++2. Declare the asset in your pubspec:
++
++```yaml
++  assets:
++    - assets/restaurant.jetlib
++```
++
++3. Read it from your own assets and make it a source:
++
++```dart
++/// The restaurant library, from this app's own assets (host guide, "The
++/// restaurant symbols").
++Future<Uint8List> readRestaurantLibrary() async {
++  final data = await rootBundle.load('assets/restaurant.jetlib');
++  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
++}
++
++const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
++    name: 'restaurant',
++    read: readRestaurantLibrary,
++    names: restaurantSymbolNames);
++```
++
++Give the loader both sources (section 4):
++`SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
++
++Two rules. Never load the copy with the package's own
++`restaurantSymbolSource`: it reads the package's asset key, which your app
++does not have. And a saved plan does not depend on the library: you can
++change which library you ship without migrating saved plans.
++
+ ## 2. Fonts
+ 
+ Plans name the family `Roboto`, and the planner ships its bytes. Declare
+ the family in your pubspec, so the web never fetches Google's Roboto
+ instead:
+ 
+ ```yaml
+ flutter:
+   uses-material-design: true
+   fonts:
+@@ -141,21 +159,21 @@ delegates in your `MaterialApp`:
+ 
+ ## 4. The controller and the view
+ 
+ A `FloorPlanController` holds one floor's plan; a `FloorPlanView` shows
+ it. Give the controller the restaurant library beside the planner's
+ furniture. With several floors, share one symbol loader and one
+ thumbnail cache between their controllers:
+ 
+ ```dart
+   final symbols = SymbolLibraryLoader(
+-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
++    sources: const [furnitureSymbolSource, restaurantSource],
+   );
+   final thumbnails = SymbolThumbnails(maxEntries: 128);
+ 
+   late final FloorPlanController controller = FloorPlanController(
+     symbols: symbols,
+     thumbnails: thumbnails,
+   );
+ ```
+ 
+ A controller you give a loader or a cache never disposes them; dispose
+diff --git a/tool/ci/host_probe.sh b/tool/ci/host_probe.sh
+index 306fe92c..5e79e3c5 100755
+--- a/tool/ci/host_probe.sh
++++ b/tool/ci/host_probe.sh
+@@ -1,36 +1,48 @@
+ #!/usr/bin/env bash
+ # Spec 14d P6: builds the host probe against the repository at a commit,
+-# by git, from outside the workspace -- as a POS would depend on it.
++# from outside the workspace -- as a POS would depend on it. The probe
++# resolves the planner from pub.dev, and its dependency overrides take the
++# four repository packages from git at the commit; the restaurant symbols
++# are copied into the probe, as a host does (publishing spec D6, D9).
+ #
+ #   tool/ci/host_probe.sh <git url> <commit sha>
+ #
+ # CI passes file://$GITHUB_WORKSPACE and `git rev-parse HEAD`, so no token
+ # is needed for a private repository. Writes only inside the probe. The
+ # sha must be the full one: the restaurant package reaches the planner at
+ # the full sha, and a short one makes pub see two refs and refuse.
+ #
+ # GPU split spec S8: the host's graph holds no GPU renderer and runs no
+ # build hook. The probe starts clean, because stale output survives a
+ # build; its lock is checked after `pub get`, and its web build after the
+ # build.
+ set -euo pipefail
+ url=$1
+ ref=$2
+ ci=$(cd "$(dirname "$0")" && pwd)
+ probe=$ci/host_probe
+-rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"
++rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \
++  "$probe/assets/restaurant.jetlib" "$probe/lib/restaurant_names.dart"
+ sed -e "s#@URL@#$url#g" -e "s#@REF@#$ref#g" \
+   "$probe/pubspec.yaml.in" > "$probe/pubspec.yaml"
+ cd "$probe"
+ flutter pub get
+-dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"
++dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"
++# Publishing spec D9: the probe carries the restaurant library as a host
++# does, copied from the package pub resolved at this commit, its names'
++# import pointed at the planner's barrel.
++symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)
++mkdir -p "$probe/assets"
++cp "$symbols/assets/restaurant.jetlib" "$probe/assets/restaurant.jetlib"
++sed 's#package:jet_cad_floor_plan/symbol_sources.dart#package:jet_cad_floor_plan/jet_cad_floor_plan.dart#' \
++  "$symbols/lib/src/names.dart" > "$probe/lib/restaurant_names.dart"
+ flutter analyze
+ flutter build web
+ fail=0
+ # The lock check above is the main guard; these three catch what reached
+ # the build anyway. hooks_runner is Flutter's own folder name, so a rename
+ # would let its check pass silently.
+ if [ -e .dart_tool/hooks_runner ]; then
+   echo "host probe: a build hook ran (.dart_tool/hooks_runner exists)" >&2
+   fail=1
+ fi
+diff --git a/tool/ci/host_probe/.gitignore b/tool/ci/host_probe/.gitignore
+index 4e0bb7a0..b66cb75e 100644
+--- a/tool/ci/host_probe/.gitignore
++++ b/tool/ci/host_probe/.gitignore
+@@ -1,6 +1,9 @@
+ # Written by tool/ci/host_probe.sh, and by pub and the build.
+ /pubspec.yaml
+ /pubspec.lock
+ /.dart_tool/
+ /build/
+ /.flutter-plugins-dependencies
++# Copied by tool/ci/host_probe.sh from the commit under test (publishing spec D9).
++/assets/restaurant.jetlib
++/lib/restaurant_names.dart
+diff --git a/tool/ci/host_probe/lib/main.dart b/tool/ci/host_probe/lib/main.dart
+index 9df939b2..53c963aa 100644
+--- a/tool/ci/host_probe/lib/main.dart
++++ b/tool/ci/host_probe/lib/main.dart
+@@ -1,22 +1,43 @@
+ // The external-host probe (spec 14d P6) and the host guide's source
+-// (P2): a small point-of-sale screen that depends on the planner and the
+-// restaurant library by git, from outside the workspace, through their
+-// public barrels only. CI resolves, analyses and builds it at the commit it
+-// tests; tool/ci/check_guide.dart checks that every Dart snippet of
+-// docs/host-guide.md is in this file, so the guide's code compiles.
++// (P2): a small point-of-sale screen that depends on the planner from
++// pub.dev (overridden to the commit under test) and carries the restaurant
++// library as a host does, from outside the workspace, through the
++// planner's public barrel only. CI resolves, analyses and builds it at the
++// commit it tests; tool/ci/check_guide.dart checks that every Dart snippet
++// of docs/host-guide.md is in this file, so the guide's code compiles.
++import 'dart:typed_data';
++
+ import 'package:flutter/foundation.dart' show kIsWeb;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart'
+-    show BrowserContextMenu, HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey;
++    show
++        BrowserContextMenu,
++        HardwareKeyboard,
++        KeyDownEvent,
++        LogicalKeyboardKey,
++        rootBundle;
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+-import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
++
++import 'restaurant_names.dart';
++
++/// The restaurant library, from this app's own assets (host guide, "The
++/// restaurant symbols").
++Future<Uint8List> readRestaurantLibrary() async {
++  final data = await rootBundle.load('assets/restaurant.jetlib');
++  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
++}
++
++const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
++    name: 'restaurant',
++    read: readRestaurantLibrary,
++    names: restaurantSymbolNames);
+ 
+ Future<void> main() async {
+   WidgetsFlutterBinding.ensureInitialized();
+   try {
+     await ensureFloorPlanFonts();
+   } catch (error, stack) {
+     // The plans then measure in the platform's font; the POS still starts.
+     FlutterError.reportError(
+         FlutterErrorDetails(exception: error, stack: stack));
+   }
+@@ -164,21 +185,21 @@ class FloorScreen extends StatefulWidget {
+ 
+   @override
+   State<FloorScreen> createState() => _FloorScreenState();
+ }
+ 
+ class _FloorScreenState extends State<FloorScreen> {
+   PosStore get store => widget.store;
+ 
+   // One loader and one thumbnail cache for every floor's controller.
+   final symbols = SymbolLibraryLoader(
+-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
++    sources: const [furnitureSymbolSource, restaurantSource],
+   );
+   final thumbnails = SymbolThumbnails(maxEntries: 128);
+ 
+   late final FloorPlanController controller = FloorPlanController(
+     symbols: symbols,
+     thumbnails: thumbnails,
+   );
+ 
+   /// Whether staff may drag tables during service.
+   bool staffMayMoveTables = true;
+diff --git a/tool/ci/host_probe/pubspec.yaml.in b/tool/ci/host_probe/pubspec.yaml.in
+index bd648798..9fd7647b 100644
+--- a/tool/ci/host_probe/pubspec.yaml.in
++++ b/tool/ci/host_probe/pubspec.yaml.in
+@@ -1,31 +1,48 @@
+ # The probe's pubspec, written by tool/ci/host_probe.sh with the
+-# repository's URL and the commit under test (spec 14d P6). The same
+-# dependency lines a host writes (docs/host-guide.md), at a commit SHA.
++# repository's URL and the commit under test (spec 14d P6). The dependency
++# line a host writes (docs/host-guide.md section 1), from pub.dev; the
++# overrides take the four repository packages from git at the commit under
++# test, and check_host_lock.dart --ref proves they did (publishing spec D6).
+ name: host_probe
+ description: A host outside the workspace (spec 14d P6).
+ publish_to: none
+ version: 0.1.0
+ 
+ environment:
+-  sdk: ^3.5.0
++  sdk: ^3.6.0
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
++  jet_cad_floor_plan: ^0.7.1
++
++flutter:
++  uses-material-design: true
++  fonts:
++    - family: Roboto
++      fonts:
++        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
++  assets:
++    - assets/restaurant.jetlib
++
++dependency_overrides:
++  jet_cad_2d:
++    git:
++      url: @URL@
++      path: packages/jet_cad_2d
++      ref: @REF@
++  jet_cad_2d_flutter:
++    git:
++      url: @URL@
++      path: packages/jet_cad_2d_flutter
++      ref: @REF@
+   jet_cad_floor_plan:
+     git:
+       url: @URL@
+       path: packages/jet_cad_floor_plan
+       ref: @REF@
+   jet_cad_restaurant_symbols:
+     git:
+       url: @URL@
+       path: packages/jet_cad_restaurant_symbols
+       ref: @REF@
+-
+-flutter:
+-  uses-material-design: true
+-  fonts:
+-    - family: Roboto
+-      fonts:
+-        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
+diff --git a/tool/ci/package_root.dart b/tool/ci/package_root.dart
+new file mode 100644
+index 00000000..0552565c
+--- /dev/null
++++ b/tool/ci/package_root.dart
+@@ -0,0 +1,24 @@
++// Prints a package's root directory from a resolved project's
++// .dart_tool/package_config.json (publishing spec D6): host_probe.sh
++// copies the restaurant library from the package pub resolved.
++//
++//   dart run tool/ci/package_root.dart <project dir> <package>
++import 'dart:convert';
++import 'dart:io';
++
++void main(List<String> args) {
++  if (args.length != 2) {
++    stderr.writeln('usage: package_root.dart <project dir> <package>');
++    exit(2);
++  }
++  final config = File('${args[0]}/.dart_tool/package_config.json');
++  final json = jsonDecode(config.readAsStringSync()) as Map<String, Object?>;
++  for (final p in (json['packages'] as List).cast<Map<String, Object?>>()) {
++    if (p['name'] != args[1]) continue;
++    final root = config.uri.resolve(p['rootUri'] as String);
++    stdout.writeln(root.toFilePath().replaceAll(RegExp(r'/$'), ''));
++    return;
++  }
++  stderr.writeln('${config.path}: no package ${args[1]}');
++  exit(2);
++}
+diff --git a/tool/ci/test/guide_test.dart b/tool/ci/test/guide_test.dart
+index 9f9065c2..30397014 100644
+--- a/tool/ci/test/guide_test.dart
++++ b/tool/ci/test/guide_test.dart
+@@ -6,53 +6,47 @@ import 'package:jet_cad_ci/guide.dart';
+ import 'package:test/test.dart';
+ 
+ final guide = File('../../docs/host-guide.md').readAsStringSync();
+ final dart = File('host_probe/lib/main.dart').readAsStringSync();
+ final yaml = File('host_probe/pubspec.yaml.in').readAsStringSync();
+ 
+ void main() {
+   test('GD1 every block of the guide is in the probe', () {
+     expect(fencedBlocks(guide, 'dart'), hasLength(greaterThan(8)),
+         reason: 'premise: the guide shows its code');
+-    expect(fencedBlocks(guide, 'yaml'), hasLength(2), reason: 'premise');
++    expect(fencedBlocks(guide, 'yaml'), hasLength(3),
++        reason: 'premise: §1\'s dependency, §2\'s fonts, the symbols\' asset');
+     expect(missingBlocks(guide, dart: dart, yaml: yaml), isEmpty);
+   });
+ 
+   test('GD2 a Dart block the probe does not have is named', () {
+     expect(guide, contains('controller.serviceLayoutJson()'),
+         reason: 'premise');
+     final renamed = guide.replaceFirst(
+         'controller.serviceLayoutJson()', 'controller.layoutJson()');
+     expect(missingBlocks(renamed, dart: dart, yaml: yaml),
+         ['dart: Future<void> saveLayout() async {']);
+   });
+ 
+   test('GD3 a pubspec line the probe does not have is named', () {
+     final moved = guide.replaceFirst(
+-        'path: packages/jet_cad_restaurant_symbols', 'path: packages/symbols');
++        'jet_cad_floor_plan: ^0.7.1', 'jet_cad_floor_plan: ^0.7.2');
+     expect(moved, isNot(guide), reason: 'premise');
+     expect(
+         missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: dependencies:']);
+   });
+ 
+-  test(
+-      'GD4 the URL and the commit are the guide\'s own; the rest of the '
+-      'line is not', () {
+-    expect(guide, contains('url: https://github.com/a-urel/jet-cad.git'),
+-        reason: 'premise: the public URL, not the probe\'s');
+-    expect(yaml, contains('url: @URL@'), reason: 'premise');
+-    final dropped =
+-        guide.replaceFirst(RegExp(r'^ +ref: .*\n', multiLine: true), '');
+-    expect(dropped, isNot(guide), reason: 'premise: a ref line removed');
+-    expect(
+-        missingBlocks(dropped, dart: dart, yaml: yaml), ['yaml: dependencies:'],
+-        reason: 'a ref line left out is a difference');
++  test('GD4 the symbols\' asset line is the probe\'s', () {
++    final moved = guide.replaceFirst(
++        '    - assets/restaurant.jetlib', '    - assets/symbols.jetlib');
++    expect(moved, isNot(guide), reason: 'premise');
++    expect(missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: assets:']);
+   });
+ 
+   test('GD5 indentation and line breaks are the formatter\'s', () {
+     const source = '''
+ class A {
+   void f() {
+     g(1,
+         2);
+   }
+ }''';
+diff --git a/tool/ci/test/scripts_test.dart b/tool/ci/test/scripts_test.dart
+index 9291c002..0e652186 100644
+--- a/tool/ci/test/scripts_test.dart
++++ b/tool/ci/test/scripts_test.dart
+@@ -136,47 +136,82 @@ void main() {
+       final bad = await dartRun('check_host_lock.dart', [
+         'test/fixtures/host_post_split.lock.txt',
+         '--ref',
+         '0000000000000000000000000000000000000000',
+       ]);
+       expect(bad.exitCode, 1);
+       expect(bad.stdout, contains('jet_cad_floor_plan'));
+     });
+   });
+ 
++  test('SC22 package_root.dart prints a package\'s root from a config',
++      () async {
++    final dir = Directory.systemTemp.createTempSync('package_root');
++    addTearDown(() => dir.deleteSync(recursive: true));
++    Directory('${dir.path}/.dart_tool').createSync();
++    File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
++        '{"configVersion":2,"packages":[{"name":"a","rootUri":"../x/a",'
++        '"packageUri":"lib/"},{"name":"b","rootUri":"file:///abs/b",'
++        '"packageUri":"lib/"}]}');
++    final a = await dartRun('package_root.dart', [dir.path, 'a']);
++    expect(a.exitCode, 0, reason: '${a.stdout}${a.stderr}');
++    // `../x/a` resolves against `.dart_tool/`, so the root is `<dir>/x/a`.
++    expect((a.stdout as String).trim(), endsWith('/x/a'));
++    // macOS reaches the temp directory through a symlink (/var, /private/var).
++    expect(
++        Directory(Directory((a.stdout as String).trim()).parent.parent.path)
++            .resolveSymbolicLinksSync(),
++        Directory(dir.path).resolveSymbolicLinksSync());
++    final b = await dartRun('package_root.dart', [dir.path, 'b']);
++    expect((b.stdout as String).trim(), '/abs/b');
++    final none = await dartRun('package_root.dart', [dir.path, 'c']);
++    expect(none.exitCode, 2);
++  });
++
+   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
+   // probe that stopped running the check would pass unseen. Its commands,
+   // comments aside, in their order.
+   test('SC14 host_probe.sh checks the lock after pub get, before the build',
+       () {
+     final commands = [
+       for (final line in File('host_probe.sh').readAsLinesSync())
+         if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))
+           line.trim(),
+     ];
+     int at(String command) {
+       final i = commands.indexOf(command);
+       expect(i, isNot(-1), reason: 'host_probe.sh runs `$command`');
+       return i;
+     }
+ 
+     expect(commands, contains('set -euo pipefail'));
+     // The final review's F-3 (MU6): stale output survives a build, so the
+     // probe starts clean.
+-    final clean =
+-        at(r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"');
++    // Review Focus 4: a copy left by an earlier run must not mask a copy
++    // step that no longer runs.
++    final clean = at(
++        r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \');
++    expect(
++        at(r'"$probe/assets/restaurant.jetlib" '
++            r'"$probe/lib/restaurant_names.dart"'),
++        clean + 1,
++        reason: 'the clean line goes on to the copies');
+     final get = at('flutter pub get');
+     expect(clean, lessThan(get), reason: 'cleaned before pub get');
+-    final check =
+-        at(r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"');
++    final check = at(
++        r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"');
++    final copy = at(
++        r'symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)');
+     final analyze = at('flutter analyze');
+     final build = at('flutter build web');
++    expect(check < copy && copy < analyze, isTrue,
++        reason: 'the symbols are copied after the check, before analyze');
+     expect(get < check && check < analyze && analyze < build, isTrue,
+         reason: 'pub get, the check, analyze, build: $get, $check, '
+             '$analyze, $build');
+   });
+ 
+   // The final review's F-3 (MU7): the probe's checks after the build, run
+   // as bash runs them, in a scratch probe; one red case per check.
+   group('SC15 host_probe.sh after the build', () {
+     final script = File('host_probe.sh').readAsStringSync();
+     final from = script.indexOf('\nfail=0\n');

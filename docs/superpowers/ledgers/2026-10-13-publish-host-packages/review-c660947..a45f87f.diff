@@ -1,0 +1,507 @@
+a45f87f2 docs: the final wave's probe re-run and M-CP1, recorded
+ce69050f fix: the final review's findings (F1-F9)
+ .github/workflows/ci.yml                           |  2 +-
+ STATUS.md                                          | 54 ++++++++++++---
+ docs/host-guide.md                                 | 19 ++++--
+ .../2026-10-13-publish-host-packages-results.md    | 78 ++++++++++++++++++++--
+ packages/jet_cad_floor_plan/README.md              |  5 +-
+ tool/ci/host_probe.sh                              | 11 ++-
+ 6 files changed, 141 insertions(+), 28 deletions(-)
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d00ac7e0..11c90173 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -164,21 +164,21 @@ jobs:
+         run: cmp LICENSE ${{ matrix.package }}/LICENSE
+       # A dry run uploads nothing; it exits 65 on any warning (a version
+       # bump without its CHANGELOG entry, a modified checked-in file), not
+       # only on an error. A dependent's dry run does not need its
+       # dependency on pub.dev (spec F-2).
+       - name: Publish dry run
+         working-directory: ${{ matrix.package }}
+         run: dart pub publish --dry-run
+ 
+   host-probe:
+-    name: an external host, by git
++    name: a host from pub.dev, repo packages overridden
+     runs-on: ubuntu-latest
+     timeout-minutes: 30
+     steps:
+       # The whole history and its tags: the released probes are read from
+       # their tags (host embedding API spec, invariant 1).
+       - uses: actions/checkout@v5
+         with:
+           fetch-depth: 0
+       - uses: subosito/flutter-action@v2
+         with:
+diff --git a/STATUS.md b/STATUS.md
+index 5f23a876..feeefa09 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -495,42 +495,78 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ ## Resume here
+ 
+ **Next: the human publishes the three packages, in order** (Claude never
+ runs `dart pub publish` without `--dry-run`; merge, push, tag and publish
+ are the human's alone). `jet_cad_2d` 0.7.1 is merged into `main` at
+ `1dc167d`; `feat/publish-host-packages` (In flight) awaits its review
+ result; its own CI run (Linux) on the pushed branch must be green, and
+ the merge waits for the human's word. The checklist (spec D10), per
+ package, in this order:
+ 
+-1. **`jet_cad_2d` 0.7.1:** push `main` and watch CI (job `publishable`
+-   included); from `packages/jet_cad_2d`, `dart pub publish --dry-run`,
++1. **`jet_cad_2d` 0.7.1:** publish it from `main` as it stands now
++   (`d41e5f6`, whose `packages/jet_cad_2d` equals `1dc167d`'s) **before**
++   this branch is merged: the branch rewrites the engine README (R-5), so
++   publishing after the merge would upload the new README under the tag
++   `jet_cad_2d-v0.7.1` → `1dc167d`, and the archive would not match the
++   tag. Push `main` and watch CI (job `publishable` included); from
++   `packages/jet_cad_2d`, `dart pub publish --dry-run`,
+    `dart pub publish`; the tag `jet_cad_2d-v0.7.1` → `1dc167d`; the
+    version visible on pub.dev. pub.dev scores it after the upload:
+    160/160 is expected once GitHub's `main` carries the pubspec (150/160
+    measured before the push).
+ 2. **`jet_cad_2d_flutter` 0.7.1:** `main` carries the merge and CI is
+    green; its lower bound on the engine is `^0.7.1` (D1: raise it to the
+    engine's current version if the render package uses newer API) and
+    pana's *"Compatible with dependency constraint lower bounds"* section
+    is green, run on the archive now that the engine is on pub.dev (it was
+    40/160 before, R-4); `dart pub publish --dry-run`; `dart pub publish`;
+-   the tag `jet_cad_2d_flutter-v0.7.1` on the merge commit; the version
++   the tag `jet_cad_2d_flutter-v0.7.1` on the commit `main` points at
++   after the merge (a fast-forward has no merge commit); the version
+    visible on pub.dev.
+ 3. **`jet_cad_floor_plan` 0.7.1:** the same, with its lower bounds on the
+    engine and the render package and pana's lower-bounds section green;
+-   the tag `jet_cad_floor_plan-v0.7.1` on the merge commit; the version
+-   visible on pub.dev.
+-4. **After the planner (D7):** in a scratch copy of
+-   `tool/ci/host_probe/pubspec.yaml.in` remove the `dependency_overrides`
+-   block, resolve it from pub.dev alone, `flutter analyze`, and record
+-   the result in the results note.
++   the tag `jet_cad_floor_plan-v0.7.1` on the commit `main` points at
++   after the merge; the version visible on pub.dev.
++4. **After the planner (D7):** from the repository root on `main`, with
++   the three packages on pub.dev. The probe's `lib/main.dart` imports
++   `restaurant_names.dart` and its pubspec declares
++   `assets/restaurant.jetlib`; both are git-ignored files that only
++   `host_probe.sh` creates, from the overridden package, so put them in
++   by hand first (all paths below exist on `main`):
++
++   ```bash
++   cp packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib tool/ci/host_probe/assets/restaurant.jetlib
++   cp packages/jet_cad_restaurant_symbols/lib/src/names.dart tool/ci/host_probe/lib/restaurant_names.dart
++   ```
++
++   Write `tool/ci/host_probe/pubspec.yaml` from `pubspec.yaml.in` with
++   the whole `dependency_overrides:` block removed (it is the file's last
++   block, so everything from that line on goes), and check that no
++   `@URL@` or `@REF@` is left:
++
++   ```bash
++   sed '/^dependency_overrides:/,$d' tool/ci/host_probe/pubspec.yaml.in > tool/ci/host_probe/pubspec.yaml
++   grep -c '@URL@\|@REF@' tool/ci/host_probe/pubspec.yaml   # expect 0
++   ```
++
++   Then resolve from pub.dev alone and check:
++
++   ```bash
++   cd tool/ci/host_probe && flutter pub get
++   dart run ../check_host_lock.dart pubspec.lock   # no --ref: the no-GPU check only
++   flutter analyze                                 # expect "No issues found!"
++   flutter build web                               # optional
++   ```
++
++   Record the result in the results note. Delete the written pubspec and
++   the copies (all git-ignored), or let the next `host_probe.sh` run
++   clean them.
+ 
+ Then the restaurant software moves (D11, in the planner's CHANGELOG and
+ the results note): replace its two git dependencies with
+ `jet_cad_floor_plan: ^0.7.1` and copy the symbols as the guide says.
+ 
+ Before this: Release 0.7.0 is **merged into `main` at
+ `0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
+ `release/0.7.0` (cut from `main` at `7d3ce8d`); it releases rubber-band
+ selection, merged at `232d905` (plan
+ [2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md)).
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 9e51bdd1..56dfc108 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -38,22 +38,22 @@ hook compiles shaders.)
+ ### The restaurant symbols
+ 
+ The restaurant library (tables, chairs, bar and kitchen symbols) is not a
+ dependency of the planner: you copy its two files into your app, in three
+ steps.
+ 
+ 1. Take the files from the tag `jet_cad_floor_plan-vX.Y.Z` of the planner
+    release you depend on: `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib`
+    and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`. Put the
+    library at `assets/restaurant.jetlib` and the names beside your code as
+-   `restaurant_names.dart`, with its import changed to the planner's
+-   barrel, `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
++   `restaurant_names.dart`, as it is: it imports `symbol_sources.dart`, a
++   public library of the planner, which your pubspec already has.
+ 2. Declare the asset in your pubspec:
+ 
+ ```yaml
+   assets:
+     - assets/restaurant.jetlib
+ ```
+ 
+ 3. Read it from your own assets and make it a source:
+ 
+ ```dart
+@@ -63,20 +63,24 @@ Future<Uint8List> readRestaurantLibrary() async {
+   final data = await rootBundle.load('assets/restaurant.jetlib');
+   return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+ }
+ 
+ const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
+     name: 'restaurant',
+     read: readRestaurantLibrary,
+     names: restaurantSymbolNames);
+ ```
+ 
++The reader needs `import 'dart:typed_data';` and `rootBundle` from
++`package:flutter/services.dart`; the source needs your copy, `import
++'restaurant_names.dart';`.
++
+ Give the loader both sources (section 4):
+ `SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
+ 
+ Two rules. Never load the copy with the package's own
+ `restaurantSymbolSource`: the loader fails when one key and version is in
+ two sources, whatever their names, and the package's source and your copy
+ carry the same keys. And a saved plan does not depend on the library:
+ placing a symbol copies its definition into the plan, so you can change
+ which library you ship without migrating saved plans.
+ 
+@@ -145,21 +149,26 @@ delegates in your `MaterialApp`:
+ - `floorPlanLocalizationsDelegates` holds the planner's delegate and
+   Flutter's Material, Widgets and Cupertino ones. If you list `de` or
+   `tr` without Flutter's delegates, Material widgets throw.
+ - To switch language at run time, change `MaterialApp.locale`.
+   `Localizations.override` around the view alone is **not supported**:
+   the Export dialog opens on the root navigator and would not see it.
+ - Your own words: `FloorPlanStrings.of(context)` gives the planner's
+   language, and its `languageCode`. *Since 0.6.0*, a class that
+   implements or directly extends `FloorPlanStrings` must add `color`,
+   `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
+-  subclass of a built-in language gets them.
++  subclass of a built-in language gets them. To change only some words,
++  subclass `FloorPlanStringsEn`, `FloorPlanStringsDe` or
++  `FloorPlanStringsTr`. A class that implements or directly extends
++  `FloorPlanStrings` must also write the abstract
++  `tableNumberProblem(TableNumberProblem)`; in 0.7.1 the planner's barrel
++  does not export the type `TableNumberProblem`.
+ - `theme` and `darkTheme` carry the floor plan's look:
+   [§ 9](#9-themes).
+ - Panel numbers show and read with the language's decimal separator,
+   per language, not per region: `de_CH` gets German's `,`.
+   The plan's own text — dimensions and room areas, on screen and on the
+   PDF and PNG, and the rulers on screen — uses the separator **the plan**
+   carries (the Page panel's
+   *Decimal separator*), the same on every terminal; a new plan takes the
+   UI language's. *Since 0.2.0; in 0.1.0 it is always `.`.*
+ 
+@@ -2252,16 +2261,16 @@ stylus behave as on a desktop.
+   that says why); a 0.1.0 plan opens here unchanged. Terminals that
+   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
+   plans and service layouts, so they can share them.
+ - **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0, 0.5.0 or 0.5.1
+   is at schema 9, with or without table data, and 0.3.0 and every
+   earlier release refuse it** (`load` throws a `FormatException` that
+   says why). **Every terminal that shares stored plans moves to it
+   together.** A schema 8 or 7 plan opens here unchanged; the service
+   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
+   plans and service layouts, so they can share them.
+-- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 or 0.7.0 is at
++- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0 or 0.7.1 is at
+   **schema 10**, which 0.5.1 and every older release refuse (`load`
+   throws a `FormatException` that says why); a schema 9, 8 or 7 plan
+   opens here unchanged. Every terminal that shares stored plans moves
+-  together. 0.6.0 and 0.7.0 save the same plans and service layouts, so
++  together. 0.6.0, 0.7.0 and 0.7.1 save the same plans and service layouts, so
+   they can share them.
+diff --git a/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md b/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md
+index 997bb99a..d1def52c 100644
+--- a/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md
++++ b/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md
+@@ -82,31 +82,55 @@ git.
+ - **R-7.** The planner's CHANGELOG and README cite the host guide's "The
+   restaurant symbols" as written; Task 6 writes that subsection under
+   exactly that heading. Cost if wrong: a dangling reference until Task 6
+   landed (before any merge).
+ - **R-8.** Task 6's `package_root` test is SC22 (the next number after
+   SC21), and Task 6 keeps SC21 untouched: the plan's SC17 name predates
+   SC16–SC21.
+ - **R-9.** The host guide's intro names the release a host depends on —
+   "covers `jet_cad_floor_plan` 0.7.1", linking the planner's CHANGELOG; the
+   "Since 0.7.0" feature markers stay (0.7.1 is packaging only).
++- **R-10.** The unexported `SymbolLibraryState` family and
++  `TableNumberProblem` stay unexported in 0.7.1 (spec D4: barrels
++  published as they stand); the note records them as 0.x export
++  candidates with the `FloorPlanStrings` consequence, and the hand-off
++  names them to the human. Cost if wrong: a host implementing
++  `FloorPlanStrings` imports `editor.dart` until a 0.x release exports the
++  enum (adding an export is non-breaking).
++- **R-11.** R-10 stands for the final fix wave (spec D4, approved by the
++  human, publishes barrels as they stand; widening the published API is
++  the human's call). The wave applies the reviewer's fallback: the guide
++  steers a custom `FloorPlanStrings` to a built-in language's subclass,
++  and the hand-off asks the human whether to add the two exports before
++  publishing. Cost if wrong: one more small commit after the human's
++  answer.
++- **R-12.** The restaurant names file is copied verbatim, no `sed`:
++  `symbol_sources.dart` is a host-facing public library exporting
++  `SymbolNames` (the reviewer verified), so the rewrite is a needless host
++  step. Cost if wrong: `host_probe.sh` and the guide revert to the
++  rewrite; the probe re-run catches a failure.
++- **R-13.** Final-review Minors 7 (the root CHANGELOG says "published"
++  before the publish: the spec's accepted window) and 8 (the example test
++  calls `symbols.load` itself) are left and recorded. Cost if wrong: a
++  stale word for the hours between merge and publish; a test that does
++  not pin the example's own `load` call.
+ 
+ ## What each task did
+ 
+ | Task | Commit(s) | What |
+ |---|---|---|
+ | 1 (D1) | `4d74b5b` | 15 path dependencies on `jet_cad_2d`, `jet_cad_2d_flutter` and `jet_cad_floor_plan` in 7 pubspecs (render 1, GPU 2, planner 2, harness 2, symbols 2, floor_planner 3, restaurant_demo 3) became `^0.7.1`; the render package and the planner at `version: 0.7.1`. New `tool/ci/test/dependency_lines_test.dart` (DL1 no `path:`/git entry for a published package, DL2 exactly 15 lines at `^0.7.1`, DL3 path entries of unpublished packages). `flutter pub get`: "Got dependencies!", the package config resolves the siblings to `../packages/<name>` (F-1). |
+ | 2 (D2) | `09153e8` | `jet_cad_2d_flutter` 0.7.1 packaged: `publish_to` removed, `sdk: ^3.6.0`, repository, issue tracker, topics, a description; LICENSE (byte-identical to the root's), `.pubignore` (`/test/`, `/build/`, `/shaders/`), README for pub.dev (the old developer README moved with `git mv` to `test/README.md`), CHANGELOG, `example/lib/main.dart` and `test/example_test.dart`, `export_testing.dart`'s library comment; 6 `dart doc` warnings fixed. |
+ | 3 (D3, D11) | `5eec301`, `e2869e5` | `jet_cad_floor_plan` 0.7.1 packaged the same way (`.pubignore` `/test/`, `/build/`, `/tool/`; the three assets stay in), a README with a section on a library of one's own, the CHANGELOG with the restaurant software's migration (D11), `editor.dart`'s library comment, 23 `dart doc` warnings fixed (R-6). The fix round (`e2869e5`) repaired one garbled CHANGELOG sentence. |
+ | 4 (D5) | `c9eed8a` | CI's `publishable` job became a matrix over the three packages: `cmp LICENSE`, then `dart pub publish --dry-run` (exit 65 on any warning). |
+ | 5 (D6) | `2f88612` | `check_host_lock.dart <lock> --ref <sha>`: each of the four packages must be in the lock with `source: git` and a `resolved-ref` equal to the ref; tests HL-C1…C3b and SC21. |
+-| 6 (D6, D8, D9) | `4712baa`, `ede7283` | The probe on pub.dev: `pubspec.yaml.in` with the planner's hosted line and four git overrides; `host_probe.sh` passes `--ref` and copies `restaurant.jetlib` and `names.dart` from the overridden symbols package (`tool/ci/lib/package_root.dart`, SC22); the probe's `main.dart` builds its own `SymbolLibrarySource`; the host guide §1 rewritten for pub.dev with the new subsection "The restaurant symbols"; `guide_test.dart` GD1/GD3/GD4. The fix round (`ede7283`) applied R-9 and the two review minors (the guide's rules paragraph; SC22's trailing slash). |
++| 6 (D6, D8, D9) | `4712baa`, `ede7283` | The probe on pub.dev: `pubspec.yaml.in` with the planner's hosted line and four git overrides; `host_probe.sh` passes `--ref` and copies `restaurant.jetlib` and `names.dart` from the overridden symbols package (`tool/ci/package_root.dart`, SC22); the probe's `main.dart` builds its own `SymbolLibrarySource`; the host guide §1 rewritten for pub.dev with the new subsection "The restaurant symbols"; `guide_test.dart` GD1/GD3/GD4. The fix round (`ede7283`) applied R-9 and the two review minors (the guide's rules paragraph; SC22's trailing slash). |
+ | 7 | this commit | The root CHANGELOG as an index, STATUS, this note, and the engine README's stale sentence (R-5). |
+ 
+ ## The dry runs
+ 
+ `dart pub publish --dry-run`, on the committed state at each task's
+ commit, and the three runs of Task 7 (below; the engine's is the README
+ rewrite's check: still 0 warnings). Sizes and results are the
+ reports' own.
+ 
+ | Package | Where | Exit | Warnings | Archive |
+@@ -204,20 +228,30 @@ Each fired from a copy and restored from it (`cmp` checked).
+ `tool/ci/host_probe.sh` at `4712baa`: exit 0; lock check *"40 packages,
+ none of flutter_scene, …"* (one line printed, the brief had expected two),
+ *"No issues found!"*, *"✓ Built build/web"*, *"host probe: no GPU
+ renderer, no build hook; build/web is 42M"*.
+ `old_host_probe.sh` for `v0.3.0`, `v0.4.0`, `v0.5.1` and `v0.6.0`: each
+ *"No issues found!"* (*"vX's main.dart analyses against 4712baab…"*). The
+ probe passes only through its overrides: the hosted 0.7.1 packages are not
+ on pub.dev yet; D7 (Owed) is the check without them. `check_guide.dart`:
+ *"all 56 code blocks are in the host probe"* (54 before this branch).
+ 
++The final wave (F5: the names file is copied with `cp`, no `sed`) re-ran
++the probe at `ce69050` after clearing the pub git cache: exit 0, lock
++check *"40 packages, none of flutter_scene, …"*, *"No issues found!"*,
++*"✓ Built build/web"*, *"host probe: no GPU renderer, no build hook;
++build/web is 42M"*; `git status --short` clean afterwards. **M-CP1** (the
++new `cp … restaurant_names.dart` line deleted): `flutter analyze` fails,
++exit 1: *"Target of URI doesn't exist: 'restaurant_names.dart'"*
++(`lib/main.dart:21:8`), *"Undefined name 'restaurantSymbolNames'"*, *"3
++issues found."*; restored and `cmp`-identical to the committed file.
++
+ ## D4: the barrels, audited
+ 
+ The barrels are published as they stand. **Method (a rough grep, not a
+ finding list):** for each package a script lists the public libraries'
+ `export` lines (honouring `show` lists; `export 'package:…'` of other
+ packages ignored), collects the type names declared in the package's
+ `lib/` and not exported by any public library, and prints those that
+ appear, as a whole word, on a line at indent four or less of an exported
+ file. That over-reports (bodies, shown and hidden classes of one file) and
+ under-reports (types a signature reaches only through another package's
+@@ -302,22 +336,22 @@ record); on Linux CI compares exactly and would catch a real regression.
+ Written into the planner's 0.7.1 CHANGELOG entry, for the human to apply
+ in the restaurant software:
+ 
+ 1. Replace the two git dependencies (`jet_cad_floor_plan` and
+    `jet_cad_restaurant_symbols`) with `jet_cad_floor_plan: ^0.7.1`.
+ 2. Drop every import of `package:jet_cad_restaurant_symbols/…`.
+ 3. From the repository tree at the tag of the planner release it depends
+    on (`jet_cad_floor_plan-v0.7.1`), copy
+    `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib` into the
+    host's assets and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`
+-   into the host's `lib/`, its import changed to
+-   `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
++   into the host's `lib/` as `restaurant_names.dart`, verbatim (it
++   imports the planner's public `symbol_sources.dart`; R-12).
+ 4. Declare the asset, build `SymbolLibrarySource(name: 'restaurant', …)`
+    and pass it with `furnitureSymbolSource` to `SymbolLibraryLoader`
+    (host guide, "The restaurant symbols").
+ 5. Never load the copy together with the package's
+    `restaurantSymbolSource`: the same keys in two sources make the loader
+    fail. Saved plans do not depend on the library.
+ 
+ ## Independent review minors (deferred, recorded)
+ 
+ From the per-task reviews; none blocks the publication.
+@@ -325,37 +359,71 @@ From the per-task reviews; none blocks the publication.
+ - T1: `dependency_lines_test.dart` has an `if` without braces; DL1's regex
+   misses a flow-style git map (DL2 catches it by value); DL3 covers
+   `path:`, not git, though its header names both.
+ - T2: `geometry_collector.dart`'s comment still names
+   `test/support/instance_expander.dart` and `frame_info.dart`, absent from
+   the archive; the README snippet uses an undefined `size` (a fragment; the
+   full example is linked); the README names `jet_cad_floor_plan`, true
+   once the planner is published.
+ - T3: M-FX1 dies on the loader's `ArgumentError`, so the
+   `library.entries` `isNotEmpty` assertion is exercised by no named
+-  mutant; the README says `symbol_sources.dart` holds "the sources and
+-  their loader's Flutter side" though the loader is on the main barrel;
++  mutant; (fixed in the final wave, F6: the README said `symbol_sources.dart`
++  holds "the sources and their loader's Flutter side");
+   `mySymbolSource` is a placeholder; CHANGELOG line 25 runs about 88
+   columns in a 76-column paragraph.
+ - T5: `lockEntryFields` throws `RangeError`, not `FormatException`, on a
+   quoted `"jet_cad_*":` key (pub never writes them); the success line does
+   not say the ref check ran; `--ref ''` exits 1, not 2.
+ - T6: `host_probe.sh`'s header still says the restaurant package reaches
+   the planner at the full sha (true for the override); a bare `dart analyze`
+   in `tool/ci` reports `host_probe/lib/main.dart`'s missing
+   `restaurant_names.dart` until a probe run copies it (CI's file list
+   excludes it).
+ 
+ The whole-branch independent review (an Opus subagent, no Codex) on
+ `git diff main..HEAD` is the controller's; its findings are recorded below
+ when it returns.
+ 
++## Final review
++
++An Opus subagent (no Codex) reviewed `git diff main..c660947`. Verdict:
++**With fixes**; 0 Critical. What the ledger records of its independent
++measurement: it verified by reading `symbol_sources.dart` that the names
++file's import is a public library exporting `SymbolNames` (R-12); the
++full report is not in the ledger, so nothing more is claimed here. Two
++Important findings and eight Minors; the fix wave (BASE `c660947`) applied F1-F9:
++
++| Item | Finding | What changed |
++|---|---|---|
++| F1 | STATUS "Resume here", the D7 step, could not work: the probe's `main.dart` imports `restaurant_names.dart` and its pubspec declares `assets/restaurant.jetlib`, both git-ignored files only `host_probe.sh` creates from the overridden package | `STATUS.md` spells out the human's commands: two `cp`, a `sed` that drops the `dependency_overrides:` block, a `grep` for `@URL@`/`@REF@`, `pub get`, `check_host_lock.dart` without `--ref`, `flutter analyze`, the optional build. Steps 1-3 were run in a scratch copy (see the fix report); step 4 on was not (the packages are not on pub.dev) |
++| F2 | Resume step 1: publishing the engine after this branch's merge would upload the rewritten README (R-5) under the tag `jet_cad_2d-v0.7.1` → `1dc167d` | `STATUS.md`: publish the engine from `main` as it stands (`d41e5f6`) before the merge; steps 2-3 tag "the commit `main` points at after the merge" |
++| F3 | The probe job's name said "by git" | `.github/workflows/ci.yml`: "a host from pub.dev, repo packages overridden" (the branch is not protected, so the rename breaks no required check) |
++| F4 | `host_probe.sh` header: the full-sha rationale was stale | reworded: `check_host_lock.dart --ref` compares it exactly with each `resolved-ref` |
++| F5 (R-12) | the `sed` import rewrite was a needless host step | `host_probe.sh` copies `names.dart` verbatim; the guide's subsection drops the rewrite, says what the copy imports, and names the reader's imports (`dart:typed_data`, `rootBundle`) and `import 'restaurant_names.dart';`; this note's D11 step 3 likewise. SC14 did not pin the `sed` line |
++| F6 | the planner README said `symbol_sources.dart` holds "the sources and their loader's Flutter side" | it exports `SymbolLibrarySource`, `furnitureSymbolSource`, `readBundledLibrary` and `SymbolNames`; the loader is on the main barrel |
++| F7 (R-11) | R-10's consequence for the guide | the `FloorPlanStrings` bullet steers a host to `FloorPlanStringsEn`/`De`/`Tr` and says a direct implementer must also write the abstract `tableNumberProblem(TableNumberProblem)`, a type the 0.7.1 barrel does not export |
++| F8 | the guide's "Schema 10" bullet named 0.6.0 and 0.7.0 | adds 0.7.1 (the planner CHANGELOG: plans stored as in 0.7.0, schema 10) |
++| F9 | this note | the `package_root.dart` path, R-10 to R-13, this section, the probe record below |
++
++Left (R-13): Minor 7 (the root CHANGELOG says "published" before the
++publish) and Minor 8 (the example test calls `symbols.load` itself).
++
++**Open for the human (R-10):** the reviewer recommends exporting
++`SymbolLibraryState`, `SymbolLibraryLoading`, `SymbolLibraryReady`,
++`SymbolLibraryFailed` and `TableNumberProblem` from
++`jet_cad_floor_plan.dart` **before** 0.7.1 is published, because the
++barrel's header calls a host's need for an unexported type a finding, D9
++makes the loader's failure state matter to a host, and
++`tableNumberProblem` is abstract. The branch publishes the barrels as
++they stand (D4, R-10, R-11); adding the exports is non-breaking and one
++small commit, but widening the published API is the human's call.
++
+ ## Owed
+ 
+ - **The human, in order (STATUS, Resume here):** `jet_cad_2d` 0.7.1 —
+   push `main`, CI green, dry run, publish, tag `jet_cad_2d-v0.7.1` on
+   `1dc167d`; then `jet_cad_2d_flutter` 0.7.1 — merge of this branch,
+   lower bounds, pana's lower-bounds section green, dry run, publish, tag
+   `jet_cad_2d_flutter-v0.7.1` on the merge commit; then
+   `jet_cad_floor_plan` 0.7.1 the same, tag `jet_cad_floor_plan-v0.7.1`.
+   The version visible on pub.dev after each.
+ - **pana** on the two dependents after each dependency is on pub.dev (R-4).
+diff --git a/packages/jet_cad_floor_plan/README.md b/packages/jet_cad_floor_plan/README.md
+index 75757995..683a9c8f 100644
+--- a/packages/jet_cad_floor_plan/README.md
++++ b/packages/jet_cad_floor_plan/README.md
+@@ -67,22 +67,23 @@ The package ships a furniture library, `furnitureSymbolSource`. A host adds
+ its own beside it with a `SymbolLibrarySource` (a name, a reader of the
+ library's bytes, and its `SymbolNames` in other languages) and gives the
+ loader every source it should read:
+ 
+ ```dart
+ SymbolLibraryLoader(sources: [furnitureSymbolSource, mySymbolSource])
+ ```
+ 
+ Two sources must not hold the same key. `package:jet_cad_floor_plan/symbols.dart`
+ holds the catalog types and the library builder a catalog's generator is
+-written in; `symbol_sources.dart` holds the sources and their loader's
+-Flutter side.
++written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
++`furnitureSymbolSource`, `readBundledLibrary` and `SymbolNames`. The loader,
++`SymbolLibraryLoader`, is on the main barrel.
+ 
+ ## The API
+ 
+ - `package:jet_cad_floor_plan/jet_cad_floor_plan.dart` is the host API.
+ - `package:jet_cad_floor_plan/symbols.dart` and `symbol_sources.dart` are the
+   symbol libraries' API.
+ - `package:jet_cad_floor_plan/editor.dart` is the editor frame of the
+   jet-cad floor planner app. It is not host API and is outside semver: it
+   may change in any release.
+ - Nothing under `src/` is API.
+diff --git a/tool/ci/host_probe.sh b/tool/ci/host_probe.sh
+index 5e79e3c5..235ee96f 100755
+--- a/tool/ci/host_probe.sh
++++ b/tool/ci/host_probe.sh
+@@ -2,47 +2,46 @@
+ # Spec 14d P6: builds the host probe against the repository at a commit,
+ # from outside the workspace -- as a POS would depend on it. The probe
+ # resolves the planner from pub.dev, and its dependency overrides take the
+ # four repository packages from git at the commit; the restaurant symbols
+ # are copied into the probe, as a host does (publishing spec D6, D9).
+ #
+ #   tool/ci/host_probe.sh <git url> <commit sha>
+ #
+ # CI passes file://$GITHUB_WORKSPACE and `git rev-parse HEAD`, so no token
+ # is needed for a private repository. Writes only inside the probe. The
+-# sha must be the full one: the restaurant package reaches the planner at
+-# the full sha, and a short one makes pub see two refs and refuse.
++# sha must be the full one: check_host_lock.dart --ref compares it exactly
++# with each package's resolved-ref in the lock.
+ #
+ # GPU split spec S8: the host's graph holds no GPU renderer and runs no
+ # build hook. The probe starts clean, because stale output survives a
+ # build; its lock is checked after `pub get`, and its web build after the
+ # build.
+ set -euo pipefail
+ url=$1
+ ref=$2
+ ci=$(cd "$(dirname "$0")" && pwd)
+ probe=$ci/host_probe
+ rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \
+   "$probe/assets/restaurant.jetlib" "$probe/lib/restaurant_names.dart"
+ sed -e "s#@URL@#$url#g" -e "s#@REF@#$ref#g" \
+   "$probe/pubspec.yaml.in" > "$probe/pubspec.yaml"
+ cd "$probe"
+ flutter pub get
+ dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"
+ # Publishing spec D9: the probe carries the restaurant library as a host
+-# does, copied from the package pub resolved at this commit, its names'
+-# import pointed at the planner's barrel.
++# does, copied verbatim from the package pub resolved at this commit (the
++# names file imports the planner's public symbol_sources.dart).
+ symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)
+ mkdir -p "$probe/assets"
+ cp "$symbols/assets/restaurant.jetlib" "$probe/assets/restaurant.jetlib"
+-sed 's#package:jet_cad_floor_plan/symbol_sources.dart#package:jet_cad_floor_plan/jet_cad_floor_plan.dart#' \
+-  "$symbols/lib/src/names.dart" > "$probe/lib/restaurant_names.dart"
++cp "$symbols/lib/src/names.dart" "$probe/lib/restaurant_names.dart"
+ flutter analyze
+ flutter build web
+ fail=0
+ # The lock check above is the main guard; these three catch what reached
+ # the build anyway. hooks_runner is Flutter's own folder name, so a rename
+ # would let its check pass silently.
+ if [ -e .dart_tool/hooks_runner ]; then
+   echo "host probe: a build hook ran (.dart_tool/hooks_runner exists)" >&2
+   fail=1
+ fi
