@@ -14,51 +14,69 @@ that file, so the code in this guide compiles against the release.
 
 ## 1. The dependency
 
-The planner's packages are not on pub.dev. Depend on them by git, **both
-pinned to the same commit SHA** — the SHA the release tag `v0.7.0` points at,
-`0fa649e2c6f09f34f2b7564071837cc1b15ffd11` (the merge of release 0.7.0 into
-`main`):
+Add the planner from pub.dev, with `dart pub add jet_cad_floor_plan` or in
+your pubspec:
 
 ```yaml
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_floor_plan:
-    git:
-      url: https://github.com/a-urel/jet-cad.git
-      path: packages/jet_cad_floor_plan
-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
-  jet_cad_restaurant_symbols:
-    git:
-      url: https://github.com/a-urel/jet-cad.git
-      path: packages/jet_cad_restaurant_symbols
-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
+  jet_cad_floor_plan: ^0.7.1
 ```
 
-Why a SHA and not the tag: the restaurant package depends on the planner
-by a path inside the repository, which pub resolves at the commit's SHA.
-If your `ref` is a tag or a branch, pub sees two different refs for the
-planner and refuses. The other form that resolves is the restaurant
-package **alone** at the tag (`ref: v0.7.0`), the planner arriving
-through it; you then import the planner without listing it, which
-`depend_on_referenced_packages` will flag.
-
-The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come
-with the planner. Import only the two barrels:
-`package:jet_cad_floor_plan/jet_cad_floor_plan.dart` and
-`package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
-Anything under `src/` is not API.
-
-The engine is also on pub.dev, as `jet_cad_2d` (since 0.7.1, under its own
-versions). Do not add it from there next to the dependencies above: the
-planner already brings it by git, and pub takes a package from one source
-only, so it refuses the pair.
+The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come with
+it, from pub.dev. Import only the planner's barrel,
+`package:jet_cad_floor_plan/jet_cad_floor_plan.dart`. Anything under `src/`
+is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
 0.7.0 was built and tested with Flutter 3.47.6. They bring no build hook
 and no GPU renderer: nothing runs at build time beyond Flutter's own.
 (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
 hook compiles shaders.)
+
+### The restaurant symbols
+
+The restaurant library (tables, chairs, bar and kitchen symbols) is not a
+dependency of the planner: you copy its two files into your app, in three
+steps.
+
+1. Take the files from the tag `jet_cad_floor_plan-vX.Y.Z` of the planner
+   release you depend on: `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib`
+   and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`. Put the
+   library at `assets/restaurant.jetlib` and the names beside your code as
+   `restaurant_names.dart`, with its import changed to the planner's
+   barrel, `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
+2. Declare the asset in your pubspec:
+
+```yaml
+  assets:
+    - assets/restaurant.jetlib
+```
+
+3. Read it from your own assets and make it a source:
+
+```dart
+/// The restaurant library, from this app's own assets (host guide, "The
+/// restaurant symbols").
+Future<Uint8List> readRestaurantLibrary() async {
+  final data = await rootBundle.load('assets/restaurant.jetlib');
+  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+}
+
+const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
+    name: 'restaurant',
+    read: readRestaurantLibrary,
+    names: restaurantSymbolNames);
+```
+
+Give the loader both sources (section 4):
+`SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
+
+Two rules. Never load the copy with the package's own
+`restaurantSymbolSource`: it reads the package's asset key, which your app
+does not have. And a saved plan does not depend on the library: you can
+change which library you ship without migrating saved plans.
 
 ## 2. Fonts
 
@@ -148,7 +166,7 @@ thumbnail cache between their controllers:
 
 ```dart
   final symbols = SymbolLibraryLoader(
-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
+    sources: const [furnitureSymbolSource, restaurantSource],
   );
   final thumbnails = SymbolThumbnails(maxEntries: 128);
 

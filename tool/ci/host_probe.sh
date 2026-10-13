@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Spec 14d P6: builds the host probe against the repository at a commit,
-# by git, from outside the workspace -- as a POS would depend on it.
+# from outside the workspace -- as a POS would depend on it. The probe
+# resolves the planner from pub.dev, and its dependency overrides take the
+# four repository packages from git at the commit; the restaurant symbols
+# are copied into the probe, as a host does (publishing spec D6, D9).
 #
 #   tool/ci/host_probe.sh <git url> <commit sha>
 #
@@ -18,12 +21,21 @@ url=$1
 ref=$2
 ci=$(cd "$(dirname "$0")" && pwd)
 probe=$ci/host_probe
-rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"
+rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \
+  "$probe/assets/restaurant.jetlib" "$probe/lib/restaurant_names.dart"
 sed -e "s#@URL@#$url#g" -e "s#@REF@#$ref#g" \
   "$probe/pubspec.yaml.in" > "$probe/pubspec.yaml"
 cd "$probe"
 flutter pub get
-dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"
+dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"
+# Publishing spec D9: the probe carries the restaurant library as a host
+# does, copied from the package pub resolved at this commit, its names'
+# import pointed at the planner's barrel.
+symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)
+mkdir -p "$probe/assets"
+cp "$symbols/assets/restaurant.jetlib" "$probe/assets/restaurant.jetlib"
+sed 's#package:jet_cad_floor_plan/symbol_sources.dart#package:jet_cad_floor_plan/jet_cad_floor_plan.dart#' \
+  "$symbols/lib/src/names.dart" > "$probe/lib/restaurant_names.dart"
 flutter analyze
 flutter build web
 fail=0

@@ -1,15 +1,36 @@
 // The external-host probe (spec 14d P6) and the host guide's source
-// (P2): a small point-of-sale screen that depends on the planner and the
-// restaurant library by git, from outside the workspace, through their
-// public barrels only. CI resolves, analyses and builds it at the commit it
-// tests; tool/ci/check_guide.dart checks that every Dart snippet of
-// docs/host-guide.md is in this file, so the guide's code compiles.
+// (P2): a small point-of-sale screen that depends on the planner from
+// pub.dev (overridden to the commit under test) and carries the restaurant
+// library as a host does, from outside the workspace, through the
+// planner's public barrel only. CI resolves, analyses and builds it at the
+// commit it tests; tool/ci/check_guide.dart checks that every Dart snippet
+// of docs/host-guide.md is in this file, so the guide's code compiles.
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show BrowserContextMenu, HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey;
+    show
+        BrowserContextMenu,
+        HardwareKeyboard,
+        KeyDownEvent,
+        LogicalKeyboardKey,
+        rootBundle;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
-import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
+
+import 'restaurant_names.dart';
+
+/// The restaurant library, from this app's own assets (host guide, "The
+/// restaurant symbols").
+Future<Uint8List> readRestaurantLibrary() async {
+  final data = await rootBundle.load('assets/restaurant.jetlib');
+  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+}
+
+const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
+    name: 'restaurant',
+    read: readRestaurantLibrary,
+    names: restaurantSymbolNames);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -171,7 +192,7 @@ class _FloorScreenState extends State<FloorScreen> {
 
   // One loader and one thumbnail cache for every floor's controller.
   final symbols = SymbolLibraryLoader(
-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
+    sources: const [furnitureSymbolSource, restaurantSource],
   );
   final thumbnails = SymbolThumbnails(maxEntries: 128);
 

@@ -128,12 +128,12 @@ jobs:
         working-directory: tool/ci
         run: >-
           dart analyze --fatal-infos lib test expect_failures.dart
-          check_guide.dart check_host_lock.dart
+          check_guide.dart check_host_lock.dart package_root.dart
       - name: Format
         working-directory: tool/ci
         run: >-
           dart format --output=none --set-exit-if-changed
-          lib test expect_failures.dart check_guide.dart check_host_lock.dart
+          lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
           host_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
