@@ -41,6 +41,7 @@ class FloorPlanView extends StatefulWidget {
     this.serviceMoves = true,
     this.onTableContextMenu,
     this.longPress = FloorPlanLongPress.toggleSelection,
+    this.floorDrag = FloorPlanFloorDrag.pan,
     this.onGroupTap,
     this.onMergeRequested,
     this.onSplitRequested,
@@ -93,6 +94,15 @@ class FloorPlanView extends StatefulWidget {
   /// What a long press on a table does in the selection mode (spec 14d
   /// S7).
   final FloorPlanLongPress longPress;
+
+  /// What a one-pointer drag on the empty floor does in the selection
+  /// mode (rubber-band spec RB-1): `pan` (the default) pans, and a Shift,
+  /// Ctrl or Cmd mouse or stylus drag draws a band that adds to the
+  /// selection; `band` draws a band that selects -- left to right the
+  /// tables wholly inside, right to left every table touched, a group
+  /// whole, a locked table never -- and the camera pans with two fingers,
+  /// the wheel or trackpad, and the middle button. Read at each press.
+  final FloorPlanFloorDrag floorDrag;
 
   /// A member of a group was tapped in the selection mode (table-groups
   /// spec G4): the group's id and the tapped number, after [onTableTap]. A
@@ -699,7 +709,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                     serviceMoves: widget.serviceMoves,
                     longPress: widget.longPress,
                     onTableContextMenu: widget.onTableContextMenu,
-                    floorDrag: FloorPlanFloorDrag.pan,
+                    floorDrag: widget.floorDrag,
                   ),
               userCamera: () => widget.userCamera,
               tableOverlays: serviceOverlays,

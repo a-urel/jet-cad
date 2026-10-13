@@ -34,6 +34,7 @@ export 'src/host/floor_plan_types.dart'
         FloorPlanExportChoice,
         FloorPlanExportDpi,
         FloorPlanExportFormat,
+        FloorPlanFloorDrag,
         FloorPlanLongPress,
         FloorPlanMode,
         FloorPlanTable,
