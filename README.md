@@ -2,7 +2,9 @@
 
 jet-cad is a parametric floor planner for Flutter, built to be embedded in an
 application such as a restaurant's point of sale. It is a Dart workspace of
-three packages on pub.dev:
+three packages on pub.dev.
+
+## The jet-cad packages
 
 | Package | What it is | Depends on |
 |---|---|---|
@@ -26,6 +28,7 @@ If jet-cad is useful to you, you can support its development through
 
 JetCAD is licensed under the [Apache License 2.0](LICENSE). The dormant
 `packages/jet_cad` line depends on Open CASCADE Technology (OCCT), which is
-distributed under the GNU LGPL v2.1 with the Open CASCADE Exception. OCCT remains a third-party dependency with its own
-license; JetCAD's Apache 2.0 license is independent of OCCT's license. See the
-[LICENSES](LICENSES/) directory for third-party license information.
+distributed under the GNU LGPL v2.1 with the Open CASCADE Exception. OCCT
+remains a third-party dependency with its own license; JetCAD's Apache 2.0
+license is independent of OCCT's license. See the [LICENSES](LICENSES/)
+directory for third-party license information.

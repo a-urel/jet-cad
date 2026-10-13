@@ -1958,7 +1958,8 @@ the plan or another field takes it.
 
 The planner follows your `MaterialApp`'s theme. In a dark theme a light
 page is shown on a dark canvas with its drawing re-toned to keep its
-contrast; exports and prints are never re-toned.
+contrast; exports and prints are never re-toned. Since 0.7.2 the
+editor's rulers follow the ambient `DefaultTextStyle`'s font family.
 
 *Since 0.4.0:* the floor plan's own look, `FloorPlanTheme`.
 

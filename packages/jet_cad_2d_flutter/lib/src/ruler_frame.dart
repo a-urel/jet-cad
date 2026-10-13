@@ -11,7 +11,9 @@ import 'ruler_painter.dart';
 /// Two ruler bars and a corner around a drawing area (spec D11). Each bar
 /// is exactly co-extensive with the child on its own axis. A translucent
 /// `Listener` over the child feeds [RulerFrameState.pointer]; the child's
-/// own listeners still receive every event.
+/// own listeners still receive every event. The labels take the font family
+/// of the ambient `DefaultTextStyle`: under a Material `Scaffold` the app's
+/// font, directly under a `MaterialApp` the debug fallback's.
 class RulerFrame extends StatefulWidget {
   const RulerFrame({
     super.key,

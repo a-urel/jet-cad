@@ -84,7 +84,14 @@ A rubber band (`floorDrag: FloorPlanFloorDrag.band`) mid-drag across the front r
 
 Tables in plan colours (`setTablesColor`).
 
-The restaurant tables in the service pictures come from the repository's restaurant symbols, which a host copies as the host guide's "The restaurant symbols" describes; the furniture library ships with the package. The captions in the pictures are set in Roboto by the pictures' own app theme; a host asks for them in its theme.
+The restaurant tables in the service pictures come from the repository's
+restaurant symbols, which a host copies as the host guide's "The restaurant
+symbols" describes; the furniture library ships with the package. The
+captions in the pictures are set in Roboto by the pictures' own app theme. A
+host sets the caption fonts in its `FloorPlanTheme`, through
+`statusCaptionStyle` and `groupChipTextStyle`; the host guide's
+[Themes](https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md#9-themes)
+section describes the theme.
 
 ## A symbol library of your own
 
@@ -116,7 +123,7 @@ written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
 - Nothing under `src/` is API.
 
 While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
-patch release (`0.7.2`) does not.
+patch release (`0.7.3`) does not.
 
 ## The jet-cad packages
 

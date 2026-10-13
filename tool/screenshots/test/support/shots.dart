@@ -47,9 +47,12 @@ Future<void> pumpScene(WidgetTester tester, Widget scene,
 }
 
 /// Lets real asynchronous work (asset reads, thumbnails) finish, frame by
-/// frame, until [until] holds or forty rounds pass, then past animations.
+/// frame, until [until] holds or ten seconds of real time pass (one second
+/// without an [until]), then past animations.
 Future<void> settle(WidgetTester tester, {bool Function()? until}) async {
-  for (var i = 0; i < 40 && !(until?.call() ?? false); i++) {
+  final limit = Duration(seconds: until == null ? 1 : 10);
+  final clock = Stopwatch()..start();
+  while (clock.elapsed < limit && !(until?.call() ?? false)) {
     await tester
         .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
     await tester.pump();

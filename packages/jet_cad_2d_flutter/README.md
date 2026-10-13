@@ -73,7 +73,7 @@ instrument for this repository's own suites; it is not API and may change in
 any release.
 
 While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
-patch release (`0.7.2`) does not.
+patch release (`0.7.3`) does not.
 
 ## The jet-cad packages
 

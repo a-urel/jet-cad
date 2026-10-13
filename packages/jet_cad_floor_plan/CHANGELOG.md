@@ -7,8 +7,9 @@ Two exports, screenshots and documentation. Plans are stored as in 0.7.1
 
 - The barrel exports `SymbolLibraryState` (`SymbolLibraryLoading`,
   `SymbolLibraryReady`, `SymbolLibraryFailed`) and `TableNumberProblem`:
-  a host that implements `FloorPlanStrings` no longer imports
-  `editor.dart` for them (R-10).
+  a host that implements `FloorPlanStrings` names `TableNumberProblem`, and a
+  host that watches its `SymbolLibraryLoader` names its states, without
+  importing `editor.dart`.
 - The editor's rulers use the app's font, through the renderer's
   `RulerFrame` change in `jet_cad_2d_flutter` 0.7.2.
 - Screenshots, in the pub.dev gallery and in the README: the editor in

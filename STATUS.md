@@ -1,6 +1,6 @@
 # jet-cad — project status
 
-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (the three host packages are on pub.dev at 0.7.1; 0.7.2 is in flight, below) (tag
+**Last updated:** 2026-10-13. **`main` carries release 0.7.0** and its tag history; the three packages are on pub.dev at 0.7.1; 0.7.2 is in flight (below) (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
 `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
 before this point — its records, reviews and resume points — is in
@@ -538,10 +538,14 @@ the real publish.
 
 2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
    lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
-   resolve at their lowest); then:
+   resolve at their lowest). The recipe (a `git archive` copy with `test/`,
+   `build/` and `tool/` removed, as `.pubignore` does, then pana and
+   `pub downgrade`) is in
+   `docs/superpowers/notes/2026-10-13-publish-host-packages-results.md`,
+   section "pana (0.23.19), on each archive's file set"; then:
 
    ```bash
-   cd packages/jet_cad_2d_flutter
+   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
    dart pub publish --dry-run
    dart pub publish
    git tag jet_cad_2d_flutter-v0.7.2 <merge commit>
@@ -549,10 +553,11 @@ the real publish.
    ```
 
 3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
-   first, as for the renderer:
+   first, by the same recipe (the results note's "pana (0.23.19), on each
+   archive's file set"):
 
    ```bash
-   cd packages/jet_cad_floor_plan
+   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
    dart pub publish --dry-run
    dart pub publish
    git tag jet_cad_floor_plan-v0.7.2 <merge commit>
@@ -578,8 +583,7 @@ renderer 160/160. D7 green from pub.dev alone. R-10 stands: the planner
 went out without the two exports. The record: the results note's
 "The publication".
 
-**Next:** D11 in the restaurant software (below); R-10's exports as a
-0.x candidate for the planner's next release. A later release of any
+**Next:** D11 in the restaurant software (below). A later release of any
 package follows the same order: its own version, CHANGELOG and tag
 `<package>-vX.Y.Z`; a dependent's lower bounds per D1, checked by
 pana's lower-bounds section once its dependencies are on pub.dev;
