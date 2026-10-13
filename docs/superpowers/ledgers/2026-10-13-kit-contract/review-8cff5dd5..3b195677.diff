@@ -1,0 +1,212 @@
+# Review package: 8cff5dd..HEAD
+
+## Commits
+3b195677 docs(kit): analysed example files behind the docs/kits.md snippets (K8)
+
+## Files changed
+ docs/kits.md                                       | 53 ++++++++++++++++------
+ .../example/cafe_conformance_test.dart             | 23 ++++++++++
+ packages/jet_cad_2d_kit/example/cafe_kit.dart      | 16 +++++++
+ packages/jet_cad_2d_kit/example/generate_cafe.dart | 20 ++++++++
+ 4 files changed, 99 insertions(+), 13 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index afd2faa8..91c1071a 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -108,21 +108,30 @@ a word id to the word.
+ Every word id carries its kit's id, so two kits never share one;
+ `PlanKit.validate` reports a word under another kit's id. Lookup
+ (`symbolName(locale, symbol)`, `categoryName(locale, kit, category)`)
+ falls back from the locale to English, then, for a symbol or a category,
+ to the library's stored English. English is required for every
+ word with no stored English. A kit's other locales are optional, and a kit
+ that declares one declares it complete.
+ 
+ ## 6. The descriptor
+ 
++The snippets in sections 6 to 8 are files under the package's `example/`
++(`cafe_kit.dart`, `generate_cafe.dart`, `cafe_conformance_test.dart`),
++analysed with the package; `example.dart` is the file with
++`buildCafeCatalog` and `cafeNames`.
++
+ ```dart
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import 'example.dart';
++
+ final PlanKit cafeKit = PlanKit(
+   id: 'cafe',
+   version: '0.1.0',
+   symbols: [
+     SymbolLibrarySource(
+       label: 'cafe',
+       read: bundledLibrary('packages/jet_cad_2d_kit_cafe/assets/cafe.jetlib'),
+     ),
+   ],
+   names: cafeNames,
+@@ -165,22 +174,31 @@ Catalog buildCafeCatalog() => Catalog(kit: 'cafe', symbols: [
+   `stoolTuck` 40; every coordinate cleaned to 1e-6 (`cleanCoordinate`). A
+   helper is a convenience: changing one never changes a published `key@N`,
+   because the conformance test holds every kit to its committed geometry.
+ - `encodeLibrary(catalog)` gives the bytes, deterministically, and refuses
+   a catalog the format refuses.
+ 
+ A kit's generator (`tool/generate.dart`) writes the library and **adds** the
+ snapshot entries of new `key@N`s; it never rewrites an existing entry:
+ 
+ ```dart
++import 'dart:io';
++
++import 'package:jet_cad_2d_kit/authoring.dart';
++
++import 'example.dart';
++
+ void main() {
+-  File('assets/cafe.jetlib').writeAsBytesSync(encodeLibrary(buildCafeCatalog()));
++  Directory('assets').createSync(recursive: true);
++  Directory('test').createSync(recursive: true);
++  File('assets/cafe.jetlib')
++      .writeAsBytesSync(encodeLibrary(buildCafeCatalog()));
+   final file = File('test/cafe_snapshot.json');
+   final committed = file.existsSync()
+       ? parseSnapshot(file.readAsStringSync())
+       : <String, String>{};
+   file.writeAsStringSync(encodeSnapshot(
+       updateSnapshot(committed, geometrySnapshot(buildCafeCatalog()))));
+ }
+ ```
+ 
+ ## 8. Keys, versions and the conformance test
+@@ -192,32 +210,41 @@ void main() {
+   symbol's definition.
+ - **Names, categories, words and tags may change at any version**; they are
+   not geometry.
+ - **Semver at 0.x:** a new symbol, a new `@N`, words or tags is a patch; a
+   removed or renamed Dart name, a type's parameters changed or the kit id
+   changed is a minor (0.x+1.0).
+ 
+ A kit's test:
+ 
+ ```dart
+-test('the kit conforms', () {
+-  expect(
+-    conformance(
+-      catalog: buildCafeCatalog(),
+-      committedLibrary: File('assets/cafe.jetlib').readAsBytesSync(),
+-      committedSnapshot: File('test/cafe_snapshot.json').readAsStringSync(),
+-      names: cafeNames,
+-      locales: const ['tr'],
+-    ),
+-    isEmpty,
+-  );
+-});
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/authoring.dart';
++
++import 'example.dart';
++
++void main() {
++  test('the kit conforms', () {
++    expect(
++      conformance(
++        catalog: buildCafeCatalog(),
++        committedLibrary: File('assets/cafe.jetlib').readAsBytesSync(),
++        committedSnapshot: File('test/cafe_snapshot.json').readAsStringSync(),
++        names: cafeNames,
++        locales: const ['tr'],
++      ),
++      isEmpty,
++    );
++  });
++}
+ ```
+ 
+ It reports: a catalog that does not build; keys, tags, kinds and families
+ not in lower case; a key under another kit's id; a committed library that
+ is not the built one, that the format refuses, or that is another kit's; a
+ committed `key@N` whose geometry or unit changed, that was removed, or a
+ new one the snapshot lacks; a declared locale missing a word, or giving the
+ English word unless `sameAsEnglish` allows it; a word for a key or category
+ the catalog lacks; a locale with words that is not declared.
+ 
+diff --git a/packages/jet_cad_2d_kit/example/cafe_conformance_test.dart b/packages/jet_cad_2d_kit/example/cafe_conformance_test.dart
+new file mode 100644
+index 00000000..601e6e81
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/example/cafe_conformance_test.dart
+@@ -0,0 +1,23 @@
++// A kit's conformance test (docs/kits.md section 8). It reads the files
++// generate_cafe.dart writes, so it is analysed here, not run.
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/authoring.dart';
++
++import 'example.dart';
++
++void main() {
++  test('the kit conforms', () {
++    expect(
++      conformance(
++        catalog: buildCafeCatalog(),
++        committedLibrary: File('assets/cafe.jetlib').readAsBytesSync(),
++        committedSnapshot: File('test/cafe_snapshot.json').readAsStringSync(),
++        names: cafeNames,
++        locales: const ['tr'],
++      ),
++      isEmpty,
++    );
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/example/cafe_kit.dart b/packages/jet_cad_2d_kit/example/cafe_kit.dart
+new file mode 100644
+index 00000000..09729028
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/example/cafe_kit.dart
+@@ -0,0 +1,16 @@
++// The kit's descriptor (docs/kits.md section 6).
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import 'example.dart';
++
++final PlanKit cafeKit = PlanKit(
++  id: 'cafe',
++  version: '0.1.0',
++  symbols: [
++    SymbolLibrarySource(
++      label: 'cafe',
++      read: bundledLibrary('packages/jet_cad_2d_kit_cafe/assets/cafe.jetlib'),
++    ),
++  ],
++  names: cafeNames,
++);
+diff --git a/packages/jet_cad_2d_kit/example/generate_cafe.dart b/packages/jet_cad_2d_kit/example/generate_cafe.dart
+new file mode 100644
+index 00000000..7a94f4e2
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/example/generate_cafe.dart
+@@ -0,0 +1,20 @@
++// A kit's generator (docs/kits.md section 7): writes the library and adds
++// the snapshot entries of new key@N's.
++import 'dart:io';
++
++import 'package:jet_cad_2d_kit/authoring.dart';
++
++import 'example.dart';
++
++void main() {
++  Directory('assets').createSync(recursive: true);
++  Directory('test').createSync(recursive: true);
++  File('assets/cafe.jetlib')
++      .writeAsBytesSync(encodeLibrary(buildCafeCatalog()));
++  final file = File('test/cafe_snapshot.json');
++  final committed = file.existsSync()
++      ? parseSnapshot(file.readAsStringSync())
++      : <String, String>{};
++  file.writeAsStringSync(encodeSnapshot(
++      updateSnapshot(committed, geometrySnapshot(buildCafeCatalog()))));
++}

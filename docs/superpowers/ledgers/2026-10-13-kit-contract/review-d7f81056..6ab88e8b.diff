@@ -1,0 +1,361 @@
+# Review package: d7f8105..HEAD
+
+## Commits
+6ab88e8b feat(kit): SymbolLibrarySource, bundledLibrary and PlanKit (K5)
+
+## Files changed
+ packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart    |  3 +
+ .../lib/src/kit/bundled_library.dart               | 16 ++++
+ packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart  | 74 +++++++++++++++++
+ .../lib/src/kit/symbol_library_source.dart         | 20 +++++
+ .../jet_cad_2d_kit/test/kit/plan_kit_test.dart     | 95 ++++++++++++++++++++++
+ packages/jet_cad_2d_kit/test/kit/sources_test.dart | 94 +++++++++++++++++++++
+ 6 files changed, 302 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+index bb8950d8..eaf96cfa 100644
+--- a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+@@ -1,9 +1,12 @@
+ /// The kit contract of jet_cad_2d plans: the components a plan stores, the
+ /// `.jetlib` symbol library format, a kit's words, its symbol sources and
+ /// its `PlanKit` descriptor.
+ ///
+ /// A Flutter library: it reads bundled assets. The model it exports is pure
+ /// Dart and is shared with `package:jet_cad_2d_kit/authoring.dart`.
+ library;
+ 
++export 'src/kit/bundled_library.dart';
++export 'src/kit/plan_kit.dart';
++export 'src/kit/symbol_library_source.dart';
+ export 'src/model/model.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/bundled_library.dart b/packages/jet_cad_2d_kit/lib/src/kit/bundled_library.dart
+new file mode 100644
+index 00000000..c1035a89
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/bundled_library.dart
+@@ -0,0 +1,16 @@
++// A reader of a library bundled as a Flutter asset (spec K5). A kit's
++// source is one line:
++//   SymbolLibrarySource(label: 'restaurant', read: bundledLibrary(
++//       'packages/jet_cad_2d_kit_restaurant/assets/restaurant.jetlib'))
++import 'dart:typed_data';
++
++import 'package:flutter/services.dart' show AssetBundle, rootBundle;
++
++/// A reader of [assetKey] in [bundle] ([rootBundle] when null), resolved
++/// each time the reader runs.
++Future<Uint8List> Function() bundledLibrary(String assetKey,
++        {AssetBundle? bundle}) =>
++    () async {
++      final data = await (bundle ?? rootBundle).load(assetKey);
++      return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
++    };
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+new file mode 100644
+index 00000000..0b524483
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/plan_kit.dart
+@@ -0,0 +1,74 @@
++// A kit's descriptor, its symbol part (spec K5). Sub-project 2 adds types,
++// tools and attachments and extends validate.
++import 'package:meta/meta.dart';
++
++import '../model/kit_ids.dart';
++import '../model/kit_names.dart';
++import '../model/kit_problem.dart';
++import 'symbol_library_source.dart';
++
++@immutable
++final class PlanKit {
++  const PlanKit({
++    required this.id,
++    required this.version,
++    this.symbols = const [],
++    this.names = KitNames.empty,
++  });
++
++  /// A kit id (K2): the first segment of the kit's keys, type and tool ids.
++  final String id;
++
++  /// The kit package's version, for the plan manifest.
++  final String version;
++
++  final List<SymbolLibrarySource> symbols;
++  final KitNames names;
++
++  /// The descriptor's problems: a bad id, an empty version, a word under
++  /// another kit's id or in no known namespace, a word with no stored
++  /// English missing from English. Empty when sound.
++  List<KitProblem> validate() {
++    final problems = <KitProblem>[];
++    if (!isKitId(id)) {
++      problems.add(KitProblem(
++          KitProblemCode.badKitId,
++          '"$id" is not a kit id: a lower-case letter, then lower-case '
++          'letters and digits'));
++    }
++    if (version.trim().isEmpty) {
++      problems.add(KitProblem(
++          KitProblemCode.emptyVersion, 'the kit "$id" has no version'));
++    }
++    final english = names.words[KitNames.english] ?? const <String, String>{};
++    for (final MapEntry(key: locale, value: words) in names.words.entries) {
++      for (final wordId in words.keys) {
++        final colon = wordId.indexOf(':');
++        final namespace = colon < 0 ? '' : wordId.substring(0, colon);
++        final rest = wordId.substring(colon + 1);
++        var foreign = false;
++        switch (namespace) {
++          case 'category':
++            final slash = rest.indexOf('/');
++            foreign = slash < 0 || rest.substring(0, slash) != id;
++          case 'symbol' || 'tool' || 'type' || 'property':
++            foreign = !rest.contains('.') || kitOfKey(rest) != id;
++            if (!foreign &&
++                namespace != 'symbol' &&
++                !english.containsKey(wordId)) {
++              problems.add(KitProblem(KitProblemCode.missingEnglish,
++                  '$locale: "$wordId" has no English word'));
++            }
++          default:
++            problems.add(KitProblem(KitProblemCode.unknownWordId,
++                '$locale: "$wordId" is in no known namespace'));
++        }
++        if (foreign) {
++          problems.add(KitProblem(KitProblemCode.foreignWordId,
++              '$locale: "$wordId" is not under the kit "$id"'));
++        }
++      }
++    }
++    return problems;
++  }
++}
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/symbol_library_source.dart b/packages/jet_cad_2d_kit/lib/src/kit/symbol_library_source.dart
+new file mode 100644
+index 00000000..c3741d8a
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/symbol_library_source.dart
+@@ -0,0 +1,20 @@
++// A symbol source (spec K5): plain data, a label for messages and a reader
++// of a library's bytes. A kit's symbols are its sources' libraries.
++import 'dart:typed_data';
++
++import 'package:meta/meta.dart';
++
++@immutable
++final class SymbolLibrarySource {
++  const SymbolLibrarySource({required this.label, required this.read});
++
++  /// Names the source in messages.
++  final String label;
++
++  /// Reads the library's bytes. Every library a kit's sources read carries
++  /// that kit's id; the plan library refuses one that does not.
++  final Future<Uint8List> Function() read;
++
++  @override
++  String toString() => 'SymbolLibrarySource($label)';
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart b/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
+new file mode 100644
+index 00000000..d073416e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
+@@ -0,0 +1,95 @@
++// Spec K5: the PlanKit descriptor's symbol part and its validation.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++List<KitProblemCode> codes(PlanKit kit) =>
++    [for (final p in kit.validate()) p.code];
++
++void main() {
++  test('K1 a const descriptor with its defaults', () {
++    const kit = PlanKit(id: 'sample', version: '0.1.0');
++    expect(kit.symbols, isEmpty);
++    expect(identical(kit.names, KitNames.empty), isTrue);
++    expect(kit.validate(), isEmpty);
++  });
++
++  test('K2 a sound kit validates: own words, categories, English present', () {
++    const kit = PlanKit(
++      id: 'sample',
++      version: '0.3.1',
++      names: KitNames({
++        'en': {
++          'tool:sample.wall': 'Wall',
++          'type:sample.wall': 'Wall',
++          'property:sample.wall.height': 'Height',
++        },
++        'tr': {
++          'symbol:sample.table.round': 'Yuvarlak masa',
++          'category:sample/Tables': 'Masalar',
++          'tool:sample.wall': 'Duvar',
++          'property:sample.wall.height': 'Yükseklik',
++        },
++      }),
++    );
++    expect(kit.validate(), isEmpty);
++  });
++
++  test('K3 a bad id and an empty version', () {
++    // M-K3a: drop the id check. M-K3b: test `version.isEmpty` only.
++    expect(codes(const PlanKit(id: 'Sample', version: '0.1.0')),
++        [KitProblemCode.badKitId]);
++    expect(codes(const PlanKit(id: 'my-kit', version: '0.1.0')),
++        [KitProblemCode.badKitId]);
++    expect(codes(const PlanKit(id: 'sample', version: ' ')),
++        [KitProblemCode.emptyVersion]);
++  });
++
++  test("K4 a word id under another kit's id, in every namespace", () {
++    for (final id in [
++      'symbol:other.table.round',
++      'tool:other.wall',
++      'type:other.wall',
++      'property:other.wall.height',
++      'tool:wall', // no kit segment at all
++      'category:other/Tables', // M-K4b: categories exempt from the check
++      'category:Tables', // no kit at all
++    ]) {
++      final kit = PlanKit(
++          id: 'sample',
++          version: '0.1.0',
++          names: KitNames({
++            'en': {id: 'x'},
++          }));
++      // M-K4: check the symbol namespace only.
++      expect(codes(kit), [KitProblemCode.foreignWordId], reason: id);
++      expect(kit.validate().single.message, contains(id));
++    }
++  });
++
++  test('K5 a word id in no known namespace', () {
++    const kit = PlanKit(
++        id: 'sample',
++        version: '0.1.0',
++        names: KitNames({
++          'tr': {'label:sample.x': 'x', 'sample.table.round': 'y'},
++        }));
++    expect(codes(kit),
++        [KitProblemCode.unknownWordId, KitProblemCode.unknownWordId]);
++  });
++
++  test('K6 a tool, type or property word without English', () {
++    const kit = PlanKit(
++        id: 'sample',
++        version: '0.1.0',
++        names: KitNames({
++          'tr': {
++            'tool:sample.wall': 'Duvar',
++            'symbol:sample.table.round': 'Yuvarlak masa',
++            'category:sample/Tables': 'Masalar',
++          },
++        }));
++    // M-K6: drop the English check; a symbol or category word needs none.
++    expect(codes(kit), [KitProblemCode.missingEnglish]);
++    expect(kit.validate().single.message, contains('tool:sample.wall'));
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/sources_test.dart b/packages/jet_cad_2d_kit/test/kit/sources_test.dart
+new file mode 100644
+index 00000000..bed4d1ae
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/sources_test.dart
+@@ -0,0 +1,94 @@
++// Spec K5: a symbol source is a label and a reader; bundledLibrary reads an
++// asset bundle (rootBundle when none is given), at read time.
++import 'dart:convert';
++
++import 'package:flutter/foundation.dart' show FlutterError;
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../support/library_fixtures.dart';
++
++const String key = 'packages/jet_cad_2d_kit_sample/assets/sample.jetlib';
++
++/// A bundle that counts its loads and serves [assets].
++class _Bundle extends CachingAssetBundle {
++  _Bundle(this.assets);
++
++  final Map<String, ByteData> assets;
++  final List<String> loads = [];
++
++  @override
++  Future<ByteData> load(String key) async {
++    loads.add(key);
++    final data = assets[key];
++    if (data == null) throw FlutterError('no asset $key');
++    return data;
++  }
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test('S1 a source is its label and its reader', () async {
++    final source = SymbolLibrarySource(
++        label: 'sample', read: () async => Uint8List.fromList([4, 5]));
++    expect(source.label, 'sample');
++    expect(await source.read(), [4, 5]);
++    expect('$source', 'SymbolLibrarySource(sample)');
++  });
++
++  test("S2 the bundle's bytes, honouring the view's offset and length",
++      () async {
++    // A view into the middle of a larger buffer, as an engine hands out.
++    final bundle = _Bundle({
++      key:
++          ByteData.sublistView(Uint8List.fromList([9, 9, 7, 1, 2, 3, 9]), 3, 6),
++    });
++    // M-S2: `data.buffer.asUint8List()` returns all seven bytes.
++    expect(await bundledLibrary(key, bundle: bundle)(), [1, 2, 3]);
++  });
++
++  test('S3 nothing is loaded until the reader runs; each run loads once',
++      () async {
++    final bundle = _Bundle({key: ByteData(4)});
++    final read = bundledLibrary(key, bundle: bundle);
++    // M-S3: load eagerly in bundledLibrary and keep the future.
++    expect(bundle.loads, isEmpty);
++    await read();
++    await read();
++    expect(bundle.loads, [key, key]);
++  });
++
++  test('S4 without a bundle the root bundle is read', () async {
++    final bytes = Uint8List.fromList([7, 8, 9]);
++    final messenger =
++        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
++    messenger.setMockMessageHandler('flutter/assets', (message) async {
++      final asked = utf8.decode(message!.buffer
++          .asUint8List(message.offsetInBytes, message.lengthInBytes));
++      return asked == key ? ByteData.sublistView(bytes) : null;
++    });
++    addTearDown(() => messenger.setMockMessageHandler('flutter/assets', null));
++    // M-S4: `bundle!` in place of `bundle ?? rootBundle`.
++    expect(await bundledLibrary(key)(), [7, 8, 9]);
++  });
++
++  test("S5 a missing asset fails the read with the bundle's error", () async {
++    final read =
++        bundledLibrary('packages/x/missing.jetlib', bundle: _Bundle(const {}));
++    await expectLater(read(), throwsA(isA<FlutterError>()));
++  });
++
++  test('S6 a bundled library decodes through its source', () async {
++    final source = SymbolLibrarySource(
++        label: 'sample',
++        read: bundledLibrary(key,
++            bundle: _Bundle({
++              key: ByteData.sublistView(bytesOf(buildValidLibrary())),
++            })));
++    final library = SymbolLibrary.decode(await source.read());
++    expect(library.kits, ['sample']);
++    expect(library.entries, hasLength(3));
++  });
++}
