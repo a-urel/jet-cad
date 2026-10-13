@@ -389,8 +389,9 @@ with 0.7.0 (below).
 
 - **The packages' READMEs, screenshots and funding links** (the human,
   2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
-  `51125b6`; **not merged** (the merge waits for the human's word, after
-  the whole-branch review). Spec
+  `51125b6`; **merged into `main` at `5c244b1`** on the human's *"merge
+  to main"* (2026-10-13), after the whole-branch review and its fixes;
+  not yet pushed. Spec
   [2026-10-13-package-readmes-design.md](docs/superpowers/specs/2026-10-13-package-readmes-design.md)
   (rev 1, amendments A1-A4), plan
   [2026-10-13-package-readmes.md](docs/superpowers/plans/2026-10-13-package-readmes.md),
@@ -514,22 +515,21 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**In flight 2026-10-13: `feat/package-readmes` (0.7.2 of the three
-packages), done up to the whole-branch review; then the human's merge and
-publication.** The checklist below is the spec's D11, in order. Fill
-`<merge commit>` with the merge commit on `main`.
+**In flight 2026-10-13: 0.7.2 of the three packages, merged into `main`
+at `5c244b1` (not yet pushed); next, the human's push and publication.**
+The checklist below is the spec's D11, in order; `5c244b1` is
+`5c244b1`.
 
 Run each `dart pub publish` from the package directory, never the
 repository root (it fails with a "private package" error). If `main` has
 moved past the merge commit, publish from a worktree at that commit
-instead: `git worktree add /tmp/jet-cad-0.7.2 <merge commit>` (and run the
+instead: `git worktree add /tmp/jet-cad-0.7.2 5c244b1` (and run the
 commands there). `dart pub publish --dry-run` must say 0 warnings before
 the real publish.
 
-0. Merge and push first: the human merges `feat/package-readmes` into
-   `main`, runs `git push origin main`, and waits for CI on that merge
-   commit to be green (all jobs) before any publish. That commit is
-   `<merge commit>` in the steps below.
+0. Push first: `feat/package-readmes` is merged into `main` at
+   `5c244b1`; the human runs `git push origin main` and waits for CI on
+   that merge commit to be green (all jobs) before any publish.
 
 1. Engine:
 
@@ -537,7 +537,7 @@ the real publish.
    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d"
    dart pub publish --dry-run
    dart pub publish
-   git tag jet_cad_2d-v0.7.2 <merge commit>
+   git tag jet_cad_2d-v0.7.2 5c244b1
    git push origin jet_cad_2d-v0.7.2
    ```
 
@@ -549,7 +549,7 @@ the real publish.
    ```bash
    cd "$(git rev-parse --show-toplevel)"
    rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
-   git archive <merge commit> packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
+   git archive 5c244b1 packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
    rm -rf /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/test /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/build /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/shaders
    dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_2d_flutter
    ```
@@ -564,7 +564,7 @@ the real publish.
    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
    dart pub publish --dry-run
    dart pub publish
-   git tag jet_cad_2d_flutter-v0.7.2 <merge commit>
+   git tag jet_cad_2d_flutter-v0.7.2 5c244b1
    git push origin jet_cad_2d_flutter-v0.7.2
    ```
 
@@ -575,7 +575,7 @@ the real publish.
    ```bash
    cd "$(git rev-parse --show-toplevel)"
    rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
-   git archive <merge commit> packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
+   git archive 5c244b1 packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
    rm -rf /tmp/jet-cad-pana/packages/jet_cad_floor_plan/test /tmp/jet-cad-pana/packages/jet_cad_floor_plan/build /tmp/jet-cad-pana/packages/jet_cad_floor_plan/tool
    dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_floor_plan
    ```
@@ -586,7 +586,7 @@ the real publish.
    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
    dart pub publish --dry-run
    dart pub publish
-   git tag jet_cad_floor_plan-v0.7.2 <merge commit>
+   git tag jet_cad_floor_plan-v0.7.2 5c244b1
    git push origin jet_cad_floor_plan-v0.7.2
    ```
 
