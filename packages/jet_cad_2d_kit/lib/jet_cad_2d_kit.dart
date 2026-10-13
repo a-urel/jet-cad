@@ -6,4 +6,7 @@
 /// Dart and is shared with `package:jet_cad_2d_kit/authoring.dart`.
 library;
 
+export 'src/kit/bundled_library.dart';
+export 'src/kit/plan_kit.dart';
+export 'src/kit/symbol_library_source.dart';
 export 'src/model/model.dart';
