@@ -137,7 +137,8 @@ the same catalog gives the same bytes. **Decoding** is
 
 1. bytes that are not a readable document of the codec (any codec error,
    any codec diagnostic: a repaired cycle is a refusal);
-2. a root without `LibraryComponent`, or a `format` other than 1;
+2. a root without `LibraryComponent`, a `format` other than 1, a
+   `LibraryComponent` anywhere but the root, or units other than millimetres;
 3. any node other than the root (an instance, a group);
 4. a definition without `SymbolComponent`; a definition with children;
 5. a key that breaks K2's pattern, or whose first segment is not the
@@ -145,7 +146,8 @@ the same catalog gives the same bytes. **Decoding** is
 6. a repeated `key@version` (the same key at two versions is allowed);
 7. a `Definition.name` other than `key@version`;
 8. a tag, target kind or family that breaks K2;
-9. a `UnitComponent` with a `family`;
+9. a unit definition (one carrying `UnitComponent`) whose `SymbolComponent`
+   has a `family`;
 10. a `UnitComponent` on a handle that is not a symbol definition;
 11. a unit whose first leaf is not closed (a closed polyline or a circle):
     the first leaf of a unit is its outline, which service mode fills
@@ -153,7 +155,11 @@ the same catalog gives the same bytes. **Decoding** is
 12. a non-finite base point;
 13. a leaf owned by anything but a definition; a leaf of kind text, fill,
     attribute or point;
-14. a leaf's style outside K3's list;
+14. a leaf's style other than exactly what the builder writes: layer 0,
+    linetype, colour, lineweight and transparency by block, linetype scale 1,
+    flags 0 (by layer and CONTINUOUS, which today's validator accepts, are
+    refused: a library leaf takes its look from the instance, as an AutoCAD
+    block's does);
 15. bad geometry: wrong coordinate or scalar counts for the kind, a
     non-finite value, a coordinate beyond `1e6`, a zero-length line, a
     polyline under 2 points, a radius or sweep at or under `Tolerance`.
@@ -166,7 +172,7 @@ another component type (preserved and ignored, as the engine does).
 order; an entry carries its `SymbolComponent`, its `UnitComponent` or null,
 its definition and its leaves. `SymbolLibrary.merge(List<SymbolLibrary>)`
 concatenates in order and refuses a `key@version` in two libraries, naming
-both kits.
+each library by its position and its kit.
 
 ## K4. Words
 
@@ -176,7 +182,7 @@ a namespaced word id to the word.
 | Word id | For |
 |---|---|
 | `symbol:<key>` | a symbol's name |
-| `category:<English category>` | a category |
+| `category:<kit id>/<English category>` | a category; under the kit's id, since two kits may both have a `Bar` |
 | `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>` | sub-project 2's words |
 
 - **Lookup** falls back from the locale to English, then, for a symbol or a
@@ -281,7 +287,8 @@ It reports:
 5. **Words are complete:** every declared locale has a word for every
    symbol and category, not equal to the English unless the English is the
    right word for that locale (an explicit allow-list per kit); no word for a
-   key or category the catalog lacks.
+   key or category the catalog lacks. A key's word is compared with the English name of
+   the key's newest version.
 6. **Lower case** for keys, tags, target kinds, families and kinds.
 
 The snapshot is a committed JSON file in the kit's `test/`. The kit's
@@ -326,7 +333,7 @@ Every test is worth landing only if a named mutation makes it go red
   degenerate-fixture lesson).
 - **The builder:** deterministic; handle order; a catalog of every shape
   kind round-trips through `decode` to equal entries; a unit's components.
-- **Merge:** order; the cross-library duplicate names both kits.
+- **Merge:** order; the cross-library duplicate names each library by position and kit.
 - **Words:** fallback chain locale → English → stored English; merge.
 - **Conformance:** one failing kit per problem of K7, including a moved
   vertex of a committed `key@1`, a changed capacity, a removed key, a missing
@@ -352,6 +359,16 @@ Every test is worth landing only if a named mutation makes it go red
 - The architecture and restaurant catalogs: sub-projects 3 and 4 (the sample
   kit in K7's tests stands in).
 - Any change to `jet_cad_floor_plan` or `jet_cad_restaurant_symbols`.
+
+## Amendments while planning (2026-10-13)
+
+From the plan's spec gaps 1-8: decode reads components through guarded
+factories so a bad pattern reaches rule 5 or 8 rather than a codec error;
+rule 2 covers units and a misplaced `LibraryComponent`; rule 9 and rule 14
+are worded exactly; the merge error names libraries by position and kit; a
+category's word id carries its kit id; K7.5 compares with the newest
+version's English. The umbrella's A2 now matches K5 (words on the kit, a
+`final` sketch).
 
 ## Risks
 

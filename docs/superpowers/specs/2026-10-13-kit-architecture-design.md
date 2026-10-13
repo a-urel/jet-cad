@@ -177,7 +177,7 @@ owner, and the authoring side never imports Flutter.
 | `PlanKit` | A kit's descriptor: its `id`, its `version`, and what it contributes (below). |
 | Plan components | The components the contract writes into a plan: the symbol identity, the service unit (A6), the manifest (A8). Their type ids start with `jetcad.`. |
 | The library format | `.jetlib`: encode and decode, in one place, with the validator. |
-| `SymbolLibrarySource` | A named reader of a library's bytes, with its `KitNames`. |
+| `SymbolLibrarySource` | A labelled reader of a library's bytes. The words belong to the kit (`PlanKit.names`), not to a source (sub-project 1, K5). |
 | `PlanType` | A parametric type as a kit contributes it: the engine's `ParametricType`, its component factory, its type id, its properties (A4), its grips, its display name. |
 | `PlanTool` | A palette entry: tool id, display name, icon, suggested letter, and a factory from `PlanToolServices` (snap, l10n, settings, the attachment registry) to a Flutter-layer `Tool`. |
 | Properties | Declarative property specs (A4). |
@@ -194,7 +194,7 @@ between the furniture and restaurant catalogs), and the conformance test
 A sketch, to fix the shape; sub-project 1's spec fixes the API:
 
 ```dart
-const PlanKit restaurantKit = PlanKit(
+final PlanKit restaurantKit = PlanKit(
   id: 'restaurant',
   version: '0.1.0',
   symbols: [restaurantSymbolSource],
