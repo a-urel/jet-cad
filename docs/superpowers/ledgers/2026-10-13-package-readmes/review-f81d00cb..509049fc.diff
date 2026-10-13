@@ -1,0 +1,177 @@
+# Review package: f81d00c..HEAD
+
+## Commits
+509049fc docs: release checklist step 0 and the pana lower-bounds commands
+
+## Files changed
+ STATUS.md                                          | 44 +++++++++++++++++-----
+ .../notes/2026-10-13-package-readmes-results.md    | 16 +++++---
+ 2 files changed, 45 insertions(+), 15 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index 8cd830af..d0772c00 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,15 +1,15 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** and its tag history; the three packages are on pub.dev at 0.7.1; 0.7.2 is in flight (below) (tag
++**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
+ `v0.7.0` → `0fa649e`, after `v0.6.0` →
+-`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
++`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.1, and 0.7.2 is in flight (below). The history of every plan
+ before this point — its records, reviews and resume points — is in
+ [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
+ 
+ ## Where the project stands
+ 
+ The product is a **parametric floor planner** embedded in a restaurant
+ point-of-sale application. The roadmap's sub-projects **01–13** (the app,
+ interaction, page and rulers, drawing tools, the parametric layer, walls,
+ openings, symbols, rooms, dimensions, the app shell, export and print)
+ and **14** (the restaurant embedding) are merged; see
+@@ -519,49 +519,73 @@ packages), done up to the whole-branch review; then the human's merge and
+ publication.** The checklist below is the spec's D11, in order. Fill
+ `<merge commit>` with the merge commit on `main`.
+ 
+ Run each `dart pub publish` from the package directory, never the
+ repository root (it fails with a "private package" error). If `main` has
+ moved past the merge commit, publish from a worktree at that commit
+ instead: `git worktree add /tmp/jet-cad-0.7.2 <merge commit>` (and run the
+ commands there). `dart pub publish --dry-run` must say 0 warnings before
+ the real publish.
+ 
++0. Merge and push first: the human merges `feat/package-readmes` into
++   `main`, runs `git push origin main`, and waits for CI on that merge
++   commit to be green (all jobs) before any publish. That commit is
++   `<merge commit>` in the steps below.
++
+ 1. Engine:
+ 
+    ```bash
+-   cd packages/jet_cad_2d
++   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d"
+    dart pub publish --dry-run
+    dart pub publish
+    git tag jet_cad_2d-v0.7.2 <merge commit>
+    git push origin jet_cad_2d-v0.7.2
+    ```
+ 
+ 2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
+    lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
+-   resolve at their lowest). The recipe (a `git archive` copy with `test/`,
+-   `build/` and `tool/` removed, as `.pubignore` does, then pana and
+-   `pub downgrade`) is in
+-   `docs/superpowers/notes/2026-10-13-publish-host-packages-results.md`,
+-   section "pana (0.23.19), on each archive's file set"; then:
++   resolve at their lowest). Run, from the repository root (if pana is not
++   activated, `dart pub global activate pana` first):
++
++   ```bash
++   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
++   git archive <merge commit> packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
++   rm -rf /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/test /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/build /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/shaders
++   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_2d_flutter
++   ```
++
++   Read the "Support up-to-date dependencies" section's lower-bounds line
++   (pana runs `pub downgrade` itself); it must pass before
++   `dart pub publish`. The copy is not a git checkout, so pana's
++   repository-URL check fails there (as in 0.7.1's record); that line is
++   not the gate. Then:
+ 
+    ```bash
+    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
+    dart pub publish --dry-run
+    dart pub publish
+    git tag jet_cad_2d_flutter-v0.7.2 <merge commit>
+    git push origin jet_cad_2d_flutter-v0.7.2
+    ```
+ 
+ 3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
+-   first, by the same recipe (the results note's "pana (0.23.19), on each
+-   archive's file set"):
++   first, the same recipe on its own directory, removing `test/`, `build/`
++   and `tool/` from the copy, and reading the same line:
++
++   ```bash
++   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
++   git archive <merge commit> packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
++   rm -rf /tmp/jet-cad-pana/packages/jet_cad_floor_plan/test /tmp/jet-cad-pana/packages/jet_cad_floor_plan/build /tmp/jet-cad-pana/packages/jet_cad_floor_plan/tool
++   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_floor_plan
++   ```
++
++   Then:
+ 
+    ```bash
+    cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
+    dart pub publish --dry-run
+    dart pub publish
+    git tag jet_cad_floor_plan-v0.7.2 <merge commit>
+    git push origin jet_cad_floor_plan-v0.7.2
+    ```
+ 
+    Pushing each tag is also when that package's README images start to
+diff --git a/docs/superpowers/notes/2026-10-13-package-readmes-results.md b/docs/superpowers/notes/2026-10-13-package-readmes-results.md
+index 4a672c49..ef3d5b59 100644
+--- a/docs/superpowers/notes/2026-10-13-package-readmes-results.md
++++ b/docs/superpowers/notes/2026-10-13-package-readmes-results.md
+@@ -266,26 +266,26 @@ behaviour:
+ 
+ ## Final review
+ 
+ Verdict of the whole-branch review of `51125b6..d8ccf7c` (opus): **Ready to
+ merge: with fixes**. The fix wave (commit `f683f5ca`, and this note's own
+ commit) did every finding and nothing else:
+ 
+ 1. (I1, R8) The CI gates no task had run were run locally; see the table
+    below. No CI run has happened on the branch; a PR to main would run it
+    (the human's word).
+-2. (I2) STATUS.md's release checklist: a step 0 (the human merges, pushes
+-   `main`, CI green on the merge commit, before any publish); the pana
+-   lower-bounds recipe pointed at (the 0.7.1 results note's "pana (0.23.19),
+-   on each archive's file set"); each `cd` written from
++2. (I2) STATUS.md's release checklist: each `cd` written from
+    `git rev-parse --show-toplevel`; line 3 says what is on pub.dev; "R-10's
+-   exports as a 0.x candidate" dropped.
++   exports as a 0.x candidate" dropped. The step 0 (the human merges, pushes
++   `main`, CI green on the merge commit, before any publish) and the runnable
++   pana lower-bounds commands were not in this wave: the re-review found them
++   missing and they were added in the residual commit (see Residuals).
+ 3. The planner README names `statusCaptionStyle`, `groupChipTextStyle` and
+    the host guide's Themes section, wrapped at 80 columns.
+ 4. The planner CHANGELOG drops "(R-10)" and says what a host no longer
+    imports `editor.dart` for.
+ 5. The README version example: the patch example is `0.7.3` in all three.
+ 6. The stale comment in `example_test.dart` deleted.
+ 7. The false Task 8 deferred item removed.
+ 8. The regeneration command stated in "Fonts, ratio and the pictures";
+    `tool/screenshots/README.md` in paragraphs.
+ 9. `settle` is bounded by a 10 s `Stopwatch` (1 s when no `until` is given,
+@@ -319,19 +319,25 @@ repository:
+ | `flutter analyze` / `dart format ...` | `No issues found! (ran in 2.4s)` / `Formatted 15 files (0 changed)` |
+ | `tool/ci/host_probe.sh "file://$(pwd)" "$(git rev-parse HEAD)"` | exit 0; `host probe: no GPU renderer, no build hook; build/web is  42M` |
+ | `tool/ci/old_host_probe.sh` `v0.3.0`, `v0.4.0`, `v0.5.1`, `v0.6.0` | each: `No issues found!` and `old host probe: <tag>'s main.dart analyses against f683f5ca...` |
+ 
+ After the fixes: `cd tool/ci && dart test` `00:04 +94: All tests passed!`;
+ `check_guide`, `check_readmes` and `check_screenshots` print the same three
+ lines as in the full gate; `tool/readme_probe` `flutter analyze` `No issues
+ found! (ran in 2.8s)`; the three `dart pub publish --dry-run` runs: 229 KB,
+ 814 KB and 782 KB, each `Package has 0 warnings.`
+ 
++**Residuals.** The re-review's verdict: the checklist still lacked a step 0
++and a runnable pana lower-bounds command, and item 2 above wrongly said both
++were added (Ruling R11). The human: "1. evet". Fixed in the residual commit
++that follows this wave: step 0, the `git archive` and pana commands for the
++renderer and the planner, and this correction.
++
+ ## Owed to the human
+ 
+ Not owed: any further work on this branch; the merge waits for the human's
+ word, after the whole-branch review.
+ 
+ - The merge, and the release checklist in STATUS's Resume here (publish and
+   tag, in order).
+ - After publication, a look at the three pub.dev pages: the images, the
+   gallery (screenshots tab), the Funding block.

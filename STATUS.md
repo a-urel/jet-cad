@@ -547,6 +547,7 @@ the real publish.
    activated, `dart pub global activate pana` first):
 
    ```bash
+   cd "$(git rev-parse --show-toplevel)"
    rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
    git archive <merge commit> packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
    rm -rf /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/test /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/build /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/shaders
@@ -572,6 +573,7 @@ the real publish.
    and `tool/` from the copy, and reading the same line:
 
    ```bash
+   cd "$(git rev-parse --show-toplevel)"
    rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
    git archive <merge commit> packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
    rm -rf /tmp/jet-cad-pana/packages/jet_cad_floor_plan/test /tmp/jet-cad-pana/packages/jet_cad_floor_plan/build /tmp/jet-cad-pana/packages/jet_cad_floor_plan/tool

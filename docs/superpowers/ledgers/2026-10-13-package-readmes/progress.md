@@ -89,3 +89,6 @@ Final fix wave: dispatched (sonnet, findings file final-findings.md)
 Final fix wave: DONE f683f5c..6596fce (13 items; local gates green incl. floor_planner/restaurant_demo/restaurant_symbols, host_probe.sh, old probes v0.3.0-v0.6.0; dry runs 0 warnings)
 Final re-review (sonnet): items 1, 3-13 addressed; item 2(a) step 0 and 2(b) pana command NOT addressed; the note's "Final review" item 2 and the fix report claim they were (inaccurate record).
 Ruling R11: no second fix wave (the process allows one); the two open items and the note's inaccurate claim are documentation the human executes, so they are surfaced at hand-off with an offer to fix them in one reviewed commit on the human's word, before the merge — cost if wrong: the human publishes from a checklist missing its merge step and the pana command, or the record keeps a false completion claim.
+Residual fix: the human approved ("1. evet") and asked to merge to main after it ("2. merge to main"); dispatched (sonnet, residual-brief.md)
+Residual fix: 509049f; re-review: all ADDRESSED; non-blocker 1 (pana blocks assume the root) closed by the controller with a leading `cd "$(git rev-parse --show-toplevel)"` in both blocks (two lines, docs only); non-blockers 2-3 stand.
+Merge: the human's word "2. merge to main" (2026-10-13).
