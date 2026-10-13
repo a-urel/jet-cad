@@ -542,8 +542,9 @@ A band starts in one of two ways, once the pointer has moved past the
 touch slop (18 px) from where it went down:
 
 - **`floorDrag: FloorPlanFloorDrag.band`:** a one-finger, mouse or stylus
-  drag that starts on the floor draws a band. The camera then pans with
-  two fingers, the wheel or trackpad and the middle button. A drag that
+  drag that starts on the floor draws a band; one finger on the floor no
+  longer pans. The camera then pans with two fingers, the wheel or
+  trackpad and the middle button. A drag that
   starts on a table still moves it (or pans, under `serviceMoves:
   false`).
 - **`floorDrag: FloorPlanFloorDrag.pan`** (the default): a mouse or
@@ -1376,8 +1377,8 @@ the designed tables added, removed and changed since the last report.
   change; an unnumbered one is not reported.
 - `longPress`: `toggleSelection` (the default: a long press adds or
   removes a table, for multiple selection on a touch screen) or
-  `contextMenu` (a long press opens your menu; a touch screen then has no
-  multiple selection).
+  `contextMenu` (a long press opens your menu; a touch screen's multiple
+  selection is then a band, `floorDrag: FloorPlanFloorDrag.band`).
 - `serviceMoves: false` forbids moving tables during service (a host
   stand, a kitchen screen): a drag from a table pans the plan. It is read
   at each press, so you can change it while the view is shown.
@@ -2181,8 +2182,8 @@ cancels the drag. A finger's picks and grips are finger-sized. In the
 selection mode a tap selects, a drag from a table moves it (or pans,
 under `serviceMoves: false`), and a long press does what `longPress`
 says, about 500 ms from contact. With `floorDrag: FloorPlanFloorDrag.band`
-a one-finger drag on the floor draws a band that selects tables, and
-the camera pans with two fingers. Mouse, trackpad and stylus behave as
+a one-finger drag on the floor draws a band that selects tables and no
+longer pans; the camera pans with two fingers. Mouse, trackpad and stylus behave as
 on a desktop.
 
 ## 11. What a host must never assume
