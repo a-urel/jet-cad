@@ -425,6 +425,10 @@ sub-project 2's spec before the wave publishes 0.1.0:
 - **R6 Manifest versions are free strings** (`ManifestComponent`,
   `PlanKit.version`). If sub-project 2 compares versions, it parses semver;
   tightening the format later must not refuse manifests already stored.
+- **R7 Rule 11's threshold does not scale.** The area test
+  (`area <= Tolerance.linear²`) is absolute, so only a zero-area outline is
+  refused: a 600 mm × 1e-9 mm sliver loads. Sub-project 2 replaces it with
+  a width test (`2·area/perimeter <= Tolerance.linear`).
 
 ## Risks
 
