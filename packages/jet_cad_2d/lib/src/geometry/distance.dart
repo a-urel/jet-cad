@@ -199,21 +199,21 @@ Vector2? projectOntoSegment(Vector2 p, Vector2 a, Vector2 b, Vector2 out) {
 /// Where segments [a1]-[a2] and [b1]-[b2] cross, written into [out].
 ///
 /// Null in three cases: a degenerate (zero-length) input segment; a
-/// near-parallel pair, guarded by [Tolerance.standard.angular] rather than
-/// an exact-zero test (see below); or infinite lines that cross outside one
-/// of the two actual segments. All three matter: a CAD user asking for an
-/// intersection snap wants a point where the *drawn* geometry meets, not an
-/// extrapolation of it, and not a point produced by dividing by something
-/// numerically indistinguishable from zero.
+/// near-parallel pair, guarded by `Tolerance.standard`'s [Tolerance.angular]
+/// rather than an exact-zero test (see below); or infinite lines that cross
+/// outside one of the two actual segments. All three matter: a CAD user
+/// asking for an intersection snap wants a point where the *drawn* geometry
+/// meets, not an extrapolation of it, and not a point produced by dividing by
+/// something numerically indistinguishable from zero.
 ///
 /// **Near-parallel is a `Tolerance` decision, not a stored-value one.**
 /// `denominator / (|a2-a1| * |b2-b1|)` is `sin` of the angle between the two
 /// segments' directions; comparing that ratio against
-/// [Tolerance.standard.angular] (rather than testing the raw, unnormalised
-/// `denominator` against zero) keeps the near-parallel threshold meaningful
-/// regardless of how long the segments happen to be. A pair just past this
-/// threshold can still report a perfectly ordinary-looking point — the
-/// danger this guards against is not that any one such point is *wrong*,
+/// `Tolerance.standard`'s [Tolerance.angular] (rather than testing the raw,
+/// unnormalised `denominator` against zero) keeps the near-parallel threshold
+/// meaningful regardless of how long the segments happen to be. A pair just
+/// past this threshold can still report a perfectly ordinary-looking point —
+/// the danger this guards against is not that any one such point is *wrong*,
 /// it is that the point is arbitrarily sensitive to a change in either
 /// segment's direction too small to matter for anything else, which is
 /// exactly the situation a routine drawing edit produces. That instability

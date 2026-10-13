@@ -495,11 +495,11 @@ class RemoveNodeCommand extends DraftCommand {
 /// Refuses, before any mutation, a handle that already names a definition, a
 /// node or an entity ([DuplicateHandleError]: a handle names one thing in the
 /// document), and a definition whose `children` is not empty
-/// ([ArgumentError]). The second refusal is deliberate: [DocumentTree.
-/// addDefinition] writes containment edges without the cycle guard
-/// [DocumentTree.addNode] has, so a v1 definition lists no nodes and no edge is
-/// written through the unguarded API. Its leaves arrive afterwards, through
-/// [AddEntityCommand] with the definition as `owner`.
+/// ([ArgumentError]). The second refusal is deliberate:
+/// [DocumentTree.addDefinition] writes containment edges without the cycle
+/// guard [DocumentTree.addNode] has, so a v1 definition lists no nodes and no
+/// edge is written through the unguarded API. Its leaves arrive afterwards,
+/// through [AddEntityCommand] with the definition as `owner`.
 ///
 /// `touched` names the definition handle, which is what makes the spatial
 /// index rebuild its containers (a touched handle that resolves to a

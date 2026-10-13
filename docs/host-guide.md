@@ -14,8 +14,8 @@ that file, so the code in this guide compiles against the release.
 
 ## 1. The dependency
 
-The packages are not on pub.dev. Depend on them by git, **both pinned to
-the same commit SHA** — the SHA the release tag `v0.7.0` points at,
+The planner's packages are not on pub.dev. Depend on them by git, **both
+pinned to the same commit SHA** — the SHA the release tag `v0.7.0` points at,
 `0fa649e2c6f09f34f2b7564071837cc1b15ffd11` (the merge of release 0.7.0 into
 `main`):
 
@@ -48,6 +48,11 @@ with the planner. Import only the two barrels:
 `package:jet_cad_floor_plan/jet_cad_floor_plan.dart` and
 `package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
 Anything under `src/` is not API.
+
+The engine is also on pub.dev, as `jet_cad_2d` (since 0.7.1, under its own
+versions). Do not add it from there next to the dependencies above: the
+planner already brings it by git, and pub takes a package from one source
+only, so it refuses the pair.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
 0.7.0 was built and tested with Flutter 3.47.6. They bring no build hook

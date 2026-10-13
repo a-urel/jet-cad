@@ -13,10 +13,10 @@ import 'dart:typed_data';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:vector_math/vector_math_64.dart' hide Aabb2;
 
-/// The floor plan's extent in each axis, independent of [entityCount]: a
+/// The floor plan's extent in each axis, independent of `entityCount`: a
 /// site is a fixed physical size, and adding more detail to it raises
 /// density rather than growing the plan. Chosen together with
-/// [kQueryRectHalfSize] in `query_throughput.dart` so a 500k-entity document
+/// `kQueryRectHalfSize` in `query_throughput.dart` so a 500k-entity document
 /// gives the "~2k visible" rect query the brief's gate row describes without
 /// re-deriving that number from a run's actual output.
 const double kFloorWidth = 60000.0;

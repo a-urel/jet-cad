@@ -1,0 +1,5 @@
+# Left out of the pub.dev archive: the suites, the benchmarks and the test
+# runner's build output, at the package root only. The example stays in.
+/test/
+/benchmark/
+/build/

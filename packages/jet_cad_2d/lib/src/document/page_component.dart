@@ -1,6 +1,7 @@
 import 'component.dart';
 
-/// Which way the sheet is turned; [PageComponent.widthMm] and [heightMm]
+/// Which way the sheet is turned; [PageComponent.widthMm] and
+/// [PageComponent.heightMm]
 /// are always the portrait dimensions.
 enum PageOrientation { portrait, landscape }
 

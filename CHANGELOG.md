@@ -1,14 +1,24 @@
 # Changelog
 
-The four packages a host depends on — `jet_cad_2d`, `jet_cad_2d_flutter`,
-`jet_cad_floor_plan`, `jet_cad_restaurant_symbols` — are released
-together, under one version and one git tag. None is published to
-pub.dev: a host depends on them by git (see
-[docs/host-guide.md](docs/host-guide.md)).
+The packages a host depends on — `jet_cad_2d_flutter`,
+`jet_cad_floor_plan` and `jet_cad_restaurant_symbols` — are released
+together, under one version and one git tag (`vX.Y.Z`); the tag also
+carries the engine, `jet_cad_2d`, at its own version (below). A host
+depends on them by git (see [docs/host-guide.md](docs/host-guide.md)).
+
+From 0.7.1 the engine, `jet_cad_2d`, is also published on pub.dev and has
+its own version and its own tags (`jet_cad_2d-vX.Y.Z`): it moves only when
+its own code changes, and its history from 0.7.1 on is in
+[packages/jet_cad_2d/CHANGELOG.md](packages/jet_cad_2d/CHANGELOG.md). A
+release here names the engine version it carries. Up to 0.7.0 the engine
+shared this file's versions, and its history is below.
 
 ## Unreleased
 
-Nothing yet.
+- The engine is published on pub.dev as `jet_cad_2d` 0.7.1: 0.7.0's code,
+  with a LICENSE, a README and an example of its own, and `sdk: ^3.6.0`.
+  Nothing a host compiles against changes; a host keeps taking the engine
+  by git, through the planner, and must not also depend on it from pub.dev.
 
 ## 0.7.0
 
