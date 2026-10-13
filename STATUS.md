@@ -343,9 +343,7 @@ one's spec, plan and results.
   guide names `3bf64a7`. The human pushed `main` and the tag `v0.6.0` →
   `3bf64a7` (2026-10-13).
 
-## In flight
-
-**Rubber-band table selection** (the human, 2026-10-13): `FloorPlanView(
+- **Rubber-band table selection** (the human, 2026-10-13): `FloorPlanView(
 floorDrag: FloorPlanFloorDrag.band)` makes a one-finger or mouse drag on
 the floor draw a band in the selection mode (left to right a window,
 right to left a crossing; a group whole, a locked table never; a modifier
@@ -354,16 +352,20 @@ floor now bands instead of panning. Spec
 [2026-10-13-rubber-band-selection-design.md](docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md)
 (revision 2, approved), plan
 [2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md).
-**Implemented on `feat/rubber-band`** in the worktree
-`.claude/worktrees/rubber-band` (Tasks 1–4: `bandModeFor` and
+**Merged into `main` at `232d905`** on the human's *"evet, main'e merge
+et"* (2026-10-13), from `feat/rubber-band` (Tasks 1–4: `bandModeFor` and
 `SelectionBandPainter` in `jet_cad_2d_flutter`, the band in the selection
 tool, `FloorPlanView.floorDrag`, the demo's switch, the guide, the
 CHANGELOG, the specs' notes), each task reviewed independently; the
 final Opus review returned "Ready after fixes" (six surviving mutants
 pinned, the docs' "the wheel pans" corrected: the wheel zooms on
-desktop), fixed in one wave and re-reviewed clean. **Waits for the
-human's merge word**, then release 0.7.0. Ledger archived in
-`docs/superpowers/ledgers/2026-10-13-rubber-band-selection/`.
+desktop), fixed in one wave and re-reviewed clean. Ledger archived in
+`docs/superpowers/ledgers/2026-10-13-rubber-band-selection/`. Release
+0.7.0 follows, on the human's word.
+
+## In flight
+
+Nothing.
 
 ## Owed to the human
 
@@ -436,13 +438,12 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's word to merge `feat/rubber-band` into `main`.** The
-slice is implemented on `feat/rubber-band` (worktree
-`.claude/worktrees/rubber-band`, plan
+**Next: release 0.7.0, on the human's word.** Rubber-band selection is
+**merged into `main` at `232d905`** (2026-10-13; plan
 [2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md),
 Tasks 1–4 done and reviewed per task, the final review's fixes applied
-and re-reviewed); after the merge, release 0.7.0 follows (and CI gains
-the v0.6.0 old-host probe) (the CHANGELOG's
+and re-reviewed); release 0.7.0 is its own step (and CI gains the v0.6.0
+old-host probe then) (the CHANGELOG's
 Unreleased section carries the slice; the guide's "Selecting with a
 band" says *Since 0.7.0*). Until then, **the human's choice** otherwise.
 Release 0.6.0 is **merged into `main` at
