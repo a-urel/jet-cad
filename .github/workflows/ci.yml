@@ -133,13 +133,14 @@ jobs:
         run: >-
           dart analyze --fatal-infos lib test expect_failures.dart
           check_guide.dart check_host_lock.dart package_root.dart
-          check_screenshots.dart check_readmes.dart
+          check_screenshots.dart check_readmes.dart check_kit_deps.dart
       - name: Format
         working-directory: tool/ci
         run: >-
           dart format --output=none --set-exit-if-changed
           lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
-          check_screenshots.dart check_readmes.dart host_probe/lib
+          check_screenshots.dart check_readmes.dart check_kit_deps.dart
+          host_probe/lib
           ../readme_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
@@ -147,6 +148,8 @@ jobs:
         run: dart run tool/ci/check_screenshots.dart
       - name: The package READMEs' code is the probe's
         run: dart run tool/ci/check_readmes.dart
+      - name: No kit names the plan library or another kit
+        run: dart run tool/ci/check_kit_deps.dart
       - name: Analyze the README probe
         working-directory: tool/readme_probe
         run: flutter analyze
@@ -161,6 +164,7 @@ jobs:
         package:
           - packages/jet_cad_2d
           - packages/jet_cad_2d_flutter
+          - packages/jet_cad_2d_kit
           - packages/jet_cad_floor_plan
     steps:
       - uses: actions/checkout@v5
