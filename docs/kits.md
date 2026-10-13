@@ -22,9 +22,11 @@ jet_cad_2d               the engine
 ```
 
 - A kit depends on `jet_cad_2d_kit`. **A kit never depends on
-  `jet_cad_2d_plan` and never on another kit**, in its pubspec or in any
-  import under `lib/`, `test/` or `tool/`. `tool/ci/check_kit_deps.dart`
-  fails CI when one does. Kits cooperate only through the contract.
+  `jet_cad_2d_plan` and never on another kit**, in its pubspec or in an
+  import of any of its Dart files (`lib/`, `test/`, `tool/`, `example/` and
+  every other directory but `build/` and `.dart_tool/`).
+  `tool/ci/check_kit_deps.dart` fails CI when one does. Kits cooperate only
+  through the contract.
 - `jet_cad_2d_kit/authoring.dart` is pure Dart: a kit's generator runs
   under `dart run`.
 
@@ -40,8 +42,11 @@ jet_cad_2d               the engine
 | Target kind, size family, unit kind | lower-case letters and digits joined by single hyphens | `wall-face`, `bed-double`, `table` |
 | Contract component | `jetcad.<name>` | `jetcad.symbol` |
 
-A kit's keys, types and tools all start with its own id; the conformance
-test (§8) refuses one that does not.
+A kit's keys, types and tools all start with its own id. Today the
+conformance test (§8) refuses a key that does not; it checks type and tool
+ids when the code side arrives (the plan library's sub-project).
+`PlanKit.validate` (§6) already reports a word under another kit's id,
+`tool:` and `type:` words included.
 
 ## 3. What a plan stores
 
@@ -80,15 +85,18 @@ each definition's leaves. `SymbolLibrary.decode(bytes)` refuses, with a
 8. a tag, target kind, family or unit kind that breaks §2 or §3;
 9. a unit in a size family;
 10. a unit component off a symbol's definition;
-11. a unit whose first leaf is not closed (a closed polyline or a circle):
-    a unit's first leaf is its outline, which service mode fills;
+11. a unit whose first leaf is not closed (a closed polyline or a circle),
+    or is a closed polyline enclosing no more area than the engine's
+    tolerance squared: a unit's first leaf is its outline, which service
+    mode fills;
 12. a non-finite base point;
 13. a leaf owned by anything but a definition; a text, fill, attribute or
     point leaf;
 14. a leaf style other than layer 0, BYBLOCK linetype at scale 1, BYBLOCK
     colour, lineweight and transparency, no flag, text style STANDARD;
 15. bad geometry: wrong counts, a non-finite value, a coordinate beyond
-    1e6 mm, a zero-length line, a polyline under 2 points, a radius or a
+    1e6 mm, a zero-length line, a polyline under 2 points or whose points
+    all lie within the engine's tolerance of each other, a radius or a
     sweep within the engine's tolerance of zero.
 
 `SymbolLibrary.merge` joins libraries in order and refuses a `key@version`
@@ -205,9 +213,10 @@ void main() {
 
 - **A published `key@N` never changes its geometry or its unit.** A change
   of either is a new `key@N+1`, beside the old one. A key is never removed
-  and never reused: a retired symbol leaves the gallery but stays in the
-  library. A plan never needs a library to draw: it copies every placed
-  symbol's definition.
+  and never reused: a retired symbol stays in the library. Taking a retired
+  symbol out of the gallery is the plan library's sub-project: the contract
+  has no retired mark yet. A plan never needs a library to draw: it copies
+  every placed symbol's definition.
 - **Names, categories, words and tags may change at any version**; they are
   not geometry.
 - **Semver at 0.x:** a new symbol, a new `@N`, words or tags is a patch; a
@@ -259,6 +268,9 @@ the catalog lacks; a locale with words that is not declared.
    declared in its pubspec, and the snapshot under `test/`.
 5. Its source and descriptor (`PlanKit`), reading the asset with
    `bundledLibrary`.
-6. Its conformance test, expecting no problem.
+6. Its conformance test, expecting no problem, and a test that
+   `kit.validate()` is empty: a word under another kit's id or in no known
+   namespace, and a `tool:`, `type:` or `property:` word without English,
+   are caught only there.
 7. Its CI line, a demo and its README pictures (the plan library's
    sub-projects describe these).
