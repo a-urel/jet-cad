@@ -1,0 +1,446 @@
+# Review package: 08dfe6e..HEAD
+
+## Commits
+d1f873b2 docs(floor_plan): the editor screenshots' rulers show real digits
+5600f4f6 feat(flutter): the rulers' labels take the ambient font family
+
+## Files changed
+ .../jet_cad_2d_flutter/lib/src/ruler_frame.dart    | 145 +++++++++++----------
+ .../jet_cad_2d_flutter/lib/src/ruler_painter.dart  |  41 ++++--
+ .../jet_cad_2d_flutter/test/ruler_frame_test.dart  |  63 ++++++++-
+ .../doc/screenshots/design_dark.png                | Bin 126047 -> 132389 bytes
+ .../doc/screenshots/design_light.png               | Bin 124546 -> 130810 bytes
+ 5 files changed, 167 insertions(+), 82 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart b/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
+index b1e8d8cc..4bb316d8 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
+@@ -48,92 +48,99 @@ class RulerFrameState extends State<RulerFrame> {
+   static Offset? _cursorAt(PointerEvent e) =>
+       e.kind == PointerDeviceKind.touch ? null : e.localPosition;
+ 
+   @override
+   void dispose() {
+     pointer.dispose();
+     super.dispose();
+   }
+ 
+   @override
+-  Widget build(BuildContext context) => Column(
+-        children: [
+-          SizedBox(
+-            height: kRulerThickness,
+-            child: Row(
+-              crossAxisAlignment: CrossAxisAlignment.stretch,
+-              children: [
+-                SizedBox(
+-                  width: kRulerThickness,
+-                  height: kRulerThickness,
+-                  child: RepaintBoundary(
+-                    child: CustomPaint(
+-                      key: const Key('ruler-corner'),
+-                      painter: RulerCornerPainter(
+-                          page: widget.page,
+-                          chrome: widget.chrome,
+-                          repaint: _cornerRepaint),
+-                    ),
+-                  ),
+-                ),
+-                Expanded(
+-                  child: RepaintBoundary(
+-                    child: CustomPaint(
+-                      key: const Key('ruler-top'),
+-                      painter: RulerPainter(
+-                        axis: RulerAxis.horizontal,
+-                        camera: widget.camera,
++  Widget build(BuildContext context) {
++    // The rulers follow the host's text: the ambient family, or none.
++    final fontFamily = DefaultTextStyle.of(context).style.fontFamily;
++    return Column(
++      children: [
++        SizedBox(
++          height: kRulerThickness,
++          child: Row(
++            crossAxisAlignment: CrossAxisAlignment.stretch,
++            children: [
++              SizedBox(
++                width: kRulerThickness,
++                height: kRulerThickness,
++                child: RepaintBoundary(
++                  child: CustomPaint(
++                    key: const Key('ruler-corner'),
++                    painter: RulerCornerPainter(
+                         page: widget.page,
+-                        pointer: pointer,
+                         chrome: widget.chrome,
+-                        repaint: _repaint,
+-                      ),
++                        fontFamily: fontFamily,
++                        repaint: _cornerRepaint),
++                  ),
++                ),
++              ),
++              Expanded(
++                child: RepaintBoundary(
++                  child: CustomPaint(
++                    key: const Key('ruler-top'),
++                    painter: RulerPainter(
++                      axis: RulerAxis.horizontal,
++                      camera: widget.camera,
++                      page: widget.page,
++                      pointer: pointer,
++                      chrome: widget.chrome,
++                      fontFamily: fontFamily,
++                      repaint: _repaint,
+                     ),
+                   ),
+                 ),
+-              ],
+-            ),
++              ),
++            ],
+           ),
+-          Expanded(
+-            child: Row(
+-              crossAxisAlignment: CrossAxisAlignment.stretch,
+-              children: [
+-                SizedBox(
+-                  width: kRulerThickness,
+-                  child: RepaintBoundary(
+-                    child: CustomPaint(
+-                      key: const Key('ruler-left'),
+-                      painter: RulerPainter(
+-                        axis: RulerAxis.vertical,
+-                        camera: widget.camera,
+-                        page: widget.page,
+-                        pointer: pointer,
+-                        chrome: widget.chrome,
+-                        repaint: _repaint,
+-                      ),
++        ),
++        Expanded(
++          child: Row(
++            crossAxisAlignment: CrossAxisAlignment.stretch,
++            children: [
++              SizedBox(
++                width: kRulerThickness,
++                child: RepaintBoundary(
++                  child: CustomPaint(
++                    key: const Key('ruler-left'),
++                    painter: RulerPainter(
++                      axis: RulerAxis.vertical,
++                      camera: widget.camera,
++                      page: widget.page,
++                      pointer: pointer,
++                      chrome: widget.chrome,
++                      fontFamily: fontFamily,
++                      repaint: _repaint,
+                     ),
+                   ),
+                 ),
+-                Expanded(
+-                  // A pointer that went down before this frame was replaced
+-                  // keeps sending its moves to the old, detached listener
+-                  // (spec 14c: a host replaced the plan mid-drag): the
+-                  // disposed notifier is not written then.
+-                  child: MouseRegion(
+-                    onExit: (_) => _point(null),
+-                    child: Listener(
+-                      behavior: HitTestBehavior.translucent,
+-                      // A finger is not a cursor (spec 14t R-10): it marks
+-                      // nothing and clears the mark.
+-                      onPointerHover: (e) => _point(_cursorAt(e)),
+-                      onPointerMove: (e) => _point(_cursorAt(e)),
+-                      onPointerCancel: (_) => _point(null),
+-                      child: widget.child,
+-                    ),
++              ),
++              Expanded(
++                // A pointer that went down before this frame was replaced
++                // keeps sending its moves to the old, detached listener
++                // (spec 14c: a host replaced the plan mid-drag): the
++                // disposed notifier is not written then.
++                child: MouseRegion(
++                  onExit: (_) => _point(null),
++                  child: Listener(
++                    behavior: HitTestBehavior.translucent,
++                    // A finger is not a cursor (spec 14t R-10): it marks
++                    // nothing and clears the mark.
++                    onPointerHover: (e) => _point(_cursorAt(e)),
++                    onPointerMove: (e) => _point(_cursorAt(e)),
++                    onPointerCancel: (_) => _point(null),
++                    child: widget.child,
+                   ),
+                 ),
+-              ],
+-            ),
++              ),
++            ],
+           ),
+-        ],
+-      );
++        ),
++      ],
++    );
++  }
+ }
+diff --git a/packages/jet_cad_2d_flutter/lib/src/ruler_painter.dart b/packages/jet_cad_2d_flutter/lib/src/ruler_painter.dart
+index c7bc255d..d4e080b1 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/ruler_painter.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/ruler_painter.dart
+@@ -18,46 +18,55 @@ enum RulerAxis { horizontal, vertical }
+ /// sheet corner, labels in the display unit, a pointer marker. The bar is
+ /// co-extensive with the drawing area on its axis, so `size` on that axis
+ /// is the child's, and every tick is placed through `camera.worldToScreen`.
+ class RulerPainter extends CustomPainter {
+   RulerPainter({
+     required this.axis,
+     required this.camera,
+     required this.page,
+     required this.pointer,
+     required this.chrome,
++    this.fontFamily,
+     super.repaint,
+   });
+ 
+   final RulerAxis axis;
+   final CameraController camera;
+   final ValueListenable<PageComponent?> page;
+   final ValueListenable<Offset?> pointer;
+ 
+   /// The bar, the ticks, the labels and the pointer marker (dark theme
+   /// spec D2).
+   final ChromePalette chrome;
+ 
++  /// The family of the labels. The rulers follow the host's text: [RulerFrame]
++  /// passes the ambient `DefaultTextStyle`'s family. Null leaves the label
++  /// family-less, which falls to the platform default (to the test font under
++  /// `flutter test`).
++  final String? fontFamily;
++
+   /// Test-only: (screen coordinate along the axis, isMajor, label).
+   @visibleForTesting
+   List<(double, bool, String?)> debugLastTicks = const [];
+ 
+   // Colours assigned from [chrome] in `paint` (dark theme spec D5).
+   final Paint _background = Paint();
+   final Paint _ink = Paint()..strokeWidth = 1.0;
+   final Paint _marker = Paint()..strokeWidth = 1.0;
+   final TextPainter _text = TextPainter(textDirection: TextDirection.ltr);
+ 
+   /// Built once per painter instance from [chrome] (dark theme spec D5, R-8):
+   /// a new palette comes only with a new painter, so no frame builds one.
+-  late final TextStyle _labelStyle =
+-      TextStyle(color: chrome.rulerInk, fontSize: kRulerLabelSize);
++  late final TextStyle _labelStyle = TextStyle(
++      color: chrome.rulerInk,
++      fontSize: kRulerLabelSize,
++      fontFamily: fontFamily);
+ 
+   /// Test-only: the span of the last label laid out, or null before one.
+   @visibleForTesting
+   TextSpan? get debugLastLabel => _text.text as TextSpan?;
+ 
+   bool get _horizontal => axis == RulerAxis.horizontal;
+ 
+   @override
+   void paint(Canvas canvas, Size size) {
+     final ticks = <(double, bool, String?)>[];
+@@ -149,42 +158,53 @@ class RulerPainter extends CustomPainter {
+   void _label(Canvas canvas, String text, Offset at, double angle) {
+     _text.text = TextSpan(text: text, style: _labelStyle);
+     _text.layout();
+     canvas.save();
+     canvas.translate(at.dx, at.dy);
+     canvas.rotate(angle);
+     _text.paint(canvas, Offset.zero);
+     canvas.restore();
+   }
+ 
+-  /// True exactly when the palette changed (dark theme spec D5); every other
+-  /// reason to repaint is in the `repaint` listenable.
++  /// True exactly when the palette or the family changed (dark theme spec D5);
++  /// every other reason to repaint is in the `repaint` listenable.
+   @override
+-  bool shouldRepaint(RulerPainter old) => old.chrome != chrome;
++  bool shouldRepaint(RulerPainter old) =>
++      old.chrome != chrome || old.fontFamily != fontFamily;
+ }
+ 
+ /// The 24 × 24 box where the bars meet: the unit's symbol.
+ class RulerCornerPainter extends CustomPainter {
+-  RulerCornerPainter({required this.page, required this.chrome, super.repaint});
++  RulerCornerPainter({
++    required this.page,
++    required this.chrome,
++    this.fontFamily,
++    super.repaint,
++  });
+ 
+   final ValueListenable<PageComponent?> page;
+ 
+   /// The box and the unit symbol (dark theme spec D2).
+   final ChromePalette chrome;
+ 
++  /// The family of the unit symbol, as [RulerPainter.fontFamily].
++  final String? fontFamily;
++
+   // Colour assigned from [chrome] in `paint` (dark theme spec D5).
+   final Paint _background = Paint();
+   final TextPainter _text = TextPainter(textDirection: TextDirection.ltr);
+ 
+   /// Built once per painter instance (dark theme spec D5, R-8).
+-  late final TextStyle _labelStyle =
+-      TextStyle(color: chrome.rulerInk, fontSize: kRulerLabelSize);
++  late final TextStyle _labelStyle = TextStyle(
++      color: chrome.rulerInk,
++      fontSize: kRulerLabelSize,
++      fontFamily: fontFamily);
+   String? _lastSymbol;
+ 
+   /// Test-only.
+   @visibleForTesting
+   String? debugLastSymbol() => _lastSymbol;
+ 
+   /// Test-only: the span of the last symbol laid out, or null before one.
+   @visibleForTesting
+   TextSpan? get debugLastLabel => _text.text as TextSpan?;
+ 
+@@ -196,14 +216,15 @@ class RulerCornerPainter extends CustomPainter {
+     _lastSymbol = symbol;
+     if (symbol == null) return;
+     _text.text = TextSpan(text: symbol, style: _labelStyle);
+     _text.layout();
+     _text.paint(
+         canvas,
+         Offset(
+             (size.width - _text.width) / 2, (size.height - _text.height) / 2));
+   }
+ 
+-  /// True exactly when the palette changed (dark theme spec D5).
++  /// True exactly when the palette or the family changed (dark theme spec D5).
+   @override
+-  bool shouldRepaint(RulerCornerPainter old) => old.chrome != chrome;
++  bool shouldRepaint(RulerCornerPainter old) =>
++      old.chrome != chrome || old.fontFamily != fontFamily;
+ }
+diff --git a/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart b/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart
+index 85eb57e0..e7d34d38 100644
+--- a/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart
++++ b/packages/jet_cad_2d_flutter/test/ruler_frame_test.dart
+@@ -2,47 +2,104 @@ import 'package:flutter/gestures.dart';
+ import 'package:flutter/widgets.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:vector_math/vector_math_64.dart' hide Aabb2;
+ 
+ import 'support/page_fixture.dart';
+ 
+ void main() {
+   Future<(RulerFrameState, int Function())> pump(WidgetTester tester,
+-      {CameraController? camera}) async {
++      {CameraController? camera, TextStyle? ambient}) async {
+     var childHovers = 0;
+     final page = ValueNotifier<PageComponent?>(standardPage());
+     final key = GlobalKey<RulerFrameState>();
++    Widget frame(Widget w) =>
++        ambient == null ? w : DefaultTextStyle(style: ambient, child: w);
+     await tester.pumpWidget(Directionality(
+       textDirection: TextDirection.ltr,
+-      child: Center(
++      child: frame(Center(
+         child: SizedBox(
+           width: 424,
+           height: 324,
+           child: RulerFrame(
+             key: key,
+             camera: camera ?? standardCamera(),
+             page: page,
+             chrome: ChromePalette.light,
+             child: Listener(
+               behavior: HitTestBehavior.opaque,
+               onPointerHover: (_) => childHovers++,
+               child: const SizedBox.expand(key: Key('child')),
+             ),
+           ),
+         ),
+-      ),
++      )),
+     ));
+     return (key.currentState!, () => childHovers);
+   }
+ 
++  RulerPainter painterOf(WidgetTester tester, String key) =>
++      tester.widget<CustomPaint>(find.byKey(Key(key))).painter! as RulerPainter;
++
++  RulerCornerPainter cornerOf(WidgetTester tester) =>
++      tester.widget<CustomPaint>(find.byKey(const Key('ruler-corner'))).painter!
++          as RulerCornerPainter;
++
++  testWidgets('RF-a: the ambient font family reaches all three painters',
++      (tester) async {
++    await pump(tester, ambient: const TextStyle(fontFamily: 'Roboto'));
++    final top = painterOf(tester, 'ruler-top');
++    final left = painterOf(tester, 'ruler-left');
++    final corner = cornerOf(tester);
++    expect(top.fontFamily, 'Roboto');
++    expect(left.fontFamily, 'Roboto');
++    expect(corner.fontFamily, 'Roboto');
++    expect(top.debugLastLabel?.style?.fontFamily, 'Roboto');
++    expect(left.debugLastLabel?.style?.fontFamily, 'Roboto');
++    expect(corner.debugLastLabel?.style?.fontFamily, 'Roboto');
++  });
++
++  testWidgets('RF-b: no ambient family keeps today\'s exact label style',
++      (tester) async {
++    await pump(tester);
++    final expected = TextStyle(
++        color: ChromePalette.light.rulerInk, fontSize: kRulerLabelSize);
++    for (final label in [
++      painterOf(tester, 'ruler-top').debugLastLabel,
++      painterOf(tester, 'ruler-left').debugLastLabel,
++      cornerOf(tester).debugLastLabel,
++    ]) {
++      expect(label, isNotNull);
++      expect(label!.style!.fontFamily, isNull);
++      expect(label.style, expected);
++    }
++  });
++
++  test('RF-c: shouldRepaint follows fontFamily', () {
++    final page = ValueNotifier<PageComponent?>(standardPage());
++    RulerPainter bar(String? f) => RulerPainter(
++        axis: RulerAxis.horizontal,
++        camera: standardCamera(),
++        page: page,
++        pointer: ValueNotifier<Offset?>(null),
++        chrome: ChromePalette.light,
++        fontFamily: f);
++    RulerCornerPainter corner(String? f) => RulerCornerPainter(
++        page: page, chrome: ChromePalette.light, fontFamily: f);
++    expect(bar('Roboto').shouldRepaint(bar('Lato')), isTrue);
++    expect(bar('Roboto').shouldRepaint(bar(null)), isTrue);
++    expect(bar('Roboto').shouldRepaint(bar('Roboto')), isFalse);
++    expect(corner('Roboto').shouldRepaint(corner('Lato')), isTrue);
++    expect(corner('Roboto').shouldRepaint(corner('Roboto')), isFalse);
++  });
++
+   testWidgets(
+       'the bars are co-extensive with the child and the corner is 24 x 24',
+       (tester) async {
+     await pump(tester);
+     final child = tester.getRect(find.byKey(const Key('child')));
+     expect(child.size, const Size(400, 300));
+     final top = tester.getRect(find.byKey(const Key('ruler-top')));
+     final left = tester.getRect(find.byKey(const Key('ruler-left')));
+     final corner = tester.getRect(find.byKey(const Key('ruler-corner')));
+     expect(top.left, child.left);
+diff --git a/packages/jet_cad_floor_plan/doc/screenshots/design_dark.png b/packages/jet_cad_floor_plan/doc/screenshots/design_dark.png
+index c2907495..a0317349 100644
+Binary files a/packages/jet_cad_floor_plan/doc/screenshots/design_dark.png and b/packages/jet_cad_floor_plan/doc/screenshots/design_dark.png differ
+diff --git a/packages/jet_cad_floor_plan/doc/screenshots/design_light.png b/packages/jet_cad_floor_plan/doc/screenshots/design_light.png
+index 0d546d44..dbf88d64 100644
+Binary files a/packages/jet_cad_floor_plan/doc/screenshots/design_light.png and b/packages/jet_cad_floor_plan/doc/screenshots/design_light.png differ

@@ -1,0 +1,630 @@
+# Review package: 34cb012..HEAD
+
+## Commits
+4ba29d0f chore: jet_cad_2d, jet_cad_2d_flutter and jet_cad_floor_plan 0.7.2
+
+## Files changed
+ CHANGELOG.md                                     |  8 ++++++++
+ apps/dev_harness_2d/pubspec.yaml                 |  4 ++--
+ apps/floor_planner/pubspec.yaml                  |  6 +++---
+ apps/restaurant_demo/pubspec.yaml                |  6 +++---
+ docs/host-guide.md                               | 10 +++++-----
+ packages/jet_cad_2d/CHANGELOG.md                 | 10 ++++++++++
+ packages/jet_cad_2d/pubspec.yaml                 |  2 +-
+ packages/jet_cad_2d_flutter/CHANGELOG.md         | 16 ++++++++++++++++
+ packages/jet_cad_2d_flutter/pubspec.yaml         |  4 ++--
+ packages/jet_cad_2d_gpu/pubspec.yaml             |  4 ++--
+ packages/jet_cad_floor_plan/CHANGELOG.md         | 18 ++++++++++++++++++
+ packages/jet_cad_floor_plan/pubspec.yaml         |  6 +++---
+ packages/jet_cad_restaurant_symbols/pubspec.yaml |  4 ++--
+ tool/ci/host_probe/pubspec.yaml.in               |  2 +-
+ tool/ci/test/dependency_lines_test.dart          |  4 ++--
+ tool/ci/test/guide_test.dart                     |  2 +-
+ tool/readme_probe/pubspec.yaml                   |  6 +++---
+ tool/screenshots/pubspec.yaml                    |  6 +++---
+ 18 files changed, 85 insertions(+), 33 deletions(-)
+
+## Diff
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 6916c951..bfe95c0d 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -8,20 +8,28 @@ CHANGELOG and its own git tags:
+ - [`jet_cad_2d_flutter`](packages/jet_cad_2d_flutter/CHANGELOG.md), the
+   renderer (`jet_cad_2d_flutter-vX.Y.Z`);
+ - [`jet_cad_floor_plan`](packages/jet_cad_floor_plan/CHANGELOG.md), the
+   planner a host depends on (`jet_cad_floor_plan-vX.Y.Z`).
+ 
+ A host depends on the planner from pub.dev (see
+ [docs/host-guide.md](docs/host-guide.md)). Up to 0.7.0 the packages were
+ released together, by git, under one version and one tag (`vX.Y.Z`); that
+ shared history follows, unchanged.
+ 
++## Latest releases
++
++0.7.2 of `jet_cad_2d`, `jet_cad_2d_flutter` and `jet_cad_floor_plan`
++(screenshots, READMEs and funding links; the planner exports
++`SymbolLibraryState` and `TableNumberProblem`, the renderer's rulers take the
++app's font). Each package's entry is in its own CHANGELOG, linked above;
++plans are stored as in 0.7.1 (schema 10).
++
+ ## 0.7.0
+ 
+ Rubber-band selection: in the selection mode a drag draws a band that
+ selects tables. Plans are stored as in 0.6.0 (schema 10): a plan either
+ release saves opens in the other, and service layouts are unchanged.
+ Nothing a host compiles against is removed or changed; the one change a
+ host can notice without opting in is under the default
+ `floorDrag: FloorPlanFloorDrag.pan`, where a mouse or stylus drag on the
+ floor with Shift, Ctrl or Cmd held now draws a band instead of panning
+ (below). The packages need Flutter 3.44 or later, as 0.6.0 did; 0.7.0
+diff --git a/apps/dev_harness_2d/pubspec.yaml b/apps/dev_harness_2d/pubspec.yaml
+index e1a0806f..e58b2b94 100644
+--- a/apps/dev_harness_2d/pubspec.yaml
++++ b/apps/dev_harness_2d/pubspec.yaml
+@@ -7,22 +7,22 @@ publish_to: none
+ version: 0.0.1
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   flutter: ">=3.24.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
+   # The resident GPU backend, installed first thing in `main`
+   # (`installResidentGpu()`): `BACKEND=residentGpu` and the GPU arm need it.
+   # The harness is the only app that depends on it.
+   jet_cad_2d_gpu:
+     path: ../../packages/jet_cad_2d_gpu
+   vector_math: ^2.2.0
+   vm_service: ^15.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+diff --git a/apps/floor_planner/pubspec.yaml b/apps/floor_planner/pubspec.yaml
+index c2fb9c6f..049ded4d 100644
+--- a/apps/floor_planner/pubspec.yaml
++++ b/apps/floor_planner/pubspec.yaml
+@@ -14,23 +14,23 @@ environment:
+   # ^3.5.0 because it sets the language version: from 3.7 on the formatter
+   # switches to the tall style and the analyzer adds lints, which would
+   # rewrite nearly every file in the app.
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   file_selector: ^1.1.0
+   flutter:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
++  jet_cad_floor_plan: ^0.7.2
+   jet_cad_restaurant_symbols:
+     path: ../../packages/jet_cad_restaurant_symbols
+   # The app names PdfPageFormat (the print flow's page size, spec 13 D9);
+   # the same bound as jet_cad_2d_flutter's.
+   pdf: ^3.13.1
+   vector_math: ^2.2.0
+   web: ^1.1.0
+ 
+ dev_dependencies:
+   flutter_test:
+diff --git a/apps/restaurant_demo/pubspec.yaml b/apps/restaurant_demo/pubspec.yaml
+index 72dafc41..d081a225 100644
+--- a/apps/restaurant_demo/pubspec.yaml
++++ b/apps/restaurant_demo/pubspec.yaml
+@@ -10,31 +10,31 @@ resolution: workspace
+ 
+ environment:
+   # The language version stays at the workspace's (see apps/floor_planner's
+   # pubspec): from 3.7 on the formatter switches to the tall style.
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_floor_plan: ^0.7.2
+   jet_cad_restaurant_symbols:
+     path: ../../packages/jet_cad_restaurant_symbols
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
+   # The tests build seeded plans with the editor's own placement.
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
+   vector_math: ^2.2.0
+ 
+ flutter:
+   uses-material-design: true
+   # The sample plans the demo opens with (test/sample_plans_test.dart builds
+   # and checks them).
+   assets:
+     - assets/plans/salon.json
+     - assets/plans/teras.json
+   # The bare family documents name, from the planner package's bytes (spec
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index adc71506..df305401 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -1,43 +1,43 @@
+ # Embedding the floor planner in a POS — host guide
+ 
+ This guide is for a Flutter point-of-sale application (a **host**) that
+ embeds the floor planner: staff design the restaurant's floors in the
+ **design** mode, and during service they see the tables, colour them by
+ status and pick them in the **selection** mode. It covers `jet_cad_floor_plan`
+-**0.7.1** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
++**0.7.2** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
+ 
+ Every Dart snippet below is taken from
+ [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
+ a small host that CI builds from outside the repository on every push.
+ `tool/ci/check_guide.dart` fails CI when a snippet here is no longer in
+ that file, so the code in this guide compiles against the release.
+ 
+ ## 1. The dependency
+ 
+ Add the planner from pub.dev, with `dart pub add jet_cad_floor_plan` or in
+ your pubspec:
+ 
+ ```yaml
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_floor_plan: ^0.7.2
+ ```
+ 
+ The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come with
+ it, from pub.dev. Import only the planner's barrel,
+ `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`. Anything under `src/`
+ is not API.
+ 
+ The packages need Flutter 3.44 or later (the Dart that comes with it);
+-0.7.1 is built and tested with Flutter 3.47.6. They bring no build hook
++0.7.2 is built and tested with Flutter 3.47.6. They bring no build hook
+ and no GPU renderer: nothing runs at build time beyond Flutter's own.
+ (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
+ hook compiles shaders.)
+ 
+ ### The restaurant symbols
+ 
+ The restaurant library (tables, chairs, bar and kitchen symbols) is not a
+ dependency of the planner: you copy its two files into your app, in three
+ steps.
+ 
+@@ -2261,16 +2261,16 @@ stylus behave as on a desktop.
+   that says why); a 0.1.0 plan opens here unchanged. Terminals that
+   share stored plans leave 0.1.0 together. 0.2.0 and 0.3.0 save the same
+   plans and service layouts, so they can share them.
+ - **Schema 9** *(since 0.4.0)*. **A plan saved by 0.4.0, 0.5.0 or 0.5.1
+   is at schema 9, with or without table data, and 0.3.0 and every
+   earlier release refuse it** (`load` throws a `FormatException` that
+   says why). **Every terminal that shares stored plans moves to it
+   together.** A schema 8 or 7 plan opens here unchanged; the service
+   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
+   plans and service layouts, so they can share them.
+-- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0 or 0.7.1 is at
++- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0, 0.7.1 or 0.7.2 is at
+   **schema 10**, which 0.5.1 and every older release refuse (`load`
+   throws a `FormatException` that says why); a schema 9, 8 or 7 plan
+   opens here unchanged. Every terminal that shares stored plans moves
+-  together. 0.6.0, 0.7.0 and 0.7.1 save the same plans and service layouts, so
++  together. 0.6.0, 0.7.0, 0.7.1 and 0.7.2 save the same plans and service layouts, so
+   they can share them.
+diff --git a/packages/jet_cad_2d/CHANGELOG.md b/packages/jet_cad_2d/CHANGELOG.md
+index 7e08e1ed..3024376e 100644
+--- a/packages/jet_cad_2d/CHANGELOG.md
++++ b/packages/jet_cad_2d/CHANGELOG.md
+@@ -1,12 +1,22 @@
+ # Changelog
+ 
++## 0.7.2
++
++Documentation and funding only; no code change. Plans are stored as in
++0.7.1.
++
++- The README links the renderer (`jet_cad_2d_flutter`), the planner
++  (`jet_cad_floor_plan`) and the host guide, and says that a host adds
++  only the planner: it brings the engine and the renderer with it.
++- Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
++
+ ## 0.7.1
+ 
+ The first release on pub.dev. The code is the engine of jet-cad 0.7.0
+ (git tag `v0.7.0`) unchanged; what changed is how it is packaged:
+ 
+ - The package carries its own LICENSE (Apache 2.0), a README written for
+   pub.dev and a runnable example (`example/jet_cad_2d_example.dart`).
+ - The SDK constraint is `^3.6.0` (was `^3.5.0`): the floor pub workspaces
+   document for their members.
+ - The repository URL points at `https://github.com/a-urel/jet-cad`.
+diff --git a/packages/jet_cad_2d/pubspec.yaml b/packages/jet_cad_2d/pubspec.yaml
+index a80cfc6c..58445546 100644
+--- a/packages/jet_cad_2d/pubspec.yaml
++++ b/packages/jet_cad_2d/pubspec.yaml
+@@ -1,16 +1,16 @@
+ name: jet_cad_2d
+ description: >-
+   A pure-Dart 2D CAD engine and document model: a scene tree, columnar
+   geometry, a spatial index with picking and snapping, undoable commands and a
+   deterministic file format.
+-version: 0.7.1
++version: 0.7.2
+ repository: https://github.com/a-urel/jet-cad
+ issue_tracker: https://github.com/a-urel/jet-cad/issues
+ topics:
+   - cad
+   - geometry
+   - spatial-index
+   - drawing
+ resolution: workspace
+ 
+ environment:
+diff --git a/packages/jet_cad_2d_flutter/CHANGELOG.md b/packages/jet_cad_2d_flutter/CHANGELOG.md
+index 1d0c3f87..f5d9802f 100644
+--- a/packages/jet_cad_2d_flutter/CHANGELOG.md
++++ b/packages/jet_cad_2d_flutter/CHANGELOG.md
+@@ -1,12 +1,28 @@
+ # Changelog
+ 
++## 0.7.2
++
++Screenshots and documentation, and one small change in the rulers. Plans
++are stored as in 0.7.1.
++
++- `RulerFrame` passes the ambient `DefaultTextStyle`'s font family to the
++  rulers' labels and to the corner's unit symbol, so the rulers follow the
++  host's text font. With no ambient family the labels are drawn exactly as
++  in 0.7.1.
++- Screenshots, in the pub.dev gallery and in the README: the canvas in
++  light and dark, the selection's grips, the crossing band and the symbol
++  gallery.
++- The README has a package table and links the host guide.
++- Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
++- Depends on `jet_cad_2d: ^0.7.2`.
++
+ ## 0.7.1
+ 
+ The first release on pub.dev. The code is jet-cad 0.7.0's render package
+ (git tag `v0.7.0`); what changed is how it is packaged: its own LICENSE
+ (Apache 2.0), a README written for pub.dev, a runnable example, `sdk:
+ ^3.6.0`, and its dependency on `jet_cad_2d` from pub.dev (`^0.7.1`).
+ 
+ From this release on, `jet_cad_2d_flutter` has its own version on pub.dev
+ and its own git tags (`jet_cad_2d_flutter-vX.Y.Z`). Before it, the package
+ was released with the other jet-cad packages under one version; that
+diff --git a/packages/jet_cad_2d_flutter/pubspec.yaml b/packages/jet_cad_2d_flutter/pubspec.yaml
+index 7890219e..cec52dad 100644
+--- a/packages/jet_cad_2d_flutter/pubspec.yaml
++++ b/packages/jet_cad_2d_flutter/pubspec.yaml
+@@ -1,34 +1,34 @@
+ name: jet_cad_2d_flutter
+ description: >-
+   Flutter rendering and interaction for the jet_cad_2d engine: a CAD canvas
+   with camera, rulers, selection and snapping, and PDF and PNG export.
+-version: 0.7.1
++version: 0.7.2
+ repository: https://github.com/a-urel/jet-cad
+ issue_tracker: https://github.com/a-urel/jet-cad/issues
+ topics:
+   - cad
+   - drawing
+   - canvas
+   - pdf
+ resolution: workspace
+ 
+ environment:
+   # The floor pub workspaces document for their members; it sets language
+   # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x requires Dart
+   # >= 3.12.0, which Flutter first ships in 3.44.0: that bound binds.
+   sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
++  jet_cad_2d: ^0.7.2
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+   # The vector PDF export's writer (spec 13 D3). Pure Dart, Apache 2.0.
+   pdf: ^3.13.1
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   lints: ^6.1.0
+diff --git a/packages/jet_cad_2d_gpu/pubspec.yaml b/packages/jet_cad_2d_gpu/pubspec.yaml
+index 3f376245..23e6770b 100644
+--- a/packages/jet_cad_2d_gpu/pubspec.yaml
++++ b/packages/jet_cad_2d_gpu/pubspec.yaml
+@@ -9,22 +9,22 @@ publish_to: none
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   # flutter_scene 0.23.0's own floor. jet_cad_2d_flutter stays at 3.44.
+   flutter: ">=3.47.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+   # **For its internal `flutter_gpu` shim only, not its scene graph.**
+   # `flutter_scene/lib/src/gpu/gpu.dart` re-exports `package:flutter_gpu`
+   # verbatim on native and falls back to a WebGL2 backend on web; bare
+   # `flutter_gpu` imports `dart:ffi` and cannot compile for the web at all.
+   # The import is off contract and pre-1.0, which is why exactly one file in
+   # this package is allowed to make it (`lib/src/gpu_facade.dart`).
+   flutter_scene: ^0.23.0
+ 
+diff --git a/packages/jet_cad_floor_plan/CHANGELOG.md b/packages/jet_cad_floor_plan/CHANGELOG.md
+index 272a744e..e44702e3 100644
+--- a/packages/jet_cad_floor_plan/CHANGELOG.md
++++ b/packages/jet_cad_floor_plan/CHANGELOG.md
+@@ -1,12 +1,30 @@
+ # Changelog
+ 
++## 0.7.2
++
++Two exports, screenshots and documentation. Plans are stored as in 0.7.1
++(schema 10).
++
++- The barrel exports `SymbolLibraryState` (`SymbolLibraryLoading`,
++  `SymbolLibraryReady`, `SymbolLibraryFailed`) and `TableNumberProblem`:
++  a host that implements `FloorPlanStrings` no longer imports
++  `editor.dart` for them (R-10).
++- The editor's rulers use the app's font, through the renderer's
++  `RulerFrame` change in `jet_cad_2d_flutter` 0.7.2.
++- Screenshots, in the pub.dev gallery and in the README: the editor in
++  light and dark, and the service view (statuses and a group, a POS theme
++  with a zone in focus, a rubber band, table colours).
++- The README has a package table.
++- Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
++- Depends on `jet_cad_2d: ^0.7.2` and `jet_cad_2d_flutter: ^0.7.2`.
++
+ ## 0.7.1
+ 
+ The first release on pub.dev. The code is jet-cad 0.7.0's planner (git
+ tag `v0.7.0`); what changed is how it is packaged: its own LICENSE (Apache
+ 2.0), a README and a runnable example, `sdk: ^3.6.0`, and its dependencies
+ on `jet_cad_2d` and `jet_cad_2d_flutter` from pub.dev (`^0.7.1`). Plans
+ are stored as in 0.7.0 (schema 10): a plan saved by either release opens in the other.
+ 
+ **Moving a host from git to pub.dev:**
+ 
+diff --git a/packages/jet_cad_floor_plan/pubspec.yaml b/packages/jet_cad_floor_plan/pubspec.yaml
+index 2c49a1fd..e4828ab4 100644
+--- a/packages/jet_cad_floor_plan/pubspec.yaml
++++ b/packages/jet_cad_floor_plan/pubspec.yaml
+@@ -1,15 +1,15 @@
+ name: jet_cad_floor_plan
+ description: >-
+   An embeddable parametric floor planner for Flutter: walls, openings,
+   rooms, dimensions and furniture symbols, with a host API for tables.
+-version: 0.7.1
++version: 0.7.2
+ repository: https://github.com/a-urel/jet-cad
+ issue_tracker: https://github.com/a-urel/jet-cad/issues
+ topics:
+   - cad
+   - floor-plan
+   - restaurant
+   - point-of-sale
+ resolution: workspace
+ 
+ environment:
+@@ -20,22 +20,22 @@ environment:
+   sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+   # Spec 14d L2: Flutter's Material, Widgets and Cupertino words for de and
+   # tr, listed with the planner's own delegate.
+   flutter_localizations:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
+   meta: ^1.18.0
+   pdf: ^3.13.1
+   printing: ^5.15.1
+   vector_math: ^2.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
+   vm_service: ^15.2.0
+diff --git a/packages/jet_cad_restaurant_symbols/pubspec.yaml b/packages/jet_cad_restaurant_symbols/pubspec.yaml
+index 1be7a6bd..d8de46ab 100644
+--- a/packages/jet_cad_restaurant_symbols/pubspec.yaml
++++ b/packages/jet_cad_restaurant_symbols/pubspec.yaml
+@@ -8,22 +8,22 @@ publish_to: none
+ version: 0.7.0
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_floor_plan: ^0.7.2
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
+   vector_math: ^2.2.0
+ 
+ flutter:
+   assets:
+     - assets/restaurant.jetlib
+diff --git a/tool/ci/host_probe/pubspec.yaml.in b/tool/ci/host_probe/pubspec.yaml.in
+index 9fd7647b..8bacc863 100644
+--- a/tool/ci/host_probe/pubspec.yaml.in
++++ b/tool/ci/host_probe/pubspec.yaml.in
+@@ -7,21 +7,21 @@ name: host_probe
+ description: A host outside the workspace (spec 14d P6).
+ publish_to: none
+ version: 0.1.0
+ 
+ environment:
+   sdk: ^3.6.0
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_floor_plan: ^0.7.2
+ 
+ flutter:
+   uses-material-design: true
+   fonts:
+     - family: Roboto
+       fonts:
+         - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
+   assets:
+     - assets/restaurant.jetlib
+ 
+diff --git a/tool/ci/test/dependency_lines_test.dart b/tool/ci/test/dependency_lines_test.dart
+index a17d7ec1..f5535aea 100644
+--- a/tool/ci/test/dependency_lines_test.dart
++++ b/tool/ci/test/dependency_lines_test.dart
+@@ -51,25 +51,25 @@ void main() {
+       expect(nonHosted(File(path).readAsStringSync()), isEmpty, reason: path);
+     }
+   });
+ 
+   test('DL2 every such dependency is the caret of D1', () {
+     var seen = 0;
+     for (final path in pubspecs) {
+       final constraints = hosted(File(path).readAsStringSync());
+       seen += constraints.length;
+       for (final c in constraints.values) {
+-        expect(c, '^0.7.1', reason: path);
++        expect(c, '^0.7.2', reason: path);
+       }
+     }
+     expect(seen, 21,
+         reason: 'premise: the dependents are read; the pubspecs hold 21 '
+             'dependency lines on a published package (15, and the three each of '
+             'tool/screenshots and tool/readme_probe)');
+   });
+ 
+   test('DL3 the reader sees a path dependency', () {
+     expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
+         ['jet_cad_2d: path: ../x']);
+-    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.1\n'), isEmpty);
++    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.2\n'), isEmpty);
+   });
+ }
+diff --git a/tool/ci/test/guide_test.dart b/tool/ci/test/guide_test.dart
+index 30397014..a6d24b05 100644
+--- a/tool/ci/test/guide_test.dart
++++ b/tool/ci/test/guide_test.dart
+@@ -22,21 +22,21 @@ void main() {
+     expect(guide, contains('controller.serviceLayoutJson()'),
+         reason: 'premise');
+     final renamed = guide.replaceFirst(
+         'controller.serviceLayoutJson()', 'controller.layoutJson()');
+     expect(missingBlocks(renamed, dart: dart, yaml: yaml),
+         ['dart: Future<void> saveLayout() async {']);
+   });
+ 
+   test('GD3 a pubspec line the probe does not have is named', () {
+     final moved = guide.replaceFirst(
+-        'jet_cad_floor_plan: ^0.7.1', 'jet_cad_floor_plan: ^0.7.2');
++        'jet_cad_floor_plan: ^0.7.2', 'jet_cad_floor_plan: ^0.7.3');
+     expect(moved, isNot(guide), reason: 'premise');
+     expect(
+         missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: dependencies:']);
+   });
+ 
+   test('GD4 the symbols\' asset line is the probe\'s', () {
+     final moved = guide.replaceFirst(
+         '    - assets/restaurant.jetlib', '    - assets/symbols.jetlib');
+     expect(moved, isNot(guide), reason: 'premise');
+     expect(missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: assets:']);
+diff --git a/tool/readme_probe/pubspec.yaml b/tool/readme_probe/pubspec.yaml
+index 74dd31d6..72ca94ef 100644
+--- a/tool/readme_probe/pubspec.yaml
++++ b/tool/readme_probe/pubspec.yaml
+@@ -7,14 +7,14 @@ publish_to: none
+ version: 0.1.0
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
++  jet_cad_floor_plan: ^0.7.2
+   vector_math: ^2.2.0
+diff --git a/tool/screenshots/pubspec.yaml b/tool/screenshots/pubspec.yaml
+index 679ab982..7d4b0a5d 100644
+--- a/tool/screenshots/pubspec.yaml
++++ b/tool/screenshots/pubspec.yaml
+@@ -9,23 +9,23 @@ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dev_dependencies:
+   flutter:
+     sdk: flutter
+   flutter_test:
+     sdk: flutter
+-  jet_cad_2d: ^0.7.1
+-  jet_cad_2d_flutter: ^0.7.1
+-  jet_cad_floor_plan: ^0.7.1
++  jet_cad_2d: ^0.7.2
++  jet_cad_2d_flutter: ^0.7.2
++  jet_cad_floor_plan: ^0.7.2
+   jet_cad_restaurant_symbols:
+     path: ../../packages/jet_cad_restaurant_symbols
+   vector_math: ^2.2.0
+ 
+ flutter:
+   uses-material-design: true
+   # As a host declares it (host guide §2): the planner's bytes under the
+   # bare family the plans name.
+   fonts:
+     - family: Roboto

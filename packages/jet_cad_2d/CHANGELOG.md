@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.2
+
+Documentation and funding only; no code change. Plans are stored as in
+0.7.1.
+
+- The README links the renderer (`jet_cad_2d_flutter`), the planner
+  (`jet_cad_floor_plan`) and the host guide, and says that a host adds
+  only the planner: it brings the engine and the renderer with it.
+- Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+
 ## 0.7.1
 
 The first release on pub.dev. The code is the engine of jet-cad 0.7.0

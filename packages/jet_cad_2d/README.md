@@ -62,16 +62,28 @@ The full walk-through, which also saves and reloads the document, is in
 repository's own suites; it is not API and may change in any release.
 
 While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
-patch release (`0.7.2`) does not.
+patch release (`0.7.3`) does not.
 
-## Where it comes from
+## The jet-cad packages
 
-This package is the engine of [jet-cad](https://github.com/a-urel/jet-cad), a
-parametric floor planner. The renderer
-[`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) and the
-planner [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan)
-are on pub.dev too. An application that embeds the floor planner depends on
-the planner and gets this engine with it.
+| Package | What it is | Depends on |
+|---|---|---|
+| [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
+| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+
+A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
+come with it, and a host should not also depend on them directly unless it
+uses their API itself.
+
+Embedding the floor planner in an app is walked through in the
+[host guide](https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md).
+
+## Support
+
+If jet-cad is useful to you, you can support its development through
+[GitHub Sponsors](https://github.com/sponsors/a-urel) or
+[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
 
 ## License
 

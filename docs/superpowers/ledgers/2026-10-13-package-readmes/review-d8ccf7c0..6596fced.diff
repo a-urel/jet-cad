@@ -1,0 +1,562 @@
+# Review package: d8ccf7c..HEAD
+
+## Commits
+6596fced docs: the final review section and the CI gates run locally
+f683f5ca docs: the final review's fixes to READMEs, changelog, guide, checklist and settle
+
+## Files changed
+ README.md                                          | 11 +--
+ STATUS.md                                          | 18 +++--
+ docs/host-guide.md                                 |  3 +-
+ .../notes/2026-10-13-package-readmes-results.md    | 81 +++++++++++++++++++---
+ packages/jet_cad_2d/README.md                      |  2 +-
+ packages/jet_cad_2d_flutter/README.md              |  2 +-
+ .../jet_cad_2d_flutter/lib/src/ruler_frame.dart    |  4 +-
+ packages/jet_cad_floor_plan/CHANGELOG.md           |  5 +-
+ packages/jet_cad_floor_plan/README.md              | 11 ++-
+ packages/jet_cad_floor_plan/test/example_test.dart |  1 -
+ tool/screenshots/README.md                         |  5 +-
+ tool/screenshots/test/support/shots.dart           |  7 +-
+ 12 files changed, 119 insertions(+), 31 deletions(-)
+
+## Diff
+diff --git a/README.md b/README.md
+index c1b6927d..fe9de0f5 100644
+--- a/README.md
++++ b/README.md
+@@ -1,15 +1,17 @@
+ # jet-cad
+ 
+ jet-cad is a parametric floor planner for Flutter, built to be embedded in an
+ application such as a restaurant's point of sale. It is a Dart workspace of
+-three packages on pub.dev:
++three packages on pub.dev.
++
++## The jet-cad packages
+ 
+ | Package | What it is | Depends on |
+ |---|---|---|
+ | [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
+ | [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+ | [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+ 
+ A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
+ come with it, and a host should not also depend on them directly unless it
+ uses their API itself.
+@@ -19,13 +21,14 @@ Embedding the floor planner in an app: [docs/host-guide.md](docs/host-guide.md).
+ ## Support
+ 
+ If jet-cad is useful to you, you can support its development through
+ [GitHub Sponsors](https://github.com/sponsors/a-urel) or
+ [Buy Me a Coffee](https://buymeacoffee.com/yazemo).
+ 
+ ## License
+ 
+ JetCAD is licensed under the [Apache License 2.0](LICENSE). The dormant
+ `packages/jet_cad` line depends on Open CASCADE Technology (OCCT), which is
+-distributed under the GNU LGPL v2.1 with the Open CASCADE Exception. OCCT remains a third-party dependency with its own
+-license; JetCAD's Apache 2.0 license is independent of OCCT's license. See the
+-[LICENSES](LICENSES/) directory for third-party license information.
+\ No newline at end of file
++distributed under the GNU LGPL v2.1 with the Open CASCADE Exception. OCCT
++remains a third-party dependency with its own license; JetCAD's Apache 2.0
++license is independent of OCCT's license. See the [LICENSES](LICENSES/)
++directory for third-party license information.
+diff --git a/STATUS.md b/STATUS.md
+index 26a9343a..8cd830af 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,13 +1,13 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (the three host packages are on pub.dev at 0.7.1; 0.7.2 is in flight, below) (tag
++**Last updated:** 2026-10-13. **`main` carries release 0.7.0** and its tag history; the three packages are on pub.dev at 0.7.1; 0.7.2 is in flight (below) (tag
+ `v0.7.0` → `0fa649e`, after `v0.6.0` →
+ `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+ before this point — its records, reviews and resume points — is in
+ [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
+ 
+ ## Where the project stands
+ 
+ The product is a **parametric floor planner** embedded in a restaurant
+ point-of-sale application. The roadmap's sub-projects **01–13** (the app,
+ interaction, page and rulers, drawing tools, the parametric layer, walls,
+@@ -531,35 +531,40 @@ the real publish.
+    ```bash
+    cd packages/jet_cad_2d
+    dart pub publish --dry-run
+    dart pub publish
+    git tag jet_cad_2d-v0.7.2 <merge commit>
+    git push origin jet_cad_2d-v0.7.2
+    ```
+ 
+ 2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
+    lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
+-   resolve at their lowest); then:
++   resolve at their lowest). The recipe (a `git archive` copy with `test/`,
++   `build/` and `tool/` removed, as `.pubignore` does, then pana and
++   `pub downgrade`) is in
++   `docs/superpowers/notes/2026-10-13-publish-host-packages-results.md`,
++   section "pana (0.23.19), on each archive's file set"; then:
+ 
+    ```bash
+-   cd packages/jet_cad_2d_flutter
++   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
+    dart pub publish --dry-run
+    dart pub publish
+    git tag jet_cad_2d_flutter-v0.7.2 <merge commit>
+    git push origin jet_cad_2d_flutter-v0.7.2
+    ```
+ 
+ 3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
+-   first, as for the renderer:
++   first, by the same recipe (the results note's "pana (0.23.19), on each
++   archive's file set"):
+ 
+    ```bash
+-   cd packages/jet_cad_floor_plan
++   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
+    dart pub publish --dry-run
+    dart pub publish
+    git tag jet_cad_floor_plan-v0.7.2 <merge commit>
+    git push origin jet_cad_floor_plan-v0.7.2
+    ```
+ 
+    Pushing each tag is also when that package's README images start to
+    resolve on GitHub (their URLs are pinned to `<package>-v0.7.2`).
+ 
+ 4. After the planner: D7's pub-only probe (the recipe below), and a look
+@@ -571,22 +576,21 @@ published by the human in order (spec D10): `jet_cad_2d` from a worktree
+ at `1dc167d` (not `main`, R-5's README), `jet_cad_2d_flutter` and
+ `jet_cad_floor_plan` from `main` at `8a86504` (CI green). Tags
+ `jet_cad_2d-v0.7.1` → `1dc167d`, `jet_cad_2d_flutter-v0.7.1` →
+ `8a86504`, `jet_cad_floor_plan-v0.7.1` → `8a86504`. pana 160/160 for the
+ two dependents before their upload, lower bounds 20/20 (`pub downgrade`
+ clean), so the `^0.7.1` lines stand; pub.dev scores the engine and the
+ renderer 160/160. D7 green from pub.dev alone. R-10 stands: the planner
+ went out without the two exports. The record: the results note's
+ "The publication".
+ 
+-**Next:** D11 in the restaurant software (below); R-10's exports as a
+-0.x candidate for the planner's next release. A later release of any
++**Next:** D11 in the restaurant software (below). A later release of any
+ package follows the same order: its own version, CHANGELOG and tag
+ `<package>-vX.Y.Z`; a dependent's lower bounds per D1, checked by
+ pana's lower-bounds section once its dependencies are on pub.dev;
+ `dart pub publish --dry-run`, then the human's `dart pub publish`.
+ 
+ **The pub-only check (D7)**, run after the planner's 0.7.1 and again
+    after any planner release, from the repository root on `main`. The probe's `lib/main.dart` imports
+    `restaurant_names.dart` and its pubspec declares
+    `assets/restaurant.jetlib`; both are git-ignored files that only
+    `host_probe.sh` creates, from the overridden package, so put them in
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index df305401..b9b6ea4c 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -1951,21 +1951,22 @@ focus on a mouse press outside it (on a desktop and on the web), after
+ the canvas has asked for it: one press on the plan right after typing
+ leaves the focus with neither, and the planner's keys reach nothing
+ until the next press. A press on one of your buttons unfocuses the field
+ too. Give the field `onTapOutside: (_) {}` to keep the focus there until
+ the plan or another field takes it.
+ 
+ ## 9. Themes
+ 
+ The planner follows your `MaterialApp`'s theme. In a dark theme a light
+ page is shown on a dark canvas with its drawing re-toned to keep its
+-contrast; exports and prints are never re-toned.
++contrast; exports and prints are never re-toned. Since 0.7.2 the
++editor's rulers follow the ambient `DefaultTextStyle`'s font family.
+ 
+ *Since 0.4.0:* the floor plan's own look, `FloorPlanTheme`.
+ 
+ **What it sets.** A `ThemeExtension` with seventeen optional fields; a
+ field you leave null is what the planner draws without a theme, so
+ `const FloorPlanTheme()` changes nothing. Widths, sizes, radii and
+ padding are logical pixels on the screen; the margin is millimetres of
+ the plan.
+ 
+ | Fields | What they reach | Null is |
+diff --git a/docs/superpowers/notes/2026-10-13-package-readmes-results.md b/docs/superpowers/notes/2026-10-13-package-readmes-results.md
+index 573d4424..4a672c49 100644
+--- a/docs/superpowers/notes/2026-10-13-package-readmes-results.md
++++ b/docs/superpowers/notes/2026-10-13-package-readmes-results.md
+@@ -143,20 +143,24 @@ the 4 MB total.
+ 
+ (Sizes from `ls -l` at the end of this task. P1 and P2 are the Task 3b
+ regeneration; Task 3's report quotes their pre-R6 sizes, 124,546 and
+ 126,047.)
+ 
+ **The machine that generated them:** macOS 27.0.1 (build 26A434), Flutter
+ 3.47.6 (stable, framework revision `5fc346839b`, 2026-09-30), engine
+ `692136cb65`. The generator compares no pixels, so a Linux CI run passes
+ whatever its fonts do; the checked-in PNGs are this machine's.
+ 
++**Regenerating them:** `cd tool/screenshots && UPDATE_SCREENSHOTS=1 flutter
++test` (spec D4); without the variable the same command checks the scenes and
++writes nothing. Look at every PNG before committing it.
++
+ ## Archive sizes (`dart pub publish --dry-run`)
+ 
+ | Package | Before (Task 2, 0.7.1 state) | After Task 7 | After Task 8 / now |
+ |---|---|---|---|
+ | `jet_cad_2d` | 229 KB | 229 KB | 229 KB |
+ | `jet_cad_2d_flutter` | 226 KB | 813 KB | 814 KB |
+ | `jet_cad_floor_plan` | 462 KB | 781 KB | 782 KB |
+ 
+ The growth is the PNGs (667 KB and 384 KB, compressed again by gzip) and
+ the READMEs. 0 warnings in all of them; no `test/` in either archive (the
+@@ -226,47 +230,108 @@ The renderer's red verdict is Ruling R7, as the 0.7.1 note's R-1 recorded
+ it for the earlier set: on macOS the text-lod-ladder rungs 1–2 pass.
+ `expect_failures` printed exactly those two lines and nothing else (re-run
+ on the saved JSON to check); the text-ladder goldens that `flutter test`
+ lists as failing are the standing ones. The Linux run compares exactly.
+ 
+ ## Found and not fixed
+ 
+ Minors from the task reviews, all deferred, none touching a published
+ behaviour:
+ 
+-- `packages/jet_cad_floor_plan/test/example_test.dart:79-80` carries a stale
+-  comment ("The loaded state is not host API"): R-10 made it host API.
++- (Fixed in the final review, item 6: the stale comment in
++  `packages/jet_cad_floor_plan/test/example_test.dart`, line 5, "The loaded
++  state is not host API", is deleted; the note had cited lines 79-80.)
+ - SH3 watches only `jet_cad_floor_plan`'s `doc/` directory; the package
+   path interpolation in `shoot` is untested.
+ - P5's band ends mid table 1; P1's palette list is cut at 800 px (its last
+   entry "Text" is half visible); the scenes' app theme names Roboto for the
+   status captions and group chips, a scene-side choice the READMEs mention
+   and the pubspec descriptions do not claim.
+ - Task 4: `_x0` / `_y0` copy the unexported `kPlanOriginX/Y`; R5 collapses
+   all but Bathroom (D5's "one category open").
+ - Task 3b: `RulerFrame.build`'s reindent is diff noise; RF-c has no
+   chrome-differs / family-matches case.
+ - `check_screenshots`: any non-tag `https` image (a badge) is flagged in the
+   two READMEs (the READMEs stay badge-free); a missing `.pubignore` or
+   README throws a raw trace; `./path` gives a second "not in the README"
+   line.
+ - The renderer README says `dart pub add` where `flutter pub add` is
+   idiomatic; the probe's imports are not checked against the README's prose.
+ - `docs/host-guide.md` lines 2271 and 2275 run past 80 columns.
+-- Task 8: the R3 caption (and the renderer's pubspec description) says "one
+-  entity highlighted under the pointer", but the highlight is not
+-  distinguishable in `selection_grips.png`; the root README's OCCT paragraph
+-  is not wrapped at 80; double blank lines after R1/P1; "a host asks for them
+-  in its theme" is vague (naming `FloorPlanTheme` or a guide section would
+-  help).
++- Task 8: double blank lines after R1/P1. (The OCCT paragraph and the vague
++  "a host asks for them in its theme" were fixed in the final review; the
++  claim that R3's hover is indistinguishable was withdrawn: the hover is
++  visible, as the sofa's grip-less outline and the rulers' pointer marks.)
+ - The images resolve nowhere until the tags are pushed (spec Risks): on
+   GitHub the READMEs show broken images from the merge to the first tag.
+ 
++## Final review
++
++Verdict of the whole-branch review of `51125b6..d8ccf7c` (opus): **Ready to
++merge: with fixes**. The fix wave (commit `f683f5ca`, and this note's own
++commit) did every finding and nothing else:
++
++1. (I1, R8) The CI gates no task had run were run locally; see the table
++   below. No CI run has happened on the branch; a PR to main would run it
++   (the human's word).
++2. (I2) STATUS.md's release checklist: a step 0 (the human merges, pushes
++   `main`, CI green on the merge commit, before any publish); the pana
++   lower-bounds recipe pointed at (the 0.7.1 results note's "pana (0.23.19),
++   on each archive's file set"); each `cd` written from
++   `git rev-parse --show-toplevel`; line 3 says what is on pub.dev; "R-10's
++   exports as a 0.x candidate" dropped.
++3. The planner README names `statusCaptionStyle`, `groupChipTextStyle` and
++   the host guide's Themes section, wrapped at 80 columns.
++4. The planner CHANGELOG drops "(R-10)" and says what a host no longer
++   imports `editor.dart` for.
++5. The README version example: the patch example is `0.7.3` in all three.
++6. The stale comment in `example_test.dart` deleted.
++7. The false Task 8 deferred item removed.
++8. The regeneration command stated in "Fonts, ratio and the pictures";
++   `tool/screenshots/README.md` in paragraphs.
++9. `settle` is bounded by a 10 s `Stopwatch` (1 s when no `until` is given,
++   as the callers without one had about 1 s before); `flutter test` in
++   `tool/screenshots` green, PNGs not regenerated.
++10. The root README: "## The jet-cad packages", the OCCT paragraph at 80
++    columns, a final newline.
++11. (R10) `RulerFrame`'s dartdoc says the labels take the ambient
++    `DefaultTextStyle`'s family.
++12. The host guide's Themes section says so in one sentence (prose only).
++13. This section.
++
++**Rulings.** R8: the fix wave runs the unexercised gates locally and
++records them; a real CI run needs a push, which is the human's word. Cost if
++wrong: a Linux-only red found at PR time, before any publish. R9: the three
++tags are not pushed before publishing (the spec accepts the broken-image
++window; a failed publish would force moving a pushed tag). Cost if wrong:
++minutes of broken images per package on pub.dev. R10: the one-line dartdoc
++note on `RulerFrame`. Cost if wrong: none.
++
++**The CI gates run locally (R8)**, at `f683f5ca`, JSON reports outside the
++repository:
++
++| Command | Last line(s) |
++|---|---|
++| `apps/floor_planner`: `flutter test` + `expect_failures` | `00:26 +212: All tests passed!` / `apps/floor_planner: 212 tests; the standing failures and skips, exactly` |
++| `flutter analyze` / `dart format ...` | `No issues found! (ran in 3.7s)` / `Formatted 47 files (0 changed)` |
++| `apps/restaurant_demo`: `flutter test` + `expect_failures` | `00:13 +69: All tests passed!` / `apps/restaurant_demo: 69 tests; the standing failures and skips, exactly` |
++| `flutter analyze` / `dart format ...` | `No issues found! (ran in 3.3s)` / `Formatted 9 files (0 changed)` |
++| `packages/jet_cad_restaurant_symbols`: `flutter test` + `expect_failures` | `00:00 +97: All tests passed!` / `packages/jet_cad_restaurant_symbols: 97 tests; the standing failures and skips, exactly` |
++| `flutter analyze` / `dart format ...` | `No issues found! (ran in 2.4s)` / `Formatted 15 files (0 changed)` |
++| `tool/ci/host_probe.sh "file://$(pwd)" "$(git rev-parse HEAD)"` | exit 0; `host probe: no GPU renderer, no build hook; build/web is  42M` |
++| `tool/ci/old_host_probe.sh` `v0.3.0`, `v0.4.0`, `v0.5.1`, `v0.6.0` | each: `No issues found!` and `old host probe: <tag>'s main.dart analyses against f683f5ca...` |
++
++After the fixes: `cd tool/ci && dart test` `00:04 +94: All tests passed!`;
++`check_guide`, `check_readmes` and `check_screenshots` print the same three
++lines as in the full gate; `tool/readme_probe` `flutter analyze` `No issues
++found! (ran in 2.8s)`; the three `dart pub publish --dry-run` runs: 229 KB,
++814 KB and 782 KB, each `Package has 0 warnings.`
++
+ ## Owed to the human
+ 
+ Not owed: any further work on this branch; the merge waits for the human's
+ word, after the whole-branch review.
+ 
+ - The merge, and the release checklist in STATUS's Resume here (publish and
+   tag, in order).
+ - After publication, a look at the three pub.dev pages: the images, the
+   gallery (screenshots tab), the Funding block.
+diff --git a/packages/jet_cad_2d/README.md b/packages/jet_cad_2d/README.md
+index dd03d3da..88fc2e1b 100644
+--- a/packages/jet_cad_2d/README.md
++++ b/packages/jet_cad_2d/README.md
+@@ -55,21 +55,21 @@ void main() {
+ The full walk-through, which also saves and reloads the document, is in
+ [`example/jet_cad_2d_example.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_2d/example/jet_cad_2d_example.dart).
+ 
+ ## The API
+ 
+ `package:jet_cad_2d/jet_cad_2d.dart` is the API. Nothing under `src/` is.
+ `package:jet_cad_2d/testing.dart` generates benchmark documents for this
+ repository's own suites; it is not API and may change in any release.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+-patch release (`0.7.2`) does not.
++patch release (`0.7.3`) does not.
+ 
+ ## The jet-cad packages
+ 
+ | Package | What it is | Depends on |
+ |---|---|---|
+ | [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
+ | [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+ | [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+ 
+ A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
+diff --git a/packages/jet_cad_2d_flutter/README.md b/packages/jet_cad_2d_flutter/README.md
+index ef34295c..757bd275 100644
+--- a/packages/jet_cad_2d_flutter/README.md
++++ b/packages/jet_cad_2d_flutter/README.md
+@@ -66,21 +66,21 @@ A crossing band, dragged right to left, mid-drag: it selects what it touches, no
+ These pictures are made by `tool/screenshots` in the repository, with the app's own theme.
+ 
+ ## The API
+ 
+ `package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart` is the API. Nothing under
+ `src/` is. `package:jet_cad_2d_flutter/export_testing.dart` is a test
+ instrument for this repository's own suites; it is not API and may change in
+ any release.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+-patch release (`0.7.2`) does not.
++patch release (`0.7.3`) does not.
+ 
+ ## The jet-cad packages
+ 
+ | Package | What it is | Depends on |
+ |---|---|---|
+ | [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
+ | [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+ | [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+ 
+ A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
+diff --git a/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart b/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
+index 4bb316d8..cf67d0f4 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart
+@@ -4,21 +4,23 @@ import 'package:flutter/widgets.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ 
+ import 'camera_controller.dart';
+ import 'canvas_palette.dart';
+ import 'chrome_style.dart';
+ import 'ruler_painter.dart';
+ 
+ /// Two ruler bars and a corner around a drawing area (spec D11). Each bar
+ /// is exactly co-extensive with the child on its own axis. A translucent
+ /// `Listener` over the child feeds [RulerFrameState.pointer]; the child's
+-/// own listeners still receive every event.
++/// own listeners still receive every event. The labels take the font family
++/// of the ambient `DefaultTextStyle`: under a Material `Scaffold` the app's
++/// font, directly under a `MaterialApp` the debug fallback's.
+ class RulerFrame extends StatefulWidget {
+   const RulerFrame({
+     super.key,
+     required this.camera,
+     required this.page,
+     required this.chrome,
+     required this.child,
+   });
+ 
+   final CameraController camera;
+diff --git a/packages/jet_cad_floor_plan/CHANGELOG.md b/packages/jet_cad_floor_plan/CHANGELOG.md
+index e44702e3..c3e02b3e 100644
+--- a/packages/jet_cad_floor_plan/CHANGELOG.md
++++ b/packages/jet_cad_floor_plan/CHANGELOG.md
+@@ -1,21 +1,22 @@
+ # Changelog
+ 
+ ## 0.7.2
+ 
+ Two exports, screenshots and documentation. Plans are stored as in 0.7.1
+ (schema 10).
+ 
+ - The barrel exports `SymbolLibraryState` (`SymbolLibraryLoading`,
+   `SymbolLibraryReady`, `SymbolLibraryFailed`) and `TableNumberProblem`:
+-  a host that implements `FloorPlanStrings` no longer imports
+-  `editor.dart` for them (R-10).
++  a host that implements `FloorPlanStrings` names `TableNumberProblem`, and a
++  host that watches its `SymbolLibraryLoader` names its states, without
++  importing `editor.dart`.
+ - The editor's rulers use the app's font, through the renderer's
+   `RulerFrame` change in `jet_cad_2d_flutter` 0.7.2.
+ - Screenshots, in the pub.dev gallery and in the README: the editor in
+   light and dark, and the service view (statuses and a group, a POS theme
+   with a zone in focus, a rubber band, table colours).
+ - The README has a package table.
+ - Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+ - Depends on `jet_cad_2d: ^0.7.2` and `jet_cad_2d_flutter: ^0.7.2`.
+ 
+ ## 0.7.1
+diff --git a/packages/jet_cad_floor_plan/README.md b/packages/jet_cad_floor_plan/README.md
+index c23de4fc..b971c5bf 100644
+--- a/packages/jet_cad_floor_plan/README.md
++++ b/packages/jet_cad_floor_plan/README.md
+@@ -77,21 +77,28 @@ The editor under a dark ambient `Theme`.
+ The service view in a dark POS-like `FloorPlanTheme`, with one zone of tables in focus (`setTableFocus`) and the rest dimmed.
+ 
+ ![A rubber band across the front row of tables](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_band.png)
+ 
+ A rubber band (`floorDrag: FloorPlanFloorDrag.band`) mid-drag across the front row of tables.
+ 
+ ![Tables in plan colours](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_colors.png)
+ 
+ Tables in plan colours (`setTablesColor`).
+ 
+-The restaurant tables in the service pictures come from the repository's restaurant symbols, which a host copies as the host guide's "The restaurant symbols" describes; the furniture library ships with the package. The captions in the pictures are set in Roboto by the pictures' own app theme; a host asks for them in its theme.
++The restaurant tables in the service pictures come from the repository's
++restaurant symbols, which a host copies as the host guide's "The restaurant
++symbols" describes; the furniture library ships with the package. The
++captions in the pictures are set in Roboto by the pictures' own app theme. A
++host sets the caption fonts in its `FloorPlanTheme`, through
++`statusCaptionStyle` and `groupChipTextStyle`; the host guide's
++[Themes](https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md#9-themes)
++section describes the theme.
+ 
+ ## A symbol library of your own
+ 
+ The package ships a furniture library, `furnitureSymbolSource`. A host adds
+ its own beside it with a `SymbolLibrarySource` (a name, a reader of the
+ library's bytes, and its `SymbolNames` in other languages) and gives the
+ loader every source it should read:
+ 
+ ```dart
+ final loader = SymbolLibraryLoader(
+@@ -109,21 +116,21 @@ written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
+ 
+ - `package:jet_cad_floor_plan/jet_cad_floor_plan.dart` is the host API.
+ - `package:jet_cad_floor_plan/symbols.dart` and `symbol_sources.dart` are the
+   symbol libraries' API.
+ - `package:jet_cad_floor_plan/editor.dart` is the editor frame of the
+   jet-cad floor planner app. It is not host API and is outside semver: it
+   may change in any release.
+ - Nothing under `src/` is API.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+-patch release (`0.7.2`) does not.
++patch release (`0.7.3`) does not.
+ 
+ ## The jet-cad packages
+ 
+ | Package | What it is | Depends on |
+ |---|---|---|
+ | [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
+ | [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
+ | [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
+ 
+ A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
+diff --git a/packages/jet_cad_floor_plan/test/example_test.dart b/packages/jet_cad_floor_plan/test/example_test.dart
+index 9d8a86c7..d1452c96 100644
+--- a/packages/jet_cad_floor_plan/test/example_test.dart
++++ b/packages/jet_cad_floor_plan/test/example_test.dart
+@@ -1,15 +1,14 @@
+ // The published example (spec D3): it shows the planner over an empty
+ // plan with the furniture library loaded from the package's own asset.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+-// The loaded state is not host API: the test reads it from src/.
+ 
+ // The example is not under lib/, so a relative path is the only way to it.
+ // ignore: avoid_relative_lib_imports
+ import '../example/lib/main.dart';
+ 
+ void main() {
+   testWidgets('the example shows the planner with its furniture library',
+       (tester) async {
+     await tester.pumpWidget(const FloorPlanExampleApp());
+     await tester.pumpAndSettle();
+diff --git a/tool/screenshots/README.md b/tool/screenshots/README.md
+index ff264c16..02bcbb1d 100644
+--- a/tool/screenshots/README.md
++++ b/tool/screenshots/README.md
+@@ -1,5 +1,8 @@
+ # jet_cad_screenshots
+ 
+-Generates the published packages' screenshots from their public widgets (not a product package).
++Generates the published packages' screenshots from their public widgets (not a
++product package).
++
+ Regenerate with: `cd tool/screenshots && UPDATE_SCREENSHOTS=1 flutter test`
++
+ Look at every PNG before committing it.
+diff --git a/tool/screenshots/test/support/shots.dart b/tool/screenshots/test/support/shots.dart
+index 1e69d167..501d48a2 100644
+--- a/tool/screenshots/test/support/shots.dart
++++ b/tool/screenshots/test/support/shots.dart
+@@ -40,23 +40,26 @@ Future<void> loadManifestFonts() async {
+ /// Pumps [scene] alone in a boundary of [size] at [kRatio].
+ Future<void> pumpScene(WidgetTester tester, Widget scene,
+     {Size size = kWide}) async {
+   tester.view.physicalSize = size * kRatio;
+   tester.view.devicePixelRatio = kRatio;
+   addTearDown(tester.view.reset);
+   await tester.pumpWidget(RepaintBoundary(key: _shot, child: scene));
+ }
+ 
+ /// Lets real asynchronous work (asset reads, thumbnails) finish, frame by
+-/// frame, until [until] holds or forty rounds pass, then past animations.
++/// frame, until [until] holds or ten seconds of real time pass (one second
++/// without an [until]), then past animations.
+ Future<void> settle(WidgetTester tester, {bool Function()? until}) async {
+-  for (var i = 0; i < 40 && !(until?.call() ?? false); i++) {
++  final limit = Duration(seconds: until == null ? 1 : 10);
++  final clock = Stopwatch()..start();
++  while (clock.elapsed < limit && !(until?.call() ?? false)) {
+     await tester
+         .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
+     await tester.pump();
+   }
+   if (until != null) expect(until(), isTrue, reason: 'the scene settled');
+   await tester.pump(const Duration(milliseconds: 400));
+   await tester.pump(const Duration(milliseconds: 400));
+ }
+ 
+ /// The scene as PNG bytes; written to the package's doc/screenshots/ only

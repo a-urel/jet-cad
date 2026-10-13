@@ -18,6 +18,8 @@ const pubspecs = [
   '../../apps/floor_planner/pubspec.yaml',
   '../../apps/restaurant_demo/pubspec.yaml',
   '../../apps/dev_harness_2d/pubspec.yaml',
+  '../../tool/screenshots/pubspec.yaml',
+  '../../tool/readme_probe/pubspec.yaml',
 ];
 
 /// The dependency lines of [pubspec] that name one of [published] by a
@@ -56,17 +58,18 @@ void main() {
       final constraints = hosted(File(path).readAsStringSync());
       seen += constraints.length;
       for (final c in constraints.values) {
-        expect(c, '^0.7.1', reason: path);
+        expect(c, '^0.7.2', reason: path);
       }
     }
-    expect(seen, 15,
-        reason: 'premise: the dependents are read; the pubspecs hold 15 '
-            'dependency lines on a published package (counted at Step 3)');
+    expect(seen, 21,
+        reason: 'premise: the dependents are read; the pubspecs hold 21 '
+            'dependency lines on a published package (15, and the three each of '
+            'tool/screenshots and tool/readme_probe)');
   });
 
   test('DL3 the reader sees a path dependency', () {
     expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
         ['jet_cad_2d: path: ../x']);
-    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.1\n'), isEmpty);
+    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.2\n'), isEmpty);
   });
 }

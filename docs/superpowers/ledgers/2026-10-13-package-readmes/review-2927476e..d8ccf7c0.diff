@@ -1,0 +1,423 @@
+# Review package: 2927476..HEAD
+
+## Commits
+d8ccf7c0 docs: package READMEs results and the 0.7.2 release checklist
+
+## Files changed
+ STATUS.md                                          |  75 +++++-
+ .../notes/2026-10-13-package-readmes-results.md    | 272 +++++++++++++++++++++
+ 2 files changed, 345 insertions(+), 2 deletions(-)
+
+## Diff
+diff --git a/STATUS.md b/STATUS.md
+index bc9555ab..26a9343a 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -1,13 +1,13 @@
+ # jet-cad — project status
+ 
+-**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
++**Last updated:** 2026-10-13. **`main` carries release 0.7.0** (the three host packages are on pub.dev at 0.7.1; 0.7.2 is in flight, below) (tag
+ `v0.7.0` → `0fa649e`, after `v0.6.0` →
+ `3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+ before this point — its records, reviews and resume points — is in
+ [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
+ 
+ ## Where the project stands
+ 
+ The product is a **parametric floor planner** embedded in a restaurant
+ point-of-sale application. The roadmap's sub-projects **01–13** (the app,
+ interaction, page and rulers, drawing tools, the parametric layer, walls,
+@@ -380,20 +380,39 @@ with 0.7.0 (below).
+   0.4.0, 0.5.1 and 0.6.0 probes, `check_guide`); an independent review
+   (*Approved with fixes*: the guide's §11 "Schema 10", R-1; what a band
+   reports and the keys it takes, R-2; smaller CHANGELOG, STATUS and guide
+   gaps, R-3 to R-5) is applied; its record is
+   `docs/superpowers/ledgers/2026-10-13-release-0.7.0/review.md`. The
+   guide names `0fa649e`. The human pushed `main` and the tag `v0.7.0` →
+   `0fa649e` (2026-10-13).
+ 
+ ## In flight
+ 
++- **The packages' READMEs, screenshots and funding links** (the human,
++  2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
++  `51125b6`; **not merged** (the merge waits for the human's word, after
++  the whole-branch review). Spec
++  [2026-10-13-package-readmes-design.md](docs/superpowers/specs/2026-10-13-package-readmes-design.md)
++  (rev 1, amendments A1-A4), plan
++  [2026-10-13-package-readmes.md](docs/superpowers/plans/2026-10-13-package-readmes.md),
++  record
++  [2026-10-13-package-readmes-results.md](docs/superpowers/notes/2026-10-13-package-readmes-results.md)
++  (the rulings R1-R7 with their costs, every mutation, the gate). The three
++  published packages go to 0.7.2: READMEs with tag-pinned images, a
++  `screenshots:` gallery (renderer 5 PNGs, planner 6), `funding:` links and
++  `.github/FUNDING.yml`; the generator is `tool/screenshots`, the README
++  code is analysed in `tool/readme_probe`, and `check_readmes.dart` and
++  `check_screenshots.dart` keep both honest. The planner's barrel exports
++  `SymbolLibraryState` and `TableNumberProblem` (R-10). **One code change
++  in the renderer** beyond "docs only" (R6): the rulers' labels take the
++  ambient font family. Dry runs: 0 warnings, 229 / 814 / 782 KB.
++
+ - **Publishing `jet_cad_2d_flutter` and `jet_cad_floor_plan` on pub.dev**
+   (the human, 2026-10-13: *"bence tümünü sırayla yayınlayalım"*), on
+   `feat/publish-host-packages`, cut by hand from `main` at `d41e5f6`;
+   **merged into `main` at `d2ad729`** on the human's word (*"1"*) and
+   pushed; **published 2026-10-13** with the engine (Resume here). Spec
+   [2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
+   (revision 2, approved), plan
+   [2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md),
+   record
+   [2026-10-13-publish-host-packages-results.md](docs/superpowers/notes/2026-10-13-publish-host-packages-results.md);
+@@ -488,21 +507,73 @@ with 0.7.0 (below).
+ 
+ ## Standing failures and skips
+ 
+ On Linux, compared exactly by CI: the engine's two `generate_document_test`
+ fingerprints and the render package's seven text-ladder goldens (macOS
+ values), and the render package's paint micro-benchmark rig (skipped,
+ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ 
+ ## Resume here
+ 
+-**Done 2026-10-13: the three host packages are on pub.dev at 0.7.1**,
++**In flight 2026-10-13: `feat/package-readmes` (0.7.2 of the three
++packages), done up to the whole-branch review; then the human's merge and
++publication.** The checklist below is the spec's D11, in order. Fill
++`<merge commit>` with the merge commit on `main`.
++
++Run each `dart pub publish` from the package directory, never the
++repository root (it fails with a "private package" error). If `main` has
++moved past the merge commit, publish from a worktree at that commit
++instead: `git worktree add /tmp/jet-cad-0.7.2 <merge commit>` (and run the
++commands there). `dart pub publish --dry-run` must say 0 warnings before
++the real publish.
++
++1. Engine:
++
++   ```bash
++   cd packages/jet_cad_2d
++   dart pub publish --dry-run
++   dart pub publish
++   git tag jet_cad_2d-v0.7.2 <merge commit>
++   git push origin jet_cad_2d-v0.7.2
++   ```
++
++2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
++   lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
++   resolve at their lowest); then:
++
++   ```bash
++   cd packages/jet_cad_2d_flutter
++   dart pub publish --dry-run
++   dart pub publish
++   git tag jet_cad_2d_flutter-v0.7.2 <merge commit>
++   git push origin jet_cad_2d_flutter-v0.7.2
++   ```
++
++3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
++   first, as for the renderer:
++
++   ```bash
++   cd packages/jet_cad_floor_plan
++   dart pub publish --dry-run
++   dart pub publish
++   git tag jet_cad_floor_plan-v0.7.2 <merge commit>
++   git push origin jet_cad_floor_plan-v0.7.2
++   ```
++
++   Pushing each tag is also when that package's README images start to
++   resolve on GitHub (their URLs are pinned to `<package>-v0.7.2`).
++
++4. After the planner: D7's pub-only probe (the recipe below), and a look
++   at the three pages on pub.dev: the images, the gallery (screenshots
++   tab) and the Funding block.
++
++**Previously done 2026-10-13: the three host packages are on pub.dev at 0.7.1**,
+ published by the human in order (spec D10): `jet_cad_2d` from a worktree
+ at `1dc167d` (not `main`, R-5's README), `jet_cad_2d_flutter` and
+ `jet_cad_floor_plan` from `main` at `8a86504` (CI green). Tags
+ `jet_cad_2d-v0.7.1` → `1dc167d`, `jet_cad_2d_flutter-v0.7.1` →
+ `8a86504`, `jet_cad_floor_plan-v0.7.1` → `8a86504`. pana 160/160 for the
+ two dependents before their upload, lower bounds 20/20 (`pub downgrade`
+ clean), so the `^0.7.1` lines stand; pub.dev scores the engine and the
+ renderer 160/160. D7 green from pub.dev alone. R-10 stands: the planner
+ went out without the two exports. The record: the results note's
+ "The publication".
+diff --git a/docs/superpowers/notes/2026-10-13-package-readmes-results.md b/docs/superpowers/notes/2026-10-13-package-readmes-results.md
+new file mode 100644
+index 00000000..573d4424
+--- /dev/null
++++ b/docs/superpowers/notes/2026-10-13-package-readmes-results.md
+@@ -0,0 +1,272 @@
++# Package READMEs, screenshots and funding — results
++
++**Date:** 2026-10-13. **Branch:** `feat/package-readmes`, cut by hand from
++`main` at `51125b6` (`main` has not moved since: `git merge-base main HEAD`
++is `51125b6`). Spec:
++[2026-10-13-package-readmes-design.md](../specs/2026-10-13-package-readmes-design.md)
++(revision 1, amendments A1–A4 from planning). Plan:
++[2026-10-13-package-readmes.md](../plans/2026-10-13-package-readmes.md),
++executed task by task with an implementer and an independent reviewer per
++task. This note is the record. Its shape follows
++[2026-10-13-publish-host-packages-results.md](2026-10-13-publish-host-packages-results.md).
++
++Nothing here ran `dart pub publish` without `--dry-run`, pushed, merged or
++tagged: those are the human's (STATUS, Resume here). The merge has not
++happened, so the release checklist writes `<merge commit>` for the human to
++fill.
++
++## What this branch does
++
++The three published packages (0.7.1 on pub.dev) get what a pub.dev page
++shows: a README with images, `screenshots:` in the pubspec, `funding:`
++links, and a package table; all three go to **0.7.2**. The images are
++generated by a new unpublished package, `tool/screenshots` (flutter_test,
++real fonts, no pixel comparison). The README code is analysed in a second
++tool package, `tool/readme_probe`. Two CI scripts keep both honest:
++`check_readmes.dart` and `check_screenshots.dart`. R-10's two exports
++(`SymbolLibraryState` family, `TableNumberProblem`) go on the planner's
++barrel, which the 0.7.1 note had left as a 0.x candidate.
++
++## The controller's rulings
++
++Quoted from the SDD ledger, each with its cost if wrong.
++
++- **R1.** Task 3 keeps the `SymbolLibraryLoader` in a local the scene passes
++  to both `FloorPlanController(symbols:)` and `_ready` (the plan's own
++  fallback). Cost if wrong: none, test-only code.
++- **R2.** The renderer's barrel does not re-export `DraftDocument` /
++  `SpatialIndex`, so the renderer README's example tells the reader to add
++  both packages (`dart pub add jet_cad_2d jet_cad_2d_flutter`, as the
++  engine's says for vector_math) and the probe imports both barrels. Cost
++  if wrong: one README sentence.
++- **R3.** `check_screenshots` stays red from Task 5 to Task 8: the plan
++  orders the check before the data it checks; nothing pushes in between.
++  Cost if wrong: none (no CI run on this branch before the merge).
++- **R4.** FT2 compares the icon's ink against a tofu reference drawn in the
++  same test (the icon's codepoint in an unloaded family, which is Ahem) and
++  requires the icon's ink to be under half the reference's and above 0.02.
++  The plan's absolute bound (0.02, 0.6) passed an Ahem box (0.333), so
++  M-FT2 survived. A relative bound kills it without a threshold tuned to
++  one glyph. Cost if wrong: one test rewrite.
++- **R5.** M-SH3 becomes `if (updating)` → `if (true)` inside `shoot`. The
++  plan's variant is unreachable: SH3 returns early when `updating`. Cost if
++  wrong: none.
++- **R6.** Task 3b was inserted before Task 4: `RulerFrame` passes the
++  ambient `DefaultTextStyle`'s `fontFamily` to `RulerPainter`'s label style
++  (null family = today's style, unchanged), a test killed by named
++  mutations, the renderer's CHANGELOG 0.7.2 says so; then P1 and P2
++  regenerated. Why: D4 requires real fonts in every picture and no public
++  API reaches the rulers' labels (they drew as test-font boxes under
++  `flutter test`). On a device the ambient family is the app's own font, so
++  the rulers then match the host's text. **Cost if wrong: one small
++  published behaviour change in the renderer to revert before release; the
++  human sees it here and in "Rulings I made" before the merge.**
++- **R7.** In the renderer's gate on macOS, `text_lod_ladder` rungs 1 and 2
++  pass; this is the known macOS difference (STATUS, Owed to the human,
++  macOS), not a regression of Task 3b, which touches no ladder code. The
++  renderer's gate on this machine is judged by "only those two differ".
++  Cost if wrong: a Linux CI red at the next push, visible at once.
++
++## Two facts for the record
++
++1. **The renderer gained a code change.** The spec's original line was "no
++   code change"; R6's Task 3b (`5600f4f`) changed
++   `packages/jet_cad_2d_flutter/lib/src/ruler_frame.dart` and
++   `ruler_painter.dart` (`RulerFrame.build` also went from an expression to
++   a block body, about 145 lines of diff noise). The 0.7.2 CHANGELOG says
++   so.
++2. **The plan's Global Constraints were wrong about `SymbolWords`.** They
++   list `SymbolWords` among the names the scenes may take from
++   `package:jet_cad_floor_plan/editor.dart`; it is not exported there (nor
++   by the planner barrel; only `SymbolNames` is). The renderer scene does
++   not need it: `searchSymbols(entries, query, [SymbolWords words =
++   SymbolWords.english])` takes it as an optional parameter, and the
++   default gives `e.name` and `g.category`. The scene calls
++   `searchSymbols(library.entries, '')`. Nothing is imported from `src/`.
++
++## What each task did
++
++| Task | Commit(s) | What |
++|---|---|---|
++| spec, plan | `d982d182`, `2dfdcc12`, `f585e02e` | The spec; its amendments A1–A4 from planning; the plan. |
++| 1 (D9, R-10) | `3e83ffe7` | The planner's barrel exports `SymbolLibraryState`, `SymbolLibraryLoading`, `SymbolLibraryReady`, `SymbolLibraryFailed` and `TableNumberProblem`; B1's set extended; new test B-R10; the host guide's bullet updated. Three `unnecessary_import` infos in tests (the `src/` import of the state) removed, outside the brief's file list. |
++| 2 (D4) | `12990fb9` | `tool/screenshots`: the capture harness (`pumpScene`, `settle`, `shoot`, `kRatio`, `kWide`, `kPanel`), real fonts, FT1, FT2, SH3; workspace entry, CI matrix entry, DL2's count. |
++| 3 (D5) | `08dfe6ee` | The planner's six scenes P1–P6 and their PNGs. |
++| 3b (R6) | `5600f4f6`, `d1f873b2` | The rulers' label family (library + test RF-a/b/c); P1 and P2 regenerated, ruler digits real. |
++| 4 (D5) | `28ec7f45` | `RendererStage` and the renderer's scenes R1–R5 with their PNGs. |
++| 5 (D6, D7) | `06d8a1ab` | `check_screenshots.dart`, `lib/screenshots.dart`, SS1–SS13; ci.yml. |
++| 6 | `34cb012f` | `tool/readme_probe` (engine, renderer, planner), `check_readmes.dart`, RM1–RM4; three README snippets given a statement form; the R2 sentence. |
++| 7 (D10) | `4ba29d0f` | The three packages at 0.7.2; every live-line dependency `^0.7.2`; CHANGELOGs; the host guide covers 0.7.2; the root CHANGELOG's "Latest releases" paragraph. |
++| 8 (D1–D3, D6) | `2927476e` | The READMEs (root and three packages), `funding:` in the three pubspecs, `screenshots:` in the renderer's and the planner's, `.github/FUNDING.yml`. |
++| 9 | this commit | This note and STATUS. |
++
++## The amendments (spec, "Amendments while planning")
++
++- **A1, P6.** `salon.json` holds no room and the host API colours tables
++  only (`setTablesColor`); P6 shows tables in plan colours, file
++  `service_colors.png`. The scene colours in design mode, then switches to
++  selection (the call is refused in selection mode).
++- **A2, where the scenes live.** Under `tool/screenshots/test/`, beside the
++  harness: a scene needs `flutter_test` for gestures and for waiting on
++  loads.
++- **A3, R5's size.** The gallery is a side panel: R5 at 480×800 logical
++  pixels (`kPanel`), every other scene at 1280×800 (`kWide`).
++- **A4, order.** R-10's exports land first, so the generator waits on
++  `SymbolLibraryReady` through the planner's barrel, as a host would.
++
++## Fonts, ratio and the pictures
++
++**Font route: the manifest.** `loadManifestFonts()` in `setUpAll` loaded
++Roboto and MaterialIcons from the package's own `pubspec.yaml`; the
++fallback of D4 (bytes through `FontLoader`) was never needed. FT1 (real
++glyph widths) and FT2 (the icon's ink against a tofu box) hold it.
++
++**`kRatio` stays 1.5.** 1280×800 logical → 1920×1200 pixels; R5 720×1200.
++Largest file 163,133 bytes against the 1 MB limit; each package far under
++the 4 MB total.
++
++| Package | File | Bytes |
++|---|---|---|
++| `jet_cad_2d_flutter` | `canvas_light.png` | 147,205 |
++| | `canvas_dark.png` | 163,133 |
++| | `selection_grips.png` | 156,685 |
++| | `selection_band.png` | 161,344 |
++| | `symbol_gallery.png` | 38,921 |
++| | **total (5)** | **667,288** |
++| `jet_cad_floor_plan` | `design_light.png` | 130,810 |
++| | `design_dark.png` | 132,389 |
++| | `service_status.png` | 34,036 |
++| | `service_dark_focus.png` | 29,815 |
++| | `service_band.png` | 28,655 |
++| | `service_colors.png` | 28,069 |
++| | **total (6)** | **383,774** |
++
++(Sizes from `ls -l` at the end of this task. P1 and P2 are the Task 3b
++regeneration; Task 3's report quotes their pre-R6 sizes, 124,546 and
++126,047.)
++
++**The machine that generated them:** macOS 27.0.1 (build 26A434), Flutter
++3.47.6 (stable, framework revision `5fc346839b`, 2026-09-30), engine
++`692136cb65`. The generator compares no pixels, so a Linux CI run passes
++whatever its fonts do; the checked-in PNGs are this machine's.
++
++## Archive sizes (`dart pub publish --dry-run`)
++
++| Package | Before (Task 2, 0.7.1 state) | After Task 7 | After Task 8 / now |
++|---|---|---|---|
++| `jet_cad_2d` | 229 KB | 229 KB | 229 KB |
++| `jet_cad_2d_flutter` | 226 KB | 813 KB | 814 KB |
++| `jet_cad_floor_plan` | 462 KB | 781 KB | 782 KB |
++
++The growth is the PNGs (667 KB and 384 KB, compressed again by gzip) and
++the READMEs. 0 warnings in all of them; no `test/` in either archive (the
++Task 8 listings).
++
++## Mutations
++
++Each mutation: the file copied aside, edited, run, restored from the copy,
++`cmp` clean. The line that showed it red:
++
++| Mutation | What | Red |
++|---|---|---|
++| M-R10a | the `symbol_library_state` export removed from the planner's barrel | `test/host/barrel_test.dart:95:17: Error: 'SymbolLibraryState' isn't a type.` |
++| M-R10b | the `table_numbers` export removed | `test/host/barrel_test.dart:101:12: Error: Undefined name 'TableNumberProblem'.` |
++| M-FT1 | `setUpAll(loadManifestFonts)` commented out | FT1: `Expected: not <40.0>  Actual: <40.0>` |
++| M-FT2a (R4) | the same `setUpAll` commented out | FT2: `Expected: a value less than <0.1601>  Actual: <0.3202>  icon 0.3202, tofu 0.3202` |
++| M-FT2b (R4) | `uses-material-design: false` | FT2 fails with the identical message; FT1 passes |
++| M-SH3 (R5) | `if (updating) {` → `if (true) {` in `shoot` | SH3: the `expect` on `probe.png` existing, `harness_test.dart:57` |
++| M-RF1 | `RulerFrame` passes a null family | `RF-a ... [E]`, `+7 -1: Some tests failed.` |
++| M-RF2 | the label style drops `fontFamily` | `RF-a [E]`, `+7 -1` |
++| M-RF3 | `shouldRepaint` ignores `fontFamily` | `+2 -1: RF-c ... [E]`, `+7 -1` |
++| M-SS-a | `maxEntries = 11` | SS2: `+12 -1`, failing `SS2 an eleventh entry` |
++| M-SS-b | `description.length < 9` | SS3: `+12 -1` |
++| M-SS-c | base URL `main/packages/$package/` instead of the tag | SS9 red (SS3 and SS11 red as well) |
++| M-RM-a | `circlePayload` → `circlePayloadX` in the engine README | `check_readmes` exit 1: `jet_cad_2d: dart: import 'package:jet_cad_2d/jet_cad_2d.dart';` |
++| M-RM-b | the planner probe's barrel import deleted | `flutter analyze`: `13 issues found`, exit 1 |
++| M-RM-c | `missingBlocks(...)` replaced by `<String>[]` | RM2 and RM4 fail (`+2 -2`) |
++| M-T8 | the planner README's `service_band.png` URL tag changed to `jet_cad_floor_plan-main` | `jet_cad_floor_plan: README: https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-main/packages/jet_cad_floor_plan/doc/screenshots/service_band.png is not on the tag jet_cad_floor_plan-v0.7.2` and `service_band.png: not in the README` |
++
++Surviving, recorded by the Task 5 review and not fixed: the boundary
++mutations `>` vs `>=` at exactly 1 MB, 4 MB and 10 entries (SS2 and SS5 test
++one past each limit only).
++
++## The full gate
++
++Run by the Task 9 implementer on the final tree (`2927476e` plus this
++commit's two files); JSON reports written outside the repository.
++
++| Command | Last line(s) |
++|---|---|
++| `packages/jet_cad_2d`: `dart test` + `dart run tool/ci/expect_failures.dart --package packages/jet_cad_2d --root packages/jet_cad_2d <json>` | `packages/jet_cad_2d: 1291 tests; the standing failures and skips, exactly` (exit 0) |
++| `dart analyze` | `No issues found!` |
++| `dart format --output=none --set-exit-if-changed .` | `Formatted 177 files (0 changed)` |
++| `packages/jet_cad_2d_flutter`: `flutter test` + expect_failures | exit 1, and only the two R7 lines: `packages/jet_cad_2d_flutter: standing failure passed or did not run: test/golden/text_lod_ladder_golden_test.dart :: text lod ladder rung 1 (RenderBackend.canvas)` and `... rung 2 (RenderBackend.canvas)` |
++| `flutter analyze` | `No issues found! (ran in 2.9s)` |
++| `dart format ...` | `Formatted 234 files (0 changed)` |
++| `packages/jet_cad_floor_plan`: `flutter test --enable-vmservice` | `01:41 +2012: All tests passed!` |
++| expect_failures | `packages/jet_cad_floor_plan: 2012 tests; the standing failures and skips, exactly` (exit 0) |
++| `flutter analyze` | `No issues found! (ran in 3.2s)` |
++| `dart format ...` | `Formatted 298 files (0 changed)` |
++| `packages/jet_cad_2d_gpu`: `flutter test` | `00:01 +20: All tests passed!` |
++| `flutter analyze` / `dart format ...` | `No issues found! (ran in 2.4s)` / `Formatted 10 files (0 changed)` |
++| `tool/screenshots`: `flutter test` (without the update variable) | `00:07 +14: All tests passed!` |
++| `flutter analyze` / `dart format ...` | `No issues found! (ran in 2.6s)` / `Formatted 5 files (0 changed)` |
++| `tool/readme_probe`: `flutter analyze` / `dart format ...` | `No issues found! (ran in 2.4s)` / `Formatted 3 files (0 changed)` |
++| `cd tool/ci && dart test` | `00:04 +94: All tests passed!` |
++| `dart run tool/ci/check_guide.dart` | `docs/host-guide.md: all 56 code blocks are in the host probe` |
++| `dart run tool/ci/check_readmes.dart` | `package READMEs: all 6 code blocks are in the probes` |
++| `dart run tool/ci/check_screenshots.dart` | `screenshots: every rule holds` |
++| `dart pub publish --dry-run`, engine | `Total compressed archive size: 229 KB.` / `Package has 0 warnings.` |
++| renderer | `Total compressed archive size: 814 KB.` / `Package has 0 warnings.` |
++| planner | `Total compressed archive size: 782 KB.` / `Package has 0 warnings.` |
++| `git status --short` | empty |
++| `git log --name-only main..HEAD \| grep analysis_options` | no output (grep exit 1) |
++
++The renderer's red verdict is Ruling R7, as the 0.7.1 note's R-1 recorded
++it for the earlier set: on macOS the text-lod-ladder rungs 1–2 pass.
++`expect_failures` printed exactly those two lines and nothing else (re-run
++on the saved JSON to check); the text-ladder goldens that `flutter test`
++lists as failing are the standing ones. The Linux run compares exactly.
++
++## Found and not fixed
++
++Minors from the task reviews, all deferred, none touching a published
++behaviour:
++
++- `packages/jet_cad_floor_plan/test/example_test.dart:79-80` carries a stale
++  comment ("The loaded state is not host API"): R-10 made it host API.
++- SH3 watches only `jet_cad_floor_plan`'s `doc/` directory; the package
++  path interpolation in `shoot` is untested.
++- P5's band ends mid table 1; P1's palette list is cut at 800 px (its last
++  entry "Text" is half visible); the scenes' app theme names Roboto for the
++  status captions and group chips, a scene-side choice the READMEs mention
++  and the pubspec descriptions do not claim.
++- Task 4: `_x0` / `_y0` copy the unexported `kPlanOriginX/Y`; R5 collapses
++  all but Bathroom (D5's "one category open").
++- Task 3b: `RulerFrame.build`'s reindent is diff noise; RF-c has no
++  chrome-differs / family-matches case.
++- `check_screenshots`: any non-tag `https` image (a badge) is flagged in the
++  two READMEs (the READMEs stay badge-free); a missing `.pubignore` or
++  README throws a raw trace; `./path` gives a second "not in the README"
++  line.
++- The renderer README says `dart pub add` where `flutter pub add` is
++  idiomatic; the probe's imports are not checked against the README's prose.
++- `docs/host-guide.md` lines 2271 and 2275 run past 80 columns.
++- Task 8: the R3 caption (and the renderer's pubspec description) says "one
++  entity highlighted under the pointer", but the highlight is not
++  distinguishable in `selection_grips.png`; the root README's OCCT paragraph
++  is not wrapped at 80; double blank lines after R1/P1; "a host asks for them
++  in its theme" is vague (naming `FloorPlanTheme` or a guide section would
++  help).
++- The images resolve nowhere until the tags are pushed (spec Risks): on
++  GitHub the READMEs show broken images from the merge to the first tag.
++
++## Owed to the human
++
++Not owed: any further work on this branch; the merge waits for the human's
++word, after the whole-branch review.
++
++- The merge, and the release checklist in STATUS's Resume here (publish and
++  tag, in order).
++- After publication, a look at the three pub.dev pages: the images, the
++  gallery (screenshots tab), the Funding block.

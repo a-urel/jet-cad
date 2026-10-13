@@ -76,11 +76,29 @@ void main() {
       'SymbolLibraryLoader',
       'SymbolLibrarySource',
       'furnitureSymbolSource',
+      'SymbolLibraryState',
+      'SymbolLibraryLoading',
+      'SymbolLibraryReady',
+      'SymbolLibraryFailed',
+      'TableNumberProblem',
       'SymbolNames',
       'SymbolThumbnails',
       'PagePrinter',
       'PrintingPagePrinter',
     });
+  });
+
+  test('B-R10 the library state and the number problem through the barrel', () {
+    // An exhaustive switch over the sealed family and every enum value:
+    // dropping either export (M-R10a, M-R10b) is a compile error here.
+    String word(SymbolLibraryState s) => switch (s) {
+          SymbolLibraryLoading() => 'loading',
+          SymbolLibraryReady() => 'ready',
+          SymbolLibraryFailed() => 'failed',
+        };
+    expect(word(const SymbolLibraryLoading()), 'loading');
+    expect(TableNumberProblem.values.map((p) => p.name).toList(),
+        ['length', 'control']);
   });
 
   testWidgets('B2 every name is usable through the barrel alone',

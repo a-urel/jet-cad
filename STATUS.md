@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-10-13. **`main` carries release 0.7.0** (tag
 `v0.7.0` → `0fa649e`, after `v0.6.0` →
-`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since. The history of every plan
+`3bf64a7`, `v0.5.1` → `3f8f7ad`, `v0.5.0` → `2fbb9c0`, `v0.4.0` → `8367010`, `v0.3.0` → `1b0c37a`, `v0.2.0` → `7355c00` and `v0.1.0` → `22206f5`) and everything since; the three packages are on pub.dev at 0.7.1, and 0.7.2 is in flight (below). The history of every plan
 before this point — its records, reviews and resume points — is in
 [STATUS-HISTORY.md](STATUS-HISTORY.md), unedited.
 
@@ -387,6 +387,25 @@ with 0.7.0 (below).
 
 ## In flight
 
+- **The packages' READMEs, screenshots and funding links** (the human,
+  2026-10-13), on `feat/package-readmes`, cut by hand from `main` at
+  `51125b6`; **not merged** (the merge waits for the human's word, after
+  the whole-branch review). Spec
+  [2026-10-13-package-readmes-design.md](docs/superpowers/specs/2026-10-13-package-readmes-design.md)
+  (rev 1, amendments A1-A4), plan
+  [2026-10-13-package-readmes.md](docs/superpowers/plans/2026-10-13-package-readmes.md),
+  record
+  [2026-10-13-package-readmes-results.md](docs/superpowers/notes/2026-10-13-package-readmes-results.md)
+  (the rulings R1-R7 with their costs, every mutation, the gate). The three
+  published packages go to 0.7.2: READMEs with tag-pinned images, a
+  `screenshots:` gallery (renderer 5 PNGs, planner 6), `funding:` links and
+  `.github/FUNDING.yml`; the generator is `tool/screenshots`, the README
+  code is analysed in `tool/readme_probe`, and `check_readmes.dart` and
+  `check_screenshots.dart` keep both honest. The planner's barrel exports
+  `SymbolLibraryState` and `TableNumberProblem` (R-10). **One code change
+  in the renderer** beyond "docs only" (R6): the rulers' labels take the
+  ambient font family. Dry runs: 0 warnings, 229 / 814 / 782 KB.
+
 - **Publishing `jet_cad_2d_flutter` and `jet_cad_floor_plan` on pub.dev**
   (the human, 2026-10-13: *"bence tümünü sırayla yayınlayalım"*), on
   `feat/publish-host-packages`, cut by hand from `main` at `d41e5f6`;
@@ -495,7 +514,90 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Done 2026-10-13: the three host packages are on pub.dev at 0.7.1**,
+**In flight 2026-10-13: `feat/package-readmes` (0.7.2 of the three
+packages), done up to the whole-branch review; then the human's merge and
+publication.** The checklist below is the spec's D11, in order. Fill
+`<merge commit>` with the merge commit on `main`.
+
+Run each `dart pub publish` from the package directory, never the
+repository root (it fails with a "private package" error). If `main` has
+moved past the merge commit, publish from a worktree at that commit
+instead: `git worktree add /tmp/jet-cad-0.7.2 <merge commit>` (and run the
+commands there). `dart pub publish --dry-run` must say 0 warnings before
+the real publish.
+
+0. Merge and push first: the human merges `feat/package-readmes` into
+   `main`, runs `git push origin main`, and waits for CI on that merge
+   commit to be green (all jobs) before any publish. That commit is
+   `<merge commit>` in the steps below.
+
+1. Engine:
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d"
+   dart pub publish --dry-run
+   dart pub publish
+   git tag jet_cad_2d-v0.7.2 <merge commit>
+   git push origin jet_cad_2d-v0.7.2
+   ```
+
+2. Renderer, once the engine 0.7.2 is on pub.dev. First pana's
+   lower-bounds section on the archive (D1's rule: the `^0.7.2` lines must
+   resolve at their lowest). Run, from the repository root (if pana is not
+   activated, `dart pub global activate pana` first):
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)"
+   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
+   git archive <merge commit> packages/jet_cad_2d_flutter | tar -x -C /tmp/jet-cad-pana
+   rm -rf /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/test /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/build /tmp/jet-cad-pana/packages/jet_cad_2d_flutter/shaders
+   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_2d_flutter
+   ```
+
+   Read the "Support up-to-date dependencies" section's lower-bounds line
+   (pana runs `pub downgrade` itself); it must pass before
+   `dart pub publish`. The copy is not a git checkout, so pana's
+   repository-URL check fails there (as in 0.7.1's record); that line is
+   not the gate. Then:
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_2d_flutter"
+   dart pub publish --dry-run
+   dart pub publish
+   git tag jet_cad_2d_flutter-v0.7.2 <merge commit>
+   git push origin jet_cad_2d_flutter-v0.7.2
+   ```
+
+3. Planner, once the renderer 0.7.2 is on pub.dev; pana's lower bounds
+   first, the same recipe on its own directory, removing `test/`, `build/`
+   and `tool/` from the copy, and reading the same line:
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)"
+   rm -rf /tmp/jet-cad-pana && mkdir -p /tmp/jet-cad-pana
+   git archive <merge commit> packages/jet_cad_floor_plan | tar -x -C /tmp/jet-cad-pana
+   rm -rf /tmp/jet-cad-pana/packages/jet_cad_floor_plan/test /tmp/jet-cad-pana/packages/jet_cad_floor_plan/build /tmp/jet-cad-pana/packages/jet_cad_floor_plan/tool
+   dart pub global run pana --no-warning /tmp/jet-cad-pana/packages/jet_cad_floor_plan
+   ```
+
+   Then:
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)/packages/jet_cad_floor_plan"
+   dart pub publish --dry-run
+   dart pub publish
+   git tag jet_cad_floor_plan-v0.7.2 <merge commit>
+   git push origin jet_cad_floor_plan-v0.7.2
+   ```
+
+   Pushing each tag is also when that package's README images start to
+   resolve on GitHub (their URLs are pinned to `<package>-v0.7.2`).
+
+4. After the planner: D7's pub-only probe (the recipe below), and a look
+   at the three pages on pub.dev: the images, the gallery (screenshots
+   tab) and the Funding block.
+
+**Previously done 2026-10-13: the three host packages are on pub.dev at 0.7.1**,
 published by the human in order (spec D10): `jet_cad_2d` from a worktree
 at `1dc167d` (not `main`, R-5's README), `jet_cad_2d_flutter` and
 `jet_cad_floor_plan` from `main` at `8a86504` (CI green). Tags
@@ -507,8 +609,7 @@ renderer 160/160. D7 green from pub.dev alone. R-10 stands: the planner
 went out without the two exports. The record: the results note's
 "The publication".
 
-**Next:** D11 in the restaurant software (below); R-10's exports as a
-0.x candidate for the planner's next release. A later release of any
+**Next:** D11 in the restaurant software (below). A later release of any
 package follows the same order: its own version, CHANGELOG and tag
 `<package>-vX.Y.Z`; a dependent's lower bounds per D1, checked by
 pana's lower-bounds section once its dependencies are on pub.dev;

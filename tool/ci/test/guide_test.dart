@@ -29,7 +29,7 @@ void main() {
 
   test('GD3 a pubspec line the probe does not have is named', () {
     final moved = guide.replaceFirst(
-        'jet_cad_floor_plan: ^0.7.1', 'jet_cad_floor_plan: ^0.7.2');
+        'jet_cad_floor_plan: ^0.7.2', 'jet_cad_floor_plan: ^0.7.3');
     expect(moved, isNot(guide), reason: 'premise');
     expect(
         missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: dependencies:']);

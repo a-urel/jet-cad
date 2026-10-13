@@ -15,6 +15,14 @@ A host depends on the planner from pub.dev (see
 released together, by git, under one version and one tag (`vX.Y.Z`); that
 shared history follows, unchanged.
 
+## Latest releases
+
+0.7.2 of `jet_cad_2d`, `jet_cad_2d_flutter` and `jet_cad_floor_plan`
+(screenshots, READMEs and funding links; the planner exports
+`SymbolLibraryState` and `TableNumberProblem`, the renderer's rulers take the
+app's font). Each package's entry is in its own CHANGELOG, linked above;
+plans are stored as in 0.7.1 (schema 10).
+
 ## 0.7.0
 
 Rubber-band selection: in the selection mode a drag draws a band that

@@ -1,0 +1,194 @@
+# Review package: f585e02..HEAD
+
+## Commits
+3e83ffe7 feat(floor_plan): export SymbolLibraryState and TableNumberProblem (R-10)
+
+## Files changed
+ docs/host-guide.md                                     |  4 ++--
+ .../jet_cad_floor_plan/lib/jet_cad_floor_plan.dart     |  7 +++++++
+ packages/jet_cad_floor_plan/test/example_test.dart     |  1 -
+ packages/jet_cad_floor_plan/test/host/barrel_test.dart | 18 ++++++++++++++++++
+ .../test/host/editor_panels_test.dart                  |  1 -
+ .../test/host/editor_tools_test.dart                   |  1 -
+ 6 files changed, 27 insertions(+), 5 deletions(-)
+
+## Diff
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 56dfc108..adc71506 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -153,22 +153,22 @@ delegates in your `MaterialApp`:
+   `Localizations.override` around the view alone is **not supported**:
+   the Export dialog opens on the root navigator and would not see it.
+ - Your own words: `FloorPlanStrings.of(context)` gives the planner's
+   language, and its `languageCode`. *Since 0.6.0*, a class that
+   implements or directly extends `FloorPlanStrings` must add `color`,
+   `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
+   subclass of a built-in language gets them. To change only some words,
+   subclass `FloorPlanStringsEn`, `FloorPlanStringsDe` or
+   `FloorPlanStringsTr`. A class that implements or directly extends
+   `FloorPlanStrings` must also write the abstract
+-  `tableNumberProblem(TableNumberProblem)`; in 0.7.1 the planner's barrel
+-  does not export the type `TableNumberProblem`.
++  `tableNumberProblem(TableNumberProblem)`; the barrel exports
++  `TableNumberProblem` since 0.7.2.
+ - `theme` and `darkTheme` carry the floor plan's look:
+   [§ 9](#9-themes).
+ - Panel numbers show and read with the language's decimal separator,
+   per language, not per region: `de_CH` gets German's `,`.
+   The plan's own text — dimensions and room areas, on screen and on the
+   PDF and PNG, and the rulers on screen — uses the separator **the plan**
+   carries (the Page panel's
+   *Decimal separator*), the same on every terminal; a new plan takes the
+   UI language's. *Since 0.2.0; in 0.1.0 it is always `.`.*
+ 
+diff --git a/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart b/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart
+index e1f68784..d8651ce0 100644
+--- a/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart
++++ b/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart
+@@ -56,15 +56,22 @@ export 'src/l10n/localizations.dart'
+     show
+         FloorPlanLocalizations,
+         floorPlanLocalizationsDelegates,
+         floorPlanSupportedLocales;
+ export 'src/l10n/strings.dart' show FloorPlanStrings;
+ export 'src/l10n/strings_de.dart' show FloorPlanStringsDe;
+ export 'src/l10n/strings_en.dart' show FloorPlanStringsEn;
+ export 'src/l10n/strings_tr.dart' show FloorPlanStringsTr;
+ export 'src/symbols/symbol_library_loader.dart'
+     show SymbolLibraryLoader, SymbolLibrarySource, furnitureSymbolSource;
++export 'src/symbols/symbol_library_state.dart'
++    show
++        SymbolLibraryState,
++        SymbolLibraryLoading,
++        SymbolLibraryReady,
++        SymbolLibraryFailed;
+ export 'src/symbols/symbol_names.dart' show SymbolNames;
++export 'src/tables/table_numbers.dart' show TableNumberProblem;
+ // A host with several plans shares one loader and one thumbnail cache
+ // between their controllers (R-11).
+ export 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show SymbolThumbnails;
+diff --git a/packages/jet_cad_floor_plan/test/example_test.dart b/packages/jet_cad_floor_plan/test/example_test.dart
+index 71c38153..9d8a86c7 100644
+--- a/packages/jet_cad_floor_plan/test/example_test.dart
++++ b/packages/jet_cad_floor_plan/test/example_test.dart
+@@ -1,16 +1,15 @@
+ // The published example (spec D3): it shows the planner over an empty
+ // plan with the furniture library loaded from the package's own asset.
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+ // The loaded state is not host API: the test reads it from src/.
+-import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
+ 
+ // The example is not under lib/, so a relative path is the only way to it.
+ // ignore: avoid_relative_lib_imports
+ import '../example/lib/main.dart';
+ 
+ void main() {
+   testWidgets('the example shows the planner with its furniture library',
+       (tester) async {
+     await tester.pumpWidget(const FloorPlanExampleApp());
+     await tester.pumpAndSettle();
+diff --git a/packages/jet_cad_floor_plan/test/host/barrel_test.dart b/packages/jet_cad_floor_plan/test/host/barrel_test.dart
+index eb92be90..2b9e93a6 100644
+--- a/packages/jet_cad_floor_plan/test/host/barrel_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/barrel_test.dart
+@@ -69,27 +69,45 @@ void main() {
+       'FloorPlanStrings',
+       'FloorPlanStringsEn',
+       'FloorPlanStringsDe',
+       'FloorPlanStringsTr',
+       'TableGroup',
+       'ensureFloorPlanFonts',
+       'registerFontLicences',
+       'SymbolLibraryLoader',
+       'SymbolLibrarySource',
+       'furnitureSymbolSource',
++      'SymbolLibraryState',
++      'SymbolLibraryLoading',
++      'SymbolLibraryReady',
++      'SymbolLibraryFailed',
++      'TableNumberProblem',
+       'SymbolNames',
+       'SymbolThumbnails',
+       'PagePrinter',
+       'PrintingPagePrinter',
+     });
+   });
+ 
++  test('B-R10 the library state and the number problem through the barrel', () {
++    // An exhaustive switch over the sealed family and every enum value:
++    // dropping either export (M-R10a, M-R10b) is a compile error here.
++    String word(SymbolLibraryState s) => switch (s) {
++          SymbolLibraryLoading() => 'loading',
++          SymbolLibraryReady() => 'ready',
++          SymbolLibraryFailed() => 'failed',
++        };
++    expect(word(const SymbolLibraryLoading()), 'loading');
++    expect(TableNumberProblem.values.map((p) => p.name).toList(),
++        ['length', 'control']);
++  });
++
+   testWidgets('B2 every name is usable through the barrel alone',
+       (tester) async {
+     final loader = SymbolLibraryLoader(sources: [furnitureSymbolSource]);
+     final thumbnails = SymbolThumbnails(maxEntries: 8);
+     final c = FloorPlanController(symbols: loader, thumbnails: thumbnails);
+     addTearDown(() {
+       c.dispose();
+       thumbnails.dispose();
+       loader.dispose();
+     });
+diff --git a/packages/jet_cad_floor_plan/test/host/editor_panels_test.dart b/packages/jet_cad_floor_plan/test/host/editor_panels_test.dart
+index c347f442..953490aa 100644
+--- a/packages/jet_cad_floor_plan/test/host/editor_panels_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/editor_panels_test.dart
+@@ -16,21 +16,20 @@ import 'package:jet_cad_floor_plan/editor.dart'
+     show
+         DimKind,
+         DimensionParams,
+         Justification,
+         OpeningKind,
+         OpeningParams,
+         RoomParams,
+         WallParams,
+         liveObjectsOf;
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+-import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
+ import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
+ import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'editor_fixture.dart';
+ import 'editor_select_test.dart' as s;
+ import 'editor_tools_test.dart' as t;
+ 
+ typedef Caps = FloorPlanEditorCapabilities;
+ 
+diff --git a/packages/jet_cad_floor_plan/test/host/editor_tools_test.dart b/packages/jet_cad_floor_plan/test/host/editor_tools_test.dart
+index 226964c7..afadc0ff 100644
+--- a/packages/jet_cad_floor_plan/test/host/editor_tools_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/editor_tools_test.dart
+@@ -15,21 +15,20 @@ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show
+         InteractionLayer,
+         ViewportTransform,
+         PageChromePainter,
+         RulerFrame,
+         SymbolGallery,
+         kRulerThickness;
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+-import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
+ import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'editor_fixture.dart';
+ 
+ typedef Caps = FloorPlanEditorCapabilities;
+ 
+ Finder byKey(String k) => find.byKey(Key(k));
+ 
+ /// The palette's rows, in its order, and their letters.

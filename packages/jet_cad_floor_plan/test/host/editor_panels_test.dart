@@ -23,7 +23,6 @@ import 'package:jet_cad_floor_plan/editor.dart'
         WallParams,
         liveObjectsOf;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
-import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
 import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;

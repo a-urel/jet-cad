@@ -1,0 +1,337 @@
+# Review package: 3e83ffe..HEAD
+
+## Commits
+12990fb9 feat(tool): the screenshots package, real fonts and the capture harness
+
+## Files changed
+ .github/workflows/ci.yml                 |  2 +
+ pubspec.yaml                             |  1 +
+ tool/ci/test/dependency_lines_test.dart  |  8 +--
+ tool/screenshots/README.md               |  5 ++
+ tool/screenshots/pubspec.yaml            | 33 +++++++++++++
+ tool/screenshots/test/harness_test.dart  | 80 ++++++++++++++++++++++++++++++
+ tool/screenshots/test/support/shots.dart | 84 ++++++++++++++++++++++++++++++++
+ 7 files changed, 210 insertions(+), 3 deletions(-)
+
+## Diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 11c90173..0645cb62 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -46,20 +46,22 @@ jobs:
+             # which flutter_tester serves only with this flag (Slice 2's
+             # final review F-2): without it the test skips, and the
+             # comparison reads that skip as red.
+             test_flags: --enable-vmservice
+           - package: packages/jet_cad_restaurant_symbols
+             tool: flutter
+           - package: apps/floor_planner
+             tool: flutter
+           - package: apps/restaurant_demo
+             tool: flutter
++          - package: tool/screenshots
++            tool: flutter
+     steps:
+       - uses: actions/checkout@v5
+       - uses: subosito/flutter-action@v2
+         with:
+           channel: stable
+           flutter-version: ${{ env.FLUTTER_VERSION }}
+           cache: true
+       - name: Resolve the workspace
+         run: flutter pub get
+       - name: Tests
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 397fdc0b..2aa6b494 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -7,10 +7,11 @@ workspace:
+   - packages/jet_cad_2d
+   - packages/jet_cad_2d_flutter
+   - packages/jet_cad_2d_gpu
+   - apps/dev_harness
+   - apps/dev_harness_2d
+   - packages/jet_cad_floor_plan
+   - packages/jet_cad_restaurant_symbols
+   - apps/floor_planner
+   - apps/restaurant_demo
+   - tool/ci
++  - tool/screenshots
+diff --git a/tool/ci/test/dependency_lines_test.dart b/tool/ci/test/dependency_lines_test.dart
+index b10f3884..f53577d2 100644
+--- a/tool/ci/test/dependency_lines_test.dart
++++ b/tool/ci/test/dependency_lines_test.dart
+@@ -11,20 +11,21 @@ const published = ['jet_cad_2d', 'jet_cad_2d_flutter', 'jet_cad_floor_plan'];
+ /// The live line's pubspecs, relative to tool/ci.
+ const pubspecs = [
+   '../../packages/jet_cad_2d/pubspec.yaml',
+   '../../packages/jet_cad_2d_flutter/pubspec.yaml',
+   '../../packages/jet_cad_2d_gpu/pubspec.yaml',
+   '../../packages/jet_cad_floor_plan/pubspec.yaml',
+   '../../packages/jet_cad_restaurant_symbols/pubspec.yaml',
+   '../../apps/floor_planner/pubspec.yaml',
+   '../../apps/restaurant_demo/pubspec.yaml',
+   '../../apps/dev_harness_2d/pubspec.yaml',
++  '../../tool/screenshots/pubspec.yaml',
+ ];
+ 
+ /// The dependency lines of [pubspec] that name one of [published] by a
+ /// source other than a hosted constraint: the key line followed by an
+ /// indented `path:` or `git:` line, or by a nested map.
+ List<String> nonHosted(String pubspec) {
+   final lines = pubspec.split('\n');
+   final found = <String>[];
+   for (var i = 0; i < lines.length; i++) {
+     final key = RegExp(r'^  (\w+):\s*$').firstMatch(lines[i]);
+@@ -52,21 +53,22 @@ void main() {
+ 
+   test('DL2 every such dependency is the caret of D1', () {
+     var seen = 0;
+     for (final path in pubspecs) {
+       final constraints = hosted(File(path).readAsStringSync());
+       seen += constraints.length;
+       for (final c in constraints.values) {
+         expect(c, '^0.7.1', reason: path);
+       }
+     }
+-    expect(seen, 15,
+-        reason: 'premise: the dependents are read; the pubspecs hold 15 '
+-            'dependency lines on a published package (counted at Step 3)');
++    expect(seen, 18,
++        reason: 'premise: the dependents are read; the pubspecs hold 18 '
++            'dependency lines on a published package (15, and the three of '
++            'tool/screenshots)');
+   });
+ 
+   test('DL3 the reader sees a path dependency', () {
+     expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
+         ['jet_cad_2d: path: ../x']);
+     expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.1\n'), isEmpty);
+   });
+ }
+diff --git a/tool/screenshots/README.md b/tool/screenshots/README.md
+new file mode 100644
+index 00000000..ff264c16
+--- /dev/null
++++ b/tool/screenshots/README.md
+@@ -0,0 +1,5 @@
++# jet_cad_screenshots
++
++Generates the published packages' screenshots from their public widgets (not a product package).
++Regenerate with: `cd tool/screenshots && UPDATE_SCREENSHOTS=1 flutter test`
++Look at every PNG before committing it.
+diff --git a/tool/screenshots/pubspec.yaml b/tool/screenshots/pubspec.yaml
+new file mode 100644
+index 00000000..679ab982
+--- /dev/null
++++ b/tool/screenshots/pubspec.yaml
+@@ -0,0 +1,33 @@
++name: jet_cad_screenshots
++description: >-
++  The published packages' screenshots (package READMEs spec D4): eleven
++  scenes over the packages' public widgets, written into each package's
++  doc/screenshots/ with UPDATE_SCREENSHOTS=1. Not a product package.
++publish_to: none
++version: 0.1.0
++resolution: workspace
++
++environment:
++  sdk: ^3.5.0
++  flutter: ">=3.44.0"
++
++dev_dependencies:
++  flutter:
++    sdk: flutter
++  flutter_test:
++    sdk: flutter
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_floor_plan: ^0.7.1
++  jet_cad_restaurant_symbols:
++    path: ../../packages/jet_cad_restaurant_symbols
++  vector_math: ^2.2.0
++
++flutter:
++  uses-material-design: true
++  # As a host declares it (host guide §2): the planner's bytes under the
++  # bare family the plans name.
++  fonts:
++    - family: Roboto
++      fonts:
++        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
+diff --git a/tool/screenshots/test/harness_test.dart b/tool/screenshots/test/harness_test.dart
+new file mode 100644
+index 00000000..9c304455
+--- /dev/null
++++ b/tool/screenshots/test/harness_test.dart
+@@ -0,0 +1,80 @@
++import 'dart:io';
++import 'dart:ui' as ui;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
++import 'package:flutter_test/flutter_test.dart';
++
++import 'support/shots.dart';
++
++void main() {
++  setUpAll(loadManifestFonts);
++
++  test('FT1 Roboto is a real face, not Ahem', () {
++    // Ahem advances every glyph one em: "Mi" at 20 px is 40 px wide.
++    final painter = TextPainter(
++        text: const TextSpan(
++            text: 'Mi', style: TextStyle(fontFamily: 'Roboto', fontSize: 20)),
++        textDirection: TextDirection.ltr)
++      ..layout();
++    expect(painter.width, isNot(40.0));
++    expect(painter.width, inInclusiveRange(15.0, 35.0));
++  });
++
++  testWidgets('FT2 a Material icon inks a glyph, not a box', (tester) async {
++    const black = Color(0xFF000000);
++    await tester.pumpWidget(Directionality(
++        textDirection: TextDirection.ltr,
++        child: Row(mainAxisSize: MainAxisSize.min, children: [
++          const RepaintBoundary(
++              key: ValueKey('icon'),
++              child: Icon(Icons.add, size: 100, color: black)),
++          // The same glyph in a family nobody loaded: Ahem's tofu.
++          RepaintBoundary(
++              key: const ValueKey('tofu'),
++              child: Text(String.fromCharCode(Icons.add.codePoint),
++                  style: const TextStyle(
++                      fontFamily: 'NoSuchFamily',
++                      fontSize: 100,
++                      color: black))),
++        ])));
++    Future<double> ink(String key) async {
++      final boundary =
++          tester.renderObject<RenderRepaintBoundary>(find.byKey(ValueKey(key)));
++      return (await tester.runAsync(() async {
++        final image = await boundary.toImage();
++        final raw =
++            (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
++        var n = 0;
++        for (var i = 3; i < raw.lengthInBytes; i += 4) {
++          if (raw.getUint8(i) > 128) n++;
++        }
++        final all = image.width * image.height;
++        image.dispose();
++        return n / all;
++      }))!;
++    }
++
++    final icon = await ink('icon');
++    final tofu = await ink('tofu');
++    expect(icon, greaterThan(0.02), reason: 'the icon drew something');
++    // A plus covers a fraction of its box; the tofu covers far more.
++    expect(icon, lessThan(0.5 * tofu), reason: 'icon $icon, tofu $tofu');
++  });
++
++  testWidgets('SH3 without UPDATE_SCREENSHOTS nothing is written',
++      (tester) async {
++    if (updating) return; // the generator's own run writes, by design
++    final dir = Directory('../../packages/jet_cad_floor_plan/doc/screenshots');
++    final before = dir.existsSync()
++        ? {for (final f in dir.listSync()) f.path: f.statSync().modified}
++        : const <String, DateTime>{};
++    await pumpScene(tester, const ColoredBox(color: Color(0xFFFFFFFF)));
++    await shoot(tester, package: 'jet_cad_floor_plan', file: 'probe.png');
++    expect(File('${dir.path}/probe.png').existsSync(), isFalse);
++    final after = dir.existsSync()
++        ? {for (final f in dir.listSync()) f.path: f.statSync().modified}
++        : const <String, DateTime>{};
++    expect(after, before);
++  });
++}
+diff --git a/tool/screenshots/test/support/shots.dart b/tool/screenshots/test/support/shots.dart
+new file mode 100644
+index 00000000..1e69d167
+--- /dev/null
++++ b/tool/screenshots/test/support/shots.dart
+@@ -0,0 +1,84 @@
++// The screenshots' harness (package READMEs spec D4): real fonts, a fixed
++// logical size and ratio, a capture of the scene's boundary, and a write
++// only under UPDATE_SCREENSHOTS=1. No pixel is ever compared.
++import 'dart:convert';
++import 'dart:io';
++import 'dart:typed_data';
++import 'dart:ui' as ui;
++
++import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
++import 'package:flutter/services.dart' show FontLoader, rootBundle;
++import 'package:flutter/widgets.dart';
++import 'package:flutter_test/flutter_test.dart';
++
++const Size kWide = Size(1280, 800);
++const Size kPanel = Size(480, 800);
++
++/// Device pixels per logical pixel (spec D6): 1.5 unless a file exceeds
++/// the budget; Task 3 measures and records the choice.
++const double kRatio = 1.5;
++
++const Key _shot = ValueKey('screenshot');
++
++bool get updating => Platform.environment['UPDATE_SCREENSHOTS'] == '1';
++
++/// Every family of the test bundle's font manifest, Roboto and
++/// MaterialIcons among them, through [FontLoader]: flutter_test draws Ahem
++/// otherwise.
++Future<void> loadManifestFonts() async {
++  final manifest = jsonDecode(await rootBundle.loadString('FontManifest.json'))
++      as List<dynamic>;
++  for (final family in manifest.cast<Map<String, dynamic>>()) {
++    final loader = FontLoader(family['family'] as String);
++    for (final font in (family['fonts'] as List).cast<Map<String, dynamic>>()) {
++      loader.addFont(rootBundle.load(font['asset'] as String));
++    }
++    await loader.load();
++  }
++}
++
++/// Pumps [scene] alone in a boundary of [size] at [kRatio].
++Future<void> pumpScene(WidgetTester tester, Widget scene,
++    {Size size = kWide}) async {
++  tester.view.physicalSize = size * kRatio;
++  tester.view.devicePixelRatio = kRatio;
++  addTearDown(tester.view.reset);
++  await tester.pumpWidget(RepaintBoundary(key: _shot, child: scene));
++}
++
++/// Lets real asynchronous work (asset reads, thumbnails) finish, frame by
++/// frame, until [until] holds or forty rounds pass, then past animations.
++Future<void> settle(WidgetTester tester, {bool Function()? until}) async {
++  for (var i = 0; i < 40 && !(until?.call() ?? false); i++) {
++    await tester
++        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 25)));
++    await tester.pump();
++  }
++  if (until != null) expect(until(), isTrue, reason: 'the scene settled');
++  await tester.pump(const Duration(milliseconds: 400));
++  await tester.pump(const Duration(milliseconds: 400));
++}
++
++/// The scene as PNG bytes; written to the package's doc/screenshots/ only
++/// when [updating].
++Future<Uint8List> shoot(WidgetTester tester,
++    {required String package, required String file, Size size = kWide}) async {
++  expect(tester.takeException(), isNull, reason: 'the scene threw');
++  final boundary =
++      tester.renderObject<RenderRepaintBoundary>(find.byKey(_shot));
++  final png = (await tester.runAsync(() async {
++    final image = await boundary.toImage(pixelRatio: kRatio);
++    expect(image.width, (size.width * kRatio).round());
++    final data = await image.toByteData(format: ui.ImageByteFormat.png);
++    image.dispose();
++    return data!.buffer.asUint8List();
++  }))!;
++  if (updating) {
++    await tester.runAsync(() async {
++      final out = File('../../packages/$package/doc/screenshots/$file');
++      await out.parent.create(recursive: true);
++      await out.writeAsBytes(png);
++    });
++  }
++  return png;
++}

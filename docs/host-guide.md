@@ -4,7 +4,7 @@ This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the floor planner: staff design the restaurant's floors in the
 **design** mode, and during service they see the tables, colour them by
 status and pick them in the **selection** mode. It covers `jet_cad_floor_plan`
-**0.7.1** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
+**0.7.2** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
 
 Every Dart snippet below is taken from
 [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
@@ -21,7 +21,7 @@ your pubspec:
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_floor_plan: ^0.7.1
+  jet_cad_floor_plan: ^0.7.2
 ```
 
 The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come with
@@ -30,7 +30,7 @@ it, from pub.dev. Import only the planner's barrel,
 is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.7.1 is built and tested with Flutter 3.47.6. They bring no build hook
+0.7.2 is built and tested with Flutter 3.47.6. They bring no build hook
 and no GPU renderer: nothing runs at build time beyond Flutter's own.
 (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
 hook compiles shaders.)
@@ -160,8 +160,8 @@ delegates in your `MaterialApp`:
   subclass `FloorPlanStringsEn`, `FloorPlanStringsDe` or
   `FloorPlanStringsTr`. A class that implements or directly extends
   `FloorPlanStrings` must also write the abstract
-  `tableNumberProblem(TableNumberProblem)`; in 0.7.1 the planner's barrel
-  does not export the type `TableNumberProblem`.
+  `tableNumberProblem(TableNumberProblem)`; the barrel exports
+  `TableNumberProblem` since 0.7.2.
 - `theme` and `darkTheme` carry the floor plan's look:
   [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
@@ -1958,7 +1958,8 @@ the plan or another field takes it.
 
 The planner follows your `MaterialApp`'s theme. In a dark theme a light
 page is shown on a dark canvas with its drawing re-toned to keep its
-contrast; exports and prints are never re-toned.
+contrast; exports and prints are never re-toned. Since 0.7.2 the
+editor's rulers follow the ambient `DefaultTextStyle`'s font family.
 
 *Since 0.4.0:* the floor plan's own look, `FloorPlanTheme`.
 
@@ -2268,9 +2269,9 @@ stylus behave as on a desktop.
   together.** A schema 8 or 7 plan opens here unchanged; the service
   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
   plans and service layouts, so they can share them.
-- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0 or 0.7.1 is at
+- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0, 0.7.1 or 0.7.2 is at
   **schema 10**, which 0.5.1 and every older release refuse (`load`
   throws a `FormatException` that says why); a schema 9, 8 or 7 plan
   opens here unchanged. Every terminal that shares stored plans moves
-  together. 0.6.0, 0.7.0 and 0.7.1 save the same plans and service layouts, so
+  together. 0.6.0, 0.7.0, 0.7.1 and 0.7.2 save the same plans and service layouts, so
   they can share them.

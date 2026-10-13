@@ -14,3 +14,5 @@ workspace:
   - apps/floor_planner
   - apps/restaurant_demo
   - tool/ci
+  - tool/screenshots
+  - tool/readme_probe

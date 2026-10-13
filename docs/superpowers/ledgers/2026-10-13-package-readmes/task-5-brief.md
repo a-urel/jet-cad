@@ -1,0 +1,334 @@
+### Task 5: `check_screenshots.dart` (D7)
+
+**Files:**
+- Modify: `tool/ci/pubspec.yaml` (`dependencies: yaml: ^3.1.3`)
+- Create: `tool/ci/lib/screenshots.dart`
+- Create: `tool/ci/check_screenshots.dart`
+- Create: `tool/ci/test/screenshots_test.dart`
+- Modify: `.github/workflows/ci.yml` (`ci-tools`: analyze and format lists, a new step)
+
+**Interfaces:**
+- Produces: `List<String> screenshotProblems({required String package, required String pubspec, required String readme, required String pubignore, required int? Function(String path) sizeOf})` — `sizeOf` returns the file's byte count or null when missing; `List<String> imagelessProblems(String readme)`.
+
+- [ ] **Step 1: Write the failing tests**, `tool/ci/test/screenshots_test.dart`, over an in-memory fixture:
+
+```dart
+import 'package:jet_cad_ci/screenshots.dart';
+import 'package:test/test.dart';
+
+const _pkg = 'jet_cad_2d_flutter';
+const _ignore = '/test/\n/build/\n/shaders/\n';
+/// The package's directory at its release tag; a README URL is this plus
+/// the screenshot's path.
+const _url = 'https://raw.githubusercontent.com/a-urel/jet-cad/'
+    'jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter';
+
+String pubspec(List<(String, String)> shots, {String version = '0.7.2'}) => [
+      'name: $_pkg',
+      'version: $version',
+      'screenshots:',
+      for (final (d, p) in shots) ...["  - description: '$d'", '    path: $p'],
+    ].join('\n');
+
+String readme(Iterable<String> paths, {String base = _url}) =>
+    paths.map((p) => '![$p]($base/$p)').join('\n\n');
+
+const _good = [
+  ('The canvas with rulers, light.', 'doc/screenshots/a.png'),
+  ('The canvas on the dark canvas.', 'doc/screenshots/b.png'),
+];
+
+List<String> run({
+  List<(String, String)> shots = _good,
+  String? md,
+  String ignore = _ignore,
+  int? Function(String)? sizeOf,
+  String version = '0.7.2',
+}) =>
+    screenshotProblems(
+      package: _pkg,
+      pubspec: pubspec(shots, version: version),
+      readme: md ?? readme(shots.map((s) => s.$2)),
+      pubignore: ignore,
+      sizeOf: sizeOf ?? (_) => 200 * 1024,
+    );
+
+void main() {
+  test('SS1 a good set has no problem', () => expect(run(), isEmpty));
+
+  test('SS2 an eleventh entry', () {
+    final eleven = [
+      for (var i = 0; i < 11; i++) ('Screenshot number $i.', 'doc/s/$i.png')
+    ];
+    expect(run(shots: eleven), contains(startsWith('11 screenshots')));
+  });
+
+  test('SS3 a 9- and a 161-character description', () {
+    expect(run(shots: [('123456789', 'doc/s/a.png')]),
+        contains(contains('description')));
+    expect(run(shots: [('x' * 161, 'doc/s/a.png')]),
+        contains(contains('description')));
+    expect(run(shots: [('x' * 160, 'doc/s/a.png')]), isEmpty);
+    expect(run(shots: [('1234567890', 'doc/s/a.png')]), isEmpty);
+  });
+
+  test('SS4 a missing file', () {
+    expect(run(sizeOf: (p) => p.endsWith('b.png') ? null : 1),
+        contains(contains('missing')));
+  });
+
+  test('SS5 a file over 1 MB, a total over 4 MB', () {
+    expect(run(sizeOf: (_) => 1024 * 1024 + 1), contains(contains('1 MB')));
+    final five = [
+      for (var i = 0; i < 5; i++) ('Screenshot number $i.', 'doc/s/$i.png')
+    ];
+    expect(run(shots: five, sizeOf: (_) => 900 * 1024),
+        contains(contains('4 MB')));
+  });
+
+  test('SS6 a path the archive leaves out', () {
+    expect(run(shots: [('A test screenshot.', 'test/a.png')]),
+        contains(contains('.pubignore')));
+    expect(run(shots: [('A hidden screenshot.', '.github/a.png')]),
+        contains(contains('dot')));
+  });
+
+  test('SS7 a path not normalised, or of another type', () {
+    expect(run(shots: [('A dotted screenshot.', './doc/a.png')]),
+        contains(contains('normalised')));
+    expect(run(shots: [('An SVG screenshot.', 'doc/a.svg')]),
+        contains(contains('type')));
+  });
+
+  test('SS8 a duplicate path', () {
+    expect(run(shots: [_good[0], _good[0]]), contains(contains('twice')));
+  });
+
+  test('SS9 a README image on main', () {
+    final main = _url.replaceFirst('jet_cad_2d_flutter-v0.7.2', 'main');
+    expect(run(md: readme(_good.map((s) => s.$2), base: main)),
+        contains(contains('tag')));
+  });
+
+  test("SS10 a README image on the previous version's tag", () {
+    final old = _url.replaceFirst('-v0.7.2', '-v0.7.1');
+    expect(run(md: readme(_good.map((s) => s.$2), base: old)),
+        contains(contains('tag')));
+  });
+
+  test('SS11 a relative README image, an unlisted one, a listed one unshown',
+      () {
+    expect(
+        run(
+            md: '![a](doc/screenshots/a.png)\n'
+                '${readme(['doc/screenshots/b.png'])}'),
+        contains(contains('absolute')));
+    expect(
+        run(
+            md: readme([..._good.map((s) => s.$2), 'doc/screenshots/c.png'])),
+        contains(contains('not listed')));
+    expect(run(md: readme(['doc/screenshots/a.png'])),
+        contains(contains('not in the README')));
+  });
+
+  test("SS12 the engine's README has no image", () {
+    expect(imagelessProblems('# jet_cad_2d\n\nText.\n'), isEmpty);
+    expect(imagelessProblems('![x](https://example.com/x.png)'), isNotEmpty);
+    expect(imagelessProblems('<img src="x.png">'), isNotEmpty);
+  });
+
+  test('SS13 a .pubignore pattern the reader does not know', () {
+    expect(run(ignore: '*.png\n'), contains(contains('pattern')));
+  });
+}
+```
+
+- [ ] **Step 2: Run them to see them fail.** `cd tool/ci && dart test test/screenshots_test.dart`: fails to load (`package:jet_cad_ci/screenshots.dart` not found).
+
+- [ ] **Step 3: Implement** `tool/ci/lib/screenshots.dart`:
+
+```dart
+// The screenshots' check (package READMEs spec D7): pub.dev's rules for a
+// pubspec's `screenshots:` (pana's 10 entries and 160 characters, the
+// upload's 10-character floor, a normalised path in the archive), the
+// spec's budget (1 MB a file, 4 MB a package), and the README's images:
+// absolute, pinned to the package's release tag, each one listed, each
+// listed one shown. `dart pub publish --dry-run` checks none of this.
+import 'package:yaml/yaml.dart';
+
+const int maxEntries = 10;
+const int maxFileBytes = 1024 * 1024;
+const int maxTotalBytes = 4 * 1024 * 1024;
+const Set<String> imageTypes = {'png', 'jpg', 'jpeg', 'gif', 'webp'};
+
+final RegExp _markdownImage = RegExp(r'!\[[^\]]*\]\(([^)\s]+)\)');
+final RegExp _htmlImage = RegExp(r'<img\s[^>]*src="([^"]+)"');
+
+/// Every image URL of [markdown], Markdown and HTML.
+List<String> imageUrls(String markdown) => [
+      for (final m in _markdownImage.allMatches(markdown)) m[1]!,
+      for (final m in _htmlImage.allMatches(markdown)) m[1]!,
+    ];
+
+/// The engine's README must stay without images (spec Decision 6).
+List<String> imagelessProblems(String readme) => [
+      for (final url in imageUrls(readme)) 'an image in an imageless README: $url'
+    ];
+
+/// The directories a package's `.pubignore` leaves out: only root-anchored
+/// directory patterns (`/test/`) are read; any other line is a problem, so
+/// the check never guesses at a rule it does not implement.
+({Set<String> dirs, List<String> problems}) _ignored(String pubignore) {
+  final dirs = <String>{};
+  final problems = <String>[];
+  for (final raw in pubignore.split('\n')) {
+    final line = raw.trim();
+    if (line.isEmpty || line.startsWith('#')) continue;
+    final m = RegExp(r'^/([\w.-]+)/$').firstMatch(line);
+    if (m == null) {
+      problems.add('.pubignore: a pattern this check does not read: $line');
+    } else {
+      dirs.add(m[1]!);
+    }
+  }
+  return (dirs: dirs, problems: problems);
+}
+
+bool _normalised(String path) =>
+    path.isNotEmpty &&
+    !path.startsWith('/') &&
+    !path.contains('\\') &&
+    !path.contains(':') &&
+    path.split('/').every((s) => s.isNotEmpty && s != '.' && s != '..');
+
+List<String> screenshotProblems({
+  required String package,
+  required String pubspec,
+  required String readme,
+  required String pubignore,
+  required int? Function(String path) sizeOf,
+}) {
+  final yaml = loadYaml(pubspec) as YamlMap;
+  final version = yaml['version'] as String;
+  final entries = (yaml['screenshots'] as YamlList?)?.cast<YamlMap>().toList() ??
+      const <YamlMap>[];
+  final problems = <String>[];
+  if (entries.isEmpty) problems.add('no screenshots: entry');
+  if (entries.length > maxEntries) {
+    problems.add('${entries.length} screenshots: pub.dev shows $maxEntries');
+  }
+  final ignored = _ignored(pubignore);
+  problems.addAll(ignored.problems);
+  final paths = <String>[];
+  var total = 0;
+  for (final e in entries) {
+    final path = e['path'] as String;
+    final description = (e['description'] as String).trim();
+    if (paths.contains(path)) problems.add('$path: listed twice');
+    paths.add(path);
+    if (description.length < 10 || description.length > 160) {
+      problems.add('$path: description of ${description.length} characters '
+          '(10 to 160)');
+    }
+    if (!_normalised(path)) {
+      problems.add('$path: not a normalised relative path');
+      continue;
+    }
+    final segments = path.split('/');
+    if (segments.any((s) => s.startsWith('.'))) {
+      problems.add('$path: under a dot directory, never in the archive');
+    }
+    if (ignored.dirs.contains(segments.first)) {
+      problems.add('$path: left out by .pubignore');
+    }
+    if (!imageTypes.contains(path.split('.').last.toLowerCase())) {
+      problems.add('$path: not an image type pub.dev takes');
+    }
+    final size = sizeOf(path);
+    if (size == null) {
+      problems.add('$path: missing');
+    } else {
+      total += size;
+      if (size > maxFileBytes) problems.add('$path: $size bytes, over 1 MB');
+    }
+  }
+  if (total > maxTotalBytes) problems.add('$total bytes in all, over 4 MB');
+
+  final base = 'https://raw.githubusercontent.com/a-urel/jet-cad/'
+      '$package-v$version/packages/$package/';
+  final shown = <String>{};
+  for (final url in imageUrls(readme)) {
+    if (!url.startsWith('https://')) {
+      problems.add('README: $url is not absolute');
+    } else if (!url.startsWith(base)) {
+      problems.add('README: $url is not on the tag $package-v$version');
+    } else {
+      final path = url.substring(base.length);
+      shown.add(path);
+      if (!paths.contains(path)) problems.add('README: $path not listed');
+    }
+  }
+  for (final path in paths) {
+    if (!shown.contains(path)) problems.add('$path: not in the README');
+  }
+  return problems;
+}
+```
+
+Add `dependencies:` with `yaml: ^3.1.3` to `tool/ci/pubspec.yaml`; `flutter pub get` at the root.
+
+- [ ] **Step 4: Run them to see them pass.** `cd tool/ci && dart test test/screenshots_test.dart`: SS1–SS13 pass. Then three source mutations, each red, restored from a copy and `cmp`ed: M-SS-a (`maxEntries = 11`: SS2 red), M-SS-b (`description.length < 9`: SS3 red), M-SS-c (drop `$package-v$version` from `base` for `main`: SS9 red).
+
+- [ ] **Step 5: The command**, `tool/ci/check_screenshots.dart`:
+
+```dart
+// Package READMEs spec D7: the renderer's and the planner's screenshots
+// against pub.dev's rules and the spec's budget, and the engine's README
+// without an image. Run from anywhere: paths come from the script's place.
+//
+//   dart run tool/ci/check_screenshots.dart
+import 'dart:io';
+
+import 'lib/screenshots.dart';
+
+void main() {
+  final repo = File.fromUri(Platform.script).parent.parent.parent.path;
+  String read(String path) => File('$repo/$path').readAsStringSync();
+  final problems = <String>[];
+  for (final package in ['jet_cad_2d_flutter', 'jet_cad_floor_plan']) {
+    final dir = 'packages/$package';
+    problems.addAll(screenshotProblems(
+      package: package,
+      pubspec: read('$dir/pubspec.yaml'),
+      readme: read('$dir/README.md'),
+      pubignore: read('$dir/.pubignore'),
+      sizeOf: (path) {
+        final f = File('$repo/$dir/$path');
+        return f.existsSync() ? f.lengthSync() : null;
+      },
+    ).map((p) => '$package: $p'));
+  }
+  problems.addAll(imagelessProblems(read('packages/jet_cad_2d/README.md'))
+      .map((p) => 'jet_cad_2d: $p'));
+  if (problems.isEmpty) {
+    stdout.writeln('screenshots: every rule holds');
+    return;
+  }
+  problems.forEach(stderr.writeln);
+  exit(1);
+}
+```
+
+Run `dart run tool/ci/check_screenshots.dart`: **red** now, naming "no screenshots: entry" for both packages (Task 8 adds them). Quote the output in the task report; this is expected until Task 8.
+
+- [ ] **Step 6: CI.** In `ci-tools`, add `check_screenshots.dart` to the Analyze and Format lists, and after "The host guide's code is the probe's" add:
+
+```yaml
+      - name: The screenshots hold pub.dev's rules
+        run: dart run tool/ci/check_screenshots.dart
+```
+
+- [ ] **Step 7: Gate and commit.** `cd tool/ci && dart test && dart analyze --fatal-infos lib test check_screenshots.dart && dart format --output=none --set-exit-if-changed lib test check_screenshots.dart`; commit: `git commit -m "feat(ci): check_screenshots, pub.dev's screenshot rules and the README's images"`.
+
+---
+

@@ -21,9 +21,9 @@ dependencies:
   file_selector: ^1.1.0
   flutter:
     sdk: flutter
-  jet_cad_2d: ^0.7.1
-  jet_cad_2d_flutter: ^0.7.1
-  jet_cad_floor_plan: ^0.7.1
+  jet_cad_2d: ^0.7.2
+  jet_cad_2d_flutter: ^0.7.2
+  jet_cad_floor_plan: ^0.7.2
   jet_cad_restaurant_symbols:
     path: ../../packages/jet_cad_restaurant_symbols
   # The app names PdfPageFormat (the print flow's page size, spec 13 D9);

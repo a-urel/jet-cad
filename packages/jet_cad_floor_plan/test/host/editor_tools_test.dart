@@ -22,7 +22,6 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
         SymbolGallery,
         kRulerThickness;
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
-import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
 import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 

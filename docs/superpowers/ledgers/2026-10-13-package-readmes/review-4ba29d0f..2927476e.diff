@@ -1,0 +1,422 @@
+# Review package: 4ba29d0..HEAD
+
+## Commits
+2927476e docs: the packages' READMEs, screenshots and funding links
+
+## Files changed
+ .github/FUNDING.yml                      |  2 ++
+ README.md                                | 28 ++++++++++++++++---
+ packages/jet_cad_2d/README.md            | 28 +++++++++++++------
+ packages/jet_cad_2d/pubspec.yaml         |  3 +++
+ packages/jet_cad_2d_flutter/README.md    | 46 +++++++++++++++++++++++++++++---
+ packages/jet_cad_2d_flutter/pubspec.yaml | 14 ++++++++++
+ packages/jet_cad_floor_plan/README.md    | 46 ++++++++++++++++++++++++++++----
+ packages/jet_cad_floor_plan/pubspec.yaml | 16 +++++++++++
+ 8 files changed, 163 insertions(+), 20 deletions(-)
+
+## Diff
+diff --git a/.github/FUNDING.yml b/.github/FUNDING.yml
+new file mode 100644
+index 00000000..49a5cf3c
+--- /dev/null
++++ b/.github/FUNDING.yml
+@@ -0,0 +1,2 @@
++github: a-urel
++buy_me_a_coffee: yazemo
+diff --git a/README.md b/README.md
+index 6763411d..c1b6927d 100644
+--- a/README.md
++++ b/README.md
+@@ -1,9 +1,31 @@
+ # jet-cad
+ 
++jet-cad is a parametric floor planner for Flutter, built to be embedded in an
++application such as a restaurant's point of sale. It is a Dart workspace of
++three packages on pub.dev:
++
++| Package | What it is | Depends on |
++|---|---|---|
++| [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
++| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
++| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
++
++A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
++come with it, and a host should not also depend on them directly unless it
++uses their API itself.
++
++Embedding the floor planner in an app: [docs/host-guide.md](docs/host-guide.md).
++
++## Support
++
++If jet-cad is useful to you, you can support its development through
++[GitHub Sponsors](https://github.com/sponsors/a-urel) or
++[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
++
+ ## License
+ 
+-JetCAD is licensed under the [Apache License 2.0](LICENSE). It depends on Open
+-CASCADE Technology (OCCT), which is distributed under the GNU LGPL v2.1 with
+-the Open CASCADE Exception. OCCT remains a third-party dependency with its own
++JetCAD is licensed under the [Apache License 2.0](LICENSE). The dormant
++`packages/jet_cad` line depends on Open CASCADE Technology (OCCT), which is
++distributed under the GNU LGPL v2.1 with the Open CASCADE Exception. OCCT remains a third-party dependency with its own
+ license; JetCAD's Apache 2.0 license is independent of OCCT's license. See the
+ [LICENSES](LICENSES/) directory for third-party license information.
+\ No newline at end of file
+diff --git a/packages/jet_cad_2d/README.md b/packages/jet_cad_2d/README.md
+index 01a881c3..dd03d3da 100644
+--- a/packages/jet_cad_2d/README.md
++++ b/packages/jet_cad_2d/README.md
+@@ -57,22 +57,34 @@ The full walk-through, which also saves and reloads the document, is in
+ 
+ ## The API
+ 
+ `package:jet_cad_2d/jet_cad_2d.dart` is the API. Nothing under `src/` is.
+ `package:jet_cad_2d/testing.dart` generates benchmark documents for this
+ repository's own suites; it is not API and may change in any release.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+ patch release (`0.7.2`) does not.
+ 
+-## Where it comes from
+-
+-This package is the engine of [jet-cad](https://github.com/a-urel/jet-cad), a
+-parametric floor planner. The renderer
+-[`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) and the
+-planner [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan)
+-are on pub.dev too. An application that embeds the floor planner depends on
+-the planner and gets this engine with it.
++## The jet-cad packages
++
++| Package | What it is | Depends on |
++|---|---|---|
++| [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
++| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
++| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
++
++A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
++come with it, and a host should not also depend on them directly unless it
++uses their API itself.
++
++Embedding the floor planner in an app is walked through in the
++[host guide](https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md).
++
++## Support
++
++If jet-cad is useful to you, you can support its development through
++[GitHub Sponsors](https://github.com/sponsors/a-urel) or
++[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
+ 
+ ## License
+ 
+ Apache License 2.0. See [LICENSE](LICENSE).
+diff --git a/packages/jet_cad_2d/pubspec.yaml b/packages/jet_cad_2d/pubspec.yaml
+index 58445546..02cf8be9 100644
+--- a/packages/jet_cad_2d/pubspec.yaml
++++ b/packages/jet_cad_2d/pubspec.yaml
+@@ -1,18 +1,21 @@
+ name: jet_cad_2d
+ description: >-
+   A pure-Dart 2D CAD engine and document model: a scene tree, columnar
+   geometry, a spatial index with picking and snapping, undoable commands and a
+   deterministic file format.
+ version: 0.7.2
+ repository: https://github.com/a-urel/jet-cad
+ issue_tracker: https://github.com/a-urel/jet-cad/issues
++funding:
++  - https://github.com/sponsors/a-urel
++  - https://buymeacoffee.com/yazemo
+ topics:
+   - cad
+   - geometry
+   - spatial-index
+   - drawing
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.6.0
+ dependencies:
+diff --git a/packages/jet_cad_2d_flutter/README.md b/packages/jet_cad_2d_flutter/README.md
+index 1fdcc313..ef34295c 100644
+--- a/packages/jet_cad_2d_flutter/README.md
++++ b/packages/jet_cad_2d_flutter/README.md
+@@ -1,18 +1,21 @@
+ # jet_cad_2d_flutter
+ 
+ Flutter rendering and interaction for the pure-Dart
+ [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) engine. It draws a
+ `DraftDocument` on a canvas, with a camera, rulers, selection and snapping,
+ and writes a page of it out as a vector PDF or a PNG. The engine stays free
+ of `dart:ui`; everything that needs Flutter is here.
+ 
++![A drawing on its sheet with rulers, drawn by DraftCanvas on the light canvas](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/canvas_light.png)
++
++
+ ## What it holds
+ 
+ - **`DraftCanvas`**: the widget that paints a document and repaints on camera
+   and document changes and on nothing else.
+ - **`CameraController` and `ViewportTransform`**: pan, zoom and the
+   world-to-screen transform, with zoom-to-fit.
+ - **`RulerFrame`**: rulers around a canvas.
+ - **`InteractionLayer` and `ToolController`**: the pointer layer over a
+   canvas, which routes mouse, touch and keyboard input to the active `Tool`:
+   `SelectTool` (selection and grips) or one of the drawing tools
+@@ -35,29 +38,64 @@ final index = SpatialIndex(document);
+ final camera = CameraController(
+     ViewportTransform.fit(document.extents.expandedBy(20), size));
+ 
+ final canvas = DraftCanvas(document: document, index: index, camera: camera);
+ ```
+ 
+ A complete app, which draws a line and a circle and frames them, is
+ [`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_2d_flutter/example/lib/main.dart).
+ Run it from the package directory with `flutter run -t example/lib/main.dart`.
+ 
++## Screenshots
++
++![The same drawing on the dark canvas](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/canvas_dark.png)
++
++The same drawing on the dark canvas: `canvasResolverFor` and `ChromePalette.dark` re-tone the colours for a dark theme.
++
++![A selection with its grips, and one entity highlighted under the pointer](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/selection_grips.png)
++
++A few entities selected, each with its grips, and one entity highlighted under the pointer.
++
++![A crossing selection band, dragged right to left](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/selection_band.png)
++
++A crossing band, dragged right to left, mid-drag: it selects what it touches, not only what it encloses.
++
++![SymbolGallery with the Bathroom category open](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_2d_flutter-v0.7.2/packages/jet_cad_2d_flutter/doc/screenshots/symbol_gallery.png)
++
++`SymbolGallery`: a furniture library in collapsible categories of thumbnails, the Bathroom category open.
++
++These pictures are made by `tool/screenshots` in the repository, with the app's own theme.
++
+ ## The API
+ 
+ `package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart` is the API. Nothing under
+ `src/` is. `package:jet_cad_2d_flutter/export_testing.dart` is a test
+ instrument for this repository's own suites; it is not API and may change in
+ any release.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+ patch release (`0.7.2`) does not.
+ 
+-## Where it comes from
++## The jet-cad packages
++
++| Package | What it is | Depends on |
++|---|---|---|
++| [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
++| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
++| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
++
++A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
++come with it, and a host should not also depend on them directly unless it
++uses their API itself.
++
++Embedding the floor planner in an app is walked through in the
++[host guide](https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md).
++
++## Support
+ 
+-This package is the rendering layer of
+-[jet-cad](https://github.com/a-urel/jet-cad), a parametric floor planner;
+-`jet_cad_floor_plan` builds on it.
++If jet-cad is useful to you, you can support its development through
++[GitHub Sponsors](https://github.com/sponsors/a-urel) or
++[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
+ 
+ ## License
+ 
+ Apache License 2.0. See [LICENSE](LICENSE).
+diff --git a/packages/jet_cad_2d_flutter/pubspec.yaml b/packages/jet_cad_2d_flutter/pubspec.yaml
+index cec52dad..92ed0d2c 100644
+--- a/packages/jet_cad_2d_flutter/pubspec.yaml
++++ b/packages/jet_cad_2d_flutter/pubspec.yaml
+@@ -1,17 +1,31 @@
+ name: jet_cad_2d_flutter
+ description: >-
+   Flutter rendering and interaction for the jet_cad_2d engine: a CAD canvas
+   with camera, rulers, selection and snapping, and PDF and PNG export.
+ version: 0.7.2
+ repository: https://github.com/a-urel/jet-cad
+ issue_tracker: https://github.com/a-urel/jet-cad/issues
++funding:
++  - https://github.com/sponsors/a-urel
++  - https://buymeacoffee.com/yazemo
++screenshots:
++  - description: 'A drawing on its sheet, with rulers, drawn by DraftCanvas on a light canvas.'
++    path: doc/screenshots/canvas_light.png
++  - description: 'The same drawing on the dark canvas, its colours re-toned for a dark theme.'
++    path: doc/screenshots/canvas_dark.png
++  - description: 'A selection with its grips, and an entity under the mouse highlighted.'
++    path: doc/screenshots/selection_grips.png
++  - description: 'A crossing selection band, dragged right to left.'
++    path: doc/screenshots/selection_band.png
++  - description: 'SymbolGallery: a furniture library in collapsible categories of thumbnails.'
++    path: doc/screenshots/symbol_gallery.png
+ topics:
+   - cad
+   - drawing
+   - canvas
+   - pdf
+ resolution: workspace
+ 
+ environment:
+   # The floor pub workspaces document for their members; it sets language
+   # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x requires Dart
+diff --git a/packages/jet_cad_floor_plan/README.md b/packages/jet_cad_floor_plan/README.md
+index 5e2a5afb..c23de4fc 100644
+--- a/packages/jet_cad_floor_plan/README.md
++++ b/packages/jet_cad_floor_plan/README.md
+@@ -1,26 +1,31 @@
+ # jet_cad_floor_plan
+ 
+ An embeddable parametric floor planner for Flutter. It draws and edits a
+ plan of walls, doors and windows, rooms, dimensions and furniture symbols,
+ and gives a host application, such as a restaurant's point of sale, a
+ controller and a view to embed it with: the tables of the plan, their
+ numbers and status, a service view over the same plan, and PDF and PNG
+ export. The planner never stores anything itself; the host keeps the plan's
+ text wherever it likes.
+ 
++![FloorPlanView in design mode: tool palette, symbols, layers and the page, light theme](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/design_light.png)
++
++
+ ## Embedding it
+ 
+ A `FloorPlanController` holds the plan and what is done to it; a
+ `FloorPlanView` shows it. The application owns the controller and disposes
+ of it.
+ 
++![The service view: tables with status colours and captions, and a group of two tables](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_status.png)
++
+ ```dart
+ final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
+ final controller = FloorPlanController(symbols: symbols);
+ 
+ final app = MaterialApp(
+   supportedLocales: floorPlanSupportedLocales,
+   localizationsDelegates: floorPlanLocalizationsDelegates,
+   home: Scaffold(body: FloorPlanView(controller: controller)),
+ );
+ ```
+@@ -54,20 +59,40 @@ A complete app is
+ [`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_floor_plan/example/lib/main.dart).
+ Run it from the package directory with `flutter run -t example/lib/main.dart`.
+ 
+ ## The host guide
+ 
+ Tables, their status and groups, the service view, the theme, the editor's
+ capabilities, saving and loading, printing: the host guide walks through
+ them all, in code that CI compiles:
+ <https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md>
+ 
++## Screenshots
++
++![The editor in a dark theme](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/design_dark.png)
++
++The editor under a dark ambient `Theme`.
++
++![The service view in a dark POS theme with one zone of tables in focus](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_dark_focus.png)
++
++The service view in a dark POS-like `FloorPlanTheme`, with one zone of tables in focus (`setTableFocus`) and the rest dimmed.
++
++![A rubber band across the front row of tables](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_band.png)
++
++A rubber band (`floorDrag: FloorPlanFloorDrag.band`) mid-drag across the front row of tables.
++
++![Tables in plan colours](https://raw.githubusercontent.com/a-urel/jet-cad/jet_cad_floor_plan-v0.7.2/packages/jet_cad_floor_plan/doc/screenshots/service_colors.png)
++
++Tables in plan colours (`setTablesColor`).
++
++The restaurant tables in the service pictures come from the repository's restaurant symbols, which a host copies as the host guide's "The restaurant symbols" describes; the furniture library ships with the package. The captions in the pictures are set in Roboto by the pictures' own app theme; a host asks for them in its theme.
++
+ ## A symbol library of your own
+ 
+ The package ships a furniture library, `furnitureSymbolSource`. A host adds
+ its own beside it with a `SymbolLibrarySource` (a name, a reader of the
+ library's bytes, and its `SymbolNames` in other languages) and gives the
+ loader every source it should read:
+ 
+ ```dart
+ final loader = SymbolLibraryLoader(
+   sources: [furnitureSymbolSource, mySymbolSource],
+@@ -86,21 +111,32 @@ written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
+ - `package:jet_cad_floor_plan/symbols.dart` and `symbol_sources.dart` are the
+   symbol libraries' API.
+ - `package:jet_cad_floor_plan/editor.dart` is the editor frame of the
+   jet-cad floor planner app. It is not host API and is outside semver: it
+   may change in any release.
+ - Nothing under `src/` is API.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+ patch release (`0.7.2`) does not.
+ 
+-## Where it comes from
++## The jet-cad packages
++
++| Package | What it is | Depends on |
++|---|---|---|
++| [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan) | The embeddable floor planner and its host API | the renderer and the engine |
++| [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) | Flutter rendering and interaction | the engine |
++| [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) | The pure-Dart engine and document model | nothing of jet-cad |
++
++A host that embeds the planner adds only `jet_cad_floor_plan`; the other two
++come with it, and a host should not also depend on them directly unless it
++uses their API itself.
++
++## Support
+ 
+-This package is part of [jet-cad](https://github.com/a-urel/jet-cad). It
+-builds on [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d), the engine,
+-and [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter), its
+-rendering.
++If jet-cad is useful to you, you can support its development through
++[GitHub Sponsors](https://github.com/sponsors/a-urel) or
++[Buy Me a Coffee](https://buymeacoffee.com/yazemo).
+ 
+ ## License
+ 
+ Apache License 2.0. See [LICENSE](LICENSE). The Roboto font in
+ `lib/fonts/` is under its own Apache License 2.0, in `assets/fonts/`.
+diff --git a/packages/jet_cad_floor_plan/pubspec.yaml b/packages/jet_cad_floor_plan/pubspec.yaml
+index e4828ab4..fb1ef73c 100644
+--- a/packages/jet_cad_floor_plan/pubspec.yaml
++++ b/packages/jet_cad_floor_plan/pubspec.yaml
+@@ -1,17 +1,33 @@
+ name: jet_cad_floor_plan
+ description: >-
+   An embeddable parametric floor planner for Flutter: walls, openings,
+   rooms, dimensions and furniture symbols, with a host API for tables.
+ version: 0.7.2
+ repository: https://github.com/a-urel/jet-cad
+ issue_tracker: https://github.com/a-urel/jet-cad/issues
++funding:
++  - https://github.com/sponsors/a-urel
++  - https://buymeacoffee.com/yazemo
++screenshots:
++  - description: 'FloorPlanView in design mode: tools, symbols, layers and the page, light theme.'
++    path: doc/screenshots/design_light.png
++  - description: 'Table statuses with captions and a group of tables in the service view.'
++    path: doc/screenshots/service_status.png
++  - description: 'The editor in a dark theme.'
++    path: doc/screenshots/design_dark.png
++  - description: 'The service view in a dark POS theme, one zone of tables in focus.'
++    path: doc/screenshots/service_dark_focus.png
++  - description: 'Rubber-band selection of tables (floorDrag: band).'
++    path: doc/screenshots/service_band.png
++  - description: 'Tables in plan colours.'
++    path: doc/screenshots/service_colors.png
+ topics:
+   - cad
+   - floor-plan
+   - restaurant
+   - point-of-sale
+ resolution: workspace
+ 
+ environment:
+   # The floor pub workspaces document for their members; it sets language
+   # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x, which the
