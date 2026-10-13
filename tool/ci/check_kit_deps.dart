@@ -1,6 +1,7 @@
 // Umbrella A1, spec K9: fails when the kit contract or a kit names the plan
-// library or another kit, in its pubspec or in an import under lib/, test/
-// or tool/. Passes vacuously for packages that do not exist yet.
+// library or another kit, in its pubspec or in an import of any of its Dart
+// files (every directory but build/ and .dart_tool/). Packages are picked by
+// their pubspec's name. Passes vacuously for packages that do not exist yet.
 //
 //   dart run tool/ci/check_kit_deps.dart [--packages <dir>]
 import 'dart:io';
@@ -23,22 +24,29 @@ void main(List<String> args) {
       : <Directory>[];
   final packages = <PackageSource>[];
   for (final d in candidates) {
-    final name = d.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
-    if (name != contractPackage && !isKitPackage(name)) continue;
     final pubspec = File('${d.path}/pubspec.yaml');
     if (!pubspec.existsSync()) continue;
+    final text = pubspec.readAsStringSync();
+    final name = packageName(text);
+    // An unreadable pubspec is checked, so that kitDepsProblems reports it.
+    if (name != null && name != contractPackage && !isKitPackage(name)) {
+      continue;
+    }
     final files = <String, String>{};
-    for (final sub in const ['lib', 'test', 'tool']) {
-      final subDir = Directory('${d.path}/$sub');
-      if (!subDir.existsSync()) continue;
-      for (final f in subDir.listSync(recursive: true).whereType<File>()) {
-        if (f.path.endsWith('.dart')) {
-          files[f.path.substring(d.path.length + 1)] = f.readAsStringSync();
-        }
+    for (final entry in d.listSync()) {
+      final top = entry.path.substring(d.path.length + 1);
+      if (entry is Directory && generatedDirectories.contains(top)) continue;
+      final found = switch (entry) {
+        Directory() => entry.listSync(recursive: true).whereType<File>(),
+        File() => [entry],
+        _ => const <File>[],
+      };
+      for (final f in found) {
+        final path = f.path.substring(d.path.length + 1);
+        if (isPackageDartFile(path)) files[path] = f.readAsStringSync();
       }
     }
-    packages.add(
-        PackageSource(pubspec: pubspec.readAsStringSync(), dartFiles: files));
+    packages.add(PackageSource(pubspec: text, dartFiles: files));
   }
   final problems = kitDepsProblems(packages);
   if (problems.isEmpty) {

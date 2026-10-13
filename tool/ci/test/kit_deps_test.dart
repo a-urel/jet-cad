@@ -1,6 +1,7 @@
 // Umbrella A1, spec K9: the contract depends on neither the plan library
 // nor a kit; a kit depends on neither the plan library nor another kit, in
-// its pubspec or in any import under lib/, test/ or tool/.
+// its pubspec or in an import of any of its Dart files (every directory but
+// build/ and .dart_tool/).
 import 'dart:io';
 
 import 'package:jet_cad_ci/kit_deps.dart';
@@ -154,6 +155,34 @@ void main() {
       expect(isKitPackage('jet_cad_2d_kitchen'), isFalse);
     });
 
+    test('D13 every Dart file of a package but generated output', () {
+      // M-D13: only lib/, test/ and tool/ (`['lib', 'test', 'tool']
+      // .contains(path.split('/').first)`).
+      for (final path in [
+        'example/main.dart',
+        'bin/generate.dart',
+        'main.dart',
+        'lib/src/build/a.dart',
+      ]) {
+        expect(isPackageDartFile(path), isTrue, reason: path);
+      }
+      for (final path in [
+        'build/a.dart',
+        '.dart_tool/b.dart',
+        'example/README.md',
+      ]) {
+        expect(isPackageDartFile(path), isFalse, reason: path);
+      }
+    });
+
+    test('D14 packageName reads the pubspec, null when it cannot', () {
+      expect(packageName(pubspec('jet_cad_2d_kit_cinema')),
+          'jet_cad_2d_kit_cinema');
+      expect(packageName('- a list\n'), isNull);
+      expect(packageName('name: [1]\n'), isNull);
+      expect(packageName('name: {\n'), isNull);
+    });
+
     test('D8 importedPackages reads directives only', () {
       expect(
           importedPackages("import 'package:a_b/x.dart';\n"
@@ -195,6 +224,39 @@ void main() {
           allOf(contains('pubspec dependencies names jet_cad_2d_plan'),
               contains('test/a_test.dart imports jet_cad_2d_kit_restaurant')));
       expect(r.stderr, isNot(contains('build/')));
+    });
+
+    test("D15 a kit's example/ and root files are read; .dart_tool is not",
+        () async {
+      // M-D15: the script reads lib/, test/ and tool/ only.
+      write('jet_cad_2d_kit_cinema/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_kit']));
+      write('jet_cad_2d_kit_cinema/example/main.dart',
+          "import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';\n");
+      write('jet_cad_2d_kit_cinema/bin/demo.dart',
+          "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n");
+      write('jet_cad_2d_kit_cinema/.dart_tool/gen.dart',
+          "import 'package:jet_cad_2d_plan/x.dart';\n");
+      final r = await check(['--packages', tmp.path]);
+      expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+      expect(
+          r.stderr,
+          allOf(contains('example/main.dart imports jet_cad_2d_plan'),
+              contains('bin/demo.dart imports jet_cad_2d_kit_restaurant')));
+      expect(r.stderr, isNot(contains('.dart_tool')));
+    });
+
+    test('D16 a package is picked by its pubspec name, not its directory',
+        () async {
+      // M-D16: pick by directory name again.
+      write('cinema/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_plan']));
+      final r = await check(['--packages', tmp.path]);
+      expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+      expect(
+          r.stderr,
+          contains('jet_cad_2d_kit_cinema: pubspec dependencies names '
+              'jet_cad_2d_plan'));
     });
 
     test('D11 no kit yet: the rule holds vacuously', () async {

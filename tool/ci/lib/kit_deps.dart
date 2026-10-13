@@ -12,13 +12,40 @@ final RegExp _kit = RegExp(r'^jet_cad_2d_kit_[a-z0-9_]+$');
 /// Whether [name] is a kit's package (not the contract's).
 bool isKitPackage(String name) => _kit.hasMatch(name);
 
-/// A package as the check reads it: its pubspec's text and its Dart files
-/// under lib/, test/ and tool/ (package-relative path → text).
+/// A package as the check reads it: its pubspec's text and every Dart file
+/// of the package (package-relative path → text; see [isPackageDartFile]).
 final class PackageSource {
   const PackageSource({required this.pubspec, required this.dartFiles});
 
   final String pubspec;
   final Map<String, String> dartFiles;
+}
+
+/// The top-level directories of a package that hold generated output, not
+/// the package's own code: the check does not read them.
+const Set<String> generatedDirectories = {'build', '.dart_tool'};
+
+/// Whether the package-relative [path] (`/`-separated) is one of the
+/// package's Dart files: any `.dart` file in any directory (`lib/`, `test/`,
+/// `tool/`, `example/`, `bin/`, the root, ...) except under
+/// [generatedDirectories]. Umbrella A1: "any of its Dart files".
+bool isPackageDartFile(String path) =>
+    path.endsWith('.dart') &&
+    !generatedDirectories.contains(path.split('/').first);
+
+/// The `name` of [pubspec], or null when it is not YAML, not a map or has
+/// no string name. The script picks the packages it checks by this name,
+/// not by their directory's.
+String? packageName(String pubspec) {
+  final Object? doc;
+  try {
+    doc = loadYaml(pubspec);
+  } on YamlException {
+    return null;
+  }
+  if (doc is! Map) return null;
+  final name = doc['name'];
+  return name is String ? name : null;
 }
 
 /// A directive and everything up to its `;` (conditional URIs included).
