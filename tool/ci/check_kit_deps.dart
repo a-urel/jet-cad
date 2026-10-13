@@ -23,32 +23,22 @@ void main(List<String> args) {
           ..sort((a, b) => a.path.compareTo(b.path)))
       : <Directory>[];
   final packages = <PackageSource>[];
+  final unreadable = <String>[];
   for (final d in candidates) {
-    final pubspec = File('${d.path}/pubspec.yaml');
-    if (!pubspec.existsSync()) continue;
-    final text = pubspec.readAsStringSync();
-    final name = packageName(text);
-    // An unreadable pubspec is checked, so that kitDepsProblems reports it.
-    if (name != null && name != contractPackage && !isKitPackage(name)) {
-      continue;
+    // A file that cannot be read (bad UTF-8, no permission) is a problem
+    // named with its package, and the other packages are still checked.
+    try {
+      final p = _package(d);
+      if (p != null) packages.add(p);
+    } on FileSystemException catch (e) {
+      final path = e.path;
+      final what = path != null && path.startsWith('${d.path}/')
+          ? path.substring(d.path.length + 1)
+          : 'a file';
+      unreadable.add('${d.path}: $what is not readable: ${e.message}');
     }
-    final files = <String, String>{};
-    for (final entry in d.listSync()) {
-      final top = entry.path.substring(d.path.length + 1);
-      if (entry is Directory && generatedDirectories.contains(top)) continue;
-      final found = switch (entry) {
-        Directory() => entry.listSync(recursive: true).whereType<File>(),
-        File() => [entry],
-        _ => const <File>[],
-      };
-      for (final f in found) {
-        final path = f.path.substring(d.path.length + 1);
-        if (isPackageDartFile(path)) files[path] = f.readAsStringSync();
-      }
-    }
-    packages.add(PackageSource(dir: d.path, pubspec: text, dartFiles: files));
   }
-  final problems = kitDepsProblems(packages);
+  final problems = [...unreadable, ...kitDepsProblems(packages)];
   if (problems.isEmpty) {
     stdout.writeln(
       'kit dependencies: ${packages.length} package(s) checked, '
@@ -58,4 +48,32 @@ void main(List<String> args) {
   }
   problems.forEach(stderr.writeln);
   exit(1);
+}
+
+/// The package in [d] with its pubspec and Dart files, or null when [d] has
+/// no pubspec or holds neither the contract nor a kit.
+PackageSource? _package(Directory d) {
+  final pubspec = File('${d.path}/pubspec.yaml');
+  if (!pubspec.existsSync()) return null;
+  final text = pubspec.readAsStringSync();
+  final name = packageName(text);
+  // An unreadable pubspec is checked, so that kitDepsProblems reports it.
+  if (name != null && name != contractPackage && !isKitPackage(name)) {
+    return null;
+  }
+  final files = <String, String>{};
+  for (final entry in d.listSync()) {
+    final top = entry.path.substring(d.path.length + 1);
+    if (entry is Directory && generatedDirectories.contains(top)) continue;
+    final found = switch (entry) {
+      Directory() => entry.listSync(recursive: true).whereType<File>(),
+      File() => [entry],
+      _ => const <File>[],
+    };
+    for (final f in found) {
+      final path = f.path.substring(d.path.length + 1);
+      if (isPackageDartFile(path)) files[path] = f.readAsStringSync();
+    }
+  }
+  return PackageSource(dir: d.path, pubspec: text, dartFiles: files);
 }

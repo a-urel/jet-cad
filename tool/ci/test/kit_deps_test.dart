@@ -407,6 +407,37 @@ void main() {
       expect(r.stderr, contains('cinema: pubspec.yaml is not readable YAML: '));
     });
 
+    test(
+      'D21 a file that cannot be read: exit 1, named, the others still checked',
+      () async {
+        // M-D21a: the script reads a pubspec outside any try, so its
+        // FileSystemException ends the run (exit 255) before any package is
+        // reported. M-D21b: only the pubspec read is guarded, so a kit's
+        // unreadable Dart file still ends the run.
+        void bytes(String path, List<int> data) => (File(
+          '${tmp.path}/$path',
+        )..createSync(recursive: true)).writeAsBytesSync(data);
+        bytes('cinema/pubspec.yaml', [0x6e, 0x3a, 0xff, 0xfe, 0x0a]);
+        write(
+          'jet_cad_2d_kit_seats/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_seats'),
+        );
+        bytes('jet_cad_2d_kit_seats/lib/a.dart', [0xff, 0xfe, 0x0a]);
+        write(
+          'jet_cad_2d_kit_zoo/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_zoo', dependencies: ['jet_cad_2d_plan']),
+        );
+        final r = await check(['--packages', tmp.path]);
+        expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+        expect(r.stderr, contains('cinema: pubspec.yaml is not readable: '));
+        expect(
+          r.stderr,
+          contains('jet_cad_2d_kit_seats: lib/a.dart is not readable: '),
+        );
+        expect(r.stderr, contains('jet_cad_2d_kit_zoo'));
+      },
+    );
+
     test('D11 no kit yet: the rule holds vacuously', () async {
       write('jet_cad_2d/pubspec.yaml', pubspec('jet_cad_2d'));
       final r = await check(['--packages', tmp.path]);
