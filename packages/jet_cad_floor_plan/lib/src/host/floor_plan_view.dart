@@ -699,6 +699,7 @@ class _FloorPlanViewState extends State<FloorPlanView> {
                     serviceMoves: widget.serviceMoves,
                     longPress: widget.longPress,
                     onTableContextMenu: widget.onTableContextMenu,
+                    floorDrag: FloorPlanFloorDrag.pan,
                   ),
               userCamera: () => widget.userCamera,
               tableOverlays: serviceOverlays,

@@ -175,8 +175,23 @@ enum FloorPlanLongPress {
   toggleSelection,
 
   /// Reports the table to `FloorPlanView.onTableContextMenu`, as a
-  /// secondary click does; a touch screen then has no multiple selection.
+  /// secondary click does; a touch screen's multiple selection is then a
+  /// band (`FloorPlanFloorDrag.band`).
   contextMenu,
+}
+
+/// What a one-pointer drag on the empty floor does in the selection mode
+/// (rubber-band spec RB-1). The design mode is unaffected.
+enum FloorPlanFloorDrag {
+  /// Pans the camera (the default). With Shift, Ctrl or Cmd held at the
+  /// press, a mouse or stylus drag draws a band that adds to the
+  /// selection.
+  pan,
+
+  /// Draws a band that selects tables: left to right takes the tables
+  /// wholly inside, right to left every table it touches. The camera
+  /// pans with two fingers, the wheel or trackpad, and the middle button.
+  band,
 }
 
 /// A problem with the plan's table numbers (spec 14a T15), as a value the

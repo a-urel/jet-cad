@@ -1,9 +1,11 @@
 // The selection mode's tool (spec 14c S3, S4, S8, R-1, R-5 to R-7): tap a
 // table to select it, long press to add or remove one, drag to move the
-// selected tables for the service, drag the floor to pan. A table in a
-// group (table-groups spec G4) acts with its whole group.
+// selected tables for the service, drag the floor to pan -- or to draw a
+// band that selects the tables it takes (rubber-band spec RB-2 to RB-5). A
+// table in a group (table-groups spec G4) acts with its whole group.
 import 'dart:async';
-import 'dart:ui' show Canvas, Offset, Size;
+import 'dart:math' as math;
+import 'dart:ui' show Canvas, Offset, Rect, Size;
 
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/gestures.dart'
@@ -40,13 +42,16 @@ typedef ServiceOptions = ({
   bool serviceMoves,
   FloorPlanLongPress longPress,
   void Function(String number, Offset globalPosition)? onTableContextMenu,
+  FloorPlanFloorDrag floorDrag,
 });
 
-/// Today's behaviour: moves allowed, a long press toggles, no menu.
+/// Today's behaviour: moves allowed, a long press toggles, no menu, a floor
+/// drag pans.
 const ServiceOptions kDefaultServiceOptions = (
   serviceMoves: true,
   longPress: FloorPlanLongPress.toggleSelection,
   onTableContextMenu: null,
+  floorDrag: FloorPlanFloorDrag.pan,
 );
 
 /// The view events (host embedding API spec E-1 to E-4), read at each call
@@ -90,7 +95,7 @@ String? contextSelect(PickCandidate hit, SelectionController selection,
   return hit.table.number;
 }
 
-enum _Gesture { none, pressed, dragging, panning, spent }
+enum _Gesture { none, pressed, dragging, panning, banding, spent }
 
 /// The selection mode's tool (S3). One per service view; disposed with it.
 class TableSelectTool extends Tool {
@@ -160,6 +165,15 @@ class TableSelectTool extends Tool {
   /// The drag's translation, in world units.
   double _dx = 0, _dy = 0;
 
+  /// A finger's press that reached a table by the reach only (14t R-11):
+  /// under FloorPlanFloorDrag.band its drag is a band (rubber-band R-4).
+  bool _reachOnly = false;
+
+  /// The live band's mode (RB-3), from the press to the pointer's latest.
+  BandMode _bandMode = BandMode.window;
+
+  final SelectionBandPainter _bandPainter = SelectionBandPainter();
+
   /// The tables a drag moves: the selection when it began, with every
   /// group it touches (G4).
   List<Handle> _moving = const [];
@@ -186,7 +200,10 @@ class TableSelectTool extends Tool {
   ToolPhase get phase => switch (_gesture) {
         _Gesture.none => ToolPhase.idle,
         _Gesture.pressed || _Gesture.spent => ToolPhase.pressed,
-        _Gesture.dragging || _Gesture.panning => ToolPhase.dragging,
+        _Gesture.dragging ||
+        _Gesture.panning ||
+        _Gesture.banding =>
+          ToolPhase.dragging,
       };
 
   /// The outlines follow the drag (F-2).
@@ -205,6 +222,9 @@ class TableSelectTool extends Tool {
     // A finger that misses every top reaches the nearest within 24 px
     // (spec 14t R-11); a mouse picks by containment only.
     _hit = picker.pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
+    // A finger's hit found by the reach alone (RB-2): one more pick, a
+    // finger's down only.
+    _reachOnly = e.isTouch && _hit != null && picker.pick(e.world) == null;
     _toggle = e.shift || e.control || e.meta;
     _options = options();
     _pans = userCamera();
@@ -239,6 +259,13 @@ class TableSelectTool extends Tool {
         _timer = null;
         // A drag, a pan or a spent drag is no tap (spec E-2).
         _lastTap = null;
+        if (_startsBand(e)) {
+          _gesture = _Gesture.banding;
+          _lastScreen = e.screen;
+          _bandMode = bandModeFor(_pressScreen, e.screen);
+          notifyListeners();
+          return;
+        }
         final hit = _hit;
         if (hit == null || !_options.serviceMoves) {
           // Empty floor pans; so does any table when moves are off (S5).
@@ -264,7 +291,20 @@ class TableSelectTool extends Tool {
         _drag(e, ctx);
       case _Gesture.dragging || _Gesture.panning:
         _drag(e, ctx);
+      case _Gesture.banding:
+        _lastScreen = e.screen;
+        _bandMode = bandModeFor(_pressScreen, e.screen);
+        notifyListeners();
     }
+  }
+
+  /// Whether this drag is a band (rubber-band RB-2): from the floor -- or,
+  /// under `band`, a finger's reach-only press -- when the host chose
+  /// `band`, or under `pan` with a modifier at the press and no finger.
+  bool _startsBand(ToolPointerEvent e) {
+    final band = _options.floorDrag == FloorPlanFloorDrag.band;
+    if (_hit != null && !(band && _reachOnly)) return false;
+    return band || (_toggle && !e.isTouch);
   }
 
   /// The drag's start (S4, G4): an unselected table, or its whole group,
@@ -325,11 +365,70 @@ class TableSelectTool extends Tool {
         _tap(ctx);
       case _Gesture.dragging:
         _move(ctx);
+      case _Gesture.banding:
+        _band(e, ctx);
       case _Gesture.none || _Gesture.panning || _Gesture.spent:
         break;
     }
     _reset();
     notifyListeners();
+  }
+
+  /// The band's end (RB-3, RB-4): both screen corners under the camera at
+  /// the up, the instances the band passes kept to the picker's
+  /// candidates, groups taken by the mode's rule; one `replace`.
+  void _band(ToolPointerEvent e, ToolContext ctx) {
+    final a = ctx.camera.value
+        .screenToWorld(Vector2(_pressScreen.dx, _pressScreen.dy));
+    final b = e.world;
+    final world = Aabb2.raw(math.min(a.x, b.x), math.min(a.y, b.y),
+        math.max(a.x, b.x), math.max(a.y, b.y));
+    final keys = _bandKeys(world, bandModeFor(_pressScreen, e.screen), ctx);
+    if (_toggle) {
+      if (keys.isEmpty) return;
+      ctx.selection.replace({...ctx.selection.keys, ...keys});
+    } else {
+      ctx.selection.replace(keys);
+    }
+  }
+
+  /// The band's keys (RB-3), ascending by handle. `snapping`, not
+  /// `picking`: a locked layer's table reaches the window's group rule
+  /// (review V-1); a locked table is never a key.
+  List<SelectionKey> _bandKeys(Aabb2 world, BandMode mode, ToolContext ctx) {
+    final locked = <Handle, bool>{
+      for (final c in picker.candidates) c.table.instance: c.locked
+    };
+    final passing = <Handle>{};
+    ctx.index.forEachInstanceInBand(world, mode, const QueryFilter.snapping(),
+        (h) {
+      if (locked.containsKey(h)) passing.add(h);
+    });
+    final lookup = _groupLookup();
+    final keys = <Handle>{};
+    final groups = <String>{};
+    for (final h in passing) {
+      final id = lookup == null ? null : _groupByHandle[h];
+      if (id != null) {
+        groups.add(id);
+      } else if (!locked[h]!) {
+        keys.add(h);
+      }
+    }
+    for (final id in groups) {
+      final members = lookup!.visibleMembers(id);
+      final take = switch (mode) {
+        BandMode.crossing =>
+          members.any((t) => !t.locked && passing.contains(t.handle)),
+        BandMode.window => members.every((t) => passing.contains(t.handle)),
+      };
+      if (take) {
+        for (final t in lookup.selectableMembers(id)) {
+          keys.add(t.handle);
+        }
+      }
+    }
+    return [for (final h in _sorted(keys)) SelectionKey.root(h)];
   }
 
   /// The pointer's table under a hover (spec E-4): picked with no reach,
@@ -533,6 +632,16 @@ class TableSelectTool extends Tool {
 
   @override
   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
+    // A band takes every key (RB-5): Escape ends it, whatever idleKeys
+    // says; no other shortcut lands in its middle.
+    if (_gesture == _Gesture.banding) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.escape) {
+        _reset();
+        notifyListeners();
+      }
+      return KeyEventResult.handled;
+    }
     if (event is KeyDownEvent &&
         event.logicalKey == LogicalKeyboardKey.escape &&
         _gesture == _Gesture.none &&
@@ -562,11 +671,18 @@ class TableSelectTool extends Tool {
     _hit = null;
     _moving = const [];
     _dx = _dy = 0;
+    _reachOnly = false;
   }
 
+  /// The live band, from the press's screen point to the pointer's latest
+  /// (RB-6); nothing otherwise.
   @override
   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
-      PaperPalette paper) {}
+      PaperPalette paper) {
+    if (_gesture != _Gesture.banding) return;
+    _bandPainter.paint(
+        canvas, Rect.fromPoints(_pressScreen, _lastScreen), _bandMode, paper);
+  }
 
   @override
   void dispose() {
