@@ -3,7 +3,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
 // The loaded state is not host API: the test reads it from src/.
-import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
 
 // The example is not under lib/, so a relative path is the only way to it.
 // ignore: avoid_relative_lib_imports

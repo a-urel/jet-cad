@@ -160,8 +160,8 @@ delegates in your `MaterialApp`:
   subclass `FloorPlanStringsEn`, `FloorPlanStringsDe` or
   `FloorPlanStringsTr`. A class that implements or directly extends
   `FloorPlanStrings` must also write the abstract
-  `tableNumberProblem(TableNumberProblem)`; in 0.7.1 the planner's barrel
-  does not export the type `TableNumberProblem`.
+  `tableNumberProblem(TableNumberProblem)`; the barrel exports
+  `TableNumberProblem` since 0.7.2.
 - `theme` and `darkTheme` carry the floor plan's look:
   [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
