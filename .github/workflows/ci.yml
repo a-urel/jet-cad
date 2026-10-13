@@ -131,14 +131,17 @@ jobs:
         run: >-
           dart analyze --fatal-infos lib test expect_failures.dart
           check_guide.dart check_host_lock.dart package_root.dart
+          check_screenshots.dart
       - name: Format
         working-directory: tool/ci
         run: >-
           dart format --output=none --set-exit-if-changed
           lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
-          host_probe/lib
+          check_screenshots.dart host_probe/lib
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
+      - name: The screenshots hold pub.dev's rules
+        run: dart run tool/ci/check_screenshots.dart
 
   publishable:
     name: ${{ matrix.package }}, publishable to pub.dev
