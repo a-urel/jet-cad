@@ -138,6 +138,27 @@ jobs:
       - name: The host guide's code is the probe's
         run: dart run tool/ci/check_guide.dart
 
+  publishable:
+    name: jet_cad_2d, publishable to pub.dev
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Resolve the workspace
+        run: flutter pub get
+      # The engine is the one package published on pub.dev. A dry run
+      # uploads nothing; it exits 65 on any warning (a version bump without
+      # its CHANGELOG entry, a modified checked-in file), not only on an
+      # error, so it gates both.
+      - name: Publish dry run
+        working-directory: packages/jet_cad_2d
+        run: dart pub publish --dry-run
+
   host-probe:
     name: an external host, by git
     runs-on: ubuntu-latest
