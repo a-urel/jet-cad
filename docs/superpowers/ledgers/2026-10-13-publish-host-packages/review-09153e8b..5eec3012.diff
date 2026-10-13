@@ -1,0 +1,757 @@
+# Review package: 09153e8..HEAD
+
+## Commits
+5eec3012 feat(jet_cad_floor_plan): package 0.7.1 for pub.dev (D3)
+
+## Files changed
+ packages/jet_cad_floor_plan/.pubignore             |   6 +
+ packages/jet_cad_floor_plan/CHANGELOG.md           |  27 +++
+ packages/jet_cad_floor_plan/LICENSE                | 201 +++++++++++++++++++++
+ packages/jet_cad_floor_plan/README.md              | 103 +++++++++++
+ packages/jet_cad_floor_plan/example/lib/main.dart  |  42 +++++
+ packages/jet_cad_floor_plan/lib/editor.dart        |   5 +-
+ .../lib/src/host/floor_plan_theme.dart             |   8 +-
+ .../lib/src/host/floor_plan_view.dart              |   4 +-
+ .../lib/src/parametric/dimension_geometry.dart     |  12 +-
+ .../lib/src/symbols/wall_attach.dart               |   6 +-
+ .../lib/src/text_entry_overlay.dart                |   2 +-
+ packages/jet_cad_floor_plan/pubspec.yaml           |  23 ++-
+ packages/jet_cad_floor_plan/test/example_test.dart |  29 +++
+ 13 files changed, 441 insertions(+), 27 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_floor_plan/.pubignore b/packages/jet_cad_floor_plan/.pubignore
+new file mode 100644
+index 00000000..5e49ed9c
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/.pubignore
+@@ -0,0 +1,6 @@
++# Left out of the pub.dev archive, at the package root only: the suites,
++# the test runner's build output, and the furniture library's generator.
++# assets/ and lib/fonts/ stay in: the planner loads them at run time.
++/test/
++/build/
++/tool/
+diff --git a/packages/jet_cad_floor_plan/CHANGELOG.md b/packages/jet_cad_floor_plan/CHANGELOG.md
+new file mode 100644
+index 00000000..60bceb6f
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/CHANGELOG.md
+@@ -0,0 +1,27 @@
++# Changelog
++
++## 0.7.1
++
++The first release on pub.dev. The code is jet-cad 0.7.0's planner (git
++tag `v0.7.0`); what changed is how it is packaged: its own LICENSE (Apache
++2.0), a README and a runnable example, `sdk: ^3.6.0`, and its dependencies
++on `jet_cad_2d` and `jet_cad_2d_flutter` from pub.dev (`^0.7.1`). Plans
++are stored as in 0.7.0 (schema 10): a plan either saves opens in the other.
++
++**Moving a host from git to pub.dev:**
++
++1. Replace the git dependencies on `jet_cad_floor_plan` and
++   `jet_cad_restaurant_symbols` with `jet_cad_floor_plan: ^0.7.1`.
++2. Remove the import of `jet_cad_restaurant_symbols`. Copy its library
++   and names into your app as the host guide's "The restaurant symbols"
++   says, and give the loader your own `SymbolLibrarySource` in place of
++   `restaurantSymbolSource`.
++3. Keep the source's name `restaurant`, and never load your copy together
++   with the package's source: the same keys in two sources make the
++   loader fail.
++
++From this release on, `jet_cad_floor_plan` has its own version on pub.dev
++and its own git tags (`jet_cad_floor_plan-vX.Y.Z`). Before it, the package
++was released with the other jet-cad packages under one version; that
++history is in the repository's
++[CHANGELOG.md](https://github.com/a-urel/jet-cad/blob/main/CHANGELOG.md).
+diff --git a/packages/jet_cad_floor_plan/LICENSE b/packages/jet_cad_floor_plan/LICENSE
+new file mode 100644
+index 00000000..261eeb9e
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/LICENSE
+@@ -0,0 +1,201 @@
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/packages/jet_cad_floor_plan/README.md b/packages/jet_cad_floor_plan/README.md
+new file mode 100644
+index 00000000..75757995
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/README.md
+@@ -0,0 +1,103 @@
++# jet_cad_floor_plan
++
++An embeddable parametric floor planner for Flutter. It draws and edits a
++plan of walls, doors and windows, rooms, dimensions and furniture symbols,
++and gives a host application, such as a restaurant's point of sale, a
++controller and a view to embed it with: the tables of the plan, their
++numbers and status, a service view over the same plan, and PDF and PNG
++export. The planner never stores anything itself; the host keeps the plan's
++text wherever it likes.
++
++## Embedding it
++
++A `FloorPlanController` holds the plan and what is done to it; a
++`FloorPlanView` shows it. The application owns the controller and disposes
++of it.
++
++```dart
++final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
++final controller = FloorPlanController(symbols: symbols);
++
++MaterialApp(
++  supportedLocales: floorPlanSupportedLocales,
++  localizationsDelegates: floorPlanLocalizationsDelegates,
++  home: Scaffold(body: FloorPlanView(controller: controller)),
++)
++```
++
++Before `runApp`, load the planner's font and register its licence:
++
++```dart
++WidgetsFlutterBinding.ensureInitialized();
++await ensureFloorPlanFonts();
++registerFontLicences();
++```
++
++The plans name the family `Roboto`, and the package ships its bytes. Declare
++the family in the host's `pubspec.yaml`, so the web never fetches Google's
++Roboto instead:
++
++```yaml
++flutter:
++  uses-material-design: true
++  fonts:
++    - family: Roboto
++      fonts:
++        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
++```
++
++The planner speaks English, German and Turkish: `floorPlanSupportedLocales`
++and `floorPlanLocalizationsDelegates` list them, with Flutter's own words
++for the same languages.
++
++A complete app is
++[`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_floor_plan/example/lib/main.dart).
++Run it from the package directory with `flutter run -t example/lib/main.dart`.
++
++## The host guide
++
++Tables, their status and groups, the service view, the theme, the editor's
++capabilities, saving and loading, printing: the host guide walks through
++them all, in code that CI compiles:
++<https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md>
++
++## A symbol library of your own
++
++The package ships a furniture library, `furnitureSymbolSource`. A host adds
++its own beside it with a `SymbolLibrarySource` (a name, a reader of the
++library's bytes, and its `SymbolNames` in other languages) and gives the
++loader every source it should read:
++
++```dart
++SymbolLibraryLoader(sources: [furnitureSymbolSource, mySymbolSource])
++```
++
++Two sources must not hold the same key. `package:jet_cad_floor_plan/symbols.dart`
++holds the catalog types and the library builder a catalog's generator is
++written in; `symbol_sources.dart` holds the sources and their loader's
++Flutter side.
++
++## The API
++
++- `package:jet_cad_floor_plan/jet_cad_floor_plan.dart` is the host API.
++- `package:jet_cad_floor_plan/symbols.dart` and `symbol_sources.dart` are the
++  symbol libraries' API.
++- `package:jet_cad_floor_plan/editor.dart` is the editor frame of the
++  jet-cad floor planner app. It is not host API and is outside semver: it
++  may change in any release.
++- Nothing under `src/` is API.
++
++While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
++patch release (`0.7.2`) does not.
++
++## Where it comes from
++
++This package is part of [jet-cad](https://github.com/a-urel/jet-cad). It
++builds on [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d), the engine,
++and [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter), its
++rendering.
++
++## License
++
++Apache License 2.0. See [LICENSE](LICENSE). The Roboto font in
++`lib/fonts/` is under its own Apache License 2.0, in `assets/fonts/`.
+diff --git a/packages/jet_cad_floor_plan/example/lib/main.dart b/packages/jet_cad_floor_plan/example/lib/main.dart
+new file mode 100644
+index 00000000..916fcfb7
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/example/lib/main.dart
+@@ -0,0 +1,42 @@
++// The floor planner over an empty plan, with the furniture library the
++// package ships. Run from the package directory with
++// `flutter run -t example/lib/main.dart`.
++import 'package:flutter/material.dart';
++import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
++
++Future<void> main() async {
++  WidgetsFlutterBinding.ensureInitialized();
++  await ensureFloorPlanFonts();
++  registerFontLicences();
++  runApp(const FloorPlanExampleApp());
++}
++
++class FloorPlanExampleApp extends StatefulWidget {
++  const FloorPlanExampleApp({super.key});
++
++  @override
++  State<FloorPlanExampleApp> createState() => FloorPlanExampleAppState();
++}
++
++class FloorPlanExampleAppState extends State<FloorPlanExampleApp> {
++  /// One loader for the furniture library the package ships.
++  final SymbolLibraryLoader symbols =
++      SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
++
++  late final FloorPlanController controller =
++      FloorPlanController(symbols: symbols);
++
++  @override
++  void dispose() {
++    controller.dispose();
++    symbols.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => MaterialApp(
++        supportedLocales: floorPlanSupportedLocales,
++        localizationsDelegates: floorPlanLocalizationsDelegates,
++        home: Scaffold(body: FloorPlanView(controller: controller)),
++      );
++}
+diff --git a/packages/jet_cad_floor_plan/lib/editor.dart b/packages/jet_cad_floor_plan/lib/editor.dart
+index 50eeac7b..2f48fc67 100644
+--- a/packages/jet_cad_floor_plan/lib/editor.dart
++++ b/packages/jet_cad_floor_plan/lib/editor.dart
+@@ -1,14 +1,14 @@
+ // The editor surface (plan 14b-1, spec 14 V-8): what `apps/floor_planner`
+ // builds its application frame from. Explicitly internal: a host embeds
+ // the planner through `jet_cad_floor_plan.dart` (14b-2), not through this
+-// library.
++// library. Not host API and outside semver: it may change in any release.
+ library;
+ 
+ export 'src/document_toolbar.dart';
+ export 'src/export/export_bytes.dart';
+ export 'src/export/export_dialog.dart';
+ export 'src/export/export_font.dart';
+ export 'src/export/page_printer.dart';
+ export 'src/fonts.dart';
+ export 'src/l10n/document_separator.dart';
+ export 'src/layers/layer_panel.dart';
+@@ -52,21 +52,22 @@ export 'src/selection_panel.dart';
+ export 'src/shell_commands.dart';
+ export 'src/shortcut_guard.dart';
+ export 'src/startup_plan.dart';
+ export 'src/symbols/build_library.dart';
+ export 'src/symbols/furniture_catalog.dart';
+ export 'src/symbols/seating_component.dart';
+ export 'src/symbols/symbol_box.dart';
+ export 'src/symbols/symbol_component.dart';
+ export 'src/symbols/symbol_ghost.dart';
+ export 'src/symbols/symbol_library.dart';
+-export 'src/symbols/symbol_library_loader.dart';
++// `readBundledLibrary` is symbol_sources.dart's: one library, one home.
++export 'src/symbols/symbol_library_loader.dart' hide readBundledLibrary;
+ export 'src/symbols/symbol_library_state.dart';
+ export 'src/symbols/symbol_move.dart';
+ export 'src/symbols/symbol_panel.dart';
+ export 'src/symbols/symbol_place_tool.dart';
+ export 'src/symbols/symbol_placer.dart';
+ export 'src/symbols/symbol_search.dart';
+ export 'src/symbols/symbol_section.dart';
+ export 'src/symbols/wall_attach.dart';
+ export 'src/tables/table_index.dart';
+ export 'src/tables/table_label.dart';
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
+index 11dc736f..b6529e68 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
+@@ -47,25 +47,25 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   });
+ 
+   /// The selection mode's status captions. A null property is today's: a
+   /// null `color` the automatic black or white ink over the drawn fill, a
+   /// null `fontSize` 11 logical pixels, a null `fontFamily` the platform's
+   /// default font. A family is drawn only when the host has loaded it.
+   /// `fontSize`, when set, is finite and above 0. Null: today's caption.
+   final TextStyle? statusCaptionStyle;
+ 
+   /// The selection mode's status fills: multiplies the host colour's alpha,
+-  /// once, in [0, 1]. Null: the colour as the host gave it.
++  /// once, in the range 0 to 1. Null: the colour as the host gave it.
+   final double? statusFillOpacity;
+ 
+   /// Both modes' table colour fills (plan colours spec PC-6): the hue's
+-  /// alpha, in [0, 1]. Null: 0.35.
++  /// alpha, in the range 0 to 1. Null: 0.35.
+   final double? tableColorOpacity;
+ 
+   /// The selection mode's group frames. Null: the paper's grip colour.
+   final Color? groupFrameColor;
+ 
+   /// The group frames' stroke, in screen logical pixels, finite and above 0.
+   /// Null: 2.
+   final double? groupFrameWidth;
+ 
+   /// How far a group frame stands off its members, in world millimetres,
+@@ -99,21 +99,21 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+ 
+   /// The selection outline's stroke in both modes, in screen logical
+   /// pixels, finite and above 0. Null: 2. The hover stays 1.5.
+   final double? selectionWidth;
+ 
+   /// The selection mode's focus veil over the tables outside the focus;
+   /// its alpha is multiplied by [focusVeilOpacity]. Null: the paper's
+   /// colour.
+   final Color? focusVeilColor;
+ 
+-  /// The focus veil's opacity, in [0, 1]. Null: 0.6.
++  /// The focus veil's opacity, in the range 0 to 1. Null: 0.6.
+   final double? focusVeilOpacity;
+ 
+   /// The canvas around the page and a page-less plan's paper, in both
+   /// modes: the drafting's ink follows it as it follows a page. A
+   /// translucent colour is used as given (the ink keys on its RGB). Null:
+   /// the ambient `ColorScheme.surface`.
+   final Color? canvasBackground;
+ 
+   /// The selection mode's bar, in logical pixels, finite and above 0. Null:
+   /// 44.
+@@ -194,21 +194,21 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+ 
+   static TextStyle? _mergeStyle(TextStyle? base, TextStyle? over) =>
+       base == null ? over : base.merge(over);
+ 
+   /// The theme [t] of the way to [other], for an animated theme switch.
+   ///
+   /// A field set on both sides is interpolated ([Color.lerp], [lerpDouble],
+   /// [TextStyle.lerp], [EdgeInsets.lerp]), and each interpolated double (a
+   /// double field, each padding side, a style's `fontSize`) is clamped
+   /// between its two ends: a host's overshooting curve
+-  /// (`Curves.easeOutBack`) drives `t` out of [0, 1], and two valid themes
++  /// (`Curves.easeOutBack`) drives `t` out of `[0, 1]`, and two valid themes
+   /// must never animate into one the view refuses. A field null on one side
+   /// means a value that depends on the paper, which cannot be interpolated,
+   /// so it takes the side `t` is nearer (this one below 0.5); so does a
+   /// text style whose `color` one side leaves null (that colour is the
+   /// automatic ink), whole, never fading from transparent.
+   ///
+   /// A field equal on both sides is that side's value, and an [other]
+   /// equal to this theme returns this theme itself, so a theme that is the
+   /// same in a host's light and dark `ThemeData` stays `==` on every frame
+   /// of the switch and notifies nobody (T-3). A null [other] returns this
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+index ca40c491..f58e7ca4 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+@@ -208,22 +208,22 @@ class FloorPlanView extends StatefulWidget {
+   ///
+   /// It reaches this view only: the export dialog and other routes follow
+   /// the ambient Material `Theme` where the view is, and a host that wants
+   /// them themed wraps the view in a local `Theme`.
+   final FloorPlanTheme? theme;
+ 
+   /// The host's export dialog (host embedding API spec C-4): when given,
+   /// **every** Export entry point (the service bar's button, the editor's
+   /// bar, the chords Cmd+E and Ctrl+E, in both modes) calls it instead of
+   /// the Material dialog, with the choice last made in this controller's
+-  /// life as [initial] (PDF at 150 dpi at first); the answer is remembered
+-  /// as the next [initial], and null from it cancels (nothing is
++  /// life as `initial` (PDF at 150 dpi at first); the answer is remembered
++  /// as the next `initial`, and null from it cancels (nothing is
+   /// exported). Print has no dialog of jet-cad's (the platform's). Read at
+   /// each Export.
+   final Future<FloorPlanExportChoice?> Function(
+       BuildContext context, FloorPlanExportChoice initial)? onExportDialog;
+ 
+   /// An export or a print this view started failed (spec C-3): the error,
+   /// once, after which the flow ends and Export and Print are enabled
+   /// again. The hook's own error ([onExportDialog]'s) is reported here too.
+   /// Without it the error propagates as it always did, out of a `Future`
+   /// the press drops: an uncaught asynchronous error (spec S-8).
+diff --git a/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart b/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart
+index 19a07d31..a5379c93 100644
+--- a/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart
++++ b/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart
+@@ -279,27 +279,27 @@ final int kDimTextAttrs =
+ /// first failure, and far beyond any plan: about 2.2e8 times the corpus far
+ /// origin (4.5e6 mm), and a million times only against the +1e9 mm
+ /// placement, which does not make a value large anyway (a value is a
+ /// length). Only a wall made absurdly thick (a panel-legal 1e20 mm) or a
+ /// file reaches it.
+ const double kDimMaxValueMm = 1e15;
+ 
+ /// One dimension's geometry in **world** (spec 11 D6-D8), from
+ /// [layoutDimension]:
+ ///
+-/// - [value]: what it measures, never negative; [text], its format in the
++/// - `value`: what it measures, never negative; `text`, its format in the
+ ///   page's unit with the page's decimal separator;
+-/// - [u], [n]: the measuring direction and its left normal;
+-/// - [q0], [q1]: the dimension line's ends;
+-/// - [ext0], [ext1]: the extension lines at `a` and `b`, (start, end);
+-/// - [slash0], [slash1]: the slashes about [q0] and [q1];
+-/// - [textAt], [textAngle] (radians), [textHeight]: the value's insertion
++/// - `u`, `n`: the measuring direction and its left normal;
++/// - `q0`, `q1`: the dimension line's ends;
++/// - `ext0`, `ext1`: the extension lines at `a` and `b`, (start, end);
++/// - `slash0`, `slash1`: the slashes about `q0` and `q1`;
++/// - `textAt`, `textAngle` (radians), `textHeight`: the value's insertion
+ ///   point, world angle and cap height.
+ typedef DimLayout = ({
+   double value,
+   Vector2 u,
+   Vector2 n,
+   Vector2 q0,
+   Vector2 q1,
+   (Vector2, Vector2) ext0,
+   (Vector2, Vector2) ext1,
+   (Vector2, Vector2) slash0,
+diff --git a/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart b/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart
+index 65cecb22..b7e1c2d8 100644
+--- a/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart
++++ b/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart
+@@ -198,23 +198,23 @@ List<FaceRun> _pieces(Vector2 p0, double end, Vector2 d, Vector2 m,
+   if (from < hi) add(from, hi);
+   return out;
+ }
+ 
+ /// A placed symbol standing against a run (spec 09c D4's neighbours): the
+ /// interval `[lo, hi]` its back edge covers along the run's `t`, measured
+ /// from the run's `a`, and the instance's handle (so a move can leave its
+ /// own instance out, D8).
+ typedef FaceNeighbour = ({double lo, double hi, Handle instance});
+ 
+-/// What [attachToWall] returns: the attached placement [transform], the
+-/// point [q] on the face the symbol's back-centre lands on (the snap
+-/// marker's, D6), and the [run] it stands against.
++/// What [attachToWall] returns: the attached placement `transform`, the
++/// point `q` on the face the symbol's back-centre lands on (the snap
++/// marker's, D6), and the `run` it stands against.
+ typedef WallAttachment = ({Transform2 transform, Vector2 q, FaceRun run});
+ 
+ /// The one attachment rule (spec 09c D4): where a symbol whose local box is
+ /// [box] stands against one of [runs] for the anchor point [p] (the raw
+ /// pointer in placement, D6; the plain-moved back-centre in a move, D8), or
+ /// null when no run takes it.
+ ///
+ /// [neighbours] is parallel to [runs]: `neighbours[i]` are the symbols
+ /// already against `runs[i]` (an [ArgumentError] when the lengths differ);
+ /// the one whose instance is [exclude] is passed over.
+diff --git a/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart b/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart
+index 97079613..14a6bfdb 100644
+--- a/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart
++++ b/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart
+@@ -22,21 +22,21 @@ const Size kTextEntrySize = Size(240, 32);
+ /// or zoom moves it and never rebuilds it (Ruling 05-10).
+ ///
+ /// **Commit and cancel.** Enter commits. Any other loss of focus cancels
+ /// if the placement is still pending. A canvas click has already committed
+ /// synchronously in the tool, so its blur finds nothing to cancel. A flow
+ /// of the document host (spec 12a D2, R-5) commits the entry through the
+ /// tool's `finish` before it moves the focus, so the focus loss that
+ /// follows finds nothing to cancel either.
+ ///
+ /// **Where the focus goes.** Back to the canvas, however the entry ends
+-/// ([_onPending], [_onTapOutside]).
++/// (`_onPending`, `_onTapOutside`).
+ class TextEntryOverlay extends StatefulWidget {
+   const TextEntryOverlay({
+     super.key,
+     required this.tool,
+     required this.tools,
+     required this.camera,
+   });
+ 
+   final TextTool tool;
+   final ToolController tools;
+diff --git a/packages/jet_cad_floor_plan/pubspec.yaml b/packages/jet_cad_floor_plan/pubspec.yaml
+index 8e0bfe31..2c49a1fd 100644
+--- a/packages/jet_cad_floor_plan/pubspec.yaml
++++ b/packages/jet_cad_floor_plan/pubspec.yaml
+@@ -1,25 +1,30 @@
+ name: jet_cad_floor_plan
+ description: >-
+-  The floor planner as a package (spec 14, slice 14b-1): the shell, the
+-  tools, the parametric objects, the symbol library and the panels that
+-  apps/floor_planner builds its application frame from, and that a host
+-  application embeds. The design / selection split is built in (14b-2).
+-publish_to: none
++  An embeddable parametric floor planner for Flutter: walls, openings,
++  rooms, dimensions and furniture symbols, with a host API for tables.
+ version: 0.7.1
++repository: https://github.com/a-urel/jet-cad
++issue_tracker: https://github.com/a-urel/jet-cad/issues
++topics:
++  - cad
++  - floor-plan
++  - restaurant
++  - point-of-sale
+ resolution: workspace
+ 
+ environment:
+-  # The same bounds as apps/floor_planner's (spec 13 R-4, plan 13 P-7): the
+-  # sdk bound sets the language version, which keeps the moved code's
+-  # formatting; printing and pdf set the Flutter floor.
+-  sdk: ^3.5.0
++  # The floor pub workspaces document for their members; it sets language
++  # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x, which the
++  # PDF export and printing need, requires Dart >= 3.12.0, which Flutter
++  # first ships in 3.44.0: that bound binds.
++  sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+   # Spec 14d L2: Flutter's Material, Widgets and Cupertino words for de and
+   # tr, listed with the planner's own delegate.
+   flutter_localizations:
+     sdk: flutter
+   jet_cad_2d: ^0.7.1
+diff --git a/packages/jet_cad_floor_plan/test/example_test.dart b/packages/jet_cad_floor_plan/test/example_test.dart
+new file mode 100644
+index 00000000..71c38153
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/example_test.dart
+@@ -0,0 +1,29 @@
++// The published example (spec D3): it shows the planner over an empty
++// plan with the furniture library loaded from the package's own asset.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
++// The loaded state is not host API: the test reads it from src/.
++import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
++
++// The example is not under lib/, so a relative path is the only way to it.
++// ignore: avoid_relative_lib_imports
++import '../example/lib/main.dart';
++
++void main() {
++  testWidgets('the example shows the planner with its furniture library',
++      (tester) async {
++    await tester.pumpWidget(const FloorPlanExampleApp());
++    await tester.pumpAndSettle();
++    expect(find.byType(FloorPlanView), findsOneWidget);
++
++    final state = tester
++        .state<FloorPlanExampleAppState>(find.byType(FloorPlanExampleApp));
++    // The asset read ends outside the test's fake-async zone.
++    await tester.runAsync(state.symbols.load);
++    await tester.pump();
++    final library = state.symbols.state;
++    expect(library, isA<SymbolLibraryReady>(),
++        reason: 'the furniture library is read from the package asset');
++    expect((library as SymbolLibraryReady).library.entries, isNotEmpty);
++  });
++}

@@ -65,7 +65,7 @@ const int kTileDevicePixels = 512;
 /// nothing because the missed entity is off-screen. A tile's edge is interior
 /// to the drawing, and there the two halves diverge:
 ///
-/// * **Arrival.** [_bake] passes the tile as the viewport, so an unpadded
+/// * **Arrival.** `_bake` passes the tile as the viewport, so an unpadded
 ///   query hands the painter nothing for a stroke whose centreline is 0.2
 ///   device pixels the wrong side of the seam. A clip only *keeps*; it cannot
 ///   return what the query never yielded, so the half of the stroke reaching
@@ -469,7 +469,7 @@ class TileCache {
   /// readily as an `InstanceNode` (`commands.dart:297-300`), so a record built
   /// from the callback alone loses every dragged group: direction one finds
   /// nothing, direction two drops the arrival tiles, and the departure tiles
-  /// keep their pixels. That is why [_bake] walks each visited handle's owner
+  /// keep their pixels. That is why `_bake` walks each visited handle's owner
   /// chain and records it here rather than trusting the callback to be
   /// complete.
   ///
@@ -481,7 +481,7 @@ class TileCache {
   /// linear: an ancestor already recorded stops the climb.
   ///
   /// Keyed identically to [_tiles] at every point where either is observable:
-  /// [_bake] writes here and its caller writes there, and nothing removes from
+  /// `_bake` writes here and its caller writes there, and nothing removes from
   /// one without removing from the other.
   final Map<TileKey, Uint32List> _baked = <TileKey, Uint32List>{};
 
@@ -760,7 +760,7 @@ class TileCache {
   /// camera it was recorded against.
   ///
   /// A tile is `tileDevicePixels` square, RGBA, one byte a channel: exactly
-  /// what `Picture.toImageSync` allocates in [_bake].
+  /// what `Picture.toImageSync` allocates in `_bake`.
   int get liveBytes {
     final carryOver = _carryOver;
     final band = _band;
@@ -1489,7 +1489,7 @@ class TileCache {
       // today; the `finally` is what keeps that true of paths added later.
       try {
         // [_bakeBand]'s `onVisit` records only what the painter visited
-        // directly; [_bake]'s climbs owners so that a *container's* transform
+        // directly; `_bake`'s climbs owners so that a *container's* transform
         // reaches the tile through invalidation's direction one. This is where
         // the band makes up the difference -- once per band rather than once
         // per tile, which is the whole reason the band callback is the simpler
@@ -1532,13 +1532,13 @@ class TileCache {
     }
   }
 
-  /// [_bake]'s owner climb, applied once to a whole band's visit list.
+  /// `_bake`'s owner climb, applied once to a whole band's visit list.
   ///
   /// **Direction one of the invalidation rule, which the band walk cannot
   /// record for itself.** A tile's `_baked` record has to name not only the
   /// entities drawn on it but every container they hang under, or a transform
   /// applied to a group never condemns the tiles its children inked and the
-  /// drawing goes stale after an edit. [_bake] does this inside its own
+  /// drawing goes stale after an edit. `_bake` does this inside its own
   /// `onVisit`; a band's `onVisit` records the direct visit alone and this
   /// closes the gap over the accumulated list.
   ///
@@ -1547,7 +1547,7 @@ class TileCache {
   /// [climb] already walks each chain to its root.
   void _recordOwners(List<int> visited, DraftDocument document) {
     // Container nodes already recorded. Both a memo and the termination
-    // guard, exactly as in [_bake]: once a node is in, every ancestor of it is
+    // guard, exactly as in `_bake`: once a node is in, every ancestor of it is
     // in too, so the climb stops there -- which keeps the pass linear in
     // visits rather than O(visits x depth), and makes a malformed cyclic
     // parent chain terminate instead of hanging the bake.
@@ -1603,7 +1603,7 @@ class TileCache {
       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
 
   /// Bytes one tile's image occupies: RGBA, one byte a channel, exactly what
-  /// `Picture.toImageSync` allocates in [_bake].
+  /// `Picture.toImageSync` allocates in `_bake`.
   int get _tileBytes => tileDevicePixels * tileDevicePixels * 4;
 
   /// One tile's footprint, in device pixels: its side squared. What
@@ -2072,7 +2072,7 @@ class TileCache {
   /// can still clip into it — accepted gap G6, until Task 9a. The remedy is
   /// not here: inflating this box by a resolved lineweight would need the
   /// style resolution the caller does not have, and would be a *different*
-  /// number from the one [_bake] queries with. [_worldRectOf] grows the tile
+  /// number from the one `_bake` queries with. [_worldRectOf] grows the tile
   /// instead, by [kTileSlack], which is the same slack the bake uses — so the
   /// record of what a tile holds and the geometry that condemns it are one
   /// rectangle rather than two that nearly agree.
@@ -2130,7 +2130,7 @@ class TileCache {
   /// The world-space box tile [key] can hold ink from, under [grid]'s anchor
   /// camera: its own rectangle grown by [kTileSlack] on every side.
   ///
-  /// **The slack is the same one [_bake] queries with, and that is the point.**
+  /// **The slack is the same one `_bake` queries with, and that is the point.**
   /// A tile's `_baked` record lists what the padded query yielded; this is the
   /// geometry that condemns the tile. Inflate one and not the other and the
   /// two halves of invalidation disagree by a ring — direction one drops tiles
@@ -2279,9 +2279,9 @@ class TileCache {
 
   /// Walks one band into one image.
   ///
-  /// Modelled on [_bake] and sharing all three of its rules, at band scale.
+  /// Modelled on `_bake` and sharing all three of its rules, at band scale.
   ///
-  /// **The `onVisit` callback is deliberately simpler than [_bake]'s.**
+  /// **The `onVisit` callback is deliberately simpler than `_bake`'s.**
   /// `_bake` climbs owners so a container transform reaches the tile through
   /// direction one. A band records the same information for a wider region,
   /// and its caller shares one record across the band's tiles, so the owner
@@ -2303,7 +2303,7 @@ class TileCache {
     // for the same reason. A generation outlives many pans, so at a rest bake
     // the frame camera sits a whole number of device pixels away from the
     // anchor; taking the translation from it would slide the band by that pan
-    // and the tiles cut out of it would not hold what [_bake] puts in the
+    // and the tiles cut out of it would not hold what `_bake` puts in the
     // same keys. The frame camera is still required to belong to this
     // generation, which is what the assert below states.
     assert(
@@ -2316,7 +2316,7 @@ class TileCache {
     final recorder = PictureRecorder();
     final into = Canvas(recorder);
     into.scale(dpr);
-    // **Hard, and for [_bake]'s reason.** An antialiased clip edge would make
+    // **Hard, and for `_bake`'s reason.** An antialiased clip edge would make
     // two adjacent bands' `source-over` fall short of full coverage along the
     // row they share: a seam, in the one place this design exists to remove
     // one.
@@ -2324,7 +2324,7 @@ class TileCache {
 
     // **The query is padded; the clip is not.** A stroke whose centreline lies
     // just outside the band still inks inside it. [kTileSlack] is the same
-    // slack [_bake] queries with and the same slack the invalidation rule
+    // slack `_bake` queries with and the same slack the invalidation rule
     // uses -- padding one alone makes them disagree. The canvas is pulled back
     // by the same amount, so the padded viewport's origin lands where the
     // band's own origin was.

@@ -15,10 +15,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_2d:
-    path: ../jet_cad_2d
-  jet_cad_floor_plan:
-    path: ../jet_cad_floor_plan
+  jet_cad_2d: ^0.7.1
+  jet_cad_floor_plan: ^0.7.1
 
 dev_dependencies:
   flutter_test:

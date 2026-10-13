@@ -101,8 +101,8 @@ final class GripRef {
 /// preview `T` — and is composed inline, so a drag's frames allocate no
 /// `Transform2` (spec D7).
 ///
-/// [anchor] is the point the grip hangs from, [centre] the disc's centre
-/// and [stem] the end of the 1 px line from [anchor], on the disc's rim.
+/// `anchor` is the point the grip hangs from, `centre` the disc's centre
+/// and `stem` the end of the 1 px line from `anchor`, on the disc's rim.
 ({Offset anchor, Offset centre, Offset stem}) rotationGripOf(
     Aabb2 box, Transform2 worldToScreen,
     [Transform2? frame, Transform2? after]) {

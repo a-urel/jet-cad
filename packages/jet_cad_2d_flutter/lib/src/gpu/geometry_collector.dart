@@ -135,10 +135,12 @@ class GeometryCollector implements DrawSink {
   int _debugCollinearJoins = 0;
 
   /// Half the stroke's width, **in device pixels** — the space the vertex
-  /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
+  /// shader consumes `half_width` in (`cad_stroke.vert` documents
   /// the attribute `// device pixels` and applies it directly against
   /// `frame_info.half_viewport`, which `buildFrameInfo` also builds in
-  /// device pixels; `frame_info.dart`).
+  /// device pixels; `frame_info.dart`). The shader sources are in the
+  /// repository (`packages/jet_cad_2d_flutter/shaders/`), not in the
+  /// published package.
   ///
   /// **This method's first version computed the *logical* half-width
   /// instead, and every stroke drew at half weight under any

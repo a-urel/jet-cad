@@ -61,3 +61,48 @@ List<String> forbiddenInLock(String lock) => [
       for (final name in lockPackages(lock))
         if (forbiddenHostPackages.contains(name)) name,
     ];
+
+/// The packages the host probe must take from the commit under test, by
+/// its `dependency_overrides` (publishing spec D6): once they are on
+/// pub.dev, a dropped override would resolve silently from there.
+const List<String> probedFromCommit = [
+  'jet_cad_2d',
+  'jet_cad_2d_flutter',
+  'jet_cad_floor_plan',
+  'jet_cad_restaurant_symbols',
+];
+
+/// The `source` and the description's `resolved-ref` of the package
+/// [name]'s entry in [lock] (keys `source` and `resolved-ref`, each only
+/// when present); empty when [lock] has no such package. Throws a
+/// [FormatException] as [lockPackages] does.
+Map<String, String> lockEntryFields(String lock, String name) {
+  if (!lockPackages(lock).contains(name)) return const {};
+  final lines = lock.split('\n');
+  final start = lines.indexWhere((l) => RegExp('^ +$name:\\s*\$').hasMatch(l));
+  final indent = lines[start].length - lines[start].trimLeft().length;
+  final fields = <String, String>{};
+  for (final line in lines.skip(start + 1)) {
+    final content = line.trimLeft();
+    if (content.isEmpty) continue;
+    final depth = line.length - content.length;
+    if (depth <= indent) break; // The next package: the entry has ended.
+    final m =
+        RegExp(r'^(source|resolved-ref):\s*"?([^"\s]+)"?').firstMatch(content);
+    if (m != null) fields[m[1]!] = m[2]!;
+  }
+  return fields;
+}
+
+/// One message per package of [probedFromCommit] that [lock] does not
+/// resolve from git at [ref]: missing, another source, or another
+/// resolved ref.
+List<String> notFromCommit(String lock, String ref) => [
+      for (final name in probedFromCommit)
+        if (lockEntryFields(lock, name) case final f
+            when f['source'] != 'git' || f['resolved-ref'] != ref)
+          f.isEmpty
+              ? '$name: not in the lock'
+              : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
+                  'not git at $ref',
+    ];

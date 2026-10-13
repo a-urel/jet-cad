@@ -67,10 +67,11 @@ patch release (`0.7.2`) does not.
 ## Where it comes from
 
 This package is the engine of [jet-cad](https://github.com/a-urel/jet-cad), a
-parametric floor planner. The Flutter packages that render and edit its
-documents live in that repository and are not published on pub.dev; an
-application that embeds the floor planner takes this engine with them, by git,
-and should not also depend on it from pub.dev.
+parametric floor planner. The renderer
+[`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) and the
+planner [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan)
+are on pub.dev too. An application that embeds the floor planner depends on
+the planner and gets this engine with it.
 
 ## License
 

@@ -3,8 +3,8 @@
 This guide is for a Flutter point-of-sale application (a **host**) that
 embeds the floor planner: staff design the restaurant's floors in the
 **design** mode, and during service they see the tables, colour them by
-status and pick them in the **selection** mode. It covers release
-**0.7.0** ([CHANGELOG](../CHANGELOG.md)).
+status and pick them in the **selection** mode. It covers `jet_cad_floor_plan`
+**0.7.1** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
 
 Every Dart snippet below is taken from
 [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
@@ -14,51 +14,79 @@ that file, so the code in this guide compiles against the release.
 
 ## 1. The dependency
 
-The planner's packages are not on pub.dev. Depend on them by git, **both
-pinned to the same commit SHA** — the SHA the release tag `v0.7.0` points at,
-`0fa649e2c6f09f34f2b7564071837cc1b15ffd11` (the merge of release 0.7.0 into
-`main`):
+Add the planner from pub.dev, with `dart pub add jet_cad_floor_plan` or in
+your pubspec:
 
 ```yaml
 dependencies:
   flutter:
     sdk: flutter
-  jet_cad_floor_plan:
-    git:
-      url: https://github.com/a-urel/jet-cad.git
-      path: packages/jet_cad_floor_plan
-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
-  jet_cad_restaurant_symbols:
-    git:
-      url: https://github.com/a-urel/jet-cad.git
-      path: packages/jet_cad_restaurant_symbols
-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
+  jet_cad_floor_plan: ^0.7.1
 ```
 
-Why a SHA and not the tag: the restaurant package depends on the planner
-by a path inside the repository, which pub resolves at the commit's SHA.
-If your `ref` is a tag or a branch, pub sees two different refs for the
-planner and refuses. The other form that resolves is the restaurant
-package **alone** at the tag (`ref: v0.7.0`), the planner arriving
-through it; you then import the planner without listing it, which
-`depend_on_referenced_packages` will flag.
-
-The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come
-with the planner. Import only the two barrels:
-`package:jet_cad_floor_plan/jet_cad_floor_plan.dart` and
-`package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
-Anything under `src/` is not API.
-
-The engine is also on pub.dev, as `jet_cad_2d` (since 0.7.1, under its own
-versions). Do not add it from there next to the dependencies above: the
-planner already brings it by git, and pub takes a package from one source
-only, so it refuses the pair.
+The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come with
+it, from pub.dev. Import only the planner's barrel,
+`package:jet_cad_floor_plan/jet_cad_floor_plan.dart`. Anything under `src/`
+is not API.
 
 The packages need Flutter 3.44 or later (the Dart that comes with it);
-0.7.0 was built and tested with Flutter 3.47.6. They bring no build hook
+0.7.1 is built and tested with Flutter 3.47.6. They bring no build hook
 and no GPU renderer: nothing runs at build time beyond Flutter's own.
 (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
 hook compiles shaders.)
+
+### The restaurant symbols
+
+The restaurant library (tables, chairs, bar and kitchen symbols) is not a
+dependency of the planner: you copy its two files into your app, in three
+steps.
+
+1. Take the files from the tag `jet_cad_floor_plan-vX.Y.Z` of the planner
+   release you depend on: `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib`
+   and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`. Put the
+   library at `assets/restaurant.jetlib` and the names beside your code as
+   `restaurant_names.dart`, as it is: it imports `symbol_sources.dart`, a
+   public library of the planner, which your pubspec already has.
+2. Declare the asset in your pubspec:
+
+```yaml
+  assets:
+    - assets/restaurant.jetlib
+```
+
+3. Read it from your own assets and make it a source:
+
+```dart
+/// The restaurant library, from this app's own assets (host guide, "The
+/// restaurant symbols").
+Future<Uint8List> readRestaurantLibrary() async {
+  final data = await rootBundle.load('assets/restaurant.jetlib');
+  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+}
+
+const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
+    name: 'restaurant',
+    read: readRestaurantLibrary,
+    names: restaurantSymbolNames);
+```
+
+The reader needs `import 'dart:typed_data';` and `rootBundle` from
+`package:flutter/services.dart`; the source needs your copy, `import
+'restaurant_names.dart';`.
+
+Give the loader both sources (section 4):
+`SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
+
+Two rules. Never load the copy with the package's own
+`restaurantSymbolSource`: the loader fails when one key and version is in
+two sources, whatever their names, and the package's source and your copy
+carry the same keys. And a saved plan does not depend on the library:
+placing a symbol copies its definition into the plan, so you can change
+which library you ship without migrating saved plans.
+
+A change to the symbols reaches hosts with a planner release, and that
+release's tag carries the files: copy them again from the tag of the
+release you move to.
 
 ## 2. Fonts
 
@@ -128,7 +156,12 @@ delegates in your `MaterialApp`:
   language, and its `languageCode`. *Since 0.6.0*, a class that
   implements or directly extends `FloorPlanStrings` must add `color`,
   `colorNone`, `colorRefused` and `colorName(FloorPlanColor)`; a
-  subclass of a built-in language gets them.
+  subclass of a built-in language gets them. To change only some words,
+  subclass `FloorPlanStringsEn`, `FloorPlanStringsDe` or
+  `FloorPlanStringsTr`. A class that implements or directly extends
+  `FloorPlanStrings` must also write the abstract
+  `tableNumberProblem(TableNumberProblem)`; in 0.7.1 the planner's barrel
+  does not export the type `TableNumberProblem`.
 - `theme` and `darkTheme` carry the floor plan's look:
   [§ 9](#9-themes).
 - Panel numbers show and read with the language's decimal separator,
@@ -148,7 +181,7 @@ thumbnail cache between their controllers:
 
 ```dart
   final symbols = SymbolLibraryLoader(
-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
+    sources: const [furnitureSymbolSource, restaurantSource],
   );
   final thumbnails = SymbolThumbnails(maxEntries: 128);
 
@@ -2235,9 +2268,9 @@ stylus behave as on a desktop.
   together.** A schema 8 or 7 plan opens here unchanged; the service
   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
   plans and service layouts, so they can share them.
-- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 or 0.7.0 is at
+- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0, 0.7.0 or 0.7.1 is at
   **schema 10**, which 0.5.1 and every older release refuse (`load`
   throws a `FormatException` that says why); a schema 9, 8 or 7 plan
   opens here unchanged. Every terminal that shares stored plans moves
-  together. 0.6.0 and 0.7.0 save the same plans and service layouts, so
+  together. 0.6.0, 0.7.0 and 0.7.1 save the same plans and service layouts, so
   they can share them.

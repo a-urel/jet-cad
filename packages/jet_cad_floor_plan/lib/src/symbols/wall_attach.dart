@@ -205,9 +205,9 @@ List<FaceRun> _pieces(Vector2 p0, double end, Vector2 d, Vector2 m,
 /// own instance out, D8).
 typedef FaceNeighbour = ({double lo, double hi, Handle instance});
 
-/// What [attachToWall] returns: the attached placement [transform], the
-/// point [q] on the face the symbol's back-centre lands on (the snap
-/// marker's, D6), and the [run] it stands against.
+/// What [attachToWall] returns: the attached placement `transform`, the
+/// point `q` on the face the symbol's back-centre lands on (the snap
+/// marker's, D6), and the `run` it stands against.
 typedef WallAttachment = ({Transform2 transform, Vector2 q, FaceRun run});
 
 /// The one attachment rule (spec 09c D4): where a symbol whose local box is

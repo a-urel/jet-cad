@@ -167,4 +167,64 @@ void main() {
     expect(shallow, contains('\n flutter_scene:\n'), reason: 'premise');
     expect(() => lockPackages(shallow), throwsFormatException);
   });
+
+  group('HL-C the four packages come from the commit under test', () {
+    const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
+
+    test('HL-C1 the green lock: all four from git at the ref', () {
+      expect(notFromCommit(green, ref), isEmpty);
+      expect(lockEntryFields(green, 'jet_cad_2d'),
+          {'source': 'git', 'resolved-ref': ref});
+    });
+
+    test('HL-C2 another ref: each of the four named', () {
+      const other = '0000000000000000000000000000000000000000';
+      expect(notFromCommit(green, other), hasLength(4));
+      expect(notFromCommit(green, other).first, contains('jet_cad_2d'));
+    });
+
+    // The named mutant of spec D6: one override dropped, so pub took the
+    // package from pub.dev.
+    for (final name in [
+      'jet_cad_2d',
+      'jet_cad_2d_flutter',
+      'jet_cad_floor_plan',
+      'jet_cad_restaurant_symbols',
+    ]) {
+      test('HL-C3 $name hosted: named', () {
+        final entry = entryOf(green, name);
+        final hostedEntry = [
+          '  $name:',
+          '    dependency: transitive',
+          '    description:',
+          '      name: $name',
+          '      sha256: "0000"',
+          '      url: "https://pub.dev"',
+          '    source: hosted',
+          '    version: "0.7.1"',
+        ].join('\n');
+        final lock = green.replaceFirst(entry, hostedEntry);
+        expect(lock, isNot(green), reason: 'premise');
+        expect(notFromCommit(lock, ref), [contains(name)]);
+      });
+    }
+
+    // A hosted entry carries no resolved-ref, so HL-C3 alone cannot tell the
+    // source test from the ref test: this one keeps the ref and changes only
+    // the source.
+    test('HL-C3b the right ref under another source: named', () {
+      final entry = entryOf(green, 'jet_cad_floor_plan');
+      final lock = green.replaceFirst(
+          entry, entry.replaceFirst('source: git', 'source: path'));
+      expect(lock, isNot(green), reason: 'premise');
+      expect(notFromCommit(lock, ref), [contains('jet_cad_floor_plan')]);
+    });
+
+    test('HL-C4 a package missing from the lock: named', () {
+      final lock = green.replaceFirst(
+          '${entryOf(green, 'jet_cad_restaurant_symbols')}\n', '');
+      expect(
+          notFromCommit(lock, ref), [contains('jet_cad_restaurant_symbols')]);
+    });
+  });
 }

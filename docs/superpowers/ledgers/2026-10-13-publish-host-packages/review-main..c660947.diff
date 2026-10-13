@@ -1,0 +1,3298 @@
+c6609475 docs: Task 7 review — D4 audit wording, stale STATUS line
+3ca02d83 docs: the host packages' publication, recorded (D4, D10, D11)
+ede72836 fix: Task 6 review — guide names 0.7.1, symbols rules, SC22 trailing slash
+4712baab ci,docs: the host probe and the guide on pub.dev (D6, D8, D9)
+2f886129 ci: the lock check proves the probe took the commit under test (D6)
+c9eed8a7 ci: dry-run and licence checks for the three published packages (D5)
+e2869e54 docs(jet_cad_floor_plan): the CHANGELOG's schema sentence
+5eec3012 feat(jet_cad_floor_plan): package 0.7.1 for pub.dev (D3)
+09153e8b feat(jet_cad_2d_flutter): package 0.7.1 for pub.dev (D2)
+4d74b5b0 build: name the published packages by hosted constraints (D1)
+690ed4c2 docs: the publishing plan; the spec approved
+aaeaf7e3 docs: publishing spec rev 2, the review's V-1 to V-14 folded in
+3874c2fa docs: spec for publishing the host packages on pub.dev (rev 1)
+ .github/workflows/ci.yml                           |   27 +-
+ CHANGELOG.md                                       |   33 +-
+ STATUS.md                                          |  172 ++-
+ apps/dev_harness_2d/pubspec.yaml                   |    6 +-
+ apps/floor_planner/pubspec.yaml                    |    9 +-
+ apps/restaurant_demo/pubspec.yaml                  |    9 +-
+ docs/host-guide.md                                 |   96 +-
+ .../2026-10-13-publish-host-packages-results.md    |  375 +++++++
+ .../plans/2026-10-13-publish-host-packages.md      | 1135 ++++++++++++++++++++
+ .../2026-10-13-publish-host-packages-design.md     |  473 ++++++++
+ packages/jet_cad_2d/README.md                      |    9 +-
+ packages/jet_cad_2d_flutter/.pubignore             |    7 +
+ packages/jet_cad_2d_flutter/CHANGELOG.md           |   14 +
+ packages/jet_cad_2d_flutter/LICENSE                |  201 ++++
+ packages/jet_cad_2d_flutter/README.md              |  120 +--
+ packages/jet_cad_2d_flutter/example/lib/main.dart  |   57 +
+ .../jet_cad_2d_flutter/lib/export_testing.dart     |    2 +
+ .../jet_cad_2d_flutter/lib/src/draft_canvas.dart   |    2 +-
+ .../lib/src/export/testing/pdf_content.dart        |    2 +-
+ .../lib/src/gpu/geometry_collector.dart            |    6 +-
+ .../jet_cad_2d_flutter/lib/src/grip_cache.dart     |    4 +-
+ .../jet_cad_2d_flutter/lib/src/tile_cache.dart     |   32 +-
+ packages/jet_cad_2d_flutter/pubspec.yaml           |   26 +-
+ packages/jet_cad_2d_flutter/test/README.md         |   80 ++
+ packages/jet_cad_2d_flutter/test/example_test.dart |   41 +
+ packages/jet_cad_2d_gpu/pubspec.yaml               |    6 +-
+ packages/jet_cad_floor_plan/.pubignore             |    6 +
+ packages/jet_cad_floor_plan/CHANGELOG.md           |   27 +
+ packages/jet_cad_floor_plan/LICENSE                |  201 ++++
+ packages/jet_cad_floor_plan/README.md              |  103 ++
+ packages/jet_cad_floor_plan/example/lib/main.dart  |   42 +
+ packages/jet_cad_floor_plan/lib/editor.dart        |    5 +-
+ .../lib/src/host/floor_plan_theme.dart             |    8 +-
+ .../lib/src/host/floor_plan_view.dart              |    4 +-
+ .../lib/src/parametric/dimension_geometry.dart     |   12 +-
+ .../lib/src/symbols/wall_attach.dart               |    6 +-
+ .../lib/src/text_entry_overlay.dart                |    2 +-
+ packages/jet_cad_floor_plan/pubspec.yaml           |   31 +-
+ packages/jet_cad_floor_plan/test/example_test.dart |   29 +
+ packages/jet_cad_restaurant_symbols/pubspec.yaml   |    6 +-
+ tool/ci/check_host_lock.dart                       |   26 +-
+ tool/ci/host_probe.sh                              |   18 +-
+ tool/ci/host_probe/.gitignore                      |    3 +
+ tool/ci/host_probe/lib/main.dart                   |   37 +-
+ tool/ci/host_probe/pubspec.yaml.in                 |   37 +-
+ tool/ci/lib/host_lock.dart                         |   45 +
+ tool/ci/package_root.dart                          |   24 +
+ tool/ci/test/dependency_lines_test.dart            |   72 ++
+ tool/ci/test/guide_test.dart                       |   22 +-
+ tool/ci/test/host_lock_test.dart                   |   60 ++
+ tool/ci/test/scripts_test.dart                     |   58 +-
+ 51 files changed, 3497 insertions(+), 331 deletions(-)
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index b8ba94fe..d00ac7e0 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -121,49 +121,60 @@ jobs:
+           cache: true
+       - name: Resolve the workspace
+         run: flutter pub get
+       - name: Tests
+         working-directory: tool/ci
+         run: dart test
+       - name: Analyze
+         working-directory: tool/ci
+         run: >-
+           dart analyze --fatal-infos lib test expect_failures.dart
+-          check_guide.dart check_host_lock.dart
++          check_guide.dart check_host_lock.dart package_root.dart
+       - name: Format
+         working-directory: tool/ci
+         run: >-
+           dart format --output=none --set-exit-if-changed
+-          lib test expect_failures.dart check_guide.dart check_host_lock.dart
++          lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
+           host_probe/lib
+       - name: The host guide's code is the probe's
+         run: dart run tool/ci/check_guide.dart
+ 
+   publishable:
+-    name: jet_cad_2d, publishable to pub.dev
++    name: ${{ matrix.package }}, publishable to pub.dev
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
++    strategy:
++      fail-fast: false
++      matrix:
++        package:
++          - packages/jet_cad_2d
++          - packages/jet_cad_2d_flutter
++          - packages/jet_cad_floor_plan
+     steps:
+       - uses: actions/checkout@v5
+       - uses: subosito/flutter-action@v2
+         with:
+           channel: stable
+           flutter-version: ${{ env.FLUTTER_VERSION }}
+           cache: true
+       - name: Resolve the workspace
+         run: flutter pub get
+-      # The engine is the one package published on pub.dev. A dry run
+-      # uploads nothing; it exits 65 on any warning (a version bump without
+-      # its CHANGELOG entry, a modified checked-in file), not only on an
+-      # error, so it gates both.
++      # Decision 2 of the publishing spec: each published package carries
++      # the root's Apache 2.0 licence, byte for byte.
++      - name: The licence is the root's
++        run: cmp LICENSE ${{ matrix.package }}/LICENSE
++      # A dry run uploads nothing; it exits 65 on any warning (a version
++      # bump without its CHANGELOG entry, a modified checked-in file), not
++      # only on an error. A dependent's dry run does not need its
++      # dependency on pub.dev (spec F-2).
+       - name: Publish dry run
+-        working-directory: packages/jet_cad_2d
++        working-directory: ${{ matrix.package }}
+         run: dart pub publish --dry-run
+ 
+   host-probe:
+     name: an external host, by git
+     runs-on: ubuntu-latest
+     timeout-minutes: 30
+     steps:
+       # The whole history and its tags: the released probes are read from
+       # their tags (host embedding API spec, invariant 1).
+       - uses: actions/checkout@v5
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index c26aaf23..6916c951 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,31 +1,26 @@
+ # Changelog
+ 
+-The packages a host depends on — `jet_cad_2d_flutter`,
+-`jet_cad_floor_plan` and `jet_cad_restaurant_symbols` — are released
+-together, under one version and one git tag (`vX.Y.Z`); the tag also
+-carries the engine, `jet_cad_2d`, at its own version (below). A host
+-depends on them by git (see [docs/host-guide.md](docs/host-guide.md)).
+-
+-From 0.7.1 the engine, `jet_cad_2d`, is also published on pub.dev and has
+-its own version and its own tags (`jet_cad_2d-vX.Y.Z`): it moves only when
+-its own code changes, and its history from 0.7.1 on is in
+-[packages/jet_cad_2d/CHANGELOG.md](packages/jet_cad_2d/CHANGELOG.md). A
+-release here names the engine version it carries. Up to 0.7.0 the engine
+-shared this file's versions, and its history is below.
+-
+-## Unreleased
+-
+-- The engine is published on pub.dev as `jet_cad_2d` 0.7.1: 0.7.0's code,
+-  with a LICENSE, a README and an example of its own, and `sdk: ^3.6.0`.
+-  Nothing a host compiles against changes; a host keeps taking the engine
+-  by git, through the planner, and must not also depend on it from pub.dev.
++The packages are published on pub.dev, each with its own version, its own
++CHANGELOG and its own git tags:
++
++- [`jet_cad_2d`](packages/jet_cad_2d/CHANGELOG.md), the engine
++  (`jet_cad_2d-vX.Y.Z`);
++- [`jet_cad_2d_flutter`](packages/jet_cad_2d_flutter/CHANGELOG.md), the
++  renderer (`jet_cad_2d_flutter-vX.Y.Z`);
++- [`jet_cad_floor_plan`](packages/jet_cad_floor_plan/CHANGELOG.md), the
++  planner a host depends on (`jet_cad_floor_plan-vX.Y.Z`).
++
++A host depends on the planner from pub.dev (see
++[docs/host-guide.md](docs/host-guide.md)). Up to 0.7.0 the packages were
++released together, by git, under one version and one tag (`vX.Y.Z`); that
++shared history follows, unchanged.
+ 
+ ## 0.7.0
+ 
+ Rubber-band selection: in the selection mode a drag draws a band that
+ selects tables. Plans are stored as in 0.6.0 (schema 10): a plan either
+ release saves opens in the other, and service layouts are unchanged.
+ Nothing a host compiles against is removed or changed; the one change a
+ host can notice without opting in is under the default
+ `floorDrag: FloorPlanFloorDrag.pan`, where a mouse or stylus drag on the
+ floor with Shift, Ctrl or Cmd held now draws a band instead of panning
+diff --git a/STATUS.md b/STATUS.md
+index 71ae934a..5f23a876 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -9,27 +9,31 @@ before this point — its records, reviews and resume points — is in
+ ## Where the project stands
+ 
+ The product is a **parametric floor planner** embedded in a restaurant
+ point-of-sale application. The roadmap's sub-projects **01–13** (the app,
+ interaction, page and rulers, drawing tools, the parametric layer, walls,
+ openings, symbols, rooms, dimensions, the app shell, export and print)
+ and **14** (the restaurant embedding) are merged; see
+ [roadmap/00-README.md](roadmap/00-README.md)'s Status table for each
+ one's spec, plan and results.
+ 
+-- **Release 0.1.0** ([CHANGELOG.md](CHANGELOG.md)): the four packages a
+-  POS depends on by git, at one commit SHA
+-  ([docs/host-guide.md](docs/host-guide.md)). CI on GitHub Actions
++- **Release 0.1.0** ([CHANGELOG.md](CHANGELOG.md), now an index of the
++  packages' own CHANGELOGs): up to 0.7.0 the four packages a POS depends
++  on were taken by git, at one commit SHA; from 0.7.1 the planner is taken
++  from pub.dev ([docs/host-guide.md](docs/host-guide.md), In flight
++  below). CI on GitHub Actions
+   (`.github/workflows/ci.yml`) runs every gate on pushes to `main` and
+   `claude/**` and on pull requests, compares the standing failures and
+-  skips exactly (`tool/ci/standing_*.txt`), and builds the host probe by
+-  git at the commit under test. In that probe it then analyses each
++  skips exactly (`tool/ci/standing_*.txt`), and builds the host probe at
++  the commit under test (the planner's hosted line, the four packages
++  overridden to the commit by `dependency_overrides`; the lock check
++  proves it). In that probe it then analyses each
+   released host's `main.dart`, read from its tag: `v0.3.0` (the host
+   embedding API spec's invariant 1), `v0.4.0` (since 2026-10-10, the
+   0.4.0 review's R-7), `v0.5.1` and `v0.6.0` (since release 0.7.0,
+   ruling 7 of the rubber-band ledger), by `tool/ci/old_host_probe.sh
+   <tag>`.
+ - **14d** (POS readiness: three languages, the service layout and
+   options, the release) and its independent review: results
+   [14d-2](docs/superpowers/notes/2026-10-06-plan-14d2-results.md),
+   [14d-1](docs/superpowers/notes/2026-10-06-plan-14d1-results.md),
+   [14d-3](docs/superpowers/notes/2026-10-06-plan-14d3-results.md),
+@@ -376,20 +380,42 @@ with 0.7.0 (below).
+   0.4.0, 0.5.1 and 0.6.0 probes, `check_guide`); an independent review
+   (*Approved with fixes*: the guide's §11 "Schema 10", R-1; what a band
+   reports and the keys it takes, R-2; smaller CHANGELOG, STATUS and guide
+   gaps, R-3 to R-5) is applied; its record is
+   `docs/superpowers/ledgers/2026-10-13-release-0.7.0/review.md`. The
+   guide names `0fa649e`. The human pushed `main` and the tag `v0.7.0` →
+   `0fa649e` (2026-10-13).
+ 
+ ## In flight
+ 
++- **Publishing `jet_cad_2d_flutter` and `jet_cad_floor_plan` on pub.dev**
++  (the human, 2026-10-13: *"bence tümünü sırayla yayınlayalım"*), on
++  `feat/publish-host-packages`, cut by hand from `main` at `d41e5f6`;
++  **not merged, not pushed**. Spec
++  [2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
++  (revision 2, approved), plan
++  [2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md),
++  record
++  [2026-10-13-publish-host-packages-results.md](docs/superpowers/notes/2026-10-13-publish-host-packages-results.md);
++  the SDD ledger is `.superpowers/sdd/2026-10-13-publish-host-packages/`
++  (archived at the merge). Seven tasks, each reviewed: every dependency on
++  a published package a hosted `^0.7.1` (the workspace resolves it to the
++  local copy); both packages at 0.7.1 with LICENSE, README, CHANGELOG,
++  `.pubignore`, an example and its test; `dart doc` 6 → 0 and 23 → 0;
++  CI's `publishable` job over the three packages; the host probe checking
++  the commit under test through overrides, its lock check proving it;
++  the host guide on pub.dev, with the restaurant symbols as files a host
++  copies. Dry runs: 0 warnings for all three. pana for the two dependents
++  is 40/160 today (R-4: pana resolves outside the workspace and their
++  dependencies are not on pub.dev yet). The engine step (0.7.1, below) is
++  still the human's.
++
+ - **Publishing `jet_cad_2d` on pub.dev** (the human, 2026-10-13; bounded
+   design in chat, approved: *"evet"*), on `feat/publish-jet-cad-2d`, cut
+   by hand from `main` at `133cf03`. **Merged into `main` at `1dc167d`** on
+   the human's *"evet önce motoru publish edeceğiz"*; **awaits the human's
+   push and publish** (Resume here). The engine leaves the shared release line (the human:
+   *"Bağımsız, 0.7.1"*): 0.7.1 is 0.7.0's code with a LICENSE, a README, an
+   example and its test, `.pubignore`, `sdk: ^3.6.0`, the real repository
+   URL, and doc references that resolve. CI's new job `publishable` runs
+   `dart pub publish --dry-run` (exit 65 on any warning). The dry run: 0
+   warnings, 228 KB. pana: 145/160 before, 150/160 after; the missing 10
+@@ -461,37 +487,60 @@ with 0.7.0 (below).
+ 
+ ## Standing failures and skips
+ 
+ On Linux, compared exactly by CI: the engine's two `generate_document_test`
+ fingerprints and the render package's seven text-ladder goldens (macOS
+ values), and the render package's paint micro-benchmark rig (skipped,
+ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ 
+ ## Resume here
+ 
+-**Next: the human publishes `jet_cad_2d` 0.7.1**, merged into `main` at
+-`1dc167d` (In flight). In this order: push `main` and watch CI (its new
+-job `publishable` included); from `packages/jet_cad_2d`, `dart pub publish
+---dry-run`, then `dart pub publish`; then the tag `jet_cad_2d-v0.7.1` →
+-`1dc167d`. pub.dev scores the package itself after the upload: 160/160 is
+-expected once GitHub's `main` carries the new pubspec (150/160 measured
+-before the push). Claude never runs `dart pub publish` without
+-`--dry-run`. In parallel: the brainstorm for publishing the host packages
+-(Rulings: "The host packages go to pub.dev too"), its first question the
+-version policy; the spec goes on a worktree cut from `main`.
++**Next: the human publishes the three packages, in order** (Claude never
++runs `dart pub publish` without `--dry-run`; merge, push, tag and publish
++are the human's alone). `jet_cad_2d` 0.7.1 is merged into `main` at
++`1dc167d`; `feat/publish-host-packages` (In flight) awaits its review
++result; its own CI run (Linux) on the pushed branch must be green, and
++the merge waits for the human's word. The checklist (spec D10), per
++package, in this order:
++
++1. **`jet_cad_2d` 0.7.1:** push `main` and watch CI (job `publishable`
++   included); from `packages/jet_cad_2d`, `dart pub publish --dry-run`,
++   `dart pub publish`; the tag `jet_cad_2d-v0.7.1` → `1dc167d`; the
++   version visible on pub.dev. pub.dev scores it after the upload:
++   160/160 is expected once GitHub's `main` carries the pubspec (150/160
++   measured before the push).
++2. **`jet_cad_2d_flutter` 0.7.1:** `main` carries the merge and CI is
++   green; its lower bound on the engine is `^0.7.1` (D1: raise it to the
++   engine's current version if the render package uses newer API) and
++   pana's *"Compatible with dependency constraint lower bounds"* section
++   is green, run on the archive now that the engine is on pub.dev (it was
++   40/160 before, R-4); `dart pub publish --dry-run`; `dart pub publish`;
++   the tag `jet_cad_2d_flutter-v0.7.1` on the merge commit; the version
++   visible on pub.dev.
++3. **`jet_cad_floor_plan` 0.7.1:** the same, with its lower bounds on the
++   engine and the render package and pana's lower-bounds section green;
++   the tag `jet_cad_floor_plan-v0.7.1` on the merge commit; the version
++   visible on pub.dev.
++4. **After the planner (D7):** in a scratch copy of
++   `tool/ci/host_probe/pubspec.yaml.in` remove the `dependency_overrides`
++   block, resolve it from pub.dev alone, `flutter analyze`, and record
++   the result in the results note.
++
++Then the restaurant software moves (D11, in the planner's CHANGELOG and
++the results note): replace its two git dependencies with
++`jet_cad_floor_plan: ^0.7.1` and copy the symbols as the guide says.
+ 
+ Before this: Release 0.7.0 is **merged into `main` at
+ `0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
+ `release/0.7.0` (cut from `main` at `7d3ce8d`); it releases rubber-band
+ selection, merged at `232d905` (plan
+ [2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md)).
+-The guide names `0fa649e` in §1.
+ Release 0.6.0 is **merged into `main` at
+ `3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
+ capability and the Selection panel's Colour row) merged at `ce0a4f9`;
+ Slice 2 (tables) came with the release merge (plan
+ [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
+ spec
+ [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md));
+ its ledger is archived in
+ `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-2/`. Release 0.6.0
+ was cut from `feat/plan-colors-slice-2` at `752eace` while the human slept
+@@ -554,73 +603,75 @@ docs/superpowers/
+   specs/   plans/   notes/     # binding specs, plans, results of record
+   ledgers/                     # per-task records of merged plans
+ .superpowers/sdd/              # git-ignored ledger of a plan in flight
+ ```
+ 
+ ---
+ 
+ ## Rulings that still bind future work
+ 
+ **The engine's own version (the human, 2026-10-13: *"Bağımsız,
+-0.7.1"*).** `jet_cad_2d` is published on pub.dev and versioned on its own:
+-it moves only when its own code or pubspec changes, gets an entry in
+-`packages/jet_cad_2d/CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z` (pushed
+-by the human), and is published by the human. The host packages
+-(`jet_cad_2d_flutter`, `jet_cad_floor_plan`, `jet_cad_restaurant_symbols`)
+-and `jet_cad_2d_gpu` keep one version and one `vX.Y.Z` tag; a host
+-release's root CHANGELOG entry names the engine version it carries. Until
+-the publication spec below lands, every other package of the live line
+-stays `publish_to: none` and keeps its `path:` dependency on the engine.
+-(The dormant `packages/jet_cad` has no
+-`publish_to` line at all: found by this branch's review, left for the
+-human.) Under 0.x, a minor bump of the engine may break its API. The
+-barrel is published whole; the narrowing candidates are in
+-[2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md),
++0.7.1"*; extended to every published package by Decision 4 of the host
++packages' spec, *"Her biri bağımsız"*).** Every published package
++(`jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`) is versioned on
++its own: it moves only when its own code or pubspec changes, gets an
++entry in its own `CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z`,
++`jet_cad_2d_flutter-vX.Y.Z` or `jet_cad_floor_plan-vX.Y.Z` (pushed by the
++human), and is published by the human, bottom-up (D10). The shared
++`vX.Y.Z` line ended at `v0.7.0`; the root `CHANGELOG.md` is an index of
++the three, then the shared history to 0.7.0 unchanged.
++`jet_cad_2d_gpu` and `jet_cad_restaurant_symbols` are unpublished and
++untagged; they keep their version fields. **D1's lower-bound rule:** the
++workspace enforces a caret's upper bound and never its lower bound, so
++when a dependent is released its lower bound on each sibling is raised to
++that sibling's current version, and pana's lower-bounds section is run on
++the dependent's archive before `dart pub publish`; a release that does
++not change a dependent does not touch its constraints. (The dormant
++`packages/jet_cad` has no `publish_to` line at all: found by the engine's
++review, left for the human.) Under 0.x, a minor bump of the engine may
++break its API. The barrels are published whole; the narrowing candidates
++are in
++[2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md)
++and
++[2026-10-13-publish-host-packages-results.md](docs/superpowers/notes/2026-10-13-publish-host-packages-results.md),
+ and narrowing is a spec of its own.
+ 
+ **The host packages go to pub.dev too, in order (the human, 2026-10-13:
+ *"bence tümünü sırayla yayınlayalım"*; the restaurant software is to
+-install them from pub.dev instead of by git).** Architectural: a spec of
+-its own, after the engine's release, brainstormed with the human. Binding
+-inputs to it:
+-
+-- **Order:** `jet_cad_2d` (this branch) → `jet_cad_2d_flutter` →
+-  `jet_cad_floor_plan`. Pub refuses a `path:` dependency in a published
+-  package, so each waits for the one it depends on to be on pub.dev, and
+-  every dependent then names the engine (and the render package) by a
+-  hosted constraint, which a workspace still resolves to the local copy.
+-  `jet_cad_2d_gpu` stays unpublished.
+-- **Licence:** Apache 2.0 for every published package (the human:
+-  *"tümü için lisans apache 2.0 olsun"*), each with its own byte-identical
+-  copy of the root LICENSE. Checked: the planner's bundled Roboto is
+-  Apache 2.0 under its own `assets/fonts/Roboto_LICENSE.txt`; the two
+-  `.jetlib` files and the render package's shaders are the project's own.
++install them from pub.dev instead of by git).** Specified in
++[2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
++and planned in
++[2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md);
++the spec's Decisions bind (Apache 2.0 for all, hosted constraints in the
++repository, pub.dev only for hosts). Order: `jet_cad_2d` → `jet_cad_2d_flutter`
++→ `jet_cad_floor_plan`; the second and third steps are **prepared on
++`feat/publish-host-packages`** (In flight), published by the human
++(Resume here). Still binding:
++
+ - **The restaurant symbols: the fourth step, deferred** (a SWOT in chat;
+   the human: *"tamam yaz"*). `jet_cad_restaurant_symbols` is published only
+   after the planner has been on pub.dev for a few releases and the schema
+   and versioning policy are settled, because a pub.dev release cannot be
+   taken back (a retraction only within 7 days) and the library's source
+   name `restaurant` and its entry keys become a contract once published.
+-  Until then the restaurant software carries `restaurant.jetlib` (the
+-  engine's JSON document format, schema 10, generated by the package's
+-  `tool/generate_restaurant_library.dart`) and the German and Turkish
+-  names in its own assets, and builds its own `SymbolLibrarySource(name:
+-  'restaurant', …)` from the planner's public API. Saved plans do not
+-  depend on the library: placing a symbol copies its definition into the
+-  plan (`symbol_placer.dart`, `definitionForEntry`).
+-- **Open for the brainstorm:** the version policy of the render package
+-  and the planner (one shared version, or each its own); whether hosts
+-  may still depend by git, and the host guide §1 that follows; CI's host
+-  probe and the released probes (`v0.3.0` … `v0.6.0`), which resolve by
+-  git today; how a dependent's dry run sees an engine version not yet on
+-  pub.dev (measured, not assumed); each package's barrel, assets, testing
+-  libraries (`export_testing.dart`), `.pubignore`, README and example.
++  Until then a host copies `restaurant.jetlib` and `names.dart` from the
++  repository tree at the planner's tag (the host guide's "The restaurant
++  symbols") and builds its own `SymbolLibrarySource(name: 'restaurant',
++  …)` from the planner's public API; it never loads the copy together with
++  the package's `restaurantSymbolSource` (the same keys in two sources
++  make the loader fail). Saved plans do not depend on the library:
++  placing a symbol copies its definition into the plan
++  (`symbol_placer.dart`, `definitionForEntry`).
++- **Licence:** Apache 2.0 for every published package, each with its own
++  byte-identical copy of the root LICENSE (CI's `publishable` job runs
++  `cmp`). The planner's bundled Roboto is Apache 2.0 under its own
++  `assets/fonts/Roboto_LICENSE.txt`.
+ 
+ Plan 3c's ledger carries 56 numbered rulings, archived in full at
+ [docs/superpowers/ledgers/](docs/superpowers/ledgers/). These are the ones that
+ constrain work not yet done:
+ 
+ **Ruling 4 — the cache limit is not a tuning knob.** `kParagraphCacheLimit` is
+ owned by Plan 3c Task 9 and may be raised **once**, and only with the
+ measured distinct-visible-key count recorded beside it. Lowering
+ `attributedInstanceFraction` is equally acceptable. **Relaxing the
+ zero-new-layouts gate row is not.** Otherwise the gate passes because the corpus
+@@ -773,20 +824,23 @@ degenerate assertion collapsing it to one label would silently void the gate.
+ ## Commands
+ 
+ ```sh
+ # engine (pure Dart)
+ cd packages/jet_cad_2d
+ dart test
+ dart test test/invariants/query_allocation_test.dart
+ dart run benchmark/query_throughput.dart
+ dart analyze && dart format --output=none --set-exit-if-changed .
+ dart pub publish --dry-run              # 0 warnings; never without --dry-run
++# the same dry run, 0 warnings, in packages/jet_cad_2d_flutter and
++# packages/jet_cad_floor_plan (from the repository root:
++# dart pub -C packages/<name> publish --dry-run)
+ 
+ # render layer (Flutter)
+ cd packages/jet_cad_2d_flutter
+ flutter test
+ flutter test --tags golden
+ flutter test --exclude-tags golden          # any platform but the one they were made on
+ flutter test --tags rig --run-skipped   # R1/R3, and R4's text counters
+ flutter test --tags rig --run-skipped test/rig/paint_microbench_test.dart \
+   --plain-name "text paint at 50000"    # the gate's feasibility number
+ flutter analyze && dart format --output=none --set-exit-if-changed .
+diff --git a/apps/dev_harness_2d/pubspec.yaml b/apps/dev_harness_2d/pubspec.yaml
+index e186a51d..e1a0806f 100644
+--- a/apps/dev_harness_2d/pubspec.yaml
++++ b/apps/dev_harness_2d/pubspec.yaml
+@@ -7,24 +7,22 @@ publish_to: none
+ version: 0.0.1
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   flutter: ">=3.24.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d:
+-    path: ../../packages/jet_cad_2d
+-  jet_cad_2d_flutter:
+-    path: ../../packages/jet_cad_2d_flutter
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
+   # The resident GPU backend, installed first thing in `main`
+   # (`installResidentGpu()`): `BACKEND=residentGpu` and the GPU arm need it.
+   # The harness is the only app that depends on it.
+   jet_cad_2d_gpu:
+     path: ../../packages/jet_cad_2d_gpu
+   vector_math: ^2.2.0
+   vm_service: ^15.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+diff --git a/apps/floor_planner/pubspec.yaml b/apps/floor_planner/pubspec.yaml
+index 02fec6d3..c2fb9c6f 100644
+--- a/apps/floor_planner/pubspec.yaml
++++ b/apps/floor_planner/pubspec.yaml
+@@ -14,26 +14,23 @@ environment:
+   # ^3.5.0 because it sets the language version: from 3.7 on the formatter
+   # switches to the tall style and the analyzer adds lints, which would
+   # rewrite nearly every file in the app.
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   file_selector: ^1.1.0
+   flutter:
+     sdk: flutter
+-  jet_cad_2d:
+-    path: ../../packages/jet_cad_2d
+-  jet_cad_2d_flutter:
+-    path: ../../packages/jet_cad_2d_flutter
+-  jet_cad_floor_plan:
+-    path: ../../packages/jet_cad_floor_plan
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_floor_plan: ^0.7.1
+   jet_cad_restaurant_symbols:
+     path: ../../packages/jet_cad_restaurant_symbols
+   # The app names PdfPageFormat (the print flow's page size, spec 13 D9);
+   # the same bound as jet_cad_2d_flutter's.
+   pdf: ^3.13.1
+   vector_math: ^2.2.0
+   web: ^1.1.0
+ 
+ dev_dependencies:
+   flutter_test:
+diff --git a/apps/restaurant_demo/pubspec.yaml b/apps/restaurant_demo/pubspec.yaml
+index ce1d2b39..72dafc41 100644
+--- a/apps/restaurant_demo/pubspec.yaml
++++ b/apps/restaurant_demo/pubspec.yaml
+@@ -10,34 +10,31 @@ resolution: workspace
+ 
+ environment:
+   # The language version stays at the workspace's (see apps/floor_planner's
+   # pubspec): from 3.7 on the formatter switches to the tall style.
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_floor_plan:
+-    path: ../../packages/jet_cad_floor_plan
++  jet_cad_floor_plan: ^0.7.1
+   jet_cad_restaurant_symbols:
+     path: ../../packages/jet_cad_restaurant_symbols
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
+   # The tests build seeded plans with the editor's own placement.
+-  jet_cad_2d:
+-    path: ../../packages/jet_cad_2d
+-  jet_cad_2d_flutter:
+-    path: ../../packages/jet_cad_2d_flutter
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
+   vector_math: ^2.2.0
+ 
+ flutter:
+   uses-material-design: true
+   # The sample plans the demo opens with (test/sample_plans_test.dart builds
+   # and checks them).
+   assets:
+     - assets/plans/salon.json
+     - assets/plans/teras.json
+   # The bare family documents name, from the planner package's bytes (spec
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 1ad1ee74..9e51bdd1 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -1,72 +1,96 @@
+ # Embedding the floor planner in a POS — host guide
+ 
+ This guide is for a Flutter point-of-sale application (a **host**) that
+ embeds the floor planner: staff design the restaurant's floors in the
+ **design** mode, and during service they see the tables, colour them by
+-status and pick them in the **selection** mode. It covers release
+-**0.7.0** ([CHANGELOG](../CHANGELOG.md)).
++status and pick them in the **selection** mode. It covers `jet_cad_floor_plan`
++**0.7.1** ([CHANGELOG](../packages/jet_cad_floor_plan/CHANGELOG.md)).
+ 
+ Every Dart snippet below is taken from
+ [`tool/ci/host_probe/lib/main.dart`](../tool/ci/host_probe/lib/main.dart),
+ a small host that CI builds from outside the repository on every push.
+ `tool/ci/check_guide.dart` fails CI when a snippet here is no longer in
+ that file, so the code in this guide compiles against the release.
+ 
+ ## 1. The dependency
+ 
+-The planner's packages are not on pub.dev. Depend on them by git, **both
+-pinned to the same commit SHA** — the SHA the release tag `v0.7.0` points at,
+-`0fa649e2c6f09f34f2b7564071837cc1b15ffd11` (the merge of release 0.7.0 into
+-`main`):
++Add the planner from pub.dev, with `dart pub add jet_cad_floor_plan` or in
++your pubspec:
+ 
+ ```yaml
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_floor_plan:
+-    git:
+-      url: https://github.com/a-urel/jet-cad.git
+-      path: packages/jet_cad_floor_plan
+-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
+-  jet_cad_restaurant_symbols:
+-    git:
+-      url: https://github.com/a-urel/jet-cad.git
+-      path: packages/jet_cad_restaurant_symbols
+-      ref: 0fa649e2c6f09f34f2b7564071837cc1b15ffd11
++  jet_cad_floor_plan: ^0.7.1
+ ```
+ 
+-Why a SHA and not the tag: the restaurant package depends on the planner
+-by a path inside the repository, which pub resolves at the commit's SHA.
+-If your `ref` is a tag or a branch, pub sees two different refs for the
+-planner and refuses. The other form that resolves is the restaurant
+-package **alone** at the tag (`ref: v0.7.0`), the planner arriving
+-through it; you then import the planner without listing it, which
+-`depend_on_referenced_packages` will flag.
+-
+-The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come
+-with the planner. Import only the two barrels:
+-`package:jet_cad_floor_plan/jet_cad_floor_plan.dart` and
+-`package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart`.
+-Anything under `src/` is not API.
+-
+-The engine is also on pub.dev, as `jet_cad_2d` (since 0.7.1, under its own
+-versions). Do not add it from there next to the dependencies above: the
+-planner already brings it by git, and pub takes a package from one source
+-only, so it refuses the pair.
++The engine (`jet_cad_2d`) and the renderer (`jet_cad_2d_flutter`) come with
++it, from pub.dev. Import only the planner's barrel,
++`package:jet_cad_floor_plan/jet_cad_floor_plan.dart`. Anything under `src/`
++is not API.
+ 
+ The packages need Flutter 3.44 or later (the Dart that comes with it);
+-0.7.0 was built and tested with Flutter 3.47.6. They bring no build hook
++0.7.1 is built and tested with Flutter 3.47.6. They bring no build hook
+ and no GPU renderer: nothing runs at build time beyond Flutter's own.
+ (0.1.0 needed Flutter 3.47: it still resolved `flutter_scene`, whose build
+ hook compiles shaders.)
+ 
++### The restaurant symbols
++
++The restaurant library (tables, chairs, bar and kitchen symbols) is not a
++dependency of the planner: you copy its two files into your app, in three
++steps.
++
++1. Take the files from the tag `jet_cad_floor_plan-vX.Y.Z` of the planner
++   release you depend on: `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib`
++   and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`. Put the
++   library at `assets/restaurant.jetlib` and the names beside your code as
++   `restaurant_names.dart`, with its import changed to the planner's
++   barrel, `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
++2. Declare the asset in your pubspec:
++
++```yaml
++  assets:
++    - assets/restaurant.jetlib
++```
++
++3. Read it from your own assets and make it a source:
++
++```dart
++/// The restaurant library, from this app's own assets (host guide, "The
++/// restaurant symbols").
++Future<Uint8List> readRestaurantLibrary() async {
++  final data = await rootBundle.load('assets/restaurant.jetlib');
++  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
++}
++
++const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
++    name: 'restaurant',
++    read: readRestaurantLibrary,
++    names: restaurantSymbolNames);
++```
++
++Give the loader both sources (section 4):
++`SymbolLibraryLoader(sources: const [furnitureSymbolSource, restaurantSource])`.
++
++Two rules. Never load the copy with the package's own
++`restaurantSymbolSource`: the loader fails when one key and version is in
++two sources, whatever their names, and the package's source and your copy
++carry the same keys. And a saved plan does not depend on the library:
++placing a symbol copies its definition into the plan, so you can change
++which library you ship without migrating saved plans.
++
++A change to the symbols reaches hosts with a planner release, and that
++release's tag carries the files: copy them again from the tag of the
++release you move to.
++
+ ## 2. Fonts
+ 
+ Plans name the family `Roboto`, and the planner ships its bytes. Declare
+ the family in your pubspec, so the web never fetches Google's Roboto
+ instead:
+ 
+ ```yaml
+ flutter:
+   uses-material-design: true
+   fonts:
+@@ -141,21 +165,21 @@ delegates in your `MaterialApp`:
+ 
+ ## 4. The controller and the view
+ 
+ A `FloorPlanController` holds one floor's plan; a `FloorPlanView` shows
+ it. Give the controller the restaurant library beside the planner's
+ furniture. With several floors, share one symbol loader and one
+ thumbnail cache between their controllers:
+ 
+ ```dart
+   final symbols = SymbolLibraryLoader(
+-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
++    sources: const [furnitureSymbolSource, restaurantSource],
+   );
+   final thumbnails = SymbolThumbnails(maxEntries: 128);
+ 
+   late final FloorPlanController controller = FloorPlanController(
+     symbols: symbols,
+     thumbnails: thumbnails,
+   );
+ ```
+ 
+ A controller you give a loader or a cache never disposes them; dispose
+diff --git a/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md b/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md
+new file mode 100644
+index 00000000..997bb99a
+--- /dev/null
++++ b/docs/superpowers/notes/2026-10-13-publish-host-packages-results.md
+@@ -0,0 +1,375 @@
++# Publishing the host packages on pub.dev — results
++
++**Date:** 2026-10-13. **Branch:** `feat/publish-host-packages`, cut by hand from
++`main` at `d41e5f6` (the engine's publication merged at `1dc167d`; tag
++`v0.7.0` → `0fa649e`). Spec:
++[2026-10-13-publish-host-packages-design.md](../specs/2026-10-13-publish-host-packages-design.md)
++(revision 2). Plan:
++[2026-10-13-publish-host-packages.md](../plans/2026-10-13-publish-host-packages.md),
++executed task by task with an implementer and an independent reviewer per
++task (the SDD ledger is archived on the branch as its last commit). This note is the record.
++The shape follows
++[2026-10-13-publish-jet-cad-2d.md](2026-10-13-publish-jet-cad-2d.md).
++
++Nothing here ran `dart pub publish` without `--dry-run`, pushed, merged or
++tagged: those are the human's (Owed).
++
++## The request and the rulings
++
++**The human's request** (2026-10-13): *"bence tümünü sırayla
++yayınlayalım. restoran sembolleri de yayınlandıktan sonra restoran
++yazılımı içinden pub.dev üzerinden kurarak kullanabilirim."* The
++restaurant software is to install the planner from pub.dev instead of by
++git.
++
++**The human's decisions** (the spec's Decisions, quoted):
++
++1. **Publish in order:** `jet_cad_2d` → `jet_cad_2d_flutter` →
++   `jet_cad_floor_plan` (*"tümünü sırayla yayınlayalım"*). `jet_cad_2d_gpu`
++   is not published.
++2. **Apache 2.0 for every published package** (*"tümü için lisans apache
++   2.0 olsun"*).
++3. **The restaurant symbols: a fourth step, deferred** (a SWOT in chat;
++   *"tamam yaz"*). A pub.dev release cannot be taken back, and the
++   library's source name and entry keys become a contract once published.
++4. **Each package its own version** (*"Her biri bağımsız"*): its own
++   semver, CHANGELOG and tag; published only when it changes.
++5. **pub.dev only for hosts** (*"Yalnız pub.dev"*): the host guide
++   describes pub.dev alone; CI checks the commit under test through
++   `dependency_overrides`.
++6. **Approach A** (*"evet a"*): every dependency on a published package
++   is a hosted constraint, in the repository as in the archive; no
++   `path:` to a published package, no rewriting at publish time, no
++   committed `pubspec_overrides.yaml`.
++7. Sections 1 (the packages), 2 (CI and the probes) and 3 (the host guide
++   and the release flow) approved as presented (*"onaylıyorum"*, three
++   times); the spec, revision 2, approved (*"onaylıyorum"*).
++
++**The controller's rulings** (the SDD ledger, quoted):
++
++- **R-1.** On macOS the render package's `expect_failures.dart` reports the
++  text-lod-ladder rungs 1–2 passing and the five text-ladder goldens
++  failing; a task is green there when exactly those differ — STATUS records
++  the macOS standing set as differing (not ruled), and `main` at `133cf03`
++  shows the same five. Cost if wrong: a real golden regression hidden
++  behind the macOS difference; CI (Linux) compares exactly and would catch
++  it.
++- **R-2.** At the end the workspace's ledger is archived to
++  `docs/superpowers/ledgers/2026-10-13-publish-host-packages/` as the
++  branch's last commit, not deleted: CLAUDE.md and the repo's merged plans
++  archive their ledger before the merge.
++- **R-3.** The no-Codex rule binds every reviewer dispatch (the human,
++  2026-10-10).
++- **R-4.** pana for a dependent cannot be measured before its dependency is
++  on pub.dev (pana resolves outside the workspace; `jet_cad_2d` 0.7.1
++  answers 404): this note records 40/160 with that reason, and the human's
++  checklist runs pana after each dependency is published (already D1's
++  lower-bound step). Cost if wrong: a pana defect found only at
++  publication time; mitigated by the dry run, `dart doc` 0 warnings and
++  the gates on the same files.
++- **R-5.** `packages/jet_cad_2d/README.md`'s "the Flutter packages … are
++  not published on pub.dev" sentence is rewritten in Task 7 (no engine
++  version bump: the README reaches pub.dev with the engine's next
++  release). Cost if wrong: pub.dev's engine page keeps the stale sentence
++  until then.
++- **R-6.** `editor.dart`'s `hide readBundledLibrary` stands though D4
++  publishes barrels as they stand: the package still exports the symbol
++  from `symbol_sources.dart` (its one home), `editor.dart` is internal by
++  its own header, the hide removes `dart doc`'s ambiguous-export warning,
++  and nothing imports it from `editor.dart` (grep). Cost if wrong: a
++  caller importing `editor.dart` for `readBundledLibrary` must import
++  `symbol_sources.dart` instead.
++- **R-7.** The planner's CHANGELOG and README cite the host guide's "The
++  restaurant symbols" as written; Task 6 writes that subsection under
++  exactly that heading. Cost if wrong: a dangling reference until Task 6
++  landed (before any merge).
++- **R-8.** Task 6's `package_root` test is SC22 (the next number after
++  SC21), and Task 6 keeps SC21 untouched: the plan's SC17 name predates
++  SC16–SC21.
++- **R-9.** The host guide's intro names the release a host depends on —
++  "covers `jet_cad_floor_plan` 0.7.1", linking the planner's CHANGELOG; the
++  "Since 0.7.0" feature markers stay (0.7.1 is packaging only).
++
++## What each task did
++
++| Task | Commit(s) | What |
++|---|---|---|
++| 1 (D1) | `4d74b5b` | 15 path dependencies on `jet_cad_2d`, `jet_cad_2d_flutter` and `jet_cad_floor_plan` in 7 pubspecs (render 1, GPU 2, planner 2, harness 2, symbols 2, floor_planner 3, restaurant_demo 3) became `^0.7.1`; the render package and the planner at `version: 0.7.1`. New `tool/ci/test/dependency_lines_test.dart` (DL1 no `path:`/git entry for a published package, DL2 exactly 15 lines at `^0.7.1`, DL3 path entries of unpublished packages). `flutter pub get`: "Got dependencies!", the package config resolves the siblings to `../packages/<name>` (F-1). |
++| 2 (D2) | `09153e8` | `jet_cad_2d_flutter` 0.7.1 packaged: `publish_to` removed, `sdk: ^3.6.0`, repository, issue tracker, topics, a description; LICENSE (byte-identical to the root's), `.pubignore` (`/test/`, `/build/`, `/shaders/`), README for pub.dev (the old developer README moved with `git mv` to `test/README.md`), CHANGELOG, `example/lib/main.dart` and `test/example_test.dart`, `export_testing.dart`'s library comment; 6 `dart doc` warnings fixed. |
++| 3 (D3, D11) | `5eec301`, `e2869e5` | `jet_cad_floor_plan` 0.7.1 packaged the same way (`.pubignore` `/test/`, `/build/`, `/tool/`; the three assets stay in), a README with a section on a library of one's own, the CHANGELOG with the restaurant software's migration (D11), `editor.dart`'s library comment, 23 `dart doc` warnings fixed (R-6). The fix round (`e2869e5`) repaired one garbled CHANGELOG sentence. |
++| 4 (D5) | `c9eed8a` | CI's `publishable` job became a matrix over the three packages: `cmp LICENSE`, then `dart pub publish --dry-run` (exit 65 on any warning). |
++| 5 (D6) | `2f88612` | `check_host_lock.dart <lock> --ref <sha>`: each of the four packages must be in the lock with `source: git` and a `resolved-ref` equal to the ref; tests HL-C1…C3b and SC21. |
++| 6 (D6, D8, D9) | `4712baa`, `ede7283` | The probe on pub.dev: `pubspec.yaml.in` with the planner's hosted line and four git overrides; `host_probe.sh` passes `--ref` and copies `restaurant.jetlib` and `names.dart` from the overridden symbols package (`tool/ci/lib/package_root.dart`, SC22); the probe's `main.dart` builds its own `SymbolLibrarySource`; the host guide §1 rewritten for pub.dev with the new subsection "The restaurant symbols"; `guide_test.dart` GD1/GD3/GD4. The fix round (`ede7283`) applied R-9 and the two review minors (the guide's rules paragraph; SC22's trailing slash). |
++| 7 | this commit | The root CHANGELOG as an index, STATUS, this note, and the engine README's stale sentence (R-5). |
++
++## The dry runs
++
++`dart pub publish --dry-run`, on the committed state at each task's
++commit, and the three runs of Task 7 (below; the engine's is the README
++rewrite's check: still 0 warnings). Sizes and results are the
++reports' own.
++
++| Package | Where | Exit | Warnings | Archive |
++|---|---|---|---|---|
++| `jet_cad_2d_flutter` | Task 2, `09153e8` | 0 | 0 | 226 KB |
++| `jet_cad_floor_plan` | Task 3, `e2869e5` | 0 | 0 | 462 KB |
++| `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan` | Task 4, `c9eed8a` | 0, 0, 0 | 0, 0, 0 | not recorded |
++| `jet_cad_2d` (Task 7, after the README rewrite) | the Task 7 commit | 0 | 0 | 229 KB (228 KB at `8f8ed32`) |
++| `jet_cad_2d_flutter` (Task 7) | the Task 7 commit | 0 | 0 | 226 KB |
++| `jet_cad_floor_plan` (Task 7) | the Task 7 commit | 0 | 0 | 462 KB |
++
++Before packaging, at `d41e5f6`: the render package's dry run had one error
++(no LICENSE) and one more issue (no CHANGELOG), the archive 1005 KB with
++`test/` inside; the planner's exit 65 with three issues (repository,
++README, CHANGELOG).
++
++**Review Focus 1** (Task 3, on the committed state): `grep -E
++'furniture.jetlib|Roboto-Regular.ttf|Roboto_LICENSE.txt'` on the planner's
++dry-run output printed three lines (`Roboto_LICENSE.txt`,
++`furniture.jetlib`, `Roboto-Regular.ttf`); the grep for a top-level
++`test`, `tool` or `build` printed nothing. In the render package's archive
++no `test/`, `build/` or `shaders/` is listed (Task 2); `lib/src/export/testing/`
++is `export_testing.dart`'s source, kept on purpose.
++
++The `cmp` of each LICENSE against the root's is silent for all three
++packages (Task 4). **M-CI1** (below) shows the licence check and the dry
++run catch a modified licence.
++
++## `dart doc`
++
++`dart doc --dry-run`: the render package 6 → 0 warnings (`[this]`,
++`[_bake]`, `[anchor]`, `[centre]`, `[stem]` and `[_attach]` references
++made plain or code-quoted); the planner 23 → 0 (unresolved references
++code-quoted, `[0, 1]` reworded, and one ambiguous re-export of
++`readBundledLibrary` removed by `editor.dart`'s `hide`, R-6). The engine's went
++11 → 0 in its own record (`6f683f2`).
++
++## pana (0.23.19), on each archive's file set
++
++Run on a `git archive HEAD` copy with `test/`, `build/` (and `shaders/` or
++`tool/`) removed, as `.pubignore` removes them.
++
++| Section | `jet_cad_2d_flutter` (Task 2) | `jet_cad_floor_plan` (Task 3) |
++|---|---|---|
++| Dart file conventions | 20 / 30 | 20 / 30 |
++| — valid pubspec | 0 / 10 | 0 / 10 |
++| — README | 5 | 5 |
++| — CHANGELOG | 5 | 5 |
++| — OSI licence | 10 (Apache-2.0) | 10 (Apache-2.0) |
++| Documentation | 10 / 20 | 10 / 20 |
++| — dartdoc ≥ 20 % | 0 | 0 (could not run) |
++| — example | 10 | 10 |
++| Platform support | 0 / 20 | 0 / 20 |
++| Static analysis | 0 / 50 | 0 / 50 |
++| Up-to-date dependencies | 10 / 40 | 10 / 40 |
++| **Total** | **40 / 160** | **40 / 160** |
++
++**This is not a meaningful score (R-4).** pana resolves outside the
++workspace, and the dependencies are not on pub.dev: `jet_cad_2d` 0.7.1
++answers 404 (*"Because jet_cad_2d_flutter depends on jet_cad_2d any which
++doesn't exist … version solving failed"*), the planner's copy fails the
++same way on `jet_cad_2d_flutter`. Dartdoc, platform detection, analysis
++and two of the dependency checks fail on that alone. A scratch copy with a
++`dependency_overrides` path was tried for the render package: pana strips
++overrides, same result.
++
++**The repository check's note.** The pubspec's 0 / 10 is the branch not
++being on GitHub's `main`: for the render package, pana found `main`'s copy
++with `publish_to: none` and the old repository URL; for the planner's copy
++(not a git checkout) it reported *"has no repository or homepage URL"*.
++Both are expected to clear once the branch is on `main` on GitHub.
++
++**Owed (the checklist):** pana re-run on each archive after its
++dependency is published, which is also D1's lower-bound check.
++
++## Named mutants
++
++Each fired from a copy and restored from it (`cmp` checked).
++
++| Mutant | Change | Result |
++|---|---|---|
++| M-DL1 | `restaurant_demo`'s `jet_cad_2d` back to `path:` | DL1 red naming `apps/restaurant_demo/pubspec.yaml` (`Actual: ['jet_cad_2d: path: ../../packages/jet_cad_2d']`); DL2 also red (expected 15, actual 14) |
++| M-RX1 | the render example's circle command removed | red: `Expected: <2> Actual: <1>` |
++| M-RX2 | `document.extents.expandedBy(20)` → `Aabb2(Vector2(0,0), Vector2(1,1))` | red: `Expected: a value greater than or equal to <500.0> Actual: <1.2017543859649122>` |
++| M-FX1 | the planner example's `sources: const []` | red, but through the loader's own `ArgumentError: Invalid argument (sources): must not be empty`, not through the `library.entries` `isNotEmpty` assertion (see Review minors) |
++| M-FX2 | `FloorPlanView` replaced by `const SizedBox()` | red: `findsOneWidget` on `FloorPlanView` |
++| M-CI1 | one byte appended to `packages/jet_cad_2d_flutter/LICENSE` | `cmp` exit 1 (*"EOF on LICENSE"*); the dry run exit **65**, *"1 checked-in file is modified in git"*, *"Package has 1 warning."* |
++| M-LK1 | the `source != 'git'` clause dropped from the lock check | **survived the brief's tests alone** (`+19: All tests passed!`): a hosted entry has no `resolved-ref`, so the ref clause catches it. HL-C3b (green entry, `source: path`, ref kept) was added and now turns it red |
++| M-LK2 | the `resolved-ref != ref` clause dropped | red: `HL-C2 another ref: each of the four named` |
++| M-PR1 | the `jet_cad_2d_flutter` override block removed from the template | red at **resolution**, exit 69: *"every version of jet_cad_floor_plan from git depends on jet_cad_2d_flutter any which doesn't exist (could not find package jet_cad_2d_flutter at https://pub.dev)"*. The lock check was not reached, which is the "either is red" case of the plan; once 0.7.1 is on pub.dev the lock check is what turns it red |
++| SC22-M | the `.replaceAll(RegExp(r'/$'), '')` removed from `package_root.dart` | red: `Expected: '/abs/b'  Actual: '/abs/b/'` (found by Task 6's review: the test had not covered the trailing slash) |
++
++## The probe and the released probes
++
++`tool/ci/host_probe.sh` at `4712baa`: exit 0; lock check *"40 packages,
++none of flutter_scene, …"* (one line printed, the brief had expected two),
++*"No issues found!"*, *"✓ Built build/web"*, *"host probe: no GPU
++renderer, no build hook; build/web is 42M"*.
++`old_host_probe.sh` for `v0.3.0`, `v0.4.0`, `v0.5.1` and `v0.6.0`: each
++*"No issues found!"* (*"vX's main.dart analyses against 4712baab…"*). The
++probe passes only through its overrides: the hosted 0.7.1 packages are not
++on pub.dev yet; D7 (Owed) is the check without them. `check_guide.dart`:
++*"all 56 code blocks are in the host probe"* (54 before this branch).
++
++## D4: the barrels, audited
++
++The barrels are published as they stand. **Method (a rough grep, not a
++finding list):** for each package a script lists the public libraries'
++`export` lines (honouring `show` lists; `export 'package:…'` of other
++packages ignored), collects the type names declared in the package's
++`lib/` and not exported by any public library, and prints those that
++appear, as a whole word, on a line at indent four or less of an exported
++file. That over-reports (bodies, shown and hidden classes of one file) and
++under-reports (types a signature reaches only through another package's
++alias, or at deeper indent). Each hit was then read by hand.
++
++- **`jet_cad_2d`:** `jet_cad_2d.dart` (56 files exported whole) and
++  `testing.dart`; no hit (the script counted 60 files). The engine's own record lists its candidates.
++- **`jet_cad_2d_flutter`:** `jet_cad_2d_flutter.dart` (59 exports) and
++  `export_testing.dart`: no hit.
++- **`jet_cad_floor_plan`** (`jet_cad_floor_plan.dart`, `symbols.dart`,
++  `symbol_sources.dart`, and `editor.dart`, which is internal by its own
++  header): the grep prints 14 names, almost all body or internal uses
++  (`FloorPlanThemeScope`, `InheritedFloorPlanTheme`, `RenderFloorPlanOverlays`,
++  `TableOverlayLayer`, `PlannerTextKeys`, `TablePicker`, `ExportFontCache`,
++  `SymbolWords`, `FloorPlanTableData` in a controller body; `ExportChoice` is
++  `@internal`). **Two are real:**
++  - `SymbolLibraryLoader.state` (a public getter on a barrel export)
++    returns `SymbolLibraryState`. It and `SymbolLibraryLoading`,
++    `SymbolLibraryReady` and `SymbolLibraryFailed` are not exported by the
++    host-facing barrels (`jet_cad_floor_plan.dart`, `symbols.dart`,
++    `symbol_sources.dart`); only `editor.dart` exports them, and it is
++    internal and outside semver. A host can read `state` but cannot name
++    or pattern-match its result without importing `editor.dart` or `src/`;
++    the planner's own example test imports
++    `src/symbols/symbol_library_state.dart` for that reason.
++  - `FloorPlanStrings.tableNumberProblem(TableNumberProblem)` (an abstract
++    method of an exported class) takes the enum `TableNumberProblem`
++    (`src/tables/table_numbers.dart`), likewise not exported by the
++    host-facing barrels and exported only by `editor.dart`. The host guide
++    (docs/host-guide.md, section on language) lets a host implement or
++    directly extend `FloorPlanStrings`; such a class must write
++    `tableNumberProblem(TableNumberProblem)` (the method is abstract) and
++    cannot name the type from the public barrel without importing
++    `editor.dart` or `src/`. A subclass of a built-in language
++    (`FloorPlanStringsEn`, `De`, `Tr`) inherits the method and needs
++    nothing.
++
++  They are 0.x candidates for exporting (a minor release of the planner),
++  not changes made here: narrowing or widening a barrel is a spec of its
++  own (D4).
++
++## Gates
++
++On macOS, Flutter 3.47.6. `expect_failures.dart` is
++`dart run tool/ci/expect_failures.dart --package <p> --root <p> <json>`,
++from the repository root.
++
++Run for this note on the tree before the Task 7 commit (documentation
++only differs from `ede7283`); the exit code of `dart test` on the engine is
++1 because of its two standing fingerprints, which `expect_failures.dart`
++compares.
++
++| Package | Tests | Analyze | Format |
++|---|---|---|---|
++| `jet_cad_2d` | `dart test` +1289 −2; `expect_failures`: "1291 tests; the standing failures and skips, exactly" | No issues found! | 177 files, 0 changed |
++| `jet_cad_2d_flutter` | `flutter test` +1447 ~1 −5 (exit 1); `expect_failures` below | No issues found! | 234 files, 0 changed |
++| `jet_cad_floor_plan` (`--enable-vmservice`) | +2011, all passed; `expect_failures`: "2011 tests; the standing failures and skips, exactly" | No issues found! | 298 files, 0 changed |
++| `jet_cad_2d_gpu` | +20 | No issues found! | 10 files, 0 changed |
++| `jet_cad_restaurant_symbols` | +97 | No issues found! | 15 files, 0 changed |
++| `apps/floor_planner` (`--enable-vmservice`) | +212 | No issues found! | 47 files, 0 changed |
++| `apps/restaurant_demo` | +69 | No issues found! | 9 files, 0 changed |
++| `apps/dev_harness_2d` | none | No issues found! | n/a |
++| `tool/ci` | `dart test` +77 | CI's file list: No issues found! | 13 files, 0 changed |
++| `check_guide.dart` | "docs/host-guide.md: all 56 code blocks are in the host probe" | | |
++
++`flutter pub get` rewrote no tracked `analysis_options.yaml` (`git status`
++shows none modified).
++
++### The expect_failures comparison
++
++| Package | Result |
++|---|---|
++| `jet_cad_2d` | exit 0: "packages/jet_cad_2d: 1291 tests; the standing failures and skips, exactly" |
++| `jet_cad_2d_flutter` | exit 1, with exactly the difference R-1 rules green on macOS: "standing failure passed or did not run" for `test/golden/text_lod_ladder_golden_test.dart` text lod ladder rungs 1 and 2 (RenderBackend.canvas); and the five goldens `test/golden/text_ladder_golden_test.dart` text ladder rungs 1 to 5 (RenderBackend.canvas) failing (+1447 ~1 −5). Nothing else differs |
++| `jet_cad_floor_plan` | exit 0: "packages/jet_cad_floor_plan: 2011 tests; the standing failures and skips, exactly" |
++
++The same five fail at `main` (`133cf03`) on this machine (the engine's
++record); on Linux CI compares exactly and would catch a real regression.
++
++## D11: the restaurant software's move
++
++Written into the planner's 0.7.1 CHANGELOG entry, for the human to apply
++in the restaurant software:
++
++1. Replace the two git dependencies (`jet_cad_floor_plan` and
++   `jet_cad_restaurant_symbols`) with `jet_cad_floor_plan: ^0.7.1`.
++2. Drop every import of `package:jet_cad_restaurant_symbols/…`.
++3. From the repository tree at the tag of the planner release it depends
++   on (`jet_cad_floor_plan-v0.7.1`), copy
++   `packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib` into the
++   host's assets and `packages/jet_cad_restaurant_symbols/lib/src/names.dart`
++   into the host's `lib/`, its import changed to
++   `package:jet_cad_floor_plan/jet_cad_floor_plan.dart`.
++4. Declare the asset, build `SymbolLibrarySource(name: 'restaurant', …)`
++   and pass it with `furnitureSymbolSource` to `SymbolLibraryLoader`
++   (host guide, "The restaurant symbols").
++5. Never load the copy together with the package's
++   `restaurantSymbolSource`: the same keys in two sources make the loader
++   fail. Saved plans do not depend on the library.
++
++## Independent review minors (deferred, recorded)
++
++From the per-task reviews; none blocks the publication.
++
++- T1: `dependency_lines_test.dart` has an `if` without braces; DL1's regex
++  misses a flow-style git map (DL2 catches it by value); DL3 covers
++  `path:`, not git, though its header names both.
++- T2: `geometry_collector.dart`'s comment still names
++  `test/support/instance_expander.dart` and `frame_info.dart`, absent from
++  the archive; the README snippet uses an undefined `size` (a fragment; the
++  full example is linked); the README names `jet_cad_floor_plan`, true
++  once the planner is published.
++- T3: M-FX1 dies on the loader's `ArgumentError`, so the
++  `library.entries` `isNotEmpty` assertion is exercised by no named
++  mutant; the README says `symbol_sources.dart` holds "the sources and
++  their loader's Flutter side" though the loader is on the main barrel;
++  `mySymbolSource` is a placeholder; CHANGELOG line 25 runs about 88
++  columns in a 76-column paragraph.
++- T5: `lockEntryFields` throws `RangeError`, not `FormatException`, on a
++  quoted `"jet_cad_*":` key (pub never writes them); the success line does
++  not say the ref check ran; `--ref ''` exits 1, not 2.
++- T6: `host_probe.sh`'s header still says the restaurant package reaches
++  the planner at the full sha (true for the override); a bare `dart analyze`
++  in `tool/ci` reports `host_probe/lib/main.dart`'s missing
++  `restaurant_names.dart` until a probe run copies it (CI's file list
++  excludes it).
++
++The whole-branch independent review (an Opus subagent, no Codex) on
++`git diff main..HEAD` is the controller's; its findings are recorded below
++when it returns.
++
++## Owed
++
++- **The human, in order (STATUS, Resume here):** `jet_cad_2d` 0.7.1 —
++  push `main`, CI green, dry run, publish, tag `jet_cad_2d-v0.7.1` on
++  `1dc167d`; then `jet_cad_2d_flutter` 0.7.1 — merge of this branch,
++  lower bounds, pana's lower-bounds section green, dry run, publish, tag
++  `jet_cad_2d_flutter-v0.7.1` on the merge commit; then
++  `jet_cad_floor_plan` 0.7.1 the same, tag `jet_cad_floor_plan-v0.7.1`.
++  The version visible on pub.dev after each.
++- **pana** on the two dependents after each dependency is on pub.dev (R-4).
++  The engine's 160/160 is likewise expected, not measured.
++- **D7:** after the planner, resolve a scratch copy of
++  `tool/ci/host_probe/pubspec.yaml.in` with its `dependency_overrides`
++  block removed, `flutter analyze`, and record the result here.
++- **CI on the pushed branch** (Linux): the whole workflow, `publishable`
++  for three packages, the probe and the four old probes; the push is the
++  human's word.
++- **D11**, in the restaurant software (above).
++- **The human's ruling** on the dormant `packages/jet_cad` (no
++  `publish_to`), carried from the engine's review.
++- **The engine README (R-5):** its "Where it comes from" paragraph is
++  rewritten on this branch (the renderer and the planner are on pub.dev
++  too); the engine's version is not bumped, so the new text reaches
++  pub.dev with its next release.
+diff --git a/packages/jet_cad_2d/README.md b/packages/jet_cad_2d/README.md
+index acbcdda9..01a881c3 100644
+--- a/packages/jet_cad_2d/README.md
++++ b/packages/jet_cad_2d/README.md
+@@ -60,18 +60,19 @@ The full walk-through, which also saves and reloads the document, is in
+ `package:jet_cad_2d/jet_cad_2d.dart` is the API. Nothing under `src/` is.
+ `package:jet_cad_2d/testing.dart` generates benchmark documents for this
+ repository's own suites; it is not API and may change in any release.
+ 
+ While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+ patch release (`0.7.2`) does not.
+ 
+ ## Where it comes from
+ 
+ This package is the engine of [jet-cad](https://github.com/a-urel/jet-cad), a
+-parametric floor planner. The Flutter packages that render and edit its
+-documents live in that repository and are not published on pub.dev; an
+-application that embeds the floor planner takes this engine with them, by git,
+-and should not also depend on it from pub.dev.
++parametric floor planner. The renderer
++[`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter) and the
++planner [`jet_cad_floor_plan`](https://pub.dev/packages/jet_cad_floor_plan)
++are on pub.dev too. An application that embeds the floor planner depends on
++the planner and gets this engine with it.
+ 
+ ## License
+ 
+ Apache License 2.0. See [LICENSE](LICENSE).
+diff --git a/packages/jet_cad_2d_flutter/.pubignore b/packages/jet_cad_2d_flutter/.pubignore
+new file mode 100644
+index 00000000..5f4f04a3
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/.pubignore
+@@ -0,0 +1,7 @@
++# Left out of the pub.dev archive, at the package root only: the suites,
++# the test runner's build output, and the shaders, which the package's GPU
++# tests read and jet_cad_2d_gpu compiles from the repository. The example
++# stays in.
++/test/
++/build/
++/shaders/
+diff --git a/packages/jet_cad_2d_flutter/CHANGELOG.md b/packages/jet_cad_2d_flutter/CHANGELOG.md
+new file mode 100644
+index 00000000..1d0c3f87
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/CHANGELOG.md
+@@ -0,0 +1,14 @@
++# Changelog
++
++## 0.7.1
++
++The first release on pub.dev. The code is jet-cad 0.7.0's render package
++(git tag `v0.7.0`); what changed is how it is packaged: its own LICENSE
++(Apache 2.0), a README written for pub.dev, a runnable example, `sdk:
++^3.6.0`, and its dependency on `jet_cad_2d` from pub.dev (`^0.7.1`).
++
++From this release on, `jet_cad_2d_flutter` has its own version on pub.dev
++and its own git tags (`jet_cad_2d_flutter-vX.Y.Z`). Before it, the package
++was released with the other jet-cad packages under one version; that
++history is in the repository's
++[CHANGELOG.md](https://github.com/a-urel/jet-cad/blob/main/CHANGELOG.md).
+diff --git a/packages/jet_cad_2d_flutter/README.md b/packages/jet_cad_2d_flutter/README.md
+index 00d212f1..1acb89f8 100644
+--- a/packages/jet_cad_2d_flutter/README.md
++++ b/packages/jet_cad_2d_flutter/README.md
+@@ -1,80 +1,62 @@
+ # jet_cad_2d_flutter
+ 
+-The Flutter rendering layer for the pure-Dart `jet_cad_2d` engine. It owns the
+-camera, coordinate rebasing, the paint seam and the viewport widget. The engine
+-package stays free of `dart:ui`.
+-
+-## What is here
+-
+-| Piece | Job |
+-|---|---|
+-| `ViewportTransform` | world → screen, and the visible world rectangle |
+-| `CameraController` | pan and zoom, and the frame's rebase origin |
+-| `DrawSink` | the paint seam: `RecordingDrawSink` for tests, `NullDrawSink` for query-only measurement, `CanvasDrawSink` for `dart:ui` |
+-| `DraftPainter` | walks the document and writes to a sink. **No cache of any kind** |
+-| `LeafOwnerMap` | owner → leaf slots, so a small container can be drawn whole |
+-| `DraftCanvas` | the widget, repainting on camera and document changes and nothing else |
+-| `referenceWalk` | an index-free second implementation, used as the differential oracle |
+-
+-`DraftPainter` is not scaffolding for the cached painter Plan 3b adds — it is
+-the oracle that one will be tested against, in the same role brute-force
+-queries played for the spatial index.
+-
+-## Tests
+-
+-```bash
+-flutter test                          # the suite, including goldens
+-flutter test --exclude-tags golden    # anywhere that is not macOS
++Flutter rendering and interaction for the pure-Dart
++[`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) engine. It draws a
++`DraftDocument` on a canvas, with a camera, rulers, selection and snapping,
++and writes a page of it out as a vector PDF or a PNG. The engine stays free
++of `dart:ui`; everything that needs Flutter is here.
++
++## What it holds
++
++- **`DraftCanvas`**: the widget that paints a document and repaints on camera
++  and document changes and on nothing else.
++- **`CameraController` and `ViewportTransform`**: pan, zoom and the
++  world-to-screen transform, with zoom-to-fit.
++- **`RulerFrame`**: rulers around a canvas.
++- **`InteractionLayer` and `ToolController`**: the pointer layer over a
++  canvas, which routes mouse, touch and keyboard input to the active `Tool`:
++  `SelectTool` (selection and grips) or one of the drawing tools
++  (`LineTool`, `PolylineTool`, `RectangleTool`, `CircleTool`, `ArcTool`,
++  `TextTool`). Object snapping is configured with `SnapSettings` and drawn
++  by `drawSnapMarker`.
++- **PDF and PNG export**: `exportPagePdf` and `exportPagePng` write a page of
++  a document to bytes.
++
++## Example
++
++`DraftCanvas` borrows its document, its spatial index and its camera: the
++application creates them and disposes of them. The document must carry a
++`FlutterTextMeasurer`, which is how its text is measured.
++
++```dart
++final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
++final index = SpatialIndex(document);
++final camera = CameraController(
++    ViewportTransform.fit(document.extents.expandedBy(20), size));
++
++DraftCanvas(document: document, index: index, camera: camera)
+ ```
+ 
+-Golden files are bytes produced by one Skia build on one platform. They were
+-generated and reviewed on macOS; another platform will differ by antialiasing
+-alone.
+-
+-## Rigs
++A complete app, which draws a line and a circle and frames them, is
++[`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_2d_flutter/example/lib/main.dart).
++Run it from the package directory with `flutter run -t example/lib/main.dart`.
+ 
+-Rigs **measure**; they do not assert. They are excluded from the default suite
+-so its result does not depend on machine load, which is why every command below
+-carries `--run-skipped`.
++## The API
+ 
+-```bash
+-# R1 — paint microbench, and R3 — query-only, both from the same file.
+-cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
++`package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart` is the API. Nothing under
++`src/` is. `package:jet_cad_2d_flutter/export_testing.dart` is a test
++instrument for this repository's own suites; it is not API and may change in
++any release.
+ 
+-# R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
+-# `flutter test --profile` does not exist; profile-mode frame timings only come
+-# out of a real run on a device, which is what `flutter drive` gives.
+-cd apps/dev_harness_2d && flutter drive \
+-  --driver=test_driver/integration_test.dart \
+-  --target=integration_test/frame_timing_test.dart --profile -d macos
++While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
++patch release (`0.7.2`) does not.
+ 
+-# One rig at a time, and at the large corpus. RIG is pan | leaf | instance.
+-cd apps/dev_harness_2d && flutter drive \
+-  --driver=test_driver/integration_test.dart \
+-  --target=integration_test/frame_timing_test.dart --profile -d macos \
+-  --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
+-  --dart-define=STEPS=60
+-
+-# The engine's own query throughput, for comparison against Plan 2's gate note.
+-cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
+-```
++## Where it comes from
+ 
+-**Run `flutter drive` in the foreground.** Backgrounded, the app blocks on its
+-first `pumpWidget` at 0% CPU, waiting for a frame the windowing system never
+-asks it for; it does not time out, it simply never finishes. Both foreground
+-runs completed and both background runs hung, which is why `RIG` and `STEPS`
+-exist — they keep a single rig inside one foreground run.
++This package is the rendering layer of
++[jet-cad](https://github.com/a-urel/jet-cad), a parametric floor planner;
++`jet_cad_floor_plan` builds on it.
+ 
+-R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
+-rasterising. **It is a relative regression signal only.** It is not comparable
+-to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
+-a results note.
++## License
+ 
+-Alongside R1 and R3's timings, each row also prints `canvasCalls` — real
+-`Canvas` draw calls from a `CanvasDrawSink` run over the same frame — and the
+-painter's `dashSpanCount` and `collapsedDashCount`, so a dash-path regression
+-shows up next to the timing it costs. `canvasCalls` is deliberately a separate
+-number from `NullDrawSink.opCount`: `opCount` counts painter calls and keeps
+-Plan 3a's R1 and R3 rows comparable line for line, while `canvasCalls` counts
+-what those calls become once dashing can split one polyline into several
+-strokes.
++Apache License 2.0. See [LICENSE](LICENSE).
+diff --git a/packages/jet_cad_2d_flutter/example/lib/main.dart b/packages/jet_cad_2d_flutter/example/lib/main.dart
+new file mode 100644
+index 00000000..2e64f7ed
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/example/lib/main.dart
+@@ -0,0 +1,57 @@
++// A document shown in a DraftCanvas: a line and a circle, framed whole.
++//
++// Run from the package directory with `flutter run -t example/lib/main.dart`.
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++void main() => runApp(const DraftExampleApp());
++
++/// A line and a circle, measured by the Flutter text measurer that
++/// [DraftCanvas] requires.
++DraftDocument buildExampleDocument() {
++  final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
++  doc.commands
++    ..execute(addDrafted(
++        doc, EntityKind.line, linePayload(Vector2(100, 100), Vector2(500, 100)),
++        layer: ReservedHandles.layerZero))
++    ..execute(addDrafted(
++        doc, EntityKind.circle, circlePayload(Vector2(300, 250), 50),
++        layer: ReservedHandles.layerZero));
++  return doc;
++}
++
++class DraftExampleApp extends StatefulWidget {
++  const DraftExampleApp({super.key});
++
++  @override
++  State<DraftExampleApp> createState() => _DraftExampleAppState();
++}
++
++class _DraftExampleAppState extends State<DraftExampleApp> {
++  final DraftDocument document = buildExampleDocument();
++  late final SpatialIndex index = SpatialIndex(document);
++  CameraController? camera;
++
++  @override
++  void dispose() {
++    camera?.dispose();
++    index.dispose();
++    document.dispose();
++    (document.textMeasurer as FlutterTextMeasurer).clear();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => Directionality(
++        textDirection: TextDirection.ltr,
++        child: LayoutBuilder(builder: (context, constraints) {
++          // Framed once, at the first layout: the drawing's extents with a
++          // margin, fitted to the space the canvas gets.
++          camera ??= CameraController(ViewportTransform.fit(
++              document.extents.expandedBy(20), constraints.biggest));
++          return DraftCanvas(document: document, index: index, camera: camera!);
++        }),
++      );
++}
+diff --git a/packages/jet_cad_2d_flutter/lib/export_testing.dart b/packages/jet_cad_2d_flutter/lib/export_testing.dart
+index 11c8c1c7..e3ba1d33 100644
+--- a/packages/jet_cad_2d_flutter/lib/export_testing.dart
++++ b/packages/jet_cad_2d_flutter/lib/export_testing.dart
+@@ -1,8 +1,10 @@
+ /// Test instruments for the export (plan 13, P-2): a reader of the PDF
+ /// `PdfDrawSink` writes, shared by the render package's tests and the app's.
+ ///
+ /// A separate library: nothing in `lib/` imports it, so it never reaches the
+ /// app's build.
++///
++/// Not API: a test instrument, outside semver; it may change in any release.
+ library;
+ 
+ export 'src/export/testing/pdf_content.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+index 1e866ae2..546f5f12 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/draft_canvas.dart
+@@ -118,21 +118,21 @@ class DraftCanvas extends StatefulWidget {
+   final double pixelsPerPaperMm;
+ 
+   /// Forwarded to [CanvasDrawSink.lineweightScale]. Measurement-only, for
+   /// Task 4c's fill-rate experiment; inert at its default of 1.0.
+   final double lineweightScale;
+ 
+   /// Forwarded to [DraftPainter.drawText]. Measurement-only, for Task 12's
+   /// text rows; inert at its default of `true`.
+   ///
+   /// It is a widget property rather than something the rig reaches through
+-  /// [DraftCanvasState] because the painter is built in [_attach] and its
++  /// [DraftCanvasState] because the painter is built in `_attach` and its
+   /// `drawText` is final: a rig that wanted to flip it after the fact would
+   /// have to rebuild the painter, and a rebuilt painter is a different frame.
+   final bool drawText;
+ 
+   /// Forwarded to [DraftPainter.minTextCapPixels]. `0.0` disables level of
+   /// detail, which is what the exit gate's control arm needs.
+   final double minTextCapPixels;
+ 
+   /// Which sink draws the frame, or `null` for [defaultRenderBackend].
+   ///
+diff --git a/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart b/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart
+index fc460aa0..a4e65948 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/export/testing/pdf_content.dart
+@@ -91,21 +91,21 @@ final class PdfContent {
+ }
+ 
+ /// A PDF matrix `[a b c d e f]`, row-vector convention (see [PdfContent]).
+ final class PdfContentMatrix {
+   const PdfContentMatrix(this.a, this.b, this.c, this.d, this.e, this.f);
+ 
+   static const identity = PdfContentMatrix(1, 0, 0, 1, 0, 0);
+ 
+   final double a, b, c, d, e, f;
+ 
+-  /// `this × other`: [this] applies first, then [other]. `M cm` sets the CTM
++  /// `this × other`: `this` applies first, then [o]. `M cm` sets the CTM
+   /// to `M.times(ctm)`.
+   PdfContentMatrix times(PdfContentMatrix o) => PdfContentMatrix(
+         a * o.a + b * o.c,
+         a * o.b + b * o.d,
+         c * o.a + d * o.c,
+         c * o.b + d * o.d,
+         e * o.a + f * o.c + o.e,
+         e * o.b + f * o.d + o.f,
+       );
+ 
+diff --git a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+index 43957a44..dc041d52 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/gpu/geometry_collector.dart
+@@ -128,24 +128,26 @@ class GeometryCollector implements DrawSink {
+   /// arms — the same predicate the shader's own degenerate branch uses
+   /// (`cad_stroke.vert`'s `cross_z == 0.0 || in_len == 0.0 || out_len ==
+   /// 0.0`, transcribed at `test/support/instance_expander.dart`) — so Task
+   /// 11 can report the buffer's collinear cost against the 8 MB budget
+   /// without moving the decision itself. `debug`-prefixed for exactly that
+   /// reason: nothing downstream reads it.
+   int get debugCollinearJoins => _debugCollinearJoins;
+   int _debugCollinearJoins = 0;
+ 
+   /// Half the stroke's width, **in device pixels** — the space the vertex
+-  /// shader consumes `half_width` in (`shaders/cad_stroke.vert` documents
++  /// shader consumes `half_width` in (`cad_stroke.vert` documents
+   /// the attribute `// device pixels` and applies it directly against
+   /// `frame_info.half_viewport`, which `buildFrameInfo` also builds in
+-  /// device pixels; `frame_info.dart`).
++  /// device pixels; `frame_info.dart`). The shader sources are in the
++  /// repository (`packages/jet_cad_2d_flutter/shaders/`), not in the
++  /// published package.
+   ///
+   /// **This method's first version computed the *logical* half-width
+   /// instead, and every stroke drew at half weight under any
+   /// `devicePixelRatio` other than 1.** `VerticesDrawSink._halfWidthFor`
+   /// (`vertices_draw_sink.dart:544-552`) is correct for itself — Skia
+   /// strokes in logical space, and its own local variable is even named
+   /// `floorLogical` — and this method's original body copied that formula
+   /// verbatim into a shader that does not share Skia's space. The fix is not
+   /// a division relocated: the *logical* width is converted into device
+   /// pixels (`* devicePixelRatio`) before it is compared against the floor
+diff --git a/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart b/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
+index 5cd2177b..6bfdd249 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/grip_cache.dart
+@@ -94,22 +94,22 @@ final class GripRef {
+ /// - Otherwise the grip rides the frame: it hangs from the middle of the
+ ///   frame's top edge, [kRotationGripOffset] pixels along the frame's up
+ ///   direction on screen. "Top" is the local `maxY` edge under a
+ ///   reflecting (y-flipped) camera and `minY` otherwise, so an unrotated
+ ///   frame under an unrotated camera lands where D6 puts it.
+ ///
+ /// [after], when given, is applied after [frame] — a move's or rotate's
+ /// preview `T` — and is composed inline, so a drag's frames allocate no
+ /// `Transform2` (spec D7).
+ ///
+-/// [anchor] is the point the grip hangs from, [centre] the disc's centre
+-/// and [stem] the end of the 1 px line from [anchor], on the disc's rim.
++/// `anchor` is the point the grip hangs from, `centre` the disc's centre
++/// and `stem` the end of the 1 px line from `anchor`, on the disc's rim.
+ ({Offset anchor, Offset centre, Offset stem}) rotationGripOf(
+     Aabb2 box, Transform2 worldToScreen,
+     [Transform2? frame, Transform2? after]) {
+   final m = worldToScreen;
+   final f0 = frame ?? const Transform2(1, 0, 0, 1, 0, 0);
+   // after ∘ frame, then worldToScreen ∘ that, inline: this runs per frame.
+   var fa = f0.a, fb = f0.b, fc = f0.c, fd = f0.d, fe = f0.e, ff = f0.f;
+   if (after != null) {
+     final t = after;
+     fa = t.a * f0.a + t.c * f0.b;
+diff --git a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+index ab8aaf4e..a9ba0ef8 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/tile_cache.dart
+@@ -58,21 +58,21 @@ const int kTileDevicePixels = 512;
+ ///
+ /// **One constant, because they are one question asked from two sides.** A
+ /// stroke is wider than its geometry: an entity whose centreline sits just
+ /// outside a tile still inks pixels inside it. [DraftPainter] already knows
+ /// this and inflates its *screen clip* by [kScreenClipInflate] — "half the
+ /// widest stroke the frame can draw" in that constant's own words — but its
+ /// index query carries no slack at all, and on a full frame that costs
+ /// nothing because the missed entity is off-screen. A tile's edge is interior
+ /// to the drawing, and there the two halves diverge:
+ ///
+-/// * **Arrival.** [_bake] passes the tile as the viewport, so an unpadded
++/// * **Arrival.** `_bake` passes the tile as the viewport, so an unpadded
+ ///   query hands the painter nothing for a stroke whose centreline is 0.2
+ ///   device pixels the wrong side of the seam. A clip only *keeps*; it cannot
+ ///   return what the query never yielded, so the half of the stroke reaching
+ ///   back into the tile was drawn by nobody. That was defect F1: six of
+ ///   forty-one swept zoom factors lost a whole stroke column.
+ /// * **Invalidation.** Direction two condemned the tiles whose *exact* world
+ ///   rect met a touched entity's *geometric* box, so the same stroke arriving
+ ///   from just outside left a tile inked and unconditioned. That was accepted
+ ///   gap G6.
+ ///
+@@ -462,33 +462,33 @@ class TileCache {
+   /// **And the painter alone does not supply the node half.**
+   /// `DraftPainter.debugOnVisit` fires for leaves and for `InstanceNode`s, and
+   /// both node call sites return early on `node is! InstanceNode`
+   /// (`draft_painter.dart:401`, `:485`), so **a group handle never reaches it**
+   /// — groups are flattened into their container's leaf list with a composed
+   /// transform, and the group itself is never "descended into" as far as the
+   /// callback is concerned. `TransformNodeCommand` takes a `GroupNode` as
+   /// readily as an `InstanceNode` (`commands.dart:297-300`), so a record built
+   /// from the callback alone loses every dragged group: direction one finds
+   /// nothing, direction two drops the arrival tiles, and the departure tiles
+-  /// keep their pixels. That is why [_bake] walks each visited handle's owner
++  /// keep their pixels. That is why `_bake` walks each visited handle's owner
+   /// chain and records it here rather than trusting the callback to be
+   /// complete.
+   ///
+   /// Duplicates are left in. A handle drawn twice — the tree/overlay pair, or
+   /// one definition placed twice inside one tile — costs one extra slot, and
+   /// the binary search does not care. Deduplicating would be a sweep over a
+   /// list that is already the right answer. The owner chain is the one
+   /// exception, and only because the walk needs a visited set anyway to stay
+   /// linear: an ancestor already recorded stops the climb.
+   ///
+   /// Keyed identically to [_tiles] at every point where either is observable:
+-  /// [_bake] writes here and its caller writes there, and nothing removes from
++  /// `_bake` writes here and its caller writes there, and nothing removes from
+   /// one without removing from the other.
+   final Map<TileKey, Uint32List> _baked = <TileKey, Uint32List>{};
+ 
+   /// The frame ordinal each live tile was last blitted on. The LRU order.
+   ///
+   /// Keyed identically to [_tiles], like [_baked]: [paintFrame] writes here
+   /// where it writes there, [_evict] and [_invalidateTouched] remove from both,
+   /// and [_disposeTiles] clears both. A tile missing from here would be
+   /// invisible to [_makeRoomForOneTile] and could never be reclaimed.
+   ///
+@@ -753,21 +753,21 @@ class TileCache {
+   /// viewport, 29.3 MiB on the reference one, whatever the tile size — so it
+   /// is worth more than a hundred tiles on its own. [kTileCacheBytes] is 96
+   /// MiB rather than 64 precisely because it has to hold a generation *and* a
+   /// composite, and a `liveBytes` that summed only [_tiles] would report the
+   /// cache using a third of what it really holds. Measured from the image's
+   /// own `width` and `height` rather than from `viewport`, because the
+   /// composite's device size is a `ceil` of the viewport and it outlives the
+   /// camera it was recorded against.
+   ///
+   /// A tile is `tileDevicePixels` square, RGBA, one byte a channel: exactly
+-  /// what `Picture.toImageSync` allocates in [_bake].
++  /// what `Picture.toImageSync` allocates in `_bake`.
+   int get liveBytes {
+     final carryOver = _carryOver;
+     final band = _band;
+     return _tiles.length * _tileBytes +
+         (carryOver == null ? 0 : carryOver.width * carryOver.height * 4) +
+         (band == null ? 0 : band.width * band.height * 4);
+   }
+ 
+   /// Tiles the ceiling reclaimed over this cache's whole life.
+   ///
+@@ -1482,21 +1482,21 @@ class TileCache {
+       _band = image;
+       // **The band is released on every exit from here, including a throw.**
+       // `_band` is not a local: [liveBytes] counts it, so an image stranded in
+       // that field overstates the cache by a whole band for the rest of its
+       // life and `_makeRoomForBytes` over-evicts forever after -- a leaked
+       // image plus a permanently wrong meter, from one exception in
+       // [_recordOwners] or [_sliceTile]. No non-throwing path reaches it
+       // today; the `finally` is what keeps that true of paths added later.
+       try {
+         // [_bakeBand]'s `onVisit` records only what the painter visited
+-        // directly; [_bake]'s climbs owners so that a *container's* transform
++        // directly; `_bake`'s climbs owners so that a *container's* transform
+         // reaches the tile through invalidation's direction one. This is where
+         // the band makes up the difference -- once per band rather than once
+         // per tile, which is the whole reason the band callback is the simpler
+         // one.
+         _recordOwners(visited, painter.document);
+         visited.sort();
+         // **One record per band, shared by reference.** `_invalidateTouched`
+         // condemns tiles by iterating `_baked`, and a sliced tile with no
+         // record is invisible to it: edit an entity after a settle and the
+         // stale tile keeps blitting over the corrected drawing. Sharing makes
+@@ -1525,36 +1525,36 @@ class TileCache {
+           _lastUsedFrame[key] = _frameSerial;
+         }
+       } finally {
+         _band = null;
+         _disposeImage(image);
+       }
+       _bakes++;
+     }
+   }
+ 
+-  /// [_bake]'s owner climb, applied once to a whole band's visit list.
++  /// `_bake`'s owner climb, applied once to a whole band's visit list.
+   ///
+   /// **Direction one of the invalidation rule, which the band walk cannot
+   /// record for itself.** A tile's `_baked` record has to name not only the
+   /// entities drawn on it but every container they hang under, or a transform
+   /// applied to a group never condemns the tiles its children inked and the
+-  /// drawing goes stale after an edit. [_bake] does this inside its own
++  /// drawing goes stale after an edit. `_bake` does this inside its own
+   /// `onVisit`; a band's `onVisit` records the direct visit alone and this
+   /// closes the gap over the accumulated list.
+   ///
+   /// Only the prefix that was there on entry is read, so the owners appended
+   /// below are not themselves re-climbed -- they cannot add anything, because
+   /// [climb] already walks each chain to its root.
+   void _recordOwners(List<int> visited, DraftDocument document) {
+     // Container nodes already recorded. Both a memo and the termination
+-    // guard, exactly as in [_bake]: once a node is in, every ancestor of it is
++    // guard, exactly as in `_bake`: once a node is in, every ancestor of it is
+     // in too, so the climb stops there -- which keeps the pass linear in
+     // visits rather than O(visits x depth), and makes a malformed cyclic
+     // parent chain terminate instead of hanging the bake.
+     final containers = <int>{};
+ 
+     void climb(Handle from) {
+       var current = from;
+       while (true) {
+         final node = document.tree[current];
+         // A definition handle lives outside the node map, and a definition is
+@@ -1596,21 +1596,21 @@ class TileCache {
+       band.deviceRect.width.round() * band.deviceRect.height.round() * 4;
+ 
+   /// Every tile is the same square, so this is built once rather than per
+   /// blit. It was a getter until Task 10, which allocated a fresh `Rect` on
+   /// each of a frame's ~48 blits — bounded by the viewport, so never a rule
+   /// break, but the wrong side of the criterion this task lands.
+   late final Rect _tileSourceRect = Rect.fromLTWH(
+       0, 0, tileDevicePixels.toDouble(), tileDevicePixels.toDouble());
+ 
+   /// Bytes one tile's image occupies: RGBA, one byte a channel, exactly what
+-  /// `Picture.toImageSync` allocates in [_bake].
++  /// `Picture.toImageSync` allocates in `_bake`.
+   int get _tileBytes => tileDevicePixels * tileDevicePixels * 4;
+ 
+   /// One tile's footprint, in device pixels: its side squared. What
+   /// [bakeBudgetDevicePixels] is measured against, in [paintFrame].
+   int get _tileDevicePixelArea => tileDevicePixels * tileDevicePixels;
+ 
+   /// Reclaims least-recently-blitted tiles until one more will fit under
+   /// [cacheBytes], and reports whether it succeeded.
+   ///
+   /// **Never a tile this frame already blitted, and that guard is the whole
+@@ -2065,21 +2065,21 @@ class TileCache {
+   /// Only ever called for handles [_isDefinitionOwned] has already rejected,
+   /// so the enclosing space is the document root and the accumulated transform
+   /// of the owner is the whole of the placement.
+   ///
+   /// **The bound is geometric, not rasterised, and that is why the *tile* box
+   /// is the padded one.** A stroke puts ink up to half its width beyond this
+   /// box, so a handle arriving at a position that misses a tile geometrically
+   /// can still clip into it — accepted gap G6, until Task 9a. The remedy is
+   /// not here: inflating this box by a resolved lineweight would need the
+   /// style resolution the caller does not have, and would be a *different*
+-  /// number from the one [_bake] queries with. [_worldRectOf] grows the tile
++  /// number from the one `_bake` queries with. [_worldRectOf] grows the tile
+   /// instead, by [kTileSlack], which is the same slack the bake uses — so the
+   /// record of what a tile holds and the geometry that condemns it are one
+   /// rectangle rather than two that nearly agree.
+   Aabb2? _worldBoxOf(DraftDocument document, Handle handle,
+       Map<Handle, List<int>>? leavesByOwner) {
+     final tree = document.tree;
+     final node = tree[handle];
+     if (node != null) {
+       // `definitionBounds` is the public spelling of "union of everything a
+       // container holds, in its own space", and it takes a group handle as
+@@ -2123,21 +2123,21 @@ class TileCache {
+       boundaryPayload: boundaryPayload,
+     );
+     if (box.isEmpty) return null;
+     return box.transformedBy(
+         tree.accumulatedTransform(document.entities.ownerAt(slot)));
+   }
+ 
+   /// The world-space box tile [key] can hold ink from, under [grid]'s anchor
+   /// camera: its own rectangle grown by [kTileSlack] on every side.
+   ///
+-  /// **The slack is the same one [_bake] queries with, and that is the point.**
++  /// **The slack is the same one `_bake` queries with, and that is the point.**
+   /// A tile's `_baked` record lists what the padded query yielded; this is the
+   /// geometry that condemns the tile. Inflate one and not the other and the
+   /// two halves of invalidation disagree by a ring — direction one drops tiles
+   /// whose record names a handle that direction two's box does not reach, and
+   /// a stroke arriving from just outside a tile leaves it stale. [kTileSlack]
+   /// carries the whole argument.
+   ///
+   /// **Grown in screen space, not in world units.** The pad is a fact about
+   /// stroke widths, which are a screen-space quantity, so it is applied to the
+   /// tile rectangle before the inversion. Adding a world-space margin
+@@ -2272,23 +2272,23 @@ class TileCache {
+     final picture = recorder.endRecording();
+     final image = picture.toImageSync(tileDevicePixels, tileDevicePixels);
+     _imagesAlive++;
+     picture.dispose();
+     _bakes++;
+     return image;
+   }
+ 
+   /// Walks one band into one image.
+   ///
+-  /// Modelled on [_bake] and sharing all three of its rules, at band scale.
++  /// Modelled on `_bake` and sharing all three of its rules, at band scale.
+   ///
+-  /// **The `onVisit` callback is deliberately simpler than [_bake]'s.**
++  /// **The `onVisit` callback is deliberately simpler than `_bake`'s.**
+   /// `_bake` climbs owners so a container transform reaches the tile through
+   /// direction one. A band records the same information for a wider region,
+   /// and its caller shares one record across the band's tiles, so the owner
+   /// climb happens once there rather than once per tile.
+   Image _bakeBand(
+     TileBand band,
+     TileGrid grid,
+     ViewportTransform quantised,
+     DraftPainter painter,
+     CanvasDrawSink sink,
+@@ -2296,42 +2296,42 @@ class TileCache {
+     Vector2 origin,
+     List<int> visitedInto,
+   ) {
+     // **The scale is the frame camera's; the translation is the anchor's.**
+     // [TileBand.deviceRect] lives in the grid's device space, whose origin is
+     // [TileGrid.anchor] and not this frame's camera -- exactly as a tile key
+     // does, and [TileGrid.bakeCameraFor] rebases a single tile off the anchor
+     // for the same reason. A generation outlives many pans, so at a rest bake
+     // the frame camera sits a whole number of device pixels away from the
+     // anchor; taking the translation from it would slide the band by that pan
+-    // and the tiles cut out of it would not hold what [_bake] puts in the
++    // and the tiles cut out of it would not hold what `_bake` puts in the
+     // same keys. The frame camera is still required to belong to this
+     // generation, which is what the assert below states.
+     assert(
+         grid.matchesScale(quantised),
+         'a band belongs to one generation, so the frame camera and the grid '
+         'anchor must agree on scale');
+     final dpr = grid.devicePixelRatio;
+     final width = band.deviceRect.width / dpr;
+     final height = band.deviceRect.height / dpr;
+     final recorder = PictureRecorder();
+     final into = Canvas(recorder);
+     into.scale(dpr);
+-    // **Hard, and for [_bake]'s reason.** An antialiased clip edge would make
++    // **Hard, and for `_bake`'s reason.** An antialiased clip edge would make
+     // two adjacent bands' `source-over` fall short of full coverage along the
+     // row they share: a seam, in the one place this design exists to remove
+     // one.
+     into.clipRect(Rect.fromLTWH(0, 0, width, height), doAntiAlias: false);
+ 
+     // **The query is padded; the clip is not.** A stroke whose centreline lies
+     // just outside the band still inks inside it. [kTileSlack] is the same
+-    // slack [_bake] queries with and the same slack the invalidation rule
++    // slack `_bake` queries with and the same slack the invalidation rule
+     // uses -- padding one alone makes them disagree. The canvas is pulled back
+     // by the same amount, so the padded viewport's origin lands where the
+     // band's own origin was.
+     const pad = kTileSlack;
+     into.save();
+     into.translate(-pad, -pad);
+ 
+     final m = grid.anchor.worldToScreenMatrix;
+     final bandCamera = ViewportTransform(
+       worldToScreenMatrix: Transform2(
+diff --git a/packages/jet_cad_2d_flutter/pubspec.yaml b/packages/jet_cad_2d_flutter/pubspec.yaml
+index 9a4f3138..7890219e 100644
+--- a/packages/jet_cad_2d_flutter/pubspec.yaml
++++ b/packages/jet_cad_2d_flutter/pubspec.yaml
+@@ -1,30 +1,34 @@
+ name: jet_cad_2d_flutter
+ description: >-
+-  Flutter rendering layer for the pure-Dart jet_cad_2d engine. Owns the camera,
+-  coordinate rebasing, the paint seam and the viewport widget. The engine
+-  package stays free of dart:ui.
+-version: 0.7.0
+-repository: https://github.com/ahmeturel/jet-cad
+-publish_to: none
++  Flutter rendering and interaction for the jet_cad_2d engine: a CAD canvas
++  with camera, rulers, selection and snapping, and PDF and PNG export.
++version: 0.7.1
++repository: https://github.com/a-urel/jet-cad
++issue_tracker: https://github.com/a-urel/jet-cad/issues
++topics:
++  - cad
++  - drawing
++  - canvas
++  - pdf
+ resolution: workspace
+ 
+ environment:
+-  sdk: ^3.5.0
+-  # pdf 3.13.x requires Dart >= 3.12.0, which Flutter first ships in 3.44.0.
+-  # Only this bound moves; `sdk:` sets the language version (spec 13 R-4).
++  # The floor pub workspaces document for their members; it sets language
++  # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x requires Dart
++  # >= 3.12.0, which Flutter first ships in 3.44.0: that bound binds.
++  sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d:
+-    path: ../jet_cad_2d
++  jet_cad_2d: ^0.7.1
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+   # The vector PDF export's writer (spec 13 D3). Pure Dart, Apache 2.0.
+   pdf: ^3.13.1
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   lints: ^6.1.0
+diff --git a/packages/jet_cad_2d_flutter/test/README.md b/packages/jet_cad_2d_flutter/test/README.md
+new file mode 100644
+index 00000000..00d212f1
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/README.md
+@@ -0,0 +1,80 @@
++# jet_cad_2d_flutter
++
++The Flutter rendering layer for the pure-Dart `jet_cad_2d` engine. It owns the
++camera, coordinate rebasing, the paint seam and the viewport widget. The engine
++package stays free of `dart:ui`.
++
++## What is here
++
++| Piece | Job |
++|---|---|
++| `ViewportTransform` | world → screen, and the visible world rectangle |
++| `CameraController` | pan and zoom, and the frame's rebase origin |
++| `DrawSink` | the paint seam: `RecordingDrawSink` for tests, `NullDrawSink` for query-only measurement, `CanvasDrawSink` for `dart:ui` |
++| `DraftPainter` | walks the document and writes to a sink. **No cache of any kind** |
++| `LeafOwnerMap` | owner → leaf slots, so a small container can be drawn whole |
++| `DraftCanvas` | the widget, repainting on camera and document changes and nothing else |
++| `referenceWalk` | an index-free second implementation, used as the differential oracle |
++
++`DraftPainter` is not scaffolding for the cached painter Plan 3b adds — it is
++the oracle that one will be tested against, in the same role brute-force
++queries played for the spatial index.
++
++## Tests
++
++```bash
++flutter test                          # the suite, including goldens
++flutter test --exclude-tags golden    # anywhere that is not macOS
++```
++
++Golden files are bytes produced by one Skia build on one platform. They were
++generated and reviewed on macOS; another platform will differ by antialiasing
++alone.
++
++## Rigs
++
++Rigs **measure**; they do not assert. They are excluded from the default suite
++so its result does not depend on machine load, which is why every command below
++carries `--run-skipped`.
++
++```bash
++# R1 — paint microbench, and R3 — query-only, both from the same file.
++cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
++
++# R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
++# `flutter test --profile` does not exist; profile-mode frame timings only come
++# out of a real run on a device, which is what `flutter drive` gives.
++cd apps/dev_harness_2d && flutter drive \
++  --driver=test_driver/integration_test.dart \
++  --target=integration_test/frame_timing_test.dart --profile -d macos
++
++# One rig at a time, and at the large corpus. RIG is pan | leaf | instance.
++cd apps/dev_harness_2d && flutter drive \
++  --driver=test_driver/integration_test.dart \
++  --target=integration_test/frame_timing_test.dart --profile -d macos \
++  --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
++  --dart-define=STEPS=60
++
++# The engine's own query throughput, for comparison against Plan 2's gate note.
++cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
++```
++
++**Run `flutter drive` in the foreground.** Backgrounded, the app blocks on its
++first `pumpWidget` at 0% CPU, waiting for a frame the windowing system never
++asks it for; it does not time out, it simply never finishes. Both foreground
++runs completed and both background runs hung, which is why `RIG` and `STEPS`
++exist — they keep a single rig inside one foreground run.
++
++R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
++rasterising. **It is a relative regression signal only.** It is not comparable
++to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
++a results note.
++
++Alongside R1 and R3's timings, each row also prints `canvasCalls` — real
++`Canvas` draw calls from a `CanvasDrawSink` run over the same frame — and the
++painter's `dashSpanCount` and `collapsedDashCount`, so a dash-path regression
++shows up next to the timing it costs. `canvasCalls` is deliberately a separate
++number from `NullDrawSink.opCount`: `opCount` counts painter calls and keeps
++Plan 3a's R1 and R3 rows comparable line for line, while `canvasCalls` counts
++what those calls become once dashing can split one polyline into several
++strokes.
+diff --git a/packages/jet_cad_2d_flutter/test/example_test.dart b/packages/jet_cad_2d_flutter/test/example_test.dart
+new file mode 100644
+index 00000000..8ff9f166
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/example_test.dart
+@@ -0,0 +1,41 @@
++// The published example (spec D2): it builds, shows its document, and
++// frames all of it.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++// The example is not under lib/, so a relative path is the only way to it.
++// ignore: avoid_relative_lib_imports
++import '../example/lib/main.dart';
++
++void main() {
++  testWidgets('the example shows a line and a circle, framed whole',
++      (tester) async {
++    await tester.pumpWidget(const DraftExampleApp());
++    final canvas = tester.widget<DraftCanvas>(find.byType(DraftCanvas));
++    final doc = canvas.document;
++    expect(doc.entities.liveCount, 2);
++
++    // The circle is where the example says: a pick 1 unit outside its top
++    // edge finds it, as an edge (a pick inside a closed circle would hit
++    // its fill at any radius and test nothing).
++    final hit = HitPath();
++    expect(
++        canvas.index
++            .pickInto(Vector2(300, 301), 2, const QueryFilter.picking(), hit),
++        isTrue);
++    expect(doc.entities.kindAt(doc.entities.slotOf(hit.entity)!),
++        EntityKind.circle);
++    expect(hit.kind, HitKind.edge);
++
++    // The camera frames the whole drawing.
++    final size = tester.getSize(find.byType(DraftCanvas));
++    final visible = canvas.camera.value.visibleWorld(size);
++    final extents = doc.extents;
++    expect(visible.minX, lessThanOrEqualTo(extents.minX));
++    expect(visible.minY, lessThanOrEqualTo(extents.minY));
++    expect(visible.maxX, greaterThanOrEqualTo(extents.maxX));
++    expect(visible.maxY, greaterThanOrEqualTo(extents.maxY));
++  });
++}
+diff --git a/packages/jet_cad_2d_gpu/pubspec.yaml b/packages/jet_cad_2d_gpu/pubspec.yaml
+index f6e66c32..3f376245 100644
+--- a/packages/jet_cad_2d_gpu/pubspec.yaml
++++ b/packages/jet_cad_2d_gpu/pubspec.yaml
+@@ -9,24 +9,22 @@ publish_to: none
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   # flutter_scene 0.23.0's own floor. jet_cad_2d_flutter stays at 3.44.
+   flutter: ">=3.47.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d:
+-    path: ../jet_cad_2d
+-  jet_cad_2d_flutter:
+-    path: ../jet_cad_2d_flutter
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
+   meta: ^1.18.0
+   vector_math: ^2.2.0
+   # **For its internal `flutter_gpu` shim only, not its scene graph.**
+   # `flutter_scene/lib/src/gpu/gpu.dart` re-exports `package:flutter_gpu`
+   # verbatim on native and falls back to a WebGL2 backend on web; bare
+   # `flutter_gpu` imports `dart:ffi` and cannot compile for the web at all.
+   # The import is off contract and pre-1.0, which is why exactly one file in
+   # this package is allowed to make it (`lib/src/gpu_facade.dart`).
+   flutter_scene: ^0.23.0
+ 
+diff --git a/packages/jet_cad_floor_plan/.pubignore b/packages/jet_cad_floor_plan/.pubignore
+new file mode 100644
+index 00000000..5e49ed9c
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/.pubignore
+@@ -0,0 +1,6 @@
++# Left out of the pub.dev archive, at the package root only: the suites,
++# the test runner's build output, and the furniture library's generator.
++# assets/ and lib/fonts/ stay in: the planner loads them at run time.
++/test/
++/build/
++/tool/
+diff --git a/packages/jet_cad_floor_plan/CHANGELOG.md b/packages/jet_cad_floor_plan/CHANGELOG.md
+new file mode 100644
+index 00000000..272a744e
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/CHANGELOG.md
+@@ -0,0 +1,27 @@
++# Changelog
++
++## 0.7.1
++
++The first release on pub.dev. The code is jet-cad 0.7.0's planner (git
++tag `v0.7.0`); what changed is how it is packaged: its own LICENSE (Apache
++2.0), a README and a runnable example, `sdk: ^3.6.0`, and its dependencies
++on `jet_cad_2d` and `jet_cad_2d_flutter` from pub.dev (`^0.7.1`). Plans
++are stored as in 0.7.0 (schema 10): a plan saved by either release opens in the other.
++
++**Moving a host from git to pub.dev:**
++
++1. Replace the git dependencies on `jet_cad_floor_plan` and
++   `jet_cad_restaurant_symbols` with `jet_cad_floor_plan: ^0.7.1`.
++2. Remove the import of `jet_cad_restaurant_symbols`. Copy its library
++   and names into your app as the host guide's "The restaurant symbols"
++   says, and give the loader your own `SymbolLibrarySource` in place of
++   `restaurantSymbolSource`.
++3. Keep the source's name `restaurant`, and never load your copy together
++   with the package's source: the same keys in two sources make the
++   loader fail.
++
++From this release on, `jet_cad_floor_plan` has its own version on pub.dev
++and its own git tags (`jet_cad_floor_plan-vX.Y.Z`). Before it, the package
++was released with the other jet-cad packages under one version; that
++history is in the repository's
++[CHANGELOG.md](https://github.com/a-urel/jet-cad/blob/main/CHANGELOG.md).
+diff --git a/packages/jet_cad_floor_plan/README.md b/packages/jet_cad_floor_plan/README.md
+new file mode 100644
+index 00000000..75757995
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/README.md
+@@ -0,0 +1,103 @@
++# jet_cad_floor_plan
++
++An embeddable parametric floor planner for Flutter. It draws and edits a
++plan of walls, doors and windows, rooms, dimensions and furniture symbols,
++and gives a host application, such as a restaurant's point of sale, a
++controller and a view to embed it with: the tables of the plan, their
++numbers and status, a service view over the same plan, and PDF and PNG
++export. The planner never stores anything itself; the host keeps the plan's
++text wherever it likes.
++
++## Embedding it
++
++A `FloorPlanController` holds the plan and what is done to it; a
++`FloorPlanView` shows it. The application owns the controller and disposes
++of it.
++
++```dart
++final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
++final controller = FloorPlanController(symbols: symbols);
++
++MaterialApp(
++  supportedLocales: floorPlanSupportedLocales,
++  localizationsDelegates: floorPlanLocalizationsDelegates,
++  home: Scaffold(body: FloorPlanView(controller: controller)),
++)
++```
++
++Before `runApp`, load the planner's font and register its licence:
++
++```dart
++WidgetsFlutterBinding.ensureInitialized();
++await ensureFloorPlanFonts();
++registerFontLicences();
++```
++
++The plans name the family `Roboto`, and the package ships its bytes. Declare
++the family in the host's `pubspec.yaml`, so the web never fetches Google's
++Roboto instead:
++
++```yaml
++flutter:
++  uses-material-design: true
++  fonts:
++    - family: Roboto
++      fonts:
++        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
++```
++
++The planner speaks English, German and Turkish: `floorPlanSupportedLocales`
++and `floorPlanLocalizationsDelegates` list them, with Flutter's own words
++for the same languages.
++
++A complete app is
++[`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_floor_plan/example/lib/main.dart).
++Run it from the package directory with `flutter run -t example/lib/main.dart`.
++
++## The host guide
++
++Tables, their status and groups, the service view, the theme, the editor's
++capabilities, saving and loading, printing: the host guide walks through
++them all, in code that CI compiles:
++<https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md>
++
++## A symbol library of your own
++
++The package ships a furniture library, `furnitureSymbolSource`. A host adds
++its own beside it with a `SymbolLibrarySource` (a name, a reader of the
++library's bytes, and its `SymbolNames` in other languages) and gives the
++loader every source it should read:
++
++```dart
++SymbolLibraryLoader(sources: [furnitureSymbolSource, mySymbolSource])
++```
++
++Two sources must not hold the same key. `package:jet_cad_floor_plan/symbols.dart`
++holds the catalog types and the library builder a catalog's generator is
++written in; `symbol_sources.dart` holds the sources and their loader's
++Flutter side.
++
++## The API
++
++- `package:jet_cad_floor_plan/jet_cad_floor_plan.dart` is the host API.
++- `package:jet_cad_floor_plan/symbols.dart` and `symbol_sources.dart` are the
++  symbol libraries' API.
++- `package:jet_cad_floor_plan/editor.dart` is the editor frame of the
++  jet-cad floor planner app. It is not host API and is outside semver: it
++  may change in any release.
++- Nothing under `src/` is API.
++
++While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
++patch release (`0.7.2`) does not.
++
++## Where it comes from
++
++This package is part of [jet-cad](https://github.com/a-urel/jet-cad). It
++builds on [`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d), the engine,
++and [`jet_cad_2d_flutter`](https://pub.dev/packages/jet_cad_2d_flutter), its
++rendering.
++
++## License
++
++Apache License 2.0. See [LICENSE](LICENSE). The Roboto font in
++`lib/fonts/` is under its own Apache License 2.0, in `assets/fonts/`.
+diff --git a/packages/jet_cad_floor_plan/example/lib/main.dart b/packages/jet_cad_floor_plan/example/lib/main.dart
+new file mode 100644
+index 00000000..916fcfb7
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/example/lib/main.dart
+@@ -0,0 +1,42 @@
++// The floor planner over an empty plan, with the furniture library the
++// package ships. Run from the package directory with
++// `flutter run -t example/lib/main.dart`.
++import 'package:flutter/material.dart';
++import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
++
++Future<void> main() async {
++  WidgetsFlutterBinding.ensureInitialized();
++  await ensureFloorPlanFonts();
++  registerFontLicences();
++  runApp(const FloorPlanExampleApp());
++}
++
++class FloorPlanExampleApp extends StatefulWidget {
++  const FloorPlanExampleApp({super.key});
++
++  @override
++  State<FloorPlanExampleApp> createState() => FloorPlanExampleAppState();
++}
++
++class FloorPlanExampleAppState extends State<FloorPlanExampleApp> {
++  /// One loader for the furniture library the package ships.
++  final SymbolLibraryLoader symbols =
++      SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
++
++  late final FloorPlanController controller =
++      FloorPlanController(symbols: symbols);
++
++  @override
++  void dispose() {
++    controller.dispose();
++    symbols.dispose();
++    super.dispose();
++  }
++
++  @override
++  Widget build(BuildContext context) => MaterialApp(
++        supportedLocales: floorPlanSupportedLocales,
++        localizationsDelegates: floorPlanLocalizationsDelegates,
++        home: Scaffold(body: FloorPlanView(controller: controller)),
++      );
++}
+diff --git a/packages/jet_cad_floor_plan/lib/editor.dart b/packages/jet_cad_floor_plan/lib/editor.dart
+index 50eeac7b..2f48fc67 100644
+--- a/packages/jet_cad_floor_plan/lib/editor.dart
++++ b/packages/jet_cad_floor_plan/lib/editor.dart
+@@ -1,14 +1,14 @@
+ // The editor surface (plan 14b-1, spec 14 V-8): what `apps/floor_planner`
+ // builds its application frame from. Explicitly internal: a host embeds
+ // the planner through `jet_cad_floor_plan.dart` (14b-2), not through this
+-// library.
++// library. Not host API and outside semver: it may change in any release.
+ library;
+ 
+ export 'src/document_toolbar.dart';
+ export 'src/export/export_bytes.dart';
+ export 'src/export/export_dialog.dart';
+ export 'src/export/export_font.dart';
+ export 'src/export/page_printer.dart';
+ export 'src/fonts.dart';
+ export 'src/l10n/document_separator.dart';
+ export 'src/layers/layer_panel.dart';
+@@ -52,21 +52,22 @@ export 'src/selection_panel.dart';
+ export 'src/shell_commands.dart';
+ export 'src/shortcut_guard.dart';
+ export 'src/startup_plan.dart';
+ export 'src/symbols/build_library.dart';
+ export 'src/symbols/furniture_catalog.dart';
+ export 'src/symbols/seating_component.dart';
+ export 'src/symbols/symbol_box.dart';
+ export 'src/symbols/symbol_component.dart';
+ export 'src/symbols/symbol_ghost.dart';
+ export 'src/symbols/symbol_library.dart';
+-export 'src/symbols/symbol_library_loader.dart';
++// `readBundledLibrary` is symbol_sources.dart's: one library, one home.
++export 'src/symbols/symbol_library_loader.dart' hide readBundledLibrary;
+ export 'src/symbols/symbol_library_state.dart';
+ export 'src/symbols/symbol_move.dart';
+ export 'src/symbols/symbol_panel.dart';
+ export 'src/symbols/symbol_place_tool.dart';
+ export 'src/symbols/symbol_placer.dart';
+ export 'src/symbols/symbol_search.dart';
+ export 'src/symbols/symbol_section.dart';
+ export 'src/symbols/wall_attach.dart';
+ export 'src/tables/table_index.dart';
+ export 'src/tables/table_label.dart';
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
+index 11dc736f..b6529e68 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_theme.dart
+@@ -47,25 +47,25 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+   });
+ 
+   /// The selection mode's status captions. A null property is today's: a
+   /// null `color` the automatic black or white ink over the drawn fill, a
+   /// null `fontSize` 11 logical pixels, a null `fontFamily` the platform's
+   /// default font. A family is drawn only when the host has loaded it.
+   /// `fontSize`, when set, is finite and above 0. Null: today's caption.
+   final TextStyle? statusCaptionStyle;
+ 
+   /// The selection mode's status fills: multiplies the host colour's alpha,
+-  /// once, in [0, 1]. Null: the colour as the host gave it.
++  /// once, in the range 0 to 1. Null: the colour as the host gave it.
+   final double? statusFillOpacity;
+ 
+   /// Both modes' table colour fills (plan colours spec PC-6): the hue's
+-  /// alpha, in [0, 1]. Null: 0.35.
++  /// alpha, in the range 0 to 1. Null: 0.35.
+   final double? tableColorOpacity;
+ 
+   /// The selection mode's group frames. Null: the paper's grip colour.
+   final Color? groupFrameColor;
+ 
+   /// The group frames' stroke, in screen logical pixels, finite and above 0.
+   /// Null: 2.
+   final double? groupFrameWidth;
+ 
+   /// How far a group frame stands off its members, in world millimetres,
+@@ -99,21 +99,21 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+ 
+   /// The selection outline's stroke in both modes, in screen logical
+   /// pixels, finite and above 0. Null: 2. The hover stays 1.5.
+   final double? selectionWidth;
+ 
+   /// The selection mode's focus veil over the tables outside the focus;
+   /// its alpha is multiplied by [focusVeilOpacity]. Null: the paper's
+   /// colour.
+   final Color? focusVeilColor;
+ 
+-  /// The focus veil's opacity, in [0, 1]. Null: 0.6.
++  /// The focus veil's opacity, in the range 0 to 1. Null: 0.6.
+   final double? focusVeilOpacity;
+ 
+   /// The canvas around the page and a page-less plan's paper, in both
+   /// modes: the drafting's ink follows it as it follows a page. A
+   /// translucent colour is used as given (the ink keys on its RGB). Null:
+   /// the ambient `ColorScheme.surface`.
+   final Color? canvasBackground;
+ 
+   /// The selection mode's bar, in logical pixels, finite and above 0. Null:
+   /// 44.
+@@ -194,21 +194,21 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
+ 
+   static TextStyle? _mergeStyle(TextStyle? base, TextStyle? over) =>
+       base == null ? over : base.merge(over);
+ 
+   /// The theme [t] of the way to [other], for an animated theme switch.
+   ///
+   /// A field set on both sides is interpolated ([Color.lerp], [lerpDouble],
+   /// [TextStyle.lerp], [EdgeInsets.lerp]), and each interpolated double (a
+   /// double field, each padding side, a style's `fontSize`) is clamped
+   /// between its two ends: a host's overshooting curve
+-  /// (`Curves.easeOutBack`) drives `t` out of [0, 1], and two valid themes
++  /// (`Curves.easeOutBack`) drives `t` out of `[0, 1]`, and two valid themes
+   /// must never animate into one the view refuses. A field null on one side
+   /// means a value that depends on the paper, which cannot be interpolated,
+   /// so it takes the side `t` is nearer (this one below 0.5); so does a
+   /// text style whose `color` one side leaves null (that colour is the
+   /// automatic ink), whole, never fading from transparent.
+   ///
+   /// A field equal on both sides is that side's value, and an [other]
+   /// equal to this theme returns this theme itself, so a theme that is the
+   /// same in a host's light and dark `ThemeData` stays `==` on every frame
+   /// of the switch and notifies nobody (T-3). A null [other] returns this
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+index ca40c491..f58e7ca4 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+@@ -208,22 +208,22 @@ class FloorPlanView extends StatefulWidget {
+   ///
+   /// It reaches this view only: the export dialog and other routes follow
+   /// the ambient Material `Theme` where the view is, and a host that wants
+   /// them themed wraps the view in a local `Theme`.
+   final FloorPlanTheme? theme;
+ 
+   /// The host's export dialog (host embedding API spec C-4): when given,
+   /// **every** Export entry point (the service bar's button, the editor's
+   /// bar, the chords Cmd+E and Ctrl+E, in both modes) calls it instead of
+   /// the Material dialog, with the choice last made in this controller's
+-  /// life as [initial] (PDF at 150 dpi at first); the answer is remembered
+-  /// as the next [initial], and null from it cancels (nothing is
++  /// life as `initial` (PDF at 150 dpi at first); the answer is remembered
++  /// as the next `initial`, and null from it cancels (nothing is
+   /// exported). Print has no dialog of jet-cad's (the platform's). Read at
+   /// each Export.
+   final Future<FloorPlanExportChoice?> Function(
+       BuildContext context, FloorPlanExportChoice initial)? onExportDialog;
+ 
+   /// An export or a print this view started failed (spec C-3): the error,
+   /// once, after which the flow ends and Export and Print are enabled
+   /// again. The hook's own error ([onExportDialog]'s) is reported here too.
+   /// Without it the error propagates as it always did, out of a `Future`
+   /// the press drops: an uncaught asynchronous error (spec S-8).
+diff --git a/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart b/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart
+index 19a07d31..a5379c93 100644
+--- a/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart
++++ b/packages/jet_cad_floor_plan/lib/src/parametric/dimension_geometry.dart
+@@ -279,27 +279,27 @@ final int kDimTextAttrs =
+ /// first failure, and far beyond any plan: about 2.2e8 times the corpus far
+ /// origin (4.5e6 mm), and a million times only against the +1e9 mm
+ /// placement, which does not make a value large anyway (a value is a
+ /// length). Only a wall made absurdly thick (a panel-legal 1e20 mm) or a
+ /// file reaches it.
+ const double kDimMaxValueMm = 1e15;
+ 
+ /// One dimension's geometry in **world** (spec 11 D6-D8), from
+ /// [layoutDimension]:
+ ///
+-/// - [value]: what it measures, never negative; [text], its format in the
++/// - `value`: what it measures, never negative; `text`, its format in the
+ ///   page's unit with the page's decimal separator;
+-/// - [u], [n]: the measuring direction and its left normal;
+-/// - [q0], [q1]: the dimension line's ends;
+-/// - [ext0], [ext1]: the extension lines at `a` and `b`, (start, end);
+-/// - [slash0], [slash1]: the slashes about [q0] and [q1];
+-/// - [textAt], [textAngle] (radians), [textHeight]: the value's insertion
++/// - `u`, `n`: the measuring direction and its left normal;
++/// - `q0`, `q1`: the dimension line's ends;
++/// - `ext0`, `ext1`: the extension lines at `a` and `b`, (start, end);
++/// - `slash0`, `slash1`: the slashes about `q0` and `q1`;
++/// - `textAt`, `textAngle` (radians), `textHeight`: the value's insertion
+ ///   point, world angle and cap height.
+ typedef DimLayout = ({
+   double value,
+   Vector2 u,
+   Vector2 n,
+   Vector2 q0,
+   Vector2 q1,
+   (Vector2, Vector2) ext0,
+   (Vector2, Vector2) ext1,
+   (Vector2, Vector2) slash0,
+diff --git a/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart b/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart
+index 65cecb22..b7e1c2d8 100644
+--- a/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart
++++ b/packages/jet_cad_floor_plan/lib/src/symbols/wall_attach.dart
+@@ -198,23 +198,23 @@ List<FaceRun> _pieces(Vector2 p0, double end, Vector2 d, Vector2 m,
+   if (from < hi) add(from, hi);
+   return out;
+ }
+ 
+ /// A placed symbol standing against a run (spec 09c D4's neighbours): the
+ /// interval `[lo, hi]` its back edge covers along the run's `t`, measured
+ /// from the run's `a`, and the instance's handle (so a move can leave its
+ /// own instance out, D8).
+ typedef FaceNeighbour = ({double lo, double hi, Handle instance});
+ 
+-/// What [attachToWall] returns: the attached placement [transform], the
+-/// point [q] on the face the symbol's back-centre lands on (the snap
+-/// marker's, D6), and the [run] it stands against.
++/// What [attachToWall] returns: the attached placement `transform`, the
++/// point `q` on the face the symbol's back-centre lands on (the snap
++/// marker's, D6), and the `run` it stands against.
+ typedef WallAttachment = ({Transform2 transform, Vector2 q, FaceRun run});
+ 
+ /// The one attachment rule (spec 09c D4): where a symbol whose local box is
+ /// [box] stands against one of [runs] for the anchor point [p] (the raw
+ /// pointer in placement, D6; the plain-moved back-centre in a move, D8), or
+ /// null when no run takes it.
+ ///
+ /// [neighbours] is parallel to [runs]: `neighbours[i]` are the symbols
+ /// already against `runs[i]` (an [ArgumentError] when the lengths differ);
+ /// the one whose instance is [exclude] is passed over.
+diff --git a/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart b/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart
+index 97079613..14a6bfdb 100644
+--- a/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart
++++ b/packages/jet_cad_floor_plan/lib/src/text_entry_overlay.dart
+@@ -22,21 +22,21 @@ const Size kTextEntrySize = Size(240, 32);
+ /// or zoom moves it and never rebuilds it (Ruling 05-10).
+ ///
+ /// **Commit and cancel.** Enter commits. Any other loss of focus cancels
+ /// if the placement is still pending. A canvas click has already committed
+ /// synchronously in the tool, so its blur finds nothing to cancel. A flow
+ /// of the document host (spec 12a D2, R-5) commits the entry through the
+ /// tool's `finish` before it moves the focus, so the focus loss that
+ /// follows finds nothing to cancel either.
+ ///
+ /// **Where the focus goes.** Back to the canvas, however the entry ends
+-/// ([_onPending], [_onTapOutside]).
++/// (`_onPending`, `_onTapOutside`).
+ class TextEntryOverlay extends StatefulWidget {
+   const TextEntryOverlay({
+     super.key,
+     required this.tool,
+     required this.tools,
+     required this.camera,
+   });
+ 
+   final TextTool tool;
+   final ToolController tools;
+diff --git a/packages/jet_cad_floor_plan/pubspec.yaml b/packages/jet_cad_floor_plan/pubspec.yaml
+index 73b154f5..2c49a1fd 100644
+--- a/packages/jet_cad_floor_plan/pubspec.yaml
++++ b/packages/jet_cad_floor_plan/pubspec.yaml
+@@ -1,38 +1,41 @@
+ name: jet_cad_floor_plan
+ description: >-
+-  The floor planner as a package (spec 14, slice 14b-1): the shell, the
+-  tools, the parametric objects, the symbol library and the panels that
+-  apps/floor_planner builds its application frame from, and that a host
+-  application embeds. The design / selection split is built in (14b-2).
+-publish_to: none
+-version: 0.7.0
++  An embeddable parametric floor planner for Flutter: walls, openings,
++  rooms, dimensions and furniture symbols, with a host API for tables.
++version: 0.7.1
++repository: https://github.com/a-urel/jet-cad
++issue_tracker: https://github.com/a-urel/jet-cad/issues
++topics:
++  - cad
++  - floor-plan
++  - restaurant
++  - point-of-sale
+ resolution: workspace
+ 
+ environment:
+-  # The same bounds as apps/floor_planner's (spec 13 R-4, plan 13 P-7): the
+-  # sdk bound sets the language version, which keeps the moved code's
+-  # formatting; printing and pdf set the Flutter floor.
+-  sdk: ^3.5.0
++  # The floor pub workspaces document for their members; it sets language
++  # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x, which the
++  # PDF export and printing need, requires Dart >= 3.12.0, which Flutter
++  # first ships in 3.44.0: that bound binds.
++  sdk: ^3.6.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+   # Spec 14d L2: Flutter's Material, Widgets and Cupertino words for de and
+   # tr, listed with the planner's own delegate.
+   flutter_localizations:
+     sdk: flutter
+-  jet_cad_2d:
+-    path: ../jet_cad_2d
+-  jet_cad_2d_flutter:
+-    path: ../jet_cad_2d_flutter
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
+   meta: ^1.18.0
+   pdf: ^3.13.1
+   printing: ^5.15.1
+   vector_math: ^2.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
+   vm_service: ^15.2.0
+diff --git a/packages/jet_cad_floor_plan/test/example_test.dart b/packages/jet_cad_floor_plan/test/example_test.dart
+new file mode 100644
+index 00000000..71c38153
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/example_test.dart
+@@ -0,0 +1,29 @@
++// The published example (spec D3): it shows the planner over an empty
++// plan with the furniture library loaded from the package's own asset.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
++// The loaded state is not host API: the test reads it from src/.
++import 'package:jet_cad_floor_plan/src/symbols/symbol_library_state.dart';
++
++// The example is not under lib/, so a relative path is the only way to it.
++// ignore: avoid_relative_lib_imports
++import '../example/lib/main.dart';
++
++void main() {
++  testWidgets('the example shows the planner with its furniture library',
++      (tester) async {
++    await tester.pumpWidget(const FloorPlanExampleApp());
++    await tester.pumpAndSettle();
++    expect(find.byType(FloorPlanView), findsOneWidget);
++
++    final state = tester
++        .state<FloorPlanExampleAppState>(find.byType(FloorPlanExampleApp));
++    // The asset read ends outside the test's fake-async zone.
++    await tester.runAsync(state.symbols.load);
++    await tester.pump();
++    final library = state.symbols.state;
++    expect(library, isA<SymbolLibraryReady>(),
++        reason: 'the furniture library is read from the package asset');
++    expect((library as SymbolLibraryReady).library.entries, isNotEmpty);
++  });
++}
+diff --git a/packages/jet_cad_restaurant_symbols/pubspec.yaml b/packages/jet_cad_restaurant_symbols/pubspec.yaml
+index e1bf4ea1..1be7a6bd 100644
+--- a/packages/jet_cad_restaurant_symbols/pubspec.yaml
++++ b/packages/jet_cad_restaurant_symbols/pubspec.yaml
+@@ -8,24 +8,22 @@ publish_to: none
+ version: 0.7.0
+ resolution: workspace
+ 
+ environment:
+   sdk: ^3.5.0
+   flutter: ">=3.44.0"
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+-  jet_cad_2d:
+-    path: ../jet_cad_2d
+-  jet_cad_floor_plan:
+-    path: ../jet_cad_floor_plan
++  jet_cad_2d: ^0.7.1
++  jet_cad_floor_plan: ^0.7.1
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   flutter_lints: ^6.0.0
+   vector_math: ^2.2.0
+ 
+ flutter:
+   assets:
+     - assets/restaurant.jetlib
+diff --git a/tool/ci/check_host_lock.dart b/tool/ci/check_host_lock.dart
+index ecd912e4..9d0ad219 100644
+--- a/tool/ci/check_host_lock.dart
++++ b/tool/ci/check_host_lock.dart
+@@ -1,42 +1,52 @@
+ // GPU split spec S8: fails when a host's pubspec.lock resolves the GPU
+-// renderer or what brings its build hook (lib/host_lock.dart).
++// renderer or what brings its build hook (lib/host_lock.dart) and, with
++// --ref, that the four repository packages came from git at that commit
++// (publishing spec D6).
+ //
+-//   dart run tool/ci/check_host_lock.dart <pubspec.lock>
++//   dart run tool/ci/check_host_lock.dart <pubspec.lock> [--ref <sha>]
+ //
+ // tool/ci/host_probe.sh runs it on the probe's lock after `pub get`. Exit 0
+-// when none of the names is a key under `packages:`; 1 when one is, each
+-// named; 2 on bad arguments, a missing file, or a file that is not a lock.
++// when none of the names is a key under `packages:` (and, with --ref, the
++// four are git at that commit); 1 when one is, or one is not, each named;
++// 2 on bad arguments, a missing file, or a file that is not a lock.
+ import 'dart:io';
+ 
+ import 'lib/host_lock.dart';
+ 
+ void main(List<String> args) {
+-  if (args.length != 1) {
+-    stderr.writeln('usage: check_host_lock.dart <pubspec.lock>');
++  final withRef = args.length == 3 && args[1] == '--ref';
++  if (args.length != 1 && !withRef) {
++    stderr.writeln('usage: check_host_lock.dart <pubspec.lock> [--ref <sha>]');
+     exit(2);
+   }
+-  final file = File(args.single);
++  final ref = withRef ? args[2] : null;
++  final file = File(args.first);
+   if (!file.existsSync()) {
+     stderr.writeln('${file.path}: no such file');
+     exit(2);
+   }
+   final List<String> packages;
+   final List<String> found;
++  final List<String> notCommit;
+   try {
+     final lock = file.readAsStringSync();
+     packages = lockPackages(lock);
+     found = forbiddenInLock(lock);
++    notCommit = ref == null ? const [] : notFromCommit(lock, ref);
+   } on FormatException catch (e) {
+     stderr.writeln('${file.path}: not a pubspec.lock: ${e.message}');
+     exit(2);
+   }
+-  if (found.isEmpty) {
++  if (found.isEmpty && notCommit.isEmpty) {
+     stdout.writeln('${file.path}: ${packages.length} packages, none of '
+         '${forbiddenHostPackages.join(', ')}');
+     return;
+   }
+   for (final name in found) {
+     stdout.writeln('${file.path}: a host must not resolve $name');
+   }
++  for (final message in notCommit) {
++    stdout.writeln('${file.path}: $message');
++  }
+   exit(1);
+ }
+diff --git a/tool/ci/host_probe.sh b/tool/ci/host_probe.sh
+index 306fe92c..5e79e3c5 100755
+--- a/tool/ci/host_probe.sh
++++ b/tool/ci/host_probe.sh
+@@ -1,36 +1,48 @@
+ #!/usr/bin/env bash
+ # Spec 14d P6: builds the host probe against the repository at a commit,
+-# by git, from outside the workspace -- as a POS would depend on it.
++# from outside the workspace -- as a POS would depend on it. The probe
++# resolves the planner from pub.dev, and its dependency overrides take the
++# four repository packages from git at the commit; the restaurant symbols
++# are copied into the probe, as a host does (publishing spec D6, D9).
+ #
+ #   tool/ci/host_probe.sh <git url> <commit sha>
+ #
+ # CI passes file://$GITHUB_WORKSPACE and `git rev-parse HEAD`, so no token
+ # is needed for a private repository. Writes only inside the probe. The
+ # sha must be the full one: the restaurant package reaches the planner at
+ # the full sha, and a short one makes pub see two refs and refuse.
+ #
+ # GPU split spec S8: the host's graph holds no GPU renderer and runs no
+ # build hook. The probe starts clean, because stale output survives a
+ # build; its lock is checked after `pub get`, and its web build after the
+ # build.
+ set -euo pipefail
+ url=$1
+ ref=$2
+ ci=$(cd "$(dirname "$0")" && pwd)
+ probe=$ci/host_probe
+-rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"
++rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \
++  "$probe/assets/restaurant.jetlib" "$probe/lib/restaurant_names.dart"
+ sed -e "s#@URL@#$url#g" -e "s#@REF@#$ref#g" \
+   "$probe/pubspec.yaml.in" > "$probe/pubspec.yaml"
+ cd "$probe"
+ flutter pub get
+-dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"
++dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"
++# Publishing spec D9: the probe carries the restaurant library as a host
++# does, copied from the package pub resolved at this commit, its names'
++# import pointed at the planner's barrel.
++symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)
++mkdir -p "$probe/assets"
++cp "$symbols/assets/restaurant.jetlib" "$probe/assets/restaurant.jetlib"
++sed 's#package:jet_cad_floor_plan/symbol_sources.dart#package:jet_cad_floor_plan/jet_cad_floor_plan.dart#' \
++  "$symbols/lib/src/names.dart" > "$probe/lib/restaurant_names.dart"
+ flutter analyze
+ flutter build web
+ fail=0
+ # The lock check above is the main guard; these three catch what reached
+ # the build anyway. hooks_runner is Flutter's own folder name, so a rename
+ # would let its check pass silently.
+ if [ -e .dart_tool/hooks_runner ]; then
+   echo "host probe: a build hook ran (.dart_tool/hooks_runner exists)" >&2
+   fail=1
+ fi
+diff --git a/tool/ci/host_probe/.gitignore b/tool/ci/host_probe/.gitignore
+index 4e0bb7a0..b66cb75e 100644
+--- a/tool/ci/host_probe/.gitignore
++++ b/tool/ci/host_probe/.gitignore
+@@ -1,6 +1,9 @@
+ # Written by tool/ci/host_probe.sh, and by pub and the build.
+ /pubspec.yaml
+ /pubspec.lock
+ /.dart_tool/
+ /build/
+ /.flutter-plugins-dependencies
++# Copied by tool/ci/host_probe.sh from the commit under test (publishing spec D9).
++/assets/restaurant.jetlib
++/lib/restaurant_names.dart
+diff --git a/tool/ci/host_probe/lib/main.dart b/tool/ci/host_probe/lib/main.dart
+index 9df939b2..53c963aa 100644
+--- a/tool/ci/host_probe/lib/main.dart
++++ b/tool/ci/host_probe/lib/main.dart
+@@ -1,22 +1,43 @@
+ // The external-host probe (spec 14d P6) and the host guide's source
+-// (P2): a small point-of-sale screen that depends on the planner and the
+-// restaurant library by git, from outside the workspace, through their
+-// public barrels only. CI resolves, analyses and builds it at the commit it
+-// tests; tool/ci/check_guide.dart checks that every Dart snippet of
+-// docs/host-guide.md is in this file, so the guide's code compiles.
++// (P2): a small point-of-sale screen that depends on the planner from
++// pub.dev (overridden to the commit under test) and carries the restaurant
++// library as a host does, from outside the workspace, through the
++// planner's public barrel only. CI resolves, analyses and builds it at the
++// commit it tests; tool/ci/check_guide.dart checks that every Dart snippet
++// of docs/host-guide.md is in this file, so the guide's code compiles.
++import 'dart:typed_data';
++
+ import 'package:flutter/foundation.dart' show kIsWeb;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart'
+-    show BrowserContextMenu, HardwareKeyboard, KeyDownEvent, LogicalKeyboardKey;
++    show
++        BrowserContextMenu,
++        HardwareKeyboard,
++        KeyDownEvent,
++        LogicalKeyboardKey,
++        rootBundle;
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
+-import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
++
++import 'restaurant_names.dart';
++
++/// The restaurant library, from this app's own assets (host guide, "The
++/// restaurant symbols").
++Future<Uint8List> readRestaurantLibrary() async {
++  final data = await rootBundle.load('assets/restaurant.jetlib');
++  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
++}
++
++const SymbolLibrarySource restaurantSource = SymbolLibrarySource(
++    name: 'restaurant',
++    read: readRestaurantLibrary,
++    names: restaurantSymbolNames);
+ 
+ Future<void> main() async {
+   WidgetsFlutterBinding.ensureInitialized();
+   try {
+     await ensureFloorPlanFonts();
+   } catch (error, stack) {
+     // The plans then measure in the platform's font; the POS still starts.
+     FlutterError.reportError(
+         FlutterErrorDetails(exception: error, stack: stack));
+   }
+@@ -164,21 +185,21 @@ class FloorScreen extends StatefulWidget {
+ 
+   @override
+   State<FloorScreen> createState() => _FloorScreenState();
+ }
+ 
+ class _FloorScreenState extends State<FloorScreen> {
+   PosStore get store => widget.store;
+ 
+   // One loader and one thumbnail cache for every floor's controller.
+   final symbols = SymbolLibraryLoader(
+-    sources: const [furnitureSymbolSource, restaurantSymbolSource],
++    sources: const [furnitureSymbolSource, restaurantSource],
+   );
+   final thumbnails = SymbolThumbnails(maxEntries: 128);
+ 
+   late final FloorPlanController controller = FloorPlanController(
+     symbols: symbols,
+     thumbnails: thumbnails,
+   );
+ 
+   /// Whether staff may drag tables during service.
+   bool staffMayMoveTables = true;
+diff --git a/tool/ci/host_probe/pubspec.yaml.in b/tool/ci/host_probe/pubspec.yaml.in
+index bd648798..9fd7647b 100644
+--- a/tool/ci/host_probe/pubspec.yaml.in
++++ b/tool/ci/host_probe/pubspec.yaml.in
+@@ -1,31 +1,48 @@
+ # The probe's pubspec, written by tool/ci/host_probe.sh with the
+-# repository's URL and the commit under test (spec 14d P6). The same
+-# dependency lines a host writes (docs/host-guide.md), at a commit SHA.
++# repository's URL and the commit under test (spec 14d P6). The dependency
++# line a host writes (docs/host-guide.md section 1), from pub.dev; the
++# overrides take the four repository packages from git at the commit under
++# test, and check_host_lock.dart --ref proves they did (publishing spec D6).
+ name: host_probe
+ description: A host outside the workspace (spec 14d P6).
+ publish_to: none
+ version: 0.1.0
+ 
+ environment:
+-  sdk: ^3.5.0
++  sdk: ^3.6.0
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
++  jet_cad_floor_plan: ^0.7.1
++
++flutter:
++  uses-material-design: true
++  fonts:
++    - family: Roboto
++      fonts:
++        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
++  assets:
++    - assets/restaurant.jetlib
++
++dependency_overrides:
++  jet_cad_2d:
++    git:
++      url: @URL@
++      path: packages/jet_cad_2d
++      ref: @REF@
++  jet_cad_2d_flutter:
++    git:
++      url: @URL@
++      path: packages/jet_cad_2d_flutter
++      ref: @REF@
+   jet_cad_floor_plan:
+     git:
+       url: @URL@
+       path: packages/jet_cad_floor_plan
+       ref: @REF@
+   jet_cad_restaurant_symbols:
+     git:
+       url: @URL@
+       path: packages/jet_cad_restaurant_symbols
+       ref: @REF@
+-
+-flutter:
+-  uses-material-design: true
+-  fonts:
+-    - family: Roboto
+-      fonts:
+-        - asset: packages/jet_cad_floor_plan/fonts/Roboto-Regular.ttf
+diff --git a/tool/ci/lib/host_lock.dart b/tool/ci/lib/host_lock.dart
+index 5e202451..a9721217 100644
+--- a/tool/ci/lib/host_lock.dart
++++ b/tool/ci/lib/host_lock.dart
+@@ -54,10 +54,55 @@ List<String> lockPackages(String lock) {
+   }
+   return keys;
+ }
+ 
+ /// The [forbiddenHostPackages] that are keys under [lock]'s `packages:`,
+ /// in the lock's order.
+ List<String> forbiddenInLock(String lock) => [
+       for (final name in lockPackages(lock))
+         if (forbiddenHostPackages.contains(name)) name,
+     ];
++
++/// The packages the host probe must take from the commit under test, by
++/// its `dependency_overrides` (publishing spec D6): once they are on
++/// pub.dev, a dropped override would resolve silently from there.
++const List<String> probedFromCommit = [
++  'jet_cad_2d',
++  'jet_cad_2d_flutter',
++  'jet_cad_floor_plan',
++  'jet_cad_restaurant_symbols',
++];
++
++/// The `source` and the description's `resolved-ref` of the package
++/// [name]'s entry in [lock] (keys `source` and `resolved-ref`, each only
++/// when present); empty when [lock] has no such package. Throws a
++/// [FormatException] as [lockPackages] does.
++Map<String, String> lockEntryFields(String lock, String name) {
++  if (!lockPackages(lock).contains(name)) return const {};
++  final lines = lock.split('\n');
++  final start = lines.indexWhere((l) => RegExp('^ +$name:\\s*\$').hasMatch(l));
++  final indent = lines[start].length - lines[start].trimLeft().length;
++  final fields = <String, String>{};
++  for (final line in lines.skip(start + 1)) {
++    final content = line.trimLeft();
++    if (content.isEmpty) continue;
++    final depth = line.length - content.length;
++    if (depth <= indent) break; // The next package: the entry has ended.
++    final m =
++        RegExp(r'^(source|resolved-ref):\s*"?([^"\s]+)"?').firstMatch(content);
++    if (m != null) fields[m[1]!] = m[2]!;
++  }
++  return fields;
++}
++
++/// One message per package of [probedFromCommit] that [lock] does not
++/// resolve from git at [ref]: missing, another source, or another
++/// resolved ref.
++List<String> notFromCommit(String lock, String ref) => [
++      for (final name in probedFromCommit)
++        if (lockEntryFields(lock, name) case final f
++            when f['source'] != 'git' || f['resolved-ref'] != ref)
++          f.isEmpty
++              ? '$name: not in the lock'
++              : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
++                  'not git at $ref',
++    ];
+diff --git a/tool/ci/package_root.dart b/tool/ci/package_root.dart
+new file mode 100644
+index 00000000..0552565c
+--- /dev/null
++++ b/tool/ci/package_root.dart
+@@ -0,0 +1,24 @@
++// Prints a package's root directory from a resolved project's
++// .dart_tool/package_config.json (publishing spec D6): host_probe.sh
++// copies the restaurant library from the package pub resolved.
++//
++//   dart run tool/ci/package_root.dart <project dir> <package>
++import 'dart:convert';
++import 'dart:io';
++
++void main(List<String> args) {
++  if (args.length != 2) {
++    stderr.writeln('usage: package_root.dart <project dir> <package>');
++    exit(2);
++  }
++  final config = File('${args[0]}/.dart_tool/package_config.json');
++  final json = jsonDecode(config.readAsStringSync()) as Map<String, Object?>;
++  for (final p in (json['packages'] as List).cast<Map<String, Object?>>()) {
++    if (p['name'] != args[1]) continue;
++    final root = config.uri.resolve(p['rootUri'] as String);
++    stdout.writeln(root.toFilePath().replaceAll(RegExp(r'/$'), ''));
++    return;
++  }
++  stderr.writeln('${config.path}: no package ${args[1]}');
++  exit(2);
++}
+diff --git a/tool/ci/test/dependency_lines_test.dart b/tool/ci/test/dependency_lines_test.dart
+new file mode 100644
+index 00000000..b10f3884
+--- /dev/null
++++ b/tool/ci/test/dependency_lines_test.dart
+@@ -0,0 +1,72 @@
++// Spec 2026-10-13-publish-host-packages D1: every pubspec of the live line
++// names a published package by a hosted constraint, never by `path:` or
++// `git:`. Run from tool/ci: the pubspecs are read from the repository.
++import 'dart:io';
++
++import 'package:test/test.dart';
++
++/// The packages published on pub.dev.
++const published = ['jet_cad_2d', 'jet_cad_2d_flutter', 'jet_cad_floor_plan'];
++
++/// The live line's pubspecs, relative to tool/ci.
++const pubspecs = [
++  '../../packages/jet_cad_2d/pubspec.yaml',
++  '../../packages/jet_cad_2d_flutter/pubspec.yaml',
++  '../../packages/jet_cad_2d_gpu/pubspec.yaml',
++  '../../packages/jet_cad_floor_plan/pubspec.yaml',
++  '../../packages/jet_cad_restaurant_symbols/pubspec.yaml',
++  '../../apps/floor_planner/pubspec.yaml',
++  '../../apps/restaurant_demo/pubspec.yaml',
++  '../../apps/dev_harness_2d/pubspec.yaml',
++];
++
++/// The dependency lines of [pubspec] that name one of [published] by a
++/// source other than a hosted constraint: the key line followed by an
++/// indented `path:` or `git:` line, or by a nested map.
++List<String> nonHosted(String pubspec) {
++  final lines = pubspec.split('\n');
++  final found = <String>[];
++  for (var i = 0; i < lines.length; i++) {
++    final key = RegExp(r'^  (\w+):\s*$').firstMatch(lines[i]);
++    if (key == null || !published.contains(key[1])) continue;
++    final next = i + 1 < lines.length ? lines[i + 1] : '';
++    if (RegExp(r'^    \S').hasMatch(next))
++      found.add('${key[1]}: ${next.trim()}');
++  }
++  return found;
++}
++
++/// The hosted constraints of [pubspec] on one of [published].
++Map<String, String> hosted(String pubspec) => {
++      for (final m in RegExp(r'^  (\w+): (\S+)\s*$', multiLine: true)
++          .allMatches(pubspec))
++        if (published.contains(m[1])) m[1]!: m[2]!,
++    };
++
++void main() {
++  test('DL1 no live-line pubspec names a published package by path or git', () {
++    for (final path in pubspecs) {
++      expect(nonHosted(File(path).readAsStringSync()), isEmpty, reason: path);
++    }
++  });
++
++  test('DL2 every such dependency is the caret of D1', () {
++    var seen = 0;
++    for (final path in pubspecs) {
++      final constraints = hosted(File(path).readAsStringSync());
++      seen += constraints.length;
++      for (final c in constraints.values) {
++        expect(c, '^0.7.1', reason: path);
++      }
++    }
++    expect(seen, 15,
++        reason: 'premise: the dependents are read; the pubspecs hold 15 '
++            'dependency lines on a published package (counted at Step 3)');
++  });
++
++  test('DL3 the reader sees a path dependency', () {
++    expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
++        ['jet_cad_2d: path: ../x']);
++    expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.1\n'), isEmpty);
++  });
++}
+diff --git a/tool/ci/test/guide_test.dart b/tool/ci/test/guide_test.dart
+index 9f9065c2..30397014 100644
+--- a/tool/ci/test/guide_test.dart
++++ b/tool/ci/test/guide_test.dart
+@@ -6,53 +6,47 @@ import 'package:jet_cad_ci/guide.dart';
+ import 'package:test/test.dart';
+ 
+ final guide = File('../../docs/host-guide.md').readAsStringSync();
+ final dart = File('host_probe/lib/main.dart').readAsStringSync();
+ final yaml = File('host_probe/pubspec.yaml.in').readAsStringSync();
+ 
+ void main() {
+   test('GD1 every block of the guide is in the probe', () {
+     expect(fencedBlocks(guide, 'dart'), hasLength(greaterThan(8)),
+         reason: 'premise: the guide shows its code');
+-    expect(fencedBlocks(guide, 'yaml'), hasLength(2), reason: 'premise');
++    expect(fencedBlocks(guide, 'yaml'), hasLength(3),
++        reason: 'premise: §1\'s dependency, §2\'s fonts, the symbols\' asset');
+     expect(missingBlocks(guide, dart: dart, yaml: yaml), isEmpty);
+   });
+ 
+   test('GD2 a Dart block the probe does not have is named', () {
+     expect(guide, contains('controller.serviceLayoutJson()'),
+         reason: 'premise');
+     final renamed = guide.replaceFirst(
+         'controller.serviceLayoutJson()', 'controller.layoutJson()');
+     expect(missingBlocks(renamed, dart: dart, yaml: yaml),
+         ['dart: Future<void> saveLayout() async {']);
+   });
+ 
+   test('GD3 a pubspec line the probe does not have is named', () {
+     final moved = guide.replaceFirst(
+-        'path: packages/jet_cad_restaurant_symbols', 'path: packages/symbols');
++        'jet_cad_floor_plan: ^0.7.1', 'jet_cad_floor_plan: ^0.7.2');
+     expect(moved, isNot(guide), reason: 'premise');
+     expect(
+         missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: dependencies:']);
+   });
+ 
+-  test(
+-      'GD4 the URL and the commit are the guide\'s own; the rest of the '
+-      'line is not', () {
+-    expect(guide, contains('url: https://github.com/a-urel/jet-cad.git'),
+-        reason: 'premise: the public URL, not the probe\'s');
+-    expect(yaml, contains('url: @URL@'), reason: 'premise');
+-    final dropped =
+-        guide.replaceFirst(RegExp(r'^ +ref: .*\n', multiLine: true), '');
+-    expect(dropped, isNot(guide), reason: 'premise: a ref line removed');
+-    expect(
+-        missingBlocks(dropped, dart: dart, yaml: yaml), ['yaml: dependencies:'],
+-        reason: 'a ref line left out is a difference');
++  test('GD4 the symbols\' asset line is the probe\'s', () {
++    final moved = guide.replaceFirst(
++        '    - assets/restaurant.jetlib', '    - assets/symbols.jetlib');
++    expect(moved, isNot(guide), reason: 'premise');
++    expect(missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: assets:']);
+   });
+ 
+   test('GD5 indentation and line breaks are the formatter\'s', () {
+     const source = '''
+ class A {
+   void f() {
+     g(1,
+         2);
+   }
+ }''';
+diff --git a/tool/ci/test/host_lock_test.dart b/tool/ci/test/host_lock_test.dart
+index 6a93153b..f23b7661 100644
+--- a/tool/ci/test/host_lock_test.dart
++++ b/tool/ci/test/host_lock_test.dart
+@@ -160,11 +160,71 @@ void main() {
+     // A key indented less than the first: read as a field, it would hide
+     // flutter_scene.
+     final shallow = withEntry(
+         green,
+         'flutter_scene',
+         entries['flutter_scene']!
+             .replaceFirst('  flutter_scene:', ' flutter_scene:'));
+     expect(shallow, contains('\n flutter_scene:\n'), reason: 'premise');
+     expect(() => lockPackages(shallow), throwsFormatException);
+   });
++
++  group('HL-C the four packages come from the commit under test', () {
++    const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
++
++    test('HL-C1 the green lock: all four from git at the ref', () {
++      expect(notFromCommit(green, ref), isEmpty);
++      expect(lockEntryFields(green, 'jet_cad_2d'),
++          {'source': 'git', 'resolved-ref': ref});
++    });
++
++    test('HL-C2 another ref: each of the four named', () {
++      const other = '0000000000000000000000000000000000000000';
++      expect(notFromCommit(green, other), hasLength(4));
++      expect(notFromCommit(green, other).first, contains('jet_cad_2d'));
++    });
++
++    // The named mutant of spec D6: one override dropped, so pub took the
++    // package from pub.dev.
++    for (final name in [
++      'jet_cad_2d',
++      'jet_cad_2d_flutter',
++      'jet_cad_floor_plan',
++      'jet_cad_restaurant_symbols',
++    ]) {
++      test('HL-C3 $name hosted: named', () {
++        final entry = entryOf(green, name);
++        final hostedEntry = [
++          '  $name:',
++          '    dependency: transitive',
++          '    description:',
++          '      name: $name',
++          '      sha256: "0000"',
++          '      url: "https://pub.dev"',
++          '    source: hosted',
++          '    version: "0.7.1"',
++        ].join('\n');
++        final lock = green.replaceFirst(entry, hostedEntry);
++        expect(lock, isNot(green), reason: 'premise');
++        expect(notFromCommit(lock, ref), [contains(name)]);
++      });
++    }
++
++    // A hosted entry carries no resolved-ref, so HL-C3 alone cannot tell the
++    // source test from the ref test: this one keeps the ref and changes only
++    // the source.
++    test('HL-C3b the right ref under another source: named', () {
++      final entry = entryOf(green, 'jet_cad_floor_plan');
++      final lock = green.replaceFirst(
++          entry, entry.replaceFirst('source: git', 'source: path'));
++      expect(lock, isNot(green), reason: 'premise');
++      expect(notFromCommit(lock, ref), [contains('jet_cad_floor_plan')]);
++    });
++
++    test('HL-C4 a package missing from the lock: named', () {
++      final lock = green.replaceFirst(
++          '${entryOf(green, 'jet_cad_restaurant_symbols')}\n', '');
++      expect(
++          notFromCommit(lock, ref), [contains('jet_cad_restaurant_symbols')]);
++    });
++  });
+ }
+diff --git a/tool/ci/test/scripts_test.dart b/tool/ci/test/scripts_test.dart
+index 4b34bb33..b0f020be 100644
+--- a/tool/ci/test/scripts_test.dart
++++ b/tool/ci/test/scripts_test.dart
+@@ -119,20 +119,59 @@ void main() {
+       final text = File('${tmp.path}/pubspec.lock')
+         ..writeAsStringSync('name: host_probe\n');
+       final notLock = await dartRun('check_host_lock.dart', [text.path]);
+       expect(notLock.exitCode, 2);
+     });
+ 
+     test('SC13 bad arguments: exit 2', () async {
+       expect((await dartRun('check_host_lock.dart', const [])).exitCode, 2);
+       expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
+     });
++
++    test('SC21 --ref: the green lock at its ref exits 0, at another exits 1',
++        () async {
++      const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
++      final ok = await dartRun('check_host_lock.dart',
++          ['test/fixtures/host_post_split.lock.txt', '--ref', ref]);
++      expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
++      final bad = await dartRun('check_host_lock.dart', [
++        'test/fixtures/host_post_split.lock.txt',
++        '--ref',
++        '0000000000000000000000000000000000000000',
++      ]);
++      expect(bad.exitCode, 1);
++      expect(bad.stdout, contains('jet_cad_floor_plan'));
++    });
++  });
++
++  test('SC22 package_root.dart prints a package\'s root from a config',
++      () async {
++    final dir = Directory.systemTemp.createTempSync('package_root');
++    addTearDown(() => dir.deleteSync(recursive: true));
++    Directory('${dir.path}/.dart_tool').createSync();
++    File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
++        '{"configVersion":2,"packages":[{"name":"a","rootUri":"../x/a",'
++        '"packageUri":"lib/"},{"name":"b","rootUri":"file:///abs/b/",'
++        '"packageUri":"lib/"}]}');
++    final a = await dartRun('package_root.dart', [dir.path, 'a']);
++    expect(a.exitCode, 0, reason: '${a.stdout}${a.stderr}');
++    // `../x/a` resolves against `.dart_tool/`, so the root is `<dir>/x/a`.
++    expect((a.stdout as String).trim(), endsWith('/x/a'));
++    // macOS reaches the temp directory through a symlink (/var, /private/var).
++    expect(
++        Directory(Directory((a.stdout as String).trim()).parent.parent.path)
++            .resolveSymbolicLinksSync(),
++        Directory(dir.path).resolveSymbolicLinksSync());
++    final b = await dartRun('package_root.dart', [dir.path, 'b']);
++    expect((b.stdout as String).trim(), '/abs/b');
++    final none = await dartRun('package_root.dart', [dir.path, 'c']);
++    expect(none.exitCode, 2);
+   });
+ 
+   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
+   // probe that stopped running the check would pass unseen. Its commands,
+   // comments aside, in their order.
+   test('SC14 host_probe.sh checks the lock after pub get, before the build',
+       () {
+     final commands = [
+       for (final line in File('host_probe.sh').readAsLinesSync())
+         if (line.trim().isNotEmpty && !line.trimLeft().startsWith('#'))
+@@ -140,28 +179,39 @@ void main() {
+     ];
+     int at(String command) {
+       final i = commands.indexOf(command);
+       expect(i, isNot(-1), reason: 'host_probe.sh runs `$command`');
+       return i;
+     }
+ 
+     expect(commands, contains('set -euo pipefail'));
+     // The final review's F-3 (MU6): stale output survives a build, so the
+     // probe starts clean.
+-    final clean =
+-        at(r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"');
++    // Review Focus 4: a copy left by an earlier run must not mask a copy
++    // step that no longer runs.
++    final clean = at(
++        r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \');
++    expect(
++        at(r'"$probe/assets/restaurant.jetlib" '
++            r'"$probe/lib/restaurant_names.dart"'),
++        clean + 1,
++        reason: 'the clean line goes on to the copies');
+     final get = at('flutter pub get');
+     expect(clean, lessThan(get), reason: 'cleaned before pub get');
+-    final check =
+-        at(r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"');
++    final check = at(
++        r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"');
++    final copy = at(
++        r'symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)');
+     final analyze = at('flutter analyze');
+     final build = at('flutter build web');
++    expect(check < copy && copy < analyze, isTrue,
++        reason: 'the symbols are copied after the check, before analyze');
+     expect(get < check && check < analyze && analyze < build, isTrue,
+         reason: 'pub get, the check, analyze, build: $get, $check, '
+             '$analyze, $build');
+   });
+ 
+   // The final review's F-3 (MU7): the probe's checks after the build, run
+   // as bash runs them, in a scratch probe; one red case per check.
+   group('SC15 host_probe.sh after the build', () {
+     final script = File('host_probe.sh').readAsStringSync();
+     final from = script.indexOf('\nfail=0\n');

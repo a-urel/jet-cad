@@ -13,7 +13,8 @@ void main() {
   test('GD1 every block of the guide is in the probe', () {
     expect(fencedBlocks(guide, 'dart'), hasLength(greaterThan(8)),
         reason: 'premise: the guide shows its code');
-    expect(fencedBlocks(guide, 'yaml'), hasLength(2), reason: 'premise');
+    expect(fencedBlocks(guide, 'yaml'), hasLength(3),
+        reason: 'premise: §1\'s dependency, §2\'s fonts, the symbols\' asset');
     expect(missingBlocks(guide, dart: dart, yaml: yaml), isEmpty);
   });
 
@@ -28,24 +29,17 @@ void main() {
 
   test('GD3 a pubspec line the probe does not have is named', () {
     final moved = guide.replaceFirst(
-        'path: packages/jet_cad_restaurant_symbols', 'path: packages/symbols');
+        'jet_cad_floor_plan: ^0.7.1', 'jet_cad_floor_plan: ^0.7.2');
     expect(moved, isNot(guide), reason: 'premise');
     expect(
         missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: dependencies:']);
   });
 
-  test(
-      'GD4 the URL and the commit are the guide\'s own; the rest of the '
-      'line is not', () {
-    expect(guide, contains('url: https://github.com/a-urel/jet-cad.git'),
-        reason: 'premise: the public URL, not the probe\'s');
-    expect(yaml, contains('url: @URL@'), reason: 'premise');
-    final dropped =
-        guide.replaceFirst(RegExp(r'^ +ref: .*\n', multiLine: true), '');
-    expect(dropped, isNot(guide), reason: 'premise: a ref line removed');
-    expect(
-        missingBlocks(dropped, dart: dart, yaml: yaml), ['yaml: dependencies:'],
-        reason: 'a ref line left out is a difference');
+  test('GD4 the symbols\' asset line is the probe\'s', () {
+    final moved = guide.replaceFirst(
+        '    - assets/restaurant.jetlib', '    - assets/symbols.jetlib');
+    expect(moved, isNot(guide), reason: 'premise');
+    expect(missingBlocks(moved, dart: dart, yaml: yaml), ['yaml: assets:']);
   });
 
   test('GD5 indentation and line breaks are the formatter\'s', () {

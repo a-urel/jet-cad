@@ -1,80 +1,62 @@
 # jet_cad_2d_flutter
 
-The Flutter rendering layer for the pure-Dart `jet_cad_2d` engine. It owns the
-camera, coordinate rebasing, the paint seam and the viewport widget. The engine
-package stays free of `dart:ui`.
+Flutter rendering and interaction for the pure-Dart
+[`jet_cad_2d`](https://pub.dev/packages/jet_cad_2d) engine. It draws a
+`DraftDocument` on a canvas, with a camera, rulers, selection and snapping,
+and writes a page of it out as a vector PDF or a PNG. The engine stays free
+of `dart:ui`; everything that needs Flutter is here.
 
-## What is here
+## What it holds
 
-| Piece | Job |
-|---|---|
-| `ViewportTransform` | world → screen, and the visible world rectangle |
-| `CameraController` | pan and zoom, and the frame's rebase origin |
-| `DrawSink` | the paint seam: `RecordingDrawSink` for tests, `NullDrawSink` for query-only measurement, `CanvasDrawSink` for `dart:ui` |
-| `DraftPainter` | walks the document and writes to a sink. **No cache of any kind** |
-| `LeafOwnerMap` | owner → leaf slots, so a small container can be drawn whole |
-| `DraftCanvas` | the widget, repainting on camera and document changes and nothing else |
-| `referenceWalk` | an index-free second implementation, used as the differential oracle |
+- **`DraftCanvas`**: the widget that paints a document and repaints on camera
+  and document changes and on nothing else.
+- **`CameraController` and `ViewportTransform`**: pan, zoom and the
+  world-to-screen transform, with zoom-to-fit.
+- **`RulerFrame`**: rulers around a canvas.
+- **`InteractionLayer` and `ToolController`**: the pointer layer over a
+  canvas, which routes mouse, touch and keyboard input to the active `Tool`:
+  `SelectTool` (selection and grips) or one of the drawing tools
+  (`LineTool`, `PolylineTool`, `RectangleTool`, `CircleTool`, `ArcTool`,
+  `TextTool`). Object snapping is configured with `SnapSettings` and drawn
+  by `drawSnapMarker`.
+- **PDF and PNG export**: `exportPagePdf` and `exportPagePng` write a page of
+  a document to bytes.
 
-`DraftPainter` is not scaffolding for the cached painter Plan 3b adds — it is
-the oracle that one will be tested against, in the same role brute-force
-queries played for the spatial index.
+## Example
 
-## Tests
+`DraftCanvas` borrows its document, its spatial index and its camera: the
+application creates them and disposes of them. The document must carry a
+`FlutterTextMeasurer`, which is how its text is measured.
 
-```bash
-flutter test                          # the suite, including goldens
-flutter test --exclude-tags golden    # anywhere that is not macOS
+```dart
+final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
+final index = SpatialIndex(document);
+final camera = CameraController(
+    ViewportTransform.fit(document.extents.expandedBy(20), size));
+
+DraftCanvas(document: document, index: index, camera: camera)
 ```
 
-Golden files are bytes produced by one Skia build on one platform. They were
-generated and reviewed on macOS; another platform will differ by antialiasing
-alone.
+A complete app, which draws a line and a circle and frames them, is
+[`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_2d_flutter/example/lib/main.dart).
+Run it from the package directory with `flutter run -t example/lib/main.dart`.
 
-## Rigs
+## The API
 
-Rigs **measure**; they do not assert. They are excluded from the default suite
-so its result does not depend on machine load, which is why every command below
-carries `--run-skipped`.
+`package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart` is the API. Nothing under
+`src/` is. `package:jet_cad_2d_flutter/export_testing.dart` is a test
+instrument for this repository's own suites; it is not API and may change in
+any release.
 
-```bash
-# R1 — paint microbench, and R3 — query-only, both from the same file.
-cd packages/jet_cad_2d_flutter && flutter test --tags rig --run-skipped
+While the version is `0.x`, a minor release (`0.8.0`) may break the API, and a
+patch release (`0.7.2`) does not.
 
-# R2 (camera), R4a (leaf edit) and R4b (instance drag), from the harness app.
-# `flutter test --profile` does not exist; profile-mode frame timings only come
-# out of a real run on a device, which is what `flutter drive` gives.
-cd apps/dev_harness_2d && flutter drive \
-  --driver=test_driver/integration_test.dart \
-  --target=integration_test/frame_timing_test.dart --profile -d macos
+## Where it comes from
 
-# One rig at a time, and at the large corpus. RIG is pan | leaf | instance.
-cd apps/dev_harness_2d && flutter drive \
-  --driver=test_driver/integration_test.dart \
-  --target=integration_test/frame_timing_test.dart --profile -d macos \
-  --dart-define=ENTITIES=500000 --dart-define=RIG=instance \
-  --dart-define=STEPS=60
+This package is the rendering layer of
+[jet-cad](https://github.com/a-urel/jet-cad), a parametric floor planner;
+`jet_cad_floor_plan` builds on it.
 
-# The engine's own query throughput, for comparison against Plan 2's gate note.
-cd packages/jet_cad_2d && dart run benchmark/query_throughput.dart
-```
+## License
 
-**Run `flutter drive` in the foreground.** Backgrounded, the app blocks on its
-first `pumpWidget` at 0% CPU, waiting for a frame the windowing system never
-asks it for; it does not time out, it simply never finishes. Both foreground
-runs completed and both background runs hung, which is why `RIG` and `STEPS`
-exist — they keep a single rig inside one foreground run.
-
-R1 runs under `flutter test`: debug JIT, and `PictureRecorder` records without
-rasterising. **It is a relative regression signal only.** It is not comparable
-to R2's profile-mode numbers and cannot see raster cost. Do not mix the two in
-a results note.
-
-Alongside R1 and R3's timings, each row also prints `canvasCalls` — real
-`Canvas` draw calls from a `CanvasDrawSink` run over the same frame — and the
-painter's `dashSpanCount` and `collapsedDashCount`, so a dash-path regression
-shows up next to the timing it costs. `canvasCalls` is deliberately a separate
-number from `NullDrawSink.opCount`: `opCount` counts painter calls and keeps
-Plan 3a's R1 and R3 rows comparable line for line, while `canvasCalls` counts
-what those calls become once dashing can split one polyline into several
-strokes.
+Apache License 2.0. See [LICENSE](LICENSE).

@@ -4,3 +4,6 @@
 /.dart_tool/
 /build/
 /.flutter-plugins-dependencies
+# Copied by tool/ci/host_probe.sh from the commit under test (publishing spec D9).
+/assets/restaurant.jetlib
+/lib/restaurant_names.dart

@@ -3,6 +3,8 @@
 ///
 /// A separate library: nothing in `lib/` imports it, so it never reaches the
 /// app's build.
+///
+/// Not API: a test instrument, outside semver; it may change in any release.
 library;
 
 export 'src/export/testing/pdf_content.dart';

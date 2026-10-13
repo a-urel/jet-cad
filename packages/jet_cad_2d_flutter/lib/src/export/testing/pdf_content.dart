@@ -98,7 +98,7 @@ final class PdfContentMatrix {
 
   final double a, b, c, d, e, f;
 
-  /// `this × other`: [this] applies first, then [other]. `M cm` sets the CTM
+  /// `this × other`: `this` applies first, then [o]. `M cm` sets the CTM
   /// to `M.times(ctm)`.
   PdfContentMatrix times(PdfContentMatrix o) => PdfContentMatrix(
         a * o.a + b * o.c,

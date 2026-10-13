@@ -126,6 +126,45 @@ void main() {
       expect((await dartRun('check_host_lock.dart', const [])).exitCode, 2);
       expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
     });
+
+    test('SC21 --ref: the green lock at its ref exits 0, at another exits 1',
+        () async {
+      const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
+      final ok = await dartRun('check_host_lock.dart',
+          ['test/fixtures/host_post_split.lock.txt', '--ref', ref]);
+      expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
+      final bad = await dartRun('check_host_lock.dart', [
+        'test/fixtures/host_post_split.lock.txt',
+        '--ref',
+        '0000000000000000000000000000000000000000',
+      ]);
+      expect(bad.exitCode, 1);
+      expect(bad.stdout, contains('jet_cad_floor_plan'));
+    });
+  });
+
+  test('SC22 package_root.dart prints a package\'s root from a config',
+      () async {
+    final dir = Directory.systemTemp.createTempSync('package_root');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    Directory('${dir.path}/.dart_tool').createSync();
+    File('${dir.path}/.dart_tool/package_config.json').writeAsStringSync(
+        '{"configVersion":2,"packages":[{"name":"a","rootUri":"../x/a",'
+        '"packageUri":"lib/"},{"name":"b","rootUri":"file:///abs/b/",'
+        '"packageUri":"lib/"}]}');
+    final a = await dartRun('package_root.dart', [dir.path, 'a']);
+    expect(a.exitCode, 0, reason: '${a.stdout}${a.stderr}');
+    // `../x/a` resolves against `.dart_tool/`, so the root is `<dir>/x/a`.
+    expect((a.stdout as String).trim(), endsWith('/x/a'));
+    // macOS reaches the temp directory through a symlink (/var, /private/var).
+    expect(
+        Directory(Directory((a.stdout as String).trim()).parent.parent.path)
+            .resolveSymbolicLinksSync(),
+        Directory(dir.path).resolveSymbolicLinksSync());
+    final b = await dartRun('package_root.dart', [dir.path, 'b']);
+    expect((b.stdout as String).trim(), '/abs/b');
+    final none = await dartRun('package_root.dart', [dir.path, 'c']);
+    expect(none.exitCode, 2);
   });
 
   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
@@ -147,14 +186,25 @@ void main() {
     expect(commands, contains('set -euo pipefail'));
     // The final review's F-3 (MU6): stale output survives a build, so the
     // probe starts clean.
-    final clean =
-        at(r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock"');
+    // Review Focus 4: a copy left by an earlier run must not mask a copy
+    // step that no longer runs.
+    final clean = at(
+        r'rm -rf "$probe/build" "$probe/.dart_tool" "$probe/pubspec.lock" \');
+    expect(
+        at(r'"$probe/assets/restaurant.jetlib" '
+            r'"$probe/lib/restaurant_names.dart"'),
+        clean + 1,
+        reason: 'the clean line goes on to the copies');
     final get = at('flutter pub get');
     expect(clean, lessThan(get), reason: 'cleaned before pub get');
-    final check =
-        at(r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock"');
+    final check = at(
+        r'dart run "$ci/check_host_lock.dart" "$probe/pubspec.lock" --ref "$ref"');
+    final copy = at(
+        r'symbols=$(dart run "$ci/package_root.dart" "$probe" jet_cad_restaurant_symbols)');
     final analyze = at('flutter analyze');
     final build = at('flutter build web');
+    expect(check < copy && copy < analyze, isTrue,
+        reason: 'the symbols are copied after the check, before analyze');
     expect(get < check && check < analyze && analyze < build, isTrue,
         reason: 'pub get, the check, analyze, build: $get, $check, '
             '$analyze, $build');

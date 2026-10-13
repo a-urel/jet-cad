@@ -54,11 +54,11 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   final TextStyle? statusCaptionStyle;
 
   /// The selection mode's status fills: multiplies the host colour's alpha,
-  /// once, in [0, 1]. Null: the colour as the host gave it.
+  /// once, in the range 0 to 1. Null: the colour as the host gave it.
   final double? statusFillOpacity;
 
   /// Both modes' table colour fills (plan colours spec PC-6): the hue's
-  /// alpha, in [0, 1]. Null: 0.35.
+  /// alpha, in the range 0 to 1. Null: 0.35.
   final double? tableColorOpacity;
 
   /// The selection mode's group frames. Null: the paper's grip colour.
@@ -106,7 +106,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   /// colour.
   final Color? focusVeilColor;
 
-  /// The focus veil's opacity, in [0, 1]. Null: 0.6.
+  /// The focus veil's opacity, in the range 0 to 1. Null: 0.6.
   final double? focusVeilOpacity;
 
   /// The canvas around the page and a page-less plan's paper, in both
@@ -201,7 +201,7 @@ final class FloorPlanTheme extends ThemeExtension<FloorPlanTheme> {
   /// [TextStyle.lerp], [EdgeInsets.lerp]), and each interpolated double (a
   /// double field, each padding side, a style's `fontSize`) is clamped
   /// between its two ends: a host's overshooting curve
-  /// (`Curves.easeOutBack`) drives `t` out of [0, 1], and two valid themes
+  /// (`Curves.easeOutBack`) drives `t` out of `[0, 1]`, and two valid themes
   /// must never animate into one the view refuses. A field null on one side
   /// means a value that depends on the paper, which cannot be interpolated,
   /// so it takes the side `t` is nearer (this one below 0.5); so does a
