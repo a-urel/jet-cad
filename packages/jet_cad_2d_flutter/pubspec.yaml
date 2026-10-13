@@ -1,17 +1,22 @@
 name: jet_cad_2d_flutter
 description: >-
-  Flutter rendering layer for the pure-Dart jet_cad_2d engine. Owns the camera,
-  coordinate rebasing, the paint seam and the viewport widget. The engine
-  package stays free of dart:ui.
+  Flutter rendering and interaction for the jet_cad_2d engine: a CAD canvas
+  with camera, rulers, selection and snapping, and PDF and PNG export.
 version: 0.7.1
-repository: https://github.com/ahmeturel/jet-cad
-publish_to: none
+repository: https://github.com/a-urel/jet-cad
+issue_tracker: https://github.com/a-urel/jet-cad/issues
+topics:
+  - cad
+  - drawing
+  - canvas
+  - pdf
 resolution: workspace
 
 environment:
-  sdk: ^3.5.0
-  # pdf 3.13.x requires Dart >= 3.12.0, which Flutter first ships in 3.44.0.
-  # Only this bound moves; `sdk:` sets the language version (spec 13 R-4).
+  # The floor pub workspaces document for their members; it sets language
+  # 3.6, which formats and analyses as 3.5 did. pdf 3.13.x requires Dart
+  # >= 3.12.0, which Flutter first ships in 3.44.0: that bound binds.
+  sdk: ^3.6.0
   flutter: ">=3.44.0"
 
 dependencies:

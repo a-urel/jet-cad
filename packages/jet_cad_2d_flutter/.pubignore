@@ -1,0 +1,7 @@
+# Left out of the pub.dev archive, at the package root only: the suites,
+# the test runner's build output, and the shaders, which the package's GPU
+# tests read and jet_cad_2d_gpu compiles from the repository. The example
+# stays in.
+/test/
+/build/
+/shaders/

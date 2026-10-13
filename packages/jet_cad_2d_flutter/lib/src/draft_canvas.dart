@@ -125,7 +125,7 @@ class DraftCanvas extends StatefulWidget {
   /// text rows; inert at its default of `true`.
   ///
   /// It is a widget property rather than something the rig reaches through
-  /// [DraftCanvasState] because the painter is built in [_attach] and its
+  /// [DraftCanvasState] because the painter is built in `_attach` and its
   /// `drawText` is final: a rig that wanted to flip it after the fact would
   /// have to rebuild the painter, and a rebuilt painter is a different frame.
   final bool drawText;
