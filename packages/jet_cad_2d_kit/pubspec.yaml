@@ -26,6 +26,7 @@ dependencies:
   vector_math: ^2.2.0
 
 dev_dependencies:
+  analyzer: ^13.3.0
   flutter_test:
     sdk: flutter
   lints: ^6.1.0

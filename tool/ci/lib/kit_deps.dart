@@ -2,6 +2,8 @@
 // contract (jet_cad_2d_kit) depends on neither the plan library nor a kit;
 // a kit (jet_cad_2d_kit_*) depends on neither the plan library nor another
 // kit. Kits cooperate only through the contract.
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:yaml/yaml.dart';
 
 const String contractPackage = 'jet_cad_2d_kit';
@@ -52,16 +54,32 @@ String? packageName(String pubspec) {
   return name is String ? name : null;
 }
 
-/// A directive and everything up to its `;` (conditional URIs included).
-final RegExp _directive =
-    RegExp(r'^\s*(?:import|export|part)\s+([^;]*);', multiLine: true);
-final RegExp _package = RegExp(r'''['"]package:([a-z0-9_]+)/''');
+final RegExp _package = RegExp(r'^package:([a-z0-9_]+)/');
+
+/// The URIs of [dart]'s import, export and part directives, the
+/// conditional URIs of an import or export included, as the Dart parser
+/// reads them: a comment between a keyword and its URI hides nothing, and a
+/// commented-out directive or a directive-shaped string is not a directive.
+List<String> directiveUris(String dart) => [
+      for (final directive
+          in parseString(content: dart, throwIfDiagnostics: false)
+              .unit
+              .directives)
+        ...switch (directive) {
+          NamespaceDirective() => [
+              directive.uri.stringValue,
+              for (final c in directive.configurations) c.uri.stringValue,
+            ],
+          PartDirective() => [directive.uri.stringValue],
+          _ => const <String?>[],
+        }
+            .nonNulls,
+    ];
 
 /// The packages [dart]'s import, export and part directives name.
 Set<String> importedPackages(String dart) => {
-      for (final directive in _directive.allMatches(dart))
-        for (final uri in _package.allMatches(directive.group(1)!))
-          uri.group(1)!,
+      for (final uri in directiveUris(dart))
+        if (_package.firstMatch(uri) case final match?) match.group(1)!,
     };
 
 /// Every break of the rule among [packages], as `<package>: <what>`.

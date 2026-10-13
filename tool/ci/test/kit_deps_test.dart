@@ -202,14 +202,46 @@ void main() {
           'jet_cad_2d_kit_bistro: pubspec dependencies names jet_cad_2d_plan');
     });
 
+    test('D19 a comment between the keyword and the URI hides nothing', () {
+      // The PR #11 review: the directives are parsed, not matched. M-D19:
+      // the former regex (`import\\s+` does not reach past a comment).
+      expect(
+          kitDepsProblems([
+            package('jet_cad_2d_kit_cinema', files: {
+              'lib/a.dart': "import/*c*/'package:jet_cad_2d_plan/x.dart';\n"
+                  "export // c\n  'package:jet_cad_2d_kit_bistro/y.dart';\n",
+            }),
+          ]),
+          [
+            'jet_cad_2d_kit_cinema: lib/a.dart imports jet_cad_2d_kit_bistro',
+            'jet_cad_2d_kit_cinema: lib/a.dart imports jet_cad_2d_plan',
+          ]);
+    });
+
+    test('D20 a commented-out directive and a directive-shaped string', () {
+      // M-D20: the former regex reports both (each starts a line).
+      expect(
+          kitDepsProblems([
+            package('jet_cad_2d_kit_cinema', files: {
+              'lib/a.dart': "import 'package:jet_cad_2d_kit/a.dart';\n"
+                  "/*\nimport 'package:jet_cad_2d_plan/x.dart';\n*/\n"
+                  "const text = '''\n"
+                  "export 'package:jet_cad_2d_kit_bistro/y.dart';\n''';\n",
+            }),
+          ]),
+          isEmpty);
+    });
+
     test('D8 importedPackages reads directives only', () {
       expect(
           importedPackages("import 'package:a_b/x.dart';\n"
               "export \"package:c/y.dart\" show Y;\n"
               "part 'z.dart';\n"
+              "part 'package:e/w.dart';\n"
               "import 'dart:io';\n"
               "// import 'package:d/z.dart';\n"),
-          {'a_b', 'c'});
+          // M-D8: drop the part directive (e is not read).
+          {'a_b', 'c', 'e'});
     });
   });
 

@@ -72,7 +72,43 @@ void main() {
     expect(walk.visited, {'lib/a.dart', 'lib/b.dart'});
   });
 
+  test('P6 a comment between the keyword and the URI hides nothing', () {
+    // The PR #11 review: the directives are parsed, not matched. M-P6: the
+    // former regex (`import\\s+` does not reach past a comment) reads none.
+    final root = tree({
+      'lib/a.dart': "import/*c*/'package:flutter/widgets.dart';\n"
+          "export // c\n  'dart:io';\n",
+    });
+    expect(walkImports(root, 'kit', ['lib/a.dart']).violations, [
+      'lib/a.dart: package:flutter/widgets.dart',
+      'lib/a.dart: dart:io',
+    ]);
+  });
+
+  test('P7 a commented-out directive and a directive-shaped string are none',
+      () {
+    // M-P7: the former regex reports both lines (each starts a line).
+    final root = tree({
+      'lib/a.dart': "import 'dart:math';\n"
+          "/*\nimport 'package:flutter/widgets.dart';\n*/\n"
+          "const text = '''\nexport 'dart:io';\n''';\n",
+    });
+    expect(walkImports(root, 'kit', ['lib/a.dart']).violations, isEmpty);
+  });
+
+  test('P8 a part is followed', () {
+    // M-P8: drop the part directive (b.dart is not visited).
+    final root = tree({
+      'lib/a.dart': "part 'src/b.dart';\n",
+      'lib/src/b.dart': "part of '../a.dart';\n",
+    });
+    final walk = walkImports(root, 'kit', ['lib/a.dart']);
+    expect(walk.visited, {'lib/a.dart', 'lib/src/b.dart'});
+    expect(walk.violations, isEmpty);
+  });
+
   test("P5 a conditional import's second URI is read", () {
+    // M-P5: drop the configurations (only the first URI is read).
     final root = tree({
       'lib/a.dart': "import 'b.dart'\n"
           "    if (dart.library.io) 'package:flutter/widgets.dart';\n",
