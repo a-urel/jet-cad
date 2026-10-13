@@ -245,6 +245,9 @@ void main() {
     });
   });
 
+  // Each test runs check_kit_deps.dart, which imports package:analyzer: a
+  // cold `dart run` compiles it (about 5 s on a fast machine, D11 runs it
+  // twice), so the group allows four times the default timeout.
   group('the script', () {
     late Directory tmp;
     setUp(() => tmp = Directory.systemTemp.createTempSync('check_kit_deps'));
@@ -331,5 +334,5 @@ void main() {
     test('D12 bad usage: exit 2', () async {
       expect((await check(['--packages'])).exitCode, 2);
     });
-  });
+  }, timeout: const Timeout.factor(4));
 }
