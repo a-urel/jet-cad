@@ -163,11 +163,14 @@ jobs:
       # code, analysed in the probe just resolved at the commit under test,
       # still compiles; the probe's own main.dart is put back after each.
       # Every release a host may still pin stays: 0.3.0 is the spec's own,
-      # 0.4.0 (the embedding API, 8367010) followed its tag, and 0.5.1 is
-      # the last release that saves schema 9.
+      # 0.4.0 (the embedding API, 8367010) followed its tag, 0.5.1 is the
+      # last release that saves schema 9, and 0.6.0 (plan colours,
+      # 3bf64a7) the first that saves schema 10.
       - name: The 0.3.0 host probe against this commit
         run: tool/ci/old_host_probe.sh v0.3.0
       - name: The 0.4.0 host probe against this commit
         run: tool/ci/old_host_probe.sh v0.4.0
       - name: The 0.5.1 host probe against this commit
         run: tool/ci/old_host_probe.sh v0.5.1
+      - name: The 0.6.0 host probe against this commit
+        run: tool/ci/old_host_probe.sh v0.6.0

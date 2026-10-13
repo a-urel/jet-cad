@@ -8,6 +8,20 @@ pub.dev: a host depends on them by git (see
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.7.0
+
+Rubber-band selection: in the selection mode a drag draws a band that
+selects tables. Plans are stored as in 0.6.0 (schema 10): a plan either
+release saves opens in the other, and service layouts are unchanged.
+Nothing a host compiles against is removed or changed; the one change a
+host can notice without opting in is under the default
+`floorDrag: FloorPlanFloorDrag.pan`, where a mouse or stylus drag on the
+floor with Shift, Ctrl or Cmd held now draws a band instead of panning
+(below). The packages need Flutter 3.44 or later, as 0.6.0 did; 0.7.0
+was built and tested with Flutter 3.47.6.
+
 - **A band selects tables in the selection mode.**
   `FloorPlanView(floorDrag: FloorPlanFloorDrag.band)` makes a one-finger
   or mouse drag on the floor draw a band — left to right the tables

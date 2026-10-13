@@ -360,12 +360,20 @@ CHANGELOG, the specs' notes), each task reviewed independently; the
 final Opus review returned "Ready after fixes" (six surviving mutants
 pinned, the docs' "the wheel pans" corrected: the wheel zooms on
 desktop), fixed in one wave and re-reviewed clean. Ledger archived in
-`docs/superpowers/ledgers/2026-10-13-rubber-band-selection/`. Release
-0.7.0 follows, on the human's word.
+`docs/superpowers/ledgers/2026-10-13-rubber-band-selection/`. Released
+with 0.7.0 (below).
 
 ## In flight
 
-Nothing.
+- **Release 0.7.0** (the human, 2026-10-13: *"başla"*), prepared on
+  `release/0.7.0` (worktree `.claude/worktrees/release-0.7.0`), cut from
+  `main` at `7d3ce8d`: the five packages at 0.7.0, the CHANGELOG's
+  Unreleased section become 0.7.0 ("Nothing yet." left under
+  Unreleased), the guide covering 0.7.0 with §1's placeholder ref
+  (filled by the commit after the merge), and CI's old-host probes gain
+  `v0.6.0` (ruling 7 of the rubber-band ledger). Plans unchanged (schema
+  10). **Waits for the human's merge word**; then the guide names the
+  merge's SHA, and the push and the tag `v0.7.0` are the human's.
 
 ## Owed to the human
 
@@ -438,14 +446,14 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: release 0.7.0, on the human's word.** Rubber-band selection is
-**merged into `main` at `232d905`** (2026-10-13; plan
-[2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md),
-Tasks 1–4 done and reviewed per task, the final review's fixes applied
-and re-reviewed); release 0.7.0 is its own step (and CI gains the v0.6.0
-old-host probe then) (the CHANGELOG's
-Unreleased section carries the slice; the guide's "Selecting with a
-band" says *Since 0.7.0*). Until then, **the human's choice** otherwise.
+**Next: the human's word to merge `release/0.7.0` into `main`.** Release
+0.7.0 is prepared on `release/0.7.0` (worktree
+`.claude/worktrees/release-0.7.0`, cut from `main` at `7d3ce8d`; see "In
+flight"): it releases rubber-band selection, **merged into `main` at
+`232d905`** (2026-10-13; plan
+[2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md)).
+After the merge: one commit filling the guide's §1 with the merge's SHA;
+the push and the tag `v0.7.0` are the human's.
 Release 0.6.0 is **merged into `main` at
 `3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
 capability and the Selection panel's Colour row) merged at `ce0a4f9`;
