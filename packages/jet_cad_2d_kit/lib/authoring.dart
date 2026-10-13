@@ -3,4 +3,6 @@
 /// conformance test. A kit's generator runs it under plain `dart run`.
 library;
 
+export 'src/authoring/builder.dart';
+export 'src/authoring/catalog.dart';
 export 'src/model/model.dart';
