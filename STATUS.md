@@ -16,13 +16,17 @@ and **14** (the restaurant embedding) are merged; see
 [roadmap/00-README.md](roadmap/00-README.md)'s Status table for each
 one's spec, plan and results.
 
-- **Release 0.1.0** ([CHANGELOG.md](CHANGELOG.md)): the four packages a
-  POS depends on by git, at one commit SHA
-  ([docs/host-guide.md](docs/host-guide.md)). CI on GitHub Actions
+- **Release 0.1.0** ([CHANGELOG.md](CHANGELOG.md), now an index of the
+  packages' own CHANGELOGs): up to 0.7.0 the four packages a POS depends
+  on were taken by git, at one commit SHA; from 0.7.1 the planner is taken
+  from pub.dev ([docs/host-guide.md](docs/host-guide.md), In flight
+  below). CI on GitHub Actions
   (`.github/workflows/ci.yml`) runs every gate on pushes to `main` and
   `claude/**` and on pull requests, compares the standing failures and
-  skips exactly (`tool/ci/standing_*.txt`), and builds the host probe by
-  git at the commit under test. In that probe it then analyses each
+  skips exactly (`tool/ci/standing_*.txt`), and builds the host probe at
+  the commit under test (the planner's hosted line, the four packages
+  overridden to the commit by `dependency_overrides`; the lock check
+  proves it). In that probe it then analyses each
   released host's `main.dart`, read from its tag: `v0.3.0` (the host
   embedding API spec's invariant 1), `v0.4.0` (since 2026-10-10, the
   0.4.0 review's R-7), `v0.5.1` and `v0.6.0` (since release 0.7.0,
@@ -383,6 +387,28 @@ with 0.7.0 (below).
 
 ## In flight
 
+- **Publishing `jet_cad_2d_flutter` and `jet_cad_floor_plan` on pub.dev**
+  (the human, 2026-10-13: *"bence tümünü sırayla yayınlayalım"*), on
+  `feat/publish-host-packages`, cut by hand from `main` at `d41e5f6`;
+  **not merged, not pushed**. Spec
+  [2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
+  (revision 2, approved), plan
+  [2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md),
+  record
+  [2026-10-13-publish-host-packages-results.md](docs/superpowers/notes/2026-10-13-publish-host-packages-results.md);
+  the SDD ledger is `.superpowers/sdd/2026-10-13-publish-host-packages/`
+  (archived at the merge). Seven tasks, each reviewed: every dependency on
+  a published package a hosted `^0.7.1` (the workspace resolves it to the
+  local copy); both packages at 0.7.1 with LICENSE, README, CHANGELOG,
+  `.pubignore`, an example and its test; `dart doc` 6 → 0 and 23 → 0;
+  CI's `publishable` job over the three packages; the host probe checking
+  the commit under test through overrides, its lock check proving it;
+  the host guide on pub.dev, with the restaurant symbols as files a host
+  copies. Dry runs: 0 warnings for all three. pana for the two dependents
+  is 40/160 today (R-4: pana resolves outside the workspace and their
+  dependencies are not on pub.dev yet). The engine step (0.7.1, below) is
+  still the human's.
+
 - **Publishing `jet_cad_2d` on pub.dev** (the human, 2026-10-13; bounded
   design in chat, approved: *"evet"*), on `feat/publish-jet-cad-2d`, cut
   by hand from `main` at `133cf03`. **Merged into `main` at `1dc167d`** on
@@ -468,16 +494,39 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human publishes `jet_cad_2d` 0.7.1**, merged into `main` at
-`1dc167d` (In flight). In this order: push `main` and watch CI (its new
-job `publishable` included); from `packages/jet_cad_2d`, `dart pub publish
---dry-run`, then `dart pub publish`; then the tag `jet_cad_2d-v0.7.1` →
-`1dc167d`. pub.dev scores the package itself after the upload: 160/160 is
-expected once GitHub's `main` carries the new pubspec (150/160 measured
-before the push). Claude never runs `dart pub publish` without
-`--dry-run`. In parallel: the brainstorm for publishing the host packages
-(Rulings: "The host packages go to pub.dev too"), its first question the
-version policy; the spec goes on a worktree cut from `main`.
+**Next: the human publishes the three packages, in order** (Claude never
+runs `dart pub publish` without `--dry-run`; merge, push, tag and publish
+are the human's alone). `jet_cad_2d` 0.7.1 is merged into `main` at
+`1dc167d`; `feat/publish-host-packages` (In flight) awaits its review
+result, then the human's word to merge. The checklist (spec D10), per
+package, in this order:
+
+1. **`jet_cad_2d` 0.7.1:** push `main` and watch CI (job `publishable`
+   included); from `packages/jet_cad_2d`, `dart pub publish --dry-run`,
+   `dart pub publish`; the tag `jet_cad_2d-v0.7.1` → `1dc167d`; the
+   version visible on pub.dev. pub.dev scores it after the upload:
+   160/160 is expected once GitHub's `main` carries the pubspec (150/160
+   measured before the push).
+2. **`jet_cad_2d_flutter` 0.7.1:** `main` carries the merge and CI is
+   green; its lower bound on the engine is `^0.7.1` (D1: raise it to the
+   engine's current version if the render package uses newer API) and
+   pana's *"Compatible with dependency constraint lower bounds"* section
+   is green, run on the archive now that the engine is on pub.dev (it was
+   40/160 before, R-4); `dart pub publish --dry-run`; `dart pub publish`;
+   the tag `jet_cad_2d_flutter-v0.7.1` on the merge commit; the version
+   visible on pub.dev.
+3. **`jet_cad_floor_plan` 0.7.1:** the same, with its lower bounds on the
+   engine and the render package and pana's lower-bounds section green;
+   the tag `jet_cad_floor_plan-v0.7.1` on the merge commit; the version
+   visible on pub.dev.
+4. **After the planner (D7):** in a scratch copy of
+   `tool/ci/host_probe/pubspec.yaml.in` remove the `dependency_overrides`
+   block, resolve it from pub.dev alone, `flutter analyze`, and record
+   the result in the results note.
+
+Then the restaurant software moves (D11, in the planner's CHANGELOG and
+the results note): replace its two git dependencies with
+`jet_cad_floor_plan: ^0.7.1` and copy the symbols as the guide says.
 
 Before this: Release 0.7.0 is **merged into `main` at
 `0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
@@ -561,59 +610,61 @@ docs/superpowers/
 ## Rulings that still bind future work
 
 **The engine's own version (the human, 2026-10-13: *"Bağımsız,
-0.7.1"*).** `jet_cad_2d` is published on pub.dev and versioned on its own:
-it moves only when its own code or pubspec changes, gets an entry in
-`packages/jet_cad_2d/CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z` (pushed
-by the human), and is published by the human. The host packages
-(`jet_cad_2d_flutter`, `jet_cad_floor_plan`, `jet_cad_restaurant_symbols`)
-and `jet_cad_2d_gpu` keep one version and one `vX.Y.Z` tag; a host
-release's root CHANGELOG entry names the engine version it carries. Until
-the publication spec below lands, every other package of the live line
-stays `publish_to: none` and keeps its `path:` dependency on the engine.
-(The dormant `packages/jet_cad` has no
-`publish_to` line at all: found by this branch's review, left for the
-human.) Under 0.x, a minor bump of the engine may break its API. The
-barrel is published whole; the narrowing candidates are in
-[2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md),
+0.7.1"*; extended to every published package by Decision 4 of the host
+packages' spec, *"Her biri bağımsız"*).** Every published package
+(`jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`) is versioned on
+its own: it moves only when its own code or pubspec changes, gets an
+entry in its own `CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z`,
+`jet_cad_2d_flutter-vX.Y.Z` or `jet_cad_floor_plan-vX.Y.Z` (pushed by the
+human), and is published by the human, bottom-up (D10). The shared
+`vX.Y.Z` line ended at `v0.7.0`; the root `CHANGELOG.md` is an index of
+the three, then the shared history to 0.7.0 unchanged.
+`jet_cad_2d_gpu` and `jet_cad_restaurant_symbols` are unpublished and
+untagged; they keep their version fields. **D1's lower-bound rule:** the
+workspace enforces a caret's upper bound and never its lower bound, so
+when a dependent is released its lower bound on each sibling is raised to
+that sibling's current version, and pana's lower-bounds section is run on
+the dependent's archive before `dart pub publish`; a release that does
+not change a dependent does not touch its constraints. (The dormant
+`packages/jet_cad` has no `publish_to` line at all: found by the engine's
+review, left for the human.) Under 0.x, a minor bump of the engine may
+break its API. The barrels are published whole; the narrowing candidates
+are in
+[2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md)
+and
+[2026-10-13-publish-host-packages-results.md](docs/superpowers/notes/2026-10-13-publish-host-packages-results.md),
 and narrowing is a spec of its own.
 
 **The host packages go to pub.dev too, in order (the human, 2026-10-13:
 *"bence tümünü sırayla yayınlayalım"*; the restaurant software is to
-install them from pub.dev instead of by git).** Architectural: a spec of
-its own, after the engine's release, brainstormed with the human. Binding
-inputs to it:
+install them from pub.dev instead of by git).** Specified in
+[2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
+and planned in
+[2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md);
+the spec's Decisions bind (Apache 2.0 for all, hosted constraints in the
+repository, pub.dev only for hosts). Order: `jet_cad_2d` → `jet_cad_2d_flutter`
+→ `jet_cad_floor_plan`; the second and third steps are **prepared on
+`feat/publish-host-packages`** (In flight), published by the human
+(Resume here). Still binding:
 
-- **Order:** `jet_cad_2d` (this branch) → `jet_cad_2d_flutter` →
-  `jet_cad_floor_plan`. Pub refuses a `path:` dependency in a published
-  package, so each waits for the one it depends on to be on pub.dev, and
-  every dependent then names the engine (and the render package) by a
-  hosted constraint, which a workspace still resolves to the local copy.
-  `jet_cad_2d_gpu` stays unpublished.
-- **Licence:** Apache 2.0 for every published package (the human:
-  *"tümü için lisans apache 2.0 olsun"*), each with its own byte-identical
-  copy of the root LICENSE. Checked: the planner's bundled Roboto is
-  Apache 2.0 under its own `assets/fonts/Roboto_LICENSE.txt`; the two
-  `.jetlib` files and the render package's shaders are the project's own.
 - **The restaurant symbols: the fourth step, deferred** (a SWOT in chat;
   the human: *"tamam yaz"*). `jet_cad_restaurant_symbols` is published only
   after the planner has been on pub.dev for a few releases and the schema
   and versioning policy are settled, because a pub.dev release cannot be
   taken back (a retraction only within 7 days) and the library's source
   name `restaurant` and its entry keys become a contract once published.
-  Until then the restaurant software carries `restaurant.jetlib` (the
-  engine's JSON document format, schema 10, generated by the package's
-  `tool/generate_restaurant_library.dart`) and the German and Turkish
-  names in its own assets, and builds its own `SymbolLibrarySource(name:
-  'restaurant', …)` from the planner's public API. Saved plans do not
-  depend on the library: placing a symbol copies its definition into the
-  plan (`symbol_placer.dart`, `definitionForEntry`).
-- **Open for the brainstorm:** the version policy of the render package
-  and the planner (one shared version, or each its own); whether hosts
-  may still depend by git, and the host guide §1 that follows; CI's host
-  probe and the released probes (`v0.3.0` … `v0.6.0`), which resolve by
-  git today; how a dependent's dry run sees an engine version not yet on
-  pub.dev (measured, not assumed); each package's barrel, assets, testing
-  libraries (`export_testing.dart`), `.pubignore`, README and example.
+  Until then a host copies `restaurant.jetlib` and `names.dart` from the
+  repository tree at the planner's tag (the host guide's "The restaurant
+  symbols") and builds its own `SymbolLibrarySource(name: 'restaurant',
+  …)` from the planner's public API; it never loads the copy together with
+  the package's `restaurantSymbolSource` (the same keys in two sources
+  make the loader fail). Saved plans do not depend on the library:
+  placing a symbol copies its definition into the plan
+  (`symbol_placer.dart`, `definitionForEntry`).
+- **Licence:** Apache 2.0 for every published package, each with its own
+  byte-identical copy of the root LICENSE (CI's `publishable` job runs
+  `cmp`). The planner's bundled Roboto is Apache 2.0 under its own
+  `assets/fonts/Roboto_LICENSE.txt`.
 
 Plan 3c's ledger carries 56 numbered rulings, archived in full at
 [docs/superpowers/ledgers/](docs/superpowers/ledgers/). These are the ones that
@@ -780,6 +831,9 @@ dart test test/invariants/query_allocation_test.dart
 dart run benchmark/query_throughput.dart
 dart analyze && dart format --output=none --set-exit-if-changed .
 dart pub publish --dry-run              # 0 warnings; never without --dry-run
+# the same dry run, 0 warnings, in packages/jet_cad_2d_flutter and
+# packages/jet_cad_floor_plan (from the repository root:
+# dart pub -C packages/<name> publish --dry-run)
 
 # render layer (Flutter)
 cd packages/jet_cad_2d_flutter
