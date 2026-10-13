@@ -20,26 +20,35 @@ void main() {
     for (final MapEntry(key: package, value: probe) in cases.entries) {
       final readme = read('../../packages/$package/README.md');
       expect(
-          readmeProblems(package, readme, dart: read(probe), yaml: probeYaml),
-          isEmpty,
-          reason: package);
+        readmeProblems(package, readme, dart: read(probe), yaml: probeYaml),
+        isEmpty,
+        reason: package,
+      );
     }
   });
 
   test('RM2 a renamed identifier in a README is named', () {
     final readme = read('../../packages/jet_cad_2d/README.md');
     expect(readme, contains('DraftDocument.empty()'), reason: 'premise');
-    final renamed =
-        readme.replaceFirst('DraftDocument.empty()', 'DraftDocument.blank()');
+    final renamed = readme.replaceFirst(
+      'DraftDocument.empty()',
+      'DraftDocument.blank()',
+    );
     expect(
-        readmeProblems('jet_cad_2d', renamed,
-            dart: read(cases['jet_cad_2d']!), yaml: probeYaml),
-        [startsWith('jet_cad_2d: dart: ')]);
+      readmeProblems(
+        'jet_cad_2d',
+        renamed,
+        dart: read(cases['jet_cad_2d']!),
+        yaml: probeYaml,
+      ),
+      [startsWith('jet_cad_2d: dart: ')],
+    );
   });
 
   test('RM3 a README without a Dart block is red', () {
-    expect(readmeProblems('x', '# x\n\nNo code.\n', dart: '', yaml: ''),
-        ['x: no dart block']);
+    expect(readmeProblems('x', '# x\n\nNo code.\n', dart: '', yaml: ''), [
+      'x: no dart block',
+    ]);
   });
 
   test("RM4 the planner's font block is the host probe's", () {
@@ -47,8 +56,13 @@ void main() {
     final moved = readme.replaceFirst('Roboto-Regular.ttf', 'Roboto.ttf');
     expect(moved, isNot(readme), reason: 'premise');
     expect(
-        readmeProblems('jet_cad_floor_plan', moved,
-            dart: read(cases['jet_cad_floor_plan']!), yaml: probeYaml),
-        [startsWith('jet_cad_floor_plan: yaml: ')]);
+      readmeProblems(
+        'jet_cad_floor_plan',
+        moved,
+        dart: read(cases['jet_cad_floor_plan']!),
+        yaml: probeYaml,
+      ),
+      [startsWith('jet_cad_floor_plan: yaml: ')],
+    );
   });
 }

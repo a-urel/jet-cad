@@ -26,8 +26,11 @@ List<String> lockPackages(String lock) {
   }
   // Pub writes the map as a block, or `{}` when it is empty. A flow map's
   // keys would sit on this line, unread: refuse it rather than pass it.
-  final inline =
-      lines[start].substring('packages:'.length).split('#').first.trim();
+  final inline = lines[start]
+      .substring('packages:'.length)
+      .split('#')
+      .first
+      .trim();
   if (inline == '{}') return const [];
   if (inline.isNotEmpty) {
     throw FormatException('a flow map under "packages:": ${lines[start]}');
@@ -45,8 +48,9 @@ List<String> lockPackages(String lock) {
       throw FormatException('a key indented less than the first: $line');
     }
     if (depth != indent) continue; // A package's own fields.
-    final key = RegExp(r'''^(?:"([^"]*)"|'([^']*)'|([^\s:#'"][^:]*?))\s*:''')
-        .firstMatch(content);
+    final key = RegExp(
+      r'''^(?:"([^"]*)"|'([^']*)'|([^\s:#'"][^:]*?))\s*:''',
+    ).firstMatch(content);
     if (key == null) {
       throw FormatException('not a key under "packages:": $line');
     }
@@ -58,9 +62,9 @@ List<String> lockPackages(String lock) {
 /// The [forbiddenHostPackages] that are keys under [lock]'s `packages:`,
 /// in the lock's order.
 List<String> forbiddenInLock(String lock) => [
-      for (final name in lockPackages(lock))
-        if (forbiddenHostPackages.contains(name)) name,
-    ];
+  for (final name in lockPackages(lock))
+    if (forbiddenHostPackages.contains(name)) name,
+];
 
 /// The packages the host probe must take from the commit under test, by
 /// its `dependency_overrides` (publishing spec D6): once they are on
@@ -87,8 +91,9 @@ Map<String, String> lockEntryFields(String lock, String name) {
     if (content.isEmpty) continue;
     final depth = line.length - content.length;
     if (depth <= indent) break; // The next package: the entry has ended.
-    final m =
-        RegExp(r'^(source|resolved-ref):\s*"?([^"\s]+)"?').firstMatch(content);
+    final m = RegExp(
+      r'^(source|resolved-ref):\s*"?([^"\s]+)"?',
+    ).firstMatch(content);
     if (m != null) fields[m[1]!] = m[2]!;
   }
   return fields;
@@ -98,11 +103,11 @@ Map<String, String> lockEntryFields(String lock, String name) {
 /// resolve from git at [ref]: missing, another source, or another
 /// resolved ref.
 List<String> notFromCommit(String lock, String ref) => [
-      for (final name in probedFromCommit)
-        if (lockEntryFields(lock, name) case final f
-            when f['source'] != 'git' || f['resolved-ref'] != ref)
-          f.isEmpty
-              ? '$name: not in the lock'
-              : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
-                  'not git at $ref',
-    ];
+  for (final name in probedFromCommit)
+    if (lockEntryFields(lock, name) case final f
+        when f['source'] != 'git' || f['resolved-ref'] != ref)
+      f.isEmpty
+          ? '$name: not in the lock'
+          : '$name: ${f['source']} at ${f['resolved-ref'] ?? 'no ref'}, '
+                'not git at $ref',
+];

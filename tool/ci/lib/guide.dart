@@ -31,8 +31,11 @@ String _pubspecShape(String yaml) => yaml
 /// occur in [dart] (the probe's `lib/main.dart`), each YAML block in
 /// [yaml] (its `pubspec.yaml.in`), white space collapsed. Returns the
 /// first line of each missing block.
-List<String> missingBlocks(String guide,
-    {required String dart, required String yaml}) {
+List<String> missingBlocks(
+  String guide, {
+  required String dart,
+  required String yaml,
+}) {
   final dartText = collapse(dart);
   final yamlText = collapse(_pubspecShape(yaml));
   return [

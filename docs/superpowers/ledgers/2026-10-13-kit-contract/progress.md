@@ -108,3 +108,11 @@ Final re-review (opus, final-rereview.md): FR2-FR9 and item-4 minors ADDRESSED; 
 - Ruling: parked — a bow-tie outline whose lobes cancel is refused as "encloses no area" — a self-intersecting outline is not a valid unit outline anyway — cost: none.
 - Ruling: parked — check_kit_deps skips build/ and .dart_tool/ only at a package's top level, and throws on a malformed pubspec anywhere — both fail closed — cost: a spurious CI failure, never a missed violation.
 Final review: complete (fix wave fea46c3..6464ad7, re-review clean, 3 parked).
+Finish: the human chose 1 ("1"): pushed feat/kit-architecture (344a417), PR https://github.com/a-urel/jet-cad/pull/11 against main; merge waits for green CI and the human's word
+## PR #11 review comments (Copilot, CodeRabbit) — the human: "evet, dördünü düzelt ve push et"
+- Ruling: PR1 rule 15's zero-length polyline check is O(n²) with allocations on untrusted bytes — replace with an O(n) bounding-box test (width and height <= Tolerance.linear) — same meaning up to the box diagonal; cost: none.
+- Ruling: PR2 kitDepsProblems guards loadYaml and reports a malformed pubspec as a problem (the script's own promise) — cost: none.
+- Ruling: PR3 CatalogArc doc says the sweep is signed (negative = clockwise) — cost: none.
+- Ruling: PR4 the purity walker and kit_deps parse directives with package:analyzer (parseString(...).unit.directives; namespace, configuration and part URIs), analyzer a dev_dependency of jet_cad_2d_kit and a dependency of tool/ci, never a production dependency — the regex missed `import/*c*/'...'` — cost: a heavier test dependency.
+- Ruling: PR re-review Important — tool/ci script tests cold-compile analyzer (~5 s per run; D11 ~10 s locally vs the 30 s default timeout) — add Timeout.factor(4) to the script-test group(s) — cost: a slow test fails later instead of sooner
+PR review fixes: complete (commits 344a417..2384017; PR1-PR4 + timeout ADDRESSED, re-review clean); ledger re-archived as the branch's last commit and pushed (the human: "evet, dördünü düzelt ve push et")

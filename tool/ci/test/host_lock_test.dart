@@ -53,46 +53,57 @@ final entries = {
     'scene',
   ])
     name: entryOf(preSplit, name),
-  'jet_cad_2d_gpu': entryOf(green, 'jet_cad_2d_flutter')
-      .replaceAll('jet_cad_2d_flutter', 'jet_cad_2d_gpu'),
+  'jet_cad_2d_gpu': entryOf(
+    green,
+    'jet_cad_2d_flutter',
+  ).replaceAll('jet_cad_2d_flutter', 'jet_cad_2d_gpu'),
 };
 
 void main() {
   test('HL1 the lock after the split: its packages, and none forbidden', () {
     final packages = lockPackages(green);
-    expect(packages, hasLength(43),
-        reason: 'the 40 the probe resolved at 2b35b69, and three look-alikes');
     expect(
-        packages,
-        containsAll([
-          'jet_cad_floor_plan',
-          'jet_cad_restaurant_symbols',
-          'jet_cad_2d',
-          'jet_cad_2d_flutter',
-          'my_flutter_scene_tools',
-          'my_scene',
-          'scene_x',
-        ]));
+      packages,
+      hasLength(43),
+      reason: 'the 40 the probe resolved at 2b35b69, and three look-alikes',
+    );
+    expect(
+      packages,
+      containsAll([
+        'jet_cad_floor_plan',
+        'jet_cad_restaurant_symbols',
+        'jet_cad_2d',
+        'jet_cad_2d_flutter',
+        'my_flutter_scene_tools',
+        'my_scene',
+        'scene_x',
+      ]),
+    );
     expect(packages, isNot(contains('sdks')), reason: 'a top-level key');
     expect(packages, isNot(contains('dart')), reason: 'a key under sdks:');
     expect(forbiddenInLock(green), isEmpty);
   });
 
-  test('HL2 every forbidden name is in the green lock as text, none as a key',
-      () {
-    for (final name in const [
-      'flutter_scene',
-      'flutter_gpu',
-      'flutter_gpu_shaders',
-      'scene',
-      'jet_cad_2d_gpu',
-    ]) {
-      expect(green, contains(name), reason: 'premise: $name as text');
-      expect(lockPackages(green), isNot(contains(name)));
-    }
-    expect(green, contains('description: name: flutter_scene'),
-        reason: 'premise: a pubspec.lock line, as text, in a string');
-  });
+  test(
+    'HL2 every forbidden name is in the green lock as text, none as a key',
+    () {
+      for (final name in const [
+        'flutter_scene',
+        'flutter_gpu',
+        'flutter_gpu_shaders',
+        'scene',
+        'jet_cad_2d_gpu',
+      ]) {
+        expect(green, contains(name), reason: 'premise: $name as text');
+        expect(lockPackages(green), isNot(contains(name)));
+      }
+      expect(
+        green,
+        contains('description: name: flutter_scene'),
+        reason: 'premise: a pubspec.lock line, as text, in a string',
+      );
+    },
+  );
 
   group('HL3 one forbidden package put in the green lock is named', () {
     for (final name in const [
@@ -114,56 +125,81 @@ void main() {
   test('HL4 the lock before the split names flutter_scene and its own', () {
     final packages = lockPackages(preSplit);
     expect(packages, hasLength(53), reason: 'what the probe resolved');
-    expect(packages, containsAll(['hooks', 'code_assets', 'data_assets']),
-        reason: 'F-6: what the build hook brought');
-    expect(forbiddenInLock(preSplit),
-        ['flutter_gpu', 'flutter_gpu_shaders', 'flutter_scene', 'scene']);
+    expect(
+      packages,
+      containsAll(['hooks', 'code_assets', 'data_assets']),
+      reason: 'F-6: what the build hook brought',
+    );
+    expect(forbiddenInLock(preSplit), [
+      'flutter_gpu',
+      'flutter_gpu_shaders',
+      'flutter_scene',
+      'scene',
+    ]);
   });
 
-  test(
-      'HL5 a forbidden name as a key elsewhere than under packages: is not '
+  test('HL5 a forbidden name as a key elsewhere than under packages: is not '
       'a package', () {
     final elsewhere = green
-        .replaceFirst('      name: scene_x\n',
-            '      name: scene_x\n      flutter_gpu: "0.0.0"\n')
+        .replaceFirst(
+          '      name: scene_x\n',
+          '      name: scene_x\n      flutter_gpu: "0.0.0"\n',
+        )
         .replaceFirst('sdks:\n', 'sdks:\n  scene: ">=0.3.0"\n');
-    expect(elsewhere, contains('      flutter_gpu: "0.0.0"\n'),
-        reason: 'premise: a field of a package');
-    expect(elsewhere, contains('sdks:\n  scene: '),
-        reason: 'premise: a key under sdks:');
+    expect(
+      elsewhere,
+      contains('      flutter_gpu: "0.0.0"\n'),
+      reason: 'premise: a field of a package',
+    );
+    expect(
+      elsewhere,
+      contains('sdks:\n  scene: '),
+      reason: 'premise: a key under sdks:',
+    );
     expect(forbiddenInLock(elsewhere), isEmpty);
     expect(lockPackages(elsewhere), lockPackages(green));
   });
 
   test('HL6 a quoted key is the same key', () {
-    final quoted = withEntry(green, 'scene',
-        entries['scene']!.replaceFirst('  scene:', '  "scene":'));
+    final quoted = withEntry(
+      green,
+      'scene',
+      entries['scene']!.replaceFirst('  scene:', '  "scene":'),
+    );
     expect(quoted, contains('\n  "scene":\n'), reason: 'premise');
     expect(forbiddenInLock(quoted), ['scene']);
   });
 
   test('HL7 text that is not a lock is an error, an empty map is not', () {
-    expect(() => lockPackages('# Generated by pub\nsdks:\n  dart: ">=3"\n'),
-        throwsFormatException);
+    expect(
+      () => lockPackages('# Generated by pub\nsdks:\n  dart: ">=3"\n'),
+      throwsFormatException,
+    );
     expect(() => lockPackages(''), throwsFormatException);
     expect(lockPackages('packages: {}\nsdks:\n  dart: ">=3"\n'), isEmpty);
     expect(
-        lockPackages('packages: {} # none\nsdks:\n  dart: ">=3"\n'), isEmpty);
+      lockPackages('packages: {} # none\nsdks:\n  dart: ">=3"\n'),
+      isEmpty,
+    );
   });
 
-  test(
-      'HL8 a layout pub never writes is an error, not a clean lock '
+  test('HL8 a layout pub never writes is an error, not a clean lock '
       '(Task 2 review R-3)', () {
     // A flow map: its keys are on the packages: line itself.
-    expect(() => lockPackages('packages: {flutter_scene: {}}\n'),
-        throwsFormatException);
+    expect(
+      () => lockPackages('packages: {flutter_scene: {}}\n'),
+      throwsFormatException,
+    );
     // A key indented less than the first: read as a field, it would hide
     // flutter_scene.
     final shallow = withEntry(
-        green,
-        'flutter_scene',
-        entries['flutter_scene']!
-            .replaceFirst('  flutter_scene:', ' flutter_scene:'));
+      green,
+      'flutter_scene',
+      entries['flutter_scene']!.replaceFirst(
+        '  flutter_scene:',
+        ' flutter_scene:',
+      ),
+    );
     expect(shallow, contains('\n flutter_scene:\n'), reason: 'premise');
     expect(() => lockPackages(shallow), throwsFormatException);
   });
@@ -173,8 +209,10 @@ void main() {
 
     test('HL-C1 the green lock: all four from git at the ref', () {
       expect(notFromCommit(green, ref), isEmpty);
-      expect(lockEntryFields(green, 'jet_cad_2d'),
-          {'source': 'git', 'resolved-ref': ref});
+      expect(lockEntryFields(green, 'jet_cad_2d'), {
+        'source': 'git',
+        'resolved-ref': ref,
+      });
     });
 
     test('HL-C2 another ref: each of the four named', () {
@@ -215,16 +253,21 @@ void main() {
     test('HL-C3b the right ref under another source: named', () {
       final entry = entryOf(green, 'jet_cad_floor_plan');
       final lock = green.replaceFirst(
-          entry, entry.replaceFirst('source: git', 'source: path'));
+        entry,
+        entry.replaceFirst('source: git', 'source: path'),
+      );
       expect(lock, isNot(green), reason: 'premise');
       expect(notFromCommit(lock, ref), [contains('jet_cad_floor_plan')]);
     });
 
     test('HL-C4 a package missing from the lock: named', () {
       final lock = green.replaceFirst(
-          '${entryOf(green, 'jet_cad_restaurant_symbols')}\n', '');
-      expect(
-          notFromCommit(lock, ref), [contains('jet_cad_restaurant_symbols')]);
+        '${entryOf(green, 'jet_cad_restaurant_symbols')}\n',
+        '',
+      );
+      expect(notFromCommit(lock, ref), [
+        contains('jet_cad_restaurant_symbols'),
+      ]);
     });
   });
 }

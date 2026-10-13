@@ -38,8 +38,10 @@ void main(List<String> args) {
     exit(2);
   }
   if (found.isEmpty && notCommit.isEmpty) {
-    stdout.writeln('${file.path}: ${packages.length} packages, none of '
-        '${forbiddenHostPackages.join(', ')}');
+    stdout.writeln(
+      '${file.path}: ${packages.length} packages, none of '
+      '${forbiddenHostPackages.join(', ')}',
+    );
     return;
   }
   for (final name in found) {

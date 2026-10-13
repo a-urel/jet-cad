@@ -20,16 +20,21 @@ void main(List<String> args) {
   };
   for (var i = 0; i < args.length; i++) {
     if (!paths.containsKey(args[i]) || i + 1 == args.length) {
-      stderr.writeln('usage: check_guide.dart [--guide <md>] [--dart <dart>] '
-          '[--yaml <pubspec template>]');
+      stderr.writeln(
+        'usage: check_guide.dart [--guide <md>] [--dart <dart>] '
+        '[--yaml <pubspec template>]',
+      );
       exit(2);
     }
     paths[args[i]] = args[++i];
   }
   String read(String flag) => File(paths[flag]!).readAsStringSync();
   final guide = read('--guide');
-  final missing =
-      missingBlocks(guide, dart: read('--dart'), yaml: read('--yaml'));
+  final missing = missingBlocks(
+    guide,
+    dart: read('--dart'),
+    yaml: read('--yaml'),
+  );
   final blocks =
       fencedBlocks(guide, 'dart').length + fencedBlocks(guide, 'yaml').length;
   if (blocks == 0) {
@@ -37,8 +42,10 @@ void main(List<String> args) {
     exit(1);
   }
   if (missing.isEmpty) {
-    stdout.writeln('docs/host-guide.md: all $blocks code blocks are in the '
-        'host probe');
+    stdout.writeln(
+      'docs/host-guide.md: all $blocks code blocks are in the '
+      'host probe',
+    );
     return;
   }
   for (final block in missing) {

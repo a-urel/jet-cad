@@ -7,10 +7,12 @@ import 'dart:io';
 import 'package:jet_cad_ci/kit_deps.dart';
 import 'package:test/test.dart';
 
-String pubspec(String name,
-    {List<String> dependencies = const [],
-    List<String> devDependencies = const [],
-    List<String> overrides = const []}) {
+String pubspec(
+  String name, {
+  List<String> dependencies = const [],
+  List<String> devDependencies = const [],
+  List<String> overrides = const [],
+}) {
   final lines = ['name: $name'];
   void section(String title, List<String> deps) {
     if (deps.isEmpty) return;
@@ -26,92 +28,109 @@ String pubspec(String name,
   return '${lines.join('\n')}\n';
 }
 
-PackageSource package(String name,
-        {List<String> dependencies = const [],
-        List<String> devDependencies = const [],
-        List<String> overrides = const [],
-        Map<String, String> files = const {}}) =>
-    PackageSource(
-      pubspec: pubspec(name,
-          dependencies: dependencies,
-          devDependencies: devDependencies,
-          overrides: overrides),
-      dartFiles: files,
-    );
+PackageSource package(
+  String name, {
+  List<String> dependencies = const [],
+  List<String> devDependencies = const [],
+  List<String> overrides = const [],
+  Map<String, String> files = const {},
+}) => PackageSource(
+  dir: name,
+  pubspec: pubspec(
+    name,
+    dependencies: dependencies,
+    devDependencies: devDependencies,
+    overrides: overrides,
+  ),
+  dartFiles: files,
+);
 
 Future<ProcessResult> check(List<String> args) => Process.run(
-    Platform.resolvedExecutable, ['run', 'check_kit_deps.dart', ...args]);
+  Platform.resolvedExecutable,
+  ['run', 'check_kit_deps.dart', ...args],
+);
 
 void main() {
   group('the rule', () {
-    test('D1 the contract and kits on the contract and the engine are clean',
-        () {
+    test('D1 the contract and kits on the contract and the engine are clean', () {
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_kit', dependencies: [
-              'jet_cad_2d',
-              'meta'
-            ], files: {
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit',
+            dependencies: ['jet_cad_2d', 'meta'],
+            files: {
               'lib/jet_cad_2d_kit.dart':
                   "import 'package:jet_cad_2d/jet_cad_2d.dart';\n",
-            }),
-            package('jet_cad_2d_kit_restaurant', dependencies: [
-              'jet_cad_2d_kit',
-              'jet_cad_2d_flutter'
-            ], files: {
+            },
+          ),
+          package(
+            'jet_cad_2d_kit_restaurant',
+            dependencies: ['jet_cad_2d_kit', 'jet_cad_2d_flutter'],
+            files: {
               // M-D1a: forbid every jet_cad_2d_* package.
-              'lib/a.dart': "import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';\n"
+              'lib/a.dart':
+                  "import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';\n"
                   "import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';\n",
               // M-D1b: forbid the kit's own package.
               'test/a_test.dart':
                   "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n",
-            }),
-          ]),
-          isEmpty);
+            },
+          ),
+        ]),
+        isEmpty,
+      );
     });
 
     test("D2 a kit's pubspec naming the plan library", () {
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_kit_cinema',
-                dependencies: ['jet_cad_2d_kit', 'jet_cad_2d_plan']),
-          ]),
-          [
-            'jet_cad_2d_kit_cinema: pubspec dependencies names jet_cad_2d_plan'
-          ]);
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit_cinema',
+            dependencies: ['jet_cad_2d_kit', 'jet_cad_2d_plan'],
+          ),
+        ]),
+        ['jet_cad_2d_kit_cinema: pubspec dependencies names jet_cad_2d_plan'],
+      );
     });
 
     test("D3 a kit's dev_dependencies naming another kit", () {
       // M-D3: read `dependencies` only.
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_kit_cinema',
-                devDependencies: ['jet_cad_2d_kit_restaurant']),
-          ]),
-          [
-            'jet_cad_2d_kit_cinema: pubspec dev_dependencies names '
-                'jet_cad_2d_kit_restaurant',
-          ]);
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit_cinema',
+            devDependencies: ['jet_cad_2d_kit_restaurant'],
+          ),
+        ]),
+        [
+          'jet_cad_2d_kit_cinema: pubspec dev_dependencies names '
+              'jet_cad_2d_kit_restaurant',
+        ],
+      );
     });
 
-    test("D4 the contract's overrides naming the plan; the contract on a kit",
-        () {
+    test("D4 the contract's overrides naming the plan; the contract on a kit", () {
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_kit',
-                dependencies: ['jet_cad_2d_kit_restaurant'],
-                overrides: ['jet_cad_2d_plan']),
-          ]),
-          [
-            'jet_cad_2d_kit: pubspec dependencies names jet_cad_2d_kit_restaurant',
-            'jet_cad_2d_kit: pubspec dependency_overrides names jet_cad_2d_plan',
-          ]);
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit',
+            dependencies: ['jet_cad_2d_kit_restaurant'],
+            overrides: ['jet_cad_2d_plan'],
+          ),
+        ]),
+        [
+          'jet_cad_2d_kit: pubspec dependencies names jet_cad_2d_kit_restaurant',
+          'jet_cad_2d_kit: pubspec dependency_overrides names jet_cad_2d_plan',
+        ],
+      );
     });
 
     test('D5 imports under lib, test and tool, every directive kind', () {
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_kit_cinema', files: {
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit_cinema',
+            files: {
               'lib/src/a.dart':
                   "export 'package:jet_cad_2d_kit_restaurant/symbols.dart';\n",
               'test/b_test.dart':
@@ -119,37 +138,46 @@ void main() {
               // M-D5: read only the first URI of a directive.
               // The first URI is allowed, the second is not: firstMatch finds
               // only the allowed one.
-              'tool/c.dart': "import 'package:jet_cad_2d_kit/a.dart'\n"
+              'tool/c.dart':
+                  "import 'package:jet_cad_2d_kit/a.dart'\n"
                   "    if (dart.library.io) "
                   "'package:jet_cad_2d_kit_architecture/x.dart';\n",
-            }),
-          ]),
-          [
-            'jet_cad_2d_kit_cinema: lib/src/a.dart imports jet_cad_2d_kit_restaurant',
-            'jet_cad_2d_kit_cinema: test/b_test.dart imports jet_cad_2d_plan',
-            'jet_cad_2d_kit_cinema: tool/c.dart imports jet_cad_2d_kit_architecture',
-          ]);
+            },
+          ),
+        ]),
+        [
+          'jet_cad_2d_kit_cinema: lib/src/a.dart imports jet_cad_2d_kit_restaurant',
+          'jet_cad_2d_kit_cinema: test/b_test.dart imports jet_cad_2d_plan',
+          'jet_cad_2d_kit_cinema: tool/c.dart imports jet_cad_2d_kit_architecture',
+        ],
+      );
     });
 
     test('D6 a comment or a string naming the plan is not an import', () {
       // M-D6: scan the whole text for package URIs.
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_kit_cinema', files: {
-              'lib/a.dart': "// See package:jet_cad_2d_plan/x.dart.\n"
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit_cinema',
+            files: {
+              'lib/a.dart':
+                  "// See package:jet_cad_2d_plan/x.dart.\n"
                   "const uri = 'package:jet_cad_2d_plan/x.dart';\n",
-            }),
-          ]),
-          isEmpty);
+            },
+          ),
+        ]),
+        isEmpty,
+      );
     });
 
     test('D7 only the contract and kits are checked', () {
       expect(
-          kitDepsProblems([
-            package('jet_cad_2d_plan', dependencies: ['jet_cad_2d_kit_cinema']),
-            package('jet_cad_2d_kitchen', dependencies: ['jet_cad_2d_plan']),
-          ]),
-          isEmpty);
+        kitDepsProblems([
+          package('jet_cad_2d_plan', dependencies: ['jet_cad_2d_kit_cinema']),
+          package('jet_cad_2d_kitchen', dependencies: ['jet_cad_2d_plan']),
+        ]),
+        isEmpty,
+      );
       expect(isKitPackage('jet_cad_2d_kit_restaurant'), isTrue);
       expect(isKitPackage('jet_cad_2d_kit'), isFalse);
       expect(isKitPackage('jet_cad_2d_kitchen'), isFalse);
@@ -175,25 +203,119 @@ void main() {
       }
     });
 
+    test('D22 packageRelative: either separator, `/` out, null outside', () {
+      // M-D22a: only `/` ends the prefix, so the Windows path is null.
+      // M-D22b: the result keeps `\`. M-D22c: a bare prefix match, so a
+      // sibling directory sharing the name's start counts as inside.
+      expect(packageRelative('/r/kit', '/r/kit/lib/a.dart'), 'lib/a.dart');
+      expect(
+        packageRelative(r'C:\r\kit', r'C:\r\kit\lib\a.dart'),
+        'lib/a.dart',
+      );
+      expect(packageRelative('/r/kit', '/r/kit_b/lib/a.dart'), isNull);
+      expect(packageRelative('/r/kit', '/r/kit'), isNull);
+      expect(packageRelative('/r/kit', null), isNull);
+    });
+
     test('D14 packageName reads the pubspec, null when it cannot', () {
-      expect(packageName(pubspec('jet_cad_2d_kit_cinema')),
-          'jet_cad_2d_kit_cinema');
+      expect(
+        packageName(pubspec('jet_cad_2d_kit_cinema')),
+        'jet_cad_2d_kit_cinema',
+      );
       expect(packageName('- a list\n'), isNull);
       expect(packageName('name: [1]\n'), isNull);
       expect(packageName('name: {\n'), isNull);
     });
 
+    test(
+      'D17 a pubspec that is not readable YAML is a problem, not a throw',
+      () {
+        // M-D17a: no guard around loadYaml (a YamlException escapes); M-D17b:
+        // stop at the unreadable pubspec (`return problems` for `continue`),
+        // and the kit after it goes unchecked.
+        final problems = kitDepsProblems([
+          const PackageSource(
+            dir: 'cinema',
+            pubspec: 'name: {\n',
+            dartFiles: {},
+          ),
+          package('jet_cad_2d_kit_bistro', dependencies: ['jet_cad_2d_plan']),
+        ]);
+        expect(problems, hasLength(2));
+        expect(
+          problems[0],
+          startsWith('cinema: pubspec.yaml is not readable YAML: '),
+        );
+        expect(
+          problems[0].length,
+          greaterThan('cinema: pubspec.yaml is not readable YAML: '.length),
+        );
+        expect(
+          problems[1],
+          'jet_cad_2d_kit_bistro: pubspec dependencies names jet_cad_2d_plan',
+        );
+      },
+    );
+
+    test('D19 a comment between the keyword and the URI hides nothing', () {
+      // The PR #11 review: the directives are parsed, not matched. M-D19:
+      // the former regex (`import\\s+` does not reach past a comment).
+      expect(
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit_cinema',
+            files: {
+              'lib/a.dart':
+                  "import/*c*/'package:jet_cad_2d_plan/x.dart';\n"
+                  "export // c\n  'package:jet_cad_2d_kit_bistro/y.dart';\n",
+            },
+          ),
+        ]),
+        [
+          'jet_cad_2d_kit_cinema: lib/a.dart imports jet_cad_2d_kit_bistro',
+          'jet_cad_2d_kit_cinema: lib/a.dart imports jet_cad_2d_plan',
+        ],
+      );
+    });
+
+    test('D20 a commented-out directive and a directive-shaped string', () {
+      // M-D20: the former regex reports both (each starts a line).
+      expect(
+        kitDepsProblems([
+          package(
+            'jet_cad_2d_kit_cinema',
+            files: {
+              'lib/a.dart':
+                  "import 'package:jet_cad_2d_kit/a.dart';\n"
+                  "/*\nimport 'package:jet_cad_2d_plan/x.dart';\n*/\n"
+                  "const text = '''\n"
+                  "export 'package:jet_cad_2d_kit_bistro/y.dart';\n''';\n",
+            },
+          ),
+        ]),
+        isEmpty,
+      );
+    });
+
     test('D8 importedPackages reads directives only', () {
       expect(
-          importedPackages("import 'package:a_b/x.dart';\n"
-              "export \"package:c/y.dart\" show Y;\n"
-              "part 'z.dart';\n"
-              "import 'dart:io';\n"
-              "// import 'package:d/z.dart';\n"),
-          {'a_b', 'c'});
+        importedPackages(
+          "import 'package:a_b/x.dart';\n"
+          "export \"package:c/y.dart\" show Y;\n"
+          "part 'z.dart';\n"
+          "part 'package:e/w.dart';\n"
+          "import 'dart:io';\n"
+          "// import 'package:d/z.dart';\n",
+        ),
+        // M-D8: drop the part directive (e is not read).
+        {'a_b', 'c', 'e'},
+      );
     });
   });
 
+  // Each test runs check_kit_deps.dart, which imports package:analyzer: a
+  // cold `dart run` compiles it (about 5 s on a fast machine, D11 runs it
+  // twice), so the group allows four times the default timeout.
   group('the script', () {
     late Directory tmp;
     setUp(() => tmp = Directory.systemTemp.createTempSync('check_kit_deps'));
@@ -209,55 +331,126 @@ void main() {
       expect(r.stdout, contains('package(s) checked'));
     });
 
-    test('D10 a kit naming the plan and another kit: exit 1, both named',
-        () async {
-      write('jet_cad_2d_kit_cinema/pubspec.yaml',
-          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_plan']));
-      write('jet_cad_2d_kit_cinema/test/a_test.dart',
-          "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n");
-      write('jet_cad_2d_kit_cinema/build/ignored.dart',
-          "import 'package:jet_cad_2d_plan/x.dart';\n");
-      final r = await check(['--packages', tmp.path]);
-      expect(r.exitCode, 1);
-      expect(
+    test(
+      'D10 a kit naming the plan and another kit: exit 1, both named',
+      () async {
+        write(
+          'jet_cad_2d_kit_cinema/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_plan']),
+        );
+        write(
+          'jet_cad_2d_kit_cinema/test/a_test.dart',
+          "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n",
+        );
+        write(
+          'jet_cad_2d_kit_cinema/build/ignored.dart',
+          "import 'package:jet_cad_2d_plan/x.dart';\n",
+        );
+        final r = await check(['--packages', tmp.path]);
+        expect(r.exitCode, 1);
+        expect(
           r.stderr,
-          allOf(contains('pubspec dependencies names jet_cad_2d_plan'),
-              contains('test/a_test.dart imports jet_cad_2d_kit_restaurant')));
-      expect(r.stderr, isNot(contains('build/')));
-    });
+          allOf(
+            contains('pubspec dependencies names jet_cad_2d_plan'),
+            contains('test/a_test.dart imports jet_cad_2d_kit_restaurant'),
+          ),
+        );
+        expect(r.stderr, isNot(contains('build/')));
+      },
+    );
 
-    test("D15 a kit's example/ and root files are read; .dart_tool is not",
-        () async {
-      // M-D15: the script reads lib/, test/ and tool/ only.
-      write('jet_cad_2d_kit_cinema/pubspec.yaml',
-          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_kit']));
-      write('jet_cad_2d_kit_cinema/example/main.dart',
-          "import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';\n");
-      write('jet_cad_2d_kit_cinema/bin/demo.dart',
-          "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n");
-      write('jet_cad_2d_kit_cinema/.dart_tool/gen.dart',
-          "import 'package:jet_cad_2d_plan/x.dart';\n");
+    test(
+      "D15 a kit's example/ and root files are read; .dart_tool is not",
+      () async {
+        // M-D15: the script reads lib/, test/ and tool/ only.
+        write(
+          'jet_cad_2d_kit_cinema/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_kit']),
+        );
+        write(
+          'jet_cad_2d_kit_cinema/example/main.dart',
+          "import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';\n",
+        );
+        write(
+          'jet_cad_2d_kit_cinema/bin/demo.dart',
+          "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n",
+        );
+        write(
+          'jet_cad_2d_kit_cinema/.dart_tool/gen.dart',
+          "import 'package:jet_cad_2d_plan/x.dart';\n",
+        );
+        final r = await check(['--packages', tmp.path]);
+        expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+        expect(
+          r.stderr,
+          allOf(
+            contains('example/main.dart imports jet_cad_2d_plan'),
+            contains('bin/demo.dart imports jet_cad_2d_kit_restaurant'),
+          ),
+        );
+        expect(r.stderr, isNot(contains('.dart_tool')));
+      },
+    );
+
+    test(
+      'D16 a package is picked by its pubspec name, not its directory',
+      () async {
+        // M-D16: pick by directory name again.
+        write(
+          'cinema/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_plan']),
+        );
+        final r = await check(['--packages', tmp.path]);
+        expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+        expect(
+          r.stderr,
+          contains(
+            'jet_cad_2d_kit_cinema: pubspec dependencies names '
+            'jet_cad_2d_plan',
+          ),
+        );
+      },
+    );
+
+    test('D18 an unreadable pubspec: exit 1, its directory named', () async {
+      // M-D18: the script skips a package whose pubspec has no name
+      // (`if (name == null) continue;`).
+      write('cinema/pubspec.yaml', 'name: {\n');
       final r = await check(['--packages', tmp.path]);
       expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
-      expect(
-          r.stderr,
-          allOf(contains('example/main.dart imports jet_cad_2d_plan'),
-              contains('bin/demo.dart imports jet_cad_2d_kit_restaurant')));
-      expect(r.stderr, isNot(contains('.dart_tool')));
+      expect(r.stderr, contains('cinema: pubspec.yaml is not readable YAML: '));
     });
 
-    test('D16 a package is picked by its pubspec name, not its directory',
-        () async {
-      // M-D16: pick by directory name again.
-      write('cinema/pubspec.yaml',
-          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_plan']));
-      final r = await check(['--packages', tmp.path]);
-      expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
-      expect(
+    test(
+      'D21 a file that cannot be read: exit 1, named, the others still checked',
+      () async {
+        // M-D21a: the script reads a pubspec outside any try, so its
+        // FileSystemException ends the run (exit 255) before any package is
+        // reported. M-D21b: only the pubspec read is guarded, so a kit's
+        // unreadable Dart file still ends the run.
+        void bytes(String path, List<int> data) => (File(
+          '${tmp.path}/$path',
+        )..createSync(recursive: true)).writeAsBytesSync(data);
+        bytes('cinema/pubspec.yaml', [0x6e, 0x3a, 0xff, 0xfe, 0x0a]);
+        write(
+          'jet_cad_2d_kit_seats/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_seats'),
+        );
+        bytes('jet_cad_2d_kit_seats/lib/a.dart', [0xff, 0xfe, 0x0a]);
+        write(
+          'jet_cad_2d_kit_zoo/pubspec.yaml',
+          pubspec('jet_cad_2d_kit_zoo', dependencies: ['jet_cad_2d_plan']),
+        );
+        final r = await check(['--packages', tmp.path]);
+        expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+        expect(r.stderr, contains('cinema: pubspec.yaml is not readable: '));
+        expect(
           r.stderr,
-          contains('jet_cad_2d_kit_cinema: pubspec dependencies names '
-              'jet_cad_2d_plan'));
-    });
+          contains('jet_cad_2d_kit_seats: lib/a.dart is not readable: '),
+        );
+        expect(r.stderr, contains('jet_cad_2d_kit_zoo'));
+      },
+    );
 
     test('D11 no kit yet: the rule holds vacuously', () async {
       write('jet_cad_2d/pubspec.yaml', pubspec('jet_cad_2d'));
@@ -271,5 +464,5 @@ void main() {
     test('D12 bad usage: exit 2', () async {
       expect((await check(['--packages'])).exitCode, 2);
     });
-  });
+  }, timeout: const Timeout.factor(4));
 }

@@ -10,8 +10,9 @@ import 'lib/readmes.dart';
 
 void main() {
   final repo = File.fromUri(Platform.script).parent.parent.parent.path;
-  final yaml =
-      File('$repo/tool/ci/host_probe/pubspec.yaml.in').readAsStringSync();
+  final yaml = File(
+    '$repo/tool/ci/host_probe/pubspec.yaml.in',
+  ).readAsStringSync();
   const cases = {
     'jet_cad_2d': 'engine',
     'jet_cad_2d_flutter': 'renderer',
@@ -21,15 +22,19 @@ void main() {
   var blocks = 0;
   for (final MapEntry(key: package, value: probe) in cases.entries) {
     final readme = File('$repo/packages/$package/README.md').readAsStringSync();
-    final dart =
-        File('$repo/tool/readme_probe/lib/$probe.dart').readAsStringSync();
-    blocks += fencedBlocks(readme, 'dart').length +
+    final dart = File(
+      '$repo/tool/readme_probe/lib/$probe.dart',
+    ).readAsStringSync();
+    blocks +=
+        fencedBlocks(readme, 'dart').length +
         fencedBlocks(readme, 'yaml').length;
     problems.addAll(readmeProblems(package, readme, dart: dart, yaml: yaml));
   }
   if (problems.isEmpty) {
-    stdout.writeln('package READMEs: all $blocks code blocks are in the '
-        'probes');
+    stdout.writeln(
+      'package READMEs: all $blocks code blocks are in the '
+      'probes',
+    );
     return;
   }
   problems.forEach(stderr.writeln);

@@ -2,6 +2,8 @@
 // contract (jet_cad_2d_kit) depends on neither the plan library nor a kit;
 // a kit (jet_cad_2d_kit_*) depends on neither the plan library nor another
 // kit. Kits cooperate only through the contract.
+import 'package:analyzer/dart/analysis/utilities.dart';
+import 'package:analyzer/dart/ast/ast.dart';
 import 'package:yaml/yaml.dart';
 
 const String contractPackage = 'jet_cad_2d_kit';
@@ -12,11 +14,18 @@ final RegExp _kit = RegExp(r'^jet_cad_2d_kit_[a-z0-9_]+$');
 /// Whether [name] is a kit's package (not the contract's).
 bool isKitPackage(String name) => _kit.hasMatch(name);
 
-/// A package as the check reads it: its pubspec's text and every Dart file
-/// of the package (package-relative path → text; see [isPackageDartFile]).
+/// A package as the check reads it: its directory (named in a problem its
+/// pubspec has before the package has a name), its pubspec's text and every
+/// Dart file of the package (package-relative path → text; see
+/// [isPackageDartFile]).
 final class PackageSource {
-  const PackageSource({required this.pubspec, required this.dartFiles});
+  const PackageSource({
+    required this.dir,
+    required this.pubspec,
+    required this.dartFiles,
+  });
 
+  final String dir;
   final String pubspec;
   final Map<String, String> dartFiles;
 }
@@ -33,6 +42,16 @@ bool isPackageDartFile(String path) =>
     path.endsWith('.dart') &&
     !generatedDirectories.contains(path.split('/').first);
 
+/// [path] relative to the package directory [dir], `/`-separated whatever
+/// the platform's separator, or null when [path] is not inside [dir].
+String? packageRelative(String dir, String? path) {
+  if (path == null || path.length <= dir.length + 1) return null;
+  if (!path.startsWith(dir)) return null;
+  final separator = path[dir.length];
+  if (separator != '/' && separator != r'\') return null;
+  return path.substring(dir.length + 1).replaceAll(r'\', '/');
+}
+
 /// The `name` of [pubspec], or null when it is not YAML, not a map or has
 /// no string name. The script picks the packages it checks by this name,
 /// not by their directory's.
@@ -48,31 +67,52 @@ String? packageName(String pubspec) {
   return name is String ? name : null;
 }
 
-/// A directive and everything up to its `;` (conditional URIs included).
-final RegExp _directive =
-    RegExp(r'^\s*(?:import|export|part)\s+([^;]*);', multiLine: true);
-final RegExp _package = RegExp(r'''['"]package:([a-z0-9_]+)/''');
+final RegExp _package = RegExp(r'^package:([a-z0-9_]+)/');
+
+/// The URIs of [dart]'s import, export and part directives, the
+/// conditional URIs of an import or export included, as the Dart parser
+/// reads them: a comment between a keyword and its URI hides nothing, and a
+/// commented-out directive or a directive-shaped string is not a directive.
+List<String> directiveUris(String dart) => [
+  for (final directive in parseString(
+    content: dart,
+    throwIfDiagnostics: false,
+  ).unit.directives)
+    ...switch (directive) {
+      NamespaceDirective() => [
+        directive.uri.stringValue,
+        for (final c in directive.configurations) c.uri.stringValue,
+      ],
+      PartDirective() => [directive.uri.stringValue],
+      _ => const <String?>[],
+    }.nonNulls,
+];
 
 /// The packages [dart]'s import, export and part directives name.
 Set<String> importedPackages(String dart) => {
-      for (final directive in _directive.allMatches(dart))
-        for (final uri in _package.allMatches(directive.group(1)!))
-          uri.group(1)!,
-    };
+  for (final uri in directiveUris(dart))
+    if (_package.firstMatch(uri) case final match?) match.group(1)!,
+};
 
 /// Every break of the rule among [packages], as `<package>: <what>`.
 /// Packages that are neither the contract nor a kit are not checked.
 List<String> kitDepsProblems(List<PackageSource> packages) {
   final problems = <String>[];
   for (final p in packages) {
-    final Object? doc = loadYaml(p.pubspec);
+    final Object? doc;
+    try {
+      doc = loadYaml(p.pubspec);
+    } on YamlException catch (e) {
+      problems.add('${p.dir}: pubspec.yaml is not readable YAML: ${e.message}');
+      continue;
+    }
     if (doc is! Map) {
-      problems.add('a pubspec that is not a map');
+      problems.add('${p.dir}: a pubspec that is not a map');
       continue;
     }
     final name = doc['name'];
     if (name is! String) {
-      problems.add('a pubspec without a name');
+      problems.add('${p.dir}: a pubspec without a name');
       continue;
     }
     if (name != contractPackage && !isKitPackage(name)) continue;

@@ -40,10 +40,12 @@ List<String> nonHosted(String pubspec) {
 
 /// The hosted constraints of [pubspec] on one of [published].
 Map<String, String> hosted(String pubspec) => {
-      for (final m in RegExp(r'^  (\w+): (\S+)\s*$', multiLine: true)
-          .allMatches(pubspec))
-        if (published.contains(m[1])) m[1]!: m[2]!,
-    };
+  for (final m in RegExp(
+    r'^  (\w+): (\S+)\s*$',
+    multiLine: true,
+  ).allMatches(pubspec))
+    if (published.contains(m[1])) m[1]!: m[2]!,
+};
 
 void main() {
   test('DL1 no live-line pubspec names a published package by path or git', () {
@@ -61,15 +63,20 @@ void main() {
         expect(c, '^0.7.2', reason: path);
       }
     }
-    expect(seen, 21,
-        reason: 'premise: the dependents are read; the pubspecs hold 21 '
-            'dependency lines on a published package (15, and the three each of '
-            'tool/screenshots and tool/readme_probe)');
+    expect(
+      seen,
+      21,
+      reason:
+          'premise: the dependents are read; the pubspecs hold 21 '
+          'dependency lines on a published package (15, and the three each of '
+          'tool/screenshots and tool/readme_probe)',
+    );
   });
 
   test('DL3 the reader sees a path dependency', () {
-    expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
-        ['jet_cad_2d: path: ../x']);
+    expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'), [
+      'jet_cad_2d: path: ../x',
+    ]);
     expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.2\n'), isEmpty);
   });
 }

@@ -66,15 +66,15 @@ final class Outcome {
 
   /// One line per difference, for the CI log.
   List<String> report() => [
-        if (!ended) 'the run did not end (no "done" event)',
-        if (unexplained) 'the run failed, but no test did',
-        if (tests == 0) 'the run had no test',
-        for (final t in newFailures) 'new failure: $t',
-        for (final t in fixed) 'standing failure passed or did not run: $t',
-        for (final t in newSkips) 'new skip: $t',
-        for (final t in ranSkips) 'standing skip ran or did not appear: $t',
-        for (final t in vmSkips) 'skipped for want of the VM service: $t',
-      ];
+    if (!ended) 'the run did not end (no "done" event)',
+    if (unexplained) 'the run failed, but no test did',
+    if (tests == 0) 'the run had no test',
+    for (final t in newFailures) 'new failure: $t',
+    for (final t in fixed) 'standing failure passed or did not run: $t',
+    for (final t in newSkips) 'new skip: $t',
+    for (final t in ranSkips) 'standing skip ran or did not appear: $t',
+    for (final t in vmSkips) 'skipped for want of the VM service: $t',
+  ];
 }
 
 /// Compares the JSON reporter's output [json] (one event per line, as
@@ -112,12 +112,15 @@ Outcome compareRun(
       case 'suite':
         final suite = event['suite']! as Map<String, Object?>;
         final path = suite['path']! as String;
-        suites[suite['id']! as int] =
-            path.startsWith(base) ? path.substring(base.length) : path;
+        suites[suite['id']! as int] = path.startsWith(base)
+            ? path.substring(base.length)
+            : path;
       case 'testStart':
         final test = event['test']! as Map<String, Object?>;
         names[test['id']! as int] = testId(
-            suites[test['suiteID']! as int] ?? '?', test['name']! as String);
+          suites[test['suiteID']! as int] ?? '?',
+          test['name']! as String,
+        );
       case 'error':
         // A failure reported apart from the test's end: one after it
         // completed (its `testDone` said success), or an error of a test
@@ -162,12 +165,15 @@ Outcome compareRun(
 /// The ids a standing list holds for [package]: lines
 /// `<package> | <suite> | <name>`; blank lines and `#` comments skipped.
 Set<String> standingFor(String list, String package) => {
-      for (final raw in const LineSplitter().convert(list))
-        if (raw.trim().isNotEmpty && !raw.trimLeft().startsWith('#'))
-          if (_fields(raw) case [final p, final suite, final name]
-              when p == package)
-            testId(suite, name),
-    };
+  for (final raw in const LineSplitter().convert(list))
+    if (raw.trim().isNotEmpty && !raw.trimLeft().startsWith('#'))
+      if (_fields(raw) case [
+        final p,
+        final suite,
+        final name,
+      ] when p == package)
+        testId(suite, name),
+};
 
 List<String> _fields(String line) {
   final first = line.indexOf(' | ');
