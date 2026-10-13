@@ -202,4 +202,26 @@ void main() {
     expect(library.kits, ['sample']);
     expect(library.entries, isEmpty);
   });
+
+  test('B8 a payload that throws once the document exists throws through', () {
+    // A premise check, exempt from the mutation rule: it pins that an empty
+    // closed polyline throws after buildLibraryDocument created its document
+    // (the path FR9's dispose-on-throw covers) and that the error reaches
+    // the caller unchanged. The disposal itself is not observable: the
+    // document never reaches the caller, and the engine keeps no registry of
+    // live documents.
+    const empty = CatalogSymbol(
+      key: 'sample.mark.empty',
+      name: 'Empty mark',
+      category: 'Marks',
+      base: (700, 300),
+      shapes: [
+        CatalogCircle((700, 300), 120),
+        CatalogPolyline([], closed: true),
+      ],
+    );
+    const throwing = Catalog(kit: 'sample', symbols: [empty]);
+    expect(() => buildLibraryDocument(throwing), throwsStateError);
+    expect(() => encodeLibrary(throwing), throwsStateError);
+  });
 }

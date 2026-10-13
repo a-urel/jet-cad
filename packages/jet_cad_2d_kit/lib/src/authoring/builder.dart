@@ -26,7 +26,8 @@ import 'catalog.dart';
 /// is on layer 0 with BYBLOCK linetype, colour, lineweight and transparency
 /// and no flag (K3 rule 14). The caller disposes the document.
 ///
-/// Throws a component's [ArgumentError] for a value spec K2 refuses.
+/// Throws a component's [ArgumentError] for a value spec K2 refuses, and
+/// whatever a shape's payload throws (the document is then disposed).
 DraftDocument buildLibraryDocument(Catalog catalog) {
   // Every component is constructed, and so validated, before the document
   // exists: a value K2 refuses throws here and leaves nothing to dispose.
@@ -52,48 +53,56 @@ DraftDocument buildLibraryDocument(Catalog catalog) {
         null,
   ];
   final doc = DraftDocument.empty();
-  registerKitComponents(doc.components);
-  doc.header.units = DrawingUnits.millimeters;
-  final commands = <DraftCommand>[
-    SetComponentCommand<LibraryComponent>(doc.rootHandle, library),
-  ];
-  for (var i = 0; i < catalog.symbols.length; i++) {
-    final s = catalog.symbols[i];
-    final def = doc.handleSeed.next();
-    commands
-      ..add(AddDefinitionCommand(Definition(
-        handle: def,
-        name: s.id,
-        basePoint: Vector2(s.base.$1, s.base.$2),
-        children: const [],
-      )))
-      ..add(SetComponentCommand<SymbolComponent>(def, symbols[i]));
-    final unit = units[i];
-    if (unit != null) {
-      commands.add(SetComponentCommand<UnitComponent>(def, unit));
+  // A payload can still throw once the document exists (an empty closed
+  // polyline has no first point): the document is disposed, the error
+  // goes on.
+  try {
+    registerKitComponents(doc.components);
+    doc.header.units = DrawingUnits.millimeters;
+    final commands = <DraftCommand>[
+      SetComponentCommand<LibraryComponent>(doc.rootHandle, library),
+    ];
+    for (var i = 0; i < catalog.symbols.length; i++) {
+      final s = catalog.symbols[i];
+      final def = doc.handleSeed.next();
+      commands
+        ..add(AddDefinitionCommand(Definition(
+          handle: def,
+          name: s.id,
+          basePoint: Vector2(s.base.$1, s.base.$2),
+          children: const [],
+        )))
+        ..add(SetComponentCommand<SymbolComponent>(def, symbols[i]));
+      final unit = units[i];
+      if (unit != null) {
+        commands.add(SetComponentCommand<UnitComponent>(def, unit));
+      }
+      for (final shape in s.shapes) {
+        commands.add(AddEntityCommand(
+          record: EntityRecord(
+            handle: doc.handleSeed.next(),
+            owner: def,
+            kind: _kindOf(shape),
+            layer: ReservedHandles.layerZero,
+            linetype: ReservedHandles.byBlockLinetype,
+            linetypeScale: 1.0,
+            geomIndex: 0,
+            color: const ByBlockColor(),
+            lineweight: kByBlock,
+            transparency: kByBlock,
+            flags: 0,
+          ),
+          payload: _payloadOf(shape),
+        ));
+      }
     }
-    for (final shape in s.shapes) {
-      commands.add(AddEntityCommand(
-        record: EntityRecord(
-          handle: doc.handleSeed.next(),
-          owner: def,
-          kind: _kindOf(shape),
-          layer: ReservedHandles.layerZero,
-          linetype: ReservedHandles.byBlockLinetype,
-          linetypeScale: 1.0,
-          geomIndex: 0,
-          color: const ByBlockColor(),
-          lineweight: kByBlock,
-          transparency: kByBlock,
-          flags: 0,
-        ),
-        payload: _payloadOf(shape),
-      ));
-    }
+    doc.commands.execute(CompoundCommand(commands, label: 'Symbol library'));
+    doc.commands.clearHistory();
+    return doc;
+  } catch (_) {
+    unawaited(doc.dispose());
+    rethrow;
   }
-  doc.commands.execute(CompoundCommand(commands, label: 'Symbol library'));
-  doc.commands.clearHistory();
-  return doc;
 }
 
 /// The `.jetlib` bytes of [catalog]: the codec's JSON of
