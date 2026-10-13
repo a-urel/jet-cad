@@ -25,6 +25,7 @@ class RulerPainter extends CustomPainter {
     required this.page,
     required this.pointer,
     required this.chrome,
+    this.fontFamily,
     super.repaint,
   });
 
@@ -36,6 +37,12 @@ class RulerPainter extends CustomPainter {
   /// The bar, the ticks, the labels and the pointer marker (dark theme
   /// spec D2).
   final ChromePalette chrome;
+
+  /// The family of the labels. The rulers follow the host's text: [RulerFrame]
+  /// passes the ambient `DefaultTextStyle`'s family. Null leaves the label
+  /// family-less, which falls to the platform default (to the test font under
+  /// `flutter test`).
+  final String? fontFamily;
 
   /// Test-only: (screen coordinate along the axis, isMajor, label).
   @visibleForTesting
@@ -49,8 +56,10 @@ class RulerPainter extends CustomPainter {
 
   /// Built once per painter instance from [chrome] (dark theme spec D5, R-8):
   /// a new palette comes only with a new painter, so no frame builds one.
-  late final TextStyle _labelStyle =
-      TextStyle(color: chrome.rulerInk, fontSize: kRulerLabelSize);
+  late final TextStyle _labelStyle = TextStyle(
+      color: chrome.rulerInk,
+      fontSize: kRulerLabelSize,
+      fontFamily: fontFamily);
 
   /// Test-only: the span of the last label laid out, or null before one.
   @visibleForTesting
@@ -156,28 +165,39 @@ class RulerPainter extends CustomPainter {
     canvas.restore();
   }
 
-  /// True exactly when the palette changed (dark theme spec D5); every other
-  /// reason to repaint is in the `repaint` listenable.
+  /// True exactly when the palette or the family changed (dark theme spec D5);
+  /// every other reason to repaint is in the `repaint` listenable.
   @override
-  bool shouldRepaint(RulerPainter old) => old.chrome != chrome;
+  bool shouldRepaint(RulerPainter old) =>
+      old.chrome != chrome || old.fontFamily != fontFamily;
 }
 
 /// The 24 × 24 box where the bars meet: the unit's symbol.
 class RulerCornerPainter extends CustomPainter {
-  RulerCornerPainter({required this.page, required this.chrome, super.repaint});
+  RulerCornerPainter({
+    required this.page,
+    required this.chrome,
+    this.fontFamily,
+    super.repaint,
+  });
 
   final ValueListenable<PageComponent?> page;
 
   /// The box and the unit symbol (dark theme spec D2).
   final ChromePalette chrome;
 
+  /// The family of the unit symbol, as [RulerPainter.fontFamily].
+  final String? fontFamily;
+
   // Colour assigned from [chrome] in `paint` (dark theme spec D5).
   final Paint _background = Paint();
   final TextPainter _text = TextPainter(textDirection: TextDirection.ltr);
 
   /// Built once per painter instance (dark theme spec D5, R-8).
-  late final TextStyle _labelStyle =
-      TextStyle(color: chrome.rulerInk, fontSize: kRulerLabelSize);
+  late final TextStyle _labelStyle = TextStyle(
+      color: chrome.rulerInk,
+      fontSize: kRulerLabelSize,
+      fontFamily: fontFamily);
   String? _lastSymbol;
 
   /// Test-only.
@@ -203,7 +223,8 @@ class RulerCornerPainter extends CustomPainter {
             (size.width - _text.width) / 2, (size.height - _text.height) / 2));
   }
 
-  /// True exactly when the palette changed (dark theme spec D5).
+  /// True exactly when the palette or the family changed (dark theme spec D5).
   @override
-  bool shouldRepaint(RulerCornerPainter old) => old.chrome != chrome;
+  bool shouldRepaint(RulerCornerPainter old) =>
+      old.chrome != chrome || old.fontFamily != fontFamily;
 }

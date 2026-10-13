@@ -55,85 +55,92 @@ class RulerFrameState extends State<RulerFrame> {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-        children: [
-          SizedBox(
-            height: kRulerThickness,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  width: kRulerThickness,
-                  height: kRulerThickness,
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      key: const Key('ruler-corner'),
-                      painter: RulerCornerPainter(
-                          page: widget.page,
-                          chrome: widget.chrome,
-                          repaint: _cornerRepaint),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      key: const Key('ruler-top'),
-                      painter: RulerPainter(
-                        axis: RulerAxis.horizontal,
-                        camera: widget.camera,
+  Widget build(BuildContext context) {
+    // The rulers follow the host's text: the ambient family, or none.
+    final fontFamily = DefaultTextStyle.of(context).style.fontFamily;
+    return Column(
+      children: [
+        SizedBox(
+          height: kRulerThickness,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: kRulerThickness,
+                height: kRulerThickness,
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('ruler-corner'),
+                    painter: RulerCornerPainter(
                         page: widget.page,
-                        pointer: pointer,
                         chrome: widget.chrome,
-                        repaint: _repaint,
-                      ),
+                        fontFamily: fontFamily,
+                        repaint: _cornerRepaint),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('ruler-top'),
+                    painter: RulerPainter(
+                      axis: RulerAxis.horizontal,
+                      camera: widget.camera,
+                      page: widget.page,
+                      pointer: pointer,
+                      chrome: widget.chrome,
+                      fontFamily: fontFamily,
+                      repaint: _repaint,
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                SizedBox(
-                  width: kRulerThickness,
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      key: const Key('ruler-left'),
-                      painter: RulerPainter(
-                        axis: RulerAxis.vertical,
-                        camera: widget.camera,
-                        page: widget.page,
-                        pointer: pointer,
-                        chrome: widget.chrome,
-                        repaint: _repaint,
-                      ),
+        ),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: kRulerThickness,
+                child: RepaintBoundary(
+                  child: CustomPaint(
+                    key: const Key('ruler-left'),
+                    painter: RulerPainter(
+                      axis: RulerAxis.vertical,
+                      camera: widget.camera,
+                      page: widget.page,
+                      pointer: pointer,
+                      chrome: widget.chrome,
+                      fontFamily: fontFamily,
+                      repaint: _repaint,
                     ),
                   ),
                 ),
-                Expanded(
-                  // A pointer that went down before this frame was replaced
-                  // keeps sending its moves to the old, detached listener
-                  // (spec 14c: a host replaced the plan mid-drag): the
-                  // disposed notifier is not written then.
-                  child: MouseRegion(
-                    onExit: (_) => _point(null),
-                    child: Listener(
-                      behavior: HitTestBehavior.translucent,
-                      // A finger is not a cursor (spec 14t R-10): it marks
-                      // nothing and clears the mark.
-                      onPointerHover: (e) => _point(_cursorAt(e)),
-                      onPointerMove: (e) => _point(_cursorAt(e)),
-                      onPointerCancel: (_) => _point(null),
-                      child: widget.child,
-                    ),
+              ),
+              Expanded(
+                // A pointer that went down before this frame was replaced
+                // keeps sending its moves to the old, detached listener
+                // (spec 14c: a host replaced the plan mid-drag): the
+                // disposed notifier is not written then.
+                child: MouseRegion(
+                  onExit: (_) => _point(null),
+                  child: Listener(
+                    behavior: HitTestBehavior.translucent,
+                    // A finger is not a cursor (spec 14t R-10): it marks
+                    // nothing and clears the mark.
+                    onPointerHover: (e) => _point(_cursorAt(e)),
+                    onPointerMove: (e) => _point(_cursorAt(e)),
+                    onPointerCancel: (_) => _point(null),
+                    child: widget.child,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      );
+        ),
+      ],
+    );
+  }
 }

@@ -9,13 +9,15 @@ import 'support/page_fixture.dart';
 
 void main() {
   Future<(RulerFrameState, int Function())> pump(WidgetTester tester,
-      {CameraController? camera}) async {
+      {CameraController? camera, TextStyle? ambient}) async {
     var childHovers = 0;
     final page = ValueNotifier<PageComponent?>(standardPage());
     final key = GlobalKey<RulerFrameState>();
+    Widget frame(Widget w) =>
+        ambient == null ? w : DefaultTextStyle(style: ambient, child: w);
     await tester.pumpWidget(Directionality(
       textDirection: TextDirection.ltr,
-      child: Center(
+      child: frame(Center(
         child: SizedBox(
           width: 424,
           height: 324,
@@ -31,10 +33,65 @@ void main() {
             ),
           ),
         ),
-      ),
+      )),
     ));
     return (key.currentState!, () => childHovers);
   }
+
+  RulerPainter painterOf(WidgetTester tester, String key) =>
+      tester.widget<CustomPaint>(find.byKey(Key(key))).painter! as RulerPainter;
+
+  RulerCornerPainter cornerOf(WidgetTester tester) =>
+      tester.widget<CustomPaint>(find.byKey(const Key('ruler-corner'))).painter!
+          as RulerCornerPainter;
+
+  testWidgets('RF-a: the ambient font family reaches all three painters',
+      (tester) async {
+    await pump(tester, ambient: const TextStyle(fontFamily: 'Roboto'));
+    final top = painterOf(tester, 'ruler-top');
+    final left = painterOf(tester, 'ruler-left');
+    final corner = cornerOf(tester);
+    expect(top.fontFamily, 'Roboto');
+    expect(left.fontFamily, 'Roboto');
+    expect(corner.fontFamily, 'Roboto');
+    expect(top.debugLastLabel?.style?.fontFamily, 'Roboto');
+    expect(left.debugLastLabel?.style?.fontFamily, 'Roboto');
+    expect(corner.debugLastLabel?.style?.fontFamily, 'Roboto');
+  });
+
+  testWidgets('RF-b: no ambient family keeps today\'s exact label style',
+      (tester) async {
+    await pump(tester);
+    final expected = TextStyle(
+        color: ChromePalette.light.rulerInk, fontSize: kRulerLabelSize);
+    for (final label in [
+      painterOf(tester, 'ruler-top').debugLastLabel,
+      painterOf(tester, 'ruler-left').debugLastLabel,
+      cornerOf(tester).debugLastLabel,
+    ]) {
+      expect(label, isNotNull);
+      expect(label!.style!.fontFamily, isNull);
+      expect(label.style, expected);
+    }
+  });
+
+  test('RF-c: shouldRepaint follows fontFamily', () {
+    final page = ValueNotifier<PageComponent?>(standardPage());
+    RulerPainter bar(String? f) => RulerPainter(
+        axis: RulerAxis.horizontal,
+        camera: standardCamera(),
+        page: page,
+        pointer: ValueNotifier<Offset?>(null),
+        chrome: ChromePalette.light,
+        fontFamily: f);
+    RulerCornerPainter corner(String? f) => RulerCornerPainter(
+        page: page, chrome: ChromePalette.light, fontFamily: f);
+    expect(bar('Roboto').shouldRepaint(bar('Lato')), isTrue);
+    expect(bar('Roboto').shouldRepaint(bar(null)), isTrue);
+    expect(bar('Roboto').shouldRepaint(bar('Roboto')), isFalse);
+    expect(corner('Roboto').shouldRepaint(corner('Lato')), isTrue);
+    expect(corner('Roboto').shouldRepaint(corner('Roboto')), isFalse);
+  });
 
   testWidgets(
       'the bars are co-extensive with the child and the corner is 24 x 24',
