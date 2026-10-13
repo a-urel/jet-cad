@@ -1,10 +1,11 @@
 # The plan library, design mode (sub-project 2a) — design
 
-**Date:** 2026-10-14. **Status:** revision 2. Revision 1 was written after the
+**Date:** 2026-10-14. **Status:** revision 3. Revision 1 was written after the
 human approved the design section by section in chat. Revision 2 applies an
 independent Opus review (3 blocking, 11 important, 13 minor findings, each
-checked against the code), on the human's *"evet, revizyonu yap"*. Awaiting
-the human's review of this file.
+checked against the code), on the human's *"evet, revizyonu yap"*; revision
+3 applies that reviewer's re-review of revision 2 (N1-N9). Awaiting the
+human's review of this file.
 
 **Binds:** the umbrella spec
 [2026-10-13-kit-architecture-design.md](2026-10-13-kit-architecture-design.md)
@@ -37,7 +38,8 @@ umbrella's amendment of 2026-10-14 records the split of sub-project 2.
 3. **Sections P1-P5 were approved one by one** (*"uygun, devam et"*).
 4. **`DraftDocument` keeps its name** (*"DraftDocument kalsın"*). The
    `Draft*` family stays whole. An importer returns a plan's text, so a host
-   never names the engine's document (P5).
+   never names the engine's document (P5), unless it writes its own
+   exporter, which renders a document and so receives one.
 5. **Nothing of today's host API is dropped by this spec.** Every
    design-mode capability is mapped in P7 to 2a, 2b or sub-project 4. A row
    may say "dropped" only with the human's word (A14).
@@ -83,15 +85,27 @@ umbrella's amendment of 2026-10-14 records the split of sub-project 2.
   (`jet_cad_floor_plan/lib/src/tables/table_label_system.dart:27-48`).
 - **A regeneration that throws is already rolled back.** `_run` puts the
   survey, `dissolves`, `generate` and the apply loop under one rollback
-  (`parametric/regeneration.dart:968-1046`). A rollback that itself throws
-  raises "partially mutated" `StateError` (`:735`, `:1040`).
+  (`parametric/regeneration.dart:968-1046`), and rethrows the error unchanged
+  (`:1013`, `:1045`). A rollback that itself throws raises a plain "partially
+  mutated" `StateError` (`:735`, `:1040`).
+- **When `apply` throws, the dispatcher records nothing:** no history, no
+  change event, no `onAfterMutate` (`undo.dart:193-199`), so the spatial
+  index learns of an edit only after a successful `apply`.
+  `commands.notifyLoaded()` (`:263-268`) clears history and rebuilds
+  listeners through `DocumentLoaded`.
 - **Kit code runs on every edit:** `_survey` calls `reach` and `references`
-  for every live object (`regeneration.dart:243-264`). `ParametricCatalog`
+  for every live object (`regeneration.dart:243-264`). `reach(T params,
+  Transform2 toWorld)` receives no handle (`parametric_system.dart:32`). A
+  neighbour's edit regenerates an object again, and `generate` has no way to
+  answer "keep my children". `ParametricCatalog`
   (`parametric_system.dart:488`) has `register` and no listing query.
   `register` throws for a type that both contributes and reads places
   (`:497`).
 - **A component factory that throws aborts the whole load**
-  (`document/component.dart:310`). An unknown type id is kept raw (`:304`).
+  (`document/component.dart:310`). An unknown type id is kept raw (`:304`),
+  and saving merges raw and registered entries by type id without collision
+  (`:254-281`). `ComponentRegistry.loadJson` takes no diagnostics list
+  (`:295`); the codec has one (`codec/json_codec.dart:134`).
 
 **The planner and the kit package**
 - **Load discards its diagnostics** (`FloorPlanController._decode`,
@@ -142,7 +156,8 @@ final class PlanKit {
 - **So the plan never reads a `T`-typed member from outside.** It calls only
   erased operations that the class implements over its own `T`, as the
   engine's `_Registration` does:
-  - `registerInto(ParametricCatalog, ComponentRegistry)`;
+  - `registerInto(ParametricCatalog)` (the catalog registers the factories
+    into a document's registry itself, through `registerComponents`);
   - `fieldsOf(CommandTarget, Handle)`, which returns `PropertyField`s bound
     to that object;
   - `colourOf` and `recolour`;
@@ -235,12 +250,31 @@ design document, as `designJson()` does today.
 - **Undo:** `undo()`, `redo()`, `canUndo`, `canRedo`.
 - **Tools and selection:** `selectTool(String id)`, `activeTool`,
   `deleteSelection()`.
-- **Export and import:** `export(String exporterId, PlanExportChoice)` →
-  `Future<Uint8List>`, `print(PlanExportChoice)`, `import(String
-  importerId, Uint8List)`. `PlanExportChoice` is today's export choice
-  without the format; the exporter's id now names the format.
+- **Export and import:**
+  - `export(String exporterId, PlanExportChoice choice, {String? name})`
+    returns `Future<PlanExport?>`, where `PlanExport` carries bytes, a name
+    and a MIME type. `PlanExportChoice` is today's export choice without the
+    format; the exporter's id now names the format.
+  - `print(PlanExportChoice choice, {PagePrinter? printer, String? name})`
+    returns `Future<bool>`.
+  - `import(String importerId, Uint8List bytes)` returns `Future<void>`.
+  - **Today's rules hold** (host guide §8):
+    - one export or print runs at a time; a second call answers `null`
+      (print: `false`);
+    - the same answer for a plan with no page where the choice needs one,
+      and for a plan replaced while the bytes are being made;
+    - pending input (a field being edited) is settled first;
+    - the dialog's remembered choice is kept;
+    - an error completes the `Future` with that error.
 - **Camera:** `panBy`, `zoomBy`, `centerOn`, `fitToView` (today's).
-- **State:** `locale`, `missingKits`, `diagnostics`, `symbolsState`.
+- **Listenables:** `canUndo`, `canRedo` and `activeTool` are
+  `ValueListenable`s, so a host's own bar can listen.
+- **Undo while drawing:** `undo()` and `redo()` do nothing while a tool is
+  part-way through a shape (today's rule).
+- **`deleteSelection()`** returns a `bool`. It refuses (`false`) with nothing
+  selected, under `delete: false` from a widget, and for a locked object.
+- **State:** `locale`, `missingKits`, `locked`, `diagnostics`,
+  `symbolsState`, `damaged`.
 
 **Events:** a `Stream<PlanChange>` (object added, changed or removed; plan
 replaced). It is domain-neutral; today's `FloorPlanDesignChange` speaks of
@@ -310,7 +344,7 @@ Each widget takes only the controller, plus its own display options.
 | `PlanSymbolGallery` | The loaded kits' symbols: search over names and tags, categories, retired symbols hidden (R2), an optional `filter` (today's `symbolFilter`). Choosing a symbol arms `plan.symbol`. |
 | `PlanPropertyPanel` | The active tool's settings, while a tool with settings is active, as today. Below them, the one selected object's section: its type's specs (P3) titled by `type:<id>`, or the generic symbol section (name, rotation, mirror, the family's Size menu). The colour row over the selection (P3). The layer field. |
 | `PlanLayerPanel`, `PlanPagePanel` | Today's panels. "Live object" comes from the catalog (E1). Editing is gated by `editLayers` and `editPage`. |
-| `PlanEditor` | Today's shell layout: top bar; palette or gallery tab on the left; canvas; property, layer and page panels on the right. Options: which panels show, `gallery`, the canvas options, `bar` (today's `editorBar`: actions, `leading`, `trailing`, `visible`), the host's file callbacks, `onExportDialog`, `onPageFlowError`, `printer`, `shortcuts`, `autofocus`. |
+| `PlanEditor` | Today's shell layout: top bar; palette or gallery tab on the left; canvas; property, layer and page panels on the right. Options: which panels show, `gallery`, the canvas options, `bar` (today's `editorBar`: actions, `leading`, `trailing`, `visible`), the host's file callbacks, `onExportDialog`, `onPageFlowError`, `printer`, `exportName`, `shortcuts`, `autofocus`, `theme` (a per-view override, today's §9). |
 | `PlanShortcuts` | The keyboard (below). `PlanEditor` wraps itself in it; a host composing its own layout uses it. |
 
 ### The keyboard
@@ -480,13 +514,16 @@ every problem:
 **Which objects are locked:**
 - every object whose component type id is under a missing kit's id;
 - every placed symbol whose key is under a missing kit's id;
-- an object whose type's code failed (below).
+- an object whose type's code failed (below). Such an object is also
+  **frozen** (E2): the parametric system treats it as a plain group, so it
+  takes no part in any later regeneration, its own or a neighbour's.
 
 **What a lock does:**
 - **What a locked object keeps:** it draws as saved; it can be selected as
   a whole.
-- **What it loses:** grips, its property section, regeneration, move,
-  rotate, mirror, delete, and direct edits of its children.
+- **What it loses:** every change: grips, its property section,
+  regeneration, move, rotate, mirror, delete, a layer change, a recolour,
+  and direct edits of its children.
 - **Reporting:** `PlanController.missingKits` lists the missing kits;
   `locked` lists the locked objects.
 
@@ -513,6 +550,11 @@ every problem:
 `PlanLocked` is a refusal, not a kit diagnostic. The canvas shows a short
 hint.
 
+**Undo and a lock.** `undo` and `redo` skip the expander (Facts). A missing
+kit's objects are locked from the load, when history is empty. When an
+object becomes locked during a session (its code failed), the controller
+clears the undo history, so no earlier edit can be undone onto it.
+
 ### The failure boundary (A9)
 
 Every kit hook is called at the contract's boundary:
@@ -522,10 +564,10 @@ Every kit hook is called at the contract's boundary:
 
 | Throws | Outcome |
 |---|---|
-| `reach`, `references`, `pageKey`, place hooks, `dissolves`, `diagnose` | The adapter catches it and reports. The object is locked from then on. For the current survey the adapter answers conservatively: `reach` is the object's present bounds from the index; `references` is empty; the rest are their defaults. So one broken object never blocks edits elsewhere. |
-| `generate`, on an edit | The engine already rolls the edit back (Facts). E2 names the type that threw. The object keeps its geometry and is locked. |
-| a rollback that throws | The engine's "partially mutated" `StateError`. The controller reports it, marks the plan `damaged` (save still allowed, a warning shown), and clears undo history, which is no longer trustworthy. |
-| the component's `fromJson`, on load | E3: the component is kept raw, as an unknown type is. The object is locked; a diagnostic names it. |
+| any `ParametricType` hook: `reach`, `references`, `pageKey`, the place hooks, `dissolves`, `generate`, `diagnose` | The adapter rethrows it as `KitHookFailure(kitId, typeId, hook, error)`; the engine rolls the edit back and rethrows it unchanged (Facts). The controller then **probes** that type's objects: for each, `ParametricSystem.probe` (E2) runs its hooks in isolation, and the controller freezes and locks every object that throws (E2). It clears the history (above) and executes the user's command once more. If the retry fails again, the command is refused. So one broken object blocks one edit, once, and never its neighbours afterwards. |
+| the same hooks, on load | After a load, the controller probes every kit object's `reach` and `references` once, so an object that is already broken is frozen before the first edit. |
+| a rollback that throws | The engine's `PartialMutationError` (E3). The controller calls `commands.notifyLoaded()`, which clears history and rebuilds the index and caches. It marks the plan `damaged`, shows a warning, and reports a diagnostic. Saving a damaged plan first encodes and decodes it; if that fails, `save` throws `PlanFormatException` (`damagedUnsavable`) and writes nothing. |
+| the component's `fromJson`, on load | E4: the component is kept raw, as an unknown type is. The object is locked and frozen. The diagnostic names it by its handle (`Diagnostic.handles`). |
 | grips | That object has none; a drag in flight is cancelled. |
 | an attachment provider | Taken as no attachment. |
 | a tool's factory | The tool is disabled. |
@@ -536,7 +578,7 @@ Every kit hook is called at the contract's boundary:
 
 **Diagnostics.** Each case produces a `KitDiagnostic` (kit id, type or tool
 id, code, error), once per subject and code. `KitDiagnosticCode` includes:
-`hookFailed`, `rollbackFailed`, `componentUnreadable`, `letterTaken`,
+`hookFailed`, `rollbackFailed`, `damagedUnsavable`, `componentUnreadable`, `letterTaken`,
 `attachmentKindUnoffered`, `libraryUnreadable`, `libraryKitMismatch`,
 `symbolDuplicate`, `kitMissing`, `kitNewer`. `PlanController.diagnostics`
 is a listenable list.
@@ -553,8 +595,8 @@ abstract interface class PlanExporter {
   Future<Uint8List> export(PlanExportRequest request);
 }
 final class PlanExportRequest {
-  final DraftDocument document;   // read-only use
-  final PageComponent page;
+  final DraftDocument document;   // a copy made when the export starts
+  final PageComponent? page;      // null for a "drawing" export, as today
   final PlanExportChoice choice;
   final Set<Handle> omitted;      // objects of types with exported: false
   final PlanExportFonts fonts;
@@ -573,8 +615,12 @@ abstract interface class PlanImporter {
   `omitted` (today's `exportOmitOwners`).
 - **The dialog and printing:** the export dialog and printing work as
   today, listing the registry instead of a closed enum.
+- **The exporter's document is a copy.** It is decoded from the plan's text
+  when the export starts, so edits made while the `Future` runs cannot race
+  with it.
 - **Who sees `DraftDocument`:** an exporter does, since exporters are code
-  that renders. A host's own code never needs to.
+  that renders. A host that only uses the built-in exporters never does
+  (decision 4).
 
 **Words:**
 - `PlanStrings` (English, German, Turkish) holds the plan library's own
@@ -618,7 +664,10 @@ table (A14) takes these rows over and adds the test for each.
 | `FloorPlanController(json:)`, `designJson`, `markSaved`, `dirty`, `load` (a `FormatException`, nothing changed), `newPlan` (the locale's separator) | 2a: `PlanController(json:)`, `save`, `markSaved`, `dirty`, `load`, `newPlan` (P2) |
 | `designChanges` | 2a: `changes` (`PlanChange`) |
 | `selectTool(FloorPlanTool)`, `deleteSelection`, `undo`, `redo` | 2a: by tool id (P2) |
-| `exportPlan`, `printPlan`, `onExport` with a MIME type | 2a: `export`, `print`, `PlanExporter.mimeType` (P5) |
+| `exportPlan(choice, {name})` → `FloorPlanExport?` (bytes, name, MIME type) and its rules; `printPlan({printer, name})` → `bool`; `onExport`; the view's `exportName` | 2a: `export` → `PlanExport?`, `print` → `bool`, the same rules, `PlanEditor(exportName:)` (P2) |
+| `undo`/`redo` doing nothing mid-shape; `canUndo`/`canRedo` listenable | 2a (P2) |
+| `deleteSelection()` → `bool` and its refusals | 2a (P2) |
+| The per-view `theme:` | 2a: `PlanEditor(theme:)` |
 | The camera: `panBy`, `zoomBy`, `centerOn`, `fitToView`, `minScale`/`maxScale` | 2a: `PlanController` (P2) |
 | `fitToTables` | 2b |
 | One view at a time | 2a: one `PlanCanvas` at a time (P2) |
@@ -647,17 +696,29 @@ Each seam is argued here and lands with its own test.
   Handle)`:** which types are registered, and which one a group is. They
   replace `isParametricObject`, the if-chain of `ObjectGrips`, and the
   layer picker's list. No public query exists today (Facts).
-- **E2, attribution of a failing regeneration:** `_run` already rolls the
-  edit back. When the error comes from a type's hook, it is rethrown as
-  `ParametricFailure(typeId, error)`, so the plan can name the kit and lock
-  the object. Nothing else in the rollback changes.
-- **E3, a component that cannot be read keeps its data:** when a registered
+- **E2, frozen objects:** `ParametricSystem` takes a predicate
+  `isFrozen(Handle)`. A frozen object is left out of every survey, view and
+  regeneration and treated as a plain group, as an unregistered type is
+  today. No hook of its type is called for it. This is the only way to keep
+  a broken object out of its neighbours' edits, because `reach` gets no
+  handle and `generate` cannot answer "keep my children" (Facts). With it,
+  `probe(Handle)` runs one object's hooks (`reach`, `references`,
+  `generate` through the system's own view) in isolation, changes nothing,
+  and returns the first error or `null`: the controller's probe (P4).
+- **E3, a typed partial mutation:** the "partially mutated" `StateError` of
+  `regeneration.dart:735` and `:1040` becomes `PartialMutationError`, a
+  `StateError` subtype, so the controller tells it apart without matching
+  message text.
+- **E4, a component that cannot be read keeps its data:** when a registered
   factory throws during load, the registry keeps the component raw, as it
-  keeps an unknown type, and adds a `Diagnostic` to the decode's list,
-  instead of aborting the load.
+  keeps an unknown type, and adds a `Diagnostic` naming the handle to a list
+  the codec passes into `ComponentRegistry.loadJson`, instead of aborting
+  the load.
 
-There is no engine change for the lock: expanders already stack (Facts).
-The Flutter layer needs no change.
+No engine change is needed for the lock, because expanders already stack
+(Facts). No engine change is needed to name a failing type either: the
+guarding adapter knows its type id and the engine rethrows its error
+unchanged. The Flutter layer needs no change.
 
 ## Package layout
 
@@ -692,8 +753,10 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
   - English and Turkish words, no German (the fallback).
 - **The throwing kit:** every hook throws, one at a time and all together.
   For each hook, a named mutant (that hook's guard removed) turns a test
-  red. One case is "an object whose `reach` throws; a plain line is still
-  drawn and edited".
+  red. Two cases are named: "an object whose `reach` throws; after one
+  refused edit, a plain line is drawn and edited", and "a broken object
+  beside a working one of another type; after the probe, the working one's
+  edits regenerate and the broken one keeps its geometry".
 
 **What each test group shows:**
 - **Locks:** a missing kit's object, a broken object and a locked symbol
@@ -767,6 +830,21 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
 ## Revision history
 
 - **Revision 1** (`c78e2a8`): the design approved in chat.
+- **Revision 3:** the re-review of revision 2.
+  - **N1, N2:** a broken object is frozen (new E2), found by probing after a
+    failed edit and after a load; it no longer blocks its neighbours.
+  - **N3:** the attribution moves into the adapter, and the old E2 is
+    dropped.
+  - **N4:** the damaged state rebuilds through `notifyLoaded()`, uses the
+    typed `PartialMutationError` (E3), and saves only what decodes.
+  - **N5:** a lock covers every change; history is cleared when an object
+    becomes locked mid-session.
+  - **N6:** the export request carries a copy and an optional page;
+    decision 4 names the exporter case.
+  - **N7:** P2 and P7 take the export, print, undo, delete, listenable and
+    theme rules.
+  - **N8:** `registerInto` takes the catalog only. **N9:** E4's plumbing
+    and `Diagnostic.handles`.
 - **Revision 2:** the Opus review's findings, applied as follows.
   - **B1, the lock:** now apply-check-rollback plus the up-front gates,
     caught by the guarding decorator.
