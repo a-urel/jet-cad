@@ -149,9 +149,11 @@ the same catalog gives the same bytes. **Decoding** is
 9. a unit definition (one carrying `UnitComponent`) whose `SymbolComponent`
    has a `family`;
 10. a `UnitComponent` on a handle that is not a symbol definition;
-11. a unit whose first leaf is not closed (a closed polyline or a circle):
-    the first leaf of a unit is its outline, which service mode fills
-    (today's S4, now a rule instead of a convention);
+11. a unit whose first leaf is not closed (a closed polyline or a circle),
+    or is a closed polyline enclosing an area at or under
+    `Tolerance.linear`² (amended by the final review): the first leaf of a
+    unit is its outline, which service mode fills (today's S4, now a rule
+    instead of a convention);
 12. a non-finite base point;
 13. a leaf owned by anything but a definition; a leaf of kind text, fill,
     attribute or point;
@@ -162,7 +164,9 @@ the same catalog gives the same bytes. **Decoding** is
     block's does);
 15. bad geometry: wrong coordinate or scalar counts for the kind, a
     non-finite value, a coordinate beyond `1e6`, a zero-length line, a
-    polyline under 2 points, a radius or sweep at or under `Tolerance`.
+    polyline under 2 points or whose points all lie within `Tolerance.linear`
+    of each other (amended by the final review), a radius or sweep at or
+    under `Tolerance`.
 
 What the validator does not check: names, categories and tags beyond K2's
 patterns (the conformance test checks completeness, K7), and anything under
@@ -314,9 +318,10 @@ side.
 - **The dependency rule** (umbrella A1) as `tool/ci/check_kit_deps.dart`
   with tests: `jet_cad_2d_kit` depends on neither `jet_cad_2d_plan` nor any
   `jet_cad_2d_kit_*`; a `jet_cad_2d_kit_*` depends on no `jet_cad_2d_plan` and no other
-  `jet_cad_2d_kit_*`, in its pubspec or in any import under `lib/`, `test/` or
-  `tool/`. It passes vacuously for packages that do not exist yet and runs in
-  the CI tools job.
+  `jet_cad_2d_kit_*`, in its pubspec or in an import of any of its Dart files
+  (every directory but `build/` and `.dart_tool/`; amended by the final
+  review, umbrella A1). It passes vacuously for packages that do not exist
+  yet and runs in the CI tools job.
 
 ## Tests
 
@@ -371,6 +376,55 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
 `final` sketch).
 
 `SymbolLibrary` holds `kits` (a list), since a merged library spans kits.
+
+## Amendments from the final review (2026-10-13)
+
+- **K3 rule 15** also refuses a polyline whose points all lie within
+  `Tolerance.linear` of each other: a zero-length polyline (a closed
+  polyline of one point among them).
+- **K3 rule 11** also refuses a unit whose outline is a closed polyline
+  enclosing an area at or under `Tolerance.linear`², in either winding:
+  service mode would fill nothing.
+- **K9** reads every Dart file of the contract and of a kit (every
+  directory but `build/` and `.dart_tool/`), picking packages by their
+  pubspec's name: umbrella A1 says "any of its Dart files", and the umbrella
+  wins.
+- `docs/kits.md` no longer says a retired symbol leaves the gallery: the
+  contract has no retired mark (R2 below).
+
+## Inputs for sub-project 2
+
+The final review's API risks, none needing a breaking change if settled in
+sub-project 2's spec before the wave publishes 0.1.0:
+
+- **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
+  umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
+  (`numbered`) need an instance-level contract component, so
+  `registerKitComponents`' "the four and nothing else" changes. A parametric
+  unit (a booth with N seats) cannot carry a capacity on a definition's
+  handle.
+- **R2 Retirement.** A retired symbol leaving the gallery (umbrella A16)
+  needs a mark, likely an optional `retired` field in `jetcad.symbol` and
+  the catalog. Every `fromJson` requires every field today: a field added
+  later must be optional when read (absent reads as its default, here
+  `false`), or plans saved before it stop opening.
+- **R3 Conformance sees no types, tools or properties.** `conformance()` is
+  pure Dart and they live on the Flutter `PlanKit`; A16 requires their ids
+  and their English to be checked. Grow additive named parameters (ids and
+  words as strings) rather than moving the check into `PlanKit.validate`
+  alone.
+- **R4 `KitProblemCode` will grow** (types, tools, attachments). Each new
+  value after 0.1.0 breaks exhaustive switches: land sub-project 2's codes
+  before publishing.
+- **R5 Engine types in the public API.** `SymbolLeaf` exposes
+  `EntityRecord` and `GeometryPayload`, `SymbolEntry.definition` a
+  `Definition`: a breaking change of those in `jet_cad_2d` 0.x is one of the
+  contract and of every kit. K7.1's byte equality ties every kit's CI to the
+  codec's exact output: an engine release that changes `encodeToString`
+  turns every kit red until it regenerates. Document both in `docs/kits.md`.
+- **R6 Manifest versions are free strings** (`ManifestComponent`,
+  `PlanKit.version`). If sub-project 2 compares versions, it parses semver;
+  tightening the format later must not refuse manifests already stored.
 
 ## Risks
 
