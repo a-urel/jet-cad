@@ -150,6 +150,10 @@ regeneration; Task 3's report quotes their pre-R6 sizes, 124,546 and
 `692136cb65`. The generator compares no pixels, so a Linux CI run passes
 whatever its fonts do; the checked-in PNGs are this machine's.
 
+**Regenerating them:** `cd tool/screenshots && UPDATE_SCREENSHOTS=1 flutter
+test` (spec D4); without the variable the same command checks the scenes and
+writes nothing. Look at every PNG before committing it.
+
 ## Archive sizes (`dart pub publish --dry-run`)
 
 | Package | Before (Task 2, 0.7.1 state) | After Task 7 | After Task 8 / now |
@@ -233,8 +237,9 @@ lists as failing are the standing ones. The Linux run compares exactly.
 Minors from the task reviews, all deferred, none touching a published
 behaviour:
 
-- `packages/jet_cad_floor_plan/test/example_test.dart:79-80` carries a stale
-  comment ("The loaded state is not host API"): R-10 made it host API.
+- (Fixed in the final review, item 6: the stale comment in
+  `packages/jet_cad_floor_plan/test/example_test.dart`, line 5, "The loaded
+  state is not host API", is deleted; the note had cited lines 79-80.)
 - SH3 watches only `jet_cad_floor_plan`'s `doc/` directory; the package
   path interpolation in `shoot` is untested.
 - P5's band ends mid table 1; P1's palette list is cut at 800 px (its last
@@ -252,14 +257,74 @@ behaviour:
 - The renderer README says `dart pub add` where `flutter pub add` is
   idiomatic; the probe's imports are not checked against the README's prose.
 - `docs/host-guide.md` lines 2271 and 2275 run past 80 columns.
-- Task 8: the R3 caption (and the renderer's pubspec description) says "one
-  entity highlighted under the pointer", but the highlight is not
-  distinguishable in `selection_grips.png`; the root README's OCCT paragraph
-  is not wrapped at 80; double blank lines after R1/P1; "a host asks for them
-  in its theme" is vague (naming `FloorPlanTheme` or a guide section would
-  help).
+- Task 8: double blank lines after R1/P1. (The OCCT paragraph and the vague
+  "a host asks for them in its theme" were fixed in the final review; the
+  claim that R3's hover is indistinguishable was withdrawn: the hover is
+  visible, as the sofa's grip-less outline and the rulers' pointer marks.)
 - The images resolve nowhere until the tags are pushed (spec Risks): on
   GitHub the READMEs show broken images from the merge to the first tag.
+
+## Final review
+
+Verdict of the whole-branch review of `51125b6..d8ccf7c` (opus): **Ready to
+merge: with fixes**. The fix wave (commit `f683f5ca`, and this note's own
+commit) did every finding and nothing else:
+
+1. (I1, R8) The CI gates no task had run were run locally; see the table
+   below. No CI run has happened on the branch; a PR to main would run it
+   (the human's word).
+2. (I2) STATUS.md's release checklist: a step 0 (the human merges, pushes
+   `main`, CI green on the merge commit, before any publish); the pana
+   lower-bounds recipe pointed at (the 0.7.1 results note's "pana (0.23.19),
+   on each archive's file set"); each `cd` written from
+   `git rev-parse --show-toplevel`; line 3 says what is on pub.dev; "R-10's
+   exports as a 0.x candidate" dropped.
+3. The planner README names `statusCaptionStyle`, `groupChipTextStyle` and
+   the host guide's Themes section, wrapped at 80 columns.
+4. The planner CHANGELOG drops "(R-10)" and says what a host no longer
+   imports `editor.dart` for.
+5. The README version example: the patch example is `0.7.3` in all three.
+6. The stale comment in `example_test.dart` deleted.
+7. The false Task 8 deferred item removed.
+8. The regeneration command stated in "Fonts, ratio and the pictures";
+   `tool/screenshots/README.md` in paragraphs.
+9. `settle` is bounded by a 10 s `Stopwatch` (1 s when no `until` is given,
+   as the callers without one had about 1 s before); `flutter test` in
+   `tool/screenshots` green, PNGs not regenerated.
+10. The root README: "## The jet-cad packages", the OCCT paragraph at 80
+    columns, a final newline.
+11. (R10) `RulerFrame`'s dartdoc says the labels take the ambient
+    `DefaultTextStyle`'s family.
+12. The host guide's Themes section says so in one sentence (prose only).
+13. This section.
+
+**Rulings.** R8: the fix wave runs the unexercised gates locally and
+records them; a real CI run needs a push, which is the human's word. Cost if
+wrong: a Linux-only red found at PR time, before any publish. R9: the three
+tags are not pushed before publishing (the spec accepts the broken-image
+window; a failed publish would force moving a pushed tag). Cost if wrong:
+minutes of broken images per package on pub.dev. R10: the one-line dartdoc
+note on `RulerFrame`. Cost if wrong: none.
+
+**The CI gates run locally (R8)**, at `f683f5ca`, JSON reports outside the
+repository:
+
+| Command | Last line(s) |
+|---|---|
+| `apps/floor_planner`: `flutter test` + `expect_failures` | `00:26 +212: All tests passed!` / `apps/floor_planner: 212 tests; the standing failures and skips, exactly` |
+| `flutter analyze` / `dart format ...` | `No issues found! (ran in 3.7s)` / `Formatted 47 files (0 changed)` |
+| `apps/restaurant_demo`: `flutter test` + `expect_failures` | `00:13 +69: All tests passed!` / `apps/restaurant_demo: 69 tests; the standing failures and skips, exactly` |
+| `flutter analyze` / `dart format ...` | `No issues found! (ran in 3.3s)` / `Formatted 9 files (0 changed)` |
+| `packages/jet_cad_restaurant_symbols`: `flutter test` + `expect_failures` | `00:00 +97: All tests passed!` / `packages/jet_cad_restaurant_symbols: 97 tests; the standing failures and skips, exactly` |
+| `flutter analyze` / `dart format ...` | `No issues found! (ran in 2.4s)` / `Formatted 15 files (0 changed)` |
+| `tool/ci/host_probe.sh "file://$(pwd)" "$(git rev-parse HEAD)"` | exit 0; `host probe: no GPU renderer, no build hook; build/web is  42M` |
+| `tool/ci/old_host_probe.sh` `v0.3.0`, `v0.4.0`, `v0.5.1`, `v0.6.0` | each: `No issues found!` and `old host probe: <tag>'s main.dart analyses against f683f5ca...` |
+
+After the fixes: `cd tool/ci && dart test` `00:04 +94: All tests passed!`;
+`check_guide`, `check_readmes` and `check_screenshots` print the same three
+lines as in the full gate; `tool/readme_probe` `flutter analyze` `No issues
+found! (ran in 2.8s)`; the three `dart pub publish --dry-run` runs: 229 KB,
+814 KB and 782 KB, each `Package has 0 warnings.`
 
 ## Owed to the human
 
