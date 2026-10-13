@@ -445,9 +445,45 @@ runs on its own catalog:
   patch; a removed or renamed Dart name, a type's parameters changed, or the
   kit id changed is a minor (0.x+1.0).
 
+## A17. Interchange with AutoCAD, later: what keeps the door open
+
+The human, 2026-10-13: *"ileride autocad dosya formatı da desteklenecek,
+mimarimizin bu genişlemelere de uygun olduğundan emin olalım."* Not built
+by this wave; these rules make sure nothing in it blocks it.
+
+- **The engine is DXF-shaped already** (`roadmap/05-drawing-tools.md`:
+  handles, layers, linetypes, by-block and by-layer attributes, block
+  definitions and their instances, attributes, text styles, lineweights,
+  text height as cap height).
+- **Where it will live:** a 2D-ecosystem package over the engine alone,
+  `jet_cad_2d_dxf`, reading and writing a `DraftDocument` as DXF. It depends
+  on neither the plan library nor a kit. DWG comes through the same
+  document model later; its licensing is a decision for its time.
+- **The plan library's export and import are open seams,** not a closed
+  enum (today's `FloorPlanExportFormat` is one): PDF and PNG are built in,
+  and a host adds an exporter or an importer, for example DXF's.
+- **Semantics survive a round trip:** every contract and kit component is
+  JSON on a handle, so a DXF writer can carry it as extended data under one
+  registered application name, and a DXF reader can restore it. Other CAD
+  software sees plain blocks, lines and polylines.
+
+**Binding on sub-projects 1–4:**
+
+1. Everything a kit stores is a component on a handle, serialisable to JSON;
+   no side table, no state outside the document.
+2. A kit generates only the engine's entity kinds (line, polyline, circle,
+   arc, text, fill, attribute); a kit never adds an entity kind. So an
+   exporter needs no kit code, and a plan exports whole even with a kit
+   missing.
+3. Symbols stay block definitions with instances (BLOCK and INSERT).
+4. Export and import are registries in `jet_cad_2d_plan` (sub-project 2).
+5. An imported drawing with no kit semantics opens as plain geometry: plain
+   entities, blocks and layers, editable with the generic tools.
+
 ## Out of scope
 
 - The cinema and aircraft kits themselves (A6 only makes room for them).
+- DXF and DWG themselves (A17 only keeps the door open).
 - `jet_cad_2d_gpu` and the dormant `jet_cad`.
 - Reading plans made by `jet_cad_floor_plan` (decision 9).
 - Opening styles as data (a door leaf drawn from a library): noted as a
