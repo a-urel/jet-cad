@@ -305,8 +305,8 @@ void main() {
 
   testWidgets(
       'RBV4 under shortcuts false Escape mid-band ends it, a secondary click '
-      'mid-band opens no menu, and a mode switch mid-band leaves nothing '
-      'selected (RB14; M-RB17)', (tester) async {
+      'mid-band opens no menu, and a mode switch mid-band leaves the '
+      'selection as it was (RB14; M-RB17)', (tester) async {
     final h = await pumpBand(tester, shortcuts: false);
     final c = h.c;
     c.select({'5'});

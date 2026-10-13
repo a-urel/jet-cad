@@ -443,6 +443,39 @@ void main() {
   });
 
   testWidgets(
+      'RB2b the modifier is read at the down (R-1): under pan Shift at the '
+      'down only still bands and adds; under band Shift on the moves and the '
+      'up only still replaces (M-RB24, M-RB25)', (tester) async {
+    final r = rig(tester);
+    final box = padded(r.leafBox(['1', '2']), 600);
+    final s = r.screen(Vector2(box.minX, box.maxY));
+    final e = r.screen(Vector2(box.maxX, box.minY));
+    expect(r.picker.pick(r.toWorld(s)), isNull, reason: 'premise: the floor');
+    expect(r.options.floorDrag, FloorPlanFloorDrag.pan, reason: 'premise');
+
+    // Under pan: Shift at the down only. Read at the first move (M-RB25) the
+    // drag would pan; read at the up (M-RB24) it would replace.
+    r.selection.replace([r.key('9')]);
+    final before = parts(r.camera.value.worldToScreenMatrix);
+    r.down(s, shift: true);
+    r.move(Offset.lerp(s, e, 0.5)!);
+    r.move(e);
+    r.up(e);
+    expect(r.selection.keys, r.keys(['1', '2', '9']), reason: 'a band adds');
+    expect(parts(r.camera.value.worldToScreenMatrix), before, reason: 'no pan');
+
+    // Under band: a plain down, Shift on the moves and the up. Read at the
+    // up (M-RB24) it would add 9 to the band's keys.
+    r.drag(FloorPlanFloorDrag.band);
+    r.selection.replace([r.key('9')]);
+    r.down(s);
+    r.move(Offset.lerp(s, e, 0.5)!, shift: true);
+    r.move(e, shift: true);
+    r.up(e, shift: true);
+    expect(r.selection.keys, r.keys(['1', '2']), reason: 'a band replaces');
+  });
+
+  testWidgets(
       'RB5 under band a drag from a table moves it, from a locked one is '
       'spent; with serviceMoves false it pans (M-RB5)', (tester) async {
     final r = rig(tester);
@@ -639,7 +672,7 @@ void main() {
       'RB10 locks and groups: a lone locked table is not taken; a window '
       'round a group with a locked member takes its unlocked one; crossing '
       'one member takes its group; a window with one member out takes none '
-      '(M-RB10, M-RB10b, M-RB11, M-RB12)', (tester) async {
+      '(M-RB10, M-RB10b, M-RB11, M-RB12, M-RB26)', (tester) async {
     final r = rig(tester);
     r.drag(FloorPlanFloorDrag.band);
     r.selection.replace([r.key('1')]);
@@ -663,6 +696,21 @@ void main() {
         reason: 'premise: 6 outside');
     r.band(two);
     expect(r.selection.isEmpty, isTrue);
+
+    // A crossing takes a group only through an unlocked member (RB-3): over
+    // the right edge of 8 (h's locked member) alone, off 7, it takes nothing
+    // and a plain band replaces the selection with that empty set.
+    r.selection.replace([r.key('1')]);
+    final eight = r.leafBox(['8']);
+    final edge = Aabb2.raw(
+        eight.maxX - 200, eight.minY - 100, eight.maxX + 300, eight.maxY + 100);
+    expect(overlaps(edge, eight), isTrue, reason: 'premise: touches 8');
+    expect(overlaps(edge, r.leafBox(['7'])), isFalse,
+        reason: 'premise: off 7\'s leaves');
+    expect(r.node('8').layer, isNot(r.node('7').layer),
+        reason: 'premise: 8 is on the locked layer, 7 not');
+    r.band(edge, crossing: true);
+    expect(r.selection.isEmpty, isTrue, reason: 'locked member alone: none');
   });
 
   testWidgets(
@@ -694,7 +742,7 @@ void main() {
   testWidgets(
       'RB13 one notification for a band that changes the selection, none '
       'for one that does not; a band reports no tap, double tap, floor tap '
-      'or hover (M-RB15, M-RB16)', (tester) async {
+      'or hover (M-RB15, M-RB16, M-RB27)', (tester) async {
     final r = rig(tester);
     r.drag(FloorPlanFloorDrag.band);
     var notified = 0;
@@ -720,6 +768,11 @@ void main() {
     expect(r.doubleTaps, isEmpty);
     expect(r.floors, isEmpty);
     expect(r.hovers, isEmpty);
+    // The rig's events are all stamped zero: were the first tap still
+    // remembered, this one would complete a double tap (M-RB27).
+    r.tap(top);
+    expect(r.taps, ['2', '2']);
+    expect(r.doubleTaps, isEmpty, reason: 'the band broke the tap chain');
   });
 
   testWidgets('RB13b a band, then at once a tap on a table: the tap acts',
@@ -795,5 +848,29 @@ void main() {
     expect(crossing.calls.first.positionalArguments[0], Rect.fromPoints(a, c));
     r.up(c);
     expect(r.paint().calls, isEmpty, reason: 'idle again');
+  });
+
+  testWidgets(
+      'RB15b the tool notifies as a band grows and when Escape ends it, so '
+      'the overlay repaints (M-RB22, M-RB23)', (tester) async {
+    final r = rig(tester);
+    r.drag(FloorPlanFloorDrag.band);
+    var n = 0;
+    r.tool.addListener(() => n++);
+    const a = Offset(900, 120), b = Offset(1100, 300), c = Offset(1150, 320);
+    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise');
+    r.down(a);
+    r.move(b);
+    expect(r.tool.phase, ToolPhase.dragging, reason: 'premise: banding');
+    final started = n;
+    expect(started, greaterThan(0), reason: 'the band starting repaints');
+    r.move(c);
+    expect(n, greaterThan(started), reason: 'a further move repaints');
+    final grown = n;
+    expect(r.paint().calls, isNotEmpty, reason: 'premise: a band is painted');
+    expect(r.tool.onKey(_escape, r.ctx), KeyEventResult.handled);
+    expect(r.tool.phase, ToolPhase.idle);
+    expect(n, greaterThan(grown), reason: 'Escape repaints');
+    expect(r.paint().calls, isEmpty);
   });
 }
