@@ -390,14 +390,15 @@ with 0.7.0 (below).
 - **Publishing `jet_cad_2d_flutter` and `jet_cad_floor_plan` on pub.dev**
   (the human, 2026-10-13: *"bence tümünü sırayla yayınlayalım"*), on
   `feat/publish-host-packages`, cut by hand from `main` at `d41e5f6`;
-  **not merged, not pushed**. Spec
+  **merged into `main` at `d2ad729`** on the human's word (*"1"*);
+  **not pushed**. Spec
   [2026-10-13-publish-host-packages-design.md](docs/superpowers/specs/2026-10-13-publish-host-packages-design.md)
   (revision 2, approved), plan
   [2026-10-13-publish-host-packages.md](docs/superpowers/plans/2026-10-13-publish-host-packages.md),
   record
   [2026-10-13-publish-host-packages-results.md](docs/superpowers/notes/2026-10-13-publish-host-packages-results.md);
-  the SDD ledger is `.superpowers/sdd/2026-10-13-publish-host-packages/`
-  (archived at the merge). Seven tasks, each reviewed: every dependency on
+  the SDD ledger is archived in
+  [docs/superpowers/ledgers/2026-10-13-publish-host-packages/](docs/superpowers/ledgers/2026-10-13-publish-host-packages/). Seven tasks, each reviewed: every dependency on
   a published package a hosted `^0.7.1` (the workspace resolves it to the
   local copy); both packages at 0.7.1 with LICENSE, README, CHANGELOG,
   `.pubignore`, an example and its test; `dart doc` 6 → 0 and 23 → 0;
@@ -497,20 +498,21 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 **Next: the human publishes the three packages, in order** (Claude never
 runs `dart pub publish` without `--dry-run`; merge, push, tag and publish
 are the human's alone). `jet_cad_2d` 0.7.1 is merged into `main` at
-`1dc167d`; `feat/publish-host-packages` (In flight) awaits its review
-result; its own CI run (Linux) on the pushed branch must be green, and
-the merge waits for the human's word. The checklist (spec D10), per
+`1dc167d`; `feat/publish-host-packages` (In flight) is merged at
+`d2ad729`, not pushed: `main`'s CI run (Linux) after the push must be
+green before any publish. The checklist (spec D10), per
 package, in this order:
 
-1. **`jet_cad_2d` 0.7.1:** publish it from `main` as it stands now
-   (`d41e5f6`, whose `packages/jet_cad_2d` equals `1dc167d`'s) **before**
-   this branch is merged: the branch rewrites the engine README (R-5), so
-   publishing after the merge would upload the new README under the tag
-   `jet_cad_2d-v0.7.1` → `1dc167d`, and the archive would not match the
-   tag. Push `main` and watch CI (job `publishable` included); from
-   `packages/jet_cad_2d`, `dart pub publish --dry-run`,
-   `dart pub publish`; the tag `jet_cad_2d-v0.7.1` → `1dc167d`; the
-   version visible on pub.dev. pub.dev scores it after the upload:
+1. **`jet_cad_2d` 0.7.1:** publish it from a checkout of `1dc167d`,
+   not from `main`: `main` now carries the rewritten engine README (R-5),
+   which would upload under the tag `jet_cad_2d-v0.7.1` → `1dc167d` and
+   not match it. Push `main` and watch CI (job `publishable` included);
+   then `git worktree add ../jet-cad-engine-0.7.1 1dc167d`, and in it
+   `flutter pub get` at the root, then from `packages/jet_cad_2d`
+   `dart pub publish --dry-run`, `dart pub publish`;
+   `git worktree remove ../jet-cad-engine-0.7.1` (measured 2026-10-13:
+   the dry run there gives 0 warnings and leaves the checkout clean); the
+   tag `jet_cad_2d-v0.7.1` → `1dc167d`; the version visible on pub.dev. pub.dev scores it after the upload:
    160/160 is expected once GitHub's `main` carries the pubspec (150/160
    measured before the push).
 2. **`jet_cad_2d_flutter` 0.7.1:** `main` carries the merge and CI is
@@ -682,7 +684,7 @@ and planned in
 the spec's Decisions bind (Apache 2.0 for all, hosted constraints in the
 repository, pub.dev only for hosts). Order: `jet_cad_2d` → `jet_cad_2d_flutter`
 → `jet_cad_floor_plan`; the second and third steps are **prepared on
-`feat/publish-host-packages`** (In flight), published by the human
+`feat/publish-host-packages`**, merged at `d2ad729` (In flight), published by the human
 (Resume here). Still binding:
 
 - **The restaurant symbols: the fourth step, deferred** (a SWOT in chat;
