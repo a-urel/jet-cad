@@ -96,7 +96,7 @@ each definition's leaves. `SymbolLibrary.decode(bytes)` refuses, with a
     colour, lineweight and transparency, no flag, text style STANDARD;
 15. bad geometry: wrong counts, a non-finite value, a coordinate beyond
     1e6 mm, a zero-length line, a polyline under 2 points or whose points
-    all lie within the engine's tolerance of each other, a radius or a
+    all lie in a box the engine's tolerance wide and high, a radius or a
     sweep within the engine's tolerance of zero.
 
 `SymbolLibrary.merge` joins libraries in order and refuses a `key@version`

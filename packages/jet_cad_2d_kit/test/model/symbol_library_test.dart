@@ -676,10 +676,11 @@ void main() {
         sofaLine,
         (g) => g['coords'] = [120.0, 340.0, 120.0 + linear / 2, 340.0],
         ['zero-length']);
-    // Amended by the final review: a polyline whose points all lie within
-    // Tolerance.standard.linear of each other is a zero-length polyline.
-    // M-V15aa: drop the check (V15aa, V15ab red); exact equality of the
-    // points (V15aa red).
+    // Amended by the final review, made O(n) by the PR #11 review: a
+    // polyline whose points all lie in a box Tolerance.standard.linear wide
+    // and high is a zero-length polyline. M-V15aa: drop the check (V15aa,
+    // V15ab red); compare the box's sides with 0, not with linear (V15aa
+    // red).
     geometry(
         'V15aa a polyline of three points within linear of each other',
         sofaPolyline,
@@ -692,8 +693,8 @@ void main() {
         (g) => g['coords'] = [120.0, 340.0, 120.0, 340.0], ['zero-length']);
     test('V15ac points within linear of the first, not of each other, load',
         () {
-      // Positive control, "of each other": the outer two are 1.8e-9 apart.
-      // M-V15ac: compare every point with the first only.
+      // Positive control: the box spans all the points, 1.8e-9 wide.
+      // M-V15ac: the box of the first two points only.
       final j = validLibraryJson();
       geometryJson(j, sofaPolyline)['coords'] = [
         120.0, 340.0, 120.0 - 0.9 * linear, 340.0, //
@@ -721,6 +722,58 @@ void main() {
               .coords[4],
           400.0);
     });
+    // The PR #11 review: the check is one pass over the raw coordinates
+    // (the bytes are untrusted), so a polyline of 200k coincident points is
+    // refused in milliseconds (about 40 ms here). A synchronous decode
+    // cannot be interrupted by a test timeout, so the bound is a stopwatch.
+    // M-V15ae: the former pairwise check (every two points compared, a
+    // vector allocated per pair: 2e10 pairs) takes tens of seconds.
+    test('V15ae a polyline of 200k coincident points is refused, fast', () {
+      final j = validLibraryJson();
+      geometryJson(j, sofaPolyline)['coords'] = [
+        for (var i = 0; i < 200000; i++) ...[120.0, 340.0],
+      ];
+      final bytes = bytesOfJson(j);
+      final watch = Stopwatch()..start();
+      expectRefused(bytes, 15, [hex(sofaPolyline), 'zero-length']);
+      expect(watch.elapsed, lessThan(const Duration(seconds: 5)));
+    });
+    test('V15af 100k coincident points and a last one 2 * linear away load',
+        () {
+      // Positive control: the box reaches the last point. M-V15af: the loop
+      // stops one point short of the end.
+      final j = validLibraryJson();
+      geometryJson(j, sofaPolyline)['coords'] = [
+        for (var i = 0; i < 100000; i++) ...[120.0, 340.0],
+        120.0, 340.0 + 2 * linear, //
+      ];
+      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
+      expect(
+          sofa.leaves
+              .firstWhere((l) => l.record.kind == EntityKind.polyline)
+              .payload
+              .pointCount,
+          100001);
+    });
+    for (final (name, coords) in [
+      ('vertical', [120.0, 340.0, 120.0, 340.0 + 2 * linear]),
+      ('horizontal', [120.0, 340.0, 120.0 + 2 * linear, 340.0]),
+    ]) {
+      test('V15ag a $name polyline 2 * linear long loads', () {
+        // Positive control: the box is refused only when both sides are
+        // under the tolerance. M-V15ag: `||` for `&&` (both red), or test the
+        // width only (vertical red) or the height only (horizontal red).
+        final j = validLibraryJson();
+        geometryJson(j, sofaPolyline)['coords'] = coords;
+        final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
+        expect(
+            sofa.leaves
+                .firstWhere((l) => l.record.kind == EntityKind.polyline)
+                .payload
+                .coords,
+            coords);
+      });
+    }
     test('V15z a line 2 * linear long loads', () {
       // Positive control: the line rule is not over-strict.
       final j = validLibraryJson();

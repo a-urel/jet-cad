@@ -370,16 +370,22 @@ final class SymbolLibrary {
     if (r.textAttrs != 0) refuse('has text attributes ${r.textAttrs}');
   }
 
-  /// Rule 15's zero-length polyline: every two points of [p] within
-  /// [Tolerance.standard]'s linear tolerance of each other. Stops at the
-  /// first pair further apart, for a drawn polyline its first two points.
+  /// Rule 15's zero-length polyline: the bounding box of [p]'s points is at
+  /// or under [Tolerance.standard]'s linear tolerance in both width and
+  /// height. One pass over the raw coordinates, no allocation: the bytes are
+  /// untrusted and a polyline may carry any number of points.
   static bool _allWithinTolerance(GeometryPayload p) {
-    for (var i = 0; i < p.pointCount; i++) {
-      for (var j = i + 1; j < p.pointCount; j++) {
-        if (!isDegenerateSegment(p.pointAt(i), p.pointAt(j))) return false;
-      }
+    final c = p.coords;
+    var minX = c[0], maxX = c[0], minY = c[1], maxY = c[1];
+    for (var i = 2; i + 1 < c.length; i += 2) {
+      final x = c[i], y = c[i + 1];
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
-    return true;
+    final linear = Tolerance.standard.linear;
+    return maxX - minX <= linear && maxY - minY <= linear;
   }
 
   /// Rule 11: the area a closed polyline encloses, unsigned (either winding
@@ -439,7 +445,7 @@ final class SymbolLibrary {
           throw SymbolLibraryError(
               15,
               '$who is a zero-length polyline: its points all lie within '
-              'the tolerance of each other');
+              'a box the tolerance wide and high');
         }
       case EntityKind.circle:
       case EntityKind.arc:
