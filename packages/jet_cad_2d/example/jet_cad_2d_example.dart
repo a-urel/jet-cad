@@ -22,9 +22,10 @@ Future<void> main() async {
   print('extents: ${doc.extents}');
 
   // The spatial index follows the document's edits synchronously. A pick
-  // finds the topmost entity within a radius of a world point; it writes
-  // into a caller-owned HitPath, so a pick in a frame loop allocates nothing.
-  // The point is 1 unit outside the circle's top, within the radius of 2.
+  // finds the topmost entity within a radius of a world point and writes
+  // into a caller-owned HitPath: nothing per entity is allocated, only a
+  // few objects per level of instance nesting. The point is 1 unit outside
+  // the circle's top, within the radius of 2.
   final index = SpatialIndex(doc);
   final hit = HitPath();
   void pick() {
@@ -44,14 +45,23 @@ Future<void> main() async {
   pick();
   doc.commands.redo();
   print('after redo, entities: ${doc.entities.liveCount}');
+  pick();
 
   // The document format is deterministic: a decoded copy writes the same
-  // bytes back.
+  // bytes back, and holds the same geometry.
   final saved = DraftDocumentCodec.encodeToString(doc);
   final copy = DraftDocumentCodec.decodeString(saved);
-  print('decoded copy encodes identically: '
-      '${DraftDocumentCodec.encodeToString(copy) == saved}');
+  print('decoded copy: entities ${copy.entities.liveCount}, encodes '
+      'identically: ${DraftDocumentCodec.encodeToString(copy) == saved}');
+  final copyIndex = SpatialIndex(copy);
+  final onCopy = copyIndex.pickInto(
+          Vector2(300, 301), 2, const QueryFilter.picking(), hit) &&
+      copy.entities.kindAt(copy.entities.slotOf(hit.entity)!) ==
+          EntityKind.circle;
+  print('pick on the copy (300, 301): '
+      '${onCopy ? 'a circle (${hit.kind.name})' : 'no circle'}');
 
+  copyIndex.dispose();
   index.dispose();
   await copy.dispose();
   await doc.dispose();

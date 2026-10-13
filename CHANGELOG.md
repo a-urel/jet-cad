@@ -1,10 +1,10 @@
 # Changelog
 
 The packages a host depends on — `jet_cad_2d_flutter`,
-`jet_cad_floor_plan`, `jet_cad_restaurant_symbols`, with the engine
-`jet_cad_2d` they bring — are released together, under one version and one
-git tag (`vX.Y.Z`). A host depends on them by git (see
-[docs/host-guide.md](docs/host-guide.md)).
+`jet_cad_floor_plan` and `jet_cad_restaurant_symbols` — are released
+together, under one version and one git tag (`vX.Y.Z`); the tag also
+carries the engine, `jet_cad_2d`, at its own version (below). A host
+depends on them by git (see [docs/host-guide.md](docs/host-guide.md)).
 
 From 0.7.1 the engine, `jet_cad_2d`, is also published on pub.dev and has
 its own version and its own tags (`jet_cad_2d-vX.Y.Z`): it moves only when

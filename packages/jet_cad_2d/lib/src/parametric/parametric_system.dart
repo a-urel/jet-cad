@@ -581,10 +581,11 @@ class ParametricSystem {
   /// [ParametricType.dissolves] is named too: its plan removes it (spec 10
   /// D15), so a loaded broken room shows here.
   ///
-  /// Guarded the same way [ParametricEdit.apply] is (F5): a client `generate` must not
-  /// mutate, and a dry run is exactly where a client could try to call
-  /// `execute` and have it actually land, since nothing else here applies
-  /// anything. Re-entry through the dispatcher throws instead.
+  /// Guarded the same way [ParametricEdit.apply] is (F5): a client
+  /// `generate` must not mutate, and a dry run is exactly where a client
+  /// could try to call `execute` and have it actually land, since nothing
+  /// else here applies anything. Re-entry through the dispatcher throws
+  /// instead.
   ///
   /// Throws what the plan throws (spec 07 D8): `ArgumentError` when a
   /// client generates a region that is not a closed, triangulable

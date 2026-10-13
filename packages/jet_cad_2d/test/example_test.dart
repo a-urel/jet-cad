@@ -22,7 +22,9 @@ void main() {
       'after undo, entities: 1',
       'pick (300, 301): nothing',
       'after redo, entities: 2',
-      'decoded copy encodes identically: true',
+      'pick (300, 301): the circle (edge)',
+      'decoded copy: entities 2, encodes identically: true',
+      'pick on the copy (300, 301): a circle (edge)',
     ]);
   });
 }

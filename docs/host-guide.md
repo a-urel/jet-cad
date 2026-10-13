@@ -14,8 +14,8 @@ that file, so the code in this guide compiles against the release.
 
 ## 1. The dependency
 
-The planner's packages are not on pub.dev. Depend on them by git, **both pinned to
-the same commit SHA** — the SHA the release tag `v0.7.0` points at,
+The planner's packages are not on pub.dev. Depend on them by git, **both
+pinned to the same commit SHA** — the SHA the release tag `v0.7.0` points at,
 `0fa649e2c6f09f34f2b7564071837cc1b15ffd11` (the merge of release 0.7.0 into
 `main`):
 

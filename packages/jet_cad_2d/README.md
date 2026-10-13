@@ -14,14 +14,21 @@ no FFI and no native build, and runs anywhere Dart runs: the VM, the web
   dispatcher, undoable and redoable, compound commands included.
 - **A spatial index** that follows each edit synchronously: rectangle
   queries, picking with the full path through nested instances, and object
-  snapping. The frame-path queries allocate nothing in steady state.
+  snapping. In steady state the frame-path queries allocate nothing per
+  entity; a pick or a snap allocates a few objects per level of instance
+  nesting, whatever the document's size.
 - **A deterministic file format**: a JSON codec that writes a document back
-  byte for byte, with a schema version, and preserves fields written by a
-  newer version.
+  byte for byte. It keeps the fields and components it does not recognise
+  (another application's components, for instance) and writes them back
+  unchanged; a file with a newer schema version is refused with
+  `SchemaVersionError`.
 - **A parametric layer**: object types an application registers are
   regenerated inside the edit that changes them, in the same undo step.
 
 ## Example
+
+The snippet uses `vector_math` for its points, so add both:
+`dart pub add jet_cad_2d vector_math`.
 
 ```dart
 import 'package:jet_cad_2d/jet_cad_2d.dart';

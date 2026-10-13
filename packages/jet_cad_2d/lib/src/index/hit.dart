@@ -22,8 +22,9 @@ enum HitKind { vertex, edge, fill }
 /// [entity] `Handle.none`, [worldPoint] the origin, [kind] [HitKind.edge],
 /// [truncated] `false`. A caller that checks the boolean result first never
 /// reads any of that — but one that does not must not be able to mistake a
-/// stale field for a fresh answer, which is why `SpatialIndex.pickInto` resets its `out`
-/// unconditionally at the start of every call rather than only on a miss.
+/// stale field for a fresh answer, which is why [SpatialIndex.pickInto]
+/// resets its `out` unconditionally at the start of every call rather than
+/// only on a miss.
 class HitPath {
   HitPath([int chainCapacity = 16]) : chain = Uint32List(chainCapacity);
 

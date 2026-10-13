@@ -1028,9 +1028,9 @@ class NarrowPhaseSlack {
   /// larger singular value of [edge] — `scaleMagnitude * sqrt(k)`, since the
   /// two singular values multiply to `|det|` and their ratio is the
   /// anisotropy. And the edge's own anisotropy compounds with whatever the
-  /// leaves below already had, which the sharper [pick] channel (pick and snap) was
-  /// computed without knowing; [crude] is exactly the bound that survives
-  /// that, so the edge's [deviationFraction] of it is added back.
+  /// leaves below already had, which the sharper [pick] channel (pick and
+  /// snap) was computed without knowing; [crude] is exactly the bound that
+  /// survives that, so the edge's [deviationFraction] of it is added back.
   ///
   /// A singular edge returns [none]: `SpatialIndex._descend` cannot invert
   /// it, so it never descends through one and there is nothing below it to

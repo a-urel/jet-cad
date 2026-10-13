@@ -117,6 +117,15 @@ about the radius: the degenerate fixture. The pick moved to (300, 301),
 
 Each was fired from a copy of the file and restored from it (`cmp` checked).
 
+The review (below) found two mutants the test survived: M-R1, the codec
+writing no entity (`json_codec.dart`, `liveSlots.take(0)`), since an empty
+document also round-trips identically; and M-R2, `redo()` not calling
+`onAfterMutate` (`undo.dart`), since redo was checked through `liveCount`
+only. The example now picks again after the redo, prints the decoded copy's
+entity count, and picks on the copy through its own index (which must find
+a circle). Both mutants now turn the test red, fired and restored the same
+way.
+
 ## The barrel, audited
 
 `lib/jet_cad_2d.dart` exports 56 files whole (no `show`, no `hide`).
@@ -169,11 +178,43 @@ change, not a cleanup: a 0.x minor of its own, with a spec.
     analyze and format clean.
 - CI (Linux) runs on a push, which waits for the human's word.
 
+## Independent review
+
+One Opus reviewer subagent on the branch diff at `943a9ad` (read-only; it
+re-ran the dry run, `dart doc`, the gates of the engine and pana itself):
+**Approve with fixes**, R-1 to R-10.
+
+- R-1, applied: "the frame-path queries allocate nothing" overstated the
+  invariant; a pick allocates a few objects per level of instance nesting
+  (`query_allocation_test.dart` budgets `Aabb2` 4.004 and `Transform2`
+  7.007 per `pickInto` on its four-level fixture). README and the
+  example's comment now say "nothing per entity".
+- R-2, applied: "preserves fields written by a newer version" was wrong; a
+  newer schema version is refused (`SchemaVersionError`). README now says
+  what is kept: unknown fields and components within a readable version.
+- R-3, applied: the two surviving mutants, above.
+- R-4, **left for the human**: the dormant `packages/jet_cad/pubspec.yaml`
+  has no `publish_to: none` (the name `jet_cad` is free on pub.dev). The
+  STATUS ruling now says "every other package of the live line".
+- R-5, R-6, applied: the root CHANGELOG header no longer puts the engine
+  under the shared version; STATUS no longer calls `jet_cad_2d_gpu` a
+  host package.
+- R-7, no change: the present tense ("is on pub.dev") holds once the
+  publish follows the merge, as Resume orders it.
+- R-8, applied: `.pubignore` anchors its patterns at the package root.
+- R-9, applied: every added line wraps at 80 columns.
+- R-10, applied: README says the snippet needs `vector_math` too.
+- Not taken: a `tree/main/packages/jet_cad_2d` repository URL (pana
+  already finds the package in the repository) and automated publishing
+  from tags (the publish is the human's).
+
 ## Owed
 
 - **The human:** the word to push and merge; then, from
   `packages/jet_cad_2d` on `main`, the pana re-run, `dart pub publish`,
   and the tag `jet_cad_2d-v0.7.1` on the merge commit.
+- **The human's ruling (R-4):** whether the dormant `packages/jet_cad`
+  gets `publish_to: none`.
 - **After the publish:** the host guide's new sentence (a host must not
   also take `jet_cad_2d` from pub.dev: pub takes a package from one source
   only) states pub's rule; it was not run, since there was no hosted

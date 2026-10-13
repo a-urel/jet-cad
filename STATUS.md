@@ -561,11 +561,13 @@ docs/superpowers/
 it moves only when its own code or pubspec changes, gets an entry in
 `packages/jet_cad_2d/CHANGELOG.md` and a tag `jet_cad_2d-vX.Y.Z` (pushed
 by the human), and is published by the human. The host packages
-(`jet_cad_2d_flutter`, `jet_cad_floor_plan`, `jet_cad_restaurant_symbols`,
-and `jet_cad_2d_gpu`) keep one version and one `vX.Y.Z` tag; a host
+(`jet_cad_2d_flutter`, `jet_cad_floor_plan`, `jet_cad_restaurant_symbols`)
+and `jet_cad_2d_gpu` keep one version and one `vX.Y.Z` tag; a host
 release's root CHANGELOG entry names the engine version it carries. Every
-other package stays `publish_to: none` and keeps its `path:` dependency on
-the engine. Under 0.x, a minor bump of the engine may break its API. The
+other package of the live line stays `publish_to: none` and keeps its
+`path:` dependency on the engine. (The dormant `packages/jet_cad` has no
+`publish_to` line at all: found by this branch's review, left for the
+human.) Under 0.x, a minor bump of the engine may break its API. The
 barrel is published whole; the narrowing candidates are in
 [2026-10-13-publish-jet-cad-2d.md](docs/superpowers/notes/2026-10-13-publish-jet-cad-2d.md),
 and narrowing is a spec of its own.
