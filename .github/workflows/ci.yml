@@ -40,6 +40,8 @@ jobs:
             tool: flutter
           - package: packages/jet_cad_2d_gpu
             tool: flutter
+          - package: packages/jet_cad_2d_kit
+            tool: flutter
           - package: packages/jet_cad_floor_plan
             tool: flutter
             # The pick's allocation test reads the VM's allocation profiler,
