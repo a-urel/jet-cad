@@ -577,7 +577,9 @@ from. A finger on the table itself moves it.
 
 **Cancelling.** Escape cancels a band at any moment, also under
 `shortcuts: false`; a second finger cancels it too. Nothing changes, and
-the next press acts normally.
+the next press acts normally. While a band is live the view takes every
+key, so no shortcut above it, yours included, sees a key pressed in a
+band's middle.
 
 **The modifier is read at the press.** Shift, Ctrl or Cmd is read once,
 when the pointer goes down, for the start and for the combining. The
@@ -1376,12 +1378,13 @@ the designed tables added, removed and changed since the last report.
 - `longPress`: `toggleSelection` (the default: a long press adds or
   removes a table, for multiple selection on a touch screen) or
   `contextMenu` (a long press opens your menu; a touch screen's multiple
-  selection is then a band, `floorDrag: FloorPlanFloorDrag.band`).
+  selection is then a band, `floorDrag: FloorPlanFloorDrag.band`, *since
+  0.7.0*).
 - `serviceMoves: false` forbids moving tables during service (a host
   stand, a kitchen screen): a drag from a table pans the plan. It is read
   at each press, so you can change it while the view is shown.
 - *Since 0.7.0:* `floorDrag`: `pan` (the default) or `band`. Under `band`
-  a one-finger or mouse drag on the floor draws a band that selects
+  a one-finger, mouse or stylus drag on the floor draws a band that selects
   tables, and the camera pans with two fingers, a trackpad's scroll and
   the middle button (the mouse wheel zooms); read at each press:
   [Selecting with a band](#selecting-with-a-band).
@@ -2179,9 +2182,10 @@ tool until every finger lifts, and a second finger during a table drag
 cancels the drag. A finger's picks and grips are finger-sized. In the
 selection mode a tap selects, a drag from a table moves it (or pans,
 under `serviceMoves: false`), and a long press does what `longPress`
-says, about 500 ms from contact. With `floorDrag: FloorPlanFloorDrag.band`
-a one-finger drag on the floor draws a band that selects tables and no
-longer pans; the camera pans with two fingers. Mouse, trackpad and
+says, about 500 ms from contact. *Since 0.7.0*, with
+`floorDrag: FloorPlanFloorDrag.band` a one-finger drag on the floor draws
+a band that selects tables and no longer pans; the camera pans with two
+fingers. Mouse, trackpad and
 stylus behave as on a desktop.
 
 ## 11. What a host must never assume
@@ -2225,8 +2229,9 @@ stylus behave as on a desktop.
   together.** A schema 8 or 7 plan opens here unchanged; the service
   layout's format is unchanged. 0.4.0, 0.5.0 and 0.5.1 save the same
   plans and service layouts, so they can share them.
-- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 is at
+- **Schema 10** *(since 0.6.0)*. A plan saved by 0.6.0 or 0.7.0 is at
   **schema 10**, which 0.5.1 and every older release refuse (`load`
   throws a `FormatException` that says why); a schema 9, 8 or 7 plan
   opens here unchanged. Every terminal that shares stored plans moves
-  together.
+  together. 0.6.0 and 0.7.0 save the same plans and service layouts, so
+  they can share them.

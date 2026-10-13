@@ -24,7 +24,9 @@ one's spec, plan and results.
   git at the commit under test. In that probe it then analyses each
   released host's `main.dart`, read from its tag: `v0.3.0` (the host
   embedding API spec's invariant 1), `v0.4.0` (since 2026-10-10, the
-  0.4.0 review's R-7) and `v0.5.1`, by `tool/ci/old_host_probe.sh <tag>`.
+  0.4.0 review's R-7), `v0.5.1` and `v0.6.0` (since release 0.7.0,
+  ruling 7 of the rubber-band ledger), by `tool/ci/old_host_probe.sh
+  <tag>`.
 - **14d** (POS readiness: three languages, the service layout and
   options, the release) and its independent review: results
   [14d-2](docs/superpowers/notes/2026-10-06-plan-14d2-results.md),
@@ -372,7 +374,13 @@ with 0.7.0 (below).
   Unreleased), the guide covering 0.7.0 with §1's placeholder ref
   (filled by the commit after the merge), and CI's old-host probes gain
   `v0.6.0` (ruling 7 of the rubber-band ledger). Plans unchanged (schema
-  10). **Waits for the human's merge word**; then the guide names the
+  10). Every gate green at `aa5d07e` (the host probe by git, the 0.3.0,
+  0.4.0, 0.5.1 and 0.6.0 probes, `check_guide`); an independent review
+  (*Approved with fixes*: the guide's §11 "Schema 10", R-1; what a band
+  reports and the keys it takes, R-2; smaller CHANGELOG, STATUS and guide
+  gaps, R-3 to R-5) is applied; its record is
+  `docs/superpowers/ledgers/2026-10-13-release-0.7.0/review.md`. **Waits
+  for the human's merge word**; then the guide names the
   merge's SHA, and the push and the tag `v0.7.0` are the human's.
 
 ## Owed to the human
