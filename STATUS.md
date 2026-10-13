@@ -385,8 +385,9 @@ with 0.7.0 (below).
 
 - **Publishing `jet_cad_2d` on pub.dev** (the human, 2026-10-13; bounded
   design in chat, approved: *"evet"*), on `feat/publish-jet-cad-2d`, cut
-  by hand from `main` at `133cf03`. **Awaits the human's word to push and
-  merge.** The engine leaves the shared release line (the human:
+  by hand from `main` at `133cf03`. **Merged into `main` at `1dc167d`** on
+  the human's *"evet önce motoru publish edeceğiz"*; **awaits the human's
+  push and publish** (Resume here). The engine leaves the shared release line (the human:
   *"Bağımsız, 0.7.1"*): 0.7.1 is 0.7.0's code with a LICENSE, a README, an
   example and its test, `.pubignore`, `sdk: ^3.6.0`, the real repository
   URL, and doc references that resolve. CI's new job `publishable` runs
@@ -467,15 +468,16 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's word on `feat/publish-jet-cad-2d`** (In flight). After
-the merge, the publish is the human's, in this order: push `main`; from
-`packages/jet_cad_2d`, re-run pana (`dart pub global run pana --no-warning
-.`; 160/160 expected once GitHub's `main` carries the new pubspec) and
-`dart pub publish --dry-run`; then `dart pub publish`; then the tag
-`jet_cad_2d-v0.7.1` on the merge commit. Claude never runs `dart pub
-publish` without `--dry-run`. Then: the brainstorm for publishing the host
-packages (Rulings: "The host packages go to pub.dev too"), on a worktree
-cut from `main`, its first question the version policy.
+**Next: the human publishes `jet_cad_2d` 0.7.1**, merged into `main` at
+`1dc167d` (In flight). In this order: push `main` and watch CI (its new
+job `publishable` included); from `packages/jet_cad_2d`, `dart pub publish
+--dry-run`, then `dart pub publish`; then the tag `jet_cad_2d-v0.7.1` →
+`1dc167d`. pub.dev scores the package itself after the upload: 160/160 is
+expected once GitHub's `main` carries the new pubspec (150/160 measured
+before the push). Claude never runs `dart pub publish` without
+`--dry-run`. In parallel: the brainstorm for publishing the host packages
+(Rulings: "The host packages go to pub.dev too"), its first question the
+version policy; the spec goes on a worktree cut from `main`.
 
 Before this: Release 0.7.0 is **merged into `main` at
 `0fa649e`** (2026-10-13), tag `v0.7.0` → `0fa649e`, pushed by the human, from
