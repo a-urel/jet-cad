@@ -1,0 +1,2820 @@
+cc196aa0 docs: the guide's longPress bullet and one finger under band
+d15385bb docs: rubber-band selection in the guide, the CHANGELOG, the specs and STATUS; the demo's switch
+e6ff7337 feat(floor-plan): FloorPlanView.floorDrag
+8210ef06 feat(floor-plan): a band selects tables in the selection mode
+9926758d test(render): the band painter's dash path is reset per call
+38ca3af6 feat(render): a shared selection band painter and direction rule
+afe4e653 docs: rubber-band selection plan
+d5002b75 docs: rubber-band selection spec approved
+449879ef docs: rubber-band selection spec, revision 2 after the review
+fa1da0d3 docs: rubber-band selection spec, revision 1
+ CHANGELOG.md                                       |  14 +-
+ STATUS.md                                          |  32 +-
+ apps/restaurant_demo/lib/demo_strings.dart         |  11 +
+ apps/restaurant_demo/lib/main.dart                 |  10 +
+ apps/restaurant_demo/test/demo_test.dart           |  21 +
+ docs/host-guide.md                                 |  79 +-
+ .../plans/2026-10-13-rubber-band-selection.md      | 798 ++++++++++++++++++++
+ .../2026-10-03-restaurant-embedding-design.md      |   2 +
+ .../specs/2026-10-03-selection-mode-design.md      |   1 +
+ docs/superpowers/specs/2026-10-03-touch-design.md  |   2 +
+ .../specs/2026-10-09-host-embedding-api-design.md  |   2 +
+ .../2026-10-13-rubber-band-selection-design.md     | 399 ++++++++++
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |   1 +
+ .../jet_cad_2d_flutter/lib/src/select_tool.dart    |  56 +-
+ .../jet_cad_2d_flutter/lib/src/selection_band.dart |  71 ++
+ .../test/selection_band_test.dart                  | 140 ++++
+ .../jet_cad_floor_plan/lib/jet_cad_floor_plan.dart |   1 +
+ .../lib/src/host/floor_plan_types.dart             |  17 +-
+ .../lib/src/host/floor_plan_view.dart              |  11 +
+ .../lib/src/service/table_select_tool.dart         | 130 +++-
+ .../test/host/band_view_test.dart                  | 502 +++++++++++++
+ .../jet_cad_floor_plan/test/host/barrel_test.dart  |   1 +
+ .../test/invariants/band_allocation_test.dart      | 192 +++++
+ .../test/service/table_band_test.dart              | 799 +++++++++++++++++++++
+ tool/ci/host_probe/lib/main.dart                   |   5 +
+ 25 files changed, 3231 insertions(+), 66 deletions(-)
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 74b36547..51aec26b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,21 +1,33 @@
+ # Changelog
+ 
+ The four packages a host depends on — `jet_cad_2d`, `jet_cad_2d_flutter`,
+ `jet_cad_floor_plan`, `jet_cad_restaurant_symbols` — are released
+ together, under one version and one git tag. None is published to
+ pub.dev: a host depends on them by git (see
+ [docs/host-guide.md](docs/host-guide.md)).
+ 
+ ## Unreleased
+ 
+-Nothing yet.
++- **A band selects tables in the selection mode.**
++  `FloorPlanView(floorDrag: FloorPlanFloorDrag.band)` makes a one-finger
++  or mouse drag on the floor draw a band — left to right the tables
++  wholly inside, right to left every table touched; a group whole; a
++  locked table never; a plain band replaces the selection, one with
++  Shift, Ctrl or Cmd adds — and the camera then pans with two fingers,
++  the wheel or trackpad and the middle button. **Changed under the
++  default `pan`:** a mouse or stylus drag on the floor with Shift, Ctrl
++  or Cmd held now draws a band that adds to the selection; it panned
++  before. See the host guide's "Selecting with a band".
++- **`jet_cad_2d_flutter`:** `bandModeFor` and `SelectionBandPainter`: the
++  selection band's direction rule and look, shared by the editor and the
++  selection mode.
+ 
+ ## 0.6.0
+ 
+ Plan colours: a room or a table takes one of eight hues, set in the
+ editor's Colour row (and, for tables, by the host), saved with the plan,
+ drawn on screen, exported and printed. **Plans are stored differently:
+ schema 10**, which 0.5.1 and every older release refuse, so every
+ terminal that shares stored plans moves to 0.6.0 together; a 0.5.1 (or
+ older) plan opens here unchanged. Service layouts are unchanged. Three
+ changes can break a host's own code: a class that implements or
+diff --git a/apps/restaurant_demo/lib/demo_strings.dart b/apps/restaurant_demo/lib/demo_strings.dart
+index 37fb238f..2d4140a2 100644
+--- a/apps/restaurant_demo/lib/demo_strings.dart
++++ b/apps/restaurant_demo/lib/demo_strings.dart
+@@ -40,20 +40,22 @@ abstract class DemoStrings {
+   String get badges;
+ 
+   String centerOnTable(String number);
+ 
+   String minutes(int minutes);
+ 
+   String get moves;
+ 
+   String get longPressMenu;
+ 
++  String get floorBand;
++
+   String get tableNumbersField;
+ 
+   String get select;
+ 
+   String get statusOfSelected;
+ 
+   String get randomStatuses;
+ 
+   String get tables;
+ 
+@@ -215,20 +217,23 @@ final class _En extends DemoStrings {
+ 
+   @override
+   String minutes(int minutes) => '$minutes min';
+ 
+   @override
+   String get moves => 'Moves';
+ 
+   @override
+   String get longPressMenu => 'Long press: menu';
+ 
++  @override
++  String get floorBand => 'Floor drag: select';
++
+   @override
+   String get tableNumbersField => 'Table numbers (comma separated)';
+ 
+   @override
+   String get select => 'Select';
+ 
+   @override
+   String get statusOfSelected => 'Status of the selected tables or group';
+ 
+   @override
+@@ -450,20 +455,23 @@ final class _De extends DemoStrings {
+ 
+   @override
+   String minutes(int minutes) => '$minutes Min.';
+ 
+   @override
+   String get moves => 'Verschieben';
+ 
+   @override
+   String get longPressMenu => 'Langes Drücken: Menü';
+ 
++  @override
++  String get floorBand => 'Ziehen auf dem Boden: Auswählen';
++
+   @override
+   String get tableNumbersField => 'Tischnummern (durch Komma getrennt)';
+ 
+   @override
+   String get select => 'Auswählen';
+ 
+   @override
+   String get statusOfSelected => 'Status der ausgewählten Tische oder Gruppe';
+ 
+   @override
+@@ -693,20 +701,23 @@ final class _Tr extends DemoStrings {
+ 
+   @override
+   String minutes(int minutes) => '$minutes dk';
+ 
+   @override
+   String get moves => 'Taşıma';
+ 
+   @override
+   String get longPressMenu => 'Uzun basış: menü';
+ 
++  @override
++  String get floorBand => 'Zeminde sürükle: Seç';
++
+   @override
+   String get tableNumbersField => 'Masa numaraları (virgülle ayrılmış)';
+ 
+   @override
+   String get select => 'Seç';
+ 
+   @override
+   String get statusOfSelected => 'Seçili masaların veya grubun durumu';
+ 
+   @override
+diff --git a/apps/restaurant_demo/lib/main.dart b/apps/restaurant_demo/lib/main.dart
+index dc260604..74477285 100644
+--- a/apps/restaurant_demo/lib/main.dart
++++ b/apps/restaurant_demo/lib/main.dart
+@@ -395,20 +395,23 @@ class DemoHomeState extends State<DemoHome> {
+           tableIds: kDemoTableIds[name] ?? const {}),
+   ];
+   int _area = 0;
+   late final math.Random _random = widget.random ?? math.Random();
+   final TextEditingController _number = TextEditingController();
+ 
+   /// The service options (spec 14d S5, S7).
+   bool moves = true;
+   bool longPressMenu = false;
+ 
++  /// Rubber-band spec RB-7: a drag on the floor draws a band.
++  bool floorBand = false;
++
+   /// The newest line first.
+   final List<String> log = [];
+ 
+   /// The service's pointer line (spec E-3, E-4), null when there is nothing
+   /// to show: a line of its own, not the log, rebuilt alone at hover rate.
+   /// Cleared when the mode, the area or the plan changes, since the view
+   /// then sends no null for the table it leaves (S-5).
+   final ValueNotifier<PointerLine?> pointer = ValueNotifier(null);
+ 
+   /// Each area's subscription to its design's table changes (spec E-5).
+@@ -1203,20 +1206,21 @@ class DemoHomeState extends State<DemoHome> {
+       controller: c,
+       exportName: a.name.toLowerCase(),
+       printer: widget.printer,
+       onExport: (e) => _exported(a, e),
+       onTableTap: (n) => _log(_words.logTapped(a.name, n)),
+       onLayoutChanged: () => _log(_words.logLayoutChanged(a.name)),
+       serviceMoves: moves,
+       longPress: longPressMenu
+           ? FloorPlanLongPress.contextMenu
+           : FloorPlanLongPress.toggleSelection,
++      floorDrag: floorBand ? FloorPlanFloorDrag.band : FloorPlanFloorDrag.pan,
+       onTableContextMenu: _tableMenu,
+       onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
+       onMergeRequested: (numbers) => _merge(a, numbers),
+       onSplitRequested: (id) => _split(a, id),
+       tableOverlayBuilder: a.badges ? tableBadge : null,
+       tableOverlayLayout: kBadgeLayout,
+       onTableDoubleTap: (n) => _opened(a, n),
+       onTablesMoved: (moved) => _log(_words.logMoved(
+           a.name, _sorted([for (final d in moved) d.table.number ?? '—']))),
+       onTableHover: (n) => pointer.value = (table: n, floor: null),
+@@ -1457,20 +1461,26 @@ class DemoHomeState extends State<DemoHome> {
+                       contentPadding: EdgeInsets.zero,
+                       title: Text(words.moves),
+                       value: moves,
+                       onChanged: (v) => setState(() => moves = v)),
+                   SwitchListTile(
+                       key: const Key('long-press-menu'),
+                       contentPadding: EdgeInsets.zero,
+                       title: Text(words.longPressMenu),
+                       value: longPressMenu,
+                       onChanged: (v) => setState(() => longPressMenu = v)),
++                  SwitchListTile(
++                      key: const Key('floor-band'),
++                      contentPadding: EdgeInsets.zero,
++                      title: Text(words.floorBand),
++                      value: floorBand,
++                      onChanged: (v) => setState(() => floorBand = v)),
+                 ],
+                 const SizedBox(height: 16),
+                 TextField(
+                   key: const Key('select-number'),
+                   controller: _number,
+                   decoration:
+                       InputDecoration(labelText: words.tableNumbersField),
+                   onSubmitted: (_) => _select(),
+                 ),
+                 const SizedBox(height: 8),
+diff --git a/apps/restaurant_demo/test/demo_test.dart b/apps/restaurant_demo/test/demo_test.dart
+index a2cb5be4..e5a2ed71 100644
+--- a/apps/restaurant_demo/test/demo_test.dart
++++ b/apps/restaurant_demo/test/demo_test.dart
+@@ -12,20 +12,21 @@ import 'dart:typed_data';
+ import 'package:flutter/gestures.dart'
+     show PointerDeviceKind, kSecondaryMouseButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey, rootBundle;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_floor_plan/editor.dart';
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
+     show
+         FloorPlanController,
++        FloorPlanFloorDrag,
+         FloorPlanMode,
+         FloorPlanView,
+         TableGroup,
+         TableStatus;
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show InteractionLayer, ViewportTransform;
+ import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
+ import 'package:restaurant_demo/main.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+@@ -680,20 +681,40 @@ void main() {
+         kind: PointerDeviceKind.touch);
+     await tester.pump(const Duration(milliseconds: 700));
+     await g.up();
+     await tester.pumpAndSettle();
+     expect(find.text('Table 1'), findsOneWidget);
+     expect(c.selectedTables.value, {'1'},
+         reason: 'an unselected table is selected alone, never toggled in');
+     expect(demo.log, contains('Salon: menu for 1'));
+   });
+ 
++  testWidgets(
++      'D23 the Floor drag: select switch flips the view\'s floorDrag from '
++      'pan to band and back (rubber-band spec RB-7)', (tester) async {
++    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
++    await tester.tap(byKey('mode-service'));
++    await tester.pump();
++    await tester.pump();
++    FloorPlanFloorDrag current() =>
++        tester.widget<FloorPlanView>(find.byType(FloorPlanView)).floorDrag;
++    expect(demo.floorBand, isFalse);
++    expect(current(), FloorPlanFloorDrag.pan);
++    await tester.tap(byKey('floor-band'));
++    await tester.pump();
++    expect(demo.floorBand, isTrue);
++    expect(current(), FloorPlanFloorDrag.band);
++    await tester.tap(byKey('floor-band'));
++    await tester.pump();
++    expect(current(), FloorPlanFloorDrag.pan);
++  });
++
+   // Table-groups spec G6: Merge (grow or a new `G<n>`), Split, the status
+   // buttons by `selectedGroup`, the groups line and `onGroupTap`.
+ 
+   /// The numbers of [groupPlan]'s numbered tables in handle order: not
+   /// sorted. 8 sits on a visible locked layer, 9 on a hidden one.
+   const groupNumbers = ['12', '3', '7', '20', '5', '11', '8', '9'];
+ 
+   /// A Salon plan of eight tables numbered [groupNumbers], each off the
+   /// origin, turned, mirrored or both, of four kinds.
+   String groupPlan() {
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 46b5a598..56b6c6c1 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -54,19 +54,20 @@ export 'src/outline_cache.dart';
+ export 'src/page_chrome_painter.dart';
+ export 'src/page_fit.dart';
+ export 'src/page_notifier.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/ruler_frame.dart';
+ export 'src/ruler_painter.dart';
+ export 'src/select_gates.dart';
+ export 'src/select_tool.dart';
+ export 'src/selection.dart';
++export 'src/selection_band.dart';
+ export 'src/selection_overlay.dart';
+ export 'src/selection_style.dart';
+ export 'src/snap_marker.dart';
+ export 'src/snap_settings.dart';
+ export 'src/symbol_gallery.dart';
+ export 'src/symbol_thumbnails.dart';
+ export 'src/tile_cache.dart';
+ export 'src/tool.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+index 741fc10c..d7df41dd 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+@@ -13,20 +13,21 @@ import 'package:flutter/gestures.dart' show kTouchSlop;
+ import 'package:flutter/widgets.dart' show KeyEventResult;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'grip_cache.dart'
+     show GripCache, GripRef, kTouchGripHitPixels, movableKey;
+ import 'canvas_palette.dart';
+ import 'grip_drag.dart';
+ import 'select_gates.dart';
+ import 'selection.dart';
++import 'selection_band.dart';
+ import 'selection_style.dart';
+ import 'snap_marker.dart';
+ import 'tool.dart';
+ import 'viewport_transform.dart';
+ 
+ /// A press that moves less than this many screen pixels stays a click
+ /// (M-02f); past it, a press becomes the drag its class names (spec 03 D2).
+ const double kBandSlopPixels = 4.0;
+ 
+ /// Spec 09c D8: what a body drag of exactly one root-level node asks, on
+@@ -114,20 +115,21 @@ class SelectTool extends Tool {
+   MouseCursor _cursor = MouseCursor.defer;
+   // Coloured from the overlay's paper set where they are drawn (dark theme
+   // spec D5): the guide and the preview `preview`, the marker `snap`.
+   final Paint _guidePaint = Paint()
+     ..style = PaintingStyle.stroke
+     ..strokeWidth = 1.0;
+   final Paint _markerPaint = Paint()
+     ..style = PaintingStyle.stroke
+     ..strokeWidth = kSnapMarkerStrokePixels;
+   final Paint _previewPaint = Paint()..style = PaintingStyle.stroke;
++  final SelectionBandPainter _bandPainter = SelectionBandPainter();
+ 
+   /// What the press landed on; null while idle.
+   PressClass? get pressClass => _phase == ToolPhase.idle ? null : _class;
+ 
+   /// The live drag's kind; null unless dragging.
+   DragKind? get dragKind => _phase == ToolPhase.dragging ? _dragKind : null;
+ 
+   /// Non-null only while a band drag is in progress, for the overlay.
+   BandMode? get bandMode => dragKind == DragKind.band ? _bandMode : null;
+ 
+@@ -229,22 +231,21 @@ class SelectTool extends Tool {
+         if (e.buttons != 0) return;
+         _hoverAt(e, ctx);
+       case ToolPhase.pressed:
+         if (e.pointer != _pointer || _clickOnly) return;
+         if ((e.screen - _start).distance < _slop) return;
+         _beginDrag(e, ctx);
+       case ToolPhase.dragging:
+         if (e.pointer != _pointer) return;
+         if (_dragKind == DragKind.band) {
+           _end = e.screen;
+-          _bandMode =
+-              _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
++          _bandMode = bandModeFor(_start, _end);
+         } else {
+           _follow(e, ctx);
+         }
+         notifyListeners();
+     }
+   }
+ 
+   /// 02's object hover, plus the hot grip and the cursor (spec 03 D5).
+   /// Notifies only when the cursor or the hot grip changed.
+   void _hoverAt(ToolPointerEvent e, ToolContext ctx) {
+@@ -297,21 +298,21 @@ class SelectTool extends Tool {
+     if (!gate) {
+       _clickOnly = true;
+       return;
+     }
+     switch (_class) {
+       case PressClass.empty:
+         _phase = ToolPhase.dragging;
+         _dragKind = DragKind.band;
+         ctx.selection.setHover(null);
+         _end = e.screen;
+-        _bandMode = _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
++        _bandMode = bandModeFor(_start, _end);
+         notifyListeners();
+       case PressClass.selectedBody:
+         final drag = GripDrag.move(ctx.document, ctx.selection.keys,
+             objects: ctx.grips?.objects);
+         if (!_permitted(drag, ctx)) {
+           _clickOnly = true;
+           return;
+         }
+         _resolvable = ctx.selection.keys.length == 1;
+         _moveBase(ctx, drag!);
+@@ -877,68 +878,21 @@ class SelectTool extends Tool {
+       PaperPalette paper) {
+     final drag = _drag;
+     if (drag != null && _phase == ToolPhase.dragging) {
+       _guidePaint.color = paper.preview;
+       _markerPaint.color = paper.snap;
+       _paintGuide(canvas, camera.worldToScreenMatrix, drag);
+       return;
+     }
+     final rect = bandScreen;
+     if (rect == null) return;
+-    final crossing = _bandMode == BandMode.crossing;
+-    final color = crossing ? paper.crossingBand : paper.windowBand;
+-    canvas.drawRect(rect, Paint()..color = color.withAlpha(kBandFillAlpha));
+-    final stroke = Paint()
+-      ..color = color
+-      ..style = PaintingStyle.stroke
+-      ..strokeWidth = 1.0;
+-    if (!crossing) {
+-      canvas.drawRect(rect, stroke);
+-      return;
+-    }
+-    _drawDashedRect(canvas, rect, stroke);
+-  }
+-
+-  /// 6-on/4-off dashes, screen pixels, walking the four edges clockwise from
+-  /// the top-left corner.
+-  void _drawDashedRect(Canvas canvas, Rect rect, Paint stroke) {
+-    const on = 6.0, off = 4.0;
+-    final corners = [
+-      rect.topLeft,
+-      rect.topRight,
+-      rect.bottomRight,
+-      rect.bottomLeft,
+-      rect.topLeft,
+-    ];
+-    final path = Path();
+-    for (var i = 0; i < corners.length - 1; i++) {
+-      final start = corners[i];
+-      final end = corners[i + 1];
+-      final delta = end - start;
+-      final length = delta.distance;
+-      if (length == 0) continue;
+-      final direction = Offset(delta.dx / length, delta.dy / length);
+-      var travelled = 0.0;
+-      var drawing = true;
+-      while (travelled < length) {
+-        final step = math.min(drawing ? on : off, length - travelled);
+-        final segmentStart = start + direction * travelled;
+-        final segmentEnd = start + direction * (travelled + step);
+-        if (drawing) {
+-          path.moveTo(segmentStart.dx, segmentStart.dy);
+-          path.lineTo(segmentEnd.dx, segmentEnd.dy);
+-        }
+-        travelled += step;
+-        drawing = !drawing;
+-      }
+-    }
+-    canvas.drawPath(path, stroke);
++    _bandPainter.paint(canvas, rect, _bandMode!, paper);
+   }
+ 
+   /// Spec D7: a 1 px line from the base (a rotate's pivot) to the target,
+   /// and D9's marker at the target. A rotate snaps to nothing, so it has no
+   /// marker.
+   void _paintGuide(Canvas canvas, Transform2 m, GripDrag drag) {
+     final from = drag.base, to = drag.target;
+     final a = Offset(
+         m.a * from.x + m.c * from.y + m.e, m.b * from.x + m.d * from.y + m.f);
+     final b =
+diff --git a/packages/jet_cad_2d_flutter/lib/src/selection_band.dart b/packages/jet_cad_2d_flutter/lib/src/selection_band.dart
+new file mode 100644
+index 00000000..3716dc19
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/selection_band.dart
+@@ -0,0 +1,71 @@
++// The selection band's direction rule and look (interaction-core D1, spec
++// D8), shared by the design mode's SelectTool and the floor planner's
++// selection mode (rubber-band spec RB-6).
++import 'dart:math' as math;
++import 'dart:ui';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart' show BandMode;
++
++import 'canvas_palette.dart';
++import 'selection_style.dart';
++
++/// The band's mode by its drag direction (interaction-core D1): left to
++/// right is a window, right to left a crossing.
++BandMode bandModeFor(Offset start, Offset end) =>
++    end.dx >= start.dx ? BandMode.window : BandMode.crossing;
++
++/// Paints a selection band over a rect in screen pixels: the band colour
++/// at [kBandFillAlpha], a 1 px outline, solid for a window, dashed 6 on and
++/// 4 off for a crossing, walking the edges clockwise from the top-left.
++///
++/// Keeps its two paints and its path and resets them per call, so a live
++/// band builds no `Paint` and no `Path` per frame.
++final class SelectionBandPainter {
++  SelectionBandPainter();
++
++  final Paint _fill = Paint();
++  final Paint _stroke = Paint()
++    ..style = PaintingStyle.stroke
++    ..strokeWidth = 1.0;
++  final Path _dashes = Path();
++
++  void paint(Canvas canvas, Rect rect, BandMode mode, PaperPalette paper) {
++    final crossing = mode == BandMode.crossing;
++    final color = crossing ? paper.crossingBand : paper.windowBand;
++    _fill.color = color.withAlpha(kBandFillAlpha);
++    canvas.drawRect(rect, _fill);
++    _stroke.color = color;
++    if (!crossing) {
++      canvas.drawRect(rect, _stroke);
++      return;
++    }
++    _dashes.reset();
++    _edge(rect.left, rect.top, rect.right, rect.top);
++    _edge(rect.right, rect.top, rect.right, rect.bottom);
++    _edge(rect.right, rect.bottom, rect.left, rect.bottom);
++    _edge(rect.left, rect.bottom, rect.left, rect.top);
++    canvas.drawPath(_dashes, _stroke);
++  }
++
++  /// Adds one edge's dashes to the path, walking from (x0, y0) to (x1, y1):
++  /// 6 px on, 4 px off, starting on, the last dash cut at the corner.
++  void _edge(double x0, double y0, double x1, double y1) {
++    const on = 6.0, off = 4.0;
++    final dx = x1 - x0, dy = y1 - y0;
++    final length = math.sqrt(dx * dx + dy * dy);
++    if (length == 0) return;
++    final ux = dx / length, uy = dy / length;
++    var travelled = 0.0;
++    var drawing = true;
++    while (travelled < length) {
++      final step = math.min(drawing ? on : off, length - travelled);
++      if (drawing) {
++        _dashes
++          ..moveTo(x0 + ux * travelled, y0 + uy * travelled)
++          ..lineTo(x0 + ux * (travelled + step), y0 + uy * (travelled + step));
++      }
++      travelled += step;
++      drawing = !drawing;
++    }
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/test/selection_band_test.dart b/packages/jet_cad_2d_flutter/test/selection_band_test.dart
+new file mode 100644
+index 00000000..becd195d
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/selection_band_test.dart
+@@ -0,0 +1,140 @@
++// Rubber-band spec RB-6, Task 1: the shared band painter and its direction
++// rule. M-BP1/M-BP2 (the rule), M-RB18 (the stroke by mode), M-BP3 (no state
++// between calls).
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
++import 'package:jet_cad_2d_flutter/src/selection_band.dart';
++import 'package:jet_cad_2d_flutter/src/selection_style.dart';
++
++import 'support/spy_canvas.dart';
++
++const Rect _rect = Rect.fromLTRB(312.5, 41.25, 518.75, 97.5);
++
++int _argb(RecordedCall c) => c.color!.toARGB32();
++
++int _fillOf(int stroke) => (stroke & 0xFFFFFF) | (kBandFillAlpha << 24);
++
++void main() {
++  test('BP1: left to right is a window, right to left a crossing', () {
++    expect(bandModeFor(const Offset(310, 40), const Offset(520, 90)),
++        BandMode.window);
++    expect(bandModeFor(const Offset(520, 90), const Offset(310, 40)),
++        BandMode.crossing);
++    // Equal x is a window (>=), whatever y does.
++    expect(bandModeFor(const Offset(310, 40), const Offset(310, 90)),
++        BandMode.window);
++    expect(bandModeFor(const Offset(310, 90), const Offset(310, 40)),
++        BandMode.window);
++    // A hair to the left is a crossing even when the drag is mostly vertical.
++    expect(bandModeFor(const Offset(310, 90), const Offset(309.5, 40)),
++        BandMode.crossing);
++    // Only x decides: a drag up and to the right is still a window.
++    expect(bandModeFor(const Offset(310, 90), const Offset(520, 40)),
++        BandMode.window);
++  });
++
++  test(
++      'BP2: a window is a fill and a solid 1 px outline; a crossing a fill '
++      'and dashes', () {
++    final painter = SelectionBandPainter();
++
++    final window = SpyCanvas();
++    painter.paint(window, _rect, BandMode.window, PaperPalette.light);
++    final rects = window.named('drawRect').toList();
++    expect(window.calls, hasLength(2));
++    expect(rects, hasLength(2));
++    expect(rects[0].args.first, _rect);
++    expect(rects[1].args.first, _rect);
++    expect(_argb(rects[0]), _fillOf(0xFF1E6FE8));
++    expect(rects[1].paintingStyle, PaintingStyle.stroke);
++    expect(_argb(rects[1]), 0xFF1E6FE8);
++    expect(rects[1].strokeWidth, 1.0);
++
++    final crossing = SpyCanvas();
++    painter.paint(crossing, _rect, BandMode.crossing, PaperPalette.light);
++    expect(crossing.calls, hasLength(2));
++    final fill = crossing.named('drawRect').single;
++    expect(fill.args.first, _rect);
++    expect(_argb(fill), _fillOf(0xFF2E9E5B));
++    final dashes = crossing.named('drawPath').single;
++    expect(dashes.paintingStyle, PaintingStyle.stroke);
++    expect(_argb(dashes), 0xFF2E9E5B);
++    expect(dashes.strokeWidth, 1.0);
++
++    final path = dashes.args.first! as Path;
++    final bounds = path.getBounds();
++    expect(bounds.left, closeTo(_rect.left, 1e-9));
++    expect(bounds.top, closeTo(_rect.top, 1e-9));
++    expect(bounds.right, closeTo(_rect.right, 1e-9));
++    expect(bounds.bottom, closeTo(_rect.bottom, 1e-9));
++    // The first dash starts at the top-left corner and runs 6 px right.
++    final first = path.computeMetrics().first;
++    expect(first.length, closeTo(6.0, 1e-9));
++    final from = first.getTangentForOffset(0)!.position;
++    final to = first.getTangentForOffset(first.length)!.position;
++    expect(from.dx, closeTo(_rect.left, 1e-9));
++    expect(from.dy, closeTo(_rect.top, 1e-9));
++    expect(to.dx, closeTo(_rect.left + 6, 1e-9));
++    expect(to.dy, closeTo(_rect.top, 1e-9));
++  });
++
++  test('BP3: no state leaks between calls of one painter', () {
++    final painter = SelectionBandPainter();
++    final a = SpyCanvas(), b = SpyCanvas(), c = SpyCanvas();
++    painter.paint(a, _rect, BandMode.window, PaperPalette.light);
++    painter.paint(b, _rect, BandMode.crossing, PaperPalette.light);
++    painter.paint(c, _rect, BandMode.window, PaperPalette.light);
++    expect(c.calls, hasLength(a.calls.length));
++    for (var i = 0; i < a.calls.length; i++) {
++      expect(c.calls[i].name, a.calls[i].name, reason: 'call $i');
++      expect(c.calls[i].color, a.calls[i].color, reason: 'call $i colour');
++      expect(c.calls[i].paintingStyle, a.calls[i].paintingStyle,
++          reason: 'call $i style');
++      expect(c.calls[i].strokeWidth, a.calls[i].strokeWidth,
++          reason: 'call $i width');
++    }
++    // The crossing in between was the crossing's: its dashes, its colour.
++    expect(b.named('drawPath'), hasLength(1));
++    expect(_argb(b.named('drawPath').single), 0xFF2E9E5B);
++  });
++
++  test('BP4: a second crossing draws its own dashes, not the first\'s too', () {
++    final painter = SelectionBandPainter();
++    final small = Rect.fromLTRB(20.5, 30.25, 120.5, 70.25);
++    final large = Rect.fromLTRB(300.5, 200.25, 560.5, 380.25);
++    // The painter reuses one Path, so what it drew must be read at the call.
++    final first = _PathSnapshot(), second = _PathSnapshot();
++    painter.paint(first, small, BandMode.crossing, PaperPalette.light);
++    painter.paint(second, large, BandMode.crossing, PaperPalette.light);
++    expect(first.bounds!.left, closeTo(small.left, 1e-9));
++    expect(first.bounds!.bottom, closeTo(small.bottom, 1e-9));
++    expect(second.bounds!.left, closeTo(large.left, 1e-9));
++    expect(second.bounds!.top, closeTo(large.top, 1e-9));
++    expect(second.bounds!.right, closeTo(large.right, 1e-9));
++    expect(second.bounds!.bottom, closeTo(large.bottom, 1e-9));
++    // A fresh painter's one crossing over the same rect has as many dashes.
++    final fresh = _PathSnapshot();
++    SelectionBandPainter()
++        .paint(fresh, large, BandMode.crossing, PaperPalette.light);
++    expect(second.contours, fresh.contours);
++    expect(second.contours, greaterThan(first.contours));
++  });
++}
++
++/// Reads the dash path at the moment it is drawn.
++class _PathSnapshot implements Canvas {
++  Rect? bounds;
++  int contours = 0;
++
++  @override
++  void drawPath(Path path, Paint paint) {
++    bounds = path.getBounds();
++    contours = path.computeMetrics().length;
++  }
++
++  @override
++  dynamic noSuchMethod(Invocation invocation) => null;
++}
+diff --git a/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart b/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart
+index 873ab4c6..e1f68784 100644
+--- a/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart
++++ b/packages/jet_cad_floor_plan/lib/jet_cad_floor_plan.dart
+@@ -27,20 +27,21 @@ export 'src/host/editor_capabilities.dart'
+     show FloorPlanEditorCapabilities, FloorPlanSymbol, FloorPlanTool;
+ export 'src/host/floor_plan_camera.dart' show FloorPlanCamera;
+ export 'src/host/floor_plan_controller.dart' show FloorPlanController;
+ export 'src/host/floor_plan_types.dart'
+     show
+         DuplicateNumber,
+         FloorPlanExport,
+         FloorPlanExportChoice,
+         FloorPlanExportDpi,
+         FloorPlanExportFormat,
++        FloorPlanFloorDrag,
+         FloorPlanLongPress,
+         FloorPlanMode,
+         FloorPlanTable,
+         ServiceLayoutRestore,
+         NumberingWarning,
+         TableGroup,
+         TableStatus,
+         Unnumbered;
+ export 'src/host/floor_plan_theme.dart' show FloorPlanTheme;
+ export 'src/host/floor_plan_view.dart' show FloorPlanView;
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart
+index 85b47614..7d814d3c 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_types.dart
+@@ -168,24 +168,39 @@ final class ServiceLayoutRestore {
+   String toString() => 'ServiceLayoutRestore(applied: $applied, '
+       'dropped: $dropped)';
+ }
+ 
+ /// What a long press on a table does in the selection mode (spec 14d S7).
+ enum FloorPlanLongPress {
+   /// Adds the table to the selection or removes it (umbrella decision 9).
+   toggleSelection,
+ 
+   /// Reports the table to `FloorPlanView.onTableContextMenu`, as a
+-  /// secondary click does; a touch screen then has no multiple selection.
++  /// secondary click does; a touch screen's multiple selection is then a
++  /// band (`FloorPlanFloorDrag.band`).
+   contextMenu,
+ }
+ 
++/// What a one-pointer drag on the empty floor does in the selection mode
++/// (rubber-band spec RB-1). The design mode is unaffected.
++enum FloorPlanFloorDrag {
++  /// Pans the camera (the default). With Shift, Ctrl or Cmd held at the
++  /// press, a mouse or stylus drag draws a band that adds to the
++  /// selection.
++  pan,
++
++  /// Draws a band that selects tables: left to right takes the tables
++  /// wholly inside, right to left every table it touches. The camera
++  /// pans with two fingers, the wheel or trackpad, and the middle button.
++  band,
++}
++
+ /// A problem with the plan's table numbers (spec 14a T15), as a value the
+ /// host words, or asks `FloorPlanStrings.numberingWarning` to (spec 14d
+ /// L6). Never a handle (D18).
+ sealed class NumberingWarning {
+   const NumberingWarning();
+ }
+ 
+ /// [count] live tables carry [number].
+ final class DuplicateNumber extends NumberingWarning {
+   const DuplicateNumber({required this.number, required this.count});
+diff --git a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+index e9faebbb..9e941923 100644
+--- a/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
++++ b/packages/jet_cad_floor_plan/lib/src/host/floor_plan_view.dart
+@@ -34,20 +34,21 @@ class FloorPlanView extends StatefulWidget {
+     super.key,
+     required this.controller,
+     this.onExport,
+     this.printer,
+     this.exportName = 'plan',
+     this.onTableTap,
+     this.onLayoutChanged,
+     this.serviceMoves = true,
+     this.onTableContextMenu,
+     this.longPress = FloorPlanLongPress.toggleSelection,
++    this.floorDrag = FloorPlanFloorDrag.pan,
+     this.onGroupTap,
+     this.onMergeRequested,
+     this.onSplitRequested,
+     this.userCamera = true,
+     this.tableOverlayBuilder,
+     this.tableOverlayLayout = const FloorPlanOverlayLayout(),
+     this.tableOverlayModes = const {FloorPlanMode.selection},
+     this.onTablesMoved,
+     this.onTableDoubleTap,
+     this.onFloorTap,
+@@ -87,20 +88,29 @@ class FloorPlanView extends StatefulWidget {
+   /// keeps the selection, so the menu acts on `selectedTables`; a locked
+   /// table is reported without a selection change; an unnumbered one is
+   /// not reported. On the web the browser's own menu opens too, unless the
+   /// host calls `BrowserContextMenu.disableContextMenu()` (S8).
+   final void Function(String number, Offset globalPosition)? onTableContextMenu;
+ 
+   /// What a long press on a table does in the selection mode (spec 14d
+   /// S7).
+   final FloorPlanLongPress longPress;
+ 
++  /// What a one-pointer drag on the empty floor does in the selection
++  /// mode (rubber-band spec RB-1): `pan` (the default) pans, and a Shift,
++  /// Ctrl or Cmd mouse or stylus drag draws a band that adds to the
++  /// selection; `band` draws a band that selects -- left to right the
++  /// tables wholly inside, right to left every table touched, a group
++  /// whole, a locked table never -- and the camera pans with two fingers,
++  /// the wheel or trackpad, and the middle button. Read at each press.
++  final FloorPlanFloorDrag floorDrag;
++
+   /// A member of a group was tapped in the selection mode (table-groups
+   /// spec G4): the group's id and the tapped number, after [onTableTap]. A
+   /// locked member reports its tap too.
+   final void Function(String groupId, String number)? onGroupTap;
+ 
+   /// The service bar's Merge was pressed (G5): the selected numbers. The
+   /// planner only asks; the host decides and calls
+   /// [FloorPlanController.setTableGroups].
+   final void Function(Set<String> numbers)? onMergeRequested;
+ 
+@@ -692,20 +702,21 @@ class _FloorPlanViewState extends State<FloorPlanView> {
+                     onTableTap: widget.onTableTap,
+                     onLayoutChanged: widget.onLayoutChanged,
+                     onGroupTap: widget.onGroupTap,
+                     onMergeRequested: widget.onMergeRequested,
+                     onSplitRequested: widget.onSplitRequested,
+                   ),
+               options: () => (
+                     serviceMoves: widget.serviceMoves,
+                     longPress: widget.longPress,
+                     onTableContextMenu: widget.onTableContextMenu,
++                    floorDrag: widget.floorDrag,
+                   ),
+               userCamera: () => widget.userCamera,
+               tableOverlays: serviceOverlays,
+               events: _serviceEvents,
+               onCanvasMoved: _canvasMoved,
+               bar: widget.serviceBar,
+               shortcuts: widget.shortcuts,
+               autofocus: widget.autofocus);
+         }
+         c.startSymbols();
+diff --git a/packages/jet_cad_floor_plan/lib/src/service/table_select_tool.dart b/packages/jet_cad_floor_plan/lib/src/service/table_select_tool.dart
+index dd5ebc87..2f5ff657 100644
+--- a/packages/jet_cad_floor_plan/lib/src/service/table_select_tool.dart
++++ b/packages/jet_cad_floor_plan/lib/src/service/table_select_tool.dart
+@@ -1,16 +1,18 @@
+ // The selection mode's tool (spec 14c S3, S4, S8, R-1, R-5 to R-7): tap a
+ // table to select it, long press to add or remove one, drag to move the
+-// selected tables for the service, drag the floor to pan. A table in a
+-// group (table-groups spec G4) acts with its whole group.
++// selected tables for the service, drag the floor to pan -- or to draw a
++// band that selects the tables it takes (rubber-band spec RB-2 to RB-5). A
++// table in a group (table-groups spec G4) acts with its whole group.
+ import 'dart:async';
+-import 'dart:ui' show Canvas, Offset, Size;
++import 'dart:math' as math;
++import 'dart:ui' show Canvas, Offset, Rect, Size;
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:flutter/gestures.dart'
+     show
+         kDoubleTapSlop,
+         kDoubleTapTimeout,
+         kLongPressTimeout,
+         kPrimaryButton,
+         kTouchSlop;
+ import 'package:flutter/services.dart';
+@@ -33,27 +35,30 @@ typedef ServiceCallbacks = ({
+   void Function(Set<String> numbers)? onMergeRequested,
+   void Function(String groupId)? onSplitRequested,
+ });
+ 
+ /// The view's options for the tool (spec 14d S5-S7), read at each press.
+ /// [onTableContextMenu] takes a global position.
+ typedef ServiceOptions = ({
+   bool serviceMoves,
+   FloorPlanLongPress longPress,
+   void Function(String number, Offset globalPosition)? onTableContextMenu,
++  FloorPlanFloorDrag floorDrag,
+ });
+ 
+-/// Today's behaviour: moves allowed, a long press toggles, no menu.
++/// Today's behaviour: moves allowed, a long press toggles, no menu, a floor
++/// drag pans.
+ const ServiceOptions kDefaultServiceOptions = (
+   serviceMoves: true,
+   longPress: FloorPlanLongPress.toggleSelection,
+   onTableContextMenu: null,
++  floorDrag: FloorPlanFloorDrag.pan,
+ );
+ 
+ /// The view events (host embedding API spec E-1 to E-4), read at each call
+ /// (R-5), in a record of their own so [ServiceCallbacks] keeps its five
+ /// fields (P-1). [M] is what a drag reports as moved: the live instances
+ /// at the tool (handles never leave the package), the controller's fresh
+ /// details at the view.
+ typedef ServiceEvents<M> = ({
+   void Function(List<M> moved)? onTablesMoved,
+   void Function(String number)? onTableDoubleTap,
+@@ -83,21 +88,21 @@ bool _always() => true;
+ /// (D18).
+ String? contextSelect(PickCandidate hit, SelectionController selection,
+     {Set<SelectionKey>? group}) {
+   if (!hit.locked) {
+     final key = SelectionKey.root(hit.table.instance);
+     if (!selection.keys.contains(key)) selection.replace(group ?? [key]);
+   }
+   return hit.table.number;
+ }
+ 
+-enum _Gesture { none, pressed, dragging, panning, spent }
++enum _Gesture { none, pressed, dragging, panning, banding, spent }
+ 
+ /// The selection mode's tool (S3). One per service view; disposed with it.
+ class TableSelectTool extends Tool {
+   TableSelectTool(
+       {required this.picker,
+       required this.groups,
+       required this.callbacks,
+       this.options = _defaultOptions,
+       this.userCamera = _always,
+       this.toGlobal = _sameOffset,
+@@ -153,20 +158,29 @@ class TableSelectTool extends Tool {
+   Offset _pressScreen = Offset.zero;
+   Offset _lastScreen = Offset.zero;
+   final Vector2 _pressWorld = Vector2.zero();
+   PickCandidate? _hit;
+   bool _toggle = false;
+   Timer? _timer;
+ 
+   /// The drag's translation, in world units.
+   double _dx = 0, _dy = 0;
+ 
++  /// A finger's press that reached a table by the reach only (14t R-11):
++  /// under FloorPlanFloorDrag.band its drag is a band (rubber-band R-4).
++  bool _reachOnly = false;
++
++  /// The live band's mode (RB-3), from the press to the pointer's latest.
++  BandMode _bandMode = BandMode.window;
++
++  final SelectionBandPainter _bandPainter = SelectionBandPainter();
++
+   /// The tables a drag moves: the selection when it began, with every
+   /// group it touches (G4).
+   List<Handle> _moving = const [];
+ 
+   /// The groups resolved against the picker's candidates, and each visible
+   /// member's group by handle (G4). Rebuilt when the candidates list (the
+   /// picker rebuilds it on the plan's state id and its tables' revision
+   /// only) or the groups map is replaced, so a `setTableGroups` alone
+   /// refreshes it; never per pointer event in steady state.
+   TableGroupLookup? _lookup;
+@@ -179,39 +193,45 @@ class TableSelectTool extends Tool {
+ 
+   /// A down only classifies a press and `cancel` executes nothing, so a
+   /// finger reaches this tool after the hold-back (spec 14t R-1).
+   @override
+   TouchPress get touchPress => TouchPress.press;
+ 
+   @override
+   ToolPhase get phase => switch (_gesture) {
+         _Gesture.none => ToolPhase.idle,
+         _Gesture.pressed || _Gesture.spent => ToolPhase.pressed,
+-        _Gesture.dragging || _Gesture.panning => ToolPhase.dragging,
++        _Gesture.dragging ||
++        _Gesture.panning ||
++        _Gesture.banding =>
++          ToolPhase.dragging,
+       };
+ 
+   /// The outlines follow the drag (F-2).
+   @override
+   Transform2? get selectionPreviewTransform =>
+       _gesture == _Gesture.dragging ? Transform2.translation(_dx, _dy) : null;
+ 
+   @override
+   void onPointerDown(ToolPointerEvent e, ToolContext ctx) {
+     if (e.buttons & kPrimaryButton == 0 || _gesture != _Gesture.none) return;
+     _pointer = e.pointer;
+     _pressTime = e.timeStamp;
+     _pressScreen = e.screen;
+     _lastScreen = e.screen;
+     _pressWorld.setFrom(e.world);
+     // A finger that misses every top reaches the nearest within 24 px
+     // (spec 14t R-11); a mouse picks by containment only.
+     _hit = picker.pick(e.world, reach: e.isTouch ? e.reachRadiusWorld : 0);
++    // A finger's hit found by the reach alone (RB-2): one more pick, a
++    // finger's down only.
++    _reachOnly = e.isTouch && _hit != null && picker.pick(e.world) == null;
+     _toggle = e.shift || e.control || e.meta;
+     _options = options();
+     _pans = userCamera();
+     _gesture = _Gesture.pressed;
+     _dx = _dy = 0;
+     final hit = _hit;
+     // Under a context menu a locked table is reported too (S7, amending
+     // 14c R-1 for this mode only).
+     if (hit != null &&
+         (!hit.locked || _options.longPress == FloorPlanLongPress.contextMenu)) {
+@@ -232,20 +252,27 @@ class TableSelectTool extends Tool {
+     if (e.pointer != _pointer || e.buttons & kPrimaryButton == 0) return;
+     switch (_gesture) {
+       case _Gesture.none || _Gesture.spent:
+         return;
+       case _Gesture.pressed:
+         if ((e.screen - _pressScreen).distance <= kTouchSlop) return;
+         _timer?.cancel();
+         _timer = null;
+         // A drag, a pan or a spent drag is no tap (spec E-2).
+         _lastTap = null;
++        if (_startsBand(e)) {
++          _gesture = _Gesture.banding;
++          _lastScreen = e.screen;
++          _bandMode = bandModeFor(_pressScreen, e.screen);
++          notifyListeners();
++          return;
++        }
+         final hit = _hit;
+         if (hit == null || !_options.serviceMoves) {
+           // Empty floor pans; so does any table when moves are off (S5).
+           // Unless the host locked the camera (spec G-3): then the drag is
+           // spent, as on a locked table.
+           if (!_pans) {
+             _gesture = _Gesture.spent;
+             notifyListeners();
+             return;
+           }
+@@ -257,23 +284,36 @@ class TableSelectTool extends Tool {
+           return;
+         } else if (!_startDrag(hit, ctx)) {
+           // A group with a locked member is never moved (G4).
+           _gesture = _Gesture.spent;
+           notifyListeners();
+           return;
+         }
+         _drag(e, ctx);
+       case _Gesture.dragging || _Gesture.panning:
+         _drag(e, ctx);
++      case _Gesture.banding:
++        _lastScreen = e.screen;
++        _bandMode = bandModeFor(_pressScreen, e.screen);
++        notifyListeners();
+     }
+   }
+ 
++  /// Whether this drag is a band (rubber-band RB-2): from the floor -- or,
++  /// under `band`, a finger's reach-only press -- when the host chose
++  /// `band`, or under `pan` with a modifier at the press and no finger.
++  bool _startsBand(ToolPointerEvent e) {
++    final band = _options.floorDrag == FloorPlanFloorDrag.band;
++    if (_hit != null && !(band && _reachOnly)) return false;
++    return band || (_toggle && !e.isTouch);
++  }
++
+   /// The drag's start (S4, G4): an unselected table, or its whole group,
+   /// replaces the selection; what moves is every root-level selected
+   /// table, each group having a member among them taken whole. False, with
+   /// the selection untouched, when such a group has a locked visible
+   /// member: the drag is then spent.
+   bool _startDrag(PickCandidate hit, ToolContext ctx) {
+     final key = SelectionKey.root(hit.table.instance);
+     // With no group every table stands alone, as before groups (G7).
+     final lookup = _groupLookup();
+     final groupOf = lookup == null ? const <Handle, String>{} : _groupByHandle;
+@@ -318,27 +358,86 @@ class TableSelectTool extends Tool {
+   }
+ 
+   @override
+   void onPointerUp(ToolPointerEvent e, ToolContext ctx) {
+     if (e.pointer != _pointer) return;
+     switch (_gesture) {
+       case _Gesture.pressed:
+         _tap(ctx);
+       case _Gesture.dragging:
+         _move(ctx);
++      case _Gesture.banding:
++        _band(e, ctx);
+       case _Gesture.none || _Gesture.panning || _Gesture.spent:
+         break;
+     }
+     _reset();
+     notifyListeners();
+   }
+ 
++  /// The band's end (RB-3, RB-4): both screen corners under the camera at
++  /// the up, the instances the band passes kept to the picker's
++  /// candidates, groups taken by the mode's rule; one `replace`.
++  void _band(ToolPointerEvent e, ToolContext ctx) {
++    final a = ctx.camera.value
++        .screenToWorld(Vector2(_pressScreen.dx, _pressScreen.dy));
++    final b = e.world;
++    final world = Aabb2.raw(math.min(a.x, b.x), math.min(a.y, b.y),
++        math.max(a.x, b.x), math.max(a.y, b.y));
++    final keys = _bandKeys(world, bandModeFor(_pressScreen, e.screen), ctx);
++    if (_toggle) {
++      if (keys.isEmpty) return;
++      ctx.selection.replace({...ctx.selection.keys, ...keys});
++    } else {
++      ctx.selection.replace(keys);
++    }
++  }
++
++  /// The band's keys (RB-3), ascending by handle. `snapping`, not
++  /// `picking`: a locked layer's table reaches the window's group rule
++  /// (review V-1); a locked table is never a key.
++  List<SelectionKey> _bandKeys(Aabb2 world, BandMode mode, ToolContext ctx) {
++    final locked = <Handle, bool>{
++      for (final c in picker.candidates) c.table.instance: c.locked
++    };
++    final passing = <Handle>{};
++    ctx.index.forEachInstanceInBand(world, mode, const QueryFilter.snapping(),
++        (h) {
++      if (locked.containsKey(h)) passing.add(h);
++    });
++    final lookup = _groupLookup();
++    final keys = <Handle>{};
++    final groups = <String>{};
++    for (final h in passing) {
++      final id = lookup == null ? null : _groupByHandle[h];
++      if (id != null) {
++        groups.add(id);
++      } else if (!locked[h]!) {
++        keys.add(h);
++      }
++    }
++    for (final id in groups) {
++      final members = lookup!.visibleMembers(id);
++      final take = switch (mode) {
++        BandMode.crossing =>
++          members.any((t) => !t.locked && passing.contains(t.handle)),
++        BandMode.window => members.every((t) => passing.contains(t.handle)),
++      };
++      if (take) {
++        for (final t in lookup.selectableMembers(id)) {
++          keys.add(t.handle);
++        }
++      }
++    }
++    return [for (final h in _sorted(keys)) SelectionKey.root(h)];
++  }
++
+   /// The pointer's table under a hover (spec E-4): picked with no reach,
+   /// only while the host listens; reported only when its number differs
+   /// from the last reported, null over the floor or an unnumbered table.
+   void _hover(ToolPointerEvent e) {
+     final report = events().onTableHover;
+     if (report == null) return;
+     final number = picker.pick(e.world)?.table.number;
+     if (number == _hovered) return;
+     _hovered = number;
+     report(number);
+@@ -526,20 +625,30 @@ class TableSelectTool extends Tool {
+   /// last number it heard was not.
+   @override
+   void onPointerExit(ToolContext ctx) {
+     if (_hovered == null) return;
+     _hovered = null;
+     events().onTableHover?.call(null);
+   }
+ 
+   @override
+   KeyEventResult onKey(KeyEvent event, ToolContext ctx) {
++    // A band takes every key (RB-5): Escape ends it, whatever idleKeys
++    // says; no other shortcut lands in its middle.
++    if (_gesture == _Gesture.banding) {
++      if (event is KeyDownEvent &&
++          event.logicalKey == LogicalKeyboardKey.escape) {
++        _reset();
++        notifyListeners();
++      }
++      return KeyEventResult.handled;
++    }
+     if (event is KeyDownEvent &&
+         event.logicalKey == LogicalKeyboardKey.escape &&
+         _gesture == _Gesture.none &&
+         idleKeys()) {
+       ctx.selection.clear();
+       return KeyEventResult.handled;
+     }
+     return KeyEventResult.ignored;
+   }
+ 
+@@ -555,23 +664,30 @@ class TableSelectTool extends Tool {
+   }
+ 
+   void _reset() {
+     _timer?.cancel();
+     _timer = null;
+     _gesture = _Gesture.none;
+     _pointer = -1;
+     _hit = null;
+     _moving = const [];
+     _dx = _dy = 0;
++    _reachOnly = false;
+   }
+ 
++  /// The live band, from the press's screen point to the pointer's latest
++  /// (RB-6); nothing otherwise.
+   @override
+   void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
+-      PaperPalette paper) {}
++      PaperPalette paper) {
++    if (_gesture != _Gesture.banding) return;
++    _bandPainter.paint(
++        canvas, Rect.fromPoints(_pressScreen, _lastScreen), _bandMode, paper);
++  }
+ 
+   @override
+   void dispose() {
+     _timer?.cancel();
+     _timer = null;
+     super.dispose();
+   }
+ }
+diff --git a/packages/jet_cad_floor_plan/test/host/band_view_test.dart b/packages/jet_cad_floor_plan/test/host/band_view_test.dart
+new file mode 100644
+index 00000000..aac0400d
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/host/band_view_test.dart
+@@ -0,0 +1,502 @@
++// Rubber-band spec RB-1 (the view's `floorDrag`), with RB-2's touch and
++// phase rules and RB-5's keys, driven through FloorPlanView and real
++// pointers (V-1). The camera is the view's own fit: y-flipped, scaled and
++// off the origin; tables are turned and one is mirrored; the plan holds a
++// group {5, 6}, a table on a locked layer (3), an unnumbered table (4), a
++// table on a hidden layer (7) and a planter.
++import 'package:flutter/gestures.dart'
++    show PointerDeviceKind, kSecondaryMouseButton;
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_controller.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_view.dart';
++import 'package:jet_cad_floor_plan/src/new_document.dart';
++import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../tables/table_fixture.dart';
++
++/// Where each table stands, as offsets from the sheet's centre in world
++/// units (y up). Tables 1 (turned a quarter, mirrored), 2, 3 (locked), 4
++/// (unnumbered), 5 and 6 (group 'g'), 7 (hidden), then the planter.
++const List<(double, double, int, bool)> _places = [
++  (-4000.5, 1500.25, 1, true),
++  (-1000.25, 1500.75, 0, false),
++  (-1000.75, -2500.5, 2, false),
++  (2500.5, 1500.25, 0, false),
++  (2500.25, -2500.75, 3, false),
++  (5000.75, -2500.25, 0, false),
++  (-4000.25, -2500.5, 0, false),
++];
++
++/// The planter's offset.
++const (double, double) _planterAt = (-6500.5, 1500.25);
++
++String bandPlan() {
++  final measurer = FlutterTextMeasurer();
++  final doc = newDocument(measurer);
++  final sheet =
++      sheetWorldRect(doc.components.get<PageComponent>(doc.rootHandle)!);
++  final cx = (sheet.minX + sheet.maxX) / 2, cy = (sheet.minY + sheet.maxY) / 2;
++  for (final (dx, dy, turns, mirrored) in _places) {
++    doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
++        at: Vector2(cx + dx, cy + dy),
++        quarterTurns: turns,
++        mirrored: mirrored));
++  }
++  doc.commands.execute(placeSymbol(doc, entryOf(planterSymbol),
++      at: Vector2(cx + _planterAt.$1, cy + _planterAt.$2)));
++  final zero = doc.tables.layers[ReservedHandles.layerZero]!;
++  Handle layer(String name) {
++    final h = doc.handleSeed.next();
++    doc.commands.execute(AddLayerCommand(LayerRecord(
++        handle: h,
++        name: name,
++        color: const IndexedColor(1),
++        linetype: zero.linetype,
++        lineweight: zero.lineweight,
++        transparency: zero.transparency,
++        visible: true,
++        locked: false)));
++    return h;
++  }
++
++  final locked = layer('Locked'), hidden = layer('Hidden');
++  final survey = TableSurvey.of(doc);
++  doc.commands.execute(
++      SetInstanceLayerCommand(survey.withNumber('3').single.instance, locked));
++  doc.commands.execute(
++      SetInstanceLayerCommand(survey.withNumber('7').single.instance, hidden));
++  doc.commands.execute(
++      SetLayerCommand(doc.tables.layers[locked]!.copyWith(locked: true)));
++  doc.commands.execute(
++      SetLayerCommand(doc.tables.layers[hidden]!.copyWith(visible: false)));
++  doc.commands.execute(SetEntityTextCommand(
++      survey.withNumber('4').single.label!, '', kTableLabelTag));
++  final json = DraftDocumentCodec.encodeToString(doc);
++  doc.dispose();
++  measurer.clear();
++  return json;
++}
++
++InstanceNode node(FloorPlanController c, String n) {
++  final d = c.activeDocument;
++  final tables = TableSurvey.of(d).tables;
++  final t = n == '4' ? tables[3] : tables.singleWhere((t) => t.number == n);
++  return d.tree[t.instance]! as InstanceNode;
++}
++
++/// A table's top centre on the screen (its base point).
++Offset centre(WidgetTester tester, FloorPlanController c, String n) {
++  final w = node(c, n).transform.transformPoint(Vector2(900, 700));
++  return global(tester, c, w);
++}
++
++Offset global(WidgetTester tester, FloorPlanController c, Vector2 world) {
++  final s = c.cameraController.value.worldToScreen(world);
++  return tester.getTopLeft(find.byType(InteractionLayer)) + Offset(s.x, s.y);
++}
++
++/// The point [dx], [dy] (world units, y up) from the sheet's centre.
++Offset floorAt(
++    WidgetTester tester, FloorPlanController c, double dx, double dy) {
++  final sheet = sheetWorldRect(c.activeDocument.components
++      .get<PageComponent>(c.activeDocument.rootHandle)!);
++  return global(
++      tester,
++      c,
++      Vector2((sheet.minX + sheet.maxX) / 2 + dx,
++          (sheet.minY + sheet.maxY) / 2 + dy));
++}
++
++/// Screen pixels per world unit.
++double pxPerUnit(FloorPlanController c) {
++  final v = c.cameraController.value;
++  return (v.worldToScreen(Vector2(1000, 0)).x -
++              v.worldToScreen(Vector2.zero()).x)
++          .abs() /
++      1000;
++}
++
++Offset worldZero(FloorPlanController c) {
++  final s = c.cameraController.value.worldToScreen(Vector2.zero());
++  return Offset(s.x, s.y);
++}
++
++/// The band that takes tables 1 and 2 whole, left to right.
++(Offset, Offset) over12(WidgetTester tester, FloorPlanController c) => (
++      floorAt(tester, c, -5600, 3200),
++      floorAt(tester, c, 300, 300),
++    );
++
++class Host {
++  final taps = <String>[];
++  final floorTaps = <Offset>[];
++  final menus = <(String, Offset)>[];
++  late FloorPlanController c;
++
++  Widget view({
++    FloorPlanFloorDrag floorDrag = FloorPlanFloorDrag.band,
++    bool userCamera = true,
++    bool shortcuts = true,
++    FloorPlanLongPress longPress = FloorPlanLongPress.toggleSelection,
++  }) =>
++      MaterialApp(
++          home: Scaffold(
++              body: FloorPlanView(
++                  controller: c,
++                  floorDrag: floorDrag,
++                  userCamera: userCamera,
++                  shortcuts: shortcuts,
++                  longPress: longPress,
++                  onTableTap: taps.add,
++                  onFloorTap: floorTaps.add,
++                  onTableContextMenu: (n, p) => menus.add((n, p)))));
++}
++
++Future<Host> pumpBand(WidgetTester tester,
++    {FloorPlanFloorDrag floorDrag = FloorPlanFloorDrag.band,
++    bool userCamera = true,
++    bool shortcuts = true,
++    FloorPlanLongPress longPress = FloorPlanLongPress.toggleSelection}) async {
++  final h = Host()..c = FloorPlanController(json: bandPlan());
++  addTearDown(h.c.dispose);
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(h.view(
++      floorDrag: floorDrag,
++      userCamera: userCamera,
++      shortcuts: shortcuts,
++      longPress: longPress));
++  h.c.setMode(FloorPlanMode.selection);
++  await tester.pump();
++  await tester.pump();
++  return h;
++}
++
++/// Moves [g] from [from] to [to] in steps of at most 12 px, pumping
++/// between: the first step stays inside the touch slop, so a finger's
++/// hold-back (spec 14t) releases on a later one.
++Future<void> glide(
++    WidgetTester tester, TestGesture g, Offset from, Offset to) async {
++  final steps = ((to - from).distance / 12).ceil().clamp(2, 400);
++  for (var i = 1; i <= steps; i++) {
++    await g.moveTo(Offset.lerp(from, to, i / steps)!);
++    await tester.pump(const Duration(milliseconds: 16));
++  }
++}
++
++Future<void> drag(
++    WidgetTester tester, PointerDeviceKind kind, Offset from, Offset to) async {
++  final g = await tester.startGesture(from, kind: kind);
++  await glide(tester, g, from, to);
++  await g.up();
++  await tester.pump();
++}
++
++void main() {
++  testWidgets(
++      'RBV1 under band a one-finger drag from the floor selects the tables '
++      'it takes and the camera stays; a mouse does the same; two fingers pan '
++      'and select nothing; a second finger landing mid-band cancels it, and '
++      'a tap then selects (RB3; M-RB3, M-RB3b)', (tester) async {
++    final h = await pumpBand(tester);
++    final c = h.c;
++    c.select({'5'});
++    await tester.pump();
++    final (from, to) = over12(tester, c);
++    final before = worldZero(c);
++
++    await drag(tester, PointerDeviceKind.touch, from, to);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'a finger bands');
++    expect(worldZero(c), before, reason: 'the camera did not move');
++    expect(h.floorTaps, isEmpty);
++    expect(h.taps, isEmpty);
++
++    c.select({'5'});
++    await tester.pump();
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'a mouse bands');
++    expect(worldZero(c), before);
++
++    // Two fingers on the floor, moved together: the camera pans.
++    c.select({'5'});
++    await tester.pump();
++    final f1 = floorAt(tester, c, 5200, 3000);
++    final f2 = f1 + const Offset(60, 0);
++    final g1 = await tester.startGesture(f1, kind: PointerDeviceKind.touch);
++    final g2 = await tester.startGesture(f2, kind: PointerDeviceKind.touch);
++    await tester.pump(const Duration(milliseconds: 200));
++    for (var i = 1; i <= 8; i++) {
++      await g1.moveTo(f1 + Offset(0, 14.0 * i));
++      await g2.moveTo(f2 + Offset(0, 14.0 * i));
++      await tester.pump(const Duration(milliseconds: 16));
++    }
++    await g1.up();
++    await g2.up();
++    await tester.pump();
++    expect((worldZero(c) - before).distance, greaterThan(60),
++        reason: 'two fingers pan');
++    expect(c.selectedTables.value, {'5'}, reason: 'and select nothing');
++
++    // A second finger landing mid-band cancels it.
++    c.fitToView();
++    await tester.pump();
++    final (a, b) = over12(tester, c);
++    final first = await tester.startGesture(a, kind: PointerDeviceKind.touch);
++    await glide(tester, first, a, b);
++    final second = await tester.startGesture(floorAt(tester, c, 5200, 3000),
++        kind: PointerDeviceKind.touch);
++    await tester.pump(const Duration(milliseconds: 50));
++    await first.moveBy(const Offset(10, 6));
++    await tester.pump();
++    await first.up();
++    await second.up();
++    await tester.pump();
++    expect(c.selectedTables.value, {'5'},
++        reason: 'the band was cancelled, the selection is unchanged');
++    await tester.tapAt(centre(tester, c, '1'), kind: PointerDeviceKind.touch);
++    await tester.pump(const Duration(milliseconds: 50));
++    expect(c.selectedTables.value, {'1'}, reason: 'a tap then selects');
++  });
++
++  testWidgets(
++      'RBV2 under band with userCamera false the band selects (RB4; '
++      'M-RB4)', (tester) async {
++    final h = await pumpBand(tester, userCamera: false);
++    final c = h.c;
++    c.select({'5'});
++    await tester.pump();
++    final (from, to) = over12(tester, c);
++    final before = worldZero(c);
++    await drag(tester, PointerDeviceKind.touch, from, to);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'a finger bands');
++    c.select({'5'});
++    await tester.pump();
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'a mouse bands');
++    expect(worldZero(c), before, reason: 'a locked camera stays');
++  });
++
++  testWidgets(
++      'RBV3 selectedTables notifies exactly once for a band, and no tap or '
++      'floor tap is reported (RB13)', (tester) async {
++    final h = await pumpBand(tester);
++    final c = h.c;
++    var notified = 0;
++    c.selectedTables.addListener(() => notified++);
++    final (from, to) = over12(tester, c);
++    final g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
++    await glide(tester, g, from, to);
++    expect(notified, 0, reason: 'a live band selects nothing');
++    await g.up();
++    await tester.pump();
++    expect(c.selectedTables.value, {'1', '2'});
++    expect(notified, 1);
++    expect(h.taps, isEmpty);
++    expect(h.floorTaps, isEmpty);
++  });
++
++  testWidgets(
++      'RBV4 under shortcuts false Escape mid-band ends it, a secondary click '
++      'mid-band opens no menu, and a mode switch mid-band leaves nothing '
++      'selected (RB14; M-RB17)', (tester) async {
++    final h = await pumpBand(tester, shortcuts: false);
++    final c = h.c;
++    c.select({'5'});
++    await tester.pump();
++    final (from, to) = over12(tester, c);
++
++    // Premise: with shortcuts off an idle Escape does not clear.
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++    expect(c.selectedTables.value, {'5'}, reason: 'premise: idle Escape');
++
++    // Premise: the same drag, without Escape, bands.
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'premise: it bands');
++    c.select({'5'});
++    await tester.pump();
++
++    var g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
++    await glide(tester, g, from, to);
++    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
++    await tester.pump();
++    await g.moveBy(const Offset(-12, 8));
++    await g.up();
++    await tester.pump();
++    expect(c.selectedTables.value, {'5'}, reason: 'Escape ended the band');
++
++    // A secondary click on table 2 mid-band.
++    g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
++    await glide(tester, g, from, to);
++    final menu = await tester.startGesture(centre(tester, c, '2'),
++        kind: PointerDeviceKind.stylus, buttons: kSecondaryMouseButton);
++    await menu.up();
++    await tester.pump();
++    expect(h.menus, isEmpty, reason: 'no menu mid-band');
++    expect(c.selectedTables.value, {'5'}, reason: 'no selection from it');
++    await g.up();
++    await tester.pump();
++    expect(c.selectedTables.value, {'1', '2'},
++        reason: 'the band went on and finished');
++
++    // A mode switch mid-band, and back.
++    c.select({'5'});
++    await tester.pump();
++    g = await tester.startGesture(from, kind: PointerDeviceKind.mouse);
++    await glide(tester, g, from, to);
++    c.setMode(FloorPlanMode.design);
++    await tester.pump();
++    await tester.pump();
++    c.setMode(FloorPlanMode.selection);
++    await tester.pump();
++    await tester.pump();
++    await g.up();
++    await tester.pump();
++    expect(c.selectedTables.value, {'5'},
++        reason: 'the band was dropped: the selection is as it was');
++    expect(h.menus, isEmpty);
++  });
++
++  testWidgets(
++      'RBV5 floorDrag is read at each press: flipped to band by a rebuild '
++      'the next drag bands; flipped back mid-band, that band finishes as a '
++      'band', (tester) async {
++    final h = await pumpBand(tester, floorDrag: FloorPlanFloorDrag.pan);
++    final c = h.c;
++    final (from, to) = over12(tester, c);
++    final before = worldZero(c);
++
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    expect(c.selectedTables.value, isEmpty, reason: 'pan: a drag pans');
++    final panned = worldZero(c);
++    expect((panned - before - (to - from)).distance, lessThan(1e-6));
++
++    await tester.pumpWidget(h.view());
++    c.fitToView();
++    await tester.pump();
++    final (a, b) = over12(tester, c);
++    await drag(tester, PointerDeviceKind.mouse, a, b);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'band: the next bands');
++
++    c.select({'5'});
++    await tester.pump();
++    final g = await tester.startGesture(a, kind: PointerDeviceKind.mouse);
++    final mid = Offset.lerp(a, b, 0.5)!;
++    await glide(tester, g, a, mid);
++    await tester.pumpWidget(h.view(floorDrag: FloorPlanFloorDrag.pan));
++    await glide(tester, g, mid, b);
++    final moved = worldZero(c);
++    await g.up();
++    await tester.pump();
++    expect(c.selectedTables.value, {'1', '2'},
++        reason: 'the band in progress finished as a band');
++    expect(worldZero(c), moved);
++  });
++
++  testWidgets(
++      'RBV6 a table out of focus, a status and a group colour do not stop a '
++      'band: it takes veiled tables (RB18)', (tester) async {
++    final h = await pumpBand(tester);
++    final c = h.c;
++    c.setTableGroups({
++      'g': TableGroup(members: {'5', '6'}, label: 'Party')
++    });
++    c.setTableStatus({'2': TableStatus(color: const Color(0xFF00AA00))});
++    c.setGroupStatus({'g': TableStatus(color: const Color(0xFFAA0000))});
++    c.setTableFocus({'2'});
++    await tester.pump();
++    final (from, to) = over12(tester, c);
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    expect(c.selectedTables.value, {'1', '2'},
++        reason: 'table 1 is veiled, still taken');
++    await drag(tester, PointerDeviceKind.mouse, floorAt(tester, c, 1600, -4600),
++        floorAt(tester, c, 6500, -700));
++    expect(c.selectedTables.value, {'5', '6'},
++        reason: 'a coloured group, veiled, is taken whole');
++  });
++
++  testWidgets(
++      'RBV7 under contextMenu and band a held table reports its menu, a '
++      'floor drag bands; a finger 10 px off a table bands, taps select it, '
++      'and a finger on its top moves it (RB19; M-RB21)', (tester) async {
++    final h = await pumpBand(tester, longPress: FloorPlanLongPress.contextMenu);
++    final c = h.c;
++    final press = await tester.startGesture(centre(tester, c, '1'),
++        kind: PointerDeviceKind.touch);
++    await tester.pump(const Duration(milliseconds: 600));
++    await press.up();
++    await tester.pump();
++    expect(h.menus.map((m) => m.$1), ['1'], reason: 'a held table: its menu');
++    expect(c.selectedTables.value, {'1'});
++
++    final (from, to) = over12(tester, c);
++    await drag(tester, PointerDeviceKind.touch, from, to);
++    expect(c.selectedTables.value, {'1', '2'}, reason: 'a floor drag bands');
++    expect(h.menus, hasLength(1));
++
++    // 10 px off table 2's top, to its left (the top is 1200 wide and 800
++    // tall about the base point; the chairs sit within 225 of its middle).
++    final s = pxPerUnit(c);
++    final edge = global(tester, c,
++        node(c, '2').transform.transformPoint(Vector2(900 - 600, 700)));
++    final near = edge - const Offset(10, 0);
++    expect(near.dx, lessThan(edge.dx));
++    c.select({'5'});
++    await tester.pump();
++    final undo = c.activeDocument.commands.undoDepth;
++    await drag(tester, PointerDeviceKind.touch, near, centre(tester, c, '1'));
++    expect(c.selectedTables.value, {'1'},
++        reason: 'a finger 10 px off a table bands (right to left: touched)');
++    expect(c.activeDocument.commands.undoDepth, undo, reason: 'nothing moved');
++    expect(s, greaterThan(0));
++
++    await tester.tapAt(near, kind: PointerDeviceKind.touch);
++    await tester.pump(const Duration(milliseconds: 50));
++    expect(c.selectedTables.value, {'2'}, reason: 'a tap there selects 2');
++    expect(h.taps.last, '2');
++
++    final top = centre(tester, c, '2');
++    await drag(
++        tester, PointerDeviceKind.touch, top, top + const Offset(0, -80));
++    expect(c.activeDocument.commands.undoDepth, undo + 1,
++        reason: 'a finger on the top moves it');
++    expect(c.selectedTables.value, {'2'});
++  });
++
++  testWidgets(
++      'RBV8 under pan, the default, a Shift mouse drag adds to the '
++      'selection and a plain one pans', (tester) async {
++    final h = await pumpBand(tester, floorDrag: FloorPlanFloorDrag.pan);
++    final c = h.c;
++    // Table 4 has no number: it is selected, but selectedTables lacks it.
++    await tester.tapAt(centre(tester, c, '4'), kind: PointerDeviceKind.mouse);
++    await tester.pump(const Duration(milliseconds: 50));
++    expect(c.selectedTables.value, isEmpty, reason: 'premise: 4 is selected');
++    expect(c.activeSelection.keys, hasLength(1));
++    final four = c.activeSelection.keys.single;
++
++    final (from, to) = over12(tester, c);
++    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
++    await tester.pump();
++    expect(c.selectedTables.value, {'1', '2'});
++    expect(c.activeSelection.keys, contains(four), reason: 'added to 4');
++    expect(c.activeSelection.keys, hasLength(3));
++
++    final before = worldZero(c);
++    await drag(tester, PointerDeviceKind.mouse, from, to);
++    expect((worldZero(c) - before - (to - from)).distance, lessThan(1e-6),
++        reason: 'a plain drag pans');
++    expect(c.selectedTables.value, {'1', '2'});
++    expect(c.activeSelection.keys, hasLength(3));
++  });
++}
+diff --git a/packages/jet_cad_floor_plan/test/host/barrel_test.dart b/packages/jet_cad_floor_plan/test/host/barrel_test.dart
+index 4277dc64..eb92be90 100644
+--- a/packages/jet_cad_floor_plan/test/host/barrel_test.dart
++++ b/packages/jet_cad_floor_plan/test/host/barrel_test.dart
+@@ -52,20 +52,21 @@ void main() {
+       'FloorPlanServiceAction',
+       'FloorPlanEditorBar',
+       'FloorPlanEditorAction',
+       'FloorPlanEditorCapabilities',
+       'FloorPlanSymbol',
+       'FloorPlanTool',
+       'FloorPlanColor',
+       'TableStatus',
+       'ServiceLayoutRestore',
+       'FloorPlanLongPress',
++      'FloorPlanFloorDrag',
+       'NumberingWarning',
+       'DuplicateNumber',
+       'Unnumbered',
+       'FloorPlanLocalizations',
+       'floorPlanLocalizationsDelegates',
+       'floorPlanSupportedLocales',
+       'FloorPlanStrings',
+       'FloorPlanStringsEn',
+       'FloorPlanStringsDe',
+       'FloorPlanStringsTr',
+diff --git a/packages/jet_cad_floor_plan/test/invariants/band_allocation_test.dart b/packages/jet_cad_floor_plan/test/invariants/band_allocation_test.dart
+new file mode 100644
+index 00000000..63307eda
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/invariants/band_allocation_test.dart
+@@ -0,0 +1,192 @@
++// What a live band builds per frame (rubber-band spec RB-6, RB16): the
++// selection mode's tool paints its band through one kept
++// `SelectionBandPainter`, so a band's frame builds no `Paint` and no `Path`.
++// Measured, not inferred: the Dart VM's own allocation profiler, through
++// `AllocationMeter` (`vm_allocation_meter.dart`), as `pick_allocation_test`
++// does.
++//
++// **Under `flutter test` the profiler needs `--enable-vmservice`**: CI runs
++// this package's tests with it. Without it the test skips with
++// [vmServiceUnavailableReason], and CI's standing comparison reads such a
++// skip as red.
++//
++// **What the VM sees.** `Paint` is a Dart class of `dart:ui`; `Path` is an
++// interface whose engine-backed implementation is the Dart wrapper class
++// `_NativePath`. The profiler counts those Dart wrappers (the engine's own
++// native memory is not on the Dart heap). A `Paint` holds its fields in a
++// `ByteData` (`_ByteDataView` to the VM) that the canvas hands the engine:
++// measured while building this test, the JIT may scalar-replace a `Paint`
++// built and drawn at once (M-RB19 once read 2 `Paint`s over 1,000 frames)
++// but never its escaping `_ByteDataView` (1,002 on every run), so both are
++// watched. `_Uint8List`, the view's buffer, is not: the meter's own round
++// trip makes some 900 of them per epoch. The test proves the meter sees a
++// paint and a path before it trusts a clean reading: a control loop that
++// builds a known number of each must read at least that many.
++//
++// **The fixture is not degenerate:** the camera is y-flipped, scaled and off
++// the origin; the plan holds a turned, mirrored table; the band's pointer
++// moves 1 px per frame on a triangle wave across the press, so the frames
++// alternate between window (a stroked rect) and crossing (a dashed path).
++library;
++
++import 'dart:ui' as ui;
++
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
++import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
++import 'package:jet_cad_floor_plan/src/service/table_select_tool.dart';
++import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../tables/table_fixture.dart';
++import 'vm_allocation_meter.dart';
++
++/// The classes a per-frame paint or path would make, as the VM names them.
++const _watched = {'Paint', '_ByteDataView', 'Path', '_NativePath'};
++
++/// Instances admitted over the measured frames, all classes together, past
++/// the no-frame baseline.
++const int _budget = 2;
++
++const int _frames = 1000;
++
++/// The pointer's x at frame [i]: a triangle wave about the press's x, 1 px
++/// per frame, from 100 px left of it to 100 px right and back.
++double _x(double pressX, int i) => pressX + 100 - ((i % 400) - 200).abs();
++
++void main() {
++  AllocationMeter? meter;
++
++  setUpAll(() async {
++    meter = await AllocationMeter.connect();
++  });
++
++  tearDownAll(() async {
++    await meter?.dispose();
++  });
++
++  test(
++      'RB16 a live band builds no Paint and no Path per frame, window and '
++      'crossing alike (M-RB19)', () async {
++    final m = meter;
++    if (m == null) {
++      markTestSkipped(vmServiceUnavailableReason);
++      return;
++    }
++    final doc = plan();
++    doc.commands.execute(placeSymbol(doc, entryOf(tableSymbol()),
++        at: Vector2(-2000, 1000), quarterTurns: 1, mirrored: true));
++    final camera = CameraController(ViewportTransform(
++        worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, 700, 450)));
++    final index = SpatialIndex(doc);
++    final selection = SelectionController(doc);
++    final groups = ValueNotifier<Map<String, TableGroup>>(const {});
++    final tool = TableSelectTool(
++        picker: TablePicker(doc),
++        groups: groups,
++        callbacks: () => (
++              onTableTap: null,
++              onLayoutChanged: null,
++              onGroupTap: null,
++              onMergeRequested: null,
++              onSplitRequested: null,
++            ),
++        options: () => (
++              serviceMoves: true,
++              longPress: FloorPlanLongPress.toggleSelection,
++              onTableContextMenu: null,
++              floorDrag: FloorPlanFloorDrag.band,
++            ));
++    addTearDown(() {
++      tool.dispose();
++      groups.dispose();
++      selection.dispose();
++      index.dispose();
++      camera.dispose();
++    });
++    final ctx = ToolContext(
++        document: doc, index: index, camera: camera, selection: selection);
++    ToolPointerEvent ev(ui.Offset s, {int buttons = kPrimaryButton}) =>
++        ToolPointerEvent(
++          screen: s,
++          world: camera.value.screenToWorld(Vector2(s.dx, s.dy)),
++          pointer: 1,
++          buttons: buttons,
++          shift: false,
++          control: false,
++          meta: false,
++          alt: false,
++          pickRadiusWorld: 6 / camera.value.scale,
++          kind: PointerDeviceKind.mouse,
++        );
++
++    const press = ui.Offset(900, 120);
++    tool.onPointerDown(ev(press), ctx);
++    tool.onPointerMove(ev(const ui.Offset(1100, 300)), ctx);
++    expect(tool.phase, ToolPhase.dragging, reason: 'premise: a live band');
++
++    final recorder = ui.PictureRecorder();
++    final canvas = ui.Canvas(recorder);
++    const viewport = ui.Size(1400, 900);
++    var windows = 0, crossings = 0;
++    void frames(int n) {
++      for (var i = 0; i < n; i++) {
++        final at = ui.Offset(_x(press.dx, i), 300 + (i % 2).toDouble());
++        tool.onPointerMove(ev(at), ctx);
++        tool.paintOverlay(canvas, camera.value, viewport, PaperPalette.light);
++      }
++    }
++
++    // Premise: the wave alternates the modes.
++    for (var i = 0; i < _frames; i++) {
++      if (bandModeFor(press, ui.Offset(_x(press.dx, i), 0)) ==
++          BandMode.window) {
++        windows++;
++      } else {
++        crossings++;
++      }
++    }
++    expect(windows, greaterThan(_frames ~/ 4));
++    expect(crossings, greaterThan(_frames ~/ 4));
++
++    // Warm: the JIT optimises the move and the paint before the count.
++    frames(4 * _frames);
++    // The baseline: an epoch with no frame. It reads the painter's own kept
++    // objects (two paints, their two data views, one path), live since the
++    // tool was built: the meter's failure mode 1, measured at 5 whatever
++    // the frame count (0 or 1,000). The frames are held to their excess
++    // over it.
++    await m.reset();
++    final baseline = await m.accumulatedInstances(_watched);
++    await m.reset();
++    frames(_frames);
++    final counts = await m.accumulatedInstances(_watched);
++    expect(tool.phase, ToolPhase.dragging, reason: 'premise: still banding');
++    recorder.endRecording().dispose();
++
++    // The meter sees both classes: a control loop builds 100 of each. Run
++    // after the measure, so its live objects never reach the measured
++    // epoch (the meter's failure mode 1).
++    await m.reset();
++    final kept = [
++      for (var i = 0; i < 100; i++) (ui.Paint(), ui.Path()),
++    ];
++    final control = await m.accumulatedInstances(_watched);
++    expect(kept, hasLength(100));
++    expect(control['Paint'], greaterThanOrEqualTo(100),
++        reason: 'premise: the meter sees a Paint ($control)');
++    expect(control['_ByteDataView'], greaterThanOrEqualTo(100),
++        reason: 'premise: the meter sees a Paint\'s data ($control)');
++    expect(
++        control['_NativePath']! + control['Path']!, greaterThanOrEqualTo(100),
++        reason: 'premise: the meter sees a Path ($control)');
++
++    int sum(Map<String, int> c) => c.values.fold(0, (a, b) => a + b);
++    expect(sum(counts) - sum(baseline), lessThanOrEqualTo(_budget),
++        reason: '$counts over $_frames frames, $baseline with none');
++  });
++}
+diff --git a/packages/jet_cad_floor_plan/test/service/table_band_test.dart b/packages/jet_cad_floor_plan/test/service/table_band_test.dart
+new file mode 100644
+index 00000000..1827c784
+--- /dev/null
++++ b/packages/jet_cad_floor_plan/test/service/table_band_test.dart
+@@ -0,0 +1,799 @@
++// Rubber-band spec RB-2 to RB-6 at the selection mode's tool: when a band
++// starts (the host's `floorDrag`, the modifier read at the down, a finger's
++// reach-only press), what it takes (the band query kept to the picker's
++// candidates, groups by the mode's rule, locks), what it does to the
++// selection (one `replace`), Escape and cancel, and its painting. Under fake
++// time (testWidgets). The camera is y-flipped, scaled and off the origin;
++// tables are turned and mirrored, one L-shaped table is turned 37 degrees;
++// the plan holds a group of three, a locked table, a group with a locked
++// member, an unnumbered table, a hidden one and a planter. Band rects are
++// computed from the tables' leaves under their transforms, never read from
++// the code.
++import 'dart:ui' show Canvas, Offset, Paint, PaintingStyle, Rect, Size;
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
++import 'package:flutter/services.dart';
++import 'package:flutter/widgets.dart' show KeyEventResult;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_floor_plan/src/host/floor_plan_types.dart';
++import 'package:jet_cad_floor_plan/src/parametric/catalog.dart';
++import 'package:jet_cad_floor_plan/src/service/table_groups.dart';
++import 'package:jet_cad_floor_plan/src/service/table_picker.dart';
++import 'package:jet_cad_floor_plan/src/service/table_select_tool.dart';
++import 'package:jet_cad_floor_plan/src/symbols/symbol_placer.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_index.dart';
++import 'package:jet_cad_floor_plan/src/tables/table_label.dart';
++import 'package:jet_cad_floor_plan/symbols.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../tables/table_fixture.dart';
++
++/// An L-shaped top, its empty quadrant at the upper right of its
++/// 1200 x 1200 box (review V-5): turned 37 degrees, a corner of its
++/// bounding box lies off every leaf.
++///
++/// Two leaves, not the plan's one L polyline: the index's window encloses
++/// each leaf's own box lifted to the world (`SpatialIndex._leafPasses`), and
++/// one L polyline's box is the whole 1200 x 1200 square, so no band could
++/// enclose the leaf and miss the box's corner. Two bars keep the same L and
++/// make RB6's premise reachable.
++const FurnitureSymbol ellTable = FurnitureSymbol(
++  key: 'test.ell',
++  name: 'Test L table',
++  category: 'Tests',
++  tags: ['table', 'test'],
++  seats: 3,
++  baseX: 600,
++  baseY: 600,
++  shapes: [
++    PolylineShape([(0, 0), (1200, 0), (1200, 500), (0, 500)], closed: true),
++    PolylineShape([(0, 500), (500, 500), (500, 1200), (0, 1200)], closed: true),
++  ],
++);
++
++/// [ellTable]'s leaves, in its definition.
++const List<List<(double, double)>> _ellLeaves = [
++  [(0, 0), (1200, 0), (1200, 500), (0, 500)],
++  [(0, 500), (500, 500), (500, 1200), (0, 1200)],
++];
++
++/// [tableSymbol]'s top and chairs, in its definition.
++const List<List<(double, double)>> _tableLeaves = [
++  [(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
++  [(675, -50), (1125, -50), (1125, 400), (675, 400)],
++  [(675, 1000), (1125, 1000), (1125, 1450), (675, 1450)],
++];
++
++/// [trapezoidTable]'s top, in its definition.
++const List<List<(double, double)>> _trapezoidLeaves = [
++  [(200, 300), (1600, 300), (1300, 1000), (500, 900)],
++];
++
++const KeyDownEvent _escape = KeyDownEvent(
++    physicalKey: PhysicalKeyboardKey.escape,
++    logicalKey: LogicalKeyboardKey.escape,
++    timeStamp: Duration.zero);
++
++const KeyDownEvent _z = KeyDownEvent(
++    physicalKey: PhysicalKeyboardKey.keyZ,
++    logicalKey: LogicalKeyboardKey.keyZ,
++    timeStamp: Duration.zero);
++
++/// A canvas that records every call.
++final class RecordingCanvas implements Canvas {
++  final List<Invocation> calls = [];
++
++  Iterable<Invocation> named(String name) =>
++      calls.where((c) => c.memberName == Symbol(name));
++
++  @override
++  dynamic noSuchMethod(Invocation invocation) {
++    calls.add(invocation);
++    return null;
++  }
++}
++
++List<double> parts(Transform2 t) => [t.a, t.b, t.c, t.d, t.e, t.f];
++
++/// The world box of [points].
++Aabb2 boxOf(Iterable<Vector2> points) => Aabb2.fromPoints(points);
++
++/// [box] grown by [pad] on every side.
++Aabb2 padded(Aabb2 box, double pad) =>
++    Aabb2.raw(box.minX - pad, box.minY - pad, box.maxX + pad, box.maxY + pad);
++
++bool encloses(Aabb2 outer, Vector2 p) =>
++    p.x > outer.minX &&
++    p.x < outer.maxX &&
++    p.y > outer.minY &&
++    p.y < outer.maxY;
++
++bool overlaps(Aabb2 a, Aabb2 b) =>
++    a.minX <= b.maxX &&
++    a.maxX >= b.minX &&
++    a.minY <= b.maxY &&
++    a.maxY >= b.minY;
++
++final class Rig {
++  /// Tables 1 (at -2000, 1000, a quarter turn, mirrored), 2 (a trapezoid at
++  /// 2500, 1000, mirrored), 3 (at 0, -2500, on a locked layer), 4, 5, 6 (at
++  /// 6000, 7600 and 9200 by 1000: group 'g'), 7, 8 (at 6000 and 7600 by
++  /// -3000: group 'h', 8 on the locked layer), 9 (the L at -6000, -3000,
++  /// turned 37 degrees), 10 (at -6000, 2500, its label emptied), 11 (at
++  /// -9000, 2500, on a hidden layer) and a planter (at -3500, -1000),
++  /// decoded as a service copy.
++  Rig() {
++    final design = plan();
++    void put(FurnitureSymbol s, double x, double y,
++        {int quarterTurns = 0, bool mirrored = false}) {
++      design.commands.execute(placeSymbol(design, entryOf(s),
++          at: Vector2(x, y), quarterTurns: quarterTurns, mirrored: mirrored));
++    }
++
++    Handle newest() => design.tree.nodes
++        .whereType<InstanceNode>()
++        .reduce((a, b) => a.handle.value > b.handle.value ? a : b)
++        .handle;
++
++    final zero = design.tables.layers[ReservedHandles.layerZero]!;
++    Handle layer(String name) {
++      final h = design.handleSeed.next();
++      design.commands.execute(AddLayerCommand(LayerRecord(
++          handle: h,
++          name: name,
++          color: const IndexedColor(1),
++          linetype: zero.linetype,
++          lineweight: zero.lineweight,
++          transparency: zero.transparency,
++          visible: true,
++          locked: false)));
++      return h;
++    }
++
++    final locked = layer('Locked');
++    final hidden = layer('Hidden');
++    put(tableSymbol(), -2000, 1000, quarterTurns: 1, mirrored: true); // 1
++    put(trapezoidTable, 2500, 1000, mirrored: true); // 2
++    put(tableSymbol(), 0, -2500); // 3
++    design.commands.execute(SetInstanceLayerCommand(newest(), locked));
++    put(tableSymbol(), 6000, 1000); // 4
++    put(tableSymbol(), 7600, 1000); // 5
++    put(tableSymbol(), 9200, 1000); // 6
++    put(tableSymbol(), 6000, -3000); // 7
++    put(tableSymbol(), 7600, -3000); // 8
++    design.commands.execute(SetInstanceLayerCommand(newest(), locked));
++    put(ellTable, -6000, -3000); // 9
++    design.commands.execute(TransformNodeCommand(
++        newest(), placementAt(-6000, -3000, kDeg37, baseX: 600, baseY: 600)));
++    put(tableSymbol(), -6000, 2500); // 10
++    final tenth = newest();
++    put(tableSymbol(), -9000, 2500); // 11
++    design.commands.execute(SetInstanceLayerCommand(newest(), hidden));
++    put(planterSymbol, -3500, -1000);
++    final planter = newest();
++    final survey = TableSurvey.of(design);
++    final tenthLabel =
++        survey.tables.singleWhere((t) => t.instance == tenth).label!;
++    expect(survey.tables.singleWhere((t) => t.instance == tenth).number, '10',
++        reason: 'premise: placed tenth');
++    design.commands
++        .execute(SetEntityTextCommand(tenthLabel, '', kTableLabelTag));
++    design.commands.execute(
++        SetLayerCommand(design.tables.layers[locked]!.copyWith(locked: true)));
++    design.commands.execute(SetLayerCommand(
++        design.tables.layers[hidden]!.copyWith(visible: false)));
++
++    doc = DraftDocumentCodec.decodeString(
++        DraftDocumentCodec.encodeToString(design),
++        permissions: DraftPermissions.runtime,
++        registerComponents: registerAppComponents,
++        diagnostics: <Diagnostic>[]);
++    final tables = TableSurvey.of(doc).tables;
++    handles = {
++      for (final t in tables)
++        if (t.number case final n?) n: t.instance,
++    };
++    handles['10'] = tenth;
++    handles['planter'] = planter;
++    expect(tables.singleWhere((t) => t.instance == tenth).number, isNull,
++        reason: 'premise: 10 is unnumbered after the round trip');
++    expect(doc.tree[planter], isA<InstanceNode>());
++    expect(
++        handles.keys.toSet(), {for (var i = 1; i <= 11; i++) '$i', 'planter'});
++
++    camera = CameraController(ViewportTransform(
++        worldToScreenMatrix: Transform2(0.1, 0, 0, -0.1, 700, 450)));
++    index = SpatialIndex(doc);
++    selection = SelectionController(doc);
++    picker = TablePicker(doc);
++    tool = TableSelectTool(
++        picker: picker,
++        groups: groups,
++        callbacks: () => (
++              onTableTap: taps.add,
++              onLayoutChanged: null,
++              onGroupTap: null,
++              onMergeRequested: null,
++              onSplitRequested: null,
++            ),
++        options: () => options,
++        events: () => events,
++        idleKeys: () => idleKeys);
++    ctx = ToolContext(
++        document: doc, index: index, camera: camera, selection: selection);
++  }
++
++  late final DraftDocument doc;
++  late final CameraController camera;
++  late final SpatialIndex index;
++  late final SelectionController selection;
++  late final TablePicker picker;
++  late final TableSelectTool tool;
++  late final ToolContext ctx;
++  late final Map<String, Handle> handles;
++
++  /// The host's groups: 'g' of three, 'h' of two with 8 locked.
++  final ValueNotifier<Map<String, TableGroup>> groups =
++      ValueNotifier(validateTableGroups({
++    'g': TableGroup(members: {'4', '5', '6'}),
++    'h': TableGroup(members: {'7', '8'}),
++  }));
++
++  /// What the tool reads at each press.
++  ServiceOptions options = kDefaultServiceOptions;
++  bool idleKeys = true;
++
++  final List<String> taps = [];
++  final List<String> doubleTaps = [];
++  final List<Offset> floors = [];
++  final List<String?> hovers = [];
++
++  late final ServiceEvents<Handle> events = (
++    onTablesMoved: null,
++    onTableDoubleTap: doubleTaps.add,
++    onFloorTap: floors.add,
++    onTableHover: hovers.add,
++  );
++
++  void drag(FloorPlanFloorDrag floorDrag, {bool serviceMoves = true}) =>
++      options = (
++        serviceMoves: serviceMoves,
++        longPress: FloorPlanLongPress.toggleSelection,
++        onTableContextMenu: null,
++        floorDrag: floorDrag,
++      );
++
++  void dispose() {
++    tool.dispose();
++    selection.dispose();
++    index.dispose();
++    camera.dispose();
++    groups.dispose();
++  }
++
++  InstanceNode node(String n) => doc.tree[handles[n]!]! as InstanceNode;
++
++  SelectionKey key(String n) => SelectionKey.root(handles[n]!);
++
++  Set<SelectionKey> keys(List<String> ns) => {for (final n in ns) key(n)};
++
++  /// The leaves of table [n] in its definition.
++  List<List<(double, double)>> leavesOf(String n) => switch (n) {
++        '2' => _trapezoidLeaves,
++        '9' => _ellLeaves,
++        _ => _tableLeaves,
++      };
++
++  /// Local ([x], [y]) of table [n] in the world.
++  Vector2 world(String n, double x, double y) =>
++      node(n).transform.transformPoint(Vector2(x, y));
++
++  /// The world box of every leaf of tables [ns].
++  Aabb2 leafBox(List<String> ns) => boxOf([
++        for (final n in ns)
++          for (final leaf in leavesOf(n))
++            for (final (x, y) in leaf) world(n, x, y)
++      ]);
++
++  Offset screen(Vector2 w) {
++    final s = camera.value.worldToScreen(w);
++    return Offset(s.x, s.y);
++  }
++
++  Vector2 toWorld(Offset s) => camera.value.screenToWorld(Vector2(s.dx, s.dy));
++
++  /// The screen point of local ([x], [y]) of table [n].
++  Offset at(String n, double x, double y) => screen(world(n, x, y));
++
++  ToolPointerEvent ev(Offset screen,
++          {int buttons = kPrimaryButton,
++          bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      ToolPointerEvent(
++        screen: screen,
++        world: camera.value.screenToWorld(Vector2(screen.dx, screen.dy)),
++        pointer: 1,
++        buttons: buttons,
++        shift: shift,
++        control: control,
++        meta: meta,
++        alt: false,
++        pickRadiusWorld: 6 / camera.value.scale,
++        kind: touch ? PointerDeviceKind.touch : PointerDeviceKind.mouse,
++        reachRadiusWorld: touch ? 24 / camera.value.scale : null,
++      );
++
++  void down(Offset s,
++          {bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      tool.onPointerDown(
++          ev(s, shift: shift, control: control, meta: meta, touch: touch), ctx);
++  void move(Offset s,
++          {bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      tool.onPointerMove(
++          ev(s, shift: shift, control: control, meta: meta, touch: touch), ctx);
++  void up(Offset s,
++          {bool shift = false,
++          bool control = false,
++          bool meta = false,
++          bool touch = false}) =>
++      tool.onPointerUp(
++          ev(s,
++              buttons: 0,
++              shift: shift,
++              control: control,
++              meta: meta,
++              touch: touch),
++          ctx);
++
++  void tap(Offset s, {bool touch = false}) {
++    down(s, touch: touch);
++    up(s, touch: touch);
++  }
++
++  /// A band over world [box]: a window from its upper left to its lower
++  /// right, or a crossing from its upper right to its lower left. Its press
++  /// is asserted off every table (a mouse's pick, no reach).
++  void band(Aabb2 box,
++      {bool crossing = false,
++      bool shift = false,
++      bool control = false,
++      bool meta = false,
++      bool touch = false}) {
++    final start = Vector2(crossing ? box.maxX : box.minX, box.maxY);
++    final end = Vector2(crossing ? box.minX : box.maxX, box.minY);
++    expect(picker.pick(start), isNull, reason: 'premise: pressed on the floor');
++    final s = screen(start), e = screen(end);
++    down(s, shift: shift, control: control, meta: meta, touch: touch);
++    move(Offset.lerp(s, e, 0.5)!,
++        shift: shift, control: control, meta: meta, touch: touch);
++    move(e, shift: shift, control: control, meta: meta, touch: touch);
++    up(e, shift: shift, control: control, meta: meta, touch: touch);
++  }
++
++  /// What the overlay paints now.
++  RecordingCanvas paint() {
++    final canvas = RecordingCanvas();
++    tool.paintOverlay(
++        canvas, camera.value, const Size(1400, 900), PaperPalette.light);
++    return canvas;
++  }
++}
++
++Rig rig(WidgetTester tester) {
++  final r = Rig();
++  addTearDown(r.dispose);
++  return r;
++}
++
++void main() {
++  testWidgets(
++      'RB1 under pan a plain mouse drag on the floor pans: the selection '
++      'unchanged, no band (M-RB1)', (tester) async {
++    final r = rig(tester);
++    r.selection.replace([r.key('1')]);
++    final before = r.camera.value.worldToScreenMatrix;
++    const a = Offset(1000, 120), b = Offset(1060, 160);
++    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise: the floor');
++    r.down(a);
++    r.move(const Offset(1030, 140));
++    r.move(b);
++    expect(r.paint().calls, isEmpty, reason: 'no band painted');
++    r.up(b);
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, closeTo(before.e + 60, 1e-9));
++    expect(after.f, closeTo(before.f + 40, 1e-9));
++    expect(r.selection.keys, {r.key('1')});
++  });
++
++  testWidgets(
++      'RB2 under pan a Shift, Ctrl or Cmd mouse drag bands and adds; a Shift '
++      'touch drag pans (M-RB2)', (tester) async {
++    final r = rig(tester);
++    // Padded 600 mm: the press is past a finger's 24 px reach too.
++    final box = padded(r.leafBox(['1', '2']), 600);
++    for (final (shift, control, meta) in [
++      (true, false, false),
++      (false, true, false),
++      (false, false, true),
++    ]) {
++      r.selection.replace([r.key('9')]);
++      r.band(box, shift: shift, control: control, meta: meta);
++      expect(r.selection.keys, r.keys(['1', '2', '9']),
++          reason: 'shift $shift, control $control, meta $meta');
++    }
++    r.selection.replace([r.key('9')]);
++    final before = r.camera.value.worldToScreenMatrix;
++    expect(r.picker.pick(Vector2(box.minX, box.maxY), reach: 240), isNull,
++        reason: 'premise: out of a finger\'s reach');
++    r.band(box, shift: true, touch: true);
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, isNot(closeTo(before.e, 1)), reason: 'a finger pans');
++    expect(r.selection.keys, {r.key('9')});
++  });
++
++  testWidgets(
++      'RB5 under band a drag from a table moves it, from a locked one is '
++      'spent; with serviceMoves false it pans (M-RB5)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    final before = parts(r.node('2').transform);
++    final p = r.at('2', 900, 650);
++    r.down(p);
++    r.move(p + const Offset(40, 0));
++    expect(r.paint().calls, isEmpty);
++    r.up(p + const Offset(40, 0));
++    expect(r.doc.commands.undoDepth, 1, reason: 'one step');
++    expect(parts(r.node('2').transform)[4], closeTo(before[4] + 400, 1e-6));
++    expect(r.selection.keys, {r.key('2')});
++
++    final cam = parts(r.camera.value.worldToScreenMatrix);
++    final q = r.at('3', 900, 700);
++    r.down(q);
++    r.move(q + const Offset(-60, 30));
++    expect(r.tool.phase, ToolPhase.pressed, reason: 'spent');
++    expect(r.paint().calls, isEmpty);
++    r.up(q + const Offset(-60, 30));
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.doc.commands.undoDepth, 1);
++    expect(parts(r.camera.value.worldToScreenMatrix), cam);
++
++    r.drag(FloorPlanFloorDrag.band, serviceMoves: false);
++    final s = r.at('2', 900, 650);
++    r.down(s);
++    r.move(s + const Offset(30, 20));
++    r.up(s + const Offset(30, 20));
++    final after = r.camera.value.worldToScreenMatrix;
++    expect(after.e, closeTo(cam[4] + 30, 1e-9), reason: 'pans (R-3)');
++    expect(after.f, closeTo(cam[5] + 20, 1e-9));
++    expect(r.doc.commands.undoDepth, 1);
++    expect(r.selection.keys, {r.key('2')});
++  });
++
++  testWidgets(
++      'RB5b under band a finger 10 px outside a table\'s box bands when '
++      'dragged and selects the table when tapped (R-4, M-RB5b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    r.selection.replace([r.key('1')]);
++    final before = parts(r.node('2').transform);
++    // 100 mm below the trapezoid's box (y 300): 10 px.
++    final p = r.at('2', 900, 200);
++    expect(r.picker.pick(r.toWorld(p)), isNull, reason: 'premise: off it');
++    expect(r.picker.pick(r.toWorld(p), reach: 240)?.table.number, '2',
++        reason: 'premise: within a finger\'s reach');
++    r.down(p, touch: true);
++    r.move(p + const Offset(40, 60), touch: true);
++    expect(r.tool.phase, ToolPhase.dragging);
++    expect(r.tool.selectionPreviewTransform, isNull, reason: 'no move');
++    expect(r.paint().named('drawRect'), hasLength(2), reason: 'a band');
++    r.up(p + const Offset(40, 60), touch: true);
++    expect(parts(r.node('2').transform), before);
++    expect(r.doc.commands.undoDepth, 0);
++    expect(r.selection.isEmpty, isTrue, reason: 'a plain band over nothing');
++    r.tap(p, touch: true);
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.taps, ['2']);
++  });
++
++  testWidgets(
++      'RB6 a window takes the turned L when every leaf is inside, a corner '
++      'of its box outside (M-RB6)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    final band = padded(r.leafBox(['9']), 50);
++    // Each leaf is a rectangle: its vertices' world box is its own box
++    // lifted to the world, what the index's window encloses.
++    for (final leaf in _ellLeaves) {
++      final leafBox = boxOf([for (final (x, y) in leaf) r.world('9', x, y)]);
++      for (final corner in [
++        Vector2(leafBox.minX, leafBox.minY),
++        Vector2(leafBox.maxX, leafBox.maxY),
++      ]) {
++        expect(encloses(band, corner), isTrue,
++            reason: 'premise: leaf $leaf\'s box inside');
++      }
++    }
++    final box = boxOf([
++      for (final (x, y) in const [(0.0, 0.0), (1200.0, 0.0), (0.0, 1200.0)])
++        r.world('9', x, y),
++      r.world('9', 1200, 1200),
++    ]);
++    expect(encloses(band, r.world('9', 1200, 1200)), isFalse,
++        reason: 'premise: the empty quadrant\'s corner is outside');
++    expect(box.maxY, greaterThan(band.maxY),
++        reason: 'premise: the instance\'s world box is not enclosed');
++    r.band(band);
++    expect(r.selection.keys, {r.key('9')});
++  });
++
++  testWidgets(
++      'RB7 a crossing takes a table it touches by a chair, nothing over the '
++      'L\'s empty quadrant; turned back mid-drag it crosses (M-RB7, M-RB7b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    // Off table 1's top (local y 300 up) and box (y -50 up), over its chair
++    // (local y -50 to 400): a quarter turn keeps the box exact.
++    final chair = boxOf([
++      for (final (x, y) in const [(600.0, -300.0), (1200.0, 0.0)])
++        r.world('1', x, y)
++    ]);
++    final top =
++        boxOf([for (final (x, y) in _tableLeaves[0]) r.world('1', x, y)]);
++    expect(overlaps(chair, top), isFalse, reason: 'premise: off the top');
++    r.band(chair, crossing: true);
++    expect(r.selection.keys, {r.key('1')}, reason: 'touched by its chair');
++
++    // Above the L's leaves, inside its turned box only near the empty
++    // quadrant's corner.
++    final leaves = r.leafBox(['9']);
++    final corner = r.world('9', 1200, 1200);
++    final quadrant = Aabb2.raw(
++        corner.x - 400, leaves.maxY + 230, corner.x + 400, leaves.maxY + 330);
++    expect(
++        r.picker.candidates.where((c) => c.table.number == '9'), hasLength(1));
++    expect(quadrant.maxY, lessThan(corner.y),
++        reason: 'premise: under the box\'s top corner');
++    r.band(quadrant, crossing: true);
++    expect(r.selection.isEmpty, isTrue, reason: 'no leaf touched');
++
++    // Right of the press, then back left past it.
++    final s = r.screen(Vector2(chair.maxX, chair.maxY));
++    final e = r.screen(Vector2(chair.minX, chair.minY));
++    r.down(s);
++    r.move(s + const Offset(40, 10));
++    final window = r.paint();
++    expect(window.named('drawRect'), hasLength(2));
++    expect(window.named('drawPath'), isEmpty);
++    r.move(e);
++    final crossing = r.paint();
++    expect(crossing.named('drawRect'), hasLength(1));
++    expect(crossing.named('drawPath'), hasLength(1));
++    r.up(e);
++    expect(r.selection.keys, {r.key('1')}, reason: 'taken by crossing');
++  });
++
++  testWidgets(
++      'RB8 a zoom during a band: the corners are converted under the camera '
++      'at the up (M-RB8)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    final target = padded(r.leafBox(['2']), 100);
++    const f = Offset(200, 700);
++    final fw = r.toWorld(f);
++    // The world points that, after a 1.5x zoom about f, lie under the
++    // band's corners: farther from f's world point by 1.5.
++    Vector2 before(Vector2 w) => fw + (w - fw) * 1.5;
++    final a = before(Vector2(target.minX, target.maxY));
++    final b = before(Vector2(target.maxX, target.minY));
++    final s0 = r.screen(a), s1 = r.screen(b);
++    final mixed = boxOf([a, Vector2(target.maxX, target.minY)]);
++    expect(
++        encloses(mixed, Vector2(target.minX + 100, target.maxY - 100)), isFalse,
++        reason: 'premise: the press\'s old world point misses 2');
++    r.down(s0);
++    r.move(Offset.lerp(s0, s1, 0.5)!);
++    r.camera.value = ViewportTransform(
++        worldToScreenMatrix: Transform2.translation(f.dx, f.dy)
++            .multiply(Transform2.scale(1.5, 1.5))
++            .multiply(Transform2.translation(-f.dx, -f.dy))
++            .multiply(r.camera.value.worldToScreenMatrix));
++    final w0 = r.toWorld(s0);
++    expect(w0.x, closeTo(target.minX, 1e-6), reason: 'premise: the zoom');
++    expect(w0.y, closeTo(target.maxY, 1e-6));
++    r.move(s1);
++    r.up(s1);
++    expect(r.selection.keys, {r.key('2')});
++  });
++
++  testWidgets(
++      'RB9 a window over the whole floor: the hidden table and the planter '
++      'are not selected, the unnumbered one is (M-RB9)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    final all = padded(r.leafBox([for (var i = 1; i <= 11; i++) '$i']), 500);
++    expect(
++        encloses(
++            all, r.node('planter').transform.transformPoint(Vector2(250, 250))),
++        isTrue,
++        reason: 'premise: the planter inside');
++    r.band(all);
++    expect(r.selection.keys, r.keys(['1', '2', '4', '5', '6', '7', '9', '10']));
++    expect(r.selection.keys, isNot(contains(r.key('11'))));
++    expect(r.selection.keys, isNot(contains(r.key('planter'))));
++  });
++
++  testWidgets(
++      'RB10 locks and groups: a lone locked table is not taken; a window '
++      'round a group with a locked member takes its unlocked one; crossing '
++      'one member takes its group; a window with one member out takes none '
++      '(M-RB10, M-RB10b, M-RB11, M-RB12)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    r.selection.replace([r.key('1')]);
++    r.band(padded(r.leafBox(['3']), 100));
++    expect(r.selection.isEmpty, isTrue, reason: 'locked: nothing');
++
++    r.band(padded(r.leafBox(['7', '8']), 100));
++    expect(r.selection.keys, {r.key('7')});
++
++    // Over 5's upper chair only (local y 1000 to 1450).
++    final chair = boxOf([r.world('5', 800, 1300), r.world('5', 1000, 1650)]);
++    for (final n in ['4', '6']) {
++      expect(overlaps(chair, r.leafBox([n])), isFalse,
++          reason: 'premise: $n untouched');
++    }
++    r.band(chair, crossing: true);
++    expect(r.selection.keys, r.keys(['4', '5', '6']));
++
++    final two = padded(r.leafBox(['4', '5']), 100);
++    expect(two.maxX, lessThan(r.leafBox(['6']).minX),
++        reason: 'premise: 6 outside');
++    r.band(two);
++    expect(r.selection.isEmpty, isTrue);
++  });
++
++  testWidgets(
++      'RB11 a plain band replaces; a Ctrl band adds and keeps a selected '
++      'table inside (M-RB13)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    r.selection.replace([r.key('1')]);
++    r.band(padded(r.leafBox(['2']), 100));
++    expect(r.selection.keys, {r.key('2')});
++    r.selection.replace([r.key('1')]);
++    r.band(padded(r.leafBox(['1', '2']), 600), control: true);
++    expect(r.selection.keys, r.keys(['1', '2']));
++  });
++
++  testWidgets(
++      'RB12 a plain band over nothing clears; a Shift band over nothing keeps '
++      '(R-2, M-RB14)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    const empty = Aabb2.raw(2000, 2000, 4000, 3500);
++    r.selection.replace([r.key('1')]);
++    r.band(empty, shift: true);
++    expect(r.selection.keys, {r.key('1')});
++    r.band(empty);
++    expect(r.selection.isEmpty, isTrue);
++  });
++
++  testWidgets(
++      'RB13 one notification for a band that changes the selection, none '
++      'for one that does not; a band reports no tap, double tap, floor tap '
++      'or hover (M-RB15, M-RB16)', (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    var notified = 0;
++    r.selection.addListener(() => notified++);
++    final both = padded(r.leafBox(['1', '2']), 600);
++    r.band(both);
++    expect(notified, 1);
++    expect(r.selection.keys, r.keys(['1', '2']));
++    r.band(both);
++    expect(notified, 1, reason: 'the same keys: silent');
++    expect(r.selection.keys, r.keys(['1', '2']));
++
++    // A tap on 2, then a band from the floor beside it ending over it.
++    final top = r.at('2', 900, 650);
++    r.tap(top);
++    expect(r.taps, ['2']);
++    final start = top + const Offset(0, -200);
++    expect(r.picker.pick(r.toWorld(start)), isNull, reason: 'premise');
++    r.down(start);
++    r.move(top);
++    r.up(top);
++    expect(r.taps, ['2'], reason: 'no tap');
++    expect(r.doubleTaps, isEmpty);
++    expect(r.floors, isEmpty);
++    expect(r.hovers, isEmpty);
++  });
++
++  testWidgets('RB13b a band, then at once a tap on a table: the tap acts',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    r.band(padded(r.leafBox(['2']), 100));
++    expect(r.selection.keys, {r.key('2')});
++    r.tap(r.at('1', 900, 700));
++    expect(r.selection.keys, {r.key('1')});
++    expect(r.taps, ['1']);
++  });
++
++  testWidgets(
++      'RB14 Escape ends a band whatever idleKeys says; every key is handled '
++      'mid-band; cancel ends it; the next tap acts (M-RB17, M-RB17b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    r.idleKeys = false;
++    r.selection.replace([r.key('1')]);
++    final box = padded(r.leafBox(['2']), 100);
++    final s = r.screen(Vector2(box.minX, box.maxY));
++    final e = r.screen(Vector2(box.maxX, box.minY));
++    r.down(s);
++    r.move(e);
++    expect(r.tool.phase, ToolPhase.dragging);
++    expect(r.tool.onKey(_z, r.ctx), KeyEventResult.handled);
++    expect(r.tool.phase, ToolPhase.dragging, reason: 'a key ends nothing');
++    expect(r.tool.onKey(_escape, r.ctx), KeyEventResult.handled);
++    expect(r.tool.phase, ToolPhase.idle);
++    expect(r.paint().calls, isEmpty);
++    r.up(e);
++    expect(r.selection.keys, {r.key('1')});
++
++    r.down(s);
++    r.move(e);
++    r.tool.cancel(r.ctx);
++    expect(r.tool.phase, ToolPhase.idle);
++    r.up(e);
++    expect(r.selection.keys, {r.key('1')});
++    r.tap(r.at('2', 900, 650));
++    expect(r.selection.keys, {r.key('2')});
++    expect(r.taps, ['2']);
++  });
++
++  testWidgets(
++      'RB15 the band painted at the screen rect: a window\'s fill and '
++      'outline, a crossing\'s dashes; nothing when idle (M-RB18b)',
++      (tester) async {
++    final r = rig(tester);
++    r.drag(FloorPlanFloorDrag.band);
++    expect(r.paint().calls, isEmpty, reason: 'idle');
++    const a = Offset(900, 120), b = Offset(1100, 300), c = Offset(800, 300);
++    expect(r.picker.pick(r.toWorld(a)), isNull, reason: 'premise');
++    r.down(a);
++    expect(r.paint().calls, isEmpty, reason: 'a press is no band');
++    r.move(b);
++    final window = r.paint();
++    expect(
++        [for (final i in window.calls) i.memberName], [#drawRect, #drawRect]);
++    final rect = Rect.fromPoints(a, b);
++    final [fill, stroke] = window.calls;
++    expect(fill.positionalArguments[0], rect);
++    expect((fill.positionalArguments[1] as Paint).style, PaintingStyle.fill);
++    expect(stroke.positionalArguments[0], rect);
++    expect(
++        (stroke.positionalArguments[1] as Paint).style, PaintingStyle.stroke);
++    r.move(c);
++    final crossing = r.paint();
++    expect(
++        [for (final i in crossing.calls) i.memberName], [#drawRect, #drawPath]);
++    expect(crossing.calls.first.positionalArguments[0], Rect.fromPoints(a, c));
++    r.up(c);
++    expect(r.paint().calls, isEmpty, reason: 'idle again');
++  });
++}
+diff --git a/tool/ci/host_probe/lib/main.dart b/tool/ci/host_probe/lib/main.dart
+index 8bbe5949..9df939b2 100644
+--- a/tool/ci/host_probe/lib/main.dart
++++ b/tool/ci/host_probe/lib/main.dart
+@@ -397,20 +397,25 @@ class _FloorScreenState extends State<FloorScreen> {
+       });
+ 
+   /// The PNG of the floor with strong table colours.
+   Future<FloorPlanExport?> exportStrong() => controller.exportPlan(
+         const FloorPlanExportChoice(
+             format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
+         name: 'floor-1',
+         tableColorOpacity: 0.6,
+       );
+ 
++  Widget bandView() => FloorPlanView(
++        controller: controller,
++        floorDrag: FloorPlanFloorDrag.band,
++      );
++
+   /// A table's colour changed: say so.
+   void colourChanged(FloorPlanDesignChange change) {
+     if (change case FloorPlanTableChanged(:final before, :final after)
+         when before.color != after.color) {
+       debugPrint('${after.table.number} is now '
+           '${after.color?.name ?? 'uncoloured'}');
+     }
+   }
+ 
+   /// The designed floor changed: keep the POS's list of tables in step.

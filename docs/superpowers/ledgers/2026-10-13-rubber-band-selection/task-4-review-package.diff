@@ -1,0 +1,675 @@
+d15385bb docs: rubber-band selection in the guide, the CHANGELOG, the specs and STATUS; the demo's switch
+ CHANGELOG.md                                       | 14 +++-
+ STATUS.md                                          | 32 +++++++++-
+ apps/restaurant_demo/lib/demo_strings.dart         | 11 ++++
+ apps/restaurant_demo/lib/main.dart                 | 10 +++
+ apps/restaurant_demo/test/demo_test.dart           | 21 ++++++
+ docs/host-guide.md                                 | 74 +++++++++++++++++++++-
+ .../2026-10-03-restaurant-embedding-design.md      |  2 +
+ .../specs/2026-10-03-selection-mode-design.md      |  1 +
+ docs/superpowers/specs/2026-10-03-touch-design.md  |  2 +
+ .../specs/2026-10-09-host-embedding-api-design.md  |  2 +
+ tool/ci/host_probe/lib/main.dart                   |  5 ++
+ 11 files changed, 169 insertions(+), 5 deletions(-)
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 74b36547..51aec26b 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,21 +1,33 @@
+ # Changelog
+ 
+ The four packages a host depends on — `jet_cad_2d`, `jet_cad_2d_flutter`,
+ `jet_cad_floor_plan`, `jet_cad_restaurant_symbols` — are released
+ together, under one version and one git tag. None is published to
+ pub.dev: a host depends on them by git (see
+ [docs/host-guide.md](docs/host-guide.md)).
+ 
+ ## Unreleased
+ 
+-Nothing yet.
++- **A band selects tables in the selection mode.**
++  `FloorPlanView(floorDrag: FloorPlanFloorDrag.band)` makes a one-finger
++  or mouse drag on the floor draw a band — left to right the tables
++  wholly inside, right to left every table touched; a group whole; a
++  locked table never; a plain band replaces the selection, one with
++  Shift, Ctrl or Cmd adds — and the camera then pans with two fingers,
++  the wheel or trackpad and the middle button. **Changed under the
++  default `pan`:** a mouse or stylus drag on the floor with Shift, Ctrl
++  or Cmd held now draws a band that adds to the selection; it panned
++  before. See the host guide's "Selecting with a band".
++- **`jet_cad_2d_flutter`:** `bandModeFor` and `SelectionBandPainter`: the
++  selection band's direction rule and look, shared by the editor and the
++  selection mode.
+ 
+ ## 0.6.0
+ 
+ Plan colours: a room or a table takes one of eight hues, set in the
+ editor's Colour row (and, for tables, by the host), saved with the plan,
+ drawn on screen, exported and printed. **Plans are stored differently:
+ schema 10**, which 0.5.1 and every older release refuse, so every
+ terminal that shares stored plans moves to 0.6.0 together; a 0.5.1 (or
+ older) plan opens here unchanged. Service layouts are unchanged. Three
+ changes can break a host's own code: a class that implements or
+diff --git a/STATUS.md b/STATUS.md
+index 7a54b24e..18d8d8bd 100644
+--- a/STATUS.md
++++ b/STATUS.md
+@@ -338,24 +338,44 @@ one's spec, plan and results.
+   and 0.5.1 probes); an independent review (*Approved with fixes*: a
+   `FloorPlanController` test double breaks, R-1; `jet_cad_2d`'s
+   `SetEntityStyleCommand` and restamp unlisted, R-2; smaller CHANGELOG
+   gaps, R-3 to R-6; STATUS, R-7) is applied; its record is
+   `docs/superpowers/ledgers/2026-10-12-release-0.6.0/review.md`. The
+   guide names `3bf64a7`. The human pushed `main` and the tag `v0.6.0` →
+   `3bf64a7` (2026-10-13).
+ 
+ ## In flight
+ 
+-Nothing.
++**Rubber-band table selection** (the human, 2026-10-13): `FloorPlanView(
++floorDrag: FloorPlanFloorDrag.band)` makes a one-finger or mouse drag on
++the floor draw a band in the selection mode (left to right a window,
++right to left a crossing; a group whole, a locked table never; a modifier
++adds), and under the default `pan` a Shift, Ctrl or Cmd mouse drag on the
++floor now bands instead of panning. Spec
++[2026-10-13-rubber-band-selection-design.md](docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md)
++(revision 2, approved), plan
++[2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md).
++**Implemented on `feat/rubber-band`** in the worktree
++`.claude/worktrees/rubber-band` (Tasks 1–4: `bandModeFor` and
++`SelectionBandPainter` in `jet_cad_2d_flutter`, the band in the selection
++tool, `FloorPlanView.floorDrag`, the demo's switch, the guide, the
++CHANGELOG, the specs' notes), each task reviewed independently; **the
++final review is pending**, then the human's merge word, then release
++0.7.0. Ledger (in the worktree, git-ignored):
++`.superpowers/sdd/2026-10-13-rubber-band-selection/`.
+ 
+ ## Owed to the human
+ 
++- **Rubber band, a look:** the band with a mouse and on a tablet, light and
++  dark, in the selection mode under `pan` with Shift held and under
++  `band`; a native German and Turkish read of the demo's new switch (de
++  *Ziehen auf dem Boden: Auswählen*, tr *Zeminde sürükle: Seç*).
+ - **Plan colours, Slice 2, a look:** coloured tables in both modes, light
+   and dark (a status over a colour, a coloured table in a coloured room),
+   and in a PNG and a PDF export.
+ - **Plan colours, Slice 1:** a native German and Turkish read of the
+   Colour row's words (the spec's PC-10 table, and `colorRefused`, which
+   that table lacks: "Farben sind hier nicht änderbar" / "Renkler burada
+   değiştirilemez"); a look at a coloured room
+   on the light and dark canvas.
+ - **Looks:** macOS, the web and a tablet, for 14 and 14d (the demo and
+   the floor planner in three languages; the service mode's menu, groups
+@@ -407,21 +427,29 @@ Nothing.
+ 
+ ## Standing failures and skips
+ 
+ On Linux, compared exactly by CI: the engine's two `generate_document_test`
+ fingerprints and the render package's seven text-ladder goldens (macOS
+ values), and the render package's paint micro-benchmark rig (skipped,
+ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
+ 
+ ## Resume here
+ 
+-**Next: the human's choice.** Release 0.6.0 is **merged into `main` at
++**Next: the final review of the rubber-band slice, then the human's merge
++word.** The slice is implemented on `feat/rubber-band` (worktree
++`.claude/worktrees/rubber-band`, plan
++[2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md),
++Tasks 1–4 done and reviewed per task); once the final review is applied
++and the human says to merge, release 0.7.0 follows (the CHANGELOG's
++Unreleased section carries the slice; the guide's "Selecting with a
++band" says *Since 0.7.0*). Until then, **the human's choice** otherwise.
++Release 0.6.0 is **merged into `main` at
+ `3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
+ capability and the Selection panel's Colour row) merged at `ce0a4f9`;
+ Slice 2 (tables) came with the release merge (plan
+ [2026-10-12-plan-colors-slice-2.md](docs/superpowers/plans/2026-10-12-plan-colors-slice-2.md),
+ spec
+ [2026-10-12-plan-colors-design.md](docs/superpowers/specs/2026-10-12-plan-colors-design.md));
+ its ledger is archived in
+ `docs/superpowers/ledgers/2026-10-12-plan-colors-slice-2/`. Release 0.6.0
+ was cut from `feat/plan-colors-slice-2` at `752eace` while the human slept
+ (2026-10-12, *"otomatik devam et"*): the five packages at 0.6.0, the
+diff --git a/apps/restaurant_demo/lib/demo_strings.dart b/apps/restaurant_demo/lib/demo_strings.dart
+index 37fb238f..2d4140a2 100644
+--- a/apps/restaurant_demo/lib/demo_strings.dart
++++ b/apps/restaurant_demo/lib/demo_strings.dart
+@@ -40,20 +40,22 @@ abstract class DemoStrings {
+   String get badges;
+ 
+   String centerOnTable(String number);
+ 
+   String minutes(int minutes);
+ 
+   String get moves;
+ 
+   String get longPressMenu;
+ 
++  String get floorBand;
++
+   String get tableNumbersField;
+ 
+   String get select;
+ 
+   String get statusOfSelected;
+ 
+   String get randomStatuses;
+ 
+   String get tables;
+ 
+@@ -215,20 +217,23 @@ final class _En extends DemoStrings {
+ 
+   @override
+   String minutes(int minutes) => '$minutes min';
+ 
+   @override
+   String get moves => 'Moves';
+ 
+   @override
+   String get longPressMenu => 'Long press: menu';
+ 
++  @override
++  String get floorBand => 'Floor drag: select';
++
+   @override
+   String get tableNumbersField => 'Table numbers (comma separated)';
+ 
+   @override
+   String get select => 'Select';
+ 
+   @override
+   String get statusOfSelected => 'Status of the selected tables or group';
+ 
+   @override
+@@ -450,20 +455,23 @@ final class _De extends DemoStrings {
+ 
+   @override
+   String minutes(int minutes) => '$minutes Min.';
+ 
+   @override
+   String get moves => 'Verschieben';
+ 
+   @override
+   String get longPressMenu => 'Langes Drücken: Menü';
+ 
++  @override
++  String get floorBand => 'Ziehen auf dem Boden: Auswählen';
++
+   @override
+   String get tableNumbersField => 'Tischnummern (durch Komma getrennt)';
+ 
+   @override
+   String get select => 'Auswählen';
+ 
+   @override
+   String get statusOfSelected => 'Status der ausgewählten Tische oder Gruppe';
+ 
+   @override
+@@ -693,20 +701,23 @@ final class _Tr extends DemoStrings {
+ 
+   @override
+   String minutes(int minutes) => '$minutes dk';
+ 
+   @override
+   String get moves => 'Taşıma';
+ 
+   @override
+   String get longPressMenu => 'Uzun basış: menü';
+ 
++  @override
++  String get floorBand => 'Zeminde sürükle: Seç';
++
+   @override
+   String get tableNumbersField => 'Masa numaraları (virgülle ayrılmış)';
+ 
+   @override
+   String get select => 'Seç';
+ 
+   @override
+   String get statusOfSelected => 'Seçili masaların veya grubun durumu';
+ 
+   @override
+diff --git a/apps/restaurant_demo/lib/main.dart b/apps/restaurant_demo/lib/main.dart
+index dc260604..74477285 100644
+--- a/apps/restaurant_demo/lib/main.dart
++++ b/apps/restaurant_demo/lib/main.dart
+@@ -395,20 +395,23 @@ class DemoHomeState extends State<DemoHome> {
+           tableIds: kDemoTableIds[name] ?? const {}),
+   ];
+   int _area = 0;
+   late final math.Random _random = widget.random ?? math.Random();
+   final TextEditingController _number = TextEditingController();
+ 
+   /// The service options (spec 14d S5, S7).
+   bool moves = true;
+   bool longPressMenu = false;
+ 
++  /// Rubber-band spec RB-7: a drag on the floor draws a band.
++  bool floorBand = false;
++
+   /// The newest line first.
+   final List<String> log = [];
+ 
+   /// The service's pointer line (spec E-3, E-4), null when there is nothing
+   /// to show: a line of its own, not the log, rebuilt alone at hover rate.
+   /// Cleared when the mode, the area or the plan changes, since the view
+   /// then sends no null for the table it leaves (S-5).
+   final ValueNotifier<PointerLine?> pointer = ValueNotifier(null);
+ 
+   /// Each area's subscription to its design's table changes (spec E-5).
+@@ -1203,20 +1206,21 @@ class DemoHomeState extends State<DemoHome> {
+       controller: c,
+       exportName: a.name.toLowerCase(),
+       printer: widget.printer,
+       onExport: (e) => _exported(a, e),
+       onTableTap: (n) => _log(_words.logTapped(a.name, n)),
+       onLayoutChanged: () => _log(_words.logLayoutChanged(a.name)),
+       serviceMoves: moves,
+       longPress: longPressMenu
+           ? FloorPlanLongPress.contextMenu
+           : FloorPlanLongPress.toggleSelection,
++      floorDrag: floorBand ? FloorPlanFloorDrag.band : FloorPlanFloorDrag.pan,
+       onTableContextMenu: _tableMenu,
+       onGroupTap: (id, n) => _log(_words.logGroupTapped(a.name, id, n)),
+       onMergeRequested: (numbers) => _merge(a, numbers),
+       onSplitRequested: (id) => _split(a, id),
+       tableOverlayBuilder: a.badges ? tableBadge : null,
+       tableOverlayLayout: kBadgeLayout,
+       onTableDoubleTap: (n) => _opened(a, n),
+       onTablesMoved: (moved) => _log(_words.logMoved(
+           a.name, _sorted([for (final d in moved) d.table.number ?? '—']))),
+       onTableHover: (n) => pointer.value = (table: n, floor: null),
+@@ -1457,20 +1461,26 @@ class DemoHomeState extends State<DemoHome> {
+                       contentPadding: EdgeInsets.zero,
+                       title: Text(words.moves),
+                       value: moves,
+                       onChanged: (v) => setState(() => moves = v)),
+                   SwitchListTile(
+                       key: const Key('long-press-menu'),
+                       contentPadding: EdgeInsets.zero,
+                       title: Text(words.longPressMenu),
+                       value: longPressMenu,
+                       onChanged: (v) => setState(() => longPressMenu = v)),
++                  SwitchListTile(
++                      key: const Key('floor-band'),
++                      contentPadding: EdgeInsets.zero,
++                      title: Text(words.floorBand),
++                      value: floorBand,
++                      onChanged: (v) => setState(() => floorBand = v)),
+                 ],
+                 const SizedBox(height: 16),
+                 TextField(
+                   key: const Key('select-number'),
+                   controller: _number,
+                   decoration:
+                       InputDecoration(labelText: words.tableNumbersField),
+                   onSubmitted: (_) => _select(),
+                 ),
+                 const SizedBox(height: 8),
+diff --git a/apps/restaurant_demo/test/demo_test.dart b/apps/restaurant_demo/test/demo_test.dart
+index a2cb5be4..e5a2ed71 100644
+--- a/apps/restaurant_demo/test/demo_test.dart
++++ b/apps/restaurant_demo/test/demo_test.dart
+@@ -12,20 +12,21 @@ import 'dart:typed_data';
+ import 'package:flutter/gestures.dart'
+     show PointerDeviceKind, kSecondaryMouseButton;
+ import 'package:flutter/material.dart';
+ import 'package:flutter/services.dart' show LogicalKeyboardKey, rootBundle;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_floor_plan/editor.dart';
+ import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
+     show
+         FloorPlanController,
++        FloorPlanFloorDrag,
+         FloorPlanMode,
+         FloorPlanView,
+         TableGroup,
+         TableStatus;
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+     show InteractionLayer, ViewportTransform;
+ import 'package:jet_cad_restaurant_symbols/jet_cad_restaurant_symbols.dart';
+ import 'package:restaurant_demo/main.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+@@ -680,20 +681,40 @@ void main() {
+         kind: PointerDeviceKind.touch);
+     await tester.pump(const Duration(milliseconds: 700));
+     await g.up();
+     await tester.pumpAndSettle();
+     expect(find.text('Table 1'), findsOneWidget);
+     expect(c.selectedTables.value, {'1'},
+         reason: 'an unselected table is selected alone, never toggled in');
+     expect(demo.log, contains('Salon: menu for 1'));
+   });
+ 
++  testWidgets(
++      'D23 the Floor drag: select switch flips the view\'s floorDrag from '
++      'pan to band and back (rubber-band spec RB-7)', (tester) async {
++    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
++    await tester.tap(byKey('mode-service'));
++    await tester.pump();
++    await tester.pump();
++    FloorPlanFloorDrag current() =>
++        tester.widget<FloorPlanView>(find.byType(FloorPlanView)).floorDrag;
++    expect(demo.floorBand, isFalse);
++    expect(current(), FloorPlanFloorDrag.pan);
++    await tester.tap(byKey('floor-band'));
++    await tester.pump();
++    expect(demo.floorBand, isTrue);
++    expect(current(), FloorPlanFloorDrag.band);
++    await tester.tap(byKey('floor-band'));
++    await tester.pump();
++    expect(current(), FloorPlanFloorDrag.pan);
++  });
++
+   // Table-groups spec G6: Merge (grow or a new `G<n>`), Split, the status
+   // buttons by `selectedGroup`, the groups line and `onGroupTap`.
+ 
+   /// The numbers of [groupPlan]'s numbered tables in handle order: not
+   /// sorted. 8 sits on a visible locked layer, 9 on a hidden one.
+   const groupNumbers = ['12', '3', '7', '20', '5', '11', '8', '9'];
+ 
+   /// A Salon plan of eight tables numbered [groupNumbers], each off the
+   /// origin, turned, mirrored or both, of four kinds.
+   String groupPlan() {
+diff --git a/docs/host-guide.md b/docs/host-guide.md
+index 8f2f4b19..ebac65d7 100644
+--- a/docs/host-guide.md
++++ b/docs/host-guide.md
+@@ -519,20 +519,83 @@ colour, and the undo a `FloorPlanTableAdded` equal to it:
+   /// A table's colour changed: say so.
+   void colourChanged(FloorPlanDesignChange change) {
+     if (change case FloorPlanTableChanged(:final before, :final after)
+         when before.color != after.color) {
+       debugPrint('${after.table.number} is now '
+           '${after.color?.name ?? 'uncoloured'}');
+     }
+   }
+ ```
+ 
++### Selecting with a band
++
++*Since 0.7.0.* In the selection mode a **band** selects tables by
++dragging across the floor. It is a view option, read at each press:
++
++```dart
++  Widget bandView() => FloorPlanView(
++        controller: controller,
++        floorDrag: FloorPlanFloorDrag.band,
++      );
++```
++
++A band starts in one of two ways, once the pointer has moved past the
++touch slop (18 px) from where it went down:
++
++- **`floorDrag: FloorPlanFloorDrag.band`:** a one-finger, mouse or stylus
++  drag that starts on the floor draws a band. The camera then pans with
++  two fingers, the wheel or trackpad and the middle button. A drag that
++  starts on a table still moves it (or pans, under `serviceMoves:
++  false`).
++- **`floorDrag: FloorPlanFloorDrag.pan`** (the default): a mouse or
++  stylus drag on the floor with Shift, Ctrl or Cmd held at the press
++  draws a band that adds to the selection. A plain drag on the floor
++  still pans, and a finger never bands.
++
++**Which tables a band takes** follows its direction, re-read at every
++move: dragged left to right it is a **window** (solid outline) and takes
++the tables wholly inside it; dragged right to left it is a **crossing**
++(dashed outline) and takes every table it touches. A window tests each
++piece of a table's drawing, so it must hold a table's chairs too.
++
++- A **group** is taken whole: by a crossing when any unlocked member is
++  touched, by a window when every visible member is inside.
++- A **locked** table is never selected.
++- A table with **no number** is selected, and is absent from
++  `selectedTables`, as for a tap.
++- Only tables are taken: a planter or a wall is not.
++
++**What it does to the selection.** A plain band replaces the selection
++with what it holds (over nothing, it clears); a band with Shift, Ctrl or
++Cmd adds to it, and a table already selected stays selected. The
++selection changes once, at the release, and `selectedTables` notifies at
++most once per band. A band reports no `onTableTap`, `onFloorTap`, double
++tap or hover: listen to `selectedTables`.
++
++**A finger near a table.** Under `band` a finger that touched a table
++only by its 24 px reach still selects that table when it taps, and draws
++a band when it drags, so an aisle between crowded tables can be banded
++from. A finger on the table itself moves it.
++
++**Cancelling.** Escape cancels a band at any moment, also under
++`shortcuts: false`; a second finger cancels it too. Nothing changes, and
++the next press acts normally.
++
++**The modifier is read at the press.** Shift, Ctrl or Cmd is read once,
++when the pointer goes down, for the start and for the combining. The
++editor's band reads Shift at the release instead.
++
++**A change under the default.** Before 0.7.0 a mouse or stylus drag on
++the floor with Shift, Ctrl or Cmd held panned the plan; under `pan` it
++now draws a band that adds to the selection. Plain drags, a finger and
++the middle button are as they were.
++
+ ### Table groups
+ 
+ A host can merge tables into a **group** — a party seated across tables.
+ In the selection mode a group's members are framed and labelled, a tap on
+ a member selects the whole group (Shift or Ctrl adds or removes it
+ whole), and a drag moves it as one. Groups, like statuses, are the
+ host's: never saved, exported, printed or undone, kept across mode
+ switches and loads.
+ 
+ - `controller.setTableGroups({id: TableGroup(members: {...}, label: ...)})`
+@@ -1311,20 +1374,25 @@ the designed tables added, removed and changed since the last report.
+   alone; a selected one keeps the selection, so your menu acts on
+   `selectedTables`; a locked table is reported without a selection
+   change; an unnumbered one is not reported.
+ - `longPress`: `toggleSelection` (the default: a long press adds or
+   removes a table, for multiple selection on a touch screen) or
+   `contextMenu` (a long press opens your menu; a touch screen then has no
+   multiple selection).
+ - `serviceMoves: false` forbids moving tables during service (a host
+   stand, a kitchen screen): a drag from a table pans the plan. It is read
+   at each press, so you can change it while the view is shown.
++- *Since 0.7.0:* `floorDrag`: `pan` (the default) or `band`. Under `band`
++  a one-finger or mouse drag on the floor draws a band that selects
++  tables, and the camera pans with two fingers, the wheel and the middle
++  button; read at each press: [Selecting with a
++  band](#selecting-with-a-band).
+ - `onExport(FloorPlanExport)`: Export's bytes, file name and MIME type,
+   for you to store or share. `printer` prints; without one, Print uses
+   the platform's dialog.
+ - *Since 0.4.0:* `onTablesMoved(moved)` after a drag of tables,
+   `onTableDoubleTap(number)` after a double tap's second `onTableTap`,
+   `onFloorTap(world)` for a tap that misses every table, and
+   `onTableHover(number)` for the mouse or a stylus over a table: [Events
+   and host data](#events-and-host-data).
+ - *Since 0.4.0:* the host's own chrome and keys.
+   `serviceBar` and `editorBar` cut down, reorder, extend or hide the two
+@@ -2105,22 +2173,24 @@ in it is drawn on your light colour, with dark ink.
+   else of it).
+ 
+ ## 10. Touch
+ 
+ Both modes work on a touch screen. Two fingers pinch about their
+ midpoint and pan together; once two fingers are down nothing reaches a
+ tool until every finger lifts, and a second finger during a table drag
+ cancels the drag. A finger's picks and grips are finger-sized. In the
+ selection mode a tap selects, a drag from a table moves it (or pans,
+ under `serviceMoves: false`), and a long press does what `longPress`
+-says, about 500 ms from contact. Mouse, trackpad and stylus behave as on
+-a desktop.
++says, about 500 ms from contact. With `floorDrag: FloorPlanFloorDrag.band`
++a one-finger drag on the floor draws a band that selects tables, and
++the camera pans with two fingers. Mouse, trackpad and stylus behave as
++on a desktop.
+ 
+ ## 11. What a host must never assume
+ 
+ - **Handles.** A table's identity is its number. The plan's internal
+   handles are not API.
+ - **Capabilities are not a security boundary** *(since 0.4.0)*. `editorCapabilities` decides what the editor offers its
+   user, nothing more: your own calls (`setTableData`, `undo()`, `load`,
+   `exportPlan`, `printPlan`) stay allowed under every value, and the
+   value is never stored with the plan. Decide who may change a floor in
+   your own application, and check it where the plan is stored.
+diff --git a/docs/superpowers/specs/2026-10-03-restaurant-embedding-design.md b/docs/superpowers/specs/2026-10-03-restaurant-embedding-design.md
+index 0003f334..4c10bc92 100644
+--- a/docs/superpowers/specs/2026-10-03-restaurant-embedding-design.md
++++ b/docs/superpowers/specs/2026-10-03-restaurant-embedding-design.md
+@@ -374,20 +374,21 @@ the catalog (the existing test's rule).
+     optional short caption).
+ - **D9. Storage is the host's**; no file dialogs when embedded. **Export
+   and Print in both modes** (decision 6), handing bytes to `onExport` or
+   to `printing`.
+ - **D10. Design mode:** today's editor under `DraftPermissions.all`.
+ - **D11. Selection mode:** canvas only, under `runtime`, with a dedicated
+   `TableSelectTool` (R-12): no grips, no band, no snapping, no keyboard
+   shortcuts but Undo/Redo; no affordance needing `geometry` or
+   `structure` exists (M-12a: the UI never relies on the dispatcher
+   refusing; asserted with a dispatcher spy).
++  (2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
+ - **D12. The barrier and service moves** (decisions 7, 11; R-10). Entering
+   selection mode records the design (`designJson()` snapshot, the undo
+   depth as a floor) and **clears redo**; selection-mode Undo stops at the
+   floor; Redo reaches only selection-mode moves. Service moves never
+   touch the design: `designJson()` returns the snapshot, `dirty` does not
+   change, `resetLayout()` restores the designed positions. Entering design
+   mode **restores the design** (service moves are discarded; the demo
+   asks first when there are any). M-14f covers undo **and** redo.
+ - **D19.** `apps/restaurant_demo`: a Design / Service toggle, two dining
+   areas (decision 12), a fake order list setting statuses, the callbacks
+@@ -395,20 +396,21 @@ the catalog (the existing test's rule).
+ 
+ ### 14t — Touch (spike first)
+ 
+ - **D17 (R-7).** A render-package decision: pointer tracking for
+   multi-touch, pinch zoom about the focal point, two-finger pan, one-finger
+   pan on empty floor in selection mode, the rule for a second finger during
+   a drag (cancels the drag, becomes a pinch — proposed), long press
+   (500 ms, within the slop) for decision 9. Pick radius in logical pixels,
+   about 24 dp (a 48 dp target) for touch, today's 6 px for a mouse, by
+   pointer kind. `fitToView()` frames the live tables' extents.
++  (2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
+ 
+ ### 14c — Selection-mode behaviour
+ 
+ - **D13. Status layer (R-5).** Not document state: no command, no undo, no
+   dirty, not saved, not exported. A `TableStatusPainter`, its own
+   `CustomPaint` and `RepaintBoundary`, in the `Stack` between
+   `PageChromePainter` and `DraftCanvas` (`planner_view.dart:130-153`), so
+   the fill is under the lines. It fills **one cached local-space path per
+   servable definition** (its first leaf, S4) under each table's instance
+   transform and the rebase origin, through reused matrices; captions are
+diff --git a/docs/superpowers/specs/2026-10-03-selection-mode-design.md b/docs/superpowers/specs/2026-10-03-selection-mode-design.md
+index e864654b..defc8aa8 100644
+--- a/docs/superpowers/specs/2026-10-03-selection-mode-design.md
++++ b/docs/superpowers/specs/2026-10-03-selection-mode-design.md
+@@ -104,20 +104,21 @@ taps and layout changes by table number. Touch gestures beyond one finger
+     the table is toggled in or out of the selection (decision 9); the up
+     that follows does nothing. On empty floor, nothing.
+   - **down on empty floor, then a drag:** pans the camera by the screen
+     delta (one finger or the primary button); 14t adds pinch and
+     two-finger pan.
+   - **cancel** (pointer cancel, a mode switch): any drag is dropped,
+     nothing executed; the timer is cancelled.
+   - **keys:** Escape clears the selection. No other key (D11).
+   - No band, no grips, no rotation (decision 10), no keyboard shortcuts
+     but the view's Undo/Redo (14b-2).
++  - (2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
+ - **S4. An unnumbered table** is picked, selected and moved like any
+   other; it is absent from `selectedTables` (14b-2 H3) and its tap
+   reports no number (S8).
+ 
+ ### The status layer
+ 
+ - **S5. `TableStatus`** (public, `host/floor_plan_types.dart`):
+   `TableStatus({required Color color, String? caption})`, value-equal; a
+   caption is at most 12 characters (longer is cut, no error).
+ - **S6. `controller.setTableStatus(Map<String, TableStatus> statuses)`**
+diff --git a/docs/superpowers/specs/2026-10-03-touch-design.md b/docs/superpowers/specs/2026-10-03-touch-design.md
+index 0d697edc..09fffd55 100644
+--- a/docs/superpowers/specs/2026-10-03-touch-design.md
++++ b/docs/superpowers/specs/2026-10-03-touch-design.md
+@@ -154,20 +154,22 @@ possible.
+ ### T6 — What follows in the two modes
+ 
+ - **Selection mode:** a second finger during a table drag cancels it —
+   no `Move`, no `onLayoutChanged` — and pinches (umbrella D17's proposed
+   rule). One finger on the floor still pans (14c). A tap on a table by
+   touch is a tap after the hold-back.
+ - **Design mode:** a pinch never places a drawing point, never starts a
+   band or a move, never selects. One finger on empty floor is a band (as
+   a mouse drag); two fingers pan and zoom.
+ 
++(2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
++
+ ## Not in scope
+ 
+ - A long press in the design mode, and multi-select by touch there (the
+   band works); a two-finger rotation of the view (the camera does not
+   rotate); fling and double-tap zoom; a larger snap aperture for touch;
+   a stylus's hover; a mouse and a finger at once (the existing one-pointer
+   guard holds); contact size (TS-5).
+ - `fitToView` framing the live tables (D17's last clause): 14b-2 fits the
+   page, the host-facing decision stands.
+ - A point placed by a finger held still past the hold-back, then joined
+diff --git a/docs/superpowers/specs/2026-10-09-host-embedding-api-design.md b/docs/superpowers/specs/2026-10-09-host-embedding-api-design.md
+index ecffbf2c..fe435f8e 100644
+--- a/docs/superpowers/specs/2026-10-09-host-embedding-api-design.md
++++ b/docs/superpowers/specs/2026-10-09-host-embedding-api-design.md
+@@ -930,20 +930,22 @@ sharing a number, an unnumbered table, a camera not at identity.
+   spec 103 B.1 and D21 should name `controller.camera` and
+   `FloorPlanTableDetail.data`.
+ 
+ ## Out of scope, recorded
+ 
+ - **O-1.** Custom table shapes beyond a symbol library (already the way).
+ - **O-2.** Host data on non-table objects (walls, rooms).
+ - **O-3.** Replacing the editor's inner Material widgets (layer menus,
+   panel fields) with host widgets.
+ - **O-4.** Multi-select of tables by rubber band in the selection mode.
++  **Taken up** (2026-10-13) by the rubber-band spec
++  [2026-10-13-rubber-band-selection-design.md](2026-10-13-rubber-band-selection-design.md).
+ - **O-5.** Animation of camera commands.
+ - **O-6.** A per-table colour on the plan itself (status is not plan
+   data).
+   **Taken up** (2026-10-12) by the plan colours spec
+   [2026-10-12-plan-colors-design.md](2026-10-12-plan-colors-design.md),
+   rooms included.
+ - **O-7.** String overrides beyond subclassing a built-in language
+   (today's way); a fourth built-in language.
+ - **O-8.** Components orphaned by node deletion in general (F-14): its own
+   task.
+diff --git a/tool/ci/host_probe/lib/main.dart b/tool/ci/host_probe/lib/main.dart
+index 8bbe5949..9df939b2 100644
+--- a/tool/ci/host_probe/lib/main.dart
++++ b/tool/ci/host_probe/lib/main.dart
+@@ -397,20 +397,25 @@ class _FloorScreenState extends State<FloorScreen> {
+       });
+ 
+   /// The PNG of the floor with strong table colours.
+   Future<FloorPlanExport?> exportStrong() => controller.exportPlan(
+         const FloorPlanExportChoice(
+             format: FloorPlanExportFormat.png, dpi: FloorPlanExportDpi.d150),
+         name: 'floor-1',
+         tableColorOpacity: 0.6,
+       );
+ 
++  Widget bandView() => FloorPlanView(
++        controller: controller,
++        floorDrag: FloorPlanFloorDrag.band,
++      );
++
+   /// A table's colour changed: say so.
+   void colourChanged(FloorPlanDesignChange change) {
+     if (change case FloorPlanTableChanged(:final before, :final after)
+         when before.color != after.color) {
+       debugPrint('${after.table.number} is now '
+           '${after.color?.name ?? 'uncoloured'}');
+     }
+   }
+ 
+   /// The designed floor changed: keep the POS's list of tables in step.

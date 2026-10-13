@@ -1,0 +1,390 @@
+38ca3af6 feat(render): a shared selection band painter and direction rule
+ .../jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart |   1 +
+ .../jet_cad_2d_flutter/lib/src/select_tool.dart    |  56 +----------
+ .../jet_cad_2d_flutter/lib/src/selection_band.dart |  71 +++++++++++++
+ .../test/selection_band_test.dart                  | 111 +++++++++++++++++++++
+ 4 files changed, 188 insertions(+), 51 deletions(-)
+diff --git a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+index 46b5a598..56b6c6c1 100644
+--- a/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
++++ b/packages/jet_cad_2d_flutter/lib/jet_cad_2d_flutter.dart
+@@ -54,19 +54,20 @@ export 'src/outline_cache.dart';
+ export 'src/page_chrome_painter.dart';
+ export 'src/page_fit.dart';
+ export 'src/page_notifier.dart';
+ export 'src/reference_walk.dart';
+ export 'src/render_backend.dart';
+ export 'src/ruler_frame.dart';
+ export 'src/ruler_painter.dart';
+ export 'src/select_gates.dart';
+ export 'src/select_tool.dart';
+ export 'src/selection.dart';
++export 'src/selection_band.dart';
+ export 'src/selection_overlay.dart';
+ export 'src/selection_style.dart';
+ export 'src/snap_marker.dart';
+ export 'src/snap_settings.dart';
+ export 'src/symbol_gallery.dart';
+ export 'src/symbol_thumbnails.dart';
+ export 'src/tile_cache.dart';
+ export 'src/tool.dart';
+ export 'src/viewport_transform.dart';
+diff --git a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+index 741fc10c..d7df41dd 100644
+--- a/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
++++ b/packages/jet_cad_2d_flutter/lib/src/select_tool.dart
+@@ -13,20 +13,21 @@ import 'package:flutter/gestures.dart' show kTouchSlop;
+ import 'package:flutter/widgets.dart' show KeyEventResult;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import 'grip_cache.dart'
+     show GripCache, GripRef, kTouchGripHitPixels, movableKey;
+ import 'canvas_palette.dart';
+ import 'grip_drag.dart';
+ import 'select_gates.dart';
+ import 'selection.dart';
++import 'selection_band.dart';
+ import 'selection_style.dart';
+ import 'snap_marker.dart';
+ import 'tool.dart';
+ import 'viewport_transform.dart';
+ 
+ /// A press that moves less than this many screen pixels stays a click
+ /// (M-02f); past it, a press becomes the drag its class names (spec 03 D2).
+ const double kBandSlopPixels = 4.0;
+ 
+ /// Spec 09c D8: what a body drag of exactly one root-level node asks, on
+@@ -114,20 +115,21 @@ class SelectTool extends Tool {
+   MouseCursor _cursor = MouseCursor.defer;
+   // Coloured from the overlay's paper set where they are drawn (dark theme
+   // spec D5): the guide and the preview `preview`, the marker `snap`.
+   final Paint _guidePaint = Paint()
+     ..style = PaintingStyle.stroke
+     ..strokeWidth = 1.0;
+   final Paint _markerPaint = Paint()
+     ..style = PaintingStyle.stroke
+     ..strokeWidth = kSnapMarkerStrokePixels;
+   final Paint _previewPaint = Paint()..style = PaintingStyle.stroke;
++  final SelectionBandPainter _bandPainter = SelectionBandPainter();
+ 
+   /// What the press landed on; null while idle.
+   PressClass? get pressClass => _phase == ToolPhase.idle ? null : _class;
+ 
+   /// The live drag's kind; null unless dragging.
+   DragKind? get dragKind => _phase == ToolPhase.dragging ? _dragKind : null;
+ 
+   /// Non-null only while a band drag is in progress, for the overlay.
+   BandMode? get bandMode => dragKind == DragKind.band ? _bandMode : null;
+ 
+@@ -229,22 +231,21 @@ class SelectTool extends Tool {
+         if (e.buttons != 0) return;
+         _hoverAt(e, ctx);
+       case ToolPhase.pressed:
+         if (e.pointer != _pointer || _clickOnly) return;
+         if ((e.screen - _start).distance < _slop) return;
+         _beginDrag(e, ctx);
+       case ToolPhase.dragging:
+         if (e.pointer != _pointer) return;
+         if (_dragKind == DragKind.band) {
+           _end = e.screen;
+-          _bandMode =
+-              _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
++          _bandMode = bandModeFor(_start, _end);
+         } else {
+           _follow(e, ctx);
+         }
+         notifyListeners();
+     }
+   }
+ 
+   /// 02's object hover, plus the hot grip and the cursor (spec 03 D5).
+   /// Notifies only when the cursor or the hot grip changed.
+   void _hoverAt(ToolPointerEvent e, ToolContext ctx) {
+@@ -297,21 +298,21 @@ class SelectTool extends Tool {
+     if (!gate) {
+       _clickOnly = true;
+       return;
+     }
+     switch (_class) {
+       case PressClass.empty:
+         _phase = ToolPhase.dragging;
+         _dragKind = DragKind.band;
+         ctx.selection.setHover(null);
+         _end = e.screen;
+-        _bandMode = _end.dx >= _start.dx ? BandMode.window : BandMode.crossing;
++        _bandMode = bandModeFor(_start, _end);
+         notifyListeners();
+       case PressClass.selectedBody:
+         final drag = GripDrag.move(ctx.document, ctx.selection.keys,
+             objects: ctx.grips?.objects);
+         if (!_permitted(drag, ctx)) {
+           _clickOnly = true;
+           return;
+         }
+         _resolvable = ctx.selection.keys.length == 1;
+         _moveBase(ctx, drag!);
+@@ -877,68 +878,21 @@ class SelectTool extends Tool {
+       PaperPalette paper) {
+     final drag = _drag;
+     if (drag != null && _phase == ToolPhase.dragging) {
+       _guidePaint.color = paper.preview;
+       _markerPaint.color = paper.snap;
+       _paintGuide(canvas, camera.worldToScreenMatrix, drag);
+       return;
+     }
+     final rect = bandScreen;
+     if (rect == null) return;
+-    final crossing = _bandMode == BandMode.crossing;
+-    final color = crossing ? paper.crossingBand : paper.windowBand;
+-    canvas.drawRect(rect, Paint()..color = color.withAlpha(kBandFillAlpha));
+-    final stroke = Paint()
+-      ..color = color
+-      ..style = PaintingStyle.stroke
+-      ..strokeWidth = 1.0;
+-    if (!crossing) {
+-      canvas.drawRect(rect, stroke);
+-      return;
+-    }
+-    _drawDashedRect(canvas, rect, stroke);
+-  }
+-
+-  /// 6-on/4-off dashes, screen pixels, walking the four edges clockwise from
+-  /// the top-left corner.
+-  void _drawDashedRect(Canvas canvas, Rect rect, Paint stroke) {
+-    const on = 6.0, off = 4.0;
+-    final corners = [
+-      rect.topLeft,
+-      rect.topRight,
+-      rect.bottomRight,
+-      rect.bottomLeft,
+-      rect.topLeft,
+-    ];
+-    final path = Path();
+-    for (var i = 0; i < corners.length - 1; i++) {
+-      final start = corners[i];
+-      final end = corners[i + 1];
+-      final delta = end - start;
+-      final length = delta.distance;
+-      if (length == 0) continue;
+-      final direction = Offset(delta.dx / length, delta.dy / length);
+-      var travelled = 0.0;
+-      var drawing = true;
+-      while (travelled < length) {
+-        final step = math.min(drawing ? on : off, length - travelled);
+-        final segmentStart = start + direction * travelled;
+-        final segmentEnd = start + direction * (travelled + step);
+-        if (drawing) {
+-          path.moveTo(segmentStart.dx, segmentStart.dy);
+-          path.lineTo(segmentEnd.dx, segmentEnd.dy);
+-        }
+-        travelled += step;
+-        drawing = !drawing;
+-      }
+-    }
+-    canvas.drawPath(path, stroke);
++    _bandPainter.paint(canvas, rect, _bandMode!, paper);
+   }
+ 
+   /// Spec D7: a 1 px line from the base (a rotate's pivot) to the target,
+   /// and D9's marker at the target. A rotate snaps to nothing, so it has no
+   /// marker.
+   void _paintGuide(Canvas canvas, Transform2 m, GripDrag drag) {
+     final from = drag.base, to = drag.target;
+     final a = Offset(
+         m.a * from.x + m.c * from.y + m.e, m.b * from.x + m.d * from.y + m.f);
+     final b =
+diff --git a/packages/jet_cad_2d_flutter/lib/src/selection_band.dart b/packages/jet_cad_2d_flutter/lib/src/selection_band.dart
+new file mode 100644
+index 00000000..fdfb9212
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/lib/src/selection_band.dart
+@@ -0,0 +1,71 @@
++// The selection band's direction rule and look (interaction-core D1, spec
++// D8), shared by the design mode's SelectTool and the floor planner's
++// selection mode (rubber-band spec RB-6).
++import 'dart:math' as math;
++import 'dart:ui';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart' show BandMode;
++
++import 'canvas_palette.dart';
++import 'selection_style.dart';
++
++/// The band's mode by its drag direction (interaction-core D1): left to
++/// right is a window, right to left a crossing.
++BandMode bandModeFor(Offset start, Offset end) =>
++    end.dx >= start.dx ? BandMode.window : BandMode.crossing;
++
++/// Paints a selection band over a rect in screen pixels: the band colour
++/// at [kBandFillAlpha], a 1 px outline, solid for a window, dashed 6 on and
++/// 4 off for a crossing, walking the edges clockwise from the top-left.
++///
++/// Keeps its two paints and its path and resets them per call, so a live
++/// band builds no `Paint` and no `Path` per frame.
++final class SelectionBandPainter {
++  SelectionBandPainter();
++
++  final Paint _fill = Paint();
++  final Paint _stroke = Paint()
++    ..style = PaintingStyle.stroke
++    ..strokeWidth = 1.0;
++  final Path _dashes = Path();
++
++  void paint(Canvas canvas, Rect rect, BandMode mode, PaperPalette paper) {
++    final crossing = mode == BandMode.crossing;
++    final color = crossing ? paper.crossingBand : paper.windowBand;
++    _fill.color = color.withAlpha(kBandFillAlpha);
++    canvas.drawRect(rect, _fill);
++    _stroke.color = color;
++    if (!crossing) {
++      canvas.drawRect(rect, _stroke);
++      return;
++    }
++    _dashes.reset();
++    _edge(rect.left, rect.top, rect.right, rect.top);
++    _edge(rect.right, rect.top, rect.right, rect.bottom);
++    _edge(rect.right, rect.bottom, rect.left, rect.bottom);
++    _edge(rect.left, rect.bottom, rect.left, rect.top);
++    canvas.drawPath(_dashes, _stroke);
++  }
++
++  /// One edge's dashes, from (x0, y0) to (x1, y1): what `SelectTool`'s
++  /// `_drawDashedRect` drew, on doubles.
++  void _edge(double x0, double y0, double x1, double y1) {
++    const on = 6.0, off = 4.0;
++    final dx = x1 - x0, dy = y1 - y0;
++    final length = math.sqrt(dx * dx + dy * dy);
++    if (length == 0) return;
++    final ux = dx / length, uy = dy / length;
++    var travelled = 0.0;
++    var drawing = true;
++    while (travelled < length) {
++      final step = math.min(drawing ? on : off, length - travelled);
++      if (drawing) {
++        _dashes
++          ..moveTo(x0 + ux * travelled, y0 + uy * travelled)
++          ..lineTo(x0 + ux * (travelled + step), y0 + uy * (travelled + step));
++      }
++      travelled += step;
++      drawing = !drawing;
++    }
++  }
++}
+diff --git a/packages/jet_cad_2d_flutter/test/selection_band_test.dart b/packages/jet_cad_2d_flutter/test/selection_band_test.dart
+new file mode 100644
+index 00000000..c2fa10b3
+--- /dev/null
++++ b/packages/jet_cad_2d_flutter/test/selection_band_test.dart
+@@ -0,0 +1,111 @@
++// Rubber-band spec RB-6, Task 1: the shared band painter and its direction
++// rule. M-BP1/M-BP2 (the rule), M-RB18 (the stroke by mode), M-BP3 (no state
++// between calls).
++import 'dart:ui';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/src/canvas_palette.dart';
++import 'package:jet_cad_2d_flutter/src/selection_band.dart';
++import 'package:jet_cad_2d_flutter/src/selection_style.dart';
++
++import 'support/spy_canvas.dart';
++
++const Rect _rect = Rect.fromLTRB(312.5, 41.25, 518.75, 97.5);
++
++int _argb(RecordedCall c) => c.color!.toARGB32();
++
++int _fillOf(int stroke) => (stroke & 0xFFFFFF) | (kBandFillAlpha << 24);
++
++void main() {
++  test('BP1: left to right is a window, right to left a crossing', () {
++    expect(bandModeFor(const Offset(310, 40), const Offset(520, 90)),
++        BandMode.window);
++    expect(bandModeFor(const Offset(520, 90), const Offset(310, 40)),
++        BandMode.crossing);
++    // Equal x is a window (>=), whatever y does.
++    expect(bandModeFor(const Offset(310, 40), const Offset(310, 90)),
++        BandMode.window);
++    expect(bandModeFor(const Offset(310, 90), const Offset(310, 40)),
++        BandMode.window);
++    // A hair to the left is a crossing even when the drag is mostly vertical.
++    expect(bandModeFor(const Offset(310, 90), const Offset(309.5, 40)),
++        BandMode.crossing);
++    // Only x decides: a drag up and to the right is still a window.
++    expect(bandModeFor(const Offset(310, 90), const Offset(520, 40)),
++        BandMode.window);
++  });
++
++  test(
++      'BP2: a window is a fill and a solid 1 px outline; a crossing a fill '
++      'and dashes', () {
++    final painter = SelectionBandPainter();
++
++    final window = SpyCanvas();
++    painter.paint(window, _rect, BandMode.window, PaperPalette.light);
++    final rects = window.named('drawRect').toList();
++    expect(window.calls, hasLength(2));
++    expect(rects, hasLength(2));
++    expect(rects[0].args.first, _rect);
++    expect(rects[1].args.first, _rect);
++    expect(_argb(rects[0]), _fillOf(0xFF1E6FE8));
++    expect(rects[1].paintingStyle, PaintingStyle.stroke);
++    expect(_argb(rects[1]), 0xFF1E6FE8);
++    expect(rects[1].strokeWidth, 1.0);
++
++    final crossing = SpyCanvas();
++    painter.paint(crossing, _rect, BandMode.crossing, PaperPalette.light);
++    expect(crossing.calls, hasLength(2));
++    final fill = crossing.named('drawRect').single;
++    expect(fill.args.first, _rect);
++    expect(_argb(fill), _fillOf(0xFF2E9E5B));
++    final dashes = crossing.named('drawPath').single;
++    expect(dashes.paintingStyle, PaintingStyle.stroke);
++    expect(_argb(dashes), 0xFF2E9E5B);
++    expect(dashes.strokeWidth, 1.0);
++
++    final path = dashes.args.first! as Path;
++    final bounds = path.getBounds();
++    expect(bounds.left, closeTo(_rect.left, 1e-9));
++    expect(bounds.top, closeTo(_rect.top, 1e-9));
++    expect(bounds.right, closeTo(_rect.right, 1e-9));
++    expect(bounds.bottom, closeTo(_rect.bottom, 1e-9));
++    // The first dash starts at the top-left corner and runs 6 px right.
++    final first = path.computeMetrics().first;
++    expect(first.length, closeTo(6.0, 1e-9));
++    final from = first.getTangentForOffset(0)!.position;
++    final to = first.getTangentForOffset(first.length)!.position;
++    expect(from.dx, closeTo(_rect.left, 1e-9));
++    expect(from.dy, closeTo(_rect.top, 1e-9));
++    expect(to.dx, closeTo(_rect.left + 6, 1e-9));
++    expect(to.dy, closeTo(_rect.top, 1e-9));
++  });
++
++  test('BP3: no state leaks between calls of one painter', () {
++    final painter = SelectionBandPainter();
++    final a = SpyCanvas(), b = SpyCanvas(), c = SpyCanvas();
++    painter.paint(a, _rect, BandMode.window, PaperPalette.light);
++    painter.paint(b, _rect, BandMode.crossing, PaperPalette.light);
++    painter.paint(c, _rect, BandMode.window, PaperPalette.light);
++    expect(c.calls, hasLength(a.calls.length));
++    for (var i = 0; i < a.calls.length; i++) {
++      expect(c.calls[i].name, a.calls[i].name, reason: 'call $i');
++      expect(c.calls[i].color, a.calls[i].color, reason: 'call $i colour');
++      expect(c.calls[i].paintingStyle, a.calls[i].paintingStyle,
++          reason: 'call $i style');
++      expect(c.calls[i].strokeWidth, a.calls[i].strokeWidth,
++          reason: 'call $i width');
++    }
++    // The crossing in between was the crossing's: its dashes, its colour.
++    expect(b.named('drawPath'), hasLength(1));
++    expect(_argb(b.named('drawPath').single), 0xFF2E9E5B);
++    // A second crossing draws the same dashes, not the first's plus its own.
++    final d = SpyCanvas();
++    painter.paint(d, _rect, BandMode.crossing, PaperPalette.light);
++    int contours(SpyCanvas s) =>
++        (s.named('drawPath').single.args.first! as Path)
++            .computeMetrics()
++            .length;
++    expect(contours(d), contours(b));
++  });
++}
