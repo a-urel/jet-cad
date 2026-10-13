@@ -32,6 +32,7 @@ PackageSource package(String name,
         List<String> overrides = const [],
         Map<String, String> files = const {}}) =>
     PackageSource(
+      dir: name,
       pubspec: pubspec(name,
           dependencies: dependencies,
           devDependencies: devDependencies,
@@ -183,6 +184,24 @@ void main() {
       expect(packageName('name: {\n'), isNull);
     });
 
+    test('D17 a pubspec that is not readable YAML is a problem, not a throw',
+        () {
+      // M-D17a: no guard around loadYaml (a YamlException escapes); M-D17b:
+      // stop at the unreadable pubspec (`return problems` for `continue`),
+      // and the kit after it goes unchecked.
+      final problems = kitDepsProblems([
+        const PackageSource(dir: 'cinema', pubspec: 'name: {\n', dartFiles: {}),
+        package('jet_cad_2d_kit_bistro', dependencies: ['jet_cad_2d_plan']),
+      ]);
+      expect(problems, hasLength(2));
+      expect(problems[0],
+          startsWith('cinema: pubspec.yaml is not readable YAML: '));
+      expect(problems[0].length,
+          greaterThan('cinema: pubspec.yaml is not readable YAML: '.length));
+      expect(problems[1],
+          'jet_cad_2d_kit_bistro: pubspec dependencies names jet_cad_2d_plan');
+    });
+
     test('D8 importedPackages reads directives only', () {
       expect(
           importedPackages("import 'package:a_b/x.dart';\n"
@@ -257,6 +276,15 @@ void main() {
           r.stderr,
           contains('jet_cad_2d_kit_cinema: pubspec dependencies names '
               'jet_cad_2d_plan'));
+    });
+
+    test('D18 an unreadable pubspec: exit 1, its directory named', () async {
+      // M-D18: the script skips a package whose pubspec has no name
+      // (`if (name == null) continue;`).
+      write('cinema/pubspec.yaml', 'name: {\n');
+      final r = await check(['--packages', tmp.path]);
+      expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
+      expect(r.stderr, contains('cinema: pubspec.yaml is not readable YAML: '));
     });
 
     test('D11 no kit yet: the rule holds vacuously', () async {

@@ -46,7 +46,7 @@ void main(List<String> args) {
         if (isPackageDartFile(path)) files[path] = f.readAsStringSync();
       }
     }
-    packages.add(PackageSource(pubspec: text, dartFiles: files));
+    packages.add(PackageSource(dir: d.path, pubspec: text, dartFiles: files));
   }
   final problems = kitDepsProblems(packages);
   if (problems.isEmpty) {

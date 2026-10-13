@@ -12,11 +12,15 @@ final RegExp _kit = RegExp(r'^jet_cad_2d_kit_[a-z0-9_]+$');
 /// Whether [name] is a kit's package (not the contract's).
 bool isKitPackage(String name) => _kit.hasMatch(name);
 
-/// A package as the check reads it: its pubspec's text and every Dart file
-/// of the package (package-relative path → text; see [isPackageDartFile]).
+/// A package as the check reads it: its directory (named in a problem its
+/// pubspec has before the package has a name), its pubspec's text and every
+/// Dart file of the package (package-relative path → text; see
+/// [isPackageDartFile]).
 final class PackageSource {
-  const PackageSource({required this.pubspec, required this.dartFiles});
+  const PackageSource(
+      {required this.dir, required this.pubspec, required this.dartFiles});
 
+  final String dir;
   final String pubspec;
   final Map<String, String> dartFiles;
 }
@@ -65,14 +69,20 @@ Set<String> importedPackages(String dart) => {
 List<String> kitDepsProblems(List<PackageSource> packages) {
   final problems = <String>[];
   for (final p in packages) {
-    final Object? doc = loadYaml(p.pubspec);
+    final Object? doc;
+    try {
+      doc = loadYaml(p.pubspec);
+    } on YamlException catch (e) {
+      problems.add('${p.dir}: pubspec.yaml is not readable YAML: ${e.message}');
+      continue;
+    }
     if (doc is! Map) {
-      problems.add('a pubspec that is not a map');
+      problems.add('${p.dir}: a pubspec that is not a map');
       continue;
     }
     final name = doc['name'];
     if (name is! String) {
-      problems.add('a pubspec without a name');
+      problems.add('${p.dir}: a pubspec without a name');
       continue;
     }
     if (name != contractPackage && !isKitPackage(name)) continue;
