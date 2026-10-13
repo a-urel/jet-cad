@@ -345,10 +345,30 @@ one's spec, plan and results.
 
 ## In flight
 
-Nothing.
+**Rubber-band table selection** (the human, 2026-10-13): `FloorPlanView(
+floorDrag: FloorPlanFloorDrag.band)` makes a one-finger or mouse drag on
+the floor draw a band in the selection mode (left to right a window,
+right to left a crossing; a group whole, a locked table never; a modifier
+adds), and under the default `pan` a Shift, Ctrl or Cmd mouse drag on the
+floor now bands instead of panning. Spec
+[2026-10-13-rubber-band-selection-design.md](docs/superpowers/specs/2026-10-13-rubber-band-selection-design.md)
+(revision 2, approved), plan
+[2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md).
+**Implemented on `feat/rubber-band`** in the worktree
+`.claude/worktrees/rubber-band` (Tasks 1–4: `bandModeFor` and
+`SelectionBandPainter` in `jet_cad_2d_flutter`, the band in the selection
+tool, `FloorPlanView.floorDrag`, the demo's switch, the guide, the
+CHANGELOG, the specs' notes), each task reviewed independently; **the
+final review is pending**, then the human's merge word, then release
+0.7.0. Ledger (in the worktree, git-ignored):
+`.superpowers/sdd/2026-10-13-rubber-band-selection/`.
 
 ## Owed to the human
 
+- **Rubber band, a look:** the band with a mouse and on a tablet, light and
+  dark, in the selection mode under `pan` with Shift held and under
+  `band`; a native German and Turkish read of the demo's new switch (de
+  *Ziehen auf dem Boden: Auswählen*, tr *Zeminde sürükle: Seç*).
 - **Plan colours, Slice 2, a look:** coloured tables in both modes, light
   and dark (a status over a colour, a coloured table in a coloured room),
   and in a PNG and a PDF export.
@@ -414,7 +434,15 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 
 ## Resume here
 
-**Next: the human's choice.** Release 0.6.0 is **merged into `main` at
+**Next: the final review of the rubber-band slice, then the human's merge
+word.** The slice is implemented on `feat/rubber-band` (worktree
+`.claude/worktrees/rubber-band`, plan
+[2026-10-13-rubber-band-selection.md](docs/superpowers/plans/2026-10-13-rubber-band-selection.md),
+Tasks 1–4 done and reviewed per task); once the final review is applied
+and the human says to merge, release 0.7.0 follows (the CHANGELOG's
+Unreleased section carries the slice; the guide's "Selecting with a
+band" says *Since 0.7.0*). Until then, **the human's choice** otherwise.
+Release 0.6.0 is **merged into `main` at
 `3bf64a7`** (2026-10-13), tag `v0.6.0` → `3bf64a7`, pushed by the human. Slice 1 of plan colours (the palette, schema 10, rooms, the `recolor`
 capability and the Selection panel's Colour row) merged at `ce0a4f9`;
 Slice 2 (tables) came with the release merge (plan

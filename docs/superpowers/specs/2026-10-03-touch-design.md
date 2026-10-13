@@ -161,6 +161,8 @@ possible.
   band or a move, never selects. One finger on empty floor is a band (as
   a mouse drag); two fingers pan and zoom.
 
+(2026-10-13) Except under `floorDrag: band` (rubber-band spec RB-2).
+
 ## Not in scope
 
 - A long press in the design mode, and multi-select by touch there (the

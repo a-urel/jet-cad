@@ -47,6 +47,8 @@ abstract class DemoStrings {
 
   String get longPressMenu;
 
+  String get floorBand;
+
   String get tableNumbersField;
 
   String get select;
@@ -221,6 +223,9 @@ final class _En extends DemoStrings {
 
   @override
   String get longPressMenu => 'Long press: menu';
+
+  @override
+  String get floorBand => 'Floor drag: select';
 
   @override
   String get tableNumbersField => 'Table numbers (comma separated)';
@@ -456,6 +461,9 @@ final class _De extends DemoStrings {
 
   @override
   String get longPressMenu => 'Langes Drücken: Menü';
+
+  @override
+  String get floorBand => 'Ziehen auf dem Boden: Auswählen';
 
   @override
   String get tableNumbersField => 'Tischnummern (durch Komma getrennt)';
@@ -699,6 +707,9 @@ final class _Tr extends DemoStrings {
 
   @override
   String get longPressMenu => 'Uzun basış: menü';
+
+  @override
+  String get floorBand => 'Zeminde sürükle: Seç';
 
   @override
   String get tableNumbersField => 'Masa numaraları (virgülle ayrılmış)';

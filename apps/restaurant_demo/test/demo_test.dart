@@ -19,6 +19,7 @@ import 'package:jet_cad_floor_plan/editor.dart';
 import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart'
     show
         FloorPlanController,
+        FloorPlanFloorDrag,
         FloorPlanMode,
         FloorPlanView,
         TableGroup,
@@ -685,6 +686,26 @@ void main() {
     expect(c.selectedTables.value, {'1'},
         reason: 'an unselected table is selected alone, never toggled in');
     expect(demo.log, contains('Salon: menu for 1'));
+  });
+
+  testWidgets(
+      'D23 the Floor drag: select switch flips the view\'s floorDrag from '
+      'pan to band and back (rubber-band spec RB-7)', (tester) async {
+    final demo = await pumpDemo(tester, plans: {'Salon': salonPlan()});
+    await tester.tap(byKey('mode-service'));
+    await tester.pump();
+    await tester.pump();
+    FloorPlanFloorDrag current() =>
+        tester.widget<FloorPlanView>(find.byType(FloorPlanView)).floorDrag;
+    expect(demo.floorBand, isFalse);
+    expect(current(), FloorPlanFloorDrag.pan);
+    await tester.tap(byKey('floor-band'));
+    await tester.pump();
+    expect(demo.floorBand, isTrue);
+    expect(current(), FloorPlanFloorDrag.band);
+    await tester.tap(byKey('floor-band'));
+    await tester.pump();
+    expect(current(), FloorPlanFloorDrag.pan);
   });
 
   // Table-groups spec G6: Merge (grow or a new `G<n>`), Split, the status

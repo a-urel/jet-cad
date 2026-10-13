@@ -937,6 +937,8 @@ sharing a number, an unnumbered table, a camera not at identity.
 - **O-3.** Replacing the editor's inner Material widgets (layer menus,
   panel fields) with host widgets.
 - **O-4.** Multi-select of tables by rubber band in the selection mode.
+  **Taken up** (2026-10-13) by the rubber-band spec
+  [2026-10-13-rubber-band-selection-design.md](2026-10-13-rubber-band-selection-design.md).
 - **O-5.** Animation of camera commands.
 - **O-6.** A per-table colour on the plan itself (status is not plan
   data).
