@@ -139,9 +139,16 @@ jobs:
         run: dart run tool/ci/check_guide.dart
 
   publishable:
-    name: jet_cad_2d, publishable to pub.dev
+    name: ${{ matrix.package }}, publishable to pub.dev
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - packages/jet_cad_2d
+          - packages/jet_cad_2d_flutter
+          - packages/jet_cad_floor_plan
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -151,12 +158,16 @@ jobs:
           cache: true
       - name: Resolve the workspace
         run: flutter pub get
-      # The engine is the one package published on pub.dev. A dry run
-      # uploads nothing; it exits 65 on any warning (a version bump without
-      # its CHANGELOG entry, a modified checked-in file), not only on an
-      # error, so it gates both.
+      # Decision 2 of the publishing spec: each published package carries
+      # the root's Apache 2.0 licence, byte for byte.
+      - name: The licence is the root's
+        run: cmp LICENSE ${{ matrix.package }}/LICENSE
+      # A dry run uploads nothing; it exits 65 on any warning (a version
+      # bump without its CHANGELOG entry, a modified checked-in file), not
+      # only on an error. A dependent's dry run does not need its
+      # dependency on pub.dev (spec F-2).
       - name: Publish dry run
-        working-directory: packages/jet_cad_2d
+        working-directory: ${{ matrix.package }}
         run: dart pub publish --dry-run
 
   host-probe:
