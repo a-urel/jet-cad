@@ -164,9 +164,9 @@ the same catalog gives the same bytes. **Decoding** is
     block's does);
 15. bad geometry: wrong coordinate or scalar counts for the kind, a
     non-finite value, a coordinate beyond `1e6`, a zero-length line, a
-    polyline under 2 points or whose points all lie within `Tolerance.linear`
-    of each other (amended by the final review), a radius or sweep at or
-    under `Tolerance`.
+    polyline under 2 points or whose points' bounding box has width and
+    height both at or under `Tolerance.linear` (amended by the final review
+    and the PR review), a radius or sweep at or under `Tolerance`.
 
 What the validator does not check: names, categories and tags beyond K2's
 patterns (the conformance test checks completeness, K7), and anything under
@@ -379,9 +379,10 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
 
 ## Amendments from the final review (2026-10-13)
 
-- **K3 rule 15** also refuses a polyline whose points all lie within
-  `Tolerance.linear` of each other: a zero-length polyline (a closed
-  polyline of one point among them).
+- **K3 rule 15** also refuses a zero-length polyline (a closed polyline of
+  one point among them): one whose points' bounding box has width and height
+  both at or under `Tolerance.linear` (the PR review's wording; this
+  amendment first said "within `Tolerance.linear` of each other").
 - **K3 rule 11** also refuses a unit whose outline is a closed polyline
   enclosing an area at or under `Tolerance.linear`², in either winding:
   service mode would fill nothing.
@@ -391,6 +392,17 @@ version's English. The umbrella's A2 now matches K5 (words on the kit, a
   wins.
 - `docs/kits.md` no longer says a retired symbol leaves the gallery: the
   contract has no retired mark (R2 below).
+
+## Amendments from the PR review (2026-10-13)
+
+- PR #11: PR1 rule 15's zero-length polyline test is the points' bounding
+  box (width and height both at or under `Tolerance.linear`), one
+  allocation-free pass on untrusted bytes, not a pairwise comparison (it
+  differs only up to the box's diagonal); PR2 K9's check reports an
+  unreadable pubspec as a problem instead of throwing; PR3 `CatalogArc`'s
+  sweep is signed (positive counter-clockwise, negative clockwise); PR4 the
+  purity test and K9 read directives with `package:analyzer`, a
+  dev_dependency of the contract and a dependency of `tool/ci`.
 
 ## Inputs for sub-project 2
 
