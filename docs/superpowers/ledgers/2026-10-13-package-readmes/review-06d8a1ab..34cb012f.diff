@@ -1,0 +1,459 @@
+# Review package: 06d8a1a..HEAD
+
+## Commits
+34cb012f feat(ci): the package READMEs' code is analysed in tool/readme_probe
+
+## Files changed
+ .github/workflows/ci.yml                | 10 ++++--
+ packages/jet_cad_2d_flutter/README.md   |  5 +--
+ packages/jet_cad_floor_plan/README.md   |  8 +++--
+ pubspec.yaml                            |  1 +
+ tool/ci/check_readmes.dart              | 37 ++++++++++++++++++++++
+ tool/ci/lib/readmes.dart                | 14 +++++++++
+ tool/ci/test/dependency_lines_test.dart |  9 +++---
+ tool/ci/test/readmes_test.dart          | 54 +++++++++++++++++++++++++++++++++
+ tool/readme_probe/lib/engine.dart       | 20 ++++++++++++
+ tool/readme_probe/lib/planner.dart      | 28 +++++++++++++++++
+ tool/readme_probe/lib/renderer.dart     | 16 ++++++++++
+ tool/readme_probe/pubspec.yaml          | 20 ++++++++++++
+ 12 files changed, 211 insertions(+), 11 deletions(-)
+
+## Diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 7b7a1b24..c7377c8a 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -124,31 +124,37 @@ jobs:
+       - name: Resolve the workspace
+         run: flutter pub get
+       - name: Tests
+         working-directory: tool/ci
+         run: dart test
+       - name: Analyze
+         working-directory: tool/ci
+         run: >-
+           dart analyze --fatal-infos lib test expect_failures.dart
+           check_guide.dart check_host_lock.dart package_root.dart
+-          check_screenshots.dart
++          check_screenshots.dart check_readmes.dart
+       - name: Format
+         working-directory: tool/ci
+         run: >-
+           dart format --output=none --set-exit-if-changed
+           lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart
+-          check_screenshots.dart host_probe/lib
++          check_screenshots.dart check_readmes.dart host_probe/lib
++          ../readme_probe/lib
+       - name: The host guide's code is the probe's
+         run: dart run tool/ci/check_guide.dart
+       - name: The screenshots hold pub.dev's rules
+         run: dart run tool/ci/check_screenshots.dart
++      - name: The package READMEs' code is the probe's
++        run: dart run tool/ci/check_readmes.dart
++      - name: Analyze the README probe
++        working-directory: tool/readme_probe
++        run: flutter analyze
+ 
+   publishable:
+     name: ${{ matrix.package }}, publishable to pub.dev
+     runs-on: ubuntu-latest
+     timeout-minutes: 15
+     strategy:
+       fail-fast: false
+       matrix:
+         package:
+           - packages/jet_cad_2d
+diff --git a/packages/jet_cad_2d_flutter/README.md b/packages/jet_cad_2d_flutter/README.md
+index 1acb89f8..1fdcc313 100644
+--- a/packages/jet_cad_2d_flutter/README.md
++++ b/packages/jet_cad_2d_flutter/README.md
+@@ -19,29 +19,30 @@ of `dart:ui`; everything that needs Flutter is here.
+   (`LineTool`, `PolylineTool`, `RectangleTool`, `CircleTool`, `ArcTool`,
+   `TextTool`). Object snapping is configured with `SnapSettings` and drawn
+   by `drawSnapMarker`.
+ - **PDF and PNG export**: `exportPagePdf` and `exportPagePng` write a page of
+   a document to bytes.
+ 
+ ## Example
+ 
+ `DraftCanvas` borrows its document, its spatial index and its camera: the
+ application creates them and disposes of them. The document must carry a
+-`FlutterTextMeasurer`, which is how its text is measured.
++`FlutterTextMeasurer`, which is how its text is measured. The snippet uses
++both packages, so add both: `dart pub add jet_cad_2d jet_cad_2d_flutter`.
+ 
+ ```dart
+ final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
+ final index = SpatialIndex(document);
+ final camera = CameraController(
+     ViewportTransform.fit(document.extents.expandedBy(20), size));
+ 
+-DraftCanvas(document: document, index: index, camera: camera)
++final canvas = DraftCanvas(document: document, index: index, camera: camera);
+ ```
+ 
+ A complete app, which draws a line and a circle and frames them, is
+ [`example/lib/main.dart`](https://github.com/a-urel/jet-cad/blob/main/packages/jet_cad_2d_flutter/example/lib/main.dart).
+ Run it from the package directory with `flutter run -t example/lib/main.dart`.
+ 
+ ## The API
+ 
+ `package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart` is the API. Nothing under
+ `src/` is. `package:jet_cad_2d_flutter/export_testing.dart` is a test
+diff --git a/packages/jet_cad_floor_plan/README.md b/packages/jet_cad_floor_plan/README.md
+index 683a9c8f..5e2a5afb 100644
+--- a/packages/jet_cad_floor_plan/README.md
++++ b/packages/jet_cad_floor_plan/README.md
+@@ -11,25 +11,25 @@ text wherever it likes.
+ ## Embedding it
+ 
+ A `FloorPlanController` holds the plan and what is done to it; a
+ `FloorPlanView` shows it. The application owns the controller and disposes
+ of it.
+ 
+ ```dart
+ final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
+ final controller = FloorPlanController(symbols: symbols);
+ 
+-MaterialApp(
++final app = MaterialApp(
+   supportedLocales: floorPlanSupportedLocales,
+   localizationsDelegates: floorPlanLocalizationsDelegates,
+   home: Scaffold(body: FloorPlanView(controller: controller)),
+-)
++);
+ ```
+ 
+ Before `runApp`, load the planner's font and register its licence:
+ 
+ ```dart
+ WidgetsFlutterBinding.ensureInitialized();
+ await ensureFloorPlanFonts();
+ registerFontLicences();
+ ```
+ 
+@@ -62,21 +62,23 @@ them all, in code that CI compiles:
+ <https://github.com/a-urel/jet-cad/blob/main/docs/host-guide.md>
+ 
+ ## A symbol library of your own
+ 
+ The package ships a furniture library, `furnitureSymbolSource`. A host adds
+ its own beside it with a `SymbolLibrarySource` (a name, a reader of the
+ library's bytes, and its `SymbolNames` in other languages) and gives the
+ loader every source it should read:
+ 
+ ```dart
+-SymbolLibraryLoader(sources: [furnitureSymbolSource, mySymbolSource])
++final loader = SymbolLibraryLoader(
++  sources: [furnitureSymbolSource, mySymbolSource],
++);
+ ```
+ 
+ Two sources must not hold the same key. `package:jet_cad_floor_plan/symbols.dart`
+ holds the catalog types and the library builder a catalog's generator is
+ written in; `symbol_sources.dart` exports `SymbolLibrarySource`,
+ `furnitureSymbolSource`, `readBundledLibrary` and `SymbolNames`. The loader,
+ `SymbolLibraryLoader`, is on the main barrel.
+ 
+ ## The API
+ 
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 2aa6b494..ddb26e60 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -8,10 +8,11 @@ workspace:
+   - packages/jet_cad_2d_flutter
+   - packages/jet_cad_2d_gpu
+   - apps/dev_harness
+   - apps/dev_harness_2d
+   - packages/jet_cad_floor_plan
+   - packages/jet_cad_restaurant_symbols
+   - apps/floor_planner
+   - apps/restaurant_demo
+   - tool/ci
+   - tool/screenshots
++  - tool/readme_probe
+diff --git a/tool/ci/check_readmes.dart b/tool/ci/check_readmes.dart
+new file mode 100644
+index 00000000..6c8d2a3f
+--- /dev/null
++++ b/tool/ci/check_readmes.dart
+@@ -0,0 +1,37 @@
++// Package READMEs spec D8: fails when a Dart block of a package README is no
++// longer in its probe file (tool/readme_probe), which CI analyses, or a YAML
++// block no longer in the host probe's pubspec.
++//
++//   dart run tool/ci/check_readmes.dart
++import 'dart:io';
++
++import 'lib/guide.dart';
++import 'lib/readmes.dart';
++
++void main() {
++  final repo = File.fromUri(Platform.script).parent.parent.parent.path;
++  final yaml =
++      File('$repo/tool/ci/host_probe/pubspec.yaml.in').readAsStringSync();
++  const cases = {
++    'jet_cad_2d': 'engine',
++    'jet_cad_2d_flutter': 'renderer',
++    'jet_cad_floor_plan': 'planner',
++  };
++  final problems = <String>[];
++  var blocks = 0;
++  for (final MapEntry(key: package, value: probe) in cases.entries) {
++    final readme = File('$repo/packages/$package/README.md').readAsStringSync();
++    final dart =
++        File('$repo/tool/readme_probe/lib/$probe.dart').readAsStringSync();
++    blocks += fencedBlocks(readme, 'dart').length +
++        fencedBlocks(readme, 'yaml').length;
++    problems.addAll(readmeProblems(package, readme, dart: dart, yaml: yaml));
++  }
++  if (problems.isEmpty) {
++    stdout.writeln('package READMEs: all $blocks code blocks are in the '
++        'probes');
++    return;
++  }
++  problems.forEach(stderr.writeln);
++  exit(1);
++}
+diff --git a/tool/ci/lib/readmes.dart b/tool/ci/lib/readmes.dart
+new file mode 100644
+index 00000000..19680acd
+--- /dev/null
++++ b/tool/ci/lib/readmes.dart
+@@ -0,0 +1,14 @@
++// The package READMEs' check (package READMEs spec D8), the host guide's
++// rule applied to each README: its Dart blocks are in a probe file CI
++// analyses, its YAML blocks in the host probe's pubspec.
++import 'guide.dart';
++
++/// [readme]'s blocks missing from [dart] and [yaml], each prefixed with
++/// [name]; a README with no Dart block is a problem of its own.
++List<String> readmeProblems(String name, String readme,
++    {required String dart, required String yaml}) {
++  if (fencedBlocks(readme, 'dart').isEmpty) return ['$name: no dart block'];
++  return [
++    for (final m in missingBlocks(readme, dart: dart, yaml: yaml)) '$name: $m'
++  ];
++}
+diff --git a/tool/ci/test/dependency_lines_test.dart b/tool/ci/test/dependency_lines_test.dart
+index f53577d2..a17d7ec1 100644
+--- a/tool/ci/test/dependency_lines_test.dart
++++ b/tool/ci/test/dependency_lines_test.dart
+@@ -12,20 +12,21 @@ const published = ['jet_cad_2d', 'jet_cad_2d_flutter', 'jet_cad_floor_plan'];
+ const pubspecs = [
+   '../../packages/jet_cad_2d/pubspec.yaml',
+   '../../packages/jet_cad_2d_flutter/pubspec.yaml',
+   '../../packages/jet_cad_2d_gpu/pubspec.yaml',
+   '../../packages/jet_cad_floor_plan/pubspec.yaml',
+   '../../packages/jet_cad_restaurant_symbols/pubspec.yaml',
+   '../../apps/floor_planner/pubspec.yaml',
+   '../../apps/restaurant_demo/pubspec.yaml',
+   '../../apps/dev_harness_2d/pubspec.yaml',
+   '../../tool/screenshots/pubspec.yaml',
++  '../../tool/readme_probe/pubspec.yaml',
+ ];
+ 
+ /// The dependency lines of [pubspec] that name one of [published] by a
+ /// source other than a hosted constraint: the key line followed by an
+ /// indented `path:` or `git:` line, or by a nested map.
+ List<String> nonHosted(String pubspec) {
+   final lines = pubspec.split('\n');
+   final found = <String>[];
+   for (var i = 0; i < lines.length; i++) {
+     final key = RegExp(r'^  (\w+):\s*$').firstMatch(lines[i]);
+@@ -53,22 +54,22 @@ void main() {
+ 
+   test('DL2 every such dependency is the caret of D1', () {
+     var seen = 0;
+     for (final path in pubspecs) {
+       final constraints = hosted(File(path).readAsStringSync());
+       seen += constraints.length;
+       for (final c in constraints.values) {
+         expect(c, '^0.7.1', reason: path);
+       }
+     }
+-    expect(seen, 18,
+-        reason: 'premise: the dependents are read; the pubspecs hold 18 '
+-            'dependency lines on a published package (15, and the three of '
+-            'tool/screenshots)');
++    expect(seen, 21,
++        reason: 'premise: the dependents are read; the pubspecs hold 21 '
++            'dependency lines on a published package (15, and the three each of '
++            'tool/screenshots and tool/readme_probe)');
+   });
+ 
+   test('DL3 the reader sees a path dependency', () {
+     expect(nonHosted('dependencies:\n  jet_cad_2d:\n    path: ../x\n'),
+         ['jet_cad_2d: path: ../x']);
+     expect(nonHosted('dependencies:\n  jet_cad_2d: ^0.7.1\n'), isEmpty);
+   });
+ }
+diff --git a/tool/ci/test/readmes_test.dart b/tool/ci/test/readmes_test.dart
+new file mode 100644
+index 00000000..e31f9804
+--- /dev/null
++++ b/tool/ci/test/readmes_test.dart
+@@ -0,0 +1,54 @@
++// Package READMEs spec D8: every Dart block of a package README is in its
++// probe file, which CI analyses against the barrels the README names.
++import 'dart:io';
++
++import 'package:jet_cad_ci/readmes.dart';
++import 'package:test/test.dart';
++
++String read(String path) => File(path).readAsStringSync();
++
++final probeYaml = read('host_probe/pubspec.yaml.in');
++
++final cases = {
++  'jet_cad_2d': '../readme_probe/lib/engine.dart',
++  'jet_cad_2d_flutter': '../readme_probe/lib/renderer.dart',
++  'jet_cad_floor_plan': '../readme_probe/lib/planner.dart',
++};
++
++void main() {
++  test('RM1 every README block is in its probe', () {
++    for (final MapEntry(key: package, value: probe) in cases.entries) {
++      final readme = read('../../packages/$package/README.md');
++      expect(
++          readmeProblems(package, readme, dart: read(probe), yaml: probeYaml),
++          isEmpty,
++          reason: package);
++    }
++  });
++
++  test('RM2 a renamed identifier in a README is named', () {
++    final readme = read('../../packages/jet_cad_2d/README.md');
++    expect(readme, contains('DraftDocument.empty()'), reason: 'premise');
++    final renamed =
++        readme.replaceFirst('DraftDocument.empty()', 'DraftDocument.blank()');
++    expect(
++        readmeProblems('jet_cad_2d', renamed,
++            dart: read(cases['jet_cad_2d']!), yaml: probeYaml),
++        [startsWith('jet_cad_2d: dart: ')]);
++  });
++
++  test('RM3 a README without a Dart block is red', () {
++    expect(readmeProblems('x', '# x\n\nNo code.\n', dart: '', yaml: ''),
++        ['x: no dart block']);
++  });
++
++  test("RM4 the planner's font block is the host probe's", () {
++    final readme = read('../../packages/jet_cad_floor_plan/README.md');
++    final moved = readme.replaceFirst('Roboto-Regular.ttf', 'Roboto.ttf');
++    expect(moved, isNot(readme), reason: 'premise');
++    expect(
++        readmeProblems('jet_cad_floor_plan', moved,
++            dart: read(cases['jet_cad_floor_plan']!), yaml: probeYaml),
++        [startsWith('jet_cad_floor_plan: yaml: ')]);
++  });
++}
+diff --git a/tool/readme_probe/lib/engine.dart b/tool/readme_probe/lib/engine.dart
+new file mode 100644
+index 00000000..f462e516
+--- /dev/null
++++ b/tool/readme_probe/lib/engine.dart
+@@ -0,0 +1,20 @@
++// The README of packages/jet_cad_2d, its Example block verbatim.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++void main() {
++  final doc = DraftDocument.empty();
++  final circle = addDrafted(
++      doc, EntityKind.circle, circlePayload(Vector2(300, 250), 50),
++      layer: ReservedHandles.layerZero);
++  doc.commands.execute(circle);
++
++  final index = SpatialIndex(doc);
++  final hit = HitPath();
++  if (index.pickInto(Vector2(300, 301), 2, const QueryFilter.picking(), hit)) {
++    print(hit.entity == circle.record.handle); // true
++  }
++
++  doc.commands.undo(); // the circle is gone, and the index knows it
++  print(DraftDocumentCodec.encodeToString(doc));
++}
+diff --git a/tool/readme_probe/lib/planner.dart b/tool/readme_probe/lib/planner.dart
+new file mode 100644
+index 00000000..27fdd3b7
+--- /dev/null
++++ b/tool/readme_probe/lib/planner.dart
+@@ -0,0 +1,28 @@
++// The README of packages/jet_cad_floor_plan, its Dart blocks verbatim.
++import 'package:flutter/material.dart';
++import 'package:jet_cad_floor_plan/jet_cad_floor_plan.dart';
++
++Widget appFor() {
++  final symbols = SymbolLibraryLoader(sources: const [furnitureSymbolSource]);
++  final controller = FloorPlanController(symbols: symbols);
++
++  final app = MaterialApp(
++    supportedLocales: floorPlanSupportedLocales,
++    localizationsDelegates: floorPlanLocalizationsDelegates,
++    home: Scaffold(body: FloorPlanView(controller: controller)),
++  );
++  return app;
++}
++
++Future<void> main() async {
++  WidgetsFlutterBinding.ensureInitialized();
++  await ensureFloorPlanFonts();
++  registerFontLicences();
++}
++
++SymbolLibraryLoader loaderWith(SymbolLibrarySource mySymbolSource) {
++  final loader = SymbolLibraryLoader(
++    sources: [furnitureSymbolSource, mySymbolSource],
++  );
++  return loader;
++}
+diff --git a/tool/readme_probe/lib/renderer.dart b/tool/readme_probe/lib/renderer.dart
+new file mode 100644
+index 00000000..8b583259
+--- /dev/null
++++ b/tool/readme_probe/lib/renderer.dart
+@@ -0,0 +1,16 @@
++// The README of packages/jet_cad_2d_flutter, its Example block verbatim.
++// DraftDocument and SpatialIndex come from the engine, which the README says
++// the snippet uses.
++import 'package:flutter/widgets.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++Widget canvasFor(Size size) {
++  final document = DraftDocument.empty(measurer: FlutterTextMeasurer());
++  final index = SpatialIndex(document);
++  final camera = CameraController(
++      ViewportTransform.fit(document.extents.expandedBy(20), size));
++
++  final canvas = DraftCanvas(document: document, index: index, camera: camera);
++  return canvas;
++}
+diff --git a/tool/readme_probe/pubspec.yaml b/tool/readme_probe/pubspec.yaml
+new file mode 100644
+index 00000000..74dd31d6
+--- /dev/null
++++ b/tool/readme_probe/pubspec.yaml
+@@ -0,0 +1,20 @@
++name: jet_cad_readme_probe
++description: >-
++  The package READMEs' code, analysed (package READMEs spec D8): one file
++  per README, each importing only the barrels its README names. Not a
++  product package.
++publish_to: none
++version: 0.1.0
++resolution: workspace
++
++environment:
++  sdk: ^3.5.0
++  flutter: ">=3.44.0"
++
++dependencies:
++  flutter:
++    sdk: flutter
++  jet_cad_2d: ^0.7.1
++  jet_cad_2d_flutter: ^0.7.1
++  jet_cad_floor_plan: ^0.7.1
++  vector_math: ^2.2.0
