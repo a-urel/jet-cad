@@ -80,8 +80,12 @@ No issues found! (ran in 2.6s)
 Formatted 10 files (0 changed) in 0.01 seconds.
 ```
 
-Both old-package failures are pre-existing and environmental (macOS); CI (Linux) is the arbiter.
+The two hash tests fail identically on the clean main checkout (ledger ruling after Task 1);
+the text-ladder goldens were reported pre-existing. CI is the arbiter.
 No file of either package is touched by this branch (see the hand checks).
+
+Task 1's report also records one full `jet_cad_2d` run in which `query_allocation_test` failed;
+it passed alone (reported as flaky). The exit-gate run above does not show it.
 
 ### 4. Publish dry run, `packages/jet_cad_2d_kit`
 
@@ -112,9 +116,11 @@ The file list holds `CHANGELOG.md`, `LICENSE`, `README.md`, `analysis_options.ya
 
 ## Mutations of Tasks 1-11
 
-Each ran on a committed file and was reverted with `git checkout --`, `git diff --quiet` exit 0,
-as recorded in the task reports (`.superpowers/sdd/2026-10-13-kit-contract/task-N-report.md`).
-"Red" is the test or tests the report names.
+As the task reports record (`.superpowers/sdd/2026-10-13-kit-contract/task-N-report.md`), each
+ran on a committed file and was reverted with `git checkout --`. One exception, from the ledger:
+Task 9's session ended with a mutation (the `libraryKitMismatch` check deleted) still applied to
+the committed `conformance.dart`; the controller reverted it with `git checkout`, and the
+implementer resumed. "Red" is the test or tests the report names.
 
 | ID | File | Change | Red |
 |---|---|---|---|
@@ -198,8 +204,8 @@ as recorded in the task reports (`.superpowers/sdd/2026-10-13-kit-contract/task-
 | M-D6 | kit_deps.dart | scan whole text | D6, D8 |
 | M-D10 | kit_deps.dart | `'build'` added to script subdirectories | D10 |
 
-Task 3 and Task 1 reports quote `[E]` markers rather than the full red lines; the ledger
-records that as a process minor.
+The Task 3 report quotes `[E]` markers rather than the red lines; the ledger records that as a
+process minor.
 
 ## Plan decisions
 
@@ -224,12 +230,12 @@ records that as a process minor.
 - The snapshot is one `"key@N": {entry}` per line, keys sorted, canonical numbers; `parseSnapshot` compares canonical texts.
 - `locales` lists non-English locales and `'en'` is an `ArgumentError`; undeclared locales with words are `localeUndeclared`; `sameAsEnglish` is per locale; a catalog key missing from the snapshot is `snapshotMissing`; a locale word is compared with the newest version's English; checks 3 and 6 end the check on a finding, and an unbuildable catalog is one `catalogInvalid`.
 - The code shown in `docs/kits.md` and the README is analysed example code (`example/`), and a test runs it through encode, decode and conformance.
-- `check_kit_deps.dart` picks packages by directory name, reads all three dependency sections and every `import`/`export`/`part` URI under `lib/`, `test/`, `tool/`; `--packages <dir>` points it elsewhere; `jet_cad_2d_kit` joins the `publishable` CI matrix.
+- `check_kit_deps.dart` picks packages by directory name, reads all three dependency sections and every `import`/`export`/`part` URI under `lib/`, `test/`, `tool/`; `--packages <dir>` points it elsewhere; `jet_cad_2d_kit` joins the `publishable` CI matrix. (The final fix wave widens it: every Dart file, packages by pubspec name.)
 
 ## Rulings of the controller (ledger)
 
 - Pre-flight F1-F13 (13 findings) taken as rulings; F1 later found wrong (`flutter/services.dart` provides `Uint8List`; the import was dropped in Task 6).
-- The `jet_cad_2d` hash tests and the `jet_cad_2d_flutter` text-ladder goldens fail locally on the clean main checkout too: environmental, CI is the arbiter.
+- The `jet_cad_2d` hash tests fail identically on the clean main checkout (`1b4670b`): environmental, CI is the arbiter. The `jet_cad_2d_flutter` text-ladder goldens were reported pre-existing.
 - Implementers write the commit trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (the human's rule).
 - Task 10: documentation snippets must be complete and analysed; they live in `example/` files that `flutter analyze` covers.
 - Review rounds: Task 9 (F19 order-dependence, fixed in `5c29a55`), Task 10 (doc snippets, fixed in `3b19567`); every other task review clean.
@@ -258,3 +264,80 @@ records that as a process minor.
 6. Umbrella A2 vs K5: names live on `PlanKit`, not on `SymbolLibrarySource`; a `bundledLibrary(...)` call makes the descriptor non-`const`; `docs/kits.md` shows a `final` descriptor.
 7. K7 check 5: a locale's word is compared with the newest version's English.
 8. K3 rule 9 ambiguity: amended to a unit definition whose `SymbolComponent` has a `family`.
+
+## Final fix wave
+
+After the final review (`.superpowers/sdd/2026-10-13-kit-contract/final-review.md`) and its
+rulings (ledger, "Final review"). Commits on top of `fea46c3`:
+
+- `f845bc7` test: rule 15's radius and line tolerance boundaries (FR2, deferred T4).
+- `6dbf4c0` feat: rule 15 refuses a polyline whose points all lie within `Tolerance.standard.linear`
+  of each other; rule 11 refuses a unit outline polyline enclosing at most linear² (FR8).
+- `6a270b5` fix: `buildLibraryDocument` disposes its document when a payload throws after it
+  exists (FR9, deferred T7). B8 pins the path (an empty closed `CatalogPolyline` throws its
+  `StateError` through `buildLibraryDocument` and `encodeLibrary`); the disposal itself is not
+  observable from outside, since the document never reaches the caller.
+- `47af545` test: V2f (a `jetcad.library` `FormatException` is rule 2), V12b (a non-finite y),
+  K4 `tool:sample`; `parseSnapshot`'s doc says it normalises white space only (deferred T4, T6, T9).
+- `096d146` ci: `check_kit_deps` reads every Dart file of a package but `build/` and
+  `.dart_tool/`, and picks packages by pubspec name (FR6, deferred T11). D13-D16.
+- `d0a4349` test: every ```` ```dart ```` block of `docs/kits.md` (4) and the README (1) stands
+  verbatim, as a run of whole lines, in one `example/*.dart` file (FR7).
+- `4a2ce84` docs: `docs/kits.md` says the conformance test checks keys today, asks a kit to test
+  `kit.validate()` is empty, no longer promises a retired symbol leaves the gallery, and follows
+  FR6 and FR8 (FR4, FR5).
+- `0dee1fb` docs: the spec's "Amendments from the final review" and "Inputs for sub-project 2"
+  (R1-R6).
+
+Mutations, as `final-fix-report.md` records each: on a committed file, reverted with
+`git checkout --`, `git diff --quiet` exit 0.
+
+| ID | File | Change | Red |
+|---|---|---|---|
+| M-V15t | symbol_library.dart | radius `<= 0` | V15t, V15u, V15v, V15w |
+| M-V15u | symbol_library.dart | radius `< Tolerance.standard.linear` | V15v, V15w |
+| M-V15y | symbol_library.dart | line `pointAt(0) == pointAt(1)` | V15y |
+| M-V15aa | symbol_library.dart | polyline check `false &&`; points compared with `!=` | V15aa, V15ab; V15aa |
+| M-V15ac | symbol_library.dart | each point compared with the first only | V15ac |
+| M-V15ad | symbol_library.dart | the first two points only | V15ac, V15ad |
+| M-V11c | symbol_library.dart | area check `false &&` | V11c, V11d |
+| M-V11d | symbol_library.dart | `area == 0` | V11d |
+| M-V11e | symbol_library.dart | `area <= linear` | V11e |
+| M-V11f | symbol_library.dart | `.abs()` dropped | V11f |
+| M-V2f | symbol_library.dart | every `FormatException` rule 1 | V2f |
+| M-V12b | symbol_library.dart | `base.x` only | V12b |
+| M-K4c | plan_kit.dart | `!rest.contains('.')` dropped | K4 (`tool:sample`) |
+| M-D13 | tool/ci/lib/kit_deps.dart | `lib`/`test`/`tool` only | D13, D15 |
+| M-D15 | tool/ci/check_kit_deps.dart | top-level `lib`/`test`/`tool` only | D15 |
+| M-D16 | check_kit_deps.dart | packages by directory name | D16 |
+| M-D10 | kit_deps.dart | `build` not excluded | D10, D13 |
+| M-DOC1 | docs/kits.md; README.md | one character of a block | DOC1 (each document) |
+| M-DOC1e | example/example.dart | one character of the catalog | DOC1 (both documents) |
+
+Gates re-run after the fixes (last lines):
+
+```
+packages/jet_cad_2d_kit$ flutter test
+00:01 +246: All tests passed!
+packages/jet_cad_2d_kit$ flutter analyze
+No issues found! (ran in 2.3s)
+packages/jet_cad_2d_kit$ dart format --output=none --set-exit-if-changed .
+Formatted 48 files (0 changed) in 0.07 seconds.
+tool/ci$ dart test
+00:06 +110: All tests passed!
+$ dart run tool/ci/check_kit_deps.dart
+kit dependencies: 1 package(s) checked, none names the plan library or another kit
+packages/jet_cad_2d_kit$ dart pub publish --dry-run
+Total compressed archive size: 56 KB.
+Package has 0 warnings.
+packages/jet_cad_2d_kit$ dart run test/fixtures/sample_kit/generate.dart
+sample kit: 4 symbols written
+```
+
+`git diff --quiet` over the sample kit's two files exited 0, and `git status --short` was empty
+after every gate. The three CLAUDE.md gates show only the failures recorded above:
+`jet_cad_2d` `00:06 +1289 -2: Some tests failed.` (the two generate_document hash tests),
+`No issues found!`, `Formatted 177 files (0 changed)`; `jet_cad_2d_flutter`
+`00:23 +1450 ~1 -5: Some tests failed.` (text ladder rungs 1-5, `RenderBackend.canvas`),
+`No issues found! (ran in 3.6s)`, `Formatted 234 files (0 changed)`; `jet_cad_2d_gpu`
+`00:00 +20: All tests passed!`, `No issues found! (ran in 2.7s)`, `Formatted 10 files (0 changed)`.
