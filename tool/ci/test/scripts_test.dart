@@ -126,6 +126,21 @@ void main() {
       expect((await dartRun('check_host_lock.dart', const [])).exitCode, 2);
       expect((await dartRun('check_host_lock.dart', ['a', 'b'])).exitCode, 2);
     });
+
+    test('SC21 --ref: the green lock at its ref exits 0, at another exits 1',
+        () async {
+      const ref = '2b35b69931d6acdb03c219a38c923a8fd3fdc50c';
+      final ok = await dartRun('check_host_lock.dart',
+          ['test/fixtures/host_post_split.lock.txt', '--ref', ref]);
+      expect(ok.exitCode, 0, reason: '${ok.stdout}${ok.stderr}');
+      final bad = await dartRun('check_host_lock.dart', [
+        'test/fixtures/host_post_split.lock.txt',
+        '--ref',
+        '0000000000000000000000000000000000000000',
+      ]);
+      expect(bad.exitCode, 1);
+      expect(bad.stdout, contains('jet_cad_floor_plan'));
+    });
   });
 
   // Task 2 review R-1: CI's probe runs only at HEAD, which is green, so a
