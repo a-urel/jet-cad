@@ -1,0 +1,559 @@
+# Review package: 178cd98..HEAD
+
+## Commits
+65a16f04 feat(kit): the jet_cad_2d_kit package and its purity test (K1)
+
+## Files changed
+ .github/workflows/ci.yml                           |   2 +
+ packages/jet_cad_2d_kit/CHANGELOG.md               |   6 +
+ packages/jet_cad_2d_kit/LICENSE                    | 201 +++++++++++++++++++++
+ packages/jet_cad_2d_kit/README.md                  |   4 +
+ packages/jet_cad_2d_kit/analysis_options.yaml      |  19 ++
+ packages/jet_cad_2d_kit/lib/authoring.dart         |   4 +
+ packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart    |   7 +
+ packages/jet_cad_2d_kit/pubspec.yaml               |  31 ++++
+ .../test/invariants/purity_test.dart               |  84 +++++++++
+ .../jet_cad_2d_kit/test/support/import_walker.dart |  78 ++++++++
+ pubspec.yaml                                       |   1 +
+ 11 files changed, 437 insertions(+)
+
+## Diff
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index c7377c8a..bae3eaee 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -33,20 +33,22 @@ jobs:
+     strategy:
+       fail-fast: false
+       matrix:
+         include:
+           - package: packages/jet_cad_2d
+             tool: dart
+           - package: packages/jet_cad_2d_flutter
+             tool: flutter
+           - package: packages/jet_cad_2d_gpu
+             tool: flutter
++          - package: packages/jet_cad_2d_kit
++            tool: flutter
+           - package: packages/jet_cad_floor_plan
+             tool: flutter
+             # The pick's allocation test reads the VM's allocation profiler,
+             # which flutter_tester serves only with this flag (Slice 2's
+             # final review F-2): without it the test skips, and the
+             # comparison reads that skip as red.
+             test_flags: --enable-vmservice
+           - package: packages/jet_cad_restaurant_symbols
+             tool: flutter
+           - package: apps/floor_planner
+diff --git a/packages/jet_cad_2d_kit/CHANGELOG.md b/packages/jet_cad_2d_kit/CHANGELOG.md
+new file mode 100644
+index 00000000..93b300c8
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/CHANGELOG.md
+@@ -0,0 +1,6 @@
++## 0.1.0
++
++- The kit contract's symbol side: the plan components (`jetcad.symbol`,
++  `jetcad.unit`, `jetcad.manifest`, `jetcad.library`), the `.jetlib`
++  library format and its validator, `KitNames`, `SymbolLibrarySource`,
++  `PlanKit`, and the pure-Dart authoring toolkit with its conformance test.
+diff --git a/packages/jet_cad_2d_kit/LICENSE b/packages/jet_cad_2d_kit/LICENSE
+new file mode 100644
+index 00000000..261eeb9e
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/LICENSE
+@@ -0,0 +1,201 @@
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright [yyyy] [name of copyright owner]
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/packages/jet_cad_2d_kit/README.md b/packages/jet_cad_2d_kit/README.md
+new file mode 100644
+index 00000000..10133fcf
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/README.md
+@@ -0,0 +1,4 @@
++# jet_cad_2d_kit
++
++The kit contract for jet_cad_2d plans. Work in progress: see `docs/kits.md`
++in the repository.
+diff --git a/packages/jet_cad_2d_kit/analysis_options.yaml b/packages/jet_cad_2d_kit/analysis_options.yaml
+new file mode 100644
+index 00000000..375a6d7d
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/analysis_options.yaml
+@@ -0,0 +1,19 @@
++include: package:lints/recommended.yaml
++
++analyzer:
++  language:
++    strict-casts: true
++    strict-inference: true
++    strict-raw-types: true
++  errors:
++    unused_import: error
++    unused_local_variable: error
++  exclude:
++    - build/**
++
++linter:
++  rules:
++    - always_declare_return_types
++    - avoid_dynamic_calls
++    - prefer_final_locals
++    - unawaited_futures
+diff --git a/packages/jet_cad_2d_kit/lib/authoring.dart b/packages/jet_cad_2d_kit/lib/authoring.dart
+new file mode 100644
+index 00000000..b4669f7b
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/authoring.dart
+@@ -0,0 +1,4 @@
++/// The kit authoring toolkit, pure Dart: the catalog language, the library
++/// builder, the shared shape helpers, the geometry snapshot and the
++/// conformance test. A kit's generator runs it under plain `dart run`.
++library;
+diff --git a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+new file mode 100644
+index 00000000..1cac7ba4
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+@@ -0,0 +1,7 @@
++/// The kit contract of jet_cad_2d plans: the components a plan stores, the
++/// `.jetlib` symbol library format, a kit's words, its symbol sources and
++/// its `PlanKit` descriptor.
++///
++/// A Flutter library: it reads bundled assets. The model it exports is pure
++/// Dart and is shared with `package:jet_cad_2d_kit/authoring.dart`.
++library;
+diff --git a/packages/jet_cad_2d_kit/pubspec.yaml b/packages/jet_cad_2d_kit/pubspec.yaml
+new file mode 100644
+index 00000000..0c44c650
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/pubspec.yaml
+@@ -0,0 +1,31 @@
++name: jet_cad_2d_kit
++description: >-
++  The kit contract for jet_cad_2d plans: plan components, the .jetlib symbol
++  library format and validator, kit words, and a pure-Dart authoring toolkit.
++version: 0.1.0
++repository: https://github.com/a-urel/jet-cad
++issue_tracker: https://github.com/a-urel/jet-cad/issues
++funding:
++  - https://github.com/sponsors/a-urel
++  - https://buymeacoffee.com/yazemo
++topics:
++  - cad
++  - floor-plan
++  - symbols
++resolution: workspace
++
++environment:
++  sdk: ^3.6.0
++  flutter: ">=3.44.0"
++
++dependencies:
++  flutter:
++    sdk: flutter
++  jet_cad_2d: ^0.7.2
++  meta: ^1.18.0
++  vector_math: ^2.2.0
++
++dev_dependencies:
++  flutter_test:
++    sdk: flutter
++  lints: ^6.1.0
+diff --git a/packages/jet_cad_2d_kit/test/invariants/purity_test.dart b/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+new file mode 100644
+index 00000000..de63c6db
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+@@ -0,0 +1,84 @@
++// Spec K1: the authoring library and every model file are pure Dart. The
++// walker is tested on its own fixtures first, so a walker that reads
++// nothing cannot pass P1 vacuously.
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++
++import '../support/import_walker.dart';
++
++/// A throw-away package tree: path → text.
++String tree(Map<String, String> files) {
++  final root = Directory.systemTemp.createTempSync('kit_purity_').path;
++  for (final MapEntry(key: path, value: text) in files.entries) {
++    File('$root/$path')
++      ..createSync(recursive: true)
++      ..writeAsStringSync(text);
++  }
++  addTearDown(() => Directory(root).deleteSync(recursive: true));
++  return root;
++}
++
++void main() {
++  test(
++      'P1 lib/authoring.dart and every file under lib/src/model reach no '
++      'Flutter, dart:ui or dart:io, and reach every authoring file', () {
++    final model = dartFilesUnder('lib/src/model');
++    final walk =
++        walkImports('.', 'jet_cad_2d_kit', ['lib/authoring.dart', ...model]);
++    expect(walk.violations, isEmpty);
++    expect(walk.visited, contains('lib/authoring.dart'));
++    for (final f in [...model, ...dartFilesUnder('lib/src/authoring')]) {
++      expect(walk.visited, contains(f), reason: '$f is not reached');
++    }
++  });
++
++  test('P2 a Flutter import two hops away is found', () {
++    final root = tree({
++      'lib/authoring.dart': "export 'src/model/a.dart';\n",
++      'lib/src/model/a.dart': "import 'b.dart';\n",
++      'lib/src/model/b.dart': "import 'package:flutter/foundation.dart';\n",
++    });
++    final walk = walkImports(root, 'kit', ['lib/authoring.dart']);
++    expect(walk.violations,
++        ['lib/src/model/b.dart: package:flutter/foundation.dart']);
++    expect(walk.visited, {
++      'lib/authoring.dart',
++      'lib/src/model/a.dart',
++      'lib/src/model/b.dart',
++    });
++  });
++
++  test('P3 dart:io, dart:ui and an own-package import of an impure file', () {
++    final root = tree({
++      'lib/a.dart': "import 'dart:io';\nimport 'package:kit/src/b.dart';\n",
++      'lib/src/b.dart': "import 'dart:ui' as ui;\n",
++    });
++    expect(walkImports(root, 'kit', ['lib/a.dart']).violations,
++        ['lib/a.dart: dart:io', 'lib/src/b.dart: dart:ui']);
++  });
++
++  test('P4 the allowed libraries and packages pass', () {
++    final root = tree({
++      'lib/a.dart': "import 'dart:convert';\nimport 'dart:math' as math;\n"
++          "import 'package:jet_cad_2d/jet_cad_2d.dart';\n"
++          "import 'package:meta/meta.dart';\n"
++          "import 'package:vector_math/vector_math_64.dart' show Vector2;\n"
++          "import '../lib/b.dart';\n",
++      'lib/b.dart': "import 'dart:typed_data';\n",
++    });
++    final walk = walkImports(root, 'kit', ['lib/a.dart']);
++    expect(walk.violations, isEmpty);
++    expect(walk.visited, {'lib/a.dart', 'lib/b.dart'});
++  });
++
++  test("P5 a conditional import's second URI is read", () {
++    final root = tree({
++      'lib/a.dart': "import 'b.dart'\n"
++          "    if (dart.library.io) 'package:flutter/widgets.dart';\n",
++      'lib/b.dart': '',
++    });
++    expect(walkImports(root, 'kit', ['lib/a.dart']).violations,
++        ['lib/a.dart: package:flutter/widgets.dart']);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/support/import_walker.dart b/packages/jet_cad_2d_kit/test/support/import_walker.dart
+new file mode 100644
+index 00000000..2ab2ea5a
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/support/import_walker.dart
+@@ -0,0 +1,78 @@
++// The import-graph walker of the purity test (spec K1): from entry files,
++// follows every relative and own-package import, export and part URI and
++// reports any URI outside an allow-list. An allow-list, not a deny-list:
++// a new dependency is impure until someone looks at it.
++import 'dart:io';
++
++/// The `dart:` libraries a pure file may import.
++const Set<String> allowedDartLibraries = {
++  'async',
++  'collection',
++  'convert',
++  'core',
++  'math',
++  'typed_data',
++};
++
++/// The packages (other than the walked one) a pure file may import.
++const Set<String> allowedPackages = {'jet_cad_2d', 'meta', 'vector_math'};
++
++/// What a walk saw: every package-relative file it read, and every URI
++/// outside the allow-lists as `<file>: <uri>`.
++final class ImportWalk {
++  ImportWalk(this.visited, this.violations);
++
++  final Set<String> visited;
++  final List<String> violations;
++}
++
++/// A directive and everything up to its `;` (conditional URIs included).
++final RegExp _directive =
++    RegExp(r'^\s*(?:import|export|part)\s+([^;]*);', multiLine: true);
++final RegExp _uri = RegExp(r'''['"]([^'"]+)['"]''');
++
++/// Walks the import graph of [packageName], rooted at [packageRoot], from
++/// [entries] (package-relative paths such as `lib/authoring.dart`).
++ImportWalk walkImports(
++    String packageRoot, String packageName, Iterable<String> entries) {
++  final visited = <String>{};
++  final violations = <String>[];
++  final queue = [...entries];
++  while (queue.isNotEmpty) {
++    final path = queue.removeLast();
++    if (!visited.add(path)) continue;
++    final text = File('$packageRoot/$path').readAsStringSync();
++    for (final directive in _directive.allMatches(text)) {
++      for (final match in _uri.allMatches(directive.group(1)!)) {
++        final uri = match.group(1)!;
++        if (uri.startsWith('dart:')) {
++          if (!allowedDartLibraries.contains(uri.substring(5))) {
++            violations.add('$path: $uri');
++          }
++        } else if (uri.startsWith('package:')) {
++          final slash = uri.indexOf('/');
++          final package = uri.substring('package:'.length, slash);
++          if (package == packageName) {
++            queue.add('lib/${uri.substring(slash + 1)}');
++          } else if (!allowedPackages.contains(package)) {
++            violations.add('$path: $uri');
++          }
++        } else {
++          queue.add(Uri.parse(path).resolve(uri).path);
++        }
++      }
++    }
++  }
++  return ImportWalk(visited, violations);
++}
++
++/// Every `.dart` file under [directory] (package-relative), sorted; empty
++/// when the directory does not exist.
++List<String> dartFilesUnder(String directory) {
++  final dir = Directory(directory);
++  if (!dir.existsSync()) return const [];
++  return [
++    for (final f in dir.listSync(recursive: true))
++      if (f is File && f.path.endsWith('.dart')) f.path,
++  ]..sort();
++}
+diff --git a/pubspec.yaml b/pubspec.yaml
+index ddb26e60..4a512b9c 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -1,18 +1,19 @@
+ name: jet_cad_workspace
+ publish_to: none
+ environment:
+   sdk: ^3.5.0
+ workspace:
+   - packages/jet_cad
+   - packages/jet_cad_2d
+   - packages/jet_cad_2d_flutter
+   - packages/jet_cad_2d_gpu
++  - packages/jet_cad_2d_kit
+   - apps/dev_harness
+   - apps/dev_harness_2d
+   - packages/jet_cad_floor_plan
+   - packages/jet_cad_restaurant_symbols
+   - apps/floor_planner
+   - apps/restaurant_demo
+   - tool/ci
+   - tool/screenshots
+   - tool/readme_probe

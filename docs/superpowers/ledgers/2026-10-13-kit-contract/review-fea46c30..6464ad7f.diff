@@ -1,0 +1,1454 @@
+# Review package: fea46c3..HEAD
+
+## Commits
+6464ad7f docs: the kit contract's results note says only what the record holds
+0dee1fb9 docs(spec): the kit contract's final-review amendments and sub-project 2's inputs
+4a2ce84f docs(kit): say what the conformance test checks today; the retired mark is sub-project 2's
+d0a4349a test(kit): every Dart block of docs/kits.md and the README is in example/
+096d1468 ci(kit): check every Dart file of a kit, picked by its pubspec name
+47af5452 test(kit): library FormatException is rule 2, a non-finite y, tool:sample
+6a270b51 fix(kit): buildLibraryDocument disposes its document when building throws
+6dbf4c0f feat(kit): refuse a zero-length polyline and an outline with no area
+f845bc71 test(kit): pin rule 15's radius and line tolerance boundaries
+
+## Files changed
+ docs/kits.md                                       |  36 +++--
+ .../notes/2026-10-13-kit-contract-results.md       |  99 +++++++++++--
+ .../specs/2026-10-13-kit-contract-design.md        |  68 ++++++++-
+ .../jet_cad_2d_kit/lib/src/authoring/builder.dart  |  91 ++++++------
+ .../jet_cad_2d_kit/lib/src/authoring/snapshot.dart |   7 +-
+ .../lib/src/model/symbol_library.dart              |  46 +++++-
+ .../test/authoring/builder_test.dart               |  22 +++
+ .../test/invariants/doc_snippets_test.dart         |  78 +++++++++++
+ .../jet_cad_2d_kit/test/kit/plan_kit_test.dart     |   2 +
+ .../test/model/symbol_library_test.dart            | 156 +++++++++++++++++++++
+ tool/ci/check_kit_deps.dart                        |  34 +++--
+ tool/ci/lib/kit_deps.dart                          |  31 +++-
+ tool/ci/test/kit_deps_test.dart                    |  64 ++++++++-
+ 13 files changed, 647 insertions(+), 87 deletions(-)
+
+## Diff
+diff --git a/docs/kits.md b/docs/kits.md
+index 91c1071a..3be23d9f 100644
+--- a/docs/kits.md
++++ b/docs/kits.md
+@@ -15,40 +15,45 @@ the plan library's sub-project and documented here then.
+ ```
+ jet_cad_2d               the engine
+ └─ jet_cad_2d_flutter    the Flutter layer
+    └─ jet_cad_2d_kit     the contract
+       ├─ jet_cad_2d_plan          the plan library
+       ├─ jet_cad_2d_kit_<domain>  a kit
+       └─ ...
+ ```
+ 
+ - A kit depends on `jet_cad_2d_kit`. **A kit never depends on
+-  `jet_cad_2d_plan` and never on another kit**, in its pubspec or in any
+-  import under `lib/`, `test/` or `tool/`. `tool/ci/check_kit_deps.dart`
+-  fails CI when one does. Kits cooperate only through the contract.
++  `jet_cad_2d_plan` and never on another kit**, in its pubspec or in an
++  import of any of its Dart files (`lib/`, `test/`, `tool/`, `example/` and
++  every other directory but `build/` and `.dart_tool/`).
++  `tool/ci/check_kit_deps.dart` fails CI when one does. Kits cooperate only
++  through the contract.
+ - `jet_cad_2d_kit/authoring.dart` is pure Dart: a kit's generator runs
+   under `dart run`.
+ 
+ ## 2. Names
+ 
+ | What | Rule | Example |
+ |---|---|---|
+ | Kit id | a lower-case letter, then lower-case letters and digits | `restaurant` |
+ | Kit package | `jet_cad_2d_kit_<kit id>` | `jet_cad_2d_kit_restaurant` |
+ | Symbol key | the kit id, then two or more segments of lower-case letters and digits joined by single hyphens | `restaurant.table.rect.four` |
+ | Symbol version | an integer from 1; `key@version` names one geometry | `restaurant.table.rect.four@1` |
+ | Type id, tool id | `<kit id>.<name>` | `architecture.wall` |
+ | Target kind, size family, unit kind | lower-case letters and digits joined by single hyphens | `wall-face`, `bed-double`, `table` |
+ | Contract component | `jetcad.<name>` | `jetcad.symbol` |
+ 
+-A kit's keys, types and tools all start with its own id; the conformance
+-test (§8) refuses one that does not.
++A kit's keys, types and tools all start with its own id. Today the
++conformance test (§8) refuses a key that does not; it checks type and tool
++ids when the code side arrives (the plan library's sub-project).
++`PlanKit.validate` (§6) already reports a word under another kit's id,
++`tool:` and `type:` words included.
+ 
+ ## 3. What a plan stores
+ 
+ | Component | On | Fields |
+ |---|---|---|
+ | `jetcad.symbol` (`SymbolComponent`) | a symbol's definition | `key`, `version`, `name` (English), `category` (English), `tags` (search words only, lower case, no duplicates), `attachTo` (target kinds, empty for none), `family` (a size family or null) |
+ | `jetcad.unit` (`UnitComponent`) | a service unit's definition | `kind` (`UnitKinds.table`, `UnitKinds.seat` or another kind), `capacity` (1 or more), `labelling` (`numbered`: the plan numbers it; `assigned`: a kit's type labels it) |
+ | `jetcad.library` (`LibraryComponent`) | a library's root | `kit`, `format` (1) |
+ | `jetcad.manifest` (`ManifestComponent`) | a plan's root | `format` (1), `kits` (kit id → the version that last saved the plan) |
+ 
+@@ -73,29 +78,32 @@ each definition's leaves. `SymbolLibrary.decode(bytes)` refuses, with a
+    component elsewhere, units other than millimetres;
+ 3. any node but the root (an instance, a group);
+ 4. a definition without `jetcad.symbol`, with children, external, or with
+    no leaf; a symbol component off a definition;
+ 5. a key that breaks §2, or that is not under the library's kit;
+ 6. a repeated `key@version` (the same key at two versions is fine);
+ 7. a definition not named `key@version`;
+ 8. a tag, target kind, family or unit kind that breaks §2 or §3;
+ 9. a unit in a size family;
+ 10. a unit component off a symbol's definition;
+-11. a unit whose first leaf is not closed (a closed polyline or a circle):
+-    a unit's first leaf is its outline, which service mode fills;
++11. a unit whose first leaf is not closed (a closed polyline or a circle),
++    or is a closed polyline enclosing no more area than the engine's
++    tolerance squared: a unit's first leaf is its outline, which service
++    mode fills;
+ 12. a non-finite base point;
+ 13. a leaf owned by anything but a definition; a text, fill, attribute or
+     point leaf;
+ 14. a leaf style other than layer 0, BYBLOCK linetype at scale 1, BYBLOCK
+     colour, lineweight and transparency, no flag, text style STANDARD;
+ 15. bad geometry: wrong counts, a non-finite value, a coordinate beyond
+-    1e6 mm, a zero-length line, a polyline under 2 points, a radius or a
++    1e6 mm, a zero-length line, a polyline under 2 points or whose points
++    all lie within the engine's tolerance of each other, a radius or a
+     sweep within the engine's tolerance of zero.
+ 
+ `SymbolLibrary.merge` joins libraries in order and refuses a `key@version`
+ in two of them.
+ 
+ ## 5. Words
+ 
+ `KitNames` holds a kit's words: one map per locale (a language code), from
+ a word id to the word.
+ 
+@@ -198,23 +206,24 @@ void main() {
+       : <String, String>{};
+   file.writeAsStringSync(encodeSnapshot(
+       updateSnapshot(committed, geometrySnapshot(buildCafeCatalog()))));
+ }
+ ```
+ 
+ ## 8. Keys, versions and the conformance test
+ 
+ - **A published `key@N` never changes its geometry or its unit.** A change
+   of either is a new `key@N+1`, beside the old one. A key is never removed
+-  and never reused: a retired symbol leaves the gallery but stays in the
+-  library. A plan never needs a library to draw: it copies every placed
+-  symbol's definition.
++  and never reused: a retired symbol stays in the library. Taking a retired
++  symbol out of the gallery is the plan library's sub-project: the contract
++  has no retired mark yet. A plan never needs a library to draw: it copies
++  every placed symbol's definition.
+ - **Names, categories, words and tags may change at any version**; they are
+   not geometry.
+ - **Semver at 0.x:** a new symbol, a new `@N`, words or tags is a patch; a
+   removed or renamed Dart name, a type's parameters changed or the kit id
+   changed is a minor (0.x+1.0).
+ 
+ A kit's test:
+ 
+ ```dart
+ import 'dart:io';
+@@ -252,13 +261,16 @@ the catalog lacks; a locale with words that is not declared.
+ 
+ 1. A package `packages/jet_cad_2d_kit_<id>` depending on `jet_cad_2d_kit`
+    (and nothing of the plan library or another kit).
+ 2. Its catalog (`lib/src/catalog.dart`), keys under its id.
+ 3. Its words (`KitNames`), English for everything without stored English,
+    each declared locale complete.
+ 4. Its generator (`tool/generate.dart`), run once: the `.jetlib` asset,
+    declared in its pubspec, and the snapshot under `test/`.
+ 5. Its source and descriptor (`PlanKit`), reading the asset with
+    `bundledLibrary`.
+-6. Its conformance test, expecting no problem.
++6. Its conformance test, expecting no problem, and a test that
++   `kit.validate()` is empty: a word under another kit's id or in no known
++   namespace, and a `tool:`, `type:` or `property:` word without English,
++   are caught only there.
+ 7. Its CI line, a demo and its README pictures (the plan library's
+    sub-projects describe these).
+diff --git a/docs/superpowers/notes/2026-10-13-kit-contract-results.md b/docs/superpowers/notes/2026-10-13-kit-contract-results.md
+index 06fcf172..5c10111c 100644
+--- a/docs/superpowers/notes/2026-10-13-kit-contract-results.md
++++ b/docs/superpowers/notes/2026-10-13-kit-contract-results.md
+@@ -73,23 +73,27 @@ Failing tests:
+ `flutter analyze`: `No issues found! (ran in 2.9s)`. Format: `Formatted 234 files (0 changed) in 0.47 seconds.`
+ 
+ `packages/jet_cad_2d_gpu`:
+ 
+ ```
+ 00:00 +20: All tests passed!
+ No issues found! (ran in 2.6s)
+ Formatted 10 files (0 changed) in 0.01 seconds.
+ ```
+ 
+-Both old-package failures are pre-existing and environmental (macOS); CI (Linux) is the arbiter.
++The two hash tests fail identically on the clean main checkout (ledger ruling after Task 1);
++the text-ladder goldens were reported pre-existing. CI is the arbiter.
+ No file of either package is touched by this branch (see the hand checks).
+ 
++Task 1's report also records one full `jet_cad_2d` run in which `query_allocation_test` failed;
++it passed alone (reported as flaky). The exit-gate run above does not show it.
++
+ ### 4. Publish dry run, `packages/jet_cad_2d_kit`
+ 
+ `dart pub publish --dry-run`: exit 0.
+ 
+ ```
+ Total compressed archive size: 52 KB.
+ Validating package...
+ The server may enforce additional checks.
+ 
+ Package has 0 warnings.
+@@ -105,23 +109,25 @@ The file list holds `CHANGELOG.md`, `LICENSE`, `README.md`, `analysis_options.ya
+ - `git status --short`: empty before and after every gate (also after the sample-kit regeneration).
+ - `git log --name-only main..HEAD | grep analysis_options`: only `packages/jet_cad_2d_kit/analysis_options.yaml`.
+ - `git diff --stat main...HEAD -- packages/jet_cad_floor_plan packages/jet_cad_restaurant_symbols packages/jet_cad_2d packages/jet_cad_2d_flutter packages/jet_cad_2d_gpu apps`: prints nothing.
+ - `grep -rn "dart:io" packages/jet_cad_2d_kit/lib`: matches only the comment line `// Pure Dart: no Flutter, no dart:io.` in 15 files; `grep -rn "import 'dart:io'" packages/jet_cad_2d_kit/lib` prints nothing. No import of `dart:io`.
+ - `grep -rln "package:flutter\|dart:ui"` over `lib/src/model`, `lib/src/authoring`, `lib/authoring.dart`: prints nothing.
+ - `grep -rn "jet_cad_2d_plan\|jet_cad_2d_kit_"` over the pubspec and `lib`: one line, the doc comment in `lib/src/kit/bundled_library.dart:4` (`packages/jet_cad_2d_kit_restaurant/assets/restaurant.jetlib`).
+ - `dart run test/fixtures/sample_kit/generate.dart` printed `sample kit: 4 symbols written`; `git diff --quiet -- test/fixtures/sample_kit/sample.jetlib test/fixtures/sample_kit/sample_snapshot.json` exited 0.
+ 
+ ## Mutations of Tasks 1-11
+ 
+-Each ran on a committed file and was reverted with `git checkout --`, `git diff --quiet` exit 0,
+-as recorded in the task reports (`.superpowers/sdd/2026-10-13-kit-contract/task-N-report.md`).
+-"Red" is the test or tests the report names.
++As the task reports record (`.superpowers/sdd/2026-10-13-kit-contract/task-N-report.md`), each
++ran on a committed file and was reverted with `git checkout --`. One exception, from the ledger:
++Task 9's session ended with a mutation (the `libraryKitMismatch` check deleted) still applied to
++the committed `conformance.dart`; the controller reverted it with `git checkout`, and the
++implementer resumed. "Red" is the test or tests the report names.
+ 
+ | ID | File | Change | Red |
+ |---|---|---|---|
+ | M-P1 | test probe | probe importing `flutter/foundation` | P1 |
+ | M-P2 | test/support/import_walker.dart | relative imports not followed | P2, P4 |
+ | M-P5 | import_walker.dart | first URI only | P5 |
+ | M-P3 | purity_test.dart | `io` allowed | P3 |
+ | M-I1 | kit_ids.dart | kit id pattern `[a-z0-9][a-z0-9]*` | I1 (I3) |
+ | M-I2 | kit_ids.dart | kind pattern `^[a-z0-9-]+$` | I2 |
+ | M-I3a | kit_ids.dart | key segments `{1,}` | I3 |
+@@ -191,22 +197,22 @@ as recorded in the task reports (`.superpowers/sdd/2026-10-13-kit-contract/task-
+ | M-F15 | conformance.dart | `lower(s, 'family', family)` deleted | F15 (shadowed by K2) |
+ | M-F19 | conformance.dart | first version wins | F19 |
+ | M-F19b | conformance.dart | `if (true)`, last version wins | F19, case `v2 first` |
+ | M-E1 | example/example.dart | `chairsAround ... 2` -> 3 | E1 |
+ | M-D1a, M-D1b | tool/ci/lib/kit_deps.dart | `startsWith('jet_cad_2d_')`; drop `&& dep != name` | D1 |
+ | M-D3 | kit_deps.dart | sections = `['dependencies']` | D3, D4 |
+ | M-D5 | kit_deps.dart | `firstMatch` per directive | D5 |
+ | M-D6 | kit_deps.dart | scan whole text | D6, D8 |
+ | M-D10 | kit_deps.dart | `'build'` added to script subdirectories | D10 |
+ 
+-Task 3 and Task 1 reports quote `[E]` markers rather than the full red lines; the ledger
+-records that as a process minor.
++The Task 3 report quotes `[E]` markers rather than the red lines; the ledger records that as a
++process minor.
+ 
+ ## Plan decisions
+ 
+ - A symbol key must also carry a kit id as first segment, not only match K2's regex.
+ - A tag must not have outer white space.
+ - `family` is always written (null when absent); every field is required by `fromJson`; an unknown field is ignored.
+ - `LibraryComponent`/`ManifestComponent` accept any format >= 1; the validator refuses a library format other than 1.
+ - A manifest's versions are only required non-empty; `kits` is stored sorted by kit id.
+ - `registerKitComponents` is one line over `registerKitComponentsWrapped`, so decoder and registry cannot drift.
+ - `SymbolLibraryError` carries the K3 rule number.
+@@ -217,26 +223,26 @@ records that as a process minor.
+ - `KitNames.merge` keeps the earlier kit's word on a shared id; `categoryName(locale, kit, category)` takes the kit id.
+ - A locale is a language code; no region fallback.
+ - `KitProblem`/`KitProblemCode` live in the model, shared by `PlanKit.validate` and `conformance`; tests assert codes.
+ - `bundledLibrary` resolves the bundle when the reader runs.
+ - `PlanKit.validate` also reports `unknownWordId` and `missingEnglish`.
+ - Catalog points are records `(double, double)`; `encodeLibrary` decodes its own output; `buildLibraryDocument` does not validate.
+ - Every shape helper cleans every coordinate; `cleanCoordinate` is public; `inset` takes the outline's corner.
+ - The snapshot is one `"key@N": {entry}` per line, keys sorted, canonical numbers; `parseSnapshot` compares canonical texts.
+ - `locales` lists non-English locales and `'en'` is an `ArgumentError`; undeclared locales with words are `localeUndeclared`; `sameAsEnglish` is per locale; a catalog key missing from the snapshot is `snapshotMissing`; a locale word is compared with the newest version's English; checks 3 and 6 end the check on a finding, and an unbuildable catalog is one `catalogInvalid`.
+ - The code shown in `docs/kits.md` and the README is analysed example code (`example/`), and a test runs it through encode, decode and conformance.
+-- `check_kit_deps.dart` picks packages by directory name, reads all three dependency sections and every `import`/`export`/`part` URI under `lib/`, `test/`, `tool/`; `--packages <dir>` points it elsewhere; `jet_cad_2d_kit` joins the `publishable` CI matrix.
++- `check_kit_deps.dart` picks packages by directory name, reads all three dependency sections and every `import`/`export`/`part` URI under `lib/`, `test/`, `tool/`; `--packages <dir>` points it elsewhere; `jet_cad_2d_kit` joins the `publishable` CI matrix. (The final fix wave widens it: every Dart file, packages by pubspec name.)
+ 
+ ## Rulings of the controller (ledger)
+ 
+ - Pre-flight F1-F13 (13 findings) taken as rulings; F1 later found wrong (`flutter/services.dart` provides `Uint8List`; the import was dropped in Task 6).
+-- The `jet_cad_2d` hash tests and the `jet_cad_2d_flutter` text-ladder goldens fail locally on the clean main checkout too: environmental, CI is the arbiter.
++- The `jet_cad_2d` hash tests fail identically on the clean main checkout (`1b4670b`): environmental, CI is the arbiter. The `jet_cad_2d_flutter` text-ladder goldens were reported pre-existing.
+ - Implementers write the commit trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` (the human's rule).
+ - Task 10: documentation snippets must be complete and analysed; they live in `example/` files that `flutter analyze` covers.
+ - Review rounds: Task 9 (F19 order-dependence, fixed in `5c29a55`), Task 10 (doc snippets, fixed in `3b19567`); every other task review clean.
+ 
+ ## Deferred minors (from the ledger, unfixed)
+ 
+ - T1: import walker: a `package:` URI without `/` throws `RangeError`; its directive regex is not comment-aware (fails closed).
+ - T2: no blank-category test (dropping `.trim()` survives); `UnitComponent.fromJson` missing-field messages unasserted and no mistyped-kind/unknown-field case; no test proves `authoring.dart` re-exports the model; tags admit interior tabs/newlines.
+ - T3: reports quote `[E]` markers, not red lines.
+ - T4: rule 15 tolerance boundaries unpinned (`<= 0` for radius, exact equality for a zero-length line survive); `_guarded` `jetcad.library` `FormatException` -> rule 2 untested and V12a only makes x non-finite; V6a also breaks rule 7; many refusal tests name no mutation; `model.dart` export order not alphabetical.
+@@ -251,10 +257,87 @@ records that as a process minor.
+ ## Spec gaps found while planning (all taken into the specs in `1525dfe`)
+ 
+ 1. K3 vs K2, rules 5 and 8: K2's constructors refuse a bad key, tag, target kind or family during decode, before any validator; Task 4 reads components through guarded factories that report them under rules 5 and 8.
+ 2. K3, millimetres: no rule refused other units; Task 4 refuses them under rule 2.
+ 3. K3 rule 14 vs today's allow-list: "by block" refuses the BYLAYER/CONTINUOUS values today's validator accepts (its L5); Task 4 follows K3 and inverts L5.
+ 4. K3, "naming both kits": a `key@version` can only repeat between two libraries of one kit; Task 5 names the libraries by position as well.
+ 5. K4: `category:<English category>` carried no kit id; amended to `category:<kit id>/<English category>`.
+ 6. Umbrella A2 vs K5: names live on `PlanKit`, not on `SymbolLibrarySource`; a `bundledLibrary(...)` call makes the descriptor non-`const`; `docs/kits.md` shows a `final` descriptor.
+ 7. K7 check 5: a locale's word is compared with the newest version's English.
+ 8. K3 rule 9 ambiguity: amended to a unit definition whose `SymbolComponent` has a `family`.
++
++## Final fix wave
++
++After the final review (`.superpowers/sdd/2026-10-13-kit-contract/final-review.md`) and its
++rulings (ledger, "Final review"). Commits on top of `fea46c3`:
++
++- `f845bc7` test: rule 15's radius and line tolerance boundaries (FR2, deferred T4).
++- `6dbf4c0` feat: rule 15 refuses a polyline whose points all lie within `Tolerance.standard.linear`
++  of each other; rule 11 refuses a unit outline polyline enclosing at most linear² (FR8).
++- `6a270b5` fix: `buildLibraryDocument` disposes its document when a payload throws after it
++  exists (FR9, deferred T7). B8 pins the path (an empty closed `CatalogPolyline` throws its
++  `StateError` through `buildLibraryDocument` and `encodeLibrary`); the disposal itself is not
++  observable from outside, since the document never reaches the caller.
++- `47af545` test: V2f (a `jetcad.library` `FormatException` is rule 2), V12b (a non-finite y),
++  K4 `tool:sample`; `parseSnapshot`'s doc says it normalises white space only (deferred T4, T6, T9).
++- `096d146` ci: `check_kit_deps` reads every Dart file of a package but `build/` and
++  `.dart_tool/`, and picks packages by pubspec name (FR6, deferred T11). D13-D16.
++- `d0a4349` test: every ```` ```dart ```` block of `docs/kits.md` (4) and the README (1) stands
++  verbatim, as a run of whole lines, in one `example/*.dart` file (FR7).
++- `4a2ce84` docs: `docs/kits.md` says the conformance test checks keys today, asks a kit to test
++  `kit.validate()` is empty, no longer promises a retired symbol leaves the gallery, and follows
++  FR6 and FR8 (FR4, FR5).
++- `0dee1fb` docs: the spec's "Amendments from the final review" and "Inputs for sub-project 2"
++  (R1-R6).
++
++Mutations, as `final-fix-report.md` records each: on a committed file, reverted with
++`git checkout --`, `git diff --quiet` exit 0.
++
++| ID | File | Change | Red |
++|---|---|---|---|
++| M-V15t | symbol_library.dart | radius `<= 0` | V15t, V15u, V15v, V15w |
++| M-V15u | symbol_library.dart | radius `< Tolerance.standard.linear` | V15v, V15w |
++| M-V15y | symbol_library.dart | line `pointAt(0) == pointAt(1)` | V15y |
++| M-V15aa | symbol_library.dart | polyline check `false &&`; points compared with `!=` | V15aa, V15ab; V15aa |
++| M-V15ac | symbol_library.dart | each point compared with the first only | V15ac |
++| M-V15ad | symbol_library.dart | the first two points only | V15ac, V15ad |
++| M-V11c | symbol_library.dart | area check `false &&` | V11c, V11d |
++| M-V11d | symbol_library.dart | `area == 0` | V11d |
++| M-V11e | symbol_library.dart | `area <= linear` | V11e |
++| M-V11f | symbol_library.dart | `.abs()` dropped | V11f |
++| M-V2f | symbol_library.dart | every `FormatException` rule 1 | V2f |
++| M-V12b | symbol_library.dart | `base.x` only | V12b |
++| M-K4c | plan_kit.dart | `!rest.contains('.')` dropped | K4 (`tool:sample`) |
++| M-D13 | tool/ci/lib/kit_deps.dart | `lib`/`test`/`tool` only | D13, D15 |
++| M-D15 | tool/ci/check_kit_deps.dart | top-level `lib`/`test`/`tool` only | D15 |
++| M-D16 | check_kit_deps.dart | packages by directory name | D16 |
++| M-D10 | kit_deps.dart | `build` not excluded | D10, D13 |
++| M-DOC1 | docs/kits.md; README.md | one character of a block | DOC1 (each document) |
++| M-DOC1e | example/example.dart | one character of the catalog | DOC1 (both documents) |
++
++Gates re-run after the fixes (last lines):
++
++```
++packages/jet_cad_2d_kit$ flutter test
++00:01 +246: All tests passed!
++packages/jet_cad_2d_kit$ flutter analyze
++No issues found! (ran in 2.3s)
++packages/jet_cad_2d_kit$ dart format --output=none --set-exit-if-changed .
++Formatted 48 files (0 changed) in 0.07 seconds.
++tool/ci$ dart test
++00:06 +110: All tests passed!
++$ dart run tool/ci/check_kit_deps.dart
++kit dependencies: 1 package(s) checked, none names the plan library or another kit
++packages/jet_cad_2d_kit$ dart pub publish --dry-run
++Total compressed archive size: 56 KB.
++Package has 0 warnings.
++packages/jet_cad_2d_kit$ dart run test/fixtures/sample_kit/generate.dart
++sample kit: 4 symbols written
++```
++
++`git diff --quiet` over the sample kit's two files exited 0, and `git status --short` was empty
++after every gate. The three CLAUDE.md gates show only the failures recorded above:
++`jet_cad_2d` `00:06 +1289 -2: Some tests failed.` (the two generate_document hash tests),
++`No issues found!`, `Formatted 177 files (0 changed)`; `jet_cad_2d_flutter`
++`00:23 +1450 ~1 -5: Some tests failed.` (text ladder rungs 1-5, `RenderBackend.canvas`),
++`No issues found! (ran in 3.6s)`, `Formatted 234 files (0 changed)`; `jet_cad_2d_gpu`
++`00:00 +20: All tests passed!`, `No issues found! (ran in 2.7s)`, `Formatted 10 files (0 changed)`.
+diff --git a/docs/superpowers/specs/2026-10-13-kit-contract-design.md b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+index cc7adc9d..9300a293 100644
+--- a/docs/superpowers/specs/2026-10-13-kit-contract-design.md
++++ b/docs/superpowers/specs/2026-10-13-kit-contract-design.md
+@@ -142,34 +142,38 @@ the same catalog gives the same bytes. **Decoding** is
+ 3. any node other than the root (an instance, a group);
+ 4. a definition without `SymbolComponent`; a definition with children;
+ 5. a key that breaks K2's pattern, or whose first segment is not the
+    library's `kit`;
+ 6. a repeated `key@version` (the same key at two versions is allowed);
+ 7. a `Definition.name` other than `key@version`;
+ 8. a tag, target kind or family that breaks K2;
+ 9. a unit definition (one carrying `UnitComponent`) whose `SymbolComponent`
+    has a `family`;
+ 10. a `UnitComponent` on a handle that is not a symbol definition;
+-11. a unit whose first leaf is not closed (a closed polyline or a circle):
+-    the first leaf of a unit is its outline, which service mode fills
+-    (today's S4, now a rule instead of a convention);
++11. a unit whose first leaf is not closed (a closed polyline or a circle),
++    or is a closed polyline enclosing an area at or under
++    `Tolerance.linear`² (amended by the final review): the first leaf of a
++    unit is its outline, which service mode fills (today's S4, now a rule
++    instead of a convention);
+ 12. a non-finite base point;
+ 13. a leaf owned by anything but a definition; a leaf of kind text, fill,
+     attribute or point;
+ 14. a leaf's style other than exactly what the builder writes: layer 0,
+     linetype, colour, lineweight and transparency by block, linetype scale 1,
+     flags 0 (by layer and CONTINUOUS, which today's validator accepts, are
+     refused: a library leaf takes its look from the instance, as an AutoCAD
+     block's does);
+ 15. bad geometry: wrong coordinate or scalar counts for the kind, a
+     non-finite value, a coordinate beyond `1e6`, a zero-length line, a
+-    polyline under 2 points, a radius or sweep at or under `Tolerance`.
++    polyline under 2 points or whose points all lie within `Tolerance.linear`
++    of each other (amended by the final review), a radius or sweep at or
++    under `Tolerance`.
+ 
+ What the validator does not check: names, categories and tags beyond K2's
+ patterns (the conformance test checks completeness, K7), and anything under
+ another component type (preserved and ignored, as the engine does).
+ 
+ **`SymbolLibrary`** (model) holds the kit id and its entries in definition
+ order; an entry carries its `SymbolComponent`, its `UnitComponent` or null,
+ its definition and its leaves. `SymbolLibrary.merge(List<SymbolLibrary>)`
+ concatenates in order and refuses a `key@version` in two libraries, naming
+ each library by its position and its kit.
+@@ -307,23 +311,24 @@ version rules and the semver steps (umbrella A16), the conformance test
+ (K7), and the new-kit checklist's symbol part. Sub-project 2 adds the code
+ side.
+ 
+ ## K9. CI
+ 
+ - A job for `packages/jet_cad_2d_kit`: `flutter test`, `flutter analyze`,
+   `dart format --output=none --set-exit-if-changed .`.
+ - **The dependency rule** (umbrella A1) as `tool/ci/check_kit_deps.dart`
+   with tests: `jet_cad_2d_kit` depends on neither `jet_cad_2d_plan` nor any
+   `jet_cad_2d_kit_*`; a `jet_cad_2d_kit_*` depends on no `jet_cad_2d_plan` and no other
+-  `jet_cad_2d_kit_*`, in its pubspec or in any import under `lib/`, `test/` or
+-  `tool/`. It passes vacuously for packages that do not exist yet and runs in
+-  the CI tools job.
++  `jet_cad_2d_kit_*`, in its pubspec or in an import of any of its Dart files
++  (every directory but `build/` and `.dart_tool/`; amended by the final
++  review, umbrella A1). It passes vacuously for packages that do not exist
++  yet and runs in the CI tools job.
+ 
+ ## Tests
+ 
+ Every test is worth landing only if a named mutation makes it go red
+ (CLAUDE.md). The plan names one per test. In outline:
+ 
+ - **Components:** constructor refusals per field and pattern; JSON key
+   order; `fromJson` refusals; a byte-identical round trip; equality over
+   every field (M: drop `attachTo` from `==`).
+ - **The validator:** one fault per rule of K3, each made by a one-edit change
+@@ -365,18 +370,67 @@ Every test is worth landing only if a named mutation makes it go red
+ From the plan's spec gaps 1-8: decode reads components through guarded
+ factories so a bad pattern reaches rule 5 or 8 rather than a codec error;
+ rule 2 covers units and a misplaced `LibraryComponent`; rule 9 and rule 14
+ are worded exactly; the merge error names libraries by position and kit; a
+ category's word id carries its kit id; K7.5 compares with the newest
+ version's English. The umbrella's A2 now matches K5 (words on the kit, a
+ `final` sketch).
+ 
+ `SymbolLibrary` holds `kits` (a list), since a merged library spans kits.
+ 
++## Amendments from the final review (2026-10-13)
++
++- **K3 rule 15** also refuses a polyline whose points all lie within
++  `Tolerance.linear` of each other: a zero-length polyline (a closed
++  polyline of one point among them).
++- **K3 rule 11** also refuses a unit whose outline is a closed polyline
++  enclosing an area at or under `Tolerance.linear`², in either winding:
++  service mode would fill nothing.
++- **K9** reads every Dart file of the contract and of a kit (every
++  directory but `build/` and `.dart_tool/`), picking packages by their
++  pubspec's name: umbrella A1 says "any of its Dart files", and the umbrella
++  wins.
++- `docs/kits.md` no longer says a retired symbol leaves the gallery: the
++  contract has no retired mark (R2 below).
++
++## Inputs for sub-project 2
++
++The final review's API risks, none needing a breaking change if settled in
++sub-project 2's spec before the wave publishes 0.1.0:
++
++- **R1 Per-unit data has no home.** `UnitComponent` sits on a definition;
++  umbrella A6's per-unit label (`assigned`, set by a kit's type) and number
++  (`numbered`) need an instance-level contract component, so
++  `registerKitComponents`' "the four and nothing else" changes. A parametric
++  unit (a booth with N seats) cannot carry a capacity on a definition's
++  handle.
++- **R2 Retirement.** A retired symbol leaving the gallery (umbrella A16)
++  needs a mark, likely an optional `retired` field in `jetcad.symbol` and
++  the catalog. Every `fromJson` requires every field today: a field added
++  later must be optional when read (absent reads as its default, here
++  `false`), or plans saved before it stop opening.
++- **R3 Conformance sees no types, tools or properties.** `conformance()` is
++  pure Dart and they live on the Flutter `PlanKit`; A16 requires their ids
++  and their English to be checked. Grow additive named parameters (ids and
++  words as strings) rather than moving the check into `PlanKit.validate`
++  alone.
++- **R4 `KitProblemCode` will grow** (types, tools, attachments). Each new
++  value after 0.1.0 breaks exhaustive switches: land sub-project 2's codes
++  before publishing.
++- **R5 Engine types in the public API.** `SymbolLeaf` exposes
++  `EntityRecord` and `GeometryPayload`, `SymbolEntry.definition` a
++  `Definition`: a breaking change of those in `jet_cad_2d` 0.x is one of the
++  contract and of every kit. K7.1's byte equality ties every kit's CI to the
++  codec's exact output: an engine release that changes `encodeToString`
++  turns every kit red until it regenerates. Document both in `docs/kits.md`.
++- **R6 Manifest versions are free strings** (`ManifestComponent`,
++  `PlanKit.version`). If sub-project 2 compares versions, it parses semver;
++  tightening the format later must not refuse manifests already stored.
++
+ ## Risks
+ 
+ - **The model fixed before its first real user.** Sub-project 2 may need a
+   field K2 lacks. Nothing is published until the wave, so K2 may still
+   change then; the change goes into this spec as an amendment.
+ - **The snapshot's canonical form** must not drift with formatting: it is
+   built from the catalog's numbers after the helpers' 1e-6 cleaning,
+   printed with Dart's shortest round-trip representation, keys sorted.
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart b/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart
+index 8e107dcc..90e8b325 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/builder.dart
+@@ -19,21 +19,22 @@ import '../model/register.dart';
+ import '../model/symbol_component.dart';
+ import '../model/symbol_library.dart';
+ import '../model/unit_component.dart';
+ import 'catalog.dart';
+ 
+ /// The library document of [catalog]. Deterministic: handles ascend in
+ /// catalog order (a definition, its leaves, the next definition). Every leaf
+ /// is on layer 0 with BYBLOCK linetype, colour, lineweight and transparency
+ /// and no flag (K3 rule 14). The caller disposes the document.
+ ///
+-/// Throws a component's [ArgumentError] for a value spec K2 refuses.
++/// Throws a component's [ArgumentError] for a value spec K2 refuses, and
++/// whatever a shape's payload throws (the document is then disposed).
+ DraftDocument buildLibraryDocument(Catalog catalog) {
+   // Every component is constructed, and so validated, before the document
+   // exists: a value K2 refuses throws here and leaves nothing to dispose.
+   final library = LibraryComponent(kit: catalog.kit);
+   final symbols = [
+     for (final s in catalog.symbols)
+       SymbolComponent(
+         key: s.key,
+         version: s.version,
+         name: s.name,
+@@ -45,62 +46,70 @@ DraftDocument buildLibraryDocument(Catalog catalog) {
+   ];
+   final units = [
+     for (final s in catalog.symbols)
+       if (s.unit case final unit?)
+         UnitComponent(
+             kind: unit.kind, capacity: unit.capacity, labelling: unit.labelling)
+       else
+         null,
+   ];
+   final doc = DraftDocument.empty();
+-  registerKitComponents(doc.components);
+-  doc.header.units = DrawingUnits.millimeters;
+-  final commands = <DraftCommand>[
+-    SetComponentCommand<LibraryComponent>(doc.rootHandle, library),
+-  ];
+-  for (var i = 0; i < catalog.symbols.length; i++) {
+-    final s = catalog.symbols[i];
+-    final def = doc.handleSeed.next();
+-    commands
+-      ..add(AddDefinitionCommand(Definition(
+-        handle: def,
+-        name: s.id,
+-        basePoint: Vector2(s.base.$1, s.base.$2),
+-        children: const [],
+-      )))
+-      ..add(SetComponentCommand<SymbolComponent>(def, symbols[i]));
+-    final unit = units[i];
+-    if (unit != null) {
+-      commands.add(SetComponentCommand<UnitComponent>(def, unit));
+-    }
+-    for (final shape in s.shapes) {
+-      commands.add(AddEntityCommand(
+-        record: EntityRecord(
+-          handle: doc.handleSeed.next(),
+-          owner: def,
+-          kind: _kindOf(shape),
+-          layer: ReservedHandles.layerZero,
+-          linetype: ReservedHandles.byBlockLinetype,
+-          linetypeScale: 1.0,
+-          geomIndex: 0,
+-          color: const ByBlockColor(),
+-          lineweight: kByBlock,
+-          transparency: kByBlock,
+-          flags: 0,
+-        ),
+-        payload: _payloadOf(shape),
+-      ));
++  // A payload can still throw once the document exists (an empty closed
++  // polyline has no first point): the document is disposed, the error
++  // goes on.
++  try {
++    registerKitComponents(doc.components);
++    doc.header.units = DrawingUnits.millimeters;
++    final commands = <DraftCommand>[
++      SetComponentCommand<LibraryComponent>(doc.rootHandle, library),
++    ];
++    for (var i = 0; i < catalog.symbols.length; i++) {
++      final s = catalog.symbols[i];
++      final def = doc.handleSeed.next();
++      commands
++        ..add(AddDefinitionCommand(Definition(
++          handle: def,
++          name: s.id,
++          basePoint: Vector2(s.base.$1, s.base.$2),
++          children: const [],
++        )))
++        ..add(SetComponentCommand<SymbolComponent>(def, symbols[i]));
++      final unit = units[i];
++      if (unit != null) {
++        commands.add(SetComponentCommand<UnitComponent>(def, unit));
++      }
++      for (final shape in s.shapes) {
++        commands.add(AddEntityCommand(
++          record: EntityRecord(
++            handle: doc.handleSeed.next(),
++            owner: def,
++            kind: _kindOf(shape),
++            layer: ReservedHandles.layerZero,
++            linetype: ReservedHandles.byBlockLinetype,
++            linetypeScale: 1.0,
++            geomIndex: 0,
++            color: const ByBlockColor(),
++            lineweight: kByBlock,
++            transparency: kByBlock,
++            flags: 0,
++          ),
++          payload: _payloadOf(shape),
++        ));
++      }
+     }
++    doc.commands.execute(CompoundCommand(commands, label: 'Symbol library'));
++    doc.commands.clearHistory();
++    return doc;
++  } catch (_) {
++    unawaited(doc.dispose());
++    rethrow;
+   }
+-  doc.commands.execute(CompoundCommand(commands, label: 'Symbol library'));
+-  doc.commands.clearHistory();
+-  return doc;
+ }
+ 
+ /// The `.jetlib` bytes of [catalog]: the codec's JSON of
+ /// [buildLibraryDocument], UTF-8. The same catalog gives the same bytes.
+ ///
+ /// Decodes its own output: throws the [SymbolLibraryError] of a catalog the
+ /// format refuses, so a generator never writes such a library.
+ Uint8List encodeLibrary(Catalog catalog) {
+   final doc = buildLibraryDocument(catalog);
+   try {
+diff --git a/packages/jet_cad_2d_kit/lib/src/authoring/snapshot.dart b/packages/jet_cad_2d_kit/lib/src/authoring/snapshot.dart
+index bfe2e904..e78ec3e9 100644
+--- a/packages/jet_cad_2d_kit/lib/src/authoring/snapshot.dart
++++ b/packages/jet_cad_2d_kit/lib/src/authoring/snapshot.dart
+@@ -51,22 +51,25 @@ Map<String, Object?> _shape(CatalogShape shape) => switch (shape) {
+           'start': _number(start),
+           'sweep': _number(sweep),
+         },
+     };
+ 
+ List<double> _point(CatalogPoint p) => [_number(p.$1), _number(p.$2)];
+ 
+ /// -0.0 is the same geometry as 0.0, and is written so.
+ double _number(double v) => v == 0 ? 0.0 : v;
+ 
+-/// A committed snapshot's text, each entry re-encoded canonically. Throws
+-/// [FormatException] when [text] is not a JSON object of objects.
++/// A committed snapshot's text, each entry re-encoded compactly. Only white
++/// space is normalised: key order and number spelling are kept, so an entry
++/// written by hand with `1` where [geometrySnapshot] writes `1.0` reads as
++/// changed (the comparison fails closed). Throws [FormatException] when
++/// [text] is not a JSON object of objects.
+ SplayTreeMap<String, String> parseSnapshot(String text) {
+   final Object? json = jsonDecode(text);
+   if (json is! Map<String, Object?>) {
+     throw const FormatException('a geometry snapshot is a JSON object');
+   }
+   final snapshot = SplayTreeMap<String, String>();
+   for (final MapEntry(:key, :value) in json.entries) {
+     if (value is! Map) {
+       throw FormatException('the snapshot entry "$key" is not an object');
+     }
+diff --git a/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart b/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart
+index 512e8dfa..d7752db5 100644
+--- a/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart
++++ b/packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart
+@@ -290,21 +290,22 @@ final class SymbolLibrary {
+               13,
+               '$who is a ${record.kind.name}: a symbol holds lines, '
+               'polylines, circles and arcs only');
+       }
+       _checkStyle(record, who);
+       final payload = doc.geometry.read(entities.geomIndexAt(slot));
+       _checkGeometry(record.kind, payload, who);
+       owned.add((record: record, payload: payload));
+     }
+ 
+-    // Rules 4 and 11, per definition: at least one leaf, a unit's outline.
++    // Rules 4 and 11, per definition: at least one leaf, a unit's outline
++    // (closed, and enclosing more than the tolerance squared).
+     final entries = <SymbolEntry>[];
+     for (final (definition, symbol, unit) in drafts) {
+       final who = 'definition ${definition.handle.toHex()} (${symbol.id})';
+       final leaves = leavesOf[definition.handle]!
+         ..sort(
+             (a, b) => a.record.handle.value.compareTo(b.record.handle.value));
+       if (leaves.isEmpty) {
+         throw SymbolLibraryError(4, '$who has no leaf');
+       }
+       if (unit != null) {
+@@ -312,20 +313,31 @@ final class SymbolLibrary {
+         final closed = first.record.kind == EntityKind.circle ||
+             (first.record.kind == EntityKind.polyline &&
+                 isClosedPolyline(first.payload));
+         if (!closed) {
+           throw SymbolLibraryError(
+               11,
+               '$who is a unit whose first leaf, '
+               '${first.record.handle.toHex()}, is not a closed polyline or a '
+               'circle');
+         }
++        // A circle's radius is already above the tolerance (rule 15).
++        if (first.record.kind == EntityKind.polyline) {
++          final area = _enclosedArea(first.payload);
++          final linear = Tolerance.standard.linear;
++          if (area <= linear * linear) {
++            throw SymbolLibraryError(
++                11,
++                '$who is a unit whose outline, '
++                '${first.record.handle.toHex()}, encloses no area ($area)');
++          }
++        }
+       }
+       entries.add(SymbolEntry(
+           symbol: symbol, unit: unit, definition: definition, leaves: leaves));
+     }
+     return SymbolLibrary._([library.kit], entries);
+   }
+ 
+   /// Rule 14: exactly the style the builder writes.
+   static void _checkStyle(EntityRecord r, String who) {
+     Never refuse(String what) => throw SymbolLibraryError(14, '$who $what');
+@@ -351,20 +363,46 @@ final class SymbolLibrary {
+       refuse('has flags ${r.flags}: a symbol is drawn and picked');
+     }
+     if (r.textStyle != ReservedHandles.standardTextStyle) {
+       refuse('has text style ${r.textStyle.toHex()}, not STANDARD');
+     }
+     if (r.text.isNotEmpty) refuse('carries text');
+     if (r.tag.isNotEmpty) refuse('carries a tag');
+     if (r.textAttrs != 0) refuse('has text attributes ${r.textAttrs}');
+   }
+ 
++  /// Rule 15's zero-length polyline: every two points of [p] within
++  /// [Tolerance.standard]'s linear tolerance of each other. Stops at the
++  /// first pair further apart, for a drawn polyline its first two points.
++  static bool _allWithinTolerance(GeometryPayload p) {
++    for (var i = 0; i < p.pointCount; i++) {
++      for (var j = i + 1; j < p.pointCount; j++) {
++        if (!isDegenerateSegment(p.pointAt(i), p.pointAt(j))) return false;
++      }
++    }
++    return true;
++  }
++
++  /// Rule 11: the area a closed polyline encloses, unsigned (either winding
++  /// is an outline). The shoelace formula, taken relative to the first
++  /// vertex so that coordinates far from the origin do not cancel.
++  static double _enclosedArea(GeometryPayload p) {
++    final c = p.coords;
++    final x0 = c[0], y0 = c[1];
++    var twice = 0.0;
++    for (var i = 1; i + 1 < p.pointCount; i++) {
++      twice += (c[i * 2] - x0) * (c[i * 2 + 3] - y0) -
++          (c[i * 2 + 2] - x0) * (c[i * 2 + 1] - y0);
++    }
++    return twice.abs() / 2;
++  }
++
+   /// Rule 15: counts, finiteness, bounds, degeneracy against [Tolerance].
+   static void _checkGeometry(EntityKind kind, GeometryPayload p, String who) {
+     final (int? coords, int scalars) = switch (kind) {
+       EntityKind.line => (4, 0),
+       EntityKind.circle => (2, 1),
+       EntityKind.arc => (2, 3),
+       _ => (null, 0), // a polyline: any even count, no scalar
+     };
+     if (p.coords.length.isOdd ||
+         (coords != null && p.coords.length != coords) ||
+@@ -390,20 +428,26 @@ final class SymbolLibrary {
+     switch (kind) {
+       case EntityKind.line:
+         if (isDegenerateSegment(p.pointAt(0), p.pointAt(1))) {
+           throw SymbolLibraryError(15, '$who is a zero-length line');
+         }
+       case EntityKind.polyline:
+         if (p.pointCount < 2) {
+           throw SymbolLibraryError(
+               15, '$who is a polyline of ${p.pointCount} vertices');
+         }
++        if (_allWithinTolerance(p)) {
++          throw SymbolLibraryError(
++              15,
++              '$who is a zero-length polyline: its points all lie within '
++              'the tolerance of each other');
++        }
+       case EntityKind.circle:
+       case EntityKind.arc:
+         if (p.scalars[0] <= Tolerance.standard.linear) {
+           throw SymbolLibraryError(15, '$who has radius ${p.scalars[0]}');
+         }
+         if (kind == EntityKind.arc &&
+             p.scalars[2].abs() <= Tolerance.standard.angular) {
+           throw SymbolLibraryError(15, '$who has a zero sweep');
+         }
+       default:
+diff --git a/packages/jet_cad_2d_kit/test/authoring/builder_test.dart b/packages/jet_cad_2d_kit/test/authoring/builder_test.dart
+index 452df548..b9d278a1 100644
+--- a/packages/jet_cad_2d_kit/test/authoring/builder_test.dart
++++ b/packages/jet_cad_2d_kit/test/authoring/builder_test.dart
+@@ -195,11 +195,33 @@ void main() {
+         throwsArgumentError);
+   });
+ 
+   test('B7 an empty catalog is a valid, empty library', () {
+     // Review Focus 4.
+     final library = SymbolLibrary.decode(
+         encodeLibrary(const Catalog(kit: 'sample', symbols: [])));
+     expect(library.kits, ['sample']);
+     expect(library.entries, isEmpty);
+   });
++
++  test('B8 a payload that throws once the document exists throws through', () {
++    // A premise check, exempt from the mutation rule: it pins that an empty
++    // closed polyline throws after buildLibraryDocument created its document
++    // (the path FR9's dispose-on-throw covers) and that the error reaches
++    // the caller unchanged. The disposal itself is not observable: the
++    // document never reaches the caller, and the engine keeps no registry of
++    // live documents.
++    const empty = CatalogSymbol(
++      key: 'sample.mark.empty',
++      name: 'Empty mark',
++      category: 'Marks',
++      base: (700, 300),
++      shapes: [
++        CatalogCircle((700, 300), 120),
++        CatalogPolyline([], closed: true),
++      ],
++    );
++    const throwing = Catalog(kit: 'sample', symbols: [empty]);
++    expect(() => buildLibraryDocument(throwing), throwsStateError);
++    expect(() => encodeLibrary(throwing), throwsStateError);
++  });
+ }
+diff --git a/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart b/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart
+new file mode 100644
+index 00000000..74328bec
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/invariants/doc_snippets_test.dart
+@@ -0,0 +1,78 @@
++// Spec K8: the Dart code docs/kits.md and the README show is analysed
++// example code. Every ```dart block of either document must stand verbatim
++// in one file under example/, so a change to one without the other is red.
++//
++// The rule, exactly: a block is the lines between a line that is exactly
++// "```dart" and the next line that is exactly "```". Each of its lines,
++// followed by a newline, must appear as one contiguous run of whole lines
++// (starting at the file's start or right after a newline) in one
++// example/*.dart file. Nothing is ignored or normalised inside the run:
++// lines of the file before or after it (such as an example file's leading
++// comment, which the documents omit) are simply outside the run.
++import 'dart:io';
++
++import 'package:flutter_test/flutter_test.dart';
++
++/// The ```dart blocks of [markdown], each as its lines joined by newlines,
++/// with a final newline.
++List<String> dartBlocks(String markdown) {
++  final blocks = <String>[];
++  List<String>? open;
++  for (final line in markdown.split('\n')) {
++    if (open == null) {
++      if (line == '```dart') open = [];
++    } else if (line == '```') {
++      blocks.add(open.map((l) => '$l\n').join());
++      open = null;
++    } else {
++      open.add(line);
++    }
++  }
++  expect(open, isNull, reason: 'a ```dart block is never closed');
++  return blocks;
++}
++
++/// Whether [block] is a run of whole lines of [file].
++bool holdsRun(String file, String block) {
++  for (var at = file.indexOf(block);
++      at >= 0;
++      at = file.indexOf(block, at + 1)) {
++    if (at == 0 || file[at - 1] == '\n') return true;
++  }
++  return false;
++}
++
++void main() {
++  final examples = {
++    for (final f in Directory('example')
++        .listSync(recursive: true)
++        .whereType<File>()
++        .where((f) => f.path.endsWith('.dart')))
++      f.path: f.readAsStringSync(),
++  };
++
++  // The number of blocks pins the parser to the documents: a parser that
++  // finds no block would pass every check below vacuously.
++  for (final (doc, count) in [('../../docs/kits.md', 4), ('README.md', 1)]) {
++    test('DOC1 every ```dart block of $doc is verbatim in example/', () {
++      final blocks = dartBlocks(File(doc).readAsStringSync());
++      expect(blocks, hasLength(count));
++      for (final block in blocks) {
++        // M-DOC1: change one character of a block in the document; M-DOC1e:
++        // change one character of the example file the block stands in.
++        expect(examples.values.any((file) => holdsRun(file, block)), isTrue,
++            reason: 'not in any of ${examples.keys}:\n$block');
++      }
++    });
++  }
++
++  test('DOC2 the run rule: whole lines, contiguous, verbatim', () {
++    // A premise check of holdsRun, exempt from the mutation rule.
++    const file = '// header\nfinal a = 1;\nfinal b = 2;\n';
++    expect(holdsRun(file, 'final a = 1;\nfinal b = 2;\n'), isTrue);
++    expect(holdsRun(file, '// header\nfinal a = 1;\n'), isTrue);
++    expect(holdsRun(file, 'a = 1;\n'), isFalse); // not a whole line
++    expect(holdsRun(file, 'final a = 1;\nfinal b = 3;\n'), isFalse);
++    expect(holdsRun(file, 'final a = 1;\n\nfinal b = 2;\n'), isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart b/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
+index d073416e..9f20eed4 100644
+--- a/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
++++ b/packages/jet_cad_2d_kit/test/kit/plan_kit_test.dart
+@@ -44,20 +44,22 @@ void main() {
+         [KitProblemCode.emptyVersion]);
+   });
+ 
+   test("K4 a word id under another kit's id, in every namespace", () {
+     for (final id in [
+       'symbol:other.table.round',
+       'tool:other.wall',
+       'type:other.wall',
+       'property:other.wall.height',
+       'tool:wall', // no kit segment at all
++      // The kit's own id with no name. M-K4c: drop `!rest.contains('.')`.
++      'tool:sample',
+       'category:other/Tables', // M-K4b: categories exempt from the check
+       'category:Tables', // no kit at all
+     ]) {
+       final kit = PlanKit(
+           id: 'sample',
+           version: '0.1.0',
+           names: KitNames({
+             'en': {id: 'x'},
+           }));
+       // M-K4: check the symbol namespace only.
+diff --git a/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart b/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
+index b8719719..54da6bd9 100644
+--- a/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
++++ b/packages/jet_cad_2d_kit/test/model/symbol_library_test.dart
+@@ -222,20 +222,29 @@ void main() {
+       (j['header']! as Map)['units'] = 'inches';
+       expectRefused(bytesOfJson(j), 2, ['inches']);
+     });
+ 
+     test('V2e a library component on a definition as well', () {
+       final j = validLibraryJson();
+       componentsJson(j, LibraryComponent.componentTypeId)['${sofaDef.value}'] =
+           {'format': 1, 'kit': 'sample'};
+       expectRefused(bytesOfJson(j), 2, [hex(sofaDef.value), 'not the root']);
+     });
++
++    test('V2f a library component with a mistyped field', () {
++      // fromJson's FormatException, not a constructor's ArgumentError.
++      // M-V2f: map every FormatException to rule 1.
++      final j = validLibraryJson();
++      componentJson(j, LibraryComponent.componentTypeId, j['root']! as int)[
++          'format'] = '1';
++      expectRefused(bytesOfJson(j), 2, ['jetcad.library', '"format"']);
++    });
+   });
+ 
+   group('rule 3: nodes', () {
+     test('V3a an instance (ported R06)', () {
+       final j = validLibraryJson();
+       (j['nodes']! as List).add(instanceNodeJson(
+           handle: 5000, parent: j['root']! as int, definition: sofaDef.value));
+       expectRefused(bytesOfJson(j), 3, ['instance ${hex(5000)}']);
+     });
+ 
+@@ -428,29 +437,79 @@ void main() {
+     test('V11b a unit whose first leaf is a line', () {
+       final j = validLibraryJson();
+       final units = componentsJson(j, UnitComponent.componentTypeId);
+       units['${sofaDef.value}'] = units.remove('${tableDef.value}');
+       componentJson(
+           j, SymbolComponent.componentTypeId, sofaDef.value)['family'] = null;
+       // Two edits: the sofa's family would be rule 9. M-V11b: take the last
+       // leaf instead of the first.
+       expectRefused(bytesOfJson(j), 11, ['sample.sofa.three@3', hex(sofaLine)]);
+     });
++
++    // Amended by the final review: an outline must enclose more than
++    // Tolerance.standard.linear squared, either winding.
++    void outline(String name, List<double> coords, List<String> parts) {
++      test(name, () {
++        final j = validLibraryJson();
++        geometryJson(j, tableTop)['coords'] = coords;
++        expectRefused(bytesOfJson(j), 11,
++            ['sample.table.high-top@2', hex(tableTop), ...parts]);
++      });
++    }
++
++    // M-V11c: drop the area check.
++    outline(
++        'V11c a closed outline on one diagonal, off the origin',
++        [950.0, 560.0, 1250.0, 860.0, 1550.0, 1160.0, 950.0, 560.0],
++        ['encloses no area (0.0)']);
++    // Area 5e-19, under linear² (1e-18), and not zero: near the origin, the
++    // only place a double can hold so thin a triangle. M-V11d: `area == 0`.
++    outline(
++        'V11d an outline of area linear² / 2',
++        [1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 1e-15, 1e-3, 2e-3],
++        ['encloses no area']);
++    test('V11e an outline of area 2 * linear² loads', () {
++      // Positive control. M-V11e: `area <= linear` (not squared).
++      final j = validLibraryJson();
++      geometryJson(j, tableTop)['coords'] = [
++        1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 4e-15, 1e-3, 2e-3, //
++      ];
++      final lib = SymbolLibrary.decode(bytesOfJson(j));
++      expect(lib.entries[1].leaves.first.payload.coords[5], 2e-3 + 4e-15);
++    });
++    test('V11f a clockwise outline loads', () {
++      // The table's top, its winding reversed. M-V11f: drop `.abs()`.
++      final j = validLibraryJson();
++      geometryJson(j, tableTop)['coords'] = [
++        950.0, 560.0, 950.0, 1160.0, 1550.0, 1160.0, 1550.0, 560.0, //
++        950.0, 560.0,
++      ];
++      final lib = SymbolLibrary.decode(bytesOfJson(j));
++      expect(lib.entries[1].leaves.first.payload.coords[3], 1160.0);
++    });
+   });
+ 
+   group('rule 12: the base point', () {
+     test('V12a a non-finite base point (ported R05)', () {
+       final j = validLibraryJson();
+       definitionJson(j, tableDef.value)['basePoint'] = [kSentinel, 860.0];
+       expectRefused(bytesOfJson(j, text: kInfinity), 12,
+           ['sample.table.high-top@2', 'non-finite base point']);
+     });
++
++    test('V12b a base point whose y is non-finite', () {
++      // M-V12b: check `base.x` only.
++      final j = validLibraryJson();
++      definitionJson(j, tableDef.value)['basePoint'] = [1250.0, kSentinel];
++      expectRefused(bytesOfJson(j, text: kInfinity), 12,
++          ['sample.table.high-top@2', 'non-finite base point']);
++    });
+   });
+ 
+   group('rule 13: leaves', () {
+     test('V13a owned by the root (ported R09)', () {
+       final j = validLibraryJson();
+       recordJson(j, sofaLine)['owner'] = j['root'];
+       expectRefused(bytesOfJson(j), 13, [hex(sofaLine), 'not a definition']);
+     });
+ 
+     test('V13b owned by a handle that names nothing', () {
+@@ -572,12 +631,109 @@ void main() {
+     for (final sweep in [2 * Tolerance.standard.angular, -2e-9]) {
+       test('V15s a sweep of $sweep, just above the tolerance, loads', () {
+         final j = validLibraryJson();
+         geometryJson(j, sofaArc)['scalars'] = [250.0, 0.5, sweep];
+         final lib = SymbolLibrary.decode(bytesOfJson(j));
+         final arc = lib.entries.first.leaves
+             .firstWhere((l) => l.record.kind == EntityKind.arc);
+         expect(arc.payload.scalars[2], sweep);
+       });
+     }
++
++    // The radius decision is Tolerance.standard.linear (1e-9), "at or
++    // under". M-V15t: `radius <= 0` turns V15t and V15u red; M-V15u:
++    // `radius < Tolerance.standard.linear` turns V15v and V15w red.
++    final linear = Tolerance.standard.linear;
++    geometry('V15t a circle of radius linear/2', sofaCircle,
++        (g) => g['scalars'] = [linear / 2], ['radius ${linear / 2}']);
++    geometry(
++        'V15u an arc of radius linear/2',
++        sofaArc,
++        (g) => g['scalars'] = [linear / 2, 0.5, 1.75],
++        ['radius ${linear / 2}']);
++    geometry('V15v a circle of radius exactly linear', sofaCircle,
++        (g) => g['scalars'] = [linear], ['radius $linear']);
++    geometry('V15w an arc of radius exactly linear', sofaArc,
++        (g) => g['scalars'] = [linear, 0.5, 1.75], ['radius $linear']);
++    test('V15x a radius just above linear loads, circle and arc', () {
++      // Positive control: the radius rule is not over-strict.
++      final j = validLibraryJson();
++      geometryJson(j, sofaCircle)['scalars'] = [2 * linear];
++      geometryJson(j, sofaArc)['scalars'] = [2 * linear, 0.5, 1.75];
++      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
++      double radiusOf(EntityKind kind) => sofa.leaves
++          .firstWhere((l) => l.record.kind == kind)
++          .payload
++          .scalars[0];
++      expect(radiusOf(EntityKind.circle), 2 * linear);
++      expect(radiusOf(EntityKind.arc), 2 * linear);
++    });
++
++    // The zero-length decision is isDegenerateSegment (distance at or under
++    // Tolerance.standard.linear), off the origin. M-V15y: `from == to`
++    // (exact equality) turns V15y red.
++    geometry(
++        'V15y a line linear/2 long',
++        sofaLine,
++        (g) => g['coords'] = [120.0, 340.0, 120.0 + linear / 2, 340.0],
++        ['zero-length']);
++    // Amended by the final review: a polyline whose points all lie within
++    // Tolerance.standard.linear of each other is a zero-length polyline.
++    // M-V15aa: drop the check (V15aa, V15ab red); exact equality of the
++    // points (V15aa red).
++    geometry(
++        'V15aa a polyline of three points within linear of each other',
++        sofaPolyline,
++        (g) => g['coords'] = [
++              120.0, 340.0, 120.0 + linear / 2, 340.0, //
++              120.0, 340.0 + linear / 2,
++            ],
++        ['zero-length polyline']);
++    geometry('V15ab a closed polyline of one point', sofaPolyline,
++        (g) => g['coords'] = [120.0, 340.0, 120.0, 340.0], ['zero-length']);
++    test('V15ac points within linear of the first, not of each other, load',
++        () {
++      // Positive control, "of each other": the outer two are 1.8e-9 apart.
++      // M-V15ac: compare every point with the first only.
++      final j = validLibraryJson();
++      geometryJson(j, sofaPolyline)['coords'] = [
++        120.0, 340.0, 120.0 - 0.9 * linear, 340.0, //
++        120.0 + 0.9 * linear, 340.0,
++      ];
++      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
++      expect(
++          sofa.leaves
++              .firstWhere((l) => l.record.kind == EntityKind.polyline)
++              .payload
++              .pointCount,
++          3);
++    });
++    test('V15ad a polyline whose first two points coincide loads', () {
++      // Positive control. M-V15ad: test the first two points only.
++      final j = validLibraryJson();
++      geometryJson(j, sofaPolyline)['coords'] = [
++        120.0, 340.0, 120.0, 340.0, 400.0, 950.0, //
++      ];
++      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
++      expect(
++          sofa.leaves
++              .firstWhere((l) => l.record.kind == EntityKind.polyline)
++              .payload
++              .coords[4],
++          400.0);
++    });
++    test('V15z a line 2 * linear long loads', () {
++      // Positive control: the line rule is not over-strict.
++      final j = validLibraryJson();
++      geometryJson(j, sofaLine)['coords'] = [
++        120.0,
++        340.0,
++        120.0,
++        340.0 + 2 * linear
++      ];
++      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
++      final line =
++          sofa.leaves.firstWhere((l) => l.record.kind == EntityKind.line);
++      expect(line.payload.coords[3], 340.0 + 2 * linear);
++    });
+   });
+ }
+diff --git a/tool/ci/check_kit_deps.dart b/tool/ci/check_kit_deps.dart
+index 5fdeeb70..1cc650b8 100644
+--- a/tool/ci/check_kit_deps.dart
++++ b/tool/ci/check_kit_deps.dart
+@@ -1,13 +1,14 @@
+ // Umbrella A1, spec K9: fails when the kit contract or a kit names the plan
+-// library or another kit, in its pubspec or in an import under lib/, test/
+-// or tool/. Passes vacuously for packages that do not exist yet.
++// library or another kit, in its pubspec or in an import of any of its Dart
++// files (every directory but build/ and .dart_tool/). Packages are picked by
++// their pubspec's name. Passes vacuously for packages that do not exist yet.
+ //
+ //   dart run tool/ci/check_kit_deps.dart [--packages <dir>]
+ import 'dart:io';
+ 
+ import 'lib/kit_deps.dart';
+ 
+ void main(List<String> args) {
+   final repo = File.fromUri(Platform.script).parent.parent.parent.path;
+   var root = '$repo/packages';
+   if (args.length == 2 && args[0] == '--packages') {
+@@ -16,36 +17,43 @@ void main(List<String> args) {
+     stderr.writeln('usage: check_kit_deps.dart [--packages <dir>]');
+     exit(2);
+   }
+   final dir = Directory(root);
+   final candidates = dir.existsSync()
+       ? (dir.listSync().whereType<Directory>().toList()
+         ..sort((a, b) => a.path.compareTo(b.path)))
+       : <Directory>[];
+   final packages = <PackageSource>[];
+   for (final d in candidates) {
+-    final name = d.uri.pathSegments.lastWhere((s) => s.isNotEmpty);
+-    if (name != contractPackage && !isKitPackage(name)) continue;
+     final pubspec = File('${d.path}/pubspec.yaml');
+     if (!pubspec.existsSync()) continue;
++    final text = pubspec.readAsStringSync();
++    final name = packageName(text);
++    // An unreadable pubspec is checked, so that kitDepsProblems reports it.
++    if (name != null && name != contractPackage && !isKitPackage(name)) {
++      continue;
++    }
+     final files = <String, String>{};
+-    for (final sub in const ['lib', 'test', 'tool']) {
+-      final subDir = Directory('${d.path}/$sub');
+-      if (!subDir.existsSync()) continue;
+-      for (final f in subDir.listSync(recursive: true).whereType<File>()) {
+-        if (f.path.endsWith('.dart')) {
+-          files[f.path.substring(d.path.length + 1)] = f.readAsStringSync();
+-        }
++    for (final entry in d.listSync()) {
++      final top = entry.path.substring(d.path.length + 1);
++      if (entry is Directory && generatedDirectories.contains(top)) continue;
++      final found = switch (entry) {
++        Directory() => entry.listSync(recursive: true).whereType<File>(),
++        File() => [entry],
++        _ => const <File>[],
++      };
++      for (final f in found) {
++        final path = f.path.substring(d.path.length + 1);
++        if (isPackageDartFile(path)) files[path] = f.readAsStringSync();
+       }
+     }
+-    packages.add(
+-        PackageSource(pubspec: pubspec.readAsStringSync(), dartFiles: files));
++    packages.add(PackageSource(pubspec: text, dartFiles: files));
+   }
+   final problems = kitDepsProblems(packages);
+   if (problems.isEmpty) {
+     stdout.writeln('kit dependencies: ${packages.length} package(s) checked, '
+         'none names the plan library or another kit');
+     return;
+   }
+   problems.forEach(stderr.writeln);
+   exit(1);
+ }
+diff --git a/tool/ci/lib/kit_deps.dart b/tool/ci/lib/kit_deps.dart
+index 19b27a18..9ed55d0f 100644
+--- a/tool/ci/lib/kit_deps.dart
++++ b/tool/ci/lib/kit_deps.dart
+@@ -5,29 +5,56 @@
+ import 'package:yaml/yaml.dart';
+ 
+ const String contractPackage = 'jet_cad_2d_kit';
+ const String planPackage = 'jet_cad_2d_plan';
+ 
+ final RegExp _kit = RegExp(r'^jet_cad_2d_kit_[a-z0-9_]+$');
+ 
+ /// Whether [name] is a kit's package (not the contract's).
+ bool isKitPackage(String name) => _kit.hasMatch(name);
+ 
+-/// A package as the check reads it: its pubspec's text and its Dart files
+-/// under lib/, test/ and tool/ (package-relative path → text).
++/// A package as the check reads it: its pubspec's text and every Dart file
++/// of the package (package-relative path → text; see [isPackageDartFile]).
+ final class PackageSource {
+   const PackageSource({required this.pubspec, required this.dartFiles});
+ 
+   final String pubspec;
+   final Map<String, String> dartFiles;
+ }
+ 
++/// The top-level directories of a package that hold generated output, not
++/// the package's own code: the check does not read them.
++const Set<String> generatedDirectories = {'build', '.dart_tool'};
++
++/// Whether the package-relative [path] (`/`-separated) is one of the
++/// package's Dart files: any `.dart` file in any directory (`lib/`, `test/`,
++/// `tool/`, `example/`, `bin/`, the root, ...) except under
++/// [generatedDirectories]. Umbrella A1: "any of its Dart files".
++bool isPackageDartFile(String path) =>
++    path.endsWith('.dart') &&
++    !generatedDirectories.contains(path.split('/').first);
++
++/// The `name` of [pubspec], or null when it is not YAML, not a map or has
++/// no string name. The script picks the packages it checks by this name,
++/// not by their directory's.
++String? packageName(String pubspec) {
++  final Object? doc;
++  try {
++    doc = loadYaml(pubspec);
++  } on YamlException {
++    return null;
++  }
++  if (doc is! Map) return null;
++  final name = doc['name'];
++  return name is String ? name : null;
++}
++
+ /// A directive and everything up to its `;` (conditional URIs included).
+ final RegExp _directive =
+     RegExp(r'^\s*(?:import|export|part)\s+([^;]*);', multiLine: true);
+ final RegExp _package = RegExp(r'''['"]package:([a-z0-9_]+)/''');
+ 
+ /// The packages [dart]'s import, export and part directives name.
+ Set<String> importedPackages(String dart) => {
+       for (final directive in _directive.allMatches(dart))
+         for (final uri in _package.allMatches(directive.group(1)!))
+           uri.group(1)!,
+diff --git a/tool/ci/test/kit_deps_test.dart b/tool/ci/test/kit_deps_test.dart
+index ab679cc7..fdffddd6 100644
+--- a/tool/ci/test/kit_deps_test.dart
++++ b/tool/ci/test/kit_deps_test.dart
+@@ -1,13 +1,14 @@
+ // Umbrella A1, spec K9: the contract depends on neither the plan library
+ // nor a kit; a kit depends on neither the plan library nor another kit, in
+-// its pubspec or in any import under lib/, test/ or tool/.
++// its pubspec or in an import of any of its Dart files (every directory but
++// build/ and .dart_tool/).
+ import 'dart:io';
+ 
+ import 'package:jet_cad_ci/kit_deps.dart';
+ import 'package:test/test.dart';
+ 
+ String pubspec(String name,
+     {List<String> dependencies = const [],
+     List<String> devDependencies = const [],
+     List<String> overrides = const []}) {
+   final lines = ['name: $name'];
+@@ -147,20 +148,48 @@ void main() {
+           kitDepsProblems([
+             package('jet_cad_2d_plan', dependencies: ['jet_cad_2d_kit_cinema']),
+             package('jet_cad_2d_kitchen', dependencies: ['jet_cad_2d_plan']),
+           ]),
+           isEmpty);
+       expect(isKitPackage('jet_cad_2d_kit_restaurant'), isTrue);
+       expect(isKitPackage('jet_cad_2d_kit'), isFalse);
+       expect(isKitPackage('jet_cad_2d_kitchen'), isFalse);
+     });
+ 
++    test('D13 every Dart file of a package but generated output', () {
++      // M-D13: only lib/, test/ and tool/ (`['lib', 'test', 'tool']
++      // .contains(path.split('/').first)`).
++      for (final path in [
++        'example/main.dart',
++        'bin/generate.dart',
++        'main.dart',
++        'lib/src/build/a.dart',
++      ]) {
++        expect(isPackageDartFile(path), isTrue, reason: path);
++      }
++      for (final path in [
++        'build/a.dart',
++        '.dart_tool/b.dart',
++        'example/README.md',
++      ]) {
++        expect(isPackageDartFile(path), isFalse, reason: path);
++      }
++    });
++
++    test('D14 packageName reads the pubspec, null when it cannot', () {
++      expect(packageName(pubspec('jet_cad_2d_kit_cinema')),
++          'jet_cad_2d_kit_cinema');
++      expect(packageName('- a list\n'), isNull);
++      expect(packageName('name: [1]\n'), isNull);
++      expect(packageName('name: {\n'), isNull);
++    });
++
+     test('D8 importedPackages reads directives only', () {
+       expect(
+           importedPackages("import 'package:a_b/x.dart';\n"
+               "export \"package:c/y.dart\" show Y;\n"
+               "part 'z.dart';\n"
+               "import 'dart:io';\n"
+               "// import 'package:d/z.dart';\n"),
+           {'a_b', 'c'});
+     });
+   });
+@@ -190,20 +219,53 @@ void main() {
+           "import 'package:jet_cad_2d_plan/x.dart';\n");
+       final r = await check(['--packages', tmp.path]);
+       expect(r.exitCode, 1);
+       expect(
+           r.stderr,
+           allOf(contains('pubspec dependencies names jet_cad_2d_plan'),
+               contains('test/a_test.dart imports jet_cad_2d_kit_restaurant')));
+       expect(r.stderr, isNot(contains('build/')));
+     });
+ 
++    test("D15 a kit's example/ and root files are read; .dart_tool is not",
++        () async {
++      // M-D15: the script reads lib/, test/ and tool/ only.
++      write('jet_cad_2d_kit_cinema/pubspec.yaml',
++          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_kit']));
++      write('jet_cad_2d_kit_cinema/example/main.dart',
++          "import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';\n");
++      write('jet_cad_2d_kit_cinema/bin/demo.dart',
++          "import 'package:jet_cad_2d_kit_restaurant/x.dart';\n");
++      write('jet_cad_2d_kit_cinema/.dart_tool/gen.dart',
++          "import 'package:jet_cad_2d_plan/x.dart';\n");
++      final r = await check(['--packages', tmp.path]);
++      expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
++      expect(
++          r.stderr,
++          allOf(contains('example/main.dart imports jet_cad_2d_plan'),
++              contains('bin/demo.dart imports jet_cad_2d_kit_restaurant')));
++      expect(r.stderr, isNot(contains('.dart_tool')));
++    });
++
++    test('D16 a package is picked by its pubspec name, not its directory',
++        () async {
++      // M-D16: pick by directory name again.
++      write('cinema/pubspec.yaml',
++          pubspec('jet_cad_2d_kit_cinema', dependencies: ['jet_cad_2d_plan']));
++      final r = await check(['--packages', tmp.path]);
++      expect(r.exitCode, 1, reason: '${r.stdout}${r.stderr}');
++      expect(
++          r.stderr,
++          contains('jet_cad_2d_kit_cinema: pubspec dependencies names '
++              'jet_cad_2d_plan'));
++    });
++
+     test('D11 no kit yet: the rule holds vacuously', () async {
+       write('jet_cad_2d/pubspec.yaml', pubspec('jet_cad_2d'));
+       final r = await check(['--packages', tmp.path]);
+       expect(r.exitCode, 0);
+       expect(r.stdout, contains('0 package(s) checked'));
+       final missing = await check(['--packages', '${tmp.path}/none']);
+       expect(missing.exitCode, 0);
+     });
+ 
+     test('D12 bad usage: exit 2', () async {
