@@ -531,9 +531,11 @@ package, in this order:
    `restaurant_names.dart` and its pubspec declares
    `assets/restaurant.jetlib`; both are git-ignored files that only
    `host_probe.sh` creates, from the overridden package, so put them in
-   by hand first (all paths below exist on `main`):
+   by hand first (the sources exist on `main`; `assets/` does not, as git
+   tracks no empty directory):
 
    ```bash
+   mkdir -p tool/ci/host_probe/assets
    cp packages/jet_cad_restaurant_symbols/assets/restaurant.jetlib tool/ci/host_probe/assets/restaurant.jetlib
    cp packages/jet_cad_restaurant_symbols/lib/src/names.dart tool/ci/host_probe/lib/restaurant_names.dart
    ```

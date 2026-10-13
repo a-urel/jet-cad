@@ -386,15 +386,33 @@ when it returns.
 ## Final review
 
 An Opus subagent (no Codex) reviewed `git diff main..c660947`. Verdict:
-**With fixes**; 0 Critical. What the ledger records of its independent
-measurement: it verified by reading `symbol_sources.dart` that the names
-file's import is a public library exporting `SymbolNames` (R-12); the
-full report is not in the ledger, so nothing more is claimed here. Two
-Important findings and eight Minors; the fix wave (BASE `c660947`) applied F1-F9:
+**With fixes**; 0 Critical. Its report is archived with the ledger
+(`final-review.md`). It measured, in a throwaway worktree at `c660947`:
+
+- the dry runs: `jet_cad_2d_flutter` 226 KB and `jet_cad_floor_plan`
+  462 KB, both exit 0 with 0 warnings;
+- the archive listings: the renderer's has no `test/`, `build/` or
+  `shaders/`; the planner's has `furniture.jetlib`, `Roboto-Regular.ttf`
+  and `Roboto_LICENSE.txt`, and no `test/`, `tool/` or `build/`;
+- every README snippet and name, analysed against its barrel, clean;
+- `names.dart` (then after the sed rewrite) analysed clean against the
+  planner's barrel, and `symbol_sources.dart` exports `SymbolNames`
+  (R-12);
+- an analyzer-based API audit of the host barrels: nothing in the
+  renderer; in the planner, `SymbolLibraryState` and
+  `TableNumberProblem`, plus `ExportChoice` and `ExportFontCache`, which
+  are reached only through `@internal` members;
+- the only non-comment `lib/` change in either package since v0.7.0:
+  `editor.dart`'s `hide readBundledLibrary`;
+- the engine at `c660947`, which differs from `1dc167d` only in its README;
+- `tool/ci` `dart test` +77 and `check_guide` 56 blocks;
+- that `a-urel/jet-cad` is public.
+
+Two Important findings and eight Minors; the fix wave (BASE `c660947`) applied F1-F9:
 
 | Item | Finding | What changed |
 |---|---|---|
-| F1 | STATUS "Resume here", the D7 step, could not work: the probe's `main.dart` imports `restaurant_names.dart` and its pubspec declares `assets/restaurant.jetlib`, both git-ignored files only `host_probe.sh` creates from the overridden package | `STATUS.md` spells out the human's commands: two `cp`, a `sed` that drops the `dependency_overrides:` block, a `grep` for `@URL@`/`@REF@`, `pub get`, `check_host_lock.dart` without `--ref`, `flutter analyze`, the optional build. Steps 1-3 were run in a scratch copy (see the fix report); step 4 on was not (the packages are not on pub.dev) |
+| F1 | STATUS "Resume here", the D7 step, could not work: the probe's `main.dart` imports `restaurant_names.dart` and its pubspec declares `assets/restaurant.jetlib`, both git-ignored files only `host_probe.sh` creates from the overridden package | `STATUS.md` spells out the human's commands: a `mkdir -p` of the untracked `assets/`, two `cp`, a `sed` that drops the `dependency_overrides:` block, a `grep` for `@URL@`/`@REF@`, `pub get`, `check_host_lock.dart` without `--ref`, `flutter analyze`, the optional build. Steps 1-3 were run in a scratch copy (see the fix report); step 4 on was not (the packages are not on pub.dev) |
 | F2 | Resume step 1: publishing the engine after this branch's merge would upload the rewritten README (R-5) under the tag `jet_cad_2d-v0.7.1` → `1dc167d` | `STATUS.md`: publish the engine from `main` as it stands (`d41e5f6`) before the merge; steps 2-3 tag "the commit `main` points at after the merge" |
 | F3 | The probe job's name said "by git" | `.github/workflows/ci.yml`: "a host from pub.dev, repo packages overridden" (the branch is not protected, so the rename breaks no required check) |
 | F4 | `host_probe.sh` header: the full-sha rationale was stale | reworded: `check_host_lock.dart --ref` compares it exactly with each `resolved-ref` |
