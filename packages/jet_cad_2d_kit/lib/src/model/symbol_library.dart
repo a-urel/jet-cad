@@ -297,7 +297,8 @@ final class SymbolLibrary {
       owned.add((record: record, payload: payload));
     }
 
-    // Rules 4 and 11, per definition: at least one leaf, a unit's outline.
+    // Rules 4 and 11, per definition: at least one leaf, a unit's outline
+    // (closed, and enclosing more than the tolerance squared).
     final entries = <SymbolEntry>[];
     for (final (definition, symbol, unit) in drafts) {
       final who = 'definition ${definition.handle.toHex()} (${symbol.id})';
@@ -318,6 +319,17 @@ final class SymbolLibrary {
               '$who is a unit whose first leaf, '
               '${first.record.handle.toHex()}, is not a closed polyline or a '
               'circle');
+        }
+        // A circle's radius is already above the tolerance (rule 15).
+        if (first.record.kind == EntityKind.polyline) {
+          final area = _enclosedArea(first.payload);
+          final linear = Tolerance.standard.linear;
+          if (area <= linear * linear) {
+            throw SymbolLibraryError(
+                11,
+                '$who is a unit whose outline, '
+                '${first.record.handle.toHex()}, encloses no area ($area)');
+          }
         }
       }
       entries.add(SymbolEntry(
@@ -358,6 +370,32 @@ final class SymbolLibrary {
     if (r.textAttrs != 0) refuse('has text attributes ${r.textAttrs}');
   }
 
+  /// Rule 15's zero-length polyline: every two points of [p] within
+  /// [Tolerance.standard]'s linear tolerance of each other. Stops at the
+  /// first pair further apart, for a drawn polyline its first two points.
+  static bool _allWithinTolerance(GeometryPayload p) {
+    for (var i = 0; i < p.pointCount; i++) {
+      for (var j = i + 1; j < p.pointCount; j++) {
+        if (!isDegenerateSegment(p.pointAt(i), p.pointAt(j))) return false;
+      }
+    }
+    return true;
+  }
+
+  /// Rule 11: the area a closed polyline encloses, unsigned (either winding
+  /// is an outline). The shoelace formula, taken relative to the first
+  /// vertex so that coordinates far from the origin do not cancel.
+  static double _enclosedArea(GeometryPayload p) {
+    final c = p.coords;
+    final x0 = c[0], y0 = c[1];
+    var twice = 0.0;
+    for (var i = 1; i + 1 < p.pointCount; i++) {
+      twice += (c[i * 2] - x0) * (c[i * 2 + 3] - y0) -
+          (c[i * 2 + 2] - x0) * (c[i * 2 + 1] - y0);
+    }
+    return twice.abs() / 2;
+  }
+
   /// Rule 15: counts, finiteness, bounds, degeneracy against [Tolerance].
   static void _checkGeometry(EntityKind kind, GeometryPayload p, String who) {
     final (int? coords, int scalars) = switch (kind) {
@@ -396,6 +434,12 @@ final class SymbolLibrary {
         if (p.pointCount < 2) {
           throw SymbolLibraryError(
               15, '$who is a polyline of ${p.pointCount} vertices');
+        }
+        if (_allWithinTolerance(p)) {
+          throw SymbolLibraryError(
+              15,
+              '$who is a zero-length polyline: its points all lie within '
+              'the tolerance of each other');
         }
       case EntityKind.circle:
       case EntityKind.arc:

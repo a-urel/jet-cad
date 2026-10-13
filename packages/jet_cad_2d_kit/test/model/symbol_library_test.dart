@@ -435,6 +435,48 @@ void main() {
       // leaf instead of the first.
       expectRefused(bytesOfJson(j), 11, ['sample.sofa.three@3', hex(sofaLine)]);
     });
+
+    // Amended by the final review: an outline must enclose more than
+    // Tolerance.standard.linear squared, either winding.
+    void outline(String name, List<double> coords, List<String> parts) {
+      test(name, () {
+        final j = validLibraryJson();
+        geometryJson(j, tableTop)['coords'] = coords;
+        expectRefused(bytesOfJson(j), 11,
+            ['sample.table.high-top@2', hex(tableTop), ...parts]);
+      });
+    }
+
+    // M-V11c: drop the area check.
+    outline(
+        'V11c a closed outline on one diagonal, off the origin',
+        [950.0, 560.0, 1250.0, 860.0, 1550.0, 1160.0, 950.0, 560.0],
+        ['encloses no area (0.0)']);
+    // Area 5e-19, under linear² (1e-18), and not zero: near the origin, the
+    // only place a double can hold so thin a triangle. M-V11d: `area == 0`.
+    outline(
+        'V11d an outline of area linear² / 2',
+        [1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 1e-15, 1e-3, 2e-3],
+        ['encloses no area']);
+    test('V11e an outline of area 2 * linear² loads', () {
+      // Positive control. M-V11e: `area <= linear` (not squared).
+      final j = validLibraryJson();
+      geometryJson(j, tableTop)['coords'] = [
+        1e-3, 2e-3, 2e-3, 2e-3, 1e-3, 2e-3 + 4e-15, 1e-3, 2e-3, //
+      ];
+      final lib = SymbolLibrary.decode(bytesOfJson(j));
+      expect(lib.entries[1].leaves.first.payload.coords[5], 2e-3 + 4e-15);
+    });
+    test('V11f a clockwise outline loads', () {
+      // The table's top, its winding reversed. M-V11f: drop `.abs()`.
+      final j = validLibraryJson();
+      geometryJson(j, tableTop)['coords'] = [
+        950.0, 560.0, 950.0, 1160.0, 1550.0, 1160.0, 1550.0, 560.0, //
+        950.0, 560.0,
+      ];
+      final lib = SymbolLibrary.decode(bytesOfJson(j));
+      expect(lib.entries[1].leaves.first.payload.coords[3], 1160.0);
+    });
   });
 
   group('rule 12: the base point', () {
@@ -617,6 +659,51 @@ void main() {
         sofaLine,
         (g) => g['coords'] = [120.0, 340.0, 120.0 + linear / 2, 340.0],
         ['zero-length']);
+    // Amended by the final review: a polyline whose points all lie within
+    // Tolerance.standard.linear of each other is a zero-length polyline.
+    // M-V15aa: drop the check (V15aa, V15ab red); exact equality of the
+    // points (V15aa red).
+    geometry(
+        'V15aa a polyline of three points within linear of each other',
+        sofaPolyline,
+        (g) => g['coords'] = [
+              120.0, 340.0, 120.0 + linear / 2, 340.0, //
+              120.0, 340.0 + linear / 2,
+            ],
+        ['zero-length polyline']);
+    geometry('V15ab a closed polyline of one point', sofaPolyline,
+        (g) => g['coords'] = [120.0, 340.0, 120.0, 340.0], ['zero-length']);
+    test('V15ac points within linear of the first, not of each other, load',
+        () {
+      // Positive control, "of each other": the outer two are 1.8e-9 apart.
+      // M-V15ac: compare every point with the first only.
+      final j = validLibraryJson();
+      geometryJson(j, sofaPolyline)['coords'] = [
+        120.0, 340.0, 120.0 - 0.9 * linear, 340.0, //
+        120.0 + 0.9 * linear, 340.0,
+      ];
+      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
+      expect(
+          sofa.leaves
+              .firstWhere((l) => l.record.kind == EntityKind.polyline)
+              .payload
+              .pointCount,
+          3);
+    });
+    test('V15ad a polyline whose first two points coincide loads', () {
+      // Positive control. M-V15ad: test the first two points only.
+      final j = validLibraryJson();
+      geometryJson(j, sofaPolyline)['coords'] = [
+        120.0, 340.0, 120.0, 340.0, 400.0, 950.0, //
+      ];
+      final sofa = SymbolLibrary.decode(bytesOfJson(j)).entries.first;
+      expect(
+          sofa.leaves
+              .firstWhere((l) => l.record.kind == EntityKind.polyline)
+              .payload
+              .coords[4],
+          400.0);
+    });
     test('V15z a line 2 * linear long loads', () {
       // Positive control: the line rule is not over-strict.
       final j = validLibraryJson();
