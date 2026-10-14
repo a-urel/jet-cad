@@ -57,16 +57,16 @@ PlanManifest? manifestOf(DraftDocument d) {
 Set<String> usedKits(DraftDocument d) => usedKitsIn(d.components.toJson());
 
 /// The kits an encoded `components` map uses: the `<kit>` of each type id
-/// `<kit>.<...>` whose `<kit>` is a kit id other than `jetcad`, and the
-/// kit of each `jetcad.symbol` payload's `key`. Raw components count by
-/// their type id.
+/// `<kit>.<...>` whose `<kit>` is a kit id other than a reserved one
+/// (`jetcad`, `plan`: [reservedKitIds]), and the kit of each
+/// `jetcad.symbol` payload's `key`. Raw components count by their type id.
 Set<String> usedKitsIn(Map<String, Object?> components) {
   final used = SplayTreeSet<String>();
   void add(String id) {
     final dot = id.indexOf('.');
     if (dot <= 0) return;
     final kit = id.substring(0, dot);
-    if (kit != 'jetcad' && isKitId(kit)) used.add(kit);
+    if (!reservedKitIds.contains(kit) && isKitId(kit)) used.add(kit);
   }
 
   for (final MapEntry(key: typeId, value: byHandle) in components.entries) {

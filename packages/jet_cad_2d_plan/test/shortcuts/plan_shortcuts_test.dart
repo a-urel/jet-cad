@@ -318,4 +318,28 @@ void main() {
     expect(c.snap.objectSnap, isNot(osnap));
     expect(d.reached['f3'], 1, reason: 'the host heard nothing more');
   });
+
+  testWidgets(
+      'KB-14 (final review) shortcuts: false closes the select tool\'s idle '
+      'keys only while it speaks for the controller: a swapped-out '
+      'controller and a removed PlanShortcuts get them back', (tester) async {
+    final one = PlanController(kits: const []);
+    addTearDown(one.dispose);
+    final two = PlanController(kits: const []);
+    addTearDown(two.dispose);
+    Widget keys(PlanController c) => MaterialApp(
+        home: PlanShortcuts(
+            controller: c, shortcuts: false, child: const SizedBox()));
+    await tester.pumpWidget(keys(one));
+    expect(one.selectGates.idleKeys, isFalse, reason: 'premise');
+    await tester.pumpWidget(keys(two));
+    // M-KB-14a: didUpdateWidget not giving the old controller its keys
+    // back.
+    expect(one.selectGates.idleKeys, isTrue);
+    expect(two.selectGates.idleKeys, isFalse);
+    await tester.pumpWidget(const SizedBox());
+    // M-KB-14b: dispose not giving them back: Delete and Escape stay dead
+    // in the canvas.
+    expect(two.selectGates.idleKeys, isTrue);
+  });
 }

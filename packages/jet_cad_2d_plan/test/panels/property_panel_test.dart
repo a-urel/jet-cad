@@ -81,6 +81,13 @@ void main() {
     expect(p().solid, isTrue);
     await enterAndSubmit(tester, 'property-count', '2.26');
     expect(p().count, 2.3, reason: 'one decimal (Task 3 rounds)');
+    // M-P-1d (final review): `_write` executing a value the spec rounds
+    // back to the stored one: an empty undo step.
+    final rounded = c.document.commands.undoDepth;
+    await enterAndSubmit(tester, 'property-count', '2.31');
+    expect(p().count, 2.3);
+    expect(c.document.commands.undoDepth, rounded);
+    expect(textOf(tester, 'property-count'), '2.3');
     await enterAndSubmit(tester, 'property-label', 'Desk');
     expect(p().label, 'Desk');
     await tapKey(tester, 'property-finish');

@@ -415,10 +415,10 @@ class PlanController extends ChangeNotifier {
   /// (`damagedUnsavable`), and a diagnostic.
   String save() {
     if (!_damaged.value) return _saveUnchecked();
-    final String text;
+    final ({String text, int state}) encoded;
     try {
-      text = _saveUnchecked();
-      unawaited(decodePlan(text,
+      encoded = _encode();
+      unawaited(decodePlan(encoded.text,
           register: _registerComponents,
           diagnostics: <Diagnostic>[]).dispose());
     } catch (error) {
@@ -430,17 +430,26 @@ class PlanController extends ChangeNotifier {
       throw PlanFormatException(PlanFormatCode.damagedUnsavable,
           'the damaged plan does not read back: $error');
     }
-    return text;
+    // Only a text that read back is one [markSaved] may mark (final
+    // review).
+    _encodedState = encoded.state;
+    return encoded.text;
   }
 
   /// Task 8's save: the state is marked encoded only once it encoded.
   String _saveUnchecked() {
+    final encoded = _encode();
+    _encodedState = encoded.state;
+    return encoded.text;
+  }
+
+  /// The plan's text and the state it encodes, pending input settled
+  /// first; nothing is marked.
+  ({String text, int state}) _encode() {
     settlePendingInput();
     _unsettled = null;
     final state = document.commands.stateId;
-    final text = encodePlan(document, kits);
-    _encodedState = state;
-    return text;
+    return (text: encodePlan(document, kits), state: state);
   }
 
   /// The host stored the last [save]: that state is the save point; an

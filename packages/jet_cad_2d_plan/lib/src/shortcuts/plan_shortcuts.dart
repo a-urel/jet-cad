@@ -78,6 +78,7 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.controller, widget.controller)) {
       oldWidget.controller.removeListener(_applyIdleKeys);
+      _restoreIdleKeys(oldWidget.controller);
       widget.controller.addListener(_applyIdleKeys);
       PlanLocaleScope.push(context, widget.controller);
     }
@@ -87,7 +88,15 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
   @override
   void dispose() {
     widget.controller.removeListener(_applyIdleKeys);
+    _restoreIdleKeys(widget.controller);
     super.dispose();
+  }
+
+  /// [c]'s select tool gets its idle keys back once these shortcuts no
+  /// longer speak for it (final review): a removed `shortcuts: false`
+  /// leaves Delete and Escape working in the canvas.
+  static void _restoreIdleKeys(PlanController c) {
+    if (!c.isDisposed) c.selectGates.idleKeys = true;
   }
 
   /// The select tool's idle keys are the shortcuts (S-16). The gates are

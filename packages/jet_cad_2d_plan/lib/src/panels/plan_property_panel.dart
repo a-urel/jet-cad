@@ -473,8 +473,16 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           if (field == null || (input != null && input == field.value)) {
             return;
           }
-          c.execute(planTypeOf(c, typeId)!
-              .commitField(c.document, handle, field, input));
+          final command = planTypeOf(c, typeId)!
+              .commitField(c.document, handle, field, input);
+          // A value the spec rounds back to the stored one (2.31 at one
+          // decimal over 2.3) writes nothing: no empty undo step (final
+          // review).
+          if (command is SetComponentCommand &&
+              command.value == _componentOf(handle, typeId)) {
+            return;
+          }
+          c.execute(command);
         case _ToolTarget():
           final field = _fieldOf(t, id);
           if (field == null || (input != null && input == field.value)) {
@@ -483,6 +491,15 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
           field.commit!(input);
       }
     });
+  }
+
+  /// [handle]'s component of [typeId], read without its `T`.
+  Component? _componentOf(Handle handle, String typeId) {
+    for (final (id, component)
+        in _c.document.components.snapshotOf(handle).components) {
+      if (id == typeId) return component;
+    }
+    return null;
   }
 
   /// A click (a toggle, a choice, an action) acts on the target shown now.

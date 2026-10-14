@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/file/manifest.dart' show usedKitsIn;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/harness.dart';
@@ -40,6 +41,29 @@ void main() {
     // M-PF-3a: symbol keys not read. M-PF-3b: 'jetcad' not excluded.
     expect(usedKits(d), {'cafe', 'disc', 'test'});
     expect(usedKits(d).toList(), ['cafe', 'disc', 'test'], reason: 'sorted');
+  });
+
+  test(
+      'PF-3b (final review) a reserved kit id is no used kit: neither a '
+      '`plan.*` nor a `jetcad.*` type id, nor a symbol key under them', () {
+    final used = usedKitsIn({
+      'plan.note': {
+        '4101': {'text': 'a note'}
+      },
+      'jetcad.manifest': {
+        '1': {'format': 1, 'kits': <String, Object?>{}}
+      },
+      'jetcad.symbol': {
+        '4102': {'key': 'plan.mark.cross'},
+        '4103': {'key': 'cafe.table.round'},
+      },
+      'deco.lamp': {
+        '4104': {'radius': 150.5}
+      },
+    });
+    // M-PF-3c: `usedKitsIn` excluding `jetcad` alone: `plan` is written
+    // into the manifest, and the next load reports it missing.
+    expect(used, {'cafe', 'deco'});
   });
 
   test('PF-4 a missing kit keeps the entry read; a loaded used kit is written',

@@ -297,6 +297,45 @@ void main() {
   });
 
   test(
+      'F-7b (final review) a damaged save that does not read back marks '
+      'nothing: markSaved after it keeps the last good save as the save '
+      'point, so the plan stays dirty', () async {
+    final sw = Switches();
+    final c = PlanController(kits: [boxKit(sw)]);
+    addTearDown(c.dispose);
+    final d = c.document;
+    final s = addObject(d, atSquare, const SquareParams(side: 1200));
+    c.save();
+    c.markSaved();
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            s, const SquareParams(side: 1250.5))),
+        isTrue);
+    sw.failing.add('reach');
+    // The edit writes a layer on a handle no file can hold, and a square
+    // whose reach throws; undoing it throws: E3, the plan damaged with
+    // both kept. It encodes, but the handle does not read back.
+    expect(
+        () => c.execute(_Sabotage(CompoundCommand([
+              SetComponentCommand<ObjectLayer>(const Handle(-7),
+                  const ObjectLayer(ReservedHandles.layerZero)),
+              SetComponentCommand<SquareParams>(
+                  s, const SquareParams(side: 1300.5, poisoned: true)),
+            ], label: 'Both'))),
+        throwsA(isA<PartialMutationError>()));
+    expect(c.damaged.value, isTrue, reason: 'premise');
+    expect(
+        c.save,
+        throwsA(isA<PlanFormatException>()
+            .having((e) => e.code, 'code', PlanFormatCode.damagedUnsavable)));
+    c.markSaved();
+    await Future<void>.delayed(Duration.zero);
+    // M-F7b: `save` marking the state encoded before its read-back: the
+    // unsaved damaged plan reads as saved.
+    expect(c.dirty.value, isTrue);
+  });
+
+  test(
       'F-8 a tool whose factory throws is disabled: one diagnostic, and '
       'selecting it leaves plan.select armed', () {
     final sw = Switches()..failing.add('create');
