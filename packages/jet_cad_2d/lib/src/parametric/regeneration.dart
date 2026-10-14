@@ -83,7 +83,8 @@ final class _Survey {
       this.stray,
       this.instances,
       this.generated,
-      this.leaves);
+      this.leaves,
+      this.nested);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -160,6 +161,11 @@ final class _Survey {
   /// Each generated instance's own entities (its ATTRIBs, and whatever a
   /// loaded file put on it), ascending; absent when none.
   final Map<Handle, List<Handle>> leaves;
+
+  /// Each nested group of a live object (a `GroupNode` child of its group,
+  /// which a file brought in), to the object. The guard leaves it what it
+  /// is today (spec 2b S1): not generated, and not an add when edited.
+  final Map<Handle, Handle> nested;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -279,14 +285,17 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
   // list, ascending by handle whatever order the list is in.
   final instances = <Handle, List<InstanceNode>>{};
   final generated = <Handle, InstanceNode>{};
+  final nested = <Handle, Handle>{};
   for (final h in order) {
     for (final c in (t.tree[h]! as GroupNode).children) {
       final node = t.tree[c];
-      if (node is InstanceNode &&
-          node.parent == h &&
-          !generated.containsKey(c)) {
+      if (node == null || node.parent != h) continue;
+      if (node is InstanceNode) {
+        if (generated.containsKey(c)) continue;
         (instances[h] ??= []).add(node);
         generated[c] = node;
+      } else {
+        nested[c] = h;
       }
     }
   }
@@ -354,7 +363,8 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
       stray,
       instances,
       generated,
-      leaves);
+      leaves,
+      nested);
 }
 
 /// The objects a page change seeds (spec 10 D14): every live object in
@@ -872,20 +882,31 @@ List<DraftCommand> _instanceRemoval(
   ];
 }
 
-/// The first touched handle that edits a generated entity, removes one
-/// while its group lives, or adds one into a live object (spec D6).
+/// The first touched handle, ascending, that the guard refuses (spec 06 D6,
+/// as amended by 2b S1), or null. Two disjoint branches by what the handle
+/// was in [before], then the adds:
 ///
-/// For `h` in `G` (before.owned[h] != null): refused if `h` **still
-/// exists** — a direct edit of a generated entity, regardless of what else
-/// the same command did to its owner — or, when `h` was removed, if the
-/// owner's group node still exists (spec D6's amendment for F4: whatever
-/// its component now is, not only while it is still a live parametric
-/// object -- a compound that detaches the component and then removes one
-/// of its still-live children in the same command must still be refused).
-/// Only a child removed *together with* its owning group is allowed.
+/// - **An owned entity** (`before.owned`: a child of a live object, or an
+///   ATTRIB of one of its generated instances): refused if it **still
+///   exists** -- a direct edit, regardless of what else the same command did
+///   to its owner -- or, when it was removed, if its object's group node
+///   still exists (spec D6's amendment for F4: whatever its component now
+///   is; a compound that detaches the component and then removes a
+///   still-live child must still be refused). Only a child removed
+///   *together with* its object's group is allowed.
+/// - **A generated instance** (`before.generated`): refused when, after the
+///   edit, it is gone while its object's group lives, or its node differs
+///   from the survey's value by `InstanceNode.==` (exact, every field): a
+///   move, a definition, a layer or a style change. A components-only
+///   write leaves the node as it was and passes (2b S1: per-unit data); it
+///   seeds nothing (`_run`).
+/// - **An add**: an entity the survey did not hold, owned by a live object
+///   or by a generated instance of one; a node, a `GroupNode` included,
+///   whose parent is a live object, unless the survey held it there (a
+///   nested group a file brought in stays what it is).
 ///
 /// A frozen object (spec 2a E2) is a plain group: a child added into it, or
-/// one of its children edited, is not refused.
+/// one of its children or instances edited, is not refused.
 Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, Set<Handle> touched, bool Function(Handle)? frozen) {
   for (final h in touched.toList()..sort(_byValue)) {
@@ -895,8 +916,28 @@ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
       if (t.tree[owner] != null) return h;
       continue;
     }
+    final seat = before.generated[h];
+    if (seat != null) {
+      final now = t.tree[h];
+      if (now == null ? t.tree[seat.parent] != null : now != seat) return h;
+      continue;
+    }
     final slot = t.entities.slotOf(h);
-    if (slot != null && _isObject(t, types, t.entities.ownerAt(slot), frozen)) {
+    if (slot != null) {
+      final holder = t.entities.ownerAt(slot);
+      if (_isObject(t, types, holder, frozen)) return h;
+      final held = before.generated[holder];
+      if (held != null &&
+          t.tree[held.parent] != null &&
+          !(before.leaves[holder]?.contains(h) ?? false)) {
+        return h;
+      }
+      continue;
+    }
+    final node = t.tree[h];
+    if (node != null &&
+        before.nested[h] != node.parent &&
+        _isObject(t, types, node.parent, frozen)) {
       return h;
     }
   }
@@ -1058,45 +1099,65 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
 /// which would refuse the whole edit.
 ///
 /// [d]'s own leaves are the survey's (an edit cannot add into a live
-/// object, 06 D6); a nested group's are found by one scan of the live
-/// slots, paid only when [d] has nested groups.
+/// object, 06 D6 as amended by 2b S1), and so are its generated instances'
+/// entities (2b S1). A nested group's leaves, and the entities of an
+/// instance the survey does not know (a nested group's), are found by one
+/// scan of the live slots, paid only when there is one. Every instance
+/// removed takes its entities first, so no ATTRIB is left behind (2b S1,
+/// "The dissolve gap closes").
 ///
 /// Two callers: [_cascade], with the before-survey, for a doomed referrer;
 /// [_plan], with the after-survey, for a dissolving object (spec 10 D15).
 List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
   final groups = <Handle>[];
+  final instances = <Handle>[];
   void collect(Handle g) {
     groups.add(g);
     final node = t.tree[g];
     if (node is! GroupNode) return;
     for (final c in t.tree.childNodesOf(node.children)) {
-      if (t.tree[c] is GroupNode) collect(c);
+      final child = t.tree[c];
+      if (child is GroupNode) {
+        collect(c);
+      } else if (child is InstanceNode) {
+        instances.add(c);
+      }
     }
   }
 
   collect(d);
+  bool live(Handle c) => t.entities.slotOf(c) != null;
   final leaves = <Handle, List<Handle>>{
     d: [
       for (final c in before.children[d] ?? const <Handle>[])
-        if (t.entities.slotOf(c) != null) c,
+        if (live(c)) c,
     ],
+    for (final i in before.instances[d] ?? const <InstanceNode>[])
+      i.handle: [
+        for (final c in before.leaves[i.handle] ?? const <Handle>[])
+          if (live(c)) c,
+      ],
   };
-  if (groups.length > 1) {
-    final nested = groups.skip(1).toSet();
+  final scanned = <Handle>{
+    ...groups.skip(1),
+    for (final i in instances)
+      if (!leaves.containsKey(i)) i,
+  };
+  if (scanned.isNotEmpty) {
     for (final slot in t.entities.liveSlots) {
       final owner = t.entities.ownerAt(slot);
-      if (nested.contains(owner)) {
+      if (scanned.contains(owner)) {
         (leaves[owner] ??= []).add(t.entities.handleAt(slot));
       }
     }
-    for (final list in leaves.values) {
-      list.sort(_byValue);
+    for (final o in scanned) {
+      leaves[o]?.sort(_byValue);
     }
   }
   bool isFill(Handle c) =>
       t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
   final out = <DraftCommand>[
-    for (final g in groups)
+    for (final g in [...groups, ...instances])
       for (final c in leaves[g] ?? const <Handle>[])
         if (isFill(c)) RemoveEntityCommand(c),
   ];
@@ -1111,6 +1172,9 @@ List<DraftCommand> _subtreeRemoval(CommandTarget t, _Survey before, Handle d) {
         if (child is GroupNode) {
           remove(c);
         } else if (child is InstanceNode) {
+          for (final e in leaves[c] ?? const <Handle>[]) {
+            if (!isFill(e)) out.add(RemoveEntityCommand(e));
+          }
           out.add(RemoveNodeCommand(c));
         }
       }
@@ -1223,6 +1287,10 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
       for (final h in before.objects.keys)
         if (!after.objects.containsKey(h) && t.tree[h] == null) h,
     ];
+    // Spec 2b S1: a generated instance seeds nothing. It is neither an
+    // object nor in `owned`, so a components-only write on one (per-unit
+    // data) regenerates nothing and pays no `_checkDangling`. Any other
+    // edit of it was refused above.
     final seeds = <Handle>{
       for (final h in r.touched) ...[
         // Ruling 06-4: a handle that was an object seeds too.

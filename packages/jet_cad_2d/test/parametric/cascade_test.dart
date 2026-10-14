@@ -632,6 +632,10 @@ void main() {
         name: 'Stool',
         basePoint: Vector2(35.5, -12.25),
         children: const []));
+    // Spec 2b S1: an edit may not add a node into a live object. A loaded
+    // file's shape: these come in past the parametric system.
+    final expander = doc.commands.expander;
+    doc.commands.expander = null;
     final instance = doc.handleSeed.next();
     doc.commands.execute(AddNodeCommand(InstanceNode(
         handle: instance,
@@ -652,6 +656,7 @@ void main() {
         record: draftRecord(leaf, nested, EntityKind.line,
             layer: ReservedHandles.layerZero),
         payload: linePayload(Vector2(10.5, 20.25), Vector2(310.75, 45.5))));
+    doc.commands.expander = expander;
     expect(doc.validate(), isEmpty);
     // Spec 2b S1: an InstanceNode child of P1's group is P1's generated
     // instance; Pin generates none, so P1's plan would remove it.

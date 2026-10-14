@@ -40,6 +40,16 @@
   `InstanceNode` child of an object's group is now that object's
   generated instance: a type that generates none removes it on its next
   regeneration.
+- The edit guard covers generated instances. Moving, removing,
+  re-pointing or re-layering one, or editing or removing its ATTRIBs, is
+  refused with `GeneratedGeometryError`. A components-only write on one
+  passes and regenerates nothing. Any node or entity added into a live
+  object by anything but the planner is refused, and so is an entity added
+  onto one of its generated instances. This includes a `GroupNode`: until
+  now a group added into an object passed. A nested group a file brought in
+  stays editable. Removing an object's subtree (a dissolve, a reference
+  cascade) also removes the entities its instances own, so no ATTRIB is
+  left behind.
 
 ## 0.7.2
 

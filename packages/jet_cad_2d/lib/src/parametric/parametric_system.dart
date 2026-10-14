@@ -401,7 +401,9 @@ final class GeneratedInstance {
   final List<GeneratedAttrib> attributes;
 }
 
-/// A direct edit of a generated entity (spec D6). Propagates like
+/// A direct edit of a generated entity or a generated instance, or a node
+/// or entity added into a live object or onto one of its generated
+/// instances (spec D6, as amended by 2b S1). Propagates like
 /// `PermissionDeniedError`; the UI never offers the edit.
 class GeneratedGeometryError implements Exception {
   const GeneratedGeometryError(this.handle);

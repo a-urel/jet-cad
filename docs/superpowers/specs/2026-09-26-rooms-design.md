@@ -1075,6 +1075,8 @@ M-10c, M-10centroid, M-10offset, M-10offsetref.
 
 ### D12 — Engine (a): generated text
 
+**Amended by the 2b spec (2026-10-14, [S1](2026-10-14-plan-library-service-mode-design.md#s1-e5-a-parametric-type-generates-instances)):** "an ATTRIB needs a tag nobody generates" no longer holds for generated instances: `ParametricType.instances` returns `GeneratedInstance`s whose `GeneratedAttrib`s name their tag. `Generated` itself still refuses `attrib`, and a TEXT still needs `Generated.text`.
+
 - **`Generated.text(GeometryPayload payload, String text, {DraftColor
   color = ByLayer, int textAttrs = 0, int flags = 0})`**: a TEXT child
   whose string the planner owns.
