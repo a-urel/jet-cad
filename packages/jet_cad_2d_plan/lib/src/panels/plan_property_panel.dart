@@ -289,19 +289,35 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       };
 
   /// [t]'s fields, bound now; none when [t] is no longer a live object of
-  /// its type.
-  List<PropertyField> _bound(_Target t) {
+  /// its type, or when a kit hook threw binding them ([_fieldsOrNull]).
+  List<PropertyField> _bound(_Target t) => _fieldsOrNull(t) ?? const [];
+
+  /// [t]'s fields, bound now, or null when a kit's hook threw binding them
+  /// (a spec's `read` or `enabled`): spec P4, every kit hook at the
+  /// contract's boundary. The failure is one diagnostic ([_hookFailed]);
+  /// the panel's builds, listeners and focus changes go on.
+  List<PropertyField>? _fieldsOrNull(_Target t) {
     final c = _c;
     switch (t) {
       case _ObjectTarget(:final handle, :final typeId):
         if (c.catalog.typeIdOf(c.document, handle) != typeId) return const [];
-        return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
+        try {
+          return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
+        } catch (error) {
+          _hookFailed(typeId, 'properties', error);
+          return null;
+        }
       case _ToolTarget(:final toolId):
         final settings = planToolOf(c, toolId)?.settings;
         if (settings == null) return const [];
-        return settings.fieldsOf(c.toolSettings.valueOf(toolId),
-            (v) => c.toolSettings.store(toolId, v),
-            toolId: toolId);
+        try {
+          return settings.fieldsOf(c.toolSettings.valueOf(toolId),
+              (v) => c.toolSettings.store(toolId, v),
+              toolId: toolId);
+        } catch (error) {
+          _hookFailed(toolId, 'settings', error);
+          return null;
+        }
       case _SymbolTarget():
         return const [];
     }
@@ -652,13 +668,53 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     }
   }
 
+  /// One `hookFailed` diagnostic for [subject] (a type or a tool id) of its
+  /// kit: published after the frame, since a build may call it; the log
+  /// keeps one per kit, subject and code.
+  void _hookFailed(String subject, String hook, Object error) =>
+      _c.diagnosticsLog.addAfterFrame(KitDiagnostic(
+          kitId: kitOfKey(subject),
+          subject: subject,
+          code: KitDiagnosticCode.hookFailed,
+          message: '$hook: $error',
+          error: error));
+
+  /// What replaces a section whose kit hook threw while it was being built
+  /// (spec P4): Task 11's "section failed" box (`KitSectionBoundary`).
+  Widget _sectionFailed() {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      key: const Key('kit-section-failed'),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        border: Border.all(color: scheme.error),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child:
+          Text(_strings.sectionFailed, style: TextStyle(color: scheme.error)),
+    );
+  }
+
   List<Widget> _settingsSection(_ToolTarget t, TextStyle? title) {
     final kit = kitOfKey(t.toolId);
+    final fields = _fieldsOrNull(t);
+    if (fields == null) return [_sectionFailed()];
     return [
       Text(planWordOf(_c, kit, 'tool:${t.toolId}') ?? t.toolId,
           key: Key('settings-${t.toolId}'), style: title),
-      for (final field in _bound(t)) _row(t, _Scope.tool, field, kit),
+      for (final field in fields) _row(t, _Scope.tool, field, kit),
     ];
+  }
+
+  /// The type's title word for [t], or null when its `title` hook threw
+  /// (one diagnostic).
+  String? _titleWordOf(PlanType<Component> type, _ObjectTarget t) {
+    try {
+      return type.titleWordOf(_c.document, t.handle);
+    } catch (error) {
+      _hookFailed(t.typeId, 'title', error);
+      return null;
+    }
   }
 
   List<Widget> _objectSection(_ObjectTarget t, TextStyle? title) {
@@ -666,10 +722,15 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     final doc = c.document;
     final type = planTypeOf(c, t.typeId)!;
     final kit = kitOfKey(t.typeId);
+    // Spec P4: a hook that throws while the section builds (a title, a
+    // spec's read or enabled) replaces the whole section by the box.
+    final titleWord = _titleWordOf(type, t);
+    final fields = _fieldsOrNull(t);
+    if (titleWord == null || fields == null) return [_sectionFailed()];
     return [
-      Text(planWordOf(c, kit, type.titleWordOf(doc, t.handle)) ?? t.typeId,
+      Text(planWordOf(c, kit, titleWord) ?? t.typeId,
           key: Key('section-${t.typeId}'), style: title),
-      for (final field in _bound(t)) _row(t, _Scope.object, field, kit),
+      for (final field in fields) _row(t, _Scope.object, field, kit),
       if (type.hasSection)
         // Spec P4: a section builder that throws shows a small box in its
         // place (Task 11's boundary).
@@ -696,11 +757,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     final node = doc.tree[h]! as InstanceNode;
     final component = doc.components.get<SymbolComponent>(node.definition)!;
     final box = boxOfDefinition(doc, node.definition);
-    final entries = symbolEntriesOf(c.symbols);
-    final entry = entryOfInstance(entries, doc, h);
-    final members = entry == null || isServableInstance(doc, h)
-        ? const <SymbolEntry>[]
-        : familyMembers(entries, entry);
+    final members = sizeMenuMembers(symbolEntriesOf(c.symbols), doc, h);
     String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
         '${formatPanelNumber(b.depth, _strings)}';
     final p = c.permissions;

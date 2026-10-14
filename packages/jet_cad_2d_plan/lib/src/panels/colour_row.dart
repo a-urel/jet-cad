@@ -11,6 +11,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
 import '../controller/plan_controller.dart';
+import '../kits/guard.dart' show KitHookFailure;
 import '../l10n/strings.dart';
 import 'kit_lookup.dart';
 
@@ -31,22 +32,50 @@ List<ColourTargetOf> colourTargets(
   ];
 }
 
+/// What [pickedColours] lists for a target whose colour `read` threw:
+/// equal to no swatch's name, so it marks nothing.
+const String _unreadable = '\u0001';
+
 /// Each target's stored swatch name (null for none), in [colourTargets]'
-/// order.
+/// order. A kit's colour `read` that throws (spec P4: every kit hook at the
+/// contract's boundary) lists a name that marks nothing and is one
+/// `hookFailed` diagnostic, published after the frame (a build reads it).
 List<String?> pickedColours(PlanController c, Iterable<SelectionKey> keys) => [
-      for (final t in colourTargets(c, keys))
-        t.type.colourOf(c.document, t.handle),
+      for (final t in colourTargets(c, keys)) _colourOf(c, t),
     ];
 
+String? _colourOf(PlanController c, ColourTargetOf t) {
+  try {
+    return t.type.colourOf(c.document, t.handle);
+  } catch (error) {
+    c.diagnosticsLog.addAfterFrame(KitDiagnostic(
+        kitId: kitOfKey(t.type.id),
+        subject: t.type.id,
+        code: KitDiagnosticCode.hookFailed,
+        message: 'colour read: $error',
+        error: error));
+    return _unreadable;
+  }
+}
+
 /// The one command that sets [swatch] (null: none) on every target among
-/// [keys], labelled 'Colour'; null when none would change.
+/// [keys], labelled 'Colour'; null when none would change. A kit's colour
+/// `write` that throws is a [KitHookFailure] (hook `colour write`): the
+/// recolour is refused whole.
 DraftCommand? recolourCommand(
     PlanController c, Iterable<SelectionKey> keys, PlanSwatch? swatch) {
   final doc = c.document;
-  final edits = <DraftCommand>[
-    for (final t in colourTargets(c, keys))
-      if (t.type.recolour(doc, t.handle, swatch?.name) case final edit?) edit,
-  ];
+  final edits = <DraftCommand>[];
+  for (final t in colourTargets(c, keys)) {
+    final DraftCommand? edit;
+    try {
+      edit = t.type.recolour(doc, t.handle, swatch?.name);
+    } catch (error) {
+      throw KitHookFailure(
+          kitOfKey(t.type.id), t.type.id, 'colour write', error);
+    }
+    if (edit != null) edits.add(edit);
+  }
   return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
 }
 
@@ -86,7 +115,20 @@ class ColourRow extends StatelessWidget {
   void _choose(PlanSwatch? swatch, PlanStrings strings) {
     final keys = controller.selection.keys;
     if (colourRowBlocked(controller, keys, strings) != null) return;
-    final command = recolourCommand(controller, keys, swatch);
+    final DraftCommand? command;
+    try {
+      command = recolourCommand(controller, keys, swatch);
+    } on KitHookFailure catch (failure) {
+      // Refused (spec P4): nothing is executed; one diagnostic, as
+      // execute reports a hook failure.
+      controller.diagnosticsLog.add(KitDiagnostic(
+          kitId: failure.kitId,
+          subject: failure.typeId,
+          code: KitDiagnosticCode.hookFailed,
+          message: '${failure.hook}: ${failure.error}',
+          error: failure.error));
+      return;
+    }
     // A refusal is caught inside execute (the lock hint, the diagnostic).
     if (command != null) controller.execute(command);
   }

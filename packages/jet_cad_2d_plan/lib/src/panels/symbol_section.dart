@@ -84,6 +84,18 @@ List<SymbolEntry> familyMembers(List<SymbolEntry> entries, SymbolEntry entry) {
   }();
 }
 
+/// What the Symbol section's Size menu offers for [instance] (D7, V-4,
+/// R5-3): its entry's size family among [entries], or nothing for an
+/// instance with no entry or a servable one (a table never changes size,
+/// whatever family its entry names).
+List<SymbolEntry> sizeMenuMembers(
+    List<SymbolEntry> entries, DraftDocument doc, Handle instance) {
+  final entry = entryOfInstance(entries, doc, instance);
+  return entry == null || isServableInstance(doc, instance)
+      ? const <SymbolEntry>[]
+      : familyMembers(entries, entry);
+}
+
 final Expando<List<SymbolEntry>> _entriesOf = Expando<List<SymbolEntry>>();
 
 /// The entries of the controller's loaded symbols, one list per symbols

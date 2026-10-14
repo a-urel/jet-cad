@@ -360,6 +360,29 @@ void main() {
           reason: 'premise: the entry would be copied');
       expect(changeSizeCommand(doc, h, entry('test.bed.1600')), isNull);
     });
+
+    test(
+        'SS12 (new, Task 17 fix round 1) the Size menu offers a bed its '
+        'family and a servable instance nothing, even when its entry names '
+        'the beds\' family (V-4, R5-3, M-09c-bf)', () {
+      final doc = rig();
+      final bed = place(doc, 'test.bed.1600', far);
+      final bedTable = place(doc, 'test.bed.table', far + Vector2(4000, 0));
+      expect(entryOfInstance(familyEntries, doc, bedTable)!.symbol.family,
+          'test-bed',
+          reason: 'premise: the servable instance\'s entry has a family');
+      expect(
+          familyMembers(familyEntries, entry('test.bed.table')), hasLength(3),
+          reason: 'premise: the family offers beds');
+      expect([
+        for (final m in sizeMenuMembers(familyEntries, doc, bed)) m.symbol.key
+      ], [
+        'test.bed.1400',
+        'test.bed.1600',
+        'test.bed.1800'
+      ]);
+      expect(sizeMenuMembers(familyEntries, doc, bedTable), isEmpty);
+    });
   });
 
   group('the panel', () {
@@ -524,7 +547,8 @@ void main() {
 
     testWidgets(
         'SW5 a table has no Size menu, its family all tables or all beds '
-        '(R5-3, M-09c-bf)', (tester) async {
+        '(R5-3; K2 rule 9 leaves the loaded library\'s tables without a '
+        'family, so M-09c-bf is pinned by SS12)', (tester) async {
       final c = await pumpPanel(tester);
       final doc = c.document;
       final table = place(doc, 'test.table.a', far);

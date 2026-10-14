@@ -17,6 +17,8 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import '../support/panel_kits.dart';
 import '../support/canvas_fixture.dart';
 import '../support/design_harness.dart';
+import '../support/test_kit.dart' show addObject;
+import '../support/throwing_kit.dart';
 
 Finder byKey(String k) => find.byKey(Key(k));
 
@@ -294,5 +296,140 @@ void main() {
     await tester.pump();
     expect(c.document.components.get<BoxParams>(b)!.width, 120);
     expect(c.document.commands.canUndo, isFalse);
+  });
+
+  // ---- Fix round 1 (controller ruling): the kit hooks the panel calls
+  // while it builds or acts are called at the contract's boundary (spec
+  // P4). The throwing kit's boom.block beside a box of the box kit.
+
+  ({PlanController c, ThrowingKit boom, Handle block, Handle box}) boomPlan() {
+    final boom = ThrowingKit();
+    final c = boxController(kits: [boxKit, boom.kit]);
+    final block = addObject<BlockComponent>(
+        c.document, const BlockComponent(size: 400, swatch: 'purple'),
+        at: Vector2(7500, 3200));
+    final box =
+        addBox(c, Vector2(7010, 3020), const BoxParams(120, 70), turn: 0.61);
+    return (c: c, boom: boom, block: block, box: box);
+  }
+
+  /// The boom kit's hookFailed diagnostics, each as its failing hook.
+  List<String> boomFailures(PlanController c) => [
+        for (final d in c.diagnostics.value)
+          if (d.kitId == 'boom' && d.code == KitDiagnosticCode.hookFailed)
+            '${d.subject}: ${(d.error! as BoomFailure).hook}',
+      ];
+
+  bool swatchMarked(WidgetTester tester, String name) =>
+      tester
+          .widget<Semantics>(find
+              .ancestor(
+                  of: byKey('color-swatch-$name'),
+                  matching: find.byWidgetPredicate(
+                      (w) => w is Semantics && w.properties.label != null))
+              .first)
+          .properties
+          .selected ??
+      false;
+
+  testWidgets(
+      'P-G1 a spec read that throws while the section builds replaces the '
+      'section with the "section failed" box, one diagnostic; a document '
+      'change reloads nothing into it; the rest of the panel edits '
+      '(M-P-G1)', (tester) async {
+    final p = boomPlan();
+    final c = p.c;
+    await panel(tester, c);
+    p.boom.failing.add('read');
+    await select(tester, c, [p.block]);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(byKey('kit-section-failed'), findsOneWidget);
+    expect(byKey('section-boom.block'), findsNothing);
+    expect(byKey('property-size'), findsNothing);
+    expect(boomFailures(c), ['boom.block: read']);
+    // A document change while the block is selected: the panel's listener
+    // binds the fields again, at the boundary.
+    c.document.commands.execute(SetComponentCommand<BoxParams>(p.box,
+        c.document.components.get<BoxParams>(p.box)!.withColour('teal')));
+    await tester.pump();
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(boomFailures(c), ['boom.block: read']);
+    // The rest of the panel stays usable.
+    await select(tester, c, [p.box]);
+    await enterAndSubmit(tester, 'property-width', '150');
+    expect(c.document.components.get<BoxParams>(p.box)!.width, 150);
+    // The hook heals: the block's section is back.
+    p.boom.failing.clear();
+    await select(tester, c, [p.block]);
+    expect(byKey('kit-section-failed'), findsNothing);
+    expect(textOf(tester, 'property-size'), '400');
+  });
+
+  testWidgets(
+      'P-G2 a title hook that throws replaces the section with the box, one '
+      'diagnostic; the box\'s section still shows (M-P-G2)', (tester) async {
+    final p = boomPlan();
+    final c = p.c;
+    await panel(tester, c);
+    p.boom.failing.add('title');
+    await select(tester, c, [p.block]);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(byKey('kit-section-failed'), findsOneWidget);
+    expect(byKey('section-boom.block'), findsNothing);
+    expect(byKey('property-size'), findsNothing);
+    expect(boomFailures(c), ['boom.block: title']);
+    await select(tester, c, [p.box]);
+    expect(tester.widget<Text>(byKey('section-box.box')).data, 'Box');
+    expect(byKey('kit-section-failed'), findsNothing);
+  });
+
+  testWidgets(
+      'P-G3 (read) a colour read that throws marks nothing for that object, '
+      'one diagnostic; the row stays and recolours (M-P-G3r)', (tester) async {
+    final p = boomPlan();
+    final c = p.c;
+    await panel(tester, c);
+    await select(tester, c, [p.block]);
+    expect(swatchMarked(tester, 'purple'), isTrue,
+        reason: 'premise: the block is purple');
+    p.boom.failing.add('colourRead');
+    await select(tester, c, []);
+    await select(tester, c, [p.block]);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(byKey('color-picker'), findsOneWidget);
+    expect(swatchMarked(tester, 'purple'), isFalse);
+    expect(boomFailures(c), ['boom.block: colourRead']);
+    final depth = c.document.commands.undoDepth;
+    await tapKey(tester, 'color-swatch-teal');
+    expect(c.document.components.get<BlockComponent>(p.block)!.swatch, 'teal');
+    expect(c.document.commands.undoDepth, depth + 1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+      'P-G3 (write) a colour write that throws refuses the whole recolour: '
+      'nothing changes, no step, one diagnostic; the row then recolours '
+      'the box alone (M-P-G3w)', (tester) async {
+    final p = boomPlan();
+    final c = p.c;
+    await panel(tester, c);
+    p.boom.failing.add('colourWrite');
+    await select(tester, c, [p.box, p.block]);
+    final depth = c.document.commands.undoDepth;
+    await tapKey(tester, 'color-swatch-teal');
+    expect(tester.takeException(), isNull);
+    expect(c.document.components.get<BoxParams>(p.box)!.colour, isNull);
+    expect(
+        c.document.components.get<BlockComponent>(p.block)!.swatch, 'purple');
+    expect(c.document.commands.undoDepth, depth);
+    expect(boomFailures(c), ['boom.block: colourWrite']);
+    await select(tester, c, [p.box]);
+    await tapKey(tester, 'color-swatch-teal');
+    expect(c.document.components.get<BoxParams>(p.box)!.colour, 'teal');
+    expect(c.document.commands.undoDepth, depth + 1);
   });
 }
