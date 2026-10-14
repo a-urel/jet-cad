@@ -28,7 +28,8 @@
   and `symbolsState`; `SymbolsState`, moved from the plan library; a unit's
   label (`kUnitLabelTag`, `unitLabelHeight`, `unitLabelStamp`,
   `unitLabelPayload`, `unitLabelAttrib`, which builds a generated unit's
-  label as an E5 `GeneratedAttrib`); `PlanGate.relabel`; the `unit:` word
+  label as an E5 `GeneratedAttrib`, and the label's constants
+  `kUnitLabelMaxHeight`, `kUnitLabelTopShare` and `kUnitLabelTextAttrs`); `PlanGate.relabel`; the `unit:` word
   namespace and `validateHostWords`; `KitProblemCode.unitKindWord`, which
   conformance reports for a unit kind the contract does not name without
   an English word. `UnitLabelling.assigned`: the label comes from a kit's

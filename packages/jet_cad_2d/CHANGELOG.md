@@ -26,7 +26,6 @@
   on a handle that is not a live root-level group (a frozen object
   included). It names the `handle` and the `typeId`. A caller catching
   `StateError` is unaffected.
-
 - `ParametricType.instances(view, self)` (default: none) lets a type
   generate symbol instances beside its entities. Each
   `GeneratedInstance(definition, transform, attributes: […])` becomes an

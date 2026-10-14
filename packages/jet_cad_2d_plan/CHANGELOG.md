@@ -50,3 +50,25 @@ The service mode (sub-project 2b).
 - In design, a generated unit stands for its object: a click on a seat
   selects its row. A window band over a row of seats alone selects
   nothing (a known limit).
+- Unit types: `PlanUnit`, `PlanUnitDetail`, the `PlanUnitChange` events
+  (`PlanUnitAdded`, `PlanUnitChanged`, `PlanUnitRemoved`,
+  `PlanUnitsReplaced`), `UnitLabelProblem`, and the label warnings
+  (`UnitLabelWarning`, `UnitProblem`, `Unlabelled`, `DuplicateLabel`,
+  `BadLabel`); `UnitStatus`, `UnitGroup` and `ServiceRestore`;
+  `PlanServiceAction`, `PlanLongPress`, `PlanFloorDrag`, `PlanOverlaySize`
+  and `PlanUnitOverlayBuilder`.
+- The camera for a host: `cameraValue` (a `PlanCamera` per pan, zoom and
+  fit), `worldToGlobal` and `globalToWorld`.
+- The unit colours in output: `export` and `print` take
+  `unitColourOpacity` (default `kUnitColourOpacity`, 0.35), and
+  `PlanExportRequest.unitColourOpacity` carries it to every exporter.
+- The unit section in `PlanPropertyPanel` (the label, its duplicate
+  warning, the capacity, a quarter turn either way);
+  `PlanEditor(unitInspectorBuilder:)` builds a host's inspector under the
+  panel for one selected placed unit.
+- `isUnitSymbol`, the gallery filter for the `unitsOnly` profile.
+- `PlanController.symbolsState` is now typed `SymbolsState`, moved to
+  `jet_cad_2d_kit` and re-exported here; 2a's `PlanSymbolsState` is removed.
+- While the plan is in service the design document is read-only: a
+  `PlanCanvas` or a kit tool still mounted cannot edit it. Leaving service
+  gives it the permissions' engine permissions again.
