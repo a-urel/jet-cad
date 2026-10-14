@@ -21,6 +21,7 @@ const List<String> kFlagNames = [
   'recolor',
   'editLayers',
   'editPage',
+  'relabel',
   'undo',
   'export',
   'print',
@@ -36,6 +37,7 @@ Map<String, bool> flagsOf(P p) => {
       'recolor': p.recolor,
       'editLayers': p.editLayers,
       'editPage': p.editPage,
+      'relabel': p.relabel,
       'undo': p.undo,
       'export': p.export,
       'print': p.print,
@@ -51,6 +53,7 @@ P copyFlag(P p, String name, bool v) => switch (name) {
       'recolor' => p.copyWith(recolor: v),
       'editLayers' => p.copyWith(editLayers: v),
       'editPage' => p.copyWith(editPage: v),
+      'relabel' => p.copyWith(relabel: v),
       'undo' => p.copyWith(undo: v),
       'export' => p.copyWith(export: v),
       'print' => p.copyWith(print: v),
@@ -68,6 +71,7 @@ const Map<PlanGate, String> kGateFlag = {
   PlanGate.recolor: 'recolor',
   PlanGate.editLayers: 'editLayers',
   PlanGate.editPage: 'editPage',
+  PlanGate.relabel: 'relabel',
 };
 
 /// readOnly's flags, as spec P2 and today's S-12 list them.
@@ -81,6 +85,7 @@ const Map<String, bool> kReadOnly = {
   'recolor': false,
   'editLayers': false,
   'editPage': false,
+  'relabel': false,
   'undo': false,
   'export': true,
   'print': true,
@@ -176,8 +181,8 @@ void main() {
     expect(P.readOnly.draft, same(DraftPermissions.readOnly));
     expect(P.readOnly.edits, isFalse);
     expect(P.full.draft, same(DraftPermissions.all));
-    for (final name in kFlagNames.take(9)) {
-      // move .. editPage: each alone is an edit.
+    for (final name in kFlagNames.take(10)) {
+      // move .. relabel: each alone is an edit.
       final one = copyFlag(P.readOnly, name, true);
       expect(one.edits, isTrue, reason: name);
       expect(one.draft, same(DraftPermissions.all), reason: name);
@@ -199,7 +204,8 @@ void main() {
         changeLayer: false,
         recolor: false,
         editLayers: false,
-        editPage: false);
+        editPage: false,
+        relabel: false);
     expect(everyTool.tools, isNull);
     expect(everyTool.draft, same(DraftPermissions.all),
         reason: 'null tools allows the drawing tools');
@@ -215,7 +221,8 @@ void main() {
         P.readOnly.toString(),
         'PlanPermissions(tools: {plan.select}, move: false, rotate: false, '
         'mirror: false, reshape: false, delete: false, changeLayer: false, '
-        'recolor: false, editLayers: false, editPage: false, undo: false)');
+        'recolor: false, editLayers: false, editPage: false, relabel: false, '
+        'undo: false)');
     // The tools sorted, so the text is stable whatever the set's order.
     expect(P.full.copyWith(tools: {'plan.text', 'acme.x'}).toString(),
         'PlanPermissions(tools: {acme.x, plan.text})');

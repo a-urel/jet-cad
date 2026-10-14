@@ -321,6 +321,7 @@ void main() {
       'recolor',
       'editLayers',
       'editPage',
+      'relabel',
     ]);
   });
 }

@@ -62,6 +62,15 @@ final class KitServices implements PlanServices {
   @override
   T shared<T extends Object>(T Function(PlanServices) create) =>
       _host.session.shared.get<T>(kit.id, this, create);
+
+  // Spec 2b S2. Task 4 implements both; no kit calls them before it.
+  @override
+  SymbolDefinitionRef? symbolDefinition(String key) =>
+      throw UnimplementedError('KitServices.symbolDefinition (2b Task 4)');
+
+  @override
+  ValueListenable<SymbolsState> get symbolsState =>
+      throw UnimplementedError('KitServices.symbolsState (2b Task 4)');
 }
 
 /// The attachment registry until Task 14: no kind, no attachment.

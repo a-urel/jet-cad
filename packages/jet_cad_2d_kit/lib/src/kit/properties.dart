@@ -17,6 +17,9 @@ enum PlanGate {
   recolor,
   editLayers,
   editPage,
+
+  /// A unit's label (spec 2b S4; today's `renumber`).
+  relabel,
 }
 
 /// How a [ValueDisplay] prints its number: a length in mm, an area in mm²,

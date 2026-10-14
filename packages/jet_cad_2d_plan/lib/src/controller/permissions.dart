@@ -16,9 +16,10 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanGate;
 /// - [move], [rotate], [mirror], [reshape], [delete]: the select tool's
 ///   gates and the panel's matching fields; [changeLayer], [recolor]: the
 ///   panel's layer field and colour row; [editLayers], [editPage]: the
-///   Layer and Page panels; [undo]: the Undo and Redo buttons and chords;
-///   [export], [print]: theirs. A property spec's `gate` names one of the
-///   first nine ([allows]).
+///   Layer and Page panels; [relabel]: a unit's label field (2b's unit
+///   section) and the property specs gated by it; [undo]: the Undo and
+///   Redo buttons and chords; [export], [print]: theirs. A property
+///   spec's `gate` names one of the first ten ([allows]).
 /// - [draft]: what the document's own `DraftPermissions` become.
 @immutable
 final class PlanPermissions {
@@ -33,6 +34,7 @@ final class PlanPermissions {
     this.recolor = true,
     this.editLayers = true,
     this.editPage = true,
+    this.relabel = true,
     this.undo = true,
     this.export = true,
     this.print = true,
@@ -54,6 +56,7 @@ final class PlanPermissions {
     recolor: false,
     editLayers: false,
     editPage: false,
+    relabel: false,
     undo: false,
   );
 
@@ -61,7 +64,7 @@ final class PlanPermissions {
 
   final Set<String>? tools;
   final bool move, rotate, mirror, reshape, delete;
-  final bool changeLayer, recolor, editLayers, editPage;
+  final bool changeLayer, recolor, editLayers, editPage, relabel;
   final bool undo, export, print;
 
   /// Whether the tool [id] is offered: `plan.select` always, else by
@@ -79,6 +82,7 @@ final class PlanPermissions {
         PlanGate.recolor => recolor,
         PlanGate.editLayers => editLayers,
         PlanGate.editPage => editPage,
+        PlanGate.relabel => relabel,
       };
 
   /// Whether anything may be edited: an edit flag, or a tool other than
@@ -93,6 +97,7 @@ final class PlanPermissions {
       recolor ||
       editLayers ||
       editPage ||
+      relabel ||
       (tools?.any((id) => id != _select) ?? true);
 
   /// The document's engine permissions: [DraftPermissions.readOnly] when
@@ -116,6 +121,7 @@ final class PlanPermissions {
     bool? recolor,
     bool? editLayers,
     bool? editPage,
+    bool? relabel,
     bool? undo,
     bool? export,
     bool? print,
@@ -131,6 +137,7 @@ final class PlanPermissions {
         recolor: recolor ?? this.recolor,
         editLayers: editLayers ?? this.editLayers,
         editPage: editPage ?? this.editPage,
+        relabel: relabel ?? this.relabel,
         undo: undo ?? this.undo,
         export: export ?? this.export,
         print: print ?? this.print,
@@ -147,6 +154,7 @@ final class PlanPermissions {
         ('recolor', recolor),
         ('editLayers', editLayers),
         ('editPage', editPage),
+        ('relabel', relabel),
         ('undo', undo),
         ('export', export),
         ('print', print),

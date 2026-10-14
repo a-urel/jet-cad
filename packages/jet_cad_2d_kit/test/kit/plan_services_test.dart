@@ -2,7 +2,9 @@
 import 'dart:ui' show Locale;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 /// A kit's shared cache, written against the barrel alone.
 final class Bands implements Disposable {
@@ -39,5 +41,28 @@ void main() {
     // the export this file does not compile.
     final Disposable bands = Bands()..dispose();
     expect((bands as Bands).disposed, 1);
+  });
+
+  test(
+      'K2B-ref SymbolDefinitionRef holds its four fields; SymbolsState '
+      'lists its three states', () {
+    // A premise of the declarations, exempt from the mutation rule.
+    final add = AddDefinitionCommand(Definition(
+        handle: const Handle(0x4A2),
+        name: 'Booth',
+        basePoint: Vector2(2100.5, 1300.25),
+        children: const []));
+    final ref = SymbolDefinitionRef(
+        handle: const Handle(0x4A2),
+        add: add,
+        basePoint: Vector2(2100.5, 1300.25),
+        top: const Aabb2.raw(1650.5, 850.25, 2550.5, 1750.25));
+    expect(ref.handle, const Handle(0x4A2));
+    expect(identical(ref.add, add), isTrue);
+    expect(ref.basePoint, Vector2(2100.5, 1300.25));
+    expect([ref.top.minX, ref.top.minY, ref.top.maxX, ref.top.maxY],
+        [1650.5, 850.25, 2550.5, 1750.25]);
+    expect(
+        SymbolsState.values.map((s) => s.name), ['loading', 'ready', 'failed']);
   });
 }

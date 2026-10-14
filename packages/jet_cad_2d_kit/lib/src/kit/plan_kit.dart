@@ -52,7 +52,8 @@ final class PlanKit {
       ];
 
   /// The descriptor's problems: a bad id, an empty version, a word under
-  /// another kit's id or in no known namespace; a type or tool id that is not
+  /// another kit's id or in no known namespace (a `category:` or `unit:` word
+  /// names the kit before its `/`); a type or tool id that is not
   /// `<this kit's id>.<name>` or is repeated; a word with no stored English
   /// missing from English, for every word a type, tool or property needs.
   /// Empty when sound. Problems across kits are the plan library's.
@@ -77,7 +78,7 @@ final class PlanKit {
         final rest = wordId.substring(colon + 1);
         var foreign = false;
         switch (namespace) {
-          case 'category':
+          case 'category' || 'unit':
             final slash = rest.indexOf('/');
             foreign = slash < 0 || rest.substring(0, slash) != id;
           case 'symbol' || 'tool' || 'type' || 'property':
