@@ -189,10 +189,10 @@ void main() {
   });
 
   testWidgets(
-      'SV-12 shortcuts: false across a mode switch: the editor\'s '
-      'PlanShortcuts, remounted in design, keeps the select tool\'s idle '
-      'Escape the host\'s (the selection stays, the host hears it)',
-      (tester) async {
+      'SV-12 shortcuts: false across a mode switch and a load: the '
+      'editor\'s PlanShortcuts, remounted in design, keeps the select '
+      'tool\'s idle Escape the host\'s (the selection stays, the host hears '
+      'it)', (tester) async {
     final c = serviceController();
     var escapes = 0;
     await tester.binding.setSurfaceSize(const Size(1440, 900));
@@ -221,6 +221,7 @@ void main() {
     await focusCanvas();
     c.select({'1'});
     await tester.pump();
+    // M-PS-idle: PlanShortcuts' initState does not apply its idle keys.
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(c.selectedUnits.value, {'1'}, reason: 'premise: the host\'s key');
@@ -235,11 +236,25 @@ void main() {
     await focusCanvas();
     c.select({'1'});
     await tester.pump();
-    // M-PS-idle: PlanShortcuts' initState does not apply its idle keys.
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
     expect(c.selectedUnits.value, {'1'},
         reason: 'remounted: still the host\'s');
     expect(escapes, 2);
+
+    // A new plan in design: the editor's shortcuts are not remounted in
+    // the frame that drops the old ones (whose dispose gives the select
+    // tool its idle keys back).
+    c.load(c.save());
+    await tester.pump();
+    await tester.pump();
+    await focusCanvas();
+    c.select({'1'});
+    await tester.pump();
+    // M-PS-remount: the editor's PlanShortcuts keyed by the document.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(c.selectedUnits.value, {'1'}, reason: 'a new plan: the host\'s');
+    expect(escapes, 3);
   });
 }
