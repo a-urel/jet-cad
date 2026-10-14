@@ -21,7 +21,7 @@
 - **Versions and environment.**
   - `jet_cad_2d_plan`: `version: 0.8.0`, `resolution: workspace`, `sdk: ^3.6.0`, `flutter: ">=3.44.0"`.
   - `jet_cad_2d_kit` stays at 0.1.0 and gains `jet_cad_2d_flutter: ^0.7.2`.
-  - The engine's and the Flutter layer's versions are **not** bumped here. Their `CHANGELOG.md` gains an `## Unreleased` section naming E1-E4; the wave (sub-project 4) picks the numbers.
+  - The engine's and the Flutter layer's versions are **not** bumped here. The engine's `CHANGELOG.md` gains an `## Unreleased` section naming E1-E4 (the Flutter layer does not change, so its `CHANGELOG.md` is untouched); the wave (sub-project 4) picks the numbers.
   - **Plan decision:** dependency floors stay `^0.7.2` in this branch; the wave raises them to the released numbers.
 - **Dependencies.**
   - `jet_cad_2d_plan` depends on: the Flutter SDK, `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_2d_kit`, `meta`, `vector_math`, and whatever the ported code already uses (`printing`, `pdf`, …), with the same constraints as `jet_cad_floor_plan`'s pubspec.
@@ -83,48 +83,85 @@
 Paths are relative to the repository root.
 
 ```
-packages/jet_cad_2d/lib/src/
-  parametric/parametric_system.dart     E1 typeIds/typeIdOf; E2 isFrozen, probe (Tasks 1, 2)
-  parametric/regeneration.dart          E2 frozen objects skipped; E3 PartialMutationError (Tasks 1, 2)
-  core/partial_mutation_error.dart      E3 (Task 1)
-  document/component.dart               E4 loadJson diagnostics (Task 1)
-  codec/json_codec.dart                 E4 plumbing (Task 1)
-packages/jet_cad_2d_kit/lib/src/kit/
-  properties.dart                       PropertySpec family, PropertyField, PlanGate (Task 3)
-  colour.dart                           ColourTarget (Task 3)
-  plan_type.dart                        PlanType, PropertySectionBuilder (Task 4)
-  plan_tool.dart                        PlanTool, PlanToolSettings (Task 4)
-  plan_services.dart                    PlanServices, KitWords (Task 4)
-  attachment.dart                       AttachmentProvider, AttachmentQuery, Attachment, AttachmentRegistry (Task 4)
-  kit_diagnostic.dart                   KitDiagnostic, KitDiagnosticCode (Task 4)
-  plan_kit.dart                         grows types, tools, attachments; validate (Task 4)
-packages/jet_cad_2d_kit/lib/src/model/  symbol_component.dart retired (Task 5); kit_problem.dart codes (Task 4)
-packages/jet_cad_2d_kit/lib/src/authoring/  catalog.dart retired; conformance.dart R3 (Task 5)
-packages/jet_cad_2d_kit/lib/src/model/symbol_library.dart   rule 11 width test, R7 (Task 5)
+packages/jet_cad_2d/                    (Tasks 1, 2 only)
+  lib/jet_cad_2d.dart                   one export (Task 1)
+  lib/src/core/partial_mutation_error.dart   E3 (Task 1)
+  lib/src/parametric/parametric_system.dart  E1 typeIds/typeIdOf (Task 1); E2 isFrozen, probe (Task 2)
+  lib/src/parametric/regeneration.dart  E3 three sites (Task 1); E2 frozen objects skipped (Task 2)
+  lib/src/document/commands.dart        E3, CompoundCommand.apply (Task 1)
+  lib/src/document/component.dart       E4 loadJson diagnostics (Task 1)
+  lib/src/codec/json_codec.dart         E4 keepUnreadableComponents (Task 1)
+  CHANGELOG.md                          ## Unreleased, E1-E4 (Tasks 1, 2)
+  test/parametric/catalog_queries_test.dart, partial_mutation_test.dart, frozen_test.dart, probe_test.dart,
+    support/frozen_clients.dart; test/codec/unreadable_component_test.dart        (Tasks 1, 2)
+packages/jet_cad_2d_kit/
+  pubspec.yaml                          gains jet_cad_2d_flutter: ^0.7.2 (Task 4)
+  lib/jet_cad_2d_kit.dart               exports (Tasks 3, 4, 9)
+  lib/src/kit/properties.dart           PropertySpec family, PropertyField, PlanGate, ValueUnit (Task 3)
+  lib/src/kit/colour.dart               ColourTarget (Task 3)
+  lib/src/kit/plan_type.dart            PlanType, PropertySectionBuilder, TypeGuard (Task 4)
+  lib/src/kit/plan_tool.dart            PlanTool, PlanToolSettings (Task 4)
+  lib/src/kit/plan_services.dart        PlanServices, KitWords, KitNamesWords, Disposable (Task 4)
+  lib/src/kit/attachment.dart           AttachmentProvider, AttachmentQuery, Attachment, AttachmentRegistry (Task 4)
+  lib/src/kit/kit_diagnostic.dart       KitDiagnostic, KitDiagnosticCode (Task 4)
+  lib/src/kit/plan_kit.dart             grows types, tools, attachments, propertyIds (Task 4)
+  lib/src/kit/swatch.dart               PlanSwatch, planSwatchNamed (Task 9)
+  lib/src/model/kit_problem.dart, kit_ids.dart   seven codes, isCodeId (Task 4)
+  lib/src/model/json_fields.dart, symbol_component.dart, symbol_library.dart   optionalField, R2 retired, R7 (Task 5)
+  lib/src/authoring/catalog.dart, builder.dart, conformance.dart              R2, R3 (Task 5)
+  example/cafe_code.dart, README.md, CHANGELOG.md                             (Tasks 3, 4, 5, 9)
 docs/kits.md                            R5 and the code side (Task 5)
+pubspec.yaml (root)                     workspace entry (Task 6)
+.github/workflows/ci.yml                the package and publishable matrices (Task 6)
 packages/jet_cad_2d_plan/
-  pubspec.yaml, analysis_options.yaml, LICENSE, README.md, CHANGELOG.md     (Tasks 6, 20)
-  lib/jet_cad_2d_plan.dart              the barrel (grows per task)
-  lib/src/kits/kit_set.dart             validateKitSet, KitSet (Task 6)
+  pubspec.yaml                          (Task 6; flutter_localizations and fonts Task 9; pdf, printing Task 19)
+  analysis_options.yaml, LICENSE        (Task 6)
+  README.md, CHANGELOG.md               (Task 6; Task 20)
+  lib/jet_cad_2d_plan.dart              the barrel (grows per task; every export with `show`, Task 20)
+  lib/fonts/Roboto-Regular.ttf, assets/fonts/Roboto_LICENSE.txt, assets/fonts/README.md   (Task 9)
+  lib/src/kits/kit_set.dart             validateKitSet, KitSet, KitSetError, reservedKitIds (Task 6)
   lib/src/file/                         manifest.dart, plan_file.dart, plan_format_exception.dart, semver.dart (Task 7)
-  lib/src/controller/                   plan_controller.dart, plan_change.dart, services.dart, shared_cache.dart,
-                                        grip_dispatch.dart, tool_settings_store.dart (Task 8)
-  lib/src/l10n/  lib/src/theme/  lib/src/fonts/                              (Task 9)
-  lib/src/kits/locks.dart               lock expander, LockSet, PlanLocked (Task 10)
-  lib/src/kits/guard.dart               GuardedType, KitHookFailure, GuardedTool, DiagnosticsLog, probe flow (Task 11)
-  lib/src/controller/permissions.dart   PlanPermissions, PlanGate enforcement (Task 12)
-  lib/src/tools/                        generic tools, plan_select_gates.dart (Task 12); plan_symbol_tool.dart, move_resolver.dart (Task 14)
-  lib/src/symbols/                      plan_symbol_loader.dart, gallery_model.dart (Task 13)
+  lib/src/controller/                   plan_controller.dart, session.dart (DocumentSession: one document and
+                                        every per-document member), plan_change.dart, services.dart,
+                                        shared_cache.dart, grip_dispatch.dart, tool_settings_store.dart,
+                                        diagnostics_log.dart, new_plan.dart, camera_bounds.dart (Task 8);
+                                        permissions.dart (Task 12)
+  lib/src/symbols/plan_symbols_state.dart                                  (Task 8)
+  lib/src/export/registries.dart        (Task 8; extended by Task 19)
+  lib/src/l10n/                         strings.dart, strings_en/de/tr.dart, localizations.dart, panel_number.dart,
+                                        number_text.dart, search_fold.dart, numbered_names.dart,
+                                        document_separator.dart, locale_scope.dart (Task 9)
+  lib/src/theme/plan_theme.dart, lib/src/fonts/plan_fonts.dart             (Task 9)
+  lib/src/kits/locks.dart               LockSet, LockExpander, LockedGrips, LockGates, PlanLocked (Task 10)
+  lib/src/kits/guard.dart               GuardedType, PlanTypeGuard, KitHookFailure, GuardedTool, GuardedGrips,
+                                        guardFactory, guardAttachment, FailureBoundary (Task 11)
+  lib/src/kits/section_boundary.dart    KitSectionBoundary (Task 11)
+  lib/src/tools/                        plan_select_gates.dart, generic_tools.dart (Task 12);
+                                        plan_symbol_tool.dart, move_resolver.dart (Task 14)
+  lib/src/symbols/                      plan_symbol.dart, plan_symbol_loader.dart, gallery_model.dart,
+                                        symbol_placer.dart, thumbnail_document.dart (Task 13);
+                                        symbol_box.dart, symbol_ghost.dart (Task 14)
   lib/src/attach/                       attachment_registry.dart, attachment_painter.dart (Task 14)
-  lib/src/canvas/plan_canvas.dart       (Task 15)
-  lib/src/editor/plan_tool_palette.dart, lib/src/shortcuts/plan_shortcuts.dart  (Task 16)
-  lib/src/panels/plan_property_panel.dart, property_fields.dart, symbol_section.dart, colour_row.dart (Task 17)
-  lib/src/panels/plan_layer_panel.dart, plan_page_panel.dart, plan_symbol_gallery.dart (Tasks 18, 13)
-  lib/src/export/                       registries, pdf_exporter.dart, png_exporter.dart, export_dialog.dart, print.dart (Task 19)
-  lib/src/editor/plan_editor.dart, plan_editor_bar.dart (Task 20)
+  lib/src/canvas/                       plan_canvas.dart, plan_canvas_view.dart, text_entry_overlay.dart (Task 15)
+  lib/src/shortcuts/                    chords.dart, plan_shortcut_guard.dart (Task 15);
+                                        tool_letters.dart, plan_shortcuts.dart (Task 16)
+  lib/src/panels/                       panel_focus.dart, plan_symbol_gallery.dart (Task 13);
+                                        plan_property_panel.dart, symbol_section.dart, colour_row.dart,
+                                        frame_safe_relay.dart, kit_lookup.dart (Task 17);
+                                        layer_row.dart, plan_layer_panel.dart, layer_picker.dart,
+                                        plan_page_panel.dart (Task 18)
+  lib/src/export/                       builtin_exporters.dart, export_font.dart, page_printer.dart,
+                                        page_flows.dart, export_dialog.dart, editor_page_flows.dart (Task 19)
+  lib/src/editor/                       plan_tool_palette.dart (Task 16); plan_editor.dart, plan_editor_bar.dart (Task 20)
   example/main.dart                     (Task 20)
-  test/support/test_kit.dart, throwing_kit.dart, harness.dart (Task 6, grown by later tasks)
-.github/workflows/ci.yml                a jet_cad_2d_plan job and a publishable entry (Task 6)
+  test/support/                         test_kit.dart, throwing_kit.dart, harness.dart (Task 6; harness grown by
+                                        Tasks 7, 8); box_kit.dart (10); tool_events.dart (12);
+                                        symbol_fixtures.dart (13); attach_fixtures.dart (14);
+                                        canvas_fixture.dart (15); stamp_kit.dart, design_harness.dart (16);
+                                        panel_kits.dart (17); mark_kit.dart, layer_plan.dart (18);
+                                        fake_page_printer.dart, export_plan.dart, recording_exporters.dart,
+                                        flows_bar.dart (19); editor_host.dart, recording_plan_strings.dart (20)
+docs/superpowers/notes/2026-10-14-plan-library-2a-results.md   (Task 21)
 ```
 
 ## Shared interfaces
@@ -241,7 +278,13 @@ abstract interface class PlanPageExporter implements PlanExporter {}   // marker
 // Task 19 also exports PlanExportAnswer and PlanExportDialog (the dialog's answer and hook);
 // Task 20 exports PlanFileCallback and PlanEditor's four file-callback options.
 // Controller internals used across tasks (@internal): toolController (never `tools`), selection, grips,
-//   camera, page, snap, catalog; registerSettle/settlePendingInput (Task 8).
+//   page, snap, catalog; registerSettle/settlePendingInput (Task 8). `camera` is public (Task 8).
+// Per-document state lives in DocumentSession (lib/src/controller/session.dart, Task 8), never in a
+//   controller field: built in the session's constructor, disposed by the session (kit products in
+//   disposeKitProducts at the swap, spec P1 lifetimes step 2; the rest in dispose(), one frame later).
+//   Session members added later: locks, lockExpander (Task 10); boundary (Task 11); gates, generic
+//   (Task 12: generic.select is the session's only plan.select); attachments, symbolTool (Task 14).
+//   The session's tool map owns every tool it holds: nothing else disposes them.
 // The property panel's layer field is mounted by Task 18 (it ports the layer picker); Task 17 leaves
 //   an @internal slot for it.
 ```
@@ -13285,7 +13328,7 @@ Resolved by controller ruling R-d (`Disposable` is Task 4's, `jet_cad_2d_kit` `p
   - `lib/fonts/Roboto-Regular.ttf`, `assets/fonts/Roboto_LICENSE.txt` (binary/text copies), `assets/fonts/README.md` (new)
   - `packages/jet_cad_2d_kit/lib/src/kit/swatch.dart` (ported: the palette)
 - Modify:
-  - `packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart` (one export)
+  - `packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart` (one export), `packages/jet_cad_2d_kit/CHANGELOG.md` (one bullet)
   - `pubspec.yaml` (`flutter_localizations`, the two font assets)
   - `lib/jet_cad_2d_plan.dart` (exports)
   - `lib/src/controller/new_plan.dart` (Task 8's `decimalSeparatorFor`: one expression)
@@ -13432,6 +13475,13 @@ In `packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart`, add beside the other `src/
 
 ```dart
 export 'src/kit/swatch.dart';
+```
+
+Append to the `## 0.1.0` list of `packages/jet_cad_2d_kit/CHANGELOG.md` (after Task 5's bullet):
+
+```markdown
+- `PlanSwatch`, the plan's eight-colour palette, and `planSwatchNamed`:
+  kits name a swatch without depending on the plan library.
 ```
 
 Run: `cd packages/jet_cad_2d_kit && flutter test test/kit/swatch_test.dart test/invariants`. Expected: `All tests passed!` (the purity test still finds `authoring.dart` pure: `swatch.dart` is not exported from it).
@@ -14916,7 +14966,7 @@ export 'src/theme/plan_theme.dart' show PlanTheme;
 - [ ] **Step 13: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_kit/lib/src/kit/swatch.dart packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/test/kit/swatch_test.dart packages/jet_cad_2d_plan/pubspec.yaml packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt packages/jet_cad_2d_plan/assets/fonts/README.md packages/jet_cad_2d_plan/lib/src/l10n/strings.dart packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart packages/jet_cad_2d_plan/lib/src/l10n/localizations.dart packages/jet_cad_2d_plan/lib/src/l10n/panel_number.dart packages/jet_cad_2d_plan/lib/src/l10n/number_text.dart packages/jet_cad_2d_plan/lib/src/l10n/search_fold.dart packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart packages/jet_cad_2d_plan/lib/src/l10n/document_separator.dart packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart packages/jet_cad_2d_plan/lib/src/theme/plan_theme.dart packages/jet_cad_2d_plan/lib/src/fonts/plan_fonts.dart packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart packages/jet_cad_2d_plan/test/l10n/l10n_test.dart packages/jet_cad_2d_plan/test/l10n/value_words_test.dart packages/jet_cad_2d_plan/test/l10n/numbered_names_test.dart packages/jet_cad_2d_plan/test/l10n/locale_scope_test.dart packages/jet_cad_2d_plan/test/theme/plan_theme_test.dart packages/jet_cad_2d_plan/test/fonts/fonts_register_test.dart packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart packages/jet_cad_2d_plan/test/l10n/document_separator_test.dart
+git add packages/jet_cad_2d_kit/lib/src/kit/swatch.dart packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart packages/jet_cad_2d_kit/CHANGELOG.md packages/jet_cad_2d_kit/test/kit/swatch_test.dart packages/jet_cad_2d_plan/pubspec.yaml packages/jet_cad_2d_plan/lib/fonts/Roboto-Regular.ttf packages/jet_cad_2d_plan/assets/fonts/Roboto_LICENSE.txt packages/jet_cad_2d_plan/assets/fonts/README.md packages/jet_cad_2d_plan/lib/src/l10n/strings.dart packages/jet_cad_2d_plan/lib/src/l10n/strings_en.dart packages/jet_cad_2d_plan/lib/src/l10n/strings_de.dart packages/jet_cad_2d_plan/lib/src/l10n/strings_tr.dart packages/jet_cad_2d_plan/lib/src/l10n/localizations.dart packages/jet_cad_2d_plan/lib/src/l10n/panel_number.dart packages/jet_cad_2d_plan/lib/src/l10n/number_text.dart packages/jet_cad_2d_plan/lib/src/l10n/search_fold.dart packages/jet_cad_2d_plan/lib/src/l10n/numbered_names.dart packages/jet_cad_2d_plan/lib/src/l10n/document_separator.dart packages/jet_cad_2d_plan/lib/src/l10n/locale_scope.dart packages/jet_cad_2d_plan/lib/src/theme/plan_theme.dart packages/jet_cad_2d_plan/lib/src/fonts/plan_fonts.dart packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart packages/jet_cad_2d_plan/lib/src/controller/new_plan.dart packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart packages/jet_cad_2d_plan/test/l10n/l10n_test.dart packages/jet_cad_2d_plan/test/l10n/value_words_test.dart packages/jet_cad_2d_plan/test/l10n/numbered_names_test.dart packages/jet_cad_2d_plan/test/l10n/locale_scope_test.dart packages/jet_cad_2d_plan/test/theme/plan_theme_test.dart packages/jet_cad_2d_plan/test/fonts/fonts_register_test.dart packages/jet_cad_2d_plan/test/fonts/plan_assets_test.dart packages/jet_cad_2d_plan/test/l10n/document_separator_test.dart
 git commit -m "$(cat <<'EOF'
 feat(plan): words, fonts and theme of the plan library (2a P5)
 
@@ -14978,7 +15028,7 @@ Resolved by controller ruling (NS7): today's behaviour kept (A14 parity); `push`
 
 **Files:**
 - Create: `packages/jet_cad_2d_plan/lib/src/kits/locks.dart`
-- Modify: `packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart` and `packages/jet_cad_2d_plan/lib/src/controller/session.dart` (Task 8 keeps the per-document build and teardown in `DocumentSession`) (Task 8's per-document build and teardown, three new members), `packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart` (export `PlanLocked`)
+- Modify: `packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart` and `packages/jet_cad_2d_plan/lib/src/controller/session.dart` (Task 8 keeps the per-document build and teardown in `DocumentSession`: `session.dart` gains `locks`, `lockExpander`, `lockGates` and the constructor's `kitLoaded`, `locked`; `plan_controller.dart` gains `locked`, `isLocked`, `lockBroken`), `packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart` (export `PlanLocked`)
 - Test: `packages/jet_cad_2d_plan/test/support/box_kit.dart` (fixture, reused by Task 11), `packages/jet_cad_2d_plan/test/kits/locks_test.dart`
 
 (Paths below are under `packages/jet_cad_2d_plan/`.)
@@ -14993,7 +15043,7 @@ Resolved by controller ruling (NS7): today's behaviour kept (A14 parity); `push`
   - Exported from the barrel: `final class PlanLocked implements Exception` — `const PlanLocked()`.
   - On `PlanController` (public): `ValueListenable<Set<Handle>> get locked` (the locked objects: a missing kit's, an unknown type's, a broken one's; never the root); `bool isLocked(Handle handle)` (the handle is a locked object, inside one, or inside a locked symbol's definition: Task 17's panel and Task 18's pickers read it).
   - On `PlanController` (`@internal`, Task 11): `void lockBroken(Set<Handle> objects)` (adds them, clears the undo history, refreshes `locked`, the undo listenables and the grip cache's gates).
-  - Internal (`lib/src/kits/locks.dart`): `final class LockSet` (`LockSet.scan(DraftDocument, bool Function(String kitId) loaded)`, `Set<Handle> get objects`, `bool get isEmpty`, `bool isLockedObject(Handle)`, `bool covers(CommandTarget, Handle)`, `void addBroken(CommandTarget, Iterable<Handle>)`); `final class LockExpander` (`LockExpander(DraftDocument document, LockSet locks)`, `install()`, `dispose()`); `final class LockedGrips implements ObjectGripProvider` (`LockedGrips(LockSet locks, ObjectGripProvider? inner)`); `final class LockGates extends SelectGates` (`LockGates({required SelectionController selection, required ValueListenable<Set<Handle>> locked})`, `bool get selectionLocked`, `dispose()`).
+  - Internal (`lib/src/kits/locks.dart`): `final class LockSet` (`LockSet.scan(DraftDocument, bool Function(String kitId) loaded)`, `Set<Handle> get objects`, `bool get isEmpty`, `bool isLockedObject(Handle)`, `bool covers(CommandTarget, Handle)`, `void addBroken(CommandTarget, Iterable<Handle>)`); `final class LockExpander` (`LockExpander(DraftDocument document, LockSet locks)`, `install()`, `dispose()`); `final class LockedGrips implements ObjectGripProvider` (`LockedGrips(LockSet locks, ObjectGripProvider? inner)`); `base class LockGates extends SelectGates` (`LockGates({required SelectionController selection, required ValueListenable<Set<Handle>> locked})`, `bool get selectionLocked`, `dispose()`; Task 12's `PlanSelectGates` extends it).
 
 Plan decision (which objects are locked; spec P4 "Which objects are locked"):
 - A node (not the root) that carries an **unknown** component whose type id is kit-namespaced: it contains a `.`, its first segment is a kit id (`isKitId`, `jet_cad_2d_kit/lib/src/model/kit_ids.dart:13`) and is neither `jetcad` nor `plan`. The engine keeps such a component raw (`component.dart:304-311`, `unknownOf` at `:247`). This covers the spec's "component type id under a missing kit's id", and also a type a **loaded** kit does not have (a plan saved by a newer version of the kit, spec R6) and a component E4 kept raw because its factory threw. Locking those too is the conservative reading of A9: what no loaded code can regenerate stays as saved. `jet_cad.object_layer` (`object_layer.dart:17`) is not kit-namespaced (`jet_cad` is no kit id), so it never locks.
@@ -15004,7 +15054,7 @@ Plan decision (how a lock is checked on commit; spec P4 "How a lock is enforced"
 
 Plan decision (a frozen object's children): E2 makes a frozen object a plain group whose children the engine lets a command edit directly (Task 2's semantics, in the Shared interfaces). The lock covers them: `lockBroken` refreshes the closure, and the walk reaches the frozen group from any of its children (L-3, L-8).
 
-Plan decision (the up-front layer and Task 12): the grip provider is wrapped in `LockedGrips` (no grips, not movable, no drag, no preview for a covered group). The select gates are `LockGates` until Task 12 replaces them with `PlanSelectGates`, which reads the same `locked` listenable with the same rule (a selected key's target or a handle of its chain in the set: Task 12's PM-9, PM-10); L-6 reads the gates through `controller.grips.gates`, so it stays green after the swap. `deleteSelection` refuses through the same gates (Task 8's `deleteSelection` is the select tool's own, `select_tool.dart:744-753`, as Task 12 also states).
+Plan decision (the up-front layer and Task 12): the grip provider is wrapped in `LockedGrips` (no grips, not movable, no drag, no preview for a covered group). The select gates are `LockGates` (a `base class`); Task 12's `PlanSelectGates` extends it, adding the permissions, so the lock rule exists once (a selected key's target or a handle of its chain in the set: L-10 here, Task 12's PM-9, PM-10); L-6 reads the gates through `controller.grips.gates`, so it stays green after Task 12. `deleteSelection` refuses through the same gates (Task 8's `deleteSelection` is the select tool's own, `select_tool.dart:744-753`, as Task 12 also states).
 
 Plan decision (undo; spec P4 "Undo and a lock"): `undo` and `redo` skip the expander (`undo.dart:144-151`), so a mid-session lock clears the history: `lockBroken` calls `commands.clearHistory()` (`undo.dart:277`), which emits no change event, so it also refreshes Task 8's `canUndo`/`canRedo` notifiers itself. A missing kit's objects are locked at load, when the history is empty.
 
@@ -15525,7 +15575,7 @@ void main() {
         reason: 'with its kit loaded, nothing is locked');
 
     b.newPlan();
-    // M-L1c: the per-document build keeping the previous LockSet.
+    // M-L1c: `_open` keeping the previous lock set's objects.
     expect(b.locked.value, isEmpty, reason: 'a new document, a new lock set');
   });
 
@@ -15663,7 +15713,7 @@ void main() {
     // M-L6a-d: `LockGates.move` (rotate, reshape, delete) without
     // `&& !_selectionLocked`.
     expect(open().values, everyElement(isFalse));
-    // M-L6e: the controller handing Task 8's dispatch to the GripCache
+    // M-L6e: the session handing Task 8's dispatch to the GripCache
     // instead of `LockedGrips(locks, dispatch)`.
     expect(b.grips.objects!.movable(d, plan.square), isFalse);
     expect(b.grips.objects!.gripsOf(d, plan.square), isEmpty);
@@ -16080,9 +16130,9 @@ final class LockedGrips implements ObjectGripProvider {
 /// its chain, is in [locked]; a locked object stays selectable. The answer
 /// is a cached `bool`, recomputed when the selection or the locked set
 /// notifies, so the getters allocate nothing (`select_gates.dart:14-21`).
-/// Task 12's `PlanSelectGates` replaces it with the same rule plus the
-/// permissions.
-final class LockGates extends SelectGates {
+/// Task 12's `PlanSelectGates` extends it with the permissions (one lock
+/// rule, not two).
+base class LockGates extends SelectGates {
   LockGates({
     required SelectionController selection,
     required ValueListenable<Set<Handle>> locked,
@@ -16140,18 +16190,65 @@ final class LockGates extends SelectGates {
 
   In `lib/jet_cad_2d_plan.dart` add `export 'src/kits/locks.dart' show PlanLocked;` (sorted with the other exports).
 
-- [ ] **Step 5: Wire it into the controller.** In `lib/src/controller/plan_controller.dart` (Task 8), import `../kits/locks.dart`, then:
-  1. Controller-lifetime fields and members:
+- [ ] **Step 5: Wire it into the session and the controller.** The lock set, the expander and the gates are per-document: they live in Task 8's `DocumentSession` (`lib/src/controller/session.dart`), are built in its constructor and disposed by it (Shared interfaces). Only the `locked` notifier is the controller's.
+  1. In `lib/src/controller/session.dart`, import `package:flutter/foundation.dart' show ValueListenable` and `'../kits/locks.dart'`. The constructor gains two named parameters, and its body becomes, in this order (the lock set is scanned first because it only reads the document and the grip cache needs it; the system still installs last and the expander stacks after it, spec P2 "It owns"):
+
+```dart
+  DocumentSession(
+      {required this.document,
+      required this.measurer,
+      required ParametricCatalog catalog,
+      required CameraController camera,
+      required SnapSettings snap,
+      required bool Function(String kitId) kitLoaded,
+      required ValueListenable<Set<Handle>> locked})
+      : page = PageNotifier(document),
+        index = SpatialIndex(document),
+        dispatch = GripDispatch(catalog) {
+    locks = LockSet.scan(document, kitLoaded);
+    // planner_shell.dart:625-671, the order load-bearing: the selection
+    // prunes a dead key before the outline cache walks it; the gates
+    // listen to the selection before the outline and grip caches do; the
+    // grip cache rebuilds after the outlines.
+    selection = SelectionController(document);
+    lockGates = LockGates(selection: selection, locked: locked);
+    outlines = OutlineCache(document, selection);
+    grips = GripCache(document, selection, outlines,
+        objects: LockedGrips(locks, dispatch), gates: lockGates);
+    toolContext = ToolContext(
+        document: document,
+        index: index,
+        camera: camera,
+        selection: selection,
+        page: page,
+        snap: snap,
+        grips: grips);
+    select = SelectTool(gates: lockGates);
+    tools = ToolController(initial: select, context: toolContext);
+    _entries.add((id: planSelectToolId, tool: select, kit: false));
+    // :1050-1057: the document arrives built; the system installs last,
+    // and the lock expander stacks after it.
+    parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
+      ..install();
+    lockExpander = LockExpander(document, locks)..install();
+  }
+```
+
+     The field `final SelectTool select = SelectTool();` becomes `late final SelectTool select;`, and the session gains:
+
+```dart
+  /// The document's lock set, expander and select gates (spec P4).
+  late final LockSet locks;
+  late final LockExpander lockExpander;
+  late final LockGates lockGates;
+```
+
+     In `dispose()`, right after `page.dispose();` and before `parametric.dispose();`: `lockGates.dispose(); lockExpander.dispose();` (the session is the only owner: nothing in the controller disposes them).
+  2. In `lib/src/controller/plan_controller.dart` (Task 8), import `../kits/locks.dart`, and add the controller-lifetime members:
 
 ```dart
   /// The locked objects of the current document (spec P4).
   final ValueNotifier<Set<Handle>> _locked = ValueNotifier(const {});
-
-  /// The current document's lock set, expander and gates (made per
-  /// document, with the parametric system).
-  late LockSet _locks;
-  late LockExpander _lockExpander;
-  late LockGates _lockGates;
 
   /// The locked objects: a missing kit's, an unknown type's, a broken
   /// one's. Never the root.
@@ -16160,7 +16257,7 @@ final class LockGates extends SelectGates {
   /// Whether [handle] is locked: a locked object, inside one, or inside a
   /// locked symbol's definition. The property panel shows no section for
   /// it; the pickers refuse it.
-  bool isLocked(Handle handle) => _locks.covers(document, handle);
+  bool isLocked(Handle handle) => _session.locks.covers(document, handle);
 
   /// Locks [objects] in the middle of a session (spec P4: a type's code
   /// failed, Task 11): adds them to the lock set, clears the undo history
@@ -16168,9 +16265,9 @@ final class LockGates extends SelectGates {
   @internal
   void lockBroken(Set<Handle> objects) {
     if (objects.isEmpty) return;
-    _locks.addBroken(document, objects);
+    _session.locks.addBroken(document, objects);
     document.commands.clearHistory();
-    _locked.value = _locks.objects;
+    _locked.value = _session.locks.objects;
     // clearHistory emits no change: refresh the undo listenables here.
     _refreshFlags();
     grips.gatesChanged();
@@ -16179,20 +16276,7 @@ final class LockGates extends SelectGates {
 ```
 
   (`_refreshFlags()` is Task 8's: it sets `dirty`, `canUndo` and `canRedo` from `document.commands`.)
-
-  2. In Task 8's per-document build (the one method the constructor, `load`, `newPlan` and `import` share), in this order:
-     - right after `ParametricSystem.install()`:
-
-```dart
-    _locks = LockSet.scan(document, (kitId) => kits.kitOf(kitId) != null);
-    _lockExpander = LockExpander(document, _locks)..install();
-    _locked.value = _locks.objects;
-```
-
-       (`kits` is Task 8's `final KitSet kits`.)
-     - right after the `SelectionController` is made, before the `OutlineCache` and the `GripCache`: `_lockGates = LockGates(selection: selection, locked: _locked);`
-     - the `GripCache` gets `objects: LockedGrips(_locks, dispatch)` (`dispatch` is the session's `GripDispatch`, Task 8) and `gates: _lockGates`; the `plan.select` `SelectTool` gets `gates: _lockGates`.
-  3. In Task 8's per-document teardown, before `ParametricSystem.dispose()`: `_lockGates.dispose(); _lockExpander.dispose();`. In the controller's `dispose`, after the teardown: `_locked.dispose();`.
+  3. In Task 8's `_open`, the `DocumentSession(...)` call gains `kitLoaded: (kitId) => kits.kitOf(kitId) != null, locked: _locked` (`kits` is Task 8's `final KitSet kits`), and right after `_session = session;` add `_locked.value = session.locks.objects;`. In the controller's `dispose`, after the last session is disposed: `_locked.dispose();`.
 
 - [ ] **Step 6: Run the tests.** Run: `cd packages/jet_cad_2d_plan && flutter test test/kits/locks_test.dart`. Expected: `All tests passed!`. Then the whole package: `flutter test`. Expected: `All tests passed!` (Task 8's controller tests unchanged: with nothing locked the expander returns the parametric command unwrapped).
 
@@ -16220,7 +16304,7 @@ EOF
 - [ ] **Step 9: Mutation check** (committed files only; after each: run `cd packages/jet_cad_2d_plan && flutter test test/kits/locks_test.dart`, see the named test red, then `git checkout -- <file>` and `git diff --quiet -- <file>` must exit 0):
   - M-L1a `lib/src/kits/locks.dart`: in `LockSet.scan`, `unknown`'s body → `return false;` → L-1 red (the square missing from `locked`).
   - M-L1b `locks.dart`: in the definition loop, `(symbol != null && !loaded(kitOfKey(symbol.key)))` → `false` → L-1 red (the lamp missing).
-  - M-L1c `plan_controller.dart`: in the per-document build, guard the three lock lines with `if (!_locksMade) { ...; _locksMade = true; }` (a new `bool _locksMade = false;` field) → L-1 red at `b.newPlan()`.
+  - M-L1c `plan_controller.dart`: in `_open`, guard `_locked.value = session.locks.objects;` with `if (!_locksMade) { ...; _locksMade = true; }` (a new `bool _locksMade = false;` field) → L-1 red at `b.newPlan()`.
   - M-L2a `locks.dart`: `_check`'s first line → `return result;` → L-2 red (no `PlanLocked`).
   - M-L2b `locks.dart`: delete `result.inverse.apply(target);` (and its `try`/`catch`, keeping `throw const PlanLocked();`) → L-2 red (the encoding differs).
   - M-L3a `locks.dart`: `covers` → `_roots.contains(h)` → L-3 red (the child edit passes).
@@ -16228,9 +16312,9 @@ EOF
   - M-L4 `locks.dart`: `_locksUnknown`'s body → `!loaded(kit)` (lock only a missing kit's) → L-4 red, L-1 still green.
   - M-L5a-d `locks.dart`: in `LockedGrips`, delete the `if (_locks.covers(d, group)) ...;` line of `gripsOf` (a), `drag` (b), `preview` (c), `movable` (d), one at a time → L-5 red each.
   - M-L6a-d `locks.dart`: `LockGates.move` (a), `rotate` (b), `reshape` (c), `delete` (d) → `true`, one at a time → L-6 and L-10 red each.
-  - M-L6e `session.dart`: `objects: LockedGrips(_locks, dispatch)` → `objects: dispatch` → L-6 red (`movable` true).
-  - M-L6f `session.dart`: the `plan.select` `SelectTool`'s `gates: _lockGates` deleted (the `GripCache`'s kept) → L-6 red (the square deleted).
-  - M-L7 `plan_controller.dart`: `isLocked` → `_locks.isLockedObject(handle)` → L-7 red.
+  - M-L6e `session.dart`: `objects: LockedGrips(locks, dispatch)` → `objects: dispatch` → L-6 red (`movable` true).
+  - M-L6f `session.dart`: `select = SelectTool(gates: lockGates);` → `select = SelectTool();` (the `GripCache`'s gates kept) → L-6 red (the square deleted).
+  - M-L7 `plan_controller.dart`: `isLocked` → `_session.locks.isLockedObject(handle)` → L-7 red.
   - M-L8 `plan_controller.dart`: delete `document.commands.clearHistory();` in `lockBroken` → L-8 red.
   - M-L9 `locks.dart`: `expandInner` → `command` → L-9 red (no children).
   - M-L10 `locks.dart`: delete `_locked.addListener(_recompute);` → L-10 red.
@@ -16240,7 +16324,7 @@ EOF
 #### Assumed from earlier tasks
 
 Each name below is used as written; where an earlier task named it otherwise, the implementer uses that task's name and reports the difference.
-- Task 8 keeps per-document state in a `DocumentSession` (`lib/src/controller/session.dart`, per its file list): the per-document members named in this task (`_locks`, `_lockExpander`, `_lockGates`, `_boundary`, the frozen set) then live in that session, built and disposed with it, and the controller's members read them through the current session.
+- Task 8 keeps per-document state in a `DocumentSession` (`lib/src/controller/session.dart`): its constructor builds the views and installs the system (`DocumentSession(...)`, `select`, `_entries`, `dispose()`), and `_open` makes one per document; the old session is disposed one frame after a swap (`_drop`). This task's `locks`, `lockExpander`, `lockGates` are session members (Step 5).
 - Task 8 (`lib/src/controller/plan_controller.dart`): `PlanController({required List<PlanKit> kits, String? json, ...})`; `DraftDocument get document`; `String save()`; `void newPlan({String? decimalSeparator})`; `void undo()`; `ValueListenable<bool> get canUndo` (and `canRedo`), refreshed by a private method or inline assignments after each document change; `bool deleteSelection()`; `Set<String> get missingKits` (the manifest's kit ids the kit set does not load; `contains` is all the tests use); `@internal` accessors `SelectionController get selection` and `GripCache get grips` (the names Tasks 12 and 15 also assume); one per-document build shared by the constructor, `load`, `newPlan` and `import` (which installs the `ParametricSystem`, makes the `SelectionController`, the `OutlineCache`, the `GripCache` with Task 8's dispatching `ObjectGripProvider`, and the `plan.select` `SelectTool`), and one per-document teardown; the validated `KitSet` as `final KitSet kits`; the controller is a `ChangeNotifier`; documents carry `registerKitComponents`' types, so `SymbolComponent` is registered.
 - Task 7: a plan saved by `save()` names its used kits in `jetcad.manifest` (the square's type id and the lamp's symbol key are under `box`); loading keeps a missing kit's entry and writes it back as read; handles survive `save()` and `PlanController(json:)`.
 - Task 6: `KitSet.kitOf(String id)`; `validateKitSet` accepts `boxKit`, `boxKit(types: false)` and `ringKit` (ids under their kits, English words for every `type:` and `tool:` id).
@@ -18238,7 +18322,7 @@ final class DiagnosticsLog extends ChangeNotifier
   }
 ```
 
-- [ ] **Step 5: Wire the controller.** In `lib/src/controller/plan_controller.dart` (Task 8), import `../kits/guard.dart` and `../file/plan_file.dart` (if not already), then:
+- [ ] **Step 5: Wire the session and the controller.** In `lib/src/controller/plan_controller.dart` (Task 8), import `../kits/guard.dart` and `../file/plan_file.dart` (if not already), then (item 4 also edits `session.dart`):
   1. **The log.** The controller keeps Task 8's log field `_diagnostics` (`@internal diagnosticsLog`), now the class of Step 3; `diagnostics` returns it as before, and `dispose` calls its `dispose()` as before.
   2. **Registration.** Where Task 8 registers each kit type, `planType.registerInto(catalog)` becomes `planType.registerInto(catalog, guard: const PlanTypeGuard())`.
   3. **New controller-lifetime members:**
@@ -18259,8 +18343,6 @@ final class DiagnosticsLog extends ChangeNotifier
 
   /// Whether [toolId]'s factory threw for the current document.
   bool isToolDisabled(String toolId) => _disabledTools.contains(toolId);
-
-  late FailureBoundary _boundary;
 
   /// Executes [command] on the current document: the commit path of every
   /// widget and panel (controller ruling R-b; no widget calls
@@ -18295,35 +18377,58 @@ final class DiagnosticsLog extends ChangeNotifier
   void _damage(PartialMutationError error) {
     _damaged.value = true;
     document.commands.notifyLoaded();
-    _locks.addBroken(document, const []);
+    _session.locks.addBroken(document, const []);
     _refreshFlags();
     notifyListeners();
   }
 ```
 
      `lockHint.dispose()` and `_damaged.dispose()` in `dispose`.
-  4. **The per-document build**, in this order:
+  4. **The per-document build.** It lives in Task 8's `DocumentSession` (`lib/src/controller/session.dart`, import `../kits/guard.dart` and `diagnostics_log.dart`) and its `_open`; the session owns what it builds (Shared interfaces).
      - Task 8's frozen set is `DocumentSession.frozen`, a fresh set per document already passed as `isFrozen: frozen.contains`: nothing to add.
-     - `_damaged.value = false; _disabledTools.clear();` at the start.
-     - Tools: where Task 8 fills the id → `Tool` map, each kit tool is made with `guardFactory(kit.id, planTool.id, () => planTool.create(services), _diagnostics)`; a null result adds `planTool.id` to `_disabledTools` and leaves the tool out of the map (`selectTool` of a missing id leaves `plan.select` armed, F-8). Every tool put in the map, generic or a kit's, is `GuardedTool(inner: tool, kitId: kitId, toolId: id, log: _diagnostics, lockHint: lockHint, onFailed: () => selectTool('plan.select'))` with `kitId` `'plan'` for the plan's own tools. Task 8's per-document disposal disposes the map's tools (each `GuardedTool` disposes its inner; dispose nothing twice).
-     - Grip providers: each `PlanType.gripsFor(services)` is called through `guardFactory(kitOfKey(type.id), type.id, () => type.gripsFor(services), _diagnostics)` (a null result: that type has no grips); the `GripCache`'s `objects` becomes `LockedGrips(_locks, GuardedGrips(_session.dispatch, typeIdOf: catalog.typeIdOf, log: _diagnostics))`.
-     - Right after Task 10's `_lockExpander = LockExpander(...)..install();`:
+     - The session's constructor gains `required DiagnosticsLog log` and `required Tool Function(String kitId, String toolId, Tool tool) guard`, kept in `final DiagnosticsLog _log;` and `final Tool Function(String, String, Tool) _guard;`. In its body, the `GripCache`'s `objects` becomes `LockedGrips(locks, GuardedGrips(dispatch, typeIdOf: catalog.typeIdOf, log: log))`, and the two lines that make the tool controller and register select become (every tool in the map is guarded, the plan's own under kit id `'plan'`):
 
 ```dart
-    _boundary = FailureBoundary(
+    final guardedSelect = guard('plan', planSelectToolId, select);
+    _entries.add((id: planSelectToolId, tool: guardedSelect, kit: false));
+    tools = ToolController(initial: guardedSelect, context: toolContext);
+```
+
+     - `addTool(String id, Tool tool)` stores `_guard('plan', id, tool)`.
+     - `runKitFactories(KitSet kits, Map<String, PlanServices> services, Set<String> disabled)`: each kit tool is `guardFactory(kit.id, tool.id, () => tool.create(s), _log)`; a null result adds `tool.id` to `disabled` and leaves the tool out of the map (`selectTool` of a missing id leaves `plan.select` armed, F-8); otherwise the map gets `_guard(kit.id, tool.id, made)`. Each `PlanType.gripsFor(s)` is called through `guardFactory(kitOfKey(type.id), type.id, () => type.gripsFor(s), _log)` (a null result: that type has no grips).
+     - A field `late final FailureBoundary boundary;` (set once by `_open`, below; the boundary holds no resource, it goes with its session).
+     - Disposal: the session's `dispose()` disposes the map's tools, as Task 8 wrote it; each `GuardedTool` disposes its inner, so `select` (the inner of the select entry) is disposed exactly once and nothing else disposes a tool.
+     - In `plan_controller.dart`, add
+
+```dart
+  /// The decorator every tool of a document's map wears (spec P4).
+  Tool _guardTool(String kitId, String toolId, Tool tool) => GuardedTool(
+      inner: tool,
+      kitId: kitId,
+      toolId: toolId,
+      log: _diagnostics,
+      lockHint: lockHint,
+      onFailed: () => selectTool(planSelectToolId));
+```
+
+       and in Task 8's `_open`: first `_damaged.value = false; _disabledTools.clear();`; the `DocumentSession(...)` call gains `log: _diagnostics, guard: _guardTool`; `session.runKitFactories(kits, _services)` becomes `session.runKitFactories(kits, _services, _disabledTools)`; right after Task 10's `_locked.value = session.locks.objects;`:
+
+```dart
+    session.boundary = FailureBoundary(
         document: document,
         catalog: catalog,
-        system: _session.parametric,
-        frozen: _session.frozen,
+        system: session.parametric,
+        frozen: session.frozen,
         log: _diagnostics,
         lock: lockBroken,
         damage: _damage);
-    _lockExpander
-      ..onHookFailure = _boundary.recover
-      ..onPartialMutation = _boundary.partialMutation;
+    session.lockExpander
+      ..onHookFailure = session.boundary.recover
+      ..onPartialMutation = session.boundary.partialMutation;
 ```
 
-     - At the end of the build (the grips and gates made, so `lockBroken` can refresh them): `_boundary.reportUnreadable(_loadDiagnostics); _boundary.probeLoaded();` (`_loadDiagnostics` is the list Task 8's `_open` keeps from `decodePlan`; empty for `newPlan`).
+     - At the end of `_open` (the grips, gates and kit products made, `_session` set, so `lockBroken` can refresh them): `session.boundary.reportUnreadable(_loadDiagnostics); session.boundary.probeLoaded();` (`_loadDiagnostics` is the list Task 8's `_open` keeps from `decodePlan`; empty for `newPlan`).
+     - In Task 8's `_replace`, `old.tools.activate(old.select);` becomes `old.tools.activate(old.toolById(planSelectToolId)!);` (the guarded entry, the one the tool controller knows).
   5. **Saving a damaged plan.** Rename Task 8's `save()` to `String _saveUnchecked()` and add:
 
 ```dart
@@ -18382,18 +18487,18 @@ EOF
   - M-F-G14 `guard.dart`: `PlanTypeGuard.wrap` → `=> type;` → F-G14 red.
   - M-F1a `guard.dart`: `recover`'s body → `return false;` → F-1 red (`test/kits/failure_flow_test.dart`).
   - M-F1b `guard.dart`: in `_freeze`, delete `frozen.addAll(objects);` → F-1 red.
-  - M-F2 `plan_controller.dart`: delete `..onHookFailure = _boundary.recover` → F-2 red.
+  - M-F2 `plan_controller.dart`: in `_open`, delete `..onHookFailure = session.boundary.recover` → F-2 red.
   - M-F3a `plan_controller.dart`: in `execute`, the `KitHookFailure` clause's `return false;` → `rethrow;` → F-3 red.
   - M-F1c `plan_controller.dart`: in `execute`'s `on PlanLocked` clause, delete `lockHint.value = true;` → F-1 red.
   - M-F9a `plan_controller.dart`: delete `execute`'s `on ArgumentError { return false; }` clause → F-9 red (the error reaches the test).
   - M-F9b `plan_controller.dart`: delete `execute`'s `on DanglingReferenceError { return false; }` clause → F-9 red.
   - M-F3b `lib/src/controller/diagnostics_log.dart`: `_isNew`'s body → `true` → F-3 and F-B4 red.
-  - M-F4 `plan_controller.dart`: delete `_boundary.probeLoaded();` → F-4 red.
-  - M-F5 `plan_controller.dart`: delete `_boundary.reportUnreadable(...);` → F-5 red.
-  - M-F6a `plan_controller.dart`: delete `..onPartialMutation = _boundary.partialMutation` → F-6 red.
+  - M-F4 `plan_controller.dart`: delete `session.boundary.probeLoaded();` → F-4 red.
+  - M-F5 `plan_controller.dart`: delete `session.boundary.reportUnreadable(...);` → F-5 red.
+  - M-F6a `plan_controller.dart`: delete `..onPartialMutation = session.boundary.partialMutation` → F-6 red.
   - M-F6b `plan_controller.dart`: delete `document.commands.notifyLoaded();` in `_damage` → F-6 red.
   - M-F7 `plan_controller.dart`: `save`'s first line → `return _saveUnchecked();` → F-7 red.
-  - M-F8 `plan_controller.dart`: the kit tool made with `planTool.create(services)` bare → F-8 red.
+  - M-F8 `session.dart`: in `runKitFactories`, the kit tool made with `tool.create(s)` bare (no `guardFactory`) → F-8 red.
   - M-F-T1-onPointerDown … M-F-T1-onKey `guard.dart`: in `GuardedTool`, that member's body → the bare inner call → F-T1 red (`test/kits/guarded_tool_test.dart`), one member at a time.
   - M-F-T2 `guard.dart`: delete the `if (error is PlanLocked || error is DanglingReferenceError) {…}` block → F-T2 red.
   - M-F-T3 `guard.dart`: delete the `if (error is KitHookFailure) {…} else` head, keeping `if (_isKit) … else rethrow` → F-T3 red.
@@ -18410,7 +18515,7 @@ EOF
 #### Assumed from earlier tasks
 
 Each name below is used as written; where an earlier task named it otherwise, the implementer uses that task's name and reports the difference.
-- Task 8 keeps per-document state in a `DocumentSession` (`lib/src/controller/session.dart`, per its file list): the per-document members named in this task (`_locks`, `_lockExpander`, `_lockGates`, `_boundary`, the frozen set) then live in that session, built and disposed with it, and the controller's members read them through the current session.
+- Task 8 keeps per-document state in a `DocumentSession` (`lib/src/controller/session.dart`); the old session is disposed one frame after a swap (`_drop`). Task 10's `locks`, `lockExpander`, `lockGates` are session members; this task's `boundary` is one too (Step 5); `frozen` is Task 8's.
 - Task 8 (`lib/src/controller/plan_controller.dart`): everything Task 10 assumed, plus `ValueListenable<List<KitDiagnostic>> get diagnostics` over a private log with `add(KitDiagnostic)`; `bool selectTool(String id)` (a missing or disabled id leaves `plan.select` armed); `ValueListenable<String> get activeTool` (the active tool's id); `@internal ToolController get toolController` (Tasks 12 and 15 assume it too); an id → `Tool` map filled per document from the generic tools and each kit's `PlanTool.create(services)`, disposed per document; each `PlanType.gripsFor(services)` called per document into one dispatching `ObjectGripProvider`; the `ParametricCatalog` in a field `catalog` (Task 18 assumes `ParametricCatalog get catalog`); a per-document frozen set passed as `isFrozen`; the load path calling Task 7's `decodePlan` with a `List<Diagnostic>` it keeps until the build ends; one registration function (engine built-ins, `registerKitComponents`, each `PlanType.registerInto`) handed to `decodePlan(register:)`.
 - Task 7: `decodePlan(String text, {required void Function(ComponentRegistry) register, required List<Diagnostic> diagnostics}) → DraftDocument` (passing `keepUnreadableComponents: true` to the codec, E4); `PlanFormatException(PlanFormatCode code, String message)` with `PlanFormatCode get code`.
 - Task 4: `KitDiagnostic` exposes `kitId`, `subject`, `code`, `message`, `error` as fields; `PlanType.registerInto(catalog, guard:)` calls `guard.wrap<T>(kitOfKey(id), id, parametric)`; `PlanKit.types` is a `List<PlanType<Component>>` (F-G14 reads `.single`); `AttachmentQuery({required Aabb2 footprint, required Transform2 current, required Vector2 pointer, required double capture, required double edgeCapture, required bool mirrored, required bool mayRotate, Set<Handle> exclude = const {}, Attachment? keep})` (the field list of spec P3, named).
@@ -18465,7 +18570,7 @@ Plan decision (`plan.select`): it is always allowed, whatever `tools` says, so `
 
 Plan decision (Fill): the Fill toggle is one `ValueNotifier<bool>` owned by the controller and kept across document swaps (today the shell's, `planner_shell.dart:421`, reset when a new shell was built). Task 16's palette and `F` key flip it.
 
-Plan decision (the gates' cost): `SelectGates` getters are read at every hover, key and frame and must allocate nothing (`select_gates.dart:14-21`). `PlanSelectGates` caches "the selection holds a locked object" as a `bool`, recomputed on a selection notification and on a `locked` notification; the getters read two booleans.
+Plan decision (the gates' cost): `SelectGates` getters are read at every hover, key and frame and must allocate nothing (`select_gates.dart:14-21`). `PlanSelectGates` extends Task 10's `LockGates`, which caches "the selection holds a locked object" as a `bool`, recomputed on a selection notification and on a `locked` notification; the getters read the permissions and that boolean.
 
 Ported tests: none verbatim. Today's capability tests drive `FloorPlanEditorCapabilities` and `FloorPlanTool` through `FloorPlanView` (`test/host/editor_capabilities_test.dart`, `editor_tools_test.dart`, `editor_select_test.dart`); `PlanPermissions` is a new type (its panel, gallery and drafting-aid fields moved to widget options, P7; `selectTablesOnly` and `renumber` to 2b). The table below maps each controller-level case to its new test. The palette, letters and bar cases (EC "letters", T4-e, T4-j, M-H41) move with their widgets to Tasks 16 and 20.
 
@@ -18906,7 +19011,7 @@ void main() {
     // after the selection.
     r.locked.value = {r.lines[0]};
     expect(r.gates.selectionLocked, isTrue);
-    // M-PM9b: `&& !_selectionLocked` dropped from `move`.
+    // M-PM9b: `&& super.move` (the lock) dropped from `move`.
     expect(r.open, kAllShut);
     // Another, unlocked object alone: open again.
     r.selection.replace([SelectionKey.root(r.lines[1])]);
@@ -19427,93 +19532,52 @@ final class PlanPermissions {
 
 (`toString` lists a flag only when it is `false`: every flag of `full` is `true`, so "differs from full" is "is false".)
 
-- [ ] **Step 8: The gates.** Create `lib/src/tools/plan_select_gates.dart`:
+- [ ] **Step 8: The gates.** Create `lib/src/tools/plan_select_gates.dart`. The lock half is Task 10's `LockGates` (`lib/src/kits/locks.dart`, a `base class`), extended, never copied:
 
 ```dart
 // Spec P2 "Permissions" (the select gates: move, rotate, reshape, delete)
 // and P4 "Locks" (the gates refuse a locked object), Task 12. One object on
 // the select tool and on the grip cache, as today's shell shares one
 // (planner_shell.dart:439-445, :648-657).
-import 'package:flutter/foundation.dart' show ValueListenable;
-import 'package:jet_cad_2d/jet_cad_2d.dart' show Handle;
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
-    show SelectGates, SelectionController;
-
 import '../controller/permissions.dart';
+import '../kits/locks.dart' show LockGates;
 
 /// The select tool's and the grip cache's gates: each drag kind and Delete
 /// need their [PlanPermissions] flag, and a selection holding a locked
-/// object (or a key inside one) shuts them all.
+/// object (or a key inside one) shuts them all ([LockGates]).
 ///
 /// The getters are read at every hover, key and frame (`SelectGates`'s
-/// contract) and allocate nothing: the lock state is a cached `bool`,
-/// recomputed when the selection or the locked set notifies.
-final class PlanSelectGates extends SelectGates {
+/// contract) and allocate nothing: the lock state is [LockGates]' cached
+/// `bool`, and the permissions are read through one closure call.
+final class PlanSelectGates extends LockGates {
   PlanSelectGates({
     required PlanPermissions Function() permissions,
-    required SelectionController selection,
-    required ValueListenable<Set<Handle>> locked,
-  })  : _permissions = permissions,
-        _selection = selection,
-        _locked = locked {
-    _selection.addListener(_recompute);
-    _locked.addListener(_recompute);
-    _recompute();
-  }
+    required super.selection,
+    required super.locked,
+  }) : _permissions = permissions;
 
   final PlanPermissions Function() _permissions;
-  final SelectionController _selection;
-  final ValueListenable<Set<Handle>> _locked;
-  bool _selectionLocked = false;
 
   /// The select tool's idle keys (Escape, Delete, Backspace while no
   /// gesture runs): the shortcuts' option (Task 16 sets it).
   @override
   bool idleKeys = true;
 
-  /// Whether a selected key's target, or a handle of its chain, is locked.
-  bool get selectionLocked => _selectionLocked;
-
-  void _recompute() {
-    final locked = _locked.value;
-    var hit = false;
-    if (locked.isNotEmpty) {
-      for (final key in _selection.keys) {
-        if (locked.contains(key.target)) {
-          hit = true;
-          break;
-        }
-        final chain = key.chain;
-        for (var i = 0; i < chain.length; i++) {
-          if (locked.contains(Handle(chain[i]))) {
-            hit = true;
-            break;
-          }
-        }
-        if (hit) break;
-      }
-    }
-    _selectionLocked = hit;
-  }
+  @override
+  bool get move => _permissions().move && super.move;
 
   @override
-  bool get move => _permissions().move && !_selectionLocked;
+  bool get rotate => _permissions().rotate && super.rotate;
 
   @override
-  bool get rotate => _permissions().rotate && !_selectionLocked;
+  bool get reshape => _permissions().reshape && super.reshape;
 
   @override
-  bool get reshape => _permissions().reshape && !_selectionLocked;
-
-  @override
-  bool get delete => _permissions().delete && !_selectionLocked;
-
-  void dispose() {
-    _selection.removeListener(_recompute);
-    _locked.removeListener(_recompute);
-  }
+  bool get delete => _permissions().delete && super.delete;
 }
 ```
+
+  `selectionLocked` and `dispose()` are `LockGates`'. If `flutter analyze` reports an unused import, delete it; change nothing else.
 
 - [ ] **Step 9: The generic tools.** Create `lib/src/tools/generic_tools.dart`:
 
@@ -19661,7 +19725,7 @@ GenericToolSet buildGenericTools({
 }
 ```
 
-- [ ] **Step 10: The controller.** In `lib/src/controller/plan_controller.dart` (Task 8), make these edits. Each names the member Task 8 wrote; the code shown is the full new body.
+- [ ] **Step 10: The session and the controller.** In `lib/src/controller/plan_controller.dart` (Task 8) and, for item 3, `lib/src/controller/session.dart`, make these edits. Each names the member Task 8 (or Tasks 10-11) wrote; the code shown is the full new body.
 
   1. Imports: `package:meta/meta.dart' show internal`, `'permissions.dart'`, `'../tools/generic_tools.dart'`, `'../tools/plan_select_gates.dart'`.
   2. Fields (controller-level, kept across document swaps):
@@ -19673,28 +19737,39 @@ GenericToolSet buildGenericTools({
 ```
 
      Task 8's factory and private constructor gain the named parameter `PlanPermissions permissions = PlanPermissions.full` (spec P2; Task 8 leaves it to this task), passed through and assigned to `_permissions` in the private constructor's initialiser list; dispose `_fill` in `dispose()`.
-  3. Per-document fields, set where Task 8 builds a document's systems (the method that the constructor, `load`, `newPlan` and `import` share), disposed where Task 8 disposes a document's tools:
+  3. Per-document members: they live in `DocumentSession` (Shared interfaces), built in its constructor and owned by it.
+     - In `session.dart`, import `../tools/generic_tools.dart` and `../tools/plan_select_gates.dart`. The constructor gains `required PlanPermissions Function() permissions` and `required ValueListenable<bool> fill` (import `permissions.dart`). Task 10's field `late final LockGates lockGates;` becomes `late final PlanSelectGates gates;` and the session gains `late final GenericToolSet generic;`. In the constructor body:
+       - `lockGates = LockGates(selection: selection, locked: locked);` (right after the `SelectionController`, before the `OutlineCache` and the `GripCache`, so its selection listener runs before theirs) becomes `gates = PlanSelectGates(permissions: permissions, selection: selection, locked: locked);`, and the `GripCache`'s `gates: lockGates` becomes `gates: gates` (Task 10's L-6 and L-10 stay green: `PlanSelectGates` is a `LockGates`).
+       - `select = SelectTool(gates: lockGates);` becomes, so that the session holds exactly one `plan.select` (the gated one):
 
 ```dart
-  late PlanSelectGates _gates;
-  late GenericToolSet _generic;
+    generic = buildGenericTools(gates: gates, fill: fill);
+    select = generic.select;
 ```
 
-     In that build method, in this order:
-     - right after the document exists and before any system is installed: `document.commands.permissions = _permissions.draft;`
-     - right after the `SelectionController` is made, **before** the `OutlineCache` and the `GripCache` (so its selection listener runs before theirs): `_gates = PlanSelectGates(permissions: () => _permissions, selection: selection, locked: locked);` (`locked` is Task 10's listenable).
-     - pass `gates: _gates` to the `GripCache` (replacing any gates object Task 10 passed; Task 10's select-gates lock test must stay green, since `PlanSelectGates` reads the same `locked` set).
-     - build the generic tools and register their needs, before the kit tools:
+       - right after Task 11's three lines that register the guarded select entry and make the `ToolController`, add the other generic tools, before any kit tool (`runKitFactories` runs later, from `_open`):
 
 ```dart
-    _generic = buildGenericTools(gates: _gates, fill: _fill);
-    for (final t in genericTools) {
-      _toolNeeds[t.id] = t.needs;
+    for (final e in generic.byId.entries) {
+      if (e.key != planSelectToolId) addTool(e.key, e.value);
     }
 ```
 
-     - the document's tool map (Task 8's id → `Tool`) starts with `_generic.byId`'s entries in order, then the kits' tools; record each kit tool's needs where Task 8 makes it: `_toolNeeds[planTool.id] = planTool.needs;`. The `ToolController`'s initial tool is `_generic.select` (wrapped in Task 11's `GuardedTool`, as every tool of the map is).
-     - in the per-document dispose: `_gates.dispose(); _generic.dispose();` (after the `ToolController` is disposed). `_toolNeeds` is not cleared: the ids are the same for every document of one controller.
+       - In `dispose()`, `lockGates.dispose();` becomes `gates.dispose();`. The generic tools are in the map, which `dispose()` already disposes (each through its `GuardedTool`): **never** call `generic.dispose()` from the session or the controller (a second dispose of a `Tool`, a `ChangeNotifier`, fails a debug assertion). `GenericToolSet.dispose` stays for a set no session holds (the unit tests of Step 4).
+     - In `plan_controller.dart`, Task 8's `_open`: before the `DocumentSession(...)` call, `document.commands.permissions = _permissions.draft;` (before any system is installed); the call gains `permissions: () => _permissions, fill: _fill`. Register the needs once per document, before the kit tools:
+
+```dart
+    for (final t in genericTools) {
+      _toolNeeds[t.id] = t.needs;
+    }
+    for (final kit in kits.kits) {
+      for (final planTool in kit.tools) {
+        _toolNeeds[planTool.id] = planTool.needs;
+      }
+    }
+```
+
+       `_toolNeeds` is not cleared: the ids are the same for every document of one controller.
   4. The tool gate (Task 8 left `_allowsTool` returning `true`):
 
 ```dart
@@ -19736,7 +19811,7 @@ GenericToolSet buildGenericTools({
     final old = _permissions;
     _permissions = value;
     document.commands.permissions = value.draft;
-    final select = _generic.select;
+    final select = _session.select;
     final stale = switch (select.dragKind) {
       DragKind.move => old.move && !value.move,
       DragKind.rotate => old.rotate && !value.rotate,
@@ -19750,10 +19825,10 @@ GenericToolSet buildGenericTools({
   }
 
   @internal
-  PlanSelectGates get selectGates => _gates;
+  PlanSelectGates get selectGates => _session.gates;
 
   @internal
-  SelectTool get planSelect => _generic.select;
+  SelectTool get planSelect => _session.select;
 
   /// The Fill toggle (Task 16's palette row and F key).
   @internal
@@ -19781,7 +19856,7 @@ GenericToolSet buildGenericTools({
   7. `deleteSelection()`: after Task 8's mid-shape check and settle, its deleting call is the select tool's own, through the gates (today's `_deleteByHost`, `planner_shell.dart:960`):
 
 ```dart
-    return _generic.select.deleteSelection(toolController.context);
+    return _session.select.deleteSelection(toolController.context);
 ```
 
 - [ ] **Step 11: The barrel.** In `lib/jet_cad_2d_plan.dart` add `export 'src/controller/permissions.dart';` (in the barrel's sorted position).
@@ -19817,9 +19892,9 @@ EOF
   - M-PM4 `permissions.dart`: `id == _select || ` deleted from `allowsTool` → PM-4 red.
   - M-PM5 `permissions.dart`: swap the right-hand sides of `PlanGate.move => move` and `PlanGate.rotate => rotate` → PM-5 red.
   - M-PM6a `permissions.dart`: `draft` returns `DraftPermissions.all` → PM-6 red; M-PM6b: delete the `|| (tools?.any(...) ?? true)` term of `edits` → PM-6 red.
-  - M-PM8 `plan_select_gates.dart`: `delete` returns `!_selectionLocked` → PM-8 red (and PM-20).
-  - M-PM9a `plan_select_gates.dart`: delete `_locked.addListener(_recompute);` → PM-9 red; M-PM9b: `move` returns `_permissions().move` → PM-9 red.
-  - M-PM10 `plan_select_gates.dart`: delete the `for (var i = 0; i < chain.length; i++)` loop → PM-10 red.
+  - M-PM8 `plan_select_gates.dart`: `delete` returns `super.delete` (the permission dropped) → PM-8 red (and PM-20).
+  - M-PM9a `lib/src/kits/locks.dart`: in `LockGates`' constructor, delete `_locked.addListener(_recompute);` → PM-9 red; M-PM9b `plan_select_gates.dart`: `move` returns `_permissions().move` (the lock dropped) → PM-9 red.
+  - M-PM10 `lib/src/kits/locks.dart`: in `LockGates._recompute`, delete the `for (var i = 0; i < chain.length && !hit; i++)` loop → PM-10 red.
   - M-PM12 `generic_tools.dart`: swap `letter: 'L'` and `letter: 'P'` → PM-12 red.
   - M-PM13 `generic_tools.dart`: `PolylineTool(fill: fill)` → `PolylineTool()` → PM-13 red.
   - M-PM14 `plan_controller.dart`: delete `if (!_permissions.allowsTool(id)) return false;` → PM-14 red.
@@ -19836,7 +19911,7 @@ EOF
 - Task 8 (`PlanController`):
   - `PlanController({required List<PlanKit> kits, String? json, ...})` (this task adds `PlanPermissions permissions = PlanPermissions.full`, Step 10); `DraftDocument get document`; `void newPlan({String? decimalSeparator})`; `bool selectTool(String id)` that consults a private `bool _allowsTool(String id)`; `ValueListenable<String> get activeTool` (the active tool's id); `bool deleteSelection()`; `void undo()`, `void redo()` (mid-shape no-op, then settle); `ValueListenable<bool> get canUndo`; `ChangeNotifier` (`addListener`).
   - `@internal` accessors: `ToolController get toolController` (whose `context` is the current document's `ToolContext`), `SelectionController get selection`, `GripCache get grips`.
-  - One per-document build method (shared by the constructor, `load`, `newPlan`, `import`) and one per-document dispose, and an id → `Tool` map from which `selectTool` arms.
+  - `DocumentSession` (`lib/src/controller/session.dart`): its constructor builds one document's views (Tasks 10-11 extend it), `_open` (shared by the constructor, `load`, `newPlan`, `import`) makes one per document, `dispose()` runs one frame after a swap, and its id → `Tool` map (`_entries`, `addTool`, `toolById`) owns every tool and is what `selectTool` arms.
 - Task 10: `ValueListenable<Set<Handle>> PlanController.locked`.
 - Task 11: every tool of the map is wrapped in `GuardedTool`, which forwards `phase`, `isMidShape` and the pointer calls (the tests read `toolController.active.phase` and `.isMidShape`).
 
@@ -19895,6 +19970,8 @@ Ported (assertions unchanged; fixtures, names and imports adapted):
 | `test/symbols/symbol_placer_test.dart` (whole file) | every test | `test/symbols/symbol_placer_test.dart` |
 | `test/symbols/symbol_section_test.dart:284-300` | SS9 (Task 17 sent it here: it asserts `definitionForEntry`, this task's port); the shuffled entry is the kit's `SymbolEntry` built from a fixture entry with its `leaves` reversed (the kit's `SymbolEntry` fields in place of `seats`) | `test/symbols/symbol_placer_test.dart` |
 | `test/symbols/symbol_panel_test.dart:230-502, 534-637` | the fixture test; states (2); search (2); the search controller (4); the field and the keys (5); the gallery: "a tap reports the entry…", "the cells are the entries…", "the thumbnail document…" | `test/panels/plan_symbol_gallery_test.dart` |
+
+Departure (fixture keys, A12-allowed): in the ported `symbol_search_test.dart` cases the fixture keys gain the kit prefix the kit format requires (`chair.wingback` → `fixture.chair.wingback`), so the expected ids and the one key query follow (`'chair.wingback@1'` → `'fixture.chair.wingback@1'`, `searchSymbols(entries, 'chair.wingback')` → `searchPlanSymbols(entries, 'fixture.chair.wingback', en)`); no other literal changes, and every matcher is the source's.
 
 Not ported here: `symbol_search_test.dart:82-164, 191-267` (they pin the furniture asset's 41 symbols; the asset moves with the furniture kit, sub-project 3) — new GM tests cover each field and rule on the fixture; `symbol_panel_test.dart:505-532` (the highlight needs `plan.symbol`: Task 14 ports it); `symbol_sources_test.dart` LS2 and LS3 (their rule changed: one failing source no longer fails the load, a duplicate is dropped, spec P2) — replaced by S-4 and S-2; LS5 (the furniture default) — gone; `symbol_words_test.dart` SN3 (the Symbol section, Task 17), SN4 (the collapsed category across languages: GM-9 pins the language-independent group id, and `SymbolGallery` keys its collapsed set by that id, `symbol_gallery.dart:32-41, 134-141`).
 
@@ -20882,16 +20959,23 @@ void main() {
 
   test('S-13 a controller disposed mid-load ignores the late result',
       () async {
-    final pending = Completer<Uint8List>();
-    final c = PlanController(kits: [
-      demoKit(
-          source: SymbolLibrarySource(
-              label: 'demo', read: () => pending.future)),
-    ]);
-    c.dispose();
-    pending.complete(demoBytes());
-    // M-S13: the `_disposed` check dropped: a disposed notifier is used.
-    await settle();
+    // The controller is made inside the zone, so the load's continuation
+    // runs there too and any error it throws lands in [errors].
+    final errors = <Object>[];
+    await runZonedGuarded(() async {
+      final pending = Completer<Uint8List>();
+      final c = PlanController(kits: [
+        demoKit(
+            source: SymbolLibrarySource(
+                label: 'demo', read: () => pending.future)),
+      ]);
+      c.dispose();
+      pending.complete(demoBytes());
+      await settle();
+    }, (error, _) => errors.add(error));
+    // M-S13: the `_disposed` check dropped: a disposed notifier is used
+    // (a debug assertion, caught here).
+    expect(errors, isEmpty, reason: 'the late result touches nothing');
   });
 
   test('S-14 armSymbol arms the symbol, whatever plan.symbol answers', () async {
@@ -21949,7 +22033,7 @@ EOF
   - M-S9 `plan_controller.dart`: delete the `for (final d in load.diagnostics)` loop → S-9 red.
   - M-S11 `plan_controller.dart`: `if (_ownsSymbolLoader) _symbolLoader.dispose();` → `_symbolLoader.dispose();` → S-11 red.
   - M-S12 `plan_controller.dart`: delete `if (_symbolsState.value != PlanSymbolsState.failed) return;` → S-12 red.
-  - M-S13 `plan_controller.dart`: delete `_disposed ||` from `_loadSymbols` → S-13 red (a disposed `ValueNotifier` is used).
+  - M-S13 `plan_controller.dart`: delete `_disposed ||` from `_loadSymbols` → S-13 red (`errors` holds the disposed `ValueNotifier`'s assertion).
   - M-S14 `plan_controller.dart`: delete `_armed.value = symbol;` → S-14 red.
   - M-GM2 `gallery_model.dart`: delete `!s.component.retired && ` → GM-2 red.
   - M-GM3a/b/c `gallery_model.dart`: delete `searchFold(c.name),` / the tags line / `searchFold(c.category),` → GM-3 red (each).
@@ -21981,7 +22065,7 @@ EOF
 - Create: `packages/jet_cad_2d_plan/lib/src/symbols/symbol_ghost.dart` (port)
 - Create: `packages/jet_cad_2d_plan/lib/src/tools/plan_symbol_tool.dart` (`PlanSymbolTool`, `kAttachPixels`, `kGhostCrossPixels`)
 - Create: `packages/jet_cad_2d_plan/lib/src/tools/move_resolver.dart` (`PlanMoveResolver`, `isOrthonormal`)
-- Modify: `packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart` and `packages/jet_cad_2d_plan/lib/src/controller/session.dart` (Task 8 keeps the per-document build and teardown in `DocumentSession`) (the per-document registry and `plan.symbol`, the move resolver on `plan.select`, `PlanServices.attachments`, the unoffered-kind diagnostic)
+- Modify: `packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart` and `packages/jet_cad_2d_plan/lib/src/controller/session.dart` (Task 8 keeps the per-document build and teardown in `DocumentSession`: `session.dart` gains `runAttachmentFactories`, `addSymbolTool`, `symbolTool`, the constructor's `moveResolver` and the registry's disposal in `disposeKitProducts`; `plan_controller.dart` gains `_moveResolver`, the `_open` calls, `_allowsTool`'s armed check, the unoffered-kind diagnostic)
 - Test support: `packages/jet_cad_2d_plan/test/support/attach_fixtures.dart` (new)
 - Test: `test/attach/attachment_registry_test.dart`, `test/symbols/symbol_box_test.dart` (port), `test/symbols/symbol_ghost_test.dart` (port), `test/tools/plan_symbol_tool_test.dart` (port + new), `test/tools/move_resolver_test.dart`, `test/controller/attachment_controller_test.dart`; add the highlight test to `test/panels/plan_symbol_gallery_test.dart` (Task 13's file)
 
@@ -23503,45 +23587,62 @@ final class PlanMoveResolver implements MoveResolver {
 }
 ```
 
-- [ ] **Step 13: The controller.** In `lib/src/controller/plan_controller.dart`:
-  1. Fields:
+- [ ] **Step 13: The session and the controller.** The registry and `plan.symbol` are per-document: they live in Task 8's `DocumentSession` (`lib/src/controller/session.dart`) and go with it (Shared interfaces). The attachment providers are kit products: they are made with the kit tools (spec P1 lifetimes, step 3) and disposed with them in `disposeKitProducts()`, at the swap (step 2), before the next document's are made.
+  1. In `session.dart` (import `../attach/attachment_registry.dart`, `../tools/plan_symbol_tool.dart` and `generic_tools.dart`'s `PlanToolIds`):
+     - The constructor gains `MoveResolver? moveResolver`, passed on as Task 12's `buildGenericTools(gates: gates, fill: fill, moveResolver: moveResolver)`.
+     - Add:
 
 ```dart
-  /// The current document's registry, plan.symbol and the move resolver
-  /// (one per controller: it reads the document from each call's context).
-  late PlanAttachmentRegistry _attachments;
-  late PlanSymbolTool _symbolTool;
+  /// plan.symbol of this document (Task 14); in the tool map, which owns
+  /// and disposes it.
+  late final PlanSymbolTool symbolTool;
+
+  /// Runs every kit's attachment-provider factories over this document,
+  /// once (spec P1 lifetimes), before its tools: the registry is what
+  /// `PlanServices.attachments` returns from here on.
+  void runAttachmentFactories(KitSet kits, Map<String, PlanServices> services,
+      void Function(KitDiagnostic) report) {
+    final registry = PlanAttachmentRegistry(report: report);
+    attachments = registry;
+    for (final kit in kits.kits) {
+      for (final factory in kit.attachments) {
+        registry.add(kit.id, factory, services[kit.id]!);
+      }
+    }
+  }
+
+  /// Puts [tool] in the map as plan.symbol, after the generic tools and
+  /// before the kits'.
+  void addSymbolTool(PlanSymbolTool tool) {
+    symbolTool = tool;
+    addTool(PlanToolIds.symbol, tool);
+  }
+```
+
+     - In `disposeKitProducts()`, right after the grip providers' loop: `final registry = attachments; if (registry is PlanAttachmentRegistry) registry.dispose();` (it disposes each provider that is `Disposable`). Nothing disposes `symbolTool` but the map.
+  2. In `plan_controller.dart`, a controller-lifetime member (it reads the current document from each call's context and the current registry from the session):
+
+```dart
   late final PlanMoveResolver _moveResolver = PlanMoveResolver(
-      attachments: () => _attachments,
+      attachments: () => _session.attachments,
       canRotate: () => _permissions.rotate);
 ```
 
-  2. In the per-document build, before any kit factory runs (the registry is what `PlanServices.attachments` returns):
+  3. In Task 8's `_open`: the `DocumentSession(...)` call gains `moveResolver: _moveResolver`; right after `_session = session;` (so the kit's `PlanServices` already read this session's registry) and before `session.runKitFactories(...)`:
 
 ```dart
-    _attachments = PlanAttachmentRegistry(report: _diagnostics.add);
-    for (final kit in kits.kits) {
-      for (final factory in kit.attachments) {
-        _attachments.add(kit.id, factory, servicesOf(kit.id));
-      }
-    }
-```
-
-     (`servicesOf(kitId)` is Task 8's per-kit `PlanServices`, whose `attachments` reads the session's `attachments` field: set `_session.attachments = _attachments;` here, in place of Task 8's `NoAttachments` default. In Task 8's `_open` this runs after the `DocumentSession` is made and before `session.runKitFactories`.)
-  3. In the same build: Task 12's `buildGenericTools(gates: _gates, fill: _fill)` gains `moveResolver: _moveResolver`; then
-
-```dart
-    _symbolTool = PlanSymbolTool(_armed,
-        attachments: _attachments,
+    session.runAttachmentFactories(kits, _services, _diagnostics.add);
+    session.addSymbolTool(PlanSymbolTool(_armed,
+        attachments: session.attachments,
         canRotate: () => _permissions.rotate,
-        canMirror: () => _permissions.mirror);
+        canMirror: () => _permissions.mirror));
     registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
 ```
 
-     and `_symbolTool` goes into the document's tool map under `PlanToolIds.symbol` (after the generic tools, before the kits'), wrapped as Task 11 wraps every tool. The build ends with `_reportUnofferedKinds();`.
-  4. Per-document dispose: `_symbolTool.dispose(); _attachments.dispose();` (after the `ToolController`).
+     (`_services` is Task 8's per-kit `PlanServices` map behind `servicesOf`; `addTool` guards the tool as Task 11 guards every tool.) `_open` ends with `_reportUnofferedKinds();`.
+  4. No per-document dispose in the controller: the session disposes the registry in `disposeKitProducts()` and `plan.symbol` with its map.
   5. `_allowsTool`: first line `if (id == PlanToolIds.symbol && _armed.value == null) return false;` (today: "`symbol` … is refused with none armed", `planner_shell.dart:945-951`).
-  6. The permissions setter (Task 12): after the fallback to plan.select, `else if (activeTool.value == PlanToolIds.symbol && (old.rotate != value.rotate || old.mirror != value.mirror)) _symbolTool.gatesChanged();` (today's `planner_shell.dart:1100-1104`).
+  6. The permissions setter (Task 12): after the fallback to plan.select, `else if (activeTool.value == PlanToolIds.symbol && (old.rotate != value.rotate || old.mirror != value.mirror)) _session.symbolTool.gatesChanged();` (today's `planner_shell.dart:1100-1104`).
   7. `_loadSymbols` (Task 13): after the diagnostics loop, `_reportUnofferedKinds();`, and add:
 
 ```dart
@@ -23549,7 +23650,7 @@ final class PlanMoveResolver implements MoveResolver {
   /// kit, subject and code) for each loaded symbol's attachTo kind that no
   /// provider of the current document offers.
   void _reportUnofferedKinds() {
-    final offered = _attachments.kinds;
+    final offered = _session.attachments.kinds;
     for (final s in _symbols) {
       for (final kind in s.component.attachTo) {
         if (offered.contains(kind)) continue;
@@ -23603,16 +23704,16 @@ EOF
   - M-MV1a `move_resolver.dart`: `pointer: moved.transformPoint(…)` → `pointer: t.transformPoint(box.backCentre)` → MV-1 red; M-MV1b: `exclude: {node}` → `exclude: const {}` → MV-1 red.
   - M-MV2a `move_resolver.dart`: delete `|| symbol.attachTo.isEmpty` → MV-2 red; M-MV2b: delete the object-snap line → MV-2 red.
   - M-MV3a `move_resolver.dart`: `keep: _last` → `keep: null` → MV-3 red; M-MV3b: make `_sync` return at once when `identical(doc, _document)` (ignoring the state) → MV-3 red.
-  - M-AT14 `plan_controller.dart`: delete `_attachments.dispose();` from the per-document dispose → AT-14 red.
+  - M-AT14 `session.dart`: in `disposeKitProducts()`, delete `if (registry is PlanAttachmentRegistry) registry.dispose();` → AT-14 red.
   - M-AT16 `plan_controller.dart`: delete the `_reportUnofferedKinds();` call in `_loadSymbols` → AT-16 red.
-  - M-AT17a `plan_controller.dart`: delete the `_armed.value == null` line of `_allowsTool` → AT-17 red; M-AT17b: `canRotate: () => _permissions.rotate` → `canRotate: () => true` for `_symbolTool` → AT-17 red.
-  - M-AT18 `plan_controller.dart`: drop `moveResolver: _moveResolver` from `buildGenericTools` → AT-18 red.
+  - M-AT17a `plan_controller.dart`: delete the `_armed.value == null` line of `_allowsTool` → AT-17 red; M-AT17b: `canRotate: () => _permissions.rotate` → `canRotate: () => true` for the `PlanSymbolTool` made in `_open` → AT-17 red.
+  - M-AT18 `plan_controller.dart`: drop `moveResolver: _moveResolver` from `_open`'s `DocumentSession(...)` call → AT-18 red.
   - The ported tool tests' own mutants (09b's M-09b… and the dark theme's M-DT-8) stay named in their tests; run M-09b9 on the gallery (`_selectedId` returns `armed.id` whatever the tool) → the highlight test red.
 
 #### Assumed from earlier tasks
 
 - Task 4: `AttachmentQuery({required Aabb2 footprint, required Transform2 current, required Vector2 pointer, required double capture, required double edgeCapture, required bool mirrored, required bool mayRotate, Set<Handle> exclude = const {}, Attachment? keep})` (Task 4: `mirrored` and `mayRotate` have no default; every call here passes both) with a getter per field; `Attachment({required Transform2 transform, required Vector2 marker, required Object token})` with getters; `AttachmentRegistry` (`attach`, `kinds`); `AttachmentProvider` (`kind`, `attach`); `PlanKit({..., List<AttachmentProvider Function(PlanServices)> attachments = const []})`; `PlanServices.attachments`; `KitDiagnosticCode.hookFailed`, `.attachmentKindUnoffered`. `Aabb2` is the engine's (`jet_cad_2d/lib/src/geometry/aabb2.dart`, `Aabb2.raw(minX, minY, maxX, maxY)`).
-- Task 8: the per-document build and dispose (`_open`, `DocumentSession`), `@internal servicesOf(kitId)` giving each kit's `PlanServices`, whose `attachments` reads `DocumentSession.attachments` (this task sets it to `_attachments`); `KitSet get kits`; the log `_diagnostics`; `newPlan()`; the diagnostics log (`add`) deduplicating by kit id, subject and code (Task 11's `DiagnosticsLog`); `Disposable` (Task 4, `jet_cad_2d_kit`; controller ruling R-d).
+- Task 8: the per-document build and dispose (`_open`, `DocumentSession`), `@internal servicesOf(kitId)` giving each kit's `PlanServices`, whose `attachments` reads `DocumentSession.attachments` (this task's `runAttachmentFactories` sets it); `KitSet get kits`; the log `_diagnostics`; `newPlan()`; the diagnostics log (`add`) deduplicating by kit id, subject and code (Task 11's `DiagnosticsLog`); `Disposable` (Task 4, `jet_cad_2d_kit`; controller ruling R-d).
 - Task 11: `GuardedTool` forwards `onKey`, the pointer calls and `isMidShape` (AT-17 calls `toolController.active.onKey`).
 - Task 12: `PlanToolIds.symbol`, `.symbolNeeds`; `buildGenericTools({required SelectGates gates, required ValueListenable<bool> fill, MoveResolver? moveResolver})`; `registerToolNeeds`; the permissions setter; `_allowsTool`; `test/support/tool_events.dart` (`useTestCamera`, `tapAt`, `dragFrom`).
 - Task 13: `PlanSymbol`, `placeSymbol`, `placementTransform`, `_armed`, `_symbols`, `_loadSymbols`, `PlanController.armSymbol`, `symbolById`, `selection` (`@internal`, Task 8), `test/support/symbol_fixtures.dart` (`box`, `settle`, `buildValidLibrary`, `bytesOf`), and the gallery test's `Host`, `entryOf`, `gallery`, `field`.
@@ -24141,13 +24242,13 @@ void main() {
 
 - [ ] **Step 4: Run the new tests to see them fail.** Run: `cd packages/jet_cad_2d_plan && flutter test test/canvas/plan_canvas_test.dart test/invariants/canvas_paint_allocation_test.dart`. Expected: compilation errors naming `PlanCanvas`, `PlanCanvasView`, `clampCameraScale` (unless Task 8 has it) and `kLockHintDuration`; no test runs.
 
-- [ ] **Step 5: The controller member the canvas adds.** Every other member of "Assumed from earlier tasks" is Task 8's or Task 12's as listed there. In `plan_controller.dart` add `textTool` (Task 12 builds the generic tools in `_generic`, a `GenericToolSet`):
+- [ ] **Step 5: The controller member the canvas adds.** Every other member of "Assumed from earlier tasks" is Task 8's or Task 12's as listed there. In `plan_controller.dart` add `textTool` (Task 12 builds the generic tools per document in `DocumentSession.generic`, a `GenericToolSet`):
 
 ```dart
   /// The current document's TEXT tool, unwrapped: the canvas's inline
   /// field (TextEntryOverlay) drives its pending placement.
   @internal
-  TextTool get textTool => _generic.byId[PlanToolIds.text]! as TextTool;
+  TextTool get textTool => _session.generic.byId[PlanToolIds.text]! as TextTool;
 ```
 
   The snapping flag is Task 8's `@internal bool snappingAllowed` (default `true`), read by its `EffectiveSnap` (the `ToolContext`'s `SnapSettings` and `PlanServices.objectSnap`); nothing to add for it.
@@ -24633,12 +24734,7 @@ PlanController controllerOn(int paper) => paletteController(
 - [ ] **Step 17: Commit.**
 
 ```bash
-git add packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas_view.dart packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart packages/jet_cad_2d_plan/lib/src/shortcuts/chords.dart packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart packages/jet_cad_2d_plan/test/support/canvas_fixture.dart packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart packages/jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_ui_test.dart packages/jet_cad_2d_plan/test/canvas/dark_canvas_test.dart packages/jet_cad_2d_plan/test/canvas/theme_canvas_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_palette_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_draw_test.dart packages/jet_cad_2d_plan/test/canvas/touch_tools_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_layout_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_camera_test.dart
-```
-
-  plus, by explicit path, `packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart` (Step 5). Then:
-
-```bash
+git add packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas_view.dart packages/jet_cad_2d_plan/lib/src/canvas/text_entry_overlay.dart packages/jet_cad_2d_plan/lib/src/shortcuts/chords.dart packages/jet_cad_2d_plan/lib/src/shortcuts/plan_shortcut_guard.dart packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart packages/jet_cad_2d_plan/test/support/canvas_fixture.dart packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart packages/jet_cad_2d_plan/test/invariants/canvas_paint_allocation_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_ui_test.dart packages/jet_cad_2d_plan/test/canvas/dark_canvas_test.dart packages/jet_cad_2d_plan/test/canvas/theme_canvas_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_palette_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_draw_test.dart packages/jet_cad_2d_plan/test/canvas/touch_tools_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_layout_test.dart packages/jet_cad_2d_plan/test/canvas/canvas_camera_test.dart packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
 git commit -m "$(cat <<'EOF'
 feat(plan): PlanCanvas and its paint-allocation invariant (P2)
 
@@ -24679,7 +24775,7 @@ Each name below is used as written; where the earlier task named it otherwise, t
 - Task 8 (`lib/src/controller/plan_controller.dart`): `PlanController` is a `ChangeNotifier` that notifies after `load`, `newPlan` and `import` swap the document (with `document`, `page`, `selection`, `toolController`, `grips` and `outlines` already naming the new document's); `void dispose()`; `void load(String json)`; documents are made with a `FlutterTextMeasurer` (`DraftCanvas` requires one, `draft_canvas.dart:267-279`); `DraftDocument get document`; `SpatialIndex get index`; `CameraController get camera` (with `minScale`, `maxScale` from the constructor's bounds); `PageNotifier get page`; `SelectionController get selection`; `OutlineCache get outlines`; `GripCache get grips`; `SnapSettings get snap` (the user's F3 setting); `bool snappingAllowed` (`@internal`, the canvas's `snapping` option, read by Task 8's `EffectiveSnap`); `ValueListenable<Locale> get locale` with `@internal reportLocale(Locale, {PlanStrings? strings})` (Task 9 adds `strings:`); `bool selectTool(String id)`; and today's camera plumbing (`floor_plan/lib/src/host/floor_plan_controller.dart:472-499`, `:812-852`) under today's names, `@internal`: `Listenable get fitRequests`, `int get cameraEpoch`, `bool takeFitOnStart()`, `bool get owesFirstFit`, `void fitted()`, `ViewportTransform? framingFor(Size viewport)`, `void canvasPlaced(Object view, Rect? global)`; `load` and `newPlan` set the fit-on-start latch as today (`floor_plan_controller.dart:815-831`). Step 5 adds `textTool`.
 - Task 9: `PlanStrings` (`lib/src/l10n/strings.dart`) with `PlanStrings.of(BuildContext)` (English without a delegate) and the word `lockedHint` ('This object is locked' in English); `PlanLocaleScope.push(BuildContext, PlanController)` (`lib/src/l10n/locale_scope.dart`), which reports `Localizations.maybeLocaleOf(context)` through `controller.reportLocale` after the frame; `PlanTheme.of(BuildContext)` returning `PlanTheme?` (`lib/src/theme/plan_theme.dart`) with nullable `canvasBackground`, `selectionOnLight`, `selectionOnDark`, `selectionWidth`, resolving a `PlanThemeScope` above, else the ambient `ThemeData` extension (today's `FloorPlanThemeScope.of`, `floor_plan/lib/src/host/floor_plan_theme.dart:465-472`); `PlanThemeScope({PlanTheme? view, required Widget child})`; `PaperPalette planPaperPaletteFor(int paperArgb, PlanTheme? theme)`. `flutter_localizations` is a dependency of `jet_cad_2d_plan` (Task 9 adds it).
 - Task 11 (`lib/src/kits/guard.dart`): `ValueNotifier<bool> PlanController.lockHint`; `GuardedTool` with `Tool get inner` (the decorated tool) that forwards `isMidShape`.
-- Task 12: `ToolController get toolController` (`@internal`), whose `context.snap` is what the tools read; `const List<GenericTool> genericTools` with `String letter` (`lib/src/tools/generic_tools.dart`); `PlanToolIds`; the per-document `GenericToolSet _generic` with `byId`.
+- Task 12: `ToolController get toolController` (`@internal`), whose `context.snap` is what the tools read; `const List<GenericTool> genericTools` with `String letter` (`lib/src/tools/generic_tools.dart`); `PlanToolIds`; the per-document `GenericToolSet` at `DocumentSession.generic` (read through `_session`) with `byId`.
 
 #### Interface problem
 
@@ -29179,6 +29275,7 @@ Resolved by controller ruling R-g: Task 17 leaves the `@internal` slot `property
 - Create (test support): `test/support/fake_page_printer.dart` (port), `test/support/export_plan.dart`, `test/support/recording_exporters.dart`, `test/support/flows_bar.dart`
 - Test (new): `test/export/plan_export_types_test.dart` (X-1), `test/export/registry_test.dart` (X-2 … X-8), `test/export/export_dialog_test.dart` (X-9)
 - Test (ported): `test/export/export_font_test.dart`, `test/export/page_flows_test.dart`
+- Modify (test): `packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart` (Task 8's C13: its `exporters` expectations include the built-ins, Step 8 item 5)
 
 **Interfaces:**
 - Consumes:
@@ -30812,6 +30909,7 @@ Resolved by the controller's Shared interfaces (`PlanPageExporter`, `PlanExportA
 - Test (new): `test/editor/plan_editor_test.dart` (ED-1 … ED-7), `test/example_test.dart` (ED-8, ED-README), `test/barrel_test.dart` (ED-9, ED-9b)
 - Test (ported): `test/editor/editor_separator_test.dart` (NS2 and the `panelShows` assertions, from Task 8)
 - Test (ported): `test/editor/editor_bar_test.dart`, `test/editor/editor_view_test.dart`, `test/editor/editor_options_test.dart`, `test/editor/editor_words_test.dart`, `test/editor/editor_theme_test.dart`, `test/invariants/theme_colours_test.dart`
+- Modify (test): `packages/jet_cad_2d_plan/test/l10n/value_words_test.dart` (Task 9's; ED-W after Task 18's LP-W, Step 5)
 
 **Interfaces:**
 - Consumes:
@@ -31257,10 +31355,14 @@ void main() {
   test('ED-9 the barrel shows exactly the plan library\'s API', () {
     expect(barrelNames(), {
       // Task 6
-      'KitSet', 'validateKitSet',
+      'KitSet', 'validateKitSet', 'KitSetError', 'reservedKitIds',
       // Task 7
       'PlanFormatException', 'PlanFormatCode', 'PlanManifest',
+      'ManifestCheck', 'checkManifest', 'kPlanFormat', 'manifestOf',
+      'manifestToWrite', 'usedKits', 'decodePlan', 'encodePlan',
+      'ensureManifest',
       // Task 8
+      'kPlanMinScale', 'kPlanMaxScale', 'kPlanThumbnailCapacity',
       'PlanController', 'PlanChange', 'PlanObjectAdded', 'PlanObjectChanged',
       'PlanObjectRemoved', 'PlanReplaced', 'PlanSymbolsState',
       // Task 9
@@ -31275,6 +31377,7 @@ void main() {
       'PlanSymbolGallery', 'SymbolThumbnails',
       // Task 15, 16, 17, 18
       'PlanCanvas', 'kLockHintDuration', 'PlanToolPalette', 'PlanShortcuts',
+      'PlanShortcutGuard',
       'PlanPropertyPanel', 'PlanLayerPanel', 'PlanPagePanel',
       // Task 19
       'PlanExport', 'PlanExportAnswer', 'PlanExportChoice', 'PlanExportDpi',
@@ -32232,6 +32335,20 @@ export 'src/editor/plan_editor.dart' show PlanEditor, PlanFileCallback;
 export 'src/editor/plan_editor_bar.dart' show PlanEditorAction, PlanEditorBar;
 ```
 
+The files earlier tasks exported whole get these `show` lists (the names of their tasks' Produces blocks; ED-9 holds each):
+
+```dart
+export 'src/controller/plan_controller.dart'
+    show PlanController, kPlanThumbnailCapacity;
+export 'src/file/plan_file.dart' show decodePlan, encodePlan, ensureManifest;
+export 'src/file/plan_format_exception.dart'
+    show PlanFormatCode, PlanFormatException;
+export 'src/kits/kit_set.dart'
+    show KitSet, KitSetError, reservedKitIds, validateKitSet;
+```
+
+Task 7's `manifest.dart` (`ManifestCheck`, `PlanManifest`, `checkManifest`, `kPlanFormat`, `manifestOf`, `manifestToWrite`, `usedKits`), Task 8's `camera_bounds.dart` (`kPlanMaxScale`, `kPlanMinScale`) and Task 16's `plan_shortcut_guard.dart` (`PlanShortcutGuard`) already carry their `show` lists; keep them.
+
 (`SymbolThumbnails` is `PlanController(thumbnails:)`'s type: a host sharing one cache across controllers names it, P7's "a shared loader and cache".) A name an earlier task exported that is not in ED-9's set is not dropped silently: report it, and the coordinator rules whether ED-9's set or the export changes.
 
 - [ ] **Step 8: The example, the README and the CHANGELOG.** Create `packages/jet_cad_2d_plan/example/main.dart`:
@@ -32569,8 +32686,8 @@ Compared with `tool/ci/standing_failures.txt`: `<…>`. `flutter analyze`: `<lin
 | P6 R5 `docs/kits.md` | 5 | `<the doc-sync test's id>` |
 | P6 R7 rule 11 width | 5 | `<R7-…>` |
 | P7 the design-mode host API, mapped | 8, 12, 15-20 | `<one id per P7 row 2a owns>` |
-| Review Focus 1 (missing kit, saved) | 10 | `L-round-trip` |
-| Review Focus 2 (one broken object) | 11 | `F-neighbour` |
+| Review Focus 1 (missing kit, saved) | 10 | `L-1` |
+| Review Focus 2 (one broken object) | 11 | `F-2` |
 | Review Focus 3 (two `T`s) | 8, 17 | `C-covariance`, `P-two-types` |
 | Review Focus 4 (load mid-shape, pending field) | 8, 17 | `C-swap-mid-shape`, `P-swap-pending` |
 | Review Focus 5 (late, failing library) | 13 | `S-late-fail` |
