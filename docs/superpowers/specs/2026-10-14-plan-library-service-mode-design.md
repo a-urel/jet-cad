@@ -524,11 +524,12 @@ An instance with a unit definition anywhere else is not a unit and raises
 the unit predicate (it checks the definition only); `UnitIndex`'s rule
 above is.
 
-**A held object flips with its kit.** A root-level group that the lock set
-holds for a missing kit, parametric or not, has its unit instances
-generated, served and locked while the kit is missing. Once a
-non-parametric holder's kit loads, the group is no object, and its unit
-instances become `unit.nested`. Accepted.
+**A held object stays held.** A root-level group that the lock set holds
+for an unknown kit-namespaced component, parametric or not, keeps it
+whether or not that kit loads: no loaded code knows the component's type
+(2a's lock rule, `kits/locks.dart:33-44`, `:79-82`). Its unit instances are
+generated, served and locked. (Amended while planning: revision 4 said they
+would turn `unit.nested` once the kit loads, which 2a's lock set rules out.)
 
 **Locked units.** One predicate, `isLockedUnit(h)`, used by the service
 tool, `unitDetails.locked`, the record's strict match and the design
@@ -1117,9 +1118,8 @@ standing at the identity alone does not count.
   kit's symbol locked (never dragged, its stored move dropped); a row frozen
   with no edit after it: its seats read `locked`; a seat whose definition's
   kit is missing, in a loaded kit's row: covered, and a row edit refused
-  with `PlanLocked`; a non-parametric root group held for a missing kit:
-  its unit instances served and locked, then `unit.nested` once the kit
-  loads; `nested`, `duplicate_label`, `unlabelled`, `bad_label`;
+  with `PlanLocked`; a non-parametric root group held for an unknown
+  component: its unit instances served and locked, the kit loaded or not; `nested`, `duplicate_label`, `unlabelled`, `bad_label`;
   `nextUnitNumber` skipping a seat's label and falling back past
   `99999999`; the label system's stamp in the same undo step; data and
   colour across regeneration; a relabelled unit leaving its group;
