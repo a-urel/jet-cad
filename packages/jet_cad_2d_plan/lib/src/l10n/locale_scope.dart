@@ -20,14 +20,18 @@ abstract final class PlanLocaleScope {
   ///
   /// Never notifies during a build: the report lands after the current
   /// frame (one is scheduled when none is pending), and only while
-  /// [context] is still mounted; an unchanged locale notifies nothing.
+  /// [context] is still mounted and [controller] not disposed (a host may
+  /// dispose it in the frame the report was owed in, Task 15); an
+  /// unchanged locale notifies nothing.
   static void push(BuildContext context, PlanController controller) {
     final next = Localizations.maybeLocaleOf(context) ?? _english;
     // The language class too (a host's own gives its own separator: NS7).
     final strings = PlanStrings.of(context);
     SchedulerBinding.instance
       ..addPostFrameCallback((_) {
-        if (context.mounted) controller.reportLocale(next, strings: strings);
+        if (context.mounted && !controller.isDisposed) {
+          controller.reportLocale(next, strings: strings);
+        }
       })
       ..ensureVisualUpdate();
   }

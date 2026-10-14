@@ -243,6 +243,11 @@ class PlanController extends ChangeNotifier {
   final List<DocumentSession> _dropped = [];
   bool _disposed = false;
 
+  /// Whether [dispose] ran: a report owed after a frame (the locale push,
+  /// Task 15) checks it before it lands.
+  @internal
+  bool get isDisposed => _disposed;
+
   final SnapSettings _userSnap = SnapSettings();
   late final EffectiveSnap _snap =
       EffectiveSnap(_userSnap, () => snappingAllowed);
@@ -816,6 +821,11 @@ class PlanController extends ChangeNotifier {
 
   @internal
   ToolController get toolController => _session.tools;
+
+  /// The current document's TEXT tool, unwrapped: the canvas's inline
+  /// field (TextEntryOverlay) drives its pending placement.
+  @internal
+  TextTool get textTool => _session.generic.byId[PlanToolIds.text]! as TextTool;
   @internal
   ToolContext get toolContext => _session.toolContext;
   @internal

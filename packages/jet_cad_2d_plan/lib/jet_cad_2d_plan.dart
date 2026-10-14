@@ -2,6 +2,7 @@
 /// composable widgets of design mode, over the kits a host loads.
 library;
 
+export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
 export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
 export 'src/controller/permissions.dart';
 export 'src/controller/plan_change.dart'
