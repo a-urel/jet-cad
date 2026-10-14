@@ -1484,8 +1484,9 @@ class PlanController extends ChangeNotifier {
     _damaged.value = false;
     _disabledTools.clear();
     // The engine's permissions follow the profile, before any system is
-    // installed over the document (spec P2).
-    document.commands.permissions = _permissions.draft;
+    // installed over the document (spec P2); read-only while a service
+    // copy exists (a load in service, spec 2b S3).
+    document.commands.permissions = _designDraft;
     for (final t in genericTools) {
       _toolNeeds[t.id] = t.needs;
     }
@@ -1663,10 +1664,14 @@ class PlanController extends ChangeNotifier {
       _attachService(copy);
       _service = copy;
       _groupsAtEnter = _groups.value;
+      // The design is not edited in service (S3): its own tools, a mounted
+      // PlanCanvas's included, write through its dispatcher.
+      design.document.commands.permissions = _designDraft;
     } else {
       final old = _service!;
       _service = null;
       _dropService(old);
+      document.commands.permissions = _designDraft;
     }
     _reframe(_mode.value, next);
     // The new mode's canvas, where an editor last showed it.
@@ -1680,6 +1685,13 @@ class PlanController extends ChangeNotifier {
     _revision.value++;
     notifyListeners();
   }
+
+  /// The design document's engine permissions: [DraftPermissions.readOnly]
+  /// exactly while a service copy exists (S3: the design is not edited in
+  /// service, whatever widget its tools run in), else the profile's
+  /// [PlanPermissions.draft].
+  DraftPermissions get _designDraft =>
+      _service != null ? DraftPermissions.readOnly : _permissions.draft;
 
   /// A copy of the design, its systems installed, nothing listening yet.
   ServiceSession _buildService() {
@@ -2008,7 +2020,8 @@ class PlanController extends ChangeNotifier {
 
   /// The editor's permissions. Settable at runtime: the widgets rebuild
   /// (this notifies), the document's engine permissions follow
-  /// ([PlanPermissions.draft]), a drag whose gate closes is cancelled now,
+  /// ([PlanPermissions.draft]; in service the design stays read-only and
+  /// takes them on leaving), a drag whose gate closes is cancelled now,
   /// and an active tool no longer allowed is cancelled and plan.select
   /// armed.
   PlanPermissions get permissions => _permissions;
@@ -2016,7 +2029,7 @@ class PlanController extends ChangeNotifier {
     if (value == _permissions) return;
     final old = _permissions;
     _permissions = value;
-    document.commands.permissions = value.draft;
+    document.commands.permissions = _designDraft;
     final select = _session.select;
     final stale = old.selectUnitsOnly != value.selectUnitsOnly ||
         switch (select.dragKind) {
