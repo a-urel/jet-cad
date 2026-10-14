@@ -27,7 +27,9 @@ import '../symbols/plan_symbol.dart';
 import '../symbols/plan_symbol_loader.dart';
 import '../symbols/plan_symbols_state.dart';
 import '../tools/generic_tools.dart';
+import '../tools/move_resolver.dart';
 import '../tools/plan_select_gates.dart';
+import '../tools/plan_symbol_tool.dart';
 import 'camera_bounds.dart';
 import 'new_plan.dart';
 import 'permissions.dart';
@@ -273,6 +275,13 @@ class PlanController extends ChangeNotifier {
   PlanPermissions _permissions;
   final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
   final Map<String, Set<Capability>> _toolNeeds = <String, Set<Capability>>{};
+
+  /// plan.select's move resolver (Task 14): one for the controller's life,
+  /// reading the current document from each call's context and the current
+  /// registry from the session.
+  late final PlanMoveResolver _moveResolver = PlanMoveResolver(
+      attachments: () => _session.attachments,
+      canRotate: () => _permissions.rotate);
 
   // ---------------------------------------------------------------------
   // The plan.
@@ -541,8 +550,18 @@ class PlanController extends ChangeNotifier {
         log: _diagnostics,
         permissions: () => _permissions,
         fill: _fill,
-        guard: _guardTool);
+        guard: _guardTool,
+        moveResolver: _moveResolver);
     _session = session;
+    // The attachment providers, once per document, before the kits' tools
+    // (the kits' services read this session's registry), then plan.symbol
+    // over the registry (Task 14).
+    session.runAttachmentFactories(kits, _services, _diagnostics.add);
+    session.addSymbolTool(PlanSymbolTool(_armed,
+        attachments: session.attachments,
+        canRotate: () => _permissions.rotate,
+        canMirror: () => _permissions.mirror));
+    registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
     _locked.value = session.locks.objects;
     session.boundary = FailureBoundary(
         document: document,
@@ -568,6 +587,7 @@ class PlanController extends ChangeNotifier {
     // one dry run of the plan.
     session.boundary.reportUnreadable(_loadDiagnostics);
     session.boundary.probeLoaded();
+    _reportUnofferedKinds();
   }
 
   /// What the plan's manifest says against the loaded kits (Task 7).
@@ -708,6 +728,8 @@ class PlanController extends ChangeNotifier {
   /// this controller knows, and every capability its commits need allowed
   /// by the document's engine permissions (spec P2).
   bool _allowsTool(String id) {
+    // plan.symbol is refused with nothing armed (planner_shell.dart:945).
+    if (id == PlanToolIds.symbol && _armed.value == null) return false;
     if (!_permissions.allowsTool(id)) return false;
     final needs = _toolNeeds[id];
     if (needs == null) return false;
@@ -722,7 +744,7 @@ class PlanController extends ChangeNotifier {
   @internal
   Set<Capability>? needsOf(String id) => _toolNeeds[id];
 
-  /// For Task 14's plan.symbol, which is built outside the generic set.
+  /// plan.symbol's needs (Task 14), which is built outside the generic set.
   @internal
   void registerToolNeeds(String id, Set<Capability> needs) =>
       _toolNeeds[id] = needs;
@@ -747,7 +769,14 @@ class PlanController extends ChangeNotifier {
     };
     if (stale) select.cancel(toolController.context);
     grips.gatesChanged();
-    if (!_allowsTool(activeTool.value)) selectTool(PlanToolIds.select);
+    if (!_allowsTool(activeTool.value)) {
+      selectTool(PlanToolIds.select);
+    } else if (activeTool.value == PlanToolIds.symbol &&
+        (old.rotate != value.rotate || old.mirror != value.mirror)) {
+      // The ghost never shows a turn or a mirror a click would not place
+      // (planner_shell.dart:1100-1104).
+      _session.symbolTool.gatesChanged();
+    }
     notifyListeners();
   }
 
@@ -948,7 +977,26 @@ class PlanController extends ChangeNotifier {
     for (final d in load.diagnostics) {
       _diagnostics.add(d);
     }
+    _reportUnofferedKinds();
     _symbolsState.value = load.state;
+  }
+
+  /// One attachmentKindUnoffered per kit and kind (the log keeps one per
+  /// kit, subject and code) for each loaded symbol's attachTo kind that no
+  /// provider of the current document offers.
+  void _reportUnofferedKinds() {
+    final offered = _session.attachments.kinds;
+    for (final s in _symbols) {
+      for (final kind in s.component.attachTo) {
+        if (offered.contains(kind)) continue;
+        _diagnostics.add(KitDiagnostic(
+            kitId: s.kitId,
+            subject: kind,
+            code: KitDiagnosticCode.attachmentKindUnoffered,
+            message: '${s.id} attaches to "$kind", which no loaded kit '
+                'offers'));
+      }
+    }
   }
 
   /// The plan's changes (spec P2 "Events"), a broadcast stream delivered

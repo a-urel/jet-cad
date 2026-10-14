@@ -25,7 +25,8 @@ void main() {
       (tester) async {
     final log = KitLog();
     final c = controllerFor(kits: [testKit(log: log)]);
-    expect(log.events, ['cache+1', 'tool+1', 'grips+1']);
+    // The attachment provider first (Task 14: before the kit's tools).
+    expect(log.events, ['edge+1', 'cache+1', 'tool+1', 'grips+1']);
     final tool = c.toolFor('test.slab')! as SlabTool;
     expect(
         c
@@ -36,12 +37,22 @@ void main() {
     expect(c.selectTool('test.slab'), isTrue);
     expect(c.selectTool('plan.select'), isTrue);
     expect(c.selectTool('test.slab'), isTrue);
-    expect(log.events, hasLength(3),
+    expect(log.events, hasLength(4),
         reason: 'once per document, not per arming');
     // M-C-life1: the kit products not disposed at a swap.
     c.newPlan();
-    expect(log.events.skip(3),
-        ['tool-1', 'grips-1', 'cache-1', 'cache+2', 'tool+2', 'grips+2']);
+    // Spec P1 lifetimes, 2: the kit tools, the grip and attachment
+    // providers, the shared cache; then 3: the next document's.
+    expect(log.events.skip(4), [
+      'tool-1',
+      'grips-1',
+      'edge-1',
+      'cache-1',
+      'edge+2',
+      'cache+2',
+      'tool+2',
+      'grips+2'
+    ]);
     expect(tool.cache.disposed, isTrue);
     expect(c.toolFor('test.slab'), isNot(same(tool)));
     expect(c.activeTool.value, 'plan.select',
@@ -116,7 +127,8 @@ void main() {
     expect(s.document, same(c.document));
     expect(s.index, same(c.index));
     expect(s.camera, same(c.camera));
-    expect(s.attachments.kinds, isEmpty, reason: 'the registry is Task 14');
+    // The current document's registry (Task 14): the test kit's edge.
+    expect(s.attachments.kinds, {testEdgeKind});
     await tester.pump();
   });
 

@@ -11,11 +11,13 @@ import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 
+import '../attach/attachment_registry.dart';
 import '../kits/guard.dart';
 import '../kits/kit_set.dart';
 import '../kits/locks.dart';
 import '../tools/generic_tools.dart';
 import '../tools/plan_select_gates.dart';
+import '../tools/plan_symbol_tool.dart';
 import 'grip_dispatch.dart';
 import 'permissions.dart';
 import 'services.dart';
@@ -36,7 +38,8 @@ final class DocumentSession {
       required DiagnosticsLog log,
       required PlanPermissions Function() permissions,
       required ValueListenable<bool> fill,
-      required Tool Function(String kitId, String toolId, Tool tool) guard})
+      required Tool Function(String kitId, String toolId, Tool tool) guard,
+      MoveResolver? moveResolver})
       : _log = log,
         _guard = guard,
         page = PageNotifier(document),
@@ -65,7 +68,8 @@ final class DocumentSession {
         grips: grips);
     // The session's one plan.select: the generic set's, gated (spec P2
     // permissions, P4 locks).
-    generic = buildGenericTools(gates: gates, fill: fill);
+    generic =
+        buildGenericTools(gates: gates, fill: fill, moveResolver: moveResolver);
     select = generic.select;
     // Every tool in the map is guarded (spec P4), the plan's own under the
     // kit id `plan`; the tool controller knows the guarded one.
@@ -124,8 +128,13 @@ final class DocumentSession {
   late final GenericToolSet generic;
   final SharedCache shared = SharedCache();
 
-  /// The registry until Task 14 runs the providers' factories.
+  /// This document's attachment registry: none until
+  /// [runAttachmentFactories] makes it (Task 14).
   AttachmentRegistry attachments = const NoAttachments();
+
+  /// plan.symbol of this document (Task 14); in the tool map, which owns
+  /// and disposes it.
+  late final PlanSymbolTool symbolTool;
 
   /// The tools by id: select, the other generic tools, then each kit's in
   /// load order.
@@ -168,6 +177,27 @@ final class DocumentSession {
     }
   }
 
+  /// Runs every kit's attachment-provider factories over this document,
+  /// once (spec P1 lifetimes), before its tools: the registry is what
+  /// `PlanServices.attachments` returns from here on.
+  void runAttachmentFactories(KitSet kits, Map<String, PlanServices> services,
+      void Function(KitDiagnostic) report) {
+    final registry = PlanAttachmentRegistry(report: report);
+    attachments = registry;
+    for (final kit in kits.kits) {
+      for (final factory in kit.attachments) {
+        registry.add(kit.id, factory, services[kit.id]!);
+      }
+    }
+  }
+
+  /// Puts [tool] in the map as plan.symbol, after the generic tools and
+  /// before the kits'.
+  void addSymbolTool(PlanSymbolTool tool) {
+    symbolTool = tool;
+    addTool(PlanToolIds.symbol, tool);
+  }
+
   Tool? toolById(String id) {
     for (var i = 0; i < _entries.length; i++) {
       if (_entries[i].id == id) return _entries[i].tool;
@@ -183,8 +213,8 @@ final class DocumentSession {
     return planSelectToolId;
   }
 
-  /// Spec P1 lifetimes, 2: the kit tools, the grip (and, Task 14,
-  /// attachment) providers and the shared cache disposed, in that order.
+  /// Spec P1 lifetimes, 2: the kit tools, the grip and attachment
+  /// providers and the shared cache disposed, in that order.
   /// The active tool must be select already.
   void disposeKitProducts() {
     for (final e in _entries) {
@@ -199,6 +229,8 @@ final class DocumentSession {
       }
     }
     _providers.clear();
+    final registry = attachments;
+    if (registry is PlanAttachmentRegistry) registry.dispose();
     shared.dispose(
         onError: (kitId, error) => _disposeFailed(kitId, null, error));
   }

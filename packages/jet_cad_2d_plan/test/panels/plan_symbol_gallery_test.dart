@@ -418,6 +418,40 @@ void main() {
   });
 
   group('the gallery', () {
+    // Ported from symbol_panel_test.dart (Task 14), assertions unchanged;
+    // the state is reached through the controller: armSymbol then
+    // selectTool('plan.select') stands for "armed, another tool active",
+    // selectTool('plan.symbol') for activating the placement tool.
+    testWidgets(
+        'the highlight follows the active tool and the armed entry '
+        '(M-09b9)', (tester) async {
+      final h = Host(tester);
+      await h.pump();
+      await tester.enterText(field, 'bed');
+      await tester.pump();
+      expect(gallery(tester).selectedId, isNull);
+
+      h.controller.armSymbol(h.loaded('demo.bed.double'));
+      h.controller.selectTool('plan.select');
+      await tester.pump();
+      expect(gallery(tester).selectedId, isNull,
+          reason: 'armed, but another tool is active');
+
+      h.controller.selectTool('plan.symbol');
+      await tester.pump();
+      expect(gallery(tester).selectedId, 'demo.bed.double@1');
+
+      h.controller.armSymbol(h.loaded('demo.bed.single'));
+      await tester.pump();
+      expect(gallery(tester).selectedId, 'demo.bed.single@1');
+
+      h.controller.selectTool('plan.select');
+      await tester.pump();
+      expect(gallery(tester).selectedId, isNull,
+          reason: 'another tool chosen: the highlight clears, armed stays');
+      expect(h.controller.armedSymbol.value, same(h.loaded('demo.bed.single')));
+    });
+
     testWidgets(
         'a tap reports the entry; a denied structure, geometry or '
         'components disables the cells (M-09b22)', (tester) async {
