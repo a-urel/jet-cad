@@ -6,7 +6,12 @@
 // changed"), the eight R-3 tests of "the review fixes" and K1; from
 // table_overlay_test.dart: TO13, TO14, TO23 and TO32 (TO32 moved from Part
 // A by controller ruling: its layer toggle is a structure command, so it
-// runs on the design's canvas). Each switches modes inside one widget,
+// runs on the design's canvas); from chrome_change_test.dart, the groups
+// "F-2 a controller swapped and disposed in one step, a bar hidden" and
+// "F-3 chrome changed in the mode shown keeps the plan in place" (no task
+// placed them; they pin the chrome kept in place, `chromeMoved`, which
+// M-SV-R2 removes; the editor capabilities -> `Caps` below: PlanEditor's
+// permissions, which decide the left column, and its rulers). Each switches modes inside one widget,
 // PlanEditor (2b spec S4; today's R-13 kept by the controller and the
 // editor).
 //
@@ -18,12 +23,17 @@
 // unit_editor_fixture.dart; the overlay test's helpers -> Part A's
 // unit_overlay_test.dart. On the embedding fixture (turned, mirrored,
 // scaled units 40 m off the origin) under `embeddingCamera()`.
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart' hide Badge;
+import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
     show InteractionLayer, ViewportTransform, kRulerThickness;
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
+import 'package:jet_cad_2d_plan/src/controller/plan_camera.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor.dart';
 import 'package:jet_cad_2d_plan/src/editor/plan_editor_bar.dart';
@@ -231,7 +241,6 @@ void main() {
       await tester.pump();
       expect(canvasIn(tester),
           const Offset(240 + kRulerThickness, kRulerThickness));
-      // M-SV-R2: chromeMoved pans nothing.
       await expectKept(
           tester, c, [PlanMode.service, PlanMode.design], 'hidden');
       h.editor = const PlanEditorBar();
@@ -632,4 +641,452 @@ void main() {
           reason: 'the badge at $at keeps its State');
     }
   });
+
+  // ---- chrome_change_test.dart: F-2 and F-3 ----
+
+  group('F-2 a controller swapped and disposed in one step, a bar hidden', () {
+    for (final mode in PlanMode.values) {
+      for (final (name, service, editor, caps) in [
+        (
+          'the service bar hidden',
+          const PlanServiceBar(visible: false),
+          const PlanEditorBar(),
+          Caps.full
+        ),
+        (
+          'the editor bar hidden',
+          const PlanServiceBar(),
+          const PlanEditorBar(visible: false),
+          Caps.full
+        ),
+        (
+          'both bars hidden, no column, read only',
+          const PlanServiceBar(visible: false),
+          const PlanEditorBar(visible: false),
+          kNoColumns
+        ),
+      ]) {
+        testWidgets('${mode.name}, $name: no assertion', (tester) async {
+          // Disposed by the test, as the host does.
+          final a = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+          final h = await mountChrome(tester,
+              mode: mode,
+              service: service,
+              editor: editor,
+              caps: caps,
+              controller: a);
+          final b = PlanController(kits: [fxKit()], json: unitEditorPlanJson())
+            ..setMode(mode);
+          addTearDown(b.dispose);
+          h.controller.value = b;
+          a.dispose();
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+          expect(find.byType(InteractionLayer), findsOneWidget,
+              reason: 'premise: the new plan shown');
+        });
+      }
+    }
+  });
+
+  group('F-3 chrome changed in the mode shown keeps the plan in place', () {
+    /// Changes the chrome by [change] and checks, at the first frame, that
+    /// unit 1 is where it was by the camera, by its overlay and in the
+    /// pixels around it; after the frame, that `canvasRect` and
+    /// `worldToGlobal` agree; at the next, that the host's widget beside
+    /// the view was built with the camera. Returns the canvas's move.
+    Future<Offset> expectKept(WidgetTester tester, ChromeHost h,
+        void Function() change, String reason) async {
+      final c = h.c;
+      final w = centreOf(c, '1');
+      final at = chromeGlobalOf(tester, c, w);
+      final overlay = overlayAt(tester, '1');
+      final canvas = canvasOrigin(tester);
+      final before = await shootView(tester);
+      change();
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: reason);
+      final moved = canvasOrigin(tester) - canvas;
+      expect(moved, isNot(Offset.zero), reason: '$reason: premise');
+      // M-SV-R2: chromeMoved pans nothing.
+      expectAt(
+          chromeGlobalOf(tester, c, w), at, '$reason: frame 1, the camera');
+      expectAt(overlayAt(tester, '1'), overlay, '$reason: frame 1, overlay');
+      final after = await shootView(tester);
+      expect(
+          largestDifference(pixelsAt(after, at, 30), pixelsAt(before, at, 30)),
+          lessThanOrEqualTo(2),
+          reason: '$reason: frame 1, the pixels');
+      // After the frame: the rect, worldToGlobal and the host's listener.
+      expect(c.canvasRect.value!.topLeft, canvasOrigin(tester),
+          reason: '$reason: canvasRect');
+      expectAt(
+          c.worldToGlobal(Offset(w.x, w.y))!, at, '$reason: worldToGlobal');
+      await tester.pump();
+      expect(identical(h.heard.last, c.cameraValue.value), isTrue,
+          reason: '$reason: the host heard the pan');
+      expectAt(chromeGlobalOf(tester, c, w), at, '$reason: settled');
+      expectAt(overlayAt(tester, '1'), overlay, '$reason: overlay settled');
+      return moved;
+    }
+
+    testWidgets(
+        'design: the left column hidden (full -> readOnly) and shown again',
+        (tester) async {
+      final h = await mountChrome(tester);
+      expect(
+          await expectKept(
+              tester, h, () => h.caps.value = Caps.readOnly, 'hidden'),
+          const Offset(-240, 0));
+      expect(
+          await expectKept(tester, h, () => h.caps.value = Caps.full, 'shown'),
+          const Offset(240, 0));
+    });
+
+    testWidgets(
+        'design: the editor bar hidden and shown, then the rulers off and '
+        'on', (tester) async {
+      final h = await mountChrome(tester);
+      expect(
+          await expectKept(
+              tester,
+              h,
+              () => h.editor.value = const PlanEditorBar(visible: false),
+              'bar hidden'),
+          const Offset(0, -44));
+      expect(
+          await expectKept(tester, h,
+              () => h.editor.value = const PlanEditorBar(), 'bar shown'),
+          const Offset(0, 44));
+      expect(
+          await expectKept(tester, h,
+              () => h.caps.value = Caps.full.copyWith(rulers: false), 'off'),
+          const Offset(-kRulerThickness, -kRulerThickness));
+      expect(await expectKept(tester, h, () => h.caps.value = Caps.full, 'on'),
+          const Offset(kRulerThickness, kRulerThickness));
+    });
+
+    testWidgets(
+        'selection: a 60 px service bar hidden and shown; a change of the '
+        "theme's bar height, 60 -> 44, still moves the plan with the canvas "
+        "(Slice 3's S-10)", (tester) async {
+      final h = await mountChrome(tester,
+          mode: PlanMode.service, theme: const PlanTheme(serviceBarHeight: 60));
+      expect(
+          await expectKept(
+              tester,
+              h,
+              () => h.service.value = const PlanServiceBar(visible: false),
+              'hidden'),
+          const Offset(0, -60));
+      expect(
+          await expectKept(tester, h,
+              () => h.service.value = const PlanServiceBar(), 'shown'),
+          const Offset(0, 60));
+      final c = h.c;
+      final w = centreOf(c, '1');
+      final at = chromeGlobalOf(tester, c, w);
+      final m = c.camera.value;
+      h.theme.value = const PlanTheme(serviceBarHeight: 44);
+      await tester.pump();
+      await tester.pump();
+      expect(identical(c.camera.value, m), isTrue,
+          reason: 'no pan for the theme');
+      expectAt(chromeGlobalOf(tester, c, w), at - const Offset(0, 16),
+          'the plan moved with the canvas');
+      // Hidden at 44 now: the pan is the bar's height today.
+      expect(
+          await expectKept(
+              tester,
+              h,
+              () => h.service.value = const PlanServiceBar(visible: false),
+              'hidden at 44'),
+          const Offset(0, -44));
+    });
+
+    testWidgets(
+        'a mode switch after a change in place still keeps the plan: '
+        'design, the left column hidden, then selection and back',
+        (tester) async {
+      final h = await mountChrome(tester);
+      await expectKept(tester, h, () => h.caps.value = Caps.readOnly, 'hidden');
+      final c = h.c;
+      final w = centreOf(c, '1');
+      final at = chromeGlobalOf(tester, c, w);
+      for (final mode in [PlanMode.service, PlanMode.design]) {
+        c.setMode(mode);
+        await tester.pump();
+        expectAt(chromeGlobalOf(tester, c, w), at, '$mode: frame 1');
+        await tester.pump();
+        expectAt(chromeGlobalOf(tester, c, w), at, '$mode: settled');
+      }
+    });
+
+    testWidgets(
+        'a change right after a mode switch the host made without '
+        'rebuilding its view: the selection mode, its bar hidden',
+        (tester) async {
+      final h = await mountChrome(tester);
+      h.c.setMode(PlanMode.service);
+      await tester.pump();
+      await tester.pump();
+      expect(
+          await expectKept(
+              tester,
+              h,
+              () => h.service.value = const PlanServiceBar(visible: false),
+              'hidden'),
+          const Offset(0, -44));
+    });
+
+    for (final mode in PlanMode.values) {
+      testWidgets(
+          '${mode.name}: a host rebuild with the default chrome moves '
+          'nothing (the camera the identical value)', (tester) async {
+        final h = await mountChrome(tester, mode: mode);
+        final m = h.c.camera.value;
+        h.caps.value = Caps.full.copyWith();
+        h.service.value =
+            const PlanServiceBar(actions: PlanServiceAction.values);
+        h.editor.value = const PlanEditorBar(actions: PlanEditorAction.values);
+        await tester.pump();
+        await tester.pump();
+        expect(identical(h.c.camera.value, m), isTrue);
+      });
+    }
+
+    testWidgets(
+        'a controller swapped back with other chrome in one step: its camera '
+        "is its own, not panned by the chrome the other's plan was laid out "
+        'in', (tester) async {
+      final a = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+      addTearDown(a.dispose);
+      final h = await mountChrome(tester);
+      final b = h.c;
+      final m = b.camera.value.worldToScreenMatrix;
+      h.controller.value = a;
+      await tester.pump();
+      await tester.pump();
+      h.controller.value = b;
+      h.caps.value = Caps.readOnly;
+      await tester.pump();
+      await tester.pump();
+      final n = b.camera.value.worldToScreenMatrix;
+      expect((n.a, n.e, n.f), (m.a, m.e, m.f));
+    });
+
+    testWidgets(
+        "the camera's notification held for after the frame is dropped when "
+        'the controller is disposed first', (tester) async {
+      final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+      var heard = 0;
+      c.cameraValue.addListener(() => heard++);
+      final m = c.camera.value.worldToScreenMatrix;
+      c.chromeMoved(const Offset(240, 44), Offset.zero);
+      final n = c.camera.value.worldToScreenMatrix;
+      expect((n.e - m.e, n.f - m.f), (240, 44), reason: 'panned at once');
+      expect(heard, 0, reason: 'heard after the frame');
+      c.dispose();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(heard, 0);
+    });
+
+    testWidgets("the camera's held notification arrives after the frame",
+        (tester) async {
+      final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+      addTearDown(c.dispose);
+      var heard = 0;
+      c.cameraValue.addListener(() => heard++);
+      c.chromeMoved(const Offset(0, 60), Offset.zero);
+      c.chromeMoved(const Offset(0, 0), const Offset(0, 60));
+      expect(heard, 0);
+      await tester.pump();
+      expect(heard, 1, reason: 'one notification for the frame');
+    });
+  });
 }
+
+// ---- chrome_change_test.dart's host ----
+
+/// Today's editor capabilities as PlanEditor has them: the permissions (no
+/// tool but Select: no left column) and the rulers.
+final class Caps {
+  const Caps(this.permissions, {this.rulers = true, this.panels = true});
+
+  final PlanPermissions permissions;
+  final bool rulers;
+
+  /// The right column's panels.
+  final bool panels;
+
+  static const Caps full = Caps(PlanPermissions.full);
+  static const Caps readOnly = Caps(PlanPermissions.readOnly);
+
+  Caps copyWith({bool? rulers}) =>
+      Caps(permissions, rulers: rulers ?? this.rulers, panels: panels);
+}
+
+/// No side column: no tool but Select, no panel.
+const Caps kNoColumns = Caps(PlanPermissions.readOnly, panels: false);
+
+/// The view's chrome as a host rebuilds it.
+final class ChromeHost {
+  ChromeHost(PlanController c, Caps caps, PlanServiceBar service,
+      PlanEditorBar editor, PlanTheme? theme)
+      : controller = ValueNotifier(c),
+        caps = ValueNotifier(caps),
+        service = ValueNotifier(service),
+        editor = ValueNotifier(editor),
+        theme = ValueNotifier(theme) {
+    // The permissions are the controller's: set outside the build.
+    this.caps.addListener(_permit);
+    controller.addListener(_permit);
+    _permit();
+  }
+
+  final ValueNotifier<PlanController> controller;
+  final ValueNotifier<Caps> caps;
+  final ValueNotifier<PlanServiceBar> service;
+  final ValueNotifier<PlanEditorBar> editor;
+  final ValueNotifier<PlanTheme?> theme;
+
+  /// The camera values a host widget outside the view was built with.
+  final List<PlanCamera> heard = [];
+
+  PlanController get c => controller.value;
+
+  void _permit() {
+    if (!c.isDisposed) c.permissions = caps.value.permissions;
+  }
+
+  void dispose() {
+    controller.dispose();
+    caps.dispose();
+    service.dispose();
+    editor.dispose();
+    theme.dispose();
+  }
+}
+
+final GlobalKey chromeShotKey = GlobalKey();
+
+/// The unit editor fixture in [mode] under an editor whose chrome a
+/// [ChromeHost] rebuilds, with a host overlay on every unit in both modes
+/// and a host widget beside the editor that rebuilds on the camera.
+Future<ChromeHost> mountChrome(WidgetTester tester,
+    {PlanMode mode = PlanMode.design,
+    Caps caps = Caps.full,
+    PlanServiceBar service = const PlanServiceBar(),
+    PlanEditorBar editor = const PlanEditorBar(),
+    PlanTheme? theme,
+    PlanController? controller}) async {
+  final c =
+      controller ?? PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+  if (controller == null) addTearDown(c.dispose);
+  c.setMode(mode);
+  final h = ChromeHost(c, caps, service, editor, theme);
+  addTearDown(h.dispose);
+  await tester.binding.setSurfaceSize(kEditorSurface);
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: ListenableBuilder(
+              listenable: Listenable.merge(
+                  [h.controller, h.caps, h.service, h.editor, h.theme]),
+              builder: (_, __) => Column(children: [
+                    // A host widget outside the view that rebuilds on the
+                    // camera: notified while the view builds, it would
+                    // assert.
+                    ValueListenableBuilder<PlanCamera>(
+                        valueListenable: h.c.cameraValue,
+                        builder: (_, camera, __) {
+                          h.heard.add(camera);
+                          return const SizedBox(height: 10);
+                        }),
+                    Expanded(
+                        child: RepaintBoundary(
+                            key: chromeShotKey,
+                            child: PlanEditor(
+                                controller: h.c,
+                                rulers: h.caps.value.rulers,
+                                propertyPanel: h.caps.value.panels,
+                                layerPanel: h.caps.value.panels,
+                                pagePanel: h.caps.value.panels,
+                                serviceBar: h.service.value,
+                                bar: h.editor.value,
+                                theme: h.theme.value,
+                                unitOverlayModes: const {
+                                  PlanMode.design,
+                                  PlanMode.service
+                                },
+                                unitOverlayBuilder: (_, unit) => SizedBox(
+                                    key: Key(
+                                        'overlay-${unit.detail.unit.label}'),
+                                    width: 12,
+                                    height: 12)))),
+                  ])))));
+  await tester.pump();
+  await tester.pump();
+  c.camera.value = editorCamera();
+  await tester.pump();
+  return h;
+}
+
+/// The shown canvas's top left, global.
+Offset canvasOrigin(WidgetTester tester) =>
+    tester.getTopLeft(find.byType(InteractionLayer));
+
+/// World [w] on the screen, by the camera's forward transform from the
+/// shown canvas's origin (chrome_change_test.dart's `globalOf`).
+Offset chromeGlobalOf(WidgetTester tester, PlanController c, Vector2 w) {
+  final p = canvasOf(c.camera.value, w.x, w.y);
+  return canvasOrigin(tester) + Offset(p.x, p.y);
+}
+
+/// The editor's pixels, and the shot's width and global origin.
+Future<(ByteData, int, Offset)> shootView(WidgetTester tester) async {
+  final boundary = chromeShotKey.currentContext!.findRenderObject()!
+      as RenderRepaintBoundary;
+  final origin = boundary.localToGlobal(Offset.zero);
+  final (bytes, width) = (await tester.runAsync(() async {
+    final image = await boundary.toImage();
+    final raw = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+    final width = image.width;
+    image.dispose();
+    return (raw!, width);
+  }))!;
+  return (bytes, width, origin);
+}
+
+/// The pixels of the global square of side 2 × [r] about [at].
+List<int> pixelsAt((ByteData, int, Offset) shot, Offset at, int r) {
+  final (bytes, width, origin) = shot;
+  final x0 = (at.dx - origin.dx).round(), y0 = (at.dy - origin.dy).round();
+  return [
+    for (var y = y0 - r; y < y0 + r; y++)
+      for (var x = x0 - r; x < x0 + r; x++)
+        bytes.getUint32((y * width + x) * 4),
+  ];
+}
+
+/// The largest difference of one channel between two runs of pixels. A
+/// layer drawn at another offset in its parent may round an edge's
+/// coverage one level apart; a plan moved by even a pixel differs by far
+/// more.
+int largestDifference(List<int> a, List<int> b) {
+  var most = 0;
+  for (var i = 0; i < a.length; i++) {
+    for (var shift = 0; shift < 32; shift += 8) {
+      final d = ((a[i] >> shift) & 0xff) - ((b[i] >> shift) & 0xff);
+      if (d.abs() > most) most = d.abs();
+    }
+  }
+  return most;
+}
+
+/// Unit [n]'s overlay centre, global.
+Offset overlayAt(WidgetTester tester, String n) =>
+    tester.getCenter(find.byKey(Key('overlay-$n')));
