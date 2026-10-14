@@ -26,6 +26,7 @@ import '../l10n/strings.dart';
 import '../export/page_flows.dart';
 import '../export/page_printer.dart';
 import '../export/registries.dart';
+import '../service/service_record.dart';
 import '../service/service_session.dart';
 import '../service/service_state.dart';
 import '../service/unit_picker.dart';
@@ -809,7 +810,7 @@ class PlanController extends ChangeNotifier {
 
   /// Moves whenever the active plan changes: an edit, an undo or a redo of
   /// it (the design's in design, the copy's in service), a mode switch,
-  /// [load], [newPlan] (Task 13 adds the reset and the restore). A host
+  /// [load], [newPlan], [resetService], [restoreService]. A host
   /// re-reads [units] and [labelWarnings] on it.
   ValueListenable<int> get revision => _revision;
 
@@ -1044,11 +1045,14 @@ class PlanController extends ChangeNotifier {
   /// for a blank id, two ids the same after trimming, a group with no
   /// member after trimming, or a label in two groups; then nothing is
   /// assigned and no listener is notified. A member label with no live
-  /// unit is kept; a shared label is allowed; a group may mix kinds.
+  /// unit is kept; a shared label is allowed; a group may mix kinds. In
+  /// service it fires [serviceChanges] (the groups are in the record); in
+  /// design it notifies [unitGroups] only.
   void setUnitGroups(Map<String, UnitGroup> groups) {
     final valid = validateUnitGroups(groups);
     _groups.value = valid;
     _refreshSelectedGroup();
+    if (_service != null) _serviceChanges.bump();
   }
 
   /// The groups' statuses by trimmed id, as [setGroupStatus] last set them.
@@ -1500,6 +1504,7 @@ class PlanController extends ChangeNotifier {
       final copy = _buildService();
       _attachService(copy);
       _service = copy;
+      _groupsAtEnter = _groups.value;
       _dropService(service);
     }
     _tracker.replaced();
@@ -1576,6 +1581,7 @@ class PlanController extends ChangeNotifier {
       final copy = _buildService();
       _attachService(copy);
       _service = copy;
+      _groupsAtEnter = _groups.value;
     } else {
       final old = _service!;
       _service = null;
@@ -1632,6 +1638,7 @@ class PlanController extends ChangeNotifier {
 
     s.onSelection = onSelection;
     s.selection.addListener(onSelection);
+    _announced = s.document.commands.stateId;
   }
 
   /// The active copy changed (a move, an undo or a redo of one).
@@ -1639,6 +1646,7 @@ class PlanController extends ChangeNotifier {
     _refreshFlags();
     _revision.value++;
     _refreshSelected();
+    _announceService();
   }
 
   /// Lets [s] go (R-2): its listeners now, the session after the frame
@@ -1702,6 +1710,7 @@ class PlanController extends ChangeNotifier {
     } on PartialMutationError catch (error) {
       (_service?.boundary ?? _session.boundary).partialMutation(error);
     }
+    _announceService();
   }
 
   /// Runs [step] with [commands]' engine permissions lifted, then puts
@@ -1728,6 +1737,135 @@ class PlanController extends ChangeNotifier {
     } on PartialMutationError catch (error) {
       (_service?.boundary ?? _session.boundary).partialMutation(error);
     }
+    _announceService();
+  }
+
+  // ---------------------------------------------------------------------
+  // The service record (spec 2b S3, decision 4).
+
+  final _Requests _serviceChanges = _Requests();
+
+  /// The active copy's history state last announced on [serviceChanges]:
+  /// an undo is announced at once and again by the change stream, which is
+  /// heard once.
+  int? _announced;
+
+  /// The groups held when service was entered (or the copy rebuilt by a
+  /// load or a new plan; none after a reset): what [serviceEdited]
+  /// compares the groups with.
+  Map<String, UnitGroup> _groupsAtEnter = const {};
+
+  /// Whether service has something to record: the copy has a placed unit
+  /// away from its design place, or the groups differ from those held when
+  /// service was entered. Not the undo depth. Surveys the copy at each
+  /// read: read it on a change, not per frame. False in design.
+  bool get serviceEdited {
+    final s = _service;
+    if (s == null) return false;
+    return serviceMovesOf(document, s.document, s.units.current).isNotEmpty ||
+        !mapEquals(_groups.value, _groupsAtEnter);
+  }
+
+  /// Fires after a move, an undo or a redo of the copy (for [undo] and
+  /// [redo], before they return), [resetService], [restoreService], and
+  /// [setUnitGroups] in service. Never on [setMode], [load] or [newPlan],
+  /// so a host that saves [serviceJson] on it never overwrites its record
+  /// with the empty one a new copy starts with.
+  Listenable get serviceChanges => _serviceChanges;
+
+  /// The service record as JSON (spec S3): the placed units moved away
+  /// from the design, ascending by handle, and the groups. Null in design.
+  String? serviceJson() {
+    settlePendingInput();
+    final s = _service;
+    if (s == null) return null;
+    return encodeServiceRecord(
+        serviceMovesOf(document, s.document, s.units.current), _groups.value);
+  }
+
+  /// Puts a stored record back (spec S3): service only (a [StateError] in
+  /// design). A [json] that is not a version-1 `jet_cad.service` record
+  /// throws a [FormatException] and changes nothing. Otherwise the copy is
+  /// rebuilt from the design, every move of the strict match applied and
+  /// the copy's history cleared (Undo does not remove them), and the
+  /// groups **replaced** by the record's that apply, each whole or not at
+  /// all. The focus is kept; the selection is selected again by label;
+  /// [revision] moves; [serviceChanges] fires.
+  ServiceRestore restoreService(String json) {
+    final old = _service;
+    if (old == null) {
+      throw StateError('restoreService needs the service mode (spec 2b S3)');
+    }
+    final record = decodeServiceRecord(json);
+    settlePendingInput();
+    _refreshSelected();
+    final labels = _selectedUnits.value;
+    final designUnits = _session.units.current;
+    final moves = matchServiceMoves(document, designUnits, record.moves);
+    final groups = matchServiceGroups(record.groups, designUnits);
+    final next = _buildService();
+    if (moves.applied.isNotEmpty) {
+      final commands = next.document.commands;
+      try {
+        commands.execute(CompoundCommand([
+          for (final m in moves.applied) TransformNodeCommand(m.handle, m.to)
+        ], label: 'Restore'));
+      } catch (_) {
+        next.dispose();
+        rethrow;
+      }
+      // The restore is the copy's floor, no step (today's C16).
+      commands.clearHistory();
+    }
+    _attachService(next);
+    _service = next;
+    _dropService(old);
+    _groups.value = groups.applied;
+    _select(labels);
+    _refreshFlags();
+    _revision.value++;
+    _serviceChanges.bump();
+    notifyListeners();
+    return ServiceRestore(
+        appliedMoves: [for (final m in moves.applied) m.label],
+        droppedMoves: [for (final m in moves.dropped) m.label],
+        appliedGroups: groups.appliedIds,
+        droppedGroups: groups.droppedIds);
+  }
+
+  /// Service only: the copy rebuilt from the design, every service move
+  /// gone, and the groups cleared (today's `resetLayout` kept them: spec
+  /// S5). The selection is kept by label. A silent no-op in design.
+  void resetService() {
+    final old = _service;
+    if (old == null) return;
+    settlePendingInput();
+    _refreshSelected();
+    final labels = _selectedUnits.value;
+    final next = _buildService();
+    _attachService(next);
+    _service = next;
+    _dropService(old);
+    _groups.value = const <String, UnitGroup>{};
+    _groupsAtEnter = const <String, UnitGroup>{};
+    _select(labels);
+    _refreshFlags();
+    _revision.value++;
+    _serviceChanges.bump();
+    notifyListeners();
+  }
+
+  /// Fires [serviceChanges] if the active copy's history moved since it
+  /// last did. The change stream is asynchronous: without this, a host
+  /// that calls [undo] and then [setMode] in one synchronous step would
+  /// never hear the undo (review 14d-2).
+  void _announceService() {
+    final s = _service;
+    if (s == null) return;
+    final state = s.document.commands.stateId;
+    if (state == _announced) return;
+    _announced = state;
+    _serviceChanges.bump();
   }
 
   // ---------------------------------------------------------------------
@@ -2299,6 +2437,7 @@ class PlanController extends ChangeNotifier {
     _fill.dispose();
     _locked.dispose();
     _mode.dispose();
+    _serviceChanges.dispose();
     _statuses.dispose();
     _groups.dispose();
     _groupStatuses.dispose();

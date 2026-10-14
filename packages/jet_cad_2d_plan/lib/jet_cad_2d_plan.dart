@@ -64,6 +64,7 @@ export 'src/panels/plan_layer_panel.dart' show PlanLayerPanel;
 export 'src/panels/plan_page_panel.dart' show PlanPagePanel;
 export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
 export 'src/panels/plan_symbol_gallery.dart' show PlanSymbolGallery;
+export 'src/service/service_record.dart' show ServiceRestore;
 export 'src/service/service_session.dart' show PlanMode;
 export 'src/service/service_state.dart' show UnitGroup, UnitStatus;
 export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;

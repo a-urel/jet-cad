@@ -1,7 +1,7 @@
 // Ported from jet_cad_floor_plan test/host/design_changes_test.dart (2b
 // Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
 // DC16 (the service mode) are Task 11's; DC15 reads Task 13's
-// `serviceEdited`, so Task 13 ports it; DC7 also reads Task 13's record and
+// `serviceEdited`, so Task 13 ported it; DC7 also reads Task 13's record and
 // reset and drags with the service tool, so Task 14 ports it. DC8, DC9,
 // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
 // `changes` stream (plan_change_test.dart); they are ported again here for
@@ -554,8 +554,37 @@ void main() {
     expect(diffUnitDetails(const [], const [], const [], const []), isEmpty);
   });
 
-  // DC15 (a listen in service after a service move): Task 13 ports it (it
-  // reads Task 13's serviceEdited as a premise).
+  testWidgets(
+      'DC15 O7: a listen in service after a service move of 1 takes the '
+      'design\'s units, not the copy\'s: back in design, nothing; then '
+      'setUnitData on 2 is exactly one Changed for 2 (2b Task 13)',
+      (tester) async {
+    final c = fixtureController();
+    final b2 = detailOf(c, instancesOf(c, '2').single);
+    final b1 = detailOf(c, instancesOf(c, '1').single);
+    c.setMode(PlanMode.service);
+    await tester.pump();
+    final one = instancesOf(c, '1').single;
+    final fixture = fixtureTable('1');
+    final shift = Transform2.translation(1200, -700);
+    c.activeDocument.commands
+        .execute(TransformNodeCommand(one, shift.multiply(fixture.transform)));
+    await tester.pump();
+    expect(c.serviceEdited, isTrue, reason: 'premise: a service move');
+    expectNear(detailOf(c, one).center,
+        boxCentre(shift.multiply(fixture.transform)), 'premise: 1 moved');
+    final seen = listen(c);
+
+    c.setMode(PlanMode.design);
+    await tester.pump();
+    // M-DC15: the baseline taken from the active (the copy's) units.
+    expect(seen, isEmpty, reason: 'a mode switch is no design change');
+    expect(detailOf(c, one), b1, reason: 'premise: the design never moved');
+    expect(c.setUnitData('2', hostData()), isTrue);
+    await tester.pump();
+    expect(seen, [PlanUnitChanged(b2, copyOf(b2, data: hostData()))],
+        reason: 'the service move of 1 is no design change');
+  });
 
   testWidgets(
       'DC16 M-H29(service moves), the trigger alone: an edit then '

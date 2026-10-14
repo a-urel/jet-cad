@@ -69,6 +69,8 @@ void main() {
       'PlanMode',
       // 2b Task 12
       'UnitGroup', 'UnitStatus',
+      // 2b Task 13
+      'ServiceRestore',
     });
   });
 

@@ -250,6 +250,63 @@ void main() {
   });
 
   testWidgets(
+      'TG-C10 groups never reach the document: save() and the service copy '
+      'are byte-identical with and without them (M-TG-19, invariant)',
+      (tester) async {
+    final c = controllerFor(kits: [testKit()], json: groupsPlanText());
+    final design = c.save();
+    c.setMode(PlanMode.service);
+    final copy = DraftDocumentCodec.encodeToString(c.activeDocument);
+    c.setUnitGroups({
+      'G7': UnitGroup(members: {'12', '3', '7'}, label: 'Window bay')
+    });
+    c.setGroupStatus({'G7': bill});
+    c.select({'3'});
+    expect(DraftDocumentCodec.encodeToString(c.activeDocument), copy);
+    expect(c.save(), design);
+    // Today's `isFalse` (2b Task 13).
+    expect(c.serviceEdited, isTrue,
+        reason: 'ruling R13-c: groups count (spec S3, S5)');
+    await tester.pump();
+  });
+
+  testWidgets(
+      'TG-C11 groups and group statuses survive a mode round trip and a '
+      'load of the same plan, and still act (M-TG-20; today\'s resetLayout '
+      'step retired by ruling R13-d: resetService clears the groups, '
+      'SR-reset)', (tester) async {
+    final json = groupsPlanText();
+    final c = controllerFor(kits: [testKit()], json: json);
+    c.setUnitGroups({
+      'G7': UnitGroup(members: {'12', '3', '7'})
+    });
+    c.setGroupStatus({'G7': bill});
+    final groups = c.unitGroups.value;
+    final statuses = c.groupStatuses.value;
+    void expectKept(String reason) {
+      expect(c.unitGroups.value, same(groups), reason: reason);
+      expect(c.groupStatuses.value, same(statuses), reason: reason);
+    }
+
+    c.setMode(PlanMode.service);
+    c.setMode(PlanMode.design);
+    c.setMode(PlanMode.service);
+    expectKept('a mode round trip');
+    c.select({'7'});
+    expect(c.selectedUnits.value, {'3', '7', '12'});
+    expect(c.selectedGroup.value, 'G7');
+
+    c.load(json);
+    expectKept('load');
+    expect(c.selectedGroup.value, isNull,
+        reason: 'a load clears the selection');
+    c.select({'12'});
+    expect(c.selectedUnits.value, {'3', '7', '12'});
+    expect(c.selectedGroup.value, 'G7');
+    await tester.pump();
+  });
+
+  testWidgets(
       'TG-C12 selectedGroup reads the active plan as it is: after a load of '
       'another plan, and after a layer edit that made no command (M-C1-16, '
       'M-C1-17)', (tester) async {

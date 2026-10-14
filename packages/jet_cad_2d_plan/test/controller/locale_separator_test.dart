@@ -4,8 +4,9 @@
 // it first; newPlan() takes the locale last reported; a loaded plan is
 // never settled. Ported from jet_cad_floor_plan's
 // new_plan_separator_test.dart (NS1, NS3, NS4, NS6, NS8, NS9) with the view
-// replaced by the report it makes (`reportLocale`); the Page panel's and
-// the service layout's assertions are left out (Task 18; 2b).
+// replaced by the report it makes (`reportLocale`); the Page panel's
+// assertions are left out (Task 18). 2b Task 13 adds NS1's service layout
+// assertions (`serviceChanges`) and NS5 (a plan first shown in service).
 import 'package:flutter/widgets.dart' show Locale;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -16,6 +17,11 @@ import '../support/test_kit.dart';
 
 DecimalSeparator separatorOf(DraftDocument doc) =>
     doc.components.get<PageComponent>(doc.rootHandle)!.decimalSeparator;
+
+/// The separator the plan [text] prints (today's `separatorIn`): read
+/// back by a controller of its own.
+DecimalSeparator separatorIn(String text) =>
+    separatorOf(controllerFor(kits: [testKit()], json: text).document);
 
 /// A design edit before any report: a layer added, one command.
 void addLayer(PlanController c) {
@@ -39,6 +45,8 @@ void main() {
       'is point and stays point when Turkish comes; newPlan() in Turkish is '
       'comma', (tester) async {
     final c = controllerFor(kits: [testKit()]);
+    var layoutFired = 0;
+    c.serviceChanges.addListener(() => layoutFired++);
     final made = c.document;
     expect(separatorOf(made), DecimalSeparator.point,
         reason: "premise: unsettled, the engine's default");
@@ -51,9 +59,11 @@ void main() {
     expect(made.commands.canRedo, isFalse);
     expect(c.canUndo.value, isFalse);
     expect(c.dirty.value, isFalse);
+    expect(layoutFired, 0);
     await tester.pump();
     expect(c.canUndo.value, isFalse);
     expect(c.dirty.value, isFalse);
+    expect(layoutFired, 0);
     addLayer(c);
     await tester.pump();
     expect(c.dirty.value, isTrue, reason: 'premise: an edit');
@@ -201,5 +211,32 @@ void main() {
     c.newPlan(decimalSeparator: '.');
     expect(separatorOf(c.document), DecimalSeparator.point);
     await tester.pump();
+  });
+
+  testWidgets(
+      'NS5 reported first in service: the design settles to comma, the '
+      'service copy taken before keeps its page, nothing fires (2b Task 13)',
+      (tester) async {
+    final c = controllerFor(kits: [testKit()]);
+    var layoutFired = 0;
+    c.serviceChanges.addListener(() => layoutFired++);
+    c.setMode(PlanMode.service);
+    final copy = c.activeDocument;
+    c.reportLocale(const Locale('tr'));
+    await tester.pump();
+    expect(identical(c.activeDocument, copy), isTrue);
+    expect(separatorOf(copy), DecimalSeparator.point,
+        reason: 'a copy taken before is not changed');
+    // M-NS5: the settle bumps serviceChanges.
+    expect(layoutFired, 0);
+    expect(c.dirty.value, isFalse);
+    expect(c.serviceEdited, isFalse);
+    expect(separatorIn(c.save()), DecimalSeparator.comma);
+    c.setMode(PlanMode.design);
+    await tester.pump();
+    expect(separatorOf(c.activeDocument), DecimalSeparator.comma);
+    expect(c.activeDocument.commands.undoDepth, 0);
+    expect(c.canUndo.value, isFalse);
+    expect(c.dirty.value, isFalse);
   });
 }
