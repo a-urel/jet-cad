@@ -563,6 +563,31 @@ void main() {
       expect(h.controller.armedSymbol.value, isNull);
     });
 
+    testWidgets(
+        'S-18 the gallery reports the app\'s locale to the controller and '
+        'shows the kit\'s words in its language', (tester) async {
+      final h = Host(tester);
+      await tester.pumpWidget(MaterialApp(
+          locale: const Locale('tr'),
+          supportedLocales: planSupportedLocales,
+          localizationsDelegates: planLocalizationsDelegates,
+          home: Scaffold(
+              body: SizedBox(
+                  width: 240,
+                  child: PlanSymbolGallery(controller: h.controller)))));
+      await tester.pump();
+      await tester.pump();
+      // M-S18a: didChangeDependencies drops PlanLocaleScope.push.
+      expect(h.controller.locale.value, const Locale('tr'));
+      // M-S18b: the gallery's words fixed to English.
+      final categories = gallery(tester).categories;
+      expect(categories.first.name, 'Yatak odası');
+      expect(categories.first.id, 'demo/Bed Room');
+      expect(categories.first.symbols.first.label, 'Çift kişilik yatak');
+      expect(categories.last.name, 'Office', reason: 'no word: the stored');
+      await tester.pumpWidget(const SizedBox());
+    });
+
     // A positive control (exempt from a mutant): the gallery's own query.
     testWidgets('S-17 a gallery given no query searches with its own',
         (tester) async {
