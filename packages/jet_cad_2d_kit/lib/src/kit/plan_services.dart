@@ -51,9 +51,6 @@ abstract interface class Disposable {
   void dispose();
 }
 
-/// One plan, as a kit's code sees it. Every member reads the current
-/// document: a kit's factories run once per document (spec 2a P1,
-/// lifetimes), so what they keep never outlives it.
 /// A symbol definition a kit's code uses (spec 2b S2): a parametric type
 /// generates instances of it (E5), a tool places it. Every value is in the
 /// definition's space.
@@ -83,6 +80,9 @@ final class SymbolDefinitionRef {
   final Aabb2 top;
 }
 
+/// One plan, as a kit's code sees it. Every member reads the current
+/// document: a kit's factories run once per document (spec 2a P1,
+/// lifetimes), so what they keep never outlives it.
 abstract interface class PlanServices {
   /// The current document.
   DraftDocument get document;
