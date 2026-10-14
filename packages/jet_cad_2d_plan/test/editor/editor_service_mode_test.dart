@@ -74,6 +74,7 @@ void main() {
     void layout() {}
     void moved(List<PlanUnitDetail> _) {}
     void floor(Offset _) {}
+    void flowError(Object _) {}
     Widget? badge(BuildContext _, PlanUnitOverlay __) => null;
     const bar = PlanServiceBar(actions: [PlanServiceAction.print]);
     const layout2 = PlanOverlayLayout(hideBelowScale: 0.1);
@@ -102,6 +103,7 @@ void main() {
           unitOverlayLayout: layout2,
           unitOverlayModes: const {PlanMode.design, PlanMode.service},
           exportName: 'hall',
+          onPageFlowError: flowError,
         ));
     final v = tester.widget<PlanServiceView>(find.byType(PlanServiceView));
     // M-SV-9: PlanEditor does not hand onUnitHover down.
@@ -125,6 +127,7 @@ void main() {
     expect(v.unitOverlayLayout, same(layout2));
     expect(v.unitOverlayModes, {PlanMode.design, PlanMode.service});
     expect(v.exportName, 'hall');
+    expect(v.onPageFlowError, same(flowError));
   });
 
   testWidgets(

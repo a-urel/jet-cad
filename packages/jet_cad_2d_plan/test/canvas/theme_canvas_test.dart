@@ -61,19 +61,21 @@ Future<void> pumpHome(WidgetTester tester, Widget home, ThemeMode mode,
 /// the view's theme over the ambient one, as `FloorPlanView(theme:)`
 /// resolved it).
 Widget viewOf(PlanController c,
-        {PlanTheme? theme, PlanMode viewMode = PlanMode.design}) =>
+        {PlanTheme? theme, required PlanMode viewMode}) =>
     Scaffold(
         body: viewMode == PlanMode.design
             ? PlanThemeScope(view: theme, child: PlanCanvas(controller: c))
             : PlanServiceView(controller: c, theme: theme));
 
-/// Pumps [v]'s canvas under [mode], sets the fixture's camera and selects
-/// the line.
-Future<void> pumpView(WidgetTester tester,
-    ({PlanController c, Handle selected, Handle ink}) v, ThemeMode mode,
+/// Pumps [v]'s view in [viewMode] under [mode], sets the fixture's camera
+/// and selects the line.
+Future<void> pumpView(
+    WidgetTester tester,
+    ({PlanController c, Handle selected, Handle ink}) v,
+    ThemeMode mode,
+    PlanMode viewMode,
     {PlanTheme? theme,
-    PlanTheme? ambient,
-    PlanMode viewMode = PlanMode.design}) async {
+    PlanTheme? ambient}) async {
   windowAt(tester, const Size(1440, 900));
   v.c.setMode(viewMode);
   await pumpHome(tester, viewOf(v.c, theme: theme, viewMode: viewMode), mode,
@@ -83,6 +85,9 @@ Future<void> pumpView(WidgetTester tester,
   v.c.camera.value = paletteCamera;
   v.c.activeSelection.replace([SelectionKey.root(v.selected)]);
   await tester.pump();
+  expect(v.c.mode.value, viewMode);
+  expect(find.byType(PlanServiceView),
+      findsNWidgets(viewMode == PlanMode.service ? 1 : 0));
 }
 
 /// The selection overlay's painter in the view.
@@ -143,7 +148,7 @@ void main() {
         'P-6 ($m): with no theme the view hands the overlay today\'s const '
         'set and 2 px', (tester) async {
       final v = controllerOn(white);
-      await pumpView(tester, v, ThemeMode.light, viewMode: viewMode);
+      await pumpView(tester, v, ThemeMode.light, viewMode);
       final view = tester.widget<PlanCanvasView>(find.byType(PlanCanvasView));
       expect(identical(view.paper, PaperPalette.light), isTrue);
       expect(view.selectionStrokePixels, kSelectionStrokePixels);
@@ -163,8 +168,7 @@ void main() {
         (blueprint, onDark, PaperPalette.dark),
       ]) {
         final v = controllerOn(paper);
-        await pumpView(tester, v, ThemeMode.light,
-            viewMode: viewMode, theme: theme);
+        await pumpView(tester, v, ThemeMode.light, viewMode, theme: theme);
         final shot = await shoot(tester);
         expectSelectionRgb(shot, tester, want, hex(paper));
         expect(tester.widget<PlanCanvasView>(find.byType(PlanCanvasView)).paper,
@@ -179,8 +183,7 @@ void main() {
         'selectionOnDark on the dark canvas ($m): a White page under the '
         'dark theme shows dark (K1) and takes the dark colour', (tester) async {
       final v = controllerOn(white);
-      await pumpView(tester, v, ThemeMode.dark,
-          viewMode: viewMode,
+      await pumpView(tester, v, ThemeMode.dark, viewMode,
           theme: const PlanTheme(
               selectionOnLight: onLight, selectionOnDark: onDark));
       final shot = await shoot(tester);
@@ -193,8 +196,7 @@ void main() {
         '0xFF7FB2FF, White takes the theme\'s (per paper)', (tester) async {
       const theme = PlanTheme(selectionOnLight: onLight);
       var v = controllerOn(blueprint);
-      await pumpView(tester, v, ThemeMode.light,
-          viewMode: viewMode, theme: theme);
+      await pumpView(tester, v, ThemeMode.light, viewMode, theme: theme);
       var shot = await shoot(tester);
       expectSelectionRgb(shot, tester, const Color(0xFF7FB2FF), 'Blueprint');
       expect(
@@ -205,8 +207,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
 
       v = controllerOn(white);
-      await pumpView(tester, v, ThemeMode.light,
-          viewMode: viewMode, theme: theme);
+      await pumpView(tester, v, ThemeMode.light, viewMode, theme: theme);
       shot = await shoot(tester);
       expectSelectionRgb(shot, tester, onLight, 'White');
     });
@@ -215,7 +216,7 @@ void main() {
         'selectionWidth: 4 ($m) covers the rows a 2 px stroke covers only '
         'half; the outline stays the paper\'s colour', (tester) async {
       final v = controllerOn(white);
-      await pumpView(tester, v, ThemeMode.light, viewMode: viewMode);
+      await pumpView(tester, v, ThemeMode.light, viewMode);
       var shot = await shoot(tester);
       expect(outerRowsAre(shot, tester, PaperPalette.light.selection),
           (false, false),
@@ -242,8 +243,8 @@ void main() {
         'theme on a dark canvasBackground: the surround is it, the ink '
         'white, the selection the dark set\'s', (tester) async {
       final v = controllerOn(null);
-      await pumpView(tester, v, ThemeMode.light,
-          viewMode: viewMode, theme: const PlanTheme(canvasBackground: canvas));
+      await pumpView(tester, v, ThemeMode.light, viewMode,
+          theme: const PlanTheme(canvasBackground: canvas));
       final shot = await shoot(tester);
       expect(hex(surroundAt(shot, tester)), hex(rgbOf(canvas)));
       final (cx, cy) = areaPixel(tester, 700, 20);
@@ -271,8 +272,7 @@ void main() {
           0x000000,
           reason: 'premise: composited over the surface it would read light');
       final v = controllerOn(null);
-      await pumpView(tester, v, ThemeMode.light,
-          viewMode: viewMode,
+      await pumpView(tester, v, ThemeMode.light, viewMode,
           theme: const PlanTheme(canvasBackground: translucent));
       expect(
           identical(
@@ -290,8 +290,8 @@ void main() {
         'the sheet, the ink and the selection are the White page\'s',
         (tester) async {
       final v = controllerOn(white);
-      await pumpView(tester, v, ThemeMode.light,
-          viewMode: viewMode, theme: const PlanTheme(canvasBackground: canvas));
+      await pumpView(tester, v, ThemeMode.light, viewMode,
+          theme: const PlanTheme(canvasBackground: canvas));
       final shot = await shoot(tester);
       expect(hex(surroundAt(shot, tester)), hex(rgbOf(canvas)),
           reason: 'the pixel beside the sheet');
@@ -313,7 +313,7 @@ void main() {
       'T2-a: a hovered line in the design mode reads the theme\'s selection '
       'at 60% over what lies under it', (tester) async {
     final v = controllerOn(white);
-    await pumpView(tester, v, ThemeMode.light,
+    await pumpView(tester, v, ThemeMode.light, PlanMode.design,
         theme: const PlanTheme(selectionOnLight: onLight));
     final (ix, iy) = pixelOf(tester, Vector2(sampleX, inkY));
     final under = (await shoot(tester)).rgbAt(ix, iy);
@@ -367,8 +367,7 @@ void main() {
       const lightCanvas = Color(0xFFFFF3E0);
       expect(foregroundFor(lightCanvas.toARGB32() & 0xFFFFFF), 0x000000);
       final v = controllerOn(null);
-      await pumpView(tester, v, ThemeMode.dark,
-          viewMode: viewMode,
+      await pumpView(tester, v, ThemeMode.dark, viewMode,
           theme: const PlanTheme(
               canvasBackground: lightCanvas,
               selectionOnLight: onLight,
