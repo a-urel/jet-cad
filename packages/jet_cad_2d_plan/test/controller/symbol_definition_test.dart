@@ -50,6 +50,39 @@ final Catalog pbCatalog = Catalog(kit: 'pb', symbols: [
   ),
 ]);
 
+/// Symbols for `servedTopOfEntry`'s other arms: a turned closed outline
+/// first with a larger line after it, an open polyline first with a larger
+/// circle after it.
+final Catalog polyCatalog = Catalog(kit: 'pp', symbols: [
+  const CatalogSymbol(
+    key: 'pp.closed.first',
+    name: 'Closed first',
+    category: 'Tables',
+    tags: ['table'],
+    base: (3000.5, 1300.25),
+    shapes: [
+      CatalogPolyline([
+        (3000.5, 1000.25),
+        (3400.5, 1300.25),
+        (3000.5, 1600.25),
+        (2600.5, 1300.25),
+      ], closed: true),
+      CatalogLine((2000.5, 800.25), (4000.5, 800.25)),
+    ],
+  ),
+  const CatalogSymbol(
+    key: 'pp.open.first',
+    name: 'Open first',
+    category: 'Tables',
+    tags: ['table'],
+    base: (1700.5, 900.25),
+    shapes: [
+      CatalogPolyline([(1500.5, 700.25), (1900.5, 900.25), (1500.5, 1100.25)]),
+      CatalogCircle((1700.5, 900.25), 600),
+    ],
+  ),
+]);
+
 PlanKit pbKit() => symbolKit('pb', [
       SymbolLibrarySource(
           label: 'pb', read: () async => encodeLibrary(pbCatalog)),
@@ -151,6 +184,26 @@ void main() {
     shelf.basePoint.x = 0;
     expect(c.symbolById('pb.shelf.plain@1')!.entry.definition.basePoint,
         Vector2(610.75, 205.5));
+  });
+
+  test(
+      'PB-def-top-poly a closed outline first is the top, an open polyline '
+      'first is not (the leafless symbol is a library error, rule 4: the '
+      'empty-leaves guard is unreachable here)', () async {
+    final c = make([
+      symbolKit('pp', [
+        SymbolLibrarySource(
+            label: 'pp', read: () async => encodeLibrary(polyCatalog)),
+      ]),
+    ]);
+    await settle();
+    final s = c.servicesOf('pp');
+    final closed = s.symbolDefinition('pp.closed.first@1')!;
+    // M-PB9a: the polyline arm of `served` made false. M-PB9b:
+    // `isClosedPolyline` made true (the open case then reads the outline).
+    expect(boxOf(closed.top), [2600.5, 1000.25, 3400.5, 1600.25]);
+    final open = s.symbolDefinition('pp.open.first@1')!;
+    expect(boxOf(open.top), [1100.5, 300.25, 2300.5, 1500.25]);
   });
 
   test(
