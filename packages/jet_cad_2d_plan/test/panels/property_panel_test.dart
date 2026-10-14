@@ -163,6 +163,9 @@ void main() {
     await tester.enterText(byKey('setting-radius'), '250');
     await tester.pump();
     expect(c.document.commands.undoDepth, depth, reason: 'settings: no step');
+    // At once: the field still has the focus, and nothing has committed it.
+    expect(c.toolSettings.valueOf('disc.draw'),
+        const DiscToolSettings(radius: 250));
     // No Enter: the click places with what the keystrokes stored.
     await tester.tapAt(globalOf(tester, c, 7150, 3110));
     await tester.pump();
