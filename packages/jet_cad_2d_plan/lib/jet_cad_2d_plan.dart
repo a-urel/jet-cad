@@ -9,7 +9,7 @@ export 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show SymbolsState;
 
 export 'src/canvas/plan_canvas.dart' show PlanCanvas, kLockHintDuration;
 export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
-export 'src/controller/permissions.dart' show PlanPermissions;
+export 'src/controller/permissions.dart' show PlanPermissions, isUnitSymbol;
 export 'src/controller/plan_change.dart'
     show
         PlanChange,

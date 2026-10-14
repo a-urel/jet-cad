@@ -59,6 +59,8 @@ void main() {
       'PrintingPagePrinter',
       // Task 20
       'PlanEditor', 'PlanEditorBar', 'PlanEditorAction', 'PlanFileCallback',
+      // 2b Task 8
+      'isUnitSymbol',
     });
   });
 

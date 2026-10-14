@@ -10,7 +10,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_plan/src/kits/locks.dart' show LockSet;
+import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
 import 'package:jet_cad_2d_plan/src/tools/plan_select_gates.dart';
+import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 final class Rig {
@@ -26,10 +29,22 @@ final class Rig {
       lines.add(cmd.record.handle);
     }
     selection = SelectionController(document);
+    final units = UnitIndexCache(document,
+        catalog: catalog,
+        locks: LockSet.scan(document, (_) => true),
+        locked: locked);
+    final picker =
+        UnitPicker(document, units, skipLocked: true, placedOnly: true);
     gates = PlanSelectGates(
-        permissions: () => permissions, selection: selection, locked: locked);
+        permissions: () => permissions,
+        selection: selection,
+        locked: locked,
+        catalog: catalog,
+        picker: () => picker,
+        units: () => units.current);
     addTearDown(() {
       gates.dispose();
+      units.dispose();
       selection.dispose();
       locked.dispose();
     });
@@ -40,6 +55,7 @@ final class Rig {
   late final PlanSelectGates gates;
   final List<Handle> lines = [];
   final ValueNotifier<Set<Handle>> locked = ValueNotifier(const {});
+  final ParametricCatalog catalog = ParametricCatalog();
   PlanPermissions permissions = PlanPermissions.full;
 
   Map<String, bool> get open => {
@@ -82,8 +98,8 @@ void main() {
     expect(r.gates.idleKeys, isTrue, reason: 'the keys are the shortcuts');
     r.gates.idleKeys = false;
     expect(r.gates.idleKeys, isFalse);
-    // The pick and the band are the select tool's own.
-    expect(r.gates.restrictsPick, isFalse);
+    // 2b S2: the design's pick maps a generated unit to its object.
+    expect(r.gates.restrictsPick, isTrue);
   });
 
   test(
@@ -127,10 +143,22 @@ void main() {
     final document = DraftDocument.empty();
     final selection = SelectionController(document);
     final locked = ValueNotifier<Set<Handle>>(const {});
+    // The cache listens to a notifier of its own: [locked] is the gates'
+    // alone, so its listener count reads theirs.
+    final cacheLocked = ValueNotifier<Set<Handle>>(const {});
+    final units = UnitIndexCache(document,
+        catalog: ParametricCatalog(),
+        locks: LockSet.scan(document, (_) => true),
+        locked: cacheLocked);
+    final picker =
+        UnitPicker(document, units, skipLocked: true, placedOnly: true);
     final gates = PlanSelectGates(
         permissions: () => PlanPermissions.full,
         selection: selection,
-        locked: locked);
+        locked: locked,
+        catalog: ParametricCatalog(),
+        picker: () => picker,
+        units: () => units.current);
     gates.dispose();
     // A disposed gates object left as a listener would recompute here; the
     // notifiers report no listener instead.
@@ -140,5 +168,7 @@ void main() {
     expect(locked.hasListeners, isFalse);
     selection.dispose();
     locked.dispose();
+    units.dispose();
+    cacheLocked.dispose();
   });
 }

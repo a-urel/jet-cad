@@ -918,13 +918,24 @@ class PlanController extends ChangeNotifier {
     _permissions = value;
     document.commands.permissions = value.draft;
     final select = _session.select;
-    final stale = switch (select.dragKind) {
-      DragKind.move => old.move && !value.move,
-      DragKind.rotate => old.rotate && !value.rotate,
-      DragKind.reshape => old.reshape && !value.reshape,
-      DragKind.band || null => false,
-    };
+    final stale = old.selectUnitsOnly != value.selectUnitsOnly ||
+        switch (select.dragKind) {
+          DragKind.move => old.move && !value.move,
+          DragKind.rotate => old.rotate && !value.rotate,
+          DragKind.reshape => old.reshape && !value.reshape,
+          DragKind.band || null => false,
+        };
     if (stale) select.cancel(toolController.context);
+    // Today's S-9 g (planner_shell.dart:1085-1095): a change to units only
+    // keeps the placed units of the selection.
+    if (value.selectUnitsOnly && !old.selectUnitsOnly) {
+      final index = _session.units.current;
+      final drop = [
+        for (final k in selection.keys)
+          if (!isPlacedUnitKey(index, k)) k
+      ];
+      if (drop.isNotEmpty) selection.remove(drop);
+    }
     grips.gatesChanged();
     if (!_allowsTool(activeTool.value)) {
       selectTool(PlanToolIds.select);

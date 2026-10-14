@@ -15,6 +15,7 @@ import '../attach/attachment_registry.dart';
 import '../kits/guard.dart';
 import '../kits/kit_set.dart';
 import '../kits/locks.dart';
+import '../service/unit_picker.dart';
 import '../tools/generic_tools.dart';
 import '../tools/plan_select_gates.dart';
 import '../tools/plan_symbol_tool.dart';
@@ -54,7 +55,12 @@ final class DocumentSession {
     // grip cache rebuilds after the outlines.
     selection = SelectionController(document);
     gates = PlanSelectGates(
-        permissions: permissions, selection: selection, locked: locked);
+        permissions: permissions,
+        selection: selection,
+        locked: locked,
+        catalog: catalog,
+        picker: () => unitPicker,
+        units: () => units.current);
     outlines = OutlineCache(document, selection);
     grips = GripCache(document, selection, outlines,
         objects: LockedGrips(locks,
@@ -136,6 +142,12 @@ final class DocumentSession {
   /// The select tool's and the grip cache's gates: the permissions and the
   /// locks (spec P2, P4).
   late final PlanSelectGates gates;
+
+  /// The design's units-only picker (spec S4 selectUnitsOnly): placed,
+  /// unlocked units, made at its first use and kept for the session's life
+  /// (today's `_tablePicker`, planner_shell.dart:444).
+  late final UnitPicker unitPicker =
+      UnitPicker(document, units, skipLocked: true, placedOnly: true);
 
   /// The generic tools (Task 12). The map holds each of them, guarded, and
   /// disposes them: never [GenericToolSet.dispose] here (a second dispose

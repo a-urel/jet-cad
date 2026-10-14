@@ -25,6 +25,9 @@ const List<String> kFlagNames = [
   'undo',
   'export',
   'print',
+  'selectUnitsOnly',
+  'serviceMove',
+  'serviceMerge',
 ];
 
 Map<String, bool> flagsOf(P p) => {
@@ -41,6 +44,9 @@ Map<String, bool> flagsOf(P p) => {
       'undo': p.undo,
       'export': p.export,
       'print': p.print,
+      'selectUnitsOnly': p.selectUnitsOnly,
+      'serviceMove': p.serviceMove,
+      'serviceMerge': p.serviceMerge,
     };
 
 P copyFlag(P p, String name, bool v) => switch (name) {
@@ -57,6 +63,9 @@ P copyFlag(P p, String name, bool v) => switch (name) {
       'undo' => p.copyWith(undo: v),
       'export' => p.copyWith(export: v),
       'print' => p.copyWith(print: v),
+      'selectUnitsOnly' => p.copyWith(selectUnitsOnly: v),
+      'serviceMove' => p.copyWith(serviceMove: v),
+      'serviceMerge' => p.copyWith(serviceMerge: v),
       _ => throw ArgumentError(name),
     };
 
@@ -74,7 +83,8 @@ const Map<PlanGate, String> kGateFlag = {
   PlanGate.relabel: 'relabel',
 };
 
-/// readOnly's flags, as spec P2 and today's S-12 list them.
+/// readOnly's flags, as spec P2 and today's S-12 list them (relabel is
+/// today's renumber, off in readOnly).
 const Map<String, bool> kReadOnly = {
   'move': false,
   'rotate': false,
@@ -89,21 +99,51 @@ const Map<String, bool> kReadOnly = {
   'undo': false,
   'export': true,
   'print': true,
+  'selectUnitsOnly': false,
+  'serviceMove': true,
+  'serviceMerge': true,
+};
+
+/// unitsOnly's flags (today's tablesOnly, editor_capabilities.dart:175-190,
+/// restricted to PlanPermissions' fields; spec S4).
+const Map<String, bool> kUnitsOnly = {
+  'move': true,
+  'rotate': true,
+  'mirror': false,
+  'reshape': false,
+  'delete': true,
+  'changeLayer': false,
+  'recolor': true,
+  'editLayers': false,
+  'editPage': false,
+  'relabel': true,
+  'undo': true,
+  'export': true,
+  'print': true,
+  'selectUnitsOnly': true,
+  'serviceMove': true,
+  'serviceMerge': true,
 };
 
 void main() {
   test('PM-1 full and readOnly, field by field', () {
     expect(P.full.tools, isNull, reason: 'every tool');
-    expect(flagsOf(P.full), {for (final n in kFlagNames) n: true});
+    expect(flagsOf(P.full),
+        {for (final n in kFlagNames) n: n != 'selectUnitsOnly'});
     expect(const P(), P.full);
     // M-PM1: readOnly's `undo: false` dropped.
     expect(P.readOnly.tools, {'plan.select'});
     expect(flagsOf(P.readOnly), kReadOnly);
+    // EC2's tablesOnly half (editor_capabilities_test.dart:137-160), on
+    // PlanPermissions' fields.
+    expect(P.unitsOnly.tools, {'plan.select', 'plan.symbol'});
+    // M-PM1b: unitsOnly's `selectUnitsOnly: true` dropped.
+    expect(flagsOf(P.unitsOnly), kUnitsOnly);
   });
 
   test('PM-2 copyWith replaces exactly the field it names; null keeps', () {
     for (final name in kFlagNames) {
-      for (final base in [P.full, P.readOnly]) {
+      for (final base in [P.full, P.readOnly, P.unitsOnly]) {
         final before = flagsOf(base);
         final after = flagsOf(copyFlag(base, name, !before[name]!));
         // M-PM2: `move: move ?? this.move` written `move: this.move`.
@@ -136,12 +176,16 @@ void main() {
     expect(a == P.full.copyWith(tools: {'plan.select', 'plan.line'}), isFalse);
     expect(a == P.full, isFalse, reason: 'a set is not "every tool"');
     for (final name in kFlagNames) {
-      final changed = copyFlag(P.full, name, false);
+      // Each flag turned from full's value (selectUnitsOnly is off there).
+      final changed = copyFlag(P.full, name, !flagsOf(P.full)[name]!);
       expect(changed == P.full, isFalse, reason: name);
       expect(P.full == changed, isFalse, reason: name);
     }
     expect(P.full == P.readOnly, isFalse);
     expect(identical(P.readOnly, P.readOnly), isTrue);
+    expect(P.unitsOnly == P.readOnly, isFalse);
+    expect(identical(P.unitsOnly, P.unitsOnly), isTrue);
+    expect(P.unitsOnly, P.unitsOnly.copyWith());
   });
 
   test('PM-4 allowsTool: select always; null allows every id; a set its own',
@@ -187,8 +231,15 @@ void main() {
       expect(one.edits, isTrue, reason: name);
       expect(one.draft, same(DraftPermissions.all), reason: name);
     }
-    for (final name in ['undo', 'export', 'print']) {
-      final one = copyFlag(P.readOnly, name, true);
+    for (final name in [
+      'undo',
+      'export',
+      'print',
+      'selectUnitsOnly',
+      'serviceMove',
+      'serviceMerge'
+    ]) {
+      final one = copyFlag(P.readOnly, name, !kReadOnly[name]!);
       expect(one.draft, same(DraftPermissions.readOnly),
           reason: '$name is not an edit');
     }
@@ -226,5 +277,60 @@ void main() {
     // The tools sorted, so the text is stable whatever the set's order.
     expect(P.full.copyWith(tools: {'plan.text', 'acme.x'}).toString(),
         'PlanPermissions(tools: {acme.x, plan.text})');
+    // EC5's tablesOnly text (editor_capabilities_test.dart:266-271), on
+    // PlanPermissions' fields: a restriction prints when on.
+    // M-PM7b: toString printing only the flags that are false.
+    expect(
+        P.unitsOnly.toString(),
+        'PlanPermissions(tools: {plan.select, plan.symbol}, mirror: false, '
+        'reshape: false, changeLayer: false, editLayers: false, '
+        'editPage: false, selectUnitsOnly: true)');
+  });
+
+  // EC3b (editor_capabilities_test.dart:386-435): two bases whose flags
+  // alternate, so a field copied from its neighbour is seen.
+  test(
+      'EC3b copyWith on two bases whose flags alternate: no argument keeps '
+      'every field, each flag replaces that field alone', () {
+    P alternating(bool first) {
+      final v = [for (var i = 0; i < kFlagNames.length; i++) i.isEven == first];
+      return P(
+        tools: const {'plan.select', 'plan.line', 'plan.symbol'},
+        move: v[0],
+        rotate: v[1],
+        mirror: v[2],
+        reshape: v[3],
+        delete: v[4],
+        changeLayer: v[5],
+        recolor: v[6],
+        editLayers: v[7],
+        editPage: v[8],
+        relabel: v[9],
+        undo: v[10],
+        export: v[11],
+        print: v[12],
+        selectUnitsOnly: v[13],
+        serviceMove: v[14],
+        serviceMerge: v[15],
+      );
+    }
+
+    for (final first in [true, false]) {
+      final base = alternating(first);
+      final flags = flagsOf(base);
+      for (final (i, name) in kFlagNames.indexed) {
+        expect(flags[name], i.isEven == first, reason: name);
+      }
+      expect(base.relabel, isNot(base.editPage));
+      final kept = base.copyWith();
+      expect(flagsOf(kept), flags, reason: 'copyWith() on $base');
+      expect(kept.tools, {'plan.select', 'plan.line', 'plan.symbol'});
+      for (final name in kFlagNames) {
+        // M-PM2b: `serviceMerge: serviceMerge ?? this.serviceMove`.
+        expect(flagsOf(copyFlag(base, name, !flags[name]!)),
+            {...flags, name: !flags[name]!},
+            reason: '$name on $base');
+      }
+    }
   });
 }

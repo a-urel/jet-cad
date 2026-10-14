@@ -1,5 +1,6 @@
-// The units' fixture (2b Task 6; Task 8 adds the picker's and the
-// editor's helpers, and Tasks 7, 9, 10, 14 and 15 reuse it), ported from
+// The units' fixture (2b Task 6; Task 8 adds the picker's helpers, two
+// more tables, `rowOfTables` and `CountingTransform`, and Tasks 7, 9, 10,
+// 14 and 15 reuse it), ported from
 // jet_cad_floor_plan's test/tables/table_fixture.dart: a servable table
 // symbol, a stool, a planter, a table with one chair and a trapezoid, and a
 // plan to place them in. A symbol is a CatalogSymbol; its SymbolEntry is
@@ -9,7 +10,10 @@
 // `isSymbolKey`; controller rulings R-10 P-1 and R-19). Base points and
 // placements are off the origin (the degenerate-fixture rule).
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/authoring.dart'
     show
@@ -20,6 +24,9 @@ import 'package:jet_cad_2d_kit/authoring.dart'
         CatalogUnit;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/src/kits/locks.dart';
+import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
+import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
+    show definitionForEntry, placementTransform;
 import 'package:jet_cad_2d_plan/src/units/unit_index.dart';
 import 'package:jet_cad_2d_plan/src/units/unit_label.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
@@ -204,3 +211,202 @@ List<String> labelsOf(UnitIndex index) => [
       for (final u in index.units)
         if (u.text != null) u.text!,
     ];
+
+/// One chair right of the top: the box spans x 300..1850.
+const CatalogSymbol sideChairTable = CatalogSymbol(
+  key: 'fx.table.side',
+  name: 'Side chair table',
+  category: 'Tests',
+  tags: ['table', 'test'],
+  unit: CatalogUnit(kind: UnitKinds.table, capacity: 1),
+  base: (900, 700),
+  shapes: [
+    CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)],
+        closed: true),
+    CatalogPolyline([(1400, 475), (1850, 475), (1850, 925), (1400, 925)],
+        closed: true),
+  ],
+);
+
+/// A unit whose first leaf is an open polyline: no top (R-8). A library
+/// refuses it (K3 rule 11); a plan file may hold it.
+const CatalogSymbol openTable = CatalogSymbol(
+  key: 'fx.table.open',
+  name: 'Open table',
+  category: 'Tests',
+  tags: ['table', 'test'],
+  unit: CatalogUnit(kind: UnitKinds.table, capacity: 2),
+  base: (900, 700),
+  shapes: [
+    CatalogPolyline([(300, 300), (1500, 300), (1500, 1100), (300, 1100)]),
+    CatalogPolyline([(675, -50), (1125, -50), (1125, 400), (675, 400)],
+        closed: true),
+  ],
+);
+
+/// An empty plan over [fxKit] (the page, the contract's components), in
+/// millimetres, no system installed.
+DraftDocument unitPlan() => planDocument([fxKit()]);
+
+/// Places [s] by [transform] on [layer] (layer 0 by default): its
+/// definition copied on first use (definitionForEntry), one instance, one
+/// step, **no label** (a test adds one with [addUnitLabel]). Returns the
+/// instance.
+Handle placeUnit(DraftDocument doc, CatalogSymbol s,
+    {required Transform2 transform, Handle? layer}) {
+  final made = definitionForEntry(doc, entryOf(s));
+  final h = doc.handleSeed.next();
+  doc.commands.execute(CompoundCommand([
+    ...made.commands,
+    AddNodeCommand(InstanceNode(
+        handle: h,
+        parent: doc.rootHandle,
+        definition: made.definition,
+        layer: layer ?? ReservedHandles.layerZero,
+        transform: transform)),
+  ], label: 'Place ${s.name}'));
+  return h;
+}
+
+/// [s] placed with its base point at [at], [quarterTurns] counter-clockwise
+/// and [mirrored] (the placer's transform, symbol_placer.dart:48).
+Handle placeAt(DraftDocument doc, CatalogSymbol s, Vector2 at,
+        {int quarterTurns = 0, bool mirrored = false}) =>
+    placeUnit(doc, s,
+        transform: placementTransform(
+            at: at,
+            basePoint: Vector2(s.base.$1, s.base.$2),
+            quarterTurns: quarterTurns,
+            mirrored: mirrored));
+
+/// Places [s] mirrored (by default) at [at], then turns it by 37 degrees
+/// about [at]. Returns the instance node.
+InstanceNode placeTurned(DraftDocument doc, CatalogSymbol s, Vector2 at,
+    {bool mirrored = true}) {
+  final h = placeAt(doc, s, at, mirrored: mirrored);
+  final node = doc.tree[h]! as InstanceNode;
+  final turn = Transform2.translation(at.x, at.y)
+      .multiply(Transform2.rotation(kDeg37))
+      .multiply(Transform2.translation(-at.x, -at.y));
+  doc.commands.execute(TransformNodeCommand(h, turn.multiply(node.transform)));
+  return doc.tree[h]! as InstanceNode;
+}
+
+Vector2 worldOf(InstanceNode n, double x, double y) =>
+    n.transform.transformPoint(Vector2(x, y));
+
+/// A layer [name] beside layer 0.
+Handle addLayer(DraftDocument doc, String name,
+    {bool visible = true, bool locked = false}) {
+  final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+  final h = doc.handleSeed.next();
+  doc.commands.execute(AddLayerCommand(LayerRecord(
+      handle: h,
+      name: name,
+      color: const IndexedColor(4),
+      linetype: zero.linetype,
+      lineweight: zero.lineweight,
+      transparency: zero.transparency,
+      visible: visible,
+      locked: locked)));
+  return h;
+}
+
+/// Adds [text] as [instance]'s UNIT label, stamped as a placed unit's
+/// (spec S2): Task 6's [labelUnit] (`addUnitLabelCommand`: owned by the
+/// instance, layer 0, BYBLOCK, the standard text style, anchored at the
+/// definition's base point, upright in the world, today's height rule,
+/// controller ruling R-21). One step. Returns the label's handle.
+Handle addUnitLabel(DraftDocument doc, Handle instance, String text) =>
+    labelUnit(doc, doc.tree[instance]! as InstanceNode, text);
+
+/// A unit index cache over [doc] with nothing locked and no type,
+/// disposed at tear-down. Call inside a test.
+UnitIndexCache unitsOf(DraftDocument doc, {ParametricCatalog? catalog}) {
+  final locked = ValueNotifier<Set<Handle>>(const {});
+  final cache = UnitIndexCache(doc,
+      catalog: catalog ?? ParametricCatalog(),
+      locks: LockSet.scan(doc, (_) => true),
+      locked: locked);
+  addTearDown(() {
+    cache.dispose();
+    locked.dispose();
+  });
+  return cache;
+}
+
+/// A picker over [doc] ([unitsOf]); the options and seams as UnitPicker's.
+UnitPicker pickerOf(DraftDocument doc,
+        {bool skipLocked = false,
+        bool placedOnly = false,
+        Map<Handle, List<int>> Function()? leavesByOwner,
+        Transform2 Function(Transform2 transform)? invert}) =>
+    UnitPicker(doc, unitsOf(doc),
+        skipLocked: skipLocked,
+        placedOnly: placedOnly,
+        leavesByOwner: leavesByOwner,
+        invert: invert);
+
+/// [n] trapezoid tables 40 m off the origin, ten to a row 2.5 m apart,
+/// each mirrored and turned 37 degrees about its base point.
+DraftDocument rowOfTables(int n) {
+  final doc = unitPlan();
+  for (var i = 0; i < n; i++) {
+    final at = Vector2(40000.0 + 2500 * (i % 10), -27000.0 - 2500 * (i ~/ 10));
+    placeTurned(doc, trapezoidTable, at);
+  }
+  return doc;
+}
+
+final class Tally {
+  int count = 0;
+}
+
+/// A candidate's inverse that counts every new object it is asked for: a
+/// point or a direction mapped, a product, an inverse, a list, a string.
+/// The coefficients are read as fields, which build nothing.
+final class CountingTransform extends Transform2 {
+  CountingTransform(Transform2 m, this.made)
+      : super(m.a, m.b, m.c, m.d, m.e, m.f);
+
+  final Tally made;
+
+  @override
+  Vector2 transformPoint(Vector2 p) {
+    made.count++;
+    return super.transformPoint(p);
+  }
+
+  @override
+  Vector2 transformDirection(Vector2 v) {
+    made.count++;
+    return super.transformDirection(v);
+  }
+
+  @override
+  Transform2 multiply(Transform2 other) {
+    made.count++;
+    return super.multiply(other);
+  }
+
+  @override
+  Transform2 invert() {
+    made.count++;
+    return super.invert();
+  }
+
+  @override
+  List<double> toJson() {
+    made.count++;
+    return super.toJson();
+  }
+
+  @override
+  String toString() {
+    made.count++;
+    return super.toString();
+  }
+}
+
+/// [values] as a Float64List (the tops' expectations).
+Float64List f64(List<double> values) => Float64List.fromList(values);
