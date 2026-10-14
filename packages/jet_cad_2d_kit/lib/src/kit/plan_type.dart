@@ -58,7 +58,10 @@ final class PlanType<T extends Component> {
   final ObjectGripProvider Function(PlanServices)? grips;
 
   /// The panel's fields, in order. Safe to list through
-  /// `PlanType<Component>`; use them through [fieldsOf].
+  /// `PlanType<Component>`, but a spec's members that take a `T` (`read`,
+  /// `write`, `enabled`, `apply`) throw a `TypeError` when read through it
+  /// (see [PropertySpec]): use the fields through [fieldsOf] and
+  /// [commitField], which keep `T`.
   final List<PropertySpec<T>> properties;
 
   /// False leaves the type's objects out of every export.

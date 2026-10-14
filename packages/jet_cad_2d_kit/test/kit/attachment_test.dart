@@ -44,6 +44,11 @@ void main() {
     expect(q.mirrored, isTrue);
     expect(q.mayRotate, isFalse);
     expect(q.keep, isNull);
+    // M-PT20c (final review): `pointer` handing out the query's own vector:
+    // a provider that moves the vector it read moves the query for the
+    // next provider.
+    q.pointer.x = -9999.5;
+    expect(q.pointer, Vector2(1610.75, -580.5));
   });
 
   test('PT21 a query refuses a capture it cannot use', () {

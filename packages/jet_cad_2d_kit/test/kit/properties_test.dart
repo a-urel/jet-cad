@@ -114,6 +114,14 @@ void main() {
       // Finish.oiled share a segment.
       expect(() => choice(const ['oiled', Finish.oiled]), refusedOn('values'));
       expect(() => choice(const ['a', '']), refusedOn('values'));
+      // M-PS4c (final review): drop the separator check. A segment holding
+      // "." or ":" makes the word id `property:<owner>.<spec>.<value>`
+      // ambiguous.
+      expect(() => choice(const ['oak', 'oak.dark']), refusedOn('values'));
+      expect(() => choice(const ['oak', 'tr:meşe']), refusedOn('values'));
+      expect(() => choice(const [0.5, 2]), refusedOn('values'));
+      expect(
+          choice(const ['oak', 'oak-dark', 2]).values, ['oak', 'oak-dark', 2]);
       final values = <Object?>[Finish.raw, 'square'];
       final c = choice(values);
       values.add('round');

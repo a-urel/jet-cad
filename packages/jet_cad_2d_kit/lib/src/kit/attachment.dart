@@ -19,8 +19,10 @@ abstract interface class AttachmentProvider {
 
 /// What a provider is asked: the symbol, where it is, where the pointer is.
 ///
-/// [pointer] and [exclude] are copied: the query never changes after it is
-/// made.
+/// The query never changes after it is made: [pointer] is copied when it
+/// is made and again at each read (a provider that changes the vector it
+/// read changes nothing the next provider sees), and [exclude] is an
+/// unmodifiable copy.
 @immutable
 final class AttachmentQuery {
   /// Throws [ArgumentError] for a capture or an edge capture that is
@@ -35,7 +37,7 @@ final class AttachmentQuery {
     required this.mayRotate,
     Set<Handle> exclude = const {},
     this.keep,
-  })  : pointer = Vector2.copy(pointer),
+  })  : _pointer = Vector2.copy(pointer),
         exclude = Set.unmodifiable(exclude) {
     _checkDistance(capture, 'capture');
     _checkDistance(edgeCapture, 'edgeCapture');
@@ -50,8 +52,9 @@ final class AttachmentQuery {
   /// The symbol's transform now (while placing: the ghost's).
   final Transform2 current;
 
-  /// The raw world point under the pointer.
-  final Vector2 pointer;
+  /// The raw world point under the pointer: a fresh copy at each read.
+  Vector2 get pointer => Vector2.copy(_pointer);
+  final Vector2 _pointer;
 
   /// World distances: how far from a target the pointer may be, and how
   /// near an end of a target the symbol may slide.

@@ -50,6 +50,8 @@ final class PlanAttachmentRegistry implements AttachmentRegistry {
   Attachment? attach(List<String> kinds, AttachmentQuery query) {
     final keep = query.keep;
     final keeper = keep == null ? null : _origin[keep];
+    // One copy for the whole ask (the query copies at each read).
+    final pointer = query.pointer;
     AttachmentQuery? bare;
     Attachment? best;
     var bestDistance = double.infinity;
@@ -63,7 +65,7 @@ final class PlanAttachmentRegistry implements AttachmentRegistry {
         final a = _ask(p, q);
         if (a == null) continue;
         _origin[a] = p;
-        final d = a.marker.distanceToSquared(query.pointer);
+        final d = a.marker.distanceToSquared(pointer);
         if (d < bestDistance) {
           best = a;
           bestDistance = d;

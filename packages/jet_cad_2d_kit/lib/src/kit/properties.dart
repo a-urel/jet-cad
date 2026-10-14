@@ -159,7 +159,10 @@ final class NumberProperty<T> extends PropertySpec<T> {
 }
 
 /// One of [values], compared with `==`. A value's word segment is
-/// [segmentOf] it: an enum's name, else its `toString`.
+/// [segmentOf] it: an enum's name, else its `toString`. A segment is not
+/// empty, given once, and holds no `.` or `:`, the separators of the word
+/// id `property:<owner>.<spec>.<value>`; a value whose segment would is an
+/// [ArgumentError] when the spec is made.
 final class ChoiceProperty<T, V> extends PropertySpec<T> {
   ChoiceProperty({
     required String id,
@@ -179,6 +182,10 @@ final class ChoiceProperty<T, V> extends PropertySpec<T> {
       if (segment.isEmpty || !seen.add(segment)) {
         throw ArgumentError.value(
             v, 'values', 'gives the word segment "$segment" twice or empty');
+      }
+      if (segment.contains('.') || segment.contains(':')) {
+        throw ArgumentError.value(v, 'values',
+            'gives the word segment "$segment", which holds "." or ":"');
       }
     }
   }
