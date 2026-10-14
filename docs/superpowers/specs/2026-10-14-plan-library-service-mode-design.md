@@ -1,10 +1,11 @@
 # The plan library, service mode (sub-project 2b) — design
 
-**Date:** 2026-10-14. **Status:** revision 2. Revision 1 was written after
+**Date:** 2026-10-14. **Status:** revision 3. Revision 1 was written after
 the human approved the design section by section in chat. Revision 2
 applies an independent Opus review (3 blocking, 11 important, 13 minor
 findings, each checked against the code), on the human's *"evet devam
-et"*. Awaiting the human's review of this file.
+et"*; revision 3 applies that reviewer's re-review of revision 2 (N1-N10).
+Awaiting the human's review of this file.
 
 **Binds:** the umbrella spec
 [2026-10-13-kit-architecture-design.md](2026-10-13-kit-architecture-design.md)
@@ -209,7 +210,8 @@ The inventory behind these lines, and behind S5's table, was read from
   pass yet (`:129-160`).
 - **The lock refuses every touch under a locked object**
   (`kits/locks.dart:367-380`), so a write on a frozen object or a missing
-  kit's object is refused.
+  kit's object is refused. It also covers a placed instance whose symbol
+  key names a missing kit (`:41-60`; `LockSet.covers`, `:112`).
 - The placer copies `jetcad.symbol` and `jetcad.unit` and writes no label;
   `definitionForEntry` takes a handle from `handleSeed.next()`
   (`symbols/symbol_placer.dart:96-121`). `isServableInstance` exists
@@ -254,8 +256,11 @@ final class GeneratedAttrib {
 
 - Today's constructors (`Generated(...)`, `Generated.region`,
   `Generated.text`) stay as factories returning a `GeneratedEntity`, so a
-  type's `generate` compiles unchanged; code that reads `kind` or `payload`
-  switches on the subtype. `Generated.instance(definition, transform,
+  type's `generate` compiles unchanged. `kind`, `payload` and the other
+  fields move to `GeneratedEntity`; code that reads them switches on the
+  subtype or casts. One engine test reads them off a constructed value
+  (`jet_cad_2d/test/parametric/regions_test.dart:334-339`); it gains a cast
+  to `GeneratedEntity`, its assertions unchanged. `Generated.instance(definition, transform,
   {attributes})` returns a `GeneratedInstance`.
 - `GeneratedAttrib` throws `ArgumentError` for an empty tag;
   `Generated.instance` throws for two attributes with one tag.
@@ -289,8 +294,9 @@ by handle. `children` stays entity-only.
 **Matching.** The i-th instance output meets the i-th existing instance,
 ascending by handle (the rule of every other kind). Every command below is
 planned only on an exact-`==` difference of the stored value (12b R-15);
-`Transform2` has no `==`, so transforms compare component by component
-(today's `sameTransform`).
+`Transform2` has no `==`, so transforms compare with
+`Transform2.equals(…, const Tolerance(linear: 0, angular: 0))`, as
+`InstanceNode.==` does (`document/node.dart:287-303`).
 - A matched instance keeps its handle: `SetInstanceDefinitionCommand` for a
   new definition, `TransformNodeCommand` for a new transform,
   `SetInstanceLayerCommand.restore` for a new layer.
@@ -343,10 +349,16 @@ the version the wave publishes, and `jet_cad_2d_kit`'s and
 An instance with a unit definition anywhere else is not a unit and raises
 `unit.nested` (today's rule for nested tables).
 
-**Locked units.** A unit is locked when its layer is locked (today), or
-when its object is frozen or belongs to a missing kit. A locked unit is
-picked, tapped, selected and grouped, and never moved (today's locked
+**Locked units.** One predicate, `isLockedUnit`, used by the service drag,
+`unitDetails.locked`, the record's strict match and the design writes: a
+unit is locked when its layer is locked (today), or when 2a's lock set
+covers its instance (`LockSet.covers`: a placed unit of a missing kit's
+symbol, a frozen object's or a missing kit's object's seat). A locked unit
+is picked, tapped, selected and grouped, and never moved (today's locked
 table).
+- The service copy has no lock set of its own: its `UnitIndex` reads the
+  design's lock set and frozen set. The handles are the same in both
+  documents.
 
 **`UnitIndex`** (plan library, pure Dart over the engine) replaces
 `TableSurvey`. One pass over the document gives, ascending by handle:
@@ -377,7 +389,8 @@ renamed; no compatibility, decision of the wave).
 - **Placed, `numbered`:** the placer writes the next free number as the
   label, in the same command as the instance. `nextUnitNumber`: `max + 1`
   over the counted labels (one to eight digits) of placed `numbered` units,
-  then up by one while that text is any unit's label. 2a's "the table
+  then up by one while that text is any unit's label; when that would pass
+  `99999999`, the smallest unused positive number (today's fallback). 2a's "the table
   number goes to 2b" is closed here.
 - **Placed, `assigned`:** no label at placement; the property panel or
   `setUnitLabel` gives one.
@@ -442,8 +455,11 @@ four or six) generates instances of different definitions.
   with `Handle handle`, `DraftCommand? add` (adds the definition when the
   document lacks it, through 2a's placer path), `Vector2 basePoint` and
   `Aabb2 top`. `key` is a full versioned key (`kit.kind.variant@N`). It
-  answers null for a key no loaded library has; `PlanServices.symbolsReady`
-  tells that apart from libraries still loading. A call that returns `add`
+  answers null for a key no loaded library has; `PlanServices.symbolsReady`,
+  a `ValueListenable<bool>`, tells that apart from libraries still loading,
+  and a tool can wait on it. `top` is the definition's first leaf's box when
+  that leaf is a closed polyline or a circle (today's served top), else the
+  definition's box. A call that returns `add`
   takes a handle from the seed, so a tool calls it once per placement,
   never per preview.
 - `unitLabelAttrib` and `kUnitLabelTag = 'UNIT'`.
@@ -464,6 +480,11 @@ four or six) generates instances of different definitions.
   set, and its own unit label system, as today's copy acquires both. It has
   no lock expander and no kit tools: its only writer is the service tool,
   and `restoreService`. Permissions are `DraftPermissions.runtime`.
+- **A kit hook failing in the copy** (a `reach` or `references` call during
+  a service edit's survey) refuses that edit: the engine rolls it back, the
+  service tool's commit changes nothing, the failure goes to the design's
+  `DiagnosticsLog`, and the failing object joins the shared frozen set, so
+  it is frozen in both documents (2a P4's rule, applied to the copy).
 - Leaving it discards the copy (today).
 - **2a's members in service:** `document`, `parametric`, `frozen`,
   `locked`, `changes` and `PlanServices.document` stay on the design.
@@ -500,7 +521,13 @@ four or six) generates instances of different definitions.
     (today: Undo does not remove restored places);
   - it **replaces** the controller's groups with the record's applied ones;
   - a group is applied whole or dropped: a member label that does not name
-    exactly one unit of the design drops it, reported, never shrunk.
+    exactly one unit of the design drops it, reported, never shrunk;
+  - groups breaking `setUnitGroups`' validation (a blank id, two ids equal
+    after trimming, an empty group) are dropped and reported, not a
+    `FormatException`; a label in two groups drops the later group;
+  - the groups a host set in design are replaced too: a host that wants to
+    keep them restores before setting them, or merges them into the
+    record itself. Sub-project 4's guide says so.
 - `serviceEdited`: the copy has a move, or a group is set.
 - `serviceChanges` fires on a move, an undo or redo of one,
   `resetService`, `restoreService`, and `setUnitGroups` in service. In
@@ -533,8 +560,9 @@ four or six) generates instances of different definitions.
 - **Design writes**, undoable, refused in service with `StateError`,
   today's rules: `setUnitData`/`setUnitsData`,
   `setUnitColour`/`setUnitsColour`, and the new
-  `setUnitLabel`/`setUnitsLabel` (the text rule; a generated unit's label is
-  its type's, so `false`). Each answers `false` for a label naming no unit
+  `setUnitLabel`/`setUnitsLabel` (the text rule; `false` for a label another
+  unit already holds, as today's panel refuses a used number; a generated
+  unit's label is its type's, so `false`). Each answers `false` for a label naming no unit
   or several, and **for a unit under a locked object** (2a's lock; a
   difference, S5). A unit on a hidden or locked layer still takes data and
   colour (today).
@@ -624,9 +652,11 @@ tool); host calls are not gated.
 - **The lookup:** the kit's word (through `KitWords.maybe`), else the
   contract's word in `PlanStrings`, else the kind as stored. A definition
   with no `SymbolComponent` skips the first step.
-- **A host's words:** `PlanController(words: KitNames)`, validated by
-  `PlanKit.validate`'s namespace rules but free to name any kit's ids. The
-  plan's words are `hostWords.merge(kitWords)`: the host's come first, per
+- **A host's words:** `PlanController(words: KitNames)`. The contract gains
+  `validateHostWords(KitNames)` → `List<KitProblem>`: every id must be in a
+  known namespace (`symbol:`, `category:`, `tool:`, `type:`, `property:`,
+  `unit:`) and name a kit, any kit. The constructor throws `ArgumentError`
+  naming the first problem. The plan's words are `hostWords.merge(kitWords)`: the host's come first, per
   locale, so a host can add a language a kit lacks or override a word.
 - `PlanKit.validate` accepts the `unit:` namespace; `conformance()` (R3)
   requires an English word for every kind a kit's libraries carry that the
@@ -714,7 +744,7 @@ parity table takes these rows over.
 - **2a P6's per-edit hook:** no `PlanKit.systems` (S2).
 - **New for 0.1.0:** `PlanServices.symbolDefinition` and `symbolsReady`,
   `SymbolDefinitionRef`, `unitLabelAttrib`, `kUnitLabelTag`, the `unit:`
-  word namespace, the `assigned` doc (S2, S4).
+  word namespace, `validateHostWords`, the `assigned` doc (S2, S4).
 
 ## Package layout
 
@@ -758,20 +788,26 @@ standing at the identity alone does not count.
   - the dissolve leaves no ATTRIB;
   - draw order and the engine's standing hash tests hold.
 - **Units:** placed and generated units in one index; a frozen row's and a
-  missing kit's row's seats served and locked; `nested`,
+  missing kit's row's seats served and locked; a placed table of a missing
+  kit's symbol locked (never dragged, its stored move dropped); `nested`,
   `duplicate_label`, `unlabelled`, `bad_label`; `nextUnitNumber` skipping a
-  seat's label; the label system's stamp in the same undo step; data and
+  seat's label and falling back past `99999999`; the label system's stamp in the same undo step; data and
   colour across regeneration; a relabelled unit leaving its group.
 - **Service:** a seat is picked, selected, given a status and grouped; a
   group mixing a table and seats; a group with a seat never dragged; the
   band over two rows; an unlabelled table tapped and dragged but not
   reported by label.
-- **The record:** round trip; a moved table restored and its history
+- **The record:** round trip; invalid groups in a record dropped and
+  reported; a moved table restored and its history
   cleared; restore replacing the host's groups; a group dropped whole when a
   member's label changed in the design; `resetService` clears moves and
   groups; today's layout text refused; `StateError` outside service.
 - **Writes:** data and colour on a seat; `false` under a frozen object;
-  `setUnitLabel` refused for a seat.
+  `setUnitLabel` refused for a seat and for a used label.
+- **The copy's boundary:** a kit hook throwing during a service move: the
+  move refused, the object frozen in both documents, the diagnostic logged.
+- **Host words:** a word in an unknown namespace refused by the
+  constructor.
 - **Words:** a kit's word in Turkish, the English fallback, a host's word
   before the kit's, a kind with no word, `unitKindWord` in conformance.
 - **Ported, assertions unchanged (A12):** `jet_cad_floor_plan`'s service,
@@ -841,3 +877,14 @@ standing at the identity alone does not count.
     rules; `nextUnitNumber`; `select` in design; the kind-word lookup; host
     words validated and merged; the `assigned` doc; `unitColourOpacity` for
     every exporter; 2a P7's amendment; `editorSelectedUnits`.
+- **Revision 3:** the re-review of revision 2.
+  - **N1:** one `isLockedUnit` predicate, covering a placed unit of a
+    missing kit's symbol. **N2:** the copy reads the design's lock and
+    frozen sets. **N3:** a hook failure in the copy refuses the edit and
+    freezes the object in both documents.
+  - **N4:** the engine's exact transform comparison. **N5:** `kind` and
+    `payload` on `GeneratedEntity`; `regions_test` gains a cast.
+    **N6:** `nextUnitNumber`'s fallback; a used label refused. **N7:**
+    invalid record groups dropped. **N8:** restore replaces design-set
+    groups, said for the guide. **N9:** `symbolsReady`'s type, `top`'s
+    rule. **N10:** `validateHostWords`.
