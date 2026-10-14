@@ -27,6 +27,7 @@ import '../export/page_flows.dart';
 import '../export/page_printer.dart';
 import '../export/registries.dart';
 import '../service/service_session.dart';
+import '../service/service_state.dart';
 import '../service/unit_picker.dart';
 import '../shortcuts/tool_letters.dart';
 import '../symbols/plan_symbol.dart';
@@ -58,6 +59,21 @@ const int kPlanThumbnailCapacity = 128;
 /// A bump-only notifier: each [bump] is one request.
 final class _Requests extends ChangeNotifier {
   void bump() => notifyListeners();
+}
+
+/// The unit focus: each [replace] notifies, an equal set or a second null
+/// included.
+final class _Focus extends ChangeNotifier
+    implements ValueListenable<Set<String>?> {
+  Set<String>? _value;
+
+  @override
+  Set<String>? get value => _value;
+
+  void replace(Set<String>? next) {
+    _value = next;
+    notifyListeners();
+  }
 }
 
 /// What a requested fit frames: a centring or some units.
@@ -784,10 +800,6 @@ class PlanController extends ChangeNotifier {
     }
   }
 
-  /// [labels], each label of a group replaced by its members in service
-  /// (Task 12). The labels as given in design.
-  Set<String> _expandLabels(Set<String> labels) => labels;
-
   /// The active document's unit index (`@internal`): the panels, the
   /// inspector and the tests read it.
   @internal
@@ -943,7 +955,8 @@ class PlanController extends ChangeNotifier {
   /// hold -- visible, not locked -- replacing the selection (today's
   /// `select`, :1834-1870). A label two units share selects both; an
   /// unknown one is ignored. In design, placed units only (the design's
-  /// selection holds root objects).
+  /// selection holds root objects). In service a label in a group stands
+  /// for the group's selectable members (the same filter).
   void select(Set<String> labels) {
     settlePendingInput();
     _select(labels);
@@ -993,6 +1006,165 @@ class PlanController extends ChangeNotifier {
     final editor = _inDesign ? _selectedUnits.value : const <String>{};
     if (!setEquals(editor, _editorSelected.value)) {
       _editorSelected.value = editor;
+    }
+    _refreshSelectedGroup();
+  }
+
+  // ---------------------------------------------------------------------
+  // Service state (spec 2b S3 "Service state"), by label. Kept for the
+  // controller's life: across mode switches, resetService, restoreService,
+  // load and newPlan. Not document state: no command, undo step, dirty or
+  // revision; never saved, exported or printed.
+
+  final ValueNotifier<Map<String, UnitStatus>> _statuses =
+      ValueNotifier(const <String, UnitStatus>{});
+  final ValueNotifier<Map<String, UnitGroup>> _groups =
+      ValueNotifier(const <String, UnitGroup>{});
+  final ValueNotifier<Map<String, UnitStatus>> _groupStatuses =
+      ValueNotifier(const <String, UnitStatus>{});
+  final ValueNotifier<String?> _selectedGroup = ValueNotifier(null);
+  final ValueNotifier<Set<String>?> _mergeCandidate = ValueNotifier(null);
+  final _Focus _focus = _Focus();
+
+  /// The units' statuses by label, as [setUnitStatus] last set them; drawn
+  /// in service only, on every live, visible unit carrying the label.
+  ValueListenable<Map<String, UnitStatus>> get unitStatuses => _statuses;
+
+  /// Replaces every status at once: labels trimmed.
+  void setUnitStatus(Map<String, UnitStatus> statuses) {
+    _statuses.value = Map.unmodifiable(
+        {for (final e in statuses.entries) e.key.trim(): e.value});
+  }
+
+  /// The unit groups by trimmed id, as [setUnitGroups] last set them; they
+  /// act in service only.
+  ValueListenable<Map<String, UnitGroup>> get unitGroups => _groups;
+
+  /// Replaces every group at once: ids trimmed. Throws an [ArgumentError]
+  /// for a blank id, two ids the same after trimming, a group with no
+  /// member after trimming, or a label in two groups; then nothing is
+  /// assigned and no listener is notified. A member label with no live
+  /// unit is kept; a shared label is allowed; a group may mix kinds.
+  void setUnitGroups(Map<String, UnitGroup> groups) {
+    final valid = validateUnitGroups(groups);
+    _groups.value = valid;
+    _refreshSelectedGroup();
+  }
+
+  /// The groups' statuses by trimmed id, as [setGroupStatus] last set them.
+  ValueListenable<Map<String, UnitStatus>> get groupStatuses => _groupStatuses;
+
+  /// Replaces every group status at once: ids trimmed. A group's status
+  /// fills every visible member and overrides each member's own status
+  /// while it is set. A status whose id has no group is kept, draws
+  /// nothing, and applies again when a group with that id comes back.
+  void setGroupStatus(Map<String, UnitStatus> statuses) {
+    _groupStatuses.value = Map.unmodifiable(
+        {for (final e in statuses.entries) e.key.trim(): e.value});
+  }
+
+  /// The labels in focus, as [setUnitFocus] last set them: null for none.
+  /// In service every unit outside a focus lies under a veil.
+  ValueListenable<Set<String>?> get unitFocus => _focus;
+
+  /// Replaces the focus: null for none, else [labels] trimmed, blanks
+  /// dropped, copied into an unmodifiable set, so `{}` and `{''}` are a
+  /// focus with no unit. Every call notifies [unitFocus], an equal set
+  /// included. Presentation only: no command, undo step, dirty, revision,
+  /// service change or notification of this controller.
+  void setUnitFocus(Set<String>? labels) {
+    _focus.replace(labels == null
+        ? null
+        : Set<String>.unmodifiable({
+            for (final l in labels)
+              if (l.trim() case final t when t.isNotEmpty) t,
+          }));
+  }
+
+  /// The id of the group the selection is exactly (the Split rule): the
+  /// selected labels are that group's selectable members' labels, and no
+  /// unlabelled unit is selected. Null otherwise, and always in design.
+  /// It updates after [selectedUnits] and [unitGroups] have notified.
+  ValueListenable<String?> get selectedGroup => _selectedGroup;
+
+  /// The labels the service bar's Merge would send: in service
+  /// [selectedUnits], unmodifiable, when they span two or more groups or
+  /// ungrouped labels; null otherwise, and always in design.
+  ValueListenable<Set<String>?> get mergeCandidate => _mergeCandidate;
+
+  /// The labels of group [groupId]'s (trimmed) selectable members in the
+  /// active document: its live members on a shown layer that no lock
+  /// covers. A label several units carry is in it once. Empty for an
+  /// unknown id; unmodifiable; valid in both modes, fresh at every call.
+  Set<String> selectableMembers(String groupId) => Set.unmodifiable({
+        for (final u in _groupLookup.selectableMembers(groupId.trim()))
+          u.label!,
+      });
+
+  /// The groups resolved against the active document's units (Tasks
+  /// 14-16).
+  @internal
+  UnitGroupLookup get groupLookup => _groupLookup;
+
+  /// The status [unit] shows (Tasks 15-16): its group's over its own.
+  @internal
+  UnitStatus? statusOf(UnitInfo unit) => statusOfUnit(unit.text,
+      statuses: _statuses.value,
+      groupStatuses: _groupStatuses.value,
+      groupByLabel: _groupLookup.byLabel);
+
+  UnitGroupLookup? _lookup;
+  UnitIndex? _lookupUnits;
+  Map<String, UnitGroup>? _lookupGroups;
+
+  /// The groups resolved against the active units, made again when the
+  /// unit index (a state, layer or lock change) or the groups move.
+  UnitGroupLookup get _groupLookup {
+    final units = _activeUnits.current;
+    final groups = _groups.value;
+    if (_lookup == null ||
+        !identical(_lookupUnits, units) ||
+        !identical(_lookupGroups, groups)) {
+      _lookup = UnitGroupLookup(groups, groupUnitsOf(units));
+      _lookupUnits = units;
+      _lookupGroups = groups;
+    }
+    return _lookup!;
+  }
+
+  /// [labels], each label of a group replaced by all its members: in
+  /// service only, where groups act. (Task 9's seam, given its body here.)
+  Set<String> _expandLabels(Set<String> labels) {
+    final groups = _groups.value;
+    if (_service == null || groups.isEmpty) return labels;
+    final lookup = _groupLookup;
+    return {
+      for (final l in labels)
+        ...switch (lookup.groupOf(l)) {
+          null => [l],
+          final id => groups[id]!.members,
+        }
+    };
+  }
+
+  /// [selectedGroup] and [mergeCandidate] over the active document.
+  void _refreshSelectedGroup() {
+    final service = _service != null;
+    String? id;
+    if (service && _groups.value.isNotEmpty) {
+      final keys = activeSelection.keys;
+      final unlabelled = _activeUnits.current.units.any((u) =>
+          u.text == null && keys.contains(SelectionKey.root(u.instance)));
+      id = _groupLookup.splitGroup(_selectedUnits.value,
+          unlabelledSelected: unlabelled);
+    }
+    _selectedGroup.value = id;
+    final selected = _selectedUnits.value;
+    final candidate =
+        service && mergeQualifies(selected, _groups.value) ? selected : null;
+    final last = _mergeCandidate.value;
+    if (candidate == null ? last != null : !setEquals(candidate, last)) {
+      _mergeCandidate.value = candidate;
     }
   }
 
@@ -2127,6 +2299,12 @@ class PlanController extends ChangeNotifier {
     _fill.dispose();
     _locked.dispose();
     _mode.dispose();
+    _statuses.dispose();
+    _groups.dispose();
+    _groupStatuses.dispose();
+    _selectedGroup.dispose();
+    _mergeCandidate.dispose();
+    _focus.dispose();
     lockHint.dispose();
     _damaged.dispose();
     _canvasRect.dispose();

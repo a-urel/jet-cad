@@ -5,7 +5,10 @@
 // 3). Every placement is off the origin, turned, most mirrored (CLAUDE.md).
 // The helpers are today's (jet_cad_floor_plan's
 // test/host/controller_test.dart:26-79): `move`, `drawLine`, `parts`.
+import 'dart:ui' show Color;
+
 import 'package:jet_cad_2d/jet_cad_2d.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
@@ -15,7 +18,7 @@ import 'package:vector_math/vector_math_64.dart' show Vector2;
 import 'harness.dart';
 import 'service_fixture.dart' show serviceFixture;
 import 'test_kit.dart';
-import 'unit_fixtures.dart' show kDeg37;
+import 'unit_fixtures.dart' show addLayer, kDeg37;
 
 // One owner per helper (controller ruling R-19): `kDeg37` and `addLayer`
 // are the units' fixture's (Tasks 6 and 8), re-exported for Tasks 11-13.
@@ -130,8 +133,10 @@ Transform2 turned(UnitDef def, double x, double y, double angle,
 /// Today's `planJson` (controller_test.dart:26-43), saved: tables 1
 /// (a quarter turn, mirrored) and 2, a stool 3 (capacity 1, half-turned)
 /// and a planter (a symbol that is no unit). [duplicate] labels the stool
-/// "2"; [secondAt] moves table 2.
-String servicePlanText({bool duplicate = false, Vector2? secondAt}) =>
+/// "2"; [secondAt] moves table 2; [unlabelled] adds a fourth table, with no
+/// label, after the planter (today's C13 placement).
+String servicePlanText(
+        {bool duplicate = false, Vector2? secondAt, bool unlabelled = false}) =>
     planText([testKit()], (d) {
       final table = unitDefinition(d, key: 'test.table.square.four');
       final stool = unitDefinition(d,
@@ -161,6 +166,13 @@ String servicePlanText({bool duplicate = false, Vector2? secondAt}) =>
           label: duplicate ? '2' : '3');
       placeDef(d, planter,
           placementTransform(at: Vector2(4100, -900), basePoint: planter.base));
+      if (unlabelled) {
+        placeDef(
+            d,
+            table,
+            placementTransform(
+                at: Vector2(-4000, -3000), basePoint: table.base));
+      }
     });
 
 /// A saved plan with tables 1 and 2 of the test kit and a table 5 whose
@@ -245,3 +257,78 @@ void drawLine(PlanController c) =>
     seats: [f.seatsA, f.seatsB],
   );
 }
+
+/// The labels given to the tables in handle order: not sorted.
+const List<String> kGroupLabels = ['12', '3', '7', '20', '5', '8', '9'];
+
+/// Today's `groupsPlanJson` (table_groups_controller_test.dart:23-85),
+/// saved: tables labelled [kGroupLabels] in handle order, each off the
+/// origin, turned or mirrored; table 8 on a visible locked layer, table 9
+/// on a hidden one; an unlabelled table last. [duplicate] labels table 5
+/// "3"; [hideNine] false leaves table 9 on layer 0. [eightTwice] labels
+/// table 5 "8", so 8 is carried by table 5's unlocked table and the locked
+/// one; [lockFive] then puts table 5's table on the locked layer instead,
+/// so the locked carrier of 8 comes first in handle order.
+String groupsPlanText(
+        {bool duplicate = false,
+        bool hideNine = true,
+        bool eightTwice = false,
+        bool lockFive = false}) =>
+    planText([testKit()], (d) {
+      final locked = addLayer(d, 'Locked', visible: true, locked: true);
+      final hidden = addLayer(d, 'Hidden', visible: false, locked: false);
+      final table = unitDefinition(d, key: 'test.table.square.four');
+      final placements = [
+        turned(table, -2600, 1400, kDeg37, mirrored: true),
+        turned(table, 2300, 1700, kDeg37 * 2),
+        turned(table, 5100, -900, -kDeg37, mirrored: true),
+        turned(table, -4300, -2600, 0, mirrored: true),
+        turned(table, 800, -3300, kDeg37),
+        turned(table, 7400, 2200, kDeg37 * 3),
+        turned(table, -7100, 3900, -kDeg37 * 2, mirrored: true),
+      ];
+      final units = <Handle>[];
+      for (var i = 0; i < placements.length; i++) {
+        final label = switch (kGroupLabels[i]) {
+          '5' when duplicate => '3',
+          '5' when eightTwice => '8',
+          final l => l,
+        };
+        units.add(placeDef(d, table, placements[i], label: label));
+      }
+      placeDef(
+          d,
+          table,
+          placementTransform(
+              at: Vector2(3600, 5200), basePoint: table.base, quarterTurns: 3));
+      d.commands
+          .execute(SetInstanceLayerCommand(units[lockFive ? 4 : 5], locked));
+      if (hideNine) {
+        d.commands.execute(SetInstanceLayerCommand(units[6], hidden));
+      }
+    });
+
+/// The selection keys of the units labelled [labels] in the active
+/// document (today's `keysOf`).
+Set<SelectionKey> keysOf(PlanController c, Set<String> labels) => {
+      for (final l in labels)
+        for (final n in unitNodes(c.activeDocument, l))
+          SelectionKey.root(n.handle),
+    };
+
+/// The key of the unlabelled unit of the active document.
+SelectionKey unlabelledKey(PlanController c) => SelectionKey.root(
+    c.unitIndex.units.firstWhere((u) => u.text == null).instance);
+
+/// One design edit: [row]'s seat count set to [count] (Task 5's row).
+void setRowCount(PlanController c, Handle row, int count) {
+  final r = c.document.components.get<RowComponent>(row)!;
+  if (!c.execute(
+      SetComponentCommand<RowComponent>(row, r.copyWith(count: count)))) {
+    throw StateError('the row edit was refused');
+  }
+}
+
+/// Today's `bill` (table_groups_controller_test.dart:109-110).
+final UnitStatus bill =
+    UnitStatus(color: const Color(0x80E53935), caption: 'Bill');

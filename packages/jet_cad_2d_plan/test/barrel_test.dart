@@ -67,6 +67,8 @@ void main() {
       'PlanUnitsReplaced', 'Unlabelled', 'UnitLabelProblem', 'UnitLabelWarning',
       // 2b Task 11
       'PlanMode',
+      // 2b Task 12
+      'UnitGroup', 'UnitStatus',
     });
   });
 
