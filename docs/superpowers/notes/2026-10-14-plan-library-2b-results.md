@@ -1,0 +1,846 @@
+# The plan library in service mode (sub-project 2b): results of record
+
+Branch `feat/plan-library-2b`, head at the exit gate: `2ca9c84fd9a0c7092f71005107a5469e9053c765`
+(the commit that adds this note sits on top of it); `42` commits over `main`
+(local `main` at `651e3d09dd803a1e8e4239b9f98ede4c2adb7018`, an ancestor of the head,
+`git merge-base --is-ancestor main HEAD` exit `0`; `origin/main` at `651e3d09`, the same
+commit, and `git ls-remote origin main` printed the same sha).
+Plan: `docs/superpowers/plans/2026-10-14-plan-library-2b.md`. Spec:
+`docs/superpowers/specs/2026-10-14-plan-library-service-mode-design.md` (revision 4, amended
+on the branch by `35d44660`, "a held object stays held", and `dc2a5d70`, groups across reset
+and restore).
+All transcripts below were copied from the terminal on `2026-10-15`, last lines only.
+
+Two kinds of evidence appear below, and each is named as such:
+- **this run**: a command run by Task 17 on the head above, its output quoted;
+- **report**: what a task report in `.superpowers/sdd/2026-10-14-plan-library-2b/`
+  recorded (`task-N-report.md`), not re-run here.
+
+## Gates
+
+### 1. `packages/jet_cad_2d_kit`
+
+`flutter test` (this run, exit `0`):
+
+```
+00:05 +340: All tests passed!
+```
+
+`flutter analyze`: `No issues found! (ran in 3.2s)`. Format:
+`Formatted 74 files (0 changed) in 0.08 seconds.`, exit 0.
+
+### 2. `packages/jet_cad_2d_plan`
+
+`flutter test --enable-vmservice` (this run, exit `0`; CI's `test_flags` for this package):
+
+```
+01:54 +1498: All tests passed!
+```
+
+No `~` (skip) in the run's output; `grep -rn "skip:" test/service/view/service_bar_test.dart`
+printed nothing (exit 1): BT1's Part A skip is gone.
+`flutter analyze`: `No issues found! (ran in 4.0s)`. Format:
+`Formatted 284 files (0 changed) in 0.71 seconds.`, exit 0.
+The invariants on their own (this run): `canvas_paint_allocation_test` (plain `flutter test`):
+`00:01 +3: All tests passed!`; `pick_allocation_test` (`--enable-vmservice`):
+`00:08 +5: All tests passed!`; `band_allocation_test` (`--enable-vmservice`):
+`00:07 +2: All tests passed!`.
+
+### 3. Tools
+
+`cd tool/ci && dart test`: `00:41 +117: All tests passed!`.
+`dart analyze --fatal-infos lib test expect_failures.dart check_guide.dart check_host_lock.dart package_root.dart check_screenshots.dart check_readmes.dart check_kit_deps.dart`:
+`No issues found!`.
+`check_kit_deps`: `kit dependencies: 1 package(s) checked, none names the plan library or another kit` (exit 0).
+`check_guide`: `docs/host-guide.md: all 56 code blocks are in the host probe` (exit 0).
+`check_readmes`: `package READMEs: all 6 code blocks are in the probes` (exit 0).
+`check_screenshots`: exit 0, `screenshots: every rule holds`.
+
+### 4. The three CLAUDE.md gates
+
+`packages/jet_cad_2d` (`dart test`, this run, exit `1`):
+
+```
+00:06 +1337 -2: Some tests failed.
+
+Failing tests:
+  test/testing/generate_document_test.dart: both text fractions default to zero and change nothing
+  test/testing/generate_document_test.dart: the default document is the one Plan 2 measured, byte for byte
+```
+
+Compared with `tool/ci/standing_failures.txt` line by line: exactly its two `packages/jet_cad_2d`
+lines, nothing else.
+`dart analyze`: `No issues found!`; `dart analyze --fatal-infos`: `No issues found!`.
+Format: `Formatted 187 files (0 changed) in 0.42 seconds.`, exit 0.
+`query_allocation_test`: `00:05 +6: All tests passed!`. `test/parametric`:
+`00:00 +184: All tests passed!`. The standing hash tests
+(`dart test test/testing/generate_document_test.dart`, named so by Task 1's and Task 2's
+briefs): `00:00 +16 -2: Some tests failed.`, the two failing names exactly the two standing
+lines above.
+
+`packages/jet_cad_2d_flutter` (`flutter test`, this run, exit `1`):
+
+```
+00:20 +1450 ~1 -5: Some tests failed.
+
+Failing tests:
+  .../packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 1 (RenderBackend.canvas)
+  .../packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 2 (RenderBackend.canvas)
+  .../packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 3 (RenderBackend.canvas)
+  .../packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 4 (RenderBackend.canvas)
+  .../packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 5 (RenderBackend.canvas)
+```
+
+(the absolute worktree prefix shortened to `...`). Compared with `tool/ci/standing_failures.txt`:
+the five failures are five of its seven `packages/jet_cad_2d_flutter` lines; its two
+`text_lod_ladder_golden_test.dart` lines did **not** fail here (they passed). No failure outside
+the file. Task 1's and Task 2's reports recorded the same `+1450 ~1 -5` with the same two lod
+lines passing, before and after E5 (report); the package is untouched by this branch (hand
+check below). The one skip is the rig test (`Skip: run explicitly: flutter test --tags rig
+--run-skipped`). `flutter analyze`: `No issues found! (ran in 4.4s)`. Format:
+`Formatted 234 files (0 changed) in 0.45 seconds.`, exit 0.
+`test/invariants/paint_allocation_test.dart` on its own: `00:00 +3: All tests passed!`.
+
+`packages/jet_cad_2d_gpu`: `00:02 +20: All tests passed!`, `No issues found! (ran in 2.9s)`,
+`Formatted 10 files (0 changed) in 0.01 seconds.` (exit 0).
+
+`packages/jet_cad_floor_plan` (`flutter test --enable-vmservice`, untouched, run once):
+`01:49 +2012: All tests passed!` (exit 0; Task 2's report recorded `+2012` on the same form).
+
+CI's other matrix entries over the engine, once each (this run): `jet_cad_restaurant_symbols`
+`00:00 +97: All tests passed!`; `apps/floor_planner` `00:29 +212: All tests passed!`;
+`apps/restaurant_demo` `00:17 +69: All tests passed!`; `tool/screenshots`
+`00:07 +14: All tests passed!` (each exit 0; Task 2's report recorded the same four counts).
+
+### 5. Publish dry runs
+
+`jet_cad_2d`: exit `0`, `Package has 0 warnings.` `jet_cad_2d_flutter`: exit `0`,
+`Package has 0 warnings.`
+`jet_cad_2d_kit`: exit `0`, `Package has 0 warnings.` `jet_cad_2d_plan`: exit `0`,
+`Package has 0 warnings.`; the file list holds `CHANGELOG.md (2 KB)`, `LICENSE (11 KB)`,
+`README.md (3 KB)`, `example/main.dart (1 KB)`, `lib/fonts/Roboto-Regular.ttf (167 KB)`,
+`lib/jet_cad_2d_plan.dart (3 KB)` and `pubspec.yaml (<1 KB)`, as printed in its tree.
+`jet_cad_floor_plan`: exit `0`, `Package has 0 warnings.`
+`cmp LICENSE packages/<package>/LICENSE`, the five: printed nothing.
+
+### 6. Hand checks
+
+- `git status --short`: empty before the first gate, after the test runs, after the dry runs
+  and after the sample kit's regeneration.
+- `git log --name-only --format= main..HEAD | grep analysis_options`: printed nothing, exit 1.
+- Old packages (`git diff --stat main -- packages/jet_cad_floor_plan packages/jet_cad_restaurant_symbols packages/jet_cad_2d_gpu packages/jet_cad_2d_flutter apps`):
+  printed nothing.
+- Engine commits (`git log --format='%h %s' main..HEAD -- packages/jet_cad_2d`):
+  `bcf4d6b8 feat(engine): E5, the guard for generated instances (2b S1)` (Task 2),
+  `4ef4a8d4 test(engine): E5-move, a matched seat's definition and transform change` (Task 1's
+  fix round), `1012413b feat(engine): E5, a parametric type generates instances (2b S1)`
+  (Task 1). Nothing else.
+- Old-package imports: `grep -rn "import 'package:jet_cad_floor_plan\|import 'package:jet_cad_restaurant_symbols" packages/jet_cad_2d_plan packages/jet_cad_2d_kit`
+  printed nothing; the filtered grep (every non-comment hit of either name in the plan
+  library's `lib`, `test`, `example`, pubspec and the kit's `lib`, pubspec) printed nothing;
+  the unfiltered count is `188`, every one a comment citing a ported source.
+- Contract dependencies (A1): `grep -n "jet_cad_2d_plan\|jet_cad_2d_kit_" packages/jet_cad_2d_kit/pubspec.yaml`
+  printed nothing.
+- Purity: the `grep -rln "package:flutter\|dart:ui"` over the kit's `model`, `authoring`,
+  `authoring.dart`, `unit_label.dart`, `host_words.dart`, `properties.dart` and `colour.dart`
+  printed nothing.
+- `dart:io`: `grep -rn "import 'dart:io'"` over the three libraries printed nothing.
+- Versions: `packages/jet_cad_2d/pubspec.yaml:6:version: 0.7.2`,
+  `packages/jet_cad_2d_flutter/pubspec.yaml:5:version: 0.7.2`,
+  `packages/jet_cad_2d_kit/pubspec.yaml:5:version: 0.1.0`,
+  `packages/jet_cad_2d_plan/pubspec.yaml:5:version: 0.8.0`. Constraints:
+  `git diff main -- packages/*/pubspec.yaml | grep "^[-+][^-+]"` printed exactly one line,
+  `+  vm_service: ^15.2.0`, under `jet_cad_2d_plan`'s `dev_dependencies` (line 38, ruling R-23).
+- CHANGELOGs: `3:## Unreleased` (one line) in the engine's; its Unreleased section holds E5's
+  two bullets ("`ParametricType.instances(view, self)` (default: none) lets a type generate
+  symbol instances …" and "The edit guard covers generated instances. … This includes a
+  `GroupNode`: until now a group added into an object passed."). Diffstat:
+  `packages/jet_cad_2d_kit/CHANGELOG.md | 9 +++++++++` and
+  `packages/jet_cad_2d_plan/CHANGELOG.md | 29 +++++++++++++++++++++++++++++`.
+- Spec amendments: the rooms spec, line 1078: `**Amended by the 2b spec (2026-10-14, [S1](…)):**
+  "an ATTRIB needs a tag nobody generates" no longer holds for generated instances: …`;
+  the 2a spec, line 668: ``| `designChanges` | 2a: `changes` (`PlanChange`), object-level;
+  amended by 2b: its unit-level events are 2b's `unitChanges` |``.
+- Sample kit: `dart run test/fixtures/sample_kit/generate.dart` printed
+  `sample kit: 4 symbols written` (exit 0); `git diff --quiet` on `sample.jetlib` and
+  `sample_snapshot.json`: exit `0`.
+- Draw order and the frame path: the invariants of gates 2 and 4 passed (this run).
+
+## Spec coverage
+
+Every id below was found in the tree by this run's grep over `packages/jet_cad_2d/test`,
+`packages/jet_cad_2d_kit/test`, `packages/jet_cad_2d_plan/test` and `tool/ci/test`, as the first
+token of a test name. No row is `missing`.
+
+| Spec requirement | Task(s) | Test ids |
+|---|---|---|
+| S1 the output: `GeneratedInstance`, `GeneratedAttrib`, their `ArgumentError`s; `instances`' default | 1 | `E5-args`, `E5-default` |
+| S1 the definition: `GeneratedDefinitionError` (probe returns, drift throws) | 1 | `E5-def` |
+| S1 the survey and matching: by position, ATTRIBs by tag, own tag kept, lowest of a duplicated tag, an unchanged row plans nothing; a matched seat's new definition and transform | 1 | `E5-shrink`, `E5-noop`, `E5-tag`, `E5-dup-tag`, `E5-move` |
+| S1 the instance on its object's layer, ATTRIBs on layer 0; draw order | 1 | `E5-layer`, `E5-order` |
+| S1 the guard: two branches; a component write passes and seeds nothing; adds refused | 2 | `E5G-refuse`, `E5G-component`, `E5G-add`, `E5G-undo` |
+| S1 the dissolve gap closes | 2 | `E5G-dissolve` |
+| S1 version: E5 in the engine's CHANGELOG; the rooms spec's amendment | 2, 17 | hand checks above |
+| S1 `GuardedType` wraps `instances` | 1 (R-1), 4 | `PB-guard-1`, `PB-guard-2` |
+| S2 a unit, placed and generated; `nested`; a held object stays held (R-9) | 6 | `UI-generated`, `UI-flip` |
+| S2 locked units: `isLockedUnit`; frozen and missing-kit seats; a missing kit's seat locks its row; a missing definition freezes on load (R-24); a layer locked outside the history | 6, 8, 14 | `UI-missing-kit`, `UI-frozen-no-edit`, `UI-def-kit-missing`, `UI-held-seat-row-locked`, `UI-def-missing`, `DS-layer`, `ST-locked-seat` |
+| S2 in design a generated unit stands for its object (pick, band, plain group) | 8 | `DS-click-seat`, `DS-click-attrib`, `DS-crossing`, `DS-window`, `DS-plain-group`, `DS-locked-object`, `DS-picker-seat` |
+| S2 `UnitIndex`, its cache and rebuild key | 6, 8 | `UI-generated` … `UI-registered`, the ported `TI1`-`TI6`, `TI4b`, `DS-layer` |
+| S2 the label: placed `numbered` and `assigned`; `nextUnitNumber`; the text rule | 6, 7 | `UI-next`, `UL-place-number`, `UL-assigned`, `UL-seat`, `TN1`-`TN8` |
+| S2 the label system and the expander stack; labels upright after a row turns | 7 | `UL-stack`, `UL-turn-row`, the ported `LS1`-`LS7`, `LS6b` |
+| S2 diagnostics; unlabelled, duplicate and bad labels | 6, 12, 14 | `UI-dup`, `UI-unlabelled`, `UI-bad`, `SS-dup-label-status`, `ST-unlabelled` |
+| S2 per-unit data and colour, across regeneration | 6, 9 | `UA-seat-data`, `UA-shrink-data`, the ported `HD1`-`HD12`, `TC1`-`TC9`, `TD1`-`TD6` |
+| S2 uniqueness is the tool's: two rows, two prefixes | 5 | `TK-two-rows`, `TK-row` |
+| S2 the contract gains: `symbolDefinition`, `symbolsState`, `SymbolsState`, `unitLabelAttrib`, `PlanGate.relabel`, the `assigned` doc | 3, 4 | `K2B-ref`, `K2B-attrib`, `K2B-attrib-empty`, `K2B-payload`, `K2B-pure`, `PB-def-twice`, `PB-def-null`, `PB-def-top`, `PB-def-top-poly`, `PB-def-execute` |
+| S3 mode and copy; 2a's members in service; the members that switch | 11 | `SM-members`, `SM-execute-false`, `SM-select`, `SM-undo`, `SM-export`, `MD-C3`, `MD-C4`, `MD-C5`, `MD-C8`, `MD-CD1` |
+| S3 the copy's lock expander and failure boundary (E3 and E4 in the copy); the retry; the design's history untouched | 11 | `SM-copy-boundary`, `SM-copy-lock`, `SM-copy-damage`, `SM-copy-unreadable`, `SM-lifetime`, `SM-tool-reset` |
+| S3 the record: format, strict match, groups applied whole, `ServiceRestore`, errors | 13 | `SR-roundtrip`, `SR-groups-replaced`, `SR-invalid-groups`, `SR-locked-move-dropped`, `SR-old-format-refused`, `SR-codec-shapes`, `LC1`-`LC6` |
+| S3 `serviceEdited`, `serviceChanges`' timing, `resetService` | 13 | `SR-edited-after-enter`, `SR-edited-after-load`, `SR-changes-timing`, `SR-reset` |
+| S3 service state by label; kept across switches, reset, restore, load, newPlan (groups per decision 4, amendment `dc2a5d70`) | 12, 13 | `SS-mixed-group`, `SS-shrink-group`, `SS-locked-not-selected`, `SR-state-kept`, `SR-CF3`, `TG-C11` |
+| S2 a changed label leaves statuses, groups and focus behind | 12, 15 | `SS-relabel`, the ported `SP4` |
+| S3 the unit API and the design writes | 9 | `UA-locked-write`, `UA-label-used`, `UA-label-seat`, `UA-labels-swap`, `UA-units`, `UA-select-design`, `UA-fit-seat` |
+| S3 `unitChanges` for a row edit | 9 | `UA-changes-row`, the ported `DC1`-`DC19` |
+| S4 `PlanServiceView` alone and in `PlanEditor`; its options passed through | 16 | `SV-1`, `SV-2`, `SV-8`, `SV-9`, `SV-10`, `SV-11`, `SV-12` |
+| S4 the service tool, the drag, the picker | 8, 14 | `ST-seat`, `ST-mixed-drag`, `ST-group-seat`, `ST-band-two-rows`, `ST-secondary`, `ST-move-gate`, the ported `ST1`-`ST17`, `RB1` … `RB15b` (the oracle has no RB3, RB4), `TPK1`-`TPK14` |
+| S4 the service bar; Merge and Split under `serviceMerge` | 16 | `SV-4`, the ported `BC1`, `BT1`, `BT2` |
+| S4 unit overlays, seats included; rebuilt at the host's rebuild only | 16 | `SV-6`, `SV-10`, the ported `TO1` … `TO33` |
+| S4 the events | 16 | `SV-7`, the ported `VE1` … `VE18`, `SE1`-`SE16` |
+| S4 the unit inspector and the unit section | 10, 16 | `UW-order`, `UW-relabel-gate`, `UW-locked-none`, `UW-section-assigned`, `UW-runtime-unit`, the ported `TS1`-`TS8`, `T6-d`, `T6-e`, `M-H45` |
+| S4 painting: today's order; the unit colour opacity to every exporter | 15, 16 | `SP-seat-fill`, `SP-group-mixed`, `SP-locked-status`, `SP-dup-label`, `SP-export-seat`, `SP-opacity-arg`, `SP-request`, `SV-5`, the ported `SP1`-`SP12`, `EX1`-`EX5` |
+| S4 theme: the thirteen fields | 15 | `TH1`, `TH4`, `TH19`, `TH20`, `TH21`, the ported painter theme tests (`unit_theme_painter_test.dart`) |
+| S4 permissions: `relabel`, `selectUnitsOnly`, `serviceMove`, `serviceMerge`, `unitsOnly`, `isUnitSymbol`; the design flags never gate service | 3, 8, 14, 16 | `DS-units-only`, `DS-perm`, `DS-prune`, `PM-1`, `PM-5`, `PM-7`, `EC3b`, `ST-move-gate`, `SV-3`, `SV-4` |
+| S4 words; the kind lookup; host words; the `unit:` namespace; `unitKindWord` | 3, 4, 10 | `K2B-host-1`, `K2B-host-2`, `K2B-host-3`, `K2B-validate`, `K2B-conf`, `PB-words-1` … `PB-words-4`, `UW-kind-lookup`, `UW-host-word-first`, `UW-words`, `TK-conformance` |
+| S5 the controller rows (each row 2b owns) | 9, 11-13, 16 | see "S5, row by row" below |
+| S5 the view rows | 14, 16 | see "S5, row by row" below |
+| S5 the capabilities, theme, words and components rows | 3, 6, 8, 10, 15 | see "S5, row by row" below |
+| R-13: the plan kept in place across a mode switch (2a's deferral) | 16 | the ported `V7a` … `V7h`, `R-3`, `K1`, and `chrome_change_test.dart`'s F-2 and F-3 groups (in `editor_modes_test.dart`) |
+| Review Focus 1 (a row shrunk under data, status, group) | 1, 9, 12 | `E5-shrink`, `UA-shrink-data`, `SS-shrink-group` |
+| Review Focus 2 (record saved, design edited, restored) | 13 | `SR-design-edited` |
+| Review Focus 3 (two rows placed) | 5 | `TK-two-rows` |
+| Review Focus 4 (rows of a missing kit) | 6, 14 | `UI-missing-kit`, `ST-locked-seat` |
+| Review Focus 5 (500 seats in 25 rows) | 14 | the ported `PA1`-`PA3` and `RB16`, and the new `PA4`, `PA5`, `RB16-hall` (in `pick_allocation_test.dart`, `band_allocation_test.dart`) |
+| Invariants: `canvas_paint_allocation_test` with the service scene; `query_allocation_test` unchanged | 15 | `CV-alloc`, `CV-alloc-colour`, `CV-alloc-service`; gate 4's `query_allocation_test` run |
+
+### S5, row by row
+
+Mapped by this task from the test names (the task reports name the tests, not the rows); each
+id was found by the grep above.
+
+The controller: `mode`/`setMode`: `MD-C3`, `SM-members`. `ServiceSession`: `SM-copy-lock`,
+`SM-copy-boundary`. `serviceEdited` (**difference**): `SR-edited-after-enter`, `TG-C10`.
+`serviceChanges` (**difference**): `SR-changes-timing`, `SR-C20`. `serviceJson`: `SR-roundtrip`,
+`LC1`. `restoreService`: `SR-groups-replaced`, `SR-C16`. The restore's focus, selection,
+revision and `FormatException`: `SR-CF3`, `SR-C14`, `LC3`, `LC4`. A `jet_cad.service_layout` v1
+text (**difference**): `SR-old-format-refused`. A group naming no unit (**difference**):
+`SR-invalid-groups`, `SR-design-edited`. `resetService` (**difference**): `SR-reset`.
+`unitStatuses`: `SS-C15`, `SS-dup-label-status`. `unitGroups`: `TG-C1`. `groupStatuses`:
+`SS-dup-label-status`, `SR-state-kept`. `unitFocus`: `SS-CF1`, `SS-CF2`. Kept across `load` and
+`newPlan`: `SR-state-kept`, `SR-CF3`, `TG-C11`. `selectedGroup`, `mergeCandidate`,
+`selectableMembers`: `TG-C9`, `TG-C14`, `M-H44`. `selectedUnits`, `editorSelectedUnits`:
+`MD-C5`, `UA-select-design`. `select(labels)`: `TG-C5`, `SS-locked-not-selected`. `unitAt`:
+`TA1`, `TA3`. `units`: `UA-units`. `unitDetails`: `TD0`-`TD13` (`unit_detail_test.dart`).
+Unlabelled, duplicate and bad labels: `UI-dup`, `UI-unlabelled`, `UI-bad`, `ST-unlabelled`.
+A locked unit tapped and grouped: `ST-locked-seat`, `SS-locked-not-selected`. `labelWarnings`:
+`VW4`. `UnitLabelProblem`: `VW2`, `TN7`. `setUnitData(s)`: `HD1`, `UA-seat-data`.
+`setUnitColour(s)`: `TC2`. `setUnitLabel(s)`: `UA-label-used`, `UA-labels-swap`. Data and colour
+under a locked object (**difference**): `UA-locked-write`. `unitChanges`: `DC1`,
+`UA-changes-row`. `fitToUnits`: `UA-fit-seat`, `TF1`-`TF4` (`unit_fit_test.dart`). `revision`:
+`SR-C14`, `SS-C15`. `cameraValue`, `worldToGlobal`/`globalToWorld`: `CM1`-`CM3`. `canvasRect`:
+2a's. `export`/`print(unitColourOpacity:)`: `SP-opacity-arg`, `SP-request`. `undo`/`redo` on the
+active document: `SM-undo`. `selectTool` true with no view (**difference**, decision 9): no 2b
+test; 2a retired RV6's second half by ruling (`editor_options_test.dart` header).
+
+The view: the unit callbacks: `VE1` … `VE18`, `SV-7`, `SV-9`. Group callbacks: `TG-G1` …
+`TG-G14`, `TG-CX1`, `TG-CX2`. `onUnitsMoved`, `onLayoutChanged`, `onFloorTap`: `SE1` … `SE16`,
+`VE15`. Service governed by the view's options plus `serviceMove`/`serviceMerge`: `SV-3`,
+`SV-4`. `serviceMoves` → `serviceMove`: `ST-move-gate`, `SO1` … `SO6`. `longPress`, `floorDrag`,
+`userCamera`: `SV-8`, `SV-9`, `RBV1` … `RBV8`. Overlays: `TO1` … `TO33`, `SV-6`. The service bar:
+`BC1`, `BT1`, `BT2`. Paint order: `SP1`, `TG-L1` … `TG-L11`, `FP1` … `FP7`.
+`unitInspectorBuilder`: `M-H45`, `T6-d`, `T6-e`. `shortcuts`, `autofocus`: `M-H41b`, `T6-g`,
+`SV-12`. The web's context menu: unchanged, no 2b test.
+
+Capabilities, theme, words, components: `unitsOnly` (**difference**: the profile alone no longer
+hides the panels): `PM-1`, `CP9`; no test reads the panels under it. `isUnitSymbol`
+(**difference**, a widening): `DS-perm`. `selectUnitsOnly`, `relabel`: `DS-units-only`,
+`UW-relabel-gate`. `PlanTheme`'s fields: `TH1`, `TH21`. The words: `UW-words`, `VW2`, `VW3`.
+`jetcad.unit_data`, `jetcad.unit_colour`, the `UNIT` label (**difference**, no compatibility):
+`TL5`, `TD6`, `K2B-attrib`, `UI-registered`. `nextUnitNumber`, `UnitLabelSystem`,
+`rotateUnitCommand`: `UI-next`, `LS1`, `TS9`. `unit.*` diagnostics: `TD6`, `UI-dup`.
+
+## Ported tests (A12)
+
+From the task reports. The counts are the reports' own (the tests they name); where a report
+gives none, the row says so. Each destination below carries a comment citing its source
+(checked by this run's grep of `jet_cad_floor_plan('s)?[ /]test/…` over
+`packages/jet_cad_2d_plan/test`, and of the kit's `unit_label_test.dart`).
+
+| Source (`jet_cad_floor_plan/test/…`) | Destination | Tests | Assertions |
+|---|---|---|---|
+| `tables/table_label_test.dart` (TL1, TL2, TL4) | kit `test/kit/unit_label_test.dart` | not counted in the report | unchanged (Task 3) |
+| `tables/table_index_test.dart` | `test/units/unit_index_test.dart` | 7 (TI1-TI6, TI4b) | unchanged; finding P-1: TI1's key list reads the fixture's `fx.*` keys (ruling R-10/R-19, fixture data) (Task 6) |
+| `tables/table_numbers_test.dart` | `test/units/unit_numbers_test.dart` | 8 (TN1-TN8) | unchanged; TN7's escape restored in fix round 1 (Task 6) |
+| `tables/table_data_test.dart` (TD1-TD6), `host/table_color_test.dart` (TC1) | `test/units/unit_components_test.dart` | 7 | unchanged but TD6's code `unit.invalid_data` (S5 rename); TD1's NBSP escape restored in fix round 1 (Task 6) |
+| `tables/table_label_test.dart` (TL5-TL7) | `test/units/unit_label_test.dart` | 3 | TL5's tag `'UNIT'` (ruling: S2 renames the tag) (Task 6) |
+| `tables/table_label_system_test.dart` | `test/units/unit_label_system_test.dart` | 10 by the ids the report lists (LS1-LS7, LS6b, TL3, TD10) | unchanged; fixture `plan(catalog: boxKit catalog)` (ruling, fixture only) (Task 7) |
+| `tables/table_placement_test.dart` | `test/units/unit_placement_test.dart` | 7 (TP1-TP7) | unchanged; TP7's subject the unit kit's square table (ruling P-2) (Task 7) |
+| `tables/table_data_test.dart` (TD7-TD9) | `test/units/unit_data_delete_test.dart` | 3 | unchanged (Task 7) |
+| `tables/table_section_test.dart` (TS9, TS10) | `test/units/unit_rotate_test.dart` | 2 | unchanged (Task 7) |
+| `service/table_picker_test.dart` | `test/service/unit_picker_test.dart` | 15 (TPK1-TPK14, TPK7b) | unchanged (Task 8) |
+| `host/editor_select_test.dart` | `test/editor/units_only_select_test.dart` | 11 cases (Task 8), 13 with T5-c, T5-d (Task 9) | unchanged; 2a's PM-3 fixture value changed (ruling, a 2a fixture) (Tasks 8, 9) |
+| `host/table_detail_test.dart` | `test/controller/unit_detail_test.dart` | 16 (Task 9); TD8's tail and TA3 (Task 11) | unchanged; TD8's `setMode` tail cut in Task 9 and restored in Task 11 (ruling) |
+| `host/table_data_test.dart` | `test/controller/unit_data_test.dart` | 11 (Task 9); HD4 and HD6's service block (Task 11) | codes `unit.invalid_data` (ruling, S5 renames); undo label "Unit data" (R-13); HD6's block restored in Task 11 |
+| `host/table_color_test.dart` | `test/controller/unit_colour_test.dart` | 7 (Task 9); TC6 and TC7's service block (Task 11) | `unit.invalid_colour`, `UnitProblem.invalidColour` (ruling); TC9's `toString` checks read `colour` (ruling); "Unit colour" (R-13) |
+| `host/design_changes_test.dart` | `test/controller/unit_changes_test.dart` | 15 (Task 9); DC10, DC16 (Task 11); DC15 (Task 13); DC7 (Task 14) | unchanged but names; DC8/9/11/12/13/17 ported a second time for `unitChanges` (R-13); DC13's `toString` gains the kind token (R-13) |
+| `host/table_fit_test.dart` | `test/units/unit_fit_test.dart` | 4 | unchanged (Task 9) |
+| `host/non_finite_table_test.dart` | `test/controller/non_finite_unit_test.dart` | 2 | unchanged (Task 9) |
+| `host/camera_test.dart` (the table half) | `test/controller/unit_camera_test.dart` | 5 | unchanged; run in design (today's default was the selection mode) (Task 9) |
+| `l10n/value_words_test.dart` (VW2-VW4) | `test/l10n/value_words_test.dart` | 6 in the file (Task 9) | unchanged (Tasks 9, 10) |
+| `tables/table_section_test.dart` (TS1-TS8) | `test/panels/unit_section_test.dart` | not counted in the report | unchanged (Task 10) |
+| `symbols/symbol_section_test.dart` (SW1, SW4 table halves; SW6, SW9) | `test/panels/symbol_section_test.dart` (2a's) | not counted in the report | unchanged; SW9's premise holds by porting today's `_turnableAt` (ruling) (Task 10 and its fix round) |
+| `colors/color_picker_test.dart` (CP7-CP12) | `test/panels/colour_row_test.dart` (2a's) | not counted in the report | unchanged; CP11 uses `disc.draw` (ruling, fixture) (Task 10) |
+| `hover_removal_test.dart` (HR2), `l10n/stale_error_test.dart` (SE1) | `test/panels/hover_removal_test.dart`, `test/l10n/stale_error_test.dart` | not counted in the report | unchanged (Task 10) |
+| `host/inspector_test.dart` | `test/editor/unit_inspector_test.dart` | 6 in the file (Task 16b) | unchanged; the mode half added by Task 16b |
+| `host/keyboard_focus_test.dart` (T6-c, RP1's tablesOnly variant, RP12) | `test/shortcuts/plan_shortcuts_test.dart` (2a's) | not counted in the report | unchanged; `tablesOnly` → `unitsOnly` (Task 10 fix round) |
+| `host/editor_panels_test.dart` (readOnly V-5, the table part) | `test/editor/editor_options_test.dart` (2a's) | 3 | unchanged; the wall, room and dimension parts are sub-project 3's (Task 10 fix round) |
+| `host/controller_test.dart` (C3, C4, C5, C8, CD1) | `test/controller/mode_test.dart` | 5 | unchanged (Task 11) |
+| `service/table_groups_test.dart` | `test/service/service_state_test.dart` | 15 (TG-U1-TG-U15), 64 `expect(` in both | unchanged (Task 12) |
+| `host/table_groups_controller_test.dart` | `test/controller/unit_groups_controller_test.dart` | 14 (TG-C1-C9, C12-C16), 70 `expect(` in both (Task 12); TG-C10, TG-C11 (Task 13) | TG-C10's last line `isTrue` (R13-c); TG-C11's `resetLayout` step retired (R13-d) |
+| `host/controller_test.dart` (C15, CF1, CF2, CF5) | `test/controller/service_state_controller_test.dart` | 4 | unchanged (Task 12) |
+| `host/service_layout_test.dart` | `test/service/service_record_test.dart` | 12 (LC1-LC6, LC5's six cases, SR-codec-shapes) | the format and keys (R13-a) (Task 13) |
+| `host/controller_test.dart` (C2, C10, C14, C16-C20, CF3, CF4) | `test/controller/service_record_controller_test.dart` | 10 ported (of 21 in the file) | R13-a, R13-b; SR-C16's cast and SR-old-format-refused's typed literals, type-only (ruling) (Task 13) |
+| `new_plan_separator_test.dart` (NS1's tail, NS5) | `test/controller/locale_separator_test.dart` (2a's) | 2 | unchanged; NS5's helper reads `save()` back (Task 13) |
+| `service/table_select_tool_test.dart` | `test/service/service_tool_test.dart` | 17 (ST1-ST17) | unchanged (Task 14) |
+| `service/table_band_test.dart` | `test/service/service_band_test.dart` | 17 (RB1-RB15b) | unchanged (Task 14) |
+| `service/service_events_test.dart` | `test/service/service_events_test.dart` | 16 (SE1-SE16) | unchanged (Task 14) |
+| `invariants/pick_allocation_test.dart` | `test/invariants/pick_allocation_test.dart` | 3 (PA1-PA3; PA4, PA5 new) | unchanged; the oracle's watch kept (ruling: PA4/PA5's Transform2 watch is 2b's own) (Task 14) |
+| `invariants/band_allocation_test.dart` | `test/invariants/band_allocation_test.dart` | 1 (RB16; RB16-hall new) | unchanged (Task 14) |
+| `invariants/vm_allocation_meter.dart` | `test/invariants/vm_allocation_meter.dart` | support | identical but its header line (Task 14) |
+| `service/table_status_painter_test.dart` | `test/service/paint/unit_status_painter_test.dart` | 12 (SP1-SP12) | unchanged (Task 15) |
+| `service/table_group_painter_test.dart` | `test/service/paint/unit_group_painter_test.dart` | 15 | unchanged (Task 15) |
+| `service/table_focus_painter_test.dart` | `test/service/paint/unit_focus_painter_test.dart` | 8 | unchanged (Task 15) |
+| `service/table_theme_painter_test.dart` | `test/service/paint/unit_theme_painter_test.dart` | 25 | unchanged (Task 15) |
+| `service/table_fill_test.dart` | `test/service/paint/unit_fill_test.dart` | 11 | R-16: TF1's and TF7's room and tint lines to sub-project 3; TF3's count ported as `hasLength(5)` (ruling, fix round 1) (Task 15) |
+| `colors/table_color_export_test.dart` | `test/export/unit_colour_export_test.dart` | 8 | R-16: EX2's and EX3's tint lines; the premises' key list without `R` (Task 15) |
+| `host/floor_plan_theme_test.dart` (T1-a, R-3, the 13-field validation, TH4's overshoot) | `test/theme/plan_theme_test.dart` (2a's) | 22 in the file | unchanged; TH19, TH20, TH21 added, TH4 gains the overshoot lines (Task 15) |
+| `host/zone_fixture.dart` | `test/support/unit_zone_fixture.dart` | support | the room dropped (R-16) (Task 15) |
+| `host/bars_test.dart` (the service parts) | `test/service/view/service_bar_test.dart` | 22 and BT1 (Task 16a), 23 (Task 16b) | unchanged but class names in `toString` text (Task 16a) |
+| `host/table_overlay_test.dart` | `test/service/view/unit_overlay_test.dart` | 29 | unchanged; TO13, TO14, TO23 and TO32 in Task 16b (ruling: TO32 needs the design canvas) (Task 16a) |
+| `host/view_events_test.dart` | `test/service/view/view_events_test.dart` | 18 (VE1-VE18) | unchanged; VE18 through `setUnitsData` (Task 16a) |
+| `host/table_groups_toolbar_test.dart` | `test/service/view/unit_groups_toolbar_test.dart` | 7 (TB1-TB7) | unchanged (Task 16a) |
+| `host/view_test.dart` | `test/editor/editor_service_view_test.dart` | 49 runs (48 tests, VF3 twice) | unchanged but R-13 renames (Task 16b) |
+| `host/bars_test.dart` (canvas re-measured, R-3, K1), `host/table_overlay_test.dart` (TO13, TO14, TO23, TO32), `host/chrome_change_test.dart` (F-2, F-3) | `test/editor/editor_modes_test.dart` | 32 (F-2: 6, F-3: 10) | unchanged; F-2 and F-3 ported by ruling (Task 16b) |
+| `host/keyboard_focus_test.dart`, `host/host_text_keys_test.dart` (the service cases) | `test/service/view/service_keys_test.dart` | 10 | DS4's last two lines not ported (ruling, premise impossible under 2a P2); `exportPlan(png96)` as `exportAs(c, png96)` (Task 16b) |
+| `service/service_options_test.dart` | `test/service/view/service_options_test.dart` | 6 (SO1-SO6) | unchanged; `serviceMoves` → `permissions.serviceMove` (Task 16b) |
+| `host/band_view_test.dart` | `test/service/view/band_view_test.dart` | 8 (RBV1-RBV8) | unchanged (Task 16b) |
+| `host/table_groups_gesture_test.dart` | `test/service/view/unit_groups_gesture_test.dart` | 14 | unchanged (Task 16b) |
+| `host/table_groups_context_test.dart` | `test/service/view/unit_groups_context_test.dart` | 2 | unchanged (Task 16b) |
+| `host/theme_service_test.dart` | `test/service/view/theme_service_test.dart` | 13 tests, 14 runs | unchanged; invariant 4 keeps the dialog flow (Task 16b) |
+| `host/status_caption_test.dart` | `test/service/view/status_caption_test.dart` | 4 | unchanged (Task 16b) |
+| `host/table_groups_look_test.dart` | `test/service/view/unit_groups_look_test.dart` | 8 | unchanged (Task 16b) |
+| `service/table_fill_test.dart` (TF6, TF7b) | `test/service/view/unit_fill_view_test.dart` | 2 | unchanged (Task 16b) |
+| `host/floor_plan_theme_test.dart` (the selection-mode resolution, G-5, R-1, R-2) | `test/theme/theme_service_mode_test.dart` | 7 | unchanged (Task 16b) |
+| `host/barrel_test.dart` (B3, B5, B6's unit half, B-R10's label half) | `test/barrel_test.dart` (2a's) | not counted in the report | unchanged (Task 16b) |
+| the 2a carry items (SW2's service half, LK1's service step, dark_canvas and theme_canvas in service, PF2's half, PF17, PF23's S-22) | `test/editor/editor_words_test.dart`, `test/canvas/dark_canvas_test.dart`, `test/canvas/theme_canvas_test.dart`, `test/export/page_flows_test.dart` (2a's) | not counted in the report | unchanged; theme_canvas's mode premise restored in fix round 1 (Task 16b) |
+
+Source files of the spec's ported families (`ls packages/jet_cad_floor_plan/test/host
+test/service test/tables test/colors test/invariants`) left without a 2b destination, each with
+its ruling:
+- `host/against_wall_rotate_test.dart`: not ported, sub-project 3 (walls); the plan's Task 7
+  Step 8 says so.
+- `host/view_replace_test.dart` (VR1-VR3): not ported, ruling R-11a (sessions own the systems).
+- `host/seams_test.dart` (SM1-SM3): `PlannerShell`'s design seams, no service member; the plan's
+  Task 11 leaves it to the ledger as 2a's.
+- `host/chrome_change_test.dart` F-1: design-only; unported, reported to the human as a 2a port
+  gap (ruling, Task 16b).
+- `host/editor_capabilities_test.dart`, `host/editor_tools_test.dart`,
+  `host/editor_tools_review_test.dart`, `host/editor_fixture.dart`, `host/embedding_fixture.dart`,
+  `host/new_plan_separator_test.dart`, `host/page_flows_test.dart`, `host/theme_canvas_test.dart`,
+  `host/host_text_keys_test.dart`, `invariants/theme_colours_test.dart`: 2a's ports (2a results
+  note; their headers in `permissions_test.dart`, `editor_options_test.dart`, `editor_host.dart`,
+  `unit_editor_fixture.dart`, `locale_separator_test.dart`, `page_flows_test.dart`,
+  `theme_canvas_test.dart`, `host_text_keys_test.dart`, `theme_colours_test.dart`), with 2b's
+  halves listed above.
+- **Finding (this run): `host/view_palette_test.dart`** has neither a destination nor a ruling.
+  It holds service-mode tests (`M-DT-11 (${viewMode.name} mode)` two views side by side, and
+  three `ServiceView` tests including `M-DT-10, ServiceView: no page …`). No 2a or 2b plan,
+  report, ledger line or port comment names it (`grep -rn view_palette` over
+  `docs/superpowers/plans/2026-10-14-*`, the 2a results note, the 2a ledger and
+  `packages/jet_cad_2d_plan/test` finds nothing). Open, for the coordinator.
+
+## Mutations of Tasks 1-16
+
+As the task reports record, each ran on a committed file and was reverted with
+`git checkout --`, then `git diff --quiet` (exit 0, report). Where a report records the id and
+the red test but not the edit, the edit is the plan's mutation of that id (the task's brief);
+the row says "brief".
+
+### Task 1 (engine, `regeneration.dart` and `parametric_system.dart`)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-E5-args-tag, M-E5-args-dup, M-E5-args-copy | `parametric_system.dart` | brief | `E5-args` |
+| M-E5-default | `parametric_system.dart` | brief | `E5-default` (`UnimplementedError: instances`) |
+| M-E5-call, M-E5-match, M-E5-surplus-leaves, M-E5-label-shape | `regeneration.dart` | brief | `E5-shrink` |
+| M-E5-eq-def, -eq-transform, -eq-layer, -eq-payload, -eq-text | `regeneration.dart` | brief | `E5-noop` |
+| M-E5-tag-own, M-E5-tag-missing, M-E5-tag-add, M-E5-owned | `regeneration.dart` | M-E5-tag-add: `if (c == null) continue;` | `E5-tag` (M-E5-tag-add: `Bad state: Pattern matching error`, fix round 1) |
+| M-E5-lowest | `regeneration.dart` | brief | `E5-dup-tag` |
+| M-E5-def | `regeneration.dart` | brief | `E5-def` |
+| M-E5-sort | `regeneration.dart` | brief | `E5-order` |
+| M-E5-layer-add, M-E5-layer-match, M-E5-label-layer | `regeneration.dart` | brief | `E5-layer` |
+| M-E5-def-set, M-E5-transform-set (fix round 1) | `regeneration.dart` | the `SetInstanceDefinitionCommand` / `TransformNodeCommand` add deleted | `E5-move` |
+
+### Task 2 (engine guard, `regeneration.dart`)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-E5G-value | `regeneration.dart` | `: now != seat)` → `: false)` | `E5G-refuse` |
+| M-E5G-gone | `regeneration.dart` | brief | `E5G-refuse` ("removal") |
+| M-E5G-seed | `regeneration.dart` | seed `seat.parent` | `E5G-component` |
+| M-E5G-add-node, M-E5G-add-onto, M-E5G-nested | `regeneration.dart` | brief | `E5G-add` |
+| M-E5G-dissolve, M-E5G-scan | `regeneration.dart` | brief | `E5G-dissolve` |
+| M-E5G-undo | `regeneration.dart` | brief | `E5G-undo` |
+
+### Task 3 (the contract)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-K2B-1 | brief | the payload stamps identity | `K2B-payload`, `K2B-attrib` |
+| M-K2B-2 | `unit_label.dart` (fix round 2) | tag `''`; re-run with `'TABLE'` (fix round 2) | `K2B-attrib` (`Expected: 'UNIT' Actual: 'TABLE'`) |
+| M-K2B-3, M-K2B-4, M-K2B-5 | brief | textAttrs removed; anchor mapped; stamp for another map | `K2B-attrib` |
+| M-K2B-6 | brief | empty check deleted | `TL4`, `K2B-attrib-empty` |
+| M-K2B-stamp, M-K2B-height | brief | `-phi` only; min → max | `TL1`; `TL4`, `K2B-attrib` |
+| M-K2B-7, M-K2B-8, M-K2B-9 | brief | brief | `K2B-host-1`, `K2B-host-2`, `K2B-host-3` |
+| M-K2B-10, M-K2B-11 | brief | brief | `K2B-validate` |
+| M-K2B-12, M-K2B-13, M-K2B-14 | brief | brief | `K2B-conf`; `F0`, `F1` |
+| M-K2B-15 | `unit_label.dart` | a flutter import | `K2B-pure` |
+| M-K2B-16, M-K2B-17, M-K2B-18 | brief | brief | `PM-5`; `PM-1`, `PM-6`; `PM-3`, `PM-7` |
+
+### Task 4 (plan plumbing)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-PB-guard-a, M-PB-guard-b | `kits/guard.dart` | a bare delegate; `_fail('generate' …)` | `PB-guard-1`, `PB-guard-2` |
+| M-PB1, M-PB2, M-PB3 | `controller/services.dart` | M-PB2: a per-kit `_pending` field | `PB-def-twice` (M-PB2 also `PB-def-execute`) |
+| M-PB4, M-PB5 | `plan_controller.dart` | brief | `PB-def-execute` |
+| M-PB6, M-PB7 | `symbols/symbol_box.dart` | brief | `PB-def-top` |
+| M-PB8 | `controller/services.dart` | brief | `PB-def-null` |
+| M-PB-W1, -W2, -W3, -W5 | `plan_controller.dart` | brief | `PB-words-1` … `PB-words-4` |
+| M-PB-W4 | `panels/kit_lookup.dart` | brief | `PB-words-3` |
+| M-PB-W6 | `editor/plan_tool_palette.dart` | brief | `PB-words-4` |
+| M-PB9a, M-PB9b (fix round 1) | `symbols/symbol_box.dart` | the closed-polyline and open-polyline arms | `PB-def-top-poly` |
+| M-PB9c | `symbols/symbol_box.dart` | the empty-leaves guard deleted | **survives**: unreachable (a symbol with no leaf makes the library unreadable, SymbolLibraryError rule 4); left as defensive code (re-reviewer confirmed) |
+
+### Task 5 (the test kit, `test/support/test_kit.dart`)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-TK-row | `test_kit.dart` | `'${row.prefix}$i'` | `TK-row` |
+| M-TK-prefix | `test_kit.dart` | `{}` in `freeRowPrefix` | `TK-two-rows` |
+| M-TK-conf | `test_kit.dart` | `'unit:test/booth': 'Booth',` deleted | `TK-conformance` |
+
+### Task 6 (units core)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-UI-generated | `unit_index.dart` | `final String? typeId = null;` | `UI-generated` |
+| M-UI-held | `unit_index.dart` | `if (typeId == null) {` | `UI-missing-kit`, `UI-flip` |
+| M-UI-object | `unit_index.dart` | `if (false) {` | `UI-flip` |
+| M-UI-locked-key | `unit_index.dart` | `_locked.addListener(_lockedChanged);` deleted | `UI-frozen-no-edit` |
+| M-UI-covers | `unit_locks.dart` | `return false;` | `UI-def-kit-missing` |
+| M-UI-scan | `kits/locks.dart` | the InstanceNode branch of `LockSet.scan` → `false` | `UI-held-seat-row-locked` |
+| M-UI-dup | `unit_index.dart` | `< 2` → `< 3` | `UI-dup` |
+| M-UI-unlabelled | `unit_index.dart` | `null \|\| '' => null` → `null => null` | `UI-unlabelled` |
+| M-UI-bad | `unit_index.dart` | the `unitLabelError` branch deleted | `UI-bad` |
+| M-UI-next-skip, M-UI-next-fallback | `unit_numbers.dart` | `while (false)`; `while (used.contains(candidate))` | `UI-next` |
+| M-UI-registered | `plan_controller.dart` | `registerUnitComponents(r);` deleted | `UI-registered` |
+| M-TN-max | `unit_numbers.dart` | `max++;` | `TN2` |
+| M-TI-label | `unit_index.dart` | the sort dropped | `TI4` |
+| M-UI-def | engine `regeneration.dart` | the definition check → `if (false)` | `UI-def-missing` |
+| M-TD1-nbsp (fix round 1) | `unit_label.dart` | C1 range to `0xA0` | `TD1`, `TN7` |
+| M-UI-heldtype, M-UI-heldtype-b (fix round 1) | `kits/locks.dart`; `unit_locks.dart` | `return kit;`; `null;` | `UI-flip` |
+
+### Task 7 (label system)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-UL-stack | `session.dart` | install and dispose swapped | `UL-stack` |
+| M-UL-number | `symbol_placer.dart` | `instanceToWorld` identity | `UL-place-number`, red only after the bare-plan assertion was added (ruling) |
+| M-UL-tool | `plan_symbol_tool.dart` | `units:` dropped | `UL-place-number` |
+| M-UL-assigned | brief | brief | `UL-assigned` |
+| M-UL-root | brief | brief | `UL-seat` |
+| M-LS-stamp, M-LS-cheap | brief | brief | `LS1`; `LS6` |
+| M-TD10 | brief | `r.inverse.apply` dropped | `TD10` |
+| M-TP-number | brief | brief | `TP2` |
+| M-TS9 | brief | brief | `TS9` |
+| M-UL-turn | `test/support/test_kit.dart` | the row label's `instanceToWorld: toWorld.multiply(seat)` → `seat` | `UL-turn-row` |
+
+### Task 8 (permissions, the design's selection, the picker)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-DS1 | `plan_select_gates.dart` | `pick`: `return key;` | `DS-click-seat`, `DS-locked-object` |
+| M-DS2 | `plan_select_gates.dart` | `SelectionKey.root(_hit.entity)` | `DS-click-seat`, `DS-locked-object`, `DS-plain-group` (not `DS-click-attrib`, a positive control; ruling) |
+| M-DS3 | `plan_select_gates.dart` | `bandAccepts` → `return true;` | `DS-crossing`, `DS-window` |
+| M-DS4, M-DS5 | `plan_select_gates.dart` | the locked term deleted; `return current;` | `DS-locked-object`; `DS-plain-group` |
+| M-DS6 | `session.dart` | `placedOnly: false` | `DS-units-only` |
+| M-DS7, M-DS8 | `plan_select_gates.dart`; `plan_controller.dart` | the selectUnitsOnly band line; the prune block | `DS-units-only`; `DS-prune` |
+| M-DS9 | brief | the instance's transform for its world | `DS-picker-seat` |
+| M-DS10, M-DS11 | `permissions.dart` | `relabel \|\|` deleted; `kind == 'table'` | `DS-perm` |
+| M-DS12, M-DS13 | `unit_index.dart`; `unit_locks.dart` | `&& revision == _revision` deleted; the layer check → `false` | `DS-layer` |
+| M-PM1b, M-PM2b, M-PM7b | `permissions.dart` | brief | `PM-1`, `EC3b`, `PM-7` |
+| M-TP-skip | `unit_picker.dart` | `(skipLocked && c.locked) \|\|` deleted | the hidden and locked layers test, `R-4` |
+
+### Task 9 (the unit API)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-UA0 | `plan_controller.dart` | `generatedBy: null` | `UA-units` |
+| M-UA1 | `plan_controller.dart` | `get<UnitData>(u.definition)` | `UA-shrink-data`, `UA-seat-data` |
+| M-UA1x | engine `regeneration.dart:787` | `existing = const <InstanceNode>[]` | `UA-shrink-data`, `UA-changes-row` |
+| M-UA2 | engine `regeneration.dart:922` | `: now != seat)` → `: true)` | `UA-seat-data`, `UA-shrink-data` |
+| M-UA3 | `plan_controller.dart` | the `locks.covers` line deleted | `UA-locked-write` |
+| M-UA4 | `plan_controller.dart` | the inner `withLabel(next)` loop deleted | `UA-label-used`, `UA-labels-swap` |
+| M-UA5 | `plan_controller.dart` | `u.generated \|\|` dropped | `UA-label-seat` |
+| M-UA6 | `plan_controller.dart` | `if (other.instance != h)` | `UA-labels-swap` |
+| M-UA7 | `plan_controller.dart` | `placedOnly && u.generated` deleted | `UA-select-design` |
+| M-UA8 | `plan_controller.dart` | `_unitsBounds` skips generated | `UA-fit-seat` |
+| M-UA9 | `unit_detail.dart` | `diffUnitDetails` by label | `UA-changes-row` |
+
+### Task 10 (words, the unit section, the inspector)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-UW1, M-UW2 | `unit_words.dart` | the key block deleted; `return unit.kind;` | `UW-kind-lookup` (M-UW1 also `UW-host-word-first`) |
+| M-UW3 | `plan_controller.dart:389` | `kit.names.merge(_hostWords)` | `UW-host-word-first` |
+| M-UW4 | `strings_en.dart` | `unitKind` `_ => kind` | `UW-words` |
+| M-UW5, M-UW6, M-UW7 | the property panel | title always `number`; `_editable` without `relabel`; `_unitTarget` without `isLocked` | `UW-section-assigned`; `UW-relabel-gate`; `UW-locked-none` |
+| M-UW8 | the property panel `_parse` | `return text;` | `TS3` |
+| M-UW9, M-UW10 | the inspector | the shared-label loop deleted; `if (next == _shown) return;` deleted | `M-H45`; `T6-d`, `T6-f` |
+| M-UW11 | `colour_row.dart` | `final u => u.name` | `CP8` |
+| M-UW12 | `unit_writes.dart` | new ATTRIB at `Transform2.identity()` | `TS5` |
+| M-UW13 | the property panel `_turnableAt` | `return true;` after the transform check | `SW9`, `UW-runtime-unit`, `SW4` (fix round) |
+| M-UW14, M-UW15 (fix round 1) | `colour_row.dart` | `&& !c.isLocked(h)` deleted; `index[h] != null` | `CP13`; `CP14` |
+| SW1 (fix round 1) | the property panel | the Symbol and unit sections swapped | `SW1` |
+| RP1, T6-c, RP12 (fix round 1) | `plan_shortcuts.dart`; `plan_symbol_tool.dart` | `if (!widget.shortcuts) return const {};` deleted; `idleKeys = true`; the M guard | `RP1`; `T6-c`; `RP12` |
+| V-5 1-3 (fix round 1) | the property panel; `permissions.dart`; `plan_controller.dart` | `_editable` unit case `true`; readOnly `delete: true`; `_requireDesign` throws on `!relabel` | the three `readOnly (V-5)` tests |
+
+### Task 11 (the service session)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-SM1 | `plan_controller.dart` | `execute`'s service refusal deleted | `SM-execute-false` |
+| M-SM2 | `plan_controller.dart` | `_requireDesign`'s body emptied | `SM-execute-false`, `TC6`, `HD4` |
+| M-SM3 | `plan_controller.dart` | `document => activeDocument` | `SM-members` |
+| M-SM4 | `service_session.dart` | the copy's expander not installed | `SM-copy-lock` |
+| M-SM5, M-SM6 | `plan_controller.dart` | `_lockFromCopy` clears the design's history; `addBroken` deleted (re-run on `_lock`, fix round 1) | `SM-copy-boundary` |
+| M-SM7 | `service_session.dart` | `isFrozen: (_) => false` | `SM-copy-boundary` |
+| M-SM8, M-SM9 | `plan_controller.dart` | `_inDesign => true`; `_select(labels)` deleted | `SM-select` |
+| M-SM10 | `plan_controller.dart` | the dropped copy not disposed | `SM-lifetime` |
+| M-SM11, M-SM12 | `plan_controller.dart` | `undo` and `_refreshFlags` read the design | `SM-undo` |
+| M-SM13 | page flows | `document: () => this.document` | `SM-export` |
+| M-SM14 | `plan_controller.dart` | `deleteSelection`'s service refusal | `SM-execute-false` |
+| M-SM15 | `plan_controller.dart` | `_activeUnits => _session.units` | `TA3`, `TD8`, `MD-CD1` |
+| M-SM16, M-SM17, M-SM18 | `service_session.dart`; `plan_controller.dart` | `DraftPermissions.all`; `_replace`'s rebuild deleted; a registrar without the unit components | `MD-C4`; `MD-C5`, `SM-lifetime`; `HD6`, `TC7` |
+| M-DC10, M-DC16 | `plan_controller.dart` | `&& _inDesign` on the baseline; `if (_inDesign) _reportUnits();` | `DC10`; `DC16` |
+| M-SM19, M-SM20, M-SM21 (fix round 1) | `plan_controller.dart` | `_damageCopy` on the design; undo / redo boundary routed to the design's | `SM-copy-damage` |
+| M-SM22, M-SM23 (fix round 1) | `plan_controller.dart`; `service_session.dart` | the design tool's reset deleted; `keepUnreadableComponents: false` | `SM-tool-reset`; `SM-copy-unreadable` |
+
+### Task 12 (service state)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-SS1 | `plan_controller.dart` | `e.key.trim()` → `e.key` | `SS-C15` |
+| M-SS2 | `plan_controller.dart` | `!identical(_lookupUnits, units) \|\|` deleted | `TG-C12`, `TG-C16`, `SS-shrink-group`, `SS-relabel` |
+| M-SS3, M-SS4 | `service_state.dart` | `label ??= '';`; the `if (id != null)` block deleted | `SS-dup-label-status` |
+| M-SS5 | `service_state.dart` | `locked: false` | `SS-locked-not-selected`, `TG-C7`, `TG-C8`, `TG-C13`, `TG-C14`, `TG-C16` |
+| M-SS6 | `plan_controller.dart` | `if (!u.visible) continue;` | `SS-locked-not-selected`, `TG-C7` |
+| M-SS7, M-SS8 | `service_state.dart` | `groupUnitsOf` skips generated; `hasGeneratedVisibleMember => false` | `SS-mixed-group`, `SS-shrink-group`, `SS-relabel`; `SS-mixed-group` |
+| M-TG1 … M-TG8 | `service_state.dart`; `plan_controller.dart` | as the report lists them | `TG-U5`, `TG-C1`; `TG-C5`; `TG-C9`; `TG-C14`; `TG-U13`, `TG-C8`; `TG-U8`, `TG-U9`; `TG-U14`, `TG-U15`; `TG-U10` |
+| M-SS9, M-SS10, M-SS11 | `plan_controller.dart` | `_Focus.replace` early return; `setUnitFocus` untrimmed; `_focus.dispose()` deleted | `SS-CF1`; `SS-CF1`, `SS-CF2`; `SS-CF5` |
+
+### Task 13 (the service record)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-SR1 | `service_record.dart` | `'label': g.label,` deleted | `SR-roundtrip` |
+| M-SR3, M-SR4 | `plan_controller.dart` | groups merged; `validateUnitGroups` inserted | `SR-groups-replaced`; `SR-invalid-groups` |
+| M-SR5, M-SR7, M-SR8, M-SR10, M-SR11, M-SR12 | `service_record.dart` | as the report lists them | `SR-invalid-groups`; `SR-design-edited` (×2); `SR-locked-move-dropped` (×2); `SR-old-format-refused` |
+| M-SR9 | `plan_controller.dart` | `commands.clearHistory();` deleted | `SR-design-edited`, `SR-C16` |
+| M-SR13, M-SR15, M-SR16, M-SR25 | `plan_controller.dart` | `_groupsAtEnter` / groups lines | `SR-edited-after-enter`; `SR-reset` (×3) |
+| M-SR17, M-SR18 | `plan_controller.dart` | `_serviceChanges.bump()` unconditional; deleted | `SR-changes-timing` |
+| M-SR19 | `service_record.dart` | `?? const <Object?>[]` | `SR-codec-shapes` |
+| M-SR20 | `plan_controller.dart` | `undo`'s `_announceService();` deleted | `SR-C20` |
+| M-SR21, M-SR22, M-SR23 | `plan_controller.dart` | reset clears statuses; restore clears focus; `_replace` clears groups | `SR-state-kept` |
+| M-SR24 | `plan_controller.dart` | `_replace`'s `_groupsAtEnter` deleted (survived before `SR-edited-after-load` was added in `844431ba`) | `SR-edited-after-load` |
+| M-NS5 | `plan_controller.dart` | `reportLocale` bumps `_serviceChanges` | `NS1`, `NS5` |
+| M-DC15 | `plan_controller.dart` | `_unitsNow` reads `_activeUnits` | `DC15` |
+
+### Task 14 (the service tool and the allocation invariants)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-ST-seat | `service_tool.dart` | `_tap`: `SelectionKey.root(hit.owner ?? hit.instance)` | `ST-seat` |
+| M-ST-mixed, M-ST-group | `service_tool.dart` | `if (k.chain.isEmpty)`; `\|\| lookup.hasGeneratedVisibleMember(id)` deleted | `ST-mixed-drag`; `ST-group-seat` (both by the copy's guard) |
+| M-ST-locked | `service_tool.dart` | `_tap`: `if (true) {` | `ST-locked-seat` (after `23206e81`, ruling) |
+| M-ST-unlabelled, M-ST-band, M-ST-secondary | `service_tool.dart` | `hit.text ?? ''`; `generated == false`; `final label = hit.text;` | `ST-unlabelled`; `ST-band-two-rows`; `ST-secondary` |
+| M-ST-gate | `plan_controller.dart` | `moves: () => true` | `ST-move-gate` |
+| M-14l (the plan's edit) | `service_tool.dart` | `_longPress`'s `if (hit.locked) return;` deleted | **survives**: an equivalent mutant (in the oracle too); re-worded by ruling |
+| M-14l (re-worded), M-14l-press | `service_tool.dart` | the drag branch's lock check `false`; both long-press guards | `ST7` |
+| M-RB-lone-locked | `service_tool.dart` | `_bandKeys`: `} else {` | `RB10` |
+| M-H29 | `service_tool.dart` | hover on any move | `SE12` |
+| M-RB19 | `service_tool.dart` | `paintOverlay` allocates a painter | `RB16`, `RB16-hall` |
+| M-PA-hall | the picker's `pick` (first loop) | `final m = c.unit.toWorld.invert();` | `PA4`, `PA5` (after `d50976ed`; survived the plan's watch, ruling) |
+| M-SC20b | `.github/workflows/ci.yml` | the plan library's `test_flags` line deleted | `SC20b` |
+| M-H29 (service moves) | `plan_controller.dart` | the diff fed by the active plan | `DC7` |
+
+### Task 15 (painting, theme, export fills)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-SP-seat | `unit_status_painter.dart` | the instance's own transform | `SP-seat-fill` |
+| M-SP-frame | `unit_group_painter.dart` | `< 2` → `< 4` | `SP-group-mixed` |
+| M-SP-locked, M-SP-dup | `unit_status_painter.dart` | `if (u.locked) continue;`; the first of a label only | `SP-locked-status`; `SP-dup-label` |
+| M-SP-export, M-SP-check | `unit_colour_underlay.dart` | the instance's own transform; the range check deleted | `SP-export-seat`; `SP-opacity-arg` |
+| M-SP-request | `page_flows.dart` | `kUnitColourOpacity` | `SP-request` |
+| M-CV-colour-a, M-CV-colour-b | `plan_canvas.dart`; `unit_status_painter.dart` | a painter per build; `if (true \|\|` | `CV-alloc-colour` |
+| M-CV-service | `unit_group_painter.dart` | `true \|\|` | `CV-alloc-service` |
+| M-H31 | `unit_focus_painter.dart` | `if (true) {` | `FP3` themed |
+| M-14c2-8 | `unit_status_painter.dart` | a `Paint` per fill | `SP1` |
+| M-TH-merge, M-TH-valid, M-TH4b | `plan_theme.dart` | merge ignores the field; validation line deleted; unclamped insets lerp | `TH1`; `TH21`; `TH4` |
+| M-C8 | `builtin_exporters.dart` | the PNG underlay deleted | `EX2` |
+| M-C23 | `plan_editor.dart` | `unitColourOpacity:` not passed | `EX4` |
+| M-TF3-dup, M-SP-lead (fix round 1) | `unit_status_painter.dart` | a second fill per unit; the caption on the last member | `TF3`; `SP-group-mixed` |
+
+### Task 16a (the view)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-SV-1 | `plan_service_view.dart` | both `addListener` lines deleted | `SV-1` |
+| M-SV-2 | `plan_service_view.dart` | `exportName: 'plan'` | `SV-2` |
+| M-SV-3a | `editor_page_flows.dart` | `_exportAllowed() => controller.permissions.export` | `SV-3` (a `StateError` at `exports.single`) |
+| M-SV-3b | `plan_service_view.dart` | Undo chords gated by `permissions.undo` | `SV-3` |
+| M-SV-4, M-SV-5, M-SV-6, M-SV-7 | `plan_service_view.dart` | `merges = true`; the opacity constant; generated skipped; `_s.host = _host;` deleted | `SV-4`; `SV-5`; `SV-6`; `SV-7` |
+| M-SV-B1, M-SV-B2 | `plan_service_bar.dart` | the 8 px gap deleted; the validation returns | `BC1`; `BT2` |
+| M-SV-O1, M-SV-O2 | `unit_overlays.dart` | no `InputClaim`; `_built.clear();` deleted | `TO28`; `TO19` |
+| M-SV-E1 | `plan_service_view.dart` | the document identity check deleted | `VE15` |
+
+### Task 16b (PlanEditor's mode switch)
+
+| ID | File | The change | Red test |
+|---|---|---|---|
+| M-SV-8, M-SV-9, M-SV-10 | `plan_editor.dart` | `_modes` returns the editor; `onUnitHover:` deleted; the view not memoized | `SV-8`; `SV-9`; `SV-10` |
+| M-SV-9b (fix round 1) | `plan_editor.dart` | `onPageFlowError:` deleted | `SV-9` |
+| M-SV-R1, M-SV-R3, M-SV-R4 | `plan_controller.dart` | `_reframe`'s panBy; `canvasAssumed` returns; `canvasMeasured`'s panBy | `V7a`; `R-3` "the service bar hidden from the start"; `V7b` |
+| M-SV-R2 | `plan_controller.dart` | `chromeMoved` returns at once | `T2-f` **stays green**; F-3 "design: the left column hidden" red (ruling: F-2, F-3 ported) |
+| M-SV-R5 | brief | `final left = 240.0;` | `R-3` "the editor's rulers and left column gone and back" |
+| M-ED-8b | `example/main.dart`, `README.md` | the button switches to design | `ED-8b` |
+| M-ED-9, M-ED-9b | `lib/jet_cad_2d_plan.dart` | the `PlanServiceView` export removed; `show PlanLongPress` only | `barrel_test.dart` does not compile; `ED-9` |
+| M-SV-3c, M-SV-3a | `editor_page_flows.dart` | `_printAllowed`/`_exportAllowed` read the permissions | `SV-11`; `PF23`'s S-22 block |
+| M-PF2s, M-PF17 | the page flows' `document:`; `guarded` | `document: () => document`; `_settle()` commented out | `PF2` (selection half); `PF17` |
+| M-PS-idle, M-PS-remount | `plan_shortcuts.dart`; `plan_editor.dart` | `initState` skips `_applyIdleKeys()`; `ObjectKey(c.document)` | `SV-12` |
+| M-CV-6c | `plan_canvas.dart` | the swap reset deleted | `CV-6b` |
+| M-SW2s, M-LK1s | the service bar | tooltips `'Undo'`, `'Print…'` | `SW2`; `LK1` |
+| M-DC-1s | `plan_service_view.dart` | `sheetArgb: null` | `dark_canvas` "service mode M-DC-1 …" |
+| M-TC-s1, M-TC-s2 | `plan_service_view.dart` | `planPaperPaletteFor(paper, null)`; `kSelectionStrokePixels` | four `theme_canvas` service tests (after fix round 1); "selectionWidth: 4 (service)" |
+
+## Plan decisions
+
+One line each, in task order, from the plan's "Plan decision(s)" paragraphs (the full text is
+the plan's).
+
+Task 1: a row's plan is entities first, then instances; ATTRIBs are matched by tag, the
+lowest of a tag kept, the rest surplus; a surplus instance goes with every entity it owns,
+fills first; every `InstanceNode` child of an object's group is that object's generated
+instance; the definition check runs over all outputs before any instance command.
+Task 2: "added" is read from the survey (`before.leaves`, the new `nested`); `_Survey`
+gains `nested`; the node branch is one ternary (two mutations); `_run`'s seeds unchanged;
+`_subtreeRemoval`'s order: every fill first, then leaves, child groups, instances.
+Task 3: `unitLabelHeight` reads a box; TL1, TL2, TL4 ported here, TL3, TL5-TL7 later;
+`unit:` words need English only in conformance; `validateHostWords` codes `unknownWordId` /
+`foreignWordId`; `PlanGate.relabel` lands whole in the plan library; `KitServices` compiles
+through two stubs until Task 4.
+Task 4: the pending refs are the controller's; only a ref with an `add` is pending; `top` is
+computed from the library entry; the host's words reach every reader of a kit's words;
+`SymbolsState` is re-exported by the plan barrel.
+Task 5: `testKit()` stays as 2a left it; `test.row` is seats only; the row's geometry is a chord
+walk; the free prefix is tried `A` … `Z`, `AA` …; the row tool takes two presses and calls
+`symbolDefinition` once per placement.
+Task 6: `diagnostics()` returns the engine's `Diagnostic` (R-8); the unit predicate (placed,
+or under a registered or locked object); `locked` is `isLockedUnit`, `visible` the layer;
+`top` and `box` by today's served-top rule; the cache's key (state id, layers' revision,
+`locked`); `nextUnitNumber`'s rule; `diagnostics()` in today's order.
+Task 7: the placer takes the index (`UnitIndex? units`); the placed label's record and payload
+(R-21); the label system stamps placed units only; the stack parametric → labels → lock,
+disposed in reverse.
+Task 8: the picker lives here (today's tablesOnly pick is the table picker); the profiles
+(`readOnly` gains `relabel: false`, `unitsOnly`); `relabel` is an edit, the other three flags
+are not; `toString` names every field differing from `full`; the mapping of a key to its
+object; the band refuses a mapped key (decision 9); `selectUnitsOnly` picks through the
+units-only picker.
+Task 9: `PlanCamera` lives in `controller/`; `unitDetails` cached on the index's identity;
+`locked` in a detail is `UnitInfo.locked`; generated units listed, `select` takes placed only;
+one write path for data, colour and label; `setUnitLabel`'s refusals; undo labels "Unit data",
+"Unit colour"; `unitChanges` is today's `designChanges`; `revision` moved by every change of the
+active document.
+Task 10: the unit words are today's table words; the kind's word through `kitOfKey` and
+`KitWords.maybe('unit:<kit>/<kind>')`; the unit section for one placed unlocked unit; the colour
+row's tables half is the placed units; the inspector is today's `_TableInspector`.
+Task 11: the copy is the design's text under `DraftPermissions.runtime`; the copy's systems
+stack as the design's; the copy's own boundary; a rollback that throws in the copy is the
+copy's alone; an idle placeholder tool until Task 14; `deleteSelection` false in service; the
+design's tool reset on entering service; no camera reframe here; `_unrestricted` takes the
+dispatcher.
+Task 12: a unit's lock in the group rules is `UnitInfo.locked`; a seat is a member like a
+table; the lookup rebuilt on the index's or the groups' identity; a status resolves by label;
+`serviceChanges` on `setUnitGroups` is Task 13's.
+Task 13: the record's shape and key order; what is a `FormatException`; the groups' match in
+record order; the moves' strict match (placed, unlocked, visible); a restore builds the new
+copy first; `_groupsAtEnter`; `serviceChanges`' timing; R13-a … R13-d for the ported tests.
+Task 14: the picker is Task 8's; the session's host (`ServiceHost`); moves are a permission
+(`serviceMove`); a drag moves placed units and their groups, spent on a seat; the band and
+the group lookup read the picker's candidates; the secondary click's rule moves into the
+tool; the view-level tests go to Task 16; the profiler in CI (`--enable-vmservice`).
+Task 15: the view-level theme tests move to Task 16; the room rows go to sub-project 3; a
+unit's world transform is the index's; the export fills come from the live index; the editor's
+opacity through `EditorPageFlows.unitColourOpacity`.
+Task 16: `PlanServiceView` follows the mode; the per-copy canvas is today's `ServiceView`,
+ported; the service tool hears the view through the session; overlays rebuild only at a host's
+rebuild; R-13 ported into the controller and `PlanEditor`; the design permissions never gate
+service; `userCamera` is a service option only; V14, the design halves and 2a's ports not
+ported here.
+Task 17: the note carries only this run's output or a report's; every publishable package is
+dry-run; the STATUS update is this task's, the ledger's archive is not.
+
+## Deliberate host-API differences (for sub-project 4's parity table)
+
+From spec S5's rows marked **difference**, each with the test that pins it:
+- `serviceEdited` counts groups (decision 4): `TG-C10` (R13-c), `SR-edited-after-enter`.
+- `serviceChanges` also fires on `setUnitGroups` in service: `SR-changes-timing`.
+- A `jet_cad.service_layout` v1 text is a `FormatException`: `SR-old-format-refused`.
+- `restoreService` drops a group whose member names no unit of the design: `SR-invalid-groups`,
+  `SR-design-edited`.
+- `resetService` also clears the groups: `SR-reset`, `SR-state-kept`.
+- Data and colour are refused under a locked object: `UA-locked-write`.
+- `selectTool` answers true with no view mounted (decision 9, the human's "true kalsın"): no 2b
+  test; 2a retired RV6's second half (2a's ruling).
+- `unitsOnly` is a permissions profile only; `PlanEditor`'s options hide the panels: `PM-1`
+  (no test reads the panels under the profile).
+- `isUnitSymbol` admits any unit symbol, seats included: `DS-perm`.
+- `jetcad.unit_data`, `jetcad.unit_colour`, the `UNIT` label: saved numbers, data and colours
+  dropped: `TL5`, `TD6`, `K2B-attrib`.
+
+Added by the task reports and the ledger (each a ruling):
+- Undo labels "Unit data", "Unit colour" (R-13): `HD8`, `TC2`.
+- `toString` texts gain the kind token (R-13): `TD10`, `DC13`; `colour:` field (`TC9`).
+- Diagnostic codes `unit.invalid_data`, `unit.invalid_colour` (Task 9 ruling): `HD6`, `HD9`,
+  `TC7`, `TD6`.
+- `lockBroken` moves neither `revision` nor `unitChanges` by itself (Task 11 ruling; documented
+  in its doc comment); no test pins the late report.
+- `deleteSelection()` acts with no editor mounted (2a spec P2; Task 16b ruling, DS4's last two
+  lines not ported).
+- `userCamera` is a service option only; the design canvas has none (Task 16 plan decision).
+- `PlanCanvas` resets the old controller's `snappingAllowed` on a controller swap (Task 16b
+  ruling): `CV-6b`.
+
+## Spec gaps and interface problems found while executing
+
+The plan's `#### Interface problem` sections, each resolved while planning:
+- Task 1: R-1 (`GuardedType.instances` lands in Task 1) and R-4 (CS11's premise
+  `drift(doc) == [hP1]`).
+- Task 2: R-4 (CS11's adds brought in as a loaded file would).
+- Task 4: R-1.
+- Task 6: R-8 (`List<Diagnostic>`), R-9 (spec S2 amended, `35d44660`), R-10 (`unitIndex` here).
+- Task 8: R-12 (`UnitPicker` created in Task 8).
+- Task 14: R-12, R-17 (`ServiceHost`, settable `ServiceSession.host`), R-15 (view-level ports to
+  Task 16), R-23 (`vm_service` dev dependency).
+- Task 15: none of its own (answers Task 16's item 4).
+- Task 16: R-17; `unitDetailInstances`, `groupIdsByLabel` and the painters' constructors in
+  their Produces; R-19 (one owner per support helper).
+
+Found while executing (from the ledger and the reports):
+- **Spec amendment `dc2a5d70`** (Task 13's finding): S3's general sentence kept groups across
+  `resetService` and `restoreService`, contradicting decision 4 and S3's own rules (restore
+  replaces, reset clears). The spec now says statuses, group statuses and focus are kept;
+  groups follow decision 4. Pinned by `SR-state-kept`, `SR-reset`, `SR-groups-replaced`.
+- **A plan gap: 21 tests 2a deferred to 2b were missing from the 2b plan** (+1 unclear;
+  `audit-2a-deferrals.md`, 50 deferred, 28 placed). Assigned by ruling
+  (`carry-2a-deferrals.md`) and ported in Tasks 10 (fix round), 11, 13, 14, 15 and 16b, with
+  DC15 and NS5 moved to Task 13 and DC7 to Task 14 (ruling). Not ported by ruling: DS4's last
+  two lines (premise impossible under 2a P2). **F-1 of `chrome_change_test.dart`** (design-only,
+  placed by neither 2a nor 2b) stays unported, a 2a gap to raise with the human. F-2 and F-3,
+  also unplaced, were ported in Task 16b (16 tests) because F-3 is M-SV-R2's real killer.
+- **This run's finding:** `host/view_palette_test.dart` (service-mode `ServiceView` palette
+  tests) has no destination and no ruling (Ported tests, above). Open.
+- Spec silent on a lock's report: `lockBroken` and `_lockFromCopy` neither report nor bump
+  `revision` (Task 11 ruling, documented).
+- Equivalent or masked mutants in the plan: M-UL-number masked by the label system (Task 7:
+  a bare-plan assertion added); M-14l unreachable in the oracle too (Task 14: re-worded to the
+  drag branch); M-PA-hall survived the plan's watch (Task 14: PA4/PA5 watch `Transform2` over a
+  no-pick baseline); M-SV-R2 left T2-f green (Task 16b: F-3 ported); M-PB9c unreachable (Task 4:
+  defensive code kept).
+- Brief tests that could not go red as written: ST-locked-seat (Task 14: a tap on A5 added);
+  UL-place-number (Task 7); SM-execute-false's order (Task 11, the command built first).
+- Task 10: today's `_turnableAt` ported so SW9's premise holds (a placed unit's rotation needs
+  `transform` and `geometry`).
+- Task 16b: a lib change outside the brief, `PlanCanvas` resets `snappingAllowed` on a swap
+  (2a's parked final-review item), pinned by `CV-6b`.
+- Carried to sub-project 3: R-16's room and tint lines (TF1, TF7, EX2, EX3, EX5, the export
+  premises' `R`; TF3's count returns to 6 when rooms land).
+- Carried to sub-project 4: the host-API differences above; `userCamera` on the design canvas.
+- Deferred minors the ledger marks "FINAL REVIEW SHOULD TRIAGE" (spec-named behaviour
+  unpinned): `restoreService`'s `_revision.value++` and `notifyListeners()` (and
+  `resetService`'s `notifyListeners`); a restored group member naming only a hidden or locked
+  unit kept; `service_tool.dart`'s `roots.isEmpty ||` spend (M-ST-empty survives).
+
+### Execution rulings that changed a test's premise or a ported assertion
+
+One line each, with its reason, from the ledger's `Ruling:` lines:
+- R-4, CS11 (engine): `drift(doc) isEmpty` → `[hP1]`, its adds made as a loaded file's (spec S1:
+  an InstanceNode under a live object is a generated instance).
+- Task 2, E5G-refuse (new test): the positive control compares by `==`, not identity (a refused
+  move's rollback rebuilds an equal node).
+- Task 3, K2B-ref (new test): the fixture is an `AddDefinitionCommand` (the engine refuses an
+  empty compound).
+- Task 6, TI1: the fixture's `fx.*` keys (P-1; fixture data, 2a precedent).
+- Task 6, TL5: the tag `'UNIT'` (S2 renames the tag; no compatibility).
+- Task 7, LS tests: built with `plan(catalog: boxKit catalog)` (fixture only).
+- Task 7, TP7: the subject is the unit kit's square table (P-2; the test kit replaces today's).
+- Task 7, UL-place-number (new test): a placement on a bare plan added (M-UL-number was masked).
+- Task 8, 2a's PM-3: the fixture value flips each flag from `full`'s (the new flag is false in
+  `full`).
+- Task 9 → 11: TD8's `setMode` tail, HD6's and TC7's service blocks cut in Task 9, restored
+  unchanged in Task 11 (they need `PlanMode.service`).
+- Task 9: diagnostic codes follow Task 6's renames inside ported expectations (S5 renames).
+- Task 9, TC9: its `toString` checks read `colour` (else the negative check is vacuous).
+- Task 10, SW9: today's `_turnableAt` ported so the premise holds (today's code is the oracle).
+- Task 10, CP11: `disc.draw` for the tool (`plan.line` has no settings; fixture only).
+- Task 11, SM-execute-false (new test): the command is built before `before` is read (building
+  takes a handle from the seed).
+- R13-a, R13-b (Task 13): LC2-LC4's format and keys, the method renames (no-compatibility wave).
+- R13-c, TG-C10: its last line `isTrue` (groups count, decision 4).
+- R13-d, TG-C11: its `resetLayout` step retired (`resetService` clears the groups).
+- Task 13, SR-C16 and SR-old-format-refused: a cast and typed literals, type-only.
+- R-13 (Task 9): undo labels "Unit data"/"Unit colour"; `toString` gains the kind token; DC8/9/
+  11/12/13/17 ported a second time for `unitChanges`.
+- R-14 (Task 8): 2a's PM-8 `restrictsPick` reads `isTrue`; PM-1/PM-7 grow; ED-9 gains exports.
+- Task 14, ST-locked-seat (new test): a tap on A5 added (as written it could not go red).
+- Task 14, PA4/PA5 (new tests): a `Transform2` watch over a no-pick baseline (confirmed by the
+  reviewer: PA1-PA3 keep today's method exactly).
+- Task 15, TF3: the fill count ported as `hasLength(5)` (R-16 removes the room; the count stays
+  pinned; returns to 6 in sub-project 3).
+- Task 15, unit_paint_test's spy: records `Color(paint.color.toARGB32())` (a `Paint` stores
+  float32 colours).
+- R-16 (Task 15): TF1's, TF7's, EX2's, EX3's room and tint lines and the export premises' `R`
+  go to sub-project 3.
+- Task 16a, TO32: moved to 16b, assertions unchanged (it needs the design canvas).
+- Task 16b, DS4: its last two lines not ported (premise impossible under 2a P2).
+- Task 16b, F-2 and F-3: ported (16 tests, assertions unchanged); F-1 left unported (2a gap).
+- R-11a: VR1-VR3 not ported (sessions own the systems).
+
+Other execution rulings (no ported assertion changed): E5-move added (Task 1); PB-def-top-poly
+added (Task 4); `heldTypeOf` and `LockSet._unknownKit` share one helper (Task 6); UL-turn-row
+added (Task 7); M-DS2 pinned by three tests, DS-layer added (Task 8); `UnitIndex.debugBuilds`
+(Task 10); `ServiceSession` builds its cache last and the picker, tool and tool controller
+after it (Tasks 11, 14); `lockBroken` neither reports nor bumps (Task 11); M-14l re-worded
+(Task 14); `_requestOf` inside the `try` (Task 15); every Task 16 carry item to 16b; the
+`snappingAllowed` reset on a swap (Task 16b).
