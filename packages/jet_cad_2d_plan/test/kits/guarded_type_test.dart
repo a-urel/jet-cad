@@ -173,6 +173,11 @@ void main() {
         () => h.doc.commands.execute(SetComponentCommand<DiscParams>(
             disc, const DiscParams(radius: 850))),
         failed('box', SquareParams.id, 'placeBox'));
+    // An edit's place trigger asks the square's box before the disc's
+    // generate runs, so the edit alone cannot tell M-F-G9b apart; the dry
+    // run asks it first inside the disc's generate (its `placedIn`).
+    expect(() => h.system.drift(),
+        throwsA(failed('box', SquareParams.id, 'placeBox')));
   });
 
   test('F-G10 placeInput', () {
