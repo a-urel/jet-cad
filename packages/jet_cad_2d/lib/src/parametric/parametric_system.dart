@@ -560,6 +560,9 @@ class ParametricCatalog {
   /// Spec 2a E1: a host dispatches grips, panels and layer pickers by this
   /// instead of re-spelling the rule. Cost: O(registered types), like
   /// [names]; no client code runs.
+  ///
+  /// A frozen object (spec 2a E2) still answers its type id: the catalog
+  /// knows no ParametricSystem.
   String? typeIdOf(CommandTarget target, Handle group) =>
       _naming(target, _types, group)?.typeId;
 }
@@ -567,12 +570,33 @@ class ParametricCatalog {
 /// Regenerates parametric objects inside the edit that changes them (spec
 /// 06 D1, D2, D4). One per document; takes the dispatcher's expander slot.
 class ParametricSystem {
-  ParametricSystem(this.document, this.catalog) {
+  /// [isFrozen] (spec 2a E2) names the objects this system leaves alone. A
+  /// frozen object is in no survey, so in no view, no regeneration (its own
+  /// or a neighbour's), [drift], [diagnostics] or [probe], and no hook of its
+  /// type is called for it. It is a plain group to this system, as a group
+  /// carrying an unregistered type is: its children can be edited directly;
+  /// moving or deleting it is an ordinary group edit; an edit that writes a
+  /// new value of its type on it is refused (spec 06 D5); an object that
+  /// references it sees a handle that is not a live object, so a `cascade`
+  /// referrer's edit is refused with [DanglingReferenceError] and an
+  /// `orphan` one regenerates as an orphan. The catalog's queries
+  /// ([ParametricCatalog.names], [ParametricCatalog.objectsOf],
+  /// [ParametricCatalog.typeIdOf]) know nothing of it.
+  ///
+  /// The predicate must give the same answer for a handle throughout one
+  /// `execute`, [drift], [diagnostics] or [probe]; between them it may change
+  /// (a host freezes an object whose type's code failed). Null freezes
+  /// nothing. It is called once per registered component per survey: keep it
+  /// a set lookup.
+  ParametricSystem(this.document, this.catalog,
+      {bool Function(Handle)? isFrozen})
+      : _frozen = isFrozen {
     catalog.registerComponents(document.components);
   }
 
   final DraftDocument document;
   final ParametricCatalog catalog;
+  final bool Function(Handle)? _frozen;
 
   /// True while this system runs client code: an edit's regeneration, a
   /// dry run, a diagnostics pass. Nested-safe: each entry restores the
@@ -617,7 +641,7 @@ class ParametricSystem {
     final was = _applying;
     _applying = true;
     try {
-      final s = _survey(document, _types);
+      final s = _survey(document, _types, _frozen);
       final view = ParametricView._(document, s);
       return [
         for (final h in s.objects.keys)
@@ -650,6 +674,8 @@ class ParametricSystem {
   /// lands. Any other exception a client's `reach` or `diagnose` throws
   /// propagates too; there is no partial report.
   List<Diagnostic> diagnostics() {
+    // The catalog's rule, without the frozen predicate: a frozen object is a
+    // live object left alone (spec 2a E2), not a misplaced component.
     final misplaced = [
       for (final t in _types)
         for (final h in t.handles(document))
@@ -665,13 +691,87 @@ class ParametricSystem {
     final was = _applying;
     _applying = true;
     try {
-      final s = _survey(document, _types);
+      final s = _survey(document, _types, _frozen);
       final view = ParametricView._(document, s);
       return [
         ...misplaced,
         for (final h in s.objects.keys) ..._unresolved(s, h),
         for (final h in s.objects.keys) ...s.objects[h]!.diagnose(view, h),
       ];
+    } finally {
+      _applying = was;
+    }
+  }
+
+  /// Runs [object]'s hooks once, in isolation, and returns the first error
+  /// any of them throws, or null (spec 2a E2). Mutates nothing. It is
+  /// guarded like [drift], so a hook that calls `execute` gets the guard's
+  /// `StateError`, which is returned.
+  ///
+  /// The hooks are every one an edit, [drift] or [diagnostics] can call for
+  /// one object, in an edit's order:
+  /// - its `reach` and `references`, in the survey;
+  /// - its type's `pageKey` of the root's page;
+  /// - `placeBox` and `placeInput`, for a contributor;
+  /// - `readBox`, for a reader;
+  /// - `dissolves` and `generate`, through the planner's dry run (so a
+  ///   region or a fill it cannot plan counts too);
+  /// - then `diagnose`.
+  ///
+  /// Each runs with a view over a survey of this system's live objects, as
+  /// an edit's after-view.
+  ///
+  /// In isolation: another live object whose own `reach` or `references`
+  /// throws is left out of that survey, as it will be once frozen, so its
+  /// error is never reported as [object]'s. Finding them takes one `reach`
+  /// and one `references` call per live object before the survey's own. A
+  /// probe is O(live objects), and is on neither the frame nor the edit path.
+  ///
+  /// Null, with no hook called, for a handle that is not a live object of
+  /// this system: not a root-level group named by a registered type, or
+  /// frozen.
+  Object? probe(Handle object) {
+    final registration = _naming(document, _types, object, _frozen);
+    if (registration == null) return null;
+    final was = _applying;
+    _applying = true;
+    try {
+      final broken = <Handle>{};
+      for (final r in _types) {
+        for (final h in r.handles(document)) {
+          if (!identical(_naming(document, _types, h, _frozen), r)) continue;
+          try {
+            r.reachOf(r.componentOf(document, h), _worldOf(document, h));
+            r.referencesOf(document, h).toList();
+          } catch (error) {
+            if (h == object) return error;
+            broken.add(h);
+          }
+        }
+      }
+      final frozen = _frozen;
+      final s = _survey(
+          document,
+          _types,
+          broken.isEmpty
+              ? frozen
+              : (Handle h) =>
+                  broken.contains(h) || (frozen != null && frozen(h)));
+      final view = ParametricView._(document, s);
+      final type = registration.type;
+      type.pageKey(view.page);
+      if (type.contributesPlace && view.placeBoxOf(object) != null) {
+        type.placeInput(view, object);
+      }
+      if (type.readsPlaces) {
+        registration.readBoxOf(s.params[object]!, s.toWorld[object]!,
+            _storedBox(document, s, object));
+      }
+      _plan(document, [object], s, view);
+      registration.diagnose(view, object);
+      return null;
+    } catch (error) {
+      return error;
     } finally {
       _applying = was;
     }

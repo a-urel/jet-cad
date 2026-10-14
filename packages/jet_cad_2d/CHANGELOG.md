@@ -16,6 +16,11 @@
   reported as a `component.unreadable` diagnostic naming its handle,
   instead of failing the load. Off by default. A value of the type
   attached to that handle later is the one a save writes.
+- `ParametricSystem(document, catalog, isFrozen: …)` leaves a frozen
+  object out of every survey, view, regeneration, `drift()` and
+  `diagnostics()`, as a plain group, and calls none of its type's hooks
+  for it. `ParametricSystem.probe(handle)` runs one live object's hooks in
+  isolation, changing nothing, and returns the first error, or null.
 
 ## 0.7.2
 
