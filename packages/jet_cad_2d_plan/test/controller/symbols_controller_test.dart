@@ -162,9 +162,14 @@ void main() {
     await retry;
     expect(c.symbolsState.value, PlanSymbolsState.ready);
     expect(read.reads, 2);
-    await c.retrySymbols();
-    // M-S12: retrySymbols acts in every state.
+    final symbols = c.symbols;
+    final again = c.retrySymbols();
+    // M-S12: retrySymbols acts in every state (it goes back to loading;
+    // the loader's cache keeps the read count at 2 either way).
+    expect(c.symbolsState.value, PlanSymbolsState.ready);
+    await again;
     expect(read.reads, 2);
+    expect(c.symbols, same(symbols), reason: 'nothing was loaded again');
   });
 
   test('S-13 a controller disposed mid-load ignores the late result', () async {
