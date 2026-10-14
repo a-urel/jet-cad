@@ -24,6 +24,8 @@ import 'package:jet_cad_2d_kit/authoring.dart'
         CatalogUnit;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/src/kits/locks.dart';
+import 'package:jet_cad_2d_plan/src/service/service_session.dart'
+    show serviceCopyOf;
 import 'package:jet_cad_2d_plan/src/service/unit_picker.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart'
     show definitionForEntry, placementTransform;
@@ -410,3 +412,25 @@ final class CountingTransform extends Transform2 {
 
 /// [values] as a Float64List (the tops' expectations).
 Float64List f64(List<double> values) => Float64List.fromList(values);
+
+/// [rowOfTables] numbered as today's placer numbered them: `1` … `n` in
+/// placement order (`floor_plan/test/service/table_status_painter_test.dart:
+/// 59-79` placed them through the numbering placer).
+DraftDocument numberedRowOfTables(int n) {
+  final doc = rowOfTables(n);
+  final instances = [
+    for (final node in doc.tree.nodes)
+      if (node is InstanceNode) node.handle
+  ]..sort((a, b) => a.value.compareTo(b.value));
+  for (final (i, h) in instances.indexed) {
+    addUnitLabel(doc, h, '${i + 1}');
+  }
+  return doc;
+}
+
+/// [design] decoded as a service copy (Task 11's `serviceCopyOf`, today's
+/// `_copyOf`): runtime permissions, the plan's components, the handles the
+/// design's.
+DraftDocument copyForService(DraftDocument design) => serviceCopyOf(design,
+    register: (r) => registerPlanComponents(r, ParametricCatalog()),
+    measurer: const InsertionPointMeasurer());

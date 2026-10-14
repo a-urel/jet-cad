@@ -9,16 +9,19 @@
 // DocumentSession (controller/session.dart:29-89).
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show ValueListenable, VoidCallback;
-import 'package:flutter/material.dart' show Canvas, KeyEventResult, Size;
-import 'package:flutter/services.dart' show KeyEvent;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, ValueNotifier, VoidCallback;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+import 'package:meta/meta.dart' show internal;
 
 import '../kits/guard.dart';
 import '../kits/locks.dart';
 import '../units/unit_index.dart';
 import '../units/unit_label_system.dart';
+import 'service_state.dart' show UnitGroup;
+import 'service_tool.dart';
+import 'unit_picker.dart' show UnitPicker;
 
 /// The controller's two modes (spec S3).
 enum PlanMode {
@@ -51,8 +54,10 @@ DraftDocument serviceCopyOf(DraftDocument design,
 final class ServiceSession {
   /// [locks] and [frozen] are the design session's own (the handles are
   /// the same in both documents); [lock] and [damage] receive this
-  /// session with what its boundary found. The copy's one tool is an idle
-  /// placeholder until Task 14's `ServiceTool`.
+  /// session with what its boundary found. [groups] are the controller's
+  /// unit groups and [moves] its `serviceMove`, both read by the service
+  /// tool at each call; without them: no group, moves allowed (a session a
+  /// test builds).
   ServiceSession({
     required this.document,
     required this.measurer,
@@ -65,6 +70,8 @@ final class ServiceSession {
     required void Function(ServiceSession session, Set<Handle> objects) lock,
     required void Function(ServiceSession session, PartialMutationError error)
         damage,
+    ValueListenable<Map<String, UnitGroup>>? groups,
+    bool Function()? moves,
   })  : page = PageNotifier(document),
         index = SpatialIndex(document) {
     // The selection before the outlines (it prunes a dead key first), as
@@ -77,8 +84,6 @@ final class ServiceSession {
         camera: camera,
         selection: selection,
         page: page);
-    tool = _IdleTool();
-    tools = ToolController(initial: tool, context: toolContext);
     // The design's stack (Task 7): parametric, unit labels, lock.
     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
       ..install();
@@ -99,10 +104,24 @@ final class ServiceSession {
       ..onPartialMutation = boundary.partialMutation
       ..onRefusedEdit = boundary.recoverRefused
       ..onRetryFailed = boundary.retryFailed;
-    // Last, as the design's (session.dart): it listens to [locked], so no
-    // later step can throw and leak the listener.
+    // Last but the tool, as the design's (session.dart): it listens to
+    // [locked], so no later step can throw and leak the listener.
     units = UnitIndexCache(document,
         catalog: catalog, locks: locks, locked: locked);
+    // The picker reads [units], so the tool comes after it; neither
+    // constructor, nor the tool controller's, can throw.
+    picker = UnitPicker(document, units);
+    tool = ServiceTool(
+        picker: picker,
+        groups: groups ?? _noGroups,
+        callbacks: () => host.callbacks(),
+        options: () => host.options(),
+        moves: moves ?? _always,
+        userCamera: () => host.userCamera(),
+        toGlobal: (local) => host.toGlobal(local),
+        events: () => host.events(),
+        idleKeys: () => host.idleKeys());
+    tools = ToolController(initial: tool, context: toolContext);
   }
 
   /// The copy.
@@ -117,8 +136,23 @@ final class ServiceSession {
   late final UnitIndexCache units;
   late final ToolContext toolContext;
 
-  /// The copy's one tool, which [tools] holds.
-  late final Tool tool;
+  /// The service tool (2b S4), the tool controller's one tool.
+  late final ServiceTool tool;
+
+  /// The copy's picker: a locked unit and a seat are picked (spec S2, S4).
+  @internal
+  late final UnitPicker picker;
+
+  /// What the tool reads from the view that shows this session, at each
+  /// call: the view sets it while its canvas is mounted and puts
+  /// [ServiceHost.none] back when it goes (Task 16).
+  @internal
+  ServiceHost host = ServiceHost.none;
+
+  static final ValueNotifier<Map<String, UnitGroup>> _noGroups =
+      ValueNotifier(const <String, UnitGroup>{});
+  static bool _always() => true;
+
   late final ToolController tools;
   late final ParametricSystem parametric;
   late final UnitLabelSystem labels;
@@ -160,28 +194,4 @@ final class ServiceSession {
     unawaited(document.dispose());
     measurer.clear();
   }
-}
-
-/// The copy's tool until Task 14's service tool: it reacts to nothing.
-final class _IdleTool extends Tool {
-  @override
-  String get name => 'plan.service';
-  @override
-  ToolPhase get phase => ToolPhase.idle;
-  @override
-  void onPointerDown(ToolPointerEvent e, ToolContext ctx) {}
-  @override
-  void onPointerMove(ToolPointerEvent e, ToolContext ctx) {}
-  @override
-  void onPointerUp(ToolPointerEvent e, ToolContext ctx) {}
-  @override
-  void onPointerExit(ToolContext ctx) {}
-  @override
-  KeyEventResult onKey(KeyEvent event, ToolContext ctx) =>
-      KeyEventResult.ignored;
-  @override
-  void cancel(ToolContext ctx) {}
-  @override
-  void paintOverlay(Canvas canvas, ViewportTransform camera, Size viewport,
-      PaperPalette paper) {}
 }

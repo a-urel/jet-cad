@@ -431,6 +431,19 @@ void main() {
     );
   });
 
+  // 2b Task 14: the plan library's pick and band allocation tests read the
+  // VM's allocation profiler too; without the flag they skip, which the
+  // standing comparison reads as red.
+  test('SC20b the plan library\'s tests run with --enable-vmservice', () {
+    final entry = workflow.indexOf('- package: packages/jet_cad_2d_plan');
+    expect(entry, isNot(-1));
+    final next = workflow.indexOf('- package: ', entry + 1);
+    expect(
+      workflow.substring(entry, next),
+      contains('\n            test_flags: --enable-vmservice\n'),
+    );
+  });
+
   // The script itself, run by bash in a scratch repository with the tag
   // and a stand-in `flutter` that records what it analysed.
   group('SC19 old_host_probe.sh', () {

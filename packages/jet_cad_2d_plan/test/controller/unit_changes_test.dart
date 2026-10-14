@@ -2,7 +2,7 @@
 // Task 9, spec S3 `unitChanges`, S5): the design's unit changes. DC10 and
 // DC16 (the service mode) are Task 11's; DC15 reads Task 13's
 // `serviceEdited`, so Task 13 ported it; DC7 also reads Task 13's record and
-// reset and drags with the service tool, so Task 14 ports it. DC8, DC9,
+// reset and drags with the service tool, so Task 14 ported it. DC8, DC9,
 // DC11, DC12, DC13 and DC17 were ported by 2a for the object-level
 // `changes` stream (plan_change_test.dart); they are ported again here for
 // `unitChanges`, whose code is its own (controller ruling R-13, F-T9c).
@@ -22,14 +22,18 @@
 // transform.
 import 'dart:async';
 
+import 'package:flutter/gestures.dart' show PointerDeviceKind, kPrimaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show kUnitLabelTag;
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show ToolPointerEvent;
 import 'package:jet_cad_2d_plan/src/units/unit_detail.dart'
     show diffUnitDetails;
+import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/unit_embedding_fixture.dart';
 import '../support/unit_fixtures.dart' show fxKit;
@@ -314,9 +318,74 @@ void main() {
       }
     });
 
-    // DC7 (service moves report nothing): Task 14 ports it (it reads Task
-    // 13's serviceEdited, record and reset, and drags with the service
-    // tool).
+    testWidgets(
+        'DC7 M-H29(service moves): in the selection mode a service drag of '
+        '1, its Undo, its Redo, resetLayout and restoreServiceLayout '
+        'report nothing; back in the design mode an edit is reported',
+        (tester) async {
+      final c = await mounted(tester);
+      final seen = listen(c);
+      c.setMode(PlanMode.service);
+      await tester.pump();
+      await tester.pump();
+      final camera = embeddingCamera();
+      c.camera.value = camera;
+      await tester.pump();
+      final one = fixtureTable('1');
+      final w = boxCentre(one.transform);
+      final p = canvasOf(camera, w.dx, w.dy);
+      final before = c.unitDetails.first;
+      expect(before.unit.label, '1', reason: 'premise');
+
+      // 2b: the service view is Task 16's, so the drag reaches the
+      // session's service tool as explicit pointer events, at today's
+      // gesture's screen points (the canvas's own, its origin aside).
+      final s = c.serviceSession!;
+      ToolPointerEvent ev(Offset at, {int buttons = kPrimaryButton}) =>
+          ToolPointerEvent(
+            screen: at,
+            world: camera.screenToWorld(Vector2(at.dx, at.dy)),
+            pointer: 1,
+            buttons: buttons,
+            shift: false,
+            control: false,
+            meta: false,
+            alt: false,
+            pickRadiusWorld: 6 / camera.scale,
+            kind: PointerDeviceKind.mouse,
+          );
+      final start = Offset(p.x, p.y);
+      s.tool.onPointerDown(ev(start), s.toolContext);
+      s.tool.onPointerMove(ev(start + const Offset(40, 0)), s.toolContext);
+      s.tool.onPointerMove(ev(start + const Offset(80, 25)), s.toolContext);
+      s.tool.onPointerUp(
+          ev(start + const Offset(80, 25), buttons: 0), s.toolContext);
+      await tester.pump();
+      expect(c.serviceEdited, isTrue, reason: 'premise: a service move');
+      expect(c.unitDetails.first.center == before.center, isFalse,
+          reason: 'premise: 1 moved in the copy');
+      final layout = c.serviceJson()!;
+      c.undo();
+      await tester.pump();
+      expect(c.serviceEdited, isFalse, reason: 'premise: undone');
+      c.redo();
+      await tester.pump();
+      expect(c.serviceEdited, isTrue, reason: 'premise: redone');
+      c.resetService();
+      await tester.pump();
+      c.restoreService(layout);
+      await tester.pump();
+      expect(c.serviceEdited, isTrue, reason: 'premise: restored');
+      expect(seen, isEmpty);
+
+      c.setMode(PlanMode.design);
+      await tester.pump();
+      expect(seen, isEmpty, reason: 'a mode switch is no design change');
+      expect(c.setUnitData('1', hostData()), isTrue);
+      await tester.pump();
+      expect(seen, [PlanUnitChanged(before, copyOf(before, data: hostData()))],
+          reason: 'the listener is live; the design never moved');
+    });
 
     testWidgets(
         'DC8 newPlan: exactly [PlanUnitsReplaced()], no Removed per '
