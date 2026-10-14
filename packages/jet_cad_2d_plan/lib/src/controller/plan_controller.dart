@@ -23,6 +23,7 @@ import '../kits/locks.dart';
 import '../l10n/document_separator.dart';
 import '../l10n/strings.dart';
 import '../export/registries.dart';
+import '../shortcuts/tool_letters.dart';
 import '../symbols/plan_symbol.dart';
 import '../symbols/plan_symbol_loader.dart';
 import '../symbols/plan_symbols_state.dart';
@@ -184,6 +185,9 @@ class PlanController extends ChangeNotifier {
     _refreshFlags();
     // Last: a constructor that threw leaves no load running.
     unawaited(_loadSymbols());
+    // The tool letters are the kit set's (Task 16): a letterTaken
+    // diagnostic is in the log before any widget is built.
+    planToolEntries(this);
   }
 
   /// The page, the contract's four components and the kits' types: what a

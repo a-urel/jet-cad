@@ -13,6 +13,7 @@ export 'src/controller/plan_change.dart'
         PlanObjectRemoved,
         PlanReplaced;
 export 'src/controller/plan_controller.dart';
+export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;
 export 'src/export/registries.dart';
 export 'src/file/manifest.dart'
     show
@@ -36,6 +37,8 @@ export 'src/l10n/strings_de.dart';
 export 'src/l10n/strings_en.dart';
 export 'src/l10n/strings_tr.dart';
 export 'src/panels/plan_symbol_gallery.dart';
+export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+export 'src/shortcuts/plan_shortcuts.dart';
 export 'src/symbols/plan_symbol.dart';
 export 'src/symbols/plan_symbol_loader.dart';
 export 'src/symbols/plan_symbols_state.dart';

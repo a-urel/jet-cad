@@ -9,8 +9,8 @@ import 'package:flutter/services.dart'
 import 'package:flutter/widgets.dart';
 
 import '../controller/plan_controller.dart';
-import '../tools/generic_tools.dart';
 import 'chords.dart';
+import 'tool_letters.dart';
 
 export 'chords.dart';
 
@@ -18,11 +18,12 @@ export 'chords.dart';
 LogicalKeyboardKey letterKey(String letter) => LogicalKeyboardKey(
     LogicalKeyboardKey.keyA.keyId + letter.codeUnitAt(0) - 0x41);
 
-/// The letters [controller]'s keyboard binds, F included (spec 2a P2: F is
-/// reserved for Fill). Here the generic tools' (V L P R C A T); Task 16
-/// adds the kits' letters in load order.
+/// The letters [controller]'s keyboard binds, F included (spec 2a P2: the
+/// guard is built from the letters actually in use; F is reserved for
+/// Fill): the generic tools' and the kits' given letters, in palette order.
 List<LogicalKeyboardKey> planLetterKeys(PlanController controller) => [
-      for (final t in genericTools) letterKey(t.letter),
+      for (final e in planToolEntries(controller))
+        if (e.key case final key?) key,
       LogicalKeyboardKey.keyF,
     ];
 
