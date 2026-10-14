@@ -83,6 +83,18 @@ class PlanStringsTr extends PlanStrings {
   String get redo => 'Yinele';
 
   @override
+  String get newDocument => 'Yeni';
+
+  @override
+  String get open => 'Aç…';
+
+  @override
+  String get save => 'Kaydet';
+
+  @override
+  String get saveAs => 'Farklı kaydet…';
+
+  @override
   String get exportEllipsis => 'Dışa aktar…';
 
   @override

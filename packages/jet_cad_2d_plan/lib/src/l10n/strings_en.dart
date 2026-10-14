@@ -84,6 +84,18 @@ class PlanStringsEn extends PlanStrings {
   String get redo => 'Redo';
 
   @override
+  String get newDocument => 'New';
+
+  @override
+  String get open => 'Open…';
+
+  @override
+  String get save => 'Save';
+
+  @override
+  String get saveAs => 'Save As…';
+
+  @override
   String get exportEllipsis => 'Export…';
 
   @override

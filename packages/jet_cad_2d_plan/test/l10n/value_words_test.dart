@@ -78,4 +78,12 @@ void main() {
     expectWorded((s) => s.lockedNoLayer,
         english: 'Locked objects cannot change layer');
   });
+
+  test('ED-W the file commands\' words in each language', () {
+    // M-ED-W: a language that returns the English text for one of them.
+    expectWorded((s) => s.newDocument, english: 'New');
+    expectWorded((s) => s.open, english: 'Open…');
+    expectWorded((s) => s.save, english: 'Save');
+    expectWorded((s) => s.saveAs, english: 'Save As…');
+  });
 }

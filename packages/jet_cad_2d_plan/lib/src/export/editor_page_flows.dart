@@ -7,6 +7,7 @@
 // run to its end. Ported from jet_cad_floor_plan/lib/src/host/page_flows.dart.
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart' show BuildContext;
+import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftDocument;
 
 import '../controller/plan_controller.dart';
 import 'builtin_exporters.dart' show exportPageOf;
@@ -30,6 +31,26 @@ typedef PageFlowHooks = ({
 });
 
 PageFlowHooks _noHooks() => const (exportDialog: null, onError: null);
+
+/// The exporters of [exporters] that can run on [document]: every one
+/// while it has a page; without one, those that plot no page (a
+/// [PlanPageExporter] needs it, the built-in PDF and PNG among them).
+List<PlanExporter> exportersFor(
+        DraftDocument document, List<PlanExporter> exporters) =>
+    exportPageOf(document) != null
+        ? exporters
+        : [
+            for (final e in exporters)
+              if (e is! PlanPageExporter) e
+          ];
+
+/// Whether an Export can run on [controller]'s plan now: it has a page, or
+/// one of its exporters needs none (spec P2: a page exporter answers null
+/// for a plan with no page). With only the built-in exporters this is
+/// today's rule (spec 13 D8): Export needs the page.
+bool exportRunnable(PlanController controller) =>
+    controller.page.value != null ||
+    controller.exporters.any((e) => e is! PlanPageExporter);
 
 /// The two flows of one editor view, for its controller.
 class EditorPageFlows {
@@ -65,18 +86,17 @@ class EditorPageFlows {
         if (sink == null) return;
         final flows = _flows;
         final document = controller.document;
-        final paged = exportPageOf(document) != null;
-        if (!paged && flows.exporters.every((e) => e is PlanPageExporter)) {
-          return;
-        }
+        // Only the exporters that can run: a plan with no page is offered
+        // none that plots the page (picking one would export nothing).
+        final offered = exportersFor(document, flows.exporters);
+        if (offered.isEmpty) return;
         if (!context.mounted) return;
         // The host's dialog when it gave one, the Material one otherwise;
         // either way from the remembered answer, and null cancels.
         final dialog = hooks().exportDialog;
         final answer = dialog != null
-            ? await dialog(context, flows.dialogAnswer, flows.exporters)
-            : await showPlanExportDialog(
-                context, flows.dialogAnswer, flows.exporters);
+            ? await dialog(context, flows.dialogAnswer, offered)
+            : await showPlanExportDialog(context, flows.dialogAnswer, offered);
         // A view gone meanwhile is the bytes' cancel, below.
         if (answer == null || (!_disposed && !_exportAllowed())) return;
         flows.dialogAnswer = answer;

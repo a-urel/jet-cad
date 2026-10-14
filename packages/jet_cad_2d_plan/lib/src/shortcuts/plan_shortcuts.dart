@@ -14,6 +14,7 @@ import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
 
 import '../controller/plan_controller.dart';
 import '../editor/plan_tool_palette.dart' show fillOffered;
+import '../export/editor_page_flows.dart' show exportRunnable;
 import '../l10n/locale_scope.dart';
 import '../tools/generic_tools.dart';
 import 'plan_shortcut_guard.dart';
@@ -27,8 +28,9 @@ import 'tool_letters.dart';
 ///   and Enter, plan.symbol's R and M). The controller's commands stay
 ///   callable.
 /// - The file chords are bound for the callbacks given; a chord whose
-///   command cannot act now (a shape part-way, or no page for Export and
-///   Print) consumes the key and does nothing (S-26).
+///   command cannot act now (a shape part-way; no page for Print; for
+///   Export, no page and no exporter that needs none) consumes the key and
+///   does nothing (S-26).
 class PlanShortcuts extends StatefulWidget {
   const PlanShortcuts({
     super.key,
@@ -95,23 +97,28 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
       widget.controller.selectGates.idleKeys = widget.shortcuts;
 
   /// Runs a file command when it can act: no shape part-way (spec 12a D6),
-  /// and a page for Export and Print (spec 13 D8, D9).
-  void _run(Future<void> Function() run, {required bool needsPage}) {
+  /// and a page for Print (spec 13 D9); for Export a page or an exporter
+  /// that needs none (spec 13 D8, P2: with only the built-in exporters,
+  /// the page).
+  void _run(Future<void> Function() run,
+      {bool Function(PlanController c)? can}) {
     final c = widget.controller;
     if (c.toolController.active.isMidShape) return;
-    if (needsPage && c.page.value == null) return;
+    if (can != null && !can(c)) return;
     unawaited(run());
   }
+
+  static bool _hasPage(PlanController c) => c.page.value != null;
 
   Map<ShortcutActivator, VoidCallback> _bindings(PlanController c) {
     if (!widget.shortcuts) return const {};
     final p = c.permissions;
     final m = <ShortcutActivator, VoidCallback>{};
     void file(List<SingleActivator> chords, Future<void> Function()? run,
-        {bool needsPage = false}) {
+        {bool Function(PlanController c)? can}) {
       if (run == null) return;
       for (final chord in chords) {
-        m[chord] = () => _run(run, needsPage: needsPage);
+        m[chord] = () => _run(run, can: can);
       }
     }
 
@@ -119,8 +126,8 @@ class _PlanShortcutsState extends State<PlanShortcuts> {
     file(kOpenChords, widget.onOpen);
     file(kSaveChords, widget.onSave);
     file(kSaveAsChords, widget.onSaveAs);
-    if (p.export) file(kExportChords, widget.onExport, needsPage: true);
-    if (p.print) file(kPrintChords, widget.onPrint, needsPage: true);
+    if (p.export) file(kExportChords, widget.onExport, can: exportRunnable);
+    if (p.print) file(kPrintChords, widget.onPrint, can: _hasPage);
     // Spec P2: widget-facing commands consult the flags; the controller's
     // undo() and redo() do nothing mid-shape.
     if (p.undo) {

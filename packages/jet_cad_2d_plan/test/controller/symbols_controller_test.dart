@@ -8,7 +8,6 @@ import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;

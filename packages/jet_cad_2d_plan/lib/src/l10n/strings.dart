@@ -94,6 +94,19 @@ abstract class PlanStrings {
   /// "Redo".
   String get redo;
 
+  /// The host's file commands (2a spec P2, `PlanEditor(onNew:, onOpen:,
+  /// onSave:, onSaveAs:)`), as the floor planner app words them: "New".
+  String get newDocument;
+
+  /// "Open…".
+  String get open;
+
+  /// "Save".
+  String get save;
+
+  /// "Save As…".
+  String get saveAs;
+
   /// "Export…".
   String get exportEllipsis;
 
