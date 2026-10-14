@@ -127,11 +127,12 @@ final List<PlanSymbol> demo = symbolsOf('demo', demoBytes(), names: demoNames);
 
 void main() {
   group('ported from symbol_search_test.dart', () {
-    // "wing" is in the key only; "reading" is a tag. FINDING (Task 13):
-    // the source's tag was the mixed-case "Reading", which the kit contract
-    // refuses (K2: a tag is lower case; SymbolComponent throws), so the
-    // fixture's tag is lower case and the mixed-case test below is skipped,
-    // its assertions unchanged, pending the controller's ruling.
+    // "wing" is in the key only; "reading" is a tag. Retired (controller
+    // ruling F-1, Task 13): the source's "a mixed-case tag is found in any
+    // case" (symbol_search_test.dart:182-189), whose premise is the
+    // mixed-case tag "Reading" -- K2 admits only lower-case tags
+    // (SymbolComponent throws), so the fixture's tag is lower case and the
+    // test's intent is kept on the query side by SF-Q below.
     final entries = [
       entry(9500, 'fixture.lamp.arc', 'Arc lamp', 'Den', ['lamp', 'light']),
       entry(9600, 'fixture.chair.wingback', 'Armchair', 'Den',
@@ -148,18 +149,15 @@ void main() {
           ['fixture.chair.wingback@1']);
     });
 
-    test('a mixed-case tag is found in any case', () {
+    test('SF-Q a mixed-case query finds a lower-case tag (ruling F-1)', () {
       expect(hitsOnly(entries, 'reading', 'tag'), ['fixture.chair.wingback@1']);
-      expect(entries[1].component.tags.first, 'Reading');
-      for (final query in ['reading', 'READING', 'rEaDiNg']) {
+      // M-SFQ: the query not folded (`searchFold(query)` → `query`).
+      for (final query in ['ReAdInG', 'READING', 'rEaDiNg']) {
         expect(ids(searchPlanSymbols(entries, query, en)),
             ['fixture.chair.wingback@1'],
             reason: query);
       }
-    },
-        skip: 'FINDING: a mixed-case tag cannot exist under the kit '
-            'contract (K2); the assertion `tags.first == "Reading"` cannot '
-            'hold. Awaiting a ruling (Task 13 report).');
+    });
 
     test('a category that is not contiguous in the library is one group', () {
       // The 09a fixture: sofa (Living Room), nightstand (Bed Room),
