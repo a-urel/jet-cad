@@ -385,6 +385,24 @@ void main() {
       await tester.pump();
     }
     expect(got.single.name, 'plan.json');
+    for (var i = 0; i < 200 && !c.pageFlows.ready.value; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)));
+      await tester.pump();
+    }
+
+    // Ctrl+E as the button: PlanShortcuts lets the chord through.
+    // M-ED-X3: PlanShortcuts' Export chord asks for a page.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyE);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    await tester.pump();
+    expect(byKey('export-dialog'), findsOneWidget);
+    expect(byKey('export-format-plan.pdf'), findsNothing);
+    await tester.tap(byKey('export-cancel'));
+    await tester.pump();
+    await tester.pump();
 
     // With a page, the page exporters are back.
     final paged = PlanController(

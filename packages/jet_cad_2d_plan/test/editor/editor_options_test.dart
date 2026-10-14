@@ -600,6 +600,7 @@ void main() {
       final h = await mountOptions(tester,
           permissions:
               PlanPermissions.full.copyWith(export: false, undo: false));
+      // M-ED-13: the Export command ignores `permissions.export`.
       for (final k in ['toolbar-export', 'toolbar-undo', 'toolbar-redo']) {
         expect(byKey(k), findsNothing, reason: k);
       }
@@ -613,7 +614,6 @@ void main() {
 
       h.c.permissions = PlanPermissions.full;
       await tester.pump();
-      // M-ED-13: the Export command ignores `permissions.export`.
       for (final k in ['toolbar-export', 'toolbar-undo', 'toolbar-redo']) {
         expect(byKey(k), findsOneWidget, reason: k);
       }
