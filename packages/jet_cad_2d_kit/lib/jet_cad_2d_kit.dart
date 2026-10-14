@@ -7,6 +7,8 @@
 library;
 
 export 'src/kit/bundled_library.dart';
+export 'src/kit/colour.dart';
 export 'src/kit/plan_kit.dart';
+export 'src/kit/properties.dart';
 export 'src/kit/symbol_library_source.dart';
 export 'src/model/model.dart';

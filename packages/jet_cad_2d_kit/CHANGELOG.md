@@ -9,3 +9,7 @@
 - The authoring toolkit (pure Dart): the catalog language,
   `encodeLibrary`, the shared shape helpers, the geometry snapshot and the
   conformance test.
+- Property specs (`LengthProperty`, `AngleProperty`, `NumberProperty`,
+  `ChoiceProperty`, `ToggleProperty`, `TextProperty`, `ValueDisplay`,
+  `ActionProperty`), their erased binding `PropertyField`, `PlanGate`,
+  `ValueUnit` and `ColourTarget`.
