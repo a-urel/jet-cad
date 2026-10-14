@@ -6,7 +6,8 @@ import 'package:test/test.dart';
 import 'support/frozen_clients.dart';
 
 /// The recorded calls, without the survey's reach and references of every
-/// object.
+/// object. The isolation pass's `placeBox` of every other contributor is
+/// kept: tests that see it name it.
 List<String> beyondSurvey() => [
       for (final c in hookCalls)
         if (!c.startsWith('reach ') && !c.startsWith('references ')) c,
@@ -22,9 +23,17 @@ void main() {
     final depth = s.doc.commands.undoDepth;
     resetHooks();
     expect(s.system.probe(hN), isNull);
-    // M-E2p-plan: neither dissolves nor generate runs.
-    expect(beyondSurvey(),
-        ['pageKey tile', 'dissolves N', 'generate N', 'diagnose N']);
+    // M-E2p-plan: neither dissolves nor generate runs. The isolation pass
+    // asks the other contributors, P and Q, for their place boxes first
+    // (fix round 1); M-E2p-placeiso drops them.
+    expect(beyondSurvey(), [
+      'placeBox P',
+      'placeBox Q',
+      'pageKey tile',
+      'dissolves N',
+      'generate N',
+      'diagnose N',
+    ]);
     expect(encoded(s.doc), before);
     expect(s.doc.commands.stateId, state);
     expect(s.doc.commands.undoDepth, depth);
@@ -100,5 +109,23 @@ void main() {
       expect(s.system.probe(h), isNull, reason: h.toHex());
     }
     expect(hookCalls, isEmpty);
+  });
+
+  test(
+      "E2-P6 a broken contributor's place box is not reported as a reader's, "
+      'and the reader reads without it', () {
+    final s = frozenScene(tiles: false, places: true);
+    final before = encoded(s.doc);
+    final state = s.doc.commands.stateId;
+    resetHooks();
+    failingHooks.add('placeBox P');
+    // M-E2p-placeiso: S's generate meets P's place box through placedIn.
+    expect(s.system.probe(hS), isNull);
+    expect(scopeSights['S'], [hQ], reason: 'P is left out of the view');
+    expect(hookCalls, contains('generate S'));
+    expect(s.system.probe(hQ), isNull);
+    expect(s.system.probe(hP), const HookFailure('placeBox P'));
+    expect(encoded(s.doc), before);
+    expect(s.doc.commands.stateId, state);
   });
 }

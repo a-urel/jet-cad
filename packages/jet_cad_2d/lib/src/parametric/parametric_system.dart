@@ -724,8 +724,14 @@ class ParametricSystem {
   /// In isolation: another live object whose own `reach` or `references`
   /// throws is left out of that survey, as it will be once frozen, so its
   /// error is never reported as [object]'s. Finding them takes one `reach`
-  /// and one `references` call per live object before the survey's own. A
-  /// probe is O(live objects), and is on neither the frame nor the edit path.
+  /// and one `references` call per live object before the survey's own.
+  /// Then every other live place contributor is asked for its `placeBox`
+  /// over that survey, since any view's `placedIn` runs it (a reader's
+  /// `generate`, say): one that throws is left out too, and the survey is
+  /// taken again without it, so a reader is never blamed for a
+  /// contributor's box. The view keeps the boxes asked, so a healthy
+  /// contributor's `placeBox` runs once. A probe is O(live objects), and is
+  /// on neither the frame nor the edit path.
   ///
   /// Null, with no hook called, for a handle that is not a live object of
   /// this system: not a root-level group named by a registered type, or
@@ -750,14 +756,27 @@ class ParametricSystem {
         }
       }
       final frozen = _frozen;
-      final s = _survey(
-          document,
-          _types,
-          broken.isEmpty
-              ? frozen
-              : (Handle h) =>
-                  broken.contains(h) || (frozen != null && frozen(h)));
-      final view = ParametricView._(document, s);
+      bool Function(Handle)? isolated() => broken.isEmpty
+          ? frozen
+          : (Handle h) => broken.contains(h) || (frozen != null && frozen(h));
+      var s = _survey(document, _types, isolated());
+      var view = ParametricView._(document, s);
+      // Another contributor's `placeBox` runs inside any `placedIn` of this
+      // view: ask each first, and leave a thrower out like a broken `reach`.
+      var placeBroken = false;
+      for (final MapEntry(key: h, value: r) in s.objects.entries) {
+        if (h == object || !r.type.contributesPlace) continue;
+        try {
+          view.placeBoxOf(h);
+        } catch (_) {
+          broken.add(h);
+          placeBroken = true;
+        }
+      }
+      if (placeBroken) {
+        s = _survey(document, _types, isolated());
+        view = ParametricView._(document, s);
+      }
       final type = registration.type;
       type.pageKey(view.page);
       if (type.contributesPlace && view.placeBoxOf(object) != null) {
