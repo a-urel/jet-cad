@@ -412,7 +412,22 @@ with 0.7.0 (below).
   `tool/ci` is in the tall format and CI formats the host probe at its own
   `--language-version=3.6`. The archived ledger stops at #11's review
   round; #12's rounds are recorded here and in the spec's amendments only.
-  Sub-project 2's inputs, R1-R7, are in the contract spec. The human asked to be told when
+  Sub-project 2's inputs, R1-R7, are in the contract spec. **Sub-project 2 is
+  split in two** (the human, 2026-10-14: *"İkiye böl"*). **2a, the plan library
+  in design mode** (`jet_cad_2d_plan` 0.8.0 unreleased, the contract's code
+  side in `jet_cad_2d_kit`, engine seams E1-E4): spec
+  [2026-10-14-plan-library-design-mode-design.md](docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md)
+  (rev 3, two Opus reviews), plan
+  [2026-10-14-plan-library-2a.md](docs/superpowers/plans/2026-10-14-plan-library-2a.md)
+  (21 tasks), results
+  [2026-10-14-plan-library-2a-results.md](docs/superpowers/notes/2026-10-14-plan-library-2a-results.md),
+  ledger [docs/superpowers/ledgers/2026-10-14-plan-library-2a/](docs/superpowers/ledgers/2026-10-14-plan-library-2a/).
+  Complete on `feat/plan-library-2a` (worktree
+  `.claude/worktrees/plan-library-2a`), every task reviewed, whole-branch Opus
+  review with one fix wave, re-review clean; **not merged, not pushed**. One
+  host-API difference awaits the human's word (A14): `selectTool` works with
+  no view mounted (today it answers false). Next: 2b, the service mode, from
+  a brainstorm. The human asked to be told when
   `apps/architecture_demo` runs on the new packages (the end of
   sub-project 3) and to have everything tested after sub-project 4.
 
@@ -545,9 +560,10 @@ run by hand). See `tool/ci/standing_failures.txt` and `standing_skips.txt`.
 ## Resume here
 
 **In flight: the kit architecture. Sub-project 1 (`jet_cad_2d_kit`) is
-merged (PR #11 `bc705be`, PR #12 `27244bf`); next, sub-project 2's spec
-(`jet_cad_2d_plan` and the contract's code side), whose inputs R1-R7 are in
-the contract spec** (In flight). Its worktree is cut by hand from `main`.
+merged (PR #11 `bc705be`, PR #12 `27244bf`). Sub-project 2a (the plan library
+in design mode) is complete on `feat/plan-library-2a`, not merged, not
+pushed; its merge waits for the human's word. Next: 2b (the service mode),
+from a brainstorm** (In flight).
 
 **Done 2026-10-13: 0.7.2 of the three packages**, published by the human in
 order (spec D11): `jet_cad_2d`, `jet_cad_2d_flutter`, `jet_cad_floor_plan`,
