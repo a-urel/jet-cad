@@ -667,7 +667,9 @@ class PlanController extends ChangeNotifier {
         damage: _damage);
     session.lockExpander
       ..onHookFailure = session.boundary.recover
-      ..onPartialMutation = session.boundary.partialMutation;
+      ..onPartialMutation = session.boundary.partialMutation
+      ..onRefusedEdit = session.boundary.recoverRefused
+      ..onRetryFailed = session.boundary.retryFailed;
     session.runKitFactories(kits, _services, _disabledTools);
     session.tools.addListener(_onTools);
     session.history = document.commands.changes.listen((_) {

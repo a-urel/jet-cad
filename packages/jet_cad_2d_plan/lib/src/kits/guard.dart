@@ -634,6 +634,27 @@ final class FailureBoundary {
     return broken;
   }
 
+  /// An edit failed on an error no kit hook threw (the planner refusing
+  /// what a `generate` returned; final review, finding I2): every live kit
+  /// object is probed, one by one, and the failing ones frozen and locked,
+  /// each with its type's diagnostic. True when one was: the edit is worth
+  /// one retry. False when none fails: the edit itself is refused.
+  bool recoverRefused(Object error) {
+    final broken = _probeAll();
+    if (broken.isEmpty) return false;
+    _freeze(broken);
+    return true;
+  }
+
+  /// The retry after [recoverRefused] (or [recover]) failed again on an
+  /// error no kit hook threw: the edit is refused, with one diagnostic.
+  void retryFailed(Object error) => log.add(KitDiagnostic(
+      kitId: 'plan',
+      code: KitDiagnosticCode.hookFailed,
+      message: 'an edit failed again after the objects that broke it were '
+          'locked: $error',
+      error: error));
+
   /// After a load: one dry run of the whole plan. While it throws, the
   /// objects to blame are frozen and locked, with their diagnostics, and it
   /// runs again: on a kit's hook failure, that type's failing objects; when
@@ -671,7 +692,7 @@ final class FailureBoundary {
 
   /// Every live, unfrozen root-level kit object whose probe (E2) fails,
   /// each reported as its type's: the per-object check of a load whose dry
-  /// run failed on no single type.
+  /// run failed on no single type, and of an edit that failed on no hook.
   Set<Handle> _probeAll() {
     final broken = <Handle>{};
     final root = document.rootHandle;

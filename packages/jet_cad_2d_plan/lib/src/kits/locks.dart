@@ -202,9 +202,23 @@ final class LockExpander {
   /// (E3), before the error goes on to the caller (Task 11).
   void Function(PartialMutationError error)? onPartialMutation;
 
+  /// Called when the applied command threw an error no kit hook threw and
+  /// that is no refusal (the engine's planner refusing what a `generate`
+  /// returned): true when it froze something, so the edit is worth one
+  /// retry (final review, finding I2).
+  bool Function(Object error)? onRefusedEdit;
+
+  /// Called when the one retry after a recovery failed again on an error
+  /// no kit hook threw and that is no refusal, before it goes on to the
+  /// caller: the refusal's diagnostic (final review, finding I2).
+  void Function(Object error)? onRetryFailed;
+
   DraftCommand _expand(DraftCommand command) {
     final inner = expandInner(command);
-    if (locks.isEmpty && onHookFailure == null && onPartialMutation == null) {
+    if (locks.isEmpty &&
+        onHookFailure == null &&
+        onPartialMutation == null &&
+        onRefusedEdit == null) {
       return inner;
     }
     return _LockCheck(this, command, inner);
@@ -255,20 +269,45 @@ final class _LockCheck extends DraftCommand {
     }
   }
 
-  /// [_applied] applied; on a kit's hook failure that the boundary
-  /// recovers from (it froze the failing objects), [original] expanded
-  /// afresh (a ParametricEdit applies once) and applied once more. A second
-  /// failure goes on: the command is refused.
+  /// [_applied] applied; on a failure that the boundary recovers from (it
+  /// froze the failing objects), [original] expanded afresh (a
+  /// ParametricEdit applies once) and applied once more. The failures it
+  /// recovers from: a kit's hook failure, and an error no hook threw that
+  /// is no refusal (the planner refusing a `generate`'s output, final
+  /// review I2). A second failure goes on: the command is refused, one
+  /// diagnostic when no hook threw it.
   CommandResult _first(CommandTarget target) {
     try {
       return _applied.apply(target);
     } on KitHookFailure catch (failure) {
       final recover = _expander.onHookFailure;
       if (recover == null || !recover(failure)) rethrow;
-      _applied = _expander.expandInner(original);
+    } catch (error) {
+      if (_isRefusal(error)) rethrow;
+      final recover = _expander.onRefusedEdit;
+      if (recover == null || !recover(error)) rethrow;
+    }
+    _applied = _expander.expandInner(original);
+    try {
       return _applied.apply(target);
+    } catch (error) {
+      if (error is! KitHookFailure && !_isRefusal(error)) {
+        _expander.onRetryFailed?.call(error);
+      }
+      rethrow;
     }
   }
+
+  /// An answer of the engine or the lock about the edit itself, never a
+  /// broken object's: no probe, no retry. A [PartialMutationError] leaves
+  /// the target unknown, so it is never retried either.
+  static bool _isRefusal(Object error) =>
+      error is PlanLocked ||
+      error is PartialMutationError ||
+      error is NonLiveWriteError ||
+      error is DanglingReferenceError ||
+      error is PermissionDeniedError ||
+      error is GeneratedGeometryError;
 
   CommandResult _check(CommandTarget target, CommandResult result) {
     final locks = _expander.locks;

@@ -4,7 +4,9 @@
 // and the edit run once more; a second failure refuses it with one
 // diagnostic. A load probes once. A component its factory cannot read is
 // kept raw, locked and frozen (E4). A rollback that throws damages the
-// plan (E3), and saving a damaged plan first reads it back.
+// plan (E3), and saving a damaged plan first reads it back. An edit the
+// planner refuses on no hook probes every kit object instead (final
+// review, I2).
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -494,6 +496,101 @@ void main() {
     expect(d.commands.canRedo, isFalse);
     expect(diagnosticsOf(c, KitDiagnosticCode.rollbackFailed), hasLength(1));
   });
+
+  test(
+      'F-15 (final review I2) a square whose generate the planner refuses '
+      '(no hook throws): its own edit is refused once, with the square '
+      'frozen, locked and one diagnostic; its neighbour then edits', () {
+    final s = refusedScene();
+    final c = s.c;
+    final d = c.document;
+    final drawn = coordsOf(d, s.broken);
+    // M-F15a: the controller not setting `LockExpander.onRefusedEdit`: the
+    // edit is refused by the planner, nothing is locked or reported, and
+    // the neighbour's edit below is refused as well.
+    expect(
+        c.execute(TransformNodeCommand(s.broken, nearSquare(100.5, 50.25, 0))),
+        isFalse);
+    expect(c.lockHint.value, isTrue, reason: 'the retry met the lock');
+    expect(c.locked.value, {s.broken});
+    expect(c.frozen, {s.broken});
+    final failures = diagnosticsOf(c, KitDiagnosticCode.hookFailed);
+    expect([for (final f in failures) (f.kitId, f.subject)],
+        [('box', SquareParams.id)]);
+    final before = coordsOf(d, s.neighbour);
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            s.neighbour, const SquareParams(side: 1010.5))),
+        isTrue);
+    expect(coordsOf(d, s.neighbour), isNot(before), reason: 'regenerated');
+    expect(coordsOf(d, s.broken), drawn,
+        reason: 'the broken one keeps its geometry');
+    expect(diagnosticsOf(c, KitDiagnosticCode.hookFailed), hasLength(1));
+  });
+
+  test(
+      'F-15b (final review I2) the neighbour edits first: the edit is not '
+      'refused; the refused square is frozen and locked on the way', () {
+    final s = refusedScene();
+    final c = s.c;
+    final d = c.document;
+    final before = coordsOf(d, s.neighbour);
+    // M-F15a again: the neighbour's edit is refused, nothing locked.
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            s.neighbour, const SquareParams(side: 1010.5))),
+        isTrue);
+    expect(coordsOf(d, s.neighbour), isNot(before));
+    expect(c.locked.value, {s.broken});
+    expect(c.lockHint.value, isFalse);
+    expect(diagnosticsOf(c, KitDiagnosticCode.hookFailed), hasLength(1));
+  });
+
+  test(
+      'F-15c (final review I2) the planner refuses the edit\'s own new '
+      'value, and no stored object fails its probe: refused, nothing '
+      'locked, no diagnostic, the document unchanged', () {
+    final s = refusedScene(poisoned: false);
+    final c = s.c;
+    final d = c.document;
+    final before = canon(d);
+    final depth = d.commands.undoDepth;
+    // M-F15c: `recoverRefused` answering true when nothing froze: the
+    // retry fails again and reports a diagnostic for a plain refusal.
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            s.neighbour, const SquareParams(side: 950.5, poisoned: true))),
+        isFalse);
+    expect(canon(d), before);
+    expect(d.commands.undoDepth, depth);
+    expect(c.locked.value, isEmpty);
+    expect(c.diagnostics.value, isEmpty);
+  });
+
+  test(
+      'F-15d (final review I2) a stored square the planner refuses, and an '
+      'edit whose own new value it refuses too: the stored one is frozen and '
+      'locked, the retry fails, and the edit is refused with a diagnostic', () {
+    final s = refusedScene();
+    final c = s.c;
+    final d = c.document;
+    final drawn = coordsOf(d, s.neighbour);
+    // M-F15d: the controller not setting `LockExpander.onRetryFailed`:
+    // the second refusal reports nothing.
+    expect(
+        c.execute(SetComponentCommand<SquareParams>(
+            s.neighbour, const SquareParams(side: 950.5, poisoned: true))),
+        isFalse);
+    expect(c.locked.value, {s.broken});
+    expect(coordsOf(d, s.neighbour), drawn);
+    expect([
+      for (final f in diagnosticsOf(c, KitDiagnosticCode.hookFailed))
+        (f.kitId, f.subject)
+    ], [
+      ('box', SquareParams.id),
+      ('plan', null),
+    ]);
+  });
 }
 
 /// Applies [inner]; its undo works, and the redo after it applies and then
@@ -581,4 +678,21 @@ final class _Refusing extends DraftCommand {
   String get label => 'Refusing';
   @override
   CommandResult apply(CommandTarget target) => throw error;
+}
+
+/// The final review's I2 scene: a square ([poisoned]: its `generate` adds
+/// an open region the planner refuses, and no hook throws) and a healthy
+/// square overlapping it, both off the origin and turned.
+({PlanController c, Handle broken, Handle neighbour}) refusedScene(
+    {bool poisoned = true}) {
+  final sw = Switches();
+  final c = PlanController(kits: [boxKit(sw)]);
+  addTearDown(c.dispose);
+  final d = c.document;
+  final broken =
+      addObject(d, atSquare, SquareParams(side: 1200, poisoned: poisoned));
+  final neighbour = addObject(
+      d, nearSquare(300.5, 200.25, 0.2), const SquareParams(side: 900));
+  sw.failing.add('openRegion');
+  return (c: c, broken: broken, neighbour: neighbour);
 }
