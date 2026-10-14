@@ -665,7 +665,7 @@ table (A14) takes these rows over and adds the test for each.
 | Today | Where |
 |---|---|
 | `FloorPlanController(json:)`, `designJson`, `markSaved`, `dirty`, `load` (a `FormatException`, nothing changed), `newPlan` (the locale's separator) | 2a: `PlanController(json:)`, `save`, `markSaved`, `dirty`, `load`, `newPlan` (P2) |
-| `designChanges` | 2a: `changes` (`PlanChange`) |
+| `designChanges` | 2a: `changes` (`PlanChange`), object-level; amended by 2b: its unit-level events are 2b's `unitChanges` |
 | `selectTool(FloorPlanTool)`, `deleteSelection`, `undo`, `redo` | 2a: by tool id (P2) |
 | `exportPlan(choice, {name})` → `FloorPlanExport?` (bytes, name, MIME type) and its rules; `printPlan({printer, name})` → `bool`; `onExport`; the view's `exportName` | 2a: `export` → `PlanExport?`, `print` → `bool`, the same rules, `PlanEditor(exportName:)` (P2) |
 | `undo`/`redo` doing nothing mid-shape; `canUndo`/`canRedo` listenable | 2a (P2) |
