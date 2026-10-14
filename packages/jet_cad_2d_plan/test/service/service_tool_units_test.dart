@@ -118,6 +118,11 @@ void main() {
     expect(r.taps, ['A2']);
     expect(r.groupTaps, ['g:A2']);
     expect(r.keys, isEmpty, reason: 'a tap selects nothing');
+    // A group's selectable members exclude a locked one, so a grouped tap
+    // selects nothing either way: a lone locked seat pins the rule itself.
+    r.tap(r.inside(f.seatsA[4]), time: const Duration(seconds: 1));
+    expect(r.taps, ['A2', 'A5']);
+    expect(r.keys, isEmpty, reason: 'a lone locked seat\'s tap selects none');
 
     // Under toggle a locked press starts no timer (T:236-243): held past
     // the long press, it is a tap.
