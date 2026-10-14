@@ -21,6 +21,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   jet_cad_2d: ^0.7.2
   jet_cad_2d_flutter: ^0.7.2
   jet_cad_2d_kit: ^0.1.0
@@ -31,3 +33,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   lints: ^6.1.0
+
+flutter:
+  assets:
+    - lib/fonts/Roboto-Regular.ttf
+    - assets/fonts/Roboto_LICENSE.txt

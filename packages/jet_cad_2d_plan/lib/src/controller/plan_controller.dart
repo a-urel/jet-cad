@@ -17,6 +17,8 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import '../file/manifest.dart';
 import '../file/plan_file.dart';
 import '../kits/kit_set.dart';
+import '../l10n/document_separator.dart';
+import '../l10n/strings.dart';
 import '../export/registries.dart';
 import '../symbols/plan_symbols_state.dart';
 import 'camera_bounds.dart';
@@ -255,6 +257,15 @@ class PlanController extends ChangeNotifier {
   /// The last locale a widget reported, for [newPlan].
   Locale? _reported;
 
+  /// The language class the last report carried (a host's own, NS7), or
+  /// null when it carried none.
+  PlanStrings? _reportedStrings;
+
+  /// A new plan's separator under [locale]: the reported class's, else the
+  /// built-in language's.
+  DecimalSeparator _separatorOf(Locale locale) =>
+      documentSeparatorFor(_reportedStrings ?? PlanStrings.forLocale(locale));
+
   /// The plan's text: the engine's JSON with the manifest of the kits it
   /// uses (Task 7). [markSaved] marks the state encoded here. An empty plan
   /// read here is settled as it is.
@@ -308,9 +319,7 @@ class PlanController extends ChangeNotifier {
     settlePendingInput();
     final reported = _reported;
     final separator = given ??
-        (reported == null
-            ? DecimalSeparator.point
-            : decimalSeparatorFor(reported));
+        (reported == null ? DecimalSeparator.point : _separatorOf(reported));
     final measurer = FlutterTextMeasurer();
     _replace(
         newPlanDocument(measurer,
@@ -556,20 +565,23 @@ class PlanController extends ChangeNotifier {
     return commands.stateId == u.at && !commands.canRedo;
   }
 
-  /// A widget's locale (floor_plan_controller.dart:1028-1045): kept for
-  /// [newPlan] and the kits' words. An unsettled, untouched plan takes its
-  /// separator now, as if made so: the page's command, then the history
-  /// cleared and the save point moved, so it stays clean with no step.
+  /// A widget's locale (floor_plan_controller.dart:1028-1045) and, when it
+  /// has one, its language class [strings] (a host's own gives its own
+  /// separator, NS7): kept for [newPlan] and the kits' words. An
+  /// unsettled, untouched plan takes its separator now, as if made so: the
+  /// page's command, then the history cleared and the save point moved, so
+  /// it stays clean with no step.
   @internal
-  void reportLocale(Locale locale) {
+  void reportLocale(Locale locale, {PlanStrings? strings}) {
     _locale.value = locale;
     _reported = locale;
+    _reportedStrings = strings;
     final untouched = _untouched;
     _unsettled = null;
     if (!untouched) return;
     final d = document;
     final page = d.components.get<PageComponent>(d.rootHandle)!;
-    final separator = decimalSeparatorFor(locale);
+    final separator = _separatorOf(locale);
     if (page.decimalSeparator == separator) return;
     d.commands.execute(SetComponentCommand<PageComponent>(
         d.rootHandle, page.copyWith(decimalSeparator: separator)));

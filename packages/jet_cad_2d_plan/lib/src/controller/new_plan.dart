@@ -7,6 +7,9 @@ import 'dart:ui' show Locale;
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 
+import '../l10n/document_separator.dart';
+import '../l10n/strings.dart';
+
 /// A4 landscape at 1:50 in metres, every field at its default, with a
 /// fixed origin that centres the sheet on the world origin.
 PageComponent defaultPlanPage(
@@ -29,12 +32,9 @@ DraftDocument newPlanDocument(TextMeasurer measurer,
   return doc;
 }
 
-/// The separator a new plan takes in [locale]'s language: comma for the
-/// built-in German and Turkish, point otherwise (today's
-/// `documentSeparatorFor` over `FloorPlanStrings.forLocale`). Task 9 reads
-/// it from `PlanStrings`, which gives the same answers.
+/// The separator a new plan takes in [locale]'s language: the built-in
+/// language's ([PlanStrings.forLocale]), so comma for German and Turkish,
+/// point otherwise (today's `documentSeparatorFor` over
+/// `FloorPlanStrings.forLocale`): the plan library's one mapping.
 DecimalSeparator decimalSeparatorFor(Locale locale) =>
-    switch (locale.languageCode) {
-      'de' || 'tr' => DecimalSeparator.comma,
-      _ => DecimalSeparator.point,
-    };
+    documentSeparatorFor(PlanStrings.forLocale(locale));

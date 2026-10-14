@@ -18,5 +18,6 @@ export 'src/kit/plan_services.dart';
 export 'src/kit/plan_tool.dart';
 export 'src/kit/plan_type.dart';
 export 'src/kit/properties.dart';
+export 'src/kit/swatch.dart';
 export 'src/kit/symbol_library_source.dart';
 export 'src/model/model.dart';

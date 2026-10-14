@@ -22,3 +22,5 @@
 - `retired` on `jetcad.symbol` and `CatalogSymbol`, written only when true;
   `conformance` takes `typeIds`, `toolIds` and `propertyIds`; rule 11
   refuses a unit outline by its width, 2·area/perimeter, not by its area.
+- `PlanSwatch`, the plan's eight-colour palette, and `planSwatchNamed`:
+  kits name a swatch without depending on the plan library.

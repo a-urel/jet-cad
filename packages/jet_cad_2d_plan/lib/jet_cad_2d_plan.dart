@@ -23,5 +23,13 @@ export 'src/file/manifest.dart'
         usedKits;
 export 'src/file/plan_file.dart';
 export 'src/file/plan_format_exception.dart';
+export 'src/fonts/plan_fonts.dart'
+    show ensurePlanFonts, kPlanFontFamily, registerFontLicences;
 export 'src/kits/kit_set.dart';
+export 'src/l10n/localizations.dart';
+export 'src/l10n/strings.dart';
+export 'src/l10n/strings_de.dart';
+export 'src/l10n/strings_en.dart';
+export 'src/l10n/strings_tr.dart';
 export 'src/symbols/plan_symbols_state.dart';
+export 'src/theme/plan_theme.dart' show PlanTheme;
