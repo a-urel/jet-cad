@@ -443,4 +443,45 @@ void main() {
     expect(canon(doc), moved);
     expect(drift(doc), isEmpty);
   });
+
+  test(
+      'E5-move a regenerated row with a new seat definition and a new bend '
+      'keeps its seats (handles, components), points them at the new '
+      'definition and re-places them; one undo restores the bytes '
+      '(M-E5-def-set, M-E5-transform-set)', () {
+    final doc = hall();
+    final before = seats(doc, hRow2);
+    expect(before, hasLength(5));
+    doc.commands.execute(CompoundCommand([
+      for (var i = 0; i < before.length; i++)
+        SetComponentCommand<SeatNote>(before[i].handle, SeatNote('m${i + 1}')),
+    ], label: 'Notes'));
+    final noted = canon(doc);
+    final depth = doc.commands.undoDepth;
+    final next = row2.copyWith(seat: hStool, bend: 0.3125, spacing: 640.75);
+    // Premise: the new placements differ from the old ones.
+    for (var i = 1; i < before.length; i++) {
+      expect(seatAt(next, i).equals(seatAt(row2, i), exact), isFalse);
+    }
+
+    doc.commands.execute(SetComponentCommand<Row>(hRow2, next));
+    final after = seats(doc, hRow2);
+    expect(
+        [for (final s in after) s.handle], [for (final s in before) s.handle]);
+    for (var i = 0; i < after.length; i++) {
+      final why = 'seat ${i + 1}';
+      expect(after[i].definition, hStool, reason: why);
+      expect(after[i].transform.equals(seatAt(next, i), exact), isTrue,
+          reason: why);
+      expect(
+          doc.components.get<SeatNote>(after[i].handle), SeatNote('m${i + 1}'),
+          reason: why);
+    }
+    expect(doc.commands.undoDepth, depth + 1);
+    expect(drift(doc), isEmpty);
+
+    doc.commands.undo();
+    expect(canon(doc), noted);
+    expect(drift(doc), isEmpty);
+  });
 }
