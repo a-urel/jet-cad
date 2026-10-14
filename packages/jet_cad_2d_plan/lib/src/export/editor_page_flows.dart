@@ -49,8 +49,7 @@ List<PlanExporter> exportersFor(
 /// for a plan with no page). With only the built-in exporters this is
 /// today's rule (spec 13 D8): Export needs the page.
 bool exportRunnable(PlanController controller) =>
-    controller.page.value != null ||
-    controller.exporters.any((e) => e is! PlanPageExporter);
+    exportersFor(controller.document, controller.exporters).isNotEmpty;
 
 /// The two flows of one editor view, for its controller.
 class EditorPageFlows {

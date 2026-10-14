@@ -160,6 +160,9 @@ class _PlanCanvasState extends State<PlanCanvas> {
     final old = oldWidget.controller;
     if (!identical(old, _c)) {
       _leave(old);
+      // RV6: the old controller is shown by no canvas now (unless another
+      // shows it): its shape in progress does not stay part-way.
+      _withdrawTool(old);
       old.removeListener(_onController);
       old.lockHint.removeListener(_onHint);
       _hintTimer?.cancel();

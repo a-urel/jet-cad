@@ -6,7 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_plan/src/canvas/plan_canvas.dart';
 import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
 import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
@@ -18,6 +19,7 @@ import 'package:jet_cad_2d_plan/src/panels/plan_layer_panel.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_page_panel.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_property_panel.dart';
 import 'package:jet_cad_2d_plan/src/panels/plan_symbol_gallery.dart';
+import 'package:jet_cad_2d_plan/src/symbols/plan_symbols_state.dart';
 import 'package:jet_cad_2d_plan/src/theme/plan_theme.dart';
 
 import '../support/editor_host.dart';
@@ -26,6 +28,7 @@ import '../support/fake_page_printer.dart';
 import '../support/layer_plan.dart';
 import '../support/mark_kit.dart';
 import '../support/recording_exporters.dart';
+import '../support/symbol_fixtures.dart' show demoKit;
 
 const _en = PlanStringsEn();
 
@@ -320,17 +323,35 @@ void main() {
             .message,
         _en.lockedNoLayer);
 
-    // A swap: the selection is the new plan's (empty), then a mark of it
-    // on layer B shows B, enabled as nothing in the new plan is broken.
-    final other = layerPlan(objects: true);
+    // A swap to another plan: its selection is empty; then its mark on its
+    // own layer D (no layer D in the first plan) shows D, enabled as
+    // nothing in the new plan is broken.
+    // M-ED-L3: the property panel never rebinds to the new document (the
+    // rebinds in `_onController` and in `build` removed).
+    final other = layerPlan(
+        objects: true,
+        more: (doc, a, b, c) {
+          final zero = doc.tables.layers[ReservedHandles.layerZero]!;
+          final d = doc.handleSeed.next();
+          doc.commands.execute(AddLayerCommand(LayerRecord(
+              handle: d,
+              name: 'D',
+              color: const IndexedColor(4),
+              linetype: zero.linetype,
+              lineweight: zero.lineweight,
+              transparency: zero.transparency,
+              visible: true,
+              locked: false)));
+          return [addMark(doc, d, at: placed(-2650.25, -1830.5, 0.85))];
+        });
     c.load(other.controller.save());
     await tester.pump();
     await tester.pump();
     expect(byKey('layer-picker'), findsNothing,
         reason: 'the new plan\'s selection is empty');
-    c.selection.replace([SelectionKey.root(marksOf(c).first)]);
+    c.selection.replace([SelectionKey.root(other.marks.last)]);
     await tester.pump();
-    expect(tester.widget<Text>(byKey('layer-picker-value')).data, 'A');
+    expect(tester.widget<Text>(byKey('layer-picker-value')).data, 'D');
     expect(picker().enabled, isTrue,
         reason: 'the old plan\'s lock is not the new plan\'s');
   });
@@ -469,5 +490,149 @@ void main() {
     await tester.pump();
     expect(c.isDisposed, isTrue);
     expect(tester.takeException(), isNull);
+  });
+
+  group('the options a host passes through (review Important 1)', () {
+    testWidgets('ED-P1 toolPalette false and no symbols: no left column at all',
+        (tester) async {
+      final c = editorController();
+      await pumpEditor(tester, PlanEditor(controller: c, toolPalette: false));
+      // M-ED-P1: `_leftShown` drops `if (!widget.toolPalette) return false;`.
+      expect(byKey('chrome-left'), findsNothing);
+      expect(find.byType(PlanToolPalette), findsNothing);
+      expect(find.byType(PlanCanvas), findsOneWidget);
+    });
+
+    testWidgets(
+        'ED-P2 toolPalette false with a kit\'s symbols: the gallery alone, '
+        'no tabs and no palette', (tester) async {
+      final c = PlanController(kits: [slowSymbolsKit()]);
+      addTearDown(c.dispose);
+      await pumpEditor(tester, PlanEditor(controller: c, toolPalette: false));
+      expect(byKey('chrome-left'), findsOneWidget);
+      // M-ED-P2: `_leftPanel` drops `if (!widget.toolPalette) return
+      // _galleryOf(c);` (the tabs over the palette come back).
+      expect(byKey('left-tabs'), findsNothing);
+      expect(find.byType(PlanToolPalette), findsNothing);
+      expect(
+          find.descendant(
+              of: byKey('chrome-left'),
+              matching: find.byType(PlanSymbolGallery)),
+          findsOneWidget);
+    });
+
+    testWidgets(
+        'ED-F symbolFilter reaches the gallery: a symbol it refuses has no '
+        'cell, the others keep theirs', (tester) async {
+      final c =
+          PlanController(kits: [markKit(), demoKit()], json: editorPlanJson());
+      addTearDown(c.dispose);
+      await pumpEditor(
+          tester,
+          PlanEditor(
+              controller: c, symbolFilter: (s) => s.id != 'demo.bed.double@1'));
+      await tester.runAsync(() async {
+        while (c.symbolsState.value != PlanSymbolsState.ready) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      await tester.tap(byKey('tab-symbols'));
+      await tester.pump();
+      await tester.pump();
+      expect(byKey('symbol-cell-demo.bed.single@1'), findsOneWidget,
+          reason: 'premise: the gallery shows the library');
+      // M-ED-F: the editor hands the gallery `filter: null`.
+      expect(byKey('symbol-cell-demo.bed.double@1'), findsNothing);
+    });
+
+    testWidgets(
+        'ED-S shortcuts false: a tool letter reaches the host\'s binding and '
+        'arms nothing', (tester) async {
+      final c = editorController();
+      var reached = 0;
+      await tester.binding.setSurfaceSize(const Size(1440, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+              body: CallbackShortcuts(bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyL): () => reached++,
+      }, child: PlanEditor(controller: c, shortcuts: false)))));
+      await tester.pump();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL);
+      await tester.pump();
+      // M-ED-S: the editor hands PlanShortcuts `shortcuts: true`.
+      expect(reached, 1);
+      expect(c.activeTool.value, 'plan.select');
+    });
+
+    bool canvasFocused() {
+      final context = FocusManager.instance.primaryFocus?.context;
+      return context != null &&
+          context.findAncestorWidgetOfExactType<InteractionLayer>() != null;
+    }
+
+    testWidgets(
+        'ED-A1 by default the canvas takes the focus (a positive '
+        'control)', (tester) async {
+      final c = editorController();
+      await pumpEditor(tester, PlanEditor(controller: c));
+      expect(canvasFocused(), isTrue);
+    });
+
+    testWidgets('ED-A2 autofocus false: the canvas does not take the focus',
+        (tester) async {
+      final c = editorController();
+      await pumpEditor(tester, PlanEditor(controller: c, autofocus: false));
+      // M-ED-A: the editor hands the canvas `autofocus: true`.
+      expect(canvasFocused(), isFalse);
+    });
+
+    testWidgets(
+        'ED-E onPageFlowError receives a page flow\'s error: a printer that '
+        'fails, once; the flows are ready again', (tester) async {
+      final c = editorController();
+      final printer = FakePagePrinter()..failNext = StateError('no printer');
+      final errors = <Object>[];
+      await pumpEditor(
+          tester,
+          PlanEditor(
+              controller: c, printer: printer, onPageFlowError: errors.add));
+      await tester.tap(byKey('toolbar-print'));
+      await tester.pump();
+      for (var i = 0; i < 200 && errors.isEmpty; i++) {
+        await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)));
+        await tester.pump();
+      }
+      // M-ED-E: the editor's hooks hand the flows `onError: null`.
+      expect(errors, hasLength(1));
+      expect(errors.single, isA<StateError>());
+      expect(printer.calls, hasLength(1));
+      expect(c.pageFlows.ready.value, isTrue);
+    });
+  });
+
+  testWidgets(
+      'ED-6b (RV6) an editor handed another controller withdraws the old '
+      'one\'s tool: its polyline part-way is cancelled and plan.select '
+      'armed', (tester) async {
+    final one = editorController();
+    final two = editorController();
+    await pumpEditor(tester, PlanEditor(controller: one));
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyP);
+    await tester.pump();
+    final origin = tester.getTopLeft(find.byType(InteractionLayer));
+    await tester.tapAt(origin + const Offset(210.5, 160.25));
+    await tester.tapAt(origin + const Offset(330.75, 215.5));
+    await tester.pump();
+    expect(one.toolController.active.isMidShape, isTrue,
+        reason: 'premise: a polyline part-way');
+    await pumpEditor(tester, PlanEditor(controller: two));
+    await tester.pump();
+    // M-ED-6b: PlanCanvas.didUpdateWidget withdraws no tool of the old
+    // controller.
+    expect(one.toolController.active.isMidShape, isFalse);
+    expect(one.activeTool.value, 'plan.select');
   });
 }

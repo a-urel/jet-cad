@@ -405,7 +405,7 @@ void main() {
       expect(byKey('layers-list'), findsNothing, reason: 'still closed');
       expect(byKey('page-preset'), findsNothing);
       await setOptions(tester, h, const Options(propertyPanel: false));
-      expect(find.byType(PlanPropertyPanel), findsNothing);
+      // The source's `selection-panel` and `table-section`, one finder here.
       expect(find.byType(PlanPropertyPanel), findsNothing);
       expect(byKey('chrome-right'), findsOneWidget);
       await setOptions(
