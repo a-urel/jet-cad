@@ -714,7 +714,8 @@ class PlanController extends ChangeNotifier {
     session.addSymbolTool(PlanSymbolTool(_armed,
         attachments: session.attachments,
         canRotate: () => _permissions.rotate,
-        canMirror: () => _permissions.mirror));
+        canMirror: () => _permissions.mirror,
+        units: () => session.units.current));
     registerToolNeeds(PlanToolIds.symbol, PlanToolIds.symbolNeeds);
     _locked.value = session.locks.objects;
     session.boundary = FailureBoundary(

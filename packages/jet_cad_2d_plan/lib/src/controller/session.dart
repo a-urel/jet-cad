@@ -19,6 +19,7 @@ import '../tools/generic_tools.dart';
 import '../tools/plan_select_gates.dart';
 import '../tools/plan_symbol_tool.dart';
 import '../units/unit_index.dart';
+import '../units/unit_label_system.dart';
 import 'grip_dispatch.dart';
 import 'permissions.dart';
 import 'services.dart';
@@ -82,10 +83,12 @@ final class DocumentSession {
     for (final e in generic.byId.entries) {
       if (e.key != planSelectToolId) addTool(e.key, e.value);
     }
-    // :1050-1057: the document arrives built; the system installs last,
-    // and the lock expander stacks after it.
+    // :1050-1057: the document arrives built; the system installs last.
+    // Spec 2b S2: parametric system -> unit label system -> lock expander,
+    // so the lock checks the stamps too.
     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
       ..install();
+    labels = UnitLabelSystem(document)..install();
     lockExpander = LockExpander(document, locks)..install();
     // Spec 2b S2: the document's units, rebuilt on its state id, its
     // layers' revision and the controller's locked set. Last: it listens to
@@ -119,6 +122,9 @@ final class DocumentSession {
   late final SelectTool select;
   late final ToolController tools;
   late final ParametricSystem parametric;
+
+  /// The placed units' label stamps (spec 2b S2).
+  late final UnitLabelSystem labels;
 
   /// The document's lock set and expander (spec P4).
   late final LockSet locks;
@@ -286,6 +292,7 @@ final class DocumentSession {
     gates.dispose();
     units.dispose();
     lockExpander.dispose();
+    labels.dispose();
     parametric.dispose();
     index.dispose();
     unawaited(document.dispose());
