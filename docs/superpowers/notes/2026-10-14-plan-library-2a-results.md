@@ -471,3 +471,43 @@ One line each, in task order; the plan's line number gives the full paragraph.
 
 The ledger's deferred minors (Tasks 1-20) are not repeated here; they are the whole-branch
 review's input in `progress.md`.
+
+## Final review
+
+The whole-branch review (`.superpowers/sdd/2026-10-14-plan-library-2a/final-review.md`, at
+`2fa4cc6f`) found no critical issue, three important ones and a "should fix" list. All were
+fixed in one wave, `f44899f0..cfb221e0`; every mutation below ran on a committed file and was
+reverted with `git checkout --`, then `git diff --quiet` exited 0.
+
+| Finding | Fix | Commit | Tests | Mutation (red) |
+|---|---|---|---|---|
+| **I1** a write of a frozen object's own component escaped `execute` as a plain `StateError` (a kit tool's `hookFailed`, a rethrow from `plan.select`) | E2 amended: the engine's refusal is `NonLiveWriteError` (a `StateError`, naming `handle` and `typeId`); `_LockCheck` maps it to `PlanLocked` on a covered handle; spec E2 and its revision history record it | `f44899f0`, `c8aa854b` | E2-4, MP1/MP3/MP6 (`refusedAt`); FW-1, FW-2, FW-3 | M-E2i (thrown as `StateError`): E2-4, MP1, MP3, MP6; M-FW-1 (mapping dropped): FW-1, FW-2, FW-3 |
+| **I2** a `generate` the planner refuses (no hook throws) blocked its object and its neighbours, silently | the lock check sends an error that is no hook failure and no refusal to `FailureBoundary.recoverRefused` (every kit object probed, the failing ones frozen, locked, reported), retries once; a failed retry is one `hookFailed` of `plan` | `5b227960` | F-15, F-15b, F-15c, F-15d | M-F15a (`onRefusedEdit` unset): F-15, F-15b, F-15d; M-F15c (`recoverRefused` true when nothing froze): F-15c; M-F15d (`onRetryFailed` unset): F-15d |
+| **I3** the Task 13 ruling: a successful retry keeps a source's `libraryUnreadable` | `DiagnosticsLog.removeWhere`; each symbol load's library problems replace the last load's | `85ad411e` | S-19, DL-1 | M-S19: S-19; M-DL-1 (`_seen` kept): DL-1 |
+| `usedKitsIn` wrote `plan` | excludes `reservedKitIds` | `cfb221e0` | PF-3b | M-PF-3c: PF-3b |
+| `ChoiceProperty` segments with `.` or `:` | refused | `62af16e5` | PS4 | M-PS4c: PS4 |
+| `probe`'s "runs once" doc | reworded (a re-survey asks the survivors again) | `f44899f0` | doc | none |
+| `AttachmentQuery.pointer` mutable, shared across providers | a fresh copy at each read; the registry reads it once per ask | `62af16e5` | PT20 | M-PT20c: PT20 |
+| `PlanType.properties` covariance | doc names the members that throw through `PlanType<Component>` | `62af16e5` | doc | none |
+| `idleKeys` left closed | restored on dispose and on a controller swap | `cfb221e0` | KB-14 | M-KB-14a (swap): KB-14 line 338; M-KB-14b (dispose): line 343 |
+| `NumberProperty` empty undo step | the panel skips a command whose value equals the stored component | `cfb221e0` | P-1 | M-P-1d: P-1 line 89 (`Expected: <4> Actual: <5>`) |
+| damaged save set `_encodedState` before the read-back | set only after it | `cfb221e0` | F-7b | M-F7b: F-7b |
+| 115-column comment, `commands.dart` | rewrapped | `f44899f0` | none | none |
+
+Not done (the review's other minors, M1, M2, M4-M8, and the "can stay deferred" list): unchanged
+by this wave. M3's second half (failing the read-back on `component.unreadable`) was left out:
+it would refuse every damaged plan that holds a component kept raw at load.
+
+Gates on `cfb221e0` (this run, last lines):
+- `packages/jet_cad_2d`: `dart test` `00:06 +1322 -2: Some tests failed.`, the two standing
+  failures only (`generate_document_test.dart`: "the default document is the one Plan 2
+  measured, byte for byte", "both text fractions default to zero and change nothing");
+  `dart analyze` `No issues found!`; format `Formatted 184 files (0 changed)`.
+- `packages/jet_cad_2d_kit`: `00:05 +314: All tests passed!`; `No issues found! (ran in 3.0s)`;
+  `Formatted 68 files (0 changed) in 0.08 seconds.`
+- `packages/jet_cad_2d_plan`: `00:38 +735: All tests passed!`; `No issues found! (ran in 3.2s)`;
+  `Formatted 179 files (0 changed) in 0.36 seconds.`
+- `packages/jet_cad_floor_plan` (`flutter test`, unchanged package): `01:41 +2008 ~4: All tests passed!`
+- `cd tool/ci && dart test`: `00:41 +116: All tests passed!`
+- `dart run tool/ci/check_kit_deps.dart`: `kit dependencies: 1 package(s) checked, none names the plan library or another kit`
+- `dart pub publish --dry-run`, `jet_cad_2d_kit` and `jet_cad_2d_plan`: `Package has 0 warnings.` each.
