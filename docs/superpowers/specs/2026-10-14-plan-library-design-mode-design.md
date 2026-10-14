@@ -394,8 +394,11 @@ final class ActionProperty<T>    extends PropertySpec<T> { apply }              
   focus; the value commits on focus loss or Enter.
 - Out-of-range input is refused and the field shows the stored value
   again.
-- Lengths print with the plan's decimal separator (the plan's own `.` or
-  `,`, chosen on the Page panel since 0.2.0).
+- Panel fields and displays print numbers with the **language's** decimal
+  separator, as today's panels do. The plan's own separator (Q0, chosen on
+  the Page panel since 0.2.0) governs what is drawn: dimensions, room
+  areas, rulers. *(Corrected while planning: revision 3 said the plan's
+  separator, which would have changed today's panels.)*
 
 **Units:** `ValueDisplay.unit` is `length`, `area`, `angle` or `none`, and
 is printed the same way as the editable kinds.
