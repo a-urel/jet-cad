@@ -88,10 +88,9 @@ void main() {
 
     await frames(10);
 
-    expect(sink.totalFlushCount, greaterThan(0),
-        reason: 'nothing was flushed, so nothing was measured');
-    expect(sink.frameTriangleCount, greaterThan(1000),
-        reason: 'a degenerate corpus would make the bound meaningless');
+    // First what a rebuild kept: a remounted canvas or a new painter flushes
+    // into another sink, so the premise below would fail first and hide
+    // which one it was.
     // M-CV-alloc-2: a key that changes per build remounts the canvas.
     expect(
         identical(
@@ -103,6 +102,10 @@ void main() {
         reason: 'a rebuild handed DraftCanvas a new resolver: a new painter '
             'and every cache made again');
     expect(identical(state.vertices, sink), isTrue);
+    expect(sink.totalFlushCount, greaterThan(0),
+        reason: 'nothing was flushed, so nothing was measured');
+    expect(sink.frameTriangleCount, greaterThan(1000),
+        reason: 'a degenerate corpus would make the bound meaningless');
     expect(sink.debugCapacityVertices, capacity,
         reason: 'the buffer grew in a steady-state frame: O(entities)');
     expect(identical(sink.debugPaint, paint), isTrue,
