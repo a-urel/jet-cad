@@ -3,7 +3,8 @@
 // each build (Task 12 sent the widget-level capability cases here).
 // Ported, assertions unchanged, from jet_cad_floor_plan/test/host/
 // editor_panels_test.dart (T5-g, the focus order, R-2, R-3's editLayers,
-// R-4's Page panel alone, V-5's generic parts), editor_tools_test.dart
+// R-4's Page panel alone, V-5's generic parts; V-5's table parts, 2b Task
+// 10 fix round, over the unit editor fixture), editor_tools_test.dart
 // (T4-e, T4-j's readOnly half, T4-f's first part, snapping false keeps
 // the user's setting, T4-g's first part, K3's design half) and
 // editor_tools_review_test.dart (RV6's first half, RV8, RV9, O23, R-2's
@@ -39,6 +40,8 @@ import 'package:jet_cad_2d_plan/src/tools/generic_tools.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/editor_host.dart';
+import '../support/unit_editor_fixture.dart' as u;
+import 'units_only_select_test.dart' as s;
 import '../support/mark_kit.dart';
 
 /// The editor's options a host rebuilds it with (today's widget flags).
@@ -376,6 +379,97 @@ void main() {
       await ctrl(tester, LogicalKeyboardKey.keyZ);
       expect(c.activeTool.value, PlanToolIds.select);
       expect(encoded(c), before);
+      expect(c.canUndo.value, isFalse);
+    });
+    testWidgets(
+        'a table is selectable by a click, its section read-only: no ±90, '
+        'Mirror or layer picker', (tester) async {
+      final c = await u.mountUnitEditor(tester,
+          permissions: PlanPermissions.readOnly);
+      await click(tester, u.screenOf(tester, c, s.edgeOf(c, '1')));
+      expect(byKey('unit-section'), findsOneWidget);
+      expect(fieldOf(tester, 'unit-label').readOnly, isTrue);
+      expect(fieldOf(tester, 'symbol-rotation').readOnly, isTrue);
+      for (final k in [
+        'unit-rotate-left',
+        'unit-rotate-right',
+        'symbol-mirror',
+        'layer-picker'
+      ]) {
+        expect(byKey(k), findsNothing, reason: k);
+      }
+    });
+
+    testWidgets(
+        'no command reaches the document from a pointer path or a key on a '
+        'table: a body drag, the rotation grip\'s place, Delete and '
+        'Backspace, the free line\'s and the column\'s grips, the letters '
+        'and Ctrl+Z leave the design byte-identical', (tester) async {
+      final c = await u.mountUnitEditor(tester,
+          permissions: PlanPermissions.readOnly);
+      final before = encoded(c);
+      Offset at(Vector2 w) => u.screenOf(tester, c, w);
+      // 1: clicked, dragged, its rotation grip's place dragged, deleted.
+      await click(tester, at(s.edgeOf(c, '1')));
+      expect(s.selected(c), {s.keyOf(c, '1')});
+      await s.drag(tester, at(s.edgeOf(c, '1')),
+          at(s.edgeOf(c, '1')) + const Offset(90, 45));
+      await click(tester, at(s.edgeOf(c, '1')));
+      final grip = s.rotationGripOf(tester, c, '1');
+      await s.drag(tester, grip, grip + const Offset(120, 60));
+      await click(tester, at(s.edgeOf(c, '1')));
+      await press(tester, LogicalKeyboardKey.delete);
+      await press(tester, LogicalKeyboardKey.backspace);
+      // The free line: its body and both ends.
+      final (a, b) = u.editorFreeLine;
+      await click(tester, at((a + b) / 2));
+      expect(s.selected(c), hasLength(1));
+      for (final end in [a, b, (a + b) / 2]) {
+        await s.drag(tester, at(end), at(end) + const Offset(50, -30));
+      }
+      await press(tester, LogicalKeyboardKey.delete);
+      // The column's end grip.
+      final column = Vector2(23500, 14000);
+      await click(tester, at(column));
+      expect(s.selected(c), hasLength(1));
+      await s.drag(tester, at(column), at(column) + const Offset(-60, 0));
+      await press(tester, LogicalKeyboardKey.backspace);
+      // The letters and the history's chords.
+      for (final k in [
+        LogicalKeyboardKey.keyP,
+        LogicalKeyboardKey.keyL,
+        LogicalKeyboardKey.keyF,
+      ]) {
+        await press(tester, k);
+      }
+      await ctrl(tester, LogicalKeyboardKey.keyZ);
+      expect(c.activeTool.value, PlanToolIds.select);
+      expect(encoded(c), before);
+      expect(c.canUndo.value, isFalse);
+    });
+
+    testWidgets(
+        'the host\'s own calls still work under readOnly: setUnitData, '
+        'undo() and load', (tester) async {
+      final c = await u.mountUnitEditor(tester,
+          permissions: PlanPermissions.readOnly);
+      final before = encoded(c);
+      expect(c.setUnitData('2', const {'pos': 'b2'}), isTrue);
+      expect(encoded(c), isNot(before));
+      expect(c.canUndo.value, isTrue);
+      c.undo();
+      await tester.pump();
+      expect(encoded(c), before);
+      // A load replaces the plan, under readOnly too: 2's data, set again,
+      // is gone with the plan it was set on.
+      expect(c.setUnitData('2', const {'pos': 'b2'}), isTrue);
+      Map<String, String> dataOf2() =>
+          c.unitDetails.where((x) => x.unit.label == '2').single.data;
+      expect(dataOf2(), const {'pos': 'b2'});
+      c.load(u.unitEditorPlanJson());
+      await tester.pump();
+      await tester.pump();
+      expect(dataOf2(), isEmpty);
       expect(c.canUndo.value, isFalse);
     });
   });

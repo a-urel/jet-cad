@@ -29,6 +29,8 @@ import 'package:jet_cad_2d_plan/src/units/unit_index.dart' show UnitIndex;
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/panel_kits.dart';
+import '../support/service_fixture.dart' show serviceFixture;
+import '../support/test_kit.dart' show unitKit;
 import '../support/unit_fixtures.dart'
     show addUnitLabel, fxKit, placeAt, tableSymbol;
 
@@ -715,5 +717,48 @@ void main() {
     expect(isTable(r.a), isFalse);
     expect(isTable(r.doc.rootHandle), isFalse);
     expect(isTable(const Handle(0x7FFFFFF)), isFalse, reason: 'no node');
+  });
+
+  testWidgets(
+      'CP13 a locked unit (its kit missing) is no colour target: selected, '
+      'no picker shows and recolourCommand is null; with its kit loaded the '
+      'same unit is one (M-UW14)', (tester) async {
+    final f = serviceFixture();
+    final locked = PlanController(kits: const [], json: f.json);
+    addTearDown(locked.dispose);
+    final open = PlanController(kits: [unitKit()], json: f.json);
+    addTearDown(open.dispose);
+    expect(open.isLocked(f.table), isFalse, reason: 'premise');
+    expect(unitColourTargets(open, [k(f.table)]), [f.table],
+        reason: 'premise: the control');
+    expect(locked.isLocked(f.table), isTrue, reason: 'premise');
+    expect(locked.unitIndex[f.table]?.generated, isFalse, reason: 'premise');
+    await tester.binding.setSurfaceSize(const Size(1440, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+            body: SingleChildScrollView(
+                child: PlanPropertyPanel(controller: locked)))));
+    locked.selection.replace([k(f.table)]);
+    await tester.pump();
+    // M-UW14: `!c.isLocked(h)` deleted from unitColourTargets.
+    expect(unitColourTargets(locked, [k(f.table)]), isEmpty);
+    expect(picker, findsNothing);
+    expect(recolourCommand(locked, [k(f.table)], PlanSwatch.teal), isNull);
+  });
+
+  test(
+      'CP14 a generated seat is no colour target through unitColourTargets, '
+      'its placed table beside it is (M-UW15)', () {
+    final f = serviceFixture();
+    final c = PlanController(kits: [unitKit()], json: f.json);
+    addTearDown(c.dispose);
+    final seat = f.seatsA.first;
+    expect(c.unitIndex[seat]?.generated, isTrue, reason: 'premise');
+    expect(c.isLocked(seat), isFalse, reason: 'premise: not the lock');
+    // M-UW15: `index[h]?.generated == false` reduced to `index[h] != null`.
+    expect(unitColourTargets(c, [k(seat)]), isEmpty);
+    expect(unitColourTargets(c, [k(seat), k(f.table)]), [f.table]);
+    expect(recolourCommand(c, [k(seat)], PlanSwatch.teal), isNull);
   });
 }

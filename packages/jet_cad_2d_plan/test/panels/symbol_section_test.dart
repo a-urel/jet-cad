@@ -461,6 +461,7 @@ void main() {
       final doc = c.document;
       final bed = place(doc, 'test.bed.1600', far);
       final other = place(doc, 'test.bed.1400', far + Vector2(4000, 0));
+      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
       await select(tester, c, [bed]);
       expect(byKey('symbol-section'), findsOneWidget);
       expect(
@@ -471,6 +472,12 @@ void main() {
           '30');
       await select(tester, c, [bed, other]);
       expect(byKey('symbol-section'), findsNothing);
+      await select(tester, c, [table]);
+      expect(byKey('symbol-section'), findsOneWidget);
+      expect(byKey('unit-section'), findsOneWidget);
+      expect(tester.getTopLeft(byKey('symbol-section')).dy,
+          lessThan(tester.getTopLeft(byKey('unit-section')).dy),
+          reason: 'the Symbol section above the Table section (R5-2)');
     });
 
     testWidgets(
@@ -529,21 +536,21 @@ void main() {
       final c = await pumpPanel(tester);
       final doc = c.document;
       final bed = place(doc, 'test.bed.1600', far);
+      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
       doc.commands.permissions = DraftPermissions.runtime;
       await select(tester, c, [bed]);
       expect(editable(tester), isTrue);
       expect(mirrorEnabled(tester), isTrue);
       expect(menuEnabled(tester), isFalse);
-      // The table half goes with 2b ("a table turns in the design mode
-      // only"); an empty selection stands for its table selections, so
-      // each permissions change below is read by a rebuild.
-      await select(tester, c, []);
+      await select(tester, c, [table]);
+      expect(editable(tester), isFalse, reason: 'a table: the design mode');
+      expect(mirrorEnabled(tester), isFalse);
       doc.commands.permissions = const DraftPermissions(
           transform: true, components: true, geometry: false, structure: true);
       await select(tester, c, [bed]);
       expect(menuEnabled(tester), isFalse);
       doc.commands.permissions = DraftPermissions.all;
-      await select(tester, c, []);
+      await select(tester, c, [table]);
       await select(tester, c, [bed]);
       expect(menuEnabled(tester), isTrue);
     });

@@ -9,7 +9,8 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
-import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
+    show InteractionLayer, SelectionKey;
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
 import 'package:jet_cad_2d_plan/src/shortcuts/plan_shortcut_guard.dart';
@@ -17,8 +18,12 @@ import 'package:jet_cad_2d_plan/src/shortcuts/tool_letters.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
 
 import '../support/canvas_fixture.dart';
+import '../support/fake_page_printer.dart';
 import '../support/design_harness.dart';
 import '../support/stamp_kit.dart';
+import '../support/unit_editor_fixture.dart'
+    show editorCamera, kEditorSurface, unitEditorPlanJson;
+import '../support/unit_fixtures.dart' show entryOf, fxKit, tableSymbol;
 
 /// The host's keys, by name.
 const Map<String, SingleActivator> kHostKeys = {
@@ -42,6 +47,99 @@ void drawALine(PlanController c) => c.document.commands.execute(addDrafted(
     EntityKind.line,
     linePayload(Vector2(7020.5, 3030.25), Vector2(7080.5, 3061.75)),
     layer: ReservedHandles.layerZero));
+
+// ---- the units-only key cases (2b Task 10 fix round) ----
+//
+// Ported from jet_cad_floor_plan/test/host/keyboard_focus_test.dart: T6-c
+// (:467-493), RP1's tablesOnly variant (:854-885) and RP12 (:886-909),
+// `tablesOnly` being `PlanPermissions.unitsOnly` and the view `PlanEditor`
+// over the unit editor fixture.
+
+/// An intent the host's own `Shortcuts` maps a key to, by name.
+class HostIntent extends Intent {
+  const HostIntent(this.name);
+  final String name;
+}
+
+/// Every letter the shell binds, F3, Escape, Delete, Backspace and the
+/// chords (Task 6 review RP1).
+final Map<String, SingleActivator> kIntentKeys = {
+  for (final l in 'VLPRBWDNGMSICATF'.split(''))
+    l: SingleActivator(LogicalKeyboardKey(
+        LogicalKeyboardKey.keyA.keyId + l.codeUnitAt(0) - 'A'.codeUnitAt(0))),
+  'f3': const SingleActivator(LogicalKeyboardKey.f3),
+  'escape': const SingleActivator(LogicalKeyboardKey.escape),
+  'delete': const SingleActivator(LogicalKeyboardKey.delete),
+  'backspace': const SingleActivator(LogicalKeyboardKey.backspace),
+  'ctrl+z': const SingleActivator(LogicalKeyboardKey.keyZ, control: true),
+  'cmd+z': const SingleActivator(LogicalKeyboardKey.keyZ, meta: true),
+  'ctrl+shift+z': const SingleActivator(LogicalKeyboardKey.keyZ,
+      control: true, shift: true),
+  'ctrl+y': const SingleActivator(LogicalKeyboardKey.keyY, control: true),
+  'ctrl+e': const SingleActivator(LogicalKeyboardKey.keyE, control: true),
+  'cmd+e': const SingleActivator(LogicalKeyboardKey.keyE, meta: true),
+  'ctrl+p': const SingleActivator(LogicalKeyboardKey.keyP, control: true),
+  'cmd+p': const SingleActivator(LogicalKeyboardKey.keyP, meta: true),
+};
+
+/// The editor over the unit fixture under [permissions], inside a host
+/// that counts every [kIntentKeys] key reaching it, through intents
+/// ([intents]) or `CallbackShortcuts`; `shortcuts` changeable at runtime.
+Future<(PlanController, Map<String, int>, ValueNotifier<bool>)> mountUnitKeys(
+    WidgetTester tester,
+    {required PlanPermissions permissions,
+    bool intents = true,
+    bool shortcuts = false}) async {
+  final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+  addTearDown(c.dispose);
+  c.permissions = permissions;
+  final keys = ValueNotifier(shortcuts);
+  addTearDown(keys.dispose);
+  final reached = <String, int>{for (final n in kIntentKeys.keys) n: 0};
+  void count(String name) => reached[name] = reached[name]! + 1;
+  await tester.binding.setSurfaceSize(kEditorSurface);
+  addTearDown(() => tester.binding.setSurfaceSize(null));
+  final editor = ValueListenableBuilder<bool>(
+      valueListenable: keys,
+      builder: (_, s, __) => PlanEditor(
+          controller: c,
+          onExport: (_) {},
+          onExportDialog: (_, __, ___) async => null,
+          printer: FakePagePrinter(),
+          shortcuts: s));
+  await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+          body: intents
+              ? Shortcuts(
+                  shortcuts: {
+                      for (final e in kIntentKeys.entries)
+                        e.value: HostIntent(e.key),
+                    },
+                  child: Actions(actions: {
+                    HostIntent: CallbackAction<HostIntent>(onInvoke: (x) {
+                      count(x.name);
+                      return null;
+                    }),
+                  }, child: Focus(child: editor)))
+              : CallbackShortcuts(bindings: {
+                  for (final e in kIntentKeys.entries)
+                    e.value: () => count(e.key),
+                }, child: editor))));
+  await tester.pump();
+  await tester.pump();
+  c.camera.value = editorCamera();
+  await tester.pump();
+  return (c, reached, keys);
+}
+
+bool canvasFocused() {
+  final context = FocusManager.instance.primaryFocus?.context;
+  return context != null &&
+      context.findAncestorWidgetOfExactType<InteractionLayer>() != null;
+}
+
+String encodedPlan(PlanController c) =>
+    DraftDocumentCodec.encodeToString(c.document);
 
 void main() {
   testWidgets(
@@ -341,5 +439,85 @@ void main() {
     // M-KB-14b: dispose not giving them back: Delete and Escape stay dead
     // in the canvas.
     expect(two.selectGates.idleKeys, isTrue);
+  });
+
+  testWidgets(
+      'T6-c unitsOnly, 1 selected: Delete and Backspace remove nothing '
+      "and reach the host's bindings; with shortcuts: Delete removes 1",
+      (tester) async {
+    final (c, reached, keys) = await mountUnitKeys(tester,
+        permissions: PlanPermissions.unitsOnly, intents: false);
+    await focusCanvas(tester);
+    c.select({'1'});
+    await tester.pump();
+    final before = encodedPlan(c);
+    await press(tester, LogicalKeyboardKey.delete);
+    await press(tester, LogicalKeyboardKey.backspace);
+    expect(encodedPlan(c), before);
+    expect(reached['delete'], 1);
+    expect(reached['backspace'], 1);
+    keys.value = true;
+    await tester.pump();
+    await press(tester, LogicalKeyboardKey.delete);
+    expect(c.unitIndex.withLabel('1'), isEmpty);
+    expect(reached['delete'], 1);
+  });
+
+  testWidgets(
+      'RP1 design, unitsOnly, shortcuts: false: every letter, F3, Escape, '
+      'Delete, Backspace and every chord reach an intent-based host; '
+      'nothing in the plan changes. With shortcuts the plan takes the file '
+      'chords', (tester) async {
+    final (c, reached, keys) =
+        await mountUnitKeys(tester, permissions: PlanPermissions.unitsOnly);
+    await focusCanvas(tester);
+    c.select({'1'});
+    await tester.pump();
+    final before = encodedPlan(c);
+    for (final e in kIntentKeys.entries) {
+      await sendActivator(tester, e.value);
+      await tester.pump();
+      expect(reached[e.key], 1, reason: e.key);
+      expect(canvasFocused(), isTrue, reason: '${e.key}: focus kept');
+    }
+    await tester.pump(const Duration(seconds: 1));
+    expect(encodedPlan(c), before);
+    expect(c.activeTool.value, 'plan.select');
+    expect(c.editorSelectedUnits.value, {'1'});
+    // The control: with the shortcuts the plan takes the chords.
+    keys.value = true;
+    await tester.pump();
+    await sendActivator(tester, kIntentKeys['ctrl+e']!);
+    await sendActivator(tester, kIntentKeys['ctrl+p']!);
+    expect(reached['ctrl+e'], 1, reason: 'the editor took Ctrl+E');
+    expect(reached['ctrl+p'], 1, reason: 'the editor took Ctrl+P');
+  });
+
+  testWidgets(
+      "RP12 shortcuts: false, unitsOnly, a table armed: R is the symbol "
+      "tool's, M (mirror refused) bubbles; W and Escape reach the host; "
+      'the tool stays symbol', (tester) async {
+    final (c, reached, _) =
+        await mountUnitKeys(tester, permissions: PlanPermissions.unitsOnly);
+    await focusCanvas(tester);
+    expect(
+        c.armSymbol(PlanSymbol(
+            kitId: 'fx',
+            names: const KitNames({}),
+            entry: entryOf(tableSymbol()))),
+        isTrue);
+    await tester.pump();
+    expect(c.activeTool.value, 'plan.symbol');
+    await focusCanvas(tester);
+    expect(canvasFocused(), isTrue, reason: 'premise: the canvas focused');
+    await sendActivator(tester, kIntentKeys['R']!);
+    await sendActivator(tester, kIntentKeys['M']!);
+    expect(reached['R'], 0, reason: "R is the armed tool's");
+    expect(reached['M'], 1, reason: 'unitsOnly refuses mirror: M bubbles');
+    await sendActivator(tester, kIntentKeys['W']!);
+    await sendActivator(tester, kIntentKeys['escape']!);
+    expect(reached['W'], 1);
+    expect(reached['escape'], 1);
+    expect(c.activeTool.value, 'plan.symbol');
   });
 }
