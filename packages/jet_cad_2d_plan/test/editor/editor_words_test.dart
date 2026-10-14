@@ -8,7 +8,8 @@
 // (PW1's zoom read-out, which Task 18 left here). The floor planner's
 // words for its own tools (Wall, Door, Dimension) are the generic tools'
 // (Line, Circle, Text); its wall is the editor fixture's first mark; the
-// service bar's lines are 2b's.
+// unit half of OV-H (2b Task 10) selects the unit editor fixture's tables;
+// the service bar's lines are 2b's.
 import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LogicalKeyboardKey;
@@ -28,6 +29,8 @@ import '../support/editor_host.dart';
 import '../support/mark_kit.dart';
 import '../support/recording_plan_strings.dart';
 import '../support/symbol_fixtures.dart' show demoKit;
+import '../support/unit_editor_fixture.dart' show tableOf, unitEditorPlanJson;
+import '../support/unit_fixtures.dart' show fxKit;
 
 Widget app(PlanController c, Locale locale) => MaterialApp(
     locale: locale,
@@ -231,6 +234,31 @@ void main() {
         c.selection.replace([SelectionKey.root(h)]);
         await tester.pump();
         expect(tester.takeException(), isNull, reason: '$code, $h');
+      }
+    });
+  }
+
+  for (final code in ['en', 'de', 'tr']) {
+    testWidgets(
+        'OV-H-unit-$code at 656 x 700, the unit fixture\'s table 1, then the '
+        'unlabelled one, then 7 selected in turn: the right panel never '
+        'overflows (review 14d-1 F-2)', (tester) async {
+      final c = PlanController(kits: [fxKit()], json: unitEditorPlanJson());
+      addTearDown(c.dispose);
+      await tester.binding.setSurfaceSize(const Size(656, 700));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(MaterialApp(
+          locale: Locale(code),
+          supportedLocales: planSupportedLocales,
+          localizationsDelegates: planLocalizationsDelegates,
+          home: Scaffold(body: PlanEditor(controller: c))));
+      await tester.pump();
+      for (final n in ['1', null, '7']) {
+        c.selection.replace([SelectionKey.root(tableOf(c, n))]);
+        await tester.pump();
+        expect(find.byKey(const Key('unit-section')), findsOneWidget,
+            reason: '$code, $n: premise');
+        expect(tester.takeException(), isNull, reason: '$code, $n');
       }
     });
   }

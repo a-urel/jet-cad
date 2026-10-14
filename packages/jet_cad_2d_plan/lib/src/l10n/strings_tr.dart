@@ -8,8 +8,11 @@ import 'package:jet_cad_2d/jet_cad_2d.dart'
         LayerNameEmpty,
         LayerNameProblem,
         LayerNameTooLong;
-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch, UnitKinds;
 
+import '../units/unit_label.dart' show UnitLabelProblem, kUnitLabelMaxLength;
+import '../units/unit_problems.dart'
+    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
 import 'strings.dart';
 
 /// The plan library's words in Turkish.
@@ -300,4 +303,53 @@ class PlanStringsTr extends PlanStrings {
   @override
   String get planDamaged =>
       'Bir düzenleme başarısız oldu; plan bozulmuş olabilir';
+
+  @override
+  String get merge => 'Birleştir';
+
+  @override
+  String get split => 'Ayır';
+
+  @override
+  String get number => 'Numara';
+
+  @override
+  String get label => 'Etiket';
+
+  @override
+  String get capacity => 'Kişilik';
+
+  @override
+  String get rotateLeft => '90° sola döndür';
+
+  @override
+  String get rotateRight => '90° sağa döndür';
+
+  @override
+  String labelProblem(UnitLabelProblem problem) => switch (problem) {
+        UnitLabelProblem.length =>
+          '1 ile $kUnitLabelMaxLength karakter arasında olmalı',
+        UnitLabelProblem.control => 'Satır sonu veya kontrol karakteri olamaz',
+      };
+
+  @override
+  String labelUsed(String label) => '$label numarası zaten kullanılıyor';
+
+  @override
+  String labelWarning(UnitLabelWarning warning) => switch (warning) {
+        DuplicateLabel(:final label, :final count) =>
+          '$label numarası $count masada kullanılıyor',
+        Unlabelled(:final kind, :final capacity) => kind == UnitKinds.table
+            ? '$capacity kişilik bir masanın numarası yok'
+            : '$capacity kişilik ${unitKind(kind) ?? kind}: numara yok',
+        BadLabel(:final label, :final problem) =>
+          '"$label" bir etiket değil: ${labelProblem(problem)}',
+      };
+
+  @override
+  String? unitKind(String kind) => switch (kind) {
+        UnitKinds.table => 'Masa',
+        UnitKinds.seat => 'Koltuk',
+        _ => null,
+      };
 }

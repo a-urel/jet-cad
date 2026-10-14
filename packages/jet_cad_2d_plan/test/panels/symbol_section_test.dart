@@ -9,8 +9,9 @@
 // tables, and a corner seat whose base point is off its box's centre x.
 // Instances sit 40 m off the origin, mirrored and turned 30 degrees.
 //
-// SS9 (definitionForEntry's assertion) is Task 13's; SW6 and SW9 (table
-// numbers, the runtime table rule) are 2b's; SW7 (a loader handed to the
+// SS9 (definitionForEntry's assertion) is Task 13's; SW6 and SW9 (a unit's
+// label, the runtime unit rule) are 2b's (Task 10), over the library's
+// corner seat and table A, which are units; SW7 (a loader handed to the
 // panel) has no counterpart: the controller owns the loader (Task 13).
 import 'dart:async';
 import 'dart:math' as math;
@@ -36,6 +37,8 @@ import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
 import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
 import 'package:vector_math/vector_math_64.dart' show Vector2;
+
+import '../support/unit_fixtures.dart' show addUnitLabel;
 
 /// A [w] x [d] rectangle, base point at its centre.
 CatalogSymbol rect(String key, double w, double d,
@@ -564,6 +567,76 @@ void main() {
       await select(tester, c, [bedTable]);
       expect(byKey('symbol-section'), findsOneWidget);
       expect(byKey('symbol-size-menu'), findsNothing);
+    });
+
+    testWidgets(
+        'SW6 a corner unit turned to 37 then mirrored: its label stays '
+        'upright, its footprint stays; one undo each (R5-2, V-6)',
+        (tester) async {
+      final c = await pumpPanel(tester);
+      final doc = c.document;
+      final corner = place(doc, 'test.corner.seat', far, mirrored: false);
+      addUnitLabel(doc, corner, '1');
+      await select(tester, c, [corner]);
+      void expectUpright(String why) {
+        final info = c.unitIndex[corner]!;
+        final slot = doc.entities.slotOf(info.label!)!;
+        final scalars =
+            doc.geometry.read(doc.entities.geomIndexAt(slot)).scalars;
+        final want = unitLabelStamp(transformOf(doc, corner));
+        expect(scalars[1], closeTo(want.rotation, 1e-12), reason: why);
+        expect(scalars[2], want.widthFactor, reason: why);
+      }
+
+      final depth = doc.commands.undoDepth;
+      final base = doc.tree
+          .definition((doc.tree[corner]! as InstanceNode).definition)!
+          .basePoint;
+      final insertion = transformOf(doc, corner).transformPoint(base);
+      await typeRotation(tester, '37');
+      expect(rotationDegreesOf(transformOf(doc, corner)), closeTo(37, 1e-9));
+      expectNear(transformOf(doc, corner).transformPoint(base), insertion,
+          'turned about the insertion point (M-09c-y)');
+      expectUpright('after the rotation');
+      final before = footprint(doc, corner);
+      await tester.tap(byKey('symbol-mirror'));
+      await tester.pump();
+      expect(footprint(doc, corner), before);
+      expectUpright('after the mirror');
+      expect(doc.commands.undoDepth, depth + 2);
+      doc.commands.undo();
+      expectUpright('after one undo');
+      doc.commands.undo();
+      expect(rotationDegreesOf(transformOf(doc, corner)), closeTo(30, 1e-9));
+      expectUpright('after two');
+    });
+
+    testWidgets(
+        'SW9 a rotation typed for a bed under runtime commits to the bed '
+        'when the selection moves to a table before the edit ends: the '
+        'pinned target decides (V-1)', (tester) async {
+      final c = await pumpPanel(tester);
+      final doc = c.document;
+      final bed = place(doc, 'test.bed.1600', far);
+      final table = place(doc, 'test.table.a', far + Vector2(0, 4000));
+      doc.commands.permissions = DraftPermissions.runtime;
+      await select(tester, c, [bed]);
+      expect(editable(tester), isTrue, reason: 'premise: a bed turns');
+      final tableBefore = transformOf(doc, table);
+      await tester.pump(kDoubleTapTimeout * 2);
+      await tester.tap(byKey('symbol-rotation'));
+      await tester.pump();
+      await tester.enterText(byKey('symbol-rotation'), '45');
+      await select(tester, c, [table]);
+      // The table's field is read-only: the input connection closes, and
+      // the edit ends by losing focus, which commits (06 D13).
+      expect(editable(tester), isFalse, reason: 'premise: a table does not');
+      tester.binding.focusManager.primaryFocus!.unfocus();
+      await tester.pump();
+      await tester.pump();
+      expect(rotationDegreesOf(transformOf(doc, bed)), closeTo(45, 1e-9),
+          reason: 'the bed, which the field was pinned to');
+      expect(transformOf(doc, table), tableBefore, reason: 'not the table');
     });
 
     testWidgets('SW8 the Rotation field offers a minus key (−90 on a phone)',

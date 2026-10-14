@@ -5,7 +5,8 @@
 // its definition-space top and box. Replaces jet_cad_floor_plan's
 // TableSurvey (tables/table_index.dart:61-226); the top and box follow
 // service/table_picker.dart:92-110, :259-299.
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, visibleForTesting;
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
     show SymbolComponent, UnitComponent, UnitLabelling, kUnitLabelTag;
@@ -88,6 +89,11 @@ final class UnitInfo {
 final class UnitIndex {
   UnitIndex._(this.units, this.nested, this._byInstance, this._extraLabels,
       this._keptData, this._invalidColour);
+
+  /// How many indexes [UnitIndex.of] has built (today's
+  /// `TableSurvey.surveys`): a test counts the passes a rebuild costs.
+  @visibleForTesting
+  static int debugBuilds = 0;
 
   /// One pass, O(nodes + entities): at document-change rate (through
   /// [UnitIndexCache]), never per frame.

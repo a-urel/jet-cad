@@ -55,6 +55,31 @@ void main() {
     }
   });
 
+  test('VW2 unit-label problems and the clash in each language', () {
+    for (final p in UnitLabelProblem.values) {
+      expectWorded((s) => s.labelProblem(p));
+    }
+    expect(const PlanStringsEn().labelProblem(UnitLabelProblem.length),
+        '1 to 8 characters');
+    expectWorded((s) => s.labelUsed('12'),
+        parts: ['12'], english: 'Number 12 is already used');
+  });
+
+  test('VW3 label warnings in each language (the Room notice is 3\'s)', () {
+    expectWorded(
+        (s) => s.labelWarning(const DuplicateLabel(label: '7', count: 3)),
+        parts: ['7', '3'],
+        english: 'Number 7 is used by 3 tables');
+    expectWorded(
+        (s) => s.labelWarning(
+            const Unlabelled(kind: 'table', capacity: 4, symbolKey: 'k')),
+        parts: ['4']);
+    expect(
+        const PlanStringsEn().labelWarning(
+            const Unlabelled(kind: 'table', capacity: 1, symbolKey: null)),
+        'A table with 1 seat has no number');
+  });
+
   test('W-VW5 the plan library\'s three new words in each language', () {
     // M-W-VW5: a language that returns the English text for a new word
     // (copy-paste) makes the three not distinct.

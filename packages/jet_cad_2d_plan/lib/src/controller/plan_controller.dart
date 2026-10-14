@@ -504,6 +504,13 @@ class PlanController extends ChangeNotifier {
   /// null when it carried none.
   PlanStrings? _reportedStrings;
 
+  /// The language class the widgets last reported (a host's own included),
+  /// else the built-in language of [locale]: the plan library's words
+  /// outside a widget (the unit kinds', `unitKindWord`).
+  @internal
+  PlanStrings get planStrings =>
+      _reportedStrings ?? PlanStrings.forLocale(_locale.value);
+
   /// A new plan's separator under [locale]: the reported class's, else the
   /// built-in language's.
   DecimalSeparator _separatorOf(Locale locale) =>

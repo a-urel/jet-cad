@@ -30,12 +30,17 @@ import '../l10n/strings.dart';
 import '../l10n/strings_en.dart';
 import '../shortcuts/plan_shortcut_guard.dart';
 import '../symbols/symbol_box.dart';
+import '../units/unit_problems.dart' show DuplicateLabel;
+import '../units/unit_rotate.dart' show rotateUnitCommand;
+import '../units/unit_words.dart';
+import '../units/unit_writes.dart' show unitLabelCommand;
 import 'colour_row.dart';
 import 'frame_safe_relay.dart';
 import 'kit_lookup.dart';
 import 'layer_picker.dart';
 import 'panel_focus.dart';
 import 'symbol_section.dart';
+import 'unit_section.dart';
 
 /// The selected object's and the active tool's properties, over
 /// [controller].
@@ -103,7 +108,20 @@ final class _SymbolTarget extends _Target {
   int get hashCode => handle.hashCode;
 }
 
-enum _Scope { object, tool, symbol }
+final class _UnitTarget extends _Target {
+  const _UnitTarget(this.handle);
+
+  final Handle handle;
+
+  @override
+  bool operator ==(Object other) =>
+      other is _UnitTarget && other.handle == handle;
+
+  @override
+  int get hashCode => Object.hash(_UnitTarget, handle);
+}
+
+enum _Scope { object, tool, symbol, unit }
 
 /// One text field's state (today's `_Field`, `selection_panel.dart:160-186`):
 /// [pinned] is the target recorded at focus gain; [loadedTarget] and
@@ -138,6 +156,11 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
   StreamSubscription<DocChange>? _changes;
   FrameSafeRelay? _selection;
   VoidCallback? _releaseSettle;
+
+  /// The label field's last refusal and the unit it was for (today's
+  /// `_numberError`, selection_panel.dart:244-249).
+  String Function(PlanStrings)? _labelError;
+  Handle? _labelErrorFor;
 
   /// The panel's words: set before the first build and on a change of
   /// language, when the fields are shown again in it (spec 14d L12).
@@ -279,6 +302,12 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     return _SymbolTarget(h);
   }
 
+  _UnitTarget? get _unitTarget {
+    final h = _single;
+    if (h == null || _c.isLocked(h)) return null;
+    return placedUnitOf(_c.unitIndex, h) == null ? null : _UnitTarget(h);
+  }
+
   _ToolTarget? get _toolTarget {
     final id = _c.activeTool.value;
     return planToolOf(_c, id)?.settings == null ? null : _ToolTarget(id);
@@ -288,6 +317,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         _Scope.object => _objectTarget,
         _Scope.tool => _toolTarget,
         _Scope.symbol => _symbolTarget,
+        _Scope.unit => _unitTarget,
       };
 
   /// [t]'s fields, bound now; none when [t] is no longer a live object of
@@ -322,6 +352,8 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         }
       case _SymbolTarget():
         return const [];
+      case _UnitTarget():
+        return const [];
     }
   }
 
@@ -340,6 +372,10 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
       return isSymbolInstance(_c.document, handle)
           ? formatPanelNumber(shownRotation(_c.document, handle), _strings)
           : null;
+    }
+    if (t case _UnitTarget(:final handle)) {
+      final u = placedUnitOf(_c.unitIndex, handle);
+      return u == null ? null : (u.text ?? '');
     }
     final field = _fieldOf(t, f.id);
     return field == null ? null : _textOf(field);
@@ -379,6 +415,17 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
   Object? _parse(_Target t, _Field f) {
     final text = f.text.text.trim();
     if (t is _SymbolTarget) return _number(text);
+    if (t case _UnitTarget(:final handle)) {
+      final u = placedUnitOf(_c.unitIndex, handle);
+      if (u == null) return null;
+      final refusal = labelRefusal(_c.unitIndex, u, text);
+      if (refusal == null) return text;
+      // The line is not cleared here: Enter's focus-loss commit re-reads
+      // the reverted text, which must not end it (today's T14).
+      _labelError = refusal;
+      _labelErrorFor = handle;
+      return null;
+    }
     final field = _fieldOf(t, f.id);
     if (field == null) return null;
     switch (field.spec) {
@@ -403,9 +450,13 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     final c = _c;
     final engine = c.document.commands.permissions;
     switch (t) {
-      case _SymbolTarget():
-        // A rotation is a TransformNodeCommand (09c D7).
-        return c.permissions.rotate && engine.allows(Capability.transform);
+      case _SymbolTarget(:final handle):
+        // A rotation is a TransformNodeCommand (09c D7); a placed unit's
+        // also re-stamps its label (V-1).
+        return c.permissions.rotate && _turnableAt(handle);
+      case _UnitTarget():
+        // A label is entity text (today's _editable, :362-366).
+        return c.permissions.relabel && engine.allows(Capability.geometry);
       case _ToolTarget():
         // A tool's settings are no edit of the document (:73).
         final field = _fieldOf(t, id);
@@ -422,12 +473,25 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     }
   }
 
+  /// Whether [symbol] can be turned or mirrored now (today's `_turnableAt`,
+  /// selection_panel.dart:486-491): `transform`, and for a placed unit, whose
+  /// label is re-stamped by the same step, `geometry` too -- a unit turns in
+  /// the design mode only (V-1, 14a Q-4). Asked of the pinned target at a
+  /// commit, which the selection may no longer be.
+  bool _turnableAt(Handle symbol) {
+    final engine = _c.document.commands.permissions;
+    if (!engine.allows(Capability.transform)) return false;
+    return placedUnitOf(_c.unitIndex, symbol) == null ||
+        engine.allows(Capability.geometry);
+  }
+
   // ---- writing ----
 
   String _kitOf(_Target t) => switch (t) {
         _ObjectTarget(:final typeId) => kitOfKey(typeId),
         _ToolTarget(:final toolId) => kitOfKey(toolId),
         _SymbolTarget() => 'plan',
+        _UnitTarget() => 'plan',
       };
 
   /// Runs [edit]. A commit goes through `controller.execute`, which catches
@@ -451,6 +515,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
             _ObjectTarget(:final typeId) => typeId,
             _ToolTarget(:final toolId) => toolId,
             _SymbolTarget() => 'plan.symbol',
+            _UnitTarget() => 'plan.unit',
           },
           code: KitDiagnosticCode.hookFailed,
           message: '$what threw',
@@ -467,6 +532,11 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         case _SymbolTarget(:final handle):
           final command =
               rotateSymbolCommand(c.document, handle, input! as double);
+          if (command != null) c.execute(command);
+        case _UnitTarget(:final handle):
+          final u = placedUnitOf(c.unitIndex, handle);
+          if (u == null) return;
+          final command = unitLabelCommand(c.document, u, input! as String);
           if (command != null) c.execute(command);
         case _ObjectTarget(:final handle, :final typeId):
           final field = _fieldOf(t, id);
@@ -572,6 +642,10 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
   }
 
   void _sync() {
+    // A selection change ends the label field's refusal line.
+    if (_labelError != null && _labelErrorFor != _unitTarget?.handle) {
+      _labelError = null;
+    }
     _load();
     if (mounted) setState(() {});
   }
@@ -580,6 +654,9 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
   /// reaches them at once (a canvas click accepts its point before the
   /// field's focus-loss commit runs).
   void _onChanged(_Field f) {
+    if (f.scope == _Scope.unit && _labelError != null) {
+      setState(() => _labelError = null);
+    }
     final t = f.pinned;
     if (t is! _ToolTarget) return;
     final input = _parse(t, f);
@@ -781,7 +858,7 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
         '${formatPanelNumber(b.depth, _strings)}';
     final p = c.permissions;
     final engine = doc.commands.permissions;
-    final turnable = engine.allows(Capability.transform);
+    final turnable = _turnableAt(h);
     final resizable = engine.allows(Capability.structure) &&
         engine.allows(Capability.geometry) &&
         engine.allows(Capability.components) &&
@@ -851,6 +928,83 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     ];
   }
 
+  /// The unit section (spec S4; today's Table section,
+  /// selection_panel.dart:1193-1248).
+  List<Widget> _unitSection(_UnitTarget t, TextStyle? title) {
+    final c = _c;
+    final u = placedUnitOf(c.unitIndex, t.handle)!;
+    final error =
+        _labelErrorFor == t.handle ? _labelError?.call(_strings) : null;
+    final shared = u.text == null ? 0 : c.unitIndex.withLabel(u.text!).length;
+    final theme = Theme.of(context);
+    final engine = c.document.commands.permissions;
+    final turnable = engine.allows(Capability.transform) &&
+        engine.allows(Capability.geometry);
+    return [
+      Text(unitKindWord(c, u), key: const Key('unit-section'), style: title),
+      _textField(
+          const Key('unit-label'),
+          u.labelling == UnitLabelling.assigned
+              ? _strings.label
+              : _strings.number,
+          _fieldFor(_Scope.unit, 'label'),
+          _editable(t, 'label'),
+          isText: true),
+      if (error != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(error,
+              key: const Key('unit-label-error'),
+              style: TextStyle(color: theme.colorScheme.error)),
+        ),
+      if (shared > 1)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+              _strings
+                  .labelWarning(DuplicateLabel(label: u.text!, count: shared)),
+              key: const Key('unit-label-duplicate'),
+              style: TextStyle(color: theme.colorScheme.tertiary)),
+        ),
+      InputDecorator(
+        decoration: InputDecoration(
+            labelText: _strings.capacity, border: InputBorder.none),
+        child: Text('${u.capacity}', key: const Key('unit-capacity')),
+      ),
+      // A button the permissions refuse is not shown (S-11).
+      if (turnable && c.permissions.rotate)
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('unit-rotate-left'),
+                onPressed: () => _rotateUnit(t, 1),
+                icon: const Icon(Icons.rotate_left),
+                label: Text(_strings.rotateLeft),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                key: const Key('unit-rotate-right'),
+                onPressed: () => _rotateUnit(t, -1),
+                icon: const Icon(Icons.rotate_right),
+                label: Text(_strings.rotateRight),
+              ),
+            ),
+          ],
+        ),
+    ];
+  }
+
+  /// Today's `_rotateTable` (:685-701): one Rotate step about the base
+  /// point; a refusal is caught inside `execute`.
+  void _rotateUnit(_UnitTarget t, int quarterTurns) =>
+      _guarded(t, 'Rotate', () {
+        final command = rotateUnitCommand(_c.document, t.handle, quarterTurns);
+        if (command != null) _c.execute(command);
+      });
+
   @override
   Widget build(BuildContext context) {
     final c = _c;
@@ -864,13 +1018,16 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
     final tool = _toolTarget;
     final object = _objectTarget;
     final symbol = object == null ? _symbolTarget : null;
+    final unit = tool == null && object == null ? _unitTarget : null;
     // CP1, CP11 (M-PC9-tool): no colour row while a tool's settings show.
-    final colours =
-        tool == null && colourTargets(c, c.selection.keys).isNotEmpty;
+    final colours = tool == null &&
+        (colourTargets(c, c.selection.keys).isNotEmpty ||
+            unitColourTargets(c, c.selection.keys).isNotEmpty);
     final sections = <List<Widget>>[
       if (tool != null) _settingsSection(tool, title),
       if (object != null) _objectSection(object, title),
       if (symbol != null) _symbolSection(symbol, title),
+      if (unit != null) _unitSection(unit, title),
       if (colours)
         [
           ColourRow(

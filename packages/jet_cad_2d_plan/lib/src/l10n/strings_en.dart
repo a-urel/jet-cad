@@ -8,8 +8,11 @@ import 'package:jet_cad_2d/jet_cad_2d.dart'
         LayerNameEmpty,
         LayerNameProblem,
         LayerNameTooLong;
-import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
+import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch, UnitKinds;
 
+import '../units/unit_label.dart' show UnitLabelProblem, kUnitLabelMaxLength;
+import '../units/unit_problems.dart'
+    show BadLabel, DuplicateLabel, Unlabelled, UnitLabelWarning;
 import 'strings.dart';
 
 /// The plan library's words in English.
@@ -301,4 +304,54 @@ class PlanStringsEn extends PlanStrings {
 
   @override
   String get planDamaged => 'An edit failed and the plan may be damaged';
+
+  @override
+  String get merge => 'Merge';
+
+  @override
+  String get split => 'Split';
+
+  @override
+  String get number => 'Number';
+
+  @override
+  String get label => 'Label';
+
+  @override
+  String get capacity => 'Seats';
+
+  @override
+  String get rotateLeft => 'Rotate 90° left';
+
+  @override
+  String get rotateRight => 'Rotate 90° right';
+
+  @override
+  String labelProblem(UnitLabelProblem problem) => switch (problem) {
+        UnitLabelProblem.length => '1 to $kUnitLabelMaxLength characters',
+        UnitLabelProblem.control => 'No line breaks or control characters',
+      };
+
+  @override
+  String labelUsed(String label) => 'Number $label is already used';
+
+  @override
+  String labelWarning(UnitLabelWarning warning) => switch (warning) {
+        DuplicateLabel(:final label, :final count) =>
+          'Number $label is used by $count tables',
+        Unlabelled(:final kind, :final capacity) => capacity == 1
+            ? 'A ${_kindLower(kind)} with 1 seat has no number'
+            : 'A ${_kindLower(kind)} with $capacity seats has no number',
+        BadLabel(:final label, :final problem) =>
+          '"$label" is no label: ${labelProblem(problem)}',
+      };
+
+  String _kindLower(String kind) => (unitKind(kind) ?? kind).toLowerCase();
+
+  @override
+  String? unitKind(String kind) => switch (kind) {
+        UnitKinds.table => 'Table',
+        UnitKinds.seat => 'Seat',
+        _ => null,
+      };
 }

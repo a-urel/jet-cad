@@ -35,8 +35,10 @@ import '../shortcuts/plan_shortcuts.dart';
 import '../symbols/plan_symbol.dart';
 import '../theme/plan_theme.dart';
 import '../tools/generic_tools.dart';
+import '../units/unit_detail.dart';
 import 'plan_editor_bar.dart';
 import 'plan_tool_palette.dart';
+import 'unit_inspector.dart';
 
 /// A host's file command: called after the editor settles pending input.
 typedef PlanFileCallback = Future<void> Function();
@@ -84,6 +86,7 @@ class PlanEditor extends StatefulWidget {
     this.shortcuts = true,
     this.autofocus = true,
     this.theme,
+    this.unitInspectorBuilder,
   });
 
   final PlanController controller;
@@ -101,6 +104,17 @@ class PlanEditor extends StatefulWidget {
   /// Whether the property panel shows. A hidden right-column panel is kept
   /// offstage with its state and out of the focus order.
   final bool propertyPanel;
+
+  /// The host's unit inspector (spec S4; today's `tableInspectorBuilder`):
+  /// built under the property panel for exactly one selected placed unit
+  /// whose label no other unit has, with nothing else selected, with that
+  /// unit's detail as `unitDetails` reads it; null from it shows nothing.
+  /// Built when the selection becomes such a unit, at each change of the
+  /// plan, and at each host rebuild; never on pan, zoom or hover. Hidden
+  /// with the property panel. A host links a drawn unit to its own record
+  /// here, with `PlanController.setUnitData`.
+  final Widget? Function(BuildContext context, PlanUnitDetail unit)?
+      unitInspectorBuilder;
 
   /// Whether the Layers section shows.
   final bool layerPanel;
@@ -644,6 +658,17 @@ class _PlanEditorState extends State<PlanEditor> {
                               children: [
                                 _kept(widget.propertyPanel,
                                     PlanPropertyPanel(controller: c)),
+                                // Spec S4: the host's inspector under the
+                                // panel's fields, with the panel. Keyed, so
+                                // adding or removing it keeps the panels
+                                // below.
+                                if (widget.unitInspectorBuilder
+                                    case final inspect?
+                                    when widget.propertyPanel)
+                                  UnitInspector(
+                                      key: const Key('unit-inspector'),
+                                      controller: c,
+                                      builder: inspect),
                                 _kept(widget.layerPanel,
                                     PlanLayerPanel(controller: c)),
                                 _kept(widget.pagePanel,

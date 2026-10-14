@@ -4,7 +4,8 @@
 // recolor. Ported from jet_cad_floor_plan/lib/src/colors/color_picker.dart:
 // the closed list of rooms and tables (pickedColors, :18-53) becomes the
 // types' colour targets (PlanType.colourOf, recolour); the swatches,
-// marks, tooltips and semantics are today's.
+// marks, tooltips and semantics are today's. Placed units are today's
+// tables (2b Task 10): `jetcad.unit_colour` on the instance.
 import 'package:flutter/material.dart';
 import 'package:jet_cad_2d/jet_cad_2d.dart';
 import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
@@ -13,6 +14,7 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
 import '../controller/plan_controller.dart';
 import '../kits/guard.dart' show KitHookFailure;
 import '../l10n/strings.dart';
+import '../units/unit_components.dart' show UnitColour;
 import 'kit_lookup.dart';
 
 typedef ColourTargetOf = ({Handle handle, PlanType<Component> type});
@@ -32,6 +34,20 @@ List<ColourTargetOf> colourTargets(
   ];
 }
 
+/// The placed units among [keys], each once, in key order, that the lock
+/// does not cover (today's `_tables`, colors/color_picker.dart:24-35: a
+/// key's target is a placed unit's instance). Per key, read from the
+/// controller's cached index: the panel asks on every build, hovers
+/// included.
+List<Handle> unitColourTargets(PlanController c, Iterable<SelectionKey> keys) {
+  if (keys.isEmpty) return const [];
+  final index = c.unitIndex;
+  return [
+    for (final h in {for (final k in keys) k.target})
+      if (index[h]?.generated == false && !c.isLocked(h)) h,
+  ];
+}
+
 /// What [pickedColours] lists for a target whose colour `read` threw:
 /// equal to no swatch's name, so it marks nothing.
 const String _unreadable = '\u0001';
@@ -42,6 +58,12 @@ const String _unreadable = '\u0001';
 /// `hookFailed` diagnostic, published after the frame (a build reads it).
 List<String?> pickedColours(PlanController c, Iterable<SelectionKey> keys) => [
       for (final t in colourTargets(c, keys)) _colourOf(c, t),
+      for (final h in unitColourTargets(c, keys))
+        switch (c.document.components.get<UnitColour>(h)) {
+          null => null,
+          // A payload of another shape marks nothing (today's _keptMarker).
+          final u => u.name ?? _unreadable,
+        },
     ];
 
 String? _colourOf(PlanController c, ColourTargetOf t) {
@@ -75,6 +97,12 @@ DraftCommand? recolourCommand(
           kitOfKey(t.type.id), t.type.id, 'colour write', error);
     }
     if (edit != null) edits.add(edit);
+  }
+  final wanted = swatch == null ? null : UnitColour(swatch);
+  for (final h in unitColourTargets(c, keys)) {
+    if (doc.components.get<UnitColour>(h) != wanted) {
+      edits.add(SetComponentCommand<UnitColour>(h, wanted));
+    }
   }
   return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
 }

@@ -98,6 +98,23 @@ Future<void> fingerTap(WidgetTester tester, Offset at) async {
   await tester.pump(const Duration(milliseconds: 300));
 }
 
+/// The rotation grip of table [n]: 24 px above its top's screen box.
+Offset rotationGripOf(WidgetTester tester, PlanController c, String n) {
+  final corners = [
+    for (final (x, y) in const [
+      (300, -200),
+      (1100, -200),
+      (900, 400),
+      (300, 250)
+    ])
+      screenOf(tester, c, onTable(c, n, x.toDouble(), y.toDouble())),
+  ];
+  final minX = corners.map((p) => p.dx).reduce(math.min);
+  final maxX = corners.map((p) => p.dx).reduce(math.max);
+  final minY = corners.map((p) => p.dy).reduce(math.min);
+  return Offset((minX + maxX) / 2, minY - 24);
+}
+
 /// The turn of [m], in degrees.
 double degreesOf(Transform2 m) => math.atan2(m.b, m.a) * 180 / math.pi;
 
@@ -245,6 +262,47 @@ void main() {
       // to the grid's 50 mm snap.
       expect(moved.x, closeTo(80 / 0.37, 50));
       expect(moved.y, closeTo(40 / 0.37, 50));
+    });
+
+    testWidgets(
+        'T5-b readOnly: 1 selected shows no rotation grip, no ±90, and a '
+        'read-only Rotation field whose typed value does not commit; a drag '
+        'at the grip\'s place turns nothing. unitsOnly: the grip turns it',
+        (tester) async {
+      final c = await mountUnitEditor(tester, permissions: P.readOnly);
+      c.selection.replace([keyOf(c, '1')]);
+      await tester.pump();
+      final before = encoded(c);
+      expect(c.grips.rotatable, isFalse);
+      expect(find.byKey(const Key('unit-rotate-left')), findsNothing);
+      expect(find.byKey(const Key('unit-rotate-right')), findsNothing);
+      final field =
+          tester.widget<TextField>(find.byKey(const Key('symbol-rotation')));
+      expect(field.readOnly, isTrue);
+      await tester.tap(find.byKey(const Key('symbol-rotation')));
+      await tester.pump();
+      field.controller!.text = '75';
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      expect(encoded(c), before, reason: 'the typed value');
+      final grip = rotationGripOf(tester, c, '1');
+      await drag(tester, grip, grip + const Offset(120, 60));
+      expect(encoded(c), before, reason: 'the grip\'s place');
+      await setPermissions(tester, c, P.unitsOnly);
+      c.selection.replace([keyOf(c, '1')]);
+      await tester.pump();
+      expect(c.grips.rotatable, isTrue);
+      expect(find.byKey(const Key('unit-rotate-left')), findsOneWidget);
+      expect(
+          tester
+              .widget<TextField>(find.byKey(const Key('symbol-rotation')))
+              .readOnly,
+          isFalse);
+      final turn = degreesOf(transformOf(c, '1'));
+      // The left column came back: the canvas moved on the screen.
+      final grip2 = rotationGripOf(tester, c, '1');
+      await drag(tester, grip2, grip2 + const Offset(120, 60));
+      expect(degreesOf(transformOf(c, '1')), isNot(closeTo(turn, 1)));
     });
 
     testWidgets(
