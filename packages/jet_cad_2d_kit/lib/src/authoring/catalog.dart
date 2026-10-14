@@ -62,7 +62,8 @@ final class CatalogUnit {
 }
 
 /// One symbol of a kit's library. A unit draws its outline first (K3 rule
-/// 11): a closed polyline or a circle.
+/// 11): a closed polyline or a circle. A [retired] symbol stays in the
+/// library and leaves the gallery (contract R2).
 final class CatalogSymbol {
   const CatalogSymbol({
     required this.key,
@@ -75,6 +76,7 @@ final class CatalogSymbol {
     this.unit,
     required this.base,
     required this.shapes,
+    this.retired = false,
   });
 
   final String key;
@@ -87,6 +89,7 @@ final class CatalogSymbol {
   final CatalogUnit? unit;
   final CatalogPoint base;
   final List<CatalogShape> shapes;
+  final bool retired;
 
   /// `key@version`.
   String get id => '$key@$version';

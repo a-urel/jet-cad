@@ -5,10 +5,11 @@ booths, a house's furniture, a cinema's seats. The plan library
 (`jet_cad_2d_plan`) knows no domain; it loads the kits a host gives it.
 Every kit and the plan library depend on one contract, `jet_cad_2d_kit`.
 
-This document is the kit author's contract. It covers the **symbol side**:
-symbols, their library, their words and their tests. Parametric types,
-tools, properties and attachment providers (the code side) are added by
-the plan library's sub-project and documented here then.
+This document is the kit author's contract. Sections 1 to 9 cover the
+**symbol side**: symbols, their library, their words and their tests.
+Section 10 covers the **code side**: parametric types, tools, property
+specs, colour targets and attachment providers, which the plan library
+composes.
 
 ## 1. Packages and dependencies
 
@@ -42,17 +43,17 @@ jet_cad_2d               the engine
 | Target kind, size family, unit kind | lower-case letters and digits joined by single hyphens | `wall-face`, `bed-double`, `table` |
 | Contract component | `jetcad.<name>` | `jetcad.symbol` |
 
-A kit's keys, types and tools all start with its own id. Today the
-conformance test (§8) refuses a key that does not; it checks type and tool
-ids when the code side arrives (the plan library's sub-project).
-`PlanKit.validate` (§6) already reports a word under another kit's id,
-`tool:` and `type:` words included.
+A kit's keys, types and tools all start with its own id. The conformance
+test (§8) refuses a key that does not, and, given the kit's type, tool and
+property ids, an id that does not. `PlanKit.validate` (§6) reports a type
+or tool id that is not `<kit id>.<name>` or is given twice, and a word
+under another kit's id, `tool:` and `type:` words included.
 
 ## 3. What a plan stores
 
 | Component | On | Fields |
 |---|---|---|
-| `jetcad.symbol` (`SymbolComponent`) | a symbol's definition | `key`, `version`, `name` (English), `category` (English), `tags` (search words only, lower case, no duplicates), `attachTo` (target kinds, empty for none), `family` (a size family or null) |
+| `jetcad.symbol` (`SymbolComponent`) | a symbol's definition | `key`, `version`, `name` (English), `category` (English), `tags` (search words only, lower case, no duplicates), `attachTo` (target kinds, empty for none), `family` (a size family or null), `retired` (true: the gallery no longer offers it) |
 | `jetcad.unit` (`UnitComponent`) | a service unit's definition | `kind` (`UnitKinds.table`, `UnitKinds.seat` or another kind), `capacity` (1 or more), `labelling` (`numbered`: the plan numbers it; `assigned`: a kit's type labels it) |
 | `jetcad.library` (`LibraryComponent`) | a library's root | `kit`, `format` (1) |
 | `jetcad.manifest` (`ManifestComponent`) | a plan's root | `format` (1), `kits` (kit id → the version that last saved the plan) |
@@ -60,6 +61,11 @@ ids when the code side arrives (the plan library's sub-project).
 Every component refuses a bad value in its constructor (an
 `ArgumentError`) and writes its JSON keys in alphabetical order.
 `registerKitComponents(registry)` registers the four and nothing else.
+
+A field added after a component was first written is optional when read,
+so what was saved before it still reads. `retired` is one: it is written
+only when true and read as false when absent, so a library or a plan
+without a retired symbol keeps its bytes.
 
 Behaviour is in fields, never in tags: a symbol that stands against a wall
 says `attachTo: ['wall-face']`; a symbol in a size family says
@@ -86,9 +92,10 @@ each definition's leaves. `SymbolLibrary.decode(bytes)` refuses, with a
 9. a unit in a size family;
 10. a unit component off a symbol's definition;
 11. a unit whose first leaf is not closed (a closed polyline or a circle),
-    or is a closed polyline enclosing no more area than the engine's
-    tolerance squared: a unit's first leaf is its outline, which service
-    mode fills;
+    or is a closed polyline no wider than the engine's tolerance, its
+    width being 2·area/perimeter (a 600 mm sliver 1e-9 mm wide is
+    refused, a 600 mm by 1 mm bar is not): a unit's first leaf is its
+    outline, which service mode fills;
 12. a non-finite base point;
 13. a leaf owned by anything but a definition; a text, fill, attribute or
     point leaf;
@@ -111,7 +118,10 @@ a word id to the word.
 |---|---|
 | `symbol:<key>` | a symbol's name (all versions of the key) |
 | `category:<kit id>/<English category>` | a category, under the kit's id: two kits may both have a `Bar` |
-| `tool:<tool id>`, `type:<type id>`, `property:<type id>.<property>` | the code side's words |
+| `type:<type id>` | a type's name: its panel section's title (§10.2) |
+| `tool:<tool id>` | a tool's name in the palette (§10.5) |
+| `property:<type or tool id>.<property id>` | a field of a type, or of a tool's settings (§10.3) |
+| `property:<type or tool id>.<property id>.<value>` | a choice's value: an enum's name, else the value's text |
 
 Every word id carries its kit's id, so two kits never share one;
 `PlanKit.validate` reports a word under another kit's id. Lookup
@@ -152,6 +162,13 @@ read carries that kit's id. `cafeKit.validate()` lists a bad id, an empty
 version, a word under another kit's id, a word in no known namespace, a
 code-side word without English. A source's `read` is a call, so a kit's
 descriptor is `final`, not `const`.
+
+The code side (§10) adds `types`, `tools` and `attachments`. `validate()`
+then also lists a type or tool id that is not `<kit id>.<name>`
+(`typeOutsideKit`, `toolOutsideKit`), one given twice (`duplicateType`,
+`duplicateTool`), and every word a type, tool or property needs that has
+no English (`missingEnglish`). `propertyIds` lists the kit's property ids,
+choice values included, for the conformance test.
 
 ## 7. The authoring toolkit
 
@@ -214,10 +231,12 @@ void main() {
 
 - **A published `key@N` never changes its geometry or its unit.** A change
   of either is a new `key@N+1`, beside the old one. A key is never removed
-  and never reused: a retired symbol stays in the library. Taking a retired
-  symbol out of the gallery is the plan library's sub-project: the contract
-  has no retired mark yet. A plan never needs a library to draw: it copies
-  every placed symbol's definition.
+  and never reused: a retired symbol stays in the library, marked
+  `retired: true` in its catalog entry (`CatalogSymbol.retired`). The
+  gallery stops offering it; a plan that holds it keeps drawing it. A plan
+  never needs a library to draw: it copies every placed symbol's
+  definition. Retiring changes no geometry, so the snapshot does not
+  change; the library does, so run the generator.
 - **Names, categories, words and tags may change at any version**; they are
   not geometry.
 - **Semver at 0.x:** a new symbol, a new `@N`, words or tags is a patch; a
@@ -258,6 +277,14 @@ new one the snapshot lacks; a declared locale missing a word, or giving the
 English word unless `sameAsEnglish` allows it; a word for a key or category
 the catalog lacks; a locale with words that is not declared.
 
+A kit with a code side also passes its ids: `typeIds:` (`[for (final t in
+kit.types) t.id]`), `toolIds:` (`[for (final t in kit.tools) t.id]`) and
+`propertyIds:` (`kit.propertyIds`). Each id must be under the kit's id
+(`typeOutsideKit`, `toolOutsideKit`, and `foreignWordId` for a property),
+its word must have English (`missingEnglish`), and every declared locale
+holds it like a symbol's word (`wordMissing`, `wordUntranslated`). Without
+them, the code side is not checked.
+
 ## 9. A new kit, the symbol part
 
 1. A package `packages/jet_cad_2d_kit_<id>` depending on `jet_cad_2d_kit`
@@ -273,5 +300,207 @@ the catalog lacks; a locale with words that is not declared.
    `kit.validate()` is empty: a word under another kit's id or in no known
    namespace, and a `tool:`, `type:` or `property:` word without English,
    are caught only there.
-7. Its CI line, a demo and its README pictures (the plan library's
+7. Its code side, if it has one (§10): its types and tools under its id,
+   their words in English and in every declared locale, its ids passed to
+   the conformance test.
+8. Its CI line, a demo and its README pictures (the plan library's
    sub-projects describe these).
+
+## 10. The code side
+
+A kit contributes the engine's own types and the Flutter layer's own tools,
+each wrapped in a contract descriptor. The plan library composes them: it
+registers the types, arms the tools, shows the fields, and calls every hook
+through a guard. A kit never registers into the engine itself.
+
+The snippets of this section are `example/cafe_code.dart`'s: a cafe's menu
+board, `CafeSign`, a component with a width, a face and a colour, drawn by
+`CafeSignType`, the engine's `ParametricType<CafeSign>`.
+
+### 10.1 The descriptor
+
+```dart
+final PlanKit cafeCodeKit = PlanKit(
+  id: 'cafe',
+  version: '0.1.0',
+  types: [
+    PlanType<CafeSign>(
+      id: CafeSign.id,
+      fromJson: CafeSign.fromJson,
+      parametric: const CafeSignType(),
+      properties: signProperties,
+      colour: signColour,
+    ),
+  ],
+  names: cafeCodeNames,
+);
+```
+
+`PlanKit` carries `types` (`PlanType`), `tools` (`PlanTool`) and
+`attachments` (factories of `AttachmentProvider`) beside its symbols and
+words. Its factories (a tool's `create`, a type's `grips`, the
+`attachments`) run **once per document**: when the plan is replaced
+(`load`, `newPlan`, an import), the plan library disposes what they made
+and runs them again, so nothing a kit holds outlives its document.
+
+### 10.2 A parametric type
+
+| `PlanType` field | What it is |
+|---|---|
+| `id` | `<kit id>.<name>`, equal to the component's `typeId`: a plan's manifest finds its kits by it |
+| `fromJson` | the component's factory |
+| `parametric` | the engine's `ParametricType<T>`: `reach`, `generate`, `references`, the place hooks |
+| `grips` | `ObjectGripProvider Function(PlanServices)?`: the Flutter layer's grips for its objects |
+| `properties` | the panel's fields (§10.3) |
+| `section` | the escape hatch: `(context, value, commit, words) => Widget`, for what specs cannot say; `commit(T)` is one undo step |
+| `title` | a word id for the section's title, from the value; default `type:<id>` |
+| `colour` | a `ColourTarget` (§10.4) |
+| `exported` | false leaves the type's objects out of every export |
+
+**Covariance.** The plan library holds every type as `PlanType<Component>`.
+A member whose type takes a `T` (a section builder, a spec's `read`) fails
+Dart's runtime type check when read through that supertype, and
+`register` would infer `T = Component`. So `PlanType` keeps those members
+private and offers erased operations that run over its own `T`:
+`registerInto`, `fieldsOf`, `commitField`, `titleWordOf`, `colourOf`,
+`recolour`, `sectionFor`, `gripsFor`. The plan library calls only these. A
+kit calls none of them, and never reads a spec's `read`, `write` or
+`enabled` through a supertype either.
+
+### 10.3 Property specs
+
+```dart
+final List<PropertySpec<CafeSign>> signProperties = [
+  LengthProperty<CafeSign>(
+    id: 'width',
+    read: (s) => s.width,
+    write: (s, v) => s.copyWith(width: v),
+    min: 300,
+    max: 2400,
+  ),
+  ChoiceProperty<CafeSign, SignFace>(
+    id: 'face',
+    values: SignFace.values,
+    read: (s) => s.face,
+    write: (s, v) => s.copyWith(face: v),
+  ),
+  ValueDisplay<CafeSign>(
+    id: 'area',
+    read: (s) => s.width * 80,
+    unit: ValueUnit.area,
+  ),
+];
+
+final ColourTarget<CafeSign> signColour = ColourTarget<CafeSign>(
+  read: (s) => s.swatch,
+  write: (s, swatch) => s.withSwatch(swatch),
+);
+```
+
+| Kind | Holds | The panel |
+|---|---|---|
+| `LengthProperty` | `read`, `write`, `min`, `max` | millimetres, with the plan's decimal separator |
+| `AngleProperty` | `read`, `write` | radians stored, degrees shown |
+| `NumberProperty` | `read`, `write`, `min`, `max`, `decimals` (0 to 10) | rounded to `decimals` on commit |
+| `ChoiceProperty<T, V>` | `values`, `read`, `write` | one of `values`, compared with `==` |
+| `ToggleProperty` | `read`, `write` | a switch |
+| `TextProperty` | `read`, `write`, `maxLength` (code points) | a text field |
+| `ValueDisplay` | `read`, `unit` (`length`, `area`, `angle`, `none`) | read-only: a room's area |
+| `ActionProperty` | `apply` | a button: a door's Flip hinge |
+
+- Every spec has an `id` (a lower-case letter, then lower-case letters,
+  digits and hyphens), an optional `enabled(T)` that greys the field out,
+  and an optional `gate`, the `PlanGate` permission it needs.
+- `write` and `apply` return a changed copy; the plan library commits it
+  as one `SetComponentCommand<T>`, the parametric system regenerates, and
+  the edit is one undo step.
+- Out of range, not finite, not one of the values, too long: the input is
+  refused and the field shows its stored value again. A bad `min`, `max`,
+  `decimals`, `maxLength`, `values` or `id` is an `ArgumentError` when the
+  spec is made.
+- Words: `property:<type id>.<id>`, a choice's values
+  `property:<type id>.<id>.<value>`.
+
+### 10.4 Colour
+
+A `ColourTarget` reads a component's swatch, a name from the plan's palette,
+and writes a copy with another (null clears it). The panel's colour row
+recolours every selected object whose type has one, of any kit, in one
+command; the `recolor` permission gates it.
+
+### 10.5 Tools
+
+| `PlanTool` field | What it is |
+|---|---|
+| `id` | `<kit id>.<name>`; its word is `tool:<id>` |
+| `icon` | the palette's icon |
+| `letter` | a suggested shortcut. The plan library's tools keep V, L, P, R, C, A and T; F is reserved; kits' letters follow in load order, and a letter already taken goes to no later tool (a `letterTaken` diagnostic) |
+| `needs` | the `Capability`s its commits need; the palette disables it where the document's permissions deny one |
+| `settings` | `PlanToolSettings<S>(initial: ..., specs: [...])`: one `S` per tool, edited in the panel with the same specs while the tool is active (words `property:<tool id>.<id>`), read by the tool through `PlanServices.settingsOf` |
+| `create` | `Tool Function(PlanServices)`: the Flutter layer's `Tool` |
+
+### 10.6 The services
+
+`PlanServices` is a live view of one plan, one per kit:
+
+| Member | |
+|---|---|
+| `document`, `index`, `camera` | the current document, its spatial index, the camera (apertures in world units) |
+| `objectSnap` | the effective object-snap flag: F3 and the editor's snapping |
+| `attachments` | every loaded kit's attachment providers (§10.7) |
+| `words` | `KitWords`: this kit's words at the plan's locale, falling back to English, read live |
+| `settingsOf<S>(toolId)` | a tool's current settings |
+| `shared<T>(create)` | one `T` per kit and document, made on first use: what a kit's tools, grips and providers share (a wall's bands). A `T` that implements `Disposable` is disposed with its document |
+
+### 10.7 Attachment
+
+An `AttachmentProvider` offers one target kind (`wall-face`). Asked with an
+`AttachmentQuery` (the symbol's footprint and transform, the pointer, the
+capture distances, whether it is mirrored, whether it may rotate, what to
+exclude, the previous answer), it answers an `Attachment` (where the symbol
+goes, where the plan library draws its marker, a token of its own) or null.
+The plan library asks the providers of every kind in a symbol's `attachTo`
+and keeps the answer whose marker is nearest the pointer. Under
+`rotate: false`, a provider offers only targets the symbol's current turn
+already fits.
+
+### 10.8 When a kit's code fails
+
+Every hook is called through a guard. A failure never stops the plan; it
+becomes a `KitDiagnostic` (kit, subject, `KitDiagnosticCode`, message),
+once per subject and code:
+
+| What throws | What happens |
+|---|---|
+| a `ParametricType` hook | the edit is rolled back; the type's objects are probed, and each one whose hooks throw is frozen (treated as a plain group) and locked; the edit is tried once more. One broken object blocks one edit, once |
+| a component's `fromJson`, on load | the component is kept as stored, and its object is locked |
+| grips, an attachment provider | none for that object; no attachment |
+| a tool's `create` | the tool is disabled |
+| a tool's event or painting | the tool is cancelled and selection is armed |
+| a spec's `write` or `apply` | the field shows its stored value |
+| a section | a small "section failed" box in its place |
+
+A plan that names a kit the host did not load opens: that kit's objects
+draw, are locked, and are saved back unchanged (`kitMissing`). A plan saved
+by a newer version of a loaded kit opens with a warning (`kitNewer`).
+
+### 10.9 The engine's types, and byte equality
+
+**The engine's types bind the contract.** A `PlanType` takes the engine's
+`ParametricType<T>` and `Component`; a tool commits the engine's
+`DraftCommand`s to its `DraftDocument`; a library's `SymbolLeaf` exposes
+`EntityRecord` and `GeometryPayload`, a `SymbolEntry` its `Definition`.
+Wrapping them in contract types would rewrite the parametric and grip
+layers, so the contract uses them as they are. A breaking change of one of
+them in `jet_cad_2d` 0.x is a breaking change of the contract and of every
+kit that uses it.
+
+**Byte equality ties a kit's CI to the codec.** The conformance test
+compares the committed `.jetlib` with `encodeLibrary(catalog)` byte for
+byte, and those bytes are the engine codec's `encodeToString`. An engine
+release that changes that output (a key order, a number's spelling, a new
+field) turns every kit's conformance test red with `builtDiffers` until the
+kit runs its generator again. That is a regeneration, not a change of
+geometry: the snapshot is unaffected and every published `key@N` keeps its
+shapes. A kit that raises its `jet_cad_2d` constraint runs its generator
+and commits the new library in the same change.

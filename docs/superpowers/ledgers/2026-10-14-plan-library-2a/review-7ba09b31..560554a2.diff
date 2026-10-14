@@ -1,0 +1,1078 @@
+# Review package: 7ba09b31..HEAD
+
+## Commits
+560554a2 feat(kit): property specs, PropertyField, PlanGate and ColourTarget (2a P3)
+
+## Files changed
+ packages/jet_cad_2d_kit/CHANGELOG.md               |   4 +
+ packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart    |   2 +
+ packages/jet_cad_2d_kit/lib/src/kit/colour.dart    |  17 +
+ .../jet_cad_2d_kit/lib/src/kit/properties.dart     | 409 +++++++++++++++++++++
+ .../test/invariants/purity_test.dart               |   9 +
+ .../jet_cad_2d_kit/test/kit/properties_test.dart   | 323 ++++++++++++++++
+ .../jet_cad_2d_kit/test/support/code_fixtures.dart | 217 +++++++++++
+ 7 files changed, 981 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_kit/CHANGELOG.md b/packages/jet_cad_2d_kit/CHANGELOG.md
+index f91d285b..592c5cf2 100644
+--- a/packages/jet_cad_2d_kit/CHANGELOG.md
++++ b/packages/jet_cad_2d_kit/CHANGELOG.md
+@@ -2,10 +2,14 @@
+ 
+ - The kit contract's symbol side: the plan components (`jetcad.symbol`
+   with attachment kinds and a size family, `jetcad.unit`, `jetcad.manifest`,
+   `jetcad.library`) and `registerKitComponents`.
+ - The `.jetlib` library format: `SymbolLibrary.decode` and its fifteen
+   rules, `SymbolLibrary.merge`.
+ - `KitNames`, `SymbolLibrarySource`, `bundledLibrary`, `PlanKit`.
+ - The authoring toolkit (pure Dart): the catalog language,
+   `encodeLibrary`, the shared shape helpers, the geometry snapshot and the
+   conformance test.
++- Property specs (`LengthProperty`, `AngleProperty`, `NumberProperty`,
++  `ChoiceProperty`, `ToggleProperty`, `TextProperty`, `ValueDisplay`,
++  `ActionProperty`), their erased binding `PropertyField`, `PlanGate`,
++  `ValueUnit` and `ColourTarget`.
+diff --git a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+index eaf96cfa..543b416a 100644
+--- a/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
++++ b/packages/jet_cad_2d_kit/lib/jet_cad_2d_kit.dart
+@@ -1,12 +1,14 @@
+ /// The kit contract of jet_cad_2d plans: the components a plan stores, the
+ /// `.jetlib` symbol library format, a kit's words, its symbol sources and
+ /// its `PlanKit` descriptor.
+ ///
+ /// A Flutter library: it reads bundled assets. The model it exports is pure
+ /// Dart and is shared with `package:jet_cad_2d_kit/authoring.dart`.
+ library;
+ 
+ export 'src/kit/bundled_library.dart';
++export 'src/kit/colour.dart';
+ export 'src/kit/plan_kit.dart';
++export 'src/kit/properties.dart';
+ export 'src/kit/symbol_library_source.dart';
+ export 'src/model/model.dart';
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/colour.dart b/packages/jet_cad_2d_kit/lib/src/kit/colour.dart
+new file mode 100644
+index 00000000..70a5b520
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/colour.dart
+@@ -0,0 +1,17 @@
++// Colour targets (spec 2a P3, umbrella A3): how a type's component carries
++// its colour, so the panel's colour row recolours a multiple selection of
++// any kits' objects in one command.
++//
++// Free of Flutter: a swatch is a name from the plan's palette, not a Color.
++import 'package:meta/meta.dart';
++
++/// A type's colour: [read] gives its swatch (null: no colour of its own),
++/// [write] a copy carrying another (null clears it). The plan library uses
++/// it only through `PlanType.colourOf` and `PlanType.recolour`.
++@immutable
++final class ColourTarget<T> {
++  const ColourTarget({required this.read, required this.write});
++
++  final String? Function(T) read;
++  final T Function(T, String?) write;
++}
+diff --git a/packages/jet_cad_2d_kit/lib/src/kit/properties.dart b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+new file mode 100644
+index 00000000..c0fe9821
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/lib/src/kit/properties.dart
+@@ -0,0 +1,409 @@
++// Property specs (spec 2a P3, umbrella A4): the fields a kit's type or a
++// tool's settings show in the plan library's property panel, as data. Each
++// spec reads one value of its owner `T` and writes a changed copy.
++//
++// Free of Flutter: nothing here draws. The panel (the plan library) turns a
++// spec into a widget through the erased PropertyField.
++
++/// A PlanPermissions flag a field needs (spec 2a P2, P3). A field whose gate
++/// is off is shown read-only.
++enum PlanGate {
++  move,
++  rotate,
++  mirror,
++  reshape,
++  delete,
++  changeLayer,
++  recolor,
++  editLayers,
++  editPage,
++}
++
++/// How a [ValueDisplay] prints its number: a length in mm, an area in mm²,
++/// an angle in radians, or a plain number.
++enum ValueUnit { length, area, angle, none }
++
++final RegExp _specId = RegExp(r'^[a-z][a-z0-9-]*$');
++
++/// One field of an owner `T`: a type's component or a tool's settings.
++///
++/// Its word is `property:<owner id>.<id>` (a choice's values:
++/// `property:<owner id>.<id>.<value>`).
++///
++/// **Covariance.** The plan library holds specs of many `T`s at once. A
++/// member whose type takes a `T` ([enabled], a kind's `read` and `write`)
++/// throws a `TypeError` when it is read through a supertype such as
++/// `PropertySpec<Object?>`. Only [id], [gate], a kind's bounds and [bind]
++/// are safe there; [bind] is how the plan library uses a spec.
++sealed class PropertySpec<T> {
++  PropertySpec._(this.id, this.enabled, this.gate) {
++    if (!_specId.hasMatch(id)) {
++      throw ArgumentError.value(id, 'id',
++          'must be a lower-case letter, then lower-case letters, digits and hyphens');
++    }
++  }
++
++  /// Unique within its owner's specs.
++  final String id;
++
++  /// False greys the field out and its commit throws [StateError]. Null:
++  /// always enabled.
++  final bool Function(T)? enabled;
++
++  /// The permission the field needs, or null for none.
++  final PlanGate? gate;
++
++  /// This spec bound to [value], an owner `T`, under [wordId]: the erased
++  /// form the plan library uses (spec 2a P1, erased operations). A kit never
++  /// calls it.
++  ///
++  /// The field's `commit` returns the changed owner and, when it is not
++  /// null, passes it to [onCommit] first. Throws [ArgumentError] when
++  /// [value] is not a `T`.
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit});
++}
++
++/// A length in millimetres, within [min] and [max] (inclusive; null:
++/// unbounded).
++final class LengthProperty<T> extends PropertySpec<T> {
++  LengthProperty({
++    required String id,
++    required this.read,
++    required this.write,
++    this.min,
++    this.max,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate) {
++    _checkBounds(min, max);
++  }
++
++  final double Function(T) read;
++  final T Function(T, double) write;
++  final double? min;
++  final double? max;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(
++        this,
++        owner,
++        wordId,
++        read(owner),
++        (input) => write(owner, _inRange(_finite(input, id), min, max, id)),
++        onCommit);
++  }
++}
++
++/// An angle, stored in radians. The field's value and its commit's input
++/// are radians; the panel shows and parses degrees (spec 2a Task 17).
++final class AngleProperty<T> extends PropertySpec<T> {
++  AngleProperty({
++    required String id,
++    required this.read,
++    required this.write,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate);
++
++  final double Function(T) read;
++  final T Function(T, double) write;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(this, owner, wordId, read(owner),
++        (input) => write(owner, _finite(input, id)), onCommit);
++  }
++}
++
++/// A plain number within [min] and [max], rounded on commit to [decimals]
++/// places (0 to 10), so what is stored is what the panel shows.
++final class NumberProperty<T> extends PropertySpec<T> {
++  NumberProperty({
++    required String id,
++    required this.read,
++    required this.write,
++    this.min,
++    this.max,
++    this.decimals = 0,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate) {
++    _checkBounds(min, max);
++    if (decimals < 0 || decimals > 10) {
++      throw ArgumentError.value(decimals, 'decimals', 'must be 0 to 10');
++    }
++  }
++
++  final double Function(T) read;
++  final T Function(T, double) write;
++  final double? min;
++  final double? max;
++  final int decimals;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(this, owner, wordId, read(owner), (input) {
++      final rounded =
++          double.parse(_finite(input, id).toStringAsFixed(decimals));
++      return write(owner, _inRange(rounded, min, max, id));
++    }, onCommit);
++  }
++}
++
++/// One of [values], compared with `==`. A value's word segment is
++/// [segmentOf] it: an enum's name, else its `toString`.
++final class ChoiceProperty<T, V> extends PropertySpec<T> {
++  ChoiceProperty({
++    required String id,
++    required List<V> values,
++    required this.read,
++    required this.write,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  })  : values = List.unmodifiable(values),
++        super._(id, enabled, gate) {
++    if (this.values.isEmpty) {
++      throw ArgumentError.value(values, 'values', 'must not be empty');
++    }
++    final seen = <String>{};
++    for (final v in this.values) {
++      final segment = segmentOf(v);
++      if (segment.isEmpty || !seen.add(segment)) {
++        throw ArgumentError.value(
++            v, 'values', 'gives the word segment "$segment" twice or empty');
++      }
++    }
++  }
++
++  /// The word segment of [value]: an enum's name, else `'$value'`.
++  static String segmentOf(Object? value) =>
++      value is Enum ? value.name : '$value';
++
++  final List<V> values;
++  final V Function(T) read;
++  final T Function(T, V) write;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(this, owner, wordId, read(owner), (input) {
++      if (input is! V || !values.contains(input)) {
++        throw ArgumentError.value(input, id, 'is not one of $values');
++      }
++      return write(owner, input);
++    }, onCommit);
++  }
++}
++
++/// A yes or no.
++final class ToggleProperty<T> extends PropertySpec<T> {
++  ToggleProperty({
++    required String id,
++    required this.read,
++    required this.write,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate);
++
++  final bool Function(T) read;
++  final T Function(T, bool) write;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(this, owner, wordId, read(owner), (input) {
++      if (input is! bool) {
++        throw ArgumentError.value(input, id, 'is not a bool');
++      }
++      return write(owner, input);
++    }, onCommit);
++  }
++}
++
++/// A text of at most [maxLength] code points (null: any length).
++final class TextProperty<T> extends PropertySpec<T> {
++  TextProperty({
++    required String id,
++    required this.read,
++    required this.write,
++    this.maxLength,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate) {
++    final m = maxLength;
++    if (m != null && m < 1) {
++      throw ArgumentError.value(m, 'maxLength', 'must be at least 1');
++    }
++  }
++
++  final String Function(T) read;
++  final T Function(T, String) write;
++  final int? maxLength;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(this, owner, wordId, read(owner), (input) {
++      if (input is! String) {
++        throw ArgumentError.value(input, id, 'is not a String');
++      }
++      final m = maxLength;
++      if (m != null && input.runes.length > m) {
++        throw ArgumentError.value(input, id, 'is longer than $m');
++      }
++      return write(owner, input);
++    }, onCommit);
++  }
++}
++
++/// A read-only number: a room's area, a dimension's value. Its field's
++/// commit is null.
++final class ValueDisplay<T> extends PropertySpec<T> {
++  ValueDisplay({
++    required String id,
++    required this.read,
++    required this.unit,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate);
++
++  final double Function(T) read;
++  final ValueUnit unit;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(this, owner, wordId, read(owner), null, onCommit);
++  }
++}
++
++/// A button: a door's Flip hinge. Its field's value is null and its commit
++/// ignores its input and returns [apply] of the owner.
++final class ActionProperty<T> extends PropertySpec<T> {
++  ActionProperty({
++    required String id,
++    required this.apply,
++    bool Function(T)? enabled,
++    PlanGate? gate,
++  }) : super._(id, enabled, gate);
++
++  final T Function(T) apply;
++
++  @override
++  PropertyField bind(Object? value,
++      {required String wordId, void Function(T next)? onCommit}) {
++    final owner = _owner<T>(value);
++    return _BoundField<T>(
++        this, owner, wordId, null, (_) => apply(owner), onCommit);
++  }
++}
++
++/// A spec bound to one owner value: one object's component or one tool's
++/// settings (spec 2a P3). Erased: the plan library holds fields of many
++/// owner types in one list and never sees a `T`.
++abstract interface class PropertyField {
++  /// For [PropertySpec.id], [PropertySpec.gate], the kind (a type test) and
++  /// a kind's bounds or values only: see [PropertySpec]'s covariance note.
++  PropertySpec<Object?> get spec;
++
++  /// `property:<owner id>.<spec id>`.
++  String get wordId;
++
++  /// The spec's `enabled` of the bound owner; true when it has none.
++  bool get enabled;
++
++  /// The bound owner's value: a `double` for a length (mm), an angle
++  /// (radians), a number and a display; the value for a choice; a `bool`;
++  /// a `String`; null for an action.
++  Object? get value;
++
++  /// Null for a [ValueDisplay]. Otherwise: the owner changed by [input]
++  /// (an action ignores it). Throws [ArgumentError] for an input of the
++  /// wrong type, not finite, out of range, not among a choice's values or
++  /// too long, and [StateError] while the field is not [enabled].
++  Object? Function(Object? input)? get commit;
++}
++
++final class _BoundField<T> implements PropertyField {
++  factory _BoundField(
++      PropertySpec<T> spec,
++      T owner,
++      String wordId,
++      Object? value,
++      T Function(Object? input)? change,
++      void Function(T next)? onCommit) {
++    final enabled = spec.enabled?.call(owner) ?? true;
++    return _BoundField._(
++        spec,
++        wordId,
++        value,
++        enabled,
++        change == null
++            ? null
++            : (input) {
++                if (!enabled) throw StateError('$wordId is not enabled');
++                final next = change(input);
++                onCommit?.call(next);
++                return next;
++              });
++  }
++
++  _BoundField._(this.spec, this.wordId, this.value, this.enabled, this.commit);
++
++  @override
++  final PropertySpec<T> spec;
++
++  @override
++  final String wordId;
++
++  @override
++  final Object? value;
++
++  @override
++  final bool enabled;
++
++  @override
++  final Object? Function(Object? input)? commit;
++}
++
++T _owner<T>(Object? value) {
++  if (value is T) return value;
++  throw ArgumentError.value(value, 'value', 'is not a $T');
++}
++
++double _finite(Object? input, String id) {
++  if (input is num && input.isFinite) return input.toDouble();
++  throw ArgumentError.value(input, id, 'is not a finite number');
++}
++
++double _inRange(double v, double? min, double? max, String id) {
++  if ((min != null && v < min) || (max != null && v > max)) {
++    throw ArgumentError.value(
++        v, id, 'is outside [${min ?? '-∞'}, ${max ?? '∞'}]');
++  }
++  return v;
++}
++
++void _checkBounds(double? min, double? max) {
++  if (min != null && !min.isFinite) {
++    throw ArgumentError.value(min, 'min', 'is not finite');
++  }
++  if (max != null && !max.isFinite) {
++    throw ArgumentError.value(max, 'max', 'is not finite');
++  }
++  if (min != null && max != null && min > max) {
++    throw ArgumentError.value(min, 'min', 'is above max ($max)');
++  }
++}
+diff --git a/packages/jet_cad_2d_kit/test/invariants/purity_test.dart b/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+index 69724e63..73500f6f 100644
+--- a/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
++++ b/packages/jet_cad_2d_kit/test/invariants/purity_test.dart
+@@ -26,20 +26,29 @@ void main() {
+     final model = dartFilesUnder('lib/src/model');
+     final walk =
+         walkImports('.', 'jet_cad_2d_kit', ['lib/authoring.dart', ...model]);
+     expect(walk.violations, isEmpty);
+     expect(walk.visited, contains('lib/authoring.dart'));
+     for (final f in [...model, ...dartFilesUnder('lib/src/authoring')]) {
+       expect(walk.visited, contains(f), reason: '$f is not reached');
+     }
+   });
+ 
++  test('P9 the property specs and the colour target reach no Flutter', () {
++    // Spec 2a P3: nothing in them draws, so they stay pure. M-P9: import
++    // package:flutter/foundation.dart in colour.dart.
++    const files = ['lib/src/kit/properties.dart', 'lib/src/kit/colour.dart'];
++    final walk = walkImports('.', 'jet_cad_2d_kit', files);
++    expect(walk.violations, isEmpty);
++    expect(walk.visited, containsAll(files));
++  });
++
+   test('P2 a Flutter import two hops away is found', () {
+     final root = tree({
+       'lib/authoring.dart': "export 'src/model/a.dart';\n",
+       'lib/src/model/a.dart': "import 'b.dart';\n",
+       'lib/src/model/b.dart': "import 'package:flutter/foundation.dart';\n",
+     });
+     final walk = walkImports(root, 'kit', ['lib/authoring.dart']);
+     expect(walk.violations,
+         ['lib/src/model/b.dart: package:flutter/foundation.dart']);
+     expect(walk.visited, {
+diff --git a/packages/jet_cad_2d_kit/test/kit/properties_test.dart b/packages/jet_cad_2d_kit/test/kit/properties_test.dart
+new file mode 100644
+index 00000000..5288e64c
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/kit/properties_test.dart
+@@ -0,0 +1,323 @@
++// Spec 2a P3: the property specs, their constructor refusals and their
++// erased binding, PropertyField. Every kind is bound to a slab whose values
++// are away from their defaults; the covariance case holds specs of two
++// owner types in one list, under the VM's runtime checks.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Component;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../support/code_fixtures.dart';
++
++const Slab slab = Slab();
++
++Matcher refusedOn(String name) =>
++    throwsA(isA<ArgumentError>().having((e) => e.name, 'name', name));
++
++/// [spec] (of [slabSpecs], by id) bound to [owner].
++PropertyField field(String id,
++    {Slab owner = slab, void Function(Slab)? onCommit}) {
++  final spec = slabSpecs().firstWhere((s) => s.id == id);
++  return spec.bind(owner, wordId: 'property:test.slab.$id', onCommit: onCommit);
++}
++
++void main() {
++  group('constructor refusals', () {
++    test('PS1 an id off the pattern is refused by every kind', () {
++      final makers = <String, PropertySpec<Slab> Function(String id)>{
++        'length': (id) => LengthProperty<Slab>(
++            id: id, read: (s) => s.width, write: (s, _) => s),
++        'angle': (id) => AngleProperty<Slab>(
++            id: id, read: (s) => s.turn, write: (s, _) => s),
++        'number': (id) => NumberProperty<Slab>(
++            id: id, read: (s) => s.grade, write: (s, _) => s),
++        'choice': (id) => ChoiceProperty<Slab, Finish>(
++            id: id,
++            values: Finish.values,
++            read: (s) => s.finish,
++            write: (s, _) => s),
++        'toggle': (id) => ToggleProperty<Slab>(
++            id: id, read: (s) => s.raised, write: (s, _) => s),
++        'text': (id) => TextProperty<Slab>(
++            id: id, read: (s) => s.label, write: (s, _) => s),
++        'display': (id) => ValueDisplay<Slab>(
++            id: id, read: (s) => s.depth, unit: ValueUnit.length),
++        'action': (id) => ActionProperty<Slab>(id: id, apply: (s) => s),
++      };
++      for (final MapEntry(key: kind, value: make) in makers.entries) {
++        for (final ok in ['width', 'a', 'seat-count', 'w2']) {
++          expect(make(ok).id, ok, reason: '$kind $ok');
++        }
++        // M-PS1: drop the id check from the base constructor.
++        for (final bad in [
++          '',
++          'Width',
++          '2width',
++          '-width',
++          'wid th',
++          'width.x',
++          'width_x',
++          'width\n',
++        ]) {
++          expect(() => make(bad), refusedOn('id'), reason: '$kind "$bad"');
++        }
++      }
++    });
++
++    test('PS2 bounds: min above max, a bound not finite', () {
++      LengthProperty<Slab> length(double? min, double? max) =>
++          LengthProperty<Slab>(
++              id: 'width',
++              read: (s) => s.width,
++              write: (s, _) => s,
++              min: min,
++              max: max);
++      NumberProperty<Slab> number(double? min, double? max) =>
++          NumberProperty<Slab>(
++              id: 'grade',
++              read: (s) => s.grade,
++              write: (s, _) => s,
++              min: min,
++              max: max);
++      // M-PS2a: drop the min > max check.
++      expect(() => length(500.5, 300.25), refusedOn('min'));
++      expect(() => number(9.5, 0.5), refusedOn('min'));
++      // M-PS2b: drop the finiteness checks.
++      expect(() => length(double.negativeInfinity, 300), refusedOn('min'));
++      expect(() => number(0.5, double.nan), refusedOn('max'));
++      expect(length(300.25, 300.25).max, 300.25);
++      expect(length(null, null).min, isNull);
++    });
++
++    test('PS3 decimals 0 to 10', () {
++      NumberProperty<Slab> number(int decimals) => NumberProperty<Slab>(
++          id: 'grade',
++          read: (s) => s.grade,
++          write: (s, _) => s,
++          decimals: decimals);
++      // M-PS3: drop the decimals check.
++      expect(() => number(-1), refusedOn('decimals'));
++      expect(() => number(11), refusedOn('decimals'));
++      expect(number(0).decimals, 0);
++      expect(number(10).decimals, 10);
++    });
++
++    test('PS4 a choice of no value, or of a word segment twice', () {
++      ChoiceProperty<Slab, Object?> choice(List<Object?> values) =>
++          ChoiceProperty<Slab, Object?>(
++              id: 'finish',
++              values: values,
++              read: (s) => s.finish,
++              write: (s, _) => s);
++      // M-PS4a: drop the empty check.
++      expect(() => choice(const []), refusedOn('values'));
++      // M-PS4b: drop the repeated-segment check. 'oiled' the string and
++      // Finish.oiled share a segment.
++      expect(() => choice(const ['oiled', Finish.oiled]), refusedOn('values'));
++      expect(() => choice(const ['a', '']), refusedOn('values'));
++      final values = <Object?>[Finish.raw, 'square'];
++      final c = choice(values);
++      values.add('round');
++      expect(c.values, [Finish.raw, 'square']);
++      expect(() => c.values.add('x'), throwsUnsupportedError);
++      expect(ChoiceProperty.segmentOf(Finish.waxed), 'waxed');
++      expect(ChoiceProperty.segmentOf(3), '3');
++    });
++
++    test('PS5 a text of maxLength below 1', () {
++      // M-PS5: drop the check.
++      expect(
++          () => TextProperty<Slab>(
++              id: 'label',
++              read: (s) => s.label,
++              write: (s, _) => s,
++              maxLength: 0),
++          refusedOn('maxLength'));
++    });
++  });
++
++  group('the bound field', () {
++    test('PS6 a length: value, word, commit inside the bounds, inclusive', () {
++      final f = field('width');
++      expect(f.value, 1250.5);
++      expect(f.wordId, 'property:test.slab.width');
++      expect(f.enabled, isTrue);
++      expect(f.spec.id, 'width');
++      expect(f.spec, isA<LengthProperty<Slab>>());
++      expect(f.commit!(2400.75), slab.copyWith(width: 2400.75));
++      // The bounds themselves are allowed.
++      expect(f.commit!(300), slab.copyWith(width: 300));
++      expect(f.commit!(4800), slab.copyWith(width: 4800));
++      // M-PS6a: drop the range check. M-PS6b: `v <= min` (exclusive).
++      expect(() => f.commit!(299.5), refusedOn('width'));
++      expect(() => f.commit!(4800.5), refusedOn('width'));
++      // M-PS6c: drop the finiteness check (a NaN passes both comparisons).
++      expect(() => f.commit!(double.nan), refusedOn('width'));
++      expect(() => f.commit!('2400'), refusedOn('width'));
++      expect(() => f.commit!(null), refusedOn('width'));
++    });
++
++    test('PS7 an angle is radians in and out', () {
++      final f = field('turn');
++      expect(f.value, 0.35);
++      expect(f.spec.gate, PlanGate.rotate);
++      // M-PS7: convert the input from degrees (v * pi / 180).
++      expect(f.commit!(1.25), slab.copyWith(turn: 1.25));
++      expect(f.commit!(-0.5), slab.copyWith(turn: -0.5));
++      expect(() => f.commit!(double.infinity), refusedOn('turn'));
++    });
++
++    test('PS8 a number is rounded to its decimals, then range-checked', () {
++      final f = field('grade');
++      expect(f.value, 2.5);
++      // M-PS8a: drop the rounding.
++      expect(f.commit!(3.14159), slab.copyWith(grade: 3.1));
++      expect(f.commit!(7), slab.copyWith(grade: 7.0));
++      // 9.04 rounds to 9.0, inside; 0.44 rounds to 0.4, outside.
++      // M-PS8b: range-check before rounding (9.04 is refused).
++      expect(f.commit!(9.04), slab.copyWith(grade: 9.0));
++      expect(() => f.commit!(0.44), refusedOn('grade'));
++    });
++
++    test('PS9 a choice takes one of its values, by ==', () {
++      final f = field('finish');
++      expect(f.value, Finish.waxed);
++      expect(f.commit!(Finish.raw), slab.copyWith(finish: Finish.raw));
++      // M-PS9: drop the membership check (a String reaches `write`).
++      expect(() => f.commit!('raw'), refusedOn('finish'));
++      expect(() => f.commit!(null), refusedOn('finish'));
++      final shape = postSpecs()[1].bind(const Post(), wordId: 'w');
++      expect(shape.commit!('square'), const Post(shape: 'square'));
++      expect(() => shape.commit!('oval'), refusedOn('shape'));
++    });
++
++    test('PS10 a toggle takes a bool', () {
++      final f = field('raised');
++      expect(f.value, isTrue);
++      expect(f.commit!(false), slab.copyWith(raised: false));
++      // M-PS10: drop the type check (a TypeError from the cast instead).
++      expect(() => f.commit!(1), refusedOn('raised'));
++    });
++
++    test('PS11 a text takes a String of at most maxLength code points', () {
++      final f = field('label');
++      expect(f.value, 'Bar top');
++      expect(f.commit!('Köşe tezgâh'), slab.copyWith(label: 'Köşe tezgâh'));
++      expect(f.commit!('123456789012'), slab.copyWith(label: '123456789012'));
++      // M-PS11: drop the length check.
++      expect(() => f.commit!('1234567890123'), refusedOn('label'));
++      expect(() => f.commit!(12), refusedOn('label'));
++    });
++
++    test('PS12 a display shows its value and has no commit', () {
++      final f = field('area');
++      expect(f.value, 1250.5 * 640.25);
++      expect((f.spec as ValueDisplay<Object?>).unit, ValueUnit.area);
++      // M-PS12: give a display a commit.
++      expect(f.commit, isNull);
++    });
++
++    test('PS13 an action has no value; its commit applies', () {
++      final f = field('flip');
++      expect(f.value, isNull);
++      // M-PS13: return the owner unchanged.
++      expect(f.commit!(null), slab.copyWith(flipped: true));
++      expect(f.commit!('ignored'), slab.copyWith(flipped: true));
++    });
++
++    test('PS14 a disabled field reads but refuses to commit', () {
++      final lowered = slab.copyWith(raised: false);
++      final f = field('grade', owner: lowered);
++      expect(f.enabled, isFalse);
++      expect(f.value, 2.5);
++      // M-PS14: drop the enabled check from commit.
++      expect(() => f.commit!(3), throwsStateError);
++      expect(field('grade').enabled, isTrue);
++    });
++
++    test('PS15 onCommit sees the changed owner once, and only on success', () {
++      final seen = <Slab>[];
++      final f = field('width', onCommit: seen.add);
++      expect(() => f.commit!(10), refusedOn('width'));
++      // M-PS15a: call onCommit before the change is checked.
++      expect(seen, isEmpty);
++      f.commit!(2400.75);
++      // M-PS15b: drop the onCommit call.
++      expect(seen, [slab.copyWith(width: 2400.75)]);
++      final disabled = field('grade',
++          owner: slab.copyWith(raised: false), onCommit: seen.add);
++      expect(() => disabled.commit!(3), throwsStateError);
++      expect(seen, hasLength(1));
++    });
++
++    test('PS16 binding a value of another type is an ArgumentError', () {
++      final spec = slabSpecs().first;
++      // M-PS16: `value as T` in place of the type test (a TypeError).
++      expect(() => spec.bind(const Post(), wordId: 'w'), refusedOn('value'));
++      expect(() => spec.bind(null, wordId: 'w'), refusedOn('value'));
++    });
++  });
++
++  test('PS17 two owner types in one list, used only through PropertyField', () {
++    // Review Focus 3. The list's static type erases each spec's owner.
++    final List<PropertySpec<Component>> specs = [
++      ...slabSpecs(),
++      ...postSpecs(),
++    ];
++    const post = Post(shape: 'square', swatch: 'ochre');
++    Component ownerOf(PropertySpec<Component> s) =>
++        s is PropertySpec<Slab> ? slab : post;
++    // Premise: the trap is real. Reading `enabled` through the erased list
++    // fails the VM's covariance check.
++    expect(() => specs[2].enabled, throwsA(isA<TypeError>()));
++    // M-PS17: in LengthProperty.bind, read through an erased view
++    // (`final LengthProperty<Object?> self = this;` and `self.read(owner)`).
++    final fields = [
++      for (final s in specs) s.bind(ownerOf(s), wordId: 'property:x.${s.id}'),
++    ];
++    expect([
++      for (final f in fields) f.value
++    ], [
++      1250.5,
++      0.35,
++      2.5,
++      Finish.waxed,
++      true,
++      'Bar top',
++      1250.5 * 640.25,
++      null,
++      180.75,
++      'square',
++    ]);
++    expect([for (final f in fields) f.enabled],
++        [true, true, true, true, true, true, true, true, false, true]);
++    expect(fields[0].commit!(600), slab.copyWith(width: 600));
++    expect(fields[9].commit!('round'),
++        const Post(shape: 'round', swatch: 'ochre'));
++    expect(() => fields[8].commit!(200), throwsStateError);
++  });
++
++  test('PS18 a colour target holds its two hooks; PlanGate lists the flags',
++      () {
++    // A premise of the declarations, exempt from the mutation rule.
++    const target = ColourTarget<Slab>(read: _swatch, write: _recolour);
++    expect(target.read(slab), 'teal');
++    expect(target.write(slab, 'ochre').swatch, 'ochre');
++    expect(target.write(slab, null).swatch, isNull);
++    expect(PlanGate.values.map((g) => g.name), [
++      'move',
++      'rotate',
++      'mirror',
++      'reshape',
++      'delete',
++      'changeLayer',
++      'recolor',
++      'editLayers',
++      'editPage',
++    ]);
++  });
++}
++
++String? _swatch(Slab s) => s.swatch;
++
++Slab _recolour(Slab s, String? swatch) =>
++    s.copyWith(swatch: swatch, clearSwatch: swatch == null);
+diff --git a/packages/jet_cad_2d_kit/test/support/code_fixtures.dart b/packages/jet_cad_2d_kit/test/support/code_fixtures.dart
+new file mode 100644
+index 00000000..7f077608
+--- /dev/null
++++ b/packages/jet_cad_2d_kit/test/support/code_fixtures.dart
+@@ -0,0 +1,217 @@
++// Fixtures for the contract's code side (spec 2a P3): two component types of
++// a kit "test", so a list can hold specs of two different owner types, and
++// the specs of every property kind. Not degenerate: every value is away from
++// its default and from zero, the turn is not a multiple of a right angle.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:meta/meta.dart';
++
++enum Finish { oiled, waxed, raw }
++
++/// A slab: one field per property kind.
++@immutable
++final class Slab implements Component {
++  const Slab({
++    this.width = 1250.5,
++    this.depth = 640.25,
++    this.turn = 0.35,
++    this.grade = 2.5,
++    this.finish = Finish.waxed,
++    this.raised = true,
++    this.label = 'Bar top',
++    this.flipped = false,
++    this.swatch = 'teal',
++  });
++
++  static const String id = 'test.slab';
++
++  final double width;
++  final double depth;
++  final double turn;
++  final double grade;
++  final Finish finish;
++  final bool raised;
++  final String label;
++  final bool flipped;
++  final String? swatch;
++
++  Slab copyWith({
++    double? width,
++    double? turn,
++    double? grade,
++    Finish? finish,
++    bool? raised,
++    String? label,
++    bool? flipped,
++    String? swatch,
++    bool clearSwatch = false,
++  }) =>
++      Slab(
++        width: width ?? this.width,
++        depth: depth,
++        turn: turn ?? this.turn,
++        grade: grade ?? this.grade,
++        finish: finish ?? this.finish,
++        raised: raised ?? this.raised,
++        label: label ?? this.label,
++        flipped: flipped ?? this.flipped,
++        swatch: clearSwatch ? null : swatch ?? this.swatch,
++      );
++
++  @override
++  String get typeId => id;
++
++  @override
++  Map<String, Object?> toJson() => {
++        'depth': depth,
++        'finish': finish.name,
++        'flipped': flipped,
++        'grade': grade,
++        'label': label,
++        'raised': raised,
++        'swatch': swatch,
++        'turn': turn,
++        'width': width,
++      };
++
++  static Slab fromJson(Map<String, Object?> j) => Slab(
++        width: (j['width']! as num).toDouble(),
++        depth: (j['depth']! as num).toDouble(),
++        turn: (j['turn']! as num).toDouble(),
++        grade: (j['grade']! as num).toDouble(),
++        finish: Finish.values.byName(j['finish']! as String),
++        raised: j['raised']! as bool,
++        label: j['label']! as String,
++        flipped: j['flipped']! as bool,
++        swatch: j['swatch'] as String?,
++      );
++
++  @override
++  bool operator ==(Object other) =>
++      other is Slab &&
++      other.width == width &&
++      other.depth == depth &&
++      other.turn == turn &&
++      other.grade == grade &&
++      other.finish == finish &&
++      other.raised == raised &&
++      other.label == label &&
++      other.flipped == flipped &&
++      other.swatch == swatch;
++
++  @override
++  int get hashCode => Object.hash(
++      width, depth, turn, grade, finish, raised, label, flipped, swatch);
++
++  @override
++  String toString() => 'Slab($width x $depth, $label, $swatch)';
++}
++
++/// A post: a second owner type. Its `width` shares the slab's spec id on
++/// purpose, so a field can be offered to the wrong type.
++@immutable
++final class Post implements Component {
++  const Post({this.width = 180.75, this.shape = 'round', this.swatch});
++
++  static const String id = 'test.post';
++
++  final double width;
++  final String shape;
++  final String? swatch;
++
++  @override
++  String get typeId => id;
++
++  @override
++  Map<String, Object?> toJson() =>
++      {'shape': shape, 'swatch': swatch, 'width': width};
++
++  static Post fromJson(Map<String, Object?> j) => Post(
++        width: (j['width']! as num).toDouble(),
++        shape: j['shape']! as String,
++        swatch: j['swatch'] as String?,
++      );
++
++  @override
++  bool operator ==(Object other) =>
++      other is Post &&
++      other.width == width &&
++      other.shape == shape &&
++      other.swatch == swatch;
++
++  @override
++  int get hashCode => Object.hash(width, shape, swatch);
++
++  @override
++  String toString() => 'Post($width, $shape, $swatch)';
++}
++
++/// The slab's specs: all eight kinds, in panel order. `turn` needs the
++/// rotate gate; `grade` is enabled only while the slab is raised.
++List<PropertySpec<Slab>> slabSpecs() => [
++      LengthProperty<Slab>(
++        id: 'width',
++        read: (s) => s.width,
++        write: (s, v) => s.copyWith(width: v),
++        min: 300,
++        max: 4800,
++      ),
++      AngleProperty<Slab>(
++        id: 'turn',
++        read: (s) => s.turn,
++        write: (s, v) => s.copyWith(turn: v),
++        gate: PlanGate.rotate,
++      ),
++      NumberProperty<Slab>(
++        id: 'grade',
++        read: (s) => s.grade,
++        write: (s, v) => s.copyWith(grade: v),
++        min: 0.5,
++        max: 9,
++        decimals: 1,
++        enabled: (s) => s.raised,
++      ),
++      ChoiceProperty<Slab, Finish>(
++        id: 'finish',
++        values: Finish.values,
++        read: (s) => s.finish,
++        write: (s, v) => s.copyWith(finish: v),
++      ),
++      ToggleProperty<Slab>(
++        id: 'raised',
++        read: (s) => s.raised,
++        write: (s, v) => s.copyWith(raised: v),
++      ),
++      TextProperty<Slab>(
++        id: 'label',
++        read: (s) => s.label,
++        write: (s, v) => s.copyWith(label: v),
++        maxLength: 12,
++      ),
++      ValueDisplay<Slab>(
++        id: 'area',
++        read: (s) => s.width * s.depth,
++        unit: ValueUnit.area,
++      ),
++      ActionProperty<Slab>(
++        id: 'flip',
++        apply: (s) => s.copyWith(flipped: !s.flipped),
++      ),
++    ];
++
++/// The post's specs.
++List<PropertySpec<Post>> postSpecs() => [
++      LengthProperty<Post>(
++        id: 'width',
++        read: (p) => p.width,
++        write: (p, v) => Post(width: v, shape: p.shape, swatch: p.swatch),
++        min: 50,
++        enabled: (p) => p.shape == 'round',
++      ),
++      ChoiceProperty<Post, String>(
++        id: 'shape',
++        values: const ['round', 'square'],
++        read: (p) => p.shape,
++        write: (p, v) => Post(width: p.width, shape: v, swatch: p.swatch),
++      ),
++    ];

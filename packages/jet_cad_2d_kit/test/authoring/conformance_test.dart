@@ -48,7 +48,8 @@ CatalogSymbol copyOf(CatalogSymbol s,
         List<String>? attachTo,
         String? family,
         CatalogUnit? unit,
-        List<CatalogShape>? shapes}) =>
+        List<CatalogShape>? shapes,
+        bool? retired}) =>
     CatalogSymbol(
       key: key ?? s.key,
       version: version ?? s.version,
@@ -60,6 +61,7 @@ CatalogSymbol copyOf(CatalogSymbol s,
       unit: unit ?? s.unit,
       base: s.base,
       shapes: shapes ?? s.shapes,
+      retired: retired ?? s.retired,
     );
 
 /// The sample catalog with [symbol] in place of the one of its id.
@@ -345,5 +347,140 @@ void main() {
           reason: order);
       expect(withTurkish('Bar stool'), isEmpty, reason: order);
     }
+  });
+
+  test('R2-7 a retired published key conforms once regenerated', () {
+    final retired =
+        replacing(copyOf(symbolOf('sample.stool.bar@1'), retired: true));
+    // The library changes (the symbol carries the mark), so the committed
+    // one is stale until the generator runs.
+    expect(codes(problems(catalog: retired)), [KitProblemCode.builtDiffers]);
+    final g = generated(retired);
+    // M-R2f (snapshot_test R2-6) turns this red as snapshotChanged.
+    expect(problems(catalog: retired, library: g.library, snapshot: g.snapshot),
+        isEmpty);
+    expect(g.snapshot, committedSnapshot());
+  });
+
+  group('the code side (contract R3)', () {
+    const Map<String, String> en = {
+      'type:sample.wall': 'Wall',
+      'tool:sample.wall': 'Wall tool',
+      'property:sample.wall.height': 'Height',
+      'property:sample.wall.finish.oiled': 'Oiled',
+    };
+    const Map<String, String> de = {
+      'type:sample.wall': 'Wand',
+      'tool:sample.wall': 'Wandwerkzeug',
+      'property:sample.wall.height': 'Höhe',
+      'property:sample.wall.finish.oiled': 'Geölt',
+    };
+    const Map<String, String> tr = {
+      'type:sample.wall': 'Duvar',
+      'tool:sample.wall': 'Duvar aracı',
+      'property:sample.wall.height': 'Yükseklik',
+      'property:sample.wall.finish.oiled': 'Yağlı',
+    };
+
+    /// The sample kit's words with the code side's added.
+    KitNames codeNames({
+      Map<String, String> english = en,
+      Map<String, String> german = de,
+      Map<String, String> turkish = tr,
+    }) =>
+        KitNames({
+          'en': english,
+          'de': {...sampleNames.words['de']!, ...german},
+          'tr': {...sampleNames.words['tr']!, ...turkish},
+        });
+
+    List<KitProblem> codeProblems({
+      KitNames? names,
+      List<String> types = const ['sample.wall'],
+      List<String> tools = const ['sample.wall'],
+      List<String> properties = const [
+        'sample.wall.height',
+        'sample.wall.finish.oiled',
+      ],
+      Map<String, Set<String>> sameAsEnglish = sampleSameAsEnglish,
+    }) =>
+        conformance(
+          catalog: sampleCatalog,
+          committedLibrary: committedLibrary(),
+          committedSnapshot: committedSnapshot(),
+          names: names ?? codeNames(),
+          locales: sampleLocales,
+          sameAsEnglish: sameAsEnglish,
+          typeIds: types,
+          toolIds: tools,
+          propertyIds: properties,
+        );
+
+    test('R3-1 a kit with types, tools and properties conforms', () {
+      // A positive control for R3-2 to R3-4.
+      expect(codeProblems(), isEmpty);
+    });
+
+    test('R3-2 an id that is not under the kit', () {
+      // M-R3a: drop the check. M-R3b: test `kitOfKey` only ('sample.Wall').
+      for (final id in ['other.wall', 'sample', 'sample.Wall']) {
+        final found = codeProblems(types: [id]);
+        expect(codes(found), [KitProblemCode.typeOutsideKit], reason: id);
+        expect(found.single.message, contains('"$id"'));
+        expect(
+            codes(codeProblems(tools: [id])), [KitProblemCode.toolOutsideKit],
+            reason: id);
+      }
+      // M-R3c: drop the property check. M-R3f: drop its dot test ('sample'
+      // is then under the kit).
+      for (final id in ['other.wall.height', 'height', 'sample']) {
+        expect(codes(codeProblems(properties: [id])),
+            [KitProblemCode.foreignWordId],
+            reason: id);
+      }
+    });
+
+    test('R3-3 a code-side word without English', () {
+      for (final id in en.keys) {
+        // M-R3d: drop the English check.
+        final found =
+            codeProblems(names: codeNames(english: {...en}..remove(id)));
+        expect(codes(found), [KitProblemCode.missingEnglish], reason: id);
+        expect(found.single.message, contains('"$id"'));
+      }
+    });
+
+    test('R3-4 a declared locale holds the code side to the same rule', () {
+      // M-R3e: leave the code words out of the declared-locale check.
+      final found = codeProblems(
+          names: codeNames(german: {...de}..remove('tool:sample.wall')));
+      expect(codes(found), [KitProblemCode.wordMissing]);
+      expect(found.single.message, contains('tool:sample.wall'));
+      final untranslated =
+          codeNames(turkish: {...tr, 'type:sample.wall': 'Wall'});
+      expect(codes(codeProblems(names: untranslated)),
+          [KitProblemCode.wordUntranslated]);
+      expect(
+          codeProblems(names: untranslated, sameAsEnglish: {
+            ...sampleSameAsEnglish,
+            'tr': {...sampleSameAsEnglish['tr']!, 'type:sample.wall'},
+          }),
+          isEmpty);
+    });
+
+    test('R3-5 without ids, the code side is not checked (additive)', () {
+      // A positive control: a kit calling conformance as before 2a, with
+      // code-side words, is held to nothing new.
+      expect(
+          conformance(
+            catalog: sampleCatalog,
+            committedLibrary: committedLibrary(),
+            committedSnapshot: committedSnapshot(),
+            names: codeNames(german: const {}),
+            locales: sampleLocales,
+            sameAsEnglish: sampleSameAsEnglish,
+          ),
+          isEmpty);
+    });
   });
 }

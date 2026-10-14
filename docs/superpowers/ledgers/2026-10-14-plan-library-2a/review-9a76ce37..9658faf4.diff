@@ -1,0 +1,3761 @@
+# Review package: 9a76ce37..HEAD
+
+## Commits
+9658faf4 test(plan): P-5 reads the settings before the click
+667f40c8 feat(plan): PlanPropertyPanel (P2, P3)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   1 +
+ .../jet_cad_2d_plan/lib/src/panels/colour_row.dart | 154 ++++
+ .../lib/src/panels/frame_safe_relay.dart           |  57 ++
+ .../jet_cad_2d_plan/lib/src/panels/kit_lookup.dart |  33 +
+ .../lib/src/panels/plan_property_panel.dart        | 839 +++++++++++++++++++++
+ .../lib/src/panels/symbol_section.dart             | 266 +++++++
+ .../test/panels/colour_row_test.dart               | 396 ++++++++++
+ .../test/panels/hover_removal_test.dart            |  47 ++
+ .../test/panels/property_panel_test.dart           | 298 ++++++++
+ .../test/panels/selection_panel_test.dart          | 432 +++++++++++
+ .../test/panels/symbol_section_test.dart           | 572 ++++++++++++++
+ .../jet_cad_2d_plan/test/support/panel_kits.dart   | 556 ++++++++++++++
+ 12 files changed, 3651 insertions(+)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index cb35bb4a..ca689f56 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -29,17 +29,18 @@ export 'src/file/plan_format_exception.dart';
+ export 'src/fonts/plan_fonts.dart'
+     show ensurePlanFonts, kPlanFontFamily, registerFontLicences;
+ export 'src/kits/guard.dart' show KitHookFailure;
+ export 'src/kits/kit_set.dart';
+ export 'src/kits/locks.dart' show PlanLocked;
+ export 'src/l10n/localizations.dart';
+ export 'src/l10n/strings.dart';
+ export 'src/l10n/strings_de.dart';
+ export 'src/l10n/strings_en.dart';
+ export 'src/l10n/strings_tr.dart';
++export 'src/panels/plan_property_panel.dart' show PlanPropertyPanel;
+ export 'src/panels/plan_symbol_gallery.dart';
+ export 'src/shortcuts/plan_shortcut_guard.dart' show PlanShortcutGuard;
+ export 'src/shortcuts/plan_shortcuts.dart';
+ export 'src/symbols/plan_symbol.dart';
+ export 'src/symbols/plan_symbol_loader.dart';
+ export 'src/symbols/plan_symbols_state.dart';
+ export 'src/theme/plan_theme.dart' show PlanTheme;
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart b/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
+new file mode 100644
+index 00000000..72e144e7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
+@@ -0,0 +1,154 @@
++// The property panel's colour row (spec 2a P3, "Colour"; plan colours spec
++// PC-9): None and the plan's eight swatches over every selected object
++// whose type has a colour target, in one step labelled Colour, gated by
++// recolor. Ported from jet_cad_floor_plan/lib/src/colors/color_picker.dart:
++// the closed list of rooms and tables (pickedColors, :18-53) becomes the
++// types' colour targets (PlanType.colourOf, recolour); the swatches,
++// marks, tooltips and semantics are today's.
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../controller/plan_controller.dart';
++import '../l10n/strings.dart';
++import 'kit_lookup.dart';
++
++typedef ColourTargetOf = ({Handle handle, PlanType<Component> type});
++
++/// The objects among [keys] whose type has a colour target, each once, in
++/// key order: live objects (E1) that are not locked (spec P4).
++List<ColourTargetOf> colourTargets(
++    PlanController c, Iterable<SelectionKey> keys) {
++  if (keys.isEmpty) return const [];
++  final doc = c.document;
++  return [
++    for (final h in {for (final k in keys) k.target})
++      if (!c.isLocked(h))
++        if (c.catalog.typeIdOf(doc, h) case final typeId?)
++          if (planTypeOf(c, typeId) case final type? when type.hasColour)
++            (handle: h, type: type),
++  ];
++}
++
++/// Each target's stored swatch name (null for none), in [colourTargets]'
++/// order.
++List<String?> pickedColours(PlanController c, Iterable<SelectionKey> keys) => [
++      for (final t in colourTargets(c, keys))
++        t.type.colourOf(c.document, t.handle),
++    ];
++
++/// The one command that sets [swatch] (null: none) on every target among
++/// [keys], labelled 'Colour'; null when none would change.
++DraftCommand? recolourCommand(
++    PlanController c, Iterable<SelectionKey> keys, PlanSwatch? swatch) {
++  final doc = c.document;
++  final edits = <DraftCommand>[
++    for (final t in colourTargets(c, keys))
++      if (t.type.recolour(doc, t.handle, swatch?.name) case final edit?) edit,
++  ];
++  return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
++}
++
++/// Why the row is read-only for [keys], or null when it acts (today's
++/// `colorPickerBlocked`, `color_picker.dart:72-86`):
++/// [PlanStrings.readOnlyDocument] when the document's permissions refuse
++/// `components` or a target type's edit capability; [PlanStrings.colorRefused]
++/// when `recolor` is off.
++String? colourRowBlocked(
++    PlanController c, Iterable<SelectionKey> keys, PlanStrings strings) {
++  final p = c.document.commands.permissions;
++  if (!p.allows(Capability.components) ||
++      colourTargets(c, keys)
++          .any((t) => !p.allows(t.type.parametric.editCapability))) {
++    return strings.readOnlyDocument;
++  }
++  if (!c.permissions.recolor) return strings.colorRefused;
++  return null;
++}
++
++/// The swatch colour of [rgb] (PC-9): as the canvas shows it, re-toned on a
++/// dark canvas. The one place the planner turns a palette hue into a Color.
++Color swatchColor(int rgb, int? darkCanvasPaper) => Color(0xFF000000 |
++    (darkCanvasPaper == null
++        ? rgb
++        : darkCanvasTone(rgb, darkCanvasPaper & 0xFFFFFF)));
++
++class ColourRow extends StatelessWidget {
++  const ColourRow({super.key, required this.controller, this.darkCanvasPaper});
++
++  final PlanController controller;
++
++  /// The dark canvas's paper, ARGB, while the canvas re-tones; null on a
++  /// light canvas.
++  final int? darkCanvasPaper;
++
++  void _choose(PlanSwatch? swatch, PlanStrings strings) {
++    final keys = controller.selection.keys;
++    if (colourRowBlocked(controller, keys, strings) != null) return;
++    final command = recolourCommand(controller, keys, swatch);
++    // A refusal is caught inside execute (the lock hint, the diagnostic).
++    if (command != null) controller.execute(command);
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final strings = PlanStrings.of(context);
++    final keys = controller.selection.keys;
++    final blocked = colourRowBlocked(controller, keys, strings);
++    final colors = pickedColours(controller, keys);
++    // The sentinel stands for "mixed": it equals no swatch's name, so no
++    // swatch is marked. A stored unknown name equals none either.
++    final common = colors.toSet().length == 1 ? colors.first : '\u0000';
++    final scheme = Theme.of(context).colorScheme;
++    Widget swatch(String key, String label, Color? fill, bool marked,
++            VoidCallback onTap) =>
++        Tooltip(
++          message: blocked ?? label,
++          child: Semantics(
++            button: true,
++            selected: marked,
++            enabled: blocked == null,
++            label: label,
++            child: InkWell(
++              key: Key('color-swatch-$key'),
++              onTap: blocked == null ? onTap : null,
++              customBorder: const CircleBorder(),
++              child: Container(
++                width: 24,
++                height: 24,
++                decoration: BoxDecoration(
++                  color: fill,
++                  shape: BoxShape.circle,
++                  border: Border.all(
++                      color: marked ? scheme.primary : scheme.outline,
++                      width: marked ? 3 : 1),
++                ),
++                child: fill == null
++                    ? Icon(Icons.block, size: 14, color: scheme.outline)
++                    : null,
++              ),
++            ),
++          ),
++        );
++    return Column(
++      key: const Key('color-picker'),
++      crossAxisAlignment: CrossAxisAlignment.start,
++      children: [
++        Text(strings.color),
++        const SizedBox(height: 6),
++        Wrap(spacing: 6, runSpacing: 6, children: [
++          swatch('none', strings.colorNone, null, common == null,
++              () => _choose(null, strings)),
++          for (final c in PlanSwatch.values)
++            swatch(
++                c.name,
++                strings.colorName(c),
++                swatchColor(c.rgb, darkCanvasPaper),
++                common == c.name,
++                () => _choose(c, strings)),
++        ]),
++      ],
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/frame_safe_relay.dart b/packages/jet_cad_2d_plan/lib/src/panels/frame_safe_relay.dart
+new file mode 100644
+index 00000000..bf218b09
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/panels/frame_safe_relay.dart
+@@ -0,0 +1,57 @@
++// Ported from jet_cad_floor_plan/lib/src/planner_shell.dart:1702-1752
++// (2a Task 17): the shell's _FrameSafeRelay, which the property panel
++// listens to the selection through (HR1).
++import 'package:flutter/foundation.dart' show ChangeNotifier, Listenable;
++import 'package:flutter/scheduler.dart' show SchedulerBinding, SchedulerPhase;
++
++/// [_source]'s notifications, forwarded at once, except while a frame
++/// builds ([SchedulerPhase.persistentCallbacks]): then one is held and
++/// delivered after that frame, the pattern of
++/// `FloorPlanController.toolChanged` (Task 4 review R-2). A pointer event,
++/// a key and a host call arrive between frames, so they are forwarded at
++/// once; [deliver] hands a held one on earlier, from its owner's update.
++class FrameSafeRelay extends ChangeNotifier {
++  FrameSafeRelay(this._source) {
++    _source.addListener(_onSource);
++  }
++
++  final Listenable _source;
++
++  /// A notification is held for after the frame.
++  bool _held = false;
++
++  /// The post-frame delivery is scheduled.
++  bool _due = false;
++  bool _disposed = false;
++
++  void _onSource() {
++    final binding = SchedulerBinding.instance;
++    if (binding.schedulerPhase != SchedulerPhase.persistentCallbacks) {
++      _held = false;
++      notifyListeners();
++      return;
++    }
++    _held = true;
++    if (_due) return;
++    _due = true;
++    binding.addPostFrameCallback((_) {
++      _due = false;
++      deliver();
++    });
++  }
++
++  /// Delivers the held notification now, if any; only where every listener
++  /// may be marked dirty (between frames, or in its owner's update).
++  void deliver() {
++    if (_disposed || !_held) return;
++    _held = false;
++    notifyListeners();
++  }
++
++  @override
++  void dispose() {
++    _disposed = true;
++    _source.removeListener(_onSource);
++    super.dispose();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart b/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart
+new file mode 100644
+index 00000000..f8cc9519
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/panels/kit_lookup.dart
+@@ -0,0 +1,33 @@
++// A kit's type, tool and word by id, over the controller's kit set (load
++// order). Not memoised: a kit set holds a handful of kits, and the panel
++// asks once per field per build.
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Component;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++
++import '../controller/plan_controller.dart';
++
++PlanType<Component>? planTypeOf(PlanController controller, String typeId) {
++  for (final kit in controller.kits.kits) {
++    for (final t in kit.types) {
++      if (t.id == typeId) return t;
++    }
++  }
++  return null;
++}
++
++PlanTool? planToolOf(PlanController controller, String toolId) {
++  for (final kit in controller.kits.kits) {
++    for (final t in kit.tools) {
++      if (t.id == toolId) return t;
++    }
++  }
++  return null;
++}
++
++/// [wordId] of kit [kitId] in the controller's locale, else English, else
++/// null (`KitNames.word`).
++String? planWordOf(PlanController controller, String kitId, String wordId) =>
++    controller.kits
++        .kitOf(kitId)
++        ?.names
++        .word(controller.locale.value.languageCode, wordId);
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+new file mode 100644
+index 00000000..f4b725de
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -0,0 +1,839 @@
++// Spec 2a P2 ("The widgets"), P3 (properties, colour), P4 (locks): the
++// active tool's settings while a tool with settings is active; the one
++// selected object's section (its type's fields titled by its title word,
++// then its escape hatch) or the generic symbol section (name, size,
++// rotation, mirror, the family's Size menu); the colour row over the
++// selection. A locked object shows no section.
++//
++// The field rules are today's (jet_cad_floor_plan/lib/src/selection_panel.dart,
++// spec 06 D13 F1/F2, 07 D11, 10 D21, fix/post-07, post-11): a field owns a
++// PanelFieldFocusNode, pins its target at focus gain, commits on its focus
++// loss and on Enter, hands the focus back to the canvas, reverts what it
++// cannot parse or what is refused, and is never reloaded while focused.
++// What changes is where a field comes from: a PropertyField that the type
++// (PlanType.fieldsOf) or the tool's settings (PlanToolSettings.fieldsOf)
++// bind, in place of the closed list of _Kind values.
++import 'dart:async';
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:meta/meta.dart' show internal;
++
++import '../controller/plan_controller.dart';
++import '../kits/section_boundary.dart' show KitSectionBoundary;
++import '../l10n/locale_scope.dart';
++import '../l10n/number_text.dart';
++import '../l10n/strings.dart';
++import '../l10n/strings_en.dart';
++import '../shortcuts/plan_shortcut_guard.dart';
++import '../symbols/symbol_box.dart';
++import 'colour_row.dart';
++import 'frame_safe_relay.dart';
++import 'kit_lookup.dart';
++import 'panel_focus.dart';
++import 'symbol_section.dart';
++
++/// The selected object's and the active tool's properties, over
++/// [controller].
++class PlanPropertyPanel extends StatefulWidget {
++  const PlanPropertyPanel({super.key, required this.controller});
++
++  final PlanController controller;
++
++  @override
++  State<PlanPropertyPanel> createState() => _PlanPropertyPanelState();
++}
++
++/// The layer field's slot (spec P2, "The layer field"): Task 18 sets this
++/// initializer to its `LayerPicker`. Null shows none.
++@internal
++Widget? Function(BuildContext context, PlanController controller)?
++    propertyPanelLayerField;
++
++/// What a field edits: one object of a type, one tool's settings, or one
++/// placed symbol's rotation.
++sealed class _Target {
++  const _Target();
++}
++
++final class _ObjectTarget extends _Target {
++  const _ObjectTarget(this.handle, this.typeId);
++
++  final Handle handle;
++  final String typeId;
++
++  @override
++  bool operator ==(Object other) =>
++      other is _ObjectTarget &&
++      other.handle == handle &&
++      other.typeId == typeId;
++
++  @override
++  int get hashCode => Object.hash(handle, typeId);
++}
++
++final class _ToolTarget extends _Target {
++  const _ToolTarget(this.toolId);
++
++  final String toolId;
++
++  @override
++  bool operator ==(Object other) =>
++      other is _ToolTarget && other.toolId == toolId;
++
++  @override
++  int get hashCode => toolId.hashCode;
++}
++
++final class _SymbolTarget extends _Target {
++  const _SymbolTarget(this.handle);
++
++  final Handle handle;
++
++  @override
++  bool operator ==(Object other) =>
++      other is _SymbolTarget && other.handle == handle;
++
++  @override
++  int get hashCode => handle.hashCode;
++}
++
++enum _Scope { object, tool, symbol }
++
++/// One text field's state (today's `_Field`, `selection_panel.dart:160-186`):
++/// [pinned] is the target recorded at focus gain; [loadedTarget] and
++/// [loadedText] are what the field last showed, so a reload can tell a real
++/// change from a notification that carries none.
++final class _Field {
++  _Field(this.scope, this.id);
++
++  final _Scope scope;
++
++  /// The spec id; `rotation` for the symbol's row.
++  final String id;
++  final TextEditingController text = TextEditingController();
++  final PanelFieldFocusNode focus = PanelFieldFocusNode();
++  _Target? pinned;
++  _Target? loadedTarget;
++  String? loadedText;
++
++  void dispose() {
++    text.dispose();
++    focus.dispose();
++  }
++}
++
++class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
++  PlanController get _c => widget.controller;
++
++  final Map<(_Scope, String), _Field> _fields = {};
++
++  /// The document the subscriptions below belong to.
++  DraftDocument? _document;
++  StreamSubscription<DocChange>? _changes;
++  FrameSafeRelay? _selection;
++  VoidCallback? _releaseSettle;
++
++  /// The panel's words: set before the first build and on a change of
++  /// language, when the fields are shown again in it (spec 14d L12).
++  PlanStrings _strings = const PlanStringsEn();
++
++  @override
++  void initState() {
++    super.initState();
++    _attach();
++  }
++
++  @override
++  void didChangeDependencies() {
++    super.didChangeDependencies();
++    PlanLocaleScope.push(context, _c);
++    final next = PlanStrings.of(context);
++    if (identical(next, _strings)) return;
++    _strings = next;
++    for (final f in _fields.values) {
++      if (!f.focus.hasFocus && f.loadedTarget != null) _show(f);
++    }
++  }
++
++  @override
++  void didUpdateWidget(PlanPropertyPanel oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (identical(oldWidget.controller, _c)) return;
++    _detach(oldWidget.controller);
++    _forgetTargets();
++    _attach();
++    PlanLocaleScope.push(context, _c);
++  }
++
++  @override
++  void dispose() {
++    _detach(_c);
++    for (final f in _fields.values) {
++      f.dispose();
++    }
++    super.dispose();
++  }
++
++  static List<Listenable> _listened(PlanController c) =>
++      [c.activeTool, c.toolSettings, c.symbolsState, c.locked, c.locale];
++
++  void _attach() {
++    final c = _c;
++    c.addListener(_onController);
++    for (final l in _listened(c)) {
++      l.addListener(_sync);
++    }
++    _releaseSettle = c.registerSettle(_settle);
++    _bindDocument();
++  }
++
++  void _detach(PlanController c) {
++    c.removeListener(_onController);
++    for (final l in _listened(c)) {
++      l.removeListener(_sync);
++    }
++    _releaseSettle?.call();
++    _releaseSettle = null;
++    _unbindDocument();
++  }
++
++  void _bindDocument() {
++    _document = _c.document;
++    _changes = _document!.commands.changes.listen((_) => _sync());
++    _selection = FrameSafeRelay(_c.selection)..addListener(_sync);
++  }
++
++  void _unbindDocument() {
++    _changes?.cancel();
++    _changes = null;
++    _selection
++      ?..removeListener(_sync)
++      ..dispose();
++    _selection = null;
++  }
++
++  /// After a swap no field may write into the new plan what it pinned in
++  /// the old one.
++  void _forgetTargets() {
++    for (final f in _fields.values) {
++      f
++        ..pinned = null
++        ..loadedTarget = null
++        ..loadedText = null;
++    }
++  }
++
++  void _onController() {
++    if (!identical(_c.document, _document)) {
++      _unbindDocument();
++      _forgetTargets();
++      _bindDocument();
++    }
++    _sync();
++  }
++
++  /// Review Focus 4: before the controller swaps the document, a focused
++  /// field hands its focus back, and its focus-loss commit lands in the plan
++  /// it was typed for (today's `_settlePendingInput`,
++  /// `planner_shell.dart:855-865`).
++  void _settle() {
++    var any = false;
++    for (final f in _fields.values) {
++      if (f.focus.hasFocus) {
++        f.focus.handBack();
++        any = true;
++      }
++    }
++    if (any) FocusManager.instance.applyFocusChangesIfNeeded();
++  }
++
++  // ---- targets ----
++
++  /// The one selected key's target when it is a root-level key.
++  Handle? get _single {
++    final keys = _c.selection.keys;
++    if (keys.length != 1) return null;
++    final key = keys.single;
++    return key.chain.isEmpty ? key.target : null;
++  }
++
++  _ObjectTarget? get _objectTarget {
++    final h = _single;
++    if (h == null || _c.isLocked(h)) return null;
++    final typeId = _c.catalog.typeIdOf(_c.document, h);
++    if (typeId == null || planTypeOf(_c, typeId) == null) return null;
++    return _ObjectTarget(h, typeId);
++  }
++
++  _SymbolTarget? get _symbolTarget {
++    final h = _single;
++    if (h == null || _c.isLocked(h) || !isSymbolInstance(_c.document, h)) {
++      return null;
++    }
++    return _SymbolTarget(h);
++  }
++
++  _ToolTarget? get _toolTarget {
++    final id = _c.activeTool.value;
++    return planToolOf(_c, id)?.settings == null ? null : _ToolTarget(id);
++  }
++
++  _Target? _targetOf(_Field f) => switch (f.scope) {
++        _Scope.object => _objectTarget,
++        _Scope.tool => _toolTarget,
++        _Scope.symbol => _symbolTarget,
++      };
++
++  /// [t]'s fields, bound now; none when [t] is no longer a live object of
++  /// its type.
++  List<PropertyField> _bound(_Target t) {
++    final c = _c;
++    switch (t) {
++      case _ObjectTarget(:final handle, :final typeId):
++        if (c.catalog.typeIdOf(c.document, handle) != typeId) return const [];
++        return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
++      case _ToolTarget(:final toolId):
++        final settings = planToolOf(c, toolId)?.settings;
++        if (settings == null) return const [];
++        return settings.fieldsOf(c.toolSettings.valueOf(toolId),
++            (v) => c.toolSettings.store(toolId, v),
++            toolId: toolId);
++      case _SymbolTarget():
++        return const [];
++    }
++  }
++
++  PropertyField? _fieldOf(_Target t, String id) {
++    for (final f in _bound(t)) {
++      if (f.spec.id == id) return f;
++    }
++    return null;
++  }
++
++  // ---- reading and parsing ----
++
++  /// What [f] shows for [t] now, or null when [t] is no longer live.
++  String? _shown(_Target t, _Field f) {
++    if (t case _SymbolTarget(:final handle)) {
++      return isSymbolInstance(_c.document, handle)
++          ? formatPanelNumber(shownRotation(_c.document, handle), _strings)
++          : null;
++    }
++    final field = _fieldOf(t, f.id);
++    return field == null ? null : _textOf(field);
++  }
++
++  String? _textOf(PropertyField field) {
++    final value = field.value;
++    switch (field.spec) {
++      case TextProperty():
++        return value is String ? value : null;
++      case AngleProperty():
++        return value is double
++            ? formatPanelNumber(degreesShown(value), _strings)
++            : null;
++      case NumberProperty(:final decimals):
++        return value is double
++            ? formatPanelNumber(
++                double.parse(value.toStringAsFixed(decimals)), _strings)
++            : null;
++      case LengthProperty():
++        return value is double ? formatPanelNumber(value, _strings) : null;
++      case ChoiceProperty() ||
++            ToggleProperty() ||
++            ValueDisplay() ||
++            ActionProperty():
++        return null;
++    }
++  }
++
++  double? _number(String text) {
++    final v = parsePanelNumber(text, _strings);
++    return v != null && v.isFinite ? v : null;
++  }
++
++  /// [f]'s text as the input to commit to [t], or null when the field
++  /// reverts instead.
++  Object? _parse(_Target t, _Field f) {
++    final text = f.text.text.trim();
++    if (t is _SymbolTarget) return _number(text);
++    final field = _fieldOf(t, f.id);
++    if (field == null) return null;
++    switch (field.spec) {
++      case TextProperty(:final maxLength):
++        return maxLength != null && text.runes.length > maxLength ? null : text;
++      case AngleProperty():
++        final degrees = _number(text);
++        return degrees == null ? null : degrees * math.pi / 180;
++      case LengthProperty() || NumberProperty():
++        return _number(text);
++      case ChoiceProperty() ||
++            ToggleProperty() ||
++            ValueDisplay() ||
++            ActionProperty():
++        return null;
++    }
++  }
++
++  /// Whether [t]'s field [id] edits (today's `_editable` and `_capable`,
++  /// `selection_panel.dart:356-391`).
++  bool _editable(_Target t, String id) {
++    final c = _c;
++    final engine = c.document.commands.permissions;
++    switch (t) {
++      case _SymbolTarget():
++        // A rotation is a TransformNodeCommand (09c D7).
++        return c.permissions.rotate && engine.allows(Capability.transform);
++      case _ToolTarget():
++        // A tool's settings are no edit of the document (:73).
++        final field = _fieldOf(t, id);
++        return field != null && field.enabled && field.commit != null;
++      case _ObjectTarget(:final typeId):
++        final field = _fieldOf(t, id);
++        if (field == null || !field.enabled || field.commit == null) {
++          return false;
++        }
++        final gate = field.spec.gate;
++        if (gate != null && !c.permissions.allows(gate)) return false;
++        return engine.allows(Capability.components) &&
++            engine.allows(planTypeOf(c, typeId)!.parametric.editCapability);
++    }
++  }
++
++  // ---- writing ----
++
++  String _kitOf(_Target t) => switch (t) {
++        _ObjectTarget(:final typeId) => kitOfKey(typeId),
++        _ToolTarget(:final toolId) => kitOfKey(toolId),
++        _SymbolTarget() => 'plan',
++      };
++
++  /// Runs [edit]. A commit goes through `controller.execute`, which catches
++  /// every refusal itself (the lock hint, the diagnostics) and answers
++  /// false. What can throw here is what runs before it: the spec's refusals
++  /// (`ArgumentError` out of range, `StateError` disabled: Task 3) change
++  /// nothing and the field shows the stored value; anything else a kit's
++  /// `write` or `apply` threw is one diagnostic (spec P4).
++  void _guarded(_Target t, String what, void Function() edit) {
++    final c = _c;
++    try {
++      edit();
++    } on ArgumentError {
++      // Refused by the spec: nothing changed.
++    } on StateError {
++      // Refused: a disabled field. Nothing changed.
++    } on Object catch (error) {
++      c.diagnosticsLog.report(KitDiagnostic(
++          kitId: _kitOf(t),
++          subject: switch (t) {
++            _ObjectTarget(:final typeId) => typeId,
++            _ToolTarget(:final toolId) => toolId,
++            _SymbolTarget() => 'plan.symbol',
++          },
++          code: KitDiagnosticCode.hookFailed,
++          message: '$what threw',
++          error: error));
++    }
++  }
++
++  /// Stores [input] as [t]'s field [id]: one command for an object or a
++  /// symbol, the settings for a tool, nothing when the value is unchanged.
++  void _write(_Target t, String id, Object? input) {
++    final c = _c;
++    _guarded(t, 'the property "$id"', () {
++      switch (t) {
++        case _SymbolTarget(:final handle):
++          final command =
++              rotateSymbolCommand(c.document, handle, input! as double);
++          if (command != null) c.execute(command);
++        case _ObjectTarget(:final handle, :final typeId):
++          final field = _fieldOf(t, id);
++          if (field == null || (input != null && input == field.value)) {
++            return;
++          }
++          c.execute(planTypeOf(c, typeId)!
++              .commitField(c.document, handle, field, input));
++        case _ToolTarget():
++          final field = _fieldOf(t, id);
++          if (field == null || (input != null && input == field.value)) {
++            return;
++          }
++          field.commit!(input);
++      }
++    });
++  }
++
++  /// A click (a toggle, a choice, an action) acts on the target shown now.
++  void _act(_Target t, String id, Object? input) {
++    _write(t, id, input);
++    if (mounted) setState(() {});
++  }
++
++  // ---- the field cycle (selection_panel.dart:760-1008) ----
++
++  _Field _fieldFor(_Scope scope, String id) =>
++      _fields.putIfAbsent((scope, id), () {
++        final f = _Field(scope, id);
++        f.focus.addListener(() => _onFocusChange(f));
++        _show(f);
++        return f;
++      });
++
++  /// Records the target on focus gain; commits on focus loss. `??=`: a
++  /// focused node that notifies again keeps its pin.
++  void _onFocusChange(_Field f) {
++    if (f.focus.hasFocus) {
++      f.pinned ??= _targetOf(f);
++      return;
++    }
++    _commit(f);
++  }
++
++  /// Commits [f]'s text to its pinned target, then shows the current
++  /// target's value. Text equal to what the field shows for the stored
++  /// value commits nothing.
++  void _commit(_Field f) {
++    final t = f.pinned;
++    if (t != null) {
++      final shown = _shown(t, f);
++      if (shown != null && f.text.text.trim() != shown && _editable(t, f.id)) {
++        final input = _parse(t, f);
++        if (input != null) _write(t, f.id, input);
++      }
++    }
++    _show(f);
++    f.pinned = f.focus.hasFocus ? _targetOf(f) : null;
++    if (mounted) setState(() {});
++  }
++
++  /// Writes the current target's value into [f], unconditionally.
++  void _show(_Field f) {
++    final t = _targetOf(f);
++    final shown = t == null ? null : _shown(t, f);
++    f.loadedTarget = shown == null ? null : t;
++    f.loadedText = shown;
++    if (shown != null && f.text.text != shown) f.text.text = shown;
++  }
++
++  /// Copies the model into the fields, never into a focused one, and only
++  /// where the target or its shown value changed (06 D13 F1).
++  void _load() {
++    for (final f in _fields.values) {
++      final t = _targetOf(f);
++      final shown = t == null ? null : _shown(t, f);
++      if (shown == null) {
++        f.loadedTarget = null;
++        f.loadedText = null;
++        continue;
++      }
++      if (f.focus.hasFocus) continue;
++      if (t == f.loadedTarget && shown == f.loadedText) continue;
++      _show(f);
++    }
++  }
++
++  void _sync() {
++    _load();
++    if (mounted) setState(() {});
++  }
++
++  /// 07 D11, 08 D16: while a tool's settings show, every valid keystroke
++  /// reaches them at once (a canvas click accepts its point before the
++  /// field's focus-loss commit runs).
++  void _onChanged(_Field f) {
++    final t = f.pinned;
++    if (t is! _ToolTarget) return;
++    final input = _parse(t, f);
++    if (input != null) _write(t, f.id, input);
++  }
++
++  // ---- widgets ----
++
++  Widget _textField(Key key, String label, _Field f, bool editable,
++          {String? suffix, bool signed = false, bool isText = false}) =>
++      TextField(
++        key: key,
++        controller: f.text,
++        focusNode: f.focus,
++        readOnly: !editable,
++        // No maxLength formatter: a text over the spec's maxLength is
++        // refused at the commit and the field reverts (Task 3's refusal).
++        decoration: InputDecoration(labelText: label, suffixText: suffix),
++        keyboardType: isText
++            ? TextInputType.text
++            : TextInputType.numberWithOptions(decimal: true, signed: signed),
++        onChanged: (_) => _onChanged(f),
++        onSubmitted: (_) => _commit(f),
++        // Enter hands the focus back to the canvas, past any other panel
++        // field (fix/post-07 F3); onSubmitted still runs after it.
++        onEditingComplete: f.focus.handBack,
++        // Only unfocuses (06 D13 F2): the commit is _onFocusChange's.
++        onTapOutside: (_) => f.focus.handBack(),
++      );
++
++  String _valueText(Object? value, ValueUnit unit) {
++    if (value is! double) return '—';
++    return switch (unit) {
++      ValueUnit.length => '${formatPanelNumber(value, _strings)} mm',
++      ValueUnit.area => '${formatPanelNumber(value / 1e6, _strings)} m²',
++      ValueUnit.angle => '${formatPanelNumber(degreesShown(value), _strings)}°',
++      ValueUnit.none => formatPanelNumber(value, _strings),
++    };
++  }
++
++  Widget _row(_Target t, _Scope scope, PropertyField field, String kitId) {
++    final id = field.spec.id;
++    final name = '${scope == _Scope.tool ? 'setting' : 'property'}-$id';
++    final key = Key(name);
++    final label = planWordOf(_c, kitId, field.wordId) ?? id;
++    final editable = _editable(t, id);
++    switch (field.spec) {
++      case LengthProperty():
++        return _textField(key, label, _fieldFor(scope, id), editable,
++            suffix: 'mm');
++      case AngleProperty():
++        return _textField(key, label, _fieldFor(scope, id), editable,
++            suffix: '°', signed: true);
++      case NumberProperty(:final min):
++        return _textField(key, label, _fieldFor(scope, id), editable,
++            signed: min == null || min < 0);
++      case TextProperty():
++        return _textField(key, label, _fieldFor(scope, id), editable,
++            isText: true);
++      case ToggleProperty():
++        return SwitchListTile(
++          key: key,
++          dense: true,
++          contentPadding: EdgeInsets.zero,
++          title: Text(label),
++          value: field.value == true,
++          onChanged: editable ? (v) => _act(t, id, v) : null,
++        );
++      case ChoiceProperty(:final values):
++        return InputDecorator(
++          decoration:
++              InputDecoration(labelText: label, border: InputBorder.none),
++          child: DropdownButton<Object?>(
++            key: key,
++            isExpanded: true,
++            value: field.value,
++            items: [
++              for (final v in values)
++                DropdownMenuItem<Object?>(
++                  value: v,
++                  child: Text(
++                      planWordOf(_c, kitId,
++                              '${field.wordId}.${ChoiceProperty.segmentOf(v)}') ??
++                          ChoiceProperty.segmentOf(v),
++                      key: Key('$name-${ChoiceProperty.segmentOf(v)}')),
++                ),
++            ],
++            onChanged: editable ? (v) => _act(t, id, v) : null,
++          ),
++        );
++      case ValueDisplay(:final unit):
++        return InputDecorator(
++          decoration:
++              InputDecoration(labelText: label, border: InputBorder.none),
++          child: Text(_valueText(field.value, unit), key: key),
++        );
++      case ActionProperty():
++        return Padding(
++          padding: const EdgeInsets.only(top: 8),
++          child: OutlinedButton(
++              key: key,
++              onPressed: editable ? () => _act(t, id, null) : null,
++              child: Text(label)),
++        );
++    }
++  }
++
++  List<Widget> _settingsSection(_ToolTarget t, TextStyle? title) {
++    final kit = kitOfKey(t.toolId);
++    return [
++      Text(planWordOf(_c, kit, 'tool:${t.toolId}') ?? t.toolId,
++          key: Key('settings-${t.toolId}'), style: title),
++      for (final field in _bound(t)) _row(t, _Scope.tool, field, kit),
++    ];
++  }
++
++  List<Widget> _objectSection(_ObjectTarget t, TextStyle? title) {
++    final c = _c;
++    final doc = c.document;
++    final type = planTypeOf(c, t.typeId)!;
++    final kit = kitOfKey(t.typeId);
++    return [
++      Text(planWordOf(c, kit, type.titleWordOf(doc, t.handle)) ?? t.typeId,
++          key: Key('section-${t.typeId}'), style: title),
++      for (final field in _bound(t)) _row(t, _Scope.object, field, kit),
++      if (type.hasSection)
++        // Spec P4: a section builder that throws shows a small box in its
++        // place (Task 11's boundary).
++        KitSectionBoundary(
++          kitId: kit,
++          typeId: t.typeId,
++          log: c.diagnosticsLog,
++          builder: (context) => type.sectionFor(
++              context,
++              doc,
++              t.handle,
++              (command) => _guarded(
++                  t, 'the section\'s commit', () => c.execute(command)),
++              KitNamesWords(c.kits.kitOf(kit)!.names, () => c.locale.value)),
++        ),
++    ];
++  }
++
++  /// The Symbol section (09c D7; `selection_panel.dart:1122-1191`).
++  List<Widget> _symbolSection(_SymbolTarget t, TextStyle? title) {
++    final c = _c;
++    final doc = c.document;
++    final h = t.handle;
++    final node = doc.tree[h]! as InstanceNode;
++    final component = doc.components.get<SymbolComponent>(node.definition)!;
++    final box = boxOfDefinition(doc, node.definition);
++    final entries = symbolEntriesOf(c.symbols);
++    final entry = entryOfInstance(entries, doc, h);
++    final members = entry == null || isServableInstance(doc, h)
++        ? const <SymbolEntry>[]
++        : familyMembers(entries, entry);
++    String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
++        '${formatPanelNumber(b.depth, _strings)}';
++    final p = c.permissions;
++    final engine = doc.commands.permissions;
++    final turnable = engine.allows(Capability.transform);
++    final resizable = engine.allows(Capability.structure) &&
++        engine.allows(Capability.geometry) &&
++        engine.allows(Capability.components) &&
++        turnable;
++    final name = c.kits
++            .kitOf(kitOfKey(component.key))
++            ?.names
++            .symbolName(_strings.languageCode, component) ??
++        component.name;
++    return [
++      Text(_strings.toolSymbol, key: const Key('symbol-section'), style: title),
++      InputDecorator(
++        decoration:
++            InputDecoration(labelText: _strings.name, border: InputBorder.none),
++        child: Text(name, key: const Key('symbol-name')),
++      ),
++      InputDecorator(
++        decoration:
++            InputDecoration(labelText: _strings.size, border: InputBorder.none),
++        child:
++            Text(box == null ? '—' : size(box), key: const Key('symbol-size')),
++      ),
++      _textField(const Key('symbol-rotation'), _strings.rotation,
++          _fieldFor(_Scope.symbol, 'rotation'), _editable(t, 'rotation'),
++          suffix: '°', signed: true),
++      // A button the permissions refuse is not shown (S-11).
++      if (p.mirror) ...[
++        const SizedBox(height: 8),
++        OutlinedButton.icon(
++          key: const Key('symbol-mirror'),
++          onPressed: turnable
++              ? () => _guarded(t, 'Mirror', () {
++                    final command = mirrorSymbolCommand(doc, h);
++                    if (command != null) c.execute(command);
++                  })
++              : null,
++          icon: const Icon(Icons.flip),
++          label: Text(_strings.mirror),
++        ),
++      ],
++      if (members.isNotEmpty && p.reshape) ...[
++        const SizedBox(height: 8),
++        DropdownButton<SymbolEntry>(
++          key: const Key('symbol-size-menu'),
++          isExpanded: true,
++          value:
++              members.where((m) => m.symbol.key == component.key).firstOrNull,
++          items: [
++            for (final m in members)
++              DropdownMenuItem(
++                value: m,
++                child: Text(size(boxOfEntry(m)!),
++                    key: Key('symbol-size-${m.symbol.key}')),
++              ),
++          ],
++          onChanged: resizable
++              ? (m) {
++                  if (m == null) return;
++                  _guarded(t, 'Change size', () {
++                    final command = changeSizeCommand(doc, h, m);
++                    if (command != null) c.execute(command);
++                  });
++                  if (mounted) setState(() {});
++                }
++              : null,
++        ),
++      ],
++    ];
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final c = _c;
++    // A parent rebuild may arrive before the controller's notification.
++    if (!identical(c.document, _document)) {
++      _unbindDocument();
++      _forgetTargets();
++      _bindDocument();
++    }
++    final title = Theme.of(context).textTheme.titleSmall;
++    final tool = _toolTarget;
++    final object = _objectTarget;
++    final symbol = object == null ? _symbolTarget : null;
++    // CP1, CP11 (M-PC9-tool): no colour row while a tool's settings show.
++    final colours =
++        tool == null && colourTargets(c, c.selection.keys).isNotEmpty;
++    final sections = <List<Widget>>[
++      if (tool != null) _settingsSection(tool, title),
++      if (object != null) _objectSection(object, title),
++      if (symbol != null) _symbolSection(symbol, title),
++      if (colours)
++        [
++          ColourRow(
++              controller: c,
++              darkCanvasPaper: darkCanvasFor(
++                      page: c.page.value?.background,
++                      brightness: Theme.of(context).brightness)
++                  ? kDarkCanvasPaper
++                  : null),
++        ],
++      // The layer field (Task 18 fills the slot): a non-empty selection,
++      // no tool's settings, changeLayer on (selection_panel.dart:1256-1263).
++      if (propertyPanelLayerField case final layer?
++          when tool == null &&
++              c.selection.keys.isNotEmpty &&
++              c.permissions.changeLayer)
++        if (layer(context, c) case final field?) [field],
++    ];
++    if (sections.isEmpty) return const SizedBox.shrink();
++    return PlanShortcutGuard(
++      controller: c,
++      child: Material(
++        key: const Key('property-panel'),
++        color: Colors.transparent,
++        child: Padding(
++          padding: const EdgeInsets.all(12),
++          child: Column(
++            crossAxisAlignment: CrossAxisAlignment.stretch,
++            mainAxisSize: MainAxisSize.min,
++            children: [
++              for (final (i, section) in sections.indexed) ...[
++                if (i > 0) const SizedBox(height: 12),
++                ...section,
++              ],
++            ],
++          ),
++        ),
++      ),
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart b/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
+new file mode 100644
+index 00000000..c8a7cf4b
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
+@@ -0,0 +1,266 @@
++// The Symbol section's model (spec 09c D7, revision 5): which instance it
++// shows, its library entry and size family, its rotation, and the commands
++// its rows commit -- Rotate, Mirror and Change size. The widgets are the
++// Selection panel's; everything here is Dart over the document.
++// Ported to the kit model: a symbol is a jetcad.symbol definition (the kit's SymbolComponent), a servable one carries a UnitComponent, and a size family is SymbolComponent.family (the K2 field) instead of a family: tag.
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart'
++    show SymbolComponent, SymbolEntry, UnitComponent;
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../symbols/plan_symbol.dart';
++import '../symbols/symbol_box.dart';
++import '../symbols/symbol_placer.dart' show definitionForEntry;
++
++/// [handle] is a root-level instance whose definition carries a
++/// [SymbolComponent] (D7's rule, F-11's for a symbol).
++bool isSymbolInstance(DraftDocument doc, Handle handle) {
++  final node = doc.tree[handle];
++  return node is InstanceNode &&
++      node.parent == doc.rootHandle &&
++      doc.tree.definition(node.definition) != null &&
++      doc.components.get<SymbolComponent>(node.definition) != null;
++}
++
++/// [instance]'s definition carries a [UnitComponent]: a table (V-4, as
++/// `TableSurvey` reads it).
++bool isServableInstance(DraftDocument doc, Handle instance) {
++  final node = doc.tree[instance];
++  return node is InstanceNode &&
++      doc.components.get<UnitComponent>(node.definition) != null;
++}
++
++/// [instance]'s library entry (V-5): the exact `key@version` of its
++/// definition's [SymbolComponent], else the key's highest version; null
++/// when the library has neither.
++SymbolEntry? entryOfInstance(
++    Iterable<SymbolEntry> entries, DraftDocument doc, Handle instance) {
++  final node = doc.tree[instance];
++  if (node is! InstanceNode) return null;
++  final c = doc.components.get<SymbolComponent>(node.definition);
++  if (c == null) return null;
++  SymbolEntry? highest;
++  for (final e in entries) {
++    if (e.symbol.key != c.key) continue;
++    if (e.symbol.version == c.version) return e;
++    if (highest == null || e.symbol.version > highest.symbol.version) {
++      highest = e;
++    }
++  }
++  return highest;
++}
++
++final Expando<Map<String, List<SymbolEntry>>> _families =
++    Expando<Map<String, List<SymbolEntry>>>('families');
++
++/// The members of [entry]'s size family (V-4, V-5): every entry of [entries]
++/// whose symbol has its `family`, one per key (its highest version), none
++/// servable, sorted by width then depth. Empty when [entry] has no family.
++/// Memoised per entries list and family: the panel rebuilds on every hover.
++List<SymbolEntry> familyMembers(List<SymbolEntry> entries, SymbolEntry entry) {
++  final family = entry.symbol.family;
++  if (family == null) return const [];
++  final memo = _families[entries] ??= {};
++  return memo[family] ??= () {
++    final byKey = <String, SymbolEntry>{};
++    for (final e in entries) {
++      if (e.unit != null || e.symbol.family != family) continue;
++      final seen = byKey[e.symbol.key];
++      if (seen == null || e.symbol.version > seen.symbol.version) {
++        byKey[e.symbol.key] = e;
++      }
++    }
++    final members = [
++      for (final e in byKey.values)
++        if (boxOfEntry(e) != null) e
++    ]..sort((a, b) {
++        final x = boxOfEntry(a)!, y = boxOfEntry(b)!;
++        final w = x.width.compareTo(y.width);
++        return w != 0 ? w : x.depth.compareTo(y.depth);
++      });
++    return List<SymbolEntry>.unmodifiable(members);
++  }();
++}
++
++final Expando<List<SymbolEntry>> _entriesOf = Expando<List<SymbolEntry>>();
++
++/// The entries of the controller's loaded symbols, one list per symbols
++/// list, so [familyMembers]' memo holds across builds.
++List<SymbolEntry> symbolEntriesOf(List<PlanSymbol> symbols) =>
++    _entriesOf[symbols] ??=
++        List<SymbolEntry>.unmodifiable([for (final s in symbols) s.entry]);
++
++/// The Rotation field's display steps per degree: it shows a rotation
++/// rounded to a millionth of a degree, and a typed value within one step
++/// of the current rotation is the shown value committed again, not a
++/// turn. A property of the field's text, not a geometric tolerance.
++const double kRotationStepsPerDegree = 1e6;
++
++/// The Rotation row's value (D7): `atan2(−c, d)` in degrees, in `[0, 360)`
++/// -- the local `y` column's angle, so a mirror does not add 180°.
++double rotationDegreesOf(Transform2 t) {
++  var deg = math.atan2(-t.c, t.d) * 180 / math.pi;
++  if (deg < 0) deg += 360;
++  if (deg >= 360) deg -= 360;
++  return deg == 0 ? 0.0 : deg;
++}
++
++/// The exact `(cos, sin)` of [quarterTurns] quarter turns (F-2).
++(double, double) _quarter(int quarterTurns) => const [
++      (1.0, 0.0),
++      (0.0, 1.0),
++      (-1.0, 0.0),
++      (0.0, -1.0),
++    ][((quarterTurns % 4) + 4) % 4];
++
++double _clean(double v) => v == 0 ? 0.0 : v;
++
++/// Whether [g]'s linear part is orthonormal (spec 09c W-8, S-10):
++/// `|a² + b² − 1|`, `|c² + d² − 1|` and `|ac + bd|` each at most
++/// `Tolerance.standard.linear`. A mirror is orthonormal; a scale is not.
++/// Copied from jet_cad_floor_plan/lib/src/symbols/wall_attach.dart:402-407
++/// (the wall attachment is sub-project 3's).
++bool _isOrthonormal(Transform2 g) {
++  final tol = Tolerance.standard.linear;
++  return (g.a * g.a + g.b * g.b - 1).abs() <= tol &&
++      (g.c * g.c + g.d * g.d - 1).abs() <= tol &&
++      (g.a * g.c + g.b * g.d).abs() <= tol;
++}
++
++/// [t] turned so its Rotation reads [degrees] (any finite number, taken
++/// modulo 360), about the insertion point `t · basePoint` (D7): the linear
++/// part `A` becomes `R(θ' − θ)·A`, so a mirror and a file's scale are
++/// kept; an orthonormal result at a multiple of 90° is `R(θ')·S` from the
++/// exact table, `S` the mirror or the identity, `-0.0` normalised.
++Transform2 rotatedTo(Transform2 t, Vector2 basePoint, double degrees) {
++  var target = degrees % 360;
++  if (target < 0) target += 360;
++  final p = t.transformPoint(basePoint);
++  final delta = (target - rotationDegreesOf(t)) * math.pi / 180;
++  final cs = math.cos(delta), sn = math.sin(delta);
++  var a = cs * t.a - sn * t.b, b = sn * t.a + cs * t.b;
++  var c = cs * t.c - sn * t.d, d = sn * t.c + cs * t.d;
++  if (target % 90 == 0 && _isOrthonormal(Transform2(a, b, c, d, 0, 0))) {
++    final (qc, qs) = _quarter(target ~/ 90);
++    if (t.a * t.d - t.b * t.c < 0) {
++      // R(θ')·scale(−1, 1).
++      a = -qc;
++      b = -qs;
++    } else {
++      a = qc;
++      b = qs;
++    }
++    c = -qs;
++    d = qc;
++  }
++  final e = p.x - (a * basePoint.x + c * basePoint.y);
++  final f = p.y - (b * basePoint.x + d * basePoint.y);
++  return Transform2(
++      _clean(a), _clean(b), _clean(c), _clean(d), _clean(e), _clean(f));
++}
++
++/// [t] mirrored in its own frame about [box]'s centre `x` (D7): the
++/// footprint does not move, a scale is kept.
++Transform2 mirroredAbout(Transform2 t, SymbolBox box) {
++  final cx = (box.left + box.right) / 2;
++  return t
++      .multiply(Transform2.translation(cx, 0))
++      .multiply(Transform2.scale(-1, 1))
++      .multiply(Transform2.translation(-cx, 0));
++}
++
++/// The `Rotate` step for [instance] (D7), or null when nothing changes.
++CompoundCommand? rotateSymbolCommand(
++    DraftDocument doc, Handle instance, double degrees) {
++  final node = doc.tree[instance];
++  if (node is! InstanceNode || !degrees.isFinite) return null;
++  final def = doc.tree.definition(node.definition);
++  if (def == null) return null;
++  // Already there, within the field's display step: the shown value
++  // committed again is nothing.
++  var diff = (degrees - rotationDegreesOf(node.transform)) % 360;
++  if (diff < 0) diff += 360;
++  final steps = diff * kRotationStepsPerDegree;
++  if (steps < 1 || steps > 360 * kRotationStepsPerDegree - 1) return null;
++  final next = rotatedTo(node.transform, def.basePoint, degrees);
++  if (_same(next, node.transform)) return null;
++  return CompoundCommand([TransformNodeCommand(instance, next)],
++      label: 'Rotate');
++}
++
++/// The `Mirror` step for [instance] (D7), or null when it has no box.
++CompoundCommand? mirrorSymbolCommand(DraftDocument doc, Handle instance) {
++  final node = doc.tree[instance];
++  if (node is! InstanceNode) return null;
++  final box = boxOfDefinition(doc, node.definition);
++  if (box == null) return null;
++  return CompoundCommand(
++      [TransformNodeCommand(instance, mirroredAbout(node.transform, box))],
++      label: 'Mirror');
++}
++
++/// The `Change size` step (D7, decision 9): [instance] takes [entry]'s
++/// definition (reused or copied, [definitionForEntry]), its linear part
++/// kept and its translation chosen so the new box's back-left corner
++/// `(left', back')` lands where the old `(left, back)` was. Null when the
++/// instance already draws [entry]'s key (re-picking the checked size is
++/// not a size change: it would copy a fresh definition over an older
++/// version or an edited one), or a box is missing.
++CompoundCommand? changeSizeCommand(
++    DraftDocument doc, Handle instance, SymbolEntry entry) {
++  final node = doc.tree[instance];
++  if (node is! InstanceNode) return null;
++  if (doc.components.get<SymbolComponent>(node.definition)?.key ==
++      entry.symbol.key) {
++    return null;
++  }
++  final oldBox = boxOfDefinition(doc, node.definition);
++  final newBox = boxOfEntry(entry);
++  if (oldBox == null || newBox == null) return null;
++  final made = definitionForEntry(doc, entry);
++  if (made.definition == node.definition) return null;
++  final t = node.transform;
++  final corner = t.transformPoint(Vector2(oldBox.left, oldBox.back));
++  final next = Transform2(
++    t.a,
++    t.b,
++    t.c,
++    t.d,
++    _clean(corner.x - (t.a * newBox.left + t.c * newBox.back)),
++    _clean(corner.y - (t.b * newBox.left + t.d * newBox.back)),
++  );
++  return CompoundCommand([
++    ...made.commands,
++    SetInstanceDefinitionCommand(instance, made.definition),
++    TransformNodeCommand(instance, next),
++  ], label: 'Change size');
++}
++
++bool _same(Transform2 x, Transform2 y) =>
++    x.a == y.a &&
++    x.b == y.b &&
++    x.c == y.c &&
++    x.d == y.d &&
++    x.e == y.e &&
++    x.f == y.f;
++
++/// [instance]'s Rotation as the row shows it (09c D7): to a millionth of a
++/// degree, so 30 is not 29.999999999999996; 360 shows as 0.
++double shownRotation(DraftDocument doc, Handle instance) {
++  final deg =
++      rotationDegreesOf((doc.tree[instance]! as InstanceNode).transform);
++  final shown =
++      (deg * kRotationStepsPerDegree).roundToDouble() / kRotationStepsPerDegree;
++  return shown >= 360 ? 0.0 : shown;
++}
++
++/// [radians] in degrees as an angle field shows them: to a millionth of a
++/// degree, no `-0.0`.
++double degreesShown(double radians) {
++  final shown =
++      (radians * 180 / math.pi * kRotationStepsPerDegree).roundToDouble() /
++          kRotationStepsPerDegree;
++  return shown == 0 ? 0.0 : shown;
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart b/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
+new file mode 100644
+index 00000000..a5951d7b
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/colour_row_test.dart
+@@ -0,0 +1,396 @@
++// Ported from jet_cad_floor_plan/test/colors/color_picker_test.dart; assertions unchanged.
++//
++// Plan colours spec PC-8, PC-9 and PC-10, over the property panel's colour
++// row (spec 2a P3, "Colour"): nine swatches, None and the palette's eight
++// hues, set the colour of every selected object whose type has a colour
++// target in one undo step labelled Colour; read-only while the permissions
++// refuse `recolor` or the document's permissions refuse the edit; its words
++// in Turkish; its swatches as the canvas shows the hues.
++//
++// Today's rooms A and B become two boxes of the box kit: A at
++// (7010.25, 3020.5) in a group turned 0.61 rad, B at (7400.75, 3120.25)
++// unturned; today's wall becomes a plain line. The hues under test are
++// `teal` and `purple`, never the first of the palette, and `magenta`, a
++// name no release knows. CP2 (tint pixels) is the room's (sub-project 3);
++// CP7 to CP12 are tables (2b).
++import 'dart:convert' show jsonEncode;
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show SelectionKey, darkCanvasTone, kDarkCanvasPaper;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanSwatch;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/panels/colour_row.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/panel_kits.dart';
++
++Finder swatch(String name) => find.byKey(Key('color-swatch-$name'));
++Finder get picker => find.byKey(const Key('color-picker'));
++
++/// The Semantics node of swatch [name] (the nearest above its InkWell that
++/// carries the label).
++Semantics semanticsOf(WidgetTester tester, String name) =>
++    tester.widget<Semantics>(find
++        .ancestor(
++            of: swatch(name),
++            matching: find.byWidgetPredicate(
++                (w) => w is Semantics && w.properties.label != null))
++        .first);
++
++/// The tooltip text of swatch [name].
++String tooltipOf(WidgetTester tester, String name) => tester
++    .widget<Tooltip>(
++        find.ancestor(of: swatch(name), matching: find.byType(Tooltip)).first)
++    .message!;
++
++/// The marked swatch's name, or null for none.
++String? marked(WidgetTester tester) {
++  final hits = <String>[
++    for (final n in ['none', for (final c in PlanSwatch.values) c.name])
++      if (semanticsOf(tester, n).properties.selected ?? false) n,
++  ];
++  expect(hits.length, lessThanOrEqualTo(1), reason: 'at most one mark: $hits');
++  return hits.isEmpty ? null : hits.single;
++}
++
++SelectionKey k(Handle h) => SelectionKey.root(h);
++
++/// Entities sorted by handle: slot order is history, not state (06 D11).
++/// floor_plan/test/support/wall_fixture.dart's `canon`.
++String canon(DraftDocument d) {
++  final j = DraftDocumentCodec.encode(d);
++  j['entities'] = List<Map<String, Object?>>.from(j['entities']! as List)
++    ..sort((a, b) => ((a['record']! as Map)['handle']! as int)
++        .compareTo((b['record']! as Map)['handle']! as int));
++  return jsonEncode(j);
++}
++
++/// The panel's plan.
++typedef Boxes = ({
++  PlanController c,
++  DraftDocument doc,
++  Handle a,
++  Handle b,
++  Handle line
++});
++
++/// Two boxes and a plain line over the box and disc kits: A (120 x 70) in a
++/// group of its own turned 0.61 rad, B (90 x 60) at the identity, the line
++/// on layer 0. The history cleared.
++Boxes boxesPlan() {
++  final c = boxController(kits: [boxKit, discKit]);
++  final a = addBox(c, Vector2(7010.25, 3020.5),
++      const BoxParams(120, 70, label: 'A', count: 2),
++      turn: 0.61);
++  final b = addBox(c, Vector2(7400.75, 3120.25),
++      const BoxParams(90, 60, label: 'B', finish: BoxFinish.gloss));
++  final add = addDrafted(c.document, EntityKind.line,
++      linePayload(Vector2(7210.5, 3300.25), Vector2(7390.75, 3360.5)),
++      layer: ReservedHandles.layerZero);
++  c.document.commands.execute(add);
++  c.document.commands.clearHistory();
++  return (c: c, doc: c.document, a: a, b: b, line: add.record.handle);
++}
++
++BoxParams boxOf(DraftDocument doc, Handle h) =>
++    doc.components.get<BoxParams>(h)!;
++
++/// Today's `paint(doc, room, name)`: the box's colour set to [name], one
++/// step.
++void paint(DraftDocument doc, Handle box, String? name) => doc.commands.execute(
++    SetComponentCommand<BoxParams>(box, boxOf(doc, box).withColour(name)));
++
++/// The composition over [r]: the canvas and, on the right, the property
++/// panel.
++final class Rig {
++  Rig._(this.tester, this.c);
++
++  final WidgetTester tester;
++  final PlanController c;
++
++  /// Pumps the canvas and the panel over [r], with [permissions] and, when
++  /// given, [locale] (with the plan library's delegates) and [theme].
++  static Future<Rig> pump(WidgetTester tester, Boxes r,
++      {PlanPermissions permissions = PlanPermissions.full,
++      Locale? locale,
++      ThemeData? theme}) async {
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final c = r.c;
++    c.permissions = permissions;
++    // A fresh tree per pump, as today's capture key made it: a second rig
++    // starts at its own theme, not animating from the first one's.
++    await tester.pumpWidget(KeyedSubtree(
++        key: GlobalKey(),
++        child: MaterialApp(
++            locale: locale,
++            theme: theme,
++            supportedLocales: planSupportedLocales,
++            localizationsDelegates: planLocalizationsDelegates,
++            home: Scaffold(
++                body: Row(children: [
++              Expanded(child: PlanCanvas(controller: c)),
++              SizedBox(
++                  width: 280,
++                  child: SingleChildScrollView(
++                      child: PlanPropertyPanel(controller: c))),
++            ])))));
++    await tester.pump();
++    return Rig._(tester, c);
++  }
++
++  Future<void> select(List<Handle> hs) async {
++    c.selection.replace([for (final h in hs) k(h)]);
++    await tester.pump();
++  }
++}
++
++void main() {
++  testWidgets(
++      'CP1 the Colour row shows for a selection holding a room, marks the '
++      'common colour, and marks nothing for a mix or an unknown name',
++      (tester) async {
++    final r = boxesPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++
++    expect(picker, findsNothing, reason: 'nothing selected');
++    await rig.select([r.line]);
++    expect(picker, findsNothing, reason: 'a line alone');
++
++    // While the Disc tool's settings show, even with a box selected.
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    r.c.selectTool('disc.draw');
++    await tester.pump();
++    expect(find.byKey(const Key('settings-disc.draw')), findsOneWidget,
++        reason: 'the Disc tool is active');
++    // Activating a tool clears the selection (PlanController.selectTool), so
++    // the box is selected again under the active tool: the row's absence is
++    // then the panel's own rule, not an empty selection's.
++    await rig.select([r.a]);
++    expect({...r.c.selection.keys}, {k(r.a)},
++        reason: 'the box is selected under the Disc tool');
++    expect(find.byKey(const Key('settings-disc.draw')), findsOneWidget,
++        reason: 'the Disc tool is still active');
++    expect(picker, findsNothing, reason: 'the Disc tool\'s settings show');
++    r.c.selectTool('plan.select');
++    await tester.pump();
++    await rig.select([r.a]);
++
++    expect(picker, findsOneWidget, reason: 'box A');
++    expect(swatch('none'), findsOneWidget);
++    for (final c in PlanSwatch.values) {
++      expect(swatch(c.name), findsOneWidget, reason: c.name);
++    }
++    expect(marked(tester), 'none', reason: 'an uncoloured box');
++    await rig.select([r.a, r.b]);
++    expect(picker, findsOneWidget, reason: 'boxes A and B');
++    expect(marked(tester), 'none', reason: 'two uncoloured boxes');
++    await rig.select([r.a, r.line]);
++    expect(picker, findsOneWidget, reason: 'box A and a line');
++    expect(marked(tester), 'none');
++
++    paint(doc, r.a, 'teal');
++    await tester.pump();
++    await rig.select([r.a]);
++    expect(marked(tester), 'teal', reason: 'A is teal');
++    await rig.select([r.a, r.b]);
++    expect(marked(tester), isNull, reason: 'teal and none: mixed');
++    // Two pumps: a box's colour draws nothing (a room's tint did), so no
++    // frame is due when the change reaches the panel, a microtask later.
++    paint(doc, r.b, 'teal');
++    await tester.pump();
++    await tester.pump();
++    expect(marked(tester), 'teal', reason: 'both teal');
++    paint(doc, r.b, 'purple');
++    await tester.pump();
++    await tester.pump();
++    expect(marked(tester), isNull, reason: 'teal and purple: mixed');
++
++    // A name this release does not know: no swatch is marked (Review Focus
++    // 5), and the stored name is untouched.
++    paint(doc, r.a, 'magenta');
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), isNull, reason: 'magenta equals no swatch');
++    expect(boxOf(doc, r.a).colour, 'magenta');
++  });
++
++  testWidgets(
++      'CP3 a colour chosen twice is no undo step; with A teal and B purple '
++      'a tap on teal changes B only (M-PC9-a, Review Focus 2)', (tester) async {
++    final r = boxesPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r);
++
++    await rig.select([r.a, r.b]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, 1);
++    final after = canon(doc);
++    final stateId = doc.commands.stateId;
++    // The same swatch again, and a selection already all teal.
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    await rig.select([r.a]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, 1, reason: 'no new step');
++    expect(doc.commands.stateId, stateId);
++    expect(canon(doc), after);
++    // Undo takes it all the way back: it was one step.
++    doc.commands.undo();
++    await tester.pump();
++    expect(doc.commands.canUndo, isFalse);
++
++    // A teal, B purple: a tap on teal changes B only.
++    paint(doc, r.a, 'teal');
++    paint(doc, r.b, 'purple');
++    await tester.pump();
++    await rig.select([r.a, r.b]);
++    final keys = [k(r.a), k(r.b)];
++    final command = recolourCommand(r.c, keys, PlanSwatch.teal)!;
++    expect(command, isA<CompoundCommand>());
++    final sets = (command as CompoundCommand)
++        .children
++        .whereType<SetComponentCommand<BoxParams>>()
++        .toList();
++    expect(sets, hasLength(1), reason: 'one box changes');
++    expect(sets.single.handle, r.b);
++    expect(sets.single.value, boxOf(doc, r.b).withColour('teal'));
++    expect(recolourCommand(r.c, [k(r.a)], PlanSwatch.teal), isNull);
++    expect(recolourCommand(r.c, [k(r.line)], PlanSwatch.teal), isNull,
++        reason: 'a line is no box');
++
++    final a0 = boxOf(doc, r.a);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(identical(boxOf(doc, r.a), a0), isTrue, reason: 'A not rewritten');
++    expect(boxOf(doc, r.b).colour, 'teal');
++
++    // None clears every selected box, and only when one is coloured.
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(boxOf(doc, r.a).colour, isNull);
++    expect(boxOf(doc, r.b).colour, isNull);
++    expect(doc.commands.undoDepth, depth + 2);
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 2, reason: 'none, twice');
++  });
++
++  testWidgets(
++      'CP4 read-only: the picker shows, marks, changes nothing, and says '
++      'why (M-C13, M-PC9-b)', (tester) async {
++    // The permissions refuse recolor.
++    final r = boxesPlan();
++    final doc = r.doc;
++    final rig = await Rig.pump(tester, r,
++        permissions: PlanPermissions.full.copyWith(recolor: false));
++    const strings = PlanStringsEn();
++    paint(doc, r.a, 'teal');
++    await rig.select([r.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'teal');
++    final before = canon(doc);
++    final depth = doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    await tester.tap(swatch('none'));
++    await tester.pump();
++    expect(canon(doc), before, reason: 'a tap changes nothing');
++    expect(doc.commands.undoDepth, depth);
++    expect(tooltipOf(tester, 'teal'), strings.colorRefused);
++    expect(tooltipOf(tester, 'none'), strings.colorRefused);
++    expect(semanticsOf(tester, 'teal').properties.enabled, isFalse);
++
++    // The document's permissions refuse it (the editor's allow it).
++    final r2 = boxesPlan();
++    final rig2 = await Rig.pump(tester, r2);
++    paint(r2.doc, r2.a, 'teal');
++    r2.doc.commands.permissions = DraftPermissions.runtime;
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    expect(picker, findsOneWidget);
++    expect(marked(tester), 'teal');
++    final before2 = canon(r2.doc);
++    final depth2 = r2.doc.commands.undoDepth;
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(canon(r2.doc), before2);
++    expect(r2.doc.commands.undoDepth, depth2);
++    expect(tooltipOf(tester, 'purple'), strings.readOnlyDocument);
++    expect(semanticsOf(tester, 'purple').properties.enabled, isFalse);
++    r2.doc.commands.permissions = DraftPermissions.all;
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    await tester.tap(swatch('purple'));
++    await tester.pump();
++    expect(boxOf(r2.doc, r2.a).colour, 'purple', reason: 'allowed again');
++
++    // Components allowed, geometry refused: the box's edit capability.
++    r2.doc.commands.permissions = const DraftPermissions(
++        transform: true, components: true, geometry: false, structure: true);
++    await rig2.select([r2.b]);
++    await rig2.select([r2.a]);
++    await tester.tap(swatch('teal'));
++    await tester.pump();
++    expect(boxOf(r2.doc, r2.a).colour, 'purple');
++    expect(tooltipOf(tester, 'teal'), strings.readOnlyDocument);
++  });
++
++  testWidgets(
++      'CP5 in Turkish the title, the swatches\' tooltips and labels and '
++      'None speak Turkish', (tester) async {
++    final r = boxesPlan();
++    final rig = await Rig.pump(tester, r, locale: const Locale('tr'));
++    await rig.select([r.a]);
++    expect(find.descendant(of: picker, matching: find.text('Renk')),
++        findsOneWidget);
++    expect(tooltipOf(tester, 'teal'), 'Turkuaz');
++    expect(semanticsOf(tester, 'teal').properties.label, 'Turkuaz');
++    expect(tooltipOf(tester, 'none'), 'Yok');
++    expect(semanticsOf(tester, 'none').properties.label, 'Yok');
++    expect(tooltipOf(tester, 'purple'), 'Mor');
++  });
++
++  testWidgets(
++      'CP6b the swatches are the canvas\'s hues: as the document has them on '
++      'a light canvas, re-toned on a dark one (M-PC9-c)', (tester) async {
++    Color fillOf(String name) => ((tester
++            .widget<Container>(find
++                .descendant(of: swatch(name), matching: find.byType(Container))
++                .first)
++            .decoration) as BoxDecoration)
++        .color!;
++    final r = boxesPlan();
++    var rig = await Rig.pump(tester, r, theme: ThemeData.light());
++    await rig.select([r.a]);
++    expect(fillOf('teal').toARGB32(), 0xFF00897B);
++    expect(fillOf('purple').toARGB32(), 0xFF8E24AA);
++
++    final r2 = boxesPlan();
++    rig = await Rig.pump(tester, r2, theme: ThemeData.dark());
++    await rig.select([r2.a]);
++    expect(fillOf('teal').toARGB32(),
++        0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
++    expect(fillOf('purple').toARGB32(),
++        0xFF000000 | darkCanvasTone(0x8E24AA, kDarkCanvasPaper));
++    expect(fillOf('teal').toARGB32(), isNot(0xFF00897B));
++  });
++
++  test('CP6 the swatch is the canvas\'s hue, re-toned on a dark canvas', () {
++    expect(swatchColor(0x00897B, null).toARGB32(), 0xFF00897B);
++    expect(swatchColor(0x8E24AA, null).toARGB32(), 0xFF8E24AA);
++    expect(swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(),
++        0xFF000000 | darkCanvasTone(0x00897B, kDarkCanvasPaper));
++    expect(
++        swatchColor(0x00897B, kDarkCanvasPaper).toARGB32(), isNot(0xFF00897B));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart b/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart
+new file mode 100644
+index 00000000..f6dd9e3b
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/hover_removal_test.dart
+@@ -0,0 +1,47 @@
++// Ported from jet_cad_floor_plan/test/hover_removal_test.dart; assertions unchanged.
++//
++// Removing the editor while a mouse hovers an entity (Slice 3's results,
++// "Found, not fixed"): the interaction layer's deactivation clears the
++// hover, and the property panel, outside the canvas and still active while
++// the removed subtree deactivates, must not be marked dirty during that
++// build. The panel's frame-safe selection relay (FrameSafeRelay, today's
++// _FrameSafeRelay) holds the notification; the panel listening to the
++// selection directly turns it red. HR2 (a hovered table) is 2b's.
++import 'package:flutter/gestures.dart' show PointerDeviceKind;
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/canvas/plan_canvas_view.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/panel_kits.dart';
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++
++void main() {
++  testWidgets(
++      'HR1 a bare shell: a hovered line, then the shell removed in one pump',
++      (tester) async {
++    final c = boxController();
++    final doc = c.document;
++    // Off the camera's centre and off the axes, under pumpDraw's rotated,
++    // zoomed camera.
++    doc.commands.execute(addDrafted(doc, EntityKind.line,
++        linePayload(Vector2(7100, 3080), Vector2(7260, 3170)),
++        layer: ReservedHandles.layerZero));
++    await pumpDesign(tester, c, right: PlanPropertyPanel(controller: c));
++    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
++    addTearDown(mouse.removePointer);
++    await mouse.addPointer(location: globalOf(tester, c, 7000, 3300));
++    await tester.pump();
++    expect(c.selection.hover, isNull, reason: 'premise: off the line');
++    await mouse.moveTo(globalOf(tester, c, 7180, 3125));
++    await tester.pump();
++    expect(c.selection.hover, isNotNull, reason: 'premise: on the line');
++
++    await tester.pumpWidget(const SizedBox());
++    expect(tester.takeException(), isNull);
++    expect(find.byType(PlanCanvasView), findsNothing);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+new file mode 100644
+index 00000000..578c6780
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+@@ -0,0 +1,298 @@
++// Spec 2a P2 ("The widgets"), P3 (properties, colour), P4 (locks), Review
++// Focus 3 and 4: PlanPropertyPanel over the box and disc kits, in the
++// design composition (the keyboard, the palette, the canvas, the panel on
++// the right) under the drawing fixture's rotated, zoomed camera. The boxes
++// sit off the origin; box values are away from their defaults.
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/panel_kits.dart';
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++
++Finder byKey(String k) => find.byKey(Key(k));
++
++String textOf(WidgetTester tester, String key) =>
++    tester.widget<TextField>(byKey(key)).controller!.text;
++
++bool readOnly(WidgetTester tester, String key) =>
++    tester.widget<TextField>(byKey(key)).readOnly;
++
++Future<void> select(
++    WidgetTester tester, PlanController c, List<Handle> hs) async {
++  c.selection.replace([for (final h in hs) SelectionKey.root(h)]);
++  await tester.pump();
++}
++
++Future<void> tapKey(WidgetTester tester, String key) async {
++  await tester.ensureVisible(byKey(key).last);
++  await tester.tap(byKey(key).last);
++  await tester.pumpAndSettle();
++}
++
++Future<void> enterAndSubmit(
++    WidgetTester tester, String key, String text) async {
++  await tester.ensureVisible(byKey(key));
++  await tester.tap(byKey(key));
++  await tester.pump();
++  await tester.enterText(byKey(key), text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++}
++
++Future<PlanController> panel(WidgetTester tester, PlanController c) async {
++  await pumpDesign(tester, c, right: PlanPropertyPanel(controller: c));
++  return c;
++}
++
++void main() {
++  testWidgets(
++      'P-1 every kind shows the stored value (an angle in degrees, an area '
++      'in m²) and each edit is one step storing exactly its value (M-P-1a, '
++      'M-P-1b, M-P-1c)', (tester) async {
++    final c = boxController();
++    final b = addBox(c, Vector2(7010, 3020),
++        const BoxParams(120, 70, turn: math.pi / 6, count: 3, label: 'Shelf'),
++        turn: 0.61);
++    await panel(tester, c);
++    await select(tester, c, [b]);
++    BoxParams p() => c.document.components.get<BoxParams>(b)!;
++    final depth = c.document.commands.undoDepth;
++    expect(textOf(tester, 'property-width'), '120');
++    expect(textOf(tester, 'property-turn'), '30');
++    expect(textOf(tester, 'property-count'), '3');
++    expect(textOf(tester, 'property-label'), 'Shelf');
++    expect(tester.widget<Text>(byKey('property-area')).data, '0.0084 m²');
++
++    await enterAndSubmit(tester, 'property-turn', '45');
++    // M-P-1a: degrees stored as typed.
++    expect(p().turn, 45 * math.pi / 180);
++    await tapKey(tester, 'property-solid');
++    expect(p().solid, isTrue);
++    await enterAndSubmit(tester, 'property-count', '2.26');
++    expect(p().count, 2.3, reason: 'one decimal (Task 3 rounds)');
++    await enterAndSubmit(tester, 'property-label', 'Desk');
++    expect(p().label, 'Desk');
++    await tapKey(tester, 'property-finish');
++    await tapKey(tester, 'property-finish-gloss');
++    expect(p().finish, BoxFinish.gloss);
++    expect(
++        find.descendant(
++            of: byKey('property-finish'), matching: find.text('Gloss')),
++        findsOneWidget);
++    await tapKey(tester, 'property-swap');
++    expect([p().width, p().height], [70, 120]);
++    // M-P-1b: the unchanged-text check dropped makes an Enter on the shown
++    // text a second step.
++    await enterAndSubmit(tester, 'property-label', 'Desk');
++    expect(c.document.commands.undoDepth, depth + 6);
++    // M-P-1c: a value the spec refuses (Task 3: over maxLength) reverts.
++    await enterAndSubmit(tester, 'property-label', 'A label of 13');
++    expect(textOf(tester, 'property-label'), 'Desk');
++    expect(c.document.commands.undoDepth, depth + 6);
++  });
++
++  testWidgets(
++      'P-2 a field\'s gate: reshape off makes Width and Height read-only and '
++      'refuses their commit; ungated fields stay editable (M-P-2)',
++      (tester) async {
++    final c = boxController();
++    final b = addBox(c, Vector2(7010, 3020), const BoxParams(120, 70));
++    await panel(tester, c);
++    c.permissions = PlanPermissions.full.copyWith(reshape: false);
++    await tester.pump();
++    await select(tester, c, [b]);
++    expect(readOnly(tester, 'property-width'), isTrue);
++    expect(readOnly(tester, 'property-height'), isTrue);
++    expect(readOnly(tester, 'property-label'), isFalse);
++    final depth = c.document.commands.undoDepth;
++    await enterAndSubmit(tester, 'property-width', '150');
++    expect(c.document.components.get<BoxParams>(b)!.width, 120);
++    expect(c.document.commands.undoDepth, depth);
++  });
++
++  testWidgets(
++      'P-3 a field the spec\'s enabled rule refuses is read-only until the '
++      'rule holds (M-P-3)', (tester) async {
++    final c = boxController();
++    final b = addBox(c, Vector2(7010, 3020), const BoxParams(120, 70));
++    await panel(tester, c);
++    await select(tester, c, [b]);
++    expect(readOnly(tester, 'property-count'), isTrue);
++    await tapKey(tester, 'property-solid');
++    expect(readOnly(tester, 'property-count'), isFalse);
++  });
++
++  testWidgets(
++      'P-4 the section is titled by the type\'s title hook: Box, then Solid '
++      'box once solid; Kutu in Turkish (M-P-4)', (tester) async {
++    final c = boxController();
++    final b = addBox(c, Vector2(7010, 3020), const BoxParams(120, 70));
++    await panel(tester, c);
++    await select(tester, c, [b]);
++    Text title() => tester.widget<Text>(byKey('section-box.box'));
++    expect(title().data, 'Box');
++    await tapKey(tester, 'property-solid');
++    expect(title().data, 'Solid box');
++    c.reportLocale(const Locale('tr'));
++    await tapKey(tester, 'property-solid');
++    expect(title().data, 'Kutu');
++  });
++
++  testWidgets(
++      'P-5 an armed tool with settings shows them; a typed radius reaches the '
++      'settings at once, no undo step, and the next click\'s disc has it '
++      '(M-P-5a, M-P-5b)', (tester) async {
++    final c = boxController(kits: [boxKit, discKit]);
++    await panel(tester, c);
++    await focusCanvas(tester);
++    await press(tester, LogicalKeyboardKey.keyD);
++    expect(byKey('settings-disc.draw'), findsOneWidget);
++    expect(textOf(tester, 'setting-radius'), '400');
++    final depth = c.document.commands.undoDepth;
++    await tester.tap(byKey('setting-radius'));
++    await tester.pump();
++    await tester.enterText(byKey('setting-radius'), '250');
++    await tester.pump();
++    expect(c.document.commands.undoDepth, depth, reason: 'settings: no step');
++    // At once: the field still has the focus, and nothing has committed it.
++    expect(c.toolSettings.valueOf('disc.draw'),
++        const DiscToolSettings(radius: 250));
++    // No Enter: the click places with what the keystrokes stored.
++    await tester.tapAt(globalOf(tester, c, 7150, 3110));
++    await tester.pump();
++    final discs = c.document.components.withComponent<DiscParams>().toList();
++    expect(discs, hasLength(1));
++    expect(c.document.components.get<DiscParams>(discs.single)!.radius, 250);
++    expect(c.document.commands.undoDepth, depth + 1);
++  });
++
++  testWidgets(
++      'P-6 a locked object shows no section and no colour row (spec P4) '
++      '(M-P-6a, M-P-6b)', (tester) async {
++    final c = boxController();
++    final b = addBox(c, Vector2(7010, 3020), const BoxParams(120, 70));
++    await panel(tester, c);
++    await select(tester, c, [b]);
++    expect(byKey('section-box.box'), findsOneWidget);
++    expect(byKey('color-picker'), findsOneWidget);
++    c.lockBroken({b});
++    await select(tester, c, []);
++    await select(tester, c, [b]);
++    expect(byKey('section-box.box'), findsNothing);
++    expect(byKey('color-picker'), findsNothing);
++  });
++
++  testWidgets(
++      'P-lock-recolour (Task 10 carry) a recolour of a locked object is '
++      'refused: beside a free box the row recolours the free one only, in '
++      'one step, and a recolour of the locked one through the controller '
++      'answers false and shows the lock hint (M-P-6b)', (tester) async {
++    final c = boxController();
++    final locked =
++        addBox(c, Vector2(7010, 3020), const BoxParams(120, 70), turn: 0.61);
++    final free = addBox(c, Vector2(7400, 3120), const BoxParams(90, 60));
++    await panel(tester, c);
++    c.lockBroken({locked});
++    await select(tester, c, [locked, free]);
++    expect(byKey('color-picker'), findsOneWidget, reason: 'premise: free');
++    final depth = c.document.commands.undoDepth;
++    await tapKey(tester, 'color-swatch-teal');
++    expect(c.document.components.get<BoxParams>(free)!.colour, 'teal');
++    expect(c.document.components.get<BoxParams>(locked)!.colour, isNull);
++    expect(c.document.commands.undoDepth, depth + 1);
++    final command = boxType.recolour(c.document, locked, 'purple');
++    expect(command, isNotNull, reason: 'premise: a change to refuse');
++    expect(c.execute(command!), isFalse);
++    expect(c.lockHint.value, isTrue);
++    expect(c.document.components.get<BoxParams>(locked)!.colour, isNull);
++    expect(c.document.commands.undoDepth, depth + 1);
++  });
++
++  testWidgets(
++      'P-7 the escape hatch: its commit is one step; a builder that throws is '
++      'contained and the fields stay (M-P-7)', (tester) async {
++    final c = boxController(kits: [boxKit, discKit]);
++    final d = addDisc(c, Vector2(7300, 3150), const DiscParams(300));
++    final big = addDisc(c, Vector2(7600, 3150), const DiscParams(6000));
++    await panel(tester, c);
++    await select(tester, c, [d]);
++    final depth = c.document.commands.undoDepth;
++    await tapKey(tester, 'disc-grow');
++    expect(c.document.components.get<DiscParams>(d)!.radius, 600);
++    expect(c.document.commands.undoDepth, depth + 1);
++    await select(tester, c, [big]);
++    expect(tester.takeException(), isNull);
++    expect(textOf(tester, 'property-radius'), '6000');
++    expect(byKey('disc-grow'), findsNothing);
++  });
++
++  testWidgets(
++      'P-two-types (Review Focus 3) two kits\' types of different component '
++      'types: each edits through its fields, and one tap recolours both in '
++      'one step, with no runtime type error (M-P-two)', (tester) async {
++    final c = boxController(kits: [boxKit, discKit]);
++    final b =
++        addBox(c, Vector2(7010, 3020), const BoxParams(120, 70), turn: 0.61);
++    final d = addDisc(c, Vector2(7300, 3150), const DiscParams(300));
++    await panel(tester, c);
++    await select(tester, c, [b]);
++    await enterAndSubmit(tester, 'property-width', '150');
++    expect(c.document.components.get<BoxParams>(b)!.width, 150);
++    await select(tester, c, [d]);
++    await enterAndSubmit(tester, 'property-radius', '350');
++    expect(c.document.components.get<DiscParams>(d)!.radius, 350);
++    await select(tester, c, [b, d]);
++    final depth = c.document.commands.undoDepth;
++    await tapKey(tester, 'color-swatch-teal');
++    expect(c.document.components.get<BoxParams>(b)!.colour, 'teal');
++    expect(c.document.components.get<DiscParams>(d)!.colour, 'teal');
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(tester.takeException(), isNull);
++    expect([
++      for (final x in c.diagnostics.value)
++        if (x.code == KitDiagnosticCode.hookFailed) x
++    ], isEmpty);
++  });
++
++  testWidgets(
++      'P-swap-pending (Review Focus 4) load while a field holds a typed, '
++      'uncommitted value: no exception; the value settles into the old plan '
++      'and never into the new one (M-P-swap)', (tester) async {
++    final other = boxController();
++    final twin = addBox(other, Vector2(7010, 3020), const BoxParams(120, 70));
++    final json = other.save();
++    final c = boxController();
++    final b = addBox(c, Vector2(7010, 3020), const BoxParams(120, 70));
++    expect(twin, b, reason: 'premise: the same handle in both plans');
++    await panel(tester, c);
++    await select(tester, c, [b]);
++    await tester.tap(byKey('property-width'));
++    await tester.pump();
++    await tester.enterText(byKey('property-width'), '150');
++    await tester.pump();
++    final old = c.document;
++    c.load(json);
++    await tester.pump();
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(identical(c.document, old), isFalse, reason: 'premise: swapped');
++    expect(old.components.get<BoxParams>(b)!.width, 150,
++        reason: 'settled into the plan it was typed for');
++    expect(c.document.components.get<BoxParams>(b)!.width, 120);
++    // A later focus loss writes nothing into the new plan.
++    await select(tester, c, [b]);
++    await tester.tap(byKey('section-box.box'));
++    await tester.pump();
++    expect(c.document.components.get<BoxParams>(b)!.width, 120);
++    expect(c.document.commands.canUndo, isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/selection_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/selection_panel_test.dart
+new file mode 100644
+index 00000000..37cb8dad
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/selection_panel_test.dart
+@@ -0,0 +1,432 @@
++// Ported from jet_cad_floor_plan/test/selection_panel_test.dart; assertions unchanged.
++//
++// The box cases (SE1-SE12, SE14, SE17, SE18, WS7 (Box)) over the box kit's
++// box.box (a stand-in for today's floor_planner.box), in the design
++// composition with PlanPropertyPanel on the right. The wall cases (WS*) are
++// sub-project 3's; SE13, SE15 and SE16 need the Page panel (Task 18).
++import 'package:flutter/material.dart';
++import 'package:flutter/services.dart' show LogicalKeyboardKey;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/l10n/panel_number.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/panel_kits.dart';
++import '../support/canvas_fixture.dart';
++import '../support/design_harness.dart';
++
++Finder get width => find.byKey(const Key('property-width'));
++Finder get height => find.byKey(const Key('property-height'));
++
++String textOf(WidgetTester tester, Finder f) =>
++    tester.widget<TextField>(f).controller!.text;
++
++Future<void> select(
++    WidgetTester tester, PlanController c, List<Handle> hs) async {
++  c.selection.replace([for (final h in hs) SelectionKey.root(h)]);
++  await tester.pump();
++}
++
++/// `c.document.components.withComponent<BoxParams>()`, ascending: today's
++/// `boxes(view.document)`.
++List<Handle> boxes(PlanController c) =>
++    c.document.components.withComponent<BoxParams>().toList();
++
++/// The box controller in the design composition, the property panel on the
++/// right: today's `pumpDraw(tester, boxDoc(FlutterTextMeasurer()))`.
++///
++/// The page snaps to its grid here (boxDoc's does not): this composition
++/// puts the canvas elsewhere than today's shell did, and under the rotated
++/// camera a click's world point no longer comes back exactly (BX4's first
++/// box drew 120 x 69.99999999999955); the grid gives the clicks today's
++/// exact corners, so the boxes are today's 120 x 70 and 90 x 60.
++Future<PlanController> pumpBoxPanel(WidgetTester tester) async {
++  final c = boxController();
++  final doc = c.document;
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      doc.components
++          .get<PageComponent>(doc.rootHandle)!
++          .copyWith(snapToGrid: true)));
++  doc.commands.clearHistory();
++  await pumpDesign(tester, c, right: PlanPropertyPanel(controller: c));
++  return c;
++}
++
++/// Draws two overlapping boxes: B, then BX4's four clicks, then a pump.
++/// Copied from floor_plan/test/support/box_rig.dart:89-96.
++Future<void> drawTwoBoxes(WidgetTester tester, PlanController c) async {
++  await press(tester, LogicalKeyboardKey.keyB);
++  await tester.tapAt(globalOf(tester, c, 7010, 3020));
++  await tester.tapAt(globalOf(tester, c, 7130, 3090));
++  await tester.tapAt(globalOf(tester, c, 7100, 3060));
++  await tester.tapAt(globalOf(tester, c, 7190, 3120));
++  await tester.pump();
++}
++
++/// A fresh composition with SE's two boxes drawn, selection empty.
++Future<PlanController> pumpBoxes(WidgetTester tester) async {
++  final c = await pumpBoxPanel(tester);
++  await drawTwoBoxes(tester, c);
++  await press(tester, LogicalKeyboardKey.keyV);
++  return c;
++}
++
++Future<void> enterAndSubmit(
++    WidgetTester tester, Finder field, String text) async {
++  await tester.enterText(field, text);
++  await tester.testTextInput.receiveAction(TextInputAction.done);
++  await tester.pump();
++}
++
++/// The panel's title, `Box`: a plain Text outside every field's tap region.
++Finder get panelTitle => find.descendant(
++    of: find.byKey(const Key('property-panel')), matching: find.text('Box'));
++
++void main() {
++  testWidgets('SE1 shown for exactly one selected box', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final bs = boxes(c);
++    expect(width, findsNothing);
++    c.selection.replace([SelectionKey.root(bs.first)]);
++    await tester.pump();
++    expect(width, findsOneWidget);
++    expect(tester.widget<TextField>(width).controller!.text, '120');
++  });
++
++  testWidgets('SE2 hidden for none, two, and a non-box', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final bs = boxes(c);
++    c.selection.replace([for (final b in bs) SelectionKey.root(b)]);
++    await tester.pump();
++    expect(width, findsNothing);
++    final line = addDrafted(c.document, EntityKind.line,
++        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)),
++        layer: ReservedHandles.layerZero);
++    c.document.commands.execute(line);
++    c.selection.replace([SelectionKey.root(line.record.handle)]);
++    await tester.pump();
++    expect(width, findsNothing);
++  });
++
++  testWidgets('SE3 Enter commits one step and regenerates', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final b = boxes(c).first;
++    c.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = c.document.commands.undoDepth;
++    await tester.enterText(width, '150');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(c.document.components.get<BoxParams>(b)!.width, 150);
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(ParametricSystem(c.document, catalogOf([boxKit])).drift(), isEmpty);
++  });
++
++  testWidgets('SE4 an invalid value reverts and commits nothing',
++      (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final b = boxes(c).first;
++    c.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = c.document.commands.undoDepth;
++    for (final bad in ['0', '-3', 'abc']) {
++      await tester.enterText(height, bad);
++      await tester.testTextInput.receiveAction(TextInputAction.done);
++      await tester.pump();
++      expect(tester.widget<TextField>(height).controller!.text, '70');
++    }
++    expect(c.document.commands.undoDepth, depth);
++  });
++
++  testWidgets('SE5 under runtime the fields are read-only', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    c.document.commands.permissions = DraftPermissions.runtime;
++    c.selection.replace([SelectionKey.root(boxes(c).first)]);
++    await tester.pump();
++    expect(tester.widget<TextField>(width).readOnly, isTrue);
++  });
++
++  testWidgets(
++      'SE6 undo after a panel edit shows the old width '
++      '(Review Focus 4)', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final b = boxes(c).first;
++    c.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    c.document.commands.undo();
++    await tester.pump();
++    expect(tester.widget<TextField>(width).controller!.text, '120');
++  });
++
++  testWidgets('SE7 typing B in the width field does not switch tools',
++      (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    await press(tester, LogicalKeyboardKey.keyV);
++    c.selection.replace([SelectionKey.root(boxes(c).first)]);
++    await tester.pump();
++    await tester.tap(width);
++    await tester.pump();
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), isNot('Box'));
++  });
++
++  testWidgets(
++      'SE8 a tap outside the width field commits it via focus loss, '
++      'with no Enter', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final b = boxes(c).first;
++    c.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = c.document.commands.undoDepth;
++    await tester.enterText(width, '150');
++    await tester.pump();
++    // No TextInputAction.done: the commit must come from the field's own
++    // `FocusNode` losing focus, which `onTapOutside` triggers by unfocusing
++    // -- not from a tap-outside handler that submits directly. Not a tap on
++    // the Height field: `TextField`'s default `groupId` is `EditableText`,
++    // so every plain `TextField` shares it, and a tap on another one counts
++    // as *inside* the group, never outside -- this would fail to exercise
++    // `onTapOutside` at all. The panel's "Box" title is a plain `Text`,
++    // genuinely outside every field's tap region (`find.descendant` because
++    // the status line has its own "Box" text while the Box tool is armed).
++    await tester.tap(panelTitle);
++    await tester.pump();
++    expect(c.document.components.get<BoxParams>(b)!.width, 150);
++    expect(c.document.commands.undoDepth, depth + 1);
++  });
++
++  testWidgets(
++      'SE9 hovering geometry, or an unrelated edit, does not wipe an '
++      'uncommitted value; a later commit still stores it', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final bs = boxes(c);
++    final b = bs.first;
++    c.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    final depth = c.document.commands.undoDepth;
++    await tester.enterText(width, '150');
++    await tester.pump();
++    // The real hover API (packages/jet_cad_2d_flutter/lib/src/selection.dart):
++    // hovering different geometry notifies `SelectionController`'s
++    // listeners exactly like a selection change would.
++    c.selection.setHover(SelectionKey.root(bs[1]));
++    await tester.pump();
++    expect(tester.widget<TextField>(width).controller!.text, '150');
++    // Clears the hover again, in the test, rather than leaving that to
++    // `InteractionLayer._release`'s own teardown-time clear: a real
++    // (non-idempotent) hover change happening as an unmanaged side effect
++    // of the widget tree tearing down is unrelated noise this test does not
++    // want to depend on.
++    c.selection.setHover(null);
++    await tester.pump();
++    // An unrelated document edit: drawing a plain line notifies the
++    // panel's document-change listener too, and must not touch the field
++    // either.
++    final line = addDrafted(c.document, EntityKind.line,
++        linePayload(Vector2(7300, 3300), Vector2(7400, 3350)),
++        layer: ReservedHandles.layerZero);
++    c.document.commands.execute(line);
++    await tester.pump();
++    expect(tester.widget<TextField>(width).controller!.text, '150');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(c.document.components.get<BoxParams>(b)!.width, 150);
++    expect(c.document.commands.undoDepth, depth + 2);
++  });
++
++  testWidgets(
++      'SE10 moving focus from Width to Height commits Width, with no '
++      'Enter', (tester) async {
++    final c = await pumpBoxPanel(tester);
++    await drawTwoBoxes(tester, c);
++    final b = boxes(c).first;
++    c.selection.replace([SelectionKey.root(b)]);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.pump();
++    await tester.tap(height);
++    await tester.pump();
++    await tester.enterText(height, '90');
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    final p = c.document.components.get<BoxParams>(b)!;
++    expect(p.width, 150);
++    expect(p.height, 90);
++  });
++
++  testWidgets(
++      'WS7 (Box) the commit target is pinned at focus gain: a selection '
++      'change while a field has focus does not redirect its commit (M-07p)',
++      (tester) async {
++    final box = await pumpBoxes(tester);
++    final bs = boxes(box);
++    final b0 = box.document.components.get<BoxParams>(bs[0])!;
++    final b1 = box.document.components.get<BoxParams>(bs[1])!;
++    await select(tester, box, [bs[0]]);
++    await tester.tap(width);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.pump();
++    await select(tester, box, [bs[1]]);
++    expect(textOf(tester, width), '150');
++    await tester.tap(panelTitle);
++    await tester.pump();
++    List<double> sizeOf(Handle h) {
++      final p = box.document.components.get<BoxParams>(h)!;
++      return [p.width, p.height];
++    }
++
++    expect(sizeOf(bs[0]), [150, b0.height]);
++    expect(sizeOf(bs[1]), [b1.width, b1.height]);
++    expect(textOf(tester, width), '90');
++  });
++
++  test(
++      'SE18 every finite value shows as text that parses back to exactly '
++      'it, sign of zero included; whole numbers below 2^53 without ".0" '
++      '(post-11 _number)', () {
++    const two53 = 9007199254740992.0;
++    final values = [
++      0.0, -0.0, 1.0, 200.0, -40.0, 262.5, 0.1, 1e-12, 5e-324, //
++      two53 - 1, two53, two53 + 2, 9223372036854775807.0, 1e20, 1e300,
++      -1e300, double.maxFinite,
++      // In [2^63, 2^64) in magnitude: an integer text there saturates, on
++      // the VM, to 2^63 - 1 or -2^63, which parse back to +-2^63 (Q4
++      // review m1).
++      1e19, -1.8e19,
++    ];
++    for (final v in values) {
++      final text = panelNumberText(v);
++      final back = double.parse(text);
++      expect(back, v, reason: '$v shows "$text"');
++      expect(back.isNegative, v.isNegative, reason: '$v shows "$text"');
++    }
++    expect([
++      for (final v in [0.0, 1.0, 200.0, -40.0, two53 - 1]) panelNumberText(v)
++    ], [
++      '0',
++      '1',
++      '200',
++      '-40',
++      '9007199254740991'
++    ]);
++  });
++
++  testWidgets(
++      'SE17 a Box width of 1e20 committed with Enter, then focus loss, is '
++      'one undo step storing 1e20: the shown text parses back to it '
++      '(post-11 _number)', (tester) async {
++    final c = await pumpBoxes(tester);
++    final doc = c.document;
++    final b = boxes(c).first;
++    final height = doc.components.get<BoxParams>(b)!.height;
++    await select(tester, c, [b]);
++    await tester.tap(width);
++    await tester.pump();
++    final depth = doc.commands.undoDepth;
++    // Enter commits, and hands focus back to the canvas: the focus loss
++    // commits the shown text again.
++    await enterAndSubmit(tester, width, '1e20');
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(doc.components.get<BoxParams>(b), BoxParams(1e20, height));
++    expect(double.parse(textOf(tester, width)), 1e20);
++    // Another focus loss, by a tap outside: still nothing to write.
++    await tester.tap(width);
++    await tester.pump();
++    await tester.tap(panelTitle);
++    await tester.pump();
++    expect(doc.commands.undoDepth, depth + 1);
++    expect(doc.components.get<BoxParams>(b)!.width, 1e20);
++    doc.commands.undo();
++    await tester.pump();
++    expect(doc.components.get<BoxParams>(b)!.width, isNot(1e20));
++  });
++
++  /// Selects the first of SE's boxes (120 x 70), types 150 into Width and
++  /// then 90 into Height, with no Enter: both fields are now in the scope's
++  /// focus history, Width before Height. Returns the box.
++  Future<Handle> typeWidthThenHeight(
++      WidgetTester tester, PlanController c) async {
++    final b = boxes(c).first;
++    await select(tester, c, [b]);
++    expect([textOf(tester, width), textOf(tester, height)], ['120', '70']);
++    await tester.tap(width);
++    await tester.pump();
++    await tester.enterText(width, '150');
++    await tester.pump();
++    await tester.tap(height);
++    await tester.pump();
++    await tester.enterText(height, '90');
++    await tester.pump();
++    return b;
++  }
++
++  List<double> sizeOf(PlanController c, Handle b) {
++    final p = c.document.components.get<BoxParams>(b)!;
++    return [p.width, p.height];
++  }
++
++  testWidgets(
++      'SE11 a tap on the panel after Width then Height commits both and '
++      'hands focus back to the canvas, not to Width (fix/post-07 F3, B7)',
++      (tester) async {
++    final c = await pumpBoxes(tester);
++    final depth = c.document.commands.undoDepth;
++    final b = await typeWidthThenHeight(tester, c);
++    await tester.tap(panelTitle);
++    await tester.pump();
++    expect(sizeOf(c, b), [150, 90]);
++    expect(c.document.commands.undoDepth, depth + 2);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++  });
++
++  testWidgets(
++      'SE12 Enter in Height after Width commits both and hands focus back to '
++      'the canvas, not to Width (fix/post-07 F3)', (tester) async {
++    final c = await pumpBoxes(tester);
++    final depth = c.document.commands.undoDepth;
++    final b = await typeWidthThenHeight(tester, c);
++    await tester.testTextInput.receiveAction(TextInputAction.done);
++    await tester.pump();
++    expect(sizeOf(c, b), [150, 90]);
++    expect(c.document.commands.undoDepth, depth + 2);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyB);
++    expect(status(tester), 'Box');
++  });
++
++  testWidgets(
++      'SE14 a canvas click after Width then Height commits both and leaves '
++      "the canvas's own focus request alone (fix/post-07 F3)", (tester) async {
++    final c = await pumpBoxes(tester);
++    final depth = c.document.commands.undoDepth;
++    final b = await typeWidthThenHeight(tester, c);
++    // Empty paper, clear of both boxes: the click also clears the
++    // selection, which unmounts the fields.
++    await tester.tapAt(globalOf(tester, c, 7150, 3250));
++    await tester.pump();
++    expect(sizeOf(c, b), [150, 90]);
++    expect(c.document.commands.undoDepth, depth + 2);
++    expect(width, findsNothing);
++    expect(FocusManager.instance.primaryFocus, same(canvasFocus(tester)));
++    await press(tester, LogicalKeyboardKey.keyL);
++    expect(status(tester), 'Line');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+new file mode 100644
+index 00000000..2b30a545
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+@@ -0,0 +1,572 @@
++// Ported from jet_cad_floor_plan/test/symbols/symbol_section_test.dart; assertions unchanged.
++//
++// Spec 09c D7, revision 5 (R5-2..R5-4, R5-7, V-1, V-3..V-7): the Symbol
++// section -- name, size, Rotation, Mirror and the Size menu -- and the
++// commands behind them, over a kit library ("test") built with the
++// authoring toolkit. Hand-made symbols, so every rule has a fixture that
++// can tell it apart: a bed family whose base point is the box's centre (not
++// its back-left corner), a servable member in that family, a family of
++// tables, and a corner seat whose base point is off its box's centre x.
++// Instances sit 40 m off the origin, mirrored and turned 30 degrees.
++//
++// SS9 (definitionForEntry's assertion) is Task 13's; SW6 and SW9 (table
++// numbers, the runtime table rule) are 2b's; SW7 (a loader handed to the
++// panel) has no counterpart: the controller owns the loader (Task 13).
++import 'dart:async';
++import 'dart:math' as math;
++import 'dart:typed_data';
++
++import 'package:flutter/gestures.dart' show kDoubleTapTimeout;
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show FlutterTextMeasurer, SelectionKey;
++import 'package:jet_cad_2d_kit/authoring.dart'
++    show
++        Catalog,
++        CatalogLine,
++        CatalogPolyline,
++        CatalogSymbol,
++        CatalogUnit,
++        encodeLibrary;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/panels/symbol_section.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_box.dart';
++import 'package:jet_cad_2d_plan/src/symbols/symbol_placer.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// A [w] x [d] rectangle, base point at its centre.
++CatalogSymbol rect(String key, double w, double d,
++        {List<String> tags = const [],
++        int? seats,
++        double? baseX,
++        String? family}) =>
++    CatalogSymbol(
++      key: key,
++      name: 'Test $key',
++      category: 'Tests',
++      tags: tags,
++      family: family,
++      unit: seats == null
++          ? null
++          : CatalogUnit(kind: UnitKinds.table, capacity: seats),
++      base: (baseX ?? w / 2, d / 2),
++      shapes: [
++        CatalogPolyline([(0, 0), (w, 0), (w, d), (0, d)], closed: true),
++        CatalogLine((w * 0.2, d * 0.7), (w * 0.8, d * 0.7)),
++      ],
++    );
++
++const bedTags = ['bed'];
++
++// K2's library rule 9 refuses a unit in a size family: the library holds
++// today's servable bed and its tables with no family, and [familyEntries]
++// puts today's servable bed back in the beds' family, by hand, for the
++// family rule (V-4) the library can no longer express.
++final List<CatalogSymbol> catalog = [
++  rect('test.bed.1800', 1800, 2000, tags: bedTags, family: 'test-bed'),
++  rect('test.bed.1400', 1400, 2000, tags: bedTags, family: 'test-bed'),
++  rect('test.bed.1600', 1600, 2000, tags: bedTags, family: 'test-bed'),
++  // Servable: never offered (V-4).
++  rect('test.bed.table', 1500, 2000, tags: bedTags, seats: 2),
++  rect('test.table.a', 900, 900, tags: ['table'], seats: 2),
++  rect('test.table.b', 1200, 900, tags: ['table'], seats: 4),
++  // A corner seat: its base point at x 1100 of a 2000-wide box.
++  rect('test.corner.seat', 2000, 1000, seats: 3, baseX: 1100),
++];
++
++Uint8List libraryBytes() =>
++    encodeLibrary(Catalog(kit: 'test', symbols: catalog));
++
++final SymbolLibrary library = SymbolLibrary.decode(libraryBytes());
++
++/// [library]'s entries with `test.bed.table` in the beds' family, as
++/// today's catalog had it (a servable member, V-4).
++final List<SymbolEntry> familyEntries = List.unmodifiable([
++  for (final e in library.entries)
++    if (e.symbol.key == 'test.bed.table')
++      SymbolEntry(
++          symbol: SymbolComponent(
++              key: e.symbol.key,
++              version: e.symbol.version,
++              name: e.symbol.name,
++              category: e.symbol.category,
++              tags: e.symbol.tags,
++              family: 'test-bed'),
++          unit: e.unit,
++          definition: e.definition,
++          leaves: e.leaves)
++    else
++      e,
++]);
++
++SymbolEntry entry(String key) =>
++    familyEntries.singleWhere((e) => e.symbol.key == key);
++
++const double kDeg30 = 30 * math.pi / 180;
++
++DraftDocument rig() {
++  final doc = DraftDocument.empty(measurer: FlutterTextMeasurer());
++  registerKitComponents(doc.components);
++  doc.header.units = DrawingUnits.millimeters;
++  return doc;
++}
++
++/// [key] placed at [at], mirrored when asked, then turned 30 degrees about
++/// [at]; returns the instance.
++Handle place(DraftDocument doc, String key, Vector2 at,
++    {bool mirrored = true}) {
++  doc.commands
++      .execute(placeSymbol(doc, entry(key), at: at, mirrored: mirrored));
++  final node = doc.tree.nodes
++      .whereType<InstanceNode>()
++      .reduce((a, b) => a.handle.value > b.handle.value ? a : b);
++  final turn = Transform2.translation(at.x, at.y)
++      .multiply(Transform2.rotation(kDeg30))
++      .multiply(Transform2.translation(-at.x, -at.y));
++  doc.commands.execute(
++      TransformNodeCommand(node.handle, turn.multiply(node.transform)));
++  return node.handle;
++}
++
++Transform2 transformOf(DraftDocument doc, Handle h) =>
++    (doc.tree[h]! as InstanceNode).transform;
++
++/// The world corners of [h]'s box, as a sorted list of rounded points.
++List<(double, double)> footprint(DraftDocument doc, Handle h) {
++  final node = doc.tree[h]! as InstanceNode;
++  final b = boxOfDefinition(doc, node.definition)!;
++  final t = node.transform;
++  final out = [
++    for (final (x, y) in [
++      (b.left, b.front),
++      (b.right, b.front),
++      (b.right, b.back),
++      (b.left, b.back),
++    ])
++      (() {
++        final p = t.transformPoint(Vector2(x, y));
++        return (
++          (p.x * 1e6).roundToDouble() / 1e6,
++          (p.y * 1e6).roundToDouble() / 1e6
++        );
++      })(),
++  ]..sort((a, b) => a.$1 != b.$1 ? a.$1.compareTo(b.$1) : a.$2.compareTo(b.$2));
++  return out;
++}
++
++void expectNear(Vector2 got, Vector2 want, String why) {
++  expect(got.x, closeTo(want.x, 1e-6), reason: why);
++  expect(got.y, closeTo(want.y, 1e-6), reason: why);
++}
++
++final Vector2 far = Vector2(40000, -27000);
++
++void main() {
++  group('the model', () {
++    test(
++        'SS1 the Rotation reads the local y column: a mirrored instance at '
++        '30 degrees reads 30, not 150 (M-09c-x)', () {
++      final doc = rig();
++      final h = place(doc, 'test.bed.1600', far);
++      expect(transformOf(doc, h).determinant, lessThan(0), reason: 'premise');
++      expect(rotationDegreesOf(transformOf(doc, h)), closeTo(30, 1e-9));
++      final plain = place(doc, 'test.bed.1600', far, mirrored: false);
++      expect(rotationDegreesOf(transformOf(doc, plain)), closeTo(30, 1e-9));
++    });
++
++    test(
++        'SS2 a Rotation composes about the insertion point and keeps the '
++        'mirror and a file\'s scale (M-09c-y, M-09c-al)', () {
++      final doc = rig();
++      final h = place(doc, 'test.bed.1600', far);
++      // A file's scale of 1.5 about the insertion point.
++      final t0 = transformOf(doc, h);
++      final base = doc.tree
++          .definition((doc.tree[h]! as InstanceNode).definition)!
++          .basePoint;
++      final p = t0.transformPoint(base);
++      doc.commands.execute(TransformNodeCommand(
++          h,
++          Transform2.translation(p.x, p.y)
++              .multiply(Transform2.scale(1.5, 1.5))
++              .multiply(Transform2.translation(-p.x, -p.y))
++              .multiply(t0)));
++      final t = transformOf(doc, h);
++      final next = rotatedTo(t, base, 67);
++      expectNear(next.transformPoint(base), p, 'the insertion point stays');
++      expect(rotationDegreesOf(next), closeTo(67, 1e-9));
++      expect(next.determinant, closeTo(t.determinant, 1e-6),
++          reason: 'the mirror and the scale are kept');
++    });
++
++    test(
++        'SS3 quarter turns are exact; 370 is 10; -90 is 270; -0.0 is '
++        'normalised', () {
++      final doc = rig();
++      final h = place(doc, 'test.bed.1600', far);
++      final t = transformOf(doc, h);
++      final base = doc.tree
++          .definition((doc.tree[h]! as InstanceNode).definition)!
++          .basePoint;
++      final q = rotatedTo(t, base, 90);
++      expect([q.a, q.b, q.c, q.d], [0.0, -1.0, -1.0, 0.0],
++          reason: 'R(90)·mirror, exactly');
++      for (final v in [q.a, q.b, q.c, q.d, q.e, q.f]) {
++        expect(v.isNegative && v == 0, isFalse, reason: 'no -0.0');
++      }
++      expect(rotationDegreesOf(rotatedTo(t, base, 370)), closeTo(10, 1e-9));
++      expect(rotationDegreesOf(rotatedTo(t, base, -90)), closeTo(270, 1e-9));
++    });
++
++    test(
++        'SS4 Mirror keeps the footprint, about the box\'s centre x, not the '
++        'base point (M-09c-bh)', () {
++      final doc = rig();
++      final h = place(doc, 'test.corner.seat', far, mirrored: false);
++      final before = footprint(doc, h);
++      final det = transformOf(doc, h).determinant;
++      doc.commands.execute(mirrorSymbolCommand(doc, h)!);
++      expect(footprint(doc, h), before);
++      expect(transformOf(doc, h).determinant, closeTo(-det, 1e-9));
++    });
++
++    test(
++        'SS5 a size change keeps the back-left corner and the linear part; '
++        'mirrored, a wider bed grows the other way (M-09c-u)', () {
++      final doc = rig();
++      for (final mirrored in [false, true]) {
++        final h = place(doc, 'test.bed.1600', far, mirrored: mirrored);
++        final t = transformOf(doc, h);
++        final corner = t.transformPoint(Vector2(0, 2000));
++        doc.commands
++            .execute(changeSizeCommand(doc, h, entry('test.bed.1800'))!);
++        final n = transformOf(doc, h);
++        expect([n.a, n.b, n.c, n.d], [t.a, t.b, t.c, t.d]);
++        expectNear(n.transformPoint(Vector2(0, 2000)), corner, 'back-left');
++        final node = doc.tree[h]! as InstanceNode;
++        expect(boxOfDefinition(doc, node.definition)!.width, 1800);
++        // The right side moved 200 mm along the local x axis, which a
++        // mirror turns around.
++        final right = n.transformPoint(Vector2(1800, 2000));
++        final oldRight = t.transformPoint(Vector2(1600, 2000));
++        final dir = t.transformPoint(Vector2(1, 0))
++          ..sub(t.transformPoint(Vector2.zero()));
++        expectNear(right - oldRight, dir * 200, 'grows along local +x');
++      }
++    });
++
++    test(
++        'SS6 a size change reuses a definition already in the plan, and is '
++        'one undo step (M-09c-v)', () {
++      final doc = rig();
++      place(doc, 'test.bed.1800', far + Vector2(5000, 0));
++      final h = place(doc, 'test.bed.1600', far);
++      final definitions = doc.tree.definitions.length;
++      final depth = doc.commands.undoDepth;
++      final before = transformOf(doc, h);
++      doc.commands.execute(changeSizeCommand(doc, h, entry('test.bed.1800'))!);
++      expect(doc.tree.definitions.length, definitions, reason: 'reused');
++      expect(doc.commands.undoDepth, depth + 1);
++      doc.commands.undo();
++      expect(transformOf(doc, h).e, before.e);
++      expect(
++          boxOfDefinition(doc, (doc.tree[h]! as InstanceNode).definition)!
++              .width,
++          1600);
++    });
++
++    test(
++        'SS7 the family: sorted by width, one per key, no servable member '
++        '(V-4, V-5, M-09c-bi)', () {
++      final members = familyMembers(familyEntries, entry('test.bed.1600'));
++      expect([for (final m in members) m.symbol.key],
++          ['test.bed.1400', 'test.bed.1600', 'test.bed.1800']);
++      expect(
++          identical(
++              familyMembers(familyEntries, entry('test.bed.1400')), members),
++          isTrue,
++          reason: 'memoised per library and family');
++      expect(familyMembers(familyEntries, entry('test.corner.seat')), isEmpty);
++    });
++
++    test('SS8 the entry: the exact version, else the key\'s highest (V-5)', () {
++      final doc = rig();
++      final h = place(doc, 'test.bed.1600', far);
++      expect(entryOfInstance(library.entries, doc, h)!.symbol.key,
++          'test.bed.1600');
++      final v2 =
++          SymbolLibrary.decode(encodeLibrary(Catalog(kit: 'test', symbols: [
++        const CatalogSymbol(
++            key: 'test.bed.1600',
++            name: 'v2',
++            category: 'Tests',
++            tags: bedTags,
++            family: 'test-bed',
++            version: 2,
++            base: (
++              800,
++              1000
++            ),
++            shapes: [
++              CatalogPolyline([(0, 0), (1600, 0), (1600, 2000), (0, 2000)],
++                  closed: true)
++            ]),
++      ])));
++      expect(entryOfInstance(v2.entries, doc, h)!.symbol.version, 2,
++          reason: 'no v1 here: the highest');
++    });
++
++    test(
++        'SS10 the Rotate step turns about the insertion point, not the box\'s '
++        'centre nor the origin: a corner seat whose base point is off its '
++        'centre x (M-09c-y)', () {
++      final doc = rig();
++      final h = place(doc, 'test.corner.seat', far, mirrored: false);
++      final base = doc.tree
++          .definition((doc.tree[h]! as InstanceNode).definition)!
++          .basePoint;
++      final box =
++          boxOfDefinition(doc, (doc.tree[h]! as InstanceNode).definition)!;
++      expect(base.x, isNot((box.left + box.right) / 2), reason: 'premise');
++      final p = transformOf(doc, h).transformPoint(base);
++      doc.commands.execute(rotateSymbolCommand(doc, h, 37)!);
++      expect(rotationDegreesOf(transformOf(doc, h)), closeTo(37, 1e-9));
++      expectNear(transformOf(doc, h).transformPoint(base), p,
++          'the insertion point stays');
++    });
++
++    test(
++        'SS11 re-picking the instance\'s own size is nothing, even when its '
++        'definition was edited and would be copied afresh', () {
++      final doc = rig();
++      final h = place(doc, 'test.bed.1600', far);
++      expect(changeSizeCommand(doc, h, entry('test.bed.1600')), isNull);
++      // Edit one leaf of the definition: no longer leaf-equal to the entry.
++      final def = (doc.tree[h]! as InstanceNode).definition;
++      final e = doc.entities;
++      final leaf = [
++        for (final slot in e.liveSlots)
++          if (e.ownerAt(slot) == def) e.handleAt(slot)
++      ].last;
++      final payload = doc.geometry.read(e.geomIndexAt(e.slotOf(leaf)!));
++      final coords = Float64List.fromList(payload.coords)..[0] += 10;
++      doc.commands.execute(SetEntityGeometryCommand(
++          leaf, GeometryPayload(coords: coords, scalars: payload.scalars)));
++      expect(
++          definitionForEntry(doc, entry('test.bed.1600')).commands, isNotEmpty,
++          reason: 'premise: the entry would be copied');
++      expect(changeSizeCommand(doc, h, entry('test.bed.1600')), isNull);
++    });
++  });
++
++  group('the panel', () {
++    Finder byKey(String k) => find.byKey(Key(k));
++
++    /// Lets the controller's symbol load settle: a few pumps, as the
++    /// gallery's tests do.
++    Future<void> settle(WidgetTester tester, PlanController c) async {
++      for (var i = 0;
++          i < 10 && c.symbolsState.value == PlanSymbolsState.loading;
++          i++) {
++        await tester.pump();
++      }
++      expect(c.symbolsState.value, PlanSymbolsState.ready,
++          reason: 'premise: the library loaded');
++      await tester.pump();
++    }
++
++    /// A controller over the kit "test" whose one source reads
++    /// [libraryBytes] (once [gate] completes, when given), and the panel
++    /// over it; without a gate, once the library has loaded.
++    Future<PlanController> pumpPanel(WidgetTester tester,
++        {Completer<Uint8List>? gate}) async {
++      final c = PlanController(kits: [
++        PlanKit(id: 'test', version: '1.0.0', symbols: [
++          SymbolLibrarySource(
++              label: 'test',
++              read: () => gate?.future ?? Future.value(libraryBytes())),
++        ]),
++      ]);
++      addTearDown(c.dispose);
++      await tester.pumpWidget(MaterialApp(
++        home: Scaffold(
++          body: SingleChildScrollView(
++            child: PlanPropertyPanel(controller: c),
++          ),
++        ),
++      ));
++      if (gate == null) await settle(tester, c);
++      return c;
++    }
++
++    Future<void> select(
++        WidgetTester tester, PlanController c, List<Handle> hs) async {
++      c.selection.replace([for (final h in hs) SelectionKey.root(h)]);
++      await tester.pump();
++    }
++
++    Future<void> typeRotation(WidgetTester tester, String text) async {
++      await tester.pump(kDoubleTapTimeout * 2);
++      await tester.tap(byKey('symbol-rotation'));
++      await tester.pump();
++      await tester.enterText(byKey('symbol-rotation'), text);
++      await tester.testTextInput.receiveAction(TextInputAction.done);
++      await tester.pump();
++      await tester.pump();
++    }
++
++    bool editable(WidgetTester tester) =>
++        !tester.widget<TextField>(byKey('symbol-rotation')).readOnly;
++    bool mirrorEnabled(WidgetTester tester) =>
++        tester.widget<OutlinedButton>(byKey('symbol-mirror')).onPressed != null;
++    bool menuEnabled(WidgetTester tester) =>
++        tester
++            .widget<DropdownButton<SymbolEntry>>(byKey('symbol-size-menu'))
++            .onChanged !=
++        null;
++
++    testWidgets(
++        'SW1 one symbol shows name, size and rotation; two hide it; a table '
++        'shows the Symbol and the Table sections', (tester) async {
++      final c = await pumpPanel(tester);
++      final doc = c.document;
++      final bed = place(doc, 'test.bed.1600', far);
++      final other = place(doc, 'test.bed.1400', far + Vector2(4000, 0));
++      await select(tester, c, [bed]);
++      expect(byKey('symbol-section'), findsOneWidget);
++      expect(
++          tester.widget<Text>(byKey('symbol-name')).data, 'Test test.bed.1600');
++      expect(tester.widget<Text>(byKey('symbol-size')).data, '1600 × 2000');
++      expect(
++          tester.widget<TextField>(byKey('symbol-rotation')).controller!.text,
++          '30');
++      await select(tester, c, [bed, other]);
++      expect(byKey('symbol-section'), findsNothing);
++    });
++
++    testWidgets(
++        'SW2 a typed rotation is one step; a word reverts; Mirror is one step',
++        (tester) async {
++      final c = await pumpPanel(tester);
++      final doc = c.document;
++      final bed = place(doc, 'test.bed.1600', far);
++      await select(tester, c, [bed]);
++      final depth = doc.commands.undoDepth;
++      // The bed reads 29.999999999999996 and shows 30: 30 again is nothing.
++      await typeRotation(tester, '30');
++      expect(doc.commands.undoDepth, depth, reason: 'the shown value again');
++      await typeRotation(tester, '45');
++      expect(rotationDegreesOf(transformOf(doc, bed)), closeTo(45, 1e-9));
++      expect(doc.commands.undoDepth, depth + 1);
++      await typeRotation(tester, '45');
++      expect(doc.commands.undoDepth, depth + 1, reason: 'the same: nothing');
++      await typeRotation(tester, 'east');
++      expect(doc.commands.undoDepth, depth + 1);
++      expect(
++          tester.widget<TextField>(byKey('symbol-rotation')).controller!.text,
++          '45');
++      final before = footprint(doc, bed);
++      await tester.tap(byKey('symbol-mirror'));
++      await tester.pump();
++      expect(doc.commands.undoDepth, depth + 2);
++      expect(footprint(doc, bed), before);
++    });
++
++    testWidgets(
++        'SW3 the Size menu appears when the library turns ready; a choice is '
++        'one Change size step (V-3)', (tester) async {
++      final gate = Completer<Uint8List>();
++      final c = await pumpPanel(tester, gate: gate);
++      final doc = c.document;
++      final bed = place(doc, 'test.bed.1600', far);
++      await select(tester, c, [bed]);
++      expect(byKey('symbol-size-menu'), findsNothing, reason: 'not ready');
++      gate.complete(libraryBytes());
++      await settle(tester, c);
++      expect(byKey('symbol-size-menu'), findsOneWidget);
++      final depth = doc.commands.undoDepth;
++      await tester.tap(byKey('symbol-size-menu'));
++      await tester.pumpAndSettle();
++      await tester.tap(byKey('symbol-size-test.bed.1800').last);
++      await tester.pumpAndSettle();
++      expect(doc.commands.undoDepth, depth + 1);
++      expect(tester.widget<Text>(byKey('symbol-size')).data, '1800 × 2000');
++    });
++
++    testWidgets(
++        'SW4 under runtime a symbol turns and mirrors, its size does not; a '
++        'table does neither; geometry alone denied disables the size '
++        '(M-09c-be, M-09c-bg)', (tester) async {
++      final c = await pumpPanel(tester);
++      final doc = c.document;
++      final bed = place(doc, 'test.bed.1600', far);
++      doc.commands.permissions = DraftPermissions.runtime;
++      await select(tester, c, [bed]);
++      expect(editable(tester), isTrue);
++      expect(mirrorEnabled(tester), isTrue);
++      expect(menuEnabled(tester), isFalse);
++      // The table half goes with 2b ("a table turns in the design mode
++      // only"); an empty selection stands for its table selections, so
++      // each permissions change below is read by a rebuild.
++      await select(tester, c, []);
++      doc.commands.permissions = const DraftPermissions(
++          transform: true, components: true, geometry: false, structure: true);
++      await select(tester, c, [bed]);
++      expect(menuEnabled(tester), isFalse);
++      doc.commands.permissions = DraftPermissions.all;
++      await select(tester, c, []);
++      await select(tester, c, [bed]);
++      expect(menuEnabled(tester), isTrue);
++    });
++
++    testWidgets(
++        'SW5 a table has no Size menu, its family all tables or all beds '
++        '(R5-3, M-09c-bf)', (tester) async {
++      final c = await pumpPanel(tester);
++      final doc = c.document;
++      final table = place(doc, 'test.table.a', far);
++      await select(tester, c, [table]);
++      expect(byKey('symbol-section'), findsOneWidget);
++      expect(byKey('symbol-size-menu'), findsNothing);
++      // A servable member of the beds' family: its family lists three beds,
++      // but a table never changes size.
++      final bedTable = place(doc, 'test.bed.table', far + Vector2(4000, 0));
++      expect(
++          familyMembers(familyEntries, entry('test.bed.table')), hasLength(3),
++          reason: 'premise: the family offers beds');
++      await select(tester, c, [bedTable]);
++      expect(byKey('symbol-section'), findsOneWidget);
++      expect(byKey('symbol-size-menu'), findsNothing);
++    });
++
++    testWidgets('SW8 the Rotation field offers a minus key (−90 on a phone)',
++        (tester) async {
++      final c = await pumpPanel(tester);
++      final bed = place(c.document, 'test.bed.1600', far);
++      await select(tester, c, [bed]);
++      expect(tester.widget<TextField>(byKey('symbol-rotation')).keyboardType,
++          const TextInputType.numberWithOptions(decimal: true, signed: true));
++    });
++
++    testWidgets(
++        'P-mirror (Task 12 carry: mirror has no SelectGates member) the '
++        'Mirror button follows PlanPermissions.mirror: hidden while it is '
++        'off, back when it is on; the Rotation row stays (M-P-mirror)',
++        (tester) async {
++      final c = await pumpPanel(tester);
++      final bed = place(c.document, 'test.bed.1600', far);
++      c.permissions = PlanPermissions.full.copyWith(mirror: false);
++      await select(tester, c, [bed]);
++      expect(byKey('symbol-section'), findsOneWidget);
++      expect(byKey('symbol-mirror'), findsNothing);
++      expect(editable(tester), isTrue, reason: 'rotate is still on');
++      c.permissions = PlanPermissions.full;
++      await tester.pump();
++      expect(byKey('symbol-mirror'), findsOneWidget);
++      expect(mirrorEnabled(tester), isTrue);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/panel_kits.dart b/packages/jet_cad_2d_plan/test/support/panel_kits.dart
+new file mode 100644
+index 00000000..5229586c
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/panel_kits.dart
+@@ -0,0 +1,556 @@
++// Two kits for the property panel (2a Task 17). The box kit's box.box is
++// today's demo box (floor_plan/lib/src/parametric/box.dart: a rectangle
++// whose outline loses what lies inside an overlapping box), drawn with B,
++// with a field of every kind, a gate, an enabled rule, a title hook and a
++// colour target. The disc kit's disc.disc is another component type (Review
++// Focus 3), with an escape-hatch section that throws for a disc over 5 m,
++// and a tool, D, whose settings set the next disc's radius.
++import 'dart:async' show unawaited;
++import 'dart:math' as math;
++
++import 'package:flutter/material.dart' hide Tolerance;
++import 'package:flutter_test/flutter_test.dart' show addTearDown;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++enum BoxFinish { matte, gloss }
++
++/// The box's parameters, in mm and radians.
++final class BoxParams implements Component {
++  const BoxParams(this.width, this.height,
++      {this.turn = 0,
++      this.count = 1,
++      this.finish = BoxFinish.matte,
++      this.solid = false,
++      this.label = '',
++      this.colour});
++
++  static const String componentTypeId = 'box.box';
++
++  final double width;
++  final double height;
++
++  /// An angle field's subject; not drawn.
++  final double turn;
++
++  /// A number field's subject (one decimal); editable only while [solid].
++  final double count;
++  final BoxFinish finish;
++  final bool solid;
++  final String label;
++
++  /// A swatch name, or null.
++  final String? colour;
++
++  @override
++  String get typeId => componentTypeId;
++
++  @override
++  Map<String, Object?> toJson() => {
++        'colour': colour,
++        'count': count,
++        'finish': finish.name,
++        'height': height,
++        'label': label,
++        'solid': solid,
++        'turn': turn,
++        'width': width,
++      };
++
++  static BoxParams fromJson(Map<String, Object?> json) => BoxParams(
++        (json['width']! as num).toDouble(),
++        (json['height']! as num).toDouble(),
++        turn: (json['turn']! as num).toDouble(),
++        count: (json['count']! as num).toDouble(),
++        finish: BoxFinish.values.byName(json['finish']! as String),
++        solid: json['solid']! as bool,
++        label: json['label']! as String,
++        colour: json['colour'] as String?,
++      );
++
++  BoxParams copyWith(
++          {double? width,
++          double? height,
++          double? turn,
++          double? count,
++          BoxFinish? finish,
++          bool? solid,
++          String? label}) =>
++      BoxParams(width ?? this.width, height ?? this.height,
++          turn: turn ?? this.turn,
++          count: count ?? this.count,
++          finish: finish ?? this.finish,
++          solid: solid ?? this.solid,
++          label: label ?? this.label,
++          colour: colour);
++
++  BoxParams withColour(String? colour) => BoxParams(width, height,
++      turn: turn,
++      count: count,
++      finish: finish,
++      solid: solid,
++      label: label,
++      colour: colour);
++
++  @override
++  bool operator ==(Object other) =>
++      other is BoxParams &&
++      other.width == width &&
++      other.height == height &&
++      other.turn == turn &&
++      other.count == count &&
++      other.finish == finish &&
++      other.solid == solid &&
++      other.label == label &&
++      other.colour == colour;
++
++  @override
++  int get hashCode =>
++      Object.hash(width, height, turn, count, finish, solid, label, colour);
++}
++
++// BoxType, _corners, _insideInterval: floor_plan/lib/src/parametric/box.dart
++// :35-124, unchanged.
++
++List<Vector2> _corners(BoxParams p) => [
++      Vector2(0, 0),
++      Vector2(p.width, 0),
++      Vector2(p.width, p.height),
++      Vector2(0, p.height),
++    ];
++
++/// A rectangle whose outline loses what lies strictly inside any
++/// overlapping box: overlapping boxes read as one outline, the wall
++/// clean-up preview (spec 06 D13).
++final class BoxType extends ParametricType<BoxParams> {
++  const BoxType();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(BoxParams params, Transform2 toWorld) => Aabb2.fromPoints(
++      [for (final c in _corners(params)) toWorld.transformPoint(c)]);
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    final p = view.paramsOf<BoxParams>(self)!;
++    final toLocal = view.toWorld(self).invert();
++    final quads = [
++      for (final n in view.neighbours(self))
++        if (view.paramsOf<BoxParams>(n) case final q?)
++          [
++            for (final c in _corners(q))
++              toLocal.transformPoint(view.toWorld(n).transformPoint(c)),
++          ],
++    ];
++    final c = _corners(p);
++    const tol = Tolerance.standard;
++    final out = <Generated>[];
++    for (var i = 0; i < 4; i++) {
++      final a = c[i], b = c[(i + 1) % 4];
++      final len = (b - a).length;
++      var keep = <(double, double)>[(0, 1)];
++      for (final q in quads) {
++        final inside = _insideInterval(a, b, q);
++        if (inside == null) continue;
++        keep = [
++          for (final (lo, hi) in keep) ...[
++            if ((math.min(hi, inside.$1) - lo) * len > tol.linear)
++              (lo, math.min(hi, inside.$1)),
++            if ((hi - math.max(lo, inside.$2)) * len > tol.linear)
++              (math.max(lo, inside.$2), hi),
++          ],
++        ];
++      }
++      for (final (lo, hi) in keep) {
++        out.add(Generated(
++            EntityKind.line, linePayload(a + (b - a) * lo, a + (b - a) * hi)));
++      }
++    }
++    return out;
++  }
++}
++
++/// The open parameter interval of a->b strictly inside the convex quad [q].
++(double, double)? _insideInterval(Vector2 a, Vector2 b, List<Vector2> q) {
++  const tol = Tolerance.standard;
++  var area = 0.0;
++  for (var i = 0; i < 4; i++) {
++    final u = q[i], v = q[(i + 1) % 4];
++    area += u.x * v.y - v.x * u.y;
++  }
++  final s = area > 0 ? 1.0 : -1.0;
++  final d = b - a;
++  var lo = 0.0, hi = 1.0;
++  for (var i = 0; i < 4; i++) {
++    final u = q[i], v = q[(i + 1) % 4];
++    final e = v - u;
++    final len = e.length;
++    final f0 = s * (e.x * (a.y - u.y) - e.y * (a.x - u.x)) / len;
++    final fd = s * (e.x * d.y - e.y * d.x) / len;
++    if (fd.abs() <= tol.linear) {
++      if (f0 <= tol.linear) return null;
++      continue;
++    }
++    final t = (tol.linear - f0) / fd;
++    if (fd > 0) {
++      lo = math.max(lo, t);
++    } else {
++      hi = math.min(hi, t);
++    }
++  }
++  return (hi - lo) * d.length > tol.linear ? (lo, hi) : null;
++}
++
++/// The box at [at] (its lower-left corner) in a group turned [turn] about
++/// it: one step, labelled `Add box`; the group takes the current layer.
++CompoundCommand boxCommand(
++        DraftDocument doc, Handle h, Vector2 at, BoxParams params,
++        {double turn = 0}) =>
++    CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: h,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(at.x, at.y)
++              .multiply(Transform2.rotation(turn)),
++          children: const [])),
++      SetComponentCommand<BoxParams>(h, params),
++      SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
++    ], label: 'Add box');
++
++/// floor_plan/lib/src/parametric/box_tool.dart:10-47: two opposite corners,
++/// world-axis aligned, one box.
++class BoxTool extends RectangleTool {
++  BoxTool();
++
++  @override
++  String get name => 'Box';
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    if (points.isEmpty) {
++      points.add(point);
++      return;
++    }
++    final c1 = points.first;
++    if (isDegenerateRectangle(c1, point)) return;
++    commit(ctx, () {
++      final doc = ctx.document;
++      return boxCommand(
++          doc,
++          doc.handleSeed.next(),
++          Vector2(math.min(c1.x, point.x), math.min(c1.y, point.y)),
++          BoxParams((point.x - c1.x).abs(), (point.y - c1.y).abs()));
++    }, needs: const {
++      Capability.structure,
++      Capability.components,
++      Capability.geometry,
++    });
++    clearShape();
++  }
++}
++
++final PlanType<BoxParams> boxType = PlanType<BoxParams>(
++  id: BoxParams.componentTypeId,
++  fromJson: BoxParams.fromJson,
++  parametric: const BoxType(),
++  properties: [
++    LengthProperty<BoxParams>(
++        id: 'width',
++        read: (p) => p.width,
++        write: (p, v) => p.copyWith(width: v),
++        min: 1,
++        gate: PlanGate.reshape),
++    LengthProperty<BoxParams>(
++        id: 'height',
++        read: (p) => p.height,
++        write: (p, v) => p.copyWith(height: v),
++        min: 1,
++        gate: PlanGate.reshape),
++    AngleProperty<BoxParams>(
++        id: 'turn', read: (p) => p.turn, write: (p, v) => p.copyWith(turn: v)),
++    NumberProperty<BoxParams>(
++        id: 'count',
++        read: (p) => p.count,
++        write: (p, v) => p.copyWith(count: v),
++        min: 0,
++        max: 99,
++        decimals: 1,
++        enabled: (p) => p.solid),
++    ChoiceProperty<BoxParams, BoxFinish>(
++        id: 'finish',
++        values: BoxFinish.values,
++        read: (p) => p.finish,
++        write: (p, v) => p.copyWith(finish: v)),
++    ToggleProperty<BoxParams>(
++        id: 'solid',
++        read: (p) => p.solid,
++        write: (p, v) => p.copyWith(solid: v)),
++    TextProperty<BoxParams>(
++        id: 'label',
++        read: (p) => p.label,
++        write: (p, v) => p.copyWith(label: v),
++        maxLength: 12),
++    ValueDisplay<BoxParams>(
++        id: 'area', read: (p) => p.width * p.height, unit: ValueUnit.area),
++    ActionProperty<BoxParams>(
++        id: 'swap', apply: (p) => p.copyWith(width: p.height, height: p.width)),
++  ],
++  title: (p) => p.solid ? 'type:box.box.solid' : 'type:box.box',
++  colour: ColourTarget<BoxParams>(
++      read: (p) => p.colour, write: (p, s) => p.withColour(s)),
++);
++
++final PlanKit boxKit = PlanKit(
++  id: 'box',
++  version: '1.0.0',
++  types: [boxType],
++  tools: [
++    PlanTool(
++        id: 'box.draw',
++        icon: Icons.crop_din,
++        letter: 'B',
++        needs: const {
++          Capability.structure,
++          Capability.components,
++          Capability.geometry,
++        },
++        create: (_) => BoxTool()),
++  ],
++  names: const KitNames({
++    'en': {
++      'type:box.box': 'Box',
++      'type:box.box.solid': 'Solid box',
++      'tool:box.draw': 'Box',
++      'property:box.box.width': 'Width',
++      'property:box.box.height': 'Height',
++      'property:box.box.turn': 'Turn',
++      'property:box.box.count': 'Count',
++      'property:box.box.finish': 'Finish',
++      'property:box.box.finish.matte': 'Matte',
++      'property:box.box.finish.gloss': 'Gloss',
++      'property:box.box.solid': 'Solid',
++      'property:box.box.label': 'Label',
++      'property:box.box.area': 'Area',
++      'property:box.box.swap': 'Swap sides',
++    },
++    'tr': {'type:box.box': 'Kutu', 'property:box.box.width': 'Genişlik'},
++  }),
++);
++
++/// The disc's parameters: a circle of [radius] about the group's origin.
++final class DiscParams implements Component {
++  const DiscParams(this.radius, {this.colour});
++
++  static const String componentTypeId = 'disc.disc';
++
++  final double radius;
++  final String? colour;
++
++  @override
++  String get typeId => componentTypeId;
++
++  @override
++  Map<String, Object?> toJson() => {'colour': colour, 'radius': radius};
++
++  static DiscParams fromJson(Map<String, Object?> json) =>
++      DiscParams((json['radius']! as num).toDouble(),
++          colour: json['colour'] as String?);
++
++  DiscParams withRadius(double radius) => DiscParams(radius, colour: colour);
++  DiscParams withColour(String? colour) => DiscParams(radius, colour: colour);
++
++  @override
++  bool operator ==(Object other) =>
++      other is DiscParams && other.radius == radius && other.colour == colour;
++
++  @override
++  int get hashCode => Object.hash(radius, colour);
++}
++
++final class DiscType extends ParametricType<DiscParams> {
++  const DiscType();
++
++  @override
++  Capability get editCapability => Capability.geometry;
++
++  @override
++  Aabb2 reach(DiscParams params, Transform2 toWorld) => Aabb2.fromPoints([
++        for (final (x, y) in [(-1, -1), (1, -1), (1, 1), (-1, 1)])
++          toWorld.transformPoint(Vector2(x * params.radius, y * params.radius)),
++      ]);
++
++  @override
++  List<Generated> generate(ParametricView view, Handle self) {
++    final p = view.paramsOf<DiscParams>(self)!;
++    return [
++      Generated(EntityKind.circle, circlePayload(Vector2.zero(), p.radius))
++    ];
++  }
++}
++
++CompoundCommand discCommand(
++        DraftDocument doc, Handle h, Vector2 at, DiscParams params) =>
++    CompoundCommand([
++      AddNodeCommand(GroupNode(
++          handle: h,
++          parent: doc.rootHandle,
++          transform: Transform2.translation(at.x, at.y),
++          children: const [])),
++      SetComponentCommand<DiscParams>(h, params),
++      SetComponentCommand<ObjectLayer>(h, ObjectLayer(drawingLayer(doc))),
++    ], label: 'Add disc');
++
++/// The disc tool's settings: the next disc's radius.
++final class DiscToolSettings {
++  const DiscToolSettings({this.radius = 400});
++
++  final double radius;
++
++  @override
++  bool operator ==(Object other) =>
++      other is DiscToolSettings && other.radius == radius;
++
++  @override
++  int get hashCode => radius.hashCode;
++}
++
++/// A click places one disc of the settings' radius there.
++class DiscTool extends PlacementTool {
++  DiscTool(this.services);
++
++  final PlanServices services;
++
++  @override
++  String get name => 'Disc';
++
++  @override
++  void accept(Vector2 point, ToolContext ctx) {
++    final radius = services.settingsOf<DiscToolSettings>('disc.draw').radius;
++    commit(ctx, () {
++      final doc = ctx.document;
++      return discCommand(doc, doc.handleSeed.next(), point, DiscParams(radius));
++    }, needs: const {
++      Capability.structure,
++      Capability.components,
++      Capability.geometry,
++    });
++    clearShape();
++  }
++
++  @override
++  void paintRubberBand(Canvas canvas, Vector2 origin, double scale) {}
++}
++
++final PlanType<DiscParams> discType = PlanType<DiscParams>(
++  id: DiscParams.componentTypeId,
++  fromJson: DiscParams.fromJson,
++  parametric: const DiscType(),
++  properties: [
++    LengthProperty<DiscParams>(
++        id: 'radius',
++        read: (p) => p.radius,
++        write: (p, v) => p.withRadius(v),
++        min: 1),
++  ],
++  colour: ColourTarget<DiscParams>(
++      read: (p) => p.colour, write: (p, s) => p.withColour(s)),
++  section: (context, value, commit, words) {
++    if (value.radius > 5000) throw StateError('a disc over 5 m');
++    return OutlinedButton(
++        key: const Key('disc-grow'),
++        onPressed: () => commit(value.withRadius(value.radius * 2)),
++        child: Text(words.word('property:disc.disc.grow')));
++  },
++);
++
++final PlanKit discKit = PlanKit(
++  id: 'disc',
++  version: '1.0.0',
++  types: [discType],
++  tools: [
++    PlanTool(
++        id: 'disc.draw',
++        icon: Icons.circle,
++        letter: 'D',
++        needs: const {
++          Capability.structure,
++          Capability.components,
++          Capability.geometry,
++        },
++        settings: PlanToolSettings<DiscToolSettings>(
++            initial: const DiscToolSettings(),
++            specs: [
++              LengthProperty<DiscToolSettings>(
++                  id: 'radius',
++                  read: (s) => s.radius,
++                  write: (s, v) => DiscToolSettings(radius: v),
++                  min: 1),
++            ]),
++        create: (services) => DiscTool(services)),
++  ],
++  names: const KitNames({
++    'en': {
++      'type:disc.disc': 'Disc',
++      'tool:disc.draw': 'Disc',
++      'property:disc.disc.radius': 'Radius',
++      'property:disc.disc.grow': 'Grow',
++      'property:disc.draw.radius': 'Radius',
++    },
++  }),
++);
++
++/// A controller over a 1:20 page anchored at (7000, 3000), grid snap off,
++/// nothing drawn (`floor_plan/test/support/box_rig.dart:16-28`'s
++/// `boxDoc`), with [kits] (the box kit by default).
++PlanController boxController({List<PlanKit>? kits}) {
++  final m = FlutterTextMeasurer();
++  final doc = DraftDocument.empty(measurer: m);
++  PageComponent.register(doc.components);
++  doc.commands.execute(SetComponentCommand<PageComponent>(
++      doc.rootHandle,
++      PageComponent(
++          scaleDenominator: 20,
++          originX: 7000,
++          originY: 3000,
++          snapToGrid: false)));
++  doc.commands.clearHistory();
++  final json = ensureManifest(DraftDocumentCodec.encodeToString(doc));
++  unawaited(doc.dispose());
++  m.clear();
++  final c = PlanController(kits: kits ?? [boxKit], json: json);
++  addTearDown(c.dispose);
++  return c;
++}
++
++/// One box on [c]'s plan, one step; its group's handle.
++Handle addBox(PlanController c, Vector2 at, BoxParams params,
++    {double turn = 0}) {
++  final doc = c.document;
++  final h = doc.handleSeed.next();
++  doc.commands.execute(boxCommand(doc, h, at, params, turn: turn));
++  return h;
++}
++
++/// One disc on [c]'s plan, one step; its group's handle.
++Handle addDisc(PlanController c, Vector2 at, DiscParams params) {
++  final doc = c.document;
++  final h = doc.handleSeed.next();
++  doc.commands.execute(discCommand(doc, h, at, params));
++  return h;
++}
++
++/// [kits]' types in a catalog of their own, for `drift()`.
++ParametricCatalog catalogOf(List<PlanKit> kits) {
++  final catalog = ParametricCatalog();
++  for (final kit in kits) {
++    for (final t in kit.types) {
++      t.registerInto(catalog);
++    }
++  }
++  return catalog;
++}

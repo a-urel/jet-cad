@@ -1,0 +1,513 @@
+# The plan library in design mode (sub-project 2a): results of record
+
+Branch `feat/plan-library-2a`, head at the exit gate: `e1e577d522c59a6376823ca7dc3cad4fa534310f`
+(the commit that adds this note sits on top of it); `45` commits over `main`
+(local `main` at `60839065`, an ancestor of the head; `origin/main` at `27244bf2` is an
+ancestor of local `main`).
+Plan: `docs/superpowers/plans/2026-10-14-plan-library-2a.md`. Spec:
+`docs/superpowers/specs/2026-10-14-plan-library-design-mode-design.md` (revision 3).
+All transcripts below were copied from the terminal on `2026-10-14`, last lines only.
+
+Two kinds of evidence appear below, and each is named as such:
+- **this run**: a command run by Task 21 on the head above, its output quoted;
+- **report**: what a task report in `.superpowers/sdd/2026-10-14-plan-library-2a/`
+  recorded (`task-N-report.md`), not re-run here.
+
+## Gates
+
+### 1. `packages/jet_cad_2d_kit`
+
+`flutter test` (this run, exit 0):
+
+```
+00:04 +314: All tests passed!
+```
+
+`flutter analyze`: `No issues found! (ran in 5.1s)` (exit 0).
+`dart format --output=none --set-exit-if-changed .`: `Formatted 68 files (0 changed) in 0.13 seconds.` (exit 0).
+
+### 2. `packages/jet_cad_2d_plan`
+
+`flutter test` (this run, exit 0):
+
+```
+00:42 +723: All tests passed!
+```
+
+No skip (`~`) in the line: the one skip Task 13 once carried was retired by ruling F-1
+(see "Ported tests"). `flutter analyze`: `No issues found! (ran in 5.2s)` (exit 0).
+Format: `Formatted 177 files (0 changed) in 0.61 seconds.` (exit 0).
+
+The plan library's paint-allocation invariant, run on its own
+(`cd packages/jet_cad_2d_plan && flutter test test/invariants/canvas_paint_allocation_test.dart`, exit 0),
+last line:
+
+```
+00:01 +1: All tests passed!
+```
+
+### 3. Tools
+
+`cd tool/ci && dart test` (exit 0): `00:49 +116: All tests passed!`.
+`dart run tool/ci/check_kit_deps.dart` (exit 0): `kit dependencies: 1 package(s) checked, none names the plan library or another kit`.
+`dart run tool/ci/check_readmes.dart` (exit 0): `package READMEs: all 6 code blocks are in the probes`.
+`dart run tool/ci/check_screenshots.dart`: exit 0, `screenshots: every rule holds`.
+
+### 4. The three CLAUDE.md gates
+
+`packages/jet_cad_2d` (`dart test`, exit 1):
+
+```
+00:08 +1322 -2: Some tests failed.
+
+Failing tests:
+  test/testing/generate_document_test.dart: both text fractions default to zero and change nothing
+  test/testing/generate_document_test.dart: the default document is the one Plan 2 measured, byte for byte
+```
+
+Compared with `tool/ci/standing_failures.txt`, line by line: exactly its two
+`packages/jet_cad_2d` lines, nothing else. `test/invariants/query_allocation_test.dart`,
+run on its own (`cd packages/jet_cad_2d && dart test test/invariants/query_allocation_test.dart`,
+exit 0), last line: `00:05 +6: All tests passed!`. `dart analyze`: `No issues found!` (exit 0). Format: `Formatted 184 files (0 changed) in 0.59 seconds.` (exit 0).
+
+`packages/jet_cad_2d_flutter` (`flutter test`, exit 1):
+
+```
+00:26 +1450 ~1 -5: Some tests failed.
+
+Failing tests:
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-library-2a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 1 (RenderBackend.canvas)
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-library-2a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 2 (RenderBackend.canvas)
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-library-2a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 3 (RenderBackend.canvas)
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-library-2a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 4 (RenderBackend.canvas)
+  /Users/ahmeturel/Projects/oss/jet-cad/.claude/worktrees/plan-library-2a/packages/jet_cad_2d_flutter/test/golden/text_ladder_golden_test.dart: text ladder rung 5 (RenderBackend.canvas)
+```
+
+Compared with `tool/ci/standing_failures.txt`, line by line: the five failures are five of
+its seven `packages/jet_cad_2d_flutter` lines (`text ladder rung 1..5`). Its other two lines,
+`text lod ladder rung 1` and `rung 2 (RenderBackend.canvas)`, passed on this machine; Tasks 1
+and 2 recorded the same local outcome (`+1450 ~1 -5`, report). No failure outside the list.
+The `~1` is the one line of `tool/ci/standing_skips.txt` (`test/rig/paint_microbench_test.dart`,
+the rig run by hand). `test/invariants/paint_allocation_test.dart`, run on its own
+(`cd packages/jet_cad_2d_flutter && flutter test test/invariants/paint_allocation_test.dart`,
+exit 0), last line: `00:00 +3: All tests passed!`.
+`flutter analyze`: `No issues found! (ran in 5.2s)` (exit 0). Format: `Formatted 234 files (0 changed) in 0.53 seconds.` (exit 0).
+
+`packages/jet_cad_2d_gpu`: `00:00 +20: All tests passed!` (exit 0), `No issues found! (ran in 3.6s)` (exit 0),
+`Formatted 10 files (0 changed) in 0.02 seconds.` (exit 0).
+
+`packages/jet_cad_floor_plan` (`flutter test`, untouched, run once, exit 0): `02:01 +2008 ~4: All tests passed!`
+(Tasks 1 and 2 recorded `+2008 ~4` before and after the engine seams, report).
+
+### 5. Publish dry runs
+
+`packages/jet_cad_2d_kit`: exit `0`, `Package has 0 warnings.`
+`packages/jet_cad_2d_plan`: exit `0`, `Package has 0 warnings.`; the file list holds, as printed:
+
+```
+├── CHANGELOG.md (1 KB)
+├── LICENSE (11 KB)
+├── README.md (2 KB)
+├── analysis_options.yaml (<1 KB)
+├── assets
+│   └── fonts
+│       ├── README.md (<1 KB)
+│       └── Roboto_LICENSE.txt (11 KB)
+├── example
+│   └── main.dart (1 KB)
+├── lib
+│   ├── fonts
+│   │   └── Roboto-Regular.ttf (167 KB)
+│   ├── jet_cad_2d_plan.dart (2 KB)
+…
+├── pubspec.yaml (<1 KB)
+```
+
+(The `…` stands for `lib/src` and its files; `Total compressed archive size: 491 KB.`)
+`cmp LICENSE packages/jet_cad_2d_plan/LICENSE`, `cmp LICENSE packages/jet_cad_2d_kit/LICENSE`:
+printed nothing, exit 0 each. Neither package was published; only `--dry-run` ran.
+
+### 6. Hand checks
+
+- `git status --short`: printed nothing before the first gate, after every pub operation
+  and after the last check (no `analysis_options.yaml` was rewritten in this run).
+- `git log --name-only --format= main..HEAD | grep analysis_options`: one line,
+  `packages/jet_cad_2d_plan/analysis_options.yaml` (Task 6's single allowed commit).
+- `git diff --stat main -- packages/jet_cad_floor_plan packages/jet_cad_restaurant_symbols packages/jet_cad_2d_gpu packages/jet_cad_2d_flutter apps`:
+  printed nothing, exit 0. So `packages/jet_cad_2d_flutter/CHANGELOG.md` is untouched too.
+- Engine commits (`git log --format='%h %s' main..HEAD -- packages/jet_cad_2d`):
+  ```
+  7ba09b31 fix(engine): probe isolates a broken place contributor (2a E2)
+  40912bf7 feat(engine): frozen objects and ParametricSystem.probe (2a E2)
+  3d84a62c feat(engine): catalog type queries, PartialMutationError, unreadable components (2a E1, E3, E4)
+  ```
+  Task 1's commit, Task 2's commit and Task 2's fix round 1 (ledger: "fix round 1/5 …
+  probe place isolation; commits 40912bf7..7ba09b31"). Nothing else.
+- Old-package names: `grep -rn "jet_cad_floor_plan\|jet_cad_restaurant_symbols" packages/jet_cad_2d_plan/lib packages/jet_cad_2d_plan/test packages/jet_cad_2d_plan/example packages/jet_cad_2d_plan/pubspec.yaml packages/jet_cad_2d_kit/lib packages/jet_cad_2d_kit/pubspec.yaml`
+  printed 99 lines; the same grep filtered with `grep -v ":[0-9]*: *//"` printed nothing,
+  so every one of the 99 is a `//` or `///` comment line (no import, no pubspec line). This
+  run checked that they are comments; it did not read each one for its citation.
+  `grep -rn "import 'package:jet_cad_floor_plan\|import 'package:jet_cad_restaurant_symbols" packages/jet_cad_2d_plan packages/jet_cad_2d_kit`:
+  printed nothing (exit 1).
+- Contract dependencies: `grep -n "jet_cad_2d_plan\|jet_cad_2d_kit_" packages/jet_cad_2d_kit/pubspec.yaml`: printed nothing (exit 1).
+- Purity: `grep -rln "package:flutter\|dart:ui" packages/jet_cad_2d_kit/lib/src/model packages/jet_cad_2d_kit/lib/src/authoring packages/jet_cad_2d_kit/lib/authoring.dart`:
+  printed nothing (exit 1); `grep -ln "package:flutter\|dart:ui" packages/jet_cad_2d_kit/lib/src/kit/properties.dart packages/jet_cad_2d_kit/lib/src/kit/colour.dart`:
+  printed nothing (exit 1). The kit's purity test ran green inside gate 1.
+- `dart:io`: `grep -rn "import 'dart:io'" packages/jet_cad_2d_plan/lib packages/jet_cad_2d_kit/lib`: printed nothing (exit 1).
+- Versions:
+  ```
+  packages/jet_cad_2d_kit/pubspec.yaml:5:version: 0.1.0
+  packages/jet_cad_2d/pubspec.yaml:6:version: 0.7.2
+  packages/jet_cad_2d_plan/pubspec.yaml:5:version: 0.8.0
+  packages/jet_cad_2d_flutter/pubspec.yaml:5:version: 0.7.2
+  ```
+  `## Unreleased` in the engine's CHANGELOG: `3:## Unreleased` (one line).
+- Draw order and the frame path: `packages/jet_cad_2d_plan/test/invariants/` holds
+  `canvas_paint_allocation_test.dart` (and `theme_colours_test.dart`); its own run is quoted
+  in gate 2. `packages/jet_cad_2d_flutter/test/invariants/paint_allocation_test.dart`'s own
+  run is quoted in gate 4.
+- Sample kit regenerated: `cd packages/jet_cad_2d_kit && dart run test/fixtures/sample_kit/generate.dart`
+  printed `sample kit: 4 symbols written` (exit 0); then
+  `git diff --quiet -- packages/jet_cad_2d_kit/test/fixtures/sample_kit/sample.jetlib packages/jet_cad_2d_kit/test/fixtures/sample_kit/sample_snapshot.json`: exit 0.
+
+## Spec coverage
+
+Every id below was found in the tree by this run's grep over `packages/jet_cad_2d/test`,
+`packages/jet_cad_2d_kit/test`, `packages/jet_cad_2d_plan/test` and `tool/ci/test`, as the
+first token of a test name. No row is `missing`.
+
+| Spec section | Task(s) | Test ids |
+|---|---|---|
+| E1 `typeIds`, `typeIdOf` | 1 | `E1-typeIds`, `E1-typeIdOf` |
+| E2 frozen objects, `probe` | 2 | `E2-1` … `E2-7`, `E2-P1` … `E2-P6` (`E2-P6` from the fix round) |
+| E3 `PartialMutationError` | 1 | `E3-compound`, `E3-undo`, `E3-cascade`, `E3-regeneration` |
+| E4 unreadable component kept raw | 1 | `E4-1` … `E4-6` |
+| P1 `PlanKit` growth, `PlanType`, `PlanTool`, `PlanServices`, `KitWords` | 4, 8 | `PT1` … `PT19`, `PT23`, `C-svc`, `C-covariance` |
+| P1 lifetimes (factories once per document, `shared` disposed) | 8, 11, 14 | `C-life1`, `C-life2`, `F-10`, `AT-14` |
+| P1 reserved ids `plan`, `jetcad` | 6, 12 | `KS3`, `PM-12` |
+| P2 `PlanController` commands, listenables, events | 8 | `C1` … `C11`, `C13`, `C14`, `C-ch1` … `C-ch8`, `CM5`, `CM6`, `C-cam1` |
+| P2 undo mid-shape, `deleteSelection` | 8, 11, 12 | `C8`, `C10`, `F-11`, `PM-20` |
+| P2 permissions and their enforcement points | 12, 16, 17, 18, 20 | `PM-1` … `PM-21`, `S-PD`, `KB-5`, `KB-8`, `P-2`, `LP-2`, `LP-4`, `LP-8`, `ED-4` |
+| P2 symbol libraries (loader, state, problems) | 13 | `S-1` … `S-14` (`S-10` is `S-late-fail`) |
+| P2 widgets: `PlanCanvas` | 15 | `CV-1` … `CV-10`, `CV-4b`, `CV-4c` |
+| P2 widgets: `PlanToolPalette`, `PlanShortcuts`, the letters | 16 | `KB-1` … `KB-13` |
+| P2 widgets: `PlanSymbolGallery` | 13 | `S-15` … `S-18`, `GM-1` … `GM-9`, `SF-Q` |
+| P2 widgets: `PlanPropertyPanel` | 17 | `P-1` … `P-7`, `P-G1` … `P-G3`, `P-mirror`, `SS12` |
+| P2 widgets: `PlanLayerPanel`, `PlanPagePanel` | 18 | `LP-1` … `LP-8`, `LP-L`, `LP-W` |
+| P2 widgets: `PlanEditor`, `PlanEditorBar` | 20 | `ED-1` … `ED-7`, `ED-6b`, `ED-L`, `ED-X1`, `ED-X2`, `ED-U`, `ED-D`, `ED-P1`, `ED-P2`, `ED-F`, `ED-S`, `ED-A1`, `ED-A2`, `ED-E`, `ED-9`, `ED-9b`, `BT2` |
+| P3 property specs, `PropertyField` | 3, 17 | `PS1` … `PS17`, `P-1`, `P-3`, `P-5` |
+| P3 colour targets | 3, 4, 17 | `PS18`, `PT7`, `P-6`, `P-lock-recolour`, `P-G3` |
+| P3 attachment | 4, 14 | `PT20` … `PT22`, `AT-1` … `AT-20`, `MV-1` … `MV-4` |
+| P4 the plan file, manifest, semver | 7 | `PF-1`, `PF-3` … `PF-10`, `PF-7u`, `PF-unreadable` |
+| P4 the kit set | 6 | `KS1` … `KS9` |
+| P4 locks | 10 | `L-1` … `L-11` |
+| P4 the failure boundary | 11 | `F-1` … `F-14`, `F-13b`, `F-14b`, `F-G1` … `F-G14`, `F-T1` … `F-T6`, `F-B1` … `F-B4` |
+| P5 export and import registries, print | 19 | `X-1` … `X-9`, `PF8`, `PF22` (ported page flows) |
+| P5 words, locale, fonts | 9 | `W-SW1`, `W-SW2`, `W-VW5`, `W-VW6`, `W-NN4`, `W-L1` … `W-L4`, `NS7`, `W-F1`, `W-F2` |
+| P5 theme | 9, 20 | `TH1` … `TH18`, `ED-7` |
+| P6 R2 `retired` | 5, 13 | `R2-1` … `R2-7`, `GM-2` |
+| P6 R3 conformance ids | 5 | `R3-2`, `R3-3`, `R3-4` |
+| P6 R5 `docs/kits.md` | 5 | `R5-1`, `DOC1` (the doc-sync test, `doc_snippets_test.dart`) |
+| P6 R7 rule 11 width | 5 | `R7-1` … `R7-4` |
+| P7 the design-mode host API, mapped | 8, 12, 15-20 | json/save/markSaved/dirty/load/newPlan: `C2` … `C5`; `designChanges` → `changes`: `C-ch1`; selectTool/deleteSelection/undo/redo by id: `C9`, `C10`, `C8`; export/print and their rules: `X-4`, `X-5`, `X-7`, `PF8`; undo mid-shape and `canUndo`: `C8`, `ED-U`; per-view theme: `ED-7`; the camera: `CM4`, `CM5`, `CM6`, `C-cam1`; one view at a time: `CV-2`; shared loader not disposed: `S-11`; tool ids: `PM-14`; the twelve flags: `PM-5`, `PM-6`; panels, gallery, filter, rulers, grid, snapping: `ED-1`, `ED-2`, `ED-F`, `CV-5`, `CV-6`; profiles and runtime change: `PM-1`, `PM-16`; `editorBar`: `ED-4`, `BT2`; `onExportDialog`/`onPageFlowError`/`printer`: `ED-X2`, `ED-E`, `PF22`; `shortcuts: false`, `autofocus`, the guard: `ED-S`, `ED-A2`, `CV-10`, `KB-3`; fonts and languages: `W-F1`, `W-L1`; the generic theme: `TH1`; touch: `TD2` |
+| Review Focus 1 (missing kit, saved) | 10 | `L-1` |
+| Review Focus 2 (one broken object) | 11 | `F-2` |
+| Review Focus 3 (two `T`s) | 8, 17 | `C-covariance`, `P-two-types` |
+| Review Focus 4 (load mid-shape, pending field) | 8, 17 | `C-swap-mid-shape`, `P-swap-pending` |
+| Review Focus 5 (late, failing library) | 13 | `S-late-fail` (test `S-10 S-late-fail: …`) |
+| The paint-allocation invariant | 15 | `CV-alloc` |
+
+A range `X1` … `Xn` names the ids the task report lists; each range's first and last id,
+and each id written out, was among this run's grep hits.
+
+## Ported tests (A12)
+
+From the task reports. The counts are the reports' own (by name); where a report gives no
+count for a file, the row says so. "Assertions" is the report's statement, then any finding
+and its ruling.
+
+| Source (`jet_cad_floor_plan` / `apps/floor_planner`) | Destination | Tests | Assertions |
+|---|---|---|---|
+| `test/controller_test.dart` (C3-C6) | `test/controller/plan_controller_test.dart` | 4 | unchanged (Task 8) |
+| `test/host/camera_test.dart` (CM4-CM6, CM15) | `test/controller/camera_test.dart` | 4 | unchanged (Task 8) |
+| `test/host/design_changes_test.dart` (DC8, DC9, DC11-DC13, DC17 …) | `test/controller/plan_change_test.dart` | not counted in the report | unchanged (Task 8) |
+| `new_plan_separator_test.dart` (NS1-NS10, NS7a) | `test/controller/locale_separator_test.dart`, `test/l10n/document_separator_test.dart` | not counted in the report | NS7 and NS7a adapted as the brief lists (ruling NS7: today's behaviour kept); otherwise unchanged (Task 9) |
+| l10n tests (LB1-LB5, the NT group, SF) | `test/l10n/l10n_test.dart` | not counted in the report | unchanged, renames and imports only (Task 9) |
+| VW1; NN2 | `test/l10n/value_words_test.dart`; `test/l10n/numbered_names_test.dart` | 1; 1 | unchanged; NN2 keeps its first loop only, as the brief says (Task 9) |
+| FR1; `package_assets_test.dart` PA1, PA5, PA6, PA8 | `test/fonts/fonts_register_test.dart`; `test/fonts/plan_assets_test.dart` | 1; 4 | unchanged (PA6, PA8 ported beyond the brief, Task 9 deviation 5) |
+| `symbol_search_test.dart` | `test/symbols/gallery_model_test.dart` | 4 | unchanged; **finding F-1**: "a mixed-case tag is found in any case" retired (K2 admits lower-case tags only, its premise cannot exist); its intent pinned by `SF-Q` (ruling F-1, `953356d8`) |
+| `symbol_placer_test.dart` (whole file) | `test/symbols/symbol_placer_test.dart` | not counted in the report | unchanged (Task 13) |
+| the symbol panel tests | `test/panels/plan_symbol_gallery_test.dart` | not counted in the report | unchanged; the highlight test moved to Task 14 and is ported there (M-09b9) |
+| `symbol_box_test.dart` | `test/symbols/symbol_box_test.dart` | not counted in the report | unchanged; three fixture keys for the asset's four (Task 14 deviation 9) |
+| `symbol_ghost_test.dart` (whole) | `test/symbols/symbol_ghost_test.dart` | 13 | unchanged; fixture changed (an own `ghost` library shaped like the asset's entries); ruling (Task 14): fixtures only, allowed by A12 |
+| `symbol_place_tool_test.dart` (ranges 78-99, 184-222, 225-366, 435-1366, 1738-1804) | `test/tools/plan_symbol_tool_test.dart` | not counted in the report | unchanged; `chair` is `fixture.armchair.single` (ruling, Task 14) |
+| `canvas_ui_test.dart`, `dark_canvas_test.dart`, `host/theme_canvas_test.dart`, `planner_palette_test.dart`, `planner_draw_test.dart`, `touch_tools_test.dart`, `planner_shell_test.dart`, `host/camera_test.dart` | `test/canvas/canvas_ui_test.dart` (3), `dark_canvas_test.dart` (5), `theme_canvas_test.dart` (12), `canvas_palette_test.dart` (9), `canvas_draw_test.dart` (5), `touch_tools_test.dart` (1), `canvas_layout_test.dart` (4), `canvas_camera_test.dart` (1) | 40 | unchanged; ported page edits get a second pump (fixture, Task 15 deviation 5) |
+| `planner_draw_test.dart` (A1-A6, A8, A10-A13); `host/host_text_keys_test.dart` | `test/editor/palette_draw_test.dart`; `test/shortcuts/host_text_keys_test.dart` | 12; 3 | unchanged (Task 16) |
+| `selection_panel_test.dart`, `colors/color_picker_test.dart`, `symbols/symbol_section_test.dart`, `hover_removal_test.dart` | `test/panels/selection_panel_test.dart`, `colour_row_test.dart`, `symbol_section_test.dart`, `hover_removal_test.dart` | not counted by file in the report | unchanged; the section word `'Wall'` follows the fixture to `'Box'` (ruling, Task 18, applied as in Task 17); table halves to 2b, SW6, SW7, SW9, SS9 not ported (brief) |
+| `apps/floor_planner/test/layers/layer_panel_test.dart`; `…/layer_picker_test.dart`; `page_panel_test.dart`; `canvas_ui_test.dart` (premise, D6a); `selection_panel_test.dart` (SE13, SE15, SE16); `planner_draw_test.dart` (A9, A14, A15, A18, A19, A23-A26); l10n (NN1, PW1, PW2, SE2L) | `test/panels/layer_panel_test.dart` (25), `layer_picker_test.dart` (11), `page_panel_test.dart` (7), `page_panel_theme_test.dart` (premise + D6a, both themes), `selection_page_test.dart` (3), `page_scale_field_test.dart` (9), `test/l10n/layer_page_words_test.dart` (4) | 59 + the theme file | unchanged; SE13/15/16's `'Wall'` → `'Box'` (ruling, Task 18) |
+| `apps/floor_planner/test/export/export_font_test.dart` (EF4, EF5, EF7, EF8); `host/page_flows_test.dart` (PF2-PF4, PF7-PF16, PF18-PF24) | `test/export/export_font_test.dart`; `test/export/page_flows_test.dart` | 4; 20 | unchanged; the mode loops run once or twice per the brief's rule; PF2, PF23 trimmed as the brief says (Task 19) |
+| `host/bars_test.dart`, `host/view_test.dart`, the host separator tests, the host options tests, `l10n/shell_words_test.dart`, `host/floor_plan_theme_test.dart`, the theme-colours scan | `test/editor/editor_bar_test.dart` (12), `editor_view_test.dart` (8), `editor_separator_test.dart` (3), `editor_options_test.dart` (19, then RV6's first half), `editor_words_test.dart` (9), `editor_theme_test.dart` (8), `test/invariants/theme_colours_test.dart` (3) | 62 + RV6 | Task 20's fix round compared every `expect` of 57 ported tests with its source (report: `TOTAL source 334, port 285, identical 235`; 23 tests identical, 34 differ, each difference listed with its reason: 2b halves, sub-project 3 rows, brief-mandated finders and fixtures). **Finding RV6**: split by ruling: its first half ported (`PlanCanvas` that unmounts withdraws the tool, `ce212b7c`); its second half ("`selectTool` is false with no view") retired, because the controller owns the tools (spec P2). **This is a deliberate host-API difference awaiting the human's word (A14)**: `selectTool` answers true with no view mounted, where today's answered false. |
+
+Other assertion changes recorded in the reports (each grows an assertion, none is weakened):
+- Task 8's `C14` (a new test, not a port) gained `('test', componentUnreadable)` when Task 11
+  started reporting E4's diagnostic (ruling, Task 11).
+- Task 8's `C-life1` and `C-svc` gained the test kit's edge provider when Task 14's registry
+  landed (ruling, Task 14).
+- Task 8's `C13` expects the built-in exporters first since Task 19 (report).
+- Task 2's `E2-P1` call list gained the isolation pass's `placeBox` calls (fix round 1, ruling).
+
+Moved assertions (the planning ruling "may move, never weaken"), as the reports name them:
+the gallery's highlight test from Task 13 to Task 14; HR1 to Task 17; `CP1`'s `layer-picker`
+assertion restored by Task 18 through Task 17's slot; RV6's first half to `PlanCanvas`
+(Task 20); the table, service-bar and selection-mode halves to 2b; the wall, room and
+dimension rows to sub-project 3; PW1's zoom read-out to Task 20.
+
+## Mutations of Tasks 1-20
+
+As the task reports record (`.superpowers/sdd/2026-10-14-plan-library-2a/task-N-report.md`),
+each ran on a committed file and was reverted with `git checkout --`, then `git diff --quiet`
+exited 0. None was re-run by Task 21. Each report holds, for every id, the exact edit and the
+red line as quoted; the table names the ids, the files and the tests that went red.
+
+| ID | Task | File | The change | Red test |
+|---|---|---|---|---|
+| M-E1a … M-E1d | 1 | `parametric_system.dart` | `typeIds` sorted / one per registration; `typeIdOf` first / last registration | E1-typeIds, E1-typeIdOf |
+| M-E3a … M-E3d | 1 | `commands.dart`, `regeneration.dart` | each of the four sites back to `StateError` | E3-compound, E3-undo, E3-cascade, E3-regeneration |
+| M-E4a … M-E4j | 1 | `component.dart`, `json_codec.dart` | no `attachUnknown`, no diagnostic, empty handles, bare message, `on Exception`, no null branch, `toJson` order, codec plumbing | E4-1 … E4-6 |
+| M-E2a … M-E2h | 2 | `regeneration.dart`, `parametric_system.dart` | the frozen predicate dropped at each touch point | E2-1 … E2-7 |
+| M-E2p-live, -iso, -guard, -catch, -page, -place, -input, -read, -plan, -diag, -self (suppl.), -placeiso, -placeiso-resurvey (suppl.) | 2 | `parametric_system.dart` | `probe`'s steps removed one at a time | E2-P1 … E2-P6 |
+| M-PS1 … M-PS17, M-P9 (25 runs) | 3 | `properties.dart`, `colour.dart` | each refusal, conversion and binding rule | PS1 … PS17, P9 |
+| M-PT1 … M-PT23, M-I5a, M-I5b (30 runs) | 4 | `lib/src/kit/*.dart`, `kit_ids.dart` | each member of PlanType, PlanTool, PlanServices, attachment, validate | PT1 … PT23, I5 |
+| M-R2a … M-R2f, M-R3a … M-R3f, M-R7a, M-R7c, M-V11c, M-R5, M-DOC1(R5) | 5 | symbol model, conformance, rule 11, `docs/kits.md` | `retired` read/write, R3 checks, width test, doc text | R2-1 … R2-7, C7, F0, R3-2 … R3-4, R7-1 … R7-3, V11c, R5-1, DOC1 |
+| M-KS1 … M-KS9 | 6 | `kit_set.dart` | sort, each refusal block, order | KS1 … KS9 |
+| M-PF-1a … M-PF-10b, M-PF-3a … M-PF-8b, M-PF-7a … M-PF-7u | 7 | `plan_file.dart`, `manifest.dart`, `semver.dart` | manifest check, keep flag, save order, kept entries, semver precedence | PF-1, PF-unreadable, PF-3 … PF-10, PF-7u |
+| M-C1a … M-C14b, M-C-swap-a … -c, M-C-life1, M-C-life2a/b, M-C-svc-a … -e, M-C-grips-a … -c, M-C-cov-a/b, M-CM4 … M-CM15, M-C-cam1a/b, M-NS1 … M-NS10, M-C-ch1a … M-C-ch8 | 8 | controller files | each command, swap step, lifetime, service, camera and change rule | C1 … C14, C-swap-mid-shape, C-life1/2, C-svc, C-grips, C-covariance, CM4 … CM15, C-cam1, NS1 … NS10, C-ch1 … C-ch8 |
+| M-W-SW1 … M-W-L3, M-NS7, M-NS7c, M-TH1 … M-TH18, M-W-F1 … M-W-F2b, M-14b1-2, M-PA6, M-PA8 | 9 | swatch, strings, locale scope, theme, fonts | each word, locale, theme and font rule | W-SW1 … W-L4, NS7, TH1 … TH18, W-F1, W-F2, FR1, PA6, PA8 |
+| M-L1a … M-L11d | 10 | `locks.dart`, `session.dart`, `plan_controller.dart` | lock scan, check, rollback, gates, grips, history, `execute` catches | L-1 … L-11 |
+| M-F-G1 … M-F-G14, M-F1a … M-F14b, M-F-T1 … M-F-T6c, M-F-B1a … M-F-B4, M-F10a … M-F12, M-F13a/b, M-F2-retry | 11 | `guard.dart`, `locks.dart`, `diagnostics_log.dart`, `section_boundary.dart`, `session.dart`, `plan_controller.dart` | each guard removed; recovery, retry, load probe, damage | F-G1 … F-G14, F-1 … F-14b, F-T1 … F-T6, F-B1 … F-B4 |
+| M-PM1 … M-PM21 (+3 extras) | 12 | `permissions.dart`, `plan_select_gates.dart`, `locks.dart`, `generic_tools.dart`, `plan_controller.dart` | each flag, gate, needs check, lift | PM-1 … PM-21, C9 |
+| M-SPD, M-S-none, M-S2 … M-S18b, M-GM2 … M-GM7, M-09b7, M-09b22, M-SP1a … c, M-P-leafEqual, M-SFQ | 13 | loader, gallery model, gallery, placer, controller | each load, search, gallery and placer rule | S-PD, C1, S-2 … S-18, GM-2 … GM-7, SP-1, SF-Q and ported gallery/placer tests |
+| M-AT2a … M-AT20, M-MV1a … M-MV3b, M-AT14 … M-AT19b, M-09b9, two tool mirror mutants, ported F-16 and M-DT-8 sanity | 14 | registry, `plan_symbol_tool.dart`, `move_resolver.dart`, `session.dart`, `plan_controller.dart`, gallery | each attach, keep, resolver and permission rule | AT-2 … AT-20, MV-1 … MV-3, C-life1, highlight test |
+| M-CV-1 … M-CV-10c, M-CV-alloc-1/2, M-DC-3, M-DT-12, M-CV-4c/d | 15 | `plan_canvas.dart`, `locale_scope.dart`, `guard.dart`, `plan_shortcut_guard.dart`, `text_entry_overlay.dart` | fit, one-canvas check, hint, options, locale, the guard, the steady-state frame | CV-1 … CV-10, CV-4b, CV-4c, CV-alloc, ported dark/canvas_ui tests |
+| M-KB-1a … M-KB-13c, M-05m, M-05v | 16 | `tool_letters.dart`, `plan_shortcut_guard.dart`, `plan_shortcuts.dart`, `plan_tool_palette.dart`, `plan_canvas.dart`, `plan_controller.dart` | letters, bindings, palette rows, snapping listenable | KB-1 … KB-13, palette_draw A4, A8 |
+| M-P-1a … M-P-mirror, M-P-G1 … M-P-G3w', M-07p, M-F3, M-PC9-a/b, M-HR1, M-09c-x, M-09c-bi, M-09c-bf | 17 | `plan_property_panel.dart`, `colour_row.dart`, `symbol_section.dart`, `plan_controller.dart` | each field rule, gate, settle, guard, colour rule | P-1 … P-7, P-lock-recolour, P-two-types, P-swap-pending, P-mirror, P-G1 … P-G3, WS7, SE11, CP3, CP4, HR1, SS1, SS7, SS12 |
+| M-LP-1 … M-LP-11, M-LP-slot, M-LP-W, M-LP-La/Lb | 18 | layer panel, page panel, layer picker, layer row, strings, `plan_controller.dart` | rebinding, gates, settle, lock up front and at commit, guards, locale | LP-1 … LP-8, LP-L, LP-W, CP1, ported picker/row/page tests |
+| M-X-1a … M-X-12, M-C13 | 19 | `registries.dart`, `page_flows.dart`, `export_dialog.dart`, `editor_page_flows.dart`, `plan_controller.dart` | equality, unique ids, the copy, page test, manifest, print, settle, dpi row, guard | X-1 … X-9, PF7, PF8, PF22, C13 |
+| M-ED-1 … M-ED-LK, M-RV6, M-ED-P1 … M-ED-L3 | 20 | `plan_editor.dart`, `plan_editor_bar.dart`, barrel, example, strings, `editor_page_flows.dart`, `plan_shortcuts.dart`, `plan_canvas.dart` | each option, flag, flow, word, swap | ED-1 … ED-7, ED-L, ED-X1/2, ED-U, ED-9, ED-README, ED-W, BT2, T4-j, T4-e, LK1, RV6, ED-P1/2, ED-F, ED-S, ED-A2, ED-E, ED-6b |
+
+Named mutations that did not turn their test red as first written, with the resolution the
+report records:
+- **M-E2p-catch** (Task 2): 7 of E2-P2's 9 rows red; `reach N` and `references N` are
+  returned by the isolation pass's own-object branch. Pinned by the supplementary M-E2p-self;
+  M-E2p-catch-inner is an equivalent mutant (report).
+- **M-L2b** (Task 10): could not show in L-11 while L-11 moved the square to its own place;
+  L-11 strengthened in `8d93ff40`.
+- **M-F-G9b** (Task 11): survived the brief's F-G9; F-G9 strengthened in `3bd18b90`.
+- **M-S12** (Task 13): survived the brief's S-12; S-12 strengthened in `c8d10b25`.
+- **M-MV2a** (Task 14): survived the brief's MV-2; MV-2 strengthened in `29aaea73`.
+- **M-CV-alloc-1, M-CV-alloc-2** (Task 15): red on the flush premise, which hid which mutant it
+  was; the identity checks moved before the premise in `8106dab0`.
+- **M-P-5a** (Task 17): survived the brief's P-5; P-5 strengthened in `9658faf4`. SW5 could not
+  pin **M-09c-bf** once K2 rule 9 left the tables without a family; `SS12` added (fix round,
+  `d510d4ea`).
+- **M-ED-6b** (Task 20): red at ED-6b's `activeTool` line; its `isMidShape` line stays green
+  under the mutation (ledger minor, deferred).
+- Red by another route than the brief predicted (still red): M-C-life2b, M-C-ch5, M-L6f,
+  M-F1b, M-PC9-a, M-P-1c, M-PF-6 (reports).
+
+## Plan decisions
+
+One line each, in task order; the plan's line number gives the full paragraph.
+
+- Global (l.25): dependency floors stay `^0.7.2` in this branch; the wave raises them.
+- Global (l.40): `packages/jet_cad_2d_plan/analysis_options.yaml` is committed once, in Task 6.
+- T1 (l.321): `typeIds` lists each type id once, where it was first registered.
+- T1 (l.322): `typeIdOf` is `_naming(...)?.typeId`; a group whose component was kept raw answers null.
+- T1 (l.323): E3 covers all four sites, `CompoundCommand.apply` included.
+- T1 (l.324): E4 catches every throw, an `Error` too.
+- T1 (l.325): `ComponentRegistry.toJson` writes unknown payloads first, registered values second.
+- T2 (l.1092): the exclusion lives in the object rule; `_naming` gains an optional `frozen` predicate.
+- T2 (l.1107): `probe` runs every hook an edit, `drift()` or `diagnostics()` can call for one object.
+- T2 (l.1117): isolation: `probe` first leaves out other objects whose `reach`/`references` throw.
+- T3 (l.2161): the binding entry point is `PropertySpec.bind`, an instance method each kind overrides.
+- T3 (l.2162): lengths are millimetres, angles radians, both ways.
+- T3 (l.2163): `commit` refuses with `ArgumentError` named by the spec id; a disabled field's commit throws `StateError`.
+- T3 (l.2164): a `NumberProperty` rounds to `decimals` on commit, then range-checks.
+- T3 (l.2165): `onCommit` sees the changed owner once, only after the change succeeded.
+- T3 (l.2166): a choice value's word segment is `ChoiceProperty.segmentOf(v)`.
+- T3 (l.2167): `properties.dart` and `colour.dart` import no Flutter (P9).
+- T4 (l.3613): `PlanType` keeps every contravariant member private.
+- T4 (l.3614): `registerInto` calls `catalog.register<T>` with the class's `T`, through `guard.wrap<T>`.
+- T4 (l.3615): `commitField` binds the field's spec again to the object's current value.
+- T4 (l.3616): `recolour` answers null with no target, no `T`, or the same swatch.
+- T4 (l.3617): `titleWordOf` answers `title(value)` or `type:<id>`.
+- T4 (l.3618): `KitNamesWords.word` falls back locale → English → the word id.
+- T4 (l.3619): `AttachmentQuery` and `Attachment` are identity-equal and copy their vectors.
+- T4 (l.3620): `PlanKit.validate` checks the code side within the kit.
+- T4 (l.3621): the `missingEnglish` message names the word id.
+- T4 (l.3622): `propertyIds` is public.
+- T5 (l.5830): `retired` is written only when true and read as false when absent.
+- T5 (l.5831): retiring changes no snapshot entry.
+- T5 (l.5832): R7's width is `2 · area / perimeter`.
+- T5 (l.5833): V11d and V11e are replaced, V11c's message part changes.
+- T5 (l.5834): R3 codes: `typeOutsideKit`, `toolOutsideKit`, `foreignWordId`, `missingEnglish`.
+- T5 (l.5835): R5 is a new §10 of `docs/kits.md`; its code is `example/cafe_code.dart`'s.
+- T6 (l.7568): `validateKitSet`'s report order per kit in load order.
+- T6 (l.7569): the place conflict is read from the descriptor's flags.
+- T6 (l.7570): the publishable dry run joins CI in this task.
+- T7 (l.9431): `decodePlan` checks the manifest on the raw JSON first.
+- T7 (l.9432): `decodePlan` passes `keepUnreadableComponents: true` and its diagnostics list.
+- T7 (l.9433): saving never mutates the document.
+- T7 (l.9434): the manifest written keeps a missing kit's entry as read.
+- T7 (l.9435): "used" is read from the encoded components map.
+- T7 (l.9436): `checkManifest` reports `kitMissing`, `kitNewer`; an unparsed version is not compared.
+- T7 (l.9437): `ensureManifest` returns the very string when the plan already has a manifest.
+- T8 (l.10313): an object is a root-level element; `changes` is reported per synchronous step in ascending handle order.
+- T8 (l.10314): the change tracker stacks on the dispatcher's `onAfterMutate`.
+- T8 (l.10315): a swap disposes the old kit products at once; engine objects after the next frame.
+- T8 (l.10316): **the tool settings are the controller's and survive a swap** (today's were per document).
+- T8 (l.10317): `settingsOf` answers only the asking kit's own tools.
+- T8 (l.10318): `shared` refuses a recursive `create` with `StateError`.
+- T8 (l.10319): the plan's diagnostics are cleared at each swap; the kit set's stay.
+- T8 (l.10320): `missingKits` is a plain getter.
+- T9 (l.13368): `PlanStrings` keeps 77 members of `FloorPlanStrings`.
+- T9 (l.13372): the palette (`PlanSwatch`) lives in the contract.
+- T9 (l.13374): `PlanTheme` has the four generic fields.
+- T9 (l.13376): `PlanTheme.of` answers the resolved theme or null.
+- T9 (l.13378): `PlanLocaleScope.push` reports the locale after the frame.
+- T9 (l.13380): the widget-level l10n and theme tests go with the task that ports their widget.
+- T10 (l.15048): which objects are locked.
+- T10 (l.15053): a lock is checked on commit: apply, check `touched`, roll back, throw `PlanLocked`.
+- T10 (l.15055): a frozen object's children are covered by the lock.
+- T10 (l.15057): `LockedGrips` and `LockGates` are the up-front layer; Task 12 extends `LockGates`.
+- T10 (l.15059): a mid-session lock clears the history.
+- T11 (l.16362): the retry lives in the expander slot, in Task 10's lock wrapper.
+- T11 (l.16364): after a load, `drift()` runs once; a failure is probed object by object.
+- T11 (l.16366): `DanglingReferenceError` is a refusal, not a kit failure.
+- T11 (l.16368): every armed tool is wrapped; a generic tool's own throw is rethrown.
+- T11 (l.16370): paint and section failures go through `addAfterFrame`.
+- T11 (l.16372): `GuardedType` allocates nothing on the happy path.
+- T11 (l.16374): a throwing getter at registration surfaces from the constructor.
+- T12 (l.18563): `PlanPermissions.draft` maps the flags onto the engine groups.
+- T12 (l.18565): host `undo()`/`redo()` run with permissions lifted for that call.
+- T12 (l.18567): `deleteSelection` keeps today's refusals.
+- T12 (l.18569): `plan.select` is always allowed.
+- T12 (l.18571): Fill is one controller-owned `ValueNotifier<bool>` kept across swaps.
+- T12 (l.18573): the gates' getters allocate nothing.
+- T13 (l.19952): `symbolsState` is `failed` only when every source failed.
+- T13 (l.19954): `retrySymbols()` acts only from `failed`.
+- T13 (l.19956): the first `key@N` in load order wins.
+- T13 (l.19958): `placeSymbol` moves here from Task 14.
+- T13 (l.19960): the gallery's search field stops typed keys itself.
+- T14 (l.22088): `keep` is handed only to the provider that made it.
+- T14 (l.22090): the nearest marker wins; the earlier on a tie.
+- T14 (l.22092): the move's pointer is the plain-moved footprint's back-centre.
+- T14 (l.22094): a throwing `attach` is no attachment plus one `hookFailed`.
+- T14 (l.22096): no `WallFaces`: the tool and the resolver know no wall.
+- T15 (l.23757): the shortcut guard lands here.
+- T15 (l.23759): which tests move (palette here, HR1 to Task 17).
+- T15 (l.23761): the canvas owns the paper.
+- T15 (l.23763): one canvas at a time, checked after the frame.
+- T15 (l.23765): the lock hint, cleared 2 s after it was set.
+- T15 (l.23767): `snapping` writes `snappingAllowed`.
+- T16 (l.24814): the letters are the controller's.
+- T16 (l.24816): which letters (V L P R C A T, F reserved, kit letters A-Z).
+- T16 (l.24818): the binding rules are today's.
+- T16 (l.24825): the palette's rows.
+- T17 (l.26070): what the panel shows, top to bottom.
+- T17 (l.26072): the field rules are today's.
+- T17 (l.26074): the kinds and their editors.
+- T17 (l.26076): the words, with English fallback.
+- T17 (l.26078): commits go through `PlanController.execute`.
+- T17 (l.26080): settling before a swap (Review Focus 4).
+- T17 (l.26082): the selection relay is `FrameSafeRelay`.
+- T18 (l.28000): the panels take only the controller.
+- T18 (l.28002): each panel listens to the controller and rebinds on a swap.
+- T18 (l.28004): every panel commit goes through `controller.execute`.
+- T18 (l.28006): the layer picker refuses a locked object up front, by its owner chain.
+- T18 (l.28008): the page panel's scale field registers its re-sync with the settle.
+- T19 (l.29307): the exporter's document is a copy made when the export starts.
+- T19 (l.29309): the built-in exporters ignore the table colours.
+- T19 (l.29311): one flow at a time per controller.
+- T19 (l.29313): the dialog lists the registry.
+- T19 (l.29315): registry ids are unique.
+- T19 (l.29317): host calls are not gated.
+- T20 (l.30930): the options are spec P2's table and P7's rows, one to one.
+- T20 (l.30932): the host's file callbacks.
+- T20 (l.30934): Export and Print are the view's flows.
+- T20 (l.30936): what is not ported.
+- T20 (l.30938): the damaged warning sits in the bar.
+- T20 (l.30940): the barrel shows exactly the public API.
+- T21 (l.32528): the results note carries only what a command printed or a report recorded.
+
+## Spec gaps and interface problems found while executing
+
+**Interface problems of the plan's task bodies** (each resolved before execution):
+- Task 1: resolved by ruling R-c (`keepUnreadableComponents`, opt-in; `decodePlan` passes true).
+- Task 4: resolved by ruling R-e (`PlanToolSettings.fieldsOf(..., {required String toolId})`); Task 4's additions and `Disposable` (R-d) listed in the Shared interfaces.
+- Task 8: resolved by ruling R-d (`Disposable` is Task 4's).
+- Task 9: resolved by ruling NS7 (today's behaviour kept, A14 parity).
+- Task 11: resolved by ruling R-b (`execute(DraftCommand) -> bool` catches every refusal).
+- Task 14: resolved by ruling R-d.
+- Task 15: resolved by ruling R-l (the guard lands in Task 15) and Task 8's Produces.
+- Task 16: resolved by ruling R-l; no interface change.
+- Task 17: resolved by rulings R-i (the language's decimal separator in panel fields, spec P3 corrected at `c4cccac`), R-g (the layer slot), R-n (tool settings survive a swap).
+- Task 18: resolved by ruling R-g.
+- Task 19: resolved by the Shared interfaces and ruling R-k.
+- Task 20: none against the Shared interfaces.
+
+**Findings and rulings raised by the task reports** (from the ledger, `progress.md`):
+- Pre-flight F1-F13 (per-document session members, tool ownership, the gated select, build order, `PlanSelectGates extends LockGates`, ED-9's names, the real ids `L-1`/`F-2`, only the engine's CHANGELOG gains `Unreleased`, `PlanSwatch`'s CHANGELOG bullet): applied to the plan at `aee66cb7`.
+- Task 2: `probe`'s isolation pass widened to place contributors (fix round 1, `7ba09b31`).
+- Task 11: a load's dry-run error is probed object by object, then reported (`FlutterError.reportError`) if no object fails; a `PartialMutationError` in undo/redo marks the plan damaged (fix round 1, `51906ea4`); Task 8's C14 grew by the E4 diagnostic.
+- Task 12: `execute` also catches `PermissionDeniedError` (applied in Task 13, `S-PD`).
+- Task 13: **F-1**, the ported mixed-case tag test retired (K2), `SF-Q` added; deferred for the final fix wave: a successful retry of a library source should clear that source's earlier `libraryUnreadable` diagnostics.
+- Task 14: ghost and tool test fixtures changed, assertions unchanged (A12).
+- Task 17: the panel guards every kit hook it calls (read, enabled, title, colour read/write) (fix round 1, `d510d4ea`).
+- Task 18: `PlanPagePanel` wraps itself in `PlanShortcutGuard`; SE13/15/16's `'Wall'` → `'Box'`.
+- Task 20: **RV6 split**; its retired half is **a deliberate host-API difference listed for the human's word at the finish (A14)**: `selectTool` answers true with no view mounted, today's answered false. Ported tests need not name a mutation (CLAUDE.md's bar is for new tests; a port is the oracle of the move).
+- Planning rulings carried as deliberate changes: **tool settings belong to the controller and survive a document swap** (today's shell kept them per document; pinned by `C-svc`); **panel fields use the language's decimal separator**, the plan's separator governs what is drawn (spec P3 corrected at `c4cccac`); NS7 kept.
+- Carried and kept: `canUndo`/`dirty` lag a synchronous edit by one asynchronous delivery; today's controller lags the same way (Task 20 report, pinned by `ED-U`).
+
+The ledger's deferred minors (Tasks 1-20) are not repeated here; they are the whole-branch
+review's input in `progress.md`.
+
+## Final review
+
+The whole-branch review (`.superpowers/sdd/2026-10-14-plan-library-2a/final-review.md`, at
+`2fa4cc6f`) found no critical issue, three important ones and a "should fix" list. All were
+fixed in one wave, `f44899f0..cfb221e0`; every mutation below ran on a committed file and was
+reverted with `git checkout --`, then `git diff --quiet` exited 0.
+
+| Finding | Fix | Commit | Tests | Mutation (red) |
+|---|---|---|---|---|
+| **I1** a write of a frozen object's own component escaped `execute` as a plain `StateError` (a kit tool's `hookFailed`, a rethrow from `plan.select`) | E2 amended: the engine's refusal is `NonLiveWriteError` (a `StateError`, naming `handle` and `typeId`); `_LockCheck` maps it to `PlanLocked` on a covered handle; spec E2 and its revision history record it | `f44899f0`, `c8aa854b` | E2-4, MP1/MP3/MP6 (`refusedAt`); FW-1, FW-2, FW-3 | M-E2i (thrown as `StateError`): E2-4, MP1, MP3, MP6; M-FW-1 (mapping dropped): FW-1, FW-2, FW-3 |
+| **I2** a `generate` the planner refuses (no hook throws) blocked its object and its neighbours, silently | the lock check sends an error that is no hook failure and no refusal to `FailureBoundary.recoverRefused` (every kit object probed, the failing ones frozen, locked, reported), retries once; a failed retry is one `hookFailed` of `plan` | `5b227960` | F-15, F-15b, F-15c, F-15d | M-F15a (`onRefusedEdit` unset): F-15, F-15b, F-15d; M-F15c (`recoverRefused` true when nothing froze): F-15c; M-F15d (`onRetryFailed` unset): F-15d |
+| **I3** the Task 13 ruling: a successful retry keeps a source's `libraryUnreadable` | `DiagnosticsLog.removeWhere`; each symbol load's library problems replace the last load's | `85ad411e` | S-19, DL-1 | M-S19: S-19; M-DL-1 (`_seen` kept): DL-1 |
+| `usedKitsIn` wrote `plan` | excludes `reservedKitIds` | `cfb221e0` | PF-3b | M-PF-3c: PF-3b |
+| `ChoiceProperty` segments with `.` or `:` | refused | `62af16e5` | PS4 | M-PS4c: PS4 |
+| `probe`'s "runs once" doc | reworded (a re-survey asks the survivors again) | `f44899f0` | doc | none |
+| `AttachmentQuery.pointer` mutable, shared across providers | a fresh copy at each read; the registry reads it once per ask | `62af16e5` | PT20 | M-PT20c: PT20 |
+| `PlanType.properties` covariance | doc names the members that throw through `PlanType<Component>` | `62af16e5` | doc | none |
+| `idleKeys` left closed | restored on dispose and on a controller swap | `cfb221e0` | KB-14 | M-KB-14a (swap): KB-14 line 338; M-KB-14b (dispose): line 343 |
+| `NumberProperty` empty undo step | the panel skips a command whose value equals the stored component | `cfb221e0` | P-1 | M-P-1d: P-1 line 89 (`Expected: <4> Actual: <5>`) |
+| damaged save set `_encodedState` before the read-back | set only after it | `cfb221e0` | F-7b | M-F7b: F-7b |
+| 115-column comment, `commands.dart` | rewrapped | `f44899f0` | none | none |
+
+Not done (the review's other minors, M1, M2, M4-M8, and the "can stay deferred" list): unchanged
+by this wave. M3's second half (failing the read-back on `component.unreadable`) was left out:
+it would refuse every damaged plan that holds a component kept raw at load.
+
+Gates on `cfb221e0` (this run, last lines):
+- `packages/jet_cad_2d`: `dart test` `00:06 +1322 -2: Some tests failed.`, the two standing
+  failures only (`generate_document_test.dart`: "the default document is the one Plan 2
+  measured, byte for byte", "both text fractions default to zero and change nothing");
+  `dart analyze` `No issues found!`; format `Formatted 184 files (0 changed)`.
+- `packages/jet_cad_2d_kit`: `00:05 +314: All tests passed!`; `No issues found! (ran in 3.0s)`;
+  `Formatted 68 files (0 changed) in 0.08 seconds.`
+- `packages/jet_cad_2d_plan`: `00:38 +735: All tests passed!`; `No issues found! (ran in 3.2s)`;
+  `Formatted 179 files (0 changed) in 0.36 seconds.`
+- `packages/jet_cad_floor_plan` (`flutter test`, unchanged package): `01:41 +2008 ~4: All tests passed!`
+- `cd tool/ci && dart test`: `00:41 +116: All tests passed!`
+- `dart run tool/ci/check_kit_deps.dart`: `kit dependencies: 1 package(s) checked, none names the plan library or another kit`
+- `dart pub publish --dry-run`, `jet_cad_2d_kit` and `jet_cad_2d_plan`: `Package has 0 warnings.` each.

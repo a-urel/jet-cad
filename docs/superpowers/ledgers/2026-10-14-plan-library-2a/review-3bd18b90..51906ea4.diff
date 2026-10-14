@@ -1,0 +1,454 @@
+# Review package: 3bd18b90..HEAD
+
+## Commits
+51906ea4 fix(plan): surface a load's dry-run error; survive a partial undo
+
+## Files changed
+ .../lib/src/controller/plan_controller.dart        |  18 +-
+ packages/jet_cad_2d_plan/lib/src/kits/guard.dart   |  64 ++++++--
+ .../test/kits/failure_flow_test.dart               | 182 +++++++++++++++++++++
+ packages/jet_cad_2d_plan/test/support/box_kit.dart |  14 +-
+ 4 files changed, 264 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 031b4988..02f13ee2 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -578,34 +578,46 @@ class PlanController extends ChangeNotifier {
+ 
+   // ---------------------------------------------------------------------
+   // Undo and redo.
+ 
+   ValueListenable<bool> get canUndo => _canUndo;
+   ValueListenable<bool> get canRedo => _canRedo;
+ 
+   bool get _midShape => _session.tools.active.isMidShape;
+ 
+   /// Undoes the last step, after settling pending input; nothing while the
+-  /// active tool is part-way through a shape (today's S-4).
++  /// active tool is part-way through a shape (today's S-4). A replay that
++  /// leaves the plan partially mutated (E3) does not escape: the plan is
++  /// rebuilt from what it holds and marked [damaged], as in [execute].
+   void undo() {
+     if (_midShape) return;
+     settlePendingInput();
+     final commands = document.commands;
+-    if (commands.canUndo) commands.undo();
++    if (!commands.canUndo) return;
++    try {
++      commands.undo();
++    } on PartialMutationError catch (error) {
++      _session.boundary.partialMutation(error);
++    }
+   }
+ 
+   /// Redoes the next step, as [undo].
+   void redo() {
+     if (_midShape) return;
+     settlePendingInput();
+     final commands = document.commands;
+-    if (commands.canRedo) commands.redo();
++    if (!commands.canRedo) return;
++    try {
++      commands.redo();
++    } on PartialMutationError catch (error) {
++      _session.boundary.partialMutation(error);
++    }
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Tools and the selection.
+ 
+   /// The active tool's id (`plan.select`, a kit's `<kit>.<tool>`).
+   ValueListenable<String> get activeTool => _activeTool;
+ 
+   void _onTools() {
+     _activeTool.value = _session.idOf(_session.tools.active);
+diff --git a/packages/jet_cad_2d_plan/lib/src/kits/guard.dart b/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
+index 271850bc..8939722c 100644
+--- a/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
++++ b/packages/jet_cad_2d_plan/lib/src/kits/guard.dart
+@@ -627,40 +627,84 @@ final class FailureBoundary {
+       if (node is! GroupNode || node.parent != root) continue;
+       final h = node.handle;
+       if (frozen.contains(h) || catalog.typeIdOf(document, h) != typeId) {
+         continue;
+       }
+       if (system.probe(h) != null) broken.add(h);
+     }
+     return broken;
+   }
+ 
+-  /// After a load: one dry run of the whole plan; while it fails on a kit's
+-  /// hook, that type's failing objects are frozen and locked and it runs
+-  /// again. Ends when it passes, when nothing more can be frozen, or on an
+-  /// error that is no kit's (the engine's own reports cover that).
++  /// After a load: one dry run of the whole plan. While it throws, the
++  /// objects to blame are frozen and locked, with their diagnostics, and it
++  /// runs again: on a kit's hook failure, that type's failing objects; when
++  /// those are none, or on an error no hook threw (the planner refusing
++  /// what a `generate` returned, an engine invariant), every live kit
++  /// object is probed, one by one (fix round 1). When no object's probe
++  /// fails, the error is reported to [FlutterError.reportError] and the
++  /// load goes on. Each round freezes at least one object or ends, so it
++  /// ends.
+   void probeLoaded() {
+     while (true) {
+       try {
+         system.drift();
+         return;
+-      } on KitHookFailure catch (failure) {
+-        _report(failure);
+-        final broken = probeType(failure.typeId);
+-        if (broken.isEmpty) return;
++      } catch (error, stack) {
++        var broken = const <Handle>{};
++        if (error is KitHookFailure) {
++          _report(error);
++          broken = probeType(error.typeId);
++        }
++        if (broken.isEmpty) broken = _probeAll();
++        if (broken.isEmpty) {
++          FlutterError.reportError(FlutterErrorDetails(
++              exception: error,
++              stack: stack,
++              library: 'jet_cad_2d_plan',
++              context: ErrorDescription("during the load's dry run of the "
++                  'plan (no object\'s probe failed)')));
++          return;
++        }
+         _freeze(broken);
+-      } catch (_) {
+-        return;
+       }
+     }
+   }
+ 
++  /// Every live, unfrozen root-level kit object whose probe (E2) fails,
++  /// each reported as its type's: the per-object check of a load whose dry
++  /// run failed on no single type.
++  Set<Handle> _probeAll() {
++    final broken = <Handle>{};
++    final root = document.rootHandle;
++    for (final node in document.tree.nodes) {
++      if (node is! GroupNode || node.parent != root) continue;
++      final h = node.handle;
++      if (frozen.contains(h)) continue;
++      final typeId = catalog.typeIdOf(document, h);
++      if (typeId == null) continue;
++      final error = system.probe(h);
++      if (error == null) continue;
++      broken.add(h);
++      if (error is KitHookFailure) {
++        _report(error);
++      } else {
++        log.add(KitDiagnostic(
++            kitId: kitOfKey(typeId),
++            subject: typeId,
++            code: KitDiagnosticCode.hookFailed,
++            message: '$error',
++            error: error));
++      }
++    }
++    return broken;
++  }
++
+   /// E4: each `component.unreadable` diagnostic of the load is reported as
+   /// its kit's `componentUnreadable`, and its handles frozen and locked.
+   void reportUnreadable(List<Diagnostic> loadDiagnostics) {
+     final unreadable = <Handle>{};
+     final registered = catalog.typeIds.toSet();
+     for (final d in loadDiagnostics) {
+       if (d.code != 'component.unreadable') continue;
+       for (final h in d.handles) {
+         final typeId = _typeOf(h, d.message, registered);
+         log.add(KitDiagnostic(
+diff --git a/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart b/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart
+index 24144833..a3a5a4ae 100644
+--- a/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart
++++ b/packages/jet_cad_2d_plan/test/kits/failure_flow_test.dart
+@@ -1,17 +1,18 @@
+ // Spec P4 "The failure boundary", through the controller: a hook that
+ // fails during an edit is caught at the expander, that type's objects are
+ // probed (E2), the failing ones frozen and locked, the history cleared,
+ // and the edit run once more; a second failure refuses it with one
+ // diagnostic. A load probes once. A component its factory cannot read is
+ // kept raw, locked and frozen (E4). A rollback that throws damages the
+ // plan (E3), and saving a damaged plan first reads it back.
++import 'package:flutter/foundation.dart';
+ import 'package:flutter/services.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:jet_cad_2d_plan/src/kits/guard.dart' show GuardedTool;
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/box_kit.dart';
+@@ -374,20 +375,201 @@ void main() {
+     expect(c.lockHint.value, isTrue);
+     expect(canon(d), before);
+     c.lockHint.value = false;
+     // M-F11b: the session's map and tool controller holding `select` bare
+     // (unguarded): the Delete key's PlanLocked escapes.
+     c.toolController.active.onKey(deleteKey, c.toolContext);
+     expect(c.lockHint.value, isTrue);
+     expect(canon(d), before);
+     expect(d.tree[outer], isNotNull);
+   });
++
++  test(
++      'F-13 (fix round 1) the load\'s dry run fails on no kit hook (an open '
++      'region the planner refuses): each kit object is probed, the failing '
++      'one frozen and locked with a diagnostic', () {
++    final sw = Switches();
++    final a = PlanController(kits: [boxKit(sw)]);
++    final broken = addObject(
++        a.document, atSquare, const SquareParams(side: 1200, poisoned: true));
++    final other = addObject(a.document, nearSquare(4000, -500, 0.25),
++        const SquareParams(side: 500));
++    final json = a.save();
++    a.dispose();
++    sw.failing.add('openRegion');
++
++    final c = PlanController(kits: [boxKit(sw)], json: json);
++    addTearDown(c.dispose);
++    // M-F13a: probeLoaded's non-kit catch back to `return`.
++    expect(c.locked.value, {broken});
++    expect(c.frozen, {broken});
++    final failures = diagnosticsOf(c, KitDiagnosticCode.hookFailed);
++    expect([for (final f in failures) (f.kitId, f.subject)],
++        [('box', SquareParams.id)]);
++    expect(
++        c.execute(SetComponentCommand<SquareParams>(
++            other, const SquareParams(side: 640.5))),
++        isTrue);
++  });
++
++  test(
++      'F-13b (fix round 1) a dry run that throws while no object\'s probe '
++      'fails: the load goes on, nothing is locked, and the error reaches '
++      'FlutterError.onError', () {
++    final sw = Switches();
++    final a = PlanController(kits: [boxKit(sw)]);
++    addObject(
++        a.document, atSquare, const SquareParams(side: 1200, poisoned: true));
++    final json = a.save();
++    a.dispose();
++    // Only the dry run sees the open region: the probe after it does not.
++    sw.once.add('openRegion');
++    final reported = <FlutterErrorDetails>[];
++    final previous = FlutterError.onError;
++    FlutterError.onError = reported.add;
++    addTearDown(() => FlutterError.onError = previous);
++
++    final c = PlanController(kits: [boxKit(sw)], json: json);
++    addTearDown(c.dispose);
++    expect(c.locked.value, isEmpty);
++    // M-F13b: the FlutterError.reportError call dropped.
++    expect(reported, hasLength(1));
++    expect(reported.single.exception, isArgumentError);
++    expect(reported.single.library, 'jet_cad_2d_plan');
++  });
++
++  test(
++      'F-14 (fix round 1) a partial mutation while undoing: undo returns, '
++      'the plan is damaged and rebuilt (history cleared, index rebuilt), '
++      'one rollbackFailed diagnostic', () {
++    final c = PlanController(kits: [boxKit(Switches())]);
++    addTearDown(c.dispose);
++    final d = c.document;
++    final line = d.handleSeed.next();
++    expect(
++        c.execute(_HalfUndone(AddEntityCommand(
++            record: draftRecord(line, d.rootHandle, EntityKind.line,
++                layer: ReservedHandles.layerZero),
++            payload: linePayload(
++                Vector2(-3100.5, 4200.25), Vector2(-1700.75, 5100.5))))),
++        isTrue);
++    final box = Aabb2.fromPoints([Vector2(-3200, 4100), Vector2(-1600, 5200)]);
++    int indexed() {
++      var n = 0;
++      c.index.forEachInRect(box, const QueryFilter.all(), (_) => n++);
++      return n;
++    }
++
++    expect(indexed(), 1, reason: 'premise');
++    // M-F14: undo without its `on PartialMutationError` clause: it escapes.
++    expect(c.undo, returnsNormally);
++    expect(d.entities.slotOf(line), isNull, reason: 'the undo half-applied');
++    expect(c.damaged.value, isTrue);
++    expect(d.commands.canUndo, isFalse);
++    expect(d.commands.canRedo, isFalse);
++    expect(indexed(), 0, reason: 'rebuilt from what the plan holds');
++    expect(diagnosticsOf(c, KitDiagnosticCode.rollbackFailed), hasLength(1));
++  });
++
++  test(
++      'F-14b (fix round 1) a partial mutation while redoing: redo returns, '
++      'the plan is damaged and the history cleared', () {
++    final c = PlanController(kits: [boxKit(Switches())]);
++    addTearDown(c.dispose);
++    final d = c.document;
++    final line = d.handleSeed.next();
++    expect(
++        c.execute(_HalfRedone(AddEntityCommand(
++            record: draftRecord(line, d.rootHandle, EntityKind.line,
++                layer: ReservedHandles.layerZero),
++            payload: linePayload(
++                Vector2(-3100.5, 4200.25), Vector2(-1700.75, 5100.5))))),
++        isTrue);
++    c.undo();
++    expect(d.commands.canRedo, isTrue, reason: 'premise');
++    expect(c.damaged.value, isFalse, reason: 'premise');
++    // M-F14b: redo without its `on PartialMutationError` clause.
++    expect(c.redo, returnsNormally);
++    expect(d.entities.slotOf(line), isNotNull, reason: 'the redo applied');
++    expect(c.damaged.value, isTrue);
++    expect(d.commands.canRedo, isFalse);
++    expect(diagnosticsOf(c, KitDiagnosticCode.rollbackFailed), hasLength(1));
++  });
++}
++
++/// Applies [inner]; its undo works, and the redo after it applies and then
++/// throws E3's error.
++final class _HalfRedone extends DraftCommand {
++  _HalfRedone(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Half redone';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _UndoThen(r.inverse), touched: r.touched);
++  }
++}
++
++/// [inner] applied; its own inverse (the redo) throws after applying.
++final class _UndoThen extends DraftCommand {
++  _UndoThen(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Undo then';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
++  }
++}
++
++/// Applies [inner]; its undo applies [inner]'s inverse and then throws
++/// E3's error: an undo that leaves the target partially mutated.
++final class _HalfUndone extends DraftCommand {
++  _HalfUndone(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Half undone';
++  @override
++  CommandResult apply(CommandTarget target) {
++    final r = inner.apply(target);
++    return CommandResult(inverse: _ThenThrow(r.inverse), touched: r.touched);
++  }
++}
++
++final class _ThenThrow extends DraftCommand {
++  _ThenThrow(this.inner);
++  final DraftCommand inner;
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Then throw';
++  @override
++  CommandResult apply(CommandTarget target) {
++    inner.apply(target);
++    throw PartialMutationError('forced: the undo applied, then failed');
++  }
+ }
+ 
+ const KeyDownEvent deleteKey = KeyDownEvent(
+     physicalKey: PhysicalKeyboardKey.delete,
+     logicalKey: LogicalKeyboardKey.delete,
+     timeStamp: Duration.zero);
+ 
+ /// A command that refuses: [apply] throws [error] before it touches
+ /// anything.
+ final class _Refusing extends DraftCommand {
+diff --git a/packages/jet_cad_2d_plan/test/support/box_kit.dart b/packages/jet_cad_2d_plan/test/support/box_kit.dart
+index de97a5fe..7d42cc9d 100644
+--- a/packages/jet_cad_2d_plan/test/support/box_kit.dart
++++ b/packages/jet_cad_2d_plan/test/support/box_kit.dart
+@@ -18,24 +18,34 @@ final class HookBoom implements Exception {
+   const HookBoom(this.hook);
+   final String hook;
+   @override
+   String toString() => 'HookBoom($hook)';
+ }
+ 
+ /// The hooks made to throw, by name: `reach`, `references`, `generate`,
+ /// `diagnose`, `dissolves`, `placeBox`, `placeInput`, `readBox` (per object,
+ /// for a poisoned one); `editCapability`, `referencePolicy`, `pageKey`,
+ /// `contributesPlace`, `readsPlaces`, `create` (type level); `fromJson` (a
+-/// poisoned component's factory).
++/// poisoned component's factory). Not a throw: `openRegion` makes a
++/// poisoned square's `generate` add an open region, which the engine's
++/// planner refuses outside any hook (an `ArgumentError`, no
++/// KitHookFailure).
+ final class Switches {
+   final Set<String> failing = {};
+ 
++  /// Switches that act once, then turn themselves off (`openRegion`).
++  final Set<String> once = {};
++
++  /// Whether [name] is on for a poisoned object; a [once] switch is spent.
++  bool takes(String name, bool poisoned) =>
++      poisoned && (failing.contains(name) || once.remove(name));
++
+   void check(String hook, [bool poisoned = true]) {
+     if (poisoned && failing.contains(hook)) throw HookBoom(hook);
+   }
+ }
+ 
+ @immutable
+ final class SquareParams implements Component {
+   const SquareParams({required this.side, this.poisoned = false, this.partner});
+ 
+   static const String id = 'box.square';
+@@ -142,20 +152,22 @@ final class SquareType extends ParametricType<SquareParams> {
+ 
+   @override
+   List<Generated> generate(ParametricView view, Handle self) {
+     final p = view.paramsOf<SquareParams>(self)!;
+     sw.check('generate', p.poisoned);
+     final h = p.side / 2;
+     final c = [Vector2(-h, -h), Vector2(h, -h), Vector2(h, h), Vector2(-h, h)];
+     return [
+       for (var i = 0; i < 4; i++)
+         Generated(EntityKind.line, linePayload(c[i], c[(i + 1) % 4])),
++      if (sw.takes('openRegion', p.poisoned))
++        Generated.region(polylinePayload(c)),
+     ];
+   }
+ 
+   @override
+   List<Diagnostic> diagnose(ParametricView view, Handle self) {
+     sw.check('diagnose', _poisoned(view, self));
+     return const [];
+   }
+ 
+   @override

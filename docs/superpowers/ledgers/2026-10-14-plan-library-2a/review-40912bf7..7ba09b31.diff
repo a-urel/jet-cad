@@ -1,0 +1,181 @@
+# Review package: 40912bf7..HEAD
+
+## Commits
+7ba09b31 fix(engine): probe isolates a broken place contributor (2a E2)
+
+## Files changed
+ .../lib/src/parametric/parametric_system.dart      | 39 ++++++++++++++++------
+ .../jet_cad_2d/test/parametric/probe_test.dart     | 35 ++++++++++++++++---
+ 2 files changed, 60 insertions(+), 14 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index a7bc5775..11a10116 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -717,22 +717,28 @@ class ParametricSystem {
+   /// - `dissolves` and `generate`, through the planner's dry run (so a
+   ///   region or a fill it cannot plan counts too);
+   /// - then `diagnose`.
+   ///
+   /// Each runs with a view over a survey of this system's live objects, as
+   /// an edit's after-view.
+   ///
+   /// In isolation: another live object whose own `reach` or `references`
+   /// throws is left out of that survey, as it will be once frozen, so its
+   /// error is never reported as [object]'s. Finding them takes one `reach`
+-  /// and one `references` call per live object before the survey's own. A
+-  /// probe is O(live objects), and is on neither the frame nor the edit path.
++  /// and one `references` call per live object before the survey's own.
++  /// Then every other live place contributor is asked for its `placeBox`
++  /// over that survey, since any view's `placedIn` runs it (a reader's
++  /// `generate`, say): one that throws is left out too, and the survey is
++  /// taken again without it, so a reader is never blamed for a
++  /// contributor's box. The view keeps the boxes asked, so a healthy
++  /// contributor's `placeBox` runs once. A probe is O(live objects), and is
++  /// on neither the frame nor the edit path.
+   ///
+   /// Null, with no hook called, for a handle that is not a live object of
+   /// this system: not a root-level group named by a registered type, or
+   /// frozen.
+   Object? probe(Handle object) {
+     final registration = _naming(document, _types, object, _frozen);
+     if (registration == null) return null;
+     final was = _applying;
+     _applying = true;
+     try {
+@@ -743,28 +749,41 @@ class ParametricSystem {
+           try {
+             r.reachOf(r.componentOf(document, h), _worldOf(document, h));
+             r.referencesOf(document, h).toList();
+           } catch (error) {
+             if (h == object) return error;
+             broken.add(h);
+           }
+         }
+       }
+       final frozen = _frozen;
+-      final s = _survey(
+-          document,
+-          _types,
+-          broken.isEmpty
+-              ? frozen
+-              : (Handle h) =>
+-                  broken.contains(h) || (frozen != null && frozen(h)));
+-      final view = ParametricView._(document, s);
++      bool Function(Handle)? isolated() => broken.isEmpty
++          ? frozen
++          : (Handle h) => broken.contains(h) || (frozen != null && frozen(h));
++      var s = _survey(document, _types, isolated());
++      var view = ParametricView._(document, s);
++      // Another contributor's `placeBox` runs inside any `placedIn` of this
++      // view: ask each first, and leave a thrower out like a broken `reach`.
++      var placeBroken = false;
++      for (final MapEntry(key: h, value: r) in s.objects.entries) {
++        if (h == object || !r.type.contributesPlace) continue;
++        try {
++          view.placeBoxOf(h);
++        } catch (_) {
++          broken.add(h);
++          placeBroken = true;
++        }
++      }
++      if (placeBroken) {
++        s = _survey(document, _types, isolated());
++        view = ParametricView._(document, s);
++      }
+       final type = registration.type;
+       type.pageKey(view.page);
+       if (type.contributesPlace && view.placeBoxOf(object) != null) {
+         type.placeInput(view, object);
+       }
+       if (type.readsPlaces) {
+         registration.readBoxOf(s.params[object]!, s.toWorld[object]!,
+             _storedBox(document, s, object));
+       }
+       _plan(document, [object], s, view);
+diff --git a/packages/jet_cad_2d/test/parametric/probe_test.dart b/packages/jet_cad_2d/test/parametric/probe_test.dart
+index e2283a01..d9683eb7 100644
+--- a/packages/jet_cad_2d/test/parametric/probe_test.dart
++++ b/packages/jet_cad_2d/test/parametric/probe_test.dart
+@@ -1,37 +1,46 @@
+ // Spec 2a E2: probe runs one live object's hooks in isolation, returns the
+ // first error or null, and changes nothing.
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:test/test.dart';
+ 
+ import 'support/frozen_clients.dart';
+ 
+ /// The recorded calls, without the survey's reach and references of every
+-/// object.
++/// object. The isolation pass's `placeBox` of every other contributor is
++/// kept: tests that see it name it.
+ List<String> beyondSurvey() => [
+       for (final c in hookCalls)
+         if (!c.startsWith('reach ') && !c.startsWith('references ')) c,
+     ];
+ 
+ void main() {
+   setUp(resetHooks);
+ 
+   test('E2-P1 a healthy object: null, its own hooks only, nothing changes', () {
+     final s = frozenScene(places: true);
+     final before = encoded(s.doc);
+     final state = s.doc.commands.stateId;
+     final depth = s.doc.commands.undoDepth;
+     resetHooks();
+     expect(s.system.probe(hN), isNull);
+-    // M-E2p-plan: neither dissolves nor generate runs.
+-    expect(beyondSurvey(),
+-        ['pageKey tile', 'dissolves N', 'generate N', 'diagnose N']);
++    // M-E2p-plan: neither dissolves nor generate runs. The isolation pass
++    // asks the other contributors, P and Q, for their place boxes first
++    // (fix round 1); M-E2p-placeiso drops them.
++    expect(beyondSurvey(), [
++      'placeBox P',
++      'placeBox Q',
++      'pageKey tile',
++      'dissolves N',
++      'generate N',
++      'diagnose N',
++    ]);
+     expect(encoded(s.doc), before);
+     expect(s.doc.commands.stateId, state);
+     expect(s.doc.commands.undoDepth, depth);
+     expect(s.doc.commands.canRedo, isFalse);
+   });
+ 
+   for (final (call, object) in [
+     ('reach N', hN),
+     ('references N', hN),
+     ('pageKey tile', hN),
+@@ -94,11 +103,29 @@ void main() {
+     expect(hookCalls, isEmpty);
+     for (final h in [
+       s.doc.rootHandle,
+       childrenOf(s.doc, hN).first,
+       const Handle(987654),
+     ]) {
+       expect(s.system.probe(h), isNull, reason: h.toHex());
+     }
+     expect(hookCalls, isEmpty);
+   });
++
++  test(
++      "E2-P6 a broken contributor's place box is not reported as a reader's, "
++      'and the reader reads without it', () {
++    final s = frozenScene(tiles: false, places: true);
++    final before = encoded(s.doc);
++    final state = s.doc.commands.stateId;
++    resetHooks();
++    failingHooks.add('placeBox P');
++    // M-E2p-placeiso: S's generate meets P's place box through placedIn.
++    expect(s.system.probe(hS), isNull);
++    expect(scopeSights['S'], [hQ], reason: 'P is left out of the view');
++    expect(hookCalls, contains('generate S'));
++    expect(s.system.probe(hQ), isNull);
++    expect(s.system.probe(hP), const HookFailure('placeBox P'));
++    expect(encoded(s.doc), before);
++    expect(s.doc.commands.stateId, state);
++  });
+ }

@@ -74,4 +74,29 @@ void main() {
     expect(kitOfKey('architecture.wall'), 'architecture');
     expect(kitOfKey('wall'), 'wall');
   });
+
+  test('I5 a type or tool id is a kit id, then one or more segments', () {
+    for (final id in [
+      'test.slab',
+      'architecture.wall',
+      'restaurant.booth.corner',
+      'a1.b-2',
+    ]) {
+      expect(isCodeId(id), isTrue, reason: id);
+    }
+    for (final id in [
+      'test', // M-I5a: `*` in place of `+` after the kit id
+      'Test.slab',
+      'test.Slab',
+      '2test.slab',
+      'my-kit.slab', // M-I5b: `[a-z0-9-]` for the kit id's characters
+      'test..slab',
+      'test.slab.',
+      'test.-slab',
+      'test.slab_x',
+      'test.slab\n',
+    ]) {
+      expect(isCodeId(id), isFalse, reason: id);
+    }
+  });
 }

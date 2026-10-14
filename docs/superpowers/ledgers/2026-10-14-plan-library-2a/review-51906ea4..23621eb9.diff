@@ -1,0 +1,1754 @@
+# Review package: 51906ea4..HEAD
+
+## Commits
+23621eb9 feat(plan): permissions and the generic tools (P2)
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |   1 +
+ .../lib/src/controller/permissions.dart            | 180 +++++++++++++++++
+ .../lib/src/controller/plan_controller.dart        | 137 +++++++++++--
+ .../lib/src/controller/session.dart                |  41 +++-
+ .../lib/src/tools/generic_tools.dart               | 141 +++++++++++++
+ .../lib/src/tools/plan_select_gates.dart           |  40 ++++
+ .../controller/permissions_controller_test.dart    | 213 ++++++++++++++++++++
+ .../test/controller/permissions_test.dart          | 223 +++++++++++++++++++++
+ .../jet_cad_2d_plan/test/support/tool_events.dart  | 101 ++++++++++
+ .../test/tools/generic_tools_test.dart             |  90 +++++++++
+ .../test/tools/plan_select_gates_test.dart         | 144 +++++++++++++
+ 11 files changed, 1280 insertions(+), 31 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 6a6ba118..63fc41c7 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -1,15 +1,16 @@
+ /// The plan library of jet_cad_2d: a `PlanController` over one plan and the
+ /// composable widgets of design mode, over the kits a host loads.
+ library;
+ 
+ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
++export 'src/controller/permissions.dart';
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart';
+ export 'src/export/registries.dart';
+ export 'src/file/manifest.dart'
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart b/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
+new file mode 100644
+index 00000000..28e8eed7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/controller/permissions.dart
+@@ -0,0 +1,180 @@
++// Spec P2 "Permissions": what the plan's widgets let their user do. The
++// select gates, the palette and selectTool, the panels and the controller's
++// widget-facing commands read it; a host's own calls are not gated. 2b adds
++// the service flags and a units-only profile.
++import 'package:flutter/foundation.dart' show immutable, setEquals;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftPermissions;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanGate;
++
++/// The editor's permissions (spec P2).
++///
++/// - [tools]: the tool ids offered (the palette, the letters,
++///   `PlanController.selectTool`); null offers every tool. `plan.select` is
++///   always offered, whatever the set says. [copyWith] copies the set it
++///   is given, unmodifiable; the `const` constructor keeps the set as
++///   given.
++/// - [move], [rotate], [mirror], [reshape], [delete]: the select tool's
++///   gates and the panel's matching fields; [changeLayer], [recolor]: the
++///   panel's layer field and colour row; [editLayers], [editPage]: the
++///   Layer and Page panels; [undo]: the Undo and Redo buttons and chords;
++///   [export], [print]: theirs. A property spec's `gate` names one of the
++///   first nine ([allows]).
++/// - [draft]: what the document's own `DraftPermissions` become.
++@immutable
++final class PlanPermissions {
++  const PlanPermissions({
++    this.tools,
++    this.move = true,
++    this.rotate = true,
++    this.mirror = true,
++    this.reshape = true,
++    this.delete = true,
++    this.changeLayer = true,
++    this.recolor = true,
++    this.editLayers = true,
++    this.editPage = true,
++    this.undo = true,
++    this.export = true,
++    this.print = true,
++  });
++
++  /// Every tool, every flag on: today's editor.
++  static const PlanPermissions full = PlanPermissions();
++
++  /// Select, pan and zoom; no edit, no undo. Export and print stay: neither
++  /// is an edit.
++  static const PlanPermissions readOnly = PlanPermissions(
++    tools: {_select},
++    move: false,
++    rotate: false,
++    mirror: false,
++    reshape: false,
++    delete: false,
++    changeLayer: false,
++    recolor: false,
++    editLayers: false,
++    editPage: false,
++    undo: false,
++  );
++
++  static const String _select = 'plan.select';
++
++  final Set<String>? tools;
++  final bool move, rotate, mirror, reshape, delete;
++  final bool changeLayer, recolor, editLayers, editPage;
++  final bool undo, export, print;
++
++  /// Whether the tool [id] is offered: `plan.select` always, else by
++  /// [tools] (null: every id).
++  bool allowsTool(String id) => id == _select || (tools?.contains(id) ?? true);
++
++  /// Whether [gate]'s flag is on.
++  bool allows(PlanGate gate) => switch (gate) {
++        PlanGate.move => move,
++        PlanGate.rotate => rotate,
++        PlanGate.mirror => mirror,
++        PlanGate.reshape => reshape,
++        PlanGate.delete => delete,
++        PlanGate.changeLayer => changeLayer,
++        PlanGate.recolor => recolor,
++        PlanGate.editLayers => editLayers,
++        PlanGate.editPage => editPage,
++      };
++
++  /// Whether anything may be edited: an edit flag, or a tool other than
++  /// `plan.select` (a drawing tool or a kit's).
++  bool get edits =>
++      move ||
++      rotate ||
++      mirror ||
++      reshape ||
++      delete ||
++      changeLayer ||
++      recolor ||
++      editLayers ||
++      editPage ||
++      (tools?.any((id) => id != _select) ?? true);
++
++  /// The document's engine permissions: [DraftPermissions.readOnly] when
++  /// nothing may be edited ([edits] false), else [DraftPermissions.all].
++  /// An engine group maps onto several flags, so it closes only when every
++  /// one of them is off.
++  DraftPermissions get draft =>
++      edits ? DraftPermissions.all : DraftPermissions.readOnly;
++
++  /// A copy with the given fields replaced; a null argument keeps the
++  /// field (so `copyWith(tools: null)` keeps the set: start from [full] for
++  /// every tool). A given [tools] is copied, unmodifiable.
++  PlanPermissions copyWith({
++    Set<String>? tools,
++    bool? move,
++    bool? rotate,
++    bool? mirror,
++    bool? reshape,
++    bool? delete,
++    bool? changeLayer,
++    bool? recolor,
++    bool? editLayers,
++    bool? editPage,
++    bool? undo,
++    bool? export,
++    bool? print,
++  }) =>
++      PlanPermissions(
++        tools: tools == null ? this.tools : Set.unmodifiable(tools),
++        move: move ?? this.move,
++        rotate: rotate ?? this.rotate,
++        mirror: mirror ?? this.mirror,
++        reshape: reshape ?? this.reshape,
++        delete: delete ?? this.delete,
++        changeLayer: changeLayer ?? this.changeLayer,
++        recolor: recolor ?? this.recolor,
++        editLayers: editLayers ?? this.editLayers,
++        editPage: editPage ?? this.editPage,
++        undo: undo ?? this.undo,
++        export: export ?? this.export,
++        print: print ?? this.print,
++      );
++
++  /// The flags, in declaration order, by name.
++  List<(String, bool)> get _flags => [
++        ('move', move),
++        ('rotate', rotate),
++        ('mirror', mirror),
++        ('reshape', reshape),
++        ('delete', delete),
++        ('changeLayer', changeLayer),
++        ('recolor', recolor),
++        ('editLayers', editLayers),
++        ('editPage', editPage),
++        ('undo', undo),
++        ('export', export),
++        ('print', print),
++      ];
++
++  @override
++  bool operator ==(Object other) {
++    if (other is! PlanPermissions || !setEquals(other.tools, tools)) {
++      return false;
++    }
++    final a = other._flags, b = _flags;
++    for (var i = 0; i < a.length; i++) {
++      if (a[i].$2 != b[i].$2) return false;
++    }
++    return true;
++  }
++
++  @override
++  int get hashCode => Object.hash(
++      tools == null ? null : Object.hashAllUnordered(tools!),
++      Object.hashAll([for (final (_, v) in _flags) v]));
++
++  /// The fields that differ from [full], as `name: value`; the tools
++  /// sorted.
++  @override
++  String toString() => 'PlanPermissions(${[
++        if (tools case final t?) 'tools: {${(t.toList()..sort()).join(', ')}}',
++        for (final (n, v) in _flags)
++          if (!v) '$n: $v',
++      ].join(', ')})';
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 02f13ee2..13e93367 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -17,22 +17,25 @@ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
+ import '../export/registries.dart';
+ import '../symbols/plan_symbols_state.dart';
++import '../tools/generic_tools.dart';
++import '../tools/plan_select_gates.dart';
+ import 'camera_bounds.dart';
+ import 'new_plan.dart';
++import 'permissions.dart';
+ import 'plan_change.dart';
+ import 'services.dart';
+ import 'session.dart';
+ import 'tool_settings_store.dart';
+ 
+ /// The thumbnail capacity of a controller's own cache (today's
+ /// `kFloorPlanThumbnailCapacity`).
+ const int kPlanThumbnailCapacity = 128;
+ 
+ /// A bump-only notifier: each [bump] is one request.
+@@ -84,20 +87,21 @@ class PlanController extends ChangeNotifier {
+   /// then as if made so -- no undo step, not [dirty] -- unless [save] read
+   /// it or an edit touched it first (today's Q0 N1, N2).
+   factory PlanController({
+     required List<PlanKit> kits,
+     String? json,
+     SymbolThumbnails? thumbnails,
+     List<PlanExporter> exporters = const [],
+     List<PlanImporter> importers = const [],
+     double minScale = kPlanMinScale,
+     double maxScale = kPlanMaxScale,
++    PlanPermissions permissions = PlanPermissions.full,
+   }) {
+     final set = validateKitSet(kits);
+     if (!minScale.isFinite || minScale < _minScaleFloor) {
+       throw ArgumentError.value(
+           minScale, 'minScale', 'must be finite and at least 1e-6');
+     }
+     if (!maxScale.isFinite || maxScale <= minScale) {
+       throw ArgumentError.value(
+           maxScale, 'maxScale', 'must be finite and above minScale');
+     }
+@@ -119,33 +123,36 @@ class PlanController extends ChangeNotifier {
+       measurer.clear();
+       rethrow;
+     }
+     return PlanController._(set, catalog, document, measurer,
+         unsettled: json == null,
+         loadDiagnostics: diagnostics,
+         thumbnails: thumbnails,
+         exporters: exporters,
+         importers: importers,
+         minScale: minScale,
+-        maxScale: maxScale);
++        maxScale: maxScale,
++        permissions: permissions);
+   }
+ 
+   PlanController._(this.kits, this.catalog, DraftDocument document,
+       FlutterTextMeasurer measurer,
+       {required bool unsettled,
+       required List<Diagnostic> loadDiagnostics,
+       required SymbolThumbnails? thumbnails,
+       required List<PlanExporter> exporters,
+       required List<PlanImporter> importers,
+       required double minScale,
+-      required double maxScale})
+-      : exporters = List.unmodifiable(exporters),
++      required double maxScale,
++      required PlanPermissions permissions})
++      : _permissions = permissions,
++        exporters = List.unmodifiable(exporters),
+         importers = List.unmodifiable(importers),
+         _minScale = minScale,
+         _maxScale = maxScale,
+         _ownsThumbnails = thumbnails == null,
+         thumbnails =
+             thumbnails ?? SymbolThumbnails(maxEntries: kPlanThumbnailCapacity),
+         camera = CameraController(
+             ViewportTransform(
+                 worldToScreenMatrix: const Transform2(1, 0, 0, -1, 0, 0)),
+             minScale: minScale,
+@@ -231,20 +238,26 @@ class PlanController extends ChangeNotifier {
+ 
+   late final PlanChangeTracker _tracker = PlanChangeTracker(_emit);
+   late final StreamController<PlanChange> _out =
+       StreamController<PlanChange>.broadcast(
+           onListen: _tracker.listen, onCancel: _tracker.cancel);
+   late final Stream<PlanChange> _changeStream =
+       _out.stream.where((_) => !_disposed);
+ 
+   final List<VoidCallback> _settles = [];
+ 
++  /// The editor's permissions (spec P2); the Fill toggle; each known tool
++  /// id's needs. Kept across document swaps.
++  PlanPermissions _permissions;
++  final ValueNotifier<bool> _fill = ValueNotifier<bool>(false);
++  final Map<String, Set<Capability>> _toolNeeds = <String, Set<Capability>>{};
++
+   // ---------------------------------------------------------------------
+   // The plan.
+ 
+   /// The plan's document. Replaced by [load] and [newPlan].
+   DraftDocument get document => _session.document;
+ 
+   /// Whether the plan differs from its save point.
+   ValueListenable<bool> get dirty => _dirty;
+ 
+   int _savedState = 0;
+@@ -472,29 +485,42 @@ class PlanController extends ChangeNotifier {
+     return typeId == null ? null : kits.typeOf(typeId);
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Opening and replacing documents.
+ 
+   void _open(DraftDocument document, FlutterTextMeasurer measurer,
+       List<Diagnostic> loadDiagnostics) {
+     _damaged.value = false;
+     _disabledTools.clear();
++    // The engine's permissions follow the profile, before any system is
++    // installed over the document (spec P2).
++    document.commands.permissions = _permissions.draft;
++    for (final t in genericTools) {
++      _toolNeeds[t.id] = t.needs;
++    }
++    for (final kit in kits.kits) {
++      for (final planTool in kit.tools) {
++        _toolNeeds[planTool.id] = planTool.needs;
++      }
++    }
+     final session = DocumentSession(
+         document: document,
+         measurer: measurer,
+         catalog: catalog,
+         camera: camera,
+         snap: _snap,
+         kitLoaded: (kitId) => kits.kitOf(kitId) != null,
+         locked: _locked,
+         log: _diagnostics,
++        permissions: () => _permissions,
++        fill: _fill,
+         guard: _guardTool);
+     _session = session;
+     _locked.value = session.locks.objects;
+     session.boundary = FailureBoundary(
+         document: document,
+         catalog: catalog,
+         system: session.parametric,
+         frozen: session.frozen,
+         log: _diagnostics,
+         lock: lockBroken,
+@@ -587,76 +613,141 @@ class PlanController extends ChangeNotifier {
+   /// Undoes the last step, after settling pending input; nothing while the
+   /// active tool is part-way through a shape (today's S-4). A replay that
+   /// leaves the plan partially mutated (E3) does not escape: the plan is
+   /// rebuilt from what it holds and marked [damaged], as in [execute].
+   void undo() {
+     if (_midShape) return;
+     settlePendingInput();
+     final commands = document.commands;
+     if (!commands.canUndo) return;
+     try {
+-      commands.undo();
++      _unrestricted(commands.undo);
+     } on PartialMutationError catch (error) {
+       _session.boundary.partialMutation(error);
+     }
+   }
+ 
++  /// Runs [step] with the document's engine permissions lifted, then puts
++  /// them back: a host's undo or redo is not gated (spec P2), and the
++  /// dispatcher checks permissions on undo and redo too (undo.dart:213).
++  void _unrestricted(void Function() step) {
++    final commands = document.commands;
++    final saved = commands.permissions;
++    commands.permissions = DraftPermissions.all;
++    try {
++      step();
++    } finally {
++      commands.permissions = saved;
++    }
++  }
++
+   /// Redoes the next step, as [undo].
+   void redo() {
+     if (_midShape) return;
+     settlePendingInput();
+     final commands = document.commands;
+     if (!commands.canRedo) return;
+     try {
+-      commands.redo();
++      _unrestricted(commands.redo);
+     } on PartialMutationError catch (error) {
+       _session.boundary.partialMutation(error);
+     }
+   }
+ 
+   // ---------------------------------------------------------------------
+   // Tools and the selection.
+ 
+   /// The active tool's id (`plan.select`, a kit's `<kit>.<tool>`).
+   ValueListenable<String> get activeTool => _activeTool;
+ 
+   void _onTools() {
+     _activeTool.value = _session.idOf(_session.tools.active);
+   }
+ 
+   /// Arms the tool [id] (spec P2), as a palette tap would, and answers
+   /// whether it is now active: false for an unknown id, a tool the
+-  /// permissions refuse (Task 12), and a drawing tool while the plan's
+-  /// permissions deny geometry. A drawing tool clears the selection
+-  /// (planner_shell.dart:926-933).
++  /// permissions' ids refuse, and a tool whose needs the document's engine
++  /// permissions deny (a drawing tool while geometry is denied,
++  /// planner_shell.dart:926-933). A drawing tool clears the selection.
+   bool selectTool(String id) {
+     final session = _session;
+     final tool = session.toolById(id);
+     if (tool == null || !_allowsTool(id)) return false;
+-    final drawing = id != planSelectToolId;
+-    if (drawing && !document.commands.permissions.allows(Capability.geometry)) {
+-      return false;
+-    }
+-    if (drawing) session.selection.clear();
++    if (id != planSelectToolId) session.selection.clear();
+     session.tools.activate(tool);
+     return true;
+   }
+ 
+-  /// The permissions' say on a tool; Task 12 fills it.
+-  bool _allowsTool(String id) => true;
++  /// Whether [id] may be armed: offered by the permissions' ids, a tool
++  /// this controller knows, and every capability its commits need allowed
++  /// by the document's engine permissions (spec P2).
++  bool _allowsTool(String id) {
++    if (!_permissions.allowsTool(id)) return false;
++    final needs = _toolNeeds[id];
++    if (needs == null) return false;
++    final engine = document.commands.permissions;
++    for (final c in needs) {
++      if (!engine.allows(c)) return false;
++    }
++    return true;
++  }
++
++  /// [id]'s needs, or null for an id this controller does not know.
++  @internal
++  Set<Capability>? needsOf(String id) => _toolNeeds[id];
++
++  /// For Task 14's plan.symbol, which is built outside the generic set.
++  @internal
++  void registerToolNeeds(String id, Set<Capability> needs) =>
++      _toolNeeds[id] = needs;
++
++  /// The editor's permissions. Settable at runtime: the widgets rebuild
++  /// (this notifies), the document's engine permissions follow
++  /// ([PlanPermissions.draft]), a drag whose gate closes is cancelled now,
++  /// and an active tool no longer allowed is cancelled and plan.select
++  /// armed.
++  PlanPermissions get permissions => _permissions;
++  set permissions(PlanPermissions value) {
++    if (value == _permissions) return;
++    final old = _permissions;
++    _permissions = value;
++    document.commands.permissions = value.draft;
++    final select = _session.select;
++    final stale = switch (select.dragKind) {
++      DragKind.move => old.move && !value.move,
++      DragKind.rotate => old.rotate && !value.rotate,
++      DragKind.reshape => old.reshape && !value.reshape,
++      DragKind.band || null => false,
++    };
++    if (stale) select.cancel(toolController.context);
++    grips.gatesChanged();
++    if (!_allowsTool(activeTool.value)) selectTool(PlanToolIds.select);
++    notifyListeners();
++  }
++
++  @internal
++  PlanSelectGates get selectGates => _session.gates;
++
++  @internal
++  SelectTool get planSelect => _session.select;
++
++  /// The Fill toggle (Task 16's palette row and F key).
++  @internal
++  ValueNotifier<bool> get fill => _fill;
+ 
+   /// Deletes the selection as the select tool's Delete does, one undo step
+-  /// (spec P2), after settling pending input. False with nothing selected,
+-  /// while a shape is part-way, and when every selected object is refused.
+-  /// Tasks 10 and 12 add the lock and `delete: false`. A delete a lock
+-  /// refuses (a locked object inside a selected group, Task 11) answers
+-  /// false and sets [lockHint], as [execute] does.
++  /// (spec P2), after settling pending input: through the select tool's
++  /// gates (the permissions' `delete`, the locks). False with nothing
++  /// selected, while a shape is part-way, under `delete: false`, with a
++  /// locked object selected, and when every selected object is refused. A
++  /// delete a lock refuses on commit (a locked object inside a selected
++  /// group, Task 11) answers false and sets [lockHint], as [execute] does.
+   bool deleteSelection() {
+     if (_midShape) return false;
+     settlePendingInput();
+     final session = _session;
+     try {
+       return session.select.deleteSelection(session.toolContext);
+     } on PlanLocked {
+       lockHint.value = true;
+       return false;
+     } on DanglingReferenceError {
+@@ -757,22 +848,23 @@ class PlanController extends ChangeNotifier {
+     _locale.value = locale;
+     _reported = locale;
+     _reportedStrings = strings;
+     final untouched = _untouched;
+     _unsettled = null;
+     if (!untouched) return;
+     final d = document;
+     final page = d.components.get<PageComponent>(d.rootHandle)!;
+     final separator = _separatorOf(locale);
+     if (page.decimalSeparator == separator) return;
+-    d.commands.execute(SetComponentCommand<PageComponent>(
+-        d.rootHandle, page.copyWith(decimalSeparator: separator)));
++    // The controller's own settling, not an edit: not gated (spec P2).
++    _unrestricted(() => d.commands.execute(SetComponentCommand<PageComponent>(
++        d.rootHandle, page.copyWith(decimalSeparator: separator))));
+     d.commands.clearHistory();
+     _savedState = d.commands.stateId;
+   }
+ 
+   // ---------------------------------------------------------------------
+   // State.
+ 
+   ValueListenable<List<KitDiagnostic>> get diagnostics => _diagnostics;
+ 
+   /// Task 13 drives it; `ready` until then.
+@@ -970,20 +1062,21 @@ class PlanController extends ChangeNotifier {
+       ..dispose();
+     if (_ownsThumbnails) thumbnails.dispose();
+     toolSettings.dispose();
+     _diagnostics.dispose();
+     _locale.dispose();
+     _symbolsState.dispose();
+     _dirty.dispose();
+     _canUndo.dispose();
+     _canRedo.dispose();
+     _activeTool.dispose();
++    _fill.dispose();
+     _locked.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
+     _snap.dispose();
+     _userSnap.dispose();
+     camera.dispose();
+     _settles.clear();
+     unawaited(_out.close());
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/session.dart b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+index 7ec5adf2..1641e833 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/session.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/session.dart
+@@ -7,69 +7,83 @@
+ import 'dart:async';
+ 
+ import 'package:flutter/foundation.dart' show ValueListenable;
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
++import '../tools/generic_tools.dart';
++import '../tools/plan_select_gates.dart';
+ import 'grip_dispatch.dart';
++import 'permissions.dart';
+ import 'services.dart';
+ import 'shared_cache.dart';
+ 
+ /// The plan library's own select tool (spec P1 reserved ids).
+ const String planSelectToolId = 'plan.select';
+ 
+ final class DocumentSession {
+   DocumentSession(
+       {required this.document,
+       required this.measurer,
+       required ParametricCatalog catalog,
+       required CameraController camera,
+       required SnapSettings snap,
+       required bool Function(String kitId) kitLoaded,
+       required ValueListenable<Set<Handle>> locked,
+       required DiagnosticsLog log,
++      required PlanPermissions Function() permissions,
++      required ValueListenable<bool> fill,
+       required Tool Function(String kitId, String toolId, Tool tool) guard})
+       : _log = log,
+         _guard = guard,
+         page = PageNotifier(document),
+         index = SpatialIndex(document),
+         dispatch = GripDispatch(catalog) {
+     locks = LockSet.scan(document, kitLoaded);
+     // planner_shell.dart:625-671, the order load-bearing: the selection
+     // prunes a dead key before the outline cache walks it; the gates
+     // listen to the selection before the outline and grip caches do; the
+     // grip cache rebuilds after the outlines.
+     selection = SelectionController(document);
+-    lockGates = LockGates(selection: selection, locked: locked);
++    gates = PlanSelectGates(
++        permissions: permissions, selection: selection, locked: locked);
+     outlines = OutlineCache(document, selection);
+     grips = GripCache(document, selection, outlines,
+         objects: LockedGrips(locks,
+             GuardedGrips(dispatch, typeIdOf: catalog.typeIdOf, log: log)),
+-        gates: lockGates);
++        gates: gates);
+     toolContext = ToolContext(
+         document: document,
+         index: index,
+         camera: camera,
+         selection: selection,
+         page: page,
+         snap: snap,
+         grips: grips);
+-    select = SelectTool(gates: lockGates);
++    // The session's one plan.select: the generic set's, gated (spec P2
++    // permissions, P4 locks).
++    generic = buildGenericTools(gates: gates, fill: fill);
++    select = generic.select;
+     // Every tool in the map is guarded (spec P4), the plan's own under the
+     // kit id `plan`; the tool controller knows the guarded one.
+     final guardedSelect = guard('plan', planSelectToolId, select);
+     _entries.add((id: planSelectToolId, tool: guardedSelect, kit: false));
+     tools = ToolController(initial: guardedSelect, context: toolContext);
++    // The other generic tools, before any kit's (runKitFactories runs
++    // later, from the controller's _open). The map owns and disposes them.
++    for (final e in generic.byId.entries) {
++      if (e.key != planSelectToolId) addTool(e.key, e.value);
++    }
+     // :1050-1057: the document arrives built; the system installs last,
+     // and the lock expander stacks after it.
+     parametric = ParametricSystem(document, catalog, isFrozen: frozen.contains)
+       ..install();
+     lockExpander = LockExpander(document, locks)..install();
+   }
+ 
+   final DraftDocument document;
+   final FlutterTextMeasurer measurer;
+   final DiagnosticsLog _log;
+@@ -89,38 +103,47 @@ final class DocumentSession {
+   late final OutlineCache outlines;
+   late final GripCache grips;
+   late final ToolContext toolContext;
+ 
+   /// The plan's select tool, unguarded (its `deleteSelection`); the map and
+   /// the tool controller hold it guarded.
+   late final SelectTool select;
+   late final ToolController tools;
+   late final ParametricSystem parametric;
+ 
+-  /// The document's lock set, expander and select gates (spec P4).
++  /// The document's lock set and expander (spec P4).
+   late final LockSet locks;
+   late final LockExpander lockExpander;
+-  late final LockGates lockGates;
++
++  /// The select tool's and the grip cache's gates: the permissions and the
++  /// locks (spec P2, P4).
++  late final PlanSelectGates gates;
++
++  /// The generic tools (Task 12). The map holds each of them, guarded, and
++  /// disposes them: never [GenericToolSet.dispose] here (a second dispose
++  /// of a tool asserts).
++  late final GenericToolSet generic;
+   final SharedCache shared = SharedCache();
+ 
+   /// The registry until Task 14 runs the providers' factories.
+   AttachmentRegistry attachments = const NoAttachments();
+ 
+-  /// The tools by id: select, then each kit's in load order (Task 12 adds
+-  /// the generic tools after select).
++  /// The tools by id: select, the other generic tools, then each kit's in
++  /// load order.
+   final List<({String id, Tool tool, bool kit})> _entries = [];
+   final List<({String kitId, String typeId, Object provider})> _providers = [];
+ 
+   /// The document's change subscription, for the history flags.
+   StreamSubscription<DocChange>? history;
+ 
+-  /// Registers a tool that is not a kit's (Task 12's generic tools).
++  /// Registers a tool that is not a kit's (the generic tools; Task 14's
++  /// plan.symbol).
+   void addTool(String id, Tool tool) =>
+       _entries.add((id: id, tool: _guard('plan', id, tool), kit: false));
+ 
+   /// Runs every kit's factories over this document, once (spec P1
+   /// lifetimes): its tools, then its types' grip providers. A factory that
+   /// throws is reported and leaves its product out (spec P4): a tool's id
+   /// joins [disabled]; a type has no grips.
+   void runKitFactories(
+       KitSet kits, Map<String, PlanServices> services, Set<String> disabled) {
+     for (final kit in kits.kits) {
+@@ -212,18 +235,18 @@ final class DocumentSession {
+   void dispose() {
+     tools.dispose();
+     for (final e in _entries) {
+       e.tool.dispose();
+     }
+     _entries.clear();
+     grips.dispose();
+     outlines.dispose();
+     selection.dispose();
+     page.dispose();
+-    lockGates.dispose();
++    gates.dispose();
+     lockExpander.dispose();
+     parametric.dispose();
+     index.dispose();
+     unawaited(document.dispose());
+     measurer.clear();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/generic_tools.dart b/packages/jet_cad_2d_plan/lib/src/tools/generic_tools.dart
+new file mode 100644
+index 00000000..ae658b16
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/tools/generic_tools.dart
+@@ -0,0 +1,141 @@
++// Spec P1 "Reserved ids" and P2 "The keyboard" (Task 12): the plan
++// library's own tools. plan.symbol is reserved here and built by Task 14;
++// a kit's tools follow in the palette (Task 16).
++import 'package:flutter/foundation.dart' show ValueListenable, immutable;
++import 'package:flutter/material.dart' show IconData, Icons;
++import 'package:jet_cad_2d/jet_cad_2d.dart' show Capability;
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++
++/// The plan library's reserved tool ids (spec P1).
++abstract final class PlanToolIds {
++  static const String select = 'plan.select';
++  static const String line = 'plan.line';
++  static const String polyline = 'plan.polyline';
++  static const String rectangle = 'plan.rectangle';
++  static const String circle = 'plan.circle';
++  static const String arc = 'plan.arc';
++  static const String text = 'plan.text';
++  static const String symbol = 'plan.symbol';
++
++  static const List<String> all = [
++    select,
++    line,
++    polyline,
++    rectangle,
++    circle,
++    arc,
++    text,
++    symbol,
++  ];
++
++  /// What a symbol placement commits (today's `kSymbolPlacementNeeds`,
++  /// `symbol_panel.dart:28-32`): the definition copy, its leaves, its
++  /// `jetcad.symbol` component.
++  static const Set<Capability> symbolNeeds = {
++    Capability.structure,
++    Capability.geometry,
++    Capability.components,
++  };
++}
++
++/// One generic tool as the palette and the keyboard see it.
++@immutable
++final class GenericTool {
++  const GenericTool({
++    required this.id,
++    required this.icon,
++    required this.letter,
++    required this.needs,
++    this.fills = false,
++  });
++
++  final String id;
++  final IconData icon;
++
++  /// Today's letter (spec P2: V L P R C A T).
++  final String letter;
++
++  /// What the tool's commits need (`PlanTool.needs`' meaning).
++  final Set<Capability> needs;
++
++  /// Whether the Fill toggle applies to it.
++  final bool fills;
++}
++
++/// The generic tools in palette order (today's rows for them,
++/// `planner_shell.dart:517-623`).
++const List<GenericTool> genericTools = [
++  GenericTool(
++      id: PlanToolIds.select,
++      icon: Icons.north_west,
++      letter: 'V',
++      needs: <Capability>{}),
++  GenericTool(
++      id: PlanToolIds.line,
++      icon: Icons.horizontal_rule,
++      letter: 'L',
++      needs: {Capability.geometry}),
++  GenericTool(
++      id: PlanToolIds.polyline,
++      icon: Icons.polyline,
++      letter: 'P',
++      needs: {Capability.geometry},
++      fills: true),
++  GenericTool(
++      id: PlanToolIds.rectangle,
++      icon: Icons.crop_square,
++      letter: 'R',
++      needs: {Capability.geometry},
++      fills: true),
++  GenericTool(
++      id: PlanToolIds.circle,
++      icon: Icons.circle_outlined,
++      letter: 'C',
++      needs: {Capability.geometry},
++      fills: true),
++  GenericTool(
++      id: PlanToolIds.arc,
++      icon: Icons.looks,
++      letter: 'A',
++      needs: {Capability.geometry}),
++  GenericTool(
++      id: PlanToolIds.text,
++      icon: Icons.title,
++      letter: 'T',
++      needs: {Capability.geometry}),
++];
++
++/// One document's generic tools: [select] and every tool by id, in
++/// [genericTools] order.
++final class GenericToolSet {
++  GenericToolSet._(this.select, this.byId);
++
++  final SelectTool select;
++  final Map<String, Tool> byId;
++
++  void dispose() {
++    for (final tool in byId.values) {
++      tool.dispose();
++    }
++  }
++}
++
++/// Builds the generic tools over [gates] (the select tool's), [fill] (the
++/// polyline's, the rectangle's and the circle's) and [moveResolver] (null
++/// until Task 14 injects plan.symbol's).
++GenericToolSet buildGenericTools({
++  required SelectGates gates,
++  required ValueListenable<bool> fill,
++  MoveResolver? moveResolver,
++}) {
++  final select = SelectTool(moveResolver: moveResolver, gates: gates);
++  return GenericToolSet._(select, {
++    PlanToolIds.select: select,
++    PlanToolIds.line: LineTool(),
++    PlanToolIds.polyline: PolylineTool(fill: fill),
++    PlanToolIds.rectangle: RectangleTool(fill: fill),
++    PlanToolIds.circle: CircleTool(fill: fill),
++    PlanToolIds.arc: ArcTool(),
++    PlanToolIds.text: TextTool(),
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart b/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart
+new file mode 100644
+index 00000000..42685bb6
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/tools/plan_select_gates.dart
+@@ -0,0 +1,40 @@
++// Spec P2 "Permissions" (the select gates: move, rotate, reshape, delete)
++// and P4 "Locks" (the gates refuse a locked object), Task 12. One object on
++// the select tool and on the grip cache, as today's shell shares one
++// (planner_shell.dart:439-445, :648-657).
++import '../controller/permissions.dart';
++import '../kits/locks.dart' show LockGates;
++
++/// The select tool's and the grip cache's gates: each drag kind and Delete
++/// need their [PlanPermissions] flag, and a selection holding a locked
++/// object (or a key inside one) shuts them all ([LockGates]).
++///
++/// The getters are read at every hover, key and frame (`SelectGates`'s
++/// contract) and allocate nothing: the lock state is [LockGates]' cached
++/// `bool`, and the permissions are read through one closure call.
++final class PlanSelectGates extends LockGates {
++  PlanSelectGates({
++    required PlanPermissions Function() permissions,
++    required super.selection,
++    required super.locked,
++  }) : _permissions = permissions;
++
++  final PlanPermissions Function() _permissions;
++
++  /// The select tool's idle keys (Escape, Delete, Backspace while no
++  /// gesture runs): the shortcuts' option (Task 16 sets it).
++  @override
++  bool idleKeys = true;
++
++  @override
++  bool get move => _permissions().move && super.move;
++
++  @override
++  bool get rotate => _permissions().rotate && super.rotate;
++
++  @override
++  bool get reshape => _permissions().reshape && super.reshape;
++
++  @override
++  bool get delete => _permissions().delete && super.delete;
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/permissions_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/permissions_controller_test.dart
+new file mode 100644
+index 00000000..2486a7b4
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/permissions_controller_test.dart
+@@ -0,0 +1,213 @@
++// Spec P2 "Permissions" at the controller (Task 12): the tool gate
++// (ids and needs), a change at runtime, host calls not gated, deleteSelection
++// and the document's engine permissions. Through the controller alone, its
++// tools driven with ToolPointerEvents under a turned, flipped, off-origin
++// camera (test/support/tool_events.dart). The kit-free controller: these are
++// the plan library's own tools.
++import 'dart:ui' show Locale;
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/tool_events.dart';
++
++final Vector2 a = Vector2(4120.5, -1415.25);
++final Vector2 b = Vector2(4730.75, -1102.5);
++final Vector2 away = Vector2(5480.25, -1630.75);
++
++PlanController make({PlanPermissions permissions = PlanPermissions.full}) {
++  final c = PlanController(kits: const [], permissions: permissions);
++  addTearDown(c.dispose);
++  useTestCamera(c);
++  return c;
++}
++
++void main() {
++  TestWidgetsFlutterBinding.ensureInitialized();
++
++  test('the fixtures are not degenerate', () {
++    expect(a.x != 0 && a.y != 0, isTrue);
++    final c = make();
++    expect(c.toolController.context.camera.value.scale,
++        closeTo(kTestScale, 1e-12));
++    expect(
++        c.toolController.context.camera.value.worldToScreenMatrix.b, isNot(0),
++        reason: 'a turned camera');
++  });
++
++  group('the tool gate', () {
++    test(
++        'PM-14 selectTool: select always; a tool the ids refuse is refused '
++        'and changes nothing; an unknown id is refused', () {
++      final c = make(
++          permissions: PlanPermissions.full
++              .copyWith(tools: {'plan.select', 'plan.arc'}));
++      // M-PM14: `_allowsTool` drops the `_permissions.allowsTool(id)` test.
++      expect(c.selectTool('plan.line'), isFalse);
++      expect(c.activeTool.value, 'plan.select');
++      expect(c.selectTool('plan.arc'), isTrue);
++      expect(c.activeTool.value, 'plan.arc');
++      expect(c.selectTool('acme.nothing'), isFalse);
++      expect(c.activeTool.value, 'plan.arc');
++      expect(c.selectTool('plan.select'), isTrue);
++      expect(c.activeTool.value, 'plan.select');
++      c.permissions = PlanPermissions.full;
++      expect(c.selectTool('plan.line'), isTrue);
++    });
++
++    test(
++        "PM-15 a tool's needs are checked against the document's engine "
++        'permissions; select needs nothing', () {
++      final c = make();
++      c.document.commands.permissions = const DraftPermissions(
++          transform: true, components: true, geometry: false, structure: true);
++      // M-PM15: `_allowsTool` drops the needs test.
++      for (final id in [
++        'plan.line',
++        'plan.polyline',
++        'plan.rectangle',
++        'plan.circle',
++        'plan.arc',
++        'plan.text',
++      ]) {
++        expect(c.selectTool(id), isFalse, reason: id);
++      }
++      expect(c.activeTool.value, 'plan.select');
++      expect(c.selectTool('plan.select'), isTrue);
++      expect(c.needsOf('plan.select'), isEmpty);
++      expect(c.needsOf('plan.line'), {Capability.geometry});
++      expect(c.needsOf('acme.nothing'), isNull);
++    });
++  });
++
++  group('a change at runtime', () {
++    test(
++        'PM-16 plan.line one point in, then readOnly: select is armed, the '
++        'pending point is gone, nothing was executed (M-H47)', () {
++      final c = make();
++      expect(c.selectTool('plan.line'), isTrue);
++      tapAt(c, a);
++      expect(c.toolController.active.isMidShape, isTrue, reason: 'premise');
++      final state = c.document.commands.stateId;
++      final depth = c.document.commands.undoDepth;
++      var told = 0;
++      void listener() => told++;
++      c.addListener(listener);
++      addTearDown(() => c.removeListener(listener));
++      c.permissions = PlanPermissions.readOnly;
++      // M-PM16: the setter drops its fallback to plan.select.
++      expect(c.activeTool.value, 'plan.select');
++      expect(told, isPositive, reason: 'the widgets rebuild');
++      tapAt(c, away);
++      tapAt(c, b);
++      expect(c.document.commands.stateId, state);
++      expect(c.document.commands.undoDepth, depth);
++      c.permissions = PlanPermissions.full;
++      expect(c.activeTool.value, 'plan.select', reason: 'no automatic return');
++      expect(c.selectTool('plan.line'), isTrue);
++      expect(c.toolController.active.isMidShape, isFalse,
++          reason: 'the line starts afresh');
++      // The same value again: no notification.
++      final before = told;
++      c.permissions = PlanPermissions.full;
++      expect(told, before);
++    });
++
++    test(
++        'PM-17 a body drag whose move gate closes before its up is cancelled '
++        'at the change and executes nothing; kept open it moves (S-9 h)',
++        () async {
++      final c = make();
++      final line = drawLine(c, a, b);
++      // The drag starts on the line as drawn (grid-snapped ends).
++      final mid = drawnMidOf(c.document, line);
++      c.selection.replace([SelectionKey.root(line)]);
++      final state = c.document.commands.stateId;
++      dragFrom(c, mid, mid + Vector2(800, 0), beforeUp: () {
++        expect(c.toolController.active.phase, ToolPhase.dragging,
++            reason: 'premise: a drag under way');
++        c.permissions = PlanPermissions.full.copyWith(move: false);
++        // M-PM17: the setter drops its stale-drag cancel.
++        expect(c.toolController.active.phase, ToolPhase.idle);
++      });
++      expect(c.document.commands.stateId, state);
++      c.permissions = PlanPermissions.full;
++      c.selection.replace([SelectionKey.root(line)]);
++      dragFrom(c, mid, mid + Vector2(800, 0));
++      expect(c.document.commands.stateId, isNot(state));
++      await settleHistory();
++      expect(c.canUndo.value, isTrue);
++    });
++
++    test(
++        "PM-18 the document's engine permissions follow the profile, and a "
++        'new plan gets them too', () {
++      final c = make();
++      expect(c.document.commands.permissions, same(DraftPermissions.all));
++      c.permissions = PlanPermissions.readOnly;
++      expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++      c.newPlan();
++      // M-PM18: the per-document `commands.permissions = _permissions.draft`
++      // dropped.
++      expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++      c.permissions = PlanPermissions.full;
++      expect(c.document.commands.permissions, same(DraftPermissions.all));
++    });
++  });
++
++  group('host calls and deleteSelection', () {
++    test(
++        "PM-19 a host's undo and redo under readOnly still work, and the "
++        'profile is back afterwards', () async {
++      final c = make();
++      final line = drawLine(c, a, b);
++      await settleHistory();
++      expect(c.canUndo.value, isTrue);
++      c.permissions = PlanPermissions.readOnly;
++      // M-PM19: undo() without the permission lift (PermissionDeniedError).
++      c.undo();
++      expect(linesOf(c.document), isNot(contains(line)));
++      expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++      c.redo();
++      expect(linesOf(c.document), contains(line));
++      expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    });
++
++    test(
++        'PM-20 deleteSelection: false with nothing selected and under '
++        'delete: false; true under full, one undo step (T5-c)', () {
++      final c = make();
++      final line = drawLine(c, a, b);
++      expect(c.deleteSelection(), isFalse, reason: 'nothing selected');
++      c.selection.replace([SelectionKey.root(line)]);
++      c.permissions = PlanPermissions.full.copyWith(delete: false);
++      final state = c.document.commands.stateId;
++      // M-PM8 turns this red too (the gate's delete ignores the flag).
++      expect(c.deleteSelection(), isFalse);
++      expect(c.document.commands.stateId, state);
++      expect(linesOf(c.document), contains(line));
++      c.permissions = PlanPermissions.full;
++      expect(c.deleteSelection(), isTrue);
++      expect(linesOf(c.document), isNot(contains(line)));
++      c.undo();
++      expect(linesOf(c.document), contains(line));
++    });
++  });
++  test(
++      "PM-21 an untouched new plan takes the reported locale's separator "
++      "under readOnly too: the controller's own settling is not gated", () {
++    final c = make(permissions: PlanPermissions.readOnly);
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++    // M-PM21: reportLocale's SetComponentCommand run without the lift
++    // (PermissionDeniedError: components).
++    c.reportLocale(const Locale('tr'));
++    final d = c.document;
++    expect(d.components.get<PageComponent>(d.rootHandle)!.decimalSeparator,
++        DecimalSeparator.comma);
++    expect(c.document.commands.canUndo, isFalse, reason: 'no undo step');
++    expect(c.document.commands.permissions, same(DraftPermissions.readOnly));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/controller/permissions_test.dart b/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
+new file mode 100644
+index 00000000..1b9d8e0b
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/controller/permissions_test.dart
+@@ -0,0 +1,223 @@
++// Spec P2 "Permissions" (Task 12): PlanPermissions, read field by field
++// against the spec's list, written out here and never read from the code
++// under test. Modelled on jet_cad_floor_plan's editor_capabilities_test
++// EC2-EC5; the type is new (P7 moves the panels, the gallery and the
++// drafting aids to the widgets' options, and the tables-only fields to 2b).
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart' show DraftPermissions;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show PlanGate;
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++
++typedef P = PlanPermissions;
++
++/// Every flag, in declaration order.
++const List<String> kFlagNames = [
++  'move',
++  'rotate',
++  'mirror',
++  'reshape',
++  'delete',
++  'changeLayer',
++  'recolor',
++  'editLayers',
++  'editPage',
++  'undo',
++  'export',
++  'print',
++];
++
++Map<String, bool> flagsOf(P p) => {
++      'move': p.move,
++      'rotate': p.rotate,
++      'mirror': p.mirror,
++      'reshape': p.reshape,
++      'delete': p.delete,
++      'changeLayer': p.changeLayer,
++      'recolor': p.recolor,
++      'editLayers': p.editLayers,
++      'editPage': p.editPage,
++      'undo': p.undo,
++      'export': p.export,
++      'print': p.print,
++    };
++
++P copyFlag(P p, String name, bool v) => switch (name) {
++      'move' => p.copyWith(move: v),
++      'rotate' => p.copyWith(rotate: v),
++      'mirror' => p.copyWith(mirror: v),
++      'reshape' => p.copyWith(reshape: v),
++      'delete' => p.copyWith(delete: v),
++      'changeLayer' => p.copyWith(changeLayer: v),
++      'recolor' => p.copyWith(recolor: v),
++      'editLayers' => p.copyWith(editLayers: v),
++      'editPage' => p.copyWith(editPage: v),
++      'undo' => p.copyWith(undo: v),
++      'export' => p.copyWith(export: v),
++      'print' => p.copyWith(print: v),
++      _ => throw ArgumentError(name),
++    };
++
++/// The flag each gate reads (spec P3: a gate names a PlanPermissions flag).
++const Map<PlanGate, String> kGateFlag = {
++  PlanGate.move: 'move',
++  PlanGate.rotate: 'rotate',
++  PlanGate.mirror: 'mirror',
++  PlanGate.reshape: 'reshape',
++  PlanGate.delete: 'delete',
++  PlanGate.changeLayer: 'changeLayer',
++  PlanGate.recolor: 'recolor',
++  PlanGate.editLayers: 'editLayers',
++  PlanGate.editPage: 'editPage',
++};
++
++/// readOnly's flags, as spec P2 and today's S-12 list them.
++const Map<String, bool> kReadOnly = {
++  'move': false,
++  'rotate': false,
++  'mirror': false,
++  'reshape': false,
++  'delete': false,
++  'changeLayer': false,
++  'recolor': false,
++  'editLayers': false,
++  'editPage': false,
++  'undo': false,
++  'export': true,
++  'print': true,
++};
++
++void main() {
++  test('PM-1 full and readOnly, field by field', () {
++    expect(P.full.tools, isNull, reason: 'every tool');
++    expect(flagsOf(P.full), {for (final n in kFlagNames) n: true});
++    expect(const P(), P.full);
++    // M-PM1: readOnly's `undo: false` dropped.
++    expect(P.readOnly.tools, {'plan.select'});
++    expect(flagsOf(P.readOnly), kReadOnly);
++  });
++
++  test('PM-2 copyWith replaces exactly the field it names; null keeps', () {
++    for (final name in kFlagNames) {
++      for (final base in [P.full, P.readOnly]) {
++        final before = flagsOf(base);
++        final after = flagsOf(copyFlag(base, name, !before[name]!));
++        // M-PM2: `move: move ?? this.move` written `move: this.move`.
++        expect(after, {...before, name: !before[name]!},
++            reason: '$name on $base');
++        expect(copyFlag(base, name, before[name]!), base, reason: name);
++      }
++    }
++    final some = P.full.copyWith(tools: {'plan.select', 'plan.line'});
++    expect(some.tools, {'plan.select', 'plan.line'});
++    expect(flagsOf(some), flagsOf(P.full));
++    // A null argument keeps (Flutter's convention): start from full to
++    // allow every tool again.
++    expect(P.readOnly.copyWith().tools, {'plan.select'});
++    expect(P.readOnly.copyWith(tools: null).tools, {'plan.select'});
++    // The set given is copied, unmodifiable.
++    final given = {'plan.select', 'plan.arc'};
++    final copied = P.full.copyWith(tools: given);
++    given.add('plan.text');
++    expect(copied.tools, {'plan.select', 'plan.arc'});
++    expect(() => copied.tools!.add('plan.circle'), throwsUnsupportedError);
++  });
++
++  test('PM-3 == and hashCode over every field; the tools as a set', () {
++    final a = P.full.copyWith(tools: {'plan.line', 'plan.select', 'acme.x'});
++    final b = P.full.copyWith(tools: {'acme.x', 'plan.select', 'plan.line'});
++    expect(a, b);
++    expect(a.hashCode, b.hashCode);
++    // M-PM3: `setEquals(other.tools, tools) &&` dropped from ==.
++    expect(a == P.full.copyWith(tools: {'plan.select', 'plan.line'}), isFalse);
++    expect(a == P.full, isFalse, reason: 'a set is not "every tool"');
++    for (final name in kFlagNames) {
++      final changed = copyFlag(P.full, name, false);
++      expect(changed == P.full, isFalse, reason: name);
++      expect(P.full == changed, isFalse, reason: name);
++    }
++    expect(P.full == P.readOnly, isFalse);
++    expect(identical(P.readOnly, P.readOnly), isTrue);
++  });
++
++  test('PM-4 allowsTool: select always; null allows every id; a set its own',
++      () {
++    for (final id in ['plan.select', 'plan.line', 'acme.wall', 'x.y']) {
++      expect(P.full.allowsTool(id), isTrue, reason: id);
++    }
++    // M-PM4: `id == PlanToolIds.select ||` dropped.
++    final none = P.full.copyWith(tools: const <String>{});
++    expect(none.allowsTool('plan.select'), isTrue);
++    expect(none.allowsTool('plan.line'), isFalse);
++    expect(P.readOnly.allowsTool('plan.select'), isTrue);
++    expect(P.readOnly.allowsTool('plan.symbol'), isFalse);
++    final some = P.full.copyWith(tools: {'acme.wall'});
++    expect(some.allowsTool('acme.wall'), isTrue);
++    expect(some.allowsTool('acme.door'), isFalse);
++    expect(some.allowsTool('plan.select'), isTrue);
++  });
++
++  test("PM-5 allows(gate) reads that gate's own flag, and only it", () {
++    for (final MapEntry(key: gate, value: flag) in kGateFlag.entries) {
++      final off = copyFlag(P.full, flag, false);
++      for (final other in PlanGate.values) {
++        // M-PM5: the `move` and `rotate` arms of `allows` swapped.
++        expect(off.allows(other), other != gate,
++            reason: '$flag off, asking $other');
++      }
++    }
++    expect(kGateFlag.keys.toSet(), PlanGate.values.toSet(),
++        reason: 'premise: every gate is listed');
++  });
++
++  test(
++      'PM-6 draft: no edit flag and no tool but select is the engine\'s '
++      'readOnly; any edit flag or any other tool opens every group', () {
++    // M-PM6a: `draft` always DraftPermissions.all.
++    expect(P.readOnly.draft, same(DraftPermissions.readOnly));
++    expect(P.readOnly.edits, isFalse);
++    expect(P.full.draft, same(DraftPermissions.all));
++    for (final name in kFlagNames.take(9)) {
++      // move .. editPage: each alone is an edit.
++      final one = copyFlag(P.readOnly, name, true);
++      expect(one.edits, isTrue, reason: name);
++      expect(one.draft, same(DraftPermissions.all), reason: name);
++    }
++    for (final name in ['undo', 'export', 'print']) {
++      final one = copyFlag(P.readOnly, name, true);
++      expect(one.draft, same(DraftPermissions.readOnly),
++          reason: '$name is not an edit');
++    }
++    // M-PM6b: the tools term dropped from `edits`.
++    final drawing = P.readOnly.copyWith(tools: {'plan.select', 'plan.line'});
++    expect(drawing.draft, same(DraftPermissions.all));
++    final everyTool = const P(
++        move: false,
++        rotate: false,
++        mirror: false,
++        reshape: false,
++        delete: false,
++        changeLayer: false,
++        recolor: false,
++        editLayers: false,
++        editPage: false);
++    expect(everyTool.tools, isNull);
++    expect(everyTool.draft, same(DraftPermissions.all),
++        reason: 'null tools allows the drawing tools');
++  });
++
++  test('PM-7 toString names the fields that differ from full', () {
++    expect(P.full.toString(), 'PlanPermissions()');
++    expect(P.full.copyWith(reshape: false).toString(),
++        'PlanPermissions(reshape: false)');
++    expect(P.full.copyWith(undo: false, move: false).toString(),
++        'PlanPermissions(move: false, undo: false)');
++    expect(
++        P.readOnly.toString(),
++        'PlanPermissions(tools: {plan.select}, move: false, rotate: false, '
++        'mirror: false, reshape: false, delete: false, changeLayer: false, '
++        'recolor: false, editLayers: false, editPage: false, undo: false)');
++    // The tools sorted, so the text is stable whatever the set's order.
++    expect(P.full.copyWith(tools: {'plan.text', 'acme.x'}).toString(),
++        'PlanPermissions(tools: {acme.x, plan.text})');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/tool_events.dart b/packages/jet_cad_2d_plan/test/support/tool_events.dart
+new file mode 100644
+index 00000000..0ec0f8f7
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/tool_events.dart
+@@ -0,0 +1,101 @@
++// Pointer events for the plan's tools without a canvas (Task 12; reused by
++// Tasks 13 and 14). Every event goes to the controller's active tool
++// through its own ToolContext, resolved through the controller's camera,
++// which a test first sets to a rotated, flipped, off-origin view
++// ([useTestCamera]) so no fixture sits at the identity transform.
++import 'dart:ui' show Offset;
++
++import 'package:flutter/gestures.dart' show kPrimaryButton;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++/// The test camera's pixels per millimetre.
++const double kTestScale = 0.25;
++
++/// Turned by 0.3 rad, y flipped, 0.25 px/mm, the world point
++/// (4200, -1300) at the screen point (400, 300).
++ViewportTransform testCamera() => ViewportTransform(
++    worldToScreenMatrix: Transform2.translation(400, 300)
++        .multiply(Transform2.rotation(0.3))
++        .multiply(Transform2.scale(kTestScale, -kTestScale))
++        .multiply(Transform2.translation(-4200, 1300)));
++
++void useTestCamera(PlanController c) =>
++    c.toolController.context.camera.value = testCamera();
++
++/// An event at world [world] as the interaction layer would build it.
++ToolPointerEvent eventAt(PlanController c, Vector2 world,
++    {int buttons = 0, int pointer = 7}) {
++  final cam = c.toolController.context.camera.value;
++  final s = cam.worldToScreen(world);
++  return ToolPointerEvent(
++      screen: Offset(s.x, s.y),
++      world: world,
++      pointer: pointer,
++      buttons: buttons,
++      shift: false,
++      control: false,
++      meta: false,
++      alt: false,
++      pickRadiusWorld: kPickRadiusPixels / cam.scale);
++}
++
++/// A hover, a primary press and a release at [world], to the active tool.
++void tapAt(PlanController c, Vector2 world) {
++  final tools = c.toolController;
++  tools.active.onPointerMove(eventAt(c, world), tools.context);
++  tools.active
++      .onPointerDown(eventAt(c, world, buttons: kPrimaryButton), tools.context);
++  tools.active.onPointerUp(eventAt(c, world), tools.context);
++}
++
++/// A primary press at [from], eight moves to [to], [beforeUp], a release.
++void dragFrom(PlanController c, Vector2 from, Vector2 to,
++    {void Function()? beforeUp}) {
++  final tools = c.toolController;
++  tools.active.onPointerMove(eventAt(c, from), tools.context);
++  tools.active
++      .onPointerDown(eventAt(c, from, buttons: kPrimaryButton), tools.context);
++  for (var i = 1; i <= 8; i++) {
++    final p = from + (to - from) * (i / 8);
++    tools.active
++        .onPointerMove(eventAt(c, p, buttons: kPrimaryButton), tools.context);
++  }
++  beforeUp?.call();
++  tools.active.onPointerUp(eventAt(c, to), tools.context);
++}
++
++/// The root-level lines of [d], ascending by handle.
++List<Handle> linesOf(DraftDocument d) {
++  final e = d.entities;
++  return [
++    for (final s in e.liveSlots)
++      if (e.kindAt(s) == EntityKind.line && e.ownerAt(s) == d.rootHandle)
++        e.handleAt(s),
++  ]..sort((a, b) => a.value.compareTo(b.value));
++}
++
++/// Draws one line from [a] to [b] with `plan.line`, then arms `plan.select`
++/// (which ends the line tool's chain). Returns the line's handle.
++Handle drawLine(PlanController c, Vector2 a, Vector2 b) {
++  final before = linesOf(c.document).toSet();
++  if (!c.selectTool('plan.line')) throw StateError('plan.line refused');
++  tapAt(c, a);
++  tapAt(c, b);
++  c.selectTool('plan.select');
++  return linesOf(c.document).singleWhere((h) => !before.contains(h));
++}
++
++/// The midpoint of the line [line] of [d] as drawn: the drawing tools snap
++/// to the page's grid, so a drawn line's ends are not the points tapped.
++Vector2 drawnMidOf(DraftDocument d, Handle line) {
++  final e = d.entities;
++  final coords = d.geometry.read(e.geomIndexAt(e.slotOf(line)!)).coords;
++  return Vector2((coords[0] + coords[2]) / 2, (coords[1] + coords[3]) / 2);
++}
++
++/// Lets the document's change stream (asynchronous) reach the controller's
++/// history flags (`canUndo`, `canRedo`, `dirty`).
++Future<void> settleHistory() => Future<void>.delayed(Duration.zero);
+diff --git a/packages/jet_cad_2d_plan/test/tools/generic_tools_test.dart b/packages/jet_cad_2d_plan/test/tools/generic_tools_test.dart
+new file mode 100644
+index 00000000..962932dd
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/tools/generic_tools_test.dart
+@@ -0,0 +1,90 @@
++// Spec P1 "Reserved ids", P2 "The keyboard" (Task 12): the plan library's
++// own tools, their ids, letters and needs, and what buildGenericTools makes
++// of them. The letters are today's (planner_shell.dart:517-623 for the
++// generic rows); plan.symbol has none and is not built here (Task 14).
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/src/tools/generic_tools.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++final class _Resolver implements MoveResolver {
++  @override
++  ({Transform2 transform, Vector2 marker})? resolveMove(
++          ToolContext ctx, Handle node, Transform2 delta) =>
++      null;
++}
++
++void main() {
++  test('PM-12 the generic tools: ids, letters, needs and Fill, in order', () {
++    expect([
++      for (final t in genericTools) t.id
++    ], [
++      'plan.select',
++      'plan.line',
++      'plan.polyline',
++      'plan.rectangle',
++      'plan.circle',
++      'plan.arc',
++      'plan.text',
++    ]);
++    // M-PM12: the letters of plan.line and plan.polyline swapped.
++    expect([for (final t in genericTools) t.letter],
++        ['V', 'L', 'P', 'R', 'C', 'A', 'T']);
++    expect(genericTools.first.needs, isEmpty, reason: 'select only reads');
++    for (final t in genericTools.skip(1)) {
++      // Every drawing tool commits an AddEntityCommand (geometry).
++      expect(t.needs, {Capability.geometry}, reason: t.id);
++    }
++    expect([
++      for (final t in genericTools)
++        if (t.fills) t.id
++    ], [
++      'plan.polyline',
++      'plan.rectangle',
++      'plan.circle'
++    ]);
++    expect(PlanToolIds.all, [
++      'plan.select',
++      'plan.line',
++      'plan.polyline',
++      'plan.rectangle',
++      'plan.circle',
++      'plan.arc',
++      'plan.text',
++      'plan.symbol',
++    ]);
++    expect(PlanToolIds.symbolNeeds,
++        {Capability.structure, Capability.geometry, Capability.components});
++  });
++
++  test(
++      'PM-13 buildGenericTools: one tool per id, select with the gates and '
++      'the resolver, the fill tools on the one toggle', () {
++    final fill = ValueNotifier<bool>(false);
++    final gates = SelectGates.all;
++    final resolver = _Resolver();
++    final set =
++        buildGenericTools(gates: gates, fill: fill, moveResolver: resolver);
++    addTearDown(() {
++      set.dispose();
++      fill.dispose();
++    });
++    expect(set.byId.keys, [for (final t in genericTools) t.id]);
++    expect(set.byId['plan.select'], same(set.select));
++    expect(set.select.gates, same(gates));
++    expect(set.select.moveResolver, same(resolver));
++    expect(set.byId['plan.line'], isA<LineTool>());
++    expect(set.byId['plan.arc'], isA<ArcTool>());
++    expect(set.byId['plan.text'], isA<TextTool>());
++    // M-PM13: PolylineTool built without `fill`.
++    expect((set.byId['plan.polyline']! as PolylineTool).fill, same(fill));
++    expect((set.byId['plan.rectangle']! as RectangleTool).fill, same(fill));
++    expect((set.byId['plan.circle']! as CircleTool).fill, same(fill));
++    expect((set.byId['plan.line']! as LineTool).fill, isNull);
++    final bare = buildGenericTools(gates: gates, fill: fill);
++    addTearDown(bare.dispose);
++    expect(bare.select.moveResolver, isNull, reason: 'Task 14 injects it');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart b/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart
+new file mode 100644
+index 00000000..d4ba6b3e
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/tools/plan_select_gates_test.dart
+@@ -0,0 +1,144 @@
++// Spec P2 "Permissions" (select gates: move, rotate, reshape, delete) and
++// P4 "Locks" (the select gates refuse a locked object), Task 12. The gates
++// read the permissions live, and the selection's lock state from a cache
++// recomputed on a selection or a lock notification. Fixtures: lines off the
++// origin; a nested key whose chain names a locked group.
++import 'dart:typed_data';
++
++import 'package:flutter/foundation.dart' show ValueNotifier;
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
++import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
++import 'package:jet_cad_2d_plan/src/tools/plan_select_gates.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++final class Rig {
++  Rig() {
++    document = DraftDocument.empty();
++    for (final (a, b) in [
++      (Vector2(4100.5, -1250.25), Vector2(4700.75, -980.5)),
++      (Vector2(5200.25, -1610.75), Vector2(5900.5, -1300.25)),
++    ]) {
++      final cmd = addDrafted(document, EntityKind.line, linePayload(a, b),
++          layer: ReservedHandles.layerZero);
++      document.commands.execute(cmd);
++      lines.add(cmd.record.handle);
++    }
++    selection = SelectionController(document);
++    gates = PlanSelectGates(
++        permissions: () => permissions, selection: selection, locked: locked);
++    addTearDown(() {
++      gates.dispose();
++      selection.dispose();
++      locked.dispose();
++    });
++  }
++
++  late final DraftDocument document;
++  late final SelectionController selection;
++  late final PlanSelectGates gates;
++  final List<Handle> lines = [];
++  final ValueNotifier<Set<Handle>> locked = ValueNotifier(const {});
++  PlanPermissions permissions = PlanPermissions.full;
++
++  Map<String, bool> get open => {
++        'move': gates.move,
++        'rotate': gates.rotate,
++        'reshape': gates.reshape,
++        'delete': gates.delete,
++      };
++}
++
++const Map<String, bool> kAllOpen = {
++  'move': true,
++  'rotate': true,
++  'reshape': true,
++  'delete': true,
++};
++const Map<String, bool> kAllShut = {
++  'move': false,
++  'rotate': false,
++  'reshape': false,
++  'delete': false,
++};
++
++void main() {
++  test('PM-8 each gate reads its own flag, live', () {
++    final r = Rig();
++    expect(r.open, kAllOpen);
++    for (final name in kAllOpen.keys) {
++      r.permissions = switch (name) {
++        'move' => PlanPermissions.full.copyWith(move: false),
++        'rotate' => PlanPermissions.full.copyWith(rotate: false),
++        'reshape' => PlanPermissions.full.copyWith(reshape: false),
++        _ => PlanPermissions.full.copyWith(delete: false),
++      };
++      // M-PM8: `PlanSelectGates.delete` drops `_permissions().delete &&`.
++      expect(r.open, {...kAllOpen, name: false}, reason: name);
++    }
++    r.permissions = PlanPermissions.readOnly;
++    expect(r.open, kAllShut);
++    expect(r.gates.idleKeys, isTrue, reason: 'the keys are the shortcuts');
++    r.gates.idleKeys = false;
++    expect(r.gates.idleKeys, isFalse);
++    // The pick and the band are the select tool's own.
++    expect(r.gates.restrictsPick, isFalse);
++  });
++
++  test(
++      'PM-9 a selection holding a locked object shuts every gate; a lock '
++      'change or a selection change recomputes it', () {
++    final r = Rig();
++    r.selection.replace([SelectionKey.root(r.lines[0])]);
++    expect(r.open, kAllOpen);
++    // M-PM9a: `_locked.addListener(_recompute)` dropped: the lock arrives
++    // after the selection.
++    r.locked.value = {r.lines[0]};
++    expect(r.gates.selectionLocked, isTrue);
++    // M-PM9b: `&& super.move` (the lock) dropped from `move`.
++    expect(r.open, kAllShut);
++    // Another, unlocked object alone: open again.
++    r.selection.replace([SelectionKey.root(r.lines[1])]);
++    expect(r.open, kAllOpen);
++    // Both: one locked object is enough.
++    r.selection.replace(
++        [SelectionKey.root(r.lines[1]), SelectionKey.root(r.lines[0])]);
++    expect(r.open, kAllShut);
++    r.locked.value = const {};
++    expect(r.open, kAllOpen);
++  });
++
++  test('PM-10 a key inside a locked object (its chain) is locked too', () {
++    final r = Rig();
++    const group = Handle(0x7a31);
++    r.locked.value = {group};
++    final nested = SelectionKey(
++        chain: Uint32List.fromList([group.value, 0x7a40]),
++        chainLength: 2,
++        target: r.lines[1]);
++    r.selection.replace([nested]);
++    // M-PM10: the chain loop of `_recompute` dropped.
++    expect(r.gates.selectionLocked, isTrue);
++    expect(r.open, kAllShut);
++  });
++
++  test('PM-11 dispose removes both listeners', () {
++    final document = DraftDocument.empty();
++    final selection = SelectionController(document);
++    final locked = ValueNotifier<Set<Handle>>(const {});
++    final gates = PlanSelectGates(
++        permissions: () => PlanPermissions.full,
++        selection: selection,
++        locked: locked);
++    gates.dispose();
++    // A disposed gates object left as a listener would recompute here; the
++    // notifiers report no listener instead.
++    // ignore: invalid_use_of_protected_member
++    expect(selection.hasListeners, isFalse);
++    // ignore: invalid_use_of_protected_member
++    expect(locked.hasListeners, isFalse);
++    selection.dispose();
++    locked.dispose();
++  });
++}

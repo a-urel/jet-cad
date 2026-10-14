@@ -15,6 +15,9 @@ import 'kit_ids.dart';
 /// Immutable and value-equal, [tags] and [attachTo] compared in order;
 /// [toJson] keys are alphabetical. Every bad value is an [ArgumentError]
 /// from the constructor, named by its field.
+///
+/// [retired] (contract R2) is written only when true and read as false when
+/// absent: a library or a plan saved before it keeps its bytes.
 @immutable
 final class SymbolComponent implements Component {
   /// Throws [ArgumentError] (never an assert: a release build refuses too)
@@ -27,6 +30,7 @@ final class SymbolComponent implements Component {
     required List<String> tags,
     List<String> attachTo = const [],
     this.family,
+    this.retired = false,
   })  : tags = List.unmodifiable(tags),
         attachTo = List.unmodifiable(attachTo) {
     if (!isSymbolKey(key)) {
@@ -97,6 +101,10 @@ final class SymbolComponent implements Component {
   /// The size family this symbol belongs to, or null.
   final String? family;
 
+  /// True: the symbol stays in its library, so plans that hold it keep
+  /// drawing it, but the plan library's gallery no longer offers it.
+  final bool retired;
+
   /// `key@version`, the definition's name in a library.
   String get id => '$key@$version';
 
@@ -110,13 +118,14 @@ final class SymbolComponent implements Component {
         'family': family,
         'key': key,
         'name': name,
+        if (retired) 'retired': true,
         'tags': tags,
         'version': version,
       };
 
   /// Throws [FormatException] for a missing or mistyped field, and the
   /// constructor's [ArgumentError] for a value K2 refuses. A field this
-  /// build does not know is ignored.
+  /// build does not know is ignored; an absent `retired` reads false.
   static SymbolComponent fromJson(Map<String, Object?> json) {
     const t = 'SymbolComponent';
     return SymbolComponent(
@@ -127,6 +136,7 @@ final class SymbolComponent implements Component {
       tags: stringList(json, 'tags', t),
       attachTo: stringList(json, 'attachTo', t),
       family: field<String?>(json, 'family', t),
+      retired: optionalField<bool>(json, 'retired', t, false),
     );
   }
 
@@ -139,12 +149,14 @@ final class SymbolComponent implements Component {
       other.category == category &&
       listEquals(other.tags, tags) &&
       listEquals(other.attachTo, attachTo) &&
-      other.family == family;
+      other.family == family &&
+      other.retired == retired;
 
   @override
   int get hashCode => Object.hash(key, version, name, category,
-      Object.hashAll(tags), Object.hashAll(attachTo), family);
+      Object.hashAll(tags), Object.hashAll(attachTo), family, retired);
 
   @override
-  String toString() => 'SymbolComponent($id, $name, $category)';
+  String toString() =>
+      'SymbolComponent($id, $name, $category${retired ? ', retired' : ''})';
 }

@@ -42,6 +42,7 @@ DraftDocument buildLibraryDocument(Catalog catalog) {
         tags: s.tags,
         attachTo: s.attachTo,
         family: s.family,
+        retired: s.retired,
       ),
   ];
   final units = [

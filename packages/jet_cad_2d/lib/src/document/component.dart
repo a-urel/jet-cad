@@ -1,5 +1,6 @@
 import 'package:meta/meta.dart';
 
+import '../core/diagnostic.dart';
 import '../core/handle.dart';
 import 'object_layer.dart';
 import 'origin_component.dart';
@@ -254,14 +255,11 @@ class ComponentRegistry {
   Map<String, Object?> toJson() {
     final byTypeId = <String, Map<String, Object?>>{};
 
-    for (final entry in _stores.entries) {
-      final typeId = _typeIdOf[entry.key]!;
-      for (final handle in entry.value.handles) {
-        (byTypeId[typeId] ??= {})[handle.value.toString()] =
-            entry.value[handle]!.toJson();
-      }
-    }
-
+    // Unknown payloads first, registered values second. On the one handle
+    // where the two share a type id (a payload `loadJson` kept raw because
+    // its factory threw, spec 2a E4, then a value of that type attached),
+    // the registered value is the one written. Among unknown payloads of one
+    // type id on one handle, the last still wins (see [restore]).
     final unknownHandles = _unknown.keys.toList()
       ..sort((a, b) => a.value.compareTo(b.value));
     for (final handle in unknownHandles) {
@@ -279,6 +277,14 @@ class ComponentRegistry {
       }
     }
 
+    for (final entry in _stores.entries) {
+      final typeId = _typeIdOf[entry.key]!;
+      for (final handle in entry.value.handles) {
+        (byTypeId[typeId] ??= {})[handle.value.toString()] =
+            entry.value[handle]!.toJson();
+      }
+    }
+
     final sortedTypeIds = byTypeId.keys.toList()..sort();
     return {
       for (final typeId in sortedTypeIds)
@@ -292,7 +298,24 @@ class ComponentRegistry {
     return {for (final k in keys) k: raw[k]};
   }
 
-  void loadJson(Map<String, Object?> json) {
+  /// Replaces every component here with those of [json], in the shape
+  /// [toJson] writes. A type id with no factory is kept raw
+  /// ([attachUnknown]), so a later save writes it back unchanged.
+  ///
+  /// A registered factory that throws (spec 2a E4):
+  /// - with no [diagnostics], its error propagates and the load stops, as
+  ///   it always has;
+  /// - with [diagnostics], the payload is kept raw exactly as an unknown
+  ///   type's is, so the handle carries no value of the type and a save
+  ///   writes the payload back unchanged. One [Diagnostic] is added:
+  ///   severity error, code `component.unreadable`, the handle, and the
+  ///   message `'<typeId>: <error>'`. Every throw counts, an [Error] too: a
+  ///   factory's missing or mistyped field is a `TypeError`.
+  ///
+  /// A value of the type attached to that handle later is the one [toJson]
+  /// writes; the raw payload stays in [unknownOf] until the handle's node
+  /// is removed.
+  void loadJson(Map<String, Object?> json, {List<Diagnostic>? diagnostics}) {
     clear();
     for (final typeId in json.keys.toList()..sort()) {
       final perHandle = (json[typeId]! as Map).cast<String, Object?>();
@@ -308,7 +331,26 @@ class ComponentRegistry {
           attachUnknown(handle, {'typeId': typeId, ...payload});
           continue;
         }
-        _stores[_typeOf[typeId]!]!.set(handle, factory(payload));
+        if (diagnostics == null) {
+          _stores[_typeOf[typeId]!]!.set(handle, factory(payload));
+          continue;
+        }
+        final Component component;
+        try {
+          component = factory(payload);
+        } catch (error) {
+          // Spec 2a E4: unreadable by this build, so kept as an unknown
+          // type is, and reported.
+          attachUnknown(handle, {'typeId': typeId, ...payload});
+          diagnostics.add(Diagnostic(
+            severity: DiagnosticSeverity.error,
+            code: 'component.unreadable',
+            message: '$typeId: $error',
+            handles: [handle],
+          ));
+          continue;
+        }
+        _stores[_typeOf[typeId]!]!.set(handle, component);
       }
     }
   }

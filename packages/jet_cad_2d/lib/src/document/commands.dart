@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../core/handle.dart';
+import '../core/partial_mutation_error.dart';
 import '../geometry/transform2.dart';
 import '../geometry/triangulate.dart';
 import '../store/entity_store.dart';
@@ -950,12 +951,12 @@ class RemoveRegionCommand extends DraftCommand {
 /// the state before this compound began — **provided the rollback itself
 /// completes.** An inverse that has just been produced by a successful
 /// `apply` is expected to replay, and every shipped inverse does; if one
-/// nevertheless throws, the rollback stops there, and a [StateError] naming
-/// both failures replaces the original error, because the target is then
-/// partially mutated with nothing in history to describe it and the caller
-/// must know that rather than see the child's own exception and conclude
-/// nothing happened. The dispatcher pushes no history and emits no
-/// [DocChange] on either path.
+/// nevertheless throws, the rollback stops there, and a
+/// [PartialMutationError] (a [StateError]) naming both failures replaces the
+/// original error, because the target is then partially mutated with
+/// nothing in history to describe it and the caller must know that rather
+/// than see the child's own exception and conclude nothing happened. The
+/// dispatcher pushes no history and emits no [DocChange] on either path.
 ///
 /// [capabilities] is the union of the children's, so a runtime document
 /// refuses a compound that removes geometry even when its first child is a
@@ -1003,7 +1004,8 @@ class CompoundCommand extends DraftCommand {
             inverse.apply(target);
           }
         } catch (rollbackError) {
-          throw StateError('"$label": child ${inverses.length} threw ($error) '
+          throw PartialMutationError(
+              '"$label": child ${inverses.length} threw ($error) '
               'and the rollback then threw ($rollbackError); the target is '
               'partially mutated and nothing was recorded in history');
         }

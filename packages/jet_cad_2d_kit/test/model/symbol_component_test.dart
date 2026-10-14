@@ -18,6 +18,7 @@ SymbolComponent sofa({
   List<String> attachTo = const ['wall-face', 'room-corner'],
   String? family = 'sofa-long',
   bool noFamily = false,
+  bool retired = false,
 }) =>
     SymbolComponent(
       key: key,
@@ -27,6 +28,7 @@ SymbolComponent sofa({
       tags: tags,
       attachTo: attachTo,
       family: noFamily ? null : family,
+      retired: retired,
     );
 
 Matcher refusedOn(String field) =>
@@ -214,6 +216,61 @@ void main() {
     test('C12 a field this build does not know is ignored', () {
       // Review Focus 3. M-C12: refuse unknown keys; this goes red.
       expect(SymbolComponent.fromJson({...full, 'newerField': 1}), sofa());
+    });
+  });
+
+  group('retired (contract R2)', () {
+    test('R2-1 written only when true, in its alphabetical place', () {
+      expect(sofa().retired, isFalse);
+      // M-R2a: always write the key; C7's pinned text goes red too.
+      expect(sofa().toJson().containsKey('retired'), isFalse);
+      expect(sofa(retired: true).toJson().keys.toList(), [
+        'attachTo',
+        'category',
+        'family',
+        'key',
+        'name',
+        'retired',
+        'tags',
+        'version',
+      ]);
+      expect(
+          jsonEncode(sofa(retired: true).toJson()),
+          '{"attachTo":["wall-face","room-corner"],"category":"Living Room",'
+          '"family":"sofa-long","key":"sample.sofa.three",'
+          '"name":"Three-seat sofa","retired":true,'
+          '"tags":["sofa","seating","couch"],"version":3}');
+    });
+
+    test('R2-2 absent reads false; present must be a bool', () {
+      // M-R2b: read it with `field` (required): a map without it, every
+      // library and plan saved before R2, is refused.
+      expect(SymbolComponent.fromJson(full).retired, isFalse);
+      expect(SymbolComponent.fromJson({...full, 'retired': true}),
+          sofa(retired: true));
+      expect(SymbolComponent.fromJson({...full, 'retired': false}), sofa());
+      // M-R2c: `json['retired'] == true` (anything else reads false).
+      for (final bad in <Object?>['true', 1, null]) {
+        expect(() => SymbolComponent.fromJson({...full, 'retired': bad}),
+            throwsFormatException,
+            reason: '$bad');
+      }
+    });
+
+    test('R2-3 equality and the hash see it', () {
+      // M-R2d: drop `retired` from ==.
+      expect(sofa(retired: true), isNot(sofa()));
+      expect(sofa(retired: true), sofa(retired: true));
+      expect(sofa(retired: true).hashCode, sofa(retired: true).hashCode);
+      expect('${sofa(retired: true)}', endsWith(', retired)'));
+    });
+
+    test('R2-4 it reads back through JSON text', () {
+      final s = sofa(retired: true, noFamily: true);
+      expect(
+          SymbolComponent.fromJson((jsonDecode(jsonEncode(s.toJson())) as Map)
+              .cast<String, Object?>()),
+          s);
     });
   });
 }

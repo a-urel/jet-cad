@@ -7,6 +7,7 @@
 // Pure Dart: no Flutter, no dart:io.
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:jet_cad_2d/jet_cad_2d.dart';
@@ -298,7 +299,7 @@ final class SymbolLibrary {
     }
 
     // Rules 4 and 11, per definition: at least one leaf, a unit's outline
-    // (closed, and enclosing more than the tolerance squared).
+    // (closed, and wider than the tolerance, contract R7).
     final entries = <SymbolEntry>[];
     for (final (definition, symbol, unit) in drafts) {
       final who = 'definition ${definition.handle.toHex()} (${symbol.id})';
@@ -320,15 +321,20 @@ final class SymbolLibrary {
               '${first.record.handle.toHex()}, is not a closed polyline or a '
               'circle');
         }
-        // A circle's radius is already above the tolerance (rule 15).
+        // A circle's radius is already above the tolerance (rule 15). A
+        // closed polyline's width is 2·area/perimeter: a sliver of any
+        // length is as thin as it is wide, so the test scales (R7). Rule 15
+        // has already refused a polyline whose points all lie within the
+        // tolerance, so the perimeter is not zero.
         if (first.record.kind == EntityKind.polyline) {
-          final area = _enclosedArea(first.payload);
-          final linear = Tolerance.standard.linear;
-          if (area <= linear * linear) {
+          final width =
+              2 * _enclosedArea(first.payload) / _perimeter(first.payload);
+          if (width <= Tolerance.standard.linear) {
             throw SymbolLibraryError(
                 11,
                 '$who is a unit whose outline, '
-                '${first.record.handle.toHex()}, encloses no area ($area)');
+                '${first.record.handle.toHex()}, is too thin (width $width): '
+                'service mode would fill nothing');
           }
         }
       }
@@ -400,6 +406,18 @@ final class SymbolLibrary {
           (c[i * 2 + 2] - x0) * (c[i * 2 + 1] - y0);
     }
     return twice.abs() / 2;
+  }
+
+  /// Rule 11: the length of [p]'s path, the closing pair included (a closed
+  /// polyline repeats its first point).
+  static double _perimeter(GeometryPayload p) {
+    final c = p.coords;
+    var length = 0.0;
+    for (var i = 0; i + 1 < p.pointCount; i++) {
+      final dx = c[i * 2 + 2] - c[i * 2], dy = c[i * 2 + 3] - c[i * 2 + 1];
+      length += math.sqrt(dx * dx + dy * dy);
+    }
+    return length;
   }
 
   /// Rule 15: counts, finiteness, bounds, degeneracy against [Tolerance].

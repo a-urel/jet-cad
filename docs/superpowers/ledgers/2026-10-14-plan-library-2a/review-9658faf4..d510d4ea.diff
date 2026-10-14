@@ -1,0 +1,605 @@
+# Review package: 9658faf4..HEAD
+
+## Commits
+d510d4ea fix(plan): panel kit hooks at the boundary; Size menu rule pinned
+
+## Files changed
+ .../jet_cad_2d_plan/lib/src/panels/colour_row.dart |  60 +++++++--
+ .../lib/src/panels/plan_property_panel.dart        |  85 ++++++++++---
+ .../lib/src/panels/symbol_section.dart             |  12 ++
+ .../test/panels/property_panel_test.dart           | 137 +++++++++++++++++++++
+ .../test/panels/symbol_section_test.dart           |  26 +++-
+ 5 files changed, 296 insertions(+), 24 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart b/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
+index 72e144e7..4315618a 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/colour_row.dart
+@@ -4,56 +4,85 @@
+ // recolor. Ported from jet_cad_floor_plan/lib/src/colors/color_picker.dart:
+ // the closed list of rooms and tables (pickedColors, :18-53) becomes the
+ // types' colour targets (PlanType.colourOf, recolour); the swatches,
+ // marks, tooltips and semantics are today's.
+ import 'package:flutter/material.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../controller/plan_controller.dart';
++import '../kits/guard.dart' show KitHookFailure;
+ import '../l10n/strings.dart';
+ import 'kit_lookup.dart';
+ 
+ typedef ColourTargetOf = ({Handle handle, PlanType<Component> type});
+ 
+ /// The objects among [keys] whose type has a colour target, each once, in
+ /// key order: live objects (E1) that are not locked (spec P4).
+ List<ColourTargetOf> colourTargets(
+     PlanController c, Iterable<SelectionKey> keys) {
+   if (keys.isEmpty) return const [];
+   final doc = c.document;
+   return [
+     for (final h in {for (final k in keys) k.target})
+       if (!c.isLocked(h))
+         if (c.catalog.typeIdOf(doc, h) case final typeId?)
+           if (planTypeOf(c, typeId) case final type? when type.hasColour)
+             (handle: h, type: type),
+   ];
+ }
+ 
++/// What [pickedColours] lists for a target whose colour `read` threw:
++/// equal to no swatch's name, so it marks nothing.
++const String _unreadable = '\u0001';
++
+ /// Each target's stored swatch name (null for none), in [colourTargets]'
+-/// order.
++/// order. A kit's colour `read` that throws (spec P4: every kit hook at the
++/// contract's boundary) lists a name that marks nothing and is one
++/// `hookFailed` diagnostic, published after the frame (a build reads it).
+ List<String?> pickedColours(PlanController c, Iterable<SelectionKey> keys) => [
+-      for (final t in colourTargets(c, keys))
+-        t.type.colourOf(c.document, t.handle),
++      for (final t in colourTargets(c, keys)) _colourOf(c, t),
+     ];
+ 
++String? _colourOf(PlanController c, ColourTargetOf t) {
++  try {
++    return t.type.colourOf(c.document, t.handle);
++  } catch (error) {
++    c.diagnosticsLog.addAfterFrame(KitDiagnostic(
++        kitId: kitOfKey(t.type.id),
++        subject: t.type.id,
++        code: KitDiagnosticCode.hookFailed,
++        message: 'colour read: $error',
++        error: error));
++    return _unreadable;
++  }
++}
++
+ /// The one command that sets [swatch] (null: none) on every target among
+-/// [keys], labelled 'Colour'; null when none would change.
++/// [keys], labelled 'Colour'; null when none would change. A kit's colour
++/// `write` that throws is a [KitHookFailure] (hook `colour write`): the
++/// recolour is refused whole.
+ DraftCommand? recolourCommand(
+     PlanController c, Iterable<SelectionKey> keys, PlanSwatch? swatch) {
+   final doc = c.document;
+-  final edits = <DraftCommand>[
+-    for (final t in colourTargets(c, keys))
+-      if (t.type.recolour(doc, t.handle, swatch?.name) case final edit?) edit,
+-  ];
++  final edits = <DraftCommand>[];
++  for (final t in colourTargets(c, keys)) {
++    final DraftCommand? edit;
++    try {
++      edit = t.type.recolour(doc, t.handle, swatch?.name);
++    } catch (error) {
++      throw KitHookFailure(
++          kitOfKey(t.type.id), t.type.id, 'colour write', error);
++    }
++    if (edit != null) edits.add(edit);
++  }
+   return edits.isEmpty ? null : CompoundCommand(edits, label: 'Colour');
+ }
+ 
+ /// Why the row is read-only for [keys], or null when it acts (today's
+ /// `colorPickerBlocked`, `color_picker.dart:72-86`):
+ /// [PlanStrings.readOnlyDocument] when the document's permissions refuse
+ /// `components` or a target type's edit capability; [PlanStrings.colorRefused]
+ /// when `recolor` is off.
+ String? colourRowBlocked(
+     PlanController c, Iterable<SelectionKey> keys, PlanStrings strings) {
+@@ -79,21 +108,34 @@ class ColourRow extends StatelessWidget {
+ 
+   final PlanController controller;
+ 
+   /// The dark canvas's paper, ARGB, while the canvas re-tones; null on a
+   /// light canvas.
+   final int? darkCanvasPaper;
+ 
+   void _choose(PlanSwatch? swatch, PlanStrings strings) {
+     final keys = controller.selection.keys;
+     if (colourRowBlocked(controller, keys, strings) != null) return;
+-    final command = recolourCommand(controller, keys, swatch);
++    final DraftCommand? command;
++    try {
++      command = recolourCommand(controller, keys, swatch);
++    } on KitHookFailure catch (failure) {
++      // Refused (spec P4): nothing is executed; one diagnostic, as
++      // execute reports a hook failure.
++      controller.diagnosticsLog.add(KitDiagnostic(
++          kitId: failure.kitId,
++          subject: failure.typeId,
++          code: KitDiagnosticCode.hookFailed,
++          message: '${failure.hook}: ${failure.error}',
++          error: failure.error));
++      return;
++    }
+     // A refusal is caught inside execute (the lock hint, the diagnostic).
+     if (command != null) controller.execute(command);
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final strings = PlanStrings.of(context);
+     final keys = controller.selection.keys;
+     final blocked = colourRowBlocked(controller, keys, strings);
+     final colors = pickedColours(controller, keys);
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+index f4b725de..7ecd06d5 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/plan_property_panel.dart
+@@ -282,33 +282,49 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+     return planToolOf(_c, id)?.settings == null ? null : _ToolTarget(id);
+   }
+ 
+   _Target? _targetOf(_Field f) => switch (f.scope) {
+         _Scope.object => _objectTarget,
+         _Scope.tool => _toolTarget,
+         _Scope.symbol => _symbolTarget,
+       };
+ 
+   /// [t]'s fields, bound now; none when [t] is no longer a live object of
+-  /// its type.
+-  List<PropertyField> _bound(_Target t) {
++  /// its type, or when a kit hook threw binding them ([_fieldsOrNull]).
++  List<PropertyField> _bound(_Target t) => _fieldsOrNull(t) ?? const [];
++
++  /// [t]'s fields, bound now, or null when a kit's hook threw binding them
++  /// (a spec's `read` or `enabled`): spec P4, every kit hook at the
++  /// contract's boundary. The failure is one diagnostic ([_hookFailed]);
++  /// the panel's builds, listeners and focus changes go on.
++  List<PropertyField>? _fieldsOrNull(_Target t) {
+     final c = _c;
+     switch (t) {
+       case _ObjectTarget(:final handle, :final typeId):
+         if (c.catalog.typeIdOf(c.document, handle) != typeId) return const [];
+-        return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
++        try {
++          return planTypeOf(c, typeId)!.fieldsOf(c.document, handle);
++        } catch (error) {
++          _hookFailed(typeId, 'properties', error);
++          return null;
++        }
+       case _ToolTarget(:final toolId):
+         final settings = planToolOf(c, toolId)?.settings;
+         if (settings == null) return const [];
+-        return settings.fieldsOf(c.toolSettings.valueOf(toolId),
+-            (v) => c.toolSettings.store(toolId, v),
+-            toolId: toolId);
++        try {
++          return settings.fieldsOf(c.toolSettings.valueOf(toolId),
++              (v) => c.toolSettings.store(toolId, v),
++              toolId: toolId);
++        } catch (error) {
++          _hookFailed(toolId, 'settings', error);
++          return null;
++        }
+       case _SymbolTarget():
+         return const [];
+     }
+   }
+ 
+   PropertyField? _fieldOf(_Target t, String id) {
+     for (final f in _bound(t)) {
+       if (f.spec.id == id) return f;
+     }
+     return null;
+@@ -645,38 +661,83 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+         return Padding(
+           padding: const EdgeInsets.only(top: 8),
+           child: OutlinedButton(
+               key: key,
+               onPressed: editable ? () => _act(t, id, null) : null,
+               child: Text(label)),
+         );
+     }
+   }
+ 
++  /// One `hookFailed` diagnostic for [subject] (a type or a tool id) of its
++  /// kit: published after the frame, since a build may call it; the log
++  /// keeps one per kit, subject and code.
++  void _hookFailed(String subject, String hook, Object error) =>
++      _c.diagnosticsLog.addAfterFrame(KitDiagnostic(
++          kitId: kitOfKey(subject),
++          subject: subject,
++          code: KitDiagnosticCode.hookFailed,
++          message: '$hook: $error',
++          error: error));
++
++  /// What replaces a section whose kit hook threw while it was being built
++  /// (spec P4): Task 11's "section failed" box (`KitSectionBoundary`).
++  Widget _sectionFailed() {
++    final scheme = Theme.of(context).colorScheme;
++    return Container(
++      key: const Key('kit-section-failed'),
++      padding: const EdgeInsets.all(8),
++      decoration: BoxDecoration(
++        border: Border.all(color: scheme.error),
++        borderRadius: BorderRadius.circular(4),
++      ),
++      child:
++          Text(_strings.sectionFailed, style: TextStyle(color: scheme.error)),
++    );
++  }
++
+   List<Widget> _settingsSection(_ToolTarget t, TextStyle? title) {
+     final kit = kitOfKey(t.toolId);
++    final fields = _fieldsOrNull(t);
++    if (fields == null) return [_sectionFailed()];
+     return [
+       Text(planWordOf(_c, kit, 'tool:${t.toolId}') ?? t.toolId,
+           key: Key('settings-${t.toolId}'), style: title),
+-      for (final field in _bound(t)) _row(t, _Scope.tool, field, kit),
++      for (final field in fields) _row(t, _Scope.tool, field, kit),
+     ];
+   }
+ 
++  /// The type's title word for [t], or null when its `title` hook threw
++  /// (one diagnostic).
++  String? _titleWordOf(PlanType<Component> type, _ObjectTarget t) {
++    try {
++      return type.titleWordOf(_c.document, t.handle);
++    } catch (error) {
++      _hookFailed(t.typeId, 'title', error);
++      return null;
++    }
++  }
++
+   List<Widget> _objectSection(_ObjectTarget t, TextStyle? title) {
+     final c = _c;
+     final doc = c.document;
+     final type = planTypeOf(c, t.typeId)!;
+     final kit = kitOfKey(t.typeId);
++    // Spec P4: a hook that throws while the section builds (a title, a
++    // spec's read or enabled) replaces the whole section by the box.
++    final titleWord = _titleWordOf(type, t);
++    final fields = _fieldsOrNull(t);
++    if (titleWord == null || fields == null) return [_sectionFailed()];
+     return [
+-      Text(planWordOf(c, kit, type.titleWordOf(doc, t.handle)) ?? t.typeId,
++      Text(planWordOf(c, kit, titleWord) ?? t.typeId,
+           key: Key('section-${t.typeId}'), style: title),
+-      for (final field in _bound(t)) _row(t, _Scope.object, field, kit),
++      for (final field in fields) _row(t, _Scope.object, field, kit),
+       if (type.hasSection)
+         // Spec P4: a section builder that throws shows a small box in its
+         // place (Task 11's boundary).
+         KitSectionBoundary(
+           kitId: kit,
+           typeId: t.typeId,
+           log: c.diagnosticsLog,
+           builder: (context) => type.sectionFor(
+               context,
+               doc,
+@@ -689,25 +750,21 @@ class _PlanPropertyPanelState extends State<PlanPropertyPanel> {
+   }
+ 
+   /// The Symbol section (09c D7; `selection_panel.dart:1122-1191`).
+   List<Widget> _symbolSection(_SymbolTarget t, TextStyle? title) {
+     final c = _c;
+     final doc = c.document;
+     final h = t.handle;
+     final node = doc.tree[h]! as InstanceNode;
+     final component = doc.components.get<SymbolComponent>(node.definition)!;
+     final box = boxOfDefinition(doc, node.definition);
+-    final entries = symbolEntriesOf(c.symbols);
+-    final entry = entryOfInstance(entries, doc, h);
+-    final members = entry == null || isServableInstance(doc, h)
+-        ? const <SymbolEntry>[]
+-        : familyMembers(entries, entry);
++    final members = sizeMenuMembers(symbolEntriesOf(c.symbols), doc, h);
+     String size(SymbolBox b) => '${formatPanelNumber(b.width, _strings)} × '
+         '${formatPanelNumber(b.depth, _strings)}';
+     final p = c.permissions;
+     final engine = doc.commands.permissions;
+     final turnable = engine.allows(Capability.transform);
+     final resizable = engine.allows(Capability.structure) &&
+         engine.allows(Capability.geometry) &&
+         engine.allows(Capability.components) &&
+         turnable;
+     final name = c.kits
+diff --git a/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart b/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
+index c8a7cf4b..05024514 100644
+--- a/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
++++ b/packages/jet_cad_2d_plan/lib/src/panels/symbol_section.dart
+@@ -77,20 +77,32 @@ List<SymbolEntry> familyMembers(List<SymbolEntry> entries, SymbolEntry entry) {
+         if (boxOfEntry(e) != null) e
+     ]..sort((a, b) {
+         final x = boxOfEntry(a)!, y = boxOfEntry(b)!;
+         final w = x.width.compareTo(y.width);
+         return w != 0 ? w : x.depth.compareTo(y.depth);
+       });
+     return List<SymbolEntry>.unmodifiable(members);
+   }();
+ }
+ 
++/// What the Symbol section's Size menu offers for [instance] (D7, V-4,
++/// R5-3): its entry's size family among [entries], or nothing for an
++/// instance with no entry or a servable one (a table never changes size,
++/// whatever family its entry names).
++List<SymbolEntry> sizeMenuMembers(
++    List<SymbolEntry> entries, DraftDocument doc, Handle instance) {
++  final entry = entryOfInstance(entries, doc, instance);
++  return entry == null || isServableInstance(doc, instance)
++      ? const <SymbolEntry>[]
++      : familyMembers(entries, entry);
++}
++
+ final Expando<List<SymbolEntry>> _entriesOf = Expando<List<SymbolEntry>>();
+ 
+ /// The entries of the controller's loaded symbols, one list per symbols
+ /// list, so [familyMembers]' memo holds across builds.
+ List<SymbolEntry> symbolEntriesOf(List<PlanSymbol> symbols) =>
+     _entriesOf[symbols] ??=
+         List<SymbolEntry>.unmodifiable([for (final s in symbols) s.entry]);
+ 
+ /// The Rotation field's display steps per degree: it shows a rotation
+ /// rounded to a millionth of a degree, and a typed value within one step
+diff --git a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+index 578c6780..c5fb3f2a 100644
+--- a/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/property_panel_test.dart
+@@ -10,20 +10,22 @@ import 'package:flutter/services.dart' show LogicalKeyboardKey;
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart' show SelectionKey;
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ import 'package:jet_cad_2d_plan/jet_cad_2d_plan.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../support/panel_kits.dart';
+ import '../support/canvas_fixture.dart';
+ import '../support/design_harness.dart';
++import '../support/test_kit.dart' show addObject;
++import '../support/throwing_kit.dart';
+ 
+ Finder byKey(String k) => find.byKey(Key(k));
+ 
+ String textOf(WidgetTester tester, String key) =>
+     tester.widget<TextField>(byKey(key)).controller!.text;
+ 
+ bool readOnly(WidgetTester tester, String key) =>
+     tester.widget<TextField>(byKey(key)).readOnly;
+ 
+ Future<void> select(
+@@ -288,11 +290,146 @@ void main() {
+     expect(old.components.get<BoxParams>(b)!.width, 150,
+         reason: 'settled into the plan it was typed for');
+     expect(c.document.components.get<BoxParams>(b)!.width, 120);
+     // A later focus loss writes nothing into the new plan.
+     await select(tester, c, [b]);
+     await tester.tap(byKey('section-box.box'));
+     await tester.pump();
+     expect(c.document.components.get<BoxParams>(b)!.width, 120);
+     expect(c.document.commands.canUndo, isFalse);
+   });
++
++  // ---- Fix round 1 (controller ruling): the kit hooks the panel calls
++  // while it builds or acts are called at the contract's boundary (spec
++  // P4). The throwing kit's boom.block beside a box of the box kit.
++
++  ({PlanController c, ThrowingKit boom, Handle block, Handle box}) boomPlan() {
++    final boom = ThrowingKit();
++    final c = boxController(kits: [boxKit, boom.kit]);
++    final block = addObject<BlockComponent>(
++        c.document, const BlockComponent(size: 400, swatch: 'purple'),
++        at: Vector2(7500, 3200));
++    final box =
++        addBox(c, Vector2(7010, 3020), const BoxParams(120, 70), turn: 0.61);
++    return (c: c, boom: boom, block: block, box: box);
++  }
++
++  /// The boom kit's hookFailed diagnostics, each as its failing hook.
++  List<String> boomFailures(PlanController c) => [
++        for (final d in c.diagnostics.value)
++          if (d.kitId == 'boom' && d.code == KitDiagnosticCode.hookFailed)
++            '${d.subject}: ${(d.error! as BoomFailure).hook}',
++      ];
++
++  bool swatchMarked(WidgetTester tester, String name) =>
++      tester
++          .widget<Semantics>(find
++              .ancestor(
++                  of: byKey('color-swatch-$name'),
++                  matching: find.byWidgetPredicate(
++                      (w) => w is Semantics && w.properties.label != null))
++              .first)
++          .properties
++          .selected ??
++      false;
++
++  testWidgets(
++      'P-G1 a spec read that throws while the section builds replaces the '
++      'section with the "section failed" box, one diagnostic; a document '
++      'change reloads nothing into it; the rest of the panel edits '
++      '(M-P-G1)', (tester) async {
++    final p = boomPlan();
++    final c = p.c;
++    await panel(tester, c);
++    p.boom.failing.add('read');
++    await select(tester, c, [p.block]);
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(byKey('kit-section-failed'), findsOneWidget);
++    expect(byKey('section-boom.block'), findsNothing);
++    expect(byKey('property-size'), findsNothing);
++    expect(boomFailures(c), ['boom.block: read']);
++    // A document change while the block is selected: the panel's listener
++    // binds the fields again, at the boundary.
++    c.document.commands.execute(SetComponentCommand<BoxParams>(p.box,
++        c.document.components.get<BoxParams>(p.box)!.withColour('teal')));
++    await tester.pump();
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(boomFailures(c), ['boom.block: read']);
++    // The rest of the panel stays usable.
++    await select(tester, c, [p.box]);
++    await enterAndSubmit(tester, 'property-width', '150');
++    expect(c.document.components.get<BoxParams>(p.box)!.width, 150);
++    // The hook heals: the block's section is back.
++    p.boom.failing.clear();
++    await select(tester, c, [p.block]);
++    expect(byKey('kit-section-failed'), findsNothing);
++    expect(textOf(tester, 'property-size'), '400');
++  });
++
++  testWidgets(
++      'P-G2 a title hook that throws replaces the section with the box, one '
++      'diagnostic; the box\'s section still shows (M-P-G2)', (tester) async {
++    final p = boomPlan();
++    final c = p.c;
++    await panel(tester, c);
++    p.boom.failing.add('title');
++    await select(tester, c, [p.block]);
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(byKey('kit-section-failed'), findsOneWidget);
++    expect(byKey('section-boom.block'), findsNothing);
++    expect(byKey('property-size'), findsNothing);
++    expect(boomFailures(c), ['boom.block: title']);
++    await select(tester, c, [p.box]);
++    expect(tester.widget<Text>(byKey('section-box.box')).data, 'Box');
++    expect(byKey('kit-section-failed'), findsNothing);
++  });
++
++  testWidgets(
++      'P-G3 (read) a colour read that throws marks nothing for that object, '
++      'one diagnostic; the row stays and recolours (M-P-G3r)', (tester) async {
++    final p = boomPlan();
++    final c = p.c;
++    await panel(tester, c);
++    await select(tester, c, [p.block]);
++    expect(swatchMarked(tester, 'purple'), isTrue,
++        reason: 'premise: the block is purple');
++    p.boom.failing.add('colourRead');
++    await select(tester, c, []);
++    await select(tester, c, [p.block]);
++    await tester.pump();
++    expect(tester.takeException(), isNull);
++    expect(byKey('color-picker'), findsOneWidget);
++    expect(swatchMarked(tester, 'purple'), isFalse);
++    expect(boomFailures(c), ['boom.block: colourRead']);
++    final depth = c.document.commands.undoDepth;
++    await tapKey(tester, 'color-swatch-teal');
++    expect(c.document.components.get<BlockComponent>(p.block)!.swatch, 'teal');
++    expect(c.document.commands.undoDepth, depth + 1);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++      'P-G3 (write) a colour write that throws refuses the whole recolour: '
++      'nothing changes, no step, one diagnostic; the row then recolours '
++      'the box alone (M-P-G3w)', (tester) async {
++    final p = boomPlan();
++    final c = p.c;
++    await panel(tester, c);
++    p.boom.failing.add('colourWrite');
++    await select(tester, c, [p.box, p.block]);
++    final depth = c.document.commands.undoDepth;
++    await tapKey(tester, 'color-swatch-teal');
++    expect(tester.takeException(), isNull);
++    expect(c.document.components.get<BoxParams>(p.box)!.colour, isNull);
++    expect(
++        c.document.components.get<BlockComponent>(p.block)!.swatch, 'purple');
++    expect(c.document.commands.undoDepth, depth);
++    expect(boomFailures(c), ['boom.block: colourWrite']);
++    await select(tester, c, [p.box]);
++    await tapKey(tester, 'color-swatch-teal');
++    expect(c.document.components.get<BoxParams>(p.box)!.colour, 'teal');
++    expect(c.document.commands.undoDepth, depth + 1);
++  });
+ }
+diff --git a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+index 2b30a545..563f88f2 100644
+--- a/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
++++ b/packages/jet_cad_2d_plan/test/panels/symbol_section_test.dart
+@@ -353,20 +353,43 @@ void main() {
+       ].last;
+       final payload = doc.geometry.read(e.geomIndexAt(e.slotOf(leaf)!));
+       final coords = Float64List.fromList(payload.coords)..[0] += 10;
+       doc.commands.execute(SetEntityGeometryCommand(
+           leaf, GeometryPayload(coords: coords, scalars: payload.scalars)));
+       expect(
+           definitionForEntry(doc, entry('test.bed.1600')).commands, isNotEmpty,
+           reason: 'premise: the entry would be copied');
+       expect(changeSizeCommand(doc, h, entry('test.bed.1600')), isNull);
+     });
++
++    test(
++        'SS12 (new, Task 17 fix round 1) the Size menu offers a bed its '
++        'family and a servable instance nothing, even when its entry names '
++        'the beds\' family (V-4, R5-3, M-09c-bf)', () {
++      final doc = rig();
++      final bed = place(doc, 'test.bed.1600', far);
++      final bedTable = place(doc, 'test.bed.table', far + Vector2(4000, 0));
++      expect(entryOfInstance(familyEntries, doc, bedTable)!.symbol.family,
++          'test-bed',
++          reason: 'premise: the servable instance\'s entry has a family');
++      expect(
++          familyMembers(familyEntries, entry('test.bed.table')), hasLength(3),
++          reason: 'premise: the family offers beds');
++      expect([
++        for (final m in sizeMenuMembers(familyEntries, doc, bed)) m.symbol.key
++      ], [
++        'test.bed.1400',
++        'test.bed.1600',
++        'test.bed.1800'
++      ]);
++      expect(sizeMenuMembers(familyEntries, doc, bedTable), isEmpty);
++    });
+   });
+ 
+   group('the panel', () {
+     Finder byKey(String k) => find.byKey(Key(k));
+ 
+     /// Lets the controller's symbol load settle: a few pumps, as the
+     /// gallery's tests do.
+     Future<void> settle(WidgetTester tester, PlanController c) async {
+       for (var i = 0;
+           i < 10 && c.symbolsState.value == PlanSymbolsState.loading;
+@@ -517,21 +540,22 @@ void main() {
+       await select(tester, c, [bed]);
+       expect(menuEnabled(tester), isFalse);
+       doc.commands.permissions = DraftPermissions.all;
+       await select(tester, c, []);
+       await select(tester, c, [bed]);
+       expect(menuEnabled(tester), isTrue);
+     });
+ 
+     testWidgets(
+         'SW5 a table has no Size menu, its family all tables or all beds '
+-        '(R5-3, M-09c-bf)', (tester) async {
++        '(R5-3; K2 rule 9 leaves the loaded library\'s tables without a '
++        'family, so M-09c-bf is pinned by SS12)', (tester) async {
+       final c = await pumpPanel(tester);
+       final doc = c.document;
+       final table = place(doc, 'test.table.a', far);
+       await select(tester, c, [table]);
+       expect(byKey('symbol-section'), findsOneWidget);
+       expect(byKey('symbol-size-menu'), findsNothing);
+       // A servable member of the beds' family: its family lists three beds,
+       // but a table never changes size.
+       final bedTable = place(doc, 'test.bed.table', far + Vector2(4000, 0));
+       expect(

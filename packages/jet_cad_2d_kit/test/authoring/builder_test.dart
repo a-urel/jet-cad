@@ -224,4 +224,31 @@ void main() {
     expect(() => buildLibraryDocument(throwing), throwsStateError);
     expect(() => encodeLibrary(throwing), throwsStateError);
   });
+
+  test('R2-5 a retired symbol is built retired, the others not', () {
+    const retiredLamp = CatalogSymbol(
+      key: 'sample.lamp.wall',
+      name: 'Wall lamp',
+      category: 'Lighting',
+      tags: ['lamp', 'light'],
+      attachTo: ['wall-face'],
+      family: 'lamp-wall',
+      base: (640, 220),
+      shapes: [
+        CatalogArc((640, 220), 180, 0.25, -2.75),
+        CatalogPolyline([(460, 220), (820, 220), (700, 90)]),
+      ],
+      retired: true,
+    );
+    final bytes = encodeLibrary(
+        const Catalog(kit: 'sample', symbols: [table, retiredLamp, seat]));
+    // M-R2e: the builder leaves `retired` out.
+    expect(
+        [for (final e in SymbolLibrary.decode(bytes).entries) e.symbol.retired],
+        [false, true, false]);
+    expect('"retired":true'.allMatches(utf8.decode(bytes)), hasLength(1));
+    // Not retired, nothing is written: a library built before R2 keeps its
+    // bytes.
+    expect(utf8.decode(encodeLibrary(catalog)), isNot(contains('retired')));
+  });
 }

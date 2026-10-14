@@ -85,17 +85,25 @@ class DraftDocumentCodec {
 
   static String encodeToString(DraftDocument doc) => jsonEncode(encode(doc));
 
-  /// [diagnostics], when supplied, receives every diagnostic import produces —
-  /// currently only [DocumentTree.repairCycles]'s reports of a dropped
-  /// definition-cycle back edge. The repair itself always happens; passing no
+  /// [diagnostics], when supplied, receives every diagnostic import produces:
+  /// [DocumentTree.repairCycles]'s reports of a dropped definition-cycle back
+  /// edge and, with [keepUnreadableComponents], one `component.unreadable`
+  /// per component kept raw. The repair itself always happens; passing no
   /// list only means the caller is not told what was dropped, so a caller that
   /// needs to surface data loss to a user must pass one.
+  ///
+  /// [keepUnreadableComponents] (spec 2a E4): when true, a component whose
+  /// registered factory throws is kept raw and reported instead of failing
+  /// the decode (see `ComponentRegistry.loadJson`). Off by default: a caller
+  /// that must refuse such a document, a symbol library, still gets the
+  /// factory's error.
   static DraftDocument decode(
     Map<String, Object?> json, {
     TextMeasurer measurer = const InsertionPointMeasurer(),
     DraftPermissions permissions = DraftPermissions.all,
     int undoLimit = 200,
     List<Diagnostic>? diagnostics,
+    bool keepUnreadableComponents = false,
     void Function(ComponentRegistry registry)? registerComponents,
   }) {
     // Both ends, not just the future one. A declared `0`, or a negative
@@ -130,8 +138,12 @@ class DraftDocumentCodec {
     diagnostics?.addAll(treeDiagnostics);
     _loadEntities(doc, json['entities']);
 
-    doc.components
-        .loadJson((json['components']! as Map).cast<String, Object?>());
+    // Spec 2a E4: only a caller that asks gets an unreadable component kept
+    // raw. A symbol library's decode relies on the factory's throw.
+    doc.components.loadJson(
+        (json['components']! as Map).cast<String, Object?>(),
+        diagnostics:
+            keepUnreadableComponents ? (diagnostics ?? <Diagnostic>[]) : null);
     doc.rawData.loadJson((json['rawData']! as Map).cast<String, Object?>());
     // The file's declared seed is a floor, not the sole source of truth: every
     // handle actually read above raises the seed as it is read (see
@@ -155,6 +167,7 @@ class DraftDocumentCodec {
     DraftPermissions permissions = DraftPermissions.all,
     int undoLimit = 200,
     List<Diagnostic>? diagnostics,
+    bool keepUnreadableComponents = false,
     void Function(ComponentRegistry registry)? registerComponents,
   }) =>
       decode(
@@ -163,6 +176,7 @@ class DraftDocumentCodec {
         permissions: permissions,
         undoLimit: undoLimit,
         diagnostics: diagnostics,
+        keepUnreadableComponents: keepUnreadableComponents,
         registerComponents: registerComponents,
       );
 

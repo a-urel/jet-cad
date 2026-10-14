@@ -1,0 +1,1087 @@
+# Review package: aee66cb7..HEAD
+
+## Commits
+3d84a62c feat(engine): catalog type queries, PartialMutationError, unreadable components (2a E1, E3, E4)
+
+## Files changed
+ packages/jet_cad_2d/CHANGELOG.md                   |  17 ++
+ packages/jet_cad_2d/lib/jet_cad_2d.dart            |   1 +
+ packages/jet_cad_2d/lib/src/codec/json_codec.dart  |  24 ++-
+ .../lib/src/core/partial_mutation_error.dart       |  15 ++
+ packages/jet_cad_2d/lib/src/document/commands.dart |  14 +-
+ .../jet_cad_2d/lib/src/document/component.dart     |  62 +++++-
+ .../lib/src/parametric/parametric_system.dart      |  21 +++
+ .../lib/src/parametric/regeneration.dart           |  20 +-
+ .../test/codec/unreadable_component_test.dart      | 208 +++++++++++++++++++++
+ .../test/parametric/catalog_queries_test.dart      | 104 +++++++++++
+ .../test/parametric/partial_mutation_test.dart     | 156 ++++++++++++++++
+ 11 files changed, 613 insertions(+), 29 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d/CHANGELOG.md b/packages/jet_cad_2d/CHANGELOG.md
+index 3024376e..4fba52b3 100644
+--- a/packages/jet_cad_2d/CHANGELOG.md
++++ b/packages/jet_cad_2d/CHANGELOG.md
+@@ -1,12 +1,29 @@
+ # Changelog
+ 
++## Unreleased
++
++- `ParametricCatalog.typeIds` and `ParametricCatalog.typeIdOf(target,
++  group)`: the registered type ids in registration order, and the type id
++  that names a group's live object by the engine's own rule (null when it
++  is none).
++- `PartialMutationError`, a `StateError` with the same message, is what a
++  failed rollback now throws: `CompoundCommand.apply`, and a
++  `ParametricEdit` undoing its edit, its reference cascade or its
++  regeneration. A caller catching `StateError` is unaffected.
++- `ComponentRegistry.loadJson(json, diagnostics: list)` and
++  `DraftDocumentCodec.decode(…, keepUnreadableComponents: true)`: a
++  component whose factory throws is kept raw, as an unknown type is, and
++  reported as a `component.unreadable` diagnostic naming its handle,
++  instead of failing the load. Off by default. A value of the type
++  attached to that handle later is the one a save writes.
++
+ ## 0.7.2
+ 
+ Documentation and funding only; no code change. Plans are stored as in
+ 0.7.1.
+ 
+ - The README links the renderer (`jet_cad_2d_flutter`), the planner
+   (`jet_cad_floor_plan`) and the host guide, and says that a host adds
+   only the planner: it brings the engine and the renderer with it.
+ - Funding links (GitHub Sponsors, Buy Me a Coffee) in the pubspec.
+ 
+diff --git a/packages/jet_cad_2d/lib/jet_cad_2d.dart b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+index 03bd6dbf..c80fbc18 100644
+--- a/packages/jet_cad_2d/lib/jet_cad_2d.dart
++++ b/packages/jet_cad_2d/lib/jet_cad_2d.dart
+@@ -3,20 +3,21 @@
+ /// This package has no Flutter dependency and performs no rendering. The
+ /// widget layer lives in `jet_cad_2d_flutter`; format adapters live in their
+ /// own packages and use only this package's public API.
+ library;
+ 
+ export 'src/codec/json_codec.dart';
+ export 'src/codec/schema_version.dart';
+ export 'src/core/diagnostic.dart';
+ export 'src/core/handle.dart';
+ export 'src/core/list_equality.dart';
++export 'src/core/partial_mutation_error.dart';
+ export 'src/core/tolerance.dart';
+ export 'src/document/command.dart';
+ export 'src/document/commands.dart';
+ export 'src/document/component.dart';
+ export 'src/document/doc_change.dart';
+ export 'src/document/draft_document.dart';
+ export 'src/document/drafting.dart';
+ export 'src/document/extents.dart';
+ export 'src/document/fill_index.dart';
+ export 'src/document/grips.dart';
+diff --git a/packages/jet_cad_2d/lib/src/codec/json_codec.dart b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+index 7a82c0c5..c614cfb4 100644
+--- a/packages/jet_cad_2d/lib/src/codec/json_codec.dart
++++ b/packages/jet_cad_2d/lib/src/codec/json_codec.dart
+@@ -78,31 +78,39 @@ class DraftDocumentCodec {
+         ],
+         'components': doc.components.toJson(),
+         'rawData': doc.rawData.toJson(),
+         'handleSeed': doc.handleSeed.current.toJson(),
+         // Anything a newer build wrote, written back untouched.
+         ...doc.unknownDocumentFields,
+       };
+ 
+   static String encodeToString(DraftDocument doc) => jsonEncode(encode(doc));
+ 
+-  /// [diagnostics], when supplied, receives every diagnostic import produces —
+-  /// currently only [DocumentTree.repairCycles]'s reports of a dropped
+-  /// definition-cycle back edge. The repair itself always happens; passing no
++  /// [diagnostics], when supplied, receives every diagnostic import produces:
++  /// [DocumentTree.repairCycles]'s reports of a dropped definition-cycle back
++  /// edge and, with [keepUnreadableComponents], one `component.unreadable`
++  /// per component kept raw. The repair itself always happens; passing no
+   /// list only means the caller is not told what was dropped, so a caller that
+   /// needs to surface data loss to a user must pass one.
++  ///
++  /// [keepUnreadableComponents] (spec 2a E4): when true, a component whose
++  /// registered factory throws is kept raw and reported instead of failing
++  /// the decode (see `ComponentRegistry.loadJson`). Off by default: a caller
++  /// that must refuse such a document, a symbol library, still gets the
++  /// factory's error.
+   static DraftDocument decode(
+     Map<String, Object?> json, {
+     TextMeasurer measurer = const InsertionPointMeasurer(),
+     DraftPermissions permissions = DraftPermissions.all,
+     int undoLimit = 200,
+     List<Diagnostic>? diagnostics,
++    bool keepUnreadableComponents = false,
+     void Function(ComponentRegistry registry)? registerComponents,
+   }) {
+     // Both ends, not just the future one. A declared `0`, or a negative
+     // version, is not a document this package ever wrote; accepting it would
+     // parse the file as v1 and only fail — if at all — somewhere deeper in,
+     // with a FormatException that names a field rather than the version.
+     final version = json['schemaVersion'];
+     if (version is! int || version < 1 || version > kSchemaVersion) {
+       throw SchemaVersionError(version);
+     }
+@@ -123,22 +131,26 @@ class DraftDocumentCodec {
+ 
+     _loadHeader(doc, json['header']);
+     _loadTables(doc, json['tables']);
+     // Not `diagnostics?.addAll(_loadTree(...))`: `?.` short-circuits on the
+     // *receiver*, so with no diagnostics list that would skip calling
+     // _loadTree entirely rather than merely skip recording its result.
+     final treeDiagnostics = _loadTree(doc, json);
+     diagnostics?.addAll(treeDiagnostics);
+     _loadEntities(doc, json['entities']);
+ 
+-    doc.components
+-        .loadJson((json['components']! as Map).cast<String, Object?>());
++    // Spec 2a E4: only a caller that asks gets an unreadable component kept
++    // raw. A symbol library's decode relies on the factory's throw.
++    doc.components.loadJson(
++        (json['components']! as Map).cast<String, Object?>(),
++        diagnostics:
++            keepUnreadableComponents ? (diagnostics ?? <Diagnostic>[]) : null);
+     doc.rawData.loadJson((json['rawData']! as Map).cast<String, Object?>());
+     // The file's declared seed is a floor, not the sole source of truth: every
+     // handle actually read above raises the seed as it is read (see
+     // _loadTables, _loadTree, _loadEntities), so a file whose declared seed
+     // undercounts what it actually contains still cannot reissue a live
+     // handle.
+     doc.handleSeed.raiseTo(Handle.fromJson(json['handleSeed']));
+ 
+     _rebuildFills(doc, diagnostics);
+ 
+@@ -148,28 +160,30 @@ class DraftDocumentCodec {
+     doc.commands.notifyLoaded();
+     return doc;
+   }
+ 
+   static DraftDocument decodeString(
+     String source, {
+     TextMeasurer measurer = const InsertionPointMeasurer(),
+     DraftPermissions permissions = DraftPermissions.all,
+     int undoLimit = 200,
+     List<Diagnostic>? diagnostics,
++    bool keepUnreadableComponents = false,
+     void Function(ComponentRegistry registry)? registerComponents,
+   }) =>
+       decode(
+         (jsonDecode(source) as Map).cast<String, Object?>(),
+         measurer: measurer,
+         permissions: permissions,
+         undoLimit: undoLimit,
+         diagnostics: diagnostics,
++        keepUnreadableComponents: keepUnreadableComponents,
+         registerComponents: registerComponents,
+       );
+ 
+   static void _loadHeader(DraftDocument doc, Object? json) {
+     final header =
+         DocumentHeader.fromJson((json! as Map).cast<String, Object?>());
+     doc.header
+       ..units = header.units
+       ..scale = header.scale
+       ..globalLinetypeScale = header.globalLinetypeScale
+diff --git a/packages/jet_cad_2d/lib/src/core/partial_mutation_error.dart b/packages/jet_cad_2d/lib/src/core/partial_mutation_error.dart
+new file mode 100644
+index 00000000..124c9c90
+--- /dev/null
++++ b/packages/jet_cad_2d/lib/src/core/partial_mutation_error.dart
+@@ -0,0 +1,15 @@
++/// A command threw, and undoing what it had already applied threw too, so
++/// the target is partially mutated and nothing was recorded in history
++/// (spec 2a E3).
++///
++/// Thrown by `CompoundCommand.apply` and by a `ParametricEdit` (when undoing
++/// the triggering edit fails, when the reference cascade's rollback fails,
++/// and when the regeneration's rollback fails), in place of the plain
++/// [StateError] they threw before. The message is unchanged. It is still a
++/// [StateError], so every caller that catches one catches it as before. A
++/// caller that must react to an unknown document state tests for this type
++/// instead of matching the message: it rebuilds what it derived from the
++/// document and stops trusting its history.
++final class PartialMutationError extends StateError {
++  PartialMutationError(super.message);
++}
+diff --git a/packages/jet_cad_2d/lib/src/document/commands.dart b/packages/jet_cad_2d/lib/src/document/commands.dart
+index 1e9d0787..8219d951 100644
+--- a/packages/jet_cad_2d/lib/src/document/commands.dart
++++ b/packages/jet_cad_2d/lib/src/document/commands.dart
+@@ -1,13 +1,14 @@
+ import 'dart:typed_data';
+ 
+ import '../core/handle.dart';
++import '../core/partial_mutation_error.dart';
+ import '../geometry/transform2.dart';
+ import '../geometry/triangulate.dart';
+ import '../store/entity_store.dart';
+ import '../store/geometry_store.dart';
+ import 'command.dart';
+ import 'component.dart';
+ import 'node.dart';
+ import 'style.dart';
+ 
+ /// Adds one leaf entity together with its geometry.
+@@ -943,25 +944,25 @@ class RemoveRegionCommand extends DraftCommand {
+ /// depend on the one before it — a node is added, then moved — and its
+ /// inverse must run before that dependency is undone.
+ ///
+ /// **All-or-nothing, like every command.** A child that throws has the
+ /// children before it rolled back by applying the inverses collected so far,
+ /// in reverse, before the error propagates. `DraftCommand.apply`'s contract
+ /// says a throwing child mutated nothing, so the rollback restores exactly
+ /// the state before this compound began — **provided the rollback itself
+ /// completes.** An inverse that has just been produced by a successful
+ /// `apply` is expected to replay, and every shipped inverse does; if one
+-/// nevertheless throws, the rollback stops there, and a [StateError] naming
+-/// both failures replaces the original error, because the target is then
+-/// partially mutated with nothing in history to describe it and the caller
+-/// must know that rather than see the child's own exception and conclude
+-/// nothing happened. The dispatcher pushes no history and emits no
++/// nevertheless throws, the rollback stops there, and a
++/// [PartialMutationError] (a [StateError]) naming both failures replaces the
++/// original error, because the target is then partially mutated with
++/// nothing in history to describe it and the caller must know that rather
++/// than see the child's own exception and conclude nothing happened. The dispatcher pushes no history and emits no
+ /// [DocChange] on either path.
+ ///
+ /// [capabilities] is the union of the children's, so a runtime document
+ /// refuses a compound that removes geometry even when its first child is a
+ /// permitted move. [capability] summarises it as the highest-ranked member,
+ /// and is what `SpatialIndex` and `TileCache` read to skip a components-only
+ /// compound (spec D13); it is `components` only when every member is, which
+ /// is why `Capability.components` is declared first (A1, Ruling 04-19).
+ class CompoundCommand extends DraftCommand {
+   final List<DraftCommand> children;
+@@ -996,21 +997,22 @@ class CompoundCommand extends DraftCommand {
+     for (final child in children) {
+       final CommandResult result;
+       try {
+         result = child.apply(target);
+       } catch (error) {
+         try {
+           for (final inverse in inverses.reversed) {
+             inverse.apply(target);
+           }
+         } catch (rollbackError) {
+-          throw StateError('"$label": child ${inverses.length} threw ($error) '
++          throw PartialMutationError(
++              '"$label": child ${inverses.length} threw ($error) '
+               'and the rollback then threw ($rollbackError); the target is '
+               'partially mutated and nothing was recorded in history');
+         }
+         rethrow;
+       }
+       inverses.add(result.inverse);
+       touched.addAll(result.touched);
+     }
+     return CommandResult(
+       inverse: CompoundCommand(inverses.reversed.toList(), label: label),
+diff --git a/packages/jet_cad_2d/lib/src/document/component.dart b/packages/jet_cad_2d/lib/src/document/component.dart
+index 34d92f6c..c1f6329f 100644
+--- a/packages/jet_cad_2d/lib/src/document/component.dart
++++ b/packages/jet_cad_2d/lib/src/document/component.dart
+@@ -1,12 +1,13 @@
+ import 'package:meta/meta.dart';
+ 
++import '../core/diagnostic.dart';
+ import '../core/handle.dart';
+ import 'object_layer.dart';
+ import 'origin_component.dart';
+ 
+ /// Extension data attached to any handle.
+ ///
+ /// Contract for every implementation: **immutable, value-equal, and [toJson]
+ /// emits keys in a fixed order.** Value equality lets value-diff undo compare
+ /// and restore component state; fixed key order keeps serialization
+ /// byte-deterministic.
+@@ -247,75 +248,116 @@ class ComponentRegistry {
+   List<Map<String, Object?>> unknownOf(Handle handle) =>
+       List.unmodifiable(_unknown[handle] ?? const []);
+ 
+   /// Shape: `{ typeId: { handleDecimal: payload } }`.
+   ///
+   /// Type ids sort lexicographically and handles sort numerically, so the same
+   /// registry always produces the same bytes.
+   Map<String, Object?> toJson() {
+     final byTypeId = <String, Map<String, Object?>>{};
+ 
+-    for (final entry in _stores.entries) {
+-      final typeId = _typeIdOf[entry.key]!;
+-      for (final handle in entry.value.handles) {
+-        (byTypeId[typeId] ??= {})[handle.value.toString()] =
+-            entry.value[handle]!.toJson();
+-      }
+-    }
+-
++    // Unknown payloads first, registered values second. On the one handle
++    // where the two share a type id (a payload `loadJson` kept raw because
++    // its factory threw, spec 2a E4, then a value of that type attached),
++    // the registered value is the one written. Among unknown payloads of one
++    // type id on one handle, the last still wins (see [restore]).
+     final unknownHandles = _unknown.keys.toList()
+       ..sort((a, b) => a.value.compareTo(b.value));
+     for (final handle in unknownHandles) {
+       for (final payload in _unknown[handle]!) {
+         final typeId = payload['typeId']! as String;
+         // The enclosing map key already names the type, so the written
+         // payload must not duplicate it — mirrors the registered branch,
+         // whose `toJson()` never embeds its own typeId. `unknownOf` keeps the
+         // stored copy (with typeId) untouched; only the written form is bare.
+         final withoutTypeId = {
+           for (final e in payload.entries)
+             if (e.key != 'typeId') e.key: e.value,
+         };
+         (byTypeId[typeId] ??= {})[handle.value.toString()] = withoutTypeId;
+       }
+     }
+ 
++    for (final entry in _stores.entries) {
++      final typeId = _typeIdOf[entry.key]!;
++      for (final handle in entry.value.handles) {
++        (byTypeId[typeId] ??= {})[handle.value.toString()] =
++            entry.value[handle]!.toJson();
++      }
++    }
++
+     final sortedTypeIds = byTypeId.keys.toList()..sort();
+     return {
+       for (final typeId in sortedTypeIds)
+         typeId: _sortedByHandle(byTypeId[typeId]!),
+     };
+   }
+ 
+   static Map<String, Object?> _sortedByHandle(Map<String, Object?> raw) {
+     final keys = raw.keys.toList()
+       ..sort((a, b) => int.parse(a).compareTo(int.parse(b)));
+     return {for (final k in keys) k: raw[k]};
+   }
+ 
+-  void loadJson(Map<String, Object?> json) {
++  /// Replaces every component here with those of [json], in the shape
++  /// [toJson] writes. A type id with no factory is kept raw
++  /// ([attachUnknown]), so a later save writes it back unchanged.
++  ///
++  /// A registered factory that throws (spec 2a E4):
++  /// - with no [diagnostics], its error propagates and the load stops, as
++  ///   it always has;
++  /// - with [diagnostics], the payload is kept raw exactly as an unknown
++  ///   type's is, so the handle carries no value of the type and a save
++  ///   writes the payload back unchanged. One [Diagnostic] is added:
++  ///   severity error, code `component.unreadable`, the handle, and the
++  ///   message `'<typeId>: <error>'`. Every throw counts, an [Error] too: a
++  ///   factory's missing or mistyped field is a `TypeError`.
++  ///
++  /// A value of the type attached to that handle later is the one [toJson]
++  /// writes; the raw payload stays in [unknownOf] until the handle's node
++  /// is removed.
++  void loadJson(Map<String, Object?> json, {List<Diagnostic>? diagnostics}) {
+     clear();
+     for (final typeId in json.keys.toList()..sort()) {
+       final perHandle = (json[typeId]! as Map).cast<String, Object?>();
+       final handleKeys = perHandle.keys.toList()
+         ..sort((a, b) => int.parse(a).compareTo(int.parse(b)));
+       final factory = _factories[typeId];
+       for (final key in handleKeys) {
+         final handle = Handle.checked(int.parse(key));
+         final payload = (perHandle[key]! as Map).cast<String, Object?>();
+         if (factory == null) {
+           // Unknown to this build: keep it exactly as read, including the
+           // typeId, so it can be written back untouched.
+           attachUnknown(handle, {'typeId': typeId, ...payload});
+           continue;
+         }
+-        _stores[_typeOf[typeId]!]!.set(handle, factory(payload));
++        if (diagnostics == null) {
++          _stores[_typeOf[typeId]!]!.set(handle, factory(payload));
++          continue;
++        }
++        final Component component;
++        try {
++          component = factory(payload);
++        } catch (error) {
++          // Spec 2a E4: unreadable by this build, so kept as an unknown
++          // type is, and reported.
++          attachUnknown(handle, {'typeId': typeId, ...payload});
++          diagnostics.add(Diagnostic(
++            severity: DiagnosticSeverity.error,
++            code: 'component.unreadable',
++            message: '$typeId: $error',
++            handles: [handle],
++          ));
++          continue;
++        }
++        _stores[_typeOf[typeId]!]!.set(handle, component);
+       }
+     }
+   }
+ 
+   void clear() {
+     for (final store in _stores.values) {
+       store.clear();
+     }
+     _unknown.clear();
+   }
+diff --git a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+index 5eaa45a3..54827de4 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/parametric_system.dart
+@@ -1,15 +1,16 @@
+ import 'package:meta/meta.dart';
+ import 'package:vector_math/vector_math_64.dart' show Vector2;
+ 
+ import '../core/diagnostic.dart';
+ import '../core/handle.dart';
++import '../core/partial_mutation_error.dart';
+ import '../core/tolerance.dart';
+ import '../document/command.dart';
+ import '../document/commands.dart';
+ import '../document/component.dart';
+ import '../document/draft_document.dart';
+ import '../document/drafting.dart';
+ import '../document/layer_commands.dart';
+ import '../document/node.dart';
+ import '../document/page_component.dart';
+ import '../document/style.dart';
+@@ -534,20 +535,40 @@ class ParametricCatalog {
+   /// engine's own rule (spec 06 D5), so a nested, deleted or shadowed `T`
+   /// is never listed. The order is `ComponentRegistry.withComponent`'s,
+   /// which is ascending by contract; a filter keeps it. A fresh list each
+   /// call.
+   ///
+   /// Cost: O(k · types) for k holders of a `T`, after the store's sort.
+   List<Handle> objectsOf<T extends Component>(CommandTarget t) => [
+         for (final h in t.components.withComponent<T>())
+           if (names<T>(t, h)) h,
+       ];
++
++  /// The type id of every registration, in registration order, each once
++  /// (spec 2a E1): a type id registered again keeps the place of its first
++  /// registration. A fresh iterable each call; reads the catalog only.
++  Iterable<String> get typeIds => {for (final t in _types) t.typeId};
++
++  /// The type id of the registration that names [group]'s object in
++  /// [target], by the engine's own rule (the one [names] reads: a
++  /// root-level `GroupNode`, named by the last registered type whose
++  /// component it carries), or null when [group] is not a live parametric
++  /// object: a nested or deleted group, an entity, the root, a handle that
++  /// names nothing, or a group carrying no registered component. A
++  /// component `ComponentRegistry.loadJson` kept raw is not a registered
++  /// one (spec 2a E4).
++  ///
++  /// Spec 2a E1: a host dispatches grips, panels and layer pickers by this
++  /// instead of re-spelling the rule. Cost: O(registered types), like
++  /// [names]; no client code runs.
++  String? typeIdOf(CommandTarget target, Handle group) =>
++      _naming(target, _types, group)?.typeId;
+ }
+ 
+ /// Regenerates parametric objects inside the edit that changes them (spec
+ /// 06 D1, D2, D4). One per document; takes the dispatcher's expander slot.
+ class ParametricSystem {
+   ParametricSystem(this.document, this.catalog) {
+     catalog.registerComponents(document.components);
+   }
+ 
+   final DraftDocument document;
+diff --git a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+index 4f1aefe2..864798f9 100644
+--- a/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
++++ b/packages/jet_cad_2d/lib/src/parametric/regeneration.dart
+@@ -720,26 +720,28 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
+       final now = r.componentOrNull(t, h);
+       if (now == null) continue;
+       if (now == _heldBefore(before, r, h)) continue;
+       return (h, r);
+     }
+   }
+   return null;
+ }
+ 
+ /// Undoes [r] after a failure; if that fails too, the target is in an
+-/// unknown state and the caller must know it.
++/// unknown state and the caller must know it. That failure is a
++/// [PartialMutationError] (spec 2a E3).
+ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
+   try {
+     r.inverse.apply(t);
+   } catch (rollbackError) {
+-    throw StateError('"$label": $cause, and undoing the edit then threw '
++    throw PartialMutationError(
++        '"$label": $cause, and undoing the edit then threw '
+         '($rollbackError); the target is partially mutated and nothing was '
+         'recorded in history');
+   }
+ }
+ 
+ /// Spec 08 D4 step 4: deletes, in the edit, every `cascade`-policy referrer
+ /// of an object that stopped being a live object, and returns [r0] extended
+ /// by the removals. [r0] itself is returned when nothing is doomed.
+ ///
+ /// Rounds (Ruling 08-4): the doomed objects are the still-live `cascade`
+@@ -747,24 +749,24 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
+ /// longer an object (06's `_isObject` on the current tree, so a removed
+ /// node, a detached component and a group that is no longer root-level
+ /// alike), in ascending order. Each loses its subtree as the select tool
+ /// deletes a group ([_subtreeRemoval]). A doomed object is then no longer
+ /// an object itself, so the next round picks up its own `cascade`
+ /// referrers. Each round costs O(referents).
+ ///
+ /// Everything, deciding each command as well as applying it, every round,
+ /// runs under one rollback: a failure undoes what the cascade applied, then
+ /// [r0], and rethrows, so the target is as it was before the edit; a failed
+-/// rollback throws 06's "partially mutated" `StateError` and undoes nothing
+-/// more. The commands are applied one at a time, like `_run`'s regeneration
+-/// loop and for the same reason (06 debt): a child's refusal and a failed
+-/// rollback stay apart.
++/// rollback throws 06's "partially mutated" error, a [PartialMutationError]
++/// since spec 2a E3, and undoes nothing more. The commands are applied one
++/// at a time, like `_run`'s regeneration loop and for the same reason (06
++/// debt): a child's refusal and a failed rollback stay apart.
+ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
+     _Survey before, CommandResult r0, String label) {
+   if (before.referrers.isEmpty) return r0;
+   final inverses = <DraftCommand>[];
+   final touched = <Handle>{...r0.touched};
+   try {
+     while (true) {
+       final doomed = <Handle>{
+         for (final e in before.referrers.entries)
+           if (!_isObject(t, types, e.key))
+@@ -783,21 +785,22 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
+           touched.addAll(applied.touched);
+         }
+       }
+     }
+   } catch (error) {
+     try {
+       for (final i in inverses.reversed) {
+         i.apply(t);
+       }
+     } catch (rollbackError) {
+-      throw StateError('"$label": the reference cascade threw ($error) and '
++      throw PartialMutationError(
++          '"$label": the reference cascade threw ($error) and '
+           'its rollback threw ($rollbackError); the target is partially '
+           'mutated and nothing was recorded in history');
+     }
+     _undoInner(t, label, r0, error);
+     rethrow;
+   }
+   if (inverses.isEmpty) return r0;
+   return CommandResult(
+     inverse: CompoundCommand([...inverses.reversed, r0.inverse],
+         label: r0.inverse.label),
+@@ -1030,21 +1033,22 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
+   for (final c in plan) {
+     final CommandResult applied;
+     try {
+       applied = c.apply(t);
+     } catch (error) {
+       try {
+         for (final i in inverses.reversed) {
+           i.apply(t);
+         }
+       } catch (rollbackError) {
+-        throw StateError('"${edit.label}": regeneration threw ($error) and '
++        throw PartialMutationError(
++            '"${edit.label}": regeneration threw ($error) and '
+             'its rollback threw ($rollbackError); the target is partially '
+             'mutated and nothing was recorded in history');
+       }
+       _undoInner(t, edit.label, r, error);
+       rethrow;
+     }
+     inverses.add(applied.inverse);
+     touched.addAll(applied.touched);
+   }
+ 
+diff --git a/packages/jet_cad_2d/test/codec/unreadable_component_test.dart b/packages/jet_cad_2d/test/codec/unreadable_component_test.dart
+new file mode 100644
+index 00000000..c42a5c63
+--- /dev/null
++++ b/packages/jet_cad_2d/test/codec/unreadable_component_test.dart
+@@ -0,0 +1,208 @@
++// Spec 2a E4: a component whose registered factory throws is kept raw, as
++// an unknown type is, and reported with its handle, when the caller asks
++// for that. Otherwise the load fails as it always did. Groups sit off the
++// origin at rotations; the spars have non-round sizes.
++import 'dart:convert';
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++
++/// Refuses a non-positive width with ArgumentError, and reads its fields
++/// with casts, so a missing field is a TypeError.
++final class Spar implements Component {
++  Spar(this.width, this.depth) {
++    if (width <= 0) {
++      throw ArgumentError.value(width, 'width', 'must be positive');
++    }
++  }
++
++  static const String id = 'test.spar';
++
++  final double width;
++  final double depth;
++
++  @override
++  String get typeId => id;
++
++  @override
++  Map<String, Object?> toJson() => {'width': width, 'depth': depth};
++
++  static Spar fromJson(Map<String, Object?> j) =>
++      Spar((j['width']! as num).toDouble(), (j['depth']! as num).toDouble());
++
++  @override
++  bool operator ==(Object other) =>
++      other is Spar && other.width == width && other.depth == depth;
++
++  @override
++  int get hashCode => Object.hash(width, depth);
++}
++
++void registerSpar(ComponentRegistry registry) =>
++    registry.register<Spar>(Spar.id, Spar.fromJson);
++
++const Handle h1 = Handle(4100);
++const Handle h2 = Handle(4200);
++const Handle h3 = Handle(4300);
++
++/// Three spars as a registry writes them; [replaced] is written in place of
++/// the payload of each handle it names.
++Map<String, Object?> sparsJson(
++        [Map<Handle, Map<String, Object?>> replaced = const {}]) =>
++    {
++      Spar.id: {
++        for (final (h, s) in [
++          (h1, Spar(2400.5, 120)),
++          (h2, Spar(900.25, 80)),
++          (h3, Spar(1750, 95.5)),
++        ])
++          '${h.value}': replaced[h] ?? s.toJson(),
++      },
++    };
++
++/// Two spars on two root-level groups, each at its own rotated placement,
++/// encoded by the codec, with the second spar's payload replaced by
++/// [unreadable]. The text is the codec's own, so a save can be compared
++/// byte for byte.
++({String text, Handle readable, Handle unreadable}) savedWithUnreadable(
++    Map<String, Object?> unreadable) {
++  final doc = DraftDocument.empty();
++  registerSpar(doc.components);
++  final groups = <Handle>[];
++  for (final (i, spar) in [Spar(2400.5, 120), Spar(900.25, 80)].indexed) {
++    final g = doc.handleSeed.next();
++    doc.commands.execute(AddNodeCommand(GroupNode(
++        handle: g,
++        parent: doc.rootHandle,
++        transform: Transform2.translation(7010.0 + 2600 * i, 3020.0 - 450 * i)
++            .multiply(Transform2.rotation(math.pi / 6 + i)),
++        children: const [])));
++    doc.commands.execute(SetComponentCommand<Spar>(g, spar));
++    groups.add(g);
++  }
++  final json = DraftDocumentCodec.encode(doc);
++  final spars = (json['components']! as Map<String, Object?>)[Spar.id]!
++      as Map<String, Object?>;
++  spars['${groups[1].value}'] = unreadable;
++  return (text: jsonEncode(json), readable: groups[0], unreadable: groups[1]);
++}
++
++void main() {
++  test(
++      'E4-1 with a list, a throwing factory keeps the payload raw and '
++      'reports its handle', () {
++    final registry = ComponentRegistry()
++      ..register<Spar>(Spar.id, Spar.fromJson);
++    final diagnostics = <Diagnostic>[];
++    final json = sparsJson({
++      h2: {'width': -5.0, 'depth': 80.0},
++    });
++    registry.loadJson(json, diagnostics: diagnostics);
++
++    expect(registry.get<Spar>(h1), Spar(2400.5, 120));
++    expect(registry.get<Spar>(h3), Spar(1750, 95.5));
++    expect(registry.get<Spar>(h2), isNull);
++    // M-E4a: the catch keeps nothing raw.
++    expect(registry.unknownOf(h2), [
++      {'typeId': Spar.id, 'width': -5.0, 'depth': 80.0},
++    ]);
++    // M-E4b: nothing reported. M-E4c: no handle. M-E4d: no type id.
++    expect(diagnostics, hasLength(1));
++    final d = diagnostics.single;
++    expect(d.severity, DiagnosticSeverity.error);
++    expect(d.code, 'component.unreadable');
++    expect(d.handles, [h2]);
++    expect(d.message, startsWith('test.spar: '));
++    expect(d.message, contains('must be positive'));
++    // Written back unchanged, byte for byte.
++    expect(jsonEncode(registry.toJson()), jsonEncode(json));
++  });
++
++  test('E4-2 an Error thrown by the factory counts too', () {
++    final registry = ComponentRegistry()
++      ..register<Spar>(Spar.id, Spar.fromJson);
++    final diagnostics = <Diagnostic>[];
++    // No width: `j['width']!` throws a TypeError, not an Exception.
++    // M-E4e: `on Exception catch` lets it end the load.
++    registry.loadJson(
++        sparsJson({
++          h3: {'depth': 95.5},
++        }),
++        diagnostics: diagnostics);
++    expect(registry.get<Spar>(h1), Spar(2400.5, 120));
++    expect(registry.unknownOf(h3), [
++      {'typeId': Spar.id, 'depth': 95.5},
++    ]);
++    expect([
++      for (final d in diagnostics) d.handles
++    ], [
++      [h3],
++    ]);
++  });
++
++  test("E4-3 with no list, the factory's error propagates as before", () {
++    final registry = ComponentRegistry()
++      ..register<Spar>(Spar.id, Spar.fromJson);
++    // M-E4f: the factory is caught whether or not a list was given.
++    expect(
++        () => registry.loadJson(sparsJson({
++              h2: {'width': -5.0, 'depth': 80.0},
++            })),
++        throwsArgumentError);
++  });
++
++  test('E4-4 a value attached to that handle later is the one written', () {
++    final registry = ComponentRegistry()
++      ..register<Spar>(Spar.id, Spar.fromJson);
++    registry.loadJson(
++        sparsJson({
++          h2: {'width': -5.0, 'depth': 80.0},
++        }),
++        diagnostics: <Diagnostic>[]);
++    registry.attach(h2, Spar(950.5, 80));
++    // M-E4g: registered values written first, so the raw payload
++    // overwrites the new value.
++    expect((registry.toJson()[Spar.id]! as Map<String, Object?>)['4200'],
++        {'width': 950.5, 'depth': 80.0});
++  });
++
++  test(
++      'E4-5 the codec keeps an unreadable component when asked, and a save '
++      'writes it back byte for byte', () {
++    final saved = savedWithUnreadable({'width': -5.0, 'depth': 80.0});
++    final diagnostics = <Diagnostic>[];
++    // M-E4h: the codec hands loadJson no list; the decode throws.
++    final loaded = DraftDocumentCodec.decodeString(saved.text,
++        diagnostics: diagnostics,
++        keepUnreadableComponents: true,
++        registerComponents: registerSpar);
++    expect(loaded.components.get<Spar>(saved.readable), Spar(2400.5, 120));
++    expect(loaded.components.get<Spar>(saved.unreadable), isNull);
++    expect([for (final d in diagnostics) (d.code, d.severity)],
++        [('component.unreadable', DiagnosticSeverity.error)]);
++    expect(diagnostics.single.handles, [saved.unreadable]);
++    expect(DraftDocumentCodec.encodeToString(loaded), saved.text);
++
++    // With no list, it is kept all the same. M-E4j: the codec hands on the
++    // caller's null.
++    final quiet = DraftDocumentCodec.decodeString(saved.text,
++        keepUnreadableComponents: true, registerComponents: registerSpar);
++    expect(DraftDocumentCodec.encodeToString(quiet), saved.text);
++  });
++
++  test('E4-6 without the flag, the codec fails on it as before', () {
++    final saved = savedWithUnreadable({'width': -5.0, 'depth': 80.0});
++    // M-E4i: the codec hands on its list whatever the flag; a symbol
++    // library with a bad component would then decode (jet_cad_2d_kit's
++    // SymbolLibrary.decode relies on this throw).
++    expect(
++        () => DraftDocumentCodec.decodeString(saved.text,
++            diagnostics: <Diagnostic>[], registerComponents: registerSpar),
++        throwsArgumentError);
++    expect(
++        () => DraftDocumentCodec.decodeString(saved.text,
++            registerComponents: registerSpar),
++        throwsArgumentError);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/parametric/catalog_queries_test.dart b/packages/jet_cad_2d/test/parametric/catalog_queries_test.dart
+new file mode 100644
+index 00000000..311950f1
+--- /dev/null
++++ b/packages/jet_cad_2d/test/parametric/catalog_queries_test.dart
+@@ -0,0 +1,104 @@
++// Spec 2a E1: the catalog lists its type ids and names the type of a
++// group's live object by the engine's own rule. No parametric system is
++// installed: nothing regenerates, so each component lands where it is put,
++// nested and on an entity included. Every group is off the origin at a
++// rotation.
++import 'dart:math' as math;
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/clients.dart';
++
++final Transform2 at = Transform2.translation(7010, 3020)
++    .multiply(Transform2.rotation(math.pi / 6));
++
++/// SoftRect, ClipRect, Trip, then ClipRect again: not sorted, and one type
++/// id registered twice.
++ParametricCatalog e1Catalog() => ParametricCatalog()
++  ..register<SoftRect>(SoftRect.id, SoftRect.fromJson,
++      const RectType<SoftRect>(Capability.components))
++  ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
++      const RectType<ClipRect>(Capability.geometry))
++  ..register<Trip>(Trip.id, Trip.fromJson, const TripType())
++  ..register<ClipRect>(ClipRect.id, ClipRect.fromJson,
++      const RectType<ClipRect>(Capability.geometry));
++
++Handle addGroup(DraftDocument doc, Handle parent, Transform2 transform) {
++  final h = doc.handleSeed.next();
++  doc.commands.execute(AddNodeCommand(GroupNode(
++      handle: h, parent: parent, transform: transform, children: const [])));
++  return h;
++}
++
++void main() {
++  test('E1-typeIds the type ids, in registration order, each once', () {
++    // M-E1a: sorted, clipRect comes first.
++    // M-E1b: one entry per registration, clipRect is listed twice.
++    expect(e1Catalog().typeIds.toList(), [SoftRect.id, ClipRect.id, Trip.id]);
++    expect(ParametricCatalog().typeIds, isEmpty);
++  });
++
++  test(
++      "E1-typeIdOf names a live object's type by the engine rule, and null "
++      'for anything that is not one', () {
++    final catalog = e1Catalog();
++    final doc = DraftDocument.empty();
++    catalog.registerComponents(doc.components);
++
++    final soft = addGroup(doc, doc.rootHandle, at);
++    doc.commands
++        .execute(SetComponentCommand<SoftRect>(soft, const SoftRect(400, 900)));
++    final trip = addGroup(
++        doc, doc.rootHandle, at.multiply(Transform2.translation(-1800, 650)));
++    doc.commands.execute(SetComponentCommand<Trip>(trip, const Trip(310, 95)));
++    // Two registered types on one root-level group: the later registered
++    // (ClipRect, registered again last) names it.
++    final both = addGroup(
++        doc,
++        doc.rootHandle,
++        at
++            .multiply(Transform2.translation(2500, -300))
++            .multiply(Transform2.rotation(0.7)));
++    doc.commands
++        .execute(SetComponentCommand<SoftRect>(both, const SoftRect(300, 200)));
++    doc.commands
++        .execute(SetComponentCommand<ClipRect>(both, const ClipRect(700, 650)));
++    final nested = addGroup(doc, soft,
++        Transform2.translation(120, 80).multiply(Transform2.rotation(0.4)));
++    doc.commands
++        .execute(SetComponentCommand<ClipRect>(nested, const ClipRect(50, 60)));
++    final layered = addGroup(
++        doc, doc.rootHandle, at.multiply(Transform2.translation(-900, 1400)));
++    doc.commands.execute(SetComponentCommand<ObjectLayer>(
++        layered, const ObjectLayer(ReservedHandles.layerZero)));
++    final add = addDrafted(doc, EntityKind.line,
++        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
++        layer: ReservedHandles.layerZero);
++    doc.commands.execute(add);
++    final line = add.record.handle;
++    doc.commands
++        .execute(SetComponentCommand<ClipRect>(line, const ClipRect(90, 40)));
++    final gone = addGroup(
++        doc, doc.rootHandle, at.multiply(Transform2.translation(4000, 900)));
++    doc.commands
++        .execute(SetComponentCommand<ClipRect>(gone, const ClipRect(80, 70)));
++    doc.commands.execute(RemoveNodeCommand(gone));
++
++    expect(catalog.typeIdOf(doc, soft), SoftRect.id);
++    expect(catalog.typeIdOf(doc, trip), Trip.id);
++    // M-E1c: the first registration found, without the root-level rule,
++    // answers softRect here.
++    expect(catalog.typeIdOf(doc, both), ClipRect.id);
++    // M-E1c, M-E1d: without the root-level rule, the nested group and the
++    // entity answer clipRect.
++    expect(catalog.typeIdOf(doc, nested), isNull);
++    expect(catalog.typeIdOf(doc, line), isNull);
++    expect(catalog.typeIdOf(doc, layered), isNull,
++        reason: 'ObjectLayer is a component, not a parametric type');
++    expect(catalog.typeIdOf(doc, gone), isNull);
++    expect(catalog.typeIdOf(doc, doc.rootHandle), isNull);
++    expect(catalog.typeIdOf(doc, const Handle(987654)), isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d/test/parametric/partial_mutation_test.dart b/packages/jet_cad_2d/test/parametric/partial_mutation_test.dart
+new file mode 100644
+index 00000000..5af5375e
+--- /dev/null
++++ b/packages/jet_cad_2d/test/parametric/partial_mutation_test.dart
+@@ -0,0 +1,156 @@
++// Spec 2a E3: every failed rollback throws PartialMutationError, a
++// StateError carrying the message it always had. Each case makes one
++// rollback throw on purpose. [_TripTarget] is the document as a command
++// target whose invalidateDerived throws once a set number of further calls
++// have passed: every command calls it exactly once, after it has mutated.
++// [_Arm] sets that number right after the triggering edit applies, so the
++// surveys and the edit run as usual up to the chosen command. A
++// ParametricEdit is applied to the tripping target directly, as
++// regeneration_test's P9 applies one.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:test/test.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'support/clients.dart';
++import 'support/fixture.dart';
++
++final class _Tripped implements Exception {
++  const _Tripped();
++  @override
++  String toString() => 'tripped';
++}
++
++/// [doc] as a command target whose [invalidateDerived] throws once
++/// [allowed] further calls have passed; null never trips.
++final class _TripTarget implements CommandTarget {
++  _TripTarget(this.doc);
++
++  final DraftDocument doc;
++  int? allowed;
++
++  @override
++  EntityStore get entities => doc.entities;
++  @override
++  GeometryStore get geometry => doc.geometry;
++  @override
++  DocumentTree get tree => doc.tree;
++  @override
++  DocumentTables get tables => doc.tables;
++  @override
++  ComponentRegistry get components => doc.components;
++  @override
++  HandleSeed get handleSeed => doc.handleSeed;
++  @override
++  DocumentHeader get header => doc.header;
++  @override
++  FillIndex get fills => doc.fills;
++
++  @override
++  void invalidateDerived() {
++    doc.invalidateDerived();
++    final left = allowed;
++    if (left == null) return;
++    if (left == 0) throw const _Tripped();
++    allowed = left - 1;
++  }
++}
++
++/// [inner], then [target] armed to trip after [allow] further calls. Its
++/// inverse is [inner]'s, so undoing it calls invalidateDerived once.
++final class _Arm extends DraftCommand {
++  _Arm(this.inner, this.target, this.allow);
++
++  final DraftCommand inner;
++  final _TripTarget target;
++  final int allow;
++
++  @override
++  Capability get capability => inner.capability;
++  @override
++  Set<Capability> get capabilities => inner.capabilities;
++  @override
++  String get label => 'Armed edit';
++
++  @override
++  CommandResult apply(CommandTarget t) {
++    final result = inner.apply(t);
++    target.allowed = allow;
++    return result;
++  }
++}
++
++const Handle hPin = Handle(3000);
++final Transform2 pinAt =
++    Transform2.translation(8400, 1900).multiply(Transform2.rotation(-1.05));
++
++/// A [PartialMutationError] from the site whose message contains [site].
++Matcher partial(String site) => throwsA(isA<PartialMutationError>()
++    .having((e) => e.message, 'message', contains(site))
++    .having((e) => e.message, 'message', contains('partially mutated')));
++
++/// The select tool's delete of one object: its children, then its node.
++DraftCommand deleteObject(DraftDocument doc, Handle g) => CompoundCommand([
++      for (final k in kids(doc, g)) RemoveEntityCommand(k),
++      RemoveNodeCommand(g),
++    ], label: 'Delete');
++
++void main() {
++  test('E3-compound a compound whose rollback throws', () {
++    final doc = DraftDocument.empty();
++    final trip = _TripTarget(doc)..allowed = 1;
++    final first = addDrafted(doc, EntityKind.line,
++        linePayload(Vector2(7010.5, 3020.25), Vector2(7133.1, 3071.9)),
++        layer: ReservedHandles.layerZero);
++    final second = addDrafted(doc, EntityKind.line,
++        linePayload(Vector2(-410.75, 8800.5), Vector2(-388.25, 9012)),
++        layer: ReservedHandles.layerZero);
++    // M-E3a: CompoundCommand.apply throws a plain StateError.
++    expect(
++        () => CompoundCommand([first, second], label: 'Two lines').apply(trip),
++        partial('child 1 threw'));
++  });
++
++  test('E3-undo a parametric edit whose undo of the edit throws', () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, parked, const ClipRect(2000, 1000)));
++    final trip = _TripTarget(doc);
++    // allow 0: the first regeneration command trips, then the undo of the
++    // edit trips too.
++    final edit = doc.commands.expander!(_Arm(
++        SetComponentCommand<ClipRect>(hA, const ClipRect(3100, 450)), trip, 0));
++    // M-E3b: _undoInner throws a plain StateError.
++    expect(() => edit.apply(trip), partial('undoing the edit then threw'));
++  });
++
++  test('E3-cascade a parametric edit whose reference cascade rollback throws',
++      () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, atA, const Post(2000, 1000)));
++    doc.commands.execute(create(doc, hPin, pinAt, const Pin(hA, 450)));
++    expect(kids(doc, hPin), hasLength(1),
++        reason: "fixture: the pin copies A's bottom edge, so the cascade "
++            'removes a child and then the node');
++    final trip = _TripTarget(doc);
++    // allow 1: the cascade's first removal lands, its second trips, and the
++    // rollback of the first trips.
++    final edit = doc.commands.expander!(_Arm(deleteObject(doc, hA), trip, 1));
++    // M-E3c: _cascade's rollback throws a plain StateError.
++    expect(() => edit.apply(trip), partial('the reference cascade threw'));
++  });
++
++  test('E3-regeneration a parametric edit whose regeneration rollback throws',
++      () {
++    final doc = paramDoc();
++    doc.commands.execute(create(doc, hA, parked, const ClipRect(2000, 1000)));
++    expect(kids(doc, hA), hasLength(4),
++        reason: 'fixture: all four edges change, so the plan has four '
++            'commands');
++    final trip = _TripTarget(doc);
++    // allow 1: the first regeneration command lands, the second trips, and
++    // the rollback of the first trips.
++    final edit = doc.commands.expander!(_Arm(
++        SetComponentCommand<ClipRect>(hA, const ClipRect(3100, 450)), trip, 1));
++    // M-E3d: _run's apply loop throws a plain StateError.
++    expect(() => edit.apply(trip), partial('regeneration threw'));
++  });
++}

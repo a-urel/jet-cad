@@ -53,7 +53,7 @@ void main() {
 
   // The number of blocks pins the parser to the documents: a parser that
   // finds no block would pass every check below vacuously.
-  for (final (doc, count) in [('../../docs/kits.md', 4), ('README.md', 1)]) {
+  for (final (doc, count) in [('../../docs/kits.md', 6), ('README.md', 1)]) {
     test('DOC1 every ```dart block of $doc is verbatim in example/', () {
       final blocks = dartBlocks(File(doc).readAsStringSync());
       expect(blocks, hasLength(count));

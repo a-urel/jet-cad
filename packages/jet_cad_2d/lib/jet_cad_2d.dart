@@ -10,6 +10,7 @@ export 'src/codec/schema_version.dart';
 export 'src/core/diagnostic.dart';
 export 'src/core/handle.dart';
 export 'src/core/list_equality.dart';
+export 'src/core/partial_mutation_error.dart';
 export 'src/core/tolerance.dart';
 export 'src/document/command.dart';
 export 'src/document/commands.dart';

@@ -9,27 +9,31 @@ Transform2 _worldOf(CommandTarget t, Handle h) =>
 
 /// The registration that names [h]'s object in [t], or null: the engine's
 /// one object rule (spec D5, as amended by fix/live-object-rule). Null
-/// unless [h] is a `GroupNode` whose parent is the root; otherwise the
-/// **last** registration, in [types]' (catalog) order, whose component [h]
-/// carries, or null when it carries none. A root-level group carrying two
-/// registered types is the later one's object; the earlier component is a
-/// stray ([_Survey.stray]). [_isObject], [_survey] and
-/// `ParametricCatalog.names` all read this. O(types).
+/// unless [h] is a `GroupNode` whose parent is the root; null when [frozen]
+/// answers true for [h] (spec 2a E2: a frozen object is a plain group to the
+/// system that froze it); otherwise the **last** registration, in [types]'
+/// (catalog) order, whose component [h] carries, or null when it carries
+/// none. A root-level group carrying two registered types is the later one's
+/// object; the earlier component is a stray ([_Survey.stray]). [_isObject],
+/// [_survey] and `ParametricCatalog.names` all read this; the catalog passes
+/// no [frozen]. O(types).
 _Registration<Component>? _naming(
-    CommandTarget t, List<_Registration<Component>> types, Handle h) {
+    CommandTarget t, List<_Registration<Component>> types, Handle h,
+    [bool Function(Handle)? frozen]) {
   final node = t.tree[h];
   if (node is! GroupNode || node.parent != t.tree.root) return null;
+  if (frozen != null && frozen(h)) return null;
   for (var i = types.length - 1; i >= 0; i--) {
     if (types[i].has(t, h)) return types[i];
   }
   return null;
 }
 
-/// A root-level group carrying a registered parametric component (spec D5):
-/// some registration names it ([_naming]).
-bool _isObject(
-        CommandTarget t, List<_Registration<Component>> types, Handle h) =>
-    _naming(t, types, h) != null;
+/// A root-level group carrying a registered parametric component (spec D5),
+/// not frozen ([_naming]).
+bool _isObject(CommandTarget t, List<_Registration<Component>> types, Handle h,
+        [bool Function(Handle)? frozen]) =>
+    _naming(t, types, h, frozen) != null;
 
 /// Pairwise reach-overlap tests performed by the neighbour search (spec 07
 /// D10), for tests that pin its cost. Never reset by the library.
@@ -132,6 +136,7 @@ final class _Survey {
   /// object. Empty in a document that has neither; filled by the walk the
   /// survey makes anyway, so it costs one insertion per such component.
   /// Read by [_written] through [_heldBefore], on the before-survey only.
+  /// A frozen object's component (spec 2a E2) is one too.
   final Map<(Handle, _Registration<Component>), Component> stray;
 
   final Map<Handle, List<Handle>> _neighbours = {};
@@ -214,7 +219,12 @@ final class _Survey {
   }
 }
 
-_Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
+/// A survey of [t]'s live objects. An object [frozen] answers true for
+/// (spec 2a E2) is named by no registration here, so its component is a
+/// [_Survey.stray], none of its hooks is called, and no view built over the
+/// survey holds it.
+_Survey _survey(CommandTarget t, List<_Registration<Component>> types,
+    [bool Function(Handle)? frozen]) {
   final found = <Handle, _Registration<Component>>{};
   final stray = <(Handle, _Registration<Component>), Component>{};
   for (final r in types) {
@@ -222,7 +232,7 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types) {
       // [_naming] decides: the later registration names the object; any
       // other component, a shadowed one included, is kept here, so every
       // registered component has a snapshot.
-      if (identical(_naming(t, types, h), r)) {
+      if (identical(_naming(t, types, h, frozen), r)) {
         found[h] = r;
       } else {
         stray[(h, r)] = r.componentOf(t, h);
@@ -662,8 +672,11 @@ List<DraftCommand> _plan(
 /// object -- a compound that detaches the component and then removes one
 /// of its still-live children in the same command must still be refused).
 /// Only a child removed *together with* its owning group is allowed.
+///
+/// A frozen object (spec 2a E2) is a plain group: a child added into it, or
+/// one of its children edited, is not refused.
 Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
-    _Survey before, Set<Handle> touched) {
+    _Survey before, Set<Handle> touched, bool Function(Handle)? frozen) {
   for (final h in touched.toList()..sort(_byValue)) {
     final owner = before.owned[h];
     if (owner != null) {
@@ -672,7 +685,7 @@ Handle? _refused(CommandTarget t, List<_Registration<Component>> types,
       continue;
     }
     final slot = t.entities.slotOf(h);
-    if (slot != null && _isObject(t, types, t.entities.ownerAt(slot))) {
+    if (slot != null && _isObject(t, types, t.entities.ownerAt(slot), frozen)) {
       return h;
     }
   }
@@ -688,7 +701,8 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
 /// registered parametric component although the handle is not a live
 /// root-level group after the edit (spec D5, as amended by fix/post-11,
 /// post-11 found item (d)), with the registration it wrote; null when
-/// there is none. `_run` then undoes `inner` and throws `StateError`.
+/// there is none. `_run` then undoes `inner` and throws
+/// [NonLiveWriteError].
 ///
 /// "Wrote" means: the component is non-null now and not `==` to what the
 /// before-survey held for the same type on the same handle ([_heldBefore];
@@ -712,10 +726,18 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
 /// component elsewhere never refuses an unrelated edit, and the cost is
 /// O(|touched| log |touched| + |touched| · types), nothing per object.
 /// Only registered types are read: any other component lands as before.
-(Handle, _Registration<Component>)? _written(CommandTarget t,
-    List<_Registration<Component>> types, _Survey before, Set<Handle> touched) {
+///
+/// A frozen object (spec 2a E2) is not a live group here, so a new value of
+/// its type written on it is refused; an unchanged one (the group moved)
+/// equals its stray snapshot and is not.
+(Handle, _Registration<Component>)? _written(
+    CommandTarget t,
+    List<_Registration<Component>> types,
+    _Survey before,
+    Set<Handle> touched,
+    bool Function(Handle)? frozen) {
   for (final h in touched.toList()..sort(_byValue)) {
-    if (_isObject(t, types, h)) continue;
+    if (_isObject(t, types, h, frozen)) continue;
     for (final r in types) {
       final now = r.componentOrNull(t, h);
       if (now == null) continue;
@@ -727,12 +749,14 @@ Component? _heldBefore(_Survey s, _Registration<Component> r, Handle h) =>
 }
 
 /// Undoes [r] after a failure; if that fails too, the target is in an
-/// unknown state and the caller must know it.
+/// unknown state and the caller must know it. That failure is a
+/// [PartialMutationError] (spec 2a E3).
 void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
   try {
     r.inverse.apply(t);
   } catch (rollbackError) {
-    throw StateError('"$label": $cause, and undoing the edit then threw '
+    throw PartialMutationError(
+        '"$label": $cause, and undoing the edit then threw '
         '($rollbackError); the target is partially mutated and nothing was '
         'recorded in history');
   }
@@ -754,10 +778,13 @@ void _undoInner(CommandTarget t, String label, CommandResult r, Object cause) {
 /// Everything, deciding each command as well as applying it, every round,
 /// runs under one rollback: a failure undoes what the cascade applied, then
 /// [r0], and rethrows, so the target is as it was before the edit; a failed
-/// rollback throws 06's "partially mutated" `StateError` and undoes nothing
-/// more. The commands are applied one at a time, like `_run`'s regeneration
-/// loop and for the same reason (06 debt): a child's refusal and a failed
-/// rollback stay apart.
+/// rollback throws 06's "partially mutated" error, a [PartialMutationError]
+/// since spec 2a E3, and undoes nothing more. The commands are applied one
+/// at a time, like `_run`'s regeneration loop and for the same reason (06
+/// debt): a child's refusal and a failed rollback stay apart.
+///
+/// It reads no frozen predicate: every handle it asks about is a key or a
+/// value of the before-survey's referrers, which holds no frozen object.
 CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
     _Survey before, CommandResult r0, String label) {
   if (before.referrers.isEmpty) return r0;
@@ -790,7 +817,8 @@ CommandResult _cascade(CommandTarget t, List<_Registration<Component>> types,
         i.apply(t);
       }
     } catch (rollbackError) {
-      throw StateError('"$label": the reference cascade threw ($error) and '
+      throw PartialMutationError(
+          '"$label": the reference cascade threw ($error) and '
           'its rollback threw ($rollbackError); the target is partially '
           'mutated and nothing was recorded in history');
     }
@@ -936,10 +964,13 @@ void _checkDangling(Set<Handle> seeds, _Survey after) {
 /// node, in the removal (node-components spec D-4): there is no cleanup.
 CommandResult _run(ParametricEdit edit, CommandTarget t) {
   final types = edit._system._types;
-  final before = _survey(t, types);
+  // Spec 2a E2: one predicate for the whole edit, both surveys and both
+  // guards.
+  final frozen = edit._system._frozen;
+  final before = _survey(t, types, frozen);
   final r0 = edit.inner.apply(t);
 
-  final refused = _refused(t, types, before, r0.touched);
+  final refused = _refused(t, types, before, r0.touched, frozen);
   if (refused != null) {
     _undoInner(t, edit.label, r0, GeneratedGeometryError(refused));
     throw GeneratedGeometryError(refused);
@@ -949,10 +980,14 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
   // root-level group would never be regenerated. A client bug, like the
   // plan's malformed-boundary refusal (`_ownBoundaryOf`), so a
   // `StateError`: `GeneratedGeometryError` names a generated child, which
-  // this is not. Refused like 06 D6's guard: `inner` undone, nothing
-  // planned, nothing in history.
-  if (_written(t, types, before, r0.touched) case (final h, final r)?) {
-    final error = StateError('"${edit.label}": ${r.typeId} written on '
+  // this is not. Typed (spec 2a E2, amended in the final review): a
+  // `NonLiveWriteError` naming the handle. Refused like 06 D6's guard:
+  // `inner` undone, nothing planned, nothing in history.
+  if (_written(t, types, before, r0.touched, frozen) case (final h, final r)?) {
+    final error = NonLiveWriteError(
+        h,
+        r.typeId,
+        '"${edit.label}": ${r.typeId} written on '
         '${h.toHex()}, which is not a live root-level group after the edit, '
         'would never be regenerated (spec 06 D5); the edit is refused');
     _undoInner(t, edit.label, r0, error);
@@ -971,7 +1006,7 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
   final _Survey after;
   final List<DraftCommand> plan;
   try {
-    after = _survey(t, types);
+    after = _survey(t, types, frozen);
     // Ruling 06-3: only objects that were live before the edit.
     final lost = [
       for (final h in before.objects.keys)
@@ -1037,7 +1072,8 @@ CommandResult _run(ParametricEdit edit, CommandTarget t) {
           i.apply(t);
         }
       } catch (rollbackError) {
-        throw StateError('"${edit.label}": regeneration threw ($error) and '
+        throw PartialMutationError(
+            '"${edit.label}": regeneration threw ($error) and '
             'its rollback threw ($rollbackError); the target is partially '
             'mutated and nothing was recorded in history');
       }

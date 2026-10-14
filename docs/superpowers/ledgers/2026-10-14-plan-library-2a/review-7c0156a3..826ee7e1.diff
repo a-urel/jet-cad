@@ -1,0 +1,2757 @@
+# Review package: 7c0156a3..HEAD
+
+## Commits
+826ee7e1 feat(plan): export, print and import through registries
+
+## Files changed
+ packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart  |  14 +-
+ .../lib/src/controller/plan_controller.dart        |  70 +-
+ .../lib/src/export/builtin_exporters.dart          |  78 +++
+ .../lib/src/export/editor_page_flows.dart          | 117 ++++
+ .../lib/src/export/export_dialog.dart              | 111 +++
+ .../lib/src/export/export_font.dart                |  39 ++
+ .../jet_cad_2d_plan/lib/src/export/page_flows.dart | 273 ++++++++
+ .../lib/src/export/page_printer.dart               |  32 +
+ .../jet_cad_2d_plan/lib/src/export/registries.dart | 144 +++-
+ packages/jet_cad_2d_plan/pubspec.yaml              |   2 +
+ .../test/controller/plan_controller_test.dart      |   7 +-
+ .../test/export/export_dialog_test.dart            |  73 ++
+ .../test/export/export_font_test.dart              |  81 +++
+ .../test/export/page_flows_test.dart               | 777 +++++++++++++++++++++
+ .../test/export/plan_export_types_test.dart        |  41 ++
+ .../jet_cad_2d_plan/test/export/registry_test.dart | 282 ++++++++
+ .../jet_cad_2d_plan/test/support/export_plan.dart  |  37 +
+ .../test/support/fake_page_printer.dart            |  42 ++
+ .../jet_cad_2d_plan/test/support/flows_bar.dart    | 101 +++
+ .../test/support/recording_exporters.dart          |  81 +++
+ 20 files changed, 2377 insertions(+), 25 deletions(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+index 4a13f0dc..0946dfe5 100644
+--- a/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
++++ b/packages/jet_cad_2d_plan/lib/jet_cad_2d_plan.dart
+@@ -7,21 +7,33 @@ export 'src/controller/camera_bounds.dart' show kPlanMaxScale, kPlanMinScale;
+ export 'src/controller/permissions.dart';
+ export 'src/controller/plan_change.dart'
+     show
+         PlanChange,
+         PlanObjectAdded,
+         PlanObjectChanged,
+         PlanObjectRemoved,
+         PlanReplaced;
+ export 'src/controller/plan_controller.dart';
+ export 'src/editor/plan_tool_palette.dart' show PlanToolPalette;
+-export 'src/export/registries.dart';
++export 'src/export/export_dialog.dart' show PlanExportDialog;
++export 'src/export/page_printer.dart' show PagePrinter, PrintingPagePrinter;
++export 'src/export/registries.dart'
++    show
++        PlanExport,
++        PlanExportAnswer,
++        PlanExportChoice,
++        PlanExportDpi,
++        PlanExportFonts,
++        PlanExportRequest,
++        PlanExporter,
++        PlanImporter,
++        PlanPageExporter;
+ export 'src/file/manifest.dart'
+     show
+         ManifestCheck,
+         PlanManifest,
+         checkManifest,
+         kPlanFormat,
+         manifestOf,
+         manifestToWrite,
+         usedKits;
+ export 'src/file/plan_file.dart';
+diff --git a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+index 83a0fee6..4beef030 100644
+--- a/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
++++ b/packages/jet_cad_2d_plan/lib/src/controller/plan_controller.dart
+@@ -15,20 +15,22 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+ import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
+ 
+ import '../file/manifest.dart';
+ import '../file/plan_file.dart';
+ import '../file/plan_format_exception.dart';
+ import '../kits/guard.dart';
+ import '../kits/kit_set.dart';
+ import '../kits/locks.dart';
+ import '../l10n/document_separator.dart';
+ import '../l10n/strings.dart';
++import '../export/page_flows.dart';
++import '../export/page_printer.dart';
+ import '../export/registries.dart';
+ import '../shortcuts/tool_letters.dart';
+ import '../symbols/plan_symbol.dart';
+ import '../symbols/plan_symbol_loader.dart';
+ import '../symbols/plan_symbols_state.dart';
+ import '../tools/generic_tools.dart';
+ import '../tools/move_resolver.dart';
+ import '../tools/plan_select_gates.dart';
+ import '../tools/plan_symbol_tool.dart';
+ import 'camera_bounds.dart';
+@@ -101,20 +103,21 @@ class PlanController extends ChangeNotifier {
+     String? json,
+     PlanSymbolLoader? symbols,
+     SymbolThumbnails? thumbnails,
+     List<PlanExporter> exporters = const [],
+     List<PlanImporter> importers = const [],
+     double minScale = kPlanMinScale,
+     double maxScale = kPlanMaxScale,
+     PlanPermissions permissions = PlanPermissions.full,
+   }) {
+     final set = validateKitSet(kits);
++    PlanPageFlows.checkRegistry(exporters: exporters, importers: importers);
+     if (!minScale.isFinite || minScale < _minScaleFloor) {
+       throw ArgumentError.value(
+           minScale, 'minScale', 'must be finite and at least 1e-6');
+     }
+     if (!maxScale.isFinite || maxScale <= minScale) {
+       throw ArgumentError.value(
+           maxScale, 'maxScale', 'must be finite and above minScale');
+     }
+     final catalog = ParametricCatalog();
+     for (final type in set.types) {
+@@ -151,35 +154,48 @@ class PlanController extends ChangeNotifier {
+       {required bool unsettled,
+       required List<Diagnostic> loadDiagnostics,
+       required PlanSymbolLoader? symbols,
+       required SymbolThumbnails? thumbnails,
+       required List<PlanExporter> exporters,
+       required List<PlanImporter> importers,
+       required double minScale,
+       required double maxScale,
+       required PlanPermissions permissions})
+       : _permissions = permissions,
+-        exporters = List.unmodifiable(exporters),
+-        importers = List.unmodifiable(importers),
+         _minScale = minScale,
+         _maxScale = maxScale,
+         _symbolLoader = symbols ?? PlanSymbolLoader(),
+         _ownsSymbolLoader = symbols == null,
+         _ownsThumbnails = thumbnails == null,
+         thumbnails =
+             thumbnails ?? SymbolThumbnails(maxEntries: kPlanThumbnailCapacity),
+         camera = CameraController(
+             ViewportTransform(
+                 worldToScreenMatrix: const Transform2(1, 0, 0, -1, 0, 0)),
+             minScale: minScale,
+             maxScale: maxScale),
+         toolSettings = ToolSettingsStore(kits) {
++    pageFlows = PlanPageFlows(
++      exporters: exporters,
++      importers: importers,
++      unexported: {
++        for (final kit in kits.kits)
++          for (final type in kit.types)
++            if (!type.exported) type.id,
++      },
++      // `this.`: the constructor's own `document` parameter is the first
++      // plan, never the current one.
++      document: () => this.document,
++      catalog: () => catalog,
++      settle: settlePendingInput,
++      load: load,
++    );
+     _services = {
+       for (final kit in kits.kits)
+         kit.id: KitServices(
+             kit, _host, KitNamesWords(kit.names, () => _locale.value)),
+     };
+     _open(document, measurer, loadDiagnostics);
+     _savedState = document.commands.stateId;
+     if (unsettled) _unsettled = (document: document, at: _savedState);
+     _placeNominally();
+     _refreshFlags();
+@@ -223,26 +239,65 @@ class PlanController extends ChangeNotifier {
+ 
+   /// The symbol libraries' loader: the given one, never disposed here, or
+   /// the controller's own.
+   final PlanSymbolLoader _symbolLoader;
+   final bool _ownsSymbolLoader;
+   final ValueNotifier<PlanSymbol?> _armed = ValueNotifier<PlanSymbol?>(null);
+   List<PlanSymbol> _symbols = const [];
+   Map<String, PlanSymbol> _symbolsById = const {};
+   int _symbolRun = 0;
+ 
+-  /// The host's exporters and importers, in order (spec P5); Task 19 adds
+-  /// the built-in ones and the flows.
++  /// The export, print and import flows (spec P2, P5): the registries,
++  /// the one-flow guard every view of this controller shares, the
++  /// remembered dialog answer and the font.
+   @internal
+-  final List<PlanExporter> exporters;
+-  @internal
+-  final List<PlanImporter> importers;
++  late final PlanPageFlows pageFlows;
++
++  /// `plan.pdf`, `plan.png`, then the host's exporters, in order.
++  List<PlanExporter> get exporters => pageFlows.exporters;
++
++  /// The host's importers, in order.
++  List<PlanImporter> get importers => pageFlows.importers;
++
++  /// [exporterId]'s bytes of the plan as [choice] says, named
++  /// `<name>.<extension>` (`name` defaults to `plan`), with no view
++  /// mounted (spec P2).
++  ///
++  /// Null when an export or a print already runs for this controller
++  /// (one at a time, its views' included), when the exporter plots the
++  /// page and the plan has none, when the plan is replaced (`load`,
++  /// `newPlan`, `import`) before the bytes are made, or after [dispose].
++  /// Pending input is settled first; the exporter is handed a copy of the
++  /// plan made then. The dialog's remembered answer is left as it is. An
++  /// error completes the `Future` with it; an unknown [exporterId] is an
++  /// [ArgumentError] at once. Not gated by [permissions] (a host call).
++  Future<PlanExport?> export(String exporterId, PlanExportChoice choice,
++          {String? name}) =>
++      pageFlows.export(exporterId, choice, name: name ?? 'plan');
++
++  /// The plan's page as a PDF to [printer] (the platform's print dialog
++  /// when null), named [name] (`plan` when null). True once the printer
++  /// is done; false under [export]'s rules for null. Not gated by
++  /// [permissions].
++  Future<bool> print(PlanExportChoice choice,
++          {PagePrinter? printer, String? name}) =>
++      pageFlows.print(choice,
++          printer: printer ?? const PrintingPagePrinter(),
++          name: name ?? 'plan');
++
++  /// Reads [bytes] with [importerId]'s importer and loads the plan's
++  /// text, an empty manifest added when it has none (spec P5). An
++  /// importer's error, or a load that refuses ([PlanFormatException]),
++  /// completes the `Future` with it and changes nothing; an unknown
++  /// [importerId] is an [ArgumentError] at once.
++  Future<void> import(String importerId, Uint8List bytes) =>
++      pageFlows.import(importerId, bytes);
+ 
+   final double _minScale, _maxScale;
+ 
+   late final Map<String, KitServices> _services;
+   late final _Host _host = _Host(this);
+   late DocumentSession _session;
+   List<Diagnostic> _loadDiagnostics = const [];
+ 
+   final List<DocumentSession> _dropped = [];
+   bool _disposed = false;
+@@ -1247,14 +1302,15 @@ class PlanController extends ChangeNotifier {
+     _locked.dispose();
+     lockHint.dispose();
+     _damaged.dispose();
+     _canvasRect.dispose();
+     _fits.dispose();
+     _snap.dispose();
+     _snapping.dispose();
+     _userSnap.dispose();
+     camera.dispose();
+     _settles.clear();
++    pageFlows.dispose();
+     unawaited(_out.close());
+     super.dispose();
+   }
+ }
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/builtin_exporters.dart b/packages/jet_cad_2d_plan/lib/src/export/builtin_exporters.dart
+new file mode 100644
+index 00000000..fd973c38
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/export/builtin_exporters.dart
+@@ -0,0 +1,78 @@
++// Spec P5: the built-in exporters, `plan.pdf` and `plan.png`, and the page
++// helpers the flows read. Ported from
++// jet_cad_floor_plan/lib/src/export/export_bytes.dart without the table
++// colours (2b): an empty underlay writes today's bytes.
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ExportDpi, exportPagePdf, exportPagePng;
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++
++import 'registries.dart';
++
++/// The page [document]'s root carries, or null when it has none. Read from
++/// the document, never from the screen (export_bytes.dart:18-24).
++PageComponent? exportPageOf(DraftDocument document) =>
++    document.components.isRegistered<PageComponent>()
++        ? document.components.get<PageComponent>(document.rootHandle)
++        : null;
++
++/// [page]'s paper in pt, as laid out: the size the print dialog opens on
++/// (export_bytes.dart:68-72).
++PdfPageFormat printPageFormat(PageComponent page) => PdfPageFormat(
++    page.effectiveWidthMm * 72 / 25.4, page.effectiveHeightMm * 72 / 25.4);
++
++ExportDpi _dpiOf(PlanExportDpi dpi) => switch (dpi) {
++      PlanExportDpi.d96 => ExportDpi.d96,
++      PlanExportDpi.d150 => ExportDpi.d150,
++      PlanExportDpi.d300 => ExportDpi.d300,
++    };
++
++/// `plan.pdf`: the page as a one-page vector PDF with the plan's font
++/// embedded, the omitted objects not drawn.
++final class PlanPdfExporter implements PlanPageExporter {
++  const PlanPdfExporter();
++
++  static const String exporterId = 'plan.pdf';
++
++  @override
++  String get id => exporterId;
++
++  @override
++  String get extension => 'pdf';
++
++  @override
++  String get mimeType => 'application/pdf';
++
++  @override
++  Future<Uint8List> export(PlanExportRequest request) async => exportPagePdf(
++      document: request.document,
++      page: request.page!,
++      fontBytes: await request.fonts.bytes,
++      omitOwners: request.omitted);
++}
++
++/// `plan.png`: the page as a PNG at the choice's resolution, the omitted
++/// objects not drawn.
++final class PlanPngExporter implements PlanPageExporter {
++  const PlanPngExporter();
++
++  static const String exporterId = 'plan.png';
++
++  @override
++  String get id => exporterId;
++
++  @override
++  String get extension => 'png';
++
++  @override
++  String get mimeType => 'image/png';
++
++  @override
++  Future<Uint8List> export(PlanExportRequest request) => exportPagePng(
++      document: request.document,
++      page: request.page!,
++      dpi: _dpiOf(request.choice.dpi),
++      omitOwners: request.omitted);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/editor_page_flows.dart b/packages/jet_cad_2d_plan/lib/src/export/editor_page_flows.dart
+new file mode 100644
+index 00000000..74e21fac
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/export/editor_page_flows.dart
+@@ -0,0 +1,117 @@
++// Export and Print from an editor's bar and chords (2a spec P2, P5): the
++// dialog (the host's when it gave one), the remembered answer, the bytes
++// to the host's onExport, the PDF to the printer. Under the controller's
++// one-flow guard; the host's hooks and settings are read at each call;
++// `permissions.export` and `.print` are read again after the dialog and
++// after the bytes, so a flow started before the host refused it does not
++// run to its end. Ported from jet_cad_floor_plan/lib/src/host/page_flows.dart.
++import 'package:flutter/foundation.dart' show ValueListenable;
++import 'package:flutter/widgets.dart' show BuildContext;
++
++import '../controller/plan_controller.dart';
++import 'builtin_exporters.dart' show exportPageOf;
++import 'export_dialog.dart';
++import 'page_flows.dart';
++import 'page_printer.dart';
++import 'registries.dart';
++
++/// What the flows read from the view at call time.
++typedef PageFlowSettings = ({
++  void Function(PlanExport export)? onExport,
++  PagePrinter printer,
++  String exportName,
++});
++
++/// The view's hooks, read at each call: the host's export dialog, in place
++/// of the Material one, and where a flow's error goes.
++typedef PageFlowHooks = ({
++  PlanExportDialog? exportDialog,
++  void Function(Object error)? onError,
++});
++
++PageFlowHooks _noHooks() => const (exportDialog: null, onError: null);
++
++/// The two flows of one editor view, for its controller.
++class EditorPageFlows {
++  EditorPageFlows(
++      {required this.controller,
++      required this.settings,
++      this.hooks = _noHooks});
++
++  final PlanController controller;
++
++  /// The view's current settings, read at each call.
++  final PageFlowSettings Function() settings;
++
++  /// The view's current hooks, read at each call.
++  final PageFlowHooks Function() hooks;
++
++  bool _disposed = false;
++
++  PlanPageFlows get _flows => controller.pageFlows;
++
++  /// False while a flow runs (this view's, another view's or the host's
++  /// own call): a second press does nothing.
++  ValueListenable<bool> get ready => _flows.ready;
++
++  /// Export is offered only with an `onExport`.
++  bool get canExport => settings().onExport != null;
++
++  bool _exportAllowed() => controller.permissions.export;
++  bool _printAllowed() => controller.permissions.print;
++
++  Future<void> export(BuildContext context) => _run(() async {
++        final sink = settings().onExport;
++        if (sink == null) return;
++        final flows = _flows;
++        final document = controller.document;
++        final paged = exportPageOf(document) != null;
++        if (!paged && flows.exporters.every((e) => e is PlanPageExporter)) {
++          return;
++        }
++        if (!context.mounted) return;
++        // The host's dialog when it gave one, the Material one otherwise;
++        // either way from the remembered answer, and null cancels.
++        final dialog = hooks().exportDialog;
++        final answer = dialog != null
++            ? await dialog(context, flows.dialogAnswer, flows.exporters)
++            : await showPlanExportDialog(
++                context, flows.dialogAnswer, flows.exporters);
++        // A view gone meanwhile is the bytes' cancel, below.
++        if (answer == null || (!_disposed && !_exportAllowed())) return;
++        flows.dialogAnswer = answer;
++        final export = await flows.exportOnce(
++            answer.exporter, answer.choice, settings().exportName,
++            document: document,
++            cancelled: () => _disposed || !_exportAllowed());
++        if (export != null) sink(export);
++      });
++
++  Future<void> print(BuildContext context) => _run(() async {
++        final s = settings();
++        await _flows.printOnce(s.printer, s.exportName,
++            choice: _flows.dialogAnswer.choice,
++            cancelled: () => _disposed || !_printAllowed());
++      });
++
++  Future<void> _run(Future<void> Function() flow) async {
++    final flows = _flows;
++    if (_disposed || !flows.acquire()) return;
++    try {
++      controller.settlePendingInput();
++      await flow();
++    } catch (error) {
++      // Without the host's callback the error propagates, as it always
++      // did, out of a Future the caller drops.
++      final report = hooks().onError;
++      if (report == null) rethrow;
++      report(error);
++    } finally {
++      // The view may have gone while the flow awaited; the controller's
++      // guard is released all the same, unless the controller went too.
++      flows.release();
++    }
++  }
++
++  void dispose() => _disposed = true;
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/export_dialog.dart b/packages/jet_cad_2d_plan/lib/src/export/export_dialog.dart
+new file mode 100644
+index 00000000..8cef38a9
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/export/export_dialog.dart
+@@ -0,0 +1,111 @@
++// The Export dialog over the registry (spec P5): the format, one segment
++// per exporter, and for an image format its resolution; Export or Cancel.
++// Escape cancels (a dismissible route pops on Escape). Ported from
++// jet_cad_floor_plan/lib/src/export/export_dialog.dart.
++import 'package:flutter/material.dart';
++
++import '../l10n/strings.dart';
++import 'registries.dart';
++
++/// A host's export dialog (`PlanEditor.onExportDialog`): it starts from
++/// [initial] over [exporters] and answers null to cancel.
++typedef PlanExportDialog = Future<PlanExportAnswer?> Function(
++    BuildContext context,
++    PlanExportAnswer initial,
++    List<PlanExporter> exporters);
++
++/// Whether [exporter] writes a raster image, whose resolution the dialog
++/// asks for.
++bool isRasterExporter(PlanExporter exporter) =>
++    exporter.mimeType.startsWith('image/');
++
++/// Asks for the export's exporter and resolution, starting from [initial]
++/// (from the first exporter when [initial] names none of [exporters]).
++/// Null when cancelled (Cancel, Escape or a tap outside).
++Future<PlanExportAnswer?> showPlanExportDialog(BuildContext context,
++        PlanExportAnswer initial, List<PlanExporter> exporters) =>
++    showDialog<PlanExportAnswer>(
++      context: context,
++      builder: (_) => _ExportDialog(initial: initial, exporters: exporters),
++    );
++
++class _ExportDialog extends StatefulWidget {
++  const _ExportDialog({required this.initial, required this.exporters});
++
++  final PlanExportAnswer initial;
++  final List<PlanExporter> exporters;
++
++  @override
++  State<_ExportDialog> createState() => _ExportDialogState();
++}
++
++class _ExportDialogState extends State<_ExportDialog> {
++  late PlanExportAnswer _answer =
++      widget.exporters.any((e) => e.id == widget.initial.exporter)
++          ? widget.initial
++          : widget.initial.copyWith(exporter: widget.exporters.first.id);
++
++  PlanExporter get _exporter =>
++      widget.exporters.firstWhere((e) => e.id == _answer.exporter);
++
++  void _cancel() => Navigator.of(context).pop();
++
++  @override
++  Widget build(BuildContext context) {
++    final strings = PlanStrings.of(context);
++    return AlertDialog(
++      key: const Key('export-dialog'),
++      title: Text(strings.exportTitle),
++      content: Column(
++        mainAxisSize: MainAxisSize.min,
++        crossAxisAlignment: CrossAxisAlignment.start,
++        children: [
++          SegmentedButton<String>(
++            key: const Key('export-format'),
++            showSelectedIcon: false,
++            segments: [
++              for (final e in widget.exporters)
++                ButtonSegment(
++                    value: e.id,
++                    label: Text(e.extension.toUpperCase(),
++                        key: Key('export-format-${e.id}'))),
++            ],
++            selected: {_answer.exporter},
++            onSelectionChanged: (s) =>
++                setState(() => _answer = _answer.copyWith(exporter: s.single)),
++          ),
++          if (isRasterExporter(_exporter)) ...[
++            const SizedBox(height: 12),
++            SegmentedButton<PlanExportDpi>(
++              key: const Key('export-dpi'),
++              showSelectedIcon: false,
++              segments: [
++                for (final d in PlanExportDpi.values)
++                  ButtonSegment(
++                      value: d,
++                      label: Text(strings.dpi(d.value),
++                          key: Key('export-dpi-${d.value}'))),
++              ],
++              selected: {_answer.choice.dpi},
++              onSelectionChanged: (s) => setState(() => _answer = _answer
++                  .copyWith(choice: _answer.choice.copyWith(dpi: s.single))),
++            ),
++          ],
++        ],
++      ),
++      actions: [
++        TextButton(
++          key: const Key('export-cancel'),
++          onPressed: _cancel,
++          child: Text(strings.cancel),
++        ),
++        FilledButton(
++          key: const Key('export-ok'),
++          autofocus: true,
++          onPressed: () => Navigator.of(context).pop(_answer),
++          child: Text(strings.exportAction),
++        ),
++      ],
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/export_font.dart b/packages/jet_cad_2d_plan/lib/src/export/export_font.dart
+new file mode 100644
+index 00000000..5cbddb35
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/export/export_font.dart
+@@ -0,0 +1,39 @@
++// Ported from jet_cad_floor_plan/lib/src/export/export_font.dart: the font
++// the PDF export embeds, read once per controller. The font, its asset key
++// and its licence are the plan library's (lib/src/fonts/plan_fonts.dart).
++import 'package:flutter/foundation.dart';
++import 'package:flutter/services.dart' show AssetBundle, rootBundle;
++
++import '../fonts/plan_fonts.dart' show kPlanFontAsset;
++import 'registries.dart';
++
++/// Reads the bundled font's bytes from [bundle] ([rootBundle] when null).
++Future<Uint8List> loadExportFont([AssetBundle? bundle]) async {
++  final data = await (bundle ?? rootBundle).load(kPlanFontAsset);
++  return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
++}
++
++/// The font's bytes, read on first use and then held for the app's
++/// lifetime (spec 13 D7: "once per app"). A failed read is not held: the
++/// next [bytes] reads again.
++class ExportFontCache implements PlanExportFonts {
++  /// [load] is the test seam; the default is [loadExportFont].
++  ExportFontCache({Future<Uint8List> Function()? load})
++      : _load = load ?? loadExportFont;
++
++  final Future<Uint8List> Function() _load;
++  Future<Uint8List>? _bytes;
++
++  /// The font's bytes; every call after the first returns the same future.
++  @override
++  Future<Uint8List> get bytes {
++    final pending = _bytes;
++    if (pending != null) return pending;
++    final next = _load();
++    _bytes = next;
++    next.then<void>((_) {}, onError: (Object _) {
++      if (identical(_bytes, next)) _bytes = null;
++    });
++    return next;
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart b/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart
+new file mode 100644
+index 00000000..082df24f
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/export/page_flows.dart
+@@ -0,0 +1,273 @@
++// Spec P2 (the export rules) and P5 (the registries): the controller's
++// export, print and import, one export or print at a time. Ported from
++// jet_cad_floor_plan/lib/src/host/page_flows.dart (exportOnce, printOnce,
++// :73-120) and floor_plan_controller.dart (_pageFlow, :1376-1388).
++import 'dart:async' show unawaited;
++import 'dart:typed_data';
++
++import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show FlutterTextMeasurer;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show registerKitComponents;
++
++import '../file/plan_file.dart' show ensureManifest;
++import 'builtin_exporters.dart';
++import 'export_font.dart';
++import 'page_printer.dart';
++import 'registries.dart';
++
++bool _never() => false;
++
++/// The export, print and import flows of one controller: the registries,
++/// the one-flow guard its views share, the remembered dialog answer and
++/// the font.
++final class PlanPageFlows {
++  /// [exporters] and [importers] are the host's; [unexported] the ids of
++  /// the types with `exported: false`; [document], [catalog], [settle] and
++  /// [load] read and act on the controller at each call.
++  PlanPageFlows({
++    required List<PlanExporter> exporters,
++    required List<PlanImporter> importers,
++    required Set<String> unexported,
++    required DraftDocument Function() document,
++    required ParametricCatalog Function() catalog,
++    required void Function() settle,
++    required void Function(String json) load,
++    PlanExportFonts? fonts,
++  })  : exporters = List.unmodifiable(<PlanExporter>[
++          const PlanPdfExporter(),
++          const PlanPngExporter(),
++          ...exporters,
++        ]),
++        importers = List.unmodifiable(importers),
++        fonts = fonts ?? ExportFontCache(),
++        _unexported = Set.unmodifiable(unexported),
++        _document = document,
++        _catalog = catalog,
++        _settle = settle,
++        _load = load {
++    checkRegistry(exporters: exporters, importers: importers);
++  }
++
++  /// Throws an [ArgumentError] naming `exporters` (or `importers`) when two
++  /// of them, the built-ins included, share an id. The controller's factory
++  /// calls it before it builds anything.
++  static void checkRegistry(
++      {required List<PlanExporter> exporters,
++      required List<PlanImporter> importers}) {
++    _unique([
++      PlanPdfExporter.exporterId,
++      PlanPngExporter.exporterId,
++      for (final e in exporters) e.id,
++    ], 'exporters');
++    _unique([for (final i in importers) i.id], 'importers');
++  }
++
++  static void _unique(List<String> ids, String name) {
++    final seen = <String>{};
++    for (final id in ids) {
++      if (!seen.add(id)) {
++        throw ArgumentError.value(ids, name, 'lists the id "$id" twice');
++      }
++    }
++  }
++
++  /// `plan.pdf`, `plan.png`, then the host's, in its order.
++  final List<PlanExporter> exporters;
++  final List<PlanImporter> importers;
++  final PlanExportFonts fonts;
++  final Set<String> _unexported;
++  final DraftDocument Function() _document;
++  final ParametricCatalog Function() _catalog;
++  final void Function() _settle;
++  final void Function(String json) _load;
++
++  final ValueNotifier<bool> _ready = ValueNotifier(true);
++  bool _disposed = false;
++
++  /// False while an export or a print runs, for this controller and every
++  /// view of it.
++  ValueListenable<bool> get ready => _ready;
++
++  /// The export dialog's last answer: the next dialog's initial.
++  PlanExportAnswer dialogAnswer = PlanExportAnswer.initial;
++
++  bool get isDisposed => _disposed;
++
++  /// Takes the guard: false when a flow runs or the flows are disposed.
++  bool acquire() {
++    if (_disposed || !_ready.value) return false;
++    _ready.value = false;
++    return true;
++  }
++
++  /// Gives the guard back, unless the flows are disposed.
++  void release() {
++    if (!_disposed) _ready.value = true;
++  }
++
++  PlanExporter exporterOf(String id) {
++    for (final e in exporters) {
++      if (e.id == id) return e;
++    }
++    throw ArgumentError.value(id, 'exporterId', 'names no exporter');
++  }
++
++  PlanImporter importerOf(String id) {
++    for (final i in importers) {
++      if (i.id == id) return i;
++    }
++    throw ArgumentError.value(id, 'importerId', 'names no importer');
++  }
++
++  /// The live objects of [document] whose type has `exported: false`.
++  Set<Handle> omittedOf(DraftDocument document) {
++    if (_unexported.isEmpty) return const {};
++    final catalog = _catalog();
++    return {
++      for (final node in document.tree.nodes)
++        if (node is GroupNode)
++          if (catalog.typeIdOf(document, node.handle) case final id?
++              when _unexported.contains(id))
++            node.handle,
++    };
++  }
++
++  /// A copy of [live]: its codec JSON decoded with a measurer of its own
++  /// and the controller's registrations. A component the plan keeps raw
++  /// (E4) stays raw in the copy, as `decodePlan` reads it.
++  ({DraftDocument document, FlutterTextMeasurer measurer}) _copyOf(
++      DraftDocument live) {
++    final measurer = FlutterTextMeasurer();
++    final catalog = _catalog();
++    final DraftDocument copy;
++    try {
++      copy = DraftDocumentCodec.decodeString(
++          DraftDocumentCodec.encodeToString(live),
++          measurer: measurer, registerComponents: (r) {
++        PageComponent.register(r);
++        registerKitComponents(r);
++        catalog.registerComponents(r);
++      }, diagnostics: <Diagnostic>[], keepUnreadableComponents: true);
++    } catch (_) {
++      measurer.clear();
++      rethrow;
++    }
++    return (document: copy, measurer: measurer);
++  }
++
++  /// [flow] under the guard, after the settle; [busy] when another flow
++  /// runs or the flows are disposed, before or after it.
++  Future<T> guarded<T>(T busy, Future<T> Function() flow) async {
++    if (!acquire()) return busy;
++    try {
++      _settle();
++      final result = await flow();
++      return _disposed ? busy : result;
++    } finally {
++      release();
++    }
++  }
++
++  /// Export's one body (page_flows.dart:73-97): [document] (the
++  /// controller's plan when null) by [exporterId] as [choice] says, named
++  /// `<name>.<extension>`. Null when the plan shown is no longer
++  /// [document], before or after the bytes; when the exporter plots the
++  /// page and the plan has none; or when [cancelled] says so after the
++  /// bytes. The exporter gets a copy, disposed when its bytes are back.
++  Future<PlanExport?> exportOnce(
++      String exporterId, PlanExportChoice choice, String name,
++      {DraftDocument? document, bool Function() cancelled = _never}) async {
++    final exporter = exporterOf(exporterId);
++    final live = document ?? _document();
++    if (!identical(live, _document())) return null;
++    if (exportPageOf(live) == null && exporter is PlanPageExporter) {
++      return null;
++    }
++    final copy = _copyOf(live);
++    final Uint8List bytes;
++    try {
++      bytes = await exporter.export(PlanExportRequest(
++          document: copy.document,
++          page: exportPageOf(copy.document),
++          choice: choice,
++          omitted: omittedOf(copy.document),
++          fonts: fonts));
++    } finally {
++      _disposeCopy(copy);
++    }
++    if (cancelled() || !identical(live, _document())) return null;
++    return PlanExport(
++        bytes: bytes,
++        name: '$name.${exporter.extension}',
++        mimeType: exporter.mimeType);
++  }
++
++  /// Print's one body (page_flows.dart:99-120): the plan's page as
++  /// `plan.pdf`'s bytes to [printer], named [name]. False when it has no
++  /// page, when the plan shown changed while the bytes were made, or when
++  /// [cancelled] says so after them; true once the printer is done.
++  Future<bool> printOnce(PagePrinter printer, String name,
++      {PlanExportChoice choice = PlanExportChoice.initial,
++      bool Function() cancelled = _never}) async {
++    final live = _document();
++    final page = exportPageOf(live);
++    if (page == null) return false;
++    final copy = _copyOf(live);
++    final Uint8List bytes;
++    try {
++      bytes = await const PlanPdfExporter().export(PlanExportRequest(
++          document: copy.document,
++          page: exportPageOf(copy.document),
++          choice: choice,
++          omitted: omittedOf(copy.document),
++          fonts: fonts));
++    } finally {
++      _disposeCopy(copy);
++    }
++    if (cancelled() || !identical(live, _document())) return false;
++    await printer.print(bytes, name, printPageFormat(page));
++    return true;
++  }
++
++  static void _disposeCopy(
++      ({DraftDocument document, FlutterTextMeasurer measurer}) copy) {
++    unawaited(copy.document.dispose());
++    copy.measurer.clear();
++  }
++
++  /// `PlanController.export`: an unknown id throws at once.
++  Future<PlanExport?> export(String exporterId, PlanExportChoice choice,
++      {required String name}) {
++    exporterOf(exporterId);
++    return guarded<PlanExport?>(null,
++        () => exportOnce(exporterId, choice, name, cancelled: () => _disposed));
++  }
++
++  /// `PlanController.print`.
++  Future<bool> print(PlanExportChoice choice,
++          {required PagePrinter printer, required String name}) =>
++      guarded<bool>(
++          false,
++          () => printOnce(printer, name,
++              choice: choice, cancelled: () => _disposed));
++
++  /// `PlanController.import`: an unknown id throws at once; the importer's
++  /// text, with an empty manifest added when it has none, is loaded.
++  Future<void> import(String importerId, Uint8List bytes) {
++    final importer = importerOf(importerId);
++    return _import(importer, bytes);
++  }
++
++  Future<void> _import(PlanImporter importer, Uint8List bytes) async {
++    final text = await importer.import(bytes);
++    if (_disposed) return;
++    _load(ensureManifest(text));
++  }
++
++  void dispose() {
++    _disposed = true;
++    _ready.dispose();
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/page_printer.dart b/packages/jet_cad_2d_plan/lib/src/export/page_printer.dart
+new file mode 100644
+index 00000000..546ba873
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/lib/src/export/page_printer.dart
+@@ -0,0 +1,32 @@
++// Ported from jet_cad_floor_plan/lib/src/export/page_printer.dart.
++// The Print flow's seam (spec 13 D9): what hands a page's PDF to the
++// platform's print dialog. The app uses [PrintingPagePrinter]; tests inject
++// a fake that records what it is given.
++import 'dart:typed_data';
++
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++import 'package:printing/printing.dart' show Printing;
++
++/// Hands a finished PDF to a print dialog.
++abstract interface class PagePrinter {
++  /// Prints [pdf], a document named [name] whose page is [format] (the
++  /// page's size in pt). Completes when the dialog is done with it.
++  Future<void> print(Uint8List pdf, String name, PdfPageFormat format);
++}
++
++/// The platform's print dialog through the `printing` package: the system
++/// dialog on macOS, the browser's on the web.
++class PrintingPagePrinter implements PagePrinter {
++  const PrintingPagePrinter();
++
++  /// The bytes are laid out once and never again: `dynamicLayout: false`,
++  /// so a paper change in the dialog does not ask for a new layout. Without
++  /// [format] the dialog would open on `PdfPageFormat.standard` (F-16).
++  @override
++  Future<void> print(Uint8List pdf, String name, PdfPageFormat format) =>
++      Printing.layoutPdf(
++          onLayout: (_) async => pdf,
++          name: name,
++          format: format,
++          dynamicLayout: false);
++}
+diff --git a/packages/jet_cad_2d_plan/lib/src/export/registries.dart b/packages/jet_cad_2d_plan/lib/src/export/registries.dart
+index 24f76b9a..03859ae7 100644
+--- a/packages/jet_cad_2d_plan/lib/src/export/registries.dart
++++ b/packages/jet_cad_2d_plan/lib/src/export/registries.dart
+@@ -1,44 +1,160 @@
+-// Export and import registries (spec 2a P5, A17.4): a host's exporters
+-// render a copy of the plan into bytes; its importers turn bytes into a
+-// plan's text. The controller stores them (Task 8); Task 19 runs them.
++// Spec P5: the export and import registries' types. A host adds its own
++// exporters and importers through PlanController(exporters:, importers:);
++// the plan library builds in `plan.pdf` and `plan.png`.
+ import 'dart:typed_data';
+ 
+ import 'package:jet_cad_2d/jet_cad_2d.dart';
+ import 'package:meta/meta.dart';
+ 
++/// What makes an export's bytes. Its [id] names the format in the dialog's
++/// answer and in `PlanController.export`: the built-ins are `plan.pdf` and
++/// `plan.png`, a host's its own (`acme.dxf`).
+ abstract interface class PlanExporter {
+-  /// `plan.pdf`, `plan.png`; a host's: `acme.dxf`.
+   String get id;
++
++  /// The file name's extension, without the dot.
+   String get extension;
+ 
+-  /// What a host's save hands on with the bytes.
++  /// The bytes' MIME type.
+   String get mimeType;
+ 
++  /// The bytes of [request]'s document. An error completes the export's
++  /// `Future` with it.
+   Future<Uint8List> export(PlanExportRequest request);
+ }
+ 
++/// An exporter that plots the plan's page (the built-ins do): for a plan
++/// without a page the controller answers null and never calls it, and its
++/// request's page is never null (spec P2: "a plan with no page where the
++/// choice needs one").
++abstract interface class PlanPageExporter implements PlanExporter {}
++
++/// What turns a file into a plan's text (spec P5, decision 4). A text
++/// without a manifest gets an empty one before it is loaded, so an imported
++/// drawing opens as plain geometry.
+ abstract interface class PlanImporter {
+   String get id;
++
++  /// The file extensions it reads, without the dot.
+   List<String> get extensions;
+ 
+-  /// A plan's text (spec decision 4); one without a manifest gets an empty
+-  /// one before it is loaded.
+   Future<String> import(Uint8List bytes);
+ }
+ 
+-/// What an exporter renders (spec P5). Task 19 adds the choice and the
+-/// fonts.
++/// The resolutions an image export offers.
++enum PlanExportDpi {
++  d96,
++  d150,
++  d300;
++
++  /// Dots per inch.
++  int get value => switch (this) {
++        PlanExportDpi.d96 => 96,
++        PlanExportDpi.d150 => 150,
++        PlanExportDpi.d300 => 300,
++      };
++}
++
++/// An export's settings: today's export choice without the format, which
++/// the exporter's id now names (spec P2). A PDF ignores the resolution.
+ @immutable
++final class PlanExportChoice {
++  const PlanExportChoice({this.dpi = PlanExportDpi.d150});
++
++  /// The first choice of a controller's life: 150 dpi.
++  static const PlanExportChoice initial = PlanExportChoice();
++
++  final PlanExportDpi dpi;
++
++  PlanExportChoice copyWith({PlanExportDpi? dpi}) =>
++      PlanExportChoice(dpi: dpi ?? this.dpi);
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanExportChoice && other.dpi == dpi;
++
++  @override
++  int get hashCode => dpi.hashCode;
++
++  @override
++  String toString() => 'PlanExportChoice(${dpi.value} dpi)';
++}
++
++/// The export dialog's answer, the host's dialog's too: the exporter's id
++/// and the choice. Remembered per controller as the next dialog's initial.
++@immutable
++final class PlanExportAnswer {
++  const PlanExportAnswer({required this.exporter, required this.choice});
++
++  /// The first answer of a controller's life: PDF, 150 dpi, as today's
++  /// dialog's.
++  static const PlanExportAnswer initial =
++      PlanExportAnswer(exporter: 'plan.pdf', choice: PlanExportChoice.initial);
++
++  final String exporter;
++  final PlanExportChoice choice;
++
++  PlanExportAnswer copyWith({String? exporter, PlanExportChoice? choice}) =>
++      PlanExportAnswer(
++          exporter: exporter ?? this.exporter, choice: choice ?? this.choice);
++
++  @override
++  bool operator ==(Object other) =>
++      other is PlanExportAnswer &&
++      other.exporter == exporter &&
++      other.choice == choice;
++
++  @override
++  int get hashCode => Object.hash(exporter, choice);
++
++  @override
++  String toString() => 'PlanExportAnswer($exporter, ${choice.dpi.value} dpi)';
++}
++
++/// The plan's fonts, for an exporter that embeds text.
++abstract interface class PlanExportFonts {
++  /// The bundled Roboto's bytes: the face the screen lays text out in.
++  Future<Uint8List> get bytes;
++}
++
++/// What an exporter is handed (spec P5).
+ final class PlanExportRequest {
+-  const PlanExportRequest(
+-      {required this.document, required this.page, required this.omitted});
++  PlanExportRequest({
++    required this.document,
++    required this.page,
++    required this.choice,
++    required Set<Handle> omitted,
++    required this.fonts,
++  }) : omitted = Set.unmodifiable(omitted);
+ 
+-  /// A copy decoded from the plan's text when the export starts.
++  /// A copy of the plan made when the export started, so edits made while
++  /// the export runs cannot race with it. Disposed once the bytes are back:
++  /// keep nothing of it.
+   final DraftDocument document;
+ 
+-  /// Null for a "drawing" export.
++  /// The plan's page, or null for a plan without one (never null for a
++  /// [PlanPageExporter]).
+   final PageComponent? page;
+ 
+-  /// Objects of types with `exported: false`.
++  final PlanExportChoice choice;
++
++  /// The objects of types with `exported: false`: their leaves are not
++  /// drawn.
+   final Set<Handle> omitted;
++
++  final PlanExportFonts fonts;
++}
++
++/// An export's bytes, its file name and its MIME type.
++@immutable
++final class PlanExport {
++  const PlanExport(
++      {required this.bytes, required this.name, required this.mimeType});
++
++  final Uint8List bytes;
++
++  /// `<name>.<extension>`.
++  final String name;
++
++  final String mimeType;
+ }
+diff --git a/packages/jet_cad_2d_plan/pubspec.yaml b/packages/jet_cad_2d_plan/pubspec.yaml
+index 69a2075e..2431d3d6 100644
+--- a/packages/jet_cad_2d_plan/pubspec.yaml
++++ b/packages/jet_cad_2d_plan/pubspec.yaml
+@@ -20,20 +20,22 @@ environment:
+ 
+ dependencies:
+   flutter:
+     sdk: flutter
+   flutter_localizations:
+     sdk: flutter
+   jet_cad_2d: ^0.7.2
+   jet_cad_2d_flutter: ^0.7.2
+   jet_cad_2d_kit: ^0.1.0
+   meta: ^1.18.0
++  pdf: ^3.13.1
++  printing: ^5.15.1
+   vector_math: ^2.2.0
+ 
+ dev_dependencies:
+   flutter_test:
+     sdk: flutter
+   lints: ^6.1.0
+ 
+ flutter:
+   assets:
+     - lib/fonts/Roboto-Regular.ttf
+diff --git a/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart b/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart
+index 453319ba..fdacfe20 100644
+--- a/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart
++++ b/packages/jet_cad_2d_plan/test/controller/plan_controller_test.dart
+@@ -312,32 +312,33 @@ void main() {
+     expect(c.document, same(document));
+     expect(c.diagnostics.value, same(diagnostics));
+     expect(c.loadDiagnostics, same(kept));
+     expect(c.missingKits, {'gone'});
+     await tester.pump();
+   });
+ 
+   testWidgets('C13 the exporters and importers given are kept, in order',
+       (tester) async {
+     final c = controllerFor(kits: [testKit()]);
+-    expect(c.exporters, isEmpty);
++    expect([for (final e in c.exporters) e.id], ['plan.pdf', 'plan.png']);
+     expect(c.importers, isEmpty);
+     final exporters = [_Exporter('acme.dxf'), _Exporter('acme.svg')];
+     final importers = [_Importer('acme.dxf')];
+     final d = PlanController(
+         kits: [testKit()], exporters: exporters, importers: importers);
+     addTearDown(d.dispose);
+     // M-C13: the lists not stored (`const []`).
+-    expect([for (final e in d.exporters) e.id], ['acme.dxf', 'acme.svg']);
++    expect([for (final e in d.exporters) e.id],
++        ['plan.pdf', 'plan.png', 'acme.dxf', 'acme.svg']);
+     expect(d.importers.single, same(importers.single));
+     exporters.clear();
+-    expect(d.exporters, hasLength(2), reason: 'copied');
++    expect(d.exporters, hasLength(4), reason: 'copied');
+   });
+ }
+ 
+ final class _Exporter implements PlanExporter {
+   _Exporter(this.id);
+ 
+   @override
+   final String id;
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart b/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart
+new file mode 100644
+index 00000000..9c262309
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/export/export_dialog_test.dart
+@@ -0,0 +1,73 @@
++// Spec P5: the export dialog lists the registry; the resolution is asked
++// for an image format only; OK answers the choice, Cancel null.
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
++import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
++import 'package:jet_cad_2d_plan/src/export/registries.dart';
++
++import '../support/recording_exporters.dart';
++
++Finder byKey(String k) => find.byKey(Key(k));
++
++void main() {
++  testWidgets(
++      'X-9 the dialog lists every exporter by its extension, asks the '
++      'resolution only for an image format, answers the choice on OK and '
++      'null on Cancel', (tester) async {
++    final exporters = <PlanExporter>[
++      const PlanPdfExporter(),
++      const PlanPngExporter(),
++      RecordingExporter('acme.json', 'json', 'application/json'),
++    ];
++    PlanExportAnswer? got;
++    var done = false;
++    await tester.pumpWidget(MaterialApp(
++        home: Builder(
++            builder: (context) => TextButton(
++                key: const Key('open'),
++                onPressed: () async {
++                  got = await showPlanExportDialog(
++                      context, PlanExportAnswer.initial, exporters);
++                  done = true;
++                },
++                child: const Text('open')))));
++    await tester.tap(byKey('open'));
++    await tester.pumpAndSettle();
++    for (final e in exporters) {
++      expect(byKey('export-format-${e.id}'), findsOneWidget, reason: e.id);
++    }
++    expect(find.text('PDF'), findsOneWidget);
++    expect(find.text('JSON'), findsOneWidget);
++    expect(byKey('export-dpi'), findsNothing, reason: 'a PDF has none');
++    await tester.tap(byKey('export-format-plan.png'));
++    await tester.pump();
++    expect(byKey('export-dpi'), findsOneWidget);
++    await tester.tap(byKey('export-dpi-300'));
++    await tester.pump();
++    await tester.tap(byKey('export-format-acme.json'));
++    await tester.pump();
++    // M-X-9: the resolution row shown for every exporter.
++    expect(byKey('export-dpi'), findsNothing);
++    await tester.tap(byKey('export-ok'));
++    await tester.pumpAndSettle();
++    expect(done, isTrue);
++    expect(
++        got,
++        const PlanExportAnswer(
++            exporter: 'acme.json',
++            choice: PlanExportChoice(dpi: PlanExportDpi.d300)));
++
++    done = false;
++    await tester.tap(byKey('open'));
++    await tester.pumpAndSettle();
++    expect(
++        tester.widget<SegmentedButton<String>>(byKey('export-format')).selected,
++        {'plan.pdf'},
++        reason: 'the initial answer it was given');
++    await tester.tap(byKey('export-cancel'));
++    await tester.pumpAndSettle();
++    expect(done, isTrue);
++    expect(got, isNull);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/export/export_font_test.dart b/packages/jet_cad_2d_plan/test/export/export_font_test.dart
+new file mode 100644
+index 00000000..3936c403
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/export/export_font_test.dart
+@@ -0,0 +1,81 @@
++// Spec P5 "Fonts": the font the PDF export embeds is read through the
++// asset bundle, once per controller. Ported from
++// apps/floor_planner/test/export/export_font_test.dart (EF4, EF5, EF7,
++// EF8); EF1-EF3 and EF9-EF12 are the app's files, main() and pubspec, and
++// EF6 (registerFontLicences) is Task 9's.
++import 'dart:io';
++
++import 'package:flutter/foundation.dart';
++import 'package:flutter/services.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/export/export_font.dart';
++import 'package:jet_cad_2d_plan/src/fonts/plan_fonts.dart' show kPlanFontAsset;
++
++const String vendoredDir = '../jet_cad_2d_flutter/test/golden/fonts';
++
++Uint8List vendoredFont() =>
++    File('$vendoredDir/Roboto-Regular.ttf').readAsBytesSync();
++
++/// A bundle that serves fixed bytes under one key and records every key
++/// asked for.
++class _MapBundle extends CachingAssetBundle {
++  _MapBundle(this.assets);
++
++  final Map<String, Uint8List> assets;
++  final List<String> asked = <String>[];
++
++  @override
++  Future<ByteData> load(String key) async {
++    asked.add(key);
++    final bytes = assets[key];
++    if (bytes == null) throw FlutterError('no asset $key');
++    return ByteData.sublistView(bytes);
++  }
++}
++
++void main() {
++  group('loadExportFont', () {
++    testWidgets('EF4 reads the bundled font through rootBundle',
++        (tester) async {
++      final bytes = await loadExportFont();
++      expect(bytes, orderedEquals(vendoredFont()));
++    });
++
++    testWidgets('EF5 reads from the bundle it is given', (tester) async {
++      final fake = Uint8List.fromList(<int>[7, 1, 9, 3]);
++      final bundle = _MapBundle(<String, Uint8List>{kPlanFontAsset: fake});
++      expect(await loadExportFont(bundle), orderedEquals(fake));
++      expect(bundle.asked, <String>[kPlanFontAsset]);
++    });
++  });
++
++  group('ExportFontCache', () {
++    test('EF7 reads once and returns the same future after', () async {
++      var reads = 0;
++      final bytes = Uint8List.fromList(<int>[4, 2]);
++      final cache = ExportFontCache(load: () async {
++        reads++;
++        return bytes;
++      });
++      expect(reads, 0, reason: 'nothing is read until asked');
++      final first = cache.bytes;
++      expect(cache.bytes, same(first));
++      expect(await first, same(bytes));
++      expect(await cache.bytes, same(bytes));
++      expect(reads, 1);
++    });
++
++    test('EF8 a failed read is not held: the next call reads again', () async {
++      var reads = 0;
++      final bytes = Uint8List.fromList(<int>[5]);
++      final cache = ExportFontCache(load: () async {
++        reads++;
++        if (reads == 1) throw StateError('first read fails');
++        return bytes;
++      });
++      await expectLater(cache.bytes, throwsStateError);
++      expect(await cache.bytes, same(bytes));
++      expect(reads, 2);
++    });
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/export/page_flows_test.dart b/packages/jet_cad_2d_plan/test/export/page_flows_test.dart
+new file mode 100644
+index 00000000..79e2c927
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/export/page_flows_test.dart
+@@ -0,0 +1,777 @@
++// Spec P2 and P5: the controller's export and print without their
++// dialogs, under one guard per controller; the editor's Export and Print
++// (EditorPageFlows, here under the editor bar's two buttons, FlowsBar) with
++// the host's onExportDialog and onPageFlowError. Ported from
++// jet_cad_floor_plan/test/host/page_flows_test.dart (PF2-PF4, PF7-PF16,
++// PF18-PF24) on the export fixture: two turned marks and a line around the
++// sheet's centre. Expected pixel sizes are computed here from the page,
++// never read from the code under test.
++import 'dart:async';
++import 'dart:convert' show latin1, utf8;
++import 'dart:typed_data';
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/controller/permissions.dart';
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
++import 'package:jet_cad_2d_plan/src/export/editor_page_flows.dart';
++import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
++import 'package:jet_cad_2d_plan/src/export/page_printer.dart';
++import 'package:jet_cad_2d_plan/src/export/registries.dart';
++import 'package:jet_cad_2d_plan/src/fonts/plan_fonts.dart' show kPlanFontAsset;
++
++import '../support/export_plan.dart';
++import '../support/fake_page_printer.dart';
++import '../support/flows_bar.dart';
++import '../support/mark_kit.dart';
++
++Finder byKey(String k) => find.byKey(Key(k));
++
++/// A PNG's width and height, from its IHDR chunk.
++({int w, int h}) pngSize(Uint8List b) {
++  expect(b.sublist(1, 4), 'PNG'.codeUnits);
++  final d = ByteData.sublistView(b);
++  return (w: d.getUint32(16), h: d.getUint32(20));
++}
++
++/// The page of [c]'s plan in pixels at [dpi] (spec 13 D5:
++/// `round(effW / 25.4 · dpi)`), computed here.
++({int w, int h}) pagePixels(PlanController c, int dpi) {
++  final page = exportPageOf(c.document)!;
++  return (
++    w: (page.effectiveWidthMm / 25.4 * dpi).round(),
++    h: (page.effectiveHeightMm / 25.4 * dpi).round(),
++  );
++}
++
++/// The PDF's first `/MediaBox`, in pt.
++List<double> mediaBox(Uint8List pdf) {
++  final text = latin1.decode(pdf);
++  final m = RegExp(r'/MediaBox\s*\[\s*([-\d.\s]+)\]').firstMatch(text);
++  expect(m, isNotNull, reason: 'a PDF names its page size');
++  return [
++    for (final n in m!.group(1)!.trim().split(RegExp(r'\s+'))) double.parse(n)
++  ];
++}
++
++const pdf150 = PlanExportAnswer.initial;
++const png96 = PlanExportAnswer(
++    exporter: 'plan.png', choice: PlanExportChoice(dpi: PlanExportDpi.d96));
++const png300 = PlanExportAnswer(
++    exporter: 'plan.png', choice: PlanExportChoice(dpi: PlanExportDpi.d300));
++
++/// The controller's export as [a] says.
++Future<PlanExport?> exportAs(PlanController c, PlanExportAnswer a,
++        {String? name}) =>
++    c.export(a.exporter, a.choice, name: name);
++
++/// Lets real asynchronous work (the bytes, the font) run until [done].
++Future<void> letRun(WidgetTester tester, bool Function() done) async {
++  for (var i = 0; i < 600 && !done(); i++) {
++    await tester
++        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
++    await tester.pump();
++  }
++}
++
++/// A host's export dialog that records each `initial` and answers [answer].
++final class RecordingHook {
++  RecordingHook(this.answer);
++
++  PlanExportAnswer? answer;
++  final List<PlanExportAnswer> initials = [];
++
++  /// Thrown instead of answering, once, when set.
++  Object? failNext;
++
++  Future<PlanExportAnswer?> call(BuildContext context, PlanExportAnswer initial,
++      List<PlanExporter> exporters) async {
++    initials.add(initial);
++    final failure = failNext;
++    failNext = null;
++    if (failure != null) throw failure;
++    return answer;
++  }
++}
++
++Future<PlanController> pumpFlows(
++  WidgetTester tester, {
++  String? json,
++  void Function(PlanExport)? onExport,
++  PagePrinter? printer,
++  String exportName = 'plan',
++  RecordingHook? hook,
++  void Function(Object error)? onError,
++}) async {
++  final c = PlanController(kits: [markKit()], json: json ?? exportPlanJson());
++  addTearDown(c.dispose);
++  await tester.binding.setSurfaceSize(const Size(1440, 900));
++  addTearDown(() => tester.binding.setSurfaceSize(null));
++  await tester.pumpWidget(MaterialApp(
++      home: Scaffold(
++          body: FlowsBar(
++              controller: c,
++              onExport: onExport,
++              printer: printer,
++              exportName: exportName,
++              onExportDialog: hook?.call,
++              onPageFlowError: onError))));
++  await tester.pump();
++  await tester.pump();
++  return c;
++}
++
++bool enabled(WidgetTester tester, String key) =>
++    tester.widget<IconButton>(byKey(key)).onPressed != null;
++
++void main() {
++  testWidgets(
++      'PF2 export(PNG at 96): image/png, <name>.png, the page\'s pixel size '
++      'at 96 dpi; the remembered answer is left as it is', (tester) async {
++    final got = <PlanExport>[];
++    final c = await pumpFlows(tester, onExport: got.add);
++    final design = (await tester.runAsync(() => exportAs(c, png96)))!;
++    expect(design.mimeType, 'image/png');
++    expect(design.name, 'plan.png');
++    expect(pngSize(design.bytes), pagePixels(c, 96));
++    final named =
++        (await tester.runAsync(() => exportAs(c, png96, name: 'salon')))!;
++    expect(named.name, 'salon.png');
++    expect(named.bytes, design.bytes);
++    expect(got, isEmpty, reason: 'the command returns, it calls no onExport');
++    expect(c.pageFlows.dialogAnswer, PlanExportAnswer.initial,
++        reason: 'exportPlan leaves the remembered choice');
++  });
++
++  testWidgets(
++      "PF3 a plan without a page exports null and prints false; print "
++      "gives the printer one call with the name and the page's format",
++      (tester) async {
++    final pageless =
++        PlanController(kits: [markKit()], json: exportPlanJson(page: false));
++    addTearDown(pageless.dispose);
++    expect(await tester.runAsync(() => exportAs(pageless, png96)), isNull);
++    final none = FakePagePrinter();
++    expect(
++        await tester.runAsync(
++            () => pageless.print(PlanExportChoice.initial, printer: none)),
++        isFalse);
++    expect(none.calls, isEmpty);
++
++    final printer = FakePagePrinter();
++    final c = await pumpFlows(tester, json: exportPlanJson());
++    for (var run = 0; run < 2; run++) {
++      expect(
++          await tester.runAsync(() => c.print(PlanExportChoice.initial,
++              printer: printer, name: 'teras')),
++          isTrue);
++    }
++    expect(printer.calls, hasLength(2));
++    final page = exportPageOf(c.document)!;
++    for (final call in printer.calls) {
++      expect(call.name, 'teras');
++      expect(
++          call.format.width, closeTo(page.effectiveWidthMm * 72 / 25.4, 1e-9));
++      expect(call.format.height,
++          closeTo(page.effectiveHeightMm * 72 / 25.4, 1e-9));
++      expect(call.pdf.sublist(0, 4), '%PDF'.codeUnits);
++    }
++  });
++
++  testWidgets(
++      'PF4 export and print act with no view mounted, and answer null and '
++      'false after dispose()', (tester) async {
++    final c = PlanController(kits: [markKit()], json: exportPlanJson());
++    final png = (await tester.runAsync(() => exportAs(c, png96)))!;
++    expect(pngSize(png.bytes), pagePixels(c, 96));
++    final printer = FakePagePrinter();
++    expect(
++        await tester.runAsync(
++            () => c.print(PlanExportChoice.initial, printer: printer)),
++        isTrue);
++    expect(printer.calls.single.name, 'plan');
++    c.dispose();
++    expect(await tester.runAsync(() => exportAs(c, png96)), isNull);
++    expect(
++        await tester.runAsync(
++            () => c.print(PlanExportChoice.initial, printer: printer)),
++        isFalse);
++    expect(printer.calls, hasLength(1));
++  });
++
++  testWidgets(
++      "PF7 (T1-a) one flow at a time per controller: a second export in "
++      "the same step answers null; print while the bar's Print awaits "
++      'its printer answers false, and true after it ends', (tester) async {
++    final barPrinter = FakePagePrinter()..hold = true;
++    final c = await pumpFlows(tester,
++        json: exportPlanJson(), printer: barPrinter, onExport: (_) {});
++    final both = await tester.runAsync(() {
++      final first = exportAs(c, png96);
++      final second = exportAs(c, png96);
++      return Future.wait([first, second]);
++    });
++    expect(both![0], isNotNull);
++    expect(both[1], isNull, reason: 'the first still ran');
++
++    const print = 'toolbar-print';
++    final calls = barPrinter.calls.length;
++    await tester.tap(byKey(print));
++    await tester.pump();
++    await letRun(tester, () => barPrinter.calls.length > calls);
++    expect(barPrinter.held, hasLength(calls + 1), reason: 'held');
++    final own = FakePagePrinter();
++    expect(
++        await tester
++            .runAsync(() => c.print(PlanExportChoice.initial, printer: own)),
++        isFalse,
++        reason: 'the bar\'s Print runs');
++    expect(await tester.runAsync(() => exportAs(c, png96)), isNull);
++    expect(own.calls, isEmpty);
++    expect(enabled(tester, print), isFalse);
++    barPrinter.held.last.complete();
++    await tester.pump();
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(enabled(tester, print), isTrue);
++    expect(
++        await tester
++            .runAsync(() => c.print(PlanExportChoice.initial, printer: own)),
++        isTrue,
++        reason: 'after it ends');
++    expect(own.calls, hasLength(1));
++
++    // A host's print holds the bar's buttons too.
++    final held = FakePagePrinter()..hold = true;
++    late Future<bool> printing;
++    await tester.runAsync(() async {
++      printing = c.print(PlanExportChoice.initial, printer: held);
++      while (held.calls.isEmpty) {
++        await Future<void>.delayed(const Duration(milliseconds: 10));
++      }
++    });
++    await tester.pump();
++    expect(enabled(tester, 'toolbar-print'), isFalse);
++    expect(enabled(tester, 'toolbar-export'), isFalse);
++    held.held.single.complete();
++    expect(await tester.runAsync(() => printing), isTrue);
++    await tester.pump();
++    expect(enabled(tester, 'toolbar-print'), isTrue);
++  });
++
++  testWidgets(
++      'PF8 (T1-b) export of a plan replaced before its bytes: a load, '
++      'each answers null; print too, before and while the PDF is made',
++      (tester) async {
++    final c = await pumpFlows(tester, json: exportPlanJson());
++    final next = exportPlanJson();
++    final switched = await tester.runAsync(() {
++      final f = exportAs(c, png96);
++      c.load(next);
++      return f;
++    });
++    expect(switched, isNull);
++    await tester.pump();
++    await tester.pump();
++    final loaded = await tester.runAsync(() {
++      final f = exportAs(c, png96);
++      c.load(next);
++      return f;
++    });
++    expect(loaded, isNull);
++    await tester.pump();
++    await tester.pump();
++    final printer = FakePagePrinter();
++    final printed = await tester.runAsync(() {
++      final f = c.print(PlanExportChoice.initial, printer: printer);
++      c.load(next);
++      return f;
++    });
++    expect(printed, isFalse);
++    expect(printer.calls, isEmpty);
++    // Replaced after the font, while the PDF is made: the font is cached,
++    // so the swap's microtask runs right after the font's check.
++    await tester.runAsync(() => c.pageFlows.fonts.bytes);
++    await tester.pump();
++    await tester.pump();
++    final late = await tester.runAsync(() {
++      final f = c.print(PlanExportChoice.initial, printer: printer);
++      scheduleMicrotask(() => c.load(next));
++      return f;
++    });
++    expect(late, isFalse);
++    expect(printer.calls, isEmpty);
++    await tester.pump();
++    await tester.pump();
++    expect(await tester.runAsync(() => exportAs(c, png96)), isNotNull,
++        reason: 'the guard is free again');
++  });
++
++  testWidgets(
++      "PF9 (T1-c) a failing flow with onPageFlowError: the error reported "
++      "once, the flow ended, Print enabled again; the hook's own error too",
++      (tester) async {
++    final errors = <Object>[];
++    final printer = FakePagePrinter();
++    final hook = RecordingHook(png96);
++    final got = <PlanExport>[];
++    await pumpFlows(tester,
++        json: exportPlanJson(),
++        printer: printer,
++        onExport: got.add,
++        hook: hook,
++        onError: errors.add);
++    for (var run = 0; run < 2; run++) {
++      const prefix = 'toolbar';
++      final jam = StateError('jam');
++      printer.failNext = jam;
++      final before = errors.length;
++      await tester.tap(byKey('$prefix-print'));
++      await tester.pump();
++      await letRun(tester, () => errors.length > before);
++      await tester.pump();
++      expect(errors, hasLength(before + 1), reason: 'run $run');
++      expect(identical(errors.last, jam), isTrue, reason: 'run $run');
++      expect(tester.takeException(), isNull);
++      expect(enabled(tester, '$prefix-print'), isTrue, reason: 'run $run');
++
++      final broken = ArgumentError('dialog');
++      hook.failNext = broken;
++      await tester.tap(byKey('$prefix-export'));
++      await tester.pump();
++      await letRun(tester, () => errors.length > before + 1);
++      await tester.pump();
++      expect(errors, hasLength(before + 2), reason: 'run $run');
++      expect(identical(errors.last, broken), isTrue, reason: 'run $run');
++      expect(got, isEmpty);
++      expect(enabled(tester, '$prefix-export'), isTrue, reason: 'run $run');
++    }
++    expect(printer.calls, hasLength(2));
++  });
++
++  testWidgets(
++      'PF10 (T1-c, S-8) without onPageFlowError a failing print escapes as '
++      'an uncaught asynchronous error, as on the base, and Print is enabled '
++      'again', (tester) async {
++    final printer = FakePagePrinter();
++    await pumpFlows(tester, json: exportPlanJson(), printer: printer);
++    const print = 'toolbar-print';
++    final jam = StateError('jam');
++    printer.failNext = jam;
++    final caught = <Object>[];
++    await runZonedGuarded(() async {
++      await tester.tap(byKey(print));
++      await tester.pump();
++      await letRun(tester, () => caught.isNotEmpty);
++      await tester.pump();
++    }, (error, _) => caught.add(error));
++    expect(caught, hasLength(1));
++    expect(identical(caught.single, jam), isTrue);
++    expect(tester.takeException(), isNull);
++    expect(enabled(tester, print), isTrue);
++  });
++
++  testWidgets(
++      "PF11 print's error completes its Future; onPageFlowError hears "
++      'nothing; the guard is free again', (tester) async {
++    final errors = <Object>[];
++    final c = await pumpFlows(tester,
++        json: exportPlanJson(), onError: errors.add, onExport: (_) {});
++    final printer = FakePagePrinter()..failNext = StateError('jam');
++    Object? thrown;
++    await tester.runAsync(() async {
++      try {
++        await c.print(PlanExportChoice.initial, printer: printer);
++      } catch (e) {
++        thrown = e;
++      }
++    });
++    expect(thrown, isA<StateError>());
++    expect(errors, isEmpty);
++    expect(c.pageFlows.ready.value, isTrue);
++    expect(
++        await tester.runAsync(
++            () => c.print(PlanExportChoice.initial, printer: printer)),
++        isTrue);
++    await tester.pump();
++    expect(enabled(tester, 'toolbar-print'), isTrue);
++  });
++
++  testWidgets(
++      'PF12 (T1-d) a hook answering null cancels: nothing exported, the '
++      'remembered answer unchanged', (tester) async {
++    final got = <PlanExport>[];
++    final hook = RecordingHook(png300);
++    final c = await pumpFlows(tester, onExport: got.add, hook: hook);
++    // Remember PNG at 300 first, so a cancel that wrote anything shows.
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pump();
++    await letRun(tester, () => got.isNotEmpty);
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(got, hasLength(1));
++    hook.answer = null;
++    for (var run = 0; run < 2; run++) {
++      await tester.tap(byKey('toolbar-export'));
++      await tester.pump();
++      await letRun(tester, () => c.pageFlows.ready.value);
++      await tester.runAsync(
++          () => Future<void>.delayed(const Duration(milliseconds: 200)));
++      await tester.pump();
++      expect(got, hasLength(1), reason: 'run $run');
++      expect(byKey('export-dialog'), findsNothing);
++      expect(c.pageFlows.dialogAnswer, png300);
++    }
++    expect(hook.initials, [pdf150, png300, png300]);
++  });
++
++  testWidgets(
++      "PF13 (T1-e) each of the six choices through export gives what the "
++      "same choice gives through the exporter's bytes: a PNG's pixel size "
++      "per dpi, a PDF's magic and page size", (tester) async {
++    final c = await pumpFlows(tester, json: exportPlanJson());
++    final document = c.document;
++    final page = exportPageOf(document)!;
++    for (final exporter in const ['plan.pdf', 'plan.png']) {
++      for (final dpi in PlanExportDpi.values) {
++        final choice = PlanExportAnswer(
++            exporter: exporter, choice: PlanExportChoice(dpi: dpi));
++        final e = (await tester.runAsync(() => exportAs(c, choice)))!;
++        if (exporter == 'plan.png') {
++          expect(e.mimeType, 'image/png', reason: '$choice');
++          expect(e.name, 'plan.png', reason: '$choice');
++          expect(pngSize(e.bytes), pagePixels(c, dpi.value), reason: '$choice');
++          final dialogs = await tester.runAsync(() => const PlanPngExporter()
++              .export(PlanExportRequest(
++                  document: document,
++                  page: page,
++                  choice: PlanExportChoice(dpi: dpi),
++                  omitted: const {},
++                  fonts: c.pageFlows.fonts)));
++          expect(e.bytes, dialogs, reason: '$choice');
++        } else {
++          expect(e.mimeType, 'application/pdf', reason: '$choice');
++          expect(e.name, 'plan.pdf', reason: '$choice');
++          expect(e.bytes.sublist(0, 5), '%PDF-'.codeUnits, reason: '$choice');
++          final box = mediaBox(e.bytes);
++          expect(box[2], closeTo(page.effectiveWidthMm * 72 / 25.4, 1e-3),
++              reason: '$choice');
++          expect(box[3], closeTo(page.effectiveHeightMm * 72 / 25.4, 1e-3),
++              reason: '$choice');
++        }
++      }
++    }
++  });
++
++  testWidgets(
++      "PF14 (T1-f) the hook's answer is remembered as the next initial; "
++      'export leaves it as it was', (tester) async {
++    final got = <PlanExport>[];
++    final hook = RecordingHook(png300);
++    final c = await pumpFlows(tester, onExport: got.add, hook: hook);
++    Future<void> press(String key) async {
++      final before = got.length;
++      await tester.tap(byKey(key));
++      await tester.pump();
++      await letRun(tester, () => got.length > before);
++      await letRun(tester, () => c.pageFlows.ready.value);
++    }
++
++    await press('toolbar-export');
++    hook.answer = png96;
++    await press('toolbar-export');
++    expect(await tester.runAsync(() => exportAs(c, png300)), isNotNull);
++    await press('toolbar-export');
++    expect(hook.initials, [pdf150, png300, png96]);
++    expect(pngSize(got.last.bytes), pagePixels(c, 96));
++  });
++
++  testWidgets(
++      "PF15 a view removed while its Print runs releases the controller's "
++      'guard when the printer is done: export acts again', (tester) async {
++    final printer = FakePagePrinter()..hold = true;
++    final c = await pumpFlows(tester, json: exportPlanJson(), printer: printer);
++    await tester.tap(byKey('toolbar-print'));
++    await tester.pump();
++    await letRun(tester, () => printer.held.isNotEmpty);
++    await tester.pumpWidget(const SizedBox());
++    expect(await tester.runAsync(() => exportAs(c, png96)), isNull,
++        reason: 'the print still runs');
++    printer.held.single.complete();
++    await tester.pump();
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(tester.takeException(), isNull);
++    expect(await tester.runAsync(() => exportAs(c, png96)), isNotNull);
++  });
++
++  // The review's probes (s4-task-1-review R-1 to R-5): each holds a mutant
++  // the tests above let survive.
++
++  testWidgets(
++      'PF16 (R-5) onExportDialog and onPageFlowError given by a host rebuild '
++      'after the flows exist are the ones used at the next Export and the '
++      'next error: read at each call, never captured', (tester) async {
++    final got = <PlanExport>[];
++    final c = PlanController(kits: [markKit()], json: exportPlanJson());
++    addTearDown(c.dispose);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final printer = FakePagePrinter();
++    Widget view({RecordingHook? hook, void Function(Object)? onError}) =>
++        MaterialApp(
++            home: Scaffold(
++                body: FlowsBar(
++                    controller: c,
++                    onExport: got.add,
++                    printer: printer,
++                    onExportDialog: hook?.call,
++                    onPageFlowError: onError)));
++    await tester.pumpWidget(view());
++    await tester.pump();
++    await tester.pump();
++    // The flows used once without a hook, so they exist before the rebuild.
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pump();
++    expect(byKey('export-dialog'), findsOneWidget, reason: 'premise');
++    await tester.tap(byKey('export-cancel'));
++    await tester.pump();
++    await tester.pump();
++    await letRun(tester, () => c.pageFlows.ready.value);
++
++    final hook = RecordingHook(png96);
++    final errors = <Object>[];
++    await tester.pumpWidget(view(hook: hook, onError: errors.add));
++    await tester.pump();
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pump();
++    expect(byKey('export-dialog'), findsNothing);
++    await letRun(tester, () => got.isNotEmpty);
++    expect(hook.initials, hasLength(1));
++    expect(got, hasLength(1));
++    expect(got.single.mimeType, 'image/png');
++    await letRun(tester, () => c.pageFlows.ready.value);
++
++    printer.failNext = StateError('jam');
++    await tester.tap(byKey('toolbar-print'));
++    await tester.pump();
++    await letRun(tester, () => errors.isNotEmpty);
++    expect(errors, hasLength(1));
++    expect(errors.single, isA<StateError>());
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(tester.takeException(), isNull);
++  });
++
++  testWidgets(
++      'PF18 (R-3) dispose() while print awaits its printer: it answers '
++      'false', (tester) async {
++    final c = PlanController(kits: [markKit()], json: exportPlanJson());
++    final printer = FakePagePrinter()..hold = true;
++    late Future<bool> printing;
++    await tester.runAsync(() async {
++      printing = c.print(PlanExportChoice.initial, printer: printer);
++      while (printer.held.isEmpty) {
++        await Future<void>.delayed(const Duration(milliseconds: 10));
++      }
++    });
++    c.dispose();
++    printer.held.single.complete();
++    expect(await tester.runAsync(() => printing), isFalse);
++  });
++
++  testWidgets(
++      'PF19 (R-4) flows disposed while Print makes its bytes: nothing is '
++      'printed', (tester) async {
++    final printer = FakePagePrinter();
++    final c = await pumpFlows(tester, json: exportPlanJson(), printer: printer);
++    await tester.runAsync(() => c.pageFlows.fonts.bytes);
++    final flows = EditorPageFlows(
++        controller: c,
++        settings: () => (onExport: null, printer: printer, exportName: 'plan'));
++    final printing = flows.print(tester.element(find.byType(FlowsBar)));
++    var done = false;
++    unawaited(printing.whenComplete(() => done = true));
++    scheduleMicrotask(flows.dispose);
++    await letRun(tester, () => done);
++    expect(done, isTrue);
++    expect(printer.calls, isEmpty);
++  });
++
++  testWidgets(
++      'PF20 (R-4) the view removed while Export makes its bytes: onExport '
++      'is not called', (tester) async {
++    final got = <PlanExport>[];
++    final hook = RecordingHook(png96);
++    await pumpFlows(tester, onExport: got.add, hook: hook);
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pumpWidget(const SizedBox());
++    await tester.runAsync(
++        () => Future<void>.delayed(const Duration(milliseconds: 1500)));
++    await tester.pump();
++    expect(hook.initials, hasLength(1), reason: 'premise: the hook answered');
++    expect(got, isEmpty);
++  });
++
++  testWidgets(
++      "PF21 (R-5) the hook's answer is remembered even when the plan is "
++      'replaced while it is open (as the dialog\'s always was); nothing is '
++      'exported', (tester) async {
++    final got = <PlanExport>[];
++    final c = PlanController(kits: [markKit()], json: exportPlanJson());
++    addTearDown(c.dispose);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    final next = exportPlanJson();
++    var asked = 0;
++    await tester.pumpWidget(MaterialApp(
++        home: Scaffold(
++            body: FlowsBar(
++                controller: c,
++                onExport: got.add,
++                onExportDialog: (context, initial, exporters) async {
++                  asked++;
++                  c.load(next);
++                  return png300;
++                }))));
++    await tester.pump();
++    await tester.pump();
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pump();
++    await letRun(tester, () => c.pageFlows.ready.value);
++    await tester.pump();
++    expect(asked, 1);
++    expect(got, isEmpty);
++    expect(c.pageFlows.dialogAnswer, png300);
++  });
++
++  /// [exportPlanJson] under a FlowsBar whose permissions the test sets on
++  /// the controller, with `onExport`, a fake printer and, when given, a
++  /// host's export dialog.
++  Future<PlanController> pumpCaps(WidgetTester tester,
++      {required void Function(PlanExport) onExport,
++      required PagePrinter printer,
++      PlanExportDialog? dialog}) async {
++    final c = PlanController(kits: [markKit()], json: exportPlanJson());
++    addTearDown(c.dispose);
++    await tester.binding.setSurfaceSize(const Size(1440, 900));
++    addTearDown(() => tester.binding.setSurfaceSize(null));
++    await tester.pumpWidget(MaterialApp(
++        home: Scaffold(
++            body: FlowsBar(
++                controller: c,
++                onExport: onExport,
++                printer: printer,
++                onExportDialog: dialog))));
++    await tester.pump();
++    await tester.pump();
++    return c;
++  }
++
++  testWidgets(
++      'PF22 (final review F-4) the Material export dialog open when the '
++      'host refuses export: OK exports nothing and the answer is not '
++      'remembered; allowed again, the same steps export', (tester) async {
++    final got = <PlanExport>[];
++    final c =
++        await pumpCaps(tester, onExport: got.add, printer: FakePagePrinter());
++    Future<void> exportPng() async {
++      await tester.tap(byKey('toolbar-export'));
++      await tester.pump();
++      await tester.pump();
++      expect(byKey('export-dialog'), findsOneWidget, reason: 'premise');
++      await tester.tap(byKey('export-format-plan.png'));
++      await tester.pump();
++    }
++
++    await exportPng();
++    c.permissions = PlanPermissions.full.copyWith(export: false);
++    await tester.pump();
++    expect(byKey('toolbar-export'), findsNothing, reason: 'premise: refused');
++    await tester.tap(byKey('export-ok'));
++    await tester.pump();
++    await letRun(tester, () => got.isNotEmpty);
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(got, isEmpty);
++    expect(c.pageFlows.dialogAnswer, PlanExportAnswer.initial);
++
++    c.permissions = PlanPermissions.full;
++    await tester.pump();
++    await exportPng();
++    await tester.tap(byKey('export-ok'));
++    await tester.pump();
++    await letRun(tester, () => got.isNotEmpty);
++    expect(got.single.name, 'plan.png', reason: 'the control');
++  });
++
++  testWidgets(
++      "PF23 (final review F-4) a host's export dialog answering after the "
++      'host refused export, and a refusal while the bytes are made: '
++      'nothing is exported', (tester) async {
++    final got = <PlanExport>[];
++    var answer = Completer<PlanExportAnswer?>();
++    final c = await pumpCaps(tester,
++        onExport: got.add,
++        printer: FakePagePrinter(),
++        dialog: (_, __, ___) => answer.future);
++    final refused = PlanPermissions.full.copyWith(export: false);
++
++    // Refused while the hook's dialog is open.
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pump();
++    c.permissions = refused;
++    await tester.pump();
++    answer.complete(png96);
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(got, isEmpty, reason: 'refused while the dialog was open');
++
++    // Refused after the dialog answered, while the bytes are made.
++    c.permissions = PlanPermissions.full;
++    await tester.pump();
++    answer = Completer();
++    await tester.tap(byKey('toolbar-export'));
++    await tester.pump();
++    answer.complete(png96);
++    await tester.pump();
++    c.permissions = refused;
++    await tester.pump();
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(got, isEmpty, reason: 'refused while the bytes were made');
++  });
++
++  testWidgets(
++      'PF24 (final review F-4) Print refused while its bytes wait on the '
++      'font: nothing is printed; allowed, it prints', (tester) async {
++    // The export font's asset held until the test lets it go, as a first
++    // print's load can take a while.
++    final gate = Completer<void>();
++    final messenger = tester.binding.defaultBinaryMessenger;
++    messenger.allMessagesHandler = (channel, handler, message) {
++      final send = handler ?? (m) => messenger.delegate.send(channel, m);
++      if (channel == 'flutter/assets' &&
++          utf8.decode(message!.buffer
++                  .asUint8List(message.offsetInBytes, message.lengthInBytes)) ==
++              kPlanFontAsset) {
++        return gate.future.then((_) => send(message));
++      }
++      return send(message);
++    };
++    addTearDown(() => messenger.allMessagesHandler = null);
++    final printer = FakePagePrinter();
++    final c = await pumpCaps(tester, onExport: (_) {}, printer: printer);
++    await tester.tap(byKey('toolbar-print'));
++    await tester.pump();
++    expect(c.pageFlows.ready.value, isFalse, reason: 'premise: under way');
++    c.permissions = PlanPermissions.full.copyWith(print: false);
++    await tester.pump();
++    expect(byKey('toolbar-print'), findsNothing, reason: 'premise: refused');
++    gate.complete();
++    await letRun(tester, () => c.pageFlows.ready.value);
++    expect(c.pageFlows.ready.value, isTrue, reason: 'premise: the flow ended');
++    expect(printer.calls, isEmpty);
++
++    c.permissions = PlanPermissions.full;
++    await tester.pump();
++    await tester.tap(byKey('toolbar-print'));
++    await tester.pump();
++    await letRun(tester, () => printer.calls.isNotEmpty);
++    expect(printer.calls.single.name, 'plan', reason: 'the control');
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/export/plan_export_types_test.dart b/packages/jet_cad_2d_plan/test/export/plan_export_types_test.dart
+new file mode 100644
+index 00000000..bb24a2e3
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/export/plan_export_types_test.dart
+@@ -0,0 +1,41 @@
++// Spec P2 and P5: the export choice without the format, the dialog's
++// answer naming the exporter, and the resolutions.
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d_plan/src/export/registries.dart';
++
++void main() {
++  test(
++      'X-1 the choice and the answer: ==, hashCode, copyWith, toString; the '
++      'resolutions in order', () {
++    const initial = PlanExportChoice.initial;
++    expect(initial.dpi, PlanExportDpi.d150);
++    expect(initial.toString(), 'PlanExportChoice(150 dpi)');
++    expect(PlanExportDpi.values.map((d) => d.value), [96, 150, 300]);
++    final d96 = initial.copyWith(dpi: PlanExportDpi.d96);
++    // M-X-1a: PlanExportChoice.== ignores dpi.
++    expect(d96 == initial, isFalse);
++    expect(initial.copyWith(), initial);
++    expect(const PlanExportChoice(dpi: PlanExportDpi.d150), initial);
++    expect(initial.hashCode == d96.hashCode, isFalse);
++
++    const answer = PlanExportAnswer.initial;
++    expect(answer.exporter, 'plan.pdf');
++    expect(answer.choice, initial);
++    expect(answer.toString(), 'PlanExportAnswer(plan.pdf, 150 dpi)');
++    final png = answer.copyWith(exporter: 'plan.png');
++    final fine = answer.copyWith(
++        choice: const PlanExportChoice(dpi: PlanExportDpi.d300));
++    expect(png.choice, initial, reason: 'choice kept');
++    expect(fine.exporter, 'plan.pdf', reason: 'exporter kept');
++    // M-X-1b: PlanExportAnswer.== ignores the exporter.
++    expect(png == answer, isFalse);
++    expect(fine == answer, isFalse);
++    expect(png == fine, isFalse);
++    expect(answer.copyWith(), answer);
++    expect(
++        const PlanExportAnswer(
++            exporter: 'plan.png', choice: PlanExportChoice.initial),
++        png);
++    expect(png.hashCode == answer.hashCode, isFalse);
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/export/registry_test.dart b/packages/jet_cad_2d_plan/test/export/registry_test.dart
+new file mode 100644
+index 00000000..4be035f8
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/export/registry_test.dart
+@@ -0,0 +1,282 @@
++// Spec P5 (the registries, the copy, omitted types, import) and P2 (the
++// export rules: a page where needed, pending input settled first).
++import 'dart:typed_data';
++
++import 'package:flutter_test/flutter_test.dart';
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
++    show ExportDpi, exportPagePng;
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/export/builtin_exporters.dart';
++import 'package:jet_cad_2d_plan/src/export/page_flows.dart';
++import 'package:jet_cad_2d_plan/src/export/registries.dart';
++import 'package:jet_cad_2d_plan/src/file/plan_format_exception.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import '../support/export_plan.dart';
++import '../support/fake_page_printer.dart';
++import '../support/layer_plan.dart' show addLineOn;
++import '../support/mark_kit.dart';
++import '../support/recording_exporters.dart';
++
++/// Flows over [doc] alone, for the registry's own rules.
++PlanPageFlows flowsOver(DraftDocument doc,
++        {List<PlanExporter> exporters = const [],
++        List<PlanImporter> importers = const []}) =>
++    PlanPageFlows(
++        exporters: exporters,
++        importers: importers,
++        unexported: const {},
++        document: () => doc,
++        catalog: ParametricCatalog.new,
++        settle: () {},
++        load: (_) {});
++
++void main() {
++  testWidgets(
++      'X-2 the registry: the built-ins first, then the host\'s in its order; '
++      'one id twice is an ArgumentError naming the list; an unknown id is an '
++      'ArgumentError at once, before any flow', (tester) async {
++    final dxf = RecordingExporter('acme.dxf', 'dxf', 'image/vnd.dxf');
++    final svg = RecordingExporter('acme.svg', 'svg', 'image/svg+xml');
++    final c = PlanController(
++        kits: const [],
++        exporters: [dxf, svg],
++        importers: [TextImporter('acme.json')]);
++    addTearDown(c.dispose);
++    expect([for (final e in c.exporters) e.id],
++        ['plan.pdf', 'plan.png', 'acme.dxf', 'acme.svg']);
++    expect([for (final i in c.importers) i.id], ['acme.json']);
++
++    final doc = DraftDocument.empty();
++    for (final (exporters, importers, name) in [
++      (
++        [RecordingExporter('plan.pdf', 'pdf', 'application/pdf')],
++        <PlanImporter>[],
++        'exporters'
++      ),
++      ([dxf, dxf], <PlanImporter>[], 'exporters'),
++      (
++        <PlanExporter>[],
++        [TextImporter('a.b'), TextImporter('a.b')],
++        'importers'
++      ),
++    ]) {
++      // M-X-2: drop PlanPageFlows' uniqueness checks.
++      expect(() => flowsOver(doc, exporters: exporters, importers: importers),
++          throwsA(isA<ArgumentError>().having((e) => e.name, 'name', name)));
++    }
++
++    expect(() => c.export('acme.nope', PlanExportChoice.initial),
++        throwsA(isA<ArgumentError>()));
++    expect(() => c.import('acme.nope', Uint8List(0)),
++        throwsA(isA<ArgumentError>()));
++    expect(c.pageFlows.ready.value, isTrue, reason: 'no flow started');
++  });
++
++  testWidgets(
++      'X-3 plan.png leaves out the objects of a type with exported: false: '
++      'its bytes are the page drawn without them; with the type exported they '
++      'are drawn', (tester) async {
++    final hidden = PlanController(
++        kits: [markKit(exported: false)],
++        json: exportPlanJson(kits: [markKit(exported: false)]));
++    addTearDown(hidden.dispose);
++    final shown = PlanController(kits: [markKit()], json: exportPlanJson());
++    addTearDown(shown.dispose);
++    final doc = hidden.document;
++    final marks = hidden.catalog.objectsOf<MarkCross>(doc);
++    expect(marks, hasLength(2), reason: 'premise');
++    final page = exportPageOf(doc)!;
++    const d96 = PlanExportChoice(dpi: PlanExportDpi.d96);
++
++    final without = (await tester.runAsync(() => exportPagePng(
++        document: doc,
++        page: page,
++        dpi: ExportDpi.d96,
++        omitOwners: marks.toSet())))!;
++    final whole = (await tester.runAsync(
++        () => exportPagePng(document: doc, page: page, dpi: ExportDpi.d96)))!;
++    expect(without, isNot(whole),
++        reason: 'premise: the marks are on the sheet');
++
++    final got = (await tester.runAsync(() => hidden.export('plan.png', d96)))!;
++    // M-X-3a: `omittedOf` answers the empty set.
++    expect(got.bytes, without);
++    expect(got.name, 'plan.png');
++    expect(got.mimeType, 'image/png');
++    final drawn = (await tester.runAsync(() => shown.export('plan.png', d96)))!;
++    // M-X-3b: `unexported` lists every type, exported or not.
++    expect(drawn.bytes, whole);
++  });
++
++  testWidgets(
++      'X-4 an exporter is handed a copy made when the export starts: '
++      'another document with the plan\'s bytes, which an edit made while it '
++      'works does not reach, disposed once the bytes are back', (tester) async {
++    final acme = RecordingExporter('acme.json', 'json', 'application/json')
++      ..hold = true;
++    final c = PlanController(
++        kits: [markKit()], json: exportPlanJson(), exporters: [acme]);
++    addTearDown(c.dispose);
++    final start = DraftDocumentCodec.encodeToString(c.document);
++    late Future<PlanExport?> pending;
++    await tester.runAsync(() async {
++      pending = c.export('acme.json', PlanExportChoice.initial, name: 'salon');
++      while (acme.held.isEmpty) {
++        await Future<void>.delayed(const Duration(milliseconds: 5));
++      }
++    });
++    final request = acme.requests.single;
++    // M-X-4: the request carries the controller's own document.
++    expect(identical(request.document, c.document), isFalse);
++    expect(acme.seen.single, start);
++    addLineOn(
++        c.document, ReservedHandles.layerZero, 900.5, 300.25, 1800.75, 650.5);
++    expect(DraftDocumentCodec.encodeToString(request.document), start,
++        reason: 'the edit is not in the copy');
++    acme.held.single.complete();
++    final export = (await tester.runAsync(() => pending))!;
++    expect(export.name, 'salon.json');
++    expect(export.mimeType, 'application/json');
++    expect(request.document.commands.isDisposed, isTrue,
++        reason: 'the copy is gone');
++  });
++
++  testWidgets(
++      'X-5 a plan without a page: a page exporter answers null and is never '
++      'called, plan.png too, print answers false; an exporter that needs no '
++      'page is handed page null and its bytes come back', (tester) async {
++    final plot =
++        RecordingPageExporter('acme.plot', 'plt', 'application/vnd.hp-hpgl');
++    final drawing = RecordingExporter('acme.json', 'json', 'application/json');
++    final c = PlanController(
++        kits: [markKit()],
++        json: exportPlanJson(page: false),
++        exporters: [plot, drawing]);
++    addTearDown(c.dispose);
++    expect(exportPageOf(c.document), isNull, reason: 'premise');
++    // M-X-5: `exportOnce` drops its page test.
++    expect(
++        await tester
++            .runAsync(() => c.export('acme.plot', PlanExportChoice.initial)),
++        isNull);
++    expect(plot.requests, isEmpty);
++    expect(
++        await tester
++            .runAsync(() => c.export('plan.png', PlanExportChoice.initial)),
++        isNull);
++    final printer = FakePagePrinter();
++    expect(
++        await tester.runAsync(
++            () => c.print(PlanExportChoice.initial, printer: printer)),
++        isFalse);
++    expect(printer.calls, isEmpty);
++    final e = (await tester
++        .runAsync(() => c.export('acme.json', PlanExportChoice.initial)))!;
++    expect(drawing.requests.single.page, isNull);
++    expect(e.name, 'plan.json');
++  });
++
++  testWidgets(
++      'X-6 import: a host importer\'s drawing without a manifest opens as '
++      'plain geometry; an importer\'s error and a plan load refuses each '
++      'complete the Future and keep the plan', (tester) async {
++    final drawing = DraftDocument.empty();
++    PageComponent.register(drawing.components);
++    final add = addDrafted(drawing, EntityKind.line,
++        linePayload(Vector2(-4200.5, 3100.25), Vector2(-1800.75, 5200.5)),
++        layer: ReservedHandles.layerZero);
++    drawing.commands.execute(add);
++    final importer = TextImporter('acme.json',
++        text: DraftDocumentCodec.encodeToString(drawing));
++    final c = PlanController(
++        kits: [markKit()], json: exportPlanJson(), importers: [importer]);
++    addTearDown(c.dispose);
++    final first = c.document;
++    await tester
++        .runAsync(() => c.import('acme.json', Uint8List.fromList([7, 1, 9])));
++    // M-X-6: `_import` loads the text without `ensureManifest`: the load
++    // refuses it (noManifest) and the plan is kept.
++    expect(identical(c.document, first), isFalse, reason: 'a new plan');
++    expect(c.document.entities.slotOf(add.record.handle), isNotNull);
++    expect(c.missingKits, isEmpty);
++    expect(importer.asked.single, [7, 1, 9]);
++
++    final kept = c.document;
++    importer.failNext = StateError('unreadable');
++    Object? thrown;
++    await tester.runAsync(() async {
++      try {
++        await c.import('acme.json', Uint8List(0));
++      } catch (e) {
++        thrown = e;
++      }
++    });
++    expect(thrown, isA<StateError>());
++    expect(identical(c.document, kept), isTrue);
++
++    // A plan of a format above 1 (spec P4): load refuses it.
++    final future = DraftDocument.empty();
++    registerKitComponents(future.components);
++    future.commands.execute(SetComponentCommand<ManifestComponent>(
++        future.rootHandle, ManifestComponent(format: 2, kits: const {})));
++    importer.text = DraftDocumentCodec.encodeToString(future);
++    thrown = null;
++    await tester.runAsync(() async {
++      try {
++        await c.import('acme.json', Uint8List(0));
++      } catch (e) {
++        thrown = e;
++      }
++    });
++    expect(thrown, isA<PlanFormatException>());
++    expect((thrown! as PlanFormatException).code, PlanFormatCode.formatTooNew);
++    expect(identical(c.document, kept), isTrue);
++  });
++
++  testWidgets(
++      'X-7 print hands the printer one PDF of the page, named, at the page\'s '
++      'size in pt', (tester) async {
++    final c = PlanController(kits: [markKit()], json: exportPlanJson());
++    addTearDown(c.dispose);
++    final printer = FakePagePrinter();
++    expect(
++        await tester.runAsync(() =>
++            c.print(PlanExportChoice.initial, printer: printer, name: 'teras')),
++        isTrue);
++    final call = printer.calls.single;
++    final page = exportPageOf(c.document)!;
++    expect(call.name, 'teras');
++    expect(call.format.width, closeTo(page.effectiveWidthMm * 72 / 25.4, 1e-9));
++    expect(
++        call.format.height, closeTo(page.effectiveHeightMm * 72 / 25.4, 1e-9));
++    // M-X-7: printOnce hands the printer the PNG exporter's bytes.
++    expect(call.pdf.sublist(0, 4), '%PDF'.codeUnits);
++  });
++
++  testWidgets(
++      'X-8 export settles pending input before it copies the plan: what a '
++      'settler commits is in the exporter\'s copy', (tester) async {
++    final acme = RecordingExporter('acme.json', 'json', 'application/json');
++    final c = PlanController(
++        kits: [markKit()], json: exportPlanJson(), exporters: [acme]);
++    addTearDown(c.dispose);
++    final before = DraftDocumentCodec.encodeToString(c.document);
++    var runs = 0;
++    final release = c.registerSettle(() {
++      if (runs++ == 0) {
++        addLineOn(c.document, ReservedHandles.layerZero, 400.5, 220.25, 1300.75,
++            980.5);
++      }
++    });
++    addTearDown(release);
++    await tester
++        .runAsync(() => c.export('acme.json', PlanExportChoice.initial));
++    // M-X-8: `guarded` does not call `_settle()`.
++    expect(runs, greaterThan(0));
++    expect(acme.seen.single, isNot(before));
++    expect(acme.seen.single, DraftDocumentCodec.encodeToString(c.document));
++  });
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/export_plan.dart b/packages/jet_cad_2d_plan/test/support/export_plan.dart
+new file mode 100644
+index 00000000..f6851c95
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/export_plan.dart
+@@ -0,0 +1,37 @@
++// The export fixture: a plan on the default page with, around the sheet's
++// centre (not the origin), two marks turned 0.4 and -1.1 rad and a line,
++// saved by a controller of the given kits; and the same plan without its
++// page.
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart';
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:vector_math/vector_math_64.dart' show Vector2;
++
++import 'mark_kit.dart';
++
++String exportPlanJson({List<PlanKit>? kits, bool page = true}) {
++  final scratch = PlanController(kits: kits ?? [markKit()]);
++  final doc = scratch.document;
++  final root = doc.rootHandle;
++  final sheet = sheetWorldRect(doc.components.get<PageComponent>(root)!);
++  final cx = (sheet.minX + sheet.maxX) / 2, cy = (sheet.minY + sheet.maxY) / 2;
++  Transform2 put(double dx, double dy, double turn) =>
++      Transform2.translation(cx + dx, cy + dy)
++          .multiply(Transform2.rotation(turn));
++  addMark(doc, ReservedHandles.layerZero,
++      at: put(-2600.5, 900.25, 0.4), size: 700.5);
++  addMark(doc, ReservedHandles.layerZero,
++      at: put(2100.25, -700.5, -1.1), size: 520.25);
++  doc.commands.execute(addDrafted(
++      doc,
++      EntityKind.line,
++      linePayload(Vector2(cx - 3900.5, cy - 2100.25),
++          Vector2(cx + 3300.75, cy + 1800.5)),
++      layer: ReservedHandles.layerZero));
++  if (!page) {
++    doc.commands.execute(SetComponentCommand<PageComponent>(root, null));
++  }
++  final json = scratch.save();
++  scratch.dispose();
++  return json;
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/fake_page_printer.dart b/packages/jet_cad_2d_plan/test/support/fake_page_printer.dart
+new file mode 100644
+index 00000000..ef2d6b53
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/fake_page_printer.dart
+@@ -0,0 +1,42 @@
++// A PagePrinter for tests (spec 13 D9): records every call's bytes, name and
++// page format; throws [failNext] once when set; while [hold] is set, keeps
++// each call open (as the system print dialog does) until the test completes
++// its completer in [held].
++import 'dart:async';
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d_plan/src/export/page_printer.dart';
++import 'package:pdf/pdf.dart' show PdfPageFormat;
++
++class PrintCall {
++  PrintCall(this.pdf, this.name, this.format);
++  final Uint8List pdf;
++  final String name;
++  final PdfPageFormat format;
++}
++
++class FakePagePrinter implements PagePrinter {
++  final List<PrintCall> calls = [];
++
++  /// Thrown by the next call, then cleared.
++  Object? failNext;
++
++  /// When true, each call waits on a completer added to [held].
++  bool hold = false;
++
++  /// The open calls' completers, in call order, while [hold] is set.
++  final List<Completer<void>> held = [];
++
++  @override
++  Future<void> print(Uint8List pdf, String name, PdfPageFormat format) async {
++    calls.add(PrintCall(pdf, name, format));
++    final failure = failNext;
++    failNext = null;
++    if (failure != null) throw failure;
++    if (hold) {
++      final open = Completer<void>();
++      held.add(open);
++      await open.future;
++    }
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/flows_bar.dart b/packages/jet_cad_2d_plan/test/support/flows_bar.dart
+new file mode 100644
+index 00000000..74d74dda
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/flows_bar.dart
+@@ -0,0 +1,101 @@
++// The editor bar's two page buttons over EditorPageFlows, as Task 20's
++// PlanEditorBar has them: Export (`toolbar-export`) only with onExport and
++// while permissions.export is on; Print (`toolbar-print`) while
++// permissions.print is on; each enabled while the controller's flows are
++// ready. The flows read this widget's fields at each call.
++import 'dart:async' show unawaited;
++
++import 'package:flutter/material.dart';
++import 'package:jet_cad_2d_plan/src/controller/plan_controller.dart';
++import 'package:jet_cad_2d_plan/src/export/editor_page_flows.dart';
++import 'package:jet_cad_2d_plan/src/export/export_dialog.dart';
++import 'package:jet_cad_2d_plan/src/export/page_printer.dart';
++import 'package:jet_cad_2d_plan/src/export/registries.dart';
++
++class FlowsBar extends StatefulWidget {
++  const FlowsBar(
++      {super.key,
++      required this.controller,
++      this.onExport,
++      this.printer,
++      this.exportName = 'plan',
++      this.onExportDialog,
++      this.onPageFlowError});
++
++  final PlanController controller;
++  final void Function(PlanExport export)? onExport;
++  final PagePrinter? printer;
++  final String exportName;
++  final PlanExportDialog? onExportDialog;
++  final void Function(Object error)? onPageFlowError;
++
++  @override
++  State<FlowsBar> createState() => FlowsBarState();
++}
++
++class FlowsBarState extends State<FlowsBar> {
++  late EditorPageFlows flows = _flowsFor(widget.controller);
++
++  EditorPageFlows _flowsFor(PlanController c) => EditorPageFlows(
++        controller: c,
++        settings: () => (
++          onExport: widget.onExport,
++          printer: widget.printer ?? const PrintingPagePrinter(),
++          exportName: widget.exportName,
++        ),
++        hooks: () => (
++          exportDialog: widget.onExportDialog,
++          onError: widget.onPageFlowError,
++        ),
++      );
++
++  @override
++  void initState() {
++    super.initState();
++    widget.controller.addListener(_refresh);
++  }
++
++  @override
++  void didUpdateWidget(FlowsBar oldWidget) {
++    super.didUpdateWidget(oldWidget);
++    if (!identical(oldWidget.controller, widget.controller)) {
++      oldWidget.controller.removeListener(_refresh);
++      widget.controller.addListener(_refresh);
++      flows.dispose();
++      flows = _flowsFor(widget.controller);
++    }
++  }
++
++  @override
++  void dispose() {
++    widget.controller.removeListener(_refresh);
++    flows.dispose();
++    super.dispose();
++  }
++
++  void _refresh() {
++    if (mounted) setState(() {});
++  }
++
++  Widget _button(String key, IconData icon, VoidCallback run) =>
++      ValueListenableBuilder<bool>(
++        valueListenable: flows.ready,
++        builder: (_, ready, __) => IconButton(
++            key: Key(key), icon: Icon(icon), onPressed: ready ? run : null),
++      );
++
++  @override
++  Widget build(BuildContext context) {
++    final permissions = widget.controller.permissions;
++    return Material(
++      child: Row(mainAxisSize: MainAxisSize.min, children: [
++        if (flows.canExport && permissions.export)
++          _button('toolbar-export', Icons.ios_share_outlined,
++              () => unawaited(flows.export(context))),
++        if (permissions.print)
++          _button('toolbar-print', Icons.print_outlined,
++              () => unawaited(flows.print(context))),
++      ]),
++    );
++  }
++}
+diff --git a/packages/jet_cad_2d_plan/test/support/recording_exporters.dart b/packages/jet_cad_2d_plan/test/support/recording_exporters.dart
+new file mode 100644
+index 00000000..020d816a
+--- /dev/null
++++ b/packages/jet_cad_2d_plan/test/support/recording_exporters.dart
+@@ -0,0 +1,81 @@
++// A host's exporter and importer for tests: each records what it was
++// handed, can fail once, and (the exporter) can hold its bytes until the
++// test lets them go.
++import 'dart:async';
++import 'dart:convert' show utf8;
++import 'dart:typed_data';
++
++import 'package:jet_cad_2d/jet_cad_2d.dart';
++import 'package:jet_cad_2d_plan/src/export/registries.dart';
++
++class RecordingExporter implements PlanExporter {
++  RecordingExporter(this.id, this.extension, this.mimeType);
++
++  @override
++  final String id;
++  @override
++  final String extension;
++  @override
++  final String mimeType;
++
++  final List<PlanExportRequest> requests = [];
++
++  /// Each request's document as the codec writes it, read on arrival (the
++  /// copy is disposed once the bytes are back).
++  final List<String> seen = [];
++
++  /// Thrown by the next call, then cleared.
++  Object? failNext;
++
++  /// While true, each call waits on a completer added to [held].
++  bool hold = false;
++  final List<Completer<void>> held = [];
++
++  @override
++  Future<Uint8List> export(PlanExportRequest request) async {
++    requests.add(request);
++    seen.add(DraftDocumentCodec.encodeToString(request.document));
++    final failure = failNext;
++    failNext = null;
++    if (failure != null) throw failure;
++    if (hold) {
++      final open = Completer<void>();
++      held.add(open);
++      await open.future;
++    }
++    return Uint8List.fromList(utf8.encode('$id ${request.omitted.length}'));
++  }
++}
++
++/// A host exporter that plots the page.
++class RecordingPageExporter extends RecordingExporter
++    implements PlanPageExporter {
++  RecordingPageExporter(super.id, super.extension, super.mimeType);
++}
++
++class TextImporter implements PlanImporter {
++  TextImporter(this.id, {this.text = ''});
++
++  @override
++  final String id;
++
++  @override
++  List<String> get extensions => const ['json'];
++
++  /// What the next import answers.
++  String text;
++
++  /// Thrown by the next call, then cleared.
++  Object? failNext;
++
++  final List<Uint8List> asked = [];
++
++  @override
++  Future<String> import(Uint8List bytes) async {
++    asked.add(bytes);
++    final failure = failNext;
++    failNext = null;
++    if (failure != null) throw failure;
++    return text;
++  }
++}

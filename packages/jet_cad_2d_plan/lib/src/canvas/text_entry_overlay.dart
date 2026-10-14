@@ -1,0 +1,190 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart';
+
+import '../controller/plan_controller.dart';
+import '../shortcuts/plan_shortcut_guard.dart';
+
+/// Ruling 05-11: the field's size. Its bottom-left sits at the insertion
+/// point's screen position.
+const Size kTextEntrySize = Size(240, 32);
+
+/// Spec 05 D9: the inline field for [TextTool].
+///
+/// **Where it sits.** Outside the `InteractionLayer`, so a click on it is
+/// not a canvas click.
+///
+/// **Keys.** The guard lets the plan's letters through as text, and
+/// Escape cancels.
+///
+/// **Rebuilds.** The field is a stable child of the camera builder, so a pan
+/// or zoom moves it and never rebuilds it (Ruling 05-10).
+///
+/// **Commit and cancel.** Enter commits. Any other loss of focus cancels
+/// if the placement is still pending. A canvas click has already committed
+/// synchronously in the tool, so its blur finds nothing to cancel. A flow
+/// of the document host (spec 12a D2, R-5) commits the entry through the
+/// tool's `finish` before it moves the focus, so the focus loss that
+/// follows finds nothing to cancel either.
+///
+/// **Where the focus goes.** Back to the canvas, however the entry ends
+/// (`_onPending`, `_onTapOutside`).
+class TextEntryOverlay extends StatefulWidget {
+  const TextEntryOverlay({
+    super.key,
+    required this.controller,
+    required this.tool,
+    required this.tools,
+    required this.camera,
+  });
+
+  /// The plan whose letters the field's guard lets through as text.
+  final PlanController controller;
+  final TextTool tool;
+  final ToolController tools;
+  final CameraController camera;
+
+  @override
+  State<TextEntryOverlay> createState() => _TextEntryOverlayState();
+}
+
+class _TextEntryOverlayState extends State<TextEntryOverlay> {
+  final FocusNode _focus = FocusNode(debugLabel: 'text-entry');
+
+  @override
+  void initState() {
+    super.initState();
+    widget.tool.pending.addListener(_onPending);
+    _focus.addListener(_onFocus);
+  }
+
+  /// A placement takes focus for the field; Ruling 05-7 hands it back to
+  /// the canvas, the scope's previous child, as soon as the placement ends.
+  ///
+  /// `autofocus` alone never fires here: the canvas already holds focus (the
+  /// layer requests it on the very click that placed the point), and
+  /// autofocus only acts on a scope with nothing focused. The field is not
+  /// built yet, so the request is deferred until its `Focus` attaches.
+  void _onPending() {
+    if (widget.tool.pending.value != null) {
+      _focus.requestFocus();
+    } else if (_focus.hasFocus) {
+      _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+    }
+  }
+
+  /// Spec 05 D9's "any other loss of focus" means one inside the app
+  /// (Ruling T7-b). A window switch moves primary focus to the root scope on
+  /// `inactive`, and the focus manager restores it on `resumed`; cancelling
+  /// here would detach the field and leave the plan's shortcuts dead. The
+  /// state is null until the first lifecycle message (and in tests), which
+  /// is not a window switch.
+  void _onFocus() {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+    if (!_focus.hasFocus && widget.tool.pending.value != null) {
+      widget.tool.cancelText(widget.tools.context);
+    }
+  }
+
+  /// A tap outside the field drops its focus exactly when `EditableText`'s
+  /// default would (`_EditableTextTapOutsideAction`: every pointer on
+  /// macOS, Windows, Linux and the web; all but touch on Android, iOS and
+  /// Fuchsia), and the focus loss cancels the entry ([_onFocus]). But the
+  /// default is a plain `unfocus()`, which clears the scope's focus history
+  /// and leaves the focus on the route's scope, where no key reaches the
+  /// plan's shortcuts: after a click on the tool palette or a panel, the tool letters
+  /// and the file chords (spec 12a D6) did nothing until a canvas click
+  /// (plan 12a Task 7). This hands the focus back to the canvas instead,
+  /// the scope's previous child (Ruling 05-7), as a panel field does
+  /// (`PanelFieldFocusNode.handBack`).
+  void _onTapOutside(PointerDownEvent event) {
+    if (!kIsWeb && event.kind == PointerDeviceKind.touch) {
+      switch (defaultTargetPlatform) {
+        case TargetPlatform.android:
+        case TargetPlatform.iOS:
+        case TargetPlatform.fuchsia:
+          return;
+        case TargetPlatform.linux:
+        case TargetPlatform.macOS:
+        case TargetPlatform.windows:
+          break;
+      }
+    }
+    _focus.unfocus(disposition: UnfocusDisposition.previouslyFocusedChild);
+  }
+
+  void _submit(String s) => widget.tool.commitText(s, widget.tools.context);
+
+  void _cancel() => widget.tool.cancelText(widget.tools.context);
+
+  @override
+  void dispose() {
+    widget.tool.pending.removeListener(_onPending);
+    _focus.removeListener(_onFocus);
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<TextPlacement?>(
+        valueListenable: widget.tool.pending,
+        builder: (context, placed, _) {
+          if (placed == null) return const SizedBox.shrink();
+          final field = SizedBox.fromSize(
+            key: const Key('text-entry-box'),
+            size: kTextEntrySize,
+            child: PlanShortcutGuard(
+              controller: widget.controller,
+              child: CallbackShortcuts(
+                bindings: <ShortcutActivator, VoidCallback>{
+                  const SingleActivator(LogicalKeyboardKey.escape): _cancel,
+                },
+                child: TextField(
+                  key: const Key('text-entry'),
+                  controller: widget.tool.controller,
+                  focusNode: _focus,
+                  autofocus: true,
+                  maxLines: 1,
+                  // Without this, `EditableText` unfocuses on submit with
+                  // `UnfocusDisposition.scope`, which clears the scope's
+                  // focus history before `_onPending` can hand focus back
+                  // to the canvas (Ruling 05-7).
+                  onEditingComplete: () {},
+                  onSubmitted: _submit,
+                  onTapOutside: _onTapOutside,
+                  // Dark theme spec D6b: filled from the theme, so the
+                  // field (its text the theme's onSurface) reads on any
+                  // paper, in either theme.
+                  decoration: InputDecoration(
+                      isDense: true,
+                      border: const OutlineInputBorder(),
+                      filled: true,
+                      fillColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest),
+                ),
+              ),
+            ),
+          );
+          return Stack(
+            children: [
+              ListenableBuilder(
+                listenable: widget.camera,
+                builder: (context, child) {
+                  final s = widget.camera.value.worldToScreen(placed.point);
+                  return Positioned(
+                    left: s.x,
+                    top: s.y - kTextEntrySize.height,
+                    child: child!,
+                  );
+                },
+                child: field,
+              ),
+            ],
+          );
+        },
+      );
+}

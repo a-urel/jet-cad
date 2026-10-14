@@ -1,0 +1,151 @@
+# Review package: a6958db4..HEAD
+
+## Commits
+1d68c7a5 fix(plan): a lock hint already set when a canvas binds clears too
+
+## Files changed
+ .../lib/src/canvas/plan_canvas.dart                | 12 +++++++-
+ .../test/canvas/plan_canvas_test.dart              | 36 ++++++++++++++++++++++
+ 2 files changed, 47 insertions(+), 1 deletion(-)
+
+## Diff
+diff --git a/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart b/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart
+index a390b902..092334ca 100644
+--- a/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart
++++ b/packages/jet_cad_2d_plan/lib/src/canvas/plan_canvas.dart
+@@ -97,20 +97,24 @@ class _PlanCanvasState extends State<PlanCanvas> {
+   bool _fitIsRequest = false;
+ 
+   Timer? _hintTimer;
+ 
+   @override
+   void initState() {
+     super.initState();
+     _enter(_c);
+     _c.addListener(_onController);
+     _c.lockHint.addListener(_onHint);
++    // A hint set before this canvas heard it (a refusal with no canvas
++    // mounted, or one in the 2 s before this canvas replaced another)
++    // clears too.
++    _onHint();
+     _c.snappingAllowed = widget.snapping;
+     _bind();
+   }
+ 
+   @override
+   void didChangeDependencies() {
+     super.didChangeDependencies();
+     final theme = Theme.of(context);
+     _theme = PlanTheme.of(context);
+     _surfaceArgb = _canvasColour(theme.colorScheme).toARGB32();
+@@ -126,20 +130,22 @@ class _PlanCanvasState extends State<PlanCanvas> {
+     super.didUpdateWidget(oldWidget);
+     final old = oldWidget.controller;
+     if (!identical(old, _c)) {
+       _leave(old);
+       old.removeListener(_onController);
+       old.lockHint.removeListener(_onHint);
+       _hintTimer?.cancel();
+       _enter(_c);
+       _c.addListener(_onController);
+       _c.lockHint.addListener(_onHint);
++      // The new controller's hint may be showing already.
++      _onHint();
+       _rebind();
+       PlanLocaleScope.push(context, _c);
+     }
+     _c.snappingAllowed = widget.snapping;
+   }
+ 
+   @override
+   void dispose() {
+     _leave(_c);
+     _c.removeListener(_onController);
+@@ -237,21 +243,25 @@ class _PlanCanvasState extends State<PlanCanvas> {
+   /// floor_plan_view.dart:595-602.
+   bool _fitOnStartFor(DraftDocument document) {
+     if (!identical(_fitFor, document)) {
+       _fitFor = document;
+       _fitIsRequest = !_c.owesFirstFit;
+       _fit = _c.takeFitOnStart();
+     }
+     return _fit;
+   }
+ 
+-  /// Spec P4: the hint clears [kLockHintDuration] after it was set.
++  /// Spec P4: the hint clears [kLockHintDuration] after it was set, or
++  /// after this canvas bound a controller whose hint was already set. A
++  /// refusal while the hint shows writes true over true, which notifies
++  /// nothing, so it does not restart the window (that needs an event from
++  /// the controller, not a ValueNotifier).
+   void _onHint() {
+     _hintTimer?.cancel();
+     if (!_c.lockHint.value) return;
+     final c = _c;
+     _hintTimer = Timer(kLockHintDuration, () {
+       if (mounted && identical(c, _c)) c.lockHint.value = false;
+     });
+   }
+ 
+   @override
+diff --git a/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart b/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart
+index e2c43ca7..96888dd3 100644
+--- a/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart
++++ b/packages/jet_cad_2d_plan/test/canvas/plan_canvas_test.dart
+@@ -120,20 +120,56 @@ void main() {
+     expect(hint, findsOneWidget);
+     expect(
+         find.descendant(of: hint, matching: find.text('This object is locked')),
+         findsOneWidget);
+     await tester.pump(kLockHintDuration);
+     await tester.pump();
+     expect(c.lockHint.value, isFalse);
+     expect(hint, findsNothing);
+   });
+ 
++  testWidgets(
++      'CV-4b a lock hint set before the canvas mounts shows and clears '
++      'after kLockHintDuration (M-CV-4c)', (tester) async {
++    final c = paletteController(paper: white).c;
++    // A refusal with no canvas mounted (a host's execute on a locked
++    // object), so no canvas heard the change.
++    c.lockHint.value = true;
++    await pumpAlone(tester, PlanCanvas(controller: c));
++    final hint = find.byKey(const Key('plan-lock-hint'));
++    expect(hint, findsOneWidget);
++    await tester.pump(kLockHintDuration);
++    await tester.pump();
++    expect(c.lockHint.value, isFalse);
++    expect(hint, findsNothing);
++  });
++
++  testWidgets(
++      'CV-4c a canvas handed another controller whose hint shows clears it '
++      'after kLockHintDuration (M-CV-4d)', (tester) async {
++    final c = paletteController(paper: white).c;
++    final d = paletteController(paper: blueprint).c;
++    await pumpAlone(tester, PlanCanvas(controller: c));
++    c.lockHint.value = true;
++    await tester.pump();
++    d.lockHint.value = true;
++    await tester.pumpWidget(
++        MaterialApp(home: Scaffold(body: PlanCanvas(controller: d))));
++    await tester.pump();
++    final hint = find.byKey(const Key('plan-lock-hint'));
++    expect(hint, findsOneWidget, reason: 'd\'s hint, set while unshown');
++    await tester.pump(kLockHintDuration);
++    await tester.pump();
++    expect(d.lockHint.value, isFalse);
++    expect(hint, findsNothing);
++  });
++
+   testWidgets(
+       'CV-5 rulers: false and grid: false: no ruler frame and a page chrome '
+       'without the grid; the defaults draw both (M-CV-5)', (tester) async {
+     final c = paletteController(paper: white).c;
+     PageChromePainter chrome() => tester
+         .widgetList<CustomPaint>(find.byType(CustomPaint))
+         .map((p) => p.painter)
+         .whereType<PageChromePainter>()
+         .single;
+     await pumpAlone(

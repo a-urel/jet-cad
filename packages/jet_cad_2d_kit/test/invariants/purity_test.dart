@@ -33,6 +33,15 @@ void main() {
     }
   });
 
+  test('P9 the property specs and the colour target reach no Flutter', () {
+    // Spec 2a P3: nothing in them draws, so they stay pure. M-P9: import
+    // package:flutter/foundation.dart in colour.dart.
+    const files = ['lib/src/kit/properties.dart', 'lib/src/kit/colour.dart'];
+    final walk = walkImports('.', 'jet_cad_2d_kit', files);
+    expect(walk.violations, isEmpty);
+    expect(walk.visited, containsAll(files));
+  });
+
   test('P2 a Flutter import two hops away is found', () {
     final root = tree({
       'lib/authoring.dart': "export 'src/model/a.dart';\n",
