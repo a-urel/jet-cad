@@ -653,7 +653,9 @@ void main() {
             layer: ReservedHandles.layerZero),
         payload: linePayload(Vector2(10.5, 20.25), Vector2(310.75, 45.5))));
     expect(doc.validate(), isEmpty);
-    expect(drift(doc), isEmpty);
+    // Spec 2b S1: an InstanceNode child of P1's group is P1's generated
+    // instance; Pin generates none, so P1's plan would remove it.
+    expect(drift(doc), [hP1]);
     final before = state(doc);
     final depth = doc.commands.undoDepth;
 

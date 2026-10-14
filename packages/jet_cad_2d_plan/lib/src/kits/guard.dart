@@ -84,6 +84,17 @@ final class GuardedType<T extends Component> implements ParametricType<T> {
   }
 
   @override
+  List<GeneratedInstance> instances(ParametricView view, Handle self) {
+    try {
+      return inner.instances(view, self);
+    } on KitHookFailure {
+      rethrow;
+    } catch (e, s) {
+      _fail('instances', e, s);
+    }
+  }
+
+  @override
   List<Diagnostic> diagnose(ParametricView view, Handle self) {
     try {
       return inner.diagnose(view, self);

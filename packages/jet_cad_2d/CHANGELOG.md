@@ -27,6 +27,20 @@
   included). It names the `handle` and the `typeId`. A caller catching
   `StateError` is unaffected.
 
+- `ParametricType.instances(view, self)` (default: none) lets a type
+  generate symbol instances beside its entities. Each
+  `GeneratedInstance(definition, transform, attributes: […])` becomes an
+  `InstanceNode` child of the object's group, on the object's layer, and
+  each `GeneratedAttrib(tag, text, payload)` an ATTRIB the instance owns,
+  on layer 0, BYBLOCK. The planner matches instances by position and
+  ATTRIBs by tag, so a regeneration keeps a seat's handle and everything
+  on it, and an unchanged output plans nothing. An output naming no live
+  definition throws `GeneratedDefinitionError` while planning: the edit is
+  refused, `probe` returns it and `drift()` throws it. Every
+  `InstanceNode` child of an object's group is now that object's
+  generated instance: a type that generates none removes it on its next
+  regeneration.
+
 ## 0.7.2
 
 Documentation and funding only; no code change. Plans are stored as in

@@ -80,7 +80,10 @@ final class _Survey {
       this.referrers,
       this.page,
       this.readers,
-      this.stray);
+      this.stray,
+      this.instances,
+      this.generated,
+      this.leaves);
 
   /// Live objects, ascending, with their registration.
   final Map<Handle, _Registration<Component>> objects;
@@ -97,10 +100,14 @@ final class _Survey {
   /// Each object's reach at this moment, one call per object.
   final Map<Handle, Aabb2> reach;
 
-  /// Each object's children, ascending.
+  /// Each object's children, ascending: its entities only. Its generated
+  /// instances are in [instances] (spec 2b S1).
   final Map<Handle, List<Handle>> children;
 
-  /// Every child of a live object, to its owner: the set G of spec D4.
+  /// Every child of a live object, and every ATTRIB of one of its generated
+  /// instances (spec 2b S1), to its object: the set G of spec D4. So 06 D6's
+  /// entity branch covers a generated ATTRIB, and an edit of one seeds its
+  /// object.
   final Map<Handle, Handle> owned;
 
   /// Each object's `references` as declared, from this survey's one call
@@ -138,6 +145,21 @@ final class _Survey {
   /// Read by [_written] through [_heldBefore], on the before-survey only.
   /// A frozen object's component (spec 2a E2) is one too.
   final Map<(Handle, _Registration<Component>), Component> stray;
+
+  /// Spec 2b S1: each live object's generated instances, the
+  /// `InstanceNode` children of its group, ascending by handle, each its
+  /// node value at this moment (nodes are immutable: a reference, not a
+  /// copy). Absent when it has none. A nested group's instances are not
+  /// generated.
+  final Map<Handle, List<InstanceNode>> instances;
+
+  /// Each generated instance of [instances], by handle, to its node value;
+  /// its object is the node's `parent`.
+  final Map<Handle, InstanceNode> generated;
+
+  /// Each generated instance's own entities (its ATTRIBs, and whatever a
+  /// loaded file put on it), ascending; absent when none.
+  final Map<Handle, List<Handle>> leaves;
 
   final Map<Handle, List<Handle>> _neighbours = {};
 
@@ -253,16 +275,45 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
   final reach = {
     for (final h in order) h: objects[h]!.reachOf(params[h]!, toWorld[h]!),
   };
+  // Spec 2b S1: each object's generated instances, from its group's own
+  // list, ascending by handle whatever order the list is in.
+  final instances = <Handle, List<InstanceNode>>{};
+  final generated = <Handle, InstanceNode>{};
+  for (final h in order) {
+    for (final c in (t.tree[h]! as GroupNode).children) {
+      final node = t.tree[c];
+      if (node is InstanceNode &&
+          node.parent == h &&
+          !generated.containsKey(c)) {
+        (instances[h] ??= []).add(node);
+        generated[c] = node;
+      }
+    }
+  }
+  for (final list in instances.values) {
+    list.sort((a, b) => _byValue(a.handle, b.handle));
+  }
   final children = <Handle, List<Handle>>{};
   final owned = <Handle, Handle>{};
+  final leaves = <Handle, List<Handle>>{};
   for (final slot in t.entities.liveSlots) {
     final owner = t.entities.ownerAt(slot);
-    if (!objects.containsKey(owner)) continue;
+    if (objects.containsKey(owner)) {
+      final h = t.entities.handleAt(slot);
+      (children[owner] ??= []).add(h);
+      owned[h] = owner;
+      continue;
+    }
+    final node = generated[owner];
+    if (node == null) continue;
     final h = t.entities.handleAt(slot);
-    (children[owner] ??= []).add(h);
-    owned[h] = owner;
+    (leaves[owner] ??= []).add(h);
+    if (t.entities.kindAt(slot) == EntityKind.attrib) owned[h] = node.parent;
   }
   for (final list in children.values) {
+    list.sort(_byValue);
+  }
+  for (final list in leaves.values) {
     list.sort(_byValue);
   }
   // Spec 08 D2: one pass, one `references` call per object. The pass walks
@@ -300,7 +351,10 @@ _Survey _survey(CommandTarget t, List<_Registration<Component>> types,
       },
       t.components.get<PageComponent>(t.tree.root),
       readers,
-      stray);
+      stray,
+      instances,
+      generated,
+      leaves);
 }
 
 /// The objects a page change seeds (spec 10 D14): every live object in
@@ -557,6 +611,10 @@ void _checkRegion(Handle h, GeometryPayload boundary) {
 /// Every added record comes from [_recordOf], on the
 /// object's layer.
 ///
+/// Then its generated instances (spec 2b S1, [_planInstances]): matched by
+/// position, ascending by handle, their ATTRIBs by tag, every command
+/// planned only on an exact-`==` difference of the stored value.
+///
 /// Each object is first asked whether it dissolves (spec 10 D15), with the
 /// same [view], before its `generate`. A dissolving object is not
 /// generated: its plan is [_subtreeRemoval] (the select tool's order),
@@ -657,8 +715,161 @@ List<DraftCommand> _plan(
     for (final c in surplus) {
       out.add(RemoveEntityCommand(c));
     }
+    // Spec 2b S1 "Matching": the object's generated instances, after its
+    // entities, from the same view.
+    reserved = _planInstances(
+        t, s, h, registration.instancesOf(view, h), layer, reserved, out);
   }
   return out;
+}
+
+/// Stored transforms compare exactly (12b R-15): `Transform2` has no `==`,
+/// and `InstanceNode.==` compares with this tolerance.
+const Tolerance _exact = Tolerance(linear: 0, angular: 0);
+
+/// The record of an ATTRIB the plan adds onto [instance] (spec 2b S1): the
+/// shape of today's table label, on layer 0 with BYBLOCK style, so it
+/// follows its instance; the layer and style stamps never touch it.
+EntityRecord _attribRecord(Handle handle, Handle instance, GeneratedAttrib a) =>
+    EntityRecord(
+      handle: handle,
+      owner: instance,
+      kind: EntityKind.attrib,
+      layer: ReservedHandles.layerZero,
+      linetype: ReservedHandles.byBlockLinetype,
+      linetypeScale: 1.0,
+      geomIndex: 0,
+      color: const ByBlockColor(),
+      lineweight: kByBlock,
+      transparency: kByBlock,
+      flags: 0,
+      text: a.text,
+      tag: a.tag,
+      textStyle: ReservedHandles.standardTextStyle,
+      textAttrs: a.textAttrs,
+    );
+
+/// Spec 2b S1 "Matching": plans [object]'s generated instances against
+/// [outputs] into [out], and returns the last handle reserved.
+///
+/// First, every output must name a live definition, or this throws
+/// [GeneratedDefinitionError] (nothing has applied yet). Then the i-th
+/// output meets the i-th existing instance, ascending by handle: a new
+/// definition is a `SetInstanceDefinitionCommand`, a new transform a
+/// `TransformNodeCommand` (exact, [_exact]), a node off [layer] (the
+/// object's) a `SetInstanceLayerCommand.restore`; then its ATTRIBs
+/// ([_planAttributes]). An unmatched output is added under reserved
+/// handles, the node then its ATTRIBs, the node with `InstanceNode`'s
+/// default style. A surplus instance is removed ([_instanceRemoval]).
+int _planInstances(
+    CommandTarget t,
+    _Survey s,
+    Handle object,
+    List<GeneratedInstance> outputs,
+    Handle layer,
+    int reserved,
+    List<DraftCommand> out) {
+  for (final g in outputs) {
+    if (t.tree.definition(g.definition) == null) {
+      throw GeneratedDefinitionError(object, g.definition);
+    }
+  }
+  final existing = s.instances[object] ?? const <InstanceNode>[];
+  for (var i = 0; i < outputs.length; i++) {
+    final g = outputs[i];
+    if (i < existing.length) {
+      final node = existing[i];
+      final c = node.handle;
+      if (node.definition != g.definition) {
+        out.add(SetInstanceDefinitionCommand(c, g.definition));
+      }
+      if (!node.transform.equals(g.transform, _exact)) {
+        out.add(TransformNodeCommand(c, g.transform));
+      }
+      if (node.layer != layer) {
+        out.add(SetInstanceLayerCommand.restore(c, layer));
+      }
+      reserved = _planAttributes(t, s, c, g.attributes, reserved, out);
+    } else {
+      final c = Handle.checked(++reserved);
+      out.add(AddNodeCommand(InstanceNode(
+          handle: c,
+          parent: object,
+          transform: g.transform,
+          definition: g.definition,
+          layer: layer)));
+      for (final a in g.attributes) {
+        out.add(AddEntityCommand(
+            record: _attribRecord(Handle.checked(++reserved), c, a),
+            payload: a.payload));
+      }
+    }
+  }
+  for (final node in existing.skip(outputs.length)) {
+    out.addAll(_instanceRemoval(t, s, node.handle));
+  }
+  return reserved;
+}
+
+/// A matched instance's ATTRIBs against [attributes] (spec 2b S1): bucketed
+/// by tag, ascending, so the lowest handle of a tag is matched and the
+/// rest are surplus (a loaded file). A matched one gets
+/// `SetEntityGeometryCommand` for a new payload and `SetEntityTextCommand`
+/// for a new text, **passing its own tag** (the TEXT call's `''` would
+/// blank it, and the next regeneration would match nothing). An unmatched
+/// tag is added; a surplus one, or one of a tag no output names, is
+/// removed. Returns the last handle reserved.
+int _planAttributes(CommandTarget t, _Survey s, Handle instance,
+    List<GeneratedAttrib> attributes, int reserved, List<DraftCommand> out) {
+  final byTag = <String, Handle>{};
+  final surplus = <Handle>[];
+  for (final c in s.leaves[instance] ?? const <Handle>[]) {
+    final slot = t.entities.slotOf(c)!;
+    if (t.entities.kindAt(slot) != EntityKind.attrib) continue;
+    final tag = t.entities.tagAt(slot);
+    if (byTag.containsKey(tag)) {
+      surplus.add(c);
+    } else {
+      byTag[tag] = c;
+    }
+  }
+  for (final a in attributes) {
+    final c = byTag.remove(a.tag);
+    if (c == null) {
+      out.add(AddEntityCommand(
+          record: _attribRecord(Handle.checked(++reserved), instance, a),
+          payload: a.payload));
+      continue;
+    }
+    final slot = t.entities.slotOf(c)!;
+    if (!_samePayload(
+        t.geometry.peek(t.entities.geomIndexAt(slot)), a.payload)) {
+      out.add(SetEntityGeometryCommand(c, a.payload));
+    }
+    if (t.entities.textAt(slot) != a.text) {
+      out.add(SetEntityTextCommand(c, a.text, t.entities.tagAt(slot)));
+    }
+  }
+  for (final c in [...surplus, ...byTag.values]..sort(_byValue)) {
+    out.add(RemoveEntityCommand(c));
+  }
+  return reserved;
+}
+
+/// A surplus generated instance's removal: every entity it owns, fills
+/// first (a boundary's removal would take its fill), then its node.
+List<DraftCommand> _instanceRemoval(
+    CommandTarget t, _Survey s, Handle instance) {
+  final leaves = s.leaves[instance] ?? const <Handle>[];
+  bool isFill(Handle c) =>
+      t.entities.kindAt(t.entities.slotOf(c)!) == EntityKind.fill;
+  return [
+    for (final c in leaves)
+      if (isFill(c)) RemoveEntityCommand(c),
+    for (final c in leaves)
+      if (!isFill(c)) RemoveEntityCommand(c),
+    RemoveNodeCommand(instance),
+  ];
 }
 
 /// The first touched handle that edits a generated entity, removes one
