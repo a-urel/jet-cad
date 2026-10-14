@@ -18,6 +18,7 @@ import '../kits/locks.dart';
 import '../tools/generic_tools.dart';
 import '../tools/plan_select_gates.dart';
 import '../tools/plan_symbol_tool.dart';
+import '../units/unit_index.dart';
 import 'grip_dispatch.dart';
 import 'permissions.dart';
 import 'services.dart';
@@ -46,6 +47,10 @@ final class DocumentSession {
         index = SpatialIndex(document),
         dispatch = GripDispatch(catalog) {
     locks = LockSet.scan(document, kitLoaded);
+    // Spec 2b S2: the document's units, rebuilt on its state id, its
+    // layers' revision and the controller's locked set.
+    units = UnitIndexCache(document,
+        catalog: catalog, locks: locks, locked: locked);
     // planner_shell.dart:625-671, the order load-bearing: the selection
     // prunes a dead key before the outline cache walks it; the gates
     // listen to the selection before the outline and grip caches do; the
@@ -117,6 +122,9 @@ final class DocumentSession {
   /// The document's lock set and expander (spec P4).
   late final LockSet locks;
   late final LockExpander lockExpander;
+
+  /// The document's units (spec 2b S2, `UnitIndex`).
+  late final UnitIndexCache units;
 
   /// The select tool's and the grip cache's gates: the permissions and the
   /// locks (spec P2, P4).
@@ -275,6 +283,7 @@ final class DocumentSession {
     selection.dispose();
     page.dispose();
     gates.dispose();
+    units.dispose();
     lockExpander.dispose();
     parametric.dispose();
     index.dispose();

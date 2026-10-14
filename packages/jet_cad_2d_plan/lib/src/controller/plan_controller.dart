@@ -32,6 +32,8 @@ import '../tools/generic_tools.dart';
 import '../tools/move_resolver.dart';
 import '../tools/plan_select_gates.dart';
 import '../tools/plan_symbol_tool.dart';
+import '../units/unit_components.dart';
+import '../units/unit_index.dart';
 import 'camera_bounds.dart';
 import 'new_plan.dart';
 import 'permissions.dart';
@@ -227,11 +229,12 @@ class PlanController extends ChangeNotifier {
     unawaited(_loadSymbols());
   }
 
-  /// The page, the contract's four components and the kits' types: what a
-  /// plan's registry holds. Once per registry.
+  /// The page, the contract's four components, the unit components and the
+  /// kits' types: what a plan's registry holds. Once per registry.
   static void _register(ComponentRegistry r, ParametricCatalog catalog) {
     PageComponent.register(r);
     registerKitComponents(r);
+    registerUnitComponents(r);
     catalog.registerComponents(r);
   }
 
@@ -564,6 +567,11 @@ class PlanController extends ChangeNotifier {
   /// locked symbol's definition. The property panel shows no section for
   /// it; the pickers refuse it.
   bool isLocked(Handle handle) => _session.locks.covers(document, handle);
+
+  /// The design document's units (spec 2b S2). Task 11 re-points it at the
+  /// active document.
+  @internal
+  UnitIndex get unitIndex => _session.units.current;
 
   /// Locks [objects] in the middle of a session (spec P4: a type's code
   /// failed, Task 11): adds them to the lock set, clears the undo history

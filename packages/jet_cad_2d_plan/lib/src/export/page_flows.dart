@@ -12,6 +12,7 @@ import 'package:jet_cad_2d_flutter/jet_cad_2d_flutter.dart'
 import 'package:jet_cad_2d_kit/jet_cad_2d_kit.dart' show registerKitComponents;
 
 import '../file/plan_file.dart' show ensureManifest;
+import '../units/unit_components.dart' show registerUnitComponents;
 import 'builtin_exporters.dart';
 import 'export_font.dart';
 import 'page_printer.dart';
@@ -148,6 +149,7 @@ final class PlanPageFlows {
           measurer: measurer, registerComponents: (r) {
         PageComponent.register(r);
         registerKitComponents(r);
+        registerUnitComponents(r);
         catalog.registerComponents(r);
       }, diagnostics: <Diagnostic>[], keepUnreadableComponents: true);
     } catch (_) {
