@@ -552,7 +552,8 @@ class PlanController extends ChangeNotifier {
   /// Executes [command] on the current document: the commit path of every
   /// widget and panel (controller ruling R-b; no widget calls
   /// `document.commands.execute`). True when it applied; false when it was
-  /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set),
+  /// refused, the refusal caught here: [PlanLocked] (and [lockHint] set;
+  /// the engine's refusal of a write on a frozen, locked object is one),
   /// `DanglingReferenceError` (E2's refusal of a frozen object's
   /// referrer), `PermissionDeniedError` (the engine permissions the
   /// editor's permissions set, e.g. [PlanPermissions.readOnly]),

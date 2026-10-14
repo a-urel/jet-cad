@@ -708,6 +708,10 @@ Each seam is argued here and lands with its own test.
   `probe(Handle)` runs one object's hooks (`reach`, `references`,
   `generate` through the system's own view) in isolation, changes nothing,
   and returns the first error or `null`: the controller's probe (P4).
+  Writing a frozen object's own type's component is refused with
+  `NonLiveWriteError`, a `StateError` subtype naming the handle (the
+  refusal of any write on a group that is not live), so the plan library
+  turns it into `PlanLocked` (amended in the final review).
 - **E3, a typed partial mutation:** the "partially mutated" `StateError` of
   `regeneration.dart:735` and `:1040` becomes `PartialMutationError`, a
   `StateError` subtype, so the controller tells it apart without matching
@@ -833,6 +837,10 @@ packages/jet_cad_2d_plan/example/      PlanEditor with no kit
 ## Revision history
 
 - **Revision 1** (`c78e2a8`): the design approved in chat.
+- **Amended in the final review** (2a's whole-branch review, finding I1):
+  E2's refusal of a write on a frozen object is typed
+  (`NonLiveWriteError`, naming the handle), and the lock maps it to
+  `PlanLocked`.
 - **Revision 3:** the re-review of revision 2.
   - **N1, N2:** a broken object is frozen (new E2), found by probing after a
     failed edit and after a load; it no longer blocks its neighbours.

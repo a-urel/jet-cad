@@ -212,8 +212,10 @@ final class LockExpander {
 }
 
 /// One edit and its lock check: [_applied] applies, then each touched
-/// handle is tested; a hit undoes the edit and throws [PlanLocked]. Created
-/// by [LockExpander], once per `execute`.
+/// handle is tested; a hit undoes the edit and throws [PlanLocked]. The
+/// engine's own refusal of a write on a locked (frozen) object, a
+/// [NonLiveWriteError], is a [PlanLocked] too. Created by [LockExpander],
+/// once per `execute`.
 final class _LockCheck extends DraftCommand {
   _LockCheck(this._expander, this.original, this._applied);
 
@@ -240,6 +242,13 @@ final class _LockCheck extends DraftCommand {
   CommandResult apply(CommandTarget target) {
     try {
       return _check(target, _first(target));
+    } on NonLiveWriteError catch (error) {
+      // E2 (amended in the final review): a write of a frozen object's own
+      // type's component. The engine has undone the edit; on a locked
+      // object (a frozen one is locked too) it is the lock's refusal, never
+      // a kit's failure.
+      if (!_expander.locks.covers(target, error.handle)) rethrow;
+      throw const PlanLocked();
     } on PartialMutationError catch (error) {
       _expander.onPartialMutation?.call(error);
       rethrow;
